@@ -140,8 +140,13 @@ const composerTier = $derived<ComposerTier>(
 				: "narrow",
 );
 
+/** The folded Duo's header stays put: its controls live in the side rail. */
 export function isBarCollapsed(): boolean {
-	return sessionViewState.compact && !sessionViewState.barOpen;
+	return (
+		sessionViewState.compact &&
+		!sessionViewState.barOpen &&
+		sessionViewState.pose !== "duo-folded-portrait"
+	);
 }
 
 /**

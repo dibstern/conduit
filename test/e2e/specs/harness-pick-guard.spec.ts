@@ -32,7 +32,7 @@ import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -1260,10 +1260,10 @@ test.describe("session composer owns its stored pick", () => {
 			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
-			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="composer-more-mode"]:visible',
+			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="picker-row-permissions"]:visible',
 		);
 		const phoneWords = page.getByTestId("composer-words-sheet-trigger");
-		let openedComposer = false;
+		let openedPanel = false;
 		const older = observed.hold("GetModels", sessionA, { once: true });
 		let stage = "A-row-read";
 		let before: string | null | undefined;
@@ -1304,11 +1304,13 @@ test.describe("session composer owns its stored pick", () => {
 					phoneWords.getByText("full", { exact: true }),
 				).toBeVisible();
 			if (!(await mode.isVisible())) {
-				await picker.click();
-				openedComposer = true;
+				await openPickerRoot(page, picker);
+				openedPanel = true;
 			}
 			await expect(mode).toHaveAccessibleName(
-				"Permissions: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
 			stage = "A-stale-delivered";
 			older.release();
@@ -1321,9 +1323,11 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			after = await picker.getAttribute("data-shown-permission-mode");
 			await expect(mode).toHaveAccessibleName(
-				"Permissions: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
-			if (openedComposer) await page.keyboard.press("Escape");
+			if (openedPanel) await page.keyboard.press("Escape");
 			if (await phoneWords.isVisible())
 				await expect(
 					phoneWords.getByText("full", { exact: true }),
@@ -1996,19 +2000,16 @@ async function selectFullPermission(page: Page): Promise<void> {
 	const trigger = page.locator(
 		'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
 	);
-	if (await trigger.count()) {
+	const panel = (await trigger.count()) === 0;
+	if (!panel) {
 		await trigger.click();
 	} else {
-		await page.locator(pickerSelector).click();
-		await page.getByTestId("composer-more-mode").click();
+		await openPickerRoot(page, page.locator(pickerSelector));
+		await page.getByTestId("picker-row-permissions").click();
 	}
-	await page.getByTestId("permission-mode-option-full").click();
-	await expect(
-		page.getByRole("button", {
-			name: "Permissions: Full access. Open options",
-			exact: true,
-		}),
-	).toBeVisible();
+	await page.getByTestId("picker-permission-full").click();
+	// Picking returns to the Session root; OpenCode's root has no Permissions row.
+	await expect(page.getByTestId("picker-subtitle")).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.locator(pickerSelector)).toHaveAttribute(
 		"data-shown-permission-mode",
@@ -2608,6 +2609,7 @@ test.describe("draft owns one complete pick", () => {
 		}
 		try {
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await held.wait;
 			await closePicker(page);
@@ -2628,7 +2630,9 @@ test.describe("draft owns one complete pick", () => {
 				expect(reply.response.providers).toEqual([]);
 			deliverEmpty = false;
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId("picker-account-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await closePicker(page);
 			await expect
@@ -4924,6 +4928,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const claudeBefore = await readShown(picker);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await expect(picker).toHaveAttribute("data-instance-id", namedId);
@@ -4948,6 +4953,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			await expect.poll(() => isProcessAlive(borrowed?.pid ?? 0)).toBe(false);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await waitForHealthy(setup.browser, namedId);
@@ -5000,6 +5006,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const otherPicker = await openDraftPage(otherPage, harness, setup.slug);
 			await openPickerRoot(otherPage, otherPicker);
 			await otherPage.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(otherPage);
 			await otherPage.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(otherPage);
 			await waitForHealthy(setup.browser, namedId);

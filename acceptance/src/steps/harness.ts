@@ -5,6 +5,7 @@ import type { StepHandler } from "../runtime.js";
 import {
 	mockInstances,
 	openModelPicker,
+	openPickerAccounts,
 	openSessionRoute,
 	requireRpcControl,
 } from "./shared.js";
@@ -282,6 +283,7 @@ export const harnessHandlers: StepHandler[] = [
 			/^the (picker card|account picker|send menu|send button) account (\S+) shows a (\S+) logo (without a badge|with badge (\S))$/,
 		run: async ({ world, match }) => {
 			const account = match[2] ?? "";
+			if (match[1] === "picker card") await openPickerAccounts(world.page);
 			const regions: Record<string, Locator> = {
 				"picker card": world.page.getByTestId(`picker-account-${account}`),
 				"account picker": world.page.getByTestId("account-switch-picker"),
@@ -463,7 +465,7 @@ export const harnessHandlers: StepHandler[] = [
 			await world.page.waitForFunction(
 				(expected) => {
 					const trigger = document.querySelector(
-						'[data-testid="composer-harness-trigger"], [data-testid="model-picker-trigger"]',
+						'[data-testid="model-picker-trigger"]',
 					);
 					const icon = trigger?.querySelector("[data-driver]");
 					return (

@@ -747,26 +747,44 @@ export const WordsDesktop: Story = {
 			await expect(trigger).toHaveTextContent("200K");
 			await expect(trigger).toHaveTextContent("high");
 			await expect(row).toHaveTextContent("42%");
-			await expect(row.querySelectorAll("button")).toHaveLength(1);
+			await expect(row.querySelectorAll("button")).toHaveLength(2);
 			await expect(
 				row.querySelector("[data-testid='composer-checkout']"),
-			).toBeNull();
+			).toHaveTextContent("conduit");
+			await expect(canvas.queryByTestId("composer-word-effort")).toBeNull();
 			await expect(
 				within(trigger).getByTestId("composer-word-context-usage"),
 			).toHaveTextContent("42%");
 			await userEvent.click(
 				within(trigger).getByTestId("composer-word-context-usage"),
 			);
-			const sheet = await body.findByTestId("composer-more-sheet");
+			const sheet = await body.findByTestId("model-picker");
 			await expect(sheet).toBeVisible();
-			await expect(sheet.querySelectorAll('[data-part="label"]')).toHaveLength(
-				6,
-			);
-			await userEvent.keyboard("{Escape}");
-			await waitFor(() =>
-				expect(body.queryByTestId("composer-more-sheet")).toBeNull(),
-			);
+			await expect(body.getByRole("dialog", { name: "Session" })).toBeVisible();
+			await expect(within(sheet).getByTestId("picker-row-model")).toBeVisible();
+			await userEvent.click(within(sheet).getByTestId("picker-row-account"));
+			await expect(
+				within(sheet).getByTestId("picker-account-options"),
+			).toBeVisible();
+			await userEvent.click(within(sheet).getByTestId("picker-back"));
+			await expect(
+				within(sheet).getByTestId("picker-row-account"),
+			).toHaveFocus();
+			await expect(
+				within(sheet).getByTestId("picker-row-effort"),
+			).toBeVisible();
+			await expect(
+				within(sheet).getByTestId("picker-row-checkout"),
+			).toBeVisible();
+			await closePicker();
 			await expect(trigger).toHaveFocus();
+			// Synthetic events never set keyboard modality, so ask for the ring a real Escape shows.
+			// FocusOptions.focusVisible is newer than the bundled DOM types.
+			const keyboardFocus: FocusOptions & { focusVisible: boolean } = {
+				focusVisible: true,
+			};
+			trigger.blur();
+			trigger.focus(keyboardFocus);
 			const summary = trigger.querySelector<HTMLElement>(
 				'[data-part="summary"]',
 			);
@@ -806,6 +824,14 @@ export const WordsDesktop: Story = {
 		await expect(canvas.queryByTestId("model-picker-trigger")).toBeNull();
 		await expect(canvas.queryByTestId("variant-badge")).toBeNull();
 		await expect(canvas.queryByTestId("permission-mode-badge")).toBeNull();
+		await userEvent.click(canvas.getByTestId("composer-word-account"));
+		await expect(
+			await body.findByTestId("picker-account-options"),
+		).toBeVisible();
+		await expect(body.getByTestId("picker-account-add")).toBeVisible();
+		await userEvent.click(body.getByTestId("picker-back"));
+		await expect(body.getByTestId("picker-row-account")).toHaveFocus();
+		await closePicker();
 		const composer = canvasElement.querySelector("#input-row");
 		if (!composer) throw new Error("Composer is missing");
 		await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(
@@ -854,7 +880,7 @@ export const WordsPhoneLight: Story = {
 	globals: { theme: "light" },
 };
 
-export const ComposerSheet: Story = {
+export const SessionPanel: Story = {
 	tags: ["viewport-capture"],
 	parameters: { phone: true },
 	beforeEach: ({ canvasElement }) => {
@@ -871,13 +897,13 @@ export const ComposerSheet: Story = {
 			).not.toBe("none"),
 		);
 		await userEvent.click(await body.findByTestId("model-picker-trigger"));
-		const sheet = await body.findByTestId("composer-more-sheet");
+		const sheet = await body.findByTestId("model-picker");
 		await waitFor(() => expect(sheet).toBeVisible());
-		await expect(body.getByRole("dialog", { name: "Composer" })).toBeVisible();
+		await expect(body.getByRole("dialog", { name: "Session" })).toBeVisible();
 	},
 };
-export const ComposerSheetLight: Story = {
-	...ComposerSheet,
+export const SessionPanelLight: Story = {
+	...SessionPanel,
 	tags: ["viewport-capture"],
 	globals: { theme: "light" },
 };
@@ -1694,7 +1720,7 @@ export const FinalIconsDesktop: Story = {
 		if (phone || sessionViewState.composerWidth >= 480) {
 			await expect(effort).toBeVisible();
 			await expect(effort).toHaveAccessibleName(
-				"Effort: High. Open effort options",
+				`Effort: High. ${phone ? "Tap to raise; hold for options" : "Click to raise; Option-click for options"}`,
 			);
 		} else {
 			await expect(effort).toBeNull();
@@ -1709,11 +1735,12 @@ export const FinalIconsDesktop: Story = {
 					window.innerWidth === 320 ? "checkout-icon" : "labels",
 				),
 			);
-			await waitFor(() =>
-				expect(checkoutControl.getBoundingClientRect().width).toBe(
-					window.innerWidth === 320 ? 44 : 90,
-				),
-			);
+			// The chip fills a 44px icon slot, or sizes to the project name within its 90px slot.
+			await waitFor(() => {
+				const width = checkoutControl.getBoundingClientRect().width;
+				if (window.innerWidth === 320) expect(width).toBe(44);
+				else expect(width > 44 && width <= 90).toBe(true);
+			});
 			await expect(canvas.queryByTestId("composer-effort-label")).toBeNull();
 			const footer = canvas.getByTestId("composer-icons-left");
 			await expect(footer.scrollWidth).toBeLessThanOrEqual(footer.clientWidth);
@@ -1798,20 +1825,21 @@ export const FinalIconsDesktop: Story = {
 			await expect(
 				frame.getBoundingClientRect().right - fieldBounds.right,
 			).toBe(8);
-			const branch = checkoutControl.querySelector<HTMLElement>(
-				'[data-part="branch"]',
+			const project = checkoutControl.querySelector<HTMLElement>(
+				'[data-part="project"]',
 			);
+			await expect(
+				checkoutControl.querySelector('[data-part="branch"]'),
+			).toBeNull();
 			if (window.innerWidth === 320) {
 				await waitFor(() =>
 					expect(
-						checkoutControl.querySelector('[data-part="branch"]'),
+						checkoutControl.querySelector('[data-part="project"]'),
 					).toBeNull(),
 				);
 			} else {
-				await expect(branch).toBeVisible();
-				if (!branch) throw new Error("Branch label missing");
-				await expect(getComputedStyle(branch).textOverflow).toBe("ellipsis");
-				await expect(branch.scrollWidth).toBeGreaterThan(branch.clientWidth);
+				await expect(project).toBeVisible();
+				await expect(project).toHaveTextContent("conduit");
 			}
 		}
 		await expect(attach.getBoundingClientRect().width).toBe(16);
@@ -1910,16 +1938,16 @@ export const FinalIconsDesktop: Story = {
 						await waitFor(() =>
 							expect(layout).toHaveAttribute("data-footer-fit", fit),
 						);
-						await waitFor(() =>
-							expect(checkoutControl.getBoundingClientRect().width).toBe(
-								fit === "checkout-icon" ? 44 : 90,
-							),
-						);
+						await waitFor(() => {
+							const width = checkoutControl.getBoundingClientRect().width;
+							if (fit === "checkout-icon") expect(width).toBe(44);
+							else expect(width > 44 && width <= 90).toBe(true);
+						});
 						await expect(modelLabel.checkVisibility()).toBe(fit === "labels");
 						await waitFor(() =>
 							expect(
 								checkoutControl
-									.querySelector('[data-part="branch"]')
+									.querySelector('[data-part="project"]')
 									?.checkVisibility() ?? false,
 							).toBe(fit !== "checkout-icon"),
 						);
@@ -1998,11 +2026,11 @@ export const FinalIconsDesktop: Story = {
 						);
 				}
 				await userEvent.click(canvas.getByTestId("model-picker-trigger"));
-				const sheet = await within(document.body).findByTestId(
-					"composer-more-sheet",
-				);
+				const sheet = await within(document.body).findByTestId("model-picker");
 				await waitFor(() =>
-					expect(within(sheet).getByTestId("composer-checkout")).toBeVisible(),
+					expect(
+						within(sheet).getByTestId("picker-row-checkout"),
+					).toBeVisible(),
 				);
 				const dialog =
 					canvasElement.ownerDocument.querySelector("dialog[open]");
@@ -2011,7 +2039,7 @@ export const FinalIconsDesktop: Story = {
 				else await userEvent.keyboard("{Escape}");
 				await waitFor(() => {
 					expect(
-						within(document.body).queryByTestId("composer-more-sheet"),
+						within(document.body).queryByTestId("model-picker"),
 					).toBeNull();
 					expect(getComputedStyle(input).pointerEvents).not.toBe("none");
 				});
@@ -2206,15 +2234,21 @@ export const ModeMenuOpen: Story = {
 		await userEvent.click(
 			await within(canvasElement).findByTestId("permission-mode-badge"),
 		);
-		const menu = await within(document.body).findByTestId(
-			"permission-mode-dropdown",
-		);
-		await expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(6);
+		const panel = await within(document.body).findByTestId("model-picker");
 		await expect(
-			within(menu).getByText("Ask before edits", { exact: true }),
+			within(panel).getByRole("heading", { name: "Permissions" }),
 		).toBeVisible();
 		await expect(
-			within(menu).getByText("Auto-accept edits", { exact: true }),
+			within(panel).getAllByTestId(/^picker-permission-/),
+		).toHaveLength(6);
+		await expect(
+			within(panel).getByTestId("picker-permission-ask"),
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			within(panel).getByText("Ask before edits", { exact: true }),
+		).toBeVisible();
+		await expect(
+			within(panel).getByText("Auto-accept edits", { exact: true }),
 		).toBeVisible();
 	},
 };
@@ -3082,26 +3116,15 @@ export const FinalIconsPhonePriorityIdle: Story = {
 				}
 			}
 			await userEvent.click(canvas.getByTestId("model-picker-trigger"));
-			const sheet = await within(document.body).findByTestId(
-				"composer-more-sheet",
-			);
-			await userEvent.click(within(sheet).getByTestId("composer-more-effort"));
+			const sheet = await within(document.body).findByTestId("model-picker");
 			await expect(
-				await within(document.body).findByTestId("picker-effort-option-high"),
+				within(sheet).getByTestId("picker-effort-option-high"),
 			).toBeVisible();
 			document
 				.querySelector("dialog[open]")
 				?.dispatchEvent(new Event("cancel", { cancelable: true }));
-			await waitFor(() =>
-				expect(within(document.body).queryByTestId("model-picker")).toBeNull(),
-			);
-			document
-				.querySelector("dialog[open]")
-				?.dispatchEvent(new Event("cancel", { cancelable: true }));
 			await waitFor(() => {
-				expect(
-					within(document.body).queryByTestId("composer-more-sheet"),
-				).toBeNull();
+				expect(within(document.body).queryByTestId("model-picker")).toBeNull();
 				expect(getComputedStyle(input).pointerEvents).not.toBe("none");
 			});
 		} finally {
@@ -3365,7 +3388,7 @@ export const PhoneProviderEffortClaude: Story = {
 			if (!meter) throw new Error("Phone effort control is missing");
 			await expect(meter).toBeVisible();
 			await expect(meter).toHaveAccessibleName(
-				`Effort: ${label}. Open effort options`,
+				`Effort: ${label}. Tap to raise; hold for options`,
 			);
 			await expect(meter).toHaveTextContent(/^$/);
 			const bars = canvas.getByTestId("effort-meter").children;
@@ -3375,7 +3398,9 @@ export const PhoneProviderEffortClaude: Story = {
 				await expect(getComputedStyle(bar).backgroundColor === color).toBe(
 					index < filled,
 				);
-			await userEvent.click(meter);
+			// A tap cycles effort on phones; Shift+F10 opens the options, like a hold.
+			meter.focus();
+			await userEvent.keyboard("{Shift>}{F10}{/Shift}");
 			const picker = await body.findByTestId("model-picker");
 			await expect(
 				within(picker).getByTestId("picker-effort-option-high"),
@@ -3422,26 +3447,32 @@ export const PhoneProviderEffortClaude: Story = {
 			await expect(meter).toBeNull();
 		}
 		await userEvent.click(canvas.getByTestId("model-picker-trigger"));
-		const more = await body.findByTestId("composer-more-sheet");
-		const row = within(more).getByTestId("composer-more-effort");
-		await expect(row).toBeEnabled();
-		await expect(row).toHaveTextContent(
-			typeof saved === "string"
-				? saved || "medium"
-				: fixture.id === "cursor"
-					? "low · Fast"
-					: fixture.levels > 0
-						? "high"
-						: fixture.label,
-		);
-		await userEvent.click(row);
 		const picker = await body.findByTestId("model-picker");
 		await expect(picker.closest("dialog[open]")).not.toBeNull();
-		if (fixture.levels === 0) {
+		await expect(body.getByRole("dialog", { name: "Session" })).toBeVisible();
+		if (fixture.levels > 0) {
+			const selected =
+				typeof saved === "string"
+					? saved === "retired"
+						? "medium"
+						: saved || "medium"
+					: fixture.id === "cursor"
+						? "low"
+						: "high";
+			await expect(
+				within(picker).getByTestId("picker-row-effort"),
+			).toBeVisible();
+			await expect(
+				within(picker).getByTestId(`picker-effort-option-${selected}`),
+			).toHaveAttribute("aria-checked", "true");
+		} else {
 			const kind = fixture.id === "cursor-thinking" ? "thinking" : "fast";
 			await expect(
 				within(picker).queryByTestId("picker-row-effort"),
 			).toBeNull();
+			await expect(
+				within(picker).getByTestId(`picker-${kind}-option-true`),
+			).toHaveAttribute("aria-checked", "true");
 			await userEvent.click(
 				within(picker).getByTestId(`picker-${kind}-option-false`),
 			);
@@ -3454,12 +3485,6 @@ export const PhoneProviderEffortClaude: Story = {
 			.querySelector("dialog[open]")
 			?.dispatchEvent(new Event("cancel", { cancelable: true }));
 		await waitFor(() => expect(body.queryByTestId("model-picker")).toBeNull());
-		document
-			.querySelector("dialog[open]")
-			?.dispatchEvent(new Event("cancel", { cancelable: true }));
-		await waitFor(() =>
-			expect(body.queryByTestId("composer-more-sheet")).toBeNull(),
-		);
 	},
 };
 export const PhoneProviderEffortOpenCode: Story = {

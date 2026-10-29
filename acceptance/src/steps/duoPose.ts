@@ -16,7 +16,7 @@ const DUO_POSES = {
  * script covers later navigations, the evaluate the page already loaded. A
  * string, because tsx names functions with a helper the page does not have.
  */
-async function installAsPwa(page: Page): Promise<void> {
+export async function installAsPwa(page: Page): Promise<void> {
 	const stub =
 		'Object.defineProperty(Navigator.prototype, "standalone", { get: () => true, configurable: true })';
 	await page.addInitScript(stub);
