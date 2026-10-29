@@ -606,7 +606,7 @@ it("snapshots folders only for an open session diff and lists the conduit reposi
 		bead: "conduit-test-f02e9.2",
 		budgets: DIFF_BUDGET,
 		instrumentation:
-			"diff spawns are snapshot commands (read-tree, write-tree, add) plus private-store reads",
+			"diff spawns are snapshot commands (write-tree, add) plus private-store reads",
 	};
 	const failures: string[] = [];
 	const check = (condition: boolean, description: string) => {
@@ -620,9 +620,7 @@ it("snapshots folders only for an open session diff and lists the conduit reposi
 		spawnEvents.filter(
 			(spawn) =>
 				spawn.cwd.startsWith(store) ||
-				["git read-tree", "git write-tree", "git add"].includes(
-					gitCommand(spawn),
-				),
+				["git write-tree", "git add"].includes(gitCommand(spawn)),
 		).length;
 	const sessionId = "budget-diff";
 

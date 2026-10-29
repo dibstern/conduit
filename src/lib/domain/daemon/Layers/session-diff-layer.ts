@@ -38,28 +38,25 @@ const blob = (id: string | undefined) =>
 /** `diff-tree -z --raw --numstat` prints every raw record, then every numstat record. */
 export function parseDiffTree(output: string) {
 	const tokens = output.split("\0");
-	const changes: Change[] = [];
 	let at = 0;
+	const next = () => tokens[at++] ?? "";
+	const changes: Change[] = [];
 	while (tokens[at]?.startsWith(":")) {
-		const [, , before, after, letter = "M"] = (tokens[at] ?? "")
-			.slice(1)
-			.split(" ");
-		const renamed = letter.startsWith("R") || letter.startsWith("C");
-		const path = tokens[at + (renamed ? 2 : 1)] ?? "";
+		const [, , before, after, letter = "M"] = next().split(" ");
+		// Renames and copies name their source before their destination.
+		const oldPath = /^[RC]/.test(letter) ? next() : undefined;
 		changes.push({
 			status: STATUS[letter[0] as keyof typeof STATUS] ?? "modified",
 			before: blob(before),
 			after: blob(after),
-			path,
-			...(renamed ? { oldPath: tokens[at + 1] ?? "" } : {}),
+			path: next(),
+			...(oldPath === undefined ? {} : { oldPath }),
 		});
-		at += renamed ? 3 : 2;
 	}
 	return changes.map((change) => {
-		const [insertions = "-", deletions = "-", path] = (tokens[at] ?? "").split(
-			"\t",
-		);
-		at += path === "" ? 3 : 1;
+		const [insertions = "-", deletions = "-", path] = next().split("\t");
+		// A rename's numstat leaves its path empty and lists both paths after it.
+		if (path === "") at += 2;
 		return {
 			...change,
 			insertions: Number(insertions) || 0,

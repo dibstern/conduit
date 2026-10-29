@@ -164,16 +164,13 @@ export const makeFolderTimeline = (configDir: string) =>
 				};
 				return yield* Effect.gen(function* () {
 					// Racy-git: an mtime floored to the second re-hashes same-second edits.
-					const copied = yield* fs(async () => {
+					// A repository with no index yet leaves no copy, which git reads as empty.
+					yield* fs(async () => {
 						const { mtimeMs } = await stat(repository.indexFile);
 						await copyFile(repository.indexFile, temp);
 						const seconds = Math.floor(mtimeMs / 1000);
 						await utimes(temp, seconds, seconds);
-					}).pipe(
-						Effect.as(true),
-						Effect.orElseSucceed(() => false),
-					);
-					if (!copied) yield* run(directory, ["read-tree", "--empty"], { env });
+					}).pipe(Effect.ignore);
 					const index = (yield* run(directory, ["write-tree"], {
 						env,
 					})).stdout.trim();
