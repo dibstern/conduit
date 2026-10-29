@@ -153,12 +153,13 @@ provider have the new one, and no row has both.
 | Serving runner of a session | `claude_runner_cursors.role` (partial unique index) | lifecycle module's register, retire and swap transactions (`register`, `requestStop`) | `serving(session)` (routing cache only); write decisions read the row in their transaction | none |
 | Runner role inside the host | runner host (`decideRunnerRole`) | host | reply to `upgrade-retire`, idle exit; not persisted | none |
 | Runner retired (fence) | retirement row `retired_at` | request stop (one transaction) | attach, `adopt`, `holdRun`, recovery | none |
-| Feeder queue and per-send I/O capabilities | the session's feeder | enqueue by reactor dispatch, committed release and restart; the feeder consumes each write capability once | live handle or `Adopted`; the released-through watermark revokes local I/O only, never persisted delivery or runner assignment | none |
+| Feeder queue and per-send I/O capabilities | the session's feeder | enqueue by reactor dispatch, committed release and restart; the feeder consumes each write capability once | live handle or `Adopted`; the released-through watermark revokes local I/O only, never persisted delivery or runner assignment; the stop commit's possibly-written set (4.5; a hold an earlier daemon made has no written bit and is in it) | none |
 | Per-operation pacing ordinal | the pending store operation | its release/settlement owner, or the failed read's caller | 4.8's backoff only; reset on commit or staleness, never run liveness or transmission count | none |
 | `awaitRun` subscription | the live caller | arm the store's commit signal, then re-read the run | includes silent lifecycle commits; no waiter map | none |
 | Uncommitted Stop intent (`Committing`) | the reconciler | intent registration and its independently owned commit worker | Stop waiters; identity only, never a durable retirement record | none |
-| Retained release/settlement evidence | the evidence source's write owner | feeder write fiber for release or start-refusal settlement; reactor call for a live reply; reconciler cadence for Settle; attachment for adoption and retained replies | retained until commit or staleness; adoption release failure propagates through bounded attachment recovery, then retirement and Settle | none |
-| Stop progress (`RunnerStop`) | reconciler module (`runner-retirement.ts`) | the reconciler only | `state`, `awaitStop` (memory is a cache of the row) | none |
+| Retained release/settlement evidence | the evidence source's write owner | feeder write fiber for a release outside a stop commit (including a refusal's release once its stop leaves `Committing`, 4.5) or start-refusal settlement; the reconciler for a release a stop commit carries (6.3); reactor call for a live reply; reconciler cadence for Settle; attachment for adoption and retained replies | retained until commit or staleness; adoption release failure propagates through bounded attachment recovery, then retirement and Settle | none |
+| Stop progress (`RunnerStop`) | reconciler module (`runner-retirement.ts`) | the reconciler only | `state`, `awaitStop`, the write fiber's gate (4.4) (memory is a cache of the row) | none |
+| Connection receipt order (`command-accepted`, `idle-exit` and refusals as read, per connection) | the runner connection, in memory | the daemon's connection reader only | the stop commit's release evidence (4.5, 6.3); gone with the connection | none |
 | Group snapshot and signal log | retirement row | the reconciler's kill routine | restart recovery | none |
 | Survivor notice sent | the deterministic notice event id | reconciler | none | none |
 | Duplicate sends at the host | host send journal | host | journal answers to the daemon | none |
@@ -296,10 +297,17 @@ Only evidence and conduit's decisions, each once:
   below the latest `querySeq` is an older label and changes nothing. Evidence under the label of
   a runner not started has no authority (3.4): it is recorded with a diagnostic and changes
   nothing. The current process is the one live runner, if any. Retiring, in the same decision:
-  1. covers every send addressed to it, the kill's own included;
-  2. ends its executions: launched Runs end `process_lost` unless Ended; wake executions end;
+  1. covers every send addressed to it, the kill's own included, whatever its tries got (a
+     `not_sent` try changes no address, H4);
+  2. ends its executions: a Run not yet delivered unlaunches (3.6); other launched Runs end
+     `process_lost` unless Ended; wake executions end;
   3. records lost work (L5, 8.4);
   4. makes its labels older (3.4).
+
+  A stop commit's releases (4.5) ride on its `process_lost` with their reasons and are read
+  first in the same decision, each as its `run_released`. So a Run they leave not yet delivered
+  unlaunches before item 1 and relaunches after item 4, and its start addresses the next runner
+  (L2).
 - **L2. Address at issue.** Every send is addressed once, when it issues, and never re-addressed:
   1. an escalation (`close` to kill, `end_session` to kill) whose parent has a runner address goes
      to that runner;
@@ -314,9 +322,10 @@ Only evidence and conduit's decisions, each once:
   A pending send resolves, once, at the first of: its own `run_dispatched` (a held send, the one
   3.4 binds to it), to the runner it names, which covers it at once if that runner is retired; or
   the next `process_started`, to that runner. A case 2 send follows its execution's start: it is
-  pending while the start is, and resolves with it, to the same runner. The start of an
-  execution dropped by an unlaunch (3.6) never resolves and is never covered: no later
-  `run_dispatched`, `process_started` or kill addresses it.
+  pending while the start is, and resolves with it, to the same runner. The sends of an
+  execution dropped by an unlaunch (3.6) resolve no further: no later `run_dispatched` or
+  `process_started` addresses them. Their work has already ended, so coverage of them (L1 item 1,
+  a pending kill) changes nothing.
   The label fixed with an address is the runner's latest label when the address is fixed; a
   `run_dispatched` naming a runner with no `process_started` yet fixes the label of that runner's
   `process_started`. A kill addressed to pending covers every pending send issued up to it,
@@ -328,8 +337,8 @@ Only evidence and conduit's decisions, each once:
   projects the address: `close` carries its execution's label; `kill_and_respawn` and
   `end_session` carry their runner's latest label; any of the three whose address has no label yet
   (pending, or a runner not started) carries null. Other effects carry no label; their address
-  lives only on the Send. A Queued Run's `interrupt` is addressed (to the
-  current process or pending) and carries no label.
+  lives only on the Send. A Run not yet delivered has no `interrupt`: Stop
+  ends it at once (3.6).
 - **`hasAuthority(execution)`:** the execution is its Run's current one, the Run is not Ended, its
   runner is live (L1), and its native session has not ended. This is the
   single read of Ended.
@@ -339,7 +348,7 @@ Only evidence and conduit's decisions, each once:
 - No in-session pruning. Run Input records, interaction records and send history are kept for the
   session's life and reclaimed when the session is archived.
 
-<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record); REDESIGN oracle r8; REDESIGN harness r9 (L2 case 2) -->
+<!-- src: FB §2; RA §7; HLK step 4, step 5; BG Decision 1, Decision 3; AUDIT-2 T6; review 2026-10-28 (H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1, L2; REDESIGN review r1-1 (03-rewrite-gap-decisions.md); REDESIGN review r1-2; REDESIGN review r2-1; REDESIGN review r2-2 (label split); REDESIGN review r3-1 (runner not started, authority at record); REDESIGN oracle r8; REDESIGN harness r9 (L2 case 2); contract r15 (D50) -->
 
 ### 3.4 Correlation and evidence
 
@@ -353,7 +362,14 @@ Only evidence and conduit's decisions, each once:
   that runner retired, or to none (an unknown token, below), since no hold is written on a
   retired runner (4.3). Each transmission has its own token and chains; the issue folds over its
   transmissions. `holdRun` alone applies the cap (4.3, 4.11). Every effect with no hold gets its
-  token from `ctx.newId()`, and `decide` applies its cap.
+  token from `ctx.newId()`, and `decide` applies its cap. A runner-held try that ends before any
+  hold (a start failure, `StartLost`, a gate answer) has no token: the host names it by its queue
+  key's `runId` and `commandId` in `unheld_outcome` (3.13, 4.4, 4.11). It belongs to that Run's
+  latest issue of that `commandId`, the one the feeder stepped (it steps one key at a time); with
+  no such issue it is an unknown token (below), and for an Ended Run it is late evidence (3.8),
+  never another Run's. Stop ends a Run not yet delivered at once (3.6), so a try that ends after
+  the Stop is late evidence, as a covered run takes no feeder settlement (4.4).
+  `unheld_outcome` reads as that try's `effect_outcome` (3.5).
 - An observation either **answers** a send (it names that send's token) or is **unsolicited**
   (it names only the host label and an event id). Unsolicited observations are background
   snapshots and task events, a turn start with no active Run (a wake Run), process events, and
@@ -395,7 +411,7 @@ Only evidence and conduit's decisions, each once:
 - Native `run_id` order is unproven. Code must not assume it sorts by time; use arrival order, or
   cite evidence that it sorts.
 
-<!-- src: C0 §1; MODEL Observation doc comment; AUDIT-2 T7, Other changes (run_id); AUDIT A11; OW Decision 3; FB §4; HLK step 1, Rules not tied to one step (9B); review 2026-10-28 (H1); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1.4; REDESIGN review r3-2 (retired send in the authority test); REDESIGN harness r12; REDESIGN-2 (D48) -->
+<!-- src: C0 §1; MODEL Observation doc comment; AUDIT-2 T7, Other changes (run_id); AUDIT A11; OW Decision 3; FB §4; HLK step 1, Rules not tied to one step (9B); review 2026-10-28 (H1); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L1.4; REDESIGN review r3-2 (retired send in the authority test); REDESIGN harness r12; REDESIGN-2 (D48); contract r15 (D49) -->
 
 ### 3.5 Send chains and the views over them
 
@@ -409,8 +425,9 @@ Each transmission has two chains; each merges by join (maximum):
 Transport and consumption stay separate unions; they are never merged into one machine.
 
 `effect_outcome` maps onto transport: succeeded to Sent, `delivery_unknown` to Unknown, retryable
-and `not_sent` to Retrying{at}, permanent to Failed{code}. A `not_sent` transmission never left
-conduit (H4): its consumption stays None and it counts toward no cap (4.8).
+and `not_sent` to Retrying{at}, permanent to Failed{code}. A `not_sent` try never left conduit
+(H4): its consumption stays None, so its own work has ended (below), and it counts toward no cap
+(4.8).
 
 **Work ended** is derived: the execution's evidence under the policy's work-ended rule, a covering
 idle probe the policy trusts, or its send's coverage (L1, L2, 3.3). A `stop_task`'s work is its
@@ -448,14 +465,38 @@ For a runner-held send these chains are never stored: they are a view over the h
 ### 3.6 Run machine
 
 - Moved only by `reconcile`: reserve to Queued (only with no active Run); launch to Launched (a new
-  execution; the only fold reset); unlaunch back to Queued when the Run is Launched, its start's
-  latest try got `not_sent` (H4), and its execution has no evidence and no send but that start:
-  the execution is dropped and its start never resolves (L2), so the Run is as it was before it
-  launched, and it launches again through admission at its start's retry (3.7); interrupt to
-  Interrupting (the policy's stop sequence); tombstone to Ended (absorbing; outcome from the fold
-  at that moment). Otherwise (a joined turn, 8.3, or a steer already issued) a `not_sent` start
-  ends its Run as a joined Run's unconsumed start does (8.3), and its inputs return to the inbox
-  with no error shown (3.9, 4.8).
+  execution; the only fold reset); unlaunch back to Queued (below); interrupt to Interrupting
+  (the policy's stop sequence; only a Run whose execution reached the agent, 5.1); tombstone to
+  Ended (absorbing; outcome from the fold at that moment).
+- **Reached the agent.** A transmission never reached the agent when it is NotConsumed, or has
+  consumption None and transport Retrying or Failed (3.5): it ended before anything consumed it
+  (a `not_sent` try, H4; a runner-held try before any hold, 3.4; a rejected resume; a failed
+  reply). Any other transmission may have, a held one with no release included. A send reached
+  the agent when a transmission of it may have; an execution, when it has execution evidence
+  (3.3), a wake execution joined to its Run (8.3) or a send that reached it. This is the one test
+  (3.8, 3.9, 4.8, 6.5).
+- **Not yet delivered (D50).** A Run is not yet delivered while it is Queued, or Launched with an
+  execution that never reached the agent. Nothing may act for it, so:
+  - Stop or Run now ends it at once, `interrupted`, with no effect (5.1). An Interrupting Run
+    whose execution comes to have never reached the agent (its start refused `interrupted`, 4.6,
+    or released by a stop commit, 4.5) ends so at once.
+  - A Launched one goes back to Queued when its start's latest transmission gets a `not_sent` or
+    retryable outcome (3.5), a release that leaves it NotConsumed (4.5) or a rejected resume
+    (4.8), or when its runner retires (L1 item 2). The execution is dropped and its sends resolve
+    no further (L2); a steer it issued returns to the inbox as the next message (3.9). It launches
+    again through admission under the same `commandId`, keeping its count (3.4): at the outcome's
+    retry (3.7), otherwise at once, as a re-send after a release goes (4.8), and `fresh` after a
+    rejected resume. An unlaunch shows nothing. A full stop or a project removal closes the
+    relay scopes, and so interrupts every feeder (4.4), before `stopRegisteredRunners` awaits
+    the Stops; the relaunch its stop commit decides is never held during the stop, and the
+    restart scan holds it when the project next serves. Main also retries nothing while closing
+    (at 3aa43c60: psr.ts 3712; project-registry-service.ts 634 before 645; daemon-foreground.ts
+    481-489).
+  - Any other permanent outcome of its start ends it `refused (code)` (3.8).
+
+  A Run whose execution reached the agent never unlaunches. A try of its start that never left
+  conduit (`not_sent`, or a start failure before any hold) is tried again at its retry in the same
+  execution (H4); its runner's retirement ends it `process_lost` (L1 item 2).
 - Derived labels: Launched with no evidence shows as Starting; with activity, Running. Settling means
   an OpenCode-style policy has a result with no later activity.
 - `reconcile` rule order: expired deadlines; end conditions (with authority); interrupts; answers,
@@ -470,7 +511,7 @@ For a runner-held send these chains are never stored: they are a view over the h
 - The view's `active` is a union by Run tag, so `by` exists only on Interrupting and the deadline
   kind is tied to the tag.
 
-<!-- src: FB §3; HLK step 2; SPEC Implementation Decisions (Native-session fence); AUDIT-2 T10; model-gaps 2026-10-28; REDESIGN-2 review r3-2 (unlaunch) -->
+<!-- src: FB §3; HLK step 2; SPEC Implementation Decisions (Native-session fence); AUDIT-2 T10; model-gaps 2026-10-28; REDESIGN-2 review r3-2 (unlaunch); contract r15 (D50) -->
 
 ### 3.7 Deadlines and the alarm
 
@@ -480,9 +521,10 @@ For a runner-held send these chains are never stored: they are a view over the h
 - Derived deadlines: each Run phase (Starting, Running, Interrupting, Settling) from its
   stored time and budget, with Settling fixed at the result; a Queued Run shows the deadline of
   the obligation that blocks it (the earliest outstanding send cleanup or Tombstone cleanup, or
-  after an unlaunch its start's retry, 3.6) and has no clock of its own; each send's cleanup or retry while it
-  may still act; permission timeouts; native command confirmation (which does not run while the
-  provider reports the command queued, or while its latest try got `not_sent`, H4).
+  after an unlaunch at a retry, its start's retry, 3.6) and has no clock of its own; each send's
+  cleanup or retry while it may still act; permission timeouts; native command confirmation
+  (which does not run while the provider reports the command queued, or while its latest try got
+  `not_sent`, H4).
 - Every non-Ended Run is bounded by a deadline, including its answer obligation's deadline while
   delivery is pending after settle expiry (3.10), so "stuck busy" cannot be represented.
 - Every probe is an obligation and owns a retry deadline from the moment it is issued. Probe
@@ -552,10 +594,22 @@ For a runner-held send these chains are never stored: they are a view over the h
   throttled.
 - End reasons: completed; provider error (code, retryable); interrupted (by stop, run now or end;
   forced when it ended on the deadline rather than native truth); process lost; deadline expired;
-  session ended (usage-limit failover or native session vanished); refused (code, including
-  `project_inactive`, 3.11); fence unconfirmed. Every failed Run shows a specific reason.
+  session ended (usage-limit failover or native session vanished); refused (code: the start's
+  own outcome, including `project_inactive`, 3.11); fence unconfirmed.
+  Every failed Run shows a specific reason.
+- **End reason of a lost Run.** A Run's reason is the cause of the decision that first ends it
+  (Tombstones are immutable). A runner's retirement is one cause whatever stopped the runner: the
+  `StopReason` (6.3) is a runner fact with no ledger input, as a project is (D48). It ends only a
+  Run whose execution reached the agent (3.6): that Run is `process lost` (L1 item 2), an error
+  carrying the fold's first specific code when it has one (10A), for every `StopReason`. One whose
+  execution never reached the agent lost nothing and unlaunches, showing nothing (3.6); the stop
+  commit has already released every start it has evidence was never received (4.5). A frame
+  written to a runner stopped while alive that exits before reading it ends `process lost` and is
+  re-sent (F51); an `Unreadable` journal is `delivery_indeterminate` (7.3). A Run that a stop, run
+  now or end ended first is `interrupted` (5.1, 3.6, 4.3 step 1) and keeps that reason (L1
+  "unless Ended").
 
-<!-- src: HLK step 4; FB §3 (10A, 11A, 12A), §4; AUDIT A6, A10; AUDIT-2 A16; SPEC Implementation Decisions (Tombstones), user story 19; MODEL EndReason; model-gaps 2026-10-28; REDESIGN harness r12 -->
+<!-- src: HLK step 4; FB §3 (10A, 11A, 12A), §4; AUDIT A6, A10; AUDIT-2 A16; SPEC Implementation Decisions (Tombstones), user story 19; MODEL EndReason; model-gaps 2026-10-28; REDESIGN harness r12; contract r15 (32.2.15) -->
 
 ### 3.9 Inputs, steers and the inbox
 
@@ -568,7 +622,7 @@ For a runner-held send these chains are never stored: they are a view over the h
   Run and queues behind a wake Run.
 - A steer the provider declines returns to the inbox.
 - When Stop, Run now or a forced close ends a Run: a steer the provider Accepted stays with the
-  ended Run. A steer that provably never reached the agent and whose outcome was not permanent
+  ended Run. A steer that provably never reached the agent (3.6) and whose outcome was not permanent
   returns to the inbox as the next message, with no error shown; a steer with a permanent outcome,
   a refusal included, stays refused (3.11, 4.8). A steer that was Delivered but not Accepted
   returns to the front of the inbox marked possibly seen, is never re-sent automatically, and with
@@ -609,14 +663,17 @@ For a runner-held send these chains are never stored: they are a view over the h
   - **Not served** (registered but not ready to serve: registering, its relay being built or
     replaced, a relay load error or its store unavailable; or a removal or registration of it in
     progress, as when a re-add imports its store before it registers): the send gets
-    `effect_outcome` `not_sent` before any hold, spawn or adapter call, runner-held or not (3.4,
-    4.4). A `not_sent` try counts no transmission and ends nothing: a start's Run goes back to
-    Queued (3.6), an input or native command shows as queued (3.9, 8.5), and the same effect
-    re-issues at the backoff, at most 30 s apart, for as long as the project is not served, while
-    the session's later input waits behind it (4.7), as main's inbox waits for the relay. Only the
-    clocks a send's own issue starts stop for a `not_sent` try (a Run's Starting, gone with the
-    unlaunch, and a native command's confirmation, 8.5); Interrupting, fence and probe deadlines
-    run, so Stop still ends a Run during an outage. No Run ends per try, so a try shows nothing.
+    `effect_outcome` `not_sent` before any hold, spawn or adapter call, runner-held or not (a
+    runner-held one as `unheld_outcome`, 3.4, 4.4). A `not_sent` try is a try, not an issue: it
+    counts no transmission and ends only its own work (3.5), never a Run, its send's address (L2)
+    or its obligation. A start's Run goes back to Queued while not yet delivered, and otherwise
+    stays Launched (3.6); an input or native command shows as queued (3.9, 8.5); and the
+    same effect is tried again at the backoff, at most 30 s apart, for as long as the project is
+    not served, while the session's later input waits behind it (4.7), as main's inbox waits for
+    the relay. Only the clocks a send's own issue starts stop for a `not_sent` try (a Run's
+    Starting, gone with the unlaunch, and a native command's confirmation, which resumes with the
+    time it had left, 8.5); Interrupting, fence and probe deadlines run, so Stop still ends a Run
+    during an outage. A try shows nothing.
   - **Served**: the send proceeds.
 
   A transmitted send is never refused; it ends by its runner's retirement or its provider's
@@ -628,17 +685,18 @@ For a runner-held send these chains are never stored: they are a view over the h
   has run since the removal began, or else removed, with any runner whose Stop never committed
   left alive as Q28 leaves it; either way every refusal precedes any transmission.
   Removal and spawn are serialized per project: a spawn either finishes before removal looks for
-  runners or is refused, and a refused spawn is `not_sent` as above, so its re-issue meets the
+  runners or is refused, and a refused spawn is `not_sent` as above, so its next try meets the
   gate again. So no refused send is addressed to a live conduit runner. The gate is read when a
   send is stepped: a waiting send whose project is removed and re-added between two of its
   tries is delivered to the re-added project, as main's inbox drains on re-add. The gate's
-  readers (the feeder and the effect interpreter) and the scheduler that fires their re-issues
+  readers (the feeder and the effect interpreter) and the scheduler that fires their retries
   are the daemon's, as the provider adapters are, not a relay's: a project with no relay,
   removed or not served, still has every send stepped and answered. The daemon's project
   registry owns this fact; the ledger holds no project state and has no project input (D48).
 - Removal reaches the ledger only through existing inputs. It stops the project's runners (6.3),
   and each retirement commit records `process_lost` (L1, 6.5): it covers the sends addressed to
-  that runner and ends launched Runs `process_lost`. A refused send ends (3.5). A refused start
+  that runner, ends launched Runs whose execution reached the agent `process_lost` and unlaunches
+  the rest (3.6). A refused send ends (3.5). A refused start
   ends its Run `refused (project_inactive)`, and `reconcile` starts the next Queued input, which
   meets the same refusal. A refused steer is never re-sent, since no permanent outcome is (4.8):
   its input is refused (3.5), as a refused start's is. A refused native command is
@@ -780,8 +838,15 @@ export type Control =
 export type Settlement =
   | { readonly kind: "alarm_fired" }
   | { readonly kind: "hold_exhausted"; readonly commandId: string }
+  // a runner-held try that ended before any hold (a start failure, StartLost, a gate answer): no token (3.4, 4.4)
+  | { readonly kind: "unheld_outcome"; readonly runId: string; readonly commandId: string; readonly outcome:
+      | { readonly tag: "retryable"; readonly retryAt: number }
+      | { readonly tag: "permanent"; readonly code: string } // includes "project_inactive"
+      | { readonly tag: "not_sent"; readonly retryAt: number } }
   | { readonly kind: "process_started"; readonly label: Label; readonly reattached: boolean }
-  | { readonly kind: "process_lost"; readonly runnerId: string } // retires runnerId (L1, 3.3)
+  | { readonly kind: "process_lost"; readonly runnerId: string;
+      readonly released: readonly { readonly token: SendToken;
+        readonly reason: "Refused" | "NotSent" | "JournalAbsent" }[] } // retires runnerId (L1, 3.3); released: its stop commit's releases, each read first as its run_released (4.5)
   | { readonly kind: "session_ended"; readonly cause: "usage_limit_failover" | "native_session_vanished" };
 
 export type RunEffect =
@@ -978,8 +1043,10 @@ One write transaction, in this order:
    ledger in the same transaction as `interrupted` with one `turn.interrupted` ("Stopped before
    delivery") and return `Covered`. When it has a hold, change nothing and return `Covered`; the
    holder's interrupt or Stop settles it, and if the holder refuses (`interrupted` or `exiting`),
-   4.5 releases it and this step settles it. Settlement is idempotent by the run's status guard.
-   Settlement goes through Send Settlement (4.7) inside this transaction.
+   4.5 releases it and this step settles it. Settlement is idempotent by the run's status guard;
+   in the ledger chain the Stop has already ended an unheld (not yet delivered) Run (3.6), and
+   this branch is its idempotent backstop. Settlement goes through Send Settlement (4.7) inside
+   this transaction.
 2. **Dispatchable?** The run is `pending` or `running`, unheld and not terminal. A terminal run,
    a run with no owner send, or a `commandId` that is not the run's returns `Ended`. A held run
    returns `Busy`.
@@ -1011,7 +1078,7 @@ One write transaction, in this order:
   exactly one runner, whichever of it and a swap commits first.
 - The holder write and a Stop commit exclude each other in the database: a hold on a runner whose
   row is retired cannot be written. A send either lands before the Stop (and is settled with the
-  runner) or is refused before the runner sees it.
+  runner, or unlaunched if it was never delivered, 3.6) or is refused before the runner sees it.
 
 <!-- src: CONT C2, Confirm before building 1; SWAP S5 refined; STOP-INTENT S5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE Data shape 1, S1, S2 -->
 
@@ -1024,21 +1091,25 @@ One write transaction, in this order:
 - From the ledger switch (32.6) it also takes `send_native_command` effects, which have no Run:
   with no runner alive it spawns one (8.5).
 - **H3. Order.** The feeder transmits in issue order, is the only spawner, and drops a send the
-  ledger no longer wants: an owner send when `holdRun` returns `Covered` or `Ended` (a Run ends when
-  its runner retires, L1), a `send_native_command` once its send has left `live` (3.5, 8.5). A send
+  ledger no longer wants: an owner send when `holdRun` returns `Covered` or `Ended` (a Run its
+  runner's retirement ends, L1; one it unlaunches is issued again under the same key, 3.6), a
+  `send_native_command` once its send has left `live` (3.5, 8.5). A send
   covered by a pending kill may still be transmitted before that kill executes; the kill, issued
   after it, then acts on the process it reached. The ledger relies on this for pending sends (L2,
   3.3).
 - The feeder's memory is its queue, keyed by `(session, run, commandId)`, and each send's
   capability (a live handle, or `Adopted`). Every step first reads the registry's project gate
-  (H4, 3.11), then calls `holdRun`. A gate settlement applies only to a run `holdRun` steps 1 and
-  2 would pass (not covered, unheld, not terminal), checked in its own transaction; any other run
-  goes on to `holdRun`. A `send_native_command`, which has no Run and no hold, is answered while
-  its send is `live` (8.5), as an `effect_outcome`: permanent `project_inactive`, or `not_sent`.
+  (H4, 3.11), then calls `holdRun`. A settlement before any hold (a gate answer, a start failure
+  or `StartLost`) applies only to a run `holdRun` steps 1 and 2 would pass (not covered, unheld,
+  not terminal), checked in its own transaction; any other run goes on to `holdRun`, which settles
+  a covered one "Stopped before delivery" (4.3 step 1). A `send_native_command`, which has no Run
+  and no hold, is answered while its send is `live` (8.5), as an `effect_outcome`: permanent
+  `project_inactive`, or `not_sent`.
   - removed: settle the send through Send Settlement as a start failure (below), permanent,
-    code `project_inactive`, with no hold and no spawn.
-  - not served: observe `effect_outcome` `not_sent` for it, with no hold and no spawn. It ends
-    no run; its Run goes back to Queued (3.6), and the ledger re-issues it (3.7).
+    code `project_inactive`, with no hold and no spawn; the ledger reads it as `unheld_outcome`
+    (3.4).
+  - not served: settle `unheld_outcome` `not_sent` for it, with no hold and no spawn. It appends
+    no run terminal; the ledger moves its Run by 3.6 and tries it again (3.7).
   - `Held`: hand the transmission to its write fiber.
   - `Busy`: drop; the hold's owner ends or releases it.
   - `Cleaning`: request candidate retirement, await its commit, then re-enter the gate.
@@ -1049,14 +1120,15 @@ One write transaction, in this order:
   - `StoreUnavailable`: one backoff (4.8).
 
   Every re-entry is a new step. The feeder has no retry loop, no poll and no failure
-  handler of its own. A key being stepped is queued again when a release commits, so no
-  release is lost.
+  handler of its own.
 - A start failure, or `Unserved` on the step right after a start (`StartLost`), settles the
-  send through Send Settlement (4.7): permanent unless the failure sets `retryable: true`. A
-  spawn the registry refuses because a removal is in progress is `not_sent` (H4). It is never
-  retried in the feeder (main parity).
+  send through Send Settlement (4.7): permanent unless the failure sets `retryable: true`; the
+  ledger reads it as `unheld_outcome` (3.4) and moves its Run by 3.6. A spawn the registry
+  refuses because a removal is in progress is `not_sent` (H4). It is never retried in the feeder
+  (main parity).
 - The write fiber runs a release that fails on the store again after one backoff, until it
-  commits (4.5's no-op rule makes the repeat safe).
+  commits (4.5's no-op rule makes the repeat safe). A release a stop commit carries is the
+  reconciler's (6.3).
 - Interruption is not an outcome: an interrupted feeder writes nothing; the restart scan owns
   its unheld sends, and Settle and adoption its held ones.
 - The live caller waits with `awaitRun(runId)`, which arms the commit signal and then re-reads
@@ -1073,6 +1145,15 @@ One write transaction, in this order:
   never ends the write. A faulted coverage read takes nothing. This race replaces the readiness
   race in SETTLE S1; SETTLE S1's "the host refuses" sentence now describes only a Stop that
   comes after the permission.
+- **Write gate.** The write fiber calls write only while its runner's stop state is `Running`
+  (6.4), read in the same synchronous step as the write. Registering a stop intent
+  (`Committing`) closes it before the stop transaction; any return to `Running` (6.4) reopens
+  it. So the runner's possibly-written set (4.5) is fixed while any stop of that runner
+  commits, and the stop commit releases `NotSent` every hold it reads on that runner outside
+  that set, including one held after its evidence read. While the gate is closed the write fiber
+  waits: it writes after a return to `Running`, and ends without writing once its transmission
+  is released (the capability's watermark), the release being its outcome. A runner stop takes
+  no write permission; only a covering user Stop or a terminal run does (above).
 - The resume mode is the outbox payload's `nativeResumeFallback`, not part of the key; at
   `Held` the frame is built in the payload's mode, and a capability in the other mode is
   replaced.
@@ -1085,16 +1166,18 @@ One write transaction, in this order:
 - A send waits on its run, never on the socket. A socket or write failure leaves it held until
   release evidence (4.5) or the run's settlement.
 - Every release, whoever commits it (the feeder's runner, the reconciler, adoption), wakes the
-  feeder in the same step; its restart scan finds the run if the daemon dies first. For
-  `ResumeRejected`, the ledger first issues the fresh fallback decision (4.8); the feeder never
-  re-holds that release itself. A held run never waits on a loop that has ended. A release of a
-  send with no queue entry enqueues it as `Adopted`.
-- A re-hold after a release goes immediately and counts toward the cap, once the fresh fallback
-  decision has issued when the reason is `ResumeRejected`.
+  feeder in the same step, so no release is lost; its restart scan finds the run if the daemon
+  dies first. A held run never waits on a loop that has ended.
+- A re-hold after a release goes immediately and counts toward the cap. Before its provider's
+  switch (6.5) the release queues its key again, even while that key is being stepped (a send
+  with no queue entry enqueues as `Adopted`), and that enqueue is the re-hold, as on R2, except
+  `ResumeRejected`, whose re-hold is the caller's fresh fallback (4.5, 4.8). From the switch the
+  key steps only on the issue the ledger makes for the release (a relaunch, 3.6; a steer's
+  re-send, 3.9; the fresh fallback, 4.8), and the feeder never re-holds a release by itself.
 - **Adoption is not a transmission.** When restart adopts a live runner that still holds a run, it
   appends nothing, checks no coverage and counts nothing toward the cap (7.2).
 
-<!-- src: CONT C2 (feeder, adoption), C3 (release hands off), closing paragraph on S9.5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE S1, S4; REDESIGN 2026-10-28 (02-options-and-pick.md) H3; 32.29.7 review r2 (P3-3) -->
+<!-- src: CONT C2 (feeder, adoption), C3 (release hands off), closing paragraph on S9.5; review 2026-10-28 (H9); model-gaps 2026-10-28; SETTLE S1, S4; REDESIGN 2026-10-28 (02-options-and-pick.md) H3; 32.29.7 review r2 (P3-3); REDESIGN-3 (write gate, A.13) -->
 
 ### 4.5 Release and its evidence
 
@@ -1109,17 +1192,24 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   else:
   - **Refused.** The runner host replies `command-refused{reason}` before `command-accepted` and
     before the command reaches the agent. Reasons: `exiting`, `retiring`, `interrupted` (4.6). For
-    `exiting` and `retiring` the runner is leaving, so the release transaction also stops it
-    (`Idle` for `exiting`, `Exited` for `retiring`) when its row is still serving. The next
-    `holdRun` returns `Unserved`, never the same runner. A Reserved runner never refuses; a
+    `exiting` and `retiring` the runner is leaving: the refusal joins or raises its stop (6.4),
+    and once that stop leaves `Committing` the refusing transmission's write fiber commits the
+    release, a no-op if the stop commit carried it (below). Once that stop has committed, the
+    next `holdRun` returns `Unserved`, never the same runner; if it returned to `Running` (6.4),
+    the re-hold may reach the same runner, and each refusal counts toward the cap (4.8) until its
+    confirmed exit stops it (6.3). A Reserved runner never refuses; a
     command cancels its reservation (6.9), so a swap never releases a send. A runner whose build
     predates `command-refused` refuses with `command-reply{failure.code: "runner_idle_exit"}`
-    before any `command-accepted` for that transmission; that reply is `Refused{exiting}`. No other
-    reply code is refusal evidence.
-  - **NotSent.** The daemon never called write for this frame: the socket was closed, the runner
-    had announced idle exit (the pre-write `runnerIdleFailure`), adoption's hello reported
-    `not_received`, or a covering Stop or a terminal run took the write permission before the
-    first byte (4.4). A write that was called and failed, or a missing `command-accepted`, is not
+    before any `command-accepted` for that transmission; that reply is `Refused{exiting}`. The
+    host's `idle-exit` is also `Refused{exiting}` for each transmission written on that connection
+    with no `command-accepted` read before it (4.6), released by a stop commit whose evidence
+    read follows the `idle-exit` read (below).
+    No other reply code is refusal evidence.
+  - **NotSent.** The daemon never called write for this frame: the socket was closed, adoption's
+    hello reported `not_received`, a covering Stop or a terminal run took the write permission
+    before the first byte, or a stop commit reads its hold outside the runner's possibly-written
+    set (below).
+    A write that was called and failed, or a missing `command-accepted`, is not
     evidence. A Stop that covers a held send before its first byte takes the write permission.
     The daemon then never calls write, so the send is NotSent and is released, and the next `holdRun` returns `Covered`
     and settles it `interrupted` with one `turn.interrupted` ("Stopped before delivery") (4.3
@@ -1138,21 +1228,37 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
     executing the input. `prepare-turn` releases; the ledger issues a new start decision with
     mode `fresh` and the same `commandId`. The feeder does not re-hold the release itself;
     `holdRun` binds the new decision as transmission `n + 1`, counting toward the cap (4.8).
-- **One commit for release and stop.** The transaction-bound stop mutation is the body of
-  `receipts.requestStop` without its `flushPendingWrites` wrapper: it runs inside the caller's write
-  and reads its candidates in that transaction. Both `requestStop` and `release` use it. After the
-  outer commit the lifecycle module applies the same post-commit step as `requestStop` (state and
-  row cache, route cache, revocation and the runner entry scope's close (6.11), waiters,
-  reconcile). A `requestStop` that races a
-  release-driven stop joins it.
-- `release` is the lifecycle module's eighth call (6.10). The `Idle` stop reason is written by a
-  refusal with `exiting` and by idle exit.
+- **A stop commit carries the releases it has evidence for.** Every stop commit, for any
+  `StopReason`, appends the release of each transmission held on that runner for which its
+  evidence read (before the transaction, 6.3; a store-fault retry reads again) finds evidence:
+  `Refused` for each one a refusal read on that runner's connection names (4.6); `NotSent` for
+  each hold its transaction reads on that runner outside the possibly-written set (below);
+  `Refused{exiting}` for one an `idle-exit` read first covers (above, 4.6); `JournalAbsent` for
+  an `Absent` one when the target is already confirmed exited (the reaper's pid and start-time
+  check, as restart's `recover` and failure cleanup stop a dead pid `Exited`, 7.2), from
+  Settle's journal read (7.3) run first. The evidence read freezes the **possibly-written set**:
+  each transmission this daemon called write for, and each hold an earlier daemon made, which
+  has no write evidence here and waits for adoption's hello (`not_received`, 7.2) or Settle's
+  journal (7.3). The set is exact and fixed: the closed gate stops every write (4.4), only this
+  daemon's `holdRun` makes a new hold, and none commits after the retirement (4.3), so a hold
+  made after the read is unwritten and released. A later release of a transmission the commit
+  released is stale. Before the switch the commit appends only these `run.released` events
+  (6.5). In the ledger chain (32.4) its `process_lost` names them with their reasons, and the
+  ledger reads them first in that one decision (L1). So a start its runner never received leaves
+  its Run not yet delivered (3.6), and its relaunch addresses the next runner (L2). A later
+  release of one it did not release (a refusal read after its evidence read, F40; `JournalAbsent`
+  for a frame written to a runner stopped while alive that exits before reading it, F51) finds
+  its Run Ended `process lost`, and the input is re-sent on a new Run (3.9, 4.8). This replaces
+  the pre-write `runnerIdleFailure`: an announced idle exit is a stop commit (6.3).
+- `release` is the lifecycle module's eighth call (6.10). The `Idle` stop reason is written by
+  idle exit, and by an `exiting` refusal only if it finds the runner `Running` (6.4).
 
-- A failed release write is retried by its caller's owner: the feeder's write fiber (4.4), or the
+- A failed release write is retried by its caller's owner: the feeder's write fiber (4.4) for a
+  release outside a stop commit, the reconciler for one a stop commit carries (6.3), or the
   reconciler's cadence for Settle. An adoption release failure propagates through attachment
   recovery; bounded reconnect exhaustion retires the runner and hands its held runs to Settle.
 
-<!-- src: CONT C3, Deleted or changed (lifecycle module); review 2026-10-28 (M7, H11); model-gaps 2026-10-28; SETTLE S1, Verified requirements 5; 32.29.7 review r2 (P3-3) -->
+<!-- src: CONT C3, Deleted or changed (lifecycle module); review 2026-10-28 (M7, H11); model-gaps 2026-10-28; SETTLE S1, Verified requirements 5; 32.29.7 review r2 (P3-3); REDESIGN-3 (stop-commit releases, A.13) -->
 
 ### 4.6 The host's interrupt refusal
 
@@ -1165,6 +1271,14 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   share a cut-off message id).
 - An `interrupt_turn` without `runIds` (an older daemon) records nothing. `end_session` needs no
   record: the runner is exiting and refuses with `exiting`.
+- **Idle exit is the host's last acceptance (host fact).** The host sets `exiting` and writes
+  `idle-exit` in one synchronous step, and reads `exiting` before anything else when a command
+  arrives, writing `command-accepted` in that same step. So on one connection every
+  `command-accepted` precedes the host's `idle-exit`, and a `send-turn` the host reads after it is
+  refused `exiting` (an older build: `runner_idle_exit`, 4.5) or never read before the process
+  exits. A reconnect is not read until the previous connection has drained, and the daemon reads
+  one connection's frames in order. So a transmission written on that connection with no
+  `command-accepted` read before `idle-exit` was never accepted and never will be (4.5).
 - **From 32.5 (OPEN-5, section 9).** The run id stays a coverage label, never a send identity.
   `interrupt_turn` also names, for a wake Run, the host turn label its opening observation carried
   (3.4), and carries no input ids. The host answers a `send-turn` in this order: `exiting`,
@@ -1174,7 +1288,7 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   once its own turn has ended. Until 32.13 the `runIds` come from `payload.stop.owners`; from 32.13,
   from the ledger's `control` `stop` coverage (5.4).
 
-<!-- src: CONT C3 (host's interrupt refusal), Required work 3; OPEN-5 decision -->
+<!-- src: CONT C3 (host's interrupt refusal), Required work 3; OPEN-5 decision; contract r15 residual fix: main at 3aa43c60, src/lib/provider/runner/runner-host.ts:125-137 (beginExit), :333-342 (a second socket destroyed, a hello refused while exiting), :652-678 (exiting checked, then command-accepted); R2 branch, same path, :258-270 (beginExit), :819-840 (refusal order), :864-870 (command-accepted), :1121-1142 (a reconnect waits for the old stream's EOF), src/lib/provider/runner/runner-connection.ts:191-199 -->
 
 ### 4.7 Outcome and the duties committed with it
 
@@ -1232,8 +1346,8 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   | hello: runner never got it (`not_received`) | `run.released` `NotSent`, read as Consumption NotConsumed{absent} (4.11) |
   | delivery unknown | `observe` `effect_outcome` `delivery_unknown`; runner-held: Settle's `delivery_indeterminate` (4.11) |
   | native resume rejected | `effect_outcome` `permanent`, code `native_resume_rejected`; runner-held: `run.released` `ResumeRejected` (4.11) |
-  | daemon refusal (project removed, H4; admission timeout) | the refused send's `effect_outcome` `permanent`; runner-held: Send Settlement's permanent outcome before any hold (4.4, 4.11) |
-  | project not served (H4) | `effect_outcome` `not_sent`, runner-held included (4.4); it ends no run (3.6) |
+  | daemon refusal (project removed, H4; admission timeout) | the refused send's `effect_outcome` `permanent`; runner-held: Send Settlement's permanent outcome before any hold, read as `unheld_outcome` (4.4, 4.11) |
+  | project not served (H4) | `effect_outcome` `not_sent`; runner-held: `settle` `unheld_outcome` `not_sent` (4.4); its Run moves by 3.6 |
   | Stop | `control` `stop` / `cancel_input` |
   | runner lost | `settle` `process_lost` |
 
@@ -1254,7 +1368,7 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
 ### 4.8 Retries, the cap, the resume fallback and steers
 
 - **A message that never reached the agent.** When a Run ends, or a runner reconnects, and an
-  input's send provably never reached the agent, its outcome was not permanent and the user did
+  input's send provably never reached the agent (3.6), its outcome was not permanent and the user did
   not press Stop, the send is re-sent automatically, up to the cap. Otherwise it ends `failed` or
   `cancelled`: the failed message is shown once and its text returns to the composer.
   `delivery_unknown` and a permanent outcome (F65, F67, a refusal included) are never re-sent.
@@ -1277,14 +1391,17 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   and its text returns to the composer; probes follow 3.7. A send retried onto a fresh run keeps
   its transmission count. The same backoff spaces the feeder's re-entries after
   `StoreUnavailable`, the write fiber's repeated release, and the reconciler's retry of a failed
-  Stop commit. A runner-held send's retryable outcome ends its run and re-sends on a fresh run; the
-  cap counts by `commandId` across runs. A start failure precedes any hold and a `not_sent`
+  Stop commit. A retryable outcome of a not-yet-delivered Run's start unlaunches it, and one
+  before any hold of a Run that reached the agent is tried again in its execution (3.6); any
+  other runner-held send's retryable outcome ends its run and re-sends on a fresh run. The cap
+  counts by `commandId` across runs. A start failure precedes any hold and a `not_sent`
   outcome precedes any hold or adapter call; neither counts a transmission, so one that keeps
   recurring re-sends without a bound at the 30 s cap, as on main. A `not_sent` outcome (a project
-  not served, H4) ends no run: a start's Run goes back to Queued (3.6).
+  not served, H4) ends only its try: a start's Run moves by 3.6.
 - **The resume fallback is a new transmission.** A rejected native resume ends that transmission
   (released `ResumeRejected` for a runner send). The ledger issues a new start decision under the
-  same `commandId`; `holdRun` binds it as `n + 1`. The feeder does not re-hold the release itself.
+  same `commandId`, mode `fresh` (a not-yet-delivered Run's relaunch, 3.6); `holdRun` binds it as
+  `n + 1`. The feeder does not re-hold the release itself.
   Until 32.5, its existing fallback marker keeps the runner's deduplication key distinct; from
   32.5 it is transmission
   `n + 1`, so its token is distinct with no marker (9). A rejection of the fresh transmission is
@@ -1379,8 +1496,8 @@ treat the hold as a cache of a ledger chain.
   | Hold fact | Source | Ledger chain value |
   |---|---|---|
   | `run.dispatched{commandId, transmission: n}` | the `run.dispatched` event | the send's issue decision; `(commandId, n)` is the transmission |
-  | settled before any hold (a start failure, `StartLost` or a removed gate answer, 4.4) | the run terminal event Send Settlement appends (4.7) | Transport Failed{code}, or Retrying when `retryable`; Consumption None |
-  | not served before any hold (H4, 4.4) | the `effect_outcome` `not_sent` the feeder observes | Transport Retrying; Consumption None; no run terminal (3.6) |
+  | settled before any hold (a start failure, `StartLost` or a removed gate answer, 4.4) | the run terminal event Send Settlement appends (4.7), `unheld_outcome` to the decider (3.4); its Run moves by 3.6 | Transport Failed{code}, or Retrying when `retryable`; Consumption None |
+  | not served before any hold (H4, 4.4) | the feeder's `unheld_outcome` `not_sent` | Transport Retrying; Consumption None; no run terminal; its Run moves by 3.6 |
   | held, no other evidence | `run.dispatched` with no later `run.released` for that transmission | Transport Issued; Consumption None |
   | released `NotSent` or `JournalAbsent` | the `run.released` event | Consumption NotConsumed{absent} |
   | released `Refused` (`exiting`, `retiring`, `interrupted`) | the `run.released` event | Consumption NotConsumed{declined} |
@@ -1429,8 +1546,10 @@ stands: the owner's holder carries it and the reactor re-sends it.
 
 ### 5.1 What Stop does to a Run
 
-- **Stop always stops.** Stop moves the active Run to Interrupting with a 30 s deadline. A native
-  interrupted result ends the Run.
+- **Stop always stops.** Stop moves an active Run that reached the agent to Interrupting with a
+  30 s deadline. A native interrupted result ends the Run. A Run not yet delivered ends at once,
+  `interrupted`, with no effect (3.6); the fence keeps holding the next Run under its own deadline
+  (3.7).
 - If the deadline passes, the Run is ended `interrupted` (forced), tombstoned, and the runner is told
   to close the native query. If the close is not confirmed before a second deadline, the effect is
   `kill_and_respawn`.
@@ -1452,7 +1571,7 @@ stands: the owner's holder carries it and the reactor re-sends it.
   alone never destroys them.
 - Stop is not a goal action. Stop never pauses or clears a goal (8.6).
 
-<!-- src: SPEC Implementation Decisions (Stop that always stops; quarantine sentence withdrawn by D1-5); D1-1 to D1-5; D1 (OpenCode is unaffected); BG Decision 3 (goal flow separate from Stop), Decision 4; REDESIGN 2026-10-28 (02-options-and-pick.md) L1 -->
+<!-- src: SPEC Implementation Decisions (Stop that always stops; quarantine sentence withdrawn by D1-5); D1-1 to D1-5; D1 (OpenCode is unaffected); BG Decision 3 (goal flow separate from Stop), Decision 4; REDESIGN 2026-10-28 (02-options-and-pick.md) L1; contract r15 (D50) -->
 
 ### 5.2 Coverage
 
@@ -1617,12 +1736,17 @@ revoke(r: Live, reason: Revocation): Exiting | Retired
 
 ### 6.3 Request stop and the retirement row
 
-- **Every way a runner is stopped** (explicit Stop, end-session, project removal, supersede or retire,
-  idle exit, a confirmed exit, a refusal with `exiting` or `retiring`, an abandoned candidate) makes
-  one call: `requestStop(target, reason)` (6.10).
-- It commits one transaction, which reads everything it decides on: the target's row, its
-  session and role, for `Superseded` the successor and any run the runner still holds, and for any
-  other Stop of a serving row every unretired candidate of the session. It writes the retirement
+- **Every way a runner is stopped** (`StopReason` `Explicit`, end-session, project removal,
+  supersede or retire, idle exit, a confirmed exit, a refusal with `exiting` or `retiring`, an
+  abandoned candidate) makes one call: `requestStop(target, reason)` (6.10).
+- It commits one transaction. The transaction reads the target's row, its session and role,
+  every hold on the runner (4.5), for `Superseded` the successor, and for any other Stop of a
+  serving row every unretired candidate of the session. Its release evidence (4.5) is read before
+  it, from owners outside the store: the runner's possibly-written set behind the closed write
+  gate (4.4: each transmission this daemon called write for, and each hold an earlier daemon
+  made, which adoption or Settle owns from the startup pass, 7.2), the runner connection's
+  `idle-exit` and `command-accepted` order and its refusals (4.6), and for a confirmed-exited
+  target Settle's journal read (7.3). It writes the retirement
   row with leader identity, reaper identity if any, the group snapshot, `retired_at` and the stop
   reason. The row lists no runs (6.5). Retirement clears `attachment_id` in the same statement.
   Attach requires `retired_at IS NULL`, so a reconnect never revives a retired runner. A
@@ -1672,7 +1796,6 @@ revoke(r: Live, reason: Revocation): Exiting | Retired
   retries it.
 - `retired_at` is set-only and is the fence that outlives memory. A daemon starting up never
   re-adopts a retired runner as live; it hands the row to the reconciler.
-- The transaction-bound form of the stop mutation (4.5) lets a release and a stop commit together.
 
 ```ts
 type StopReason =
@@ -1713,19 +1836,25 @@ decideRunnerStop(state, observation) -> { state, actions }
 - The reconciler module (`runner-retirement.ts`) owns this state. Callers read it; only the
   reconciler changes it. `entry.retirement` is a read of it.
 - `Committing` is the only state that is not durable. A second Stop joins it instead of committing
-  again. It does not guard dispatch; the database does (4.3). For a Stop other than `Superseded`,
-  it stays `Committing` on any store fault and the reconciler retries the commit (6.3). A decode
+  again. It does not guard dispatch; the database does (4.3). It guards writes: every state but
+  `Running` closes the runner's write gate (4.4). For a Stop other than `Superseded`, it stays
+  `Committing` on any store fault and the reconciler retries the commit (6.3). A decode
   rejection, an identity rejection (session mismatch), any failure of a `Superseded` Stop (a store
   fault included), or a defect returns it to `Running` and fails its waiters.
 - The commit worker starts when the intent is registered and runs in the reconciler's scope. It
   is not a `decideRunnerStop` action, and the durable-row tick never treats `Committing` as
   `Requested`. Only the row the committing transaction returns moves the state on (to `Requested`
   for a new commit), and that same transaction's session rows replace the session's routing
-  cache. `Ignored` resolves to `Running` with no Stop wait, and each joiner then rechecks its own
-  reason.
-- A release that refuses with `exiting` or `retiring` holds `Committing` for the release
-  transaction. If that transaction fails, the state is restored and its joiners are resolved
-  `Ignored`, so each commits its own Stop.
+  cache. `Ignored` resolves to `Running` with no Stop wait, and each joiner but a refusal (below)
+  then rechecks its own reason.
+- A refusal with `exiting` or `retiring` registers no stop form of its own. It joins the runner's
+  `Committing` intent, or calls `requestStop` (`Idle` for `exiting`, `Exited` for `retiring`) when
+  the runner is `Running`. Once that stop leaves `Committing`, committed or returned to `Running`,
+  its write fiber commits the release (4.5); a refusal read after it left commits at once, stale
+  if that commit carried it, else a later release (F40). The refusal never rechecks or raises a
+  second stop, and the runner's confirmed exit stops it (6.3). The host writes `idle-exit` before
+  any `exiting` refusal on a connection, so an `exiting` refusal finds the `Idle` intent or its
+  commit; a `retiring` refusal is the daemon's first word of a self-retire (4.6).
 - `Requested` to `Settled` map onto the row: its tag plus its signal log. Memory is a cache of the
   row and is rebuilt from it at startup.
 - `decideRunnerKill` is the signal part of `decideRunnerStop`.
@@ -1758,10 +1887,9 @@ decideRunnerStop(state, observation) -> { state, actions }
   reconciler's in-memory state on `runnerRetrySchedule` are the reconciler's own wait, bounded
   by the same window. The park also ends early, and the feeder steps, when the head's run ends or
   a Stop commit covers it (4.4). No other code scans the stop states for a predecessor.
-- The release's stop step receives the serving row that `releaseRun` selected in its own
-  transaction (`runner_id, session_id, driver_kind, pid, start_time, reaper_pid,
-  reaper_start_time`) as a `StopTarget`. With no serving row there is no stop step. The
-  in-memory registry is a routing cache and is never read for who serves.
+- A refusal's `requestStop` names the refusing runner, and its transaction reads that runner's
+  row as every Stop does (6.3). The in-memory registry is a routing cache and is never read for
+  who serves.
 - **One process watcher.** `RunnerAuthority` owns the only process watcher, over Exiting and Retired
   records; it is the reconciler's cadence. When a process is confirmed gone (exited, pid reused,
   zombie) it emits `runnerGone(runnerId)` once. 32.4 keeps only failed liveness checks, which are
@@ -1789,9 +1917,10 @@ decideRunnerStop(state, observation) -> { state, actions }
   union of `owned_run_ids` and the holder query, and runs with a commandless `run.dispatched` keep
   legacy recovery (4.1). New rows never write `owned_run_ids`. The fallback is deleted at 32.13.
 - **`process_lost` is recorded with `retired_at` (decided OPEN-4, 2026-10-28).** In the ledger
-  chain, the transaction that sets a runner's `retired_at` also records `process_lost{runnerId}`,
-  which retires that runner (L1, 3.3). Settlement is decided once, in the commit that retires the
-  runner, so it cannot be lost between retirement and `Gone`.
+  chain, the transaction that sets a runner's `retired_at` also records
+  `process_lost{runnerId, released}` (3.13), which retires that runner (L1, 3.3); before the
+  switch a stop commit appends only its `run.released` events (4.5). Settlement is decided once,
+  in the commit that retires the runner, so it cannot be lost between retirement and `Gone`.
   - The process may still be running after that commit. It is fenced (6.2), so it accepts no new
     work; evidence it still sends is recorded and folds by 3.8, and never reopens a run.
   - Process cleanup (kill, reaper, discovery files) still waits for `Gone` and runs in the
@@ -1802,6 +1931,19 @@ decideRunnerStop(state, observation) -> { state, actions }
     Cursor 32.10, Codex 32.21), which moves them to the retirement commit and deletes `Gone`-time
     settlement for that provider in the same change. So each run has one settling writer at every
     point (section 2).
+  - **One end label (3.8).** Gone-time settlement ends a lost run as the ledger will, for every
+    `StopReason`, except the one label below: a run whose execution never reached the agent (3.6,
+    after the stop commit's releases, 4.5) is not settled and is held again, as main retries an
+    unaccepted send at idle exit and recovery abandonment (psr.ts at 3aa43c60: 975, 2331-2335,
+    3707-3711); any other lost run ends `turn.error` (main's `runner_stopped`, or the run's own specific failure code);
+    `turn.interrupted` only for a run its own Stop or End already settled, which includes a user
+    End's cohort (992: an End command id drops `runner_stopped`), since the ledger ends it before
+    it issues `end_session` (8.4).
+    `classify` never maps `process_lost` to `cancelled` by reason. The switch changes one label: a
+    frame written to a runner stopped while alive (`StopReason` `Explicit`, `EndSession`,
+    `ProjectRemoved`) that exits before reading it is re-held silently before the switch, and
+    after it ends `process lost` and is re-sent (F51), as main shows `runner_stopped` for those
+    stops.
   - **After the switch,** the run is already Ended `process_lost` when Settle reads the journal at
     `Gone`. `Absent` (`JournalAbsent`) means the pending input never reached the agent, so it is
     re-sent on a new Run (3.9, 4.8). `finished` and `uncertain` (`delivery_indeterminate`) are late
@@ -1811,7 +1953,7 @@ decideRunnerStop(state, observation) -> { state, actions }
     matches the as-built reconciler but leaves a retired runner's runs open until the kill
     completes.
 
-<!-- src: STOP-INTENT S5; CONT Data shape, C2, C3; AUDIT A1 (with the ledger), A3; SWAP failure mode 17; review 2026-10-28 (H4, H5) -->
+<!-- src: STOP-INTENT S5; CONT Data shape, C2, C3; AUDIT A1 (with the ledger), A3; SWAP failure mode 17; review 2026-10-28 (H4, H5); contract r15 (32.2.15) -->
 
 ### 6.6 The reaper and the kill routine
 
@@ -2095,14 +2237,16 @@ At startup, in one recovery pass:
 
 - Settle reads the journal first, typed `Absent | Present(state) | Unreadable` (4.5).
 - `Absent`, with the process confirmed exited and a build that writes the journal before executing:
-  release `JournalAbsent`; the feeder holds the send again.
+  release `JournalAbsent`; the feeder holds the send again. When the process is confirmed exited
+  before its stop commits, that commit carries these releases (4.5).
 - `Present`: settle from the journal answer (4.9).
 - `Unreadable`, or a runner from an older build: `delivery_indeterminate`, never re-sent. Settle is
   the only writer of this marker for runner-held rows.
 - Today, and for each runner-held provider until its ledger ticket: every non-terminal run the
   runner held is settled at `Gone` (6.5).
-- From that provider's ledger ticket (Claude 32.6, Cursor 32.10, Codex 32.21), the run is already
-  Ended `process_lost` in the retirement commit (6.5), so Settle settles no run. `Absent`
+- From that provider's ledger ticket (Claude 32.6, Cursor 32.10, Codex 32.21), Settle settles no
+  run. A Run whose start the stop commit released `JournalAbsent` has unlaunched (4.5, 3.6); any
+  other is already Ended `process_lost` in the retirement commit (6.5), and a later `Absent`
   (`JournalAbsent`) means the pending input is re-sent on a new Run (3.9, 4.8). `Present` answers
   and `delivery_indeterminate` are late evidence (3.8); an uncertain input is never re-sent.
 
@@ -2226,7 +2370,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 - An unsolicited `turn_started` names no send, so the execution it starts is outstanding work in
   its own right (D47), whether it records a wake Run or joins an active Run: no send's chains can
   end it, so a joined Run's start being NotConsumed (declined or absent) ends the Run but not this
-  execution. From
+  execution. A Run with a joined wake execution has reached the agent and never unlaunches (3.6).
+  From
   `turn_started` until its runner retires (L1) or its provider's Run-end evidence for that label
   is recorded, `anythingMayAct` is true, whether or not the Run has Ended (by its start NotConsumed, deadline,
   a refusal or `session_ended`). Run-end evidence clears this liveness even without
@@ -2320,9 +2465,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   finishes the send (3.4). The deadline starts at issue and drives only the view.
 - The provider may report it queued ("queued by Claude"). The deadline does not run while the
   provider reports it queued, or while its latest try got `not_sent` (H4), which shows as
-  `Queued`. When it fires, the tracker re-reads native state (Claude's
-  transcript, Codex's `thread/goal/get`), with no authority needed, and shows "Clear not confirmed"
-  or "Pause not confirmed" with Retry. The tracker runs no timer.
+  `Queued`; it resumes with the time it had left, since a try is not an issue (H4). When it
+  fires, the tracker re-reads native state (Claude's transcript, Codex's `thread/goal/get`), with
+  no authority needed, and shows "Clear not confirmed" or "Pause not confirmed" with Retry. The
+  tracker runs no timer.
 
 <!-- src: BG Decision 3; AUDIT A4; AUDIT-2 T5; REDESIGN 2026-10-28 (02-options-and-pick.md) L4; REDESIGN review r2-1 -->
 
@@ -2641,9 +2787,12 @@ the ledger chain.
 - F39. The journal is unreadable or corrupt, or the runner is an older build: indeterminate, never
   re-sent.
 - F40. A runner retires itself after an abandoned run while a send waits: refused `retiring`,
-  released, the runner stopped, the send delivered once on a new runner. Ledger chain: the run is already Ended `process_lost` in the retirement commit (6.5);
-  the pending input is re-sent on a new Run (3.9, 4.8), delivered once; a late answer is late
-  evidence (3.8).
+  released, the runner stopped, the send delivered once on a new runner. Ledger chain: the
+  refusal raises the `Exited` stop, whose commit carries its release, so the Run unlaunches and
+  relaunches on the next runner, showing nothing (6.4, 4.5, 3.6). A refusal read after that
+  commit's evidence read is released by its write fiber and finds its Run Ended `process_lost`
+  (6.5); the pending input is re-sent on a new Run
+  (3.9, 4.8), delivered once; a late answer is late evidence (3.8).
 - F41. Repeated daemon restarts during one long turn: adoption appends nothing; never `Exhausted`.
 - F42. Every new runner refuses: the fifth transmission's refusal ends `Exhausted`, one `turn.error`.
 - F43. A projection rebuild after a release: the run is unheld, as before the rebuild.
@@ -2662,10 +2811,16 @@ the ledger chain.
   over, and re-sends after retryable provider failures count toward the cap.
 - F51. A live daemon, a held send, the runner exits before reading it: the reconciler releases it
   `JournalAbsent`, the feeder holds it on a new runner, delivered once, no restart needed. Ledger
-  chain: the run is already Ended `process_lost` in the retirement commit (6.5); `JournalAbsent` means the pending input is re-sent on a
-  new Run (3.9, 4.8), delivered once; a late answer is late evidence (3.8).
-- F52. The runner announces idle exit, then a send reaches the pre-write check: `NotSent`, released,
-  delivered once on a new runner.
+  chain: when the exit is confirmed before the stop commits, that commit carries the
+  `JournalAbsent` release and the Run unlaunches, showing nothing (4.5, 3.6). When a stop of the
+  live runner came first, the run is already Ended `process_lost` in the retirement commit (6.5);
+  `JournalAbsent` means the pending input is re-sent on a new Run (3.9, 4.8), delivered once; a
+  late answer is late evidence (3.8).
+- F52. The runner announces idle exit with a send held and unwritten: the write gate keeps it
+  unwritten and the `Idle` stop commit releases it `NotSent` (4.4, 4.5), delivered once on a new
+  runner, as is one held after the stop's evidence read. A send written with no
+  `command-accepted` before the `idle-exit` is released `Refused{exiting}` in the same commit
+  (4.6). Ledger chain: its Run unlaunches and relaunches, showing nothing (3.6).
 - F53. An older-build runner refuses with `command-reply runner_idle_exit` before
   `command-accepted`: `Refused{exiting}`, delivered once on a new runner.
 - F54. Daemon SIGKILL between the hold commit and the write, runner alive: adoption's hello reports
@@ -2688,9 +2843,9 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   the daemon refuses the session's sends (H4). A later receipt for A's input changes nothing; B's
   start is refused and B ends `refused (project_inactive)`. Nothing reaches the agent. A start of
   B stepped while the removal is still in progress gets `not_sent` and B goes back to Queued;
-  its re-issue is refused once the removal has finished. If instead the project is only not
+  its next try is refused once the removal has finished. If instead the project is only not
   served (a relay load error), B's start gets `not_sent` before any hold, B goes back to Queued,
-  counts no transmission, re-issues at the backoff for as long as the error lasts, and is
+  counts no transmission, is tried again at the backoff for as long as the error lasts, and is
   delivered once after the project is served again.
 - F59. Question q answered with E; E gets a retryable outcome; result (error ActualFailure); E
   retried; then q's delayed confirmation of the first transmission arrives, then `query_ended`. The
@@ -2945,8 +3100,9 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.11 | A4's deadline as a ledger deadline, A11 unsolicited observations, T5, T7, `run_id` order | 3.4, 3.7, 8.2, 8.5 |
 | 32.2.12 | core destructive confirm and lost work, including stale snapshots and labels | 8.3, 8.4 |
 | 32.2.14 | per-provider native-session fence membership, idle proof and `resultReleasesFence` | 9 |
+| 32.2.15 | end label per `StopReason`, derived from L5 and 3.6; the oracle and R2 tests agree | 3.8, 6.5 |
 | 32.3 | ledger on SQLite with four verbs; the Run Effects table, empty and not yet authoritative for any provider (the outbox stays authoritative); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test | 3.1, 3.7, 3.12, 11.3 |
-| 32.4 | deadlines as data and the process watcher; A1 with the ledger: builds `process_lost` with `retired_at` in the retirement commit for ledger-owned runs, while runner-held providers keep `Gone`-time settlement until their own ticket (6.5); A3, A8, A15 with the ledger; Q26: durable process-loss recovery, including the uncommitted direct-Stop/live-reattachment limitation (7.2), with 32.6/32.8 | 3.7, 6.4, 6.5, 6.8, 7.2 |
+| 32.4 | deadlines as data and the process watcher; A1 with the ledger: builds `process_lost` with `retired_at` in the retirement commit for ledger-owned runs, carrying the stop commit's releases (L1, 4.5), while runner-held providers keep `Gone`-time settlement until their own ticket (6.5); A3, A8, A15 with the ledger; Q26: durable process-loss recovery, including the uncommitted direct-Stop/live-reattachment limitation (7.2), with 32.6/32.8 | 3.7, 6.4, 6.5, 6.8, 7.2 |
 | 32.5 | stateless runner protocol; A11; the protocol bump with 32.19; Send Token identity on the wire, run ids as coverage labels only, wake labels on `interrupt_turn`; a joined steer's own `run.dispatched` and token (4.11) | 4.6, 4.9, 4.11, 9 |
 | 32.6 | Claude send and run end through the ledger; reuses the journal answers. Switch for Claude: Run Effects, run state and `delivery_indeterminate` become the ledger's; `process_lost` settlement moves to the retirement commit and `Gone`-time settlement is deleted for Claude; migrate Send Settlement's Claude callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Claude; Claude's `process_started` reporter (6.1), the swap commit's included, with promote's memory part before the permit's release and a command activating a Candidate host (6.9); Q26: close native terminal projection's missing attempt fence with 32.2.6 and durable process-loss/control recovery with 32.4/32.8 | 3.12, 4.9, 4.11, 6.1, 6.5, 6.9 |
 | 32.7, 32.23 | steering as a Run Input; wake admission. Run Inputs own steer association for each switched provider; `joined_into` stays for the rest until 32.13 | 3.9, 3.12, 8.3 |
@@ -2957,7 +3113,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.13 | Codex policy in the decider | 3, 8, 9 |
 | 32.21 | Codex on the ledger, runner-held; reuses 32.6's runner path. Switch for Codex, as 32.6 does for Claude; migrate Send Settlement's Codex callers to the ledger's source-specific inputs (4.7, 4.11) and delete their outbox path; `processLost` is a no-op for Codex | 3.12, 4, 6.5, 9 |
 | 32.11 | OpenCode on the ledger. Switch for OpenCode: Run Effects, run state and the direct-provider `delivery_indeterminate` marker (written by the interpreter) become the ledger's; the OpenCode process reporter, labelled with the instance's `promptProcessId` (9) | 3.12, 4.10, 9 |
-| 32.12 | session-wide failures and removed projects: one project gate for H4 (removed, not served, served: `not_sent` before any transmission, its Run back to Queued, while registered and not served or while a removal or registration runs, a permanent `project_inactive` once removed), removal serialized with spawn per project, `project_inactive` a final refusal | 3.11, 4.4, 4.7, 4.8 |
+| 32.12 | session-wide failures and removed projects: one project gate for H4 (removed, not served, served: `not_sent` before any transmission, its Run back to Queued while not yet delivered (3.6), while registered and not served or while a removal or registration runs, a permanent `project_inactive` once removed), removal serialized with spawn per project, `project_inactive` a final refusal | 3.11, 4.4, 4.7, 4.8 |
 | 32.13 | deletes the old run-state copies: `owned_run_ids` and the fallback, main-built paths, `newestRunnerFirst`, run joining, `payload.stop.owners`, `stopCovers`, `joined_into` and the outbox; the ledger's `control` `stop` takes over coverage (5.4); Send Settlement's outbox adapter and its `settleRunnerCommandReply` call path | 3.12, 5.4, 6.5, 6.9, 7.4 |
 | 32.14 | full crash matrix and two-build upgrade, run once each for Claude, Codex and Cursor; reuses the journal answers | 4.9, 11.3 |
 | 32.22 | A9, A20, T6, T11 | 8.3 |
@@ -2965,7 +3121,8 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.25 | destructive confirm and durable lost-work notice | 8.4 |
 | 32.26, 32.27 | A4, A17, T4 | 8.1, 8.4, 8.6 |
 | 32.28 | Codex background terminals as tasks | 8, 9 |
-| 32.29 | the send settlement redesign (SETTLE S1 to S5) and the split by state owner: send gate and feeder, Send Settlement, Starter, legacy recovery, retirement, live send | 2, 4.3-4.5, 4.7-4.9, 4.11, 6.3, 6.4, 6.9, 6.10, 7.1-7.2 |
+| 32.29 | the send settlement redesign (SETTLE S1 to S5) and the split by state owner: send gate and feeder, Send Settlement, Starter, legacy recovery, retirement, live send; the write gate read from the 6.4 stop state (4.4); a stop commit carries the releases it has evidence for, and a refusal joins or raises its stop (4.5, 6.4) | 2, 4.3-4.5, 4.7-4.9, 4.11, 6.3, 6.4, 6.9, 6.10, 7.1-7.2 |
+| 32.2.16 (R2 runtime, a 32.29 child) | Gone-time settlement holds again a run that never reached the agent, after the stop commit's releases, for every `StopReason`; flips the R2 label tests | 3.6, 4.5, 6.5, 7.3 |
 | 32.30 | SessionActivity as every surface's activity view; bead requires a contract extension before implementation | 2, 8.1 |
 
 - Lanes paused for this redesign: 82tn.10.6, 10.7, 10.9, 11, 12, 13, 14, 15 and 16. They build on
@@ -3298,6 +3455,65 @@ the project seam. D48 (A.12) removes the state they asked about: no send is reti
 so binding is 3.4 alone, a probe's findings apply as for any probe, nothing revives, and
 `activity` is ordinary evidence.
 
+**Decided (contract round 15, after REDESIGN-3, 2026-10-29)**
+
+Twelve questions from oracle round 12, harness round 13 and bead 32.2.15, revised after three
+review rounds and REDESIGN-3 (A.13). Five follow from H1-H4, L1-L5 and existing clauses and are
+written into them: a not-served native command shows `Queued` (8.5); lifecycle evidence is
+recorded with or without authority (3.4); backoff counts a `not_sent` try and the cap does not
+(3.7, 4.8); retirement covers a send by address whatever its tries got (L1 item 1); a Run's end
+reason is the cause of the decision that first ends it, so a retirement ends a Run that reached
+the agent `process lost` for every `StopReason` (3.8, 6.5). Two new decisions (D49, D50) and one
+amendment to D48 decide the rest. The host's idle-exit order (4.6) is a host fact read from the
+runner host on main and the R2 branch, not a decision. Round 15 (contract, after redesign): 2 new
+decisions, 2 amend earlier ones, 0 came from new generator input kinds.
+- D49: a runner-held try that ends before any hold is named by its queue key, in the settlement
+  `unheld_outcome{runId, commandId, outcome}` (3.13), and belongs to that Run's latest issue of
+  that `commandId`; for an Ended Run it is late evidence (3.4). It carries start failures,
+  `StartLost` and gate answers (4.4, 4.11), and like a gate answer it settles only a run that is
+  not covered, so a Stop during a spawn shows "Stopped before delivery" (4.4). Reason: no rule
+  names it; `holdRun` mints the token (3.4), so before any hold the model had no input for the
+  outcome, and a `commandId` alone binds a late start failure to a re-send on a fresh Run (4.8).
+  Rejected: a host-minted try token (a second token source); an Answer keyed by `commandId` (an
+  Answer names a token); the latest issue of the `commandId` across Runs (no anchor).
+- D50: amends A.11 (L1 item 2, the L2 wire label, and the order of a stop commit's releases),
+  D48 (3.6) and the clauses of 3.13 (`process_lost` carries its releases), 4.3 (the switch
+  backstop), 4.4 (CONT C3's re-hold after a release, SETTLE S1's write race), 4.5 (SETTLE's
+  pre-write idle check, CONT C3's one commit for release and stop), 4.8 (the fresh Run for a
+  start that never reached the agent), 5.1 and 6.5 (as-built Gone-time settlement), 6.3 and 6.4
+  (the stop commit's release evidence; a refusal joins or raises its stop), 7.3, F40 and F51 (an
+  exit confirmed before its stop), each rewritten in place. A Run is
+  not yet delivered while it is Queued, or Launched with an execution that never reached the
+  agent (the one test, 3.6). Stop or Run now ends such a Run at once, `interrupted`, with no
+  effect; a non-permanent outcome of its start (`not_sent`, retryable, a release, a rejected
+  resume) or its runner's retirement unlaunches it, showing nothing, and it relaunches under the
+  same `commandId` and count at the retry or at once; a permanent outcome ends it
+  `refused (code)`. A Run that reached the agent never unlaunches (3.6, L1, 3.8, 4.4, 4.5, 4.8,
+  5.1, 6.5, 8.3). The possibly-written set is fixed at retirement because the stop intent closes
+  the write gate before its evidence read (4.4, 6.4), and the stop commit releases `NotSent` every
+  hold it reads outside that set, so a hold made after the read is released and an earlier
+  daemon's hold, with no write evidence, is not (4.5). One rule replaces round 15's two drafts
+  (an unlaunch that `not_sent` and retirement alone triggered, and a separate Stop rule for a
+  Queued Run), 4.8's error turn and fresh Run for a retryable start failure, the feeder's
+  same-execution re-hold of a released start from the switch (before it the release's enqueue is
+  still the re-hold, but for `ResumeRejected`, 4.4), and round 15's first
+  `refused (not_sent)`. Reason: no rule decided it; the earlier text gave a start that
+  never reached the agent three answers and ended a Run that lost nothing: an idle exit, a swap
+  or a refusal before the start was consumed showed a `runner_stopped` error where main retries
+  silently at idle exit and recovery abandonment (psr.ts at 3aa43c60: 975, 2331-2335,
+  3707-3711), and a Stop during a spawn could show `refused` where main shows "Stopped before
+  delivery". Rejected: ending the Run and re-sending on a fresh Run (an error turn for nothing
+  lost); a new end reason (a try is not an issue, H4); the write fiber releasing an unwritten
+  start after the retirement commit (the Run is already Ended `process lost`); a Stop rule for
+  Queued Runs only (a Launched Run with a spawn in flight is just as undelivered); the stop
+  commit taking write permissions in its transaction (a permission with no owner after a failed
+  commit, A.13); a refusal's own stop form with a restore on failure (a second reopen rule, A.13);
+  a durable `command-accepted` fact (A.13).
+- Amends D48 (H4): a `not_sent` try is a try, not an issue. It ends only its own work, never a
+  Run, an address or an obligation, and a native command's confirmation clock resumes with the
+  time it had left instead of restarting (H4, 8.5). Reason: L2 addresses a send once, at issue,
+  and 8.5 starts the deadline at issue; H4's "re-issues" read as a restart.
+
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
 Decided autonomously under the Review Rounds rule after the harness rounds that added D15 to D42.
@@ -3338,12 +3554,14 @@ concept needed a disposition for it and its writer raced the host's refusals. So
   `effect_outcome` code `project_inactive` (4.7), only after removal has finished and its runners'
   Stops have committed. A registered project that is not served, or whose removal is in
   progress, is never refused: each send gets `not_sent` before any transmission, which counts
-  none and ends nothing (a start's Run goes back to Queued, 3.6), so its input re-issues at the
-  backoff until the project is served (4.8), and no try is shown because none ends a Run. The
-  gate never applies to `kill_and_respawn` (H2).
+  none and ends only that try, never a Run (a start's Run goes back to Queued while not yet
+  delivered, and otherwise stays Launched, D50, 3.6), so its input is tried again at the backoff
+  until the project is served (4.8), and no try is shown. The gate never applies to
+  `kill_and_respawn` (H2).
   Removal reaches the ledger only as `process_lost` and refusals: launched runner-held Runs end
-  `process_lost`, queued input ends refused, a refused steer is never re-sent (4.8), native commands
-  `Failed` (D34), probes re-probe under their cap, and deadlines and gates are unchanged.
+  `process_lost` when their execution reached the agent and otherwise unlaunch (D50, 3.6), queued
+  input ends refused, a refused steer is never re-sent (4.8), native commands `Failed` (D34),
+  probes re-probe under their cap, and deadlines and gates are unchanged.
   Replaces round 14's draft (defer at inactive, re-decide at `project_active`) and HEAD's
   retirement. Amends D7, D10, D27, D29 and A.1 Q9; removes D11, D17 and D30; amends the glossary,
   3.1, 3.3, 3.4, 3.5, 3.6, 3.7, 3.8, 3.9, 3.11, 3.13, 4.4, 4.7, 4.8, 4.11, 8.3, 8.4, 8.5, 9, LI6, the
@@ -3362,7 +3580,7 @@ concept needed a disposition for it and its writer raced the host's refusals. So
 | B: removal settles every session inactive before unregistering | rejected: rollback, crash, restart and concurrent create each need a host rule; still a mode |
 | D': suspend the project's sessions until it returns | rejected: deadlines get a second owner; overdue deadlines fire against untransmitted sends |
 | P: park a not-served project's sends in the feeder until the registry marks it ready | rejected (review r2): the Run's deadlines run while parked, so an outage longer than them ends queued input, and the park needs a wake for every gate change (a removal ends with no ready mark) |
-| N: a not-served send is `not_sent`, which ends nothing; a start's Run unlaunches to Queued and borrows its start's retry deadline | chosen (review r3) |
+| N: a not-served send is `not_sent`, which ends only that try, never a Run; a start's Run unlaunches to Queued (or stays Launched once it reached the agent, D50) and borrows its start's retry deadline | chosen (review r3) |
 | R: a not-served try is a retryable start failure that ends its Run, hidden from view | rejected (review r3): every try ends a Run that each user-facing consumer must hide, a waiting input shows Starting or Dispatching, and a Run held Launched through an outage would absorb a self-started turn (8.3) |
 | E: removal is `session_ended` | rejected: lies about the native session; hides live OpenCode work from cleanup |
 | F: removal is a host Stop per session | rejected: a second writer of stop intent; the same order race; paused input waits forever |
@@ -3371,6 +3589,55 @@ concept needed a disposition for it and its writer raced the host's refusals. So
 | M5: removal on each session's drain lane | rejected: C is order-free; a lane only adds waiting |
 
 <!-- src: REDESIGN-2 2026-10-29 (/private/tmp/r32-inactive-redesign/02-options-and-pick.md) -->
+
+### A.13 REDESIGN-3 Delivery at the stop commit (2026-10-29): A + M1 + M3 + M5 + N + O
+
+Decided autonomously under the Review Rounds rule after round 15's three review rounds with
+material findings (r1 6, r2 4, r3 1). Root cause: whether a runner received a frame is
+connection state (the write, `command-accepted`, `idle-exit`, the journal), and the ledger learns
+it only as a release. A stop commit turned that state into ledger facts while the write side
+could still change it, so each round found a frame whose receipt the retirement read wrong (r1
+P1-1, r2 P1-A) or a permission with no owner after a failed commit (r3 P2-1). Chosen: the stop
+intent closes the runner's write gate before its transaction, so the commit reads a fixed
+possibly-written set and releases every other hold it reads `NotSent`, and every stop commit
+carries the releases its evidence already holds (4.4, 4.5, 6.4). The gate
+is the reconciler's stop state, so it adds no owner and no reopen rule. Prior art: paseo blocks
+new prompts before it stops an idle runtime (packages/server/src/server/agent/agent-manager.ts
+at c4b451689), and zeron sets a `retiring` flag under its delivery ledger's lock (crates/engine/
+src/sessions.rs at a0468502); diri, monocode and bb also refuse or park writes once a stop
+begins. Source: this record.
+
+| Option | Verdict |
+|---|---|
+| A: the stop intent closes a one-way write gate before its transaction (review r3) | chosen (basis) |
+| M1: the gate is a read of `RunnerStop` (6.4), not a new state | chosen (its owner) |
+| M3: deletion test on the stop commit's releases | chosen: the permission take and its owner sentence go; `Refused{exiting}` and `JournalAbsent` stay, as deleting either brings back r2 P1-A |
+| M5: `requestStop(target, reason)` reads the evidence before its transaction (6.3) | chosen (interface unchanged) |
+| B: bind each effect to a target process at issue; lost work only when that process is lost | rejected: that is L2 and L5 already (A.11); it names the process but never says whether it received the frame |
+| C: a durable `command-accepted` fact (bb's `turn/input/accepted`) | rejected: one more event per send, and the stop commit still needs the idle-exit order and the journal for a frame with no acceptance read |
+| D: decide "reached" at Settle, with Runs awaiting settlement | rejected: a Launched-on-retired state and a settle input, the next Run waits out the escalation, and `Unreadable` or older builds turn main's silent idle retry into `delivery_indeterminate` |
+| E: keep the take and add a rule for a stop that fails after it took permissions | rejected: a second owner sentence for a permission a stop never needs |
+| F: reached only on agent evidence; re-send every frame without it (t3code's agent-confirmed acceptance, zeron's re-send of unconfirmed messages) | rejected: a frame the agent read before a crash or explicit stop is delivered twice, where main shows `runner_stopped` (F51) |
+| G: the daemon defers an idle exit while a frame is unaccepted (paseo refuses to stop with unstarted messages) | rejected: the host decides idle exit and leaves after 2 s without the daemon (runner-host.ts:131-135 at 3aa43c60) |
+| H: the host lists what it accepted in `idle-exit` and the shutdown ack | rejected: a protocol change on both builds for a set 4.6's order already gives, and a crash sends nothing |
+| I: releases commit first, the stop in a second transaction | rejected: the stop waits on write fibers, and a crash between the two is the r2 P1-A trace |
+| M2: a per-connection gate in the write fiber's capability (review r3's literal form) | rejected: a second owner of "this runner is stopping", with its own reopen rule |
+| M4: a receipt module behind a per-provider port | rejected: one adapter (one runner host serves Claude, Codex and Cursor; OpenCode holds nothing), a hypothetical seam |
+| N (spec r1): a stop commit's `process_lost` carries its releases, read first in one decision, so a relaunch addresses the next runner | chosen |
+| N1: reconcile every release once per transaction | rejected: a decider change for one caller |
+| N2: `process_lost` before the releases | rejected: it ends the released Runs `process lost` |
+| O (spec r1): a refusal registers no stop form; it joins the `Committing` intent or calls `requestStop` (6.4) | chosen: R2's `retiring` refusal is a host self-retire and `exiting` follows `idle-exit` (runner-host.ts:258-270, 369-381, 819-826), so the stop is owed anyway |
+| O1: the refusal's own `Committing`, restored on failure (R2 runner-retirement.ts:958-1007) | rejected: a second reopen rule for the gate |
+| O2 (spec r2): a stop commit carries the refusals its evidence read finds on the connection, and the refusing write fiber commits the release once the stop leaves `Committing` (a no-op if carried) | chosen: one owner covers a refusal read after the evidence read and a stop that returns to `Running` |
+| O3: the refusal rechecks and raises a new stop after a failed one | rejected: a loop on a defect path, and the runner's exit stops it anyway |
+| O4: a separate sentence each for the late refusal and the failed stop | rejected: two rules for one owner |
+| P (spec r3): the evidence read freezes a possibly-written set (each transmission this daemon called write for, each hold an earlier daemon made), and the commit releases every other hold it reads `NotSent` | chosen: one set answers a hold made after the read (unwritten, so released) and a restart hold with no write evidence (kept for the hello or the journal, as main replays it to the same host, deduped, or never re-sends it: runner-host.ts:683, 713-714 and runner-recovery.ts:125-126 at 3aa43c60) |
+| P1: `NotSent` only for the frames the read finds unwritten (spec r2 text) | rejected: a hold made after the read gets neither a release nor a write (spec r3 ub P1-1) |
+| P2: `NotSent` for every hold outside the read's written set (ub's literal fix) | rejected: a recovery Stop before the hello releases a frame an earlier daemon wrote, delivered twice (spec r3 poteto P1) |
+| P3: `holdRun` reads `RunnerStop` and holds nothing while `Committing` | rejected: an in-memory read in a step that reads only the row and the clock (4.3), with a retry when the stop returns to `Running` |
+| P4: the write fiber releases its unwritten frame after the commit | rejected: the Run is then Ended `process lost`, a fresh Run for nothing lost (D50) |
+
+<!-- src: REDESIGN-3 2026-10-29 (/private/tmp/r32-redesign-3); reviews /private/tmp/r32-contract-r15/review-r1.md, r2, r3; REDESIGN-3 spec reviews r1, r2 and r3 (ub, poteto) -->
 
 ## Appendix B. Old-id mapping
 
@@ -3487,7 +3754,7 @@ Every old id maps here. Ids were reused across documents, so each is named with 
   reads that liveness until a re-add reconciles it (9).
 - **A not-served project's input polls at the backoff** (3.11, D48). While a registered project's
   relay stays down (a load error until the next successful load, a folder missing until it
-  returns), its session's head input stays Queued and re-issues every 30 s at most (3.6, H4),
+  returns), its session's head input stays Queued and is tried again every 30 s at most (3.6, H4),
   and once the project is served it goes at
   its next backoff, up to 30 s later. Main's inbox waited with no Run and drained when the relay
   started, and main failed a claimed, unstarted send on a relay load error
