@@ -172,46 +172,49 @@ export const makeSessionDiff = Effect.gen(function* () {
 			);
 		});
 
+	const listFolder = (folder: SessionDiffSession["folders"][number]) =>
+		Effect.gen(function* (): Effect.fn.Return<Listed, FolderTimelineError> {
+			if (!folder.present)
+				return {
+					folder: folder.root,
+					error: "unavailable" as const,
+					message: `Folder is missing: ${folder.directory}`,
+				};
+			const snapshot = yield* timeline.snapshot(folder.directory);
+			return {
+				folder: folder.root,
+				snapshot,
+				files: yield* listFiles(snapshot),
+			};
+		}).pipe(
+			Effect.catch((error) =>
+				Effect.succeed<Listed>({
+					folder: folder.root,
+					error:
+						error.reason === "timeout"
+							? ("timeout" as const)
+							: ("unavailable" as const),
+					message: error.message,
+				}),
+			),
+		);
+
+	/** The listing a revision names, if this (session, scope) made it. */
+	const recall = (sessionId: string, scopeKey: string, revision?: string) => {
+		const remembered = revision === undefined ? undefined : memo.get(revision);
+		return remembered?.sessionId === sessionId && remembered.scope === scopeKey
+			? remembered.listing
+			: undefined;
+	};
+
 	const list: SessionDiff["Service"]["list"] = (session, scope, revision) =>
 		Effect.gen(function* () {
 			const scopeKey = JSON.stringify(scope);
-			const remembered =
-				revision === undefined ? undefined : memo.get(revision);
-			if (remembered?.sessionId === session.id && remembered.scope === scopeKey)
-				return remembered.listing;
-			const folders = yield* Effect.forEach(
-				session.folders,
-				(folder) =>
-					Effect.gen(function* (): Effect.fn.Return<
-						Listed,
-						FolderTimelineError
-					> {
-						if (!folder.present)
-							return {
-								folder: folder.root,
-								error: "unavailable" as const,
-								message: `Folder is missing: ${folder.directory}`,
-							};
-						const snapshot = yield* timeline.snapshot(folder.directory);
-						return {
-							folder: folder.root,
-							snapshot,
-							files: yield* listFiles(snapshot),
-						};
-					}).pipe(
-						Effect.catch((error) =>
-							Effect.succeed<Listed>({
-								folder: folder.root,
-								error:
-									error.reason === "timeout"
-										? ("timeout" as const)
-										: ("unavailable" as const),
-								message: error.message,
-							}),
-						),
-					),
-				{ concurrency: "unbounded" },
-			);
+			const recalled = recall(session.id, scopeKey, revision);
+			if (recalled) return recalled;
+			const folders = yield* Effect.forEach(session.folders, listFolder, {
+				concurrency: "unbounded",
+			});
 			const listed = createHash("sha256")
 				.update(
 					JSON.stringify([
