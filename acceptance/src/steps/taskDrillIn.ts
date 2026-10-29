@@ -317,7 +317,7 @@ export const taskDrillInHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the pull-down reopened",
-		match: /^the background tasks pull-down is open again$/,
+		match: /^the background tasks pull-down is (?:open again|still open)$/,
 		run: async ({ world }) => {
 			await expect(panel(world.page)).toBeVisible();
 			await expect(

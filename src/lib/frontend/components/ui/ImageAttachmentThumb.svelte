@@ -1,6 +1,6 @@
 <script lang="ts">
 	import Button from "./Button.svelte";
-	let { src, name, imageId, onopen, onremove }: { src: string; name: string; imageId?: string; onopen: () => void; onremove: (event: MouseEvent) => void } = $props();
+	let { src, name, imageId, onopen, onremove }: { src: string; name: string; imageId?: string; onopen: (event: MouseEvent) => void; onremove: (event: MouseEvent) => void } = $props();
 	let failedSrc = $state<string | null>(null);
 </script>
 

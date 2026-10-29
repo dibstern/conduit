@@ -63,7 +63,7 @@ vi.mock(
 	emptyComponent,
 );
 vi.mock(
-	"../../../src/lib/frontend/components/overlays/ImageLightbox.svelte",
+	"../../../src/lib/frontend/components/overlays/MediaViewer.svelte",
 	emptyComponent,
 );
 vi.mock(

@@ -1,18 +1,18 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { uiState } from "../../stores/ui.svelte.js";
-import ImageLightbox from "./ImageLightbox.svelte";
+import { closeMediaViewer, openMediaViewer } from "../../stores/ui.svelte.js";
+import MediaViewer from "./MediaViewer.svelte";
 
 const meta = {
-	title: "Overlays/ImageLightbox",
-	component: ImageLightbox,
+	title: "Overlays/MediaViewer",
+	component: MediaViewer,
 	tags: ["autodocs"],
 	parameters: {
 		docs: { story: { inline: false, height: "400px" } },
 	},
 	beforeEach: () => {
-		uiState.lightboxSrc = null;
+		closeMediaViewer();
 	},
-} satisfies Meta<typeof ImageLightbox>;
+} satisfies Meta<typeof MediaViewer>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -27,7 +27,7 @@ type Story = StoryObj<typeof meta>;
  * under load. npm-release.yml Job 4 gates `release` on this suite, so an outage
  * at picsum.photos was one failed release.
  *
- * Intrinsic dimensions are declared on the SVG so the lightbox's fit/scale
+ * Intrinsic dimensions are declared on the SVG so the media viewer's fit/scale
  * maths sees exactly what an 800x600 raster would, and a data URI decodes with
  * no network round trip — which removes the load race along with the
  * dependency.
@@ -46,13 +46,13 @@ const FIXTURE_IMAGE_SRC = `data:image/svg+xml;utf8,${encodeURIComponent(
 
 export const WithImage: Story = {
 	beforeEach: () => {
-		uiState.lightboxSrc = FIXTURE_IMAGE_SRC;
+		openMediaViewer({ kind: "image", src: FIXTURE_IMAGE_SRC }, null);
 	},
 };
 
 export const Hidden: Story = {
 	beforeEach: () => {
-		uiState.lightboxSrc = null;
+		closeMediaViewer();
 	},
 };
 
