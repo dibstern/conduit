@@ -47,7 +47,7 @@ function usageFailure(error: unknown, stderr: string): UsageRead {
 				windows: [],
 				reason: "Claude account authentication failed",
 			}
-		: { status: "unknown", windows: [] };
+		: { status: "unknown", windows: [], reason: "Usage read failed" };
 }
 
 export const makeClaudeUsageReader = (

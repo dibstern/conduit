@@ -935,9 +935,9 @@ export const usageSettingsHandlers: StepHandler[] = [
 		name: "assert the no-plan-data card explanation",
 		match: /^the Usage no-data card (\S+) reads (.+)$/,
 		run: async ({ world, match }) => {
-			const message = world.page
-				.getByTestId(`usage-settings-card-${match[1]}`)
-				.getByText(/^No plan data for this login/);
+			const message = world.page.getByTestId(
+				`usage-settings-no-data-${match[1]}`,
+			);
 			if (match[2] === "absent") await expect(message).toHaveCount(0);
 			else await expect(message).toHaveText(match[2] ?? "");
 		},
@@ -1379,15 +1379,42 @@ export const usageSettingsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert refresh uses the attached project's existing quota RPC",
+		name: "assert refresh forces a fresh read through the attached project's quota RPC",
 		match: /^the QuotaForAccounts RPC refreshes the attached project$/,
 		run: async ({ world }) => {
 			const request = await requireRpcControl(world.page).waitForRequest(
 				(candidate) => candidate.tag === "QuotaForAccounts",
 			);
+			// Without force the daemon returns a read that failed in the last 30s.
 			expect(request.payload).toMatchObject({
 				projectSlug: "myapp",
 				originId: expect.any(String),
+				force: true,
+			});
+		},
+	},
+	{
+		name: "make refresh fail to read one account, as a cold read past the timeout does",
+		match: /^the next Usage refresh fails to read (\S+) because (.+)$/,
+		run: ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setStubs({
+				QuotaForAccounts: () => {
+					const now = clockTimes.get(world.page) ?? Date.now();
+					const failed = snapshot(world.page).map((reading) =>
+						reading.accountId === match[1]
+							? {
+									...reading,
+									status: "unknown" as const,
+									windows: [],
+									readAt: now,
+									reason: match[2] ?? "",
+								}
+							: reading,
+					);
+					rpc.setUsageReadings(failed);
+					return failed;
+				},
 			});
 		},
 	},

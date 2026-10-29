@@ -425,6 +425,17 @@ Scenario: Refresh all names every account and the oldest reading sets the update
   And the Usage account claude status reads 91% of weekly window in amber
   And the Usage settings subheader reads 3 accounts · updated just now · Refresh all
 
+Scenario: Refresh all reports an account it couldn't read instead of calling it a plan-less login
+  Given the viewport is a desktop
+  And Usage settings have several Claude accounts in the normal state
+  And the next Usage refresh fails to read claude because Usage read timed out
+  When I open settings to the Usage section
+  And I press Refresh all in Usage settings
+  Then the QuotaForAccounts RPC refreshes the attached project
+  And an error toast contains Couldn't read plan usage for Personal
+  And the Usage account claude status reads couldn't read usage in muted
+  And the Usage no-data card claude reads Usage read timed out. Press Refresh to try again.
+
 Scenario: the desktop footer opens the Usage section directly
   Given the viewport is a desktop
   And Usage settings have one Claude account in the normal state

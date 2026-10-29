@@ -104,32 +104,37 @@ class ClaudeAccounts {
 		if (clear) this.sendQuotas = undefined;
 	}
 
-	/** Every open reads afresh; only the latest request may replace the result. */
-	async refreshQuotas(source: "shared" | "send" = "shared"): Promise<boolean> {
+	/**
+	 * Every open reads afresh; only the latest request may replace the result.
+	 * Resolves to every account's reading, or undefined when the request failed.
+	 */
+	async refreshQuotas(
+		source: "shared" | "send" = "shared",
+		force = false,
+	): Promise<readonly UsageReading[] | undefined> {
 		const ticket = ++this.quotaTicket;
 		const sendTicket = source === "send" ? ++this.sendQuotaTicket : undefined;
 		this.quotas = undefined;
 		if (source === "send") this.sendQuotas = undefined;
-		let checked: readonly UsageReading[] = [];
-		let refreshed = false;
+		let checked: readonly UsageReading[] | undefined;
 		try {
 			checked = await rpc("QuotaForAccounts", {
 				projectSlug: this.projectSlug,
 				originId: getBrowserClientId(),
+				...(force ? { force } : {}),
 			});
-			refreshed = true;
 		} catch {
 			// A failed read leaves accounts for the user to choose explicitly.
 		}
 		const quotas = new Map(
-			checked
+			(checked ?? [])
 				.filter((reading) => reading.harness === this.harness)
 				.map((reading) => [reading.accountId, reading]),
 		);
 		if (ticket === this.quotaTicket) this.quotas = quotas;
 		// A picker's refresh must not discard the send menu's own fresh result.
 		if (sendTicket === this.sendQuotaTicket) this.sendQuotas = quotas;
-		return refreshed;
+		return checked;
 	}
 
 	private accountLimitFor(reading: UsageReading | undefined) {

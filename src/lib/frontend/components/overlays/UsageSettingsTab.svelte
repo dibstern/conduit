@@ -68,7 +68,8 @@
 	let keychainPending = $state<string | null>(null);
 	let keychainErrors = $state<Record<string, string | undefined>>({});
 	let now = $state(Date.now());
-	const readAt = $derived(Math.min(...accounts.map((account) => account.readAt).filter((at) => at > 0)));
+	// A failed read is not an update.
+	const readAt = $derived(Math.min(...accounts.filter((account) => !readFailed(account)).map((account) => account.readAt).filter((at) => at > 0)));
 	const updated = $derived(Number.isFinite(readAt) ? Math.floor(Math.max(0, now - readAt) / 60_000) : null);
 	const updatedLabel = $derived(updated === null ? "not read yet" : updated === 0 ? "just now" : `${updated}m ago`);
 	const nameOf = (account: UsageReading) => claudeAccounts.nameOf(account.accountId, account.accountId);
@@ -112,7 +113,10 @@
 		refreshing = true;
 		try {
 			// Usage.refresh publishes through SubscribeUsage, which owns the view.
-			if (!await claudeAccounts.refreshQuotas()) showToast("Couldn't refresh plan usage", { variant: "error" });
+			const checked = await claudeAccounts.refreshQuotas("shared", true);
+			const failed = checked?.filter(readFailed) ?? [];
+			if (!checked) showToast("Couldn't refresh plan usage", { variant: "error" });
+			else if (failed.length > 0) showToast(`Couldn't read plan usage for ${failed.map(nameOf).join(", ")}`, { variant: "error" });
 		} finally {
 			refreshing = false;
 		}
@@ -131,6 +135,11 @@
 		} finally {
 			keychainPending = null;
 		}
+	}
+
+	/** A read that timed out or failed, as opposed to a login with no plan (API key, Bedrock...). */
+	function readFailed(account: UsageReading): boolean {
+		return account.status === "unknown" && account.reason !== undefined;
 	}
 
 	function hasPlanData(account: UsageReading | undefined): boolean {
@@ -152,6 +161,7 @@
 	}
 
 	function statusOf(account: UsageReading): string {
+		if (readFailed(account)) return "couldn't read usage";
 		if (!hasPlanData(account)) return "no plan data";
 		const display = usageDisplay(account, usageState.limits.warnAt, now);
 		if (display.level === "limited") {
@@ -286,7 +296,8 @@
 					? [`${window.model} week ${Math.round(window.utilization)}%`] : [])}
 				<!-- Desktop details line up under the name, past the handle and position. -->
 				<div id="usage-settings-card-{account.accountId}" data-testid="usage-settings-card-{account.accountId}" class="md:pl-[48px]">
-					{#if !hasPlanData(account)}<p class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
+					{#if readFailed(account)}<p data-testid="usage-settings-no-data-{account.accountId}" class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">{account.reason}. Press Refresh to try again.</p>
+					{:else if !hasPlanData(account)}<p data-testid="usage-settings-no-data-{account.accountId}" class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
 					{#if models.length > 0}<div data-testid="usage-settings-models-{account.accountId}" class="mt-[7px] font-mono text-[10.5px] text-text-dimmer">{models.join(" · ")}</div>{/if}
 					{#if usageForecastWindow(account, now)}
 						{@const pace = usagePaceLine(account, now)}
