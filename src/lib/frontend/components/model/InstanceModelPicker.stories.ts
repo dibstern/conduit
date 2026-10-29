@@ -182,6 +182,13 @@ async function rootControls(canvasElement: HTMLElement) {
 		? "picker-harness-claude"
 		: "picker-row-model";
 	await expect(sheet.getByTestId(rootFocusTestId)).toHaveFocus();
+	await userEvent.click(sheet.getByTestId("picker-row-account"));
+	await expect(sheet.getByTestId("picker-account-options")).toBeVisible();
+	await expect(sheet.getByTestId("picker-account-add")).toHaveTextContent(
+		"Add account",
+	);
+	await userEvent.click(sheet.getByTestId("picker-back"));
+	await expect(sheet.getByTestId("picker-row-account")).toHaveFocus();
 	await drillModel(picker);
 	await expect(picker.querySelectorAll(".model-item-context")).toHaveLength(2);
 	await expect(picker.querySelector(".model-item-context")).toHaveTextContent(
@@ -189,7 +196,7 @@ async function rootControls(canvasElement: HTMLElement) {
 	);
 	await userEvent.click(sheet.getByTestId("picker-back"));
 	await expect(sheet.getByTestId("picker-row-model")).toBeVisible();
-	await expect(sheet.getByTestId(rootFocusTestId)).toHaveFocus();
+	await expect(sheet.getByTestId("picker-row-model")).toHaveFocus();
 	await userEvent.click(sheet.getByTestId("picker-context-option-1m"));
 	await expect(sheet.getByTestId("picker-context-option-1m")).toHaveAttribute(
 		"aria-checked",

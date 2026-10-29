@@ -230,6 +230,14 @@ export async function openModelPicker(page: Page): Promise<void> {
 	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
+export async function openPickerAccounts(page: Page): Promise<void> {
+	const section = page.getByTestId("picker-account-section");
+	if (await section.isVisible()) return;
+	await openModelPicker(page);
+	await page.getByTestId("picker-row-account").click();
+	await expect(section).toBeVisible();
+}
+
 export function exampleValue(
 	example: Record<string, string>,
 	key: string,

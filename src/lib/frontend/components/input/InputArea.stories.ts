@@ -762,6 +762,14 @@ export const WordsDesktop: Story = {
 			await expect(sheet).toBeVisible();
 			await expect(body.getByRole("dialog", { name: "Session" })).toBeVisible();
 			await expect(within(sheet).getByTestId("picker-row-model")).toBeVisible();
+			await userEvent.click(within(sheet).getByTestId("picker-row-account"));
+			await expect(
+				within(sheet).getByTestId("picker-account-options"),
+			).toBeVisible();
+			await userEvent.click(within(sheet).getByTestId("picker-back"));
+			await expect(
+				within(sheet).getByTestId("picker-row-account"),
+			).toHaveFocus();
 			await expect(
 				within(sheet).getByTestId("picker-row-effort"),
 			).toBeVisible();
@@ -816,6 +824,14 @@ export const WordsDesktop: Story = {
 		await expect(canvas.queryByTestId("model-picker-trigger")).toBeNull();
 		await expect(canvas.queryByTestId("variant-badge")).toBeNull();
 		await expect(canvas.queryByTestId("permission-mode-badge")).toBeNull();
+		await userEvent.click(canvas.getByTestId("composer-word-account"));
+		await expect(
+			await body.findByTestId("picker-account-options"),
+		).toBeVisible();
+		await expect(body.getByTestId("picker-account-add")).toBeVisible();
+		await userEvent.click(body.getByTestId("picker-back"));
+		await expect(body.getByTestId("picker-row-account")).toHaveFocus();
+		await closePicker();
 		const composer = canvasElement.querySelector("#input-row");
 		if (!composer) throw new Error("Composer is missing");
 		await expect(row.getBoundingClientRect().top).toBeGreaterThanOrEqual(

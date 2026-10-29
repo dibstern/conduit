@@ -8,6 +8,8 @@
 	import HarnessLogo from "./HarnessLogo.svelte";
 	import HandoffDialog from "../overlays/HandoffDialog.svelte";
 	import Button from "../ui/Button.svelte";
+	import Menu from "../ui/Menu.svelte";
+	import MenuItem from "../ui/MenuItem.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import PermissionShield from "../ui/PermissionShield.svelte";
 	import TextButton from "../ui/TextButton.svelte";
@@ -61,7 +63,8 @@
 	} = $props();
 
 	const pickerOpen = $derived(composerPickerState.request !== null);
-	let view = $state<"root" | "model" | "agent" | "permissions" | "checkout">("root");
+	let view = $state<"root" | "account" | "model" | "agent" | "permissions" | "checkout">("root");
+	let actionsOpen = $state(false);
 	const phone = $derived(sessionViewState.composerTier === "phone");
 	let searchQuery = $state("");
 	let favoritesOnly = $state(false);
@@ -76,9 +79,6 @@
 	// with the provider id, because the picker can mount more than once.
 	const groupHeadingId = $props.id();
 	const titleId = `${groupHeadingId}-title`;
-	const title = $derived(
-		view === "root" ? "Session" : view === "agent" ? "Agent" : view === "permissions" ? "Permissions" : view === "checkout" ? "Checkout" : "Model",
-	);
 	const permissionMode = $derived(approvals.current?.mode ?? "ask");
 	const permissionOptions = $derived(getRankedApprovalOptions());
 	const checkoutState = $derived(getWorkspaceCheckout());
@@ -104,6 +104,9 @@
 	const showPermissions = $derived((selectedTraits?.composerModeControl ?? "permission-mode") === "permission-mode");
 	const canSwitchAccounts = $derived(selectedTraits?.usageHarness === "claude" || selectedTraits?.usageHarness === "codex");
 	const accountLabel = $derived(selectedTraits?.accountKind === "config-directory" ? "Account" : "Instance");
+	const title = $derived(
+		view === "root" ? "Session" : view === "account" ? accountLabel : view === "agent" ? "Agent" : view === "permissions" ? "Permissions" : view === "checkout" ? "Checkout" : "Model",
+	);
 	const selectedLabel = $derived(
 		selectedInstance?.label ?? (locked ? "Account unavailable" : "Add account"),
 	);
@@ -174,6 +177,8 @@
 			status: instance.status ?? "healthy",
 		}));
 	});
+	const showAccountRow = $derived(canSwitchAccounts ? accountCards.length > 0 : accountCards.length > 1);
+	const selectedAccountCard = $derived(accountCards.find((card) => card.value === (switchingTo ?? selectedLogoInstanceId)));
 	const hasAccountWord = $derived(!phone);
 
 	const selection = createModelSelectionState(() => target);
@@ -273,6 +278,7 @@
 	}
 
 	function closePicker() {
+		actionsOpen = false;
 		const opener = phone ? composerPickerState.request?.opener : undefined;
 		composerPickerState.request = null;
 		(opener?.isConnected ? opener : pickerTriggerEl?.isConnected ? pickerTriggerEl : triggerEl)?.focus({ preventScroll: true });
@@ -304,8 +310,11 @@
 			}
 			return;
 		}
+		// Selection follows focus, so arrow keys pick cards here; only a click or Space leaves the drill-in.
 		const instance = instances.find((instance) => instance.id === id);
-		if (instance) handleInstanceSelect(instance);
+		if (!instance || isInstanceDisabled(instance)) return;
+		// Always pin, even the current account: a prefilled default also sets hasInstanceChoice, and only an explicit pick survives a default change.
+		target.selectAccount(instance.id);
 	}
 
 	function handleSetDefault(model: Immutable<ModelInfo>, e: MouseEvent) {
@@ -326,7 +335,7 @@
 		}
 	}
 
-	function handleReload(e: MouseEvent) {
+	function handleReload(e: Event) {
 		e.stopPropagation();
 		const sessionId = sessionState.currentId;
 		if (sessionId) {
@@ -352,7 +361,7 @@
 			searchQuery = "";
 			shownView = "root";
 			leftView = undefined;
-			view = request.section === "model" || request.section === "agent"
+			view = request.section === "model" || request.section === "agent" || request.section === "account"
 				? request.section
 				: "root";
 		});
@@ -366,22 +375,23 @@
 		}
 		const section = leftView ?? composerPickerState.request?.section;
 		const root = view === "root";
+		const accountView = view === "account";
 		// Phones skip the search box: focusing it would raise the keyboard over the list.
 		const target = view === "model" && !phone ? searchEl : backEl;
 		let cancelled = false;
 		void tick().then(() => {
 			if (cancelled) return;
-			if (!root) {
-				target?.focus({ preventScroll: true });
-				return;
-			}
 			const panel = document.getElementById("model-picker");
 			const selectedTab = panel?.querySelector<HTMLElement>('[data-testid="picker-harness-options"] [aria-checked="true"]');
 			// An open session's current card is disabled. Focus its section instead: focusing
 			// another card would select it (bits-ui selection follows focus) and start a switch.
 			const selectedCard = panel?.querySelector<HTMLElement>('[data-testid="picker-account-options"] [aria-checked="true"]:not(:disabled)')
 				?? panel?.querySelector<HTMLElement>('[data-testid="picker-account-section"]');
-			const row = (section === "harness" ? selectedTab : section === "account" ? selectedCard : panel?.querySelector<HTMLElement>(
+			if (!root) {
+				(accountView ? selectedCard : target)?.focus({ preventScroll: true });
+				return;
+			}
+			const row = (section === "harness" ? selectedTab : panel?.querySelector<HTMLElement>(
 				`[data-testid="picker-row-${section}"]`,
 			)) ?? selectedTab ?? selectedCard ?? panel?.querySelector<HTMLElement>('[data-testid="picker-row-model"]');
 			row?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -419,6 +429,12 @@
 			{#snippet subtitle()}
 			{#if view === "root"}
 				<span data-testid="picker-subtitle" class="ml-auto text-[12px] text-text-muted">{locked ? "this session" : "new session"}</span>
+				<Menu bind:open={actionsOpen} ariaLabel="Session actions" appearance="final" align="end">
+					{#snippet trigger({ props })}
+						<Button {...props} variant="ghost" size="content" iconOnly icon="ellipsis" iconSize={16} ariaLabel="Session actions" data-testid="picker-more" class="h-7 w-7 rounded-lg" />
+					{/snippet}
+					<MenuItem icon="refresh-cw" data-testid="picker-reload-skills" onselect={handleReload}>Reload skills &amp; commands</MenuItem>
+				</Menu>
 			{/if}
 			{/snippet}
 			{#snippet accountControls()}
@@ -467,74 +483,24 @@
 						{/each}
 					</section>
 				{/if}
-				{#if accountCards.length > 1}
-					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[6px] outline-none">
-						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
-							<span>{accountLabel}</span>
-							<span data-testid="picker-account-section-caption">{selectedTraits?.usageHarness === "claude" ? "5-hour use" : canSwitchAccounts ? "usage" : "status"}</span>
-						</div>
-						<OptionRow
-							variant="cards"
-							options={accountCards}
-							value={selectedLogoInstanceId ?? ""}
-							onChange={handleAccountSelect}
-							onActivate={locked ? undefined : target.selectAccount}
-							label={accountLabel}
-							lockedReason={canSwitchAccounts ? "" : "Harness is fixed for this session"}
-							itemWidth={108}
-							testId="picker-account-options"
-							itemTestId={(id) => `picker-account-${id}`}
-							class="mx-[4px] gap-[6px] pt-[2px] pb-[6px]"
-						>
-							{#snippet item(option, selected)}
-								{@const card = accountCards.find((card) => card.value === option.value)}
-								{#if card}
-									{@const availability = card.kind === "usage" ? card.availability : undefined}
-									<span
-										class="picker-account-card"
-										data-option-card
-										data-limited={availability?.kind === "limited" ? "true" : undefined}
-										data-locked={card.kind === "status" && locked && !selected ? "true" : undefined}
-									>
-										<span class="flex min-w-0 items-center gap-[6px]">
-											{#if selectedDriver}
-												<HarnessLogo driver={getInstanceById(card.value)?.driver ?? selectedDriver} instanceId={card.value} size={15} aligned data-testid="account-logo" />
-											{/if}
-											<span data-testid="picker-account-name" class="min-w-0 truncate">{card.label}</span>
-										</span>
-										{#if card.kind === "status"}
-											<span data-testid="picker-account-caption" class="flex items-center gap-[6px] text-[10.5px] font-normal text-text-muted">
-												<span data-testid="picker-instance-status-dot" class="size-[7px] shrink-0 rounded-full {instanceStatusColor(card.status)}" aria-hidden="true"></span>
-												{card.status}
-											</span>
-										{:else if availability?.kind === "limited"}
-											{@const reset = usageResetTime(availability.resetsAt)}
-											<span data-testid="picker-account-caption" class="text-[10.5px] font-normal text-error">limit{reset ? ` · resets ${reset}` : ""}</span>
-										{:else if availability?.kind === "selectable" && availability.usagePct !== null}
-											<QuotaMeter
-												used={availability.usagePct}
-												warnAt={usageState.limits.warnAt}
-												caption={`${Math.round(availability.usagePct)}%`}
-												variant="usage"
-												trackWidth={26}
-												gap={6}
-												trackTestId="picker-account-meter"
-												captionTestId="picker-account-usage"
-											/>
-										{:else}
-											<span class="flex flex-wrap items-center gap-[6px] text-[10.5px] font-normal text-text-muted">
-												{#if card.kind === "usage" && availability?.kind === "selectable"}<small data-testid="picker-account-usage" class="font-mono text-[10.5px]">—</small>{/if}
-												<span data-testid="picker-account-caption">usage unknown</span>
-											</span>
-										{/if}
-									</span>
-								{/if}
-							{/snippet}
-						</OptionRow>
-						{#if locked && canSwitchAccounts}
-							<div data-testid="picker-account-note" class="mx-[4px] mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
+				{#if showAccountRow}
+					<Button variant="picker-row" size="content" layout="flow" data-testid="picker-row-account" onclick={() => { view = "account"; }}>
+						{#if selectedDriver}
+							<HarnessLogo driver={selectedDriver} instanceId={selectedLogoInstanceId} size={16} spinning={selectedLogoSpinning} class="shrink-0" />
+						{:else}
+							<Icon name="user" size={16} class="shrink-0 text-text-muted" />
 						{/if}
-					</section>
+						<span class="flex-1">{accountLabel}</span>
+						<span class="min-w-0 truncate text-text-secondary">{wordAccountName}</span>
+						{#if selectedAccountCard?.kind === "usage" && selectedAccountCard.availability.kind === "selectable" && selectedAccountCard.availability.usagePct !== null}
+							<span data-testid="picker-row-account-meta" class="shrink-0 text-[11px] text-text-muted font-mono">{selectedTraits?.usageHarness === "claude" ? "5h " : ""}{Math.round(selectedAccountCard.availability.usagePct)}%</span>
+						{:else if selectedAccountCard?.kind === "usage" && selectedAccountCard.availability.kind === "limited"}
+							<span data-testid="picker-row-account-meta" class="shrink-0 text-[11px] text-error font-mono">limit</span>
+						{:else if selectedAccountCard?.kind === "status"}
+							<span data-testid="picker-row-account-meta" class="shrink-0 text-[11px] text-text-muted font-mono">{selectedAccountCard.status}</span>
+						{/if}
+						<Icon name="chevron-right" size={13} class="shrink-0 text-text-muted" />
+					</Button>
 				{/if}
 				{#if needsAccount}
 					<div class="flex items-center justify-between gap-2 border-b border-border-subtle py-2 text-xs text-text-muted">
@@ -542,7 +508,7 @@
 						<Button variant="ghost-accent" size="content" data-testid="picker-add-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}>Add account</Button>
 					</div>
 				{/if}
-				{#if accountCards.length > 1}
+				{#if showAccountRow}
 					<div aria-hidden="true" class="mx-[8px] my-[4px] h-px bg-border-chip opacity-70"></div>
 				{/if}
 
@@ -629,7 +595,81 @@
 
 			{/snippet}
 			{#snippet extraView()}
-				{#if view === "agent"}
+				{#if view === "account"}
+					<section data-testid="picker-account-section" tabindex="-1" aria-label={accountLabel} class="pb-[6px] outline-none">
+						<div class="flex items-center justify-between px-[10px] pt-[8px] pb-[6px] text-[12px] font-medium text-text-muted">
+							<span>{accountLabel}</span>
+							<span data-testid="picker-account-section-caption">{selectedTraits?.usageHarness === "claude" ? "5-hour use" : canSwitchAccounts ? "usage" : "status"}</span>
+						</div>
+						<OptionRow
+							variant="cards"
+							options={accountCards}
+							value={selectedLogoInstanceId ?? ""}
+							onChange={handleAccountSelect}
+							onActivate={locked ? undefined : (id) => { handleAccountSelect(id); view = "root"; }}
+							label={accountLabel}
+							lockedReason={canSwitchAccounts ? "" : "Harness is fixed for this session"}
+							itemWidth={108}
+							testId="picker-account-options"
+							itemTestId={(id) => `picker-account-${id}`}
+							class="mx-[4px] gap-[6px] pt-[2px] pb-[6px]"
+						>
+							{#snippet item(option, selected)}
+								{@const card = accountCards.find((card) => card.value === option.value)}
+								{#if card}
+									{@const availability = card.kind === "usage" ? card.availability : undefined}
+									<span
+										class="picker-account-card"
+										data-option-card
+										data-limited={availability?.kind === "limited" ? "true" : undefined}
+										data-locked={card.kind === "status" && locked && !selected ? "true" : undefined}
+									>
+										<span class="flex min-w-0 items-center gap-[6px]">
+											{#if selectedDriver}
+												<HarnessLogo driver={getInstanceById(card.value)?.driver ?? selectedDriver} instanceId={card.value} size={15} aligned data-testid="account-logo" />
+											{/if}
+											<span data-testid="picker-account-name" class="min-w-0 truncate">{card.label}</span>
+										</span>
+										{#if card.kind === "status"}
+											<span data-testid="picker-account-caption" class="flex items-center gap-[6px] text-[10.5px] font-normal text-text-muted">
+												<span data-testid="picker-instance-status-dot" class="size-[7px] shrink-0 rounded-full {instanceStatusColor(card.status)}" aria-hidden="true"></span>
+												{card.status}
+											</span>
+										{:else if availability?.kind === "limited"}
+											{@const reset = usageResetTime(availability.resetsAt)}
+											<span data-testid="picker-account-caption" class="text-[10.5px] font-normal text-error">limit{reset ? ` · resets ${reset}` : ""}</span>
+										{:else if availability?.kind === "selectable" && availability.usagePct !== null}
+											<QuotaMeter
+												used={availability.usagePct}
+												warnAt={usageState.limits.warnAt}
+												caption={`${Math.round(availability.usagePct)}%`}
+												variant="usage"
+												trackWidth={26}
+												gap={6}
+												trackTestId="picker-account-meter"
+												captionTestId="picker-account-usage"
+											/>
+										{:else}
+											<span class="flex flex-wrap items-center gap-[6px] text-[10.5px] font-normal text-text-muted">
+												{#if card.kind === "usage" && availability?.kind === "selectable"}<small data-testid="picker-account-usage" class="font-mono text-[10.5px]">—</small>{/if}
+												<span data-testid="picker-account-caption">usage unknown</span>
+											</span>
+										{/if}
+									</span>
+								{/if}
+							{/snippet}
+						</OptionRow>
+						{#if locked && canSwitchAccounts}
+							<div data-testid="picker-account-note" class="mx-[4px] mt-[8px] border-t border-border-subtle pt-[6px] text-[10.5px] text-text-muted">You'll see what carries over before anything changes.</div>
+						{/if}
+					</section>
+					{#if canSwitchAccounts}
+						<Button variant="picker-row" size="content" layout="flow" data-testid="picker-account-add" onclick={() => { closePicker(); openSettings("server", "instances"); }}>
+							<Icon name="plus" size={16} class="shrink-0 text-text-muted" />
+							<span class="flex-1">Add account</span>
+						</Button>
+					{/if}
+				{:else if view === "agent"}
 					{#each visibleAgents as agent (agent.id)}
 						{@const selected = agent.id === activeAgent?.id}
 						<Button
@@ -735,20 +775,6 @@
 											</span>
 										{/if}
 			{/snippet}
-			{#snippet modelFooter()}
-					<div class="mx-[4px] mt-1 border-t border-border pt-1">
-						<Button
-							variant="toolbar"
-							size="content"
-							class="flex w-full items-center justify-center gap-1.5 px-3 py-1.5 text-xs duration-100 hover:bg-bg hover:text-text-secondary"
-							title="Reload skills and commands from disk"
-							onclick={handleReload}
-						>
-							<Icon name="refresh-cw" size={12} />
-							<span>Reload skills &amp; commands</span>
-						</Button>
-					</div>
-			{/snippet}
 		</ModelSelectionPanel>
 	</Surface>
 	</SheetChrome>
@@ -800,7 +826,7 @@
 <div
 	id="model-display"
 	class="relative inline-flex min-w-0 items-center gap-[5px] {phone && variant === 'words' ? 'w-full' : 'flex-[0_1_auto]'}"
-	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone }}
+	use:dismiss={{ onDismiss: closePicker, enabled: pickerOpen && !phone && !actionsOpen }}
 >
 	{#if needsAccount}
 		<Button variant="ghost-accent" size="content" class="shrink-0 gap-1 px-1.5 py-1 text-[11.5px]" data-testid="add-claude-account-btn" onclick={() => { closePicker(); openSettings("server", "instances"); }}><Icon name="plus" size={12} />Add account</Button>

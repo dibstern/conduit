@@ -524,7 +524,7 @@ Scenario Outline: the picker root carries the agent and switches it
   And a session already exists on the Claude harness
   And the composer picker has the Claude catalog
   When I open the model picker
-  Then the picker root sections and rows are harness, model, context, effort, agent, permissions, checkout
+  Then the picker root sections and rows are harness, account, model, context, effort, agent, permissions, checkout
   And the model-picker region visually matches <baseline> at <threshold> percent
   When I view Agent choices in the picker
   Then the picker lists agents Planner, Reviewer

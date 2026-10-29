@@ -65,6 +65,49 @@ Examples:
   | wide   | composer-icons-mode-menu-wide   | 98        |
   | narrow | composer-icons-mode-menu-narrow | 98        |
 
+Scenario Outline: Account choices open from the Session root and Back restores focus
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as personal, self as work
+  And the quota check reads claude <usage_pct>% used, self 90% used
+  And the composer picker has the Claude catalog
+  When I open the model picker
+  Then the picker Account row reads personal with 5h <usage_pct>%
+  When I open the Account drill-in
+  Then the Account drill-in shows account cards and Add account
+  And the claude Account card is selected and in view
+  When I go Back in the picker
+  Then the Account row is focused
+  And the picker Account row reads personal with 5h <usage_pct>%
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | usage_pct | baseline                           | threshold |
+  | wide  | 42        | composer-picker-account-root        | 98        |
+  | phone | 42        | composer-picker-account-root        | 98        |
+
+Scenario Outline: Session actions reload skills and keep Escape inside the menu
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  When I open the model picker
+  And I open the Session actions menu
+  Then the Session actions menu offers Reload skills & commands
+  When I press Escape in the Session actions menu
+  Then only the Session actions menu is closed
+  When I open the Session actions menu
+  And I reload skills and commands from Session actions
+  Then the shared composer picker is closed
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | baseline                            | threshold |
+  | wide  | composer-picker-after-skills-reload  | 98        |
+  | phone | composer-picker-after-skills-reload  | 98        |
+
 Scenario Outline: C1 draft Claude accounts form a grid and bind the project on tap
   Given the conduit app is served with the connected mockup
   And the harness logo is viewed in the <tier> tier
@@ -73,10 +116,11 @@ Scenario Outline: C1 draft Claude accounts form a grid and bind the project on t
   And the quota check reads claude 62% used, self 90% used
   And I start a new session
   And the composer picker has the Claude catalog
+  When I view Harness choices in the picker
+  Then the picker root sections and rows are harness, account, model, context, effort, agent, permissions
   When I view Account choices in the picker
   Then the Account section has 2 equal-width cards and the caption 5-hour use
   And the picker has no account handoff note
-  And the picker root sections and rows are harness, account, model, context, effort, agent, permissions
   And the picker card claude is named personal and shows its account logo
   And the claude Account card shows 62% usage
   And the self Account card shows 90% usage
@@ -197,7 +241,8 @@ Scenario Outline: C2 open Claude cards lock current and limited accounts and swi
   Then the client Account card is selected and in view
   And the client Account card is disabled
   And the composer harness badge for client has its account identity colour
-  And the picker harness badge for client has its account identity colour
+  When I go Back in the picker
+  Then the picker harness badge for client has its account identity colour
 
 Examples:
   | tier  | reading     | baseline                       | threshold |
@@ -331,7 +376,7 @@ Examples:
   | wide  | unhealthy | composer-picker-account-c5-locked | 98        |
   | phone | starting  | composer-picker-account-c5-starting | 98      |
 
-Scenario Outline: C6 a single account or instance hides its section beneath two Harness tabs
+Scenario Outline: C6 a single switchable account keeps its row while a single instance hides it
   Given the conduit app is served with the connected mockup
   And the harness logo is viewed in the <tier> tier
   And the configured Harness choices are Claude, OpenCode
@@ -345,8 +390,8 @@ Scenario Outline: C6 a single account or instance hides its section beneath two 
 
 Examples:
   | tier  | harness  | rows                                   | baseline                            | threshold |
-  | wide  | Claude   | harness, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
-  | phone | Claude   | harness, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
+  | wide  | Claude   | harness, account, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
+  | phone | Claude   | harness, account, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
   | wide  | OpenCode | harness, model, context, agent                      | composer-picker-account-c6-opencode | 98        |
   | phone | OpenCode | harness, model, context, agent                      | composer-picker-account-c6-opencode | 98        |
 

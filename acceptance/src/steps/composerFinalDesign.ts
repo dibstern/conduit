@@ -18,7 +18,7 @@ const iconsControls = {
 } as const;
 const phoneRows = {
 	Harness: "picker-harness-section",
-	Account: "picker-account-section",
+	Account: "picker-row-account",
 	Model: "picker-row-model",
 	Effort: "picker-row-effort",
 	Permissions: "picker-row-permissions",
@@ -384,7 +384,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 				.getByTestId(phoneRows[match[1] as keyof typeof phoneRows]);
 			if (match[1] === "Harness") {
 				await row.locator('[aria-checked="true"]').focus();
-			} else if (match[1] === "Account" || match[1] === "Effort") {
+			} else if (match[1] === "Effort") {
 				await row.focus();
 			} else {
 				await row.click();
@@ -432,8 +432,6 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 					await expect(
 						row.getByRole("radio", { name: value, exact: true }),
 					).toBeChecked();
-			} else if (match[1] === "Account") {
-				await expect(row.locator('[aria-checked="true"]')).toContainText(value);
 			} else {
 				await expect(row).toContainText(value);
 			}
@@ -570,11 +568,7 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 			await expect(sheet.getByTestId("picker-harness-section")).toContainText(
 				"Claude",
 			);
-			await expect(
-				sheet
-					.getByTestId("picker-account-section")
-					.locator('[aria-checked="true"]'),
-			).toContainText(/\S/);
+			await expect(sheet.getByTestId("picker-row-account")).toContainText(/\S/);
 			await expect(sheet.getByTestId("picker-row-model")).toContainText(
 				"Sonnet 5",
 			);
@@ -1149,8 +1143,8 @@ export const composerFinalDesignHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const rows = world.page.locator(
 				match[1]
-					? '#model-picker [data-testid^="picker-row-"], #model-picker [data-testid="picker-harness-section"], #model-picker [data-testid="picker-account-section"]'
-					: '#model-picker [data-testid^="picker-row-"]',
+					? '#model-picker [data-testid^="picker-row-"]:not([data-testid="picker-row-account-meta"]), #model-picker [data-testid="picker-harness-section"]'
+					: '#model-picker [data-testid^="picker-row-"]:not([data-testid="picker-row-account-meta"])',
 			);
 			await expect(rows).toHaveCount((match[2] ?? "").split(", ").length);
 			expect(

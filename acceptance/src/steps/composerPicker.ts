@@ -8,6 +8,7 @@ import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
 	openModelPicker,
+	openPickerAccounts,
 	pickerFixtureQuotaReads,
 	refetchModelCatalog,
 	requireRpcControl,
@@ -167,6 +168,108 @@ export async function seedComposerPickerCatalog(
 
 export const composerPickerHandlers: StepHandler[] = [
 	{
+		name: "assert the root Account row name and usage",
+		match: /^the picker Account row reads (.+) with 5h (\d+)%$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("picker-row-account");
+			await expect(row).toContainText("Account");
+			await expect(row).toContainText(match[1] ?? "");
+			await expect(row.getByTestId("picker-row-account-meta")).toHaveText(
+				`5h ${match[2]}%`,
+			);
+			await expect(
+				world.page.getByTestId("picker-account-section"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "open the Account drill-in",
+		match: /^I open the Account drill-in$/,
+		run: async ({ world }) => {
+			await openPickerAccounts(world.page);
+		},
+	},
+	{
+		name: "assert Account drill-in cards and Add account",
+		match: /^the Account drill-in shows account cards and Add account$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Account", exact: true }),
+			).toBeVisible();
+			await expect(
+				picker.getByTestId("picker-account-options").getByRole("radio"),
+			).toHaveCount(2);
+			await expect(picker.getByTestId("picker-account-add")).toHaveText(
+				"Add account",
+			);
+			await expect(picker.getByTestId("picker-account-add")).toBeVisible();
+			await expect(picker.getByTestId("picker-more")).toHaveCount(0);
+			await expect(picker.getByTestId("picker-back")).toBeVisible();
+		},
+	},
+	{
+		name: "assert Back restores Account row focus",
+		match: /^the Account row is focused$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-row-account")).toBeFocused();
+		},
+	},
+	{
+		name: "open the Session actions menu",
+		match: /^I open the Session actions menu$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-more").click();
+		},
+	},
+	{
+		name: "assert the Session actions reload item",
+		match: /^the Session actions menu offers Reload skills & commands$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-reload-skills")).toHaveText(
+				"Reload skills & commands",
+			);
+			await expect(
+				world.page.getByTestId("picker-reload-skills"),
+			).toBeVisible();
+			await expect(world.page.getByTestId("model-picker")).toBeVisible();
+		},
+	},
+	{
+		name: "press Escape in the Session actions menu",
+		match: /^I press Escape in the Session actions menu$/,
+		run: async ({ world }) => {
+			await world.page.keyboard.press("Escape");
+		},
+	},
+	{
+		name: "assert Escape closes only the Session actions menu",
+		match: /^only the Session actions menu is closed$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-reload-skills")).toHaveCount(
+				0,
+			);
+			await expect(world.page.getByTestId("model-picker")).toBeVisible();
+			await expect(world.page.getByTestId("picker-more")).toBeFocused();
+		},
+	},
+	{
+		name: "reload skills and commands from Session actions",
+		match: /^I reload skills and commands from Session actions$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-reload-skills").click();
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "ReloadProviderSession" &&
+					request.payload["sessionId"] ===
+						decodeURIComponent(
+							new URL(world.page.url()).pathname.split("/")[2] ?? "",
+						),
+			);
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
+		},
+	},
+	{
 		name: "assert desktop model chip returns to the picker root",
 		match: /^the picker root shows Harness and focuses Model$/,
 		run: async ({ world }) => {
@@ -226,6 +329,7 @@ export const composerPickerHandlers: StepHandler[] = [
 					picker.getByTestId(phone ? "picker-back" : "model-picker-search"),
 				).toBeFocused();
 			} else if (match[1] === "Account") {
+				await expect(picker.getByTestId("picker-back")).toBeVisible();
 				await expect(
 					picker.getByTestId("picker-account-section"),
 				).toBeVisible();
@@ -270,13 +374,14 @@ export const composerPickerHandlers: StepHandler[] = [
 				return;
 			}
 			if (match[1] === "Account" || match[1] === "Instance") {
+				await openPickerAccounts(world.page);
 				await expect(
 					world.page.getByTestId("picker-account-section"),
 				).toHaveAttribute("aria-label", match[1]);
 				await expect(
 					world.page.getByTestId("picker-account-options"),
 				).toBeVisible();
-				await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
+				await expect(world.page.getByTestId("picker-back")).toBeVisible();
 				return;
 			}
 			await world.page

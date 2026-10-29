@@ -5,6 +5,7 @@ import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	openModelPicker,
+	openPickerAccounts,
 	requireRelayControl,
 	requireRpcControl,
 	setSessionRowStatus,
@@ -201,6 +202,7 @@ export const opencodeConnectionBannerHandlers: StepHandler[] = [
 			});
 			await openModelPicker(world.page);
 			await world.page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(world.page);
 			await world.page.getByTestId(`picker-account-${instanceId}`).click();
 			await world.page
 				.getByTestId("picker-row-model")

@@ -566,6 +566,7 @@ export const composerWordsHandlers: StepHandler[] = [
 			} else if (match[1] === "Agent") {
 				await expect(picker.getByTestId("picker-agent-build")).toBeVisible();
 			} else if (match[1] === "Account") {
+				await expect(picker.getByTestId("picker-back")).toBeVisible();
 				await expect
 					.poll(() =>
 						picker

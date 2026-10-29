@@ -32,7 +32,7 @@ import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -2582,6 +2582,7 @@ test.describe("draft owns one complete pick", () => {
 		}
 		try {
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await held.wait;
 			await closePicker(page);
@@ -2602,7 +2603,9 @@ test.describe("draft owns one complete pick", () => {
 				expect(reply.response.providers).toEqual([]);
 			deliverEmpty = false;
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId("picker-account-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await closePicker(page);
 			await expect
@@ -4898,6 +4901,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const claudeBefore = await readShown(picker);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await expect(picker).toHaveAttribute("data-instance-id", namedId);
@@ -4922,6 +4926,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			await expect.poll(() => isProcessAlive(borrowed?.pid ?? 0)).toBe(false);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await waitForHealthy(setup.browser, namedId);
@@ -4974,6 +4979,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const otherPicker = await openDraftPage(otherPage, harness, setup.slug);
 			await openPickerRoot(otherPage, otherPicker);
 			await otherPage.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(otherPage);
 			await otherPage.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(otherPage);
 			await waitForHealthy(setup.browser, namedId);

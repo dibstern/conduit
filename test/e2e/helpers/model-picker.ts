@@ -14,6 +14,14 @@ export async function openPickerRoot(
 	if (await back.isVisible()) await back.click();
 }
 
+/** Opens the Account drill-in from an already open picker. */
+export async function openPickerAccounts(page: Page): Promise<void> {
+	const options = page.getByTestId("picker-account-options");
+	if (!(await options.isVisible()))
+		await page.getByTestId("picker-row-account").click();
+	await expect(options).toBeVisible();
+}
+
 /**
  * Opens the Session panel root, where checkout notices and actions live.
  * A panel that is already open stays open.

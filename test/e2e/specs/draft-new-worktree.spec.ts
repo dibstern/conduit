@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -714,8 +714,10 @@ for (const mode of [
 						`picker-harness-${provider === "claude" ? "claude" : "opencode"}`,
 					),
 				);
-				if (provider !== "claude")
+				if (provider !== "claude") {
+					await openPickerAccounts(page);
 					await press(page.getByTestId(`picker-account-${provider}`));
+				}
 				await page.keyboard.press("Escape");
 				await expect(picker).toHaveAttribute("data-instance-id", provider);
 				if (provider === "opencode") {
