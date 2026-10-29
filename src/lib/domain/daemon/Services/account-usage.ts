@@ -94,14 +94,14 @@ const comingWake = ({ wakeAt }: AccountUsage, now: number) =>
 // set for after the read began still stands: the read can't answer for it.
 const nextRead = (
 	record: AccountUsage,
-	reading: UsageReading,
+	{ status }: UsageRead,
 	{
 		readAt,
 		startedAt,
 	}: { readonly readAt: number; readonly startedAt: number },
 ) => {
 	const { failures: before = 0 } = record;
-	const failures = reading.status === "unknown" ? before + 1 : 0;
+	const failures = status === "unknown" ? before + 1 : 0;
 	return {
 		failures,
 		wakeAt: Math.min(
@@ -139,6 +139,10 @@ export const settle = (
 			? record.reading
 			: { ...read, windows, accountId, harness, readAt, stale: false };
 	if (record.inFlight?.result !== result) return { reading, record };
+	// During a read only a live reading with every window moves lastAttemptAt
+	// off the read's start, and then it answers for the account. Otherwise the
+	// read's own outcome sets the backoff, even under a partial live reading.
+	const outcome = record.lastAttemptAt === startedAt ? read : reading;
 	return {
 		reading,
 		record: {
@@ -146,7 +150,7 @@ export const settle = (
 			...series,
 			inFlight: undefined,
 			reading: keptReading(record, reading),
-			...nextRead(record, reading, { readAt, startedAt }),
+			...nextRead(record, outcome, { readAt, startedAt }),
 		},
 	};
 };

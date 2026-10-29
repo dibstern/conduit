@@ -48,8 +48,9 @@
 // it doesn't restart the account's timer, so a viewer arriving after a skipped
 // wake reads at once and nothing reads five minutes after it; it pushes back a
 // sooner post-turn re-read; an older read landing after it overwrites it, adds
-// a failure, or winds its freshness back; a reading for an unknown account is
-// kept.
+// a failure, or winds its freshness back; a read that fails after a partial
+// live reading resets the failure count and waits five minutes instead of
+// backing off; a reading for an unknown account is kept.
 import {
 	mkdtemp,
 	readdir,
@@ -1866,6 +1867,34 @@ it.effect(
 			]);
 			yield* TestClock.adjust("0 millis");
 			expect(readAt).toEqual([0]);
+		}),
+);
+
+it.effect(
+	"a read that fails after a partial live reading keeps the live windows and backs off",
+	() =>
+		Effect.gen(function* () {
+			const { service } = yield* scriptedAccount(
+				[bothWindows, failedRead],
+				20_000,
+			);
+			yield* service.refresh({ maxAge: 0, wait: 0 });
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: 0, wait: 0 });
+			yield* TestClock.adjust("10 seconds");
+			yield* service.update("account-1", "claude", {
+				status: "available",
+				windows: [{ kind: "five_hour", utilization: 60 }],
+			});
+			yield* TestClock.adjust("10 seconds");
+			expect(yield* published(service)).toMatchObject({
+				status: "available",
+				windows: [
+					{ kind: "five_hour", utilization: 60 },
+					{ kind: "seven_day", utilization: 10 },
+				],
+				retryAt: 110_000,
+			});
 		}),
 );
 
