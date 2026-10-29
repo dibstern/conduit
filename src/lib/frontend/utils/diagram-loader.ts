@@ -9,3 +9,17 @@ export function loadPele(): Promise<typeof Pele> {
 		throw error;
 	}));
 }
+
+let wake = (): void => {};
+let retried = new Promise<void>((resolve) => (wake = resolve));
+
+/** Wakes every diagram waiting in nextRetry(); each tries its download once more. */
+export function retry(): void {
+	wake();
+	retried = new Promise((resolve) => (wake = resolve));
+}
+
+/** Settles at the next retry(). Only failed diagrams wait on it, so drawn ones are never remounted. */
+export function nextRetry(): Promise<void> {
+	return retried;
+}

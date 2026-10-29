@@ -75,3 +75,15 @@ Scenario: a session's diagrams are drawn once its replay ends
   And the transcript contains a finished assistant message with a flowchart diagram
   When I reload the page
   Then the assistant message draws the diagram
+
+Scenario: one Retry recovers every diagram whose renderer failed to download
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the sequence diagram renderer fails to download once
+  When the transcript contains a finished assistant message with a flowchart and two sequence diagrams
+  Then the first diagram is drawn and the other two say the renderer failed to load
+  When I note the drawn diagram and its node colour
+  And I press Retry on one failed diagram
+  Then every diagram in the assistant message is drawn
+  And the noted diagram is still on screen
