@@ -2460,6 +2460,8 @@ export const QuotaForAccounts = Rpc.make("QuotaForAccounts", {
 	payload: Schema.TaggedStruct("QuotaForAccounts", {
 		projectSlug: NonEmptyString,
 		originId: Schema.optional(NonEmptyString),
+		/** A user's explicit refresh: read again even after a recent failed read. */
+		force: Schema.optional(Schema.Boolean),
 	}),
 	success: QuotaForAccountsResponseSchema,
 	error: WsRpcError,
