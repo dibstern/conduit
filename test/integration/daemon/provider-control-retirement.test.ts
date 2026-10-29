@@ -666,6 +666,8 @@ describe("provider process control retirement", () => {
 							nativeRequestId: "native-permission",
 							decision: "always",
 							response,
+							// Only rows written before the Stop marker existed omit it.
+							stop: null,
 						},
 					},
 					{
@@ -680,6 +682,7 @@ describe("provider process control retirement", () => {
 							nativeRequestId: "native-question",
 							answers: {},
 							operation: "reject",
+							stop: null,
 						},
 					},
 				]);

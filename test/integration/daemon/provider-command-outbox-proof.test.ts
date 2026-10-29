@@ -123,6 +123,14 @@ describe("command outbox crash proof through the real daemon and stub SDK", () =
 			db.exec(`CREATE TRIGGER hold_control BEFORE UPDATE OF status ON provider_command_outbox
 					WHEN NEW.effect_type = '${kind}' AND NEW.status = '${accepted ? "completed" : "running"}'
 					BEGIN SELECT RAISE(IGNORE); END`);
+			// End stops its runner through one requestStop; the reconciler sends
+			// shutdown as the row enters Escalating, which survives pruning here.
+			db.exec(`CREATE TABLE runner_stops (runner_id TEXT, stop_reason TEXT);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.stop_reason); END`);
+			const runnerStops = () =>
+				db.prepare("SELECT runner_id, stop_reason FROM runner_stops").all();
 			const commandId = randomUUID();
 			const control = (
 				kind === "interrupt_turn"
@@ -166,6 +174,8 @@ describe("command outbox crash proof through the real daemon and stub SDK", () =
 						expect(
 							sdkProof(harness).filter((mark) => mark["kind"] === nativeKind),
 						).toHaveLength(1);
+					if (accepted && kind === "end_session")
+						expect(runnerStops()).toHaveLength(1);
 				},
 				{ timeout: 10_000 },
 			);
@@ -224,8 +234,18 @@ describe("command outbox crash proof through the real daemon and stub SDK", () =
 					mark["kind"] === "runner-control" &&
 					mark["commandId"] === target.command_id,
 			);
-			expect(deliveries).toHaveLength(1);
-			expect(deliveries[0]?.["runnerId"]).toBe(target.provider_process_id);
+			if (kind === "end_session") {
+				expect(deliveries).toEqual([]);
+				expect(runnerStops()).toEqual([
+					{
+						runner_id: target.provider_process_id,
+						stop_reason: JSON.stringify({ _tag: "EndSession" }),
+					},
+				]);
+			} else {
+				expect(deliveries).toHaveLength(1);
+				expect(deliveries[0]?.["runnerId"]).toBe(target.provider_process_id);
+			}
 			expect(sdk.filter((mark) => mark["kind"] === nativeKind)).toHaveLength(1);
 			if (kind === "interrupt_turn")
 				writeFileSync(join(harness.root, "release-upgrade-turn"), "release");
@@ -234,6 +254,7 @@ describe("command outbox crash proof through the real daemon and stub SDK", () =
 			).length;
 			record["nativeCalls"] = sdk.filter((mark) => mark["kind"] === nativeKind);
 			record["deliveries"] = deliveries;
+			record["runnerStops"] = runnerStops();
 			record["passed"] = true;
 		} finally {
 			record["events"] = db

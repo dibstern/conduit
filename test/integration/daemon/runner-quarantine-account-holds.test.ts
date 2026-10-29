@@ -92,6 +92,15 @@ it.each([
 		const sessionId = sessions[0];
 		if (!sessionId) throw new Error("Missing retired owner");
 		db = new Database(fixture.daemonStorePath());
+		// The retirement row is pruned once the stopped process is gone, so
+		// record it as its Stop escalates.
+		db.exec(`CREATE TABLE runner_stops (runner_id TEXT, retired INTEGER, attachment_id TEXT, pid INTEGER);
+			CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+			WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+			BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.retired_at IS NOT NULL, NEW.attachment_id, NEW.pid); END`);
+		const runnerStops = db.prepare(
+			"SELECT runner_id, retired, attachment_id, pid FROM runner_stops",
+		);
 		const retirement = db.prepare<[string]>(
 			"SELECT retired_at, attachment_id, pid FROM claude_runner_cursors WHERE runner_id = ?",
 		);
@@ -112,33 +121,44 @@ it.each([
 		await fixture.terminate();
 		writeFileSync(fault, JSON.stringify({ socketPaths: [runner.socketPath] }));
 		await fixture.restart({ serviceEnvironment });
-		await vi.waitFor(
-			() =>
-				expect(retirement.get(runner.runnerId)).toEqual({
-					retired_at: expect.any(Number),
-					attachment_id: "",
-					pid: runner.pid,
-				}),
-			{ timeout: 20_000 },
-		);
+		const retired = [
+			{
+				runner_id: runner.runnerId,
+				retired: 1,
+				attachment_id: "",
+				pid: runner.pid,
+			},
+		];
+		await vi.waitFor(() => expect(runnerStops.all()).toEqual(retired), {
+			timeout: 20_000,
+		});
 		expect(rows(`${fault}.ndjson`)).toHaveLength(1);
 		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(5);
-		const retired = retirement.get(runner.runnerId);
-		evidence["retiredCursor"] = retired;
-		expect(existsSync(`${runner.socketPath}.spool`)).toBe(true);
-		expect(() => process.kill(runner.pid, 0)).not.toThrow();
+		evidence["retiredCursor"] = runnerStops.all();
+		// A failed attachment's Stop kills the verified runner.
+		await vi.waitFor(
+			() => expect(() => process.kill(runner.pid, 0)).toThrow(),
+			{
+				timeout: 10_000,
+			},
+		);
 		evidence["restoredAttachmentDrops"] = rows(`${fault}.ndjson`);
 		evidence["failedAttachments"] = rows(`${fault}.attempts.ndjson`);
-		// A second restart must keep the survivor retired without restoring its account holds.
+		// A second restart must not revive the retired runner or restore its
+		// account holds. Its row is pruned once the process is gone and its
+		// runs are settled.
 		await fixture.terminate();
 		await fixture.restart({ serviceEnvironment });
 		await vi.waitFor(
-			() => expect(retirement.get(runner.runnerId)).toEqual(retired),
+			() => expect(retirement.get(runner.runnerId)).toBeUndefined(),
 			{ timeout: 20_000 },
 		);
 		expect(rows(`${fault}.attempts.ndjson`)).toHaveLength(5);
 		expect(rows(`${fault}.ndjson`)).toHaveLength(1);
-		expect(retirement.get(runner.runnerId)).toEqual(retired);
+		expect(retirement.get(runner.runnerId)).toBeUndefined();
+		// Prune deletes the retired runner's unread spool after Settle.
+		expect(existsSync(`${runner.socketPath}.spool`)).toBe(false);
+		expect(runnerStops.all()).toEqual(retired);
 		evidence["restartWhileRetired"] = true;
 		let settled = false;
 		const changing = fixture
@@ -199,11 +219,12 @@ it.each([
 		await fixture.terminate();
 		rmSync(fault);
 		await fixture.restart({ serviceEnvironment });
+		// Discovery finds only live runners; the retired one was killed.
 		expect(
 			discoverRunners(fixture.projectDir, fixture.configDir).find(
 				(entry) => entry.sessionId === sessionId,
-			)?.pid,
-		).toBe(runner.pid);
+			),
+		).toBeUndefined();
 		if (change === "update") {
 			expect(states()).toEqual(["interrupted", "interrupted", "running"]);
 			// Removing the updated account must not reattach the retired native turn.

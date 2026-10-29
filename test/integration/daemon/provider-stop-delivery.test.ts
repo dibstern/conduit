@@ -460,6 +460,11 @@ describe("Stop delivery preserves its captured cohort", () => {
 			db.exec(`CREATE TRIGGER hold_retirement BEFORE UPDATE OF status ON provider_command_outbox
 				WHEN NEW.command_id = '${commandId}:retire' AND NEW.status = 'running'
 				BEGIN SELECT RAISE(IGNORE); END`);
+			// A Stop of the runner enters Escalating as the reconciler sends shutdown.
+			db.exec(`CREATE TABLE runner_stops (runner_id TEXT, stop_reason TEXT);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.stop_reason); END`);
 			const stop = Effect.runPromise(
 				browser.rpc.CancelSession({ sessionId, commandId }),
 			).catch(() => undefined);
@@ -513,13 +518,10 @@ describe("Stop delivery preserves its captured cohort", () => {
 				{ timeout: 10_000 },
 			);
 			expect(() => process.kill(runner.pid, 0)).not.toThrow();
+			// The retirement's cohort already finished, so it stops nothing.
 			expect(
-				sdkProof(harness).filter(
-					(mark) =>
-						mark["kind"] === "runner-control" &&
-						mark["commandId"] === `${commandId}:retire`,
-				),
-			).toHaveLength(projectionDelayed ? 1 : 0);
+				db.prepare("SELECT runner_id, stop_reason FROM runner_stops").all(),
+			).toEqual([]);
 			expect(
 				db
 					.prepare(
@@ -636,6 +638,11 @@ describe("Stop delivery preserves its captured cohort", () => {
 			db.exec(`CREATE TRIGGER hold_retirement BEFORE UPDATE OF status ON provider_command_outbox
 				WHEN NEW.command_id = '${commandId}:retire' AND NEW.status = 'running'
 				BEGIN SELECT RAISE(IGNORE); END`);
+			// A Stop of the runner enters Escalating as the reconciler sends shutdown.
+			db.exec(`CREATE TABLE runner_stops (runner_id TEXT, stop_reason TEXT);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.stop_reason); END`);
 			expect(
 				await Effect.runPromise(
 					browser.rpc["input.submit"]({
@@ -693,13 +700,10 @@ describe("Stop delivery preserves its captured cohort", () => {
 				{ timeout: 10_000 },
 			);
 			expect(() => process.kill(runner.pid, 0)).not.toThrow();
+			// The retirement's cohort already finished, so it stops nothing.
 			expect(
-				sdkProof(harness).filter(
-					(mark) =>
-						mark["kind"] === "runner-control" &&
-						mark["commandId"] === `${commandId}:retire`,
-				),
-			).toHaveLength(1);
+				db.prepare("SELECT runner_id, stop_reason FROM runner_stops").all(),
+			).toEqual([]);
 			retirementClosedQueries = sdkProof(harness).filter(
 				(mark) => mark["kind"] === "query-closed",
 			).length;

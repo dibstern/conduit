@@ -397,6 +397,12 @@ describe("Stop waits for provider confirmation", () => {
 				CREATE TRIGGER record_control_terminal AFTER UPDATE OF status ON provider_command_outbox
 				WHEN NEW.effect_type <> 'send_turn' AND NEW.status IN ('completed', 'failed', 'cancelled')
 				BEGIN INSERT INTO control_terminals VALUES (NEW.command_id, NEW.status); END`);
+			// Retirement stops the runner through one requestStop; the reconciler
+			// sends shutdown as the row enters Escalating, which survives pruning.
+			db.exec(`CREATE TABLE runner_stops (runner_id TEXT, stop_reason TEXT);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.stop_reason); END`);
 			const stop = Effect.runPromise(
 				browser.rpc.CancelSession({ sessionId, commandId }),
 			).catch(() => undefined);
@@ -508,7 +514,23 @@ describe("Stop waits for provider confirmation", () => {
 						mark["kind"] === "runner-control" &&
 						mark["commandId"] === `${commandId}:retire`,
 				),
-			).toHaveLength(1);
+			).toEqual([]);
+			await vi.waitFor(() =>
+				expect(
+					db.prepare("SELECT runner_id, stop_reason FROM runner_stops").all(),
+				).toEqual([
+					{
+						runner_id: (
+							db
+								.prepare(
+									"SELECT provider_process_id FROM provider_command_outbox WHERE command_id = ?",
+								)
+								.get(`${commandId}:retire`) as { provider_process_id: string }
+						).provider_process_id,
+						stop_reason: JSON.stringify({ _tag: "EndSession" }),
+					},
+				]),
+			);
 			expect(
 				db
 					.prepare(
@@ -605,6 +627,12 @@ describe("Stop waits for provider confirmation", () => {
 		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
 		const db = new Database(harness.daemonStorePath());
 		try {
+			// Retirement stops the runner through one requestStop; the reconciler
+			// sends shutdown as the row enters Escalating, which survives pruning.
+			db.exec(`CREATE TABLE runner_stops (runner_id TEXT, stop_reason TEXT);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.stop_reason); END`);
 			if (retirementQueued)
 				db.exec(`CREATE TRIGGER hold_retirement BEFORE UPDATE OF status ON provider_command_outbox
 					WHEN NEW.command_id = '${commandId}:retire' AND NEW.status = 'running'
@@ -755,7 +783,15 @@ describe("Stop waits for provider confirmation", () => {
 						mark["kind"] === "runner-control" &&
 						mark["commandId"] === `${commandId}:retire`,
 				),
-			).toHaveLength(1);
+			).toEqual([]);
+			expect(
+				db.prepare("SELECT runner_id, stop_reason FROM runner_stops").all(),
+			).toEqual([
+				{
+					runner_id: original.providerProcessId,
+					stop_reason: JSON.stringify({ _tag: "EndSession" }),
+				},
+			]);
 			expect(
 				sdkProof(harness).filter((mark) => mark["kind"] === "query-closed"),
 			).toHaveLength(1);

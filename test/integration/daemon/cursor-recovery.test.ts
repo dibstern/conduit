@@ -98,6 +98,10 @@ function comparable(
 	root: string,
 ): unknown {
 	const ids = new Map<string, string>();
+	const alias = (id: string) => {
+		if (!ids.has(id)) ids.set(id, `id-${ids.size}`);
+		return ids.get(id) ?? id;
+	};
 	return JSON.parse(
 		JSON.stringify(events, (key, value: unknown) => {
 			if (
@@ -107,14 +111,13 @@ function comparable(
 			)
 				return "<clock>";
 			if (typeof value !== "string") return value;
+			// run.dispatched names its holder, a per-process runner id.
+			if (key === "runnerId") return alias(value);
 			return value
 				.replaceAll(root, "<root>")
 				.replace(
 					/ses_[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
-					(id) => {
-						if (!ids.has(id)) ids.set(id, `id-${ids.size}`);
-						return ids.get(id) ?? id;
-					},
+					alias,
 				);
 		}),
 	) as unknown;
