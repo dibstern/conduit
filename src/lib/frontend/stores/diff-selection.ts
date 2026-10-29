@@ -3,7 +3,6 @@
 // restores one, and a link opens the same diff elsewhere. None of it reaches the
 // daemon, so a reveal on one device never moves another's pane.
 
-import type { SessionDiffScope } from "../../contracts/session-diff.js";
 import {
 	DIFF_FOLDER_PARAM,
 	DIFF_PATH_PARAM,
@@ -23,12 +22,13 @@ export interface DiffReveal {
 	readonly nonce: string | null;
 }
 
-const UNSTAGED: SessionDiffScope = { kind: "unstaged" };
-
-/** The scope `?diff=` names. Unstaged is the only one so far, so every token,
- *  and none, reads as it. One stable object, so the view outlives URL changes. */
-export function getDiffScope(): SessionDiffScope {
-	return UNSTAGED;
+/** The scope kind `?diff=` names: `unstaged` by its token, the branch scope by any
+ *  other and by none. A kind, not a scope, so a derived of it is stable across URL
+ *  changes and the view outlives them; the branch's base is the session's. */
+export function getDiffScopeKind(): "branch" | "unstaged" {
+	return getCurrentSearchParams().get(DIFF_SCOPE_PARAM) === "unstaged"
+		? "unstaged"
+		: "branch";
 }
 
 export function getDiffReveal(): DiffReveal | null {

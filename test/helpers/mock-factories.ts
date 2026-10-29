@@ -713,6 +713,7 @@ export function makeMockSessionManagerService(
 		restoreSessionForSend: vi.fn(() => Effect.void),
 		setSessionPinned: vi.fn(() => Effect.succeed(false)),
 		setSessionJev: vi.fn(() => Effect.succeed(false)),
+		setSessionDiffBase: vi.fn(() => Effect.succeed(false)),
 		snoozeSession: vi.fn(() => Effect.succeed(false)),
 		unsnoozeSession: vi.fn(() => Effect.succeed(false)),
 		loadPreRenderedHistory: vi.fn(() =>

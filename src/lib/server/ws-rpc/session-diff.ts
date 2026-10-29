@@ -6,6 +6,8 @@ import {
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
+import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
+import { recordedOwnershipForFolder } from "../../persistence/effect/session-worktree-ownership.js";
 import { guardWorkspacePath } from "../../session/workspace-directories.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
@@ -19,16 +21,31 @@ const sessionDiff = Effect.serviceOption(SessionDiff).pipe(
 	),
 );
 
-/** The session's folders as this request may read them; an unguarded one reads as missing. */
-const sessionFolders = (sessionId: string) =>
+/** The session's folders as this request may read them; an unguarded one reads as missing.
+ *  A branch scope also carries each folder's launch base. */
+const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 	Effect.gen(function* () {
 		const { effectiveFolders } = yield* resolveSessionRequestFolders(sessionId);
-		const folders = yield* Effect.forEach(effectiveFolders, (folder) =>
-			guardWorkspacePath(folder.directory).pipe(
-				Effect.as(folder),
-				Effect.orElseSucceed(() => ({ ...folder, present: false })),
-			),
-		);
+		// Unreadable ownership only drops the launch base: the default branch stands in.
+		const owned =
+			scope.kind === "branch"
+				? yield* readSessionWorktreeOwnership(sessionId, false).pipe(
+						Effect.orElseSucceed(() => []),
+					)
+				: [];
+		const folders = yield* Effect.forEach(effectiveFolders, (folder) => {
+			const launchBase = recordedOwnershipForFolder(
+				owned,
+				folder.root,
+				folder.directory,
+			)?.head;
+			const listed =
+				launchBase === undefined ? folder : { ...folder, launchBase };
+			return guardWorkspacePath(folder.directory).pipe(
+				Effect.as(listed),
+				Effect.orElseSucceed(() => ({ ...listed, present: false })),
+			);
+		});
 		return { id: sessionId, folders };
 	});
 
@@ -39,7 +56,7 @@ export const subscribeSessionDiff = (request: {
 	Stream.unwrap(
 		Effect.gen(function* () {
 			const diff = yield* sessionDiff;
-			const session = yield* sessionFolders(request.sessionId);
+			const session = yield* sessionFolders(request.sessionId, request.scope);
 			return diff
 				.changes(session, request.scope)
 				.pipe(Stream.map((revision) => ({ revision })));
@@ -51,7 +68,7 @@ export const sessionDiffHandlers = {
 		Effect.gen(function* () {
 			const diff = yield* sessionDiff;
 			return yield* diff.list(
-				yield* sessionFolders(request.sessionId),
+				yield* sessionFolders(request.sessionId, request.scope),
 				request.scope,
 				request.revision,
 			);

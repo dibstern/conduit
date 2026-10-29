@@ -3,6 +3,7 @@ import { Effect, Fiber, PubSub, Semaphore, Stream } from "effect";
 import {
 	SESSION_DIFF_AUTO_LINES,
 	SESSION_DIFF_TOO_LARGE_BYTES,
+	type SessionDiffBase,
 	SessionDiffError,
 	type SessionDiffFile,
 	type SessionDiffFolder,
@@ -17,8 +18,10 @@ import {
 import type {
 	SessionDiff,
 	SessionDiffSession,
+	SessionDiffFolder as SessionFolder,
 } from "../Services/session-diff.js";
 import { SessionGit } from "../Services/session-git.js";
+import type { SubprocessResult } from "../Services/subprocess.js";
 
 const MEMO_LIMIT = 64;
 const STATUS = {
@@ -71,10 +74,22 @@ export function parseDiffTree(output: string) {
 	});
 }
 
+/** A failed command reads as absent; a timeout still fails the folder. */
+const output = (effect: Effect.Effect<SubprocessResult, FolderTimelineError>) =>
+	effect.pipe(
+		Effect.map(({ stdout }) => stdout.trim() || null),
+		Effect.catch((error) =>
+			error.reason === "timeout" ? Effect.fail(error) : Effect.succeed(null),
+		),
+	);
+
 type Listed =
 	| {
 			readonly folder: string;
 			readonly snapshot: FolderSnapshot;
+			/** The tree-ish the snapshot's working tree is compared against. */
+			readonly from: string;
+			readonly base?: SessionDiffBase;
 			readonly files: readonly SessionDiffFile[];
 	  }
 	| Extract<SessionDiffFolder, { readonly error: unknown }>;
@@ -93,6 +108,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 				string,
 				{
 					readonly snapshot: FolderSnapshot;
+					readonly from: string;
 					readonly files: ReadonlyMap<string, SessionDiffFile>;
 				}
 			>;
@@ -111,7 +127,81 @@ export const makeSessionDiff = Effect.gen(function* () {
 	const relative = (snapshot: FolderSnapshot) =>
 		snapshot.prefix === "" ? [] : [`--relative=${snapshot.prefix}`];
 
-	const listFiles = (snapshot: FolderSnapshot) =>
+	/** Override, then launch base, then default branch, then HEAD; the first with a merge-base wins. */
+	const branchBase = (
+		folder: SessionFolder,
+		snapshot: FolderSnapshot,
+		override: string | null,
+	) =>
+		Effect.gen(function* () {
+			const git = (...args: string[]) =>
+				output(timeline.folderGit(folder.directory, args));
+			const verify = (ref: string) =>
+				git("rev-parse", "--verify", "--quiet", "--end-of-options", ref);
+			let fallback: SessionDiffBase["fallback"];
+			const attempt = (ref: string, source: SessionDiffBase["source"]) =>
+				Effect.gen(function* () {
+					const commit = yield* verify(`${ref}^{commit}`);
+					const mergeBase =
+						commit && (yield* git("merge-base", commit, "HEAD"));
+					if (mergeBase)
+						return {
+							from: mergeBase,
+							base: { ref, source, ...(fallback ? { fallback } : {}) },
+						};
+					fallback ??= {
+						wanted: ref,
+						reason: !commit
+							? "missing"
+							: (yield* git("rev-parse", "--is-shallow-repository")) === "true"
+								? "shallow"
+								: "unrelated",
+					};
+					return undefined;
+				});
+			const wanted = [
+				override === null ? undefined : attempt(override, "override"),
+				folder.launchBase === undefined
+					? undefined
+					: attempt(folder.launchBase, "launch"),
+				// origin/HEAD can name a branch the remote has since renamed, so each default gets its try.
+				...[
+					git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"),
+					verify("refs/heads/main").pipe(
+						Effect.map((found) => found && "main"),
+					),
+					verify("refs/heads/master").pipe(
+						Effect.map((found) => found && "master"),
+					),
+				].map((ref) =>
+					Effect.flatMap(ref, (found) =>
+						found === null ? Effect.undefined : attempt(found, "default"),
+					),
+				),
+			];
+			for (const effect of wanted) {
+				const resolved = effect && (yield* effect);
+				if (resolved) return resolved;
+			}
+			// An unborn HEAD compares against the empty tree, so everything shows as added.
+			const head =
+				(yield* verify("HEAD")) ??
+				(yield* timeline.git(
+					snapshot.store,
+					["hash-object", "-t", "tree", "--stdin"],
+					{ input: "" },
+				)).stdout.trim();
+			return {
+				from: head,
+				base: {
+					ref: "HEAD",
+					source: "head",
+					...(fallback ? { fallback } : {}),
+				} satisfies SessionDiffBase,
+			};
+		});
+
+	const listFiles = (snapshot: FolderSnapshot, from: string) =>
 		Effect.gen(function* () {
 			const { stdout } = yield* timeline.git(snapshot.store, [
 				"-c",
@@ -123,7 +213,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 				"--raw",
 				"--numstat",
 				...relative(snapshot),
-				snapshot.index,
+				from,
 				snapshot.worktree,
 			]);
 			const changes = parseDiffTree(stdout);
@@ -172,7 +262,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 			);
 		});
 
-	const listFolder = (folder: SessionDiffSession["folders"][number]) =>
+	const listFolder = (folder: SessionFolder, scope: SessionDiffScope) =>
 		Effect.gen(function* (): Effect.fn.Return<Listed, FolderTimelineError> {
 			if (!folder.present)
 				return {
@@ -181,10 +271,15 @@ export const makeSessionDiff = Effect.gen(function* () {
 					message: `Folder is missing: ${folder.directory}`,
 				};
 			const snapshot = yield* timeline.snapshot(folder.directory);
+			const compared =
+				scope.kind === "branch"
+					? yield* branchBase(folder, snapshot, scope.base)
+					: { from: snapshot.index };
 			return {
 				folder: folder.root,
 				snapshot,
-				files: yield* listFiles(snapshot),
+				...compared,
+				files: yield* listFiles(snapshot, compared.from),
 			};
 		}).pipe(
 			Effect.catch((error) =>
@@ -212,9 +307,11 @@ export const makeSessionDiff = Effect.gen(function* () {
 			const scopeKey = JSON.stringify(scope);
 			const recalled = recall(session.id, scopeKey, revision);
 			if (recalled) return recalled;
-			const folders = yield* Effect.forEach(session.folders, listFolder, {
-				concurrency: "unbounded",
-			});
+			const folders = yield* Effect.forEach(
+				session.folders,
+				(folder) => listFolder(folder, scope),
+				{ concurrency: "unbounded" },
+			);
 			const listed = createHash("sha256")
 				.update(
 					JSON.stringify([
@@ -222,7 +319,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 						scopeKey,
 						folders.map((folder) =>
 							"snapshot" in folder
-								? [folder.folder, folder.snapshot]
+								? [folder.folder, folder.snapshot, folder.from, folder.base]
 								: [folder.folder, folder.error, folder.message],
 						),
 					]),
@@ -234,7 +331,11 @@ export const makeSessionDiff = Effect.gen(function* () {
 				folders: folders.map(
 					(folder): SessionDiffFolder =>
 						"snapshot" in folder
-							? { folder: folder.folder, files: folder.files }
+							? {
+									folder: folder.folder,
+									files: folder.files,
+									...(folder.base ? { base: folder.base } : {}),
+								}
 							: folder,
 				),
 			} satisfies SessionDiffListing;
@@ -251,6 +352,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 										folder.folder,
 										{
 											snapshot: folder.snapshot,
+											from: folder.from,
 											files: new Map(
 												folder.files.map((file) => [file.path, file]),
 											),
@@ -368,14 +470,14 @@ export const makeSessionDiff = Effect.gen(function* () {
 						reason: "too-large",
 						message: `${request.path} is too large to diff`,
 					});
-				const { snapshot } = folder;
+				const { snapshot, from } = folder;
 				const { stdout } = yield* timeline
 					.git(snapshot.store, [
 						"diff-tree",
 						"-p",
 						"-M",
 						...relative(snapshot),
-						snapshot.index,
+						from,
 						snapshot.worktree,
 						"--",
 						...[file.oldPath, file.path].flatMap((path) =>

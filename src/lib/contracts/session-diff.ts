@@ -1,8 +1,13 @@
 import { Schema } from "effect";
 
-/** Which change set a Session Diff shows. Branch, turn and tool-call scopes extend this union. */
+/** Which change set a Session Diff shows. Turn and tool-call scopes extend this union. */
 export const SessionDiffScopeSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("unstaged") }),
+	/** The merge-base of base and HEAD against the live working tree; null base is the launch base. */
+	Schema.Struct({
+		kind: Schema.Literal("branch"),
+		base: Schema.NullOr(Schema.String),
+	}),
 ]);
 export type SessionDiffScope = typeof SessionDiffScopeSchema.Type;
 
@@ -41,11 +46,27 @@ export const SessionDiffFileSchema = Schema.Union([
 ]);
 export type SessionDiffFile = typeof SessionDiffFileSchema.Type;
 
+/** The base a branch scope compared against; fallback names the preferred base it could not use. */
+export const SessionDiffBaseSchema = Schema.Struct({
+	/** A ref, the launch commit, or HEAD. */
+	ref: Schema.String,
+	source: Schema.Literals(["override", "launch", "default", "head"]),
+	fallback: Schema.optional(
+		Schema.Struct({
+			wanted: Schema.String,
+			reason: Schema.Literals(["missing", "shallow", "unrelated"]),
+		}),
+	),
+});
+export type SessionDiffBase = typeof SessionDiffBaseSchema.Type;
+
 /** `folder` is the Project Folder root, as in the file RPCs. */
 export const SessionDiffFolderSchema = Schema.Union([
 	Schema.Struct({
 		folder: Schema.String,
 		files: Schema.Array(SessionDiffFileSchema),
+		/** Branch scope only. */
+		base: Schema.optional(SessionDiffBaseSchema),
 	}),
 	Schema.Struct({
 		folder: Schema.String,

@@ -230,6 +230,22 @@ export const setSessionJev = (sessionId: string, jev: "on" | "off" | null) =>
 		),
 	);
 
+export const setSessionDiffBase = (sessionId: string, base: string | null) =>
+	Effect.gen(function* () {
+		const row = yield* readSessionForTriage(sessionId);
+		if (!row || (row.diff_base ?? null) === base) return false;
+		yield* applySessionCommand({
+			type: "session.diff_base_set",
+			data: { sessionId, base },
+		});
+		return true;
+	}).pipe(
+		Effect.mapError(
+			(cause) =>
+				new SessionManagerError({ operation: "setSessionDiffBase", cause }),
+		),
+	);
+
 export const snoozeSession = (sessionId: string, until: number | null) =>
 	Effect.gen(function* () {
 		const row = yield* readSessionForTriage(sessionId);

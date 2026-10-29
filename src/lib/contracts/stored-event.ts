@@ -157,6 +157,7 @@ export type SessionSettledPayload = PayloadOf<"session.settled">;
 
 export type SessionAutoSettleSetPayload = PayloadOf<"session.auto_settle_set">;
 export type SessionJevSetPayload = PayloadOf<"session.jev_set">;
+export type SessionDiffBaseSetPayload = PayloadOf<"session.diff_base_set">;
 
 export type SessionUnsettledPayload = PayloadOf<"session.unsettled">;
 export type SessionArchivedPayload = PayloadOf<"session.archived">;
@@ -917,6 +918,13 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),
 			jev: Schema.NullOr(Schema.Literals(["on", "off"])),
+		}),
+	),
+	/** The ref the branch diff compares against; null returns to the launch base. */
+	"session.diff_base_set": live(
+		Schema.Struct({
+			sessionId: Schema.String.pipe(SessionRef(false)),
+			base: Schema.NullOr(Schema.String),
 		}),
 	),
 	"session.unsnoozed": live(

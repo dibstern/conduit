@@ -716,6 +716,8 @@ it("stops snapshotting when a subscriber is interrupted at any step of joining",
 								})),
 							git: () =>
 								Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+							folderGit: () =>
+								Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
 							collect: () => Effect.void,
 						}),
 						Effect.provideService(SessionGit, {
@@ -748,4 +750,180 @@ it("stops snapshotting when a subscriber is interrupted at any step of joining",
 		if (leaked) leaks.push(interruptAt);
 	}
 	expect(leaks).toEqual([]);
+});
+
+// Branch scope failure modes: the before side is HEAD or the base tip rather
+// than their merge-base; uncommitted or untracked work drops out; the launch
+// base, override or default branch is skipped or tried out of order; a missing
+// commit or a shallow clone with no common history fails the folder instead of
+// falling back, or falls back silently; file() diffs against the index; a base
+// change keeps the old revision; an unborn HEAD fails instead of listing all.
+const commit = (repo: string, message: string) => {
+	git(repo, "add", "--all");
+	git(
+		repo,
+		"-c",
+		"user.name=Diff test",
+		"-c",
+		"user.email=diff@example.test",
+		"commit",
+		"-qm",
+		message,
+	);
+	return git(repo, "rev-parse", "HEAD");
+};
+
+const listBranch = (
+	folder: {
+		root: string;
+		directory: string;
+		present: boolean;
+		launchBase?: string;
+	},
+	base: string | null,
+) =>
+	run(
+		Effect.gen(function* () {
+			const diff = yield* SessionDiff;
+			const branch = { kind: "branch", base } as const;
+			const listing = yield* diff.list({ id: "s", folders: [folder] }, branch);
+			const [listed] = listing.folders;
+			if (!listed || !("files" in listed)) throw new Error("Folder not listed");
+			const patches = yield* Effect.forEach(listed.files, (file) =>
+				diff.file({
+					sessionId: "s",
+					scope: branch,
+					revision: listing.revision,
+					folder: folder.root,
+					path: file.path,
+					before: file.before,
+					after: file.after,
+				}),
+			);
+			return {
+				revision: listing.revision,
+				base: listed.base,
+				files: listed.files.map(({ path, status }) => `${status} ${path}`),
+				patches: patches.map(({ patch }) => patch),
+			};
+		}),
+	);
+
+it("branch scope diffs the merge-base of each base in order against the live tree, untracked files included", async () => {
+	const repo = repository({ "shared.txt": "base\n" });
+	git(repo, "checkout", "-q", "-b", "feature");
+	writeFileSync(join(repo, "first.txt"), "first\n");
+	const launch = commit(repo, "First");
+	writeFileSync(join(repo, "second.txt"), "second\n");
+	commit(repo, "Second");
+	git(repo, "checkout", "-q", "main");
+	writeFileSync(join(repo, "main-only.txt"), "ahead\n");
+	commit(repo, "Main moves on");
+	git(repo, "checkout", "-q", "feature");
+	writeFileSync(join(repo, "shared.txt"), "edited\n");
+	writeFileSync(join(repo, "untracked.txt"), "new\n");
+	const folder = { ...present(repo), launchBase: launch };
+
+	const byLaunch = await listBranch(folder, null);
+	expect(byLaunch.base).toEqual({ ref: launch, source: "launch" });
+	expect(byLaunch.files).toEqual([
+		"added second.txt",
+		"modified shared.txt",
+		"added untracked.txt",
+	]);
+	expect(byLaunch.patches[1]).toContain("-base\n+edited\n");
+
+	const byOverride = await listBranch(folder, "main");
+	expect(byOverride.base).toEqual({ ref: "main", source: "override" });
+	expect(byOverride.files).toEqual([
+		"added first.txt",
+		"added second.txt",
+		"modified shared.txt",
+		"added untracked.txt",
+	]);
+	expect(byOverride.revision).not.toBe(byLaunch.revision);
+
+	const byDefault = await listBranch(present(repo), null);
+	expect(byDefault.base).toEqual({ ref: "main", source: "default" });
+	expect(byDefault.files).toEqual(byOverride.files);
+});
+
+it("falls back past a missing launch commit or override with a notice, and lists an unborn repository whole", async () => {
+	const repo = repository({ "tracked.txt": "one\n" });
+	writeFileSync(join(repo, "tracked.txt"), "two\n");
+	const gone = "0123456789abcdef0123456789abcdef01234567";
+
+	const missingLaunch = await listBranch(
+		{ ...present(repo), launchBase: gone },
+		null,
+	);
+	expect(missingLaunch.base).toEqual({
+		ref: "main",
+		source: "default",
+		fallback: { wanted: gone, reason: "missing" },
+	});
+	expect(missingLaunch.files).toEqual(["modified tracked.txt"]);
+
+	const missingOverride = await listBranch(
+		{ ...present(repo), launchBase: gone },
+		"no-such-branch",
+	);
+	expect(missingOverride.base).toEqual({
+		ref: "main",
+		source: "default",
+		fallback: { wanted: "no-such-branch", reason: "missing" },
+	});
+
+	// A stale origin/HEAD, as after the remote renames its default branch.
+	git(
+		repo,
+		"symbolic-ref",
+		"refs/remotes/origin/HEAD",
+		"refs/remotes/origin/gone",
+	);
+	const staleRemote = await listBranch(present(repo), null);
+	expect(staleRemote.base).toEqual({
+		ref: "main",
+		source: "default",
+		fallback: { wanted: "origin/gone", reason: "missing" },
+	});
+
+	const fresh = join(root, "fresh");
+	mkdirSync(fresh);
+	git(fresh, "init", "-q", "-b", "main");
+	writeFileSync(join(fresh, "untracked.txt"), "new\n");
+	const unborn = await listBranch(present(fresh), null);
+	expect(unborn.base).toEqual({ ref: "HEAD", source: "head" });
+	expect(unborn.files).toEqual(["added untracked.txt"]);
+});
+
+it("falls back to HEAD with a shallow notice when a shallow clone has no common history", async () => {
+	const origin = repository({ "tracked.txt": "one\n" });
+	git(origin, "checkout", "-q", "-b", "feature");
+	writeFileSync(join(origin, "feature.txt"), "feature\n");
+	commit(origin, "Feature");
+	git(origin, "checkout", "-q", "main");
+	writeFileSync(join(origin, "main.txt"), "main\n");
+	commit(origin, "Main");
+	const clone = join(root, "clone");
+	execFileSync("git", [
+		"clone",
+		"-q",
+		"--depth",
+		"1",
+		"--no-single-branch",
+		"--branch",
+		"feature",
+		`file://${origin}`,
+		clone,
+	]);
+	writeFileSync(join(clone, "feature.txt"), "edited\n");
+
+	const shallow = await listBranch(present(clone), null);
+	expect(shallow.base).toEqual({
+		ref: "HEAD",
+		source: "head",
+		fallback: { wanted: "origin/main", reason: "shallow" },
+	});
+	expect(shallow.files).toEqual(["modified feature.txt"]);
 });

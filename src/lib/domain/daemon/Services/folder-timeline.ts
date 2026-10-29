@@ -37,6 +37,11 @@ export class FolderTimeline extends Context.Service<
 			args: readonly string[],
 			options?: { readonly input?: string; readonly maxBuffer?: number },
 		) => Effect.Effect<SubprocessResult, FolderTimelineError>;
+		/** Read-only git in the folder's own repository, for the refs and history a store lacks. */
+		readonly folderGit: (
+			directory: string,
+			args: readonly string[],
+		) => Effect.Effect<SubprocessResult, FolderTimelineError>;
 		/** Prune snapshot objects older than the grace period. */
 		readonly collect: (graceMs: number) => Effect.Effect<void>;
 	}

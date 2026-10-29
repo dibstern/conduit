@@ -142,7 +142,7 @@ export const WORKTREE_CLEANUP_PATHS_SQL = `
 		AND mapping.type = 'text'`;
 
 // Several project folders can share one checkout and its single ownership row.
-export const recordedBranchForFolder = (
+export const recordedOwnershipForFolder = (
 	ownership: readonly SessionWorktreeOwnership[],
 	folder: string,
 	directory: string,
@@ -152,4 +152,4 @@ export const recordedBranchForFolder = (
 			owned.folder === folder ||
 			directory === owned.path ||
 			directory.startsWith(`${owned.path}${sep}`),
-	)?.branchName;
+	);

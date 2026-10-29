@@ -52,6 +52,7 @@ export interface SessionRow {
 	unsettled_at?: number | null;
 	auto_settle_disabled_at?: number | null;
 	jev?: "on" | "off" | null;
+	diff_base?: string | null;
 	settled_automatically?: number;
 	pinned_at: number | null;
 	snoozed_at: number | null;
