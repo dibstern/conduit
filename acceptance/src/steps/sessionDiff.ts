@@ -8,6 +8,8 @@ import { requireRpcControl } from "./shared.js";
 
 interface DiffFixture {
 	readonly files: SessionDiffFile[];
+	/** Each folder lists every file. */
+	readonly folders: readonly string[];
 	readonly requested: string[];
 	/** Gone answers left per path. */
 	readonly gone: Map<string, number>;
@@ -21,6 +23,9 @@ interface DiffFixture {
 }
 
 const fixtures = new WeakMap<Page, DiffFixture>();
+
+/** How many RPC requests the page had sent when the last reveal was clicked. */
+const revealMarks = new WeakMap<Page, number>();
 
 /** Row observer callbacks a step parks, and the paths each one saw come into view. */
 interface DiffObservations {
@@ -89,9 +94,14 @@ const changed = (path: string, insertions = 1, deletions = 1) =>
 		binary: false,
 	}) satisfies SessionDiffFile;
 
-function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
+function seed(
+	page: Page,
+	files: SessionDiffFile[],
+	folders: readonly string[] = ["/workspace/myapp"],
+): DiffFixture {
 	const fixture: DiffFixture = {
 		files,
+		folders,
 		requested: [],
 		gone: new Map(),
 		foreign: [],
@@ -112,7 +122,10 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
 			return {
 				revision: `rev-${sessionId}`,
-				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
+				folders: fixture.folders.map((folder) => ({
+					folder,
+					files: fixture.files,
+				})),
 			};
 		},
 		SessionDiffFile: async ({ path, sessionId, revision }) => {
@@ -156,6 +169,10 @@ function requireFixture(page: Page): DiffFixture {
 const row = (page: Page, path: string) =>
 	page.locator(`[data-testid="session-diff-file"][data-path="${path}"]`);
 
+/** A row's header, which sits in the pane's view only while the row is scrolled to. */
+const rowHeader = (page: Page, path: string) =>
+	row(page, path).locator("header");
+
 export const sessionDiffHandlers: StepHandler[] = [
 	{
 		name: "seed diff tiers",
@@ -194,14 +211,16 @@ export const sessionDiffHandlers: StepHandler[] = [
 	},
 	{
 		name: "seed many small diffs",
-		match: /^the session has ([0-9]+) small unstaged files$/,
+		match:
+			/^the session has ([0-9]+) small unstaged files(?: in each of (\S+) and (\S+))?$/,
 		run: async ({ world, match }) => {
-			const count = Number(match[1]);
+			const [, count = "", ...folders] = match;
 			seed(
 				world.page,
-				Array.from({ length: count }, (_, index) =>
+				Array.from({ length: Number(count) }, (_, index) =>
 					changed(`file-${String(index + 1).padStart(2, "0")}.ts`),
 				),
+				folders[0] && folders[1] ? [folders[0], folders[1]] : undefined,
 			);
 		},
 	},
@@ -486,6 +505,128 @@ export const sessionDiffHandlers: StepHandler[] = [
 			await expect(
 				world.page.locator('[data-testid="session-diff-error"]'),
 			).toHaveCount(0);
+		},
+	},
+	{
+		name: "preview diff file in files",
+		match: /^I preview (\S+) in Files$/,
+		run: async ({ world, match }) => {
+			const { page } = world;
+			const entries = requireFixture(page).files.map(({ path }) => path);
+			requireRpcControl(page).setStubs({
+				GetFileTree: () => ({ projectSlug: "myapp", entries }),
+				GetFileList: ({ path = "." }) => ({
+					projectSlug: "myapp",
+					path,
+					entries: entries.map((name) => ({ name, type: "file", size: 12 })),
+				}),
+				GetFileContent: ({ path = "" }) => ({
+					projectSlug: "myapp",
+					path,
+					content: `// ${path}\n`,
+				}),
+			});
+			const pane = page.locator("#right-pane");
+			if (await pane.isVisible())
+				await pane.getByRole("tab", { name: "Files", exact: true }).click();
+			else await page.getByTestId("views-rail-files").click();
+			const browser = pane.getByRole("button", { name: "File browser" });
+			if (await browser.isVisible()) await browser.click();
+			await pane.locator(".fb-entry", { hasText: match[1] ?? "" }).click();
+			await expect(page.locator("#file-viewer-path")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "reveal previewed file diff",
+		match: /^I open the previewed file's diff$/,
+		run: async ({ world }) => {
+			const { page } = world;
+			revealMarks.set(page, requireRpcControl(page).getRequests().length);
+			await page
+				.locator("#file-viewer")
+				.getByRole("button", { name: "Show diff" })
+				.click();
+		},
+	},
+	{
+		name: "open diff link",
+		match: /^I open the diff link for (\S+) in (?:the (\S+) scope|(\S+))$/,
+		run: async ({ world, match }) => {
+			const [, path = "", scope, folder] = match;
+			const url = new URL(world.page.url());
+			url.searchParams.set("diffPath", path);
+			url.searchParams.set("diffReveal", "link");
+			if (scope) url.searchParams.set("diff", scope);
+			if (folder) url.searchParams.set("diffFolder", folder);
+			await world.page.goto(url.toString());
+		},
+	},
+	{
+		name: "diff revealed",
+		match: /^the (\S+) diff is revealed$/,
+		run: async ({ world, match }) => {
+			await expect(rowHeader(world.page, match[1] ?? "")).toBeInViewport();
+		},
+	},
+	{
+		name: "diff revealed in folder",
+		match: /^the (\S+) diff in (\S+) is (revealed|out of view)$/,
+		run: async ({ world, match }) => {
+			const [, path = "", folder = "", seen] = match;
+			const header = row(world.page, path)
+				.and(world.page.locator(`[data-folder="${folder}"]`))
+				.locator("header");
+			if (seen === "revealed") await expect(header).toBeInViewport();
+			else await expect(header).not.toBeInViewport();
+		},
+	},
+	{
+		name: "diff out of view",
+		match: /^the (\S+) diff is out of view$/,
+		run: async ({ world, match }) => {
+			await expect(rowHeader(world.page, match[1] ?? "")).not.toBeInViewport();
+		},
+	},
+	{
+		name: "diff selection in url",
+		match: /^the URL holds the (\S+) diff selection$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => {
+					const params = new URL(world.page.url()).searchParams;
+					return {
+						path: params.get("diffPath"),
+						reveal: Boolean(params.get("diffReveal")),
+						scope: params.get("diff"),
+					};
+				})
+				.toEqual({ path: match[1], reveal: true, scope: null });
+		},
+	},
+	{
+		name: "reveal stays on this device",
+		match: /^revealing the diff sent the daemon only diff reads$/,
+		run: async ({ world }) => {
+			const { page } = world;
+			await settle(page);
+			const tags = requireRpcControl(page)
+				.getRequests()
+				.slice(revealMarks.get(page))
+				.map(({ tag }) => tag);
+			expect(
+				tags.filter(
+					(tag) => tag !== "SessionDiffList" && tag !== "SessionDiffFile",
+				),
+			).toEqual([]);
+		},
+	},
+	{
+		name: "browser back",
+		match: /^I go back in the browser$/,
+		run: async ({ world }) => {
+			await world.page.goBack();
 		},
 	},
 ];
