@@ -4,12 +4,15 @@ import {
 	type SessionDiffBase,
 	SessionDiffError,
 	type SessionDiffFile,
+	type SessionDiffFolder,
+	type SessionDiffPatch,
 	type SessionDiffScope,
 } from "../../../src/lib/contracts/session-diff.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
 interface DiffFixture {
+	/** The first folder's files, listed under `folder`; `others` list after it. */
 	readonly files: SessionDiffFile[];
 	/** Each folder lists every file. */
 	readonly folders: readonly string[];
@@ -19,6 +22,9 @@ interface DiffFixture {
 	readonly scopes: SessionDiffScope[];
 	/** Every SetSessionDiffBase payload's base, in order. */
 	readonly setBases: (string | null)[];
+	/** Folders listed as given, after those that list every file. */
+	readonly others: readonly SessionDiffFolder[];
+	readonly notes: ReadonlyMap<string, SessionDiffPatch["notes"]>;
 	readonly requested: string[];
 	/** Gone answers left per path. */
 	readonly gone: Map<string, number>;
@@ -116,7 +122,11 @@ const revisionOf = (fixture: DiffFixture, sessionId: string) =>
 function seed(
 	page: Page,
 	files: SessionDiffFile[],
-	folders: readonly string[] = ["/workspace/myapp"],
+	{
+		folders = ["/workspace/myapp"],
+		others = [],
+		notes = new Map(),
+	}: Partial<Pick<DiffFixture, "folders" | "others" | "notes">> = {},
 ): DiffFixture {
 	const fixture: DiffFixture = {
 		files,
@@ -124,6 +134,8 @@ function seed(
 		base: { ref: "main", source: "default" },
 		scopes: [],
 		setBases: [],
+		others,
+		notes,
 		requested: [],
 		gone: new Map(),
 		foreign: [],
@@ -147,18 +159,21 @@ function seed(
 			// A held listing answers with the snapshot taken when it was asked.
 			const listing = {
 				revision: revisionOf(fixture, sessionId),
-				folders: fixture.folders.map((folder) => ({
-					folder,
-					files: [...fixture.files],
-					...(scope.kind === "branch"
-						? {
-								base:
-									scope.base === null
-										? fixture.base
-										: { ref: scope.base, source: "override" as const },
-							}
-						: {}),
-				})),
+				folders: [
+					...fixture.folders.map((folder) => ({
+						folder,
+						files: [...fixture.files],
+						...(scope.kind === "branch"
+							? {
+									base:
+										scope.base === null
+											? fixture.base
+											: { ref: scope.base, source: "override" as const },
+								}
+							: {}),
+					})),
+					...fixture.others,
+				],
 			};
 			if (fixture.holdList) {
 				fixture.holdList = false;
@@ -200,13 +215,18 @@ function seed(
 					reason: "gone",
 					message: "The listing is no longer available",
 				});
-			const file = fixture.files.find((entry) => entry.path === path);
-			return {
-				patch:
-					file && "insertions" in file
-						? patchFor(path, file.insertions, file.deletions)
-						: "",
-			};
+			const file = [
+				fixture.files,
+				...others.map((entry) => ("files" in entry ? entry.files : [])),
+			]
+				.flat()
+				.find((entry) => entry.path === path);
+			const patch =
+				file && "insertions" in file
+					? patchFor(path, file.insertions, file.deletions)
+					: "";
+			const fileNotes = notes.get(path);
+			return fileNotes ? { patch, notes: fileNotes } : { patch };
 		},
 		// The server opens a live scope with its current revision.
 		SubscribeSessionDiff: ({ sessionId }) => {
@@ -363,7 +383,91 @@ export const sessionDiffHandlers: StepHandler[] = [
 				Array.from({ length: Number(count) }, (_, index) =>
 					changed(`file-${String(index + 1).padStart(2, "0")}.ts`, lines),
 				),
-				folders[0] && folders[1] ? [folders[0], folders[1]] : undefined,
+				folders[0] && folders[1] ? { folders: [folders[0], folders[1]] } : {},
+			);
+		},
+	},
+	{
+		name: "seed diff folders",
+		match:
+			/^the session diff has folders (\S+) with (\S+), (\S+) with (\S+), and (\S+) unavailable$/,
+		run: async ({ world, match }) => {
+			const [
+				,
+				first = "",
+				firstPath = "",
+				second = "",
+				secondPath = "",
+				gone = "",
+			] = match;
+			seed(world.page, [changed(firstPath)], {
+				folders: [first],
+				others: [
+					{ folder: second, files: [changed(secondPath)] },
+					{
+						folder: gone,
+						error: "unavailable",
+						message: `Folder is missing: ${gone}`,
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "seed diff edge cases",
+		match:
+			/^the session has unstaged edge cases: submodule (\S+), LFS (\S+), symlink (\S+), mode change (\S+) from ([0-7]+) to ([0-7]+), rename (\S+) to (\S+), CRLF (\S+) and Latin-1 (\S+)$/,
+		run: async ({ world, match }) => {
+			const [
+				,
+				submodule = "",
+				lfs = "",
+				symlink = "",
+				script = "",
+				modeBefore = "",
+				modeAfter = "",
+				oldPath = "",
+				moved = "",
+				crlf = "",
+				latin1 = "",
+			] = match;
+			const same = "7777777777777777777777777777777777777777";
+			seed(
+				world.page,
+				(
+					[
+						{
+							...changed(submodule),
+							kind: "submodule",
+							before: "5555555555555555555555555555555555555555",
+							after: "6666666666666666666666666666666666666666",
+							bytes: 0,
+						},
+						{ ...changed(lfs, 2, 2), kind: "lfs" },
+						{ ...changed(symlink), kind: "symlink" },
+						{
+							...changed(script, 0, 0),
+							before: same,
+							after: same,
+							mode: { before: modeBefore, after: modeAfter },
+						},
+						{
+							...changed(moved, 0, 0),
+							status: "renamed",
+							oldPath,
+							before: same,
+							after: same,
+						},
+						changed(crlf),
+						changed(latin1),
+					] satisfies SessionDiffFile[]
+				).sort((left, right) => left.path.localeCompare(right.path)),
+				{
+					notes: new Map([
+						[crlf, ["crlf"]],
+						[latin1, ["latin1"]],
+					]),
+				},
 			);
 		},
 	},
@@ -388,6 +492,21 @@ export const sessionDiffHandlers: StepHandler[] = [
 			fixture.files[index] = {
 				...file,
 				after: "5555555555555555555555555555555555555555",
+			};
+			fixture.version += 1;
+		},
+	},
+	{
+		name: "diff mode changes",
+		match: /^the (\S+) mode changes from ([0-7]+) to ([0-7]+)$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const index = fixture.files.findIndex((file) => file.path === match[1]);
+			const file = fixture.files[index];
+			if (!file) throw new Error(`No diff fixture file ${match[1]}`);
+			fixture.files[index] = {
+				...file,
+				mode: { before: match[2] ?? "", after: match[3] ?? "" },
 			};
 			fixture.version += 1;
 		},
@@ -689,6 +808,46 @@ export const sessionDiffHandlers: StepHandler[] = [
 			const opened = fixture.subscriptions;
 			requireRpcControl(world.page).closeSockets();
 			await expect.poll(() => fixture.subscriptions).toBe(opened + 1);
+		},
+	},
+	{
+		name: "diff folder group",
+		match:
+			/^the (\S+) diff group is headed (\S+) and (?:lists (\S+)|shows "([^"]+)")$/,
+		run: async ({ world, match }) => {
+			const [, folder = "", name = "", path, error] = match;
+			const group = world.page.locator(
+				`[data-testid="session-diff-folder"][data-folder="${folder}"]`,
+			);
+			const rows = group.locator('[data-testid="session-diff-file"]');
+			const errors = group.locator('[data-testid="session-diff-error"]');
+			await expect(group.getByRole("heading")).toHaveText(name);
+			if (path === undefined) {
+				await expect(errors).toHaveText(error ?? "");
+				await expect(rows).toHaveCount(0);
+			} else {
+				await expect(rows).toHaveAttribute("data-path", path);
+				await expect(errors).toHaveCount(0);
+			}
+		},
+	},
+	{
+		name: "diff row label",
+		match: /^the (\S+) diff is labelled "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				row(world.page, match[1] ?? "").getByTestId("session-diff-label"),
+			).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "patchless diff row",
+		match: /^the (\S+) diff reads "([^"]+)" without a patch$/,
+		run: async ({ world, match }) => {
+			const path = match[1] ?? "";
+			await expect(row(world.page, path)).toContainText(match[2] ?? "");
+			await settle(world.page);
+			expect(requireFixture(world.page).requested).not.toContain(path);
 		},
 	},
 	{

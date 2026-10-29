@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -7,6 +8,7 @@ import {
 	realpathSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
@@ -42,7 +44,11 @@ import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.j
 // itself, or leaks changes outside it; a path with glob characters serves
 // other files' patches; worktrees sharing a repository race to create its
 // store on first use; a folder without an index, a missing
-// folder or a non-git folder fails the whole listing; collect skips stores
+// folder, a non-git folder or a worktree deleted, moved or orphaned after it
+// listed fails the whole listing; an LFS file, submodule, symlink or mode
+// change goes unlabelled, or a pure rename or mode change claims content;
+// CRLF line endings lose their carriage returns or go unlabelled, and
+// non-UTF-8 bytes decode to replacement characters; collect skips stores
 // left by an earlier run, prunes a snapshot still inside its grace period, or
 // keeps one past it so Gone never comes; a live scope snapshots once per
 // subscriber instead of once per change, pushes an unchanged revision, reacts
@@ -484,6 +490,205 @@ it("reports missing and non-git folders as unavailable beside a listed one", asy
 		["added untracked.txt 4"],
 		[plain, "unavailable", expect.stringContaining("not a git repository")],
 		[missing, "unavailable", `Folder is missing: ${missing}`],
+	]);
+});
+
+it("errors only a deleted, moved or orphaned worktree while its repository still lists", async () => {
+	const repo = repository({ "tracked.txt": "one\n" });
+	writeFileSync(join(repo, "tracked.txt"), "two\n");
+	const [deleted, moved, orphaned] = ["deleted", "moved", "orphaned"].map(
+		(name) => {
+			const worktree = join(root, name);
+			git(repo, "worktree", "add", "-q", "--detach", worktree);
+			writeFileSync(join(worktree, "tracked.txt"), `${name}\n`);
+			return worktree;
+		},
+	) as [string, string, string];
+	const folders = [repo, deleted, moved, orphaned].map(present);
+
+	const [before, after] = await run(
+		Effect.gen(function* () {
+			const diff = yield* SessionDiff;
+			const before = yield* diff.list({ id: "s", folders }, scope);
+			// Resolved folders are cached, so each loss happens after a listing.
+			rmSync(deleted, { recursive: true, force: true });
+			renameSync(moved, join(root, "moved-away"));
+			rmSync(join(repo, ".git", "worktrees", "orphaned"), {
+				recursive: true,
+				force: true,
+			});
+			return [before, yield* diff.list({ id: "s", folders }, scope)];
+		}),
+	);
+
+	const shape = (listing: typeof before) =>
+		listing.folders.map((folder) =>
+			"files" in folder
+				? folder.files.map(({ path }) => path)
+				: [folder.folder, folder.error],
+		);
+	expect(shape(before)).toEqual([
+		["tracked.txt"],
+		["tracked.txt"],
+		["tracked.txt"],
+		["tracked.txt"],
+	]);
+	expect(shape(after)).toEqual([
+		["tracked.txt"],
+		[deleted, "unavailable"],
+		[moved, "unavailable"],
+		[orphaned, "unavailable"],
+	]);
+});
+
+it("labels LFS, submodule, symlink and mode-only rows, and serves CRLF and non-UTF-8 patches byte for byte", async () => {
+	// The developer's global LFS filter must not run, nor be needed, to build the fixture.
+	const lfsOff = [
+		"-c",
+		"filter.lfs.process=",
+		"-c",
+		"filter.lfs.clean=",
+		"-c",
+		"filter.lfs.smudge=",
+		"-c",
+		"filter.lfs.required=false",
+	];
+	const pointer = (digit: string, size: number) =>
+		`version https://git-lfs.github.com/spec/v1\noid sha256:${digit.repeat(64)}\nsize ${size}\n`;
+	const commit = (directory: string, message: string) =>
+		git(
+			directory,
+			...lfsOff,
+			"-c",
+			"user.name=Diff test",
+			"-c",
+			"user.email=diff@example.test",
+			"commit",
+			"-qam",
+			message,
+		);
+	const repo = join(root, "repo");
+	const sub = join(repo, "sub");
+	mkdirSync(sub, { recursive: true });
+	git(sub, "init", "-q", "-b", "main");
+	writeFileSync(join(sub, "s.txt"), "one\n");
+	git(sub, "add", ".");
+	commit(sub, "First");
+	const first = git(sub, "rev-parse", "HEAD");
+	git(repo, "init", "-q", "-b", "main");
+	writeFileSync(
+		join(repo, ".gitattributes"),
+		"*.psd filter=lfs diff=lfs merge=lfs -text\n",
+	);
+	writeFileSync(join(repo, "photo.psd"), pointer("a", 100));
+	writeFileSync(join(repo, "crlf.txt"), "a\r\nb\r\n");
+	writeFileSync(join(repo, "latin1.txt"), Buffer.from("caf\xe9\n", "latin1"));
+	writeFileSync(join(repo, "same.txt"), "unchanged\n");
+	writeFileSync(join(repo, "script.sh"), "echo\n");
+	symlinkSync("target.txt", join(repo, "link"));
+	git(repo, ...lfsOff, "-c", "advice.addEmbeddedRepo=false", "add", ".");
+	commit(repo, "Initial");
+	writeFileSync(join(repo, "photo.psd"), pointer("b", 200));
+	writeFileSync(join(repo, "crlf.txt"), "a\r\nc\r\n");
+	writeFileSync(join(repo, "latin1.txt"), Buffer.from("caf\xe8\n", "latin1"));
+	renameSync(join(repo, "same.txt"), join(repo, "moved.txt"));
+	chmodSync(join(repo, "script.sh"), 0o755);
+	rmSync(join(repo, "link"));
+	symlinkSync("other.txt", join(repo, "link"));
+	writeFileSync(join(sub, "s.txt"), "two\n");
+	commit(sub, "Second");
+	const second = git(sub, "rev-parse", "HEAD");
+
+	const { files, replies } = await run(
+		Effect.gen(function* () {
+			const diff = yield* SessionDiff;
+			const listing = yield* diff.list(
+				{ id: "s", folders: [present(repo)] },
+				scope,
+			);
+			const [folder] = listing.folders;
+			const files = folder && "files" in folder ? folder.files : [];
+			const replies = yield* Effect.forEach(
+				["crlf.txt", "latin1.txt", "link"],
+				(path) => {
+					const file = files.find((listed) => listed.path === path);
+					return diff.file({
+						sessionId: "s",
+						scope,
+						revision: listing.revision,
+						folder: repo,
+						path,
+						before: file?.before ?? null,
+						after: file?.after ?? null,
+					});
+				},
+			);
+			return { files, replies };
+		}),
+	);
+
+	expect(
+		files.map((file) => ({
+			path: file.path,
+			status: file.status,
+			kind: file.kind,
+			mode: file.mode,
+			counts: "insertions" in file ? [file.insertions, file.deletions] : [],
+			same: file.before === file.after,
+		})),
+	).toEqual([
+		{ path: "crlf.txt", status: "modified", counts: [1, 1], same: false },
+		{ path: "latin1.txt", status: "modified", counts: [1, 1], same: false },
+		{
+			path: "link",
+			status: "modified",
+			kind: "symlink",
+			counts: [1, 1],
+			same: false,
+		},
+		{ path: "moved.txt", status: "renamed", counts: [0, 0], same: true },
+		{
+			path: "photo.psd",
+			status: "modified",
+			kind: "lfs",
+			counts: [2, 2],
+			same: false,
+		},
+		{
+			path: "script.sh",
+			status: "modified",
+			mode: { before: "100644", after: "100755" },
+			counts: [0, 0],
+			same: true,
+		},
+		{
+			path: "sub",
+			status: "modified",
+			kind: "submodule",
+			counts: [1, 1],
+			same: false,
+		},
+	]);
+	expect(files.find(({ path }) => path === "sub")).toMatchObject({
+		before: first,
+		after: second,
+		// Its commits are not blobs in the store, so they have no size.
+		bytes: 0,
+	});
+	expect(replies).toEqual([
+		{
+			patch: expect.stringContaining(" a\r\n-b\r\n+c\r\n"),
+			notes: ["crlf"],
+		},
+		{
+			patch: expect.stringContaining("-café\n+cafè\n"),
+			notes: ["latin1"],
+		},
+		{
+			patch: expect.stringContaining(
+				"-target.txt\n\\ No newline at end of file\n+other.txt\n",
+			),
+		},
 	]);
 });
 

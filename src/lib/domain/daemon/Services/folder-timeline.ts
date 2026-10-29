@@ -35,7 +35,12 @@ export class FolderTimeline extends Context.Service<
 		readonly git: (
 			store: string,
 			args: readonly string[],
-			options?: { readonly input?: string; readonly maxBuffer?: number },
+			options?: {
+				readonly input?: string;
+				readonly maxBuffer?: number;
+				/** Raw stdout bytes, for output that may not be UTF-8. */
+				readonly onStdout?: (chunk: Buffer) => void;
+			},
 		) => Effect.Effect<SubprocessResult, FolderTimelineError>;
 		/** Read-only git in the folder's own repository, for the refs and history a store lacks. */
 		readonly folderGit: (

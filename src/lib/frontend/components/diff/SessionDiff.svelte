@@ -66,24 +66,26 @@
 	{:else}
 		{@const folders = view.state.folders}
 		{#each folders as folder (folder.folder)}
-			{#if folders.length > 1}
-				<h3 class="truncate border-b border-border-subtle px-3 py-1.5 text-xs font-semibold text-text-muted" title={folder.folder}>
-					{folder.folder.split("/").at(-1)}
-				</h3>
-			{/if}
-			{#if "error" in folder}
-				<p data-testid="session-diff-error" class="px-3 py-2 text-xs text-error" title={folder.message}>
-					{folder.error === "timeout" ? "Git took too long to read this folder." : "This folder's changes are unavailable."}
-				</p>
-			{:else}
-				{@render baseNotice(folder)}
-				{#each folder.rows as row (row.key)}
-					<DiffFile
-						{row}
-						reveal={reveal?.path === row.file.path && (reveal.folder ?? row.folder) === row.folder ? reveal.nonce : undefined}
-					/>
-				{/each}
-			{/if}
+			<div data-testid="session-diff-folder" data-folder={folder.folder}>
+				{#if folders.length > 1}
+					<h3 class="truncate border-b border-border-subtle px-3 py-1.5 text-xs font-semibold text-text-muted" title={folder.folder}>
+						{folder.folder.split("/").at(-1)}
+					</h3>
+				{/if}
+				{#if "error" in folder}
+					<p data-testid="session-diff-error" class="px-3 py-2 text-xs text-error" title={folder.message}>
+						{folder.error === "timeout" ? "Git took too long to read this folder." : "This folder's changes are unavailable."}
+					</p>
+				{:else}
+					{@render baseNotice(folder)}
+					{#each folder.rows as row (row.key)}
+						<DiffFile
+							{row}
+							reveal={reveal?.path === row.file.path && (reveal.folder ?? row.folder) === row.folder ? reveal.nonce : undefined}
+						/>
+					{/each}
+				{/if}
+			</div>
 		{/each}
 	{/if}
 </div>

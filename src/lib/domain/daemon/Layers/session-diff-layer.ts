@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { createHash } from "node:crypto";
 import { Effect, Fiber, PubSub, Semaphore, Stream } from "effect";
 import {
@@ -31,6 +32,11 @@ const STATUS = {
 	R: "renamed",
 	T: "typeChanged",
 } as const satisfies Record<string, SessionDiffFile["status"]>;
+/** Git modes whose entry is not a regular file's text. */
+const KIND: Readonly<Record<string, "submodule" | "symlink" | undefined>> = {
+	"160000": "submodule",
+	"120000": "symlink",
+};
 
 interface Change {
 	readonly status: SessionDiffFile["status"];
@@ -38,10 +44,23 @@ interface Change {
 	readonly after: string | null;
 	readonly path: string;
 	readonly oldPath?: string;
+	readonly kind?: SessionDiffFile["kind"];
+	readonly mode?: SessionDiffFile["mode"];
 }
 
 const blob = (id: string | undefined) =>
 	id === undefined || /^0+$/.test(id) ? null : id;
+
+/** A raw record's modes as the file's kind, and its mode change when both sides exist (a missing side's mode is all zeros). */
+const modes = (before = "", after = "") => {
+	const kind = KIND[after] ?? KIND[before];
+	return {
+		...(kind === undefined ? {} : { kind }),
+		...(before !== after && blob(before) && blob(after)
+			? { mode: { before, after } }
+			: {}),
+	};
+};
 
 /** `diff-tree -z --raw --numstat` prints every raw record, then every numstat record. */
 export function parseDiffTree(output: string) {
@@ -50,7 +69,9 @@ export function parseDiffTree(output: string) {
 	const next = () => tokens[at++] ?? "";
 	const changes: Change[] = [];
 	while (tokens[at]?.startsWith(":")) {
-		const [, , before, after, letter = "M"] = next().split(" ");
+		const [beforeMode, afterMode, before, after, letter = "M"] = next()
+			.slice(1)
+			.split(" ");
 		// Renames and copies name their source before their destination.
 		const oldPath = /^[RC]/.test(letter) ? next() : undefined;
 		changes.push({
@@ -59,6 +80,7 @@ export function parseDiffTree(output: string) {
 			after: blob(after),
 			path: next(),
 			...(oldPath === undefined ? {} : { oldPath }),
+			...modes(beforeMode, afterMode),
 		});
 	}
 	return changes.map((change) => {
@@ -201,6 +223,65 @@ export const makeSessionDiff = Effect.gen(function* () {
 			};
 		});
 
+	const blobSizes = (snapshot: FolderSnapshot, changes: readonly Change[]) => {
+		const ids = [
+			...new Set(
+				changes.flatMap(({ before, after }) =>
+					[before, after].filter((id) => id !== null),
+				),
+			),
+		];
+		return timeline
+			.git(
+				snapshot.store,
+				["cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)"],
+				{ input: `${ids.join("\n")}\n` },
+			)
+			.pipe(
+				Effect.map(
+					({ stdout }) =>
+						new Map<string | null, number>(
+							stdout.split("\n").flatMap((line) => {
+								const [id, type, size] = line.split(" ");
+								return id && type === "blob"
+									? [[id, Number(size)] as const]
+									: [];
+							}),
+						),
+				),
+			);
+	};
+
+	/** The worktree tree's attributes name LFS files, whichever side is a pointer. */
+	const lfsPaths = (snapshot: FolderSnapshot, changes: readonly Change[]) => {
+		const paths = changes.flatMap(({ kind, path }) =>
+			kind === undefined ? [path] : [],
+		);
+		return timeline
+			.git(
+				snapshot.store,
+				[
+					"check-attr",
+					`--source=${snapshot.worktree}`,
+					"-z",
+					"--stdin",
+					"filter",
+				],
+				{
+					input: paths.map((path) => `${snapshot.prefix}${path}\0`).join(""),
+				},
+			)
+			.pipe(
+				// Each path prints path, attribute and value, in input order.
+				Effect.map(({ stdout }) => {
+					const tokens = stdout.split("\0");
+					return new Set(paths.filter((_, n) => tokens[n * 3 + 2] === "lfs"));
+				}),
+				// Only a label: git before 2.40 has no --source, and lists without it.
+				Effect.orElseSucceed(() => new Set<string>()),
+			);
+	};
+
 	const listFiles = (snapshot: FolderSnapshot, from: string) =>
 		Effect.gen(function* () {
 			const { stdout } = yield* timeline.git(snapshot.store, [
@@ -217,35 +298,21 @@ export const makeSessionDiff = Effect.gen(function* () {
 				snapshot.worktree,
 			]);
 			const changes = parseDiffTree(stdout);
-			const ids = [
-				...new Set(
-					changes.flatMap(({ before, after }) =>
-						[before, after].filter((id) => id !== null),
-					),
-				),
-			];
-			const sizes = new Map<string, number>();
-			if (ids.length > 0) {
-				const batch = yield* timeline.git(
-					snapshot.store,
-					[
-						"cat-file",
-						"--batch-check=%(objectname) %(objecttype) %(objectsize)",
-					],
-					{ input: `${ids.join("\n")}\n` },
-				);
-				for (const line of batch.stdout.split("\n")) {
-					const [id, type, size] = line.split(" ");
-					if (id && type === "blob") sizes.set(id, Number(size));
-				}
-			}
+			if (changes.length === 0) return [];
+			const [sizes, lfs] = yield* Effect.all(
+				[blobSizes(snapshot, changes), lfsPaths(snapshot, changes)],
+				{ concurrency: "unbounded" },
+			);
 			return changes.map(
 				({ insertions, deletions, binary, before, after, ...change }) => {
-					const bytes = Math.max(
-						before === null ? 0 : (sizes.get(before) ?? 0),
-						after === null ? 0 : (sizes.get(after) ?? 0),
-					);
-					const base = { ...change, before, after, bytes };
+					const bytes = Math.max(sizes.get(before) ?? 0, sizes.get(after) ?? 0);
+					const base = {
+						...change,
+						...(lfs.has(change.path) ? { kind: "lfs" as const } : {}),
+						before,
+						after,
+						bytes,
+					};
 					if (bytes > SESSION_DIFF_TOO_LARGE_BYTES)
 						return { ...base, tier: "tooLarge" as const };
 					return {
@@ -471,20 +538,27 @@ export const makeSessionDiff = Effect.gen(function* () {
 						message: `${request.path} is too large to diff`,
 					});
 				const { snapshot, from } = folder;
-				const { stdout } = yield* timeline
-					.git(snapshot.store, [
-						"diff-tree",
-						"-p",
-						"-M",
-						...relative(snapshot),
-						from,
-						snapshot.worktree,
-						"--",
-						...[file.oldPath, file.path].flatMap((path) =>
-							// Literal, so a name like `[id].ts` cannot match other files.
-							path === undefined ? [] : [`:(literal)${snapshot.prefix}${path}`],
-						),
-					])
+				const chunks: Buffer[] = [];
+				yield* timeline
+					.git(
+						snapshot.store,
+						[
+							"diff-tree",
+							"-p",
+							"-M",
+							...relative(snapshot),
+							from,
+							snapshot.worktree,
+							"--",
+							...[file.oldPath, file.path].flatMap((path) =>
+								// Literal, so a name like `[id].ts` cannot match other files.
+								path === undefined
+									? []
+									: [`:(literal)${snapshot.prefix}${path}`],
+							),
+						],
+						{ onStdout: (chunk) => chunks.push(chunk) },
+					)
 					.pipe(
 						Effect.mapError(
 							(error) =>
@@ -494,7 +568,17 @@ export const makeSessionDiff = Effect.gen(function* () {
 								}),
 						),
 					);
-				return { patch: stdout };
+				// Latin-1 maps every byte to one character, so no change decodes away.
+				const bytes = Buffer.concat(chunks);
+				const latin1 = !isUtf8(bytes);
+				const patch = latin1
+					? bytes.toString("latin1")
+					: bytes.toString("utf8");
+				const notes = [
+					...(patch.includes("\r\n") ? (["crlf"] as const) : []),
+					...(latin1 ? (["latin1"] as const) : []),
+				];
+				return notes.length === 0 ? { patch } : { patch, notes };
 			}),
 	} satisfies SessionDiff["Service"];
 });

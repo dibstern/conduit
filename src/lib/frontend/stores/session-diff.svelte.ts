@@ -5,6 +5,7 @@ import {
 	type SessionDiffBase,
 	SessionDiffError,
 	type SessionDiffFile,
+	type SessionDiffPatch,
 	type SessionDiffScope,
 } from "../../contracts/session-diff.js";
 import { failureLine } from "../transport/rpc-errors.js";
@@ -17,14 +18,14 @@ import { rpc } from "../transport/ws-rpc-client.js";
 export type DiffPatch =
 	| { readonly kind: "idle" }
 	| { readonly kind: "loading" }
-	| { readonly kind: "ready"; readonly patch: string }
+	| ({ readonly kind: "ready" } & SessionDiffPatch)
 	| { readonly kind: "gone"; readonly answer: number }
 	| { readonly kind: "failed"; readonly message: string };
 
 export class DiffRow {
 	patch = $state<DiffPatch>({ kind: "idle" });
 	constructor(
-		/** The blob pair; an unchanged pair keeps its row and patch across listings. */
+		/** The blob pair and its labels; an unchanged one keeps its row and patch across listings. */
 		readonly key: string,
 		readonly folder: string,
 		readonly file: SessionDiffFile,
@@ -160,6 +161,10 @@ export class SessionDiffView {
 							file.path,
 							file.before,
 							file.after,
+							// A mode change rewrites the patch header and the label.
+							file.kind,
+							file.mode?.before,
+							file.mode?.after,
 						].join("\0");
 						const row: DiffRow =
 							this.#rows.get(key) ??
@@ -210,7 +215,7 @@ export class SessionDiffView {
 				before: row.file.before,
 				after: row.file.after,
 			});
-			row.patch = { kind: "ready", patch: reply.patch };
+			row.patch = { kind: "ready", ...reply };
 		} catch (error) {
 			if (!(error instanceof SessionDiffError && error.reason === "gone"))
 				row.patch = { kind: "failed", message: failureLine(error, unloadable) };

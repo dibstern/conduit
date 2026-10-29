@@ -132,6 +132,21 @@ Examples:
   | count | same_path  | changed_path | last_path  | changed_requests | same_requests |
   | 3     | file-01.ts | file-02.ts   | file-03.ts | 2                | 1             |
 
+Scenario Outline: A re-list relabels and re-fetches a pair whose mode changed
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <path> diff shows its patch
+  When the <path> mode changes from <mode_before> to <mode_after>
+  And I select the Files right pane tab
+  And I select the Diff right pane tab
+  Then the <path> diff is labelled "<mode_label>"
+  And the <path> patch was requested <requests> times
+
+Examples:
+  | count | path       | mode_before | mode_after | mode_label      | requests |
+  | 1     | file-01.ts | 100644      | 100755     | 100644 → 100755 | 2        |
+
 Scenario Outline: A listing that lands after a session switch stays with its session
   Given the conduit app is served with the long-transcript mockup
   And the session has <count> small unstaged files
@@ -294,3 +309,41 @@ Examples:
   | count | size  | wanted      | reason  | ref  | notice                                                                               | baseline                  | threshold |
   | 1     | long  | release     | missing | main | release was not found, so this compares against main.                                | session-diff-base-missing | 98        |
   | 0     | small | origin/main | shallow | HEAD | This clone is shallow, so origin/main has no shared history. Comparing against HEAD. | session-diff-base-shallow | 98        |
+
+Scenario Outline: Each folder's files group under its own heading, and an unavailable folder errors alone
+  Given the conduit app is served with the long-transcript mockup
+  And the session diff has folders <first_folder> with <first_path>, <second_folder> with <second_path>, and <gone_folder> unavailable
+  When I open the Diff right pane
+  Then the <first_folder> diff group is headed <first_name> and lists <first_path>
+  And the <second_folder> diff group is headed <second_name> and lists <second_path>
+  And the <gone_folder> diff group is headed <gone_name> and shows "<error>"
+  And the <first_path> diff shows its patch
+  And the <second_path> diff shows its patch
+  And the right-pane region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | first_folder     | first_path | first_name | second_folder  | second_path   | second_name | gone_folder        | gone_name | error                                  | baseline             | threshold |
+  | /workspace/myapp | src/app.ts | myapp      | /workspace/api | src/server.ts | api         | /workspace/feature | feature   | This folder's changes are unavailable. | session-diff-folders | 98        |
+
+Scenario Outline: Submodule, LFS, symlink, mode-only, renamed, CRLF and non-UTF-8 files are labelled, with no broken patch
+  Given the conduit app is served with the long-transcript mockup
+  And the session has unstaged edge cases: submodule <submodule_path>, LFS <lfs_path>, symlink <link_path>, mode change <script_path> from <mode_before> to <mode_after>, rename <old_path> to <moved_path>, CRLF <crlf_path> and Latin-1 <latin1_path>
+  When I open the Diff right pane
+  Then the <submodule_path> diff is labelled "<submodule_label>"
+  And the <submodule_path> diff reads "<submodule_body>" without a patch
+  And the <lfs_path> diff is labelled "<lfs_label>"
+  And the <lfs_path> diff reads "<lfs_body>" without a patch
+  And the <script_path> diff is labelled "<mode_label>"
+  And the <script_path> diff reads "<unchanged_body>" without a patch
+  And the <moved_path> diff reads "<unchanged_body>" without a patch
+  And the <link_path> diff is labelled "<link_label>"
+  And the <link_path> diff shows its patch
+  And the <crlf_path> diff shows its patch
+  And the <crlf_path> diff is labelled "<crlf_label>"
+  And the <latin1_path> diff shows its patch
+  And the <latin1_path> diff is labelled "<latin1_label>"
+  And the right-pane region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | submodule_path | submodule_label | submodule_body            | lfs_path       | lfs_label | lfs_body           | link_path    | link_label | script_path      | mode_before | mode_after | mode_label       | old_path   | moved_path    | unchanged_body      | crlf_path       | crlf_label | latin1_path      | latin1_label        | baseline                | threshold |
+  | vendor/lib     | Submodule       | Commit 5555555 → 6666666  | assets/art.psd | Git LFS   | Stored in Git LFS. | current      | Symlink    | scripts/build.sh | 100644      | 100755     | 100644 → 100755  | old/doc.md | docs/guide.md | No content changes. | windows/run.bat | CRLF       | legacy/names.txt | Not UTF-8 (Latin-1) | session-diff-edge-cases | 98        |
