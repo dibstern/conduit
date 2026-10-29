@@ -1289,6 +1289,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			SELECT id, status, updated_at FROM sessions
 			WHERE project_id IN ${sql.in(scope.projectIds)} AND (status != 'idle'
 				OR id IN (SELECT value FROM json_each(${JSON.stringify(reportedIds)})))
+				-- An open run settles only on provider confirmation; the projector
+				-- drops an unowned idle for it, so the session would re-qualify forever.
+				AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = sessions.id
+					AND run.status IN ('pending', 'running'))
 			ORDER BY updated_at DESC, id DESC`.pipe(
 			Effect.mapError(
 				(cause) =>

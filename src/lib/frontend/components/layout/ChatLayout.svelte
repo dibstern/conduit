@@ -58,7 +58,7 @@
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchCompactViewport } from "../../stores/session-view.svelte.js";
+	import { FILES_PANE_MIN_WIDTH, isBarCollapsed, sessionViewState, setFilesOpen, setFilesPaneWidth, watchViewportPose } from "../../stores/session-view.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -485,10 +485,10 @@
 		});
 	}
 
-	// One matchMedia listener for the whole app decides whether the session's
-	// own bar replaces the global header. Kept here rather than in each consumer
-	// so the chrome cannot disagree with itself about what "compact" means.
-	$effect(() => watchCompactViewport());
+	// One listener for the whole app decides the pose, and from it whether the
+	// session's own bar replaces the global header. Kept here rather than in each
+	// consumer so the chrome cannot disagree with itself about the pose.
+	$effect(() => watchViewportPose());
 	let paneSessionId = sessionState.currentId;
 	$effect(() => {
 		const sessionId = sessionState.currentId;
@@ -600,7 +600,7 @@
 {#if firstRun}
 	<FirstRunProjects oncomplete={() => { firstRun = false; }} />
 {:else}
-<div id="layout" class={layoutClass}>
+<div id="layout" class={layoutClass} data-pose={sessionViewState.pose}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
 		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 4).

@@ -9,15 +9,17 @@
 		sentinelEl,
 		view = primaryTranscript,
 		scrollRoot,
+		paused = false,
 	}: {
 		sentinelEl?: HTMLElement | undefined;
 		view?: TranscriptView;
 		scrollRoot?: HTMLElement | undefined;
+		paused?: boolean;
 	} = $props();
 
 	const chat = $derived(view.chat);
 	const canPage = $derived(
-		view.window.kind === "latest" && view.navigation === null && !!view.sessionId && chat.historyHasMore && !chat.historyLoading && !view.pageError,
+		!paused && view.window.kind === "latest" && view.navigation === null && !!view.sessionId && chat.historyHasMore && !chat.historyLoading && !view.pageError,
 	);
 
 	// An observer reports once on creation, then only on changes. A page that

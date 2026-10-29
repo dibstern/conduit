@@ -644,7 +644,7 @@ describe("SessionLifecycleWiringLive", () => {
 			}).pipe(
 				Effect.scoped,
 				Effect.provide(Layer.fresh(makeTestLayer(services, deps))),
-				Effect.provide(makePinoLoggerLive(pino.root as any)),
+				Effect.provide(makePinoLoggerLive(() => pino.root as any)),
 			);
 		},
 	);

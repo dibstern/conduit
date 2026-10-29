@@ -571,7 +571,6 @@
 						{#if hovered !== null}<span>{stepCaption(segment, turn, final, hovered, now)}</span>{:else if live}<span>{currentStepLabel(segment)}</span>{/if}
 						{#if phrase}<span>{phrase}</span>{/if}
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
-						{#if stats.failed > 0}<span>{stats.failed} failed</span>{/if}
 						<TurnEconomics economics={bill} />
 						{#if final}<RunningPill count={running.size} />{/if}
 						<span>Click to {expanded ? "hide" : "show"} the step log</span>
@@ -657,7 +656,6 @@
 						</Button>
 					{/if}
 					{#if stats.compactions > 0}<span class="compaction-marker">compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
-					{#if stats.failed > 0}<span class="text-error">{stats.failed} failed</span>{/if}
 					{#if final}<RunningPill count={running.size} /><TurnEconomics economics={bill} />{/if}
 				</div>
 				{#if skillsOpen}

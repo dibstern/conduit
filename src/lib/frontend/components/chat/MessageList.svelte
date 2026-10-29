@@ -532,7 +532,14 @@
 	<div id={primary ? "history-sentinel" : `${messagesId}-history-sentinel`} class="h-1" bind:this={sentinelEl}></div>
 
 	<!-- Headless loader (no visual output) -->
-	<HistoryLoader {sentinelEl} {view} scrollRoot={primary ? undefined : messagesEl} />
+	<!-- Older pages of a fork are all inherited. Collapsed, they add no height,
+	     so the sentinel never leaves view and every page would load in turn. -->
+	<HistoryLoader
+		{sentinelEl}
+		{view}
+		scrollRoot={primary ? undefined : messagesEl}
+		paused={!!forkSplit?.inherited.length && forkCollapsed}
+	/>
 
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
