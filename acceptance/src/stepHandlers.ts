@@ -47,6 +47,7 @@ import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
+import { sessionDiffHandlers } from "./steps/sessionDiff.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionModeDefaultHandlers } from "./steps/sessionModeDefault.js";
@@ -98,6 +99,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
 	...rightPaneHandlers,
+	...sessionDiffHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,
