@@ -54,6 +54,8 @@ const settings = (action: string, open: boolean) =>
 	`${action} ${SETTLE} if (!!${q("#settings-panel")}?.closest("dialog")?.open !== ${open}) throw new Error("settings did not ${open ? "open" : "close"}"); return "${open ? "opened" : "closed"}";`;
 // The chat hydrates over the WebSocket after the page loads.
 const READY = `for (const deadline = Date.now() + 15000; !document.getElementById("session-bar-more"); await new Promise((resolve) => setTimeout(resolve, 100))) if (Date.now() > deadline) throw new Error("no chat at " + location.href); return "chat";`;
+const UNFOLD = `for (const deadline = Date.now() + 5000; document.getElementById("layout").classList.contains("layout-compact"); await new Promise((resolve) => setTimeout(resolve, 100))) if (Date.now() > deadline) throw new Error("still compact"); return document.documentElement.clientWidth + "px, sidebar " + document.getElementById("sidebar").getBoundingClientRect().width + "px";`;
+const STRIP_COLOUR = `Object.assign(document.createElement("canvas").getContext("2d"), { fillStyle: getComputedStyle(${q("#compact-top-edge")}).backgroundColor }).fillStyle`;
 const GROW = `const filler = document.createElement("div"); filler.style.height = "4000px"; document.getElementById("messages").append(filler); return "grown";`;
 // Scrolled up, the sticky "scroll to bottom" button renders; that is what
 // made WebKit read the box painted over the strip.
@@ -117,7 +119,16 @@ const CASES: Record<string, string[]> = {
 	// The probe widens the page to the iPhone Duo's inner screen first.
 	unfolded: [
 		`ready=${READY}`,
-		`unfold=for (const deadline = Date.now() + 5000; document.getElementById("layout").classList.contains("layout-compact"); await new Promise((resolve) => setTimeout(resolve, 100))) if (Date.now() > deadline) throw new Error("still compact"); return document.documentElement.clientWidth + "px, sidebar " + document.getElementById("sidebar").getBoundingClientRect().width + "px";`,
+		`unfold=${UNFOLD}`,
+		`session-menu-open=${menu("#session-bar-more", true)}`,
+		`session-menu-close=${menu("#session-bar-more", false)}`,
+		`aligned=const selectors = ["[data-testid=list-bar-title]", "#sidebar-toggle-btn", "#session-bar-title", "#session-bar-settle", "#session-bar-more"]; const centres = selectors.map((s) => { const r = document.querySelector(s).getBoundingClientRect(); return r.top + r.height / 2; }); if (Math.max(...centres) - Math.min(...centres) > 0.5) throw new Error(selectors.map((s, i) => s + "=" + centres[i]).join(", ")); return centres[0] + " strip=" + ${STRIP_COLOUR};`,
+	],
+	// A card covering WebKit's sample at (innerWidth/2, 4) must keep the chat colour and hide the blur.
+	"unfolded, widest sidebar": [
+		`ready=${READY}`,
+		`unfold=${UNFOLD}`,
+		`widen=${q("#sidebar")}.style.width = "480px"; ${SETTLE} const right = ${q("#sidebar")}.getBoundingClientRect().right; if (right <= innerWidth / 2) throw new Error("sidebar right " + right + " did not pass " + innerWidth / 2); return "strip=" + ${STRIP_COLOUR};`,
 		`session-menu-open=${menu("#session-bar-more", true)}`,
 		`session-menu-close=${menu("#session-bar-more", false)}`,
 	],
@@ -253,6 +264,18 @@ describe.skipIf(!RUN)("iOS top scroll pocket (WKWebView probe app)", () => {
 				expect(light, "status bar colour after the theme switch").toContain(
 					`c=${light.match(/js=(\S+)/)?.[1]}/1.00`,
 				);
+			if (name.startsWith("unfolded")) {
+				const strip = result.lines
+					.join("\n")
+					.match(/\bstrip=(#[\da-f]{6})\b/i)?.[1];
+				const final = result.lines.find((line) =>
+					line.startsWith(`PROBE ${labels.at(-1)} `),
+				);
+				expect(
+					final?.toLowerCase(),
+					"status bar colour matches the chat strip",
+				).toContain(`c=${strip?.toLowerCase()}/1.00`);
+			}
 			if (name === "control")
 				expect(result.timelines["menu-close"]).toContain("S");
 			else
