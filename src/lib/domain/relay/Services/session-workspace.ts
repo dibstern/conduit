@@ -20,10 +20,8 @@ import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effec
 import { readPublishedWorkspaceMissing } from "../../../persistence/effect/session-git-publication.js";
 import { recordedBranchForFolder } from "../../../persistence/effect/session-worktree-ownership.js";
 import { labelProjectFolders } from "../../../project-folders.js";
-import {
-	effectiveWorkingDirectory,
-	readWorkspaceFolders,
-} from "../../../session/session-workspace.js";
+import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
+import { readWorkspaceFolders } from "../../../session/workspace-directories.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import {
 	OpenCodeInstancesTag,

@@ -51,10 +51,8 @@ import {
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type { ModelInfo, SendTurnInput } from "../../../provider/types.js";
-import {
-	sessionFolders,
-	workspaceFolderPresent,
-} from "../../../session/session-workspace.js";
+import { sessionFolders } from "../../../session/session-workspace.js";
+import { workspaceFolderPresent } from "../../../session/workspace-directories.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { publishAlert } from "./alerts.js";

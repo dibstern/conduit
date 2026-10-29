@@ -30,19 +30,22 @@ import {
 // These timing tests use virtual folders. Filesystem containment has real-path
 // coverage in session-workspace-read.test.ts and must not race the TestClock.
 vi.mock(
-	"../../../src/lib/session/session-workspace.js",
+	"../../../src/lib/session/workspace-directories.js",
 	async (importOriginal) => {
 		const actual =
 			await importOriginal<
-				typeof import("../../../src/lib/session/session-workspace.js")
+				typeof import("../../../src/lib/session/workspace-directories.js")
 			>();
+		const { sessionFolders } = await import(
+			"../../../src/lib/session/session-workspace.js"
+		);
 		return {
 			...actual,
 			guardWorkspacePath: () => Effect.void,
 			readWorkspaceFolders: (
 				...args: Parameters<typeof actual.readWorkspaceFolders>
 			) => {
-				const folders = actual.sessionFolders(args[0], args[1]);
+				const folders = sessionFolders(args[0], args[1]);
 				return Effect.succeed({
 					...folders,
 					workspaceRootPresent: true,

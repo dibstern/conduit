@@ -15,7 +15,7 @@ import {
 import { getDiscoveredSkillForSession } from "../../handlers/settings.js";
 import { getSkillContentValue } from "../../handlers/skill-content.js";
 import { labelProjectFolders } from "../../project-folders.js";
-import { guardWorkspacePath } from "../../session/session-workspace.js";
+import { guardWorkspacePath } from "../../session/workspace-directories.js";
 import {
 	mapRpcFailure,
 	resolveSessionRequestDirectory,
