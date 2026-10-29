@@ -13,9 +13,52 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
-import { clockTimes } from "./usageSettings.js";
+import { clockTimes, snapshot } from "./usageSettings.js";
 
 const cutOffMessageId = "msg-cut-off";
+
+/** Parses `<id> N% used`, `<id> limited until <iso>`, `<id> unavailable` or `<id> unknown`. */
+const usageReadingsFrom = (list: string): UsageReading[] =>
+	list.split(", ").map((reading): UsageReading => {
+		const [instanceId = "", ...words] = reading.split(" ");
+		const said = words.join(" ");
+		const used = /^(\d+)% used$/.exec(said)?.[1];
+		const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
+		const usage: Pick<UsageReading, "status" | "windows" | "reason"> =
+			used !== undefined
+				? {
+						status: "available",
+						windows: [{ kind: "five_hour", utilization: Number(used) }],
+					}
+				: limitedUntil !== undefined
+					? {
+							status: "limited",
+							windows: [
+								{
+									kind: "seven_day",
+									utilization: 100,
+									resetsAt: limitedUntil,
+								},
+							],
+						}
+					: said === "unavailable"
+						? {
+								status: "unavailable",
+								windows: [],
+								reason: "not logged in",
+							}
+						: { status: "unknown", windows: [] };
+		return {
+			accountId: instanceId,
+			harness: "claude",
+			readAt: 0,
+			stale: false,
+			...usage,
+		};
+	});
+
+/** The account picker's own usage read, held open until the scenario lets it return. */
+const heldUsageReads = new WeakMap<Page, () => void>();
 
 const pickerRow = (page: Page, name: string) =>
 	page.getByTestId("account-switch-option").filter({ hasText: name });
@@ -629,48 +672,55 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		name: "quota check results for the accounts",
 		match: /^the quota check reads (.+)$/,
 		run: ({ world, match }) => {
-			const accounts = (match[1] ?? "")
-				.split(", ")
-				.map((reading): UsageReading => {
-					const [instanceId = "", ...words] = reading.split(" ");
-					const said = words.join(" ");
-					const used = /^(\d+)% used$/.exec(said)?.[1];
-					const limitedUntil = /^limited until (\S+)$/.exec(said)?.[1];
-					const usage: Pick<UsageReading, "status" | "windows" | "reason"> =
-						used !== undefined
-							? {
-									status: "available",
-									windows: [{ kind: "five_hour", utilization: Number(used) }],
-								}
-							: limitedUntil !== undefined
-								? {
-										status: "limited",
-										windows: [
-											{
-												kind: "seven_day",
-												utilization: 100,
-												resetsAt: limitedUntil,
-											},
-										],
-									}
-								: said === "unavailable"
-									? {
-											status: "unavailable",
-											windows: [],
-											reason: "not logged in",
-										}
-									: { status: "unknown", windows: [] };
-					return {
-						accountId: instanceId,
-						harness: "claude",
-						readAt: 0,
-						stale: false,
-						...usage,
-					};
-				});
-			requireRpcControl(world.page).setStubs({
-				QuotaForAccounts: () => accounts,
+			const accounts = usageReadingsFrom(match[1] ?? "");
+			const rpc = requireRpcControl(world.page);
+			// Like the daemon, a read publishes its readings before it answers.
+			rpc.setStubs({
+				QuotaForAccounts: () => {
+					rpc.setUsageReadings([
+						...snapshot(world.page).filter(
+							(reading) =>
+								!accounts.some(
+									(account) => account.accountId === reading.accountId,
+								),
+						),
+						...accounts,
+					]);
+					return accounts;
+				},
 			});
+		},
+	},
+	{
+		name: "usage stream readings for the accounts",
+		match: /^the usage stream reads (.+)$/,
+		run: ({ world, match }) => {
+			requireRpcControl(world.page).setUsageReadings(
+				usageReadingsFrom(match[1] ?? ""),
+			);
+		},
+	},
+	{
+		name: "hold the account picker's usage read",
+		match: /^the quota check is held$/,
+		run: ({ world }) => {
+			const reply = new Promise<readonly UsageReading[]>((resolve) => {
+				heldUsageReads.set(world.page, () => resolve(snapshot(world.page)));
+			});
+			requireRpcControl(world.page).setStubs({ QuotaForAccounts: () => reply });
+		},
+	},
+	{
+		name: "release the account picker's usage read",
+		match: /^the quota check returns$/,
+		run: async ({ world }) => {
+			await requireRpcControl(world.page).waitForRequest(
+				(request) => request.tag === "QuotaForAccounts",
+			);
+			const release = heldUsageReads.get(world.page);
+			if (!release) throw new Error("No quota check is held");
+			release();
+			heldUsageReads.delete(world.page);
 		},
 	},
 	{
@@ -734,6 +784,10 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			const selected = world.page.locator(
 				'[data-testid="account-switch-option"][data-selected="true"]',
 			);
+			if (match[1] === "nothing") {
+				await expect(selected).toHaveCount(0);
+				return;
+			}
 			await expect(selected).toHaveCount(1);
 			await expect(selected).toContainText(match[1] ?? "");
 		},

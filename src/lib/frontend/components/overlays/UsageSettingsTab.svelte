@@ -113,7 +113,7 @@
 		refreshing = true;
 		try {
 			// Usage.refresh publishes through SubscribeUsage, which owns the view.
-			const checked = await claudeAccounts.refreshQuotas("shared", true);
+			const checked = await claudeAccounts.readUsage(true);
 			const failed = checked?.filter(readFailed) ?? [];
 			if (!checked) showToast("Couldn't refresh plan usage", { variant: "error" });
 			else if (failed.length > 0) showToast(`Couldn't read plan usage for ${failed.map(nameOf).join(", ")}`, { variant: "error" });

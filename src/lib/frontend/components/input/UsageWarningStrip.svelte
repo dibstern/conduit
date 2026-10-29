@@ -34,7 +34,7 @@
 	const reading = $derived(claudeAccounts.readingOf(accountId));
 	const severalAccounts = $derived(claudeAccounts.hasAlternative(accountId));
 	const alternatives = $derived(claudeAccounts.configuredAccounts.filter((account) => {
-		const reading = claudeAccounts.quotaOf(account.id) ?? claudeAccounts.readingOf(account.id);
+		const reading = claudeAccounts.readingOf(account.id);
 		return account.id !== accountId && accountLimit({
 			asker: "user",
 			modelId: session?.model?.model,
