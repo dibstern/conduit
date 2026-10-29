@@ -477,8 +477,13 @@ export const makeSessionProjector = defineProjector(() => {
 					return { stamped: [], removed: [], collections: [] };
 				const unownedStatus =
 					event.type === "session.status" && !event.metadata.runId;
-				if (terminal && unownedStatus) {
+				if (
+					unownedStatus &&
+					(terminal || event.metadata.source === "reconciliation-loop")
+				) {
 					// An orphan status observation may move; it cannot end owned work.
+					// The poller's guess is checked here, in the write transaction, so
+					// a session resumed after its query still keeps its new run.
 					const open =
 						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
 					AND status IN ('pending', 'running') LIMIT 1`;
