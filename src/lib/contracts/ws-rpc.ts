@@ -81,6 +81,7 @@ import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
+import { DraftReviewSchema } from "./review-comment.js";
 import {
 	SessionWorktreeInspectionSchema,
 	WorkspaceMoveError,
@@ -3097,6 +3098,8 @@ export const DraftAttachmentSchema = Schema.Struct({
 	mime: Schema.String,
 	size: Schema.Number,
 	hash: Schema.String,
+	/** Present exactly when the attachment is a review comment. */
+	review: Schema.optional(DraftReviewSchema),
 });
 export type DraftAttachment = typeof DraftAttachmentSchema.Type;
 
@@ -3114,6 +3117,18 @@ export const AddDraftAttachment = Rpc.make("AddDraftAttachment", {
 		Schema.Struct({ ended: Schema.Literals(["removed", "sent"]) }),
 	]),
 	error: Schema.Union([WsRpcError, DraftAttachmentRejected]),
+});
+
+/** A review comment joins the draft as an attachment; removal is RemoveDraftAttachment. */
+export const AddDraftReview = Rpc.make("AddDraftReview", {
+	payload: Schema.TaggedStruct("AddDraftReview", {
+		key: InputDraftKeySchema,
+		id: NonEmptyString,
+		review: DraftReviewSchema,
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: AddDraftAttachment.successSchema,
+	error: WsRpcError,
 });
 
 export const RemoveDraftAttachment = Rpc.make("RemoveDraftAttachment", {
@@ -3661,6 +3676,7 @@ const wsRpcRequests = [
 	SendInputNow,
 	SyncInputDraft,
 	AddDraftAttachment,
+	AddDraftReview,
 	RemoveDraftAttachment,
 	CancelSession,
 	StopBackgroundTask,

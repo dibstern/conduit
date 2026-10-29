@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, fn, within } from "storybook/test";
+import { expect, fn, userEvent, within } from "storybook/test";
 import type { DraftAttachmentItem } from "../../stores/composer-draft/state.js";
 import PastePreview from "./PastePreview.svelte";
 
@@ -103,6 +103,40 @@ export const WithFiles: Story = {
 		await expect(
 			canvas.getByRole("button", { name: "Remove file guide.pdf" }),
 		).toBeVisible();
+	},
+};
+
+export const WithReviewComment: Story = {
+	args: {
+		images: [
+			{
+				id: "review",
+				mime: "application/vnd.conduit.review+json",
+				status: "saved",
+				name: "src/app.ts",
+				size: 180,
+				hash: "review-hash",
+				review: {
+					folder: "/repo",
+					path: "src/app.ts",
+					side: "additions",
+					lines: { start: 3, end: 5 },
+					excerpt: "+const b = 3;",
+					text: "Why 3? Keep b at 2.",
+				},
+			},
+		],
+		onRemove: fn(),
+	},
+	play: async ({ args, canvasElement }) => {
+		const canvas = within(canvasElement);
+		const chip = canvas.getByTestId("review-attachment-chip");
+		await expect(chip).toHaveTextContent("src/app.ts:3–5");
+		await expect(chip).toHaveTextContent("Why 3? Keep b at 2.");
+		await userEvent.click(
+			canvas.getByRole("button", { name: "Remove comment src/app.ts:3–5" }),
+		);
+		await expect(args["onRemove"]).toHaveBeenCalledWith("review");
 	},
 };
 
