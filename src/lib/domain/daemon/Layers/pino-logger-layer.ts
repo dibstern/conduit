@@ -10,7 +10,7 @@ import * as Failure from "../../../effect/failure-classification.js";
 
 /**
  * Create a Layer that replaces Effect's default logger with one that routes
- * to the given Pino instance. Log levels are mapped:
+ * to the Pino instance `getPino` returns at each log call. Log levels are mapped:
  *
  *   Effect.logDebug / Effect.logTrace  ->  pino.debug
  *   Effect.logInfo                      ->  pino.info
@@ -30,7 +30,9 @@ const formatPart = (part: unknown): string => {
 	}
 };
 
-export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
+export const makePinoLoggerLive = (
+	getPino: () => PinoLogger,
+): Layer.Layer<never> =>
 	Logger.layer([
 		Logger.tracerLogger,
 		Logger.make(({ logLevel, message, fiber, cause }) => {
@@ -50,6 +52,7 @@ export const makePinoLoggerLive = (pino: PinoLogger): Layer.Layer<never> =>
 
 			// Create child logger with bindings, or use root if no bindings
 			const hasBindings = Object.keys(bindings).length > 0;
+			const pino = getPino();
 			const target = hasBindings ? pino.child(bindings) : pino;
 
 			switch (logLevel) {
@@ -91,5 +94,5 @@ import { _getRawPinoChild } from "../../../logger.js";
  * annotation bindings.
  */
 export const PinoLoggerLive: Layer.Layer<never> = makePinoLoggerLive(
-	_getRawPinoChild("effect") as unknown as PinoLogger,
+	_getRawPinoChild("effect") as unknown as () => PinoLogger,
 );

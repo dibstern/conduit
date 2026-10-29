@@ -4,6 +4,11 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const args = process.argv.slice(2);
 if (args[0] === "--") args.shift();
+// Info logs drown dev:all's own lines; daemon.log keeps warnings either way.
+// `pnpm dev:all -- --log-level info` (or the UI setting) brings them back.
+const serveArgs = args.includes("--log-level")
+	? args
+	: ["--log-level", "warn", ...args];
 
 const watchers = [];
 let stopping = false;
@@ -202,7 +207,7 @@ async function restart() {
 	mode = "child";
 	const server = spawn(
 		process.execPath,
-		["dist/src/bin/cli.js", "serve", ...args],
+		["dist/src/bin/cli.js", "serve", ...serveArgs],
 		{
 			stdio: "inherit",
 			detached: true,

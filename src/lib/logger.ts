@@ -168,18 +168,33 @@ function formatArgs(args: unknown[]): string {
 		.join(" ");
 }
 
-function wrapPino(p: PinoInstance): Logger {
+/**
+ * A child of whichever root is current. setLogLevel and setLogFormat replace
+ * the root, so a child captured once (a module-level logger, made before the
+ * daemon applies its flags) would keep logging JSON at the startup level.
+ */
+function currentChild(component: string[]): () => PinoInstance {
+	let root: PinoInstance | undefined;
+	let child: PinoInstance | undefined;
+	return () => {
+		const current = getRootPino();
+		if (current !== root || !child) {
+			root = current;
+			child = current.child({ component });
+		}
+		return child;
+	};
+}
+
+function wrapPino(component: string[]): Logger {
+	const p = currentChild(component);
 	return {
-		debug: (...args) => p.debug(formatArgs(args)),
-		verbose: (...args) => p.verbose(formatArgs(args)),
-		info: (...args) => p.info(formatArgs(args)),
-		warn: (...args) => p.warn(formatArgs(args)),
-		error: (...args) => p.error(formatArgs(args)),
-		child: (childTag) => {
-			const bindings = p.bindings() as { component?: string[] };
-			const components = [...(bindings.component ?? []), childTag];
-			return wrapPino(p.child({ component: components }));
-		},
+		debug: (...args) => p().debug(formatArgs(args)),
+		verbose: (...args) => p().verbose(formatArgs(args)),
+		info: (...args) => p().info(formatArgs(args)),
+		warn: (...args) => p().warn(formatArgs(args)),
+		error: (...args) => p().error(formatArgs(args)),
+		child: (childTag) => wrapPino([...component, childTag]),
 	};
 }
 
@@ -242,8 +257,7 @@ export function createLogger(tag: string, parent?: Logger): Logger {
 		};
 	}
 
-	const pinoChild = getRootPino().child({ component: [tag] });
-	return wrapPino(pinoChild);
+	return wrapPino([tag]);
 }
 
 /**
@@ -290,7 +304,8 @@ export function _getOutputStream(): Writable {
 }
 
 /**
- * Return the raw Pino child instance for the given tag.
+ * Return a getter for the raw Pino child for the given tag. Call it per log:
+ * it follows the root that setLogLevel/setLogFormat rebuild.
  *
  * Unlike `createLogger()`, this does **not** wrap the instance with the
  * project's `Logger` interface — callers get the native pino API whose
@@ -299,6 +314,6 @@ export function _getOutputStream(): Writable {
  * Primary consumer: `PinoLoggerLive` in `src/lib/domain/daemon/Layers/pino-logger-layer.ts`.
  * @internal
  */
-export function _getRawPinoChild(tag: string): PinoInstance {
-	return getRootPino().child({ component: [tag] });
+export function _getRawPinoChild(tag: string): () => PinoInstance {
+	return currentChild([tag]);
 }
