@@ -1,7 +1,10 @@
 import { expect, type Page } from "@playwright/test";
+import { Schema } from "effect";
+import type { ToolFileChange } from "../../../src/lib/contracts/stored-event.js";
 import {
 	PartVersion,
 	ToolCallId,
+	ToolPresentationSchema,
 	Utf8Bytes,
 } from "../../../src/lib/contracts/tool-wire.js";
 import type {
@@ -53,11 +56,36 @@ function tool(
 	};
 }
 
+function withFileChanges(
+	part: HistoryMessagePart,
+	fileChanges: readonly ToolFileChange[],
+): HistoryMessagePart {
+	return { ...part, state: { ...part.state, fileChanges } };
+}
+
+// The server decodes each Cursor part's metadata into its presentation.
+function withPresentation(part: HistoryMessagePart): HistoryMessagePart {
+	return part.state
+		? {
+				...part,
+				state: {
+					...part.state,
+					presentation: Schema.decodeUnknownSync(ToolPresentationSchema)(
+						part.state["metadata"],
+					),
+				},
+			}
+		: part;
+}
+
 // Publish the typed detail shape: the legacy tool mock drops metadata updates.
 function publish(page: Page, added: HistoryMessagePart[]): void {
 	const previous = parts.get(page) ?? [];
 	const replaced = new Set(added.map(({ id }) => id));
-	const next = [...previous.filter(({ id }) => !replaced.has(id)), ...added];
+	const next = [
+		...previous.filter(({ id }) => !replaced.has(id)),
+		...added.map(withPresentation),
+	];
 	parts.set(page, next);
 	const messages: HistoryMessage[] = [
 		{
@@ -280,52 +308,57 @@ export const cursorToolsHandlers: StepHandler[] = [
 		match: /^the Cursor relay publishes file changes$/,
 		run: ({ world }) =>
 			publish(world.page, [
-				tool(
-					"edit",
-					"Edit",
-					{
-						tool: "Edit",
-						filePath: "src/value.ts",
-						oldString: "old value",
-						newString: "new value",
-					},
-					"Updated src/value.ts",
-					{
-						fileChange: {
+				withFileChanges(
+					tool(
+						"edit",
+						"Edit",
+						{
+							tool: "Edit",
 							filePath: "src/value.ts",
-							diff: "@@ -1 +1 @@\n-old value\n+new value\n",
-							linesAdded: 1,
-							linesRemoved: 1,
+							oldString: "old value",
+							newString: "new value",
 						},
-					},
+						"Updated src/value.ts",
+					),
+					[
+						{
+							path: "src/value.ts",
+							kind: "update",
+							patch: "@@ -1 +1 @@\n-old value\n+new value\n",
+						},
+					],
 				),
-				tool(
-					"write",
-					"Write",
-					{
-						tool: "Write",
-						filePath: "src/new.ts",
-						content: "first line\nsecond line\n",
-					},
-					"Created src/new.ts",
-					{
-						fileChange: {
+				withFileChanges(
+					tool(
+						"write",
+						"Write",
+						{
+							tool: "Write",
 							filePath: "src/new.ts",
-							linesAdded: 2,
+							content: "first line\nsecond line\n",
 						},
-					},
+						"Created src/new.ts",
+					),
+					[
+						{
+							path: "src/new.ts",
+							kind: "add",
+							after: "first line\nsecond line\n",
+						},
+					],
 				),
-				tool(
-					"delete",
-					"Delete",
-					{ tool: "Unknown", name: "Delete", raw: { path: "src/deleted.ts" } },
-					"Deleted src/deleted.ts",
-					{
-						fileChange: {
-							filePath: "src/deleted.ts",
-							fileSize: 23,
+				withFileChanges(
+					tool(
+						"delete",
+						"Delete",
+						{
+							tool: "Unknown",
+							name: "Delete",
+							raw: { path: "src/deleted.ts" },
 						},
-					},
+						"Deleted src/deleted.ts",
+					),
+					[{ path: "src/deleted.ts", kind: "delete" }],
 				),
 			]),
 	},
@@ -364,14 +397,14 @@ export const cursorToolsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert Cursor delete SDK path and size",
+		name: "assert Cursor delete SDK path",
 		match:
-			/^the Cursor delete row shows its path and ([0-9]+) bytes without invented lines$/,
-		run: async ({ world, match }) => {
+			/^the Cursor delete row shows its path as deleted without invented lines$/,
+		run: async ({ world }) => {
 			await expand(world.page, "delete");
 			const change = row(world.page, "delete").getByTestId("tool-file-change");
 			await expect(change).toContainText("src/deleted.ts");
-			await expect(change).toContainText(`${match[1]} bytes`);
+			await expect(change.getByText("delete", { exact: true })).toBeVisible();
 			await expect(change.locator(".diff-stats span")).toHaveCount(0);
 			await expect(change.locator("pre")).toHaveCount(0);
 		},
@@ -660,8 +693,15 @@ export const cursorToolsHandlers: StepHandler[] = [
 						throw new Error("The recording must render a video element");
 					// Playback exits the native loading animation without waiting for its cooldown.
 					await video.play();
-					video.pause();
-					video.currentTime = 0;
+					// Seeking before pause settles can leave Chromium at the stopped position.
+					await new Promise<void>((resolve) => {
+						video.addEventListener("pause", () => resolve(), { once: true });
+						video.pause();
+					});
+					await new Promise<void>((resolve) => {
+						video.addEventListener("seeked", () => resolve(), { once: true });
+						video.currentTime = 0;
+					});
 				});
 				await expect
 					.poll(() =>
@@ -716,6 +756,26 @@ export const cursorToolsHandlers: StepHandler[] = [
 					"First page of tool output",
 					{ truncated: true },
 				),
+				withFileChanges(
+					tool(
+						"truncated-write",
+						"Write",
+						{
+							tool: "Write",
+							filePath: "src/cut.ts",
+							content: "first line\nsecond line\n",
+						},
+						"Created src/cut.ts",
+						{ truncated: true },
+					),
+					[
+						{
+							path: "src/cut.ts",
+							kind: "add",
+							after: "first line\nsecond line\n",
+						},
+					],
+				),
 			]),
 	},
 	{
@@ -749,6 +809,21 @@ export const cursorToolsHandlers: StepHandler[] = [
 			await expect(row(world.page, "truncated")).toContainText(
 				"First page of tool output",
 			);
+		},
+	},
+	{
+		name: "assert truncated Cursor write has no count",
+		match:
+			/^the truncated Cursor write shows its content without an added count$/,
+		run: async ({ world }) => {
+			await expand(world.page, "truncated-write");
+			const change = row(world.page, "truncated-write").getByTestId(
+				"tool-file-change",
+			);
+			await expect(change.locator("pre")).toHaveText(
+				"first line\nsecond line\n",
+			);
+			await expect(change.locator(".diff-stats span")).toHaveCount(0);
 		},
 	},
 	{
@@ -807,7 +882,7 @@ export const cursorToolsHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await expect(
 				world.page.locator('.tool-item[data-tool-id^="cursor-tools-"]'),
-			).toHaveCount(19);
+			).toHaveCount(20);
 		},
 	},
 ];

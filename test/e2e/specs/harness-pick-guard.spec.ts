@@ -32,7 +32,7 @@ import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -1260,10 +1260,10 @@ test.describe("session composer owns its stored pick", () => {
 			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
-			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="composer-more-mode"]:visible',
+			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="picker-row-permissions"]:visible',
 		);
 		const phoneWords = page.getByTestId("composer-words-sheet-trigger");
-		let openedComposer = false;
+		let openedPanel = false;
 		const older = observed.hold("GetModels", sessionA, { once: true });
 		let stage = "A-row-read";
 		let before: string | null | undefined;
@@ -1304,11 +1304,13 @@ test.describe("session composer owns its stored pick", () => {
 					phoneWords.getByText("full", { exact: true }),
 				).toBeVisible();
 			if (!(await mode.isVisible())) {
-				await picker.click();
-				openedComposer = true;
+				await openPickerRoot(page, picker);
+				openedPanel = true;
 			}
 			await expect(mode).toHaveAccessibleName(
-				"Permissions: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
 			stage = "A-stale-delivered";
 			older.release();
@@ -1321,9 +1323,11 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			after = await picker.getAttribute("data-shown-permission-mode");
 			await expect(mode).toHaveAccessibleName(
-				"Permissions: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
-			if (openedComposer) await page.keyboard.press("Escape");
+			if (openedPanel) await page.keyboard.press("Escape");
 			if (await phoneWords.isVisible())
 				await expect(
 					phoneWords.getByText("full", { exact: true }),
@@ -1996,19 +2000,16 @@ async function selectFullPermission(page: Page): Promise<void> {
 	const trigger = page.locator(
 		'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
 	);
-	if (await trigger.count()) {
+	const panel = (await trigger.count()) === 0;
+	if (!panel) {
 		await trigger.click();
 	} else {
-		await page.locator(pickerSelector).click();
-		await page.getByTestId("composer-more-mode").click();
+		await openPickerRoot(page, page.locator(pickerSelector));
+		await page.getByTestId("picker-row-permissions").click();
 	}
-	await page.getByTestId("permission-mode-option-full").click();
-	await expect(
-		page.getByRole("button", {
-			name: "Permissions: Full access. Open options",
-			exact: true,
-		}),
-	).toBeVisible();
+	await page.getByTestId("picker-permission-full").click();
+	// Picking returns to the Session root; OpenCode's root has no Permissions row.
+	await expect(page.getByTestId("picker-subtitle")).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.locator(pickerSelector)).toHaveAttribute(
 		"data-shown-permission-mode",
@@ -2608,6 +2609,7 @@ test.describe("draft owns one complete pick", () => {
 		}
 		try {
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await held.wait;
 			await closePicker(page);
@@ -2628,7 +2630,9 @@ test.describe("draft owns one complete pick", () => {
 				expect(reply.response.providers).toEqual([]);
 			deliverEmpty = false;
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId("picker-account-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await closePicker(page);
 			await expect
@@ -4438,6 +4442,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 
 	test.describe("default harness with a named instance", () => {
 		test.use({
+			startHarness: false,
 			harnessOptions: {
 				managedOpenCode: true,
 				opencodeBorrowIdleTimeoutMs: borrowIdleTimeoutMs,
@@ -4445,7 +4450,38 @@ test.describe("OpenCode draft inventory borrows", () => {
 				restartProof: true,
 			},
 		});
-		test("9cn3-default-named-instance: a stopped named OpenCode default prefills on page load", async ({
+		test.beforeEach(async ({ harness }) => {
+			const config = Either.getOrThrow(
+				loadDaemonConfigResult(harness.configDir),
+			);
+			const named = config?.instances?.find(({ id }) => id === "managed-test");
+			if (!config || !named) throw new Error("Missing named OpenCode fixture");
+			// Concrete named accounts and managed fallback need independent servers.
+			writeFileSync(
+				join(harness.configDir, "daemon.json"),
+				JSON.stringify({
+					...config,
+					instances: [
+						...(config.instances ?? []),
+						{
+							...named,
+							id: "opencode",
+							name: "Managed fallback",
+							env: {
+								...named.env,
+								CONDUIT_TEST_OPENCODE_STATE_PREFIX: "fallback",
+							},
+						},
+					],
+					accountDefaults: {
+						...config.accountDefaults,
+						opencode: "managed-test",
+					},
+				}),
+			);
+			await harness.restart();
+		});
+		test("9cn3-default-named-instance: a stopped named OpenCode default prefills with managed fallback on page load", async ({
 			page,
 			harness,
 		}, testInfo) => {
@@ -4462,14 +4498,8 @@ test.describe("OpenCode draft inventory borrows", () => {
 					setup.slug,
 					"opencode",
 				);
-				await expect(picker).toHaveAttribute(
-					"data-instance-id",
-					"managed-test",
-				);
-				evidence["running"] = await waitForHealthy(
-					setup.browser,
-					"managed-test",
-				);
+				await expect(picker).toHaveAttribute("data-instance-id", "opencode");
+				evidence["running"] = await waitForHealthy(setup.browser, "opencode");
 				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
 				evidence["receipt"] = await sendShownPick(
 					page,
@@ -4478,8 +4508,15 @@ test.describe("OpenCode draft inventory borrows", () => {
 					setup.slug,
 					"9cn3-default-named-instance",
 					observed,
-					"managed-test",
+					"opencode",
 				);
+				expect((await instance(setup.browser, "managed-test"))?.status).toBe(
+					"stopped",
+				);
+				expect(
+					Either.getOrThrow(loadDaemonConfigResult(harness.configDir))
+						?.accountDefaults?.opencode,
+				).toBe("managed-test");
 			} finally {
 				evidence["finalInstance"] = await instance(
 					setup.browser,
@@ -4490,17 +4527,17 @@ test.describe("OpenCode draft inventory borrows", () => {
 		});
 
 		for (const catalogState of ["refreshed", "missing"] as const) {
-			test(`9cn3-review-alias-${catalogState}: an alias-bound turn validates the named default catalog`, async ({
+			test(`9cn3-review-named-${catalogState}: a named-account turn validates its own catalog`, async ({
 				harness,
 			}, testInfo) => {
-				const caseId = `9cn3-review-alias-${catalogState}`;
+				const caseId = `9cn3-review-named-${catalogState}`;
 				const setup = await prepareDraft(harness, "claude", "managed-test");
 				const { sessionId } = await Effect.runPromise(
 					setup.browser.rpc.CreateSession({
 						projectSlug: setup.slug,
 						originId: caseId,
 						permissionMode: "ask",
-						instanceId: AccountIdSchema.make("opencode"),
+						instanceId: AccountIdSchema.make("managed-test"),
 						model: {
 							providerId: "fake",
 							modelId: "fake-model",
@@ -4521,7 +4558,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 					evidence["before"] = readStoredState(harness, setup.slug, sessionId);
 					expect(
 						readStoredState(harness, setup.slug, sessionId).pick?.provider,
-					).toBe("opencode");
+					).toBe("managed-test");
 					if (catalogState === "refreshed") {
 						writeFileSync(
 							join(harness.configDir, "fake-opencode-model-catalog.json"),
@@ -4924,6 +4961,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const claudeBefore = await readShown(picker);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await expect(picker).toHaveAttribute("data-instance-id", namedId);
@@ -4948,6 +4986,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			await expect.poll(() => isProcessAlive(borrowed?.pid ?? 0)).toBe(false);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await waitForHealthy(setup.browser, namedId);
@@ -5000,6 +5039,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const otherPicker = await openDraftPage(otherPage, harness, setup.slug);
 			await openPickerRoot(otherPage, otherPicker);
 			await otherPage.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(otherPage);
 			await otherPage.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(otherPage);
 			await waitForHealthy(setup.browser, namedId);
@@ -5276,7 +5316,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				expect(response.ok).toBe(true);
 				const native = (await response.json()) as { id: string };
 				const expected = {
-					provider: "opencode",
+					provider: instanceId,
 					model_id: parentId ? "fake-source" : "fake-model",
 					model_provider: "fake",
 					variant: parentId ? "" : "high",
@@ -5373,7 +5413,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 					parent_id: parentId ?? null,
 					pick_event_count: 3,
 					created_event_count: 1,
-					bound_provider: "opencode",
+					bound_provider: instanceId,
 				});
 				expect(created.pick).toEqual(expected);
 				expect(typeof runtimeInstance.pid).toBe("number");

@@ -16,14 +16,13 @@ import {
 	type WorkspaceMissing,
 	WorktreeRecoveryError,
 } from "../../../src/lib/contracts/worktree.js";
-import { openComposerSheet } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple", screenshot: "off" });
 
-// Desktop Words shows the checkout in the footer; phones keep it in the Composer sheet.
+// Words keeps the checkout chip in the footer on both phone and desktop.
 test.beforeEach(async ({ page }) => {
 	await page.addInitScript(() => {
 		localStorage.setItem(
@@ -80,7 +79,6 @@ async function openMissingSession(
 				nextCursor: null,
 			}),
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : projectSlug,
 				providers: [],
 			}),
@@ -152,10 +150,6 @@ for (const viewport of [
 				folder === main ? "main" : "library",
 			);
 			const label = `worktree missing: ${names.join(", ")}`;
-			if (viewport.width < 768) {
-				await expect(page.getByTestId("composer-more-attention")).toBeVisible();
-				await openComposerSheet(page);
-			}
 			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-notice-indicator");
 			await expect(notice).toBeVisible();
@@ -163,7 +157,17 @@ for (const viewport of [
 			await expect(identity).toHaveAccessibleName(new RegExp(label));
 			await capture(page, testInfo, "multi-folder-missing");
 			await identity.click();
-			const menu = page.getByRole("menu", { name: "Checkout" });
+			const menu = page.getByTestId("model-picker");
+			await expect(page.getByTestId("picker-row-checkout")).toBeFocused();
+			await expect(menu.getByTestId("picker-checkout-warning")).toHaveAttribute(
+				"aria-label",
+				label,
+			);
+			for (const { folder } of entries)
+				await expect(menu.getByTestId("picker-checkout-notice")).toContainText(
+					folder === main ? "main" : "library",
+				);
+			await menu.getByTestId("picker-row-checkout").click();
 			for (const { folder, path } of entries) {
 				await expect(
 					menu
@@ -174,8 +178,9 @@ for (const viewport of [
 				await expect(folderStatus).toContainText("Worktree missing");
 				await expect(folderStatus).not.toContainText("clean");
 			}
+			await menu.getByTestId("picker-back").click();
 			await capture(page, testInfo, "multi-folder-missing-menu");
-			await menu.getByRole("menuitem", { name: "Recreate worktree" }).click();
+			await menu.getByTestId("picker-checkout-notice-recreate").click();
 			await expect
 				.poll(() =>
 					rpc
@@ -194,10 +199,7 @@ for (const viewport of [
 				workspaceMissing: undefined,
 				git: { branch, worktree: "0" },
 			});
-			if (viewport.width < 768)
-				await expect(page.getByTestId("composer-more-attention")).toHaveCount(
-					0,
-				);
+			await expect(menu.getByTestId("picker-checkout-warning")).toHaveCount(0);
 			await expect(notice).toHaveCount(0);
 			await capture(page, testInfo, "multi-folder-recovered");
 			await testInfo.attach("multi-folder-recovery-request", {
@@ -236,11 +238,6 @@ for (const viewport of [
 				page,
 				harness.relayBaseUrl,
 			);
-			const phone = viewport.width < 768;
-			if (phone) {
-				await expect(page.getByTestId("composer-more-attention")).toBeVisible();
-				await openComposerSheet(page);
-			}
 			const identity = page.getByTestId("composer-checkout");
 			const notice = page.getByTestId("workspace-notice-indicator");
 			await expect(notice).toBeVisible();
@@ -253,16 +250,26 @@ for (const viewport of [
 			await expect(identity).toHaveAccessibleName(/worktree missing/);
 			await capture(page, testInfo, "workspace-missing");
 			await identity.click();
-			const menu = page.getByRole("menu", { name: "Checkout" });
+			const menu = page.getByTestId("model-picker");
+			await expect(menu.getByTestId("picker-checkout-notice")).toContainText(
+				"worktree missing",
+			);
+			await menu.getByTestId("picker-row-checkout").click();
 			await expect(menu).toContainText(worktree);
-			await expect(
-				menu.getByRole("menuitem", { name: "Recreate worktree" }),
-			).toBeVisible();
-			await expect(
-				menu.getByRole("menuitem", { name: "Continue in main folder" }),
-			).toBeVisible();
+			await menu.getByTestId("picker-back").click();
+			const recreateAction = menu.getByTestId(
+				"picker-checkout-notice-recreate",
+			);
+			const continueAction = menu.getByTestId(
+				"picker-checkout-notice-continue",
+			);
+			await expect(recreateAction).toBeVisible();
+			await expect(continueAction).toBeVisible();
 			await capture(page, testInfo, "workspace-missing-menu");
-			await menu.getByRole("menuitem", { name: recovery.label }).click();
+			await (recovery.tag === "RecreateSessionWorktree"
+				? recreateAction
+				: continueAction
+			).click();
 			await expect
 				.poll(() =>
 					rpc
@@ -271,7 +278,7 @@ for (const viewport of [
 						.map(({ payload }) => payload),
 				)
 				.toEqual([{ _tag: recovery.tag, sessionId: session.id }]);
-			await expect(menu).not.toBeVisible();
+			await expect(menu).toBeVisible();
 			const recreated = recovery.tag === "RecreateSessionWorktree";
 			rpc.upsertShellRow({
 				...session,
@@ -279,12 +286,8 @@ for (const viewport of [
 				workspace: recreated ? session.workspace : null,
 				git: recreated ? { branch, worktree: "0" } : { branch: "main" },
 			});
-			if (phone) {
-				await expect(page.getByTestId("composer-more-attention")).toHaveCount(
-					0,
-				);
-				await openComposerSheet(page);
-			}
+			await expect(menu.getByTestId("picker-checkout-warning")).toHaveCount(0);
+			await expect(menu.getByTestId("picker-checkout-notice")).toHaveCount(0);
 			await expect(notice).toHaveCount(0);
 			await expect(identity).toHaveAttribute(
 				"title",
@@ -293,13 +296,8 @@ for (const viewport of [
 			await expect(identity).not.toHaveAccessibleName(
 				/moved back: worktree removed/,
 			);
-			await identity.click();
-			await expect(
-				menu.getByRole("menuitem", { name: "Recreate worktree" }),
-			).toHaveCount(0);
-			await expect(
-				menu.getByRole("menuitem", { name: "Continue in main folder" }),
-			).toHaveCount(0);
+			await expect(recreateAction).toHaveCount(0);
+			await expect(continueAction).toHaveCount(0);
 			await testInfo.attach("workspace-recovery-request", {
 				body: JSON.stringify({
 					path: recreated ? worktree : main,
@@ -323,13 +321,14 @@ test("a deleted branch offers only Continue in main folder", async ({
 		reason: "branch-missing",
 	});
 	await page.getByTestId("composer-checkout").click();
-	const menu = page.getByRole("menu", { name: "Checkout" });
+	const menu = page.getByTestId("model-picker");
+	await expect(menu.getByTestId("picker-checkout-notice-recreate")).toHaveCount(
+		0,
+	);
 	await expect(
-		menu.getByRole("menuitem", { name: "Recreate worktree" }),
-	).toHaveCount(0);
-	await expect(
-		menu.getByRole("menuitem", { name: "Continue in main folder" }),
+		menu.getByTestId("picker-checkout-notice-continue"),
 	).toBeVisible();
+	await menu.getByTestId("picker-row-checkout").click();
 	await expect(menu).toContainText("branch no longer exists");
 	await capture(page, testInfo, "workspace-missing-branch-deleted");
 });
@@ -366,7 +365,11 @@ for (const failure of [
 			},
 		});
 		await page.getByTestId("composer-checkout").click();
-		await page.getByRole("menuitem", { name: failure.label }).click();
+		await page
+			.getByTestId(
+				`picker-checkout-notice-${failure.tag === "RecreateSessionWorktree" ? "recreate" : "continue"}`,
+			)
+			.click();
 		await expect(
 			page.getByRole("alert").getByText(failure.title, { exact: true }),
 		).toBeVisible();

@@ -4,7 +4,9 @@ export type PickerSection =
 	| "model"
 	| "context"
 	| "effort"
-	| "agent";
+	| "agent"
+	| "permissions"
+	| "checkout";
 
 export const composerPickerState = $state<{
 	request: { section: PickerSection; opener: HTMLElement | null } | null;

@@ -1,6 +1,10 @@
 import { expect, type Page } from "@playwright/test";
 import type { StepHandler } from "../runtime.js";
-import { pickerFixtureQuotaReads, requireRpcControl } from "./shared.js";
+import {
+	openPickerAccounts,
+	pickerFixtureQuotaReads,
+	requireRpcControl,
+} from "./shared.js";
 
 const card = (page: Page, id: string) =>
 	page.getByTestId(`picker-account-${id}`);
@@ -12,6 +16,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match:
 			/^the (Account|Instance) section has (\d+) (equal-width|scroll-snap) cards and the caption (.+)$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const section = world.page.getByTestId("picker-account-section");
 			const row = world.page.getByTestId("picker-account-options");
 			await expect(section).toHaveAttribute("aria-label", match[1] ?? "");
@@ -59,6 +64,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert card name and account logo",
 		match: /^the picker card (\S+) is named (.+) and shows its account logo$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const radio = card(world.page, match[1] ?? "");
 			await expect(radio).toHaveAttribute("aria-label", match[2] ?? "");
 			await expect(radio.getByTestId("picker-account-name")).toHaveText(
@@ -94,6 +100,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "select or try a disabled picker card",
 		match: /^I (select|try to pick) the (\S+) (Account|Instance) card$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			beforeCardTap.set(
 				world.page,
 				requireRpcControl(world.page).getRequests().length,
@@ -162,6 +169,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match:
 			/^the picker account handoff note is a muted footer under the cards$/,
 		run: async ({ world }) => {
+			await openPickerAccounts(world.page);
 			const section = world.page.getByTestId("picker-account-section");
 			const note = section.getByTestId("picker-account-note");
 			await expect(note).toHaveText(
@@ -173,8 +181,8 @@ export const composerAccountsHandlers: StepHandler[] = [
 			await expect(note).toHaveCSS("padding", "6px 0px 0px");
 			await expect(note).toHaveCSS(
 				"color",
-				await world.page
-					.getByTestId("picker-subtitle")
+				await section
+					.getByTestId("picker-account-section-caption")
 					.evaluate((element) => getComputedStyle(element).color),
 			);
 			const cards = await section
@@ -191,6 +199,9 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert account handoff note hidden",
 		match: /^the picker has no account handoff note$/,
 		run: async ({ world }) => {
+			if (await world.page.getByTestId("picker-row-account").isVisible()) {
+				await openPickerAccounts(world.page);
+			}
 			await expect(world.page.getByTestId("picker-account-note")).toHaveCount(
 				0,
 			);
@@ -201,6 +212,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match:
 			/^the (\S+) (Account|Instance) card is (selected and in view|outside the visible row)$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const radio = card(world.page, match[1] ?? "");
 			await expect(radio).toHaveAttribute("aria-checked", "true");
 			await expect
@@ -248,6 +260,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert known card usage and matching meter tone",
 		match: /^the (\S+) Account card shows (\d+)% usage$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const radio = card(world.page, match[1] ?? "");
 			await expect(radio.getByTestId("picker-account-usage")).toHaveText(
 				`${match[2]}%`,
@@ -287,6 +300,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert unknown card usage",
 		match: /^the (\S+) Account card shows unknown usage$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const radio = card(world.page, match[1] ?? "");
 			await expect(radio.getByTestId("picker-account-usage")).toHaveText("—");
 			await expect(radio.getByTestId("picker-account-caption")).toHaveText(
@@ -300,6 +314,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert limited card state and reset time",
 		match: /^the (\S+) Account card is limited until (\S+)$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const radio = card(world.page, match[1] ?? "");
 			const time = await world.page.evaluate(
 				(at) =>
@@ -331,6 +346,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert current Claude card disabled",
 		match: /^the (\S+) Account card is disabled$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			await expect(card(world.page, match[1] ?? "")).toBeDisabled();
 			await expect(card(world.page, match[1] ?? "")).toHaveAttribute(
 				"aria-disabled",
@@ -343,6 +359,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match:
 			/^the (\S+) Instance card shows (healthy|starting|unhealthy|stopped) status$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const radio = card(world.page, match[1] ?? "");
 			await expect(radio.getByTestId("picker-account-caption")).toHaveText(
 				match[2] ?? "",
@@ -371,6 +388,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match:
 			/^the Instance cards are locked and announce Harness is fixed for this session$/,
 		run: async ({ world }) => {
+			await openPickerAccounts(world.page);
 			for (const radio of await world.page
 				.getByTestId("picker-account-options")
 				.getByRole("radio")
@@ -387,6 +405,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "scroll account cards",
 		match: /^I scroll the Account row to the (start|end)$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const row = world.page.getByTestId("picker-account-options");
 			await row.evaluate(
 				(element, edge) =>
@@ -416,6 +435,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "assert account overflow fade",
 		match: /^the Account row has (a|no) right-edge fade$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			const row = world.page.getByTestId("picker-account-options");
 			// The row measures its fade after opening and again after scrolling to
 			// the selection, so read the attribute and mask together and only once
@@ -440,6 +460,7 @@ export const composerAccountsHandlers: StepHandler[] = [
 		name: "move between account cards with arrow keys",
 		match: /^I move to the (next|previous) Account card with the keyboard$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			await world.page
 				.getByTestId("picker-account-options")
 				.getByRole("radio", { checked: true })
@@ -447,6 +468,10 @@ export const composerAccountsHandlers: StepHandler[] = [
 			await world.page.keyboard.press(
 				match[1] === "next" ? "ArrowRight" : "ArrowLeft",
 			);
+			// Arrows pick a card without leaving the Account drill-in.
+			await expect(
+				world.page.getByTestId("picker-account-section"),
+			).toBeVisible();
 		},
 	},
 	{
@@ -468,9 +493,10 @@ export const composerAccountsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert single account or instance section hidden",
+		name: "assert account cards are absent from the picker root",
 		match: /^the picker has no Account or Instance section$/,
 		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
 			await expect(
 				world.page.getByTestId("picker-account-section"),
 			).toHaveCount(0);

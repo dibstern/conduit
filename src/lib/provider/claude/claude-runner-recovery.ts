@@ -1,6 +1,10 @@
 import { Effect, Result } from "effect";
 import { SqlClient } from "effect/sql";
-import { accountsStateFromConfig, resolve } from "../../account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+	resolve,
+} from "../../account-directory.js";
 import { defaultDaemonConfig } from "../../daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { makeAttachmentStore } from "../../persistence/attachment-store.js";
@@ -80,7 +84,9 @@ export const recoverClaudeRunnerCommands = (
 				),
 			);
 		const accountForId = (id: string) =>
-			Result.getOrUndefined(resolve(accounts, { _tag: "Id", id }));
+			Result.getOrUndefined(
+				resolve(accounts, { _tag: "Id", id }, NO_OPENCODE_HEALTH),
+			);
 		const driverForAccount = (id: string) => accountForId(id)?.driver;
 		return yield* recoverRunnerCommands(sql, sessionId, "claude", {
 			driverForAccount,

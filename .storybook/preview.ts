@@ -2,7 +2,6 @@ import type { Preview } from "@storybook/svelte-vite";
 import { expect, waitFor } from "storybook/test";
 import "../src/lib/frontend/style.css";
 import { avatarState } from "../src/lib/frontend/stores/avatar.svelte.js";
-import { watchCompactViewport } from "../src/lib/frontend/stores/session-view.svelte.js";
 import { setThemeMode } from "../src/lib/frontend/stores/theme.svelte.js";
 import { seedStoryAvatar } from "../src/lib/frontend/stories/sockets.js";
 
@@ -31,7 +30,6 @@ const preview: Preview = {
 			expect(getComputedStyle(document.body).pointerEvents).not.toBe("none"),
 		);
 		setThemeMode(context.globals["theme"] === "light" ? "light" : "dark");
-		const stopCompactViewport = watchCompactViewport();
 		const avatar = {
 			choice: { kind: "initial" as const },
 			name: "David",
@@ -63,7 +61,6 @@ const preview: Preview = {
 		};
 
 		return () => {
-			stopCompactViewport();
 			globalThis.fetch = realFetch;
 			if (requested.length === 0) return;
 			throw new Error(

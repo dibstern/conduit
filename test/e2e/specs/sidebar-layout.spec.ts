@@ -291,7 +291,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 		await expect(rail).toHaveCSS("width", "44px");
 		await page.locator("#session-list .session-item").first().click();
 		await expect(rail).toBeVisible();
-		await expect(page.getByTestId("views-rail-diff")).toBeDisabled();
+		await expect(page.getByTestId("views-rail-diff")).toBeEnabled();
 		await expect(terminal).toHaveAttribute("aria-label", "Terminal");
 		await expect(files).toHaveAttribute("aria-label", "Files");
 		await terminal.hover();
@@ -345,7 +345,7 @@ test.describe("Sidebar Layout — Desktop", () => {
 		const files = page.getByTestId("views-rail-files");
 		await files.click();
 		await page.setViewportSize({ width: 393, height: 852 });
-		await expect(page.getByTestId("side-pane-files")).toHaveCount(0);
+		await expect(page.getByTestId("side-pane-files")).toBeVisible();
 		await expect(page.locator("#sidebar-panel-files")).toBeVisible();
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await expect(page.getByTestId("side-pane-files")).toBeVisible();
@@ -657,7 +657,6 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await expect(items.nth(1)).toContainText("Terminal");
 		await expect(items.nth(2)).toContainText("Diff");
 		await expect(items.nth(3)).toContainText("Files");
-		await expect(items.nth(2)).toHaveAttribute("aria-disabled", "true");
 		await expect(items.nth(0)).toHaveAttribute("aria-checked", "true");
 		await page.keyboard.press("Escape");
 		await expect(menu).toBeHidden();
@@ -847,10 +846,6 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const terminal = page.getByTestId("overflow-view-terminal");
 		const files = page.getByTestId("overflow-view-files");
 		await expect(chat).toHaveAttribute("aria-checked", "true");
-		await expect(page.getByTestId("overflow-view-diff")).toHaveAttribute(
-			"aria-disabled",
-			"true",
-		);
 		for (const item of await items.all()) {
 			expect((await item.boundingBox())?.height).toBeGreaterThanOrEqual(44);
 		}
@@ -981,10 +976,6 @@ test.describe("Sidebar Layout — Mobile", () => {
 		const chat = page.getByTestId("overflow-view-chat");
 		await expect(chat).toHaveAttribute("role", "menuitemradio");
 		await expect(chat).toHaveAttribute("aria-checked", "true");
-		await expect(page.getByTestId("overflow-view-diff")).toHaveAttribute(
-			"aria-disabled",
-			"true",
-		);
 		for (const view of ["terminal", "files", "chat"] as const) {
 			await page.getByTestId(`overflow-view-${view}`).click();
 			await expect(sheet).toBeHidden();

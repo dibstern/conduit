@@ -21,14 +21,9 @@ describe("Patch summarizer", () => {
 		"Patch",
 		"ApplyPatch",
 		"apply_patch",
-	])("does not lose the patch display when the event name is %s", (name) => {
+	])("summarizes canonical patch files when the event name is %s", (name) => {
 		const summary = lookupSummarizer(name).summarize(input, {});
-		expect(summary.subtitle).toBe("/repo/first.ts, /repo/second.ts");
-		expect(summary.expandedContent).toEqual({
-			kind: "code",
-			language: "diff",
-			content: patch,
-		});
+		expect(summary).toEqual({ subtitle: "/repo/first.ts, /repo/second.ts" });
 	});
 
 	it("does not repeat the repo root in the patch file subtitle", () => {
@@ -38,18 +33,13 @@ describe("Patch summarizer", () => {
 		expect(summary.subtitle).toBe("first.ts, second.ts");
 	});
 
-	it("does not discard patch text when no path header is recognized", () => {
+	it("omits a subtitle when no path header is recognized", () => {
 		const unrecognizedPatch = "--- a/file.ts\n+++ b/file.ts\n-old\n+new";
 		const summary = lookupSummarizer("Patch").summarize(
 			{ tool: "Patch", patch: unrecognizedPatch, filePaths: [] },
 			{},
 		);
-		expect(summary.subtitle).toBeUndefined();
-		expect(summary.expandedContent).toEqual({
-			kind: "code",
-			language: "diff",
-			content: unrecognizedPatch,
-		});
+		expect(summary).toEqual({});
 	});
 
 	it.each([

@@ -1,7 +1,8 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import type { ProviderInfo } from "../../../src/lib/frontend/types.js";
+import { defaultInstances } from "../fixtures/mockup-state.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -56,7 +57,6 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	const rpc = await mockWsRpc(page, {
 		stubs: {
 			GetModels: () => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "e2e-replay",
 				providers,
 				hiddenModels,
@@ -97,6 +97,7 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 				sessions: [
 					{
 						id: "settings-models",
+						accountId: "opencode",
 						title: "Model visibility",
 						status: "idle",
 						projectSlug: "e2e-replay",
@@ -110,7 +111,25 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 		page,
 		new URL("/s/settings-models?p=e2e-replay", relayUrl).toString(),
 	);
+	const requestsBeforeOpen = rpc.getRequests().length;
 	await openModels(page);
+	await expect
+		.poll(() => rpc.getRequests().slice(requestsBeforeOpen))
+		.toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					tag: "GetModels",
+					payload: expect.objectContaining({
+						projectSlug: "e2e-replay",
+						instanceId: "opencode",
+					}),
+				}),
+				expect.objectContaining({
+					tag: "GetAgents",
+					payload: expect.objectContaining({ sessionId: "settings-models" }),
+				}),
+			]),
+		);
 
 	const panel = page.locator("#settings-panel");
 	const filter = panel.getByTestId("settings-models-filter");
@@ -151,7 +170,9 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 	await expect(panel.getByTestId("settings-models-summary")).toHaveText(
 		"3 of 4 shown",
 	);
-	const artifactDir = resolve("test-results/settings-models-filter");
+	const artifactDir = resolve(
+		"/tmp/conduit-test-3fc0.2/settings-models-filter",
+	);
 	await mkdir(artifactDir, { recursive: true });
 	await page.evaluate(() => document.fonts.ready);
 	const filteredPath = resolve(artifactDir, "filtered-desktop.png");
@@ -260,3 +281,282 @@ test("filters models and agents, clears no matches and resets groups on reopen",
 		"1 of 4 shown",
 	);
 });
+
+test("keeps OpenCode visibility groups after the current Claude account catalog loads", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	const claudeProvider: ProviderInfo = {
+		id: "claude",
+		name: "Claude",
+		configured: true,
+		models: [
+			{
+				id: "account-model",
+				name: "Discovered account model",
+				provider: "claude",
+			},
+		],
+	};
+	const rpc = await mockWsRpc(page, {
+		stubs: {
+			GetModels: ({ instanceId }) => ({
+				projectSlug: "e2e-replay",
+				instanceId: "claude",
+				defaultOpenCodeInstanceId: "opencode",
+				providers: instanceId === "claude" ? [claudeProvider] : providers,
+				hiddenModels: ["anthropic/claude-haiku-3-5"],
+			}),
+			GetAgents: () => ({
+				projectSlug: "e2e-replay",
+				providerScope: { id: "claude", name: "Claude" },
+				agents: [],
+				hiddenAgents: [],
+			}),
+		},
+	});
+	await mockRelayWebSocket(page, {
+		initMessages: [
+			{
+				type: "project_list",
+				projects: [
+					{
+						slug: "e2e-replay",
+						title: "Merged catalog",
+						folders: ["/workspace/settings"],
+					},
+				],
+				current: "e2e-replay",
+			},
+			{
+				type: "shell_snapshot",
+				roots: true,
+				sessions: [
+					{
+						id: "claude-models",
+						accountId: "claude",
+						title: "Merged catalog",
+						status: "idle",
+						projectSlug: "e2e-replay",
+					},
+				],
+			},
+		],
+		responses: new Map(),
+	});
+	await gotoRelay(
+		page,
+		new URL("/s/claude-models?p=e2e-replay", relayUrl).toString(),
+	);
+	await openModels(page);
+	await rpc.waitForRequest(
+		({ tag, payload }) =>
+			tag === "GetModels" &&
+			payload?.["projectSlug"] === "e2e-replay" &&
+			payload?.["instanceId"] === "claude",
+	);
+
+	const panel = page.locator("#settings-panel");
+	const claude = panel.getByTestId("settings-models-group-claude");
+	await claude.locator("[aria-expanded]").click();
+	// This model only arrives in the account reply, so its switch proves the read settled.
+	await expect(
+		claude.getByRole("switch", { name: "Toggle discovered account model" }),
+	).toBeVisible();
+	for (const provider of providers) {
+		const group = panel.getByTestId(`settings-models-group-${provider.id}`);
+		await expect(group).toBeVisible();
+		await group.locator("[aria-expanded]").click();
+		await expect(group.getByRole("switch")).toHaveCount(provider.models.length);
+		for (const model of provider.models) {
+			const toggle = group.getByRole("switch", {
+				name: `Toggle ${model.name.toLowerCase()}`,
+				exact: true,
+			});
+			await expect(toggle).toBeVisible();
+			await expect(toggle).toHaveAttribute(
+				"aria-checked",
+				model.id === "claude-haiku-3-5" ? "false" : "true",
+			);
+		}
+	}
+	await expect(panel.getByTestId("settings-models-summary")).toHaveText(
+		"4 of 5 shown",
+	);
+	const artifactDir = resolve(
+		"/tmp/conduit-test-3fc0.2/settings-models-filter",
+	);
+	await mkdir(artifactDir, { recursive: true });
+	const artifact = resolve(artifactDir, "claude-merged-catalog.png");
+	await page.screenshot({ path: artifact, animations: "disabled" });
+	await testInfo.attach("merged Claude catalog visibility", {
+		path: artifact,
+		contentType: "image/png",
+	});
+});
+
+for (const driver of ["opencode", "claude"] as const) {
+	test(`loads visibility models for the current non-default ${driver} account`, async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const accountId = `${driver}-secondary`;
+		const providerId = driver === "opencode" ? "anthropic" : "claude";
+		let hiddenModels = ["elsewhere/keep-hidden"];
+		const rpc = await mockWsRpc(page, {
+			stubs: {
+				GetModels: (payload) => ({
+					projectSlug: "e2e-replay",
+					instanceId: accountId,
+					defaultOpenCodeInstanceId: "opencode",
+					providers:
+						payload.instanceId === accountId ||
+						("sessionId" in payload && payload.sessionId === "account-models")
+							? [
+									{
+										id: providerId,
+										name: "Account catalog",
+										configured: true,
+										models: [
+											{
+												id: "account-only",
+												name: "Account only",
+												provider: providerId,
+											},
+										],
+									},
+								]
+							: providers,
+					hiddenModels,
+				}),
+				GetAgents: () => ({
+					projectSlug: "e2e-replay",
+					providerScope: { id: "opencode", name: "OpenCode" },
+					agents: [{ id: "review", name: "Review" }],
+					hiddenAgents: [],
+				}),
+				SetHiddenEntries: (params) => {
+					if (params.hiddenModels) hiddenModels = [...params.hiddenModels];
+					return { projectSlug: "e2e-replay", hiddenModels, hiddenAgents: [] };
+				},
+			},
+		});
+		rpc.setDaemonList("SubscribeInstances", {
+			instances: [
+				...defaultInstances,
+				{
+					id: accountId,
+					name: "Secondary account",
+					driver,
+					isDefault: false,
+					port: driver === "opencode" ? 4097 : 0,
+					managed: false,
+					status: "healthy",
+					restartCount: 0,
+					createdAt: 1,
+				},
+			],
+		});
+		await mockRelayWebSocket(page, {
+			initMessages: [
+				{
+					type: "project_list",
+					projects: [
+						{
+							slug: "e2e-replay",
+							title: "Account catalog",
+							folders: ["/workspace/settings"],
+						},
+					],
+					current: "e2e-replay",
+				},
+				{
+					type: "shell_snapshot",
+					roots: true,
+					sessions: [
+						{
+							id: "account-models",
+							accountId,
+							title: "Account catalog",
+							status: "idle",
+							projectSlug: "e2e-replay",
+						},
+					],
+				},
+			],
+			responses: new Map(),
+		});
+		await gotoRelay(
+			page,
+			new URL("/s/account-models?p=e2e-replay", relayUrl).toString(),
+		);
+		await openModels(page);
+
+		const panel = page.locator("#settings-panel");
+		await expect(panel.getByTestId("settings-models-filter")).toHaveAttribute(
+			"placeholder",
+			"Filter 1 models",
+		);
+		await expect(panel.getByTestId("settings-models-summary")).toHaveText(
+			"1 of 1 shown",
+		);
+		const group = panel.getByTestId(`settings-models-group-${providerId}`);
+		await group.locator("[aria-expanded]").click();
+		await expect(group.getByRole("switch")).toHaveAccessibleName(
+			"Toggle account only",
+		);
+		await group.getByRole("switch").click();
+		await expect(group).toContainText("0 of 1 shown");
+		await expect
+			.poll(
+				() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "SetHiddenEntries")
+						.at(-1)?.payload,
+			)
+			.toEqual(
+				expect.objectContaining({
+					projectSlug: "e2e-replay",
+					hiddenModels: ["elsewhere/keep-hidden", `${providerId}/account-only`],
+				}),
+			);
+		await expect(panel.getByTestId("settings-agents-group")).toContainText(
+			"OpenCode agents",
+		);
+		await expect
+			.poll(
+				() =>
+					rpc
+						.getRequests()
+						.filter(({ tag }) => tag === "GetAgents")
+						.at(-1)?.payload,
+			)
+			.toEqual(expect.objectContaining({ sessionId: "account-models" }));
+		const artifactDir = resolve(
+			"/tmp/conduit-test-3fc0.2/settings-models-filter",
+		);
+		await mkdir(artifactDir, { recursive: true });
+		const artifact = resolve(artifactDir, `${driver}-catalog.json`);
+		await writeFile(
+			artifact,
+			JSON.stringify(
+				{
+					accountId,
+					hiddenModels,
+					requests: rpc
+						.getRequests()
+						.filter(({ tag }) =>
+							["GetModels", "GetAgents", "SetHiddenEntries"].includes(tag),
+						),
+				},
+				null,
+				2,
+			),
+		);
+		await testInfo.attach("account catalog visibility", {
+			path: artifact,
+			contentType: "application/json",
+		});
+	});
+}

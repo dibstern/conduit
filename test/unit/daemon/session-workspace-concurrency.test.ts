@@ -14,9 +14,12 @@ import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
 import { makeWorktreeLive } from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
-import { resolveSessionRequestFolders } from "../../../src/lib/domain/relay/Services/provider-turn-dispatch.js";
+import { resolveSessionFolders } from "../../../src/lib/domain/relay/Services/provider-turn-dispatch.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
-import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
+import {
+	resolveSessionRequestFolders,
+	SessionWorkspaceTag,
+} from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import {
 	makeMockConfig,
@@ -78,7 +81,7 @@ describe("session workspace concurrency", () => {
 		});
 	});
 
-	it.effect(
+	it.live(
 		"serves another session's file tree and prewarm folders while CreateSession is blocked",
 		() => {
 			const creating = Deferred.makeUnsafe<void>();
@@ -107,14 +110,14 @@ describe("session workspace concurrency", () => {
 				const folders = yield* Effect.forkScoped(
 					resolveSessionRequestFolders("existing"),
 				);
-				yield* TestClock.adjust("1 second");
+				const results = yield* Effect.all([
+					Fiber.join(tree),
+					Fiber.join(folders),
+				]).pipe(Effect.timeoutOption("1 second"));
 				expect(
-					{
-						fileTree: tree.pollUnsafe() !== undefined,
-						prewarmFolders: folders.pollUnsafe() !== undefined,
-					},
+					results._tag,
 					"both reads must finish before creation is released",
-				).toEqual({ fileTree: true, prewarmFolders: true });
+				).toBe("Some");
 				expect((yield* Fiber.join(tree)).entries).toEqual(["tracked.txt"]);
 				expect((yield* Fiber.join(folders)).workspaceRoot).toBe(
 					fixture.repository,
@@ -145,7 +148,7 @@ describe("session workspace concurrency", () => {
 				);
 				const { id, path: target } = yield* Deferred.await(moving);
 				const folders = yield* Effect.forkScoped(
-					resolveSessionRequestFolders(id),
+					resolveSessionFolders({ id, workspace: null }),
 				);
 				yield* TestClock.adjust("1 second");
 				expect(folders.pollUnsafe()).toBeUndefined();

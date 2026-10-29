@@ -1,5 +1,8 @@
 import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
-import type { InstanceOption } from "../../stores/discovery.svelte.js";
+import type {
+	InstanceOption,
+	InstanceSelection,
+} from "../../stores/discovery.svelte.js";
 import type {
 	ContextWindowOption,
 	Immutable,
@@ -34,7 +37,7 @@ export interface ModelSelectionTarget {
 		readonly effort: boolean;
 		readonly contextWindow: boolean;
 	};
-	selectAccount(id: string): void;
+	selectAccount(selection: InstanceSelection): void;
 	selectModel(pick: { modelId: string; providerId: string }): void;
 	selectEffort(value: string): void;
 	selectContextWindow(value: Immutable<ContextWindowOption> | null): void;

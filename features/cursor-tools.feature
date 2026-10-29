@@ -31,7 +31,7 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   When the Cursor relay publishes file changes
   Then the Cursor edit row shows old value replaced by new value with 1 added and 1 removed
   And the Cursor write row shows its content and 2 added lines without a removed count
-  And the Cursor delete row shows its path and 23 bytes without invented lines
+  And the Cursor delete row shows its path as deleted without invented lines
   When I scroll the transcript down by 200 pixels
   And I scroll the transcript back to the bottom
   Then the transcript is pinned to the bottom
@@ -56,6 +56,7 @@ Scenario Outline: inspect Cursor tool activity while output streams and after co
   When the Cursor relay publishes unknown and truncated tools
   Then the unknown Cursor tool shows its arguments and result
   And the truncated Cursor output is marked as truncated
+  And the truncated Cursor write shows its content without an added count
   When the Cursor task reports progress Reviewing the page
   Then the running Cursor turn shows progress Reviewing the page
   And the Cursor task remains a generic row

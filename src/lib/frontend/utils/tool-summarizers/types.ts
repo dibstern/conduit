@@ -10,7 +10,6 @@ export type ExpandedContent =
 	| { kind: "code"; language: string; content: string }
 	| { kind: "path"; filePath: string; offset?: number; limit?: number }
 	| { kind: "link"; url: string; label: string }
-	| { kind: "diff"; before: string; after: string }
 	| { kind: "text"; body: string };
 
 export interface SummarizerContext {

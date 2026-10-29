@@ -39,9 +39,9 @@ import { subscribeSessionPromptIndex } from "../domain/relay/Services/session-pr
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import * as Failure from "../effect/failure-classification.js";
-import { EventDelivery } from "./event-audiences.js";
 import {
 	CurrentEventDelivery,
+	currentEventDelivery,
 	deliverEventStream,
 	deliverPtyRows,
 	deliverSessionRows,
@@ -550,8 +550,7 @@ export const makeRoutedWsRpcServerLayer = <
 							);
 							const context = yield* resolveContext(projectSlug);
 							const producerProject = Context.get(context, ConfigTag).slug;
-							const delivery =
-								(yield* CurrentEventDelivery) ?? new EventDelivery();
+							const delivery = yield* currentEventDelivery;
 							const source = Stream.unwrap(
 								Effect.gen(function* () {
 									const queue = yield* Effect.acquireRelease(

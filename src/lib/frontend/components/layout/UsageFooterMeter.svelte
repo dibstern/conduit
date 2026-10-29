@@ -252,7 +252,9 @@
 				{@const isDefault = reading.accountId === currentAccount}
 				{@const accountName = getInstanceById(reading.accountId)?.name ?? reading.accountId}
 				{@const interactive = size === "sidebar" || prefix === "usage-sheet"}
-				{@const canSelect = interactive && getProviderDriver(getInstanceById(reading.accountId)?.driver)?.defaultAccountSource === "selection"}
+				<!-- A row sets only its own group's default; an OpenCode server's Codex reading stays read-only. -->
+				{@const accountDriver = getInstanceById(reading.accountId)?.driver}
+				{@const canSelect = interactive && accountDriver === group.harness && getProviderDriver(accountDriver)?.defaultAccountSource === "selection"}
 				{#snippet rowContent()}
 					<span class="flex min-w-0 items-center gap-[6px]">
 						<HarnessLogo driver={getInstanceById(reading.accountId)?.driver ?? reading.harness} instanceId={reading.accountId} size={15} aligned data-testid="{prefix}-logo-{row.id}" />

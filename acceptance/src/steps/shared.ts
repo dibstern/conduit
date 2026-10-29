@@ -163,7 +163,6 @@ export async function serveModelCatalog(
 					),
 				});
 			return {
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "myapp",
 				...(typeof binding === "object" && binding !== null ? binding : {}),
 				...response,
@@ -213,19 +212,51 @@ export async function holdUntilVisible(
 	await button.page().mouse.up();
 }
 
+/**
+ * The header controls a thumb would miss: each one centred above `minCentre`,
+ * or whose hit area ends less than `below` px under its centre. Hit testing
+ * finds targets that outgrow their box (a ::before, a clip-path).
+ */
+export function headerTargetMisses(
+	page: Page,
+	controls: string,
+	minCentre: number,
+	below: number,
+): Promise<string[]> {
+	return page.locator(controls).evaluateAll(
+		(elements, { controls, minCentre, below }) =>
+			elements.flatMap((control) => {
+				const rect = control.getBoundingClientRect();
+				if (rect.width === 0) return [];
+				const x = rect.left + rect.width / 2;
+				const y = rect.top + rect.height / 2;
+				const label =
+					control.getAttribute("aria-label") ||
+					control.id ||
+					control.getAttribute("data-testid");
+				if (y < minCentre - 0.5) return [`${label} centred at y ${y}`];
+				// The band's last pixel row; hit testing rounds to whole pixels.
+				const hit = document.elementFromPoint(x, y + below - 1);
+				return hit?.closest(controls) === control
+					? []
+					: [
+							`${label} has under ${below}px of hit area below y ${y}: ${hit?.id || hit?.tagName} is there`,
+						];
+			}),
+		{ controls, minCentre, below },
+	);
+}
+
 export async function openModelPicker(page: Page): Promise<void> {
 	const picker = page.locator("#model-picker");
 	if ((await picker.count()) === 0) {
 		// One locator, not a count-then-pick: a tier change can swap the triggers mid-step.
 		await page
 			.getByTestId(
-				/^(composer-harness-trigger|model-picker-trigger|composer-word-model|composer-words-sheet-trigger)$/,
+				/^(model-picker-trigger|composer-word-model|composer-words-sheet-trigger)$/,
 			)
 			.first()
 			.click();
-		const sheet = page.getByTestId("composer-more-sheet");
-		if (await sheet.isVisible())
-			await page.getByTestId("composer-more-model").click();
 	}
 	await picker.waitFor({ state: "visible", timeout: 5_000 });
 	const back = page.getByTestId("picker-back");
@@ -233,13 +264,12 @@ export async function openModelPicker(page: Page): Promise<void> {
 	await page.getByTestId("picker-row-model").waitFor({ state: "visible" });
 }
 
-export async function openComposerMoreSheet(page: Page): Promise<void> {
-	const sheet = page.getByTestId("composer-more-sheet");
-	if (!(await sheet.isVisible()))
-		await page
-			.getByTestId(/^(model-picker-trigger|composer-words-sheet-trigger)$/)
-			.click();
-	await expect(sheet).toBeVisible();
+export async function openPickerAccounts(page: Page): Promise<void> {
+	const section = page.getByTestId("picker-account-section");
+	if (await section.isVisible()) return;
+	await openModelPicker(page);
+	await page.getByTestId("picker-row-account").click();
+	await expect(section).toBeVisible();
 }
 
 export function exampleValue(

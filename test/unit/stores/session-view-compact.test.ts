@@ -6,7 +6,7 @@
 // store nobody is rendering. Duo poses are covered by duo-pose.test.ts and the
 // duo-pose acceptance feature.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const matchMediaState = vi.hoisted(() => {
 	let matches = false;
@@ -41,6 +41,7 @@ vi.hoisted(() => {
 const {
 	forceBarOpen,
 	isBarCollapsed,
+	isDuoChipRowFolded,
 	noteScrollGesture,
 	noteSessionChanged,
 	publishAtBottom,
@@ -50,9 +51,6 @@ const {
 const { closePanel, openPanel, terminalState } = await import(
 	"../../../src/lib/frontend/stores/terminal.svelte.js"
 );
-const { uiState } = await import(
-	"../../../src/lib/frontend/stores/ui.svelte.js"
-);
 
 beforeEach(() => {
 	matchMediaState.reset();
@@ -60,7 +58,7 @@ beforeEach(() => {
 	publishAtBottom(true);
 	noteSessionChanged();
 	closePanel();
-	uiState.fileViewerOpen = false;
+	sessionViewState.filePreview = null;
 	vi.clearAllMocks();
 });
 
@@ -116,6 +114,41 @@ describe("session bar collapse", () => {
 	});
 });
 
+describe("folded Duo chip row", () => {
+	beforeEach(() => {
+		sessionViewState.compact = true;
+		sessionViewState.pose = "duo-folded-portrait";
+		sessionViewState.keyboardOpen = false;
+	});
+	afterEach(() => {
+		sessionViewState.pose = "desktop";
+		sessionViewState.keyboardOpen = false;
+	});
+
+	it("folds on a downward gesture and unfolds on an upward one", () => {
+		expect(isDuoChipRowFolded()).toBe(false);
+		noteScrollGesture("down");
+		expect(isDuoChipRowFolded()).toBe(true);
+		noteScrollGesture("up");
+		expect(isDuoChipRowFolded()).toBe(false);
+	});
+
+	it("folds while the keyboard is open, even after an upward gesture", () => {
+		noteScrollGesture("up");
+		sessionViewState.keyboardOpen = true;
+		expect(isDuoChipRowFolded()).toBe(true);
+		sessionViewState.keyboardOpen = false;
+		expect(isDuoChipRowFolded()).toBe(false);
+	});
+
+	it("never folds outside the folded portrait", () => {
+		noteScrollGesture("down");
+		sessionViewState.keyboardOpen = true;
+		sessionViewState.pose = "phone";
+		expect(isDuoChipRowFolded()).toBe(false);
+	});
+});
+
 describe("watchViewportPose", () => {
 	it("agrees with Tailwind's md breakpoint", () => {
 		watchViewportPose()();
@@ -152,14 +185,14 @@ describe("watchViewportPose", () => {
 
 	it("keeps open views and the file preview across the breakpoint", () => {
 		const stop = watchViewportPose();
-		sessionViewState.filesOpen = true;
+		sessionViewState.rightPaneView = "files";
 		openPanel();
-		uiState.fileViewerOpen = true;
+		sessionViewState.filePreview = { path: "src/index.ts", root: null };
 		matchMediaState.setMatches(true);
 		matchMediaState.setMatches(false);
-		expect(sessionViewState.filesOpen).toBe(true);
+		expect(sessionViewState.rightPaneView).toBe("files");
 		expect(terminalState.panelOpen).toBe(true);
-		expect(uiState.fileViewerOpen).toBe(true);
+		expect(sessionViewState.filePreview?.path).toBe("src/index.ts");
 		stop();
 	});
 

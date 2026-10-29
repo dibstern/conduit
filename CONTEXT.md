@@ -362,6 +362,17 @@ that outcome; the message projection stores it as `completed` or `error`.
 The stored-event decoder fills a missing outcome from legacy
 `metadata.isError === true`, so existing events need no migration.
 
+## Tool File Change
+
+A **Tool File Change** is a provider-reported change to one path, recorded in
+`tool.completed.fileChanges`. Its kind is `add`, `update`, `delete` or `move`;
+a move also names its old path. It retains the provider's patch text or supplied
+before/after text. Edit text can describe only the replaced fragment. These
+records are tool evidence, not snapshots of disk state or proof of shell writes.
+An absent field falls back to one pure derivation from canonical tool input for
+successful completed tools. An empty array explicitly records no file changes.
+Existing events need no migration.
+
 ## Sidebar Overlay
 
 **Sidebar Overlay** is sidebar state that is deliberately not a canonical

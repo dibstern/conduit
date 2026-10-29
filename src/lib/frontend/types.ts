@@ -8,7 +8,12 @@
 import type { AttachmentSource } from "../contracts/attachment-ref.js";
 import type { SurfacingMark } from "../contracts/category-set.js";
 import type { ProjectSetupState } from "../contracts/project-setup.js";
-import type { InputCut, Utf8Bytes } from "../contracts/tool-wire.js";
+import type { ToolFileChange } from "../contracts/stored-event.js";
+import type {
+	InputCut,
+	ToolPresentation,
+	Utf8Bytes,
+} from "../contracts/tool-wire.js";
 
 export type { DraftListItem } from "../contracts/ws-rpc.js";
 
@@ -165,6 +170,7 @@ export interface ThinkingMessage {
 export interface ToolPreview {
 	readonly inputCuts?: readonly InputCut[];
 	readonly resultBytes?: Utf8Bytes;
+	readonly fileChangesBytes?: Utf8Bytes;
 }
 
 export interface ToolMessage {
@@ -176,6 +182,8 @@ export interface ToolMessage {
 	input?: unknown;
 	status: ToolStatus;
 	outcome?: "succeeded" | "failed";
+	fileChanges?: readonly ToolFileChange[];
+	presentation?: ToolPresentation;
 	result?: string;
 	isError?: boolean;
 	/** Set while `input` or `result` is a preview: each cut field's full size.

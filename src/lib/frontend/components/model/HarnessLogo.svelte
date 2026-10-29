@@ -11,7 +11,7 @@
 		driver: ProviderDriverKind;
 		instanceId?: string | undefined;
 		/** The tile's edge; the mark inside is 60% of it, as in the Final design. */
-		size: 15 | 18;
+		size: 15 | 16 | 18 | 26;
 		aligned?: boolean | undefined;
 		spinning?: boolean | undefined;
 		"data-testid"?: string;

@@ -92,99 +92,107 @@ describe("WsRpcServerLayer GetAgents", () => {
 				})),
 			});
 
-			return Effect.gen(function* () {
-				yield* Effect.tryPromise(() =>
-					saveDaemonConfig(
-						{
-							pid: process.pid,
-							port: 2633,
-							pinHash: null,
-							tls: false,
-							debug: false,
-							keepAwake: false,
-							projects: [],
-							instances: [
-								{
-									id: "opencode-work",
-									name: "OpenCode Work",
-									port: 4096,
-									managed: false,
-									driver: "opencode",
-								},
-								{
-									id: "claude-work",
-									name: "Claude Work",
-									port: 0,
-									managed: false,
-									driver: "claude",
-								},
-							],
-						},
-						configDir,
-					),
-				);
-				const client = yield* RpcTest.makeClient(WsRpcGroup);
-				const claudeResult = yield* client.GetAgents({
-					projectSlug: "project-a",
-					instanceId: "claude-work",
-				});
-				const openCodeResult = yield* client.GetAgents({
-					projectSlug: "project-a",
-					instanceId: "opencode-work",
-				});
+			// makeTestHandlerLayer reads configured instances when called, so save first.
+			return Effect.tryPromise(() =>
+				saveDaemonConfig(
+					{
+						pid: process.pid,
+						port: 2633,
+						pinHash: null,
+						tls: false,
+						debug: false,
+						keepAwake: false,
+						projects: [],
+						instances: [
+							{
+								id: "opencode-work",
+								name: "OpenCode Work",
+								port: 4096,
+								managed: false,
+								driver: "opencode",
+							},
+							{
+								id: "claude-work",
+								name: "Claude Work",
+								port: 0,
+								managed: false,
+								driver: "claude",
+							},
+						],
+					},
+					configDir,
+				),
+			).pipe(
+				Effect.andThen(() =>
+					Effect.gen(function* () {
+						const client = yield* RpcTest.makeClient(WsRpcGroup);
+						const claudeResult = yield* client.GetAgents({
+							projectSlug: "project-a",
+							instanceId: "claude-work",
+						});
+						const openCodeResult = yield* client.GetAgents({
+							projectSlug: "project-a",
+							instanceId: "opencode-work",
+						});
 
-				expect(claudeResult).toEqual({
-					projectSlug: "test-project",
-					instanceId: "claude-work",
-					providerScope: { id: "claude", name: "Claude" },
-					agents: [
-						{ id: "Explore", name: "Explore", description: "Claude only" },
-					],
-					hiddenAgents: [],
-				});
-				expect(openCodeResult).toEqual({
-					projectSlug: "test-project",
-					instanceId: "opencode-work",
-					providerScope: { id: "opencode", name: "OpenCode" },
-					agents: [{ id: "build", name: "build" }],
-					hiddenAgents: [],
-				});
-				expect(api.app.agents).toHaveBeenCalledOnce();
-			}).pipe(
-				Effect.scoped,
-				Effect.provide(
-					WsRpcServerLayer.pipe(
-						Layer.provideMerge(
-							makeTestHandlerLayer({
-								api,
-								orchestrationEngine,
-								accountDirectory: makeMockAccountDirectory([
-									{
-										id: AccountIdSchema.make("claude"),
-										name: "Claude",
-										driver: "claude",
-										folder: configuredClaudeConfigDir(join(configDir, "login")),
-										usageEligible: true,
-									},
-									{
-										id: AccountIdSchema.make("claude-work"),
-										name: "Work",
-										driver: "claude",
-										folder: configuredClaudeConfigDir(join(configDir, "work")),
-										usageEligible: true,
-									},
-									{
-										id: AccountIdSchema.make("opencode-work"),
-										name: "OpenCode work",
-										driver: "opencode",
-										usageEligible: false,
-									},
-								]),
-								config: makeMockConfig({ configDir }),
-							}),
+						expect(claudeResult).toEqual({
+							projectSlug: "test-project",
+							instanceId: "claude-work",
+							providerScope: { id: "claude", name: "Claude" },
+							agents: [
+								{ id: "Explore", name: "Explore", description: "Claude only" },
+							],
+							hiddenAgents: [],
+						});
+						expect(openCodeResult).toEqual({
+							projectSlug: "test-project",
+							instanceId: "opencode-work",
+							providerScope: { id: "opencode", name: "OpenCode" },
+							agents: [{ id: "build", name: "build" }],
+							hiddenAgents: [],
+						});
+						expect(api.app.agents).toHaveBeenCalledOnce();
+					}).pipe(
+						Effect.scoped,
+						Effect.provide(
+							WsRpcServerLayer.pipe(
+								Layer.provideMerge(
+									makeTestHandlerLayer({
+										api,
+										orchestrationEngine,
+										accountDirectory: makeMockAccountDirectory([
+											{
+												id: AccountIdSchema.make("claude"),
+												name: "Claude",
+												driver: "claude",
+												folder: configuredClaudeConfigDir(
+													join(configDir, "login"),
+												),
+												usageEligible: true,
+											},
+											{
+												id: AccountIdSchema.make("claude-work"),
+												name: "Work",
+												driver: "claude",
+												folder: configuredClaudeConfigDir(
+													join(configDir, "work"),
+												),
+												usageEligible: true,
+											},
+											{
+												id: AccountIdSchema.make("opencode-work"),
+												name: "OpenCode work",
+												driver: "opencode",
+												usageEligible: false,
+											},
+										]),
+										config: makeMockConfig({ configDir }),
+									}),
+								),
+							),
+							{ local: true },
 						),
 					),
-					{ local: true },
 				),
 			);
 		},

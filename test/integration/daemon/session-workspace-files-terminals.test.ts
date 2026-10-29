@@ -74,6 +74,7 @@ describe("Session workspace files and terminals through the built daemon", () =>
 		evidence = {};
 		harness = ProcessHarness.create({
 			managedOpenCode: true,
+			managedOpenCodeId: "opencode",
 			claudeReplay: { turns: ["pong-thinking-text-turn"], delayMs: 0 },
 		});
 		git(harness.projectDir, "init", "-b", "main");

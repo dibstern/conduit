@@ -130,7 +130,7 @@ export const SSEStreamLive: Layer.Layer<
 		const log = config.log;
 		const scope = yield* Effect.scope;
 		const gate = yield* Semaphore.make(1);
-		// The relay view tags the selected instance with the default id.
+		// The main channel belongs to managed OpenCode; other accounts keep their ids.
 		const selectedId = MANAGED_OPENCODE_ACCOUNT_ID;
 		const main = makeChannel(log);
 		const others = new Map<string, ReturnType<typeof makeChannel>>();
@@ -149,11 +149,7 @@ export const SSEStreamLive: Layer.Layer<
 					const retired = yield* retireReplacedPrompts(
 						message.providerProcessId,
 						{
-							providerInstanceIds:
-								message.instanceId ===
-								(config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID)
-									? [message.instanceId, MANAGED_OPENCODE_ACCOUNT_ID]
-									: [message.instanceId],
+							providerInstanceIds: [message.instanceId],
 						},
 					).pipe(
 						Effect.tapError((error) =>

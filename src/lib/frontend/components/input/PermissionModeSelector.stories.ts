@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
+import {
+	composerPickerState,
+	openPicker,
+} from "../../stores/composer-picker.svelte.js";
 import { approvals } from "../../stores/composer-settings.svelte.js";
 import {
 	applyGetModelsResponse,
@@ -17,6 +21,7 @@ import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import type { SessionPermissionMode } from "../../types.js";
+import ComposerControlWithPicker from "../model/__fixtures__/ComposerControlWithPicker.svelte";
 import PermissionModeSelector from "./PermissionModeSelector.svelte";
 
 function viewport(width: number): () => void {
@@ -100,32 +105,54 @@ async function assertMode(
 	);
 }
 
+// The phone panel is a native <dialog>: a synthetic Escape never reaches the
+// browser's cancel handler, so dispatch cancel there and Escape on desktop.
+async function closePanel(canvasElement: HTMLElement): Promise<void> {
+	const sheet = canvasElement.ownerDocument.querySelector("dialog[open]");
+	if (sheet) sheet.dispatchEvent(new Event("cancel", { cancelable: true }));
+	else await userEvent.keyboard("{Escape}");
+}
+
+// Room for the desktop panel inside the captured root. The phone panel is a
+// full-screen sheet, so stretching the root there only adds empty space.
+function framePicker(canvasElement: HTMLElement): void {
+	if (sessionViewState.compact) return;
+	canvasElement.style.minHeight = "calc(100vh - 32px)";
+	canvasElement.style.display = "flex";
+	canvasElement.style.alignItems = "flex-end";
+}
+
 async function selectMode(
 	canvasElement: HTMLElement,
 	mode: SessionPermissionMode,
 ) {
+	framePicker(canvasElement);
 	const canvas = within(canvasElement);
 	const body = within(canvasElement.ownerDocument.body);
 	await userEvent.click(canvas.getByTestId("permission-mode-badge"));
-	await userEvent.click(
-		await body.findByTestId(`permission-mode-option-${mode}`),
-	);
-	await waitFor(() =>
-		expect(
-			body.queryByTestId("permission-mode-dropdown"),
-		).not.toBeInTheDocument(),
-	);
+	await userEvent.click(await body.findByTestId(`picker-permission-${mode}`));
+	await expect(body.getByRole("heading", { name: "Session" })).toBeVisible();
 	await assertMode(canvasElement, mode);
+	await closePanel(canvasElement);
+	await waitFor(() =>
+		expect(body.queryByTestId("model-picker")).not.toBeInTheDocument(),
+	);
 }
 
 const meta = {
 	title: "Input/PermissionModeSelector",
 	component: PermissionModeSelector,
+	render: (args) => ({
+		Component: ComposerControlWithPicker,
+		props: { ...args, control: "permissions" },
+	}),
 	tags: ["autodocs"],
 	globals: { theme: "dark" },
 	parameters: { layout: "centered" },
-	beforeEach: () => {
+	beforeEach: ({ canvasElement }) => {
+		const previousStyle = canvasElement.getAttribute("style");
 		const previousSession = sessionState.currentId;
+		composerPickerState.request = null;
 		const previousInstances = instanceState.instances;
 		const restoreViewport = viewport(1280);
 		clearDiscoveryState();
@@ -133,16 +160,19 @@ const meta = {
 		seedModel("claude");
 		setMode("ask");
 		return () => {
+			composerPickerState.request = null;
 			restoreViewport();
 			clearDiscoveryState();
 			openSessionForSetup(previousSession);
 			instanceState.instances = previousInstances;
+			if (previousStyle === null) canvasElement.removeAttribute("style");
+			else canvasElement.setAttribute("style", previousStyle);
 		};
 	},
 } satisfies Meta<typeof PermissionModeSelector>;
 
 export default meta;
-type Story = StoryObj<typeof meta>;
+type Story = StoryObj<typeof PermissionModeSelector>;
 
 export const Default: Story = {
 	play: async ({ canvasElement }) => {
@@ -171,25 +201,27 @@ export const AutoApprove: Story = {
 export const DropdownOpen: Story = {
 	tags: ["viewport-capture"],
 	play: async ({ canvasElement }) => {
+		framePicker(canvasElement);
 		await userEvent.click(
 			within(canvasElement).getByTestId("permission-mode-badge"),
 		);
-		const menu = within(canvasElement.ownerDocument.body).getByTestId(
-			"permission-mode-dropdown",
+		const panel = within(canvasElement.ownerDocument.body).getByTestId(
+			"model-picker",
 		);
-		await expect(menu).toBeVisible();
-		await expect(menu).toHaveAttribute("role", "menu");
-		await expect(within(menu).getAllByRole("separator")).toHaveLength(1);
+		await expect(panel).toBeVisible();
 		await expect(
-			within(menu).getByTestId("permission-mode-option-ask"),
-		).toHaveAttribute("aria-checked", "true");
+			within(panel).getByRole("heading", { name: "Permissions" }),
+		).toBeVisible();
 		await expect(
-			within(menu)
-				.getAllByRole("menuitemradio")
+			within(panel).getByTestId("picker-permission-ask"),
+		).toHaveAttribute("aria-pressed", "true");
+		await expect(
+			within(panel)
+				.getAllByTestId(/^picker-permission-/)
 				.map((item) => item.getAttribute("data-testid")),
-		).toEqual(ranked.map(([mode]) => `permission-mode-option-${mode}`));
+		).toEqual(ranked.map(([mode]) => `picker-permission-${mode}`));
 		for (const [mode, label, description, claudeOnly] of ranked) {
-			const item = within(menu).getByTestId(`permission-mode-option-${mode}`);
+			const item = within(panel).getByTestId(`picker-permission-${mode}`);
 			await expect(within(item).getByText(label)).toBeVisible();
 			await expect(within(item).getByText(description)).toBeVisible();
 			await expect(within(item).queryByText("Claude") !== null).toBe(
@@ -197,32 +229,17 @@ export const DropdownOpen: Story = {
 			);
 		}
 		const colours = ranked.map(([mode]) => {
-			const icon = within(menu)
-				.getByTestId(`permission-mode-option-${mode}`)
+			const icon = within(panel)
+				.getByTestId(`picker-permission-${mode}`)
 				.querySelector("svg");
 			if (!icon) throw new Error(`Missing permission icon for ${mode}`);
 			return getComputedStyle(icon).color;
 		});
 		await expect(new Set(colours).size).toBe(6);
-		const selected = within(menu).getByTestId("permission-mode-option-ask");
-		await expect(getComputedStyle(menu).paddingTop).toBe("6px");
-		await expect(getComputedStyle(menu).borderRadius).toBe("16px");
-		await expect(getComputedStyle(selected).borderRadius).toBe("10px");
-		const probe = document.createElement("span");
-		probe.style.cssText =
-			"color:var(--color-text);background:color-mix(in oklab, var(--color-accent) 14%, transparent)";
-		menu.append(probe);
-		await expect(getComputedStyle(selected).color).toBe(
-			getComputedStyle(probe).color,
-		);
-		await expect(getComputedStyle(selected).backgroundColor).toBe(
-			getComputedStyle(probe).backgroundColor,
-		);
-		probe.remove();
 		const masks = new Set<string>();
 		for (const [mode] of ranked) {
-			const icon = within(menu)
-				.getByTestId(`permission-mode-option-${mode}`)
+			const icon = within(panel)
+				.getByTestId(`picker-permission-${mode}`)
 				.querySelector("svg");
 			const body = icon?.querySelector('[data-part="body"]');
 			const mask = icon?.querySelector("mask");
@@ -306,20 +323,21 @@ export const PhoneHoldMenu: Story = {
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
+		framePicker(canvasElement);
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		await userEvent.click(badge);
-		const menu = body.getByTestId("permission-mode-dropdown");
-		await expect(menu).toBeVisible();
+		const panel = body.getByTestId("model-picker");
+		await expect(panel).toBeVisible();
 		await assertMode(canvasElement, "acceptEdits");
-		await expect(menu).toBeVisible();
+		await expect(panel).toBeVisible();
 		await expect(
-			within(menu)
-				.getAllByRole("menuitemradio")
+			within(panel)
+				.getAllByTestId(/^picker-permission-/)
 				.map((item) => item.getAttribute("data-testid")),
-		).toEqual(ranked.map(([mode]) => `permission-mode-option-${mode}`));
+		).toEqual(ranked.map(([mode]) => `picker-permission-${mode}`));
 		for (const [mode, label, description, claudeOnly] of ranked) {
-			const item = within(menu).getByTestId(`permission-mode-option-${mode}`);
+			const item = within(panel).getByTestId(`picker-permission-${mode}`);
 			await expect(within(item).getByText(label)).toBeVisible();
 			await expect(within(item).getByText(description)).toBeVisible();
 			await expect(within(item).queryByText("Claude") !== null).toBe(
@@ -335,21 +353,20 @@ export const PhoneSelectCloses: Story = {
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
+		framePicker(canvasElement);
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		badge.focus();
 		await userEvent.keyboard("{Enter}");
-		await expect(body.getByTestId("permission-mode-dropdown")).toBeVisible();
-		await userEvent.click(body.getByTestId("permission-mode-option-full"));
+		await expect(body.getByTestId("model-picker")).toBeVisible();
+		await userEvent.click(body.getByTestId("picker-permission-full"));
 		await assertMode(canvasElement, "full");
-		await waitFor(() =>
-			expect(
-				body.queryByTestId("permission-mode-dropdown"),
-			).not.toBeInTheDocument(),
-		);
-		await waitFor(async () => {
-			await expect(badge).toHaveFocus();
-		});
+		await expect(body.getByRole("heading", { name: "Session" })).toBeVisible();
+		await expect(
+			body.queryByTestId("picker-permission-full"),
+		).not.toBeInTheDocument();
+		await closePanel(canvasElement);
+		await waitFor(() => expect(badge).toHaveFocus());
 	},
 };
 
@@ -359,25 +376,22 @@ export const PhoneKeyboard: Story = {
 		return viewport(393);
 	},
 	play: async ({ canvasElement }) => {
+		framePicker(canvasElement);
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		badge.focus();
 		await userEvent.keyboard("{Enter}");
-		await expect(body.getByTestId("permission-mode-dropdown")).toBeVisible();
+		await expect(body.getByTestId("model-picker")).toBeVisible();
 		await assertMode(canvasElement, "acceptEdits");
-		await userEvent.keyboard("{Escape}");
+		await closePanel(canvasElement);
 		await waitFor(() =>
-			expect(
-				body.queryByTestId("permission-mode-dropdown"),
-			).not.toBeInTheDocument(),
+			expect(body.queryByTestId("model-picker")).not.toBeInTheDocument(),
 		);
 		await userEvent.keyboard(" ");
-		await expect(body.getByTestId("permission-mode-dropdown")).toBeVisible();
-		await userEvent.keyboard("{Escape}");
+		await expect(body.getByTestId("model-picker")).toBeVisible();
+		await closePanel(canvasElement);
 		await waitFor(() =>
-			expect(
-				body.queryByTestId("permission-mode-dropdown"),
-			).not.toBeInTheDocument(),
+			expect(body.queryByTestId("model-picker")).not.toBeInTheDocument(),
 		);
 	},
 };
@@ -423,22 +437,26 @@ export const OpenCodeNormalizesAuto: Story = {
 };
 
 export const Pending: Story = {
-	// play() ends with the menu open to show its disabled options.
+	// Leave Permissions open to show its disabled options.
 	tags: ["viewport-capture"],
 	beforeEach: () => pendingApprovals(),
 	play: async ({ canvasElement }) => {
+		framePicker(canvasElement);
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(badge).toHaveAttribute("aria-busy", "true");
 		await expect(badge).toHaveAttribute("aria-disabled", "true");
+		// A pending change makes the trigger inert; the open panel still shows it.
 		await userEvent.click(badge);
+		await expect(body.queryByTestId("model-picker")).not.toBeInTheDocument();
+		openPicker("permissions");
 		await assertMode(canvasElement, "ask");
-		const menu = body.getByTestId("permission-mode-dropdown");
-		await expect(menu).toBeVisible();
-		for (const item of within(menu).getAllByRole("menuitemradio")) {
-			await expect(item).toHaveAttribute("aria-disabled", "true");
+		const panel = await body.findByTestId("model-picker");
+		await expect(panel).toBeVisible();
+		for (const item of within(panel).getAllByTestId(/^picker-permission-/)) {
+			await expect(item).toBeDisabled();
 		}
-		body.getByTestId("permission-mode-option-full").click();
+		body.getByTestId("picker-permission-full").click();
 		await tick();
 		await assertMode(canvasElement, "ask");
 	},
@@ -455,22 +473,23 @@ export const PhonePending: Story = {
 		};
 	},
 	play: async ({ canvasElement }) => {
+		framePicker(canvasElement);
 		const badge = within(canvasElement).getByTestId("permission-mode-badge");
 		const body = within(canvasElement.ownerDocument.body);
 		await expect(badge).toHaveAttribute("aria-busy", "true");
 		await userEvent.click(badge);
+		await expect(body.queryByTestId("model-picker")).not.toBeInTheDocument();
+		openPicker("permissions");
 		await assertMode(canvasElement, "plan");
-		const menu = body.getByTestId("permission-mode-dropdown");
-		await expect(menu).toBeVisible();
-		for (const item of within(menu).getAllByRole("menuitemradio"))
-			await expect(item).toHaveAttribute("aria-disabled", "true");
-		body.getByTestId("permission-mode-option-full").click();
+		const panel = await body.findByTestId("model-picker");
+		await expect(panel).toBeVisible();
+		for (const item of within(panel).getAllByTestId(/^picker-permission-/))
+			await expect(item).toBeDisabled();
+		body.getByTestId("picker-permission-full").click();
 		await assertMode(canvasElement, "plan");
-		await userEvent.keyboard("{Escape}");
+		await closePanel(canvasElement);
 		await waitFor(() =>
-			expect(
-				body.queryByTestId("permission-mode-dropdown"),
-			).not.toBeInTheDocument(),
+			expect(body.queryByTestId("model-picker")).not.toBeInTheDocument(),
 		);
 	},
 };

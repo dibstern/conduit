@@ -123,7 +123,10 @@ describe("turn-only Stop interactions", () => {
 							.filter(([event]) => event.type === "tool.completed")
 							.map(([event]) => event.data),
 					).toContainEqual(
-						expect.objectContaining({ partId: "foreground-tool" }),
+						expect.objectContaining({
+							partId: "foreground-tool",
+							fileChanges: [],
+						}),
 					);
 					expect(
 						push.mock.calls.filter(([event]) => event.type === "turn.error"),

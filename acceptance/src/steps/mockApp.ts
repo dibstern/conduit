@@ -421,7 +421,6 @@ export const mockAppHandlers: StepHandler[] = [
 					!("sessionId" in payload) || payload.sessionId !== sessionId
 						? previous(payload)
 						: {
-								defaultOpenCodeInstanceId: "opencode",
 								projectSlug: "myapp",
 								instanceId,
 								providers: [],
@@ -469,10 +468,10 @@ export const mockAppHandlers: StepHandler[] = [
 				"data-shown-context-window",
 				match[3] === "none" ? "" : (match[3] ?? ""),
 			);
-			const effortRow = world.page.getByTestId("picker-row-effort");
-			await expect(effortRow).toContainText("high");
-			await expect(effortRow).toHaveAttribute("aria-disabled", "true");
-			await expect(effortRow.getByRole("radio")).toHaveCount(0);
+			const effortSelection = world.page.getByTestId("picker-row-effort");
+			await expect(effortSelection).toContainText("high");
+			await expect(effortSelection).toHaveAttribute("aria-disabled", "true");
+			await expect(effortSelection.getByRole("radio")).toHaveCount(0);
 			if (match[3] !== "none") {
 				await expect(
 					world.page.getByTestId("picker-row-context"),
@@ -485,7 +484,7 @@ export const mockAppHandlers: StepHandler[] = [
 		match:
 			/^the (wide|narrow|phone) (icons|words) composer shows its stored effort without offered choices$/,
 		run: async ({ world, match }) => {
-			// A phone composer keeps effort in its sheet's effort row.
+			// The Session panel keeps stored effort visible without offered choices.
 			if (match[1] === "phone") {
 				await expect(world.page.getByTestId("picker-row-effort")).toContainText(
 					/high/i,
@@ -790,7 +789,6 @@ export const mockAppHandlers: StepHandler[] = [
 								),
 							});
 						return {
-							defaultOpenCodeInstanceId: "opencode",
 							projectSlug: "myapp",
 							...(instanceId ? { instanceId } : {}),
 							providers:

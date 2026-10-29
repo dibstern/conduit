@@ -12,7 +12,10 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 const defaultId = AccountIdSchema.make("claude");
-const artifacts = resolve("test-results/settings-default-claude-account");
+const artifacts = resolve(
+	process.env["CONDUIT_E2E_ARTIFACTS"] ?? "test-results",
+	"settings-default-claude-account",
+);
 const test = base.extend<{
 	harness: ProcessHarness;
 	serviceEnvironment: Pick<NodeJS.ProcessEnv, "CONDUIT_SERVICE">;

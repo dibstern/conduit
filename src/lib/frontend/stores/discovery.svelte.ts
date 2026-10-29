@@ -3,6 +3,7 @@
 import { Effect, Fiber, Result, Stream } from "effect";
 import { untrack } from "svelte";
 import { accountRefFromSelection } from "../../account-directory.js";
+import type { AccountRef } from "../../contracts/account.js";
 import type { DefaultSessionMode } from "../../contracts/project-file.js";
 import {
 	type BrowserDriverTraits,
@@ -12,6 +13,7 @@ import {
 	type ProviderDriverKind,
 	type ProviderSessionCapabilities,
 } from "../../contracts/provider-instance.js";
+import { openCodeStartSelection } from "../../contracts/start-selection.js";
 import type { TitleGenerationState } from "../../contracts/title-generation.js";
 import {
 	catalogFromProviderList,
@@ -142,9 +144,13 @@ const providersFromGetModelsResponse = (
 		})),
 	}));
 
-// The composer's harness picker selects a provider *instance*. Default
-// instances come from the daemon's isDefault flags. Catalogue groups remain
-// keyed by driver; an explicit provider.instanceId keeps its own account.
+// Catalogue groups remain keyed by driver; an explicit provider.instanceId
+// keeps its own account.
+
+/** An exact account id, or a driver's default account. */
+export type InstanceSelection =
+	| string
+	| { readonly driver: ProviderDriverKind };
 
 export interface InstanceOption {
 	readonly id: string;
@@ -252,7 +258,6 @@ const commandCatalogs = $state<
 >({});
 // Pruning entries must never reuse an issue number held by an in-flight read.
 let catalogReadIssue = 0;
-const projectCatalogDefaults = $state<Record<string, string>>({});
 const noModels = emptyModels();
 const noAgents = emptyAgents();
 
@@ -304,6 +309,23 @@ function providersFor(scope = catalogScope()): ProviderInfo[] {
 function agentsFor(scope = catalogScope()) {
 	return agentCatalogs[scope.key] ?? noAgents;
 }
+
+/** Keep the current account's merged catalog; use an account-scoped catalog for others. */
+export function getModelProvidersForInstance(
+	instanceId: string | undefined,
+	project = getCurrentSlug() ?? "",
+): readonly Immutable<ProviderInfo>[] {
+	if (!instanceId) return providersFor();
+	const scope = catalogScope(null, instanceId, project);
+	const current = catalogScope();
+	return providersFor(
+		current.project === project &&
+			discoveryState.catalogAccountId === instanceId
+			? current
+			: scope,
+	);
+}
+
 export function getModelCatalogForInstance(
 	instanceId: string,
 	project = getCurrentSlug() ?? "",
@@ -404,6 +426,7 @@ export function watchCatalogs(): () => void {
 				for (const held of Object.keys(draftModels))
 					if (held !== key) delete draftModels[held];
 				const scope = catalogScope();
+				draftModelKey = key;
 				if (connected && scope.project === attached && selection.scope !== null)
 					void readCatalogs(scope, "models-agents");
 			});
@@ -475,6 +498,10 @@ const draft = $state<{
 }>({ instanceId: null, driver: null, permissionMode: "ask" });
 const draftModels = $state<Record<string, DraftPick["model"] | null>>({});
 const draftModel = $derived(draftModels[catalogScope().key] ?? null);
+// Snapshot listeners run after the effective account, and therefore its key, changes.
+let draftModelKey: string | undefined;
+/** Draft keys holding a model carried from another account before their catalogue loaded. */
+const unverifiedCarries = new Set<string>();
 let draftPermissionChosen = $state(false);
 /** Like the permission mode, an untouched draft pick follows the server default. */
 let draftPickChosen = false;
@@ -483,7 +510,14 @@ let draftAccountChosen = false;
 const modelMemory = new Map<string, Map<string, DraftPick["model"]>>();
 accountSnapshotChangedListeners.add(() => {
 	const pinned = draft.instanceId;
-	const model = draftModel;
+	const model = draftModels[draftModelKey ?? catalogScope().key];
+	// A chosen model follows the account when its catalogue has it; an unread catalogue revalidates on arrival.
+	const carries = (instanceId: string, picked: DraftPick["model"]) => {
+		if (!draftPickChosen) return false;
+		if (modelsFor().loaded) return draftModelFits(instanceId, picked);
+		unverifiedCarries.add(catalogScope().key);
+		return true;
+	};
 	// A removed account, or an unpicked draft account, falls back to its driver's default.
 	if (
 		pinned &&
@@ -494,12 +528,15 @@ accountSnapshotChangedListeners.add(() => {
 		draft.instanceId = null;
 		const next = getEffectiveInstanceId();
 		if (next === pinned) draft.instanceId = pinned;
-		else if (next && model && draftPickChosen) {
-			// A chosen model follows the account; the account's catalogue read revalidates it.
+		else if (next && model && carries(next, model)) {
 			draft.instanceId = next;
 			draftModels[catalogScope().key] = model;
 		} else draftModels[catalogScope().key] = null;
+	} else if (!pinned && draft.driver !== null && model) {
+		const next = getEffectiveInstanceId();
+		if (next && carries(next, model)) draftModels[catalogScope().key] = model;
 	}
+	draftModelKey = catalogScope().key;
 	fillDraftDefault();
 });
 
@@ -598,20 +635,7 @@ export function getDraftPick(): Immutable<DraftPick> | undefined {
 		(draftModelInventory.loading || draftModelInventory.error)
 	)
 		return undefined;
-	if (!draftModel || !instanceId) return undefined;
-	if (
-		Result.isFailure(
-			resolveTurnSettings(
-				{
-					harness: draftDriver(instanceId),
-					model: draftModel,
-					effort: draftModel.variant,
-					contextWindow: draftModel.contextWindow,
-				},
-				catalogFromProviderList(getModelCatalogForInstance(instanceId)),
-			),
-		)
-	)
+	if (!draftModel || !instanceId || !draftModelFits(instanceId, draftModel))
 		return undefined;
 	return {
 		instanceId,
@@ -815,6 +839,12 @@ export const discoveryState = {
 	},
 	get providers(): readonly Immutable<ProviderInfo>[] {
 		return providersFor();
+	},
+	get catalogAccountId(): string | undefined {
+		const scope = catalogScope();
+		return scope.sessionId
+			? getSessionInstanceId(scope.sessionId) || undefined
+			: scope.instanceId;
 	},
 	get sessionProviderIds(): Readonly<Record<string, string>> {
 		return serverDiscovery.sessionProviderIds;
@@ -1109,28 +1139,58 @@ export function getProviderGroupsForInstance(
 	);
 }
 
-/** Hold a live draft account; removed accounts fall back to their driver's default. */
-export function getEffectiveInstanceId(): string | undefined {
+/** Resolve the saved default against the currently published account health. */
+export function defaultInstanceFor(
+	driver: ProviderDriverKind | undefined,
+): InstanceOption | undefined {
 	const available = getAvailableInstances();
-	if (draft.instanceId !== null)
-		return available.find((account) => account.id === draft.instanceId)?.id;
-	const provider = discoveryState.defaultProviderId;
-	const driver = draft.driver ?? driverForProvider(provider);
-	const defaultOpenCodeInstanceId =
-		projectCatalogDefaults[getCurrentSlug() ?? ""];
-	if (
-		getDriverTraits(driver)?.runsOpenCodeServer &&
-		defaultOpenCodeInstanceId &&
-		available.some(
-			(account) =>
-				account.id === defaultOpenCodeInstanceId && account.driver === driver,
-		)
-	)
-		return defaultOpenCodeInstanceId;
+	if (driver === "opencode") {
+		const { account } = openCodeStartSelection(
+			instanceState.instances,
+			new Map(instanceState.instances.map(({ id, status }) => [id, status])),
+		);
+		return available.find((instance) => instance.id === account.id);
+	}
 	return available.find(
 		(account) =>
 			account.isDefault && (driver === undefined || account.driver === driver),
-	)?.id;
+	);
+}
+
+/** A harness pick follows its usable default, falling back only when unusable. */
+export function accountRefForSelection(
+	selection: InstanceSelection,
+): AccountRef | undefined {
+	const available = getAvailableInstances();
+	if (typeof selection === "string") {
+		// An exact pick pins its account even when unknown, so it stays unroutable.
+		if (available.some((account) => account.id === selection))
+			return { _tag: "Id", id: selection };
+		const ref = accountRefFromSelection({ providerId: selection });
+		return ref._tag === "DriverDefault"
+			? accountRefForSelection({ driver: ref.driver })
+			: ref;
+	}
+	if (defaultInstanceFor(selection.driver)?.available === false) {
+		const usable = available.find(
+			(account) =>
+				account.driver === selection.driver && account.available !== false,
+		);
+		if (usable) return { _tag: "Id", id: usable.id };
+	}
+	return isKnownDriverKind(selection.driver)
+		? { _tag: "DriverDefault", driver: selection.driver }
+		: undefined;
+}
+
+/** Hold a live draft account; removed accounts fall back to their driver's default. */
+export function getEffectiveInstanceId(): string | undefined {
+	if (draft.instanceId !== null)
+		return getAvailableInstances().find(
+			(account) => account.id === draft.instanceId,
+		)?.id;
+	const provider = discoveryState.defaultProviderId;
+	return defaultInstanceFor(draft.driver ?? driverForProvider(provider))?.id;
 }
 
 /** The server's session snapshot publishes the directory's effective account. */
@@ -1145,6 +1205,23 @@ function draftDriver(instanceId: string | undefined): KnownProviderDriverKind {
 	return isKnownDriverKind(driver) ? driver : "opencode";
 }
 
+function draftModelFits(
+	instanceId: string,
+	model: DraftPick["model"],
+): boolean {
+	return Result.isSuccess(
+		resolveTurnSettings(
+			{
+				harness: draftDriver(instanceId),
+				model,
+				effort: model.variant,
+				contextWindow: model.contextWindow,
+			},
+			catalogFromProviderList(getModelCatalogForInstance(instanceId)),
+		),
+	);
+}
+
 /** Fill only an empty draft from the selected harness's resolved default. */
 function fillDraftDefault(): void {
 	if (
@@ -1157,12 +1234,6 @@ function fillDraftDefault(): void {
 	const instanceId = getEffectiveInstanceId();
 	if (!instanceId) return;
 	const defaults = serverDiscovery.harnessDefaults[draftDriver(instanceId)];
-	if (
-		draft.instanceId === null &&
-		getInstanceTraits(instanceId)?.runsOpenCodeServer &&
-		projectCatalogDefaults[getCurrentSlug() ?? ""] === undefined
-	)
-		return;
 	if (defaults.status !== "ok" || !defaults.pick) return;
 	const catalog = catalogFromProviderList(
 		getModelCatalogForInstance(instanceId),
@@ -1183,6 +1254,7 @@ function fillDraftDefault(): void {
 		defaults.pick,
 		defaults.pick.effort,
 		defaults.pick.contextWindow,
+		catalogScope(null, instanceId),
 	);
 }
 
@@ -1246,43 +1318,51 @@ function setDraftModel(
 		draft.instanceId = instanceId;
 		draft.driver = harness;
 	}
+	unverifiedCarries.delete(target.key);
 	draftModels[target.key] = {
 		...resolved.success.model,
 		variant: resolved.success.effort,
 		contextWindow: resolved.success.contextWindow,
 	};
+	if (target.key === catalogScope().key) draftModelKey = target.key;
 	// Prefilling a harness default must not erase this model's browser memory.
 	if ((effort === undefined && contextWindow === undefined) || !remembered)
 		rememberDraftModel(target);
 }
 
-/** A different instance starts with its own default, never a neighboring model. */
-export function selectInstance(instanceId: string): void {
-	draftPickChosen = true;
-	draftAccountChosen = true;
-	const available = getAvailableInstances();
-	const ref = accountRefFromSelection({ providerId: instanceId });
-	const selected =
-		available.find((account) => account.id === instanceId) ??
-		(ref._tag === "DriverDefault"
-			? available.find(
-					(account) => account.driver === ref.driver && account.isDefault,
-				)
-			: undefined);
-	if (!selected) {
-		draft.instanceId = ref._tag === "Id" ? instanceId : null;
-		draft.driver = ref._tag === "DriverDefault" ? ref.driver : null;
-		draftModels[catalogScope().key] = null;
-		return;
-	}
-	if (draft.instanceId === selected.id) return;
-	draft.instanceId = selected.id;
-	draft.driver = selected.driver;
-	draftModels[catalogScope().key] = null;
+/** Exact accounts stay pinned; driver defaults follow current health. */
+export function selectInstance(selection: InstanceSelection): void {
+	const ref = accountRefForSelection(selection);
+	const { instanceId, driver } =
+		ref?._tag === "Id"
+			? {
+					instanceId: ref.id,
+					driver:
+						getAvailableInstances().find((account) => account.id === ref.id)
+							?.driver ?? null,
+				}
+			: {
+					instanceId: null,
+					// An unknown harness has no DriverDefault ref; its draft follows the driver itself.
+					driver:
+						ref?.driver ??
+						(typeof selection === "string" ? null : selection.driver),
+				};
 	if (
-		!getDriverTraits(selected.driver)?.permissionModes.includes(
-			draft.permissionMode,
-		)
+		instanceId === null &&
+		(driver === null || draft.instanceId === defaultInstanceFor(driver)?.id)
+	)
+		return;
+	draftPickChosen = true;
+	draftAccountChosen = instanceId !== null;
+	if (draft.instanceId === instanceId && draft.driver === driver) return;
+	draft.instanceId = instanceId;
+	draft.driver = driver;
+	draftModelKey = catalogScope().key;
+	draftModels[draftModelKey] = null;
+	if (
+		driver !== null &&
+		!getDriverTraits(driver)?.permissionModes.includes(draft.permissionMode)
 	)
 		draft.permissionMode = "ask";
 	fillDraftDefault();
@@ -1291,6 +1371,8 @@ export function selectInstance(instanceId: string): void {
 /** A created or viewed session consumes the draft's harness and model picks. */
 export function clearDraftSelection(): void {
 	for (const key of Object.keys(draftModels)) delete draftModels[key];
+	unverifiedCarries.clear();
+	draftModelKey = undefined;
 	draft.instanceId = null;
 	draft.driver = null;
 	draft.permissionMode = serverDiscovery.defaultPermissionMode;
@@ -1527,8 +1609,6 @@ export function applyGetModelsResponse(
 			}
 		}
 	}
-	if (response.defaultOpenCodeInstanceId !== undefined)
-		projectCatalogDefaults[scope.project] = response.defaultOpenCodeInstanceId;
 	const previous = modelsFor(scope);
 	modelCatalogs[scope.key] = {
 		...previous,
@@ -1549,6 +1629,12 @@ export function applyGetModelsResponse(
 			? [...response.hiddenModels]
 			: previous.hiddenModels,
 	};
+	// A model carried from another account yields to this account's default when its catalogue lacks it.
+	const carried = unverifiedCarries.delete(scope.key)
+		? draftModels[scope.key]
+		: null;
+	if (carried && scope.instanceId && !draftModelFits(scope.instanceId, carried))
+		draftModels[scope.key] = null;
 	// A fresh account reply can supply its own native default. Never refill from a cached active pick.
 	if (
 		!scope.sessionId &&
@@ -1963,8 +2049,6 @@ export function clearDiscoveryState(): void {
 		delete accountModelCatalogs[project];
 	for (const key of Object.keys(agentCatalogs)) delete agentCatalogs[key];
 	for (const key of Object.keys(commandCatalogs)) delete commandCatalogs[key];
-	for (const key of Object.keys(projectCatalogDefaults))
-		delete projectCatalogDefaults[key];
 	serverDiscovery.currentModelId = "";
 	serverDiscovery.currentProviderId = "";
 	serverDiscovery.sessionProviderIds = {};

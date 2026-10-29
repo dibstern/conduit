@@ -777,7 +777,6 @@ describe("session selection at the browser RPC wire", () => {
 		const models = {
 			projectSlug: "B",
 			instanceId: "home-opencode",
-			defaultOpenCodeInstanceId: "home-opencode",
 			providers: [
 				{
 					id: "openai",

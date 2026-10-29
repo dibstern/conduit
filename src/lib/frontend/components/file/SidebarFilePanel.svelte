@@ -6,8 +6,7 @@
 	import { untrack } from "svelte";
 	import type { BreadcrumbSegment, FileEntry } from "../../types.js";
 	import { onFileBrowser, applyGetFileListResponse } from "../../stores/ws-listeners.js";
-	import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
-	import { setFilesOpen } from "../../stores/session-view.svelte.js";
+	import { openFileViewer, sessionViewState, setRightPaneView } from "../../stores/session-view.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
@@ -96,7 +95,7 @@
 	let previewedPath: string | undefined;
 	let previewedRoot: string | undefined;
 	$effect(() => {
-		if (uiState.fileViewerOpen || !previewedPath || !fileTreeEl) return;
+		if (sessionViewState.filePreview !== null || !previewedPath || !fileTreeEl) return;
 		const folder = previewedRoot === undefined ? ":not([data-root])" : `[data-root="${CSS.escape(previewedRoot)}"]`;
 		fileTreeEl
 			.querySelector<HTMLElement>(`[data-path="${CSS.escape(previewedPath)}"]${folder}`)
@@ -132,7 +131,7 @@
 
 	function closePanel() {
 		if (onClose) onClose();
-		else setFilesOpen(false);
+		else setRightPaneView("closed");
 	}
 
 	$effect(() => {
@@ -196,6 +195,9 @@
 			/>
 		</div>
 	</div>{/if}
+	{#if pane && !paneTitle}
+		<div class="flex shrink-0 justify-end px-2">{@render refreshButton()}</div>
+	{/if}
 
 	<!-- Breadcrumbs -->
 	{#if !showRoots}

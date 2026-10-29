@@ -2,7 +2,10 @@ import { describe, it } from "@effect/vitest";
 import { Deferred, Effect, Fiber } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeAccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
@@ -103,6 +106,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 							configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 						),
 					),
+					Effect.succeed(NO_OPENCODE_HEALTH),
 				);
 				const resolveAccount = vi.spyOn(accountDirectory, "resolve");
 				const engine = new OrchestrationEngine({ registry, accountDirectory });
@@ -268,6 +272,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 				const command = {
@@ -323,6 +328,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 				const command = {
@@ -369,6 +375,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 				const command = {

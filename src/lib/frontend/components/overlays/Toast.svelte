@@ -22,6 +22,8 @@
 	import { quintOut } from "svelte/easing";
 	import { prefersReducedMotion } from "svelte/motion";
 	import type { Toast, ToastAction } from "../../types.js";
+	import { belowHeader } from "../../actions/drag-to-dismiss.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { dismissToast, uiState } from "../../stores/ui.svelte.js";
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
@@ -36,6 +38,8 @@
 	} as const;
 
 	const SWIPE_DISMISS_PX = 48;
+
+	const duo = $derived(sessionViewState.pose.startsWith("duo-"));
 
 	function drop(_node: Element, { y, scale, duration }: { y: number; scale: number; duration: number }) {
 		const still = prefersReducedMotion.current;
@@ -99,13 +103,18 @@
 	}
 </script>
 
-<!-- Always mounted, so a closing card has a parent to play its exit in. The
-     top offsets are fixed constants, never measured: below the phone session
-     bar's 42px first row (or its 52px collapsed island), and 8px below the
-     52px desktop top bar. -->
+<!-- Always mounted, so a closing card has a parent to play its exit in. On a
+     phone and the desktop the top offsets are fixed constants: below the phone
+     session bar's 42px first row (or its 52px collapsed island), and 8px below
+     the 52px desktop top bar. Each Duo pose has its own header, so there the
+     layer is measured: 8px under the live header, centred in its column. -->
 <div
 	data-toast-layer
-	class="pointer-events-none fixed inset-x-0 top-[calc(env(safe-area-inset-top,0px)+56px)] z-[var(--z-toast)] mx-auto flex max-w-[416px] flex-col gap-[6px] px-[8px] md:top-[60px]"
+	id="toasts"
+	class="pointer-events-none fixed z-[var(--z-toast)] mx-auto flex max-w-[416px] flex-col gap-[6px] px-[8px] {duo
+		? 'below-header mt-[8px]'
+		: 'inset-x-0 top-[calc(env(safe-area-inset-top,0px)+56px)] md:top-[60px]'}"
+	use:belowHeader={duo && uiState.toasts.length > 0}
 >
 	{#each [...uiState.toasts].reverse() as toast (toast.id)}
 		{@const icon = VARIANT_ICON[toast.variant]}
