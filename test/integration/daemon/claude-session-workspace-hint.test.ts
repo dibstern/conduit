@@ -45,6 +45,19 @@ function shellRows(
 	});
 }
 
+/** Hint changes land after the turn, behind the reactor's git work. */
+function hintUpsert(
+	sessionId: string,
+	path: string,
+	feed: "shell" | "family" = "shell",
+) {
+	return (message: Record<string, unknown>) => {
+		if (message["type"] !== feed || message["_tag"] !== "upsert") return false;
+		const row = Schema.decodeUnknownSync(SessionInfoSchema)(message["item"]);
+		return row.id === sessionId && row.workspaceHint === path;
+	};
+}
+
 function storedEvents(fixture: ProcessHarness) {
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
@@ -191,18 +204,10 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		const sessionId = await browser.createSession("Undeclared worktree work");
 		await anotherTab.view(sessionId);
 		await browser.send(sessionId, toolTurn(threePaths(first)));
-		// Turn completion precedes the hint reactor's filesystem and git work.
 		await Promise.all(
 			[browser, anotherTab].flatMap((tab) =>
 				(["shell", "family"] as const).map((feed) =>
-					tab.waitFor((message) => {
-						if (message["type"] !== feed || message["_tag"] !== "upsert")
-							return false;
-						const row = Schema.decodeUnknownSync(SessionInfoSchema)(
-							message["item"],
-						);
-						return row.id === sessionId && row.workspaceHint === first;
-					}),
+					tab.waitFor(hintUpsert(sessionId, first, feed)),
 				),
 			),
 		);
@@ -237,14 +242,11 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		await browser.send(sessionId, toolTurn(threePaths(main)));
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
-		await vi.waitFor(() =>
-			expect(
-				storedEvents(fixture)
-					.filter(({ type }) => type === "session.workspace_hint_changed")
-					.at(-1)?.data["path"],
-			).toBeNull(),
-		);
+		// The dismissed hint can only come back after the main turn records null;
+		// the final hintChanges assertion pins that order.
+		const returnedAt = browser.frames.length;
 		await browser.send(sessionId, toolTurn(threePaths(first)));
+		await browser.waitFor(hintUpsert(sessionId, first), returnedAt);
 		await vi.waitFor(() =>
 			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
 		);
@@ -255,6 +257,11 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 			}),
 		);
 		await browser.send(sessionId, toolTurn(threePaths(second)));
+		await Promise.all(
+			[browser, anotherTab].map((tab) =>
+				tab.waitFor(hintUpsert(sessionId, second)),
+			),
+		);
 		await vi.waitFor(() => {
 			for (const tab of [browser, anotherTab])
 				expect(shellRows(tab, sessionId).at(-1)?.workspaceHint).toBe(second);
@@ -275,6 +282,7 @@ describe("Workspace hints through the built daemon and shell subscription", () =
 			});
 		});
 		await browser.send(sessionId, toolTurn(threePaths(main)));
+		await browser.waitFor(hintUpsert(sessionId, main));
 		await vi.waitFor(() =>
 			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(main),
 		);
@@ -411,6 +419,7 @@ exec '${realGit}' "$@"
 		);
 		writeFileSync(join(fixture.root, "workspace-hint-release"), "release\n");
 		await sending;
+		await browser.waitFor(hintUpsert(sessionId, first));
 		await vi.waitFor(() =>
 			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
 		);
@@ -449,6 +458,7 @@ exec '${realGit}' "$@"
 		expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBeUndefined();
 		writeFileSync(join(fixture.root, "workspace-hint-release"), "release\n");
 		await sending;
+		await browser.waitFor(hintUpsert(sessionId, main));
 		await vi.waitFor(() =>
 			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(main),
 		);
@@ -465,6 +475,7 @@ exec '${realGit}' "$@"
 			sessionId,
 			toolTurn(threePaths(first), { failAfterTools: true }),
 		);
+		await browser.waitFor(hintUpsert(sessionId, first));
 		await vi.waitFor(() =>
 			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first),
 		);
@@ -503,6 +514,7 @@ exec '${realGit}' "$@"
 				commandId: randomUUID(),
 			}),
 		);
+		await browser.waitFor(hintUpsert(sessionId, first));
 		await vi.waitFor(() => {
 			expect(shellRows(browser, sessionId).at(-1)?.workspaceHint).toBe(first);
 			expect(
