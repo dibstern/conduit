@@ -3,7 +3,10 @@
 // Per-session activity follows shell rows; transcripts follow session detail.
 
 import { SvelteMap, SvelteSet } from "svelte/reactivity";
-import type { SessionDetailEnvelope } from "../../contracts/ws-rpc.js";
+import type {
+	SessionDetailEnvelope,
+	SessionDetailWindow,
+} from "../../contracts/ws-rpc.js";
 import type { FeedStatus } from "../transport/supervise.js";
 import type {
 	ChatMessage,
@@ -40,6 +43,7 @@ export type SessionActivity = {
 export class SessionMessages {
 	messages = $state.raw<ChatMessage[]>([]);
 	transcript = $state.raw<{
+		window?: SessionDetailWindow | undefined;
 		rows: HistoryMessage[];
 		hwm: number | null;
 		hasMore: boolean;

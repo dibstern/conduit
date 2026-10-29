@@ -14,15 +14,10 @@ import {
 	getOrCreateSessionMessages,
 	getOrCreateSessionSlot,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
-import {
-	loadOlderTranscript,
-	placedSessionId,
-} from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { primaryTranscript } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
-vi.mocked(loadOlderTranscript).mockImplementation(() => Promise.resolve());
-vi.mocked(placedSessionId).mockImplementation(() => sessionState.currentId);
+const loadOlder = vi.spyOn(primaryTranscript, "loadOlder").mockResolvedValue();
 
 let observerCallback: IntersectionObserverCallback | null = null;
 const disconnect = vi.fn();
@@ -72,7 +67,7 @@ describe("HistoryLoader", () => {
 		});
 		flushSync();
 		intersect();
-		expect(loadOlderTranscript).toHaveBeenCalledExactlyOnceWith("test-session");
+		expect(loadOlder).toHaveBeenCalledExactlyOnceWith();
 	});
 
 	it.each([
@@ -88,7 +83,7 @@ describe("HistoryLoader", () => {
 		});
 		flushSync();
 		intersect(isIntersecting);
-		expect(loadOlderTranscript).not.toHaveBeenCalled();
+		expect(loadOlder).not.toHaveBeenCalled();
 	});
 
 	it("does not load without an active session", () => {
@@ -99,6 +94,6 @@ describe("HistoryLoader", () => {
 		flushSync();
 		openSessionForSetup(null);
 		intersect();
-		expect(loadOlderTranscript).not.toHaveBeenCalled();
+		expect(loadOlder).not.toHaveBeenCalled();
 	});
 });

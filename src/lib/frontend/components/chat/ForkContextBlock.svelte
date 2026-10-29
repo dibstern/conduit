@@ -1,43 +1,22 @@
 <!-- Fork Context Block -->
 <!-- Collapsible block showing inherited messages from the parent session. -->
-<!-- Collapsed by default. Expand/collapse state stored in sessionStorage. -->
+<!-- The containing transcript owns expansion and its persistence. -->
 
 <script lang="ts">
-	import { sessionState } from "../../stores/session.svelte.js";
 	import Icon from "../ui/Icon.svelte";
 	import Button from "../ui/Button.svelte";
 
-	interface Props {
+	let { children, collapsed = $bindable(true), onCollapsedChange }: {
 		children: import("svelte").Snippet;
 		collapsed?: boolean;
-	}
-
-	// Default to collapsed; read from sessionStorage if available
-	let { children, collapsed = $bindable(true) }: Props = $props();
-
-	const storageKey = $derived(
-		`fork-collapsed-${sessionState.currentId ?? ""}`,
-	);
-
-	$effect(() => {
-		const key = storageKey;
-		if (key) {
-			const stored = sessionStorage.getItem(key);
-			collapsed = stored !== "false";
-		}
-	});
-
-	// Wired to the toggle's aria-controls; the region is a sibling, so only an id
-	// links them.
+		onCollapsedChange?: (collapsed: boolean) => void;
+	} = $props();
 	const messagesId = $props.id();
-
 	function toggle() {
 		collapsed = !collapsed;
-		const key = storageKey;
-		if (key) {
-			sessionStorage.setItem(key, String(collapsed));
-		}
+		onCollapsedChange?.(collapsed);
 	}
+
 </script>
 
 <div class="fork-context-block max-w-[760px] mx-auto px-5 mt-2">

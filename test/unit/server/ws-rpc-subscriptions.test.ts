@@ -383,6 +383,16 @@ describe("subscription RPC handlers", () => {
 												message: expect.objectContaining({ id: "message-1" }),
 											},
 											{ _tag: "rewind", messageId: null },
+											{
+												_tag: "window",
+												window: {
+													kind: "latest",
+													firstMessageId: "message-1",
+													lastMessageId: "message-1",
+													hasEarlier: false,
+													hasLater: false,
+												},
+											},
 										],
 						});
 						expect(yield* Queue.take(envelopes)).toEqual({
@@ -442,6 +452,16 @@ describe("subscription RPC handlers", () => {
 								{ _tag: "part", part: { id: "part-1", text: "Hello" } },
 								{ _tag: "message", message: { id: "message-1" } },
 								{ _tag: "rewind", messageId: null },
+								{
+									_tag: "window",
+									window: {
+										kind: "latest",
+										firstMessageId: "message-1",
+										lastMessageId: "message-1",
+										hasEarlier: false,
+										hasLater: false,
+									},
+								},
 							],
 						});
 						expect(yield* Queue.take(wire)).toEqual({ _tag: "synchronized" });

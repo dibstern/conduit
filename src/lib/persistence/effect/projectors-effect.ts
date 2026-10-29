@@ -969,7 +969,7 @@ export const makeMessageProjector = defineProjector(() => ({
 								id: string;
 							}>`UPDATE messages SET input_id = COALESCE(input_id, ${event.data.inputId ?? null})
 								WHERE id = ${event.data.messageId}
-								AND ((input_id IS NULL AND ${event.data.inputId ?? null} IS NOT NULL) OR ${event.metadata.synthetic === true})
+								AND ((input_id IS NULL AND ${event.data.inputId ?? null} IS NOT NULL) OR ${event.metadata.synthetic === true ? 1 : 0})
 								RETURNING id`,
 						);
 					}
@@ -1191,15 +1191,15 @@ export const makeMessageProjector = defineProjector(() => ({
 									AND id != ${event.data.messageId}))
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
-							created_at = CASE WHEN ${event.metadata.providerCreatedAt !== undefined}
+							created_at = CASE WHEN ${event.metadata.providerCreatedAt !== undefined ? 1 : 0}
 								THEN excluded.created_at ELSE messages.created_at END,
 							is_streaming = CASE WHEN excluded.role = 'user' THEN 0 ELSE messages.is_streaming END,
 							input_id = COALESCE(messages.input_id, excluded.input_id),
 							is_inherited = MAX(messages.is_inherited, excluded.is_inherited)
 						WHERE messages.role <> excluded.role
-							OR ${event.metadata.synthetic === true}
+							OR ${event.metadata.synthetic === true ? 1 : 0}
 							OR messages.is_inherited < excluded.is_inherited
-							OR (${event.metadata.providerCreatedAt !== undefined} AND messages.created_at <> excluded.created_at)
+							OR (${event.metadata.providerCreatedAt !== undefined ? 1 : 0} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
 						RETURNING id`;
 				if (
@@ -1369,13 +1369,13 @@ export const makeMessageProjector = defineProjector(() => ({
 				yield* sql`
 					UPDATE message_parts
 					SET status = CASE
-							WHEN ${resumed} THEN 'running'
+							WHEN ${resumed ? 1 : 0} THEN 'running'
 							WHEN status IN ('completed', 'error') THEN status
 							ELSE 'running'
 						END,
-						result = CASE WHEN ${resumed} THEN NULL ELSE result END,
-						result_bytes = CASE WHEN ${resumed} THEN NULL ELSE result_bytes END,
-						result_event_seq = CASE WHEN ${resumed} THEN NULL ELSE result_event_seq END,
+						result = CASE WHEN ${resumed ? 1 : 0} THEN NULL ELSE result END,
+						result_bytes = CASE WHEN ${resumed ? 1 : 0} THEN NULL ELSE result_bytes END,
+						result_event_seq = CASE WHEN ${resumed ? 1 : 0} THEN NULL ELSE result_event_seq END,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
 						updated_at = ${event.createdAt},

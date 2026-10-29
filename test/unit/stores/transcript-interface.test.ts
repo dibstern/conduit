@@ -37,6 +37,7 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	createTranscriptView,
 	loadOlderTranscript,
 	transcriptStatus,
 	viewTranscript,
@@ -59,6 +60,7 @@ function adapter() {
 		>[]
 	>();
 	const table: StubTable = {
+		SubscribeSessionPromptIndex: () => Stream.never,
 		SubscribeSessionDetail: ({ sessionId }) =>
 			Stream.unwrap(
 				makeRpcStream<SessionDetailEnvelope, WsRpcError>().pipe(
@@ -166,6 +168,174 @@ afterEach(async () => {
 });
 
 describe("transcript feed interface", () => {
+	it.each([
+		"edit",
+		"remove",
+	] as const)("discards an older page crossed by a same-sequence %s and permits a stable retry", async (change) => {
+		viewTranscript("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const feed = requestFor(wire.requests, "A");
+		if (!feed) throw new Error("missing feed");
+		await wire.emit(feed, snapshot([row("u2", "current")], 2, true));
+		await wire.emit(feed, { _tag: "synchronized" });
+		const messages = getOrCreateSessionSlot("A").messages;
+		await settled(() => messages.transcript?.status._tag === "live");
+		let finish:
+			| ((value: {
+					projectSlug: string;
+					sessionId: string;
+					messages: HistoryMessage[];
+					hasMore: boolean;
+			  }) => void)
+			| undefined;
+		pageMock.rpc.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finish = resolve;
+				}),
+		);
+		const pending = loadOlderTranscript("A");
+		const before = messages.transcript;
+		await wire.emit(
+			feed,
+			change === "edit"
+				? {
+						_tag: "upsert",
+						sequence: 2,
+						item: {
+							_tag: "part",
+							messageId: "u2",
+							sortOrder: 0,
+							part: { id: "u2-text", type: "text", text: "edited" },
+						},
+					}
+				: { _tag: "remove", sequence: 2, id: "u1" },
+		);
+		await settled(() => messages.transcript !== before);
+		finish?.({
+			projectSlug: "project",
+			sessionId: "A",
+			messages: [row("u1", "stale older"), row("u2", "stale overlap")],
+			hasMore: false,
+		});
+		await pending;
+		expect(messages.transcript?.rows.map((item) => item.id)).toEqual(["u2"]);
+		expect(messages.historyLoading).toBe(false);
+		expect(messages.historyHasMore).toBe(true);
+		await settled(() =>
+			messages.messages.some(
+				(message) =>
+					message.type === "user" &&
+					message.text === (change === "edit" ? "edited" : "current"),
+			),
+		);
+		pageMock.rpc.mockResolvedValueOnce({
+			projectSlug: "project",
+			sessionId: "A",
+			messages: [row("u0", "stable older")],
+			hasMore: false,
+		});
+		await loadOlderTranscript("A");
+		expect(messages.transcript?.rows.map((item) => item.id)).toEqual([
+			"u0",
+			"u2",
+		]);
+		expect(messages.historyHasMore).toBe(false);
+	});
+	it("keeps two views of the same session independent", async () => {
+		const drawer = createTranscriptView();
+		viewTranscript("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const primary = requestFor(wire.requests, "A");
+		if (!primary) throw new Error("missing primary request");
+		await wire.emit(primary, snapshot([row("u2", "primary page")], 2, true));
+		await wire.emit(primary, { _tag: "synchronized" });
+		drawer.view("project", "A");
+		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
+		const task = requestFor(wire.requests, "A", 1);
+		if (!task) throw new Error("missing task request");
+		await wire.emit(task, snapshot([row("u3", "task page")], 3, true));
+		await wire.emit(task, { _tag: "synchronized" });
+		await settled(() => drawer.chat.transcript?.status._tag === "live");
+		expect(getOrCreateSessionSlot("A").messages.messages).toMatchObject([
+			{ type: "user", text: "primary page" },
+		]);
+		pageMock.rpc.mockResolvedValueOnce({
+			messages: [row("u1", "earlier task")],
+			hasMore: false,
+		});
+		await drawer.loadOlder();
+		expect(drawer.chat.messages.map((message) => message.uuid)).toEqual([
+			"u1/user",
+			"u3/user",
+		]);
+		expect(
+			getOrCreateSessionSlot("A").messages.messages.map(
+				(message) => message.uuid,
+			),
+		).toEqual(["u2/user"]);
+		expect(getOrCreateSessionSlot("A").messages.historyHasMore).toBe(true);
+		drawer.dispose();
+		await wire.emit(primary, snapshot([row("u4", "primary still live")], 4));
+		await wire.emit(primary, { _tag: "synchronized" });
+		await settled(() =>
+			getOrCreateSessionSlot("A").messages.messages.some(
+				(message) => message.uuid === "u4/user",
+			),
+		);
+	});
+	it("ignores a disposed view's late page without clearing a newer page", async () => {
+		const drawer = createTranscriptView();
+		drawer.view("project", "A");
+		await settled(() => requestFor(wire.requests, "A") !== undefined);
+		const first = requestFor(wire.requests, "A");
+		if (!first) throw new Error("missing first request");
+		await wire.emit(first, snapshot([row("u2", "first page")], 2, true));
+		await wire.emit(first, { _tag: "synchronized" });
+		await settled(() => drawer.chat.transcript?.status._tag === "live");
+		let finishOld:
+			| ((value: { messages: HistoryMessage[]; hasMore: boolean }) => void)
+			| undefined;
+		let finishNew:
+			| ((value: { messages: HistoryMessage[]; hasMore: boolean }) => void)
+			| undefined;
+		pageMock.rpc.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishOld = resolve;
+				}),
+		);
+		const oldPage = drawer.loadOlder();
+		drawer.dispose();
+		drawer.view("project", "A");
+		await settled(() => requestFor(wire.requests, "A", 1) !== undefined);
+		const second = requestFor(wire.requests, "A", 1);
+		if (!second) throw new Error("missing replacement request");
+		await wire.emit(second, snapshot([row("u5", "replacement page")], 5, true));
+		await wire.emit(second, { _tag: "synchronized" });
+		await settled(() => drawer.chat.transcript?.hwm === 5);
+		pageMock.rpc.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishNew = resolve;
+				}),
+		);
+		const newPage = drawer.loadOlder();
+		finishOld?.({ messages: [row("u1", "stale page")], hasMore: false });
+		await oldPage;
+		expect(drawer.chat.historyLoading).toBe(true);
+		expect(drawer.chat.messages.map((message) => message.uuid)).toEqual([
+			"u5/user",
+		]);
+		finishNew?.({ messages: [row("u4", "fresh page")], hasMore: false });
+		await newPage;
+		expect(drawer.chat.historyLoading).toBe(false);
+		expect(drawer.chat.messages.map((message) => message.uuid)).toEqual([
+			"u4/user",
+			"u5/user",
+		]);
+		drawer.dispose();
+	});
 	it("starts the feed while storage is pending and rejects a late saved draw", async () => {
 		let finish: ((record: SavedTranscript) => void) | undefined;
 		savedMock.openSavedTranscript.mockImplementation(
@@ -303,7 +473,13 @@ describe("transcript feed interface", () => {
 				wire.interrupted.includes(String(first.id)) &&
 				wire.interrupted.includes(String(second.id)),
 		);
-		expect(wire.requests.length - wire.interrupted.length).toBe(1);
+		expect(
+			wire.requests.filter(
+				(request) =>
+					request.tag === "SubscribeSessionDetail" &&
+					!wire.interrupted.includes(String(request.id)),
+			),
+		).toHaveLength(1);
 	});
 
 	it("resyncs from a fresh snapshot after a suffix length mismatch", async () => {

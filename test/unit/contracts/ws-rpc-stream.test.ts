@@ -149,6 +149,8 @@ const makeLayer = (options: {
 					readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 					readInboxState: () => Effect.succeed(undefined),
 					readStoreIdentity: () => Effect.succeed("store"),
+					readSessionPromptIndex: () =>
+						Effect.succeed({ rows: [], removed: [], version: 0 }),
 					readSessionTranscriptPage: () =>
 						options.failRead
 							? Effect.fail(readFailure)

@@ -1,60 +1,29 @@
 <script lang="ts">
-	import { untrack } from "svelte";
-	import type { UserMessage } from "../../types.js";
-	import { extractDisplayText, formatClockTime } from "../../utils/format.js";
+	import type { TranscriptView } from "../../stores/transcript.svelte.js";
+	import { formatClockTime } from "../../utils/format.js";
 
-	let { scroller, messages, topClearance = 0, onjump, visible = $bindable(false) }: {
-		scroller: HTMLElement;
-		messages: readonly UserMessage[];
+	let { prompts, activeId, pending = false, paneWidth, topClearance = 0, onnavigate }: {
+		prompts: TranscriptView["prompts"];
+		activeId: string | null;
+		pending?: boolean;
+		paneWidth: number;
 		topClearance?: number;
-		onjump: () => void;
-		visible?: boolean;
+		onnavigate: (id: string) => void;
 	} = $props();
-
-	type Entry = { message: UserMessage; element: HTMLElement; top: number };
-	let available = $state.raw<Entry[]>([]);
-	let captured = $state.raw<Entry[] | null>(null);
-	const entries = $derived(captured ?? available);
-	let activeId = $state("");
+	let captured = $state.raw<TranscriptView["prompts"] | null>(null);
+	const entries = $derived(captured ?? prompts);
 	let previewId = $state<string | null>(null);
 	let pointerId: number | null = null;
-	let selectedScrollTop: number | null = null;
 	let track: HTMLDivElement | undefined = $state();
 	let availableHeight = $state(0);
 	let previewHeight = $state(0);
-	let paneWidth = $state(0);
-	let refresh = () => {};
-	const activeIndex = $derived(Math.max(0, entries.findIndex((entry) => entry.message.uuid === activeId)));
-	const previewIndex = $derived(entries.findIndex((entry) => entry.message.uuid === previewId));
-	const preview = $derived(entries[previewIndex]?.message);
+	const activeIndex = $derived(entries.findIndex((entry) => entry.id === activeId));
+	const previewIndex = $derived(entries.findIndex((entry) => entry.id === previewId));
+	const preview = $derived(entries[previewIndex]);
 	const trackHeight = $derived(Math.max(44, Math.min(availableHeight, (entries.length - 1) * 18 + 24)));
 	const previewTop = $derived(Math.max(0, Math.min(availableHeight - previewHeight,
 		(availableHeight - trackHeight) / 2 + 12 + previewIndex / Math.max(1, entries.length - 1) * (trackHeight - 24) - previewHeight / 2)));
 	const previewDomId = $props.id();
-
-	function prompt(message: UserMessage): string {
-		return extractDisplayText(message.text).replace(/\s+/g, " ").trim() || "Attached files";
-	}
-
-	function followVisibleMessage() {
-		if (pointerId !== null || available.length === 0) return;
-		if (selectedScrollTop !== null && Math.abs(scroller.scrollTop - selectedScrollTop) < 1
-			&& available.some((entry) => entry.message.uuid === activeId)) return;
-		selectedScrollTop = null;
-		if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 5) {
-			activeId = available.at(-1)?.message.uuid ?? "";
-			return;
-		}
-		const top = scroller.scrollTop + topClearance + 24;
-		let low = 0;
-		let high = available.length - 1;
-		while (low < high) {
-			const mid = Math.ceil((low + high) / 2);
-			if ((available[mid]?.top ?? Infinity) <= top) low = mid;
-			else high = mid - 1;
-		}
-		activeId = available[low]?.message.uuid ?? "";
-	}
 
 	function finishPointer(dismiss = false) {
 		const id = pointerId;
@@ -64,67 +33,11 @@
 		if (dismiss) previewId = null;
 	}
 
-	$effect(() => {
-		const container = scroller;
-		let frame: number | undefined;
-		const observed = new Set<Element>();
-		const schedule = () => {
-			if (frame === undefined) frame = requestAnimationFrame(() => untrack(measure));
-		};
-		const resize = new ResizeObserver(schedule);
-		function measure() {
-			frame = undefined;
-			const byId = new Map(untrack(() => messages).map((message) => [message.uuid, message]));
-			const origin = container.getBoundingClientRect().top + container.clientTop - container.scrollTop;
-			available = Array.from(container.querySelectorAll<HTMLElement>(".msg-user[data-uuid]")).flatMap((element) => {
-				const message = byId.get(element.dataset["uuid"] ?? "");
-				return message && element.getClientRects().length > 0
-					? [{ message, element, top: element.getBoundingClientRect().top - origin }]
-					: [];
-			});
-			paneWidth = container.clientWidth;
-			visible = available.length > 1;
-			// A fixed viewport does not resize when a reply or expanded turn moves
-			// later prompts. Observe its content blocks as well as the viewport.
-			for (const element of observed) {
-				if (element.parentElement !== container) { resize.unobserve(element); observed.delete(element); }
-			}
-			for (const element of container.children) {
-				if (!observed.has(element)) { resize.observe(element); observed.add(element); }
-			}
-			if (captured?.some((entry) => !entry.element.isConnected)) finishPointer(true);
-			followVisibleMessage();
-		}
-		const mutation = new MutationObserver(schedule);
-		mutation.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "data-uuid"] });
-		resize.observe(container);
-		container.addEventListener("scroll", followVisibleMessage, { passive: true });
-		refresh = schedule;
-		schedule();
-		return () => {
-			if (frame !== undefined) cancelAnimationFrame(frame);
-			resize.disconnect();
-			mutation.disconnect();
-			container.removeEventListener("scroll", followVisibleMessage);
-			refresh = () => {};
-			finishPointer(true);
-			visible = false;
-		};
-	});
-	$effect(() => { messages; topClearance; refresh(); });
-
 	function navigate(index: number) {
 		const entry = entries[Math.max(0, Math.min(entries.length - 1, index))];
-		if (!entry?.element.isConnected) { finishPointer(true); return; }
-		onjump();
-		// Drag order is frozen, geometry is not: a history prepend can move the
-		// same prompt while the pointer remains captured.
-		const top = scroller.scrollTop + entry.element.getBoundingClientRect().top
-			- scroller.getBoundingClientRect().top - scroller.clientTop - topClearance - 20;
-		scroller.scrollTo({ top, behavior: "instant" });
-		selectedScrollTop = scroller.scrollTop;
-		activeId = entry.message.uuid;
-		previewId = activeId;
+		if (!entry || !prompts.some((prompt) => prompt.id === entry.id)) return;
+		previewId = entry.id;
+		onnavigate(entry.id);
 	}
 
 	function indexAt(event: PointerEvent): number {
@@ -137,7 +50,7 @@
 	function startPointer(event: PointerEvent) {
 		if (event.button !== 0 || !event.isPrimary || pointerId !== null || !track) return;
 		event.preventDefault();
-		captured = available;
+		captured = prompts;
 		pointerId = event.pointerId;
 		track.setPointerCapture(event.pointerId);
 		track.focus({ preventScroll: true });
@@ -147,15 +60,17 @@
 	function movePointer(event: PointerEvent) {
 		if (!event.isPrimary || (pointerId !== null && event.pointerId !== pointerId)) return;
 		const index = indexAt(event);
-		if (pointerId !== null) navigate(index);
-		else if (event.pointerType !== "touch") previewId = entries[index]?.message.uuid ?? null;
+		if (pointerId !== null) {
+			if (entries[index]?.id !== previewId) navigate(index);
+		} else if (event.pointerType !== "touch") previewId = entries[index]?.id ?? null;
 	}
 
 	function keydown(event: KeyboardEvent) {
 		if (event.key === "Escape") { finishPointer(true); return; }
+		const current = previewIndex >= 0 ? previewIndex : Math.max(0, activeIndex);
 		const index = event.key === "Home" ? 0 : event.key === "End" ? entries.length - 1
-			: event.key === "ArrowDown" ? activeIndex + 1 : event.key === "ArrowUp" ? activeIndex - 1
-				: event.key === "PageDown" ? activeIndex + 10 : event.key === "PageUp" ? activeIndex - 10 : undefined;
+			: event.key === "ArrowDown" ? current + 1 : event.key === "ArrowUp" ? current - 1
+				: event.key === "PageDown" ? current + 10 : event.key === "PageUp" ? current - 10 : undefined;
 		if (index === undefined) return;
 		event.preventDefault();
 		navigate(index);
@@ -166,7 +81,7 @@
 	if (pointerId === null && event.target instanceof Node && !track?.contains(event.target)) previewId = null;
 }} />
 
-{#if visible}
+{#if entries.length > 1}
 	<div class="message-rail" style:top="{topClearance + 16}px" bind:clientHeight={availableHeight}>
 		<div
 			bind:this={track}
@@ -178,8 +93,9 @@
 			aria-orientation="vertical"
 			aria-valuemin="1"
 			aria-valuemax={entries.length}
-			aria-valuenow={activeIndex + 1}
-			aria-valuetext={`Message ${activeIndex + 1} of ${entries.length}: ${entries[activeIndex] ? prompt(entries[activeIndex].message) : ""}`}
+			aria-valuenow={activeIndex >= 0 ? activeIndex + 1 : undefined}
+			aria-busy={pending}
+			aria-valuetext={activeIndex >= 0 ? `Message ${activeIndex + 1} of ${entries.length}: ${entries[activeIndex]?.preview ?? ""}` : "No prompt visible"}
 			aria-describedby={preview ? previewDomId : undefined}
 			onpointerdown={startPointer}
 			onpointermove={movePointer}
@@ -191,7 +107,7 @@
 			onblur={() => { if (pointerId === null) previewId = null; }}
 			onkeydown={keydown}
 		>
-			{#each entries as entry, index (entry.message.uuid)}
+			{#each entries as entry, index (entry.id)}
 				<span class="message-rail-tick" class:active={index === activeIndex} class:hot={index === previewIndex}
 					class:near={previewIndex >= 0 && Math.abs(index - previewIndex) === 1}
 					class:next={previewIndex >= 0 && Math.abs(index - previewIndex) === 2}
@@ -208,7 +124,7 @@
 						<span aria-hidden="true"> · </span><time datetime={new Date(preview.createdAt).toISOString()}>{new Date(preview.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short" })} · {formatClockTime(preview.createdAt)}</time>
 					{/if}
 				</div>
-				<p class="text-[13px] leading-5 font-medium line-clamp-3 break-words">{prompt(preview)}</p>
+				<p class="text-[13px] leading-5 font-medium line-clamp-3 break-words">{preview.preview}</p>
 			</div>
 		{/if}
 	</div>

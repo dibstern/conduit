@@ -6,7 +6,10 @@ import {
 	within,
 } from "@testing-library/svelte";
 import { flushSync } from "svelte";
+import { SvelteMap } from "svelte/reactivity";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../../src/lib/frontend/stores/transcript.svelte.js", { spy: true });
 
 const rpc = vi.hoisted(() => ({
 	call: vi.fn<(tag: string, payload: unknown) => Promise<unknown>>((tag) =>
@@ -61,8 +64,11 @@ import {
 	sessionViewState,
 } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import {
+	applyTranscriptEnvelope,
+	createTranscriptView,
 	deriveTranscriptMessages,
 	type TranscriptEntry,
+	type TranscriptView,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
@@ -133,9 +139,74 @@ function setScrollSize(el: HTMLElement) {
 }
 
 function mountDrawer() {
+	// UI fixtures supply a view; stream ownership is exercised with real mocked
+	// subscriptions in transcript-interface.test.ts, not through global slots.
+	const selected = new SvelteMap([["session", task.sessionId]]);
+	const owner: TranscriptView = {
+		id: Symbol("drawer-fixture"),
+		generation: 0,
+		get sessionId() {
+			return selected.get("session") ?? null;
+		},
+		get chat() {
+			return getOrCreateSessionSlot(selected.get("session") ?? childId)
+				.messages;
+		},
+		pageError: null,
+		prompts: [],
+		window: { kind: "latest", hasEarlier: false, hasLater: false },
+		navigation: null,
+		transition: null,
+		navigate: () => {},
+		loadMessage: async (messageId) => {
+			if (!owner.chat.transcript?.rows.some((row) => row.id === messageId))
+				await owner.loadOlder();
+		},
+		latest: () => {},
+		loadNewer: async () => {},
+		acknowledgePlacement: () => {},
+		view: () => {},
+		dispose: () => {},
+		loaded: () => undefined,
+		requested: () => undefined,
+		loadOlder: async () => {
+			const id = owner.sessionId;
+			if (!id) return;
+			const messages = getOrCreateSessionSlot(id).messages;
+			const entry = messages.transcript;
+			if (!entry?.hasMore || !entry.rows[0]) return;
+			const response = await rpc.call("LoadMoreHistory", {
+				sessionId: id,
+				before: entry.rows[0].id,
+			});
+			const page = response as {
+				messages: import("../../../src/lib/frontend/types.js").HistoryMessage[];
+				hasMore: boolean;
+			};
+			messages.transcript = applyTranscriptEnvelope(entry, {
+				...page,
+				projectSlug: "project",
+				sessionId: id,
+			});
+			messages.messages = deriveTranscriptMessages(
+				messages.transcript,
+				messages.messages,
+			);
+			messages.historyHasMore = messages.transcript.hasMore;
+		},
+	};
+	vi.mocked(createTranscriptView).mockReturnValue(owner);
 	const view = render(TaskDrawer, { props: { task } });
 	const pane = view.getByTestId("task-drawer-transcript");
-	return { ...view, pane };
+	return {
+		...view,
+		pane,
+		owner,
+		rerender: async (props: { task: typeof task }) => {
+			selected.set("session", props.task.sessionId);
+			await view.rerender(props);
+		},
+	};
 }
 
 beforeEach(() => {
@@ -584,16 +655,20 @@ describe("Surfacing in primary and child transcripts", () => {
 		messages.historyHasMore = true;
 		if (!messages.transcript) throw new Error("Missing child transcript");
 		messages.transcript.hasMore = true;
-		const { pane } = mountDrawer();
+		const { pane, owner } = mountDrawer();
 		rpc.call.mockResolvedValueOnce({
 			projectSlug: "conduit",
 			sessionId: childId,
 			messages: [textRow("older-child", "Earlier child prompt", 1, "user")],
 			hasMore: false,
 		});
-		expect(await reveal({ sessionId: childId, messageId: "older-child" })).toBe(
-			"landed",
-		);
+		expect(
+			await reveal(
+				{ sessionId: childId, messageId: "older-child" },
+				owner,
+				pane,
+			),
+		).toBe("landed");
 		expect(rpc.call).toHaveBeenCalledWith("LoadMoreHistory", {
 			sessionId: childId,
 			before: `${childId}-reply`,

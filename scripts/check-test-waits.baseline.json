@@ -249,6 +249,9 @@
 	"test/e2e/specs/harness-first-run-projects.spec.ts": {
 		"timeout-override": 1
 	},
+	"test/e2e/specs/harness-message-navigation.spec.ts": {
+		"timeout-override": 1
+	},
 	"test/e2e/specs/harness-overflow-fanout-pin.spec.ts": {
 		"retry-override": 1,
 		"timeout-override": 1
@@ -1589,6 +1592,10 @@
 	"test/unit/stores/transcript-interface.test.ts": {
 		"polling": 2,
 		"real-wait": 2
+	},
+	"test/unit/stores/transcript-navigation.test.ts": {
+		"polling": 1,
+		"real-wait": 8
 	},
 	"test/visual/components.spec.ts": {
 		"real-wait": 4

@@ -1,37 +1,32 @@
-<!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
+<!-- Automatically pages older rows only in the latest transcript window. -->
 <!-- Pages older projected rows through the transcript module. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
 <script lang="ts">
-	import { currentChat, sessionMessages } from "../../stores/chat.svelte.js";
-	import { loadOlderTranscript, placedSessionId } from "../../stores/transcript.svelte.js";
+	import { primaryTranscript, type TranscriptView } from "../../stores/transcript.svelte.js";
 
 	let {
 		sentinelEl,
-		sessionId,
+		view = primaryTranscript,
 		scrollRoot,
 		paused = false,
 	}: {
 		sentinelEl?: HTMLElement | undefined;
-		sessionId?: string | undefined;
+		view?: TranscriptView;
 		scrollRoot?: HTMLElement | undefined;
 		paused?: boolean;
 	} = $props();
 
-	const chat = $derived(
-		sessionId === undefined ? currentChat() : sessionMessages.get(sessionId),
-	);
-	// A failed page stops paging this chat rather than retrying every frame.
-	let failedChat = $state<typeof chat>();
+	const chat = $derived(view.chat);
 	const canPage = $derived(
-		!paused && !!chat?.historyHasMore && !chat.historyLoading && failedChat !== chat,
+		!paused && view.window.kind === "latest" && view.navigation === null && !!view.sessionId && chat.historyHasMore && !chat.historyLoading && !view.pageError,
 	);
 
 	// An observer reports once on creation, then only on changes. A page that
 	// leaves the sentinel in view would produce no further report, so a fresh
 	// observer is made each time a page settles and paging can continue.
 	$effect(() => {
-		if (!canPage || !sentinelEl || (sessionId !== undefined && !scrollRoot))
+		if (!canPage || !sentinelEl || (view !== primaryTranscript && !scrollRoot))
 			return undefined;
 		const observer = new IntersectionObserver(
 			(entries) => {
@@ -44,12 +39,8 @@
 	});
 
 	function loadMore() {
-		const id = sessionId ?? placedSessionId();
-		const pagedChat = chat;
-		if (!id || !canPage) return;
-		void loadOlderTranscript(id).catch(() => {
-			failedChat = pagedChat;
-		});
+		if (!canPage) return;
+		void view.loadOlder().catch(() => { /* The view retains the failure. */ });
 	}
 </script>
 

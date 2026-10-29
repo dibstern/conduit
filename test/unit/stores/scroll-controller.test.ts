@@ -62,6 +62,45 @@ describe("ScrollController", () => {
 		div.dispatchEvent(new Event("scroll"));
 	}
 
+	// Failure cases: a short historical window looks like latest at its bottom;
+	// an already queued prepend applies to a different navigation/window.
+	describe("transcript windows", () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+		it("does not follow the physical bottom of a historical window", () => {
+			const ctrl = createScrollController(
+				() => "ready",
+				() => ({ historical: true, busy: false, topClearance: 0, identity: 1 }),
+			);
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			ctrl.requestJump();
+			vi.runAllTimers();
+			expect(ctrl.state).toBe("detached");
+			div.scrollTop = 1500;
+			div.dispatchEvent(new Event("scroll"));
+			ctrl.onNewContent();
+			expect(div.scrollTop).toBe(1500);
+			expect(ctrl.state).toBe("detached");
+			ctrl.detach();
+		});
+		it("discards prepend placement when navigation changes before its frame", () => {
+			let identity = 1;
+			const ctrl = createScrollController(
+				() => "ready",
+				() => ({ historical: false, busy: false, topClearance: 0, identity }),
+			);
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			ctrl.onPrepend(1500, 100);
+			identity++;
+			div.scrollTop = 900;
+			vi.runAllTimers();
+			expect(div.scrollTop).toBe(900);
+			ctrl.detach();
+		});
+	});
+
 	describe("explicit jumps", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
