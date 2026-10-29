@@ -1,8 +1,10 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Effect, Result as Either } from "effect";
+import { Effect, Result as Either, Option, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { openCodeStartSelection } from "../../../src/lib/contracts/start-selection.js";
@@ -141,6 +143,86 @@ describe("OpenCode Instances use", () => {
 				);
 				harness = undefined;
 			}
+		}
+	});
+
+	it("health-polls a saved external default after restart before its first use", async () => {
+		const fixture = await start("external-default");
+		const externalRoot = join(fixture.root, "external");
+		const externalConfig = join(externalRoot, "config");
+		mkdirSync(externalConfig, { recursive: true });
+		mkdirSync(join(externalRoot, "home"));
+		const server = spawn(
+			join(fixture.root, "bin", "opencode"),
+			["serve", "--port=0"],
+			{
+				env: {
+					PATH: process.env["PATH"],
+					CONDUIT_CONFIG_DIR: externalConfig,
+					HOME: join(externalRoot, "home"),
+				},
+				detached: true,
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		);
+		try {
+			const [line] = (await once(server.stdout, "data")) as [Buffer];
+			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(line.toString())?.[0];
+			if (!url) throw new Error(`No external OpenCode URL in ${line}`);
+			const { addedInstanceId } = await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "External default",
+				driver: "opencode",
+				managed: false,
+				port: Number(new URL(url).port),
+				url,
+			});
+			if (!addedInstanceId) throw new Error("Missing external instance id");
+			await fixture.requestRpc({
+				_tag: "SetDefault",
+				instanceId: addedInstanceId,
+			});
+			await fixture.terminate();
+			await fixture.restart({ skipBrowserProbe: true });
+			const browser = await fixture.connect();
+			const snapshot = Option.getOrThrow(
+				await Effect.runPromise(
+					browser.rpc.SubscribeInstances({}).pipe(
+						Stream.filter(({ instances }) =>
+							instances.some(
+								(instance) =>
+									instance.id === addedInstanceId &&
+									instance.status === "healthy",
+							),
+						),
+						Stream.runHead,
+					),
+				),
+			);
+			expect(snapshot.instances).toContainEqual(
+				expect.objectContaining({
+					id: addedInstanceId,
+					managed: false,
+					isDefault: true,
+					status: "healthy",
+				}),
+			);
+			const sessionId = await browser.createSession(
+				"External default draft",
+				undefined,
+				"opencode",
+			);
+			expect(sessionIdentity(fixture, sessionId).accountId).toBe(
+				addedInstanceId,
+			);
+			evidence["externalDefault"] = {
+				url,
+				addedInstanceId,
+				sessionId,
+				snapshot,
+			};
+		} finally {
+			if (server.pid) process.kill(-server.pid, "SIGKILL");
 		}
 	});
 

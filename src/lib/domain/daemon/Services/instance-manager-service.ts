@@ -1418,15 +1418,20 @@ export const ManagedOpenCodeLifecycleLive = (configDir: string) =>
 					Effect.provide(context),
 					Effect.asVoid,
 				);
-			// Re-adopt managed OpenCode that outlived the previous daemon. Nothing
-			// spawns here: instances start on first use.
+			// Re-adopt managed survivors; nothing spawns here. Named external
+			// servers are polled because a named default is used only while
+			// healthy. "opencode" needs no health to be chosen, so it stays quiet
+			// until first use.
 			const state = yield* Ref.get(yield* InstanceManagerStateTag);
 			yield* Effect.forEach(
 				HashMap.values(state.instances),
 				(instance) =>
-					instance.managed &&
 					getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer
-						? semaphore.withPermits(1)(start(instance, true))
+						? instance.managed
+							? semaphore.withPermits(1)(start(instance, true))
+							: instance.id === MANAGED_OPENCODE_ACCOUNT_ID
+								? Effect.void
+								: startHealthPoller(instance.id)
 						: Effect.void,
 				{ concurrency: 1, discard: true },
 			);
