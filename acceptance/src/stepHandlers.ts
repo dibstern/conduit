@@ -31,6 +31,7 @@ import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { draftAttachmentFailureHandlers } from "./steps/draftAttachmentFailures.js";
 import { duoAlertsHandlers } from "./steps/duoAlerts.js";
+import { duoFoldedKeyboardHandlers } from "./steps/duoFoldedKeyboard.js";
 import { duoFoldedPortraitHandlers } from "./steps/duoFoldedPortrait.js";
 import { duoPoseHandlers } from "./steps/duoPose.js";
 import { duoUnfoldedPortraitHandlers } from "./steps/duoUnfoldedPortrait.js";
@@ -93,6 +94,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...phoneToastsHandlers,
 	...duoPoseHandlers,
 	...duoUnfoldedPortraitHandlers,
+	...duoFoldedKeyboardHandlers,
 	...duoFoldedPortraitHandlers,
 	...duoAlertsHandlers,
 	...sessionRowsHandlers,

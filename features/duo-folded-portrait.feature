@@ -46,6 +46,8 @@ Scenario Outline: The rail holds the session's controls, and Send moves up for S
   When the open session starts working
   Then the rail reads Settle at 260, More at 308, Stop at 447, Permissions at 495, Model at 543, Attach at 591
   When I type keep going into the composer
+  And I close the keyboard
+  And the handoff settles
   Then the rail reads Settle at 260, More at 308, Send at 399, Stop at 447, Permissions at 495, Model at 543, Attach at 591
   And no control reaches into the status column
   And the duo-rail region visually matches <rail_working> at <threshold> percent

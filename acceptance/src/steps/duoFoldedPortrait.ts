@@ -3,7 +3,7 @@ import type { StepHandler } from "../runtime.js";
 import { headerTargetMisses } from "./shared.js";
 
 /** The rail's controls, found by what they are, not by where the rail put them. */
-const railControls: Record<string, string> = {
+export const railControls: Record<string, string> = {
 	Settle: "[data-testid='session-bar-settle']",
 	More: "[data-testid='session-bar-island-overflow']",
 	Send: "#send",
@@ -11,23 +11,25 @@ const railControls: Record<string, string> = {
 	Permissions: "[data-testid='permission-mode-badge']",
 	Model: "[data-testid='model-picker-trigger']",
 	Attach: "#attach-btn",
+	Effort: "[data-testid='variant-badge']",
+	Directory: "[data-testid='composer-checkout']",
 	New: "#new-session-btn",
 	Select: "[data-testid='list-bar-select']",
 	Theme: "[data-testid='list-bar-theme']",
 	Settings: "[data-testid='list-bar-settings']",
 };
-const RAIL_LEFT = 396;
-const SLOT = 44;
+export const RAIL_LEFT = 396;
+export const SLOT = 44;
 /** The status column: camera, island and glyphs, worst case with two Live Activities. */
 const STATUS_COLUMN = { left: 394, bottom: 253 };
 /** The home bar's top edge: y665 on the 678pt screen, 8pt below the 657pt viewport. */
 const HOME_INDICATOR_BELOW_VIEWPORT = 8;
-const INTERACTIVE =
+export const INTERACTIVE =
 	'button, a[href], input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [tabindex]:not([tabindex="-1"])';
 
 type Box = { x: number; y: number; width: number; height: number };
 
-async function boxOf(page: Page, selector: string): Promise<Box> {
+export async function boxOf(page: Page, selector: string): Promise<Box> {
 	const box = await page.locator(selector).boundingBox();
 	if (!box) throw new Error(`${selector} is not laid out`);
 	return box;
