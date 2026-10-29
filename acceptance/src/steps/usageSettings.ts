@@ -9,6 +9,7 @@ import {
 	chooseSettingsOption,
 	closeSettings,
 } from "../../../test/e2e/helpers/settings.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { seedUsageLimits } from "./providerInstances.js";
 import { mockInstances, requireRpcControl } from "./shared.js";
@@ -1505,12 +1506,13 @@ export const usageSettingsHandlers: StepHandler[] = [
 	},
 	{
 		name: "make refresh fail to read one account, as a cold read past the timeout does",
-		match: /^the next Usage refresh fails to read (\S+) because (.+)$/,
+		match:
+			/^the next Usage refresh fails to read (\S+) because (.+) and retries in (\d+) seconds$/,
 		run: ({ world, match }) => {
 			const rpc = requireRpcControl(world.page);
 			rpc.setStubs({
 				QuotaForAccounts: () => {
-					const now = clockTimes.get(world.page) ?? Date.now();
+					const now = clockTimes.get(world.page) ?? PINNED_CLOCK_MS;
 					const failed = snapshot(world.page).map((reading) =>
 						reading.accountId === match[1]
 							? {
@@ -1518,6 +1520,7 @@ export const usageSettingsHandlers: StepHandler[] = [
 									status: "unknown" as const,
 									windows: [],
 									readAt: now,
+									retryAt: now + Number(match[3]) * 1000,
 									reason: match[2] ?? "",
 								}
 							: reading,

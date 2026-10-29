@@ -24,6 +24,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
+	import { clock } from "../../stores/clock.svelte.js";
 	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getCachedInstances, getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
@@ -141,6 +142,14 @@
 	/** A read that timed out or failed, as opposed to a login with no plan (API key, Bedrock...). */
 	function readFailed(account: UsageReading): boolean {
 		return account.status === "unknown" && account.reason !== undefined;
+	}
+
+	function retryNote({ checking, retryAt }: UsageReading): string {
+		if (checking) return "Trying again now…";
+		if (retryAt === undefined) return "Press Refresh to try again.";
+		const seconds = Math.ceil((retryAt - clock.now) / 1000);
+		if (seconds <= 0) return "Trying again now…";
+		return seconds < 60 ? `Trying again in ${seconds}s.` : `Trying again in ${Math.ceil(seconds / 60)}m.`;
 	}
 
 	function hasPlanData(account: UsageReading | undefined): boolean {
@@ -297,7 +306,7 @@
 					? [`${window.model} week ${Math.round(window.utilization)}%`] : [])}
 				<!-- Desktop details line up under the name, past the handle and position. -->
 				<div id="usage-settings-card-{account.accountId}" data-testid="usage-settings-card-{account.accountId}" class="md:pl-[48px]">
-					{#if readFailed(account)}<p data-testid="usage-settings-no-data-{account.accountId}" class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">{account.reason}. Press Refresh to try again.</p>
+					{#if readFailed(account)}<p data-testid="usage-settings-no-data-{account.accountId}" class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">{account.reason}. {retryNote(account)}</p>
 					{:else if !hasPlanData(account)}<p data-testid="usage-settings-no-data-{account.accountId}" class="mt-[6px] font-mono text-[10.5px] text-text-dimmer">No plan data for this login (API key, Bedrock, Vertex or proxy). Auto-switch can still pick it.</p>{/if}
 					{#if models.length > 0}<div data-testid="usage-settings-models-{account.accountId}" class="mt-[7px] font-mono text-[10.5px] text-text-dimmer">{models.join(" · ")}</div>{/if}
 					{#if usageForecastWindow(account, now)}
