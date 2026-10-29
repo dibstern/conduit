@@ -17,6 +17,7 @@ const adapterSources = [
 	"src/lib/provider/runner/process-session-runner.ts",
 	"src/lib/provider/runner/runner-dispatch.ts",
 	"src/lib/provider/runner/runner-starter.ts",
+	"src/lib/provider/runner/runner-send-feeder.ts",
 	"src/lib/provider/runner/in-process-session-runner.ts",
 ] as const;
 

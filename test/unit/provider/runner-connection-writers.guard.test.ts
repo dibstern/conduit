@@ -66,13 +66,13 @@ describe("runner connection writers", () => {
 			});
 		});
 		expect(writers.sort()).toEqual([
-			// Dispatch, the one intended send writer.
+			// Dispatch: the one send writer, behind its WritePermission.
 			"src/lib/provider/runner/runner-dispatch.ts: payload",
-			// Finding: retained legacy replay writes its send without Dispatch.
+			// A legacy run holds no transmission, so its retained replay has no permission to take.
 			"src/lib/provider/runner/runner-legacy-recovery.ts: command",
-			// Finding: onHello's legacy replay writes its send without Dispatch.
+			// onHello replays a legacy send on the connection that said hello, before Dispatch serves it.
 			"src/lib/provider/runner/runner-starter.ts: command",
-			// Upgrade warm: a pre-warm, not a send.
+			// Upgrade warm: a pre-warm carries no turn bytes.
 			"src/lib/provider/runner/runner-starter.ts: driver.warmCommand(sessionId, state, snapshot)",
 		]);
 	});

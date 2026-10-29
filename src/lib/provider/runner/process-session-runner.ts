@@ -30,17 +30,10 @@ import {
 } from "../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
-import { recordClaudeNativeResumeFallback } from "../claude/prepare-turn.js";
-import { isClaudeResumeRefused } from "../event-sink-errors.js";
-import {
-	runSendCommandIdQuery,
-	stopCovers,
-} from "../session-run-settlement.js";
 import type {
 	ProviderControlCommandStatus,
 	ProviderControlContext,
 	ProviderNativeSession,
-	TurnResult,
 } from "../types.js";
 import type { RunnerRecord } from "./runner-authority.js";
 import type { connectRunner } from "./runner-connection.js";
@@ -51,23 +44,12 @@ import {
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
 import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
-import { replayLegacyRunnerSend } from "./runner-legacy-recovery.js";
-import {
-	runnerCommandReplied,
-	runnerDeliveryEvidence,
-	runnerFailure,
-	runnerSinkId,
-} from "./runner-protocol.js";
+import { runnerFailure } from "./runner-protocol.js";
 import type {
 	RunnerDriverPieces,
 	RunnerProviderInstanceDeps,
 } from "./runner-provider-instance.js";
 import { makeRunnerReceiptStore } from "./runner-receipts.js";
-import {
-	currentPendingSendOwner,
-	runnerCommandEnded,
-	runningRunnerCommands,
-} from "./runner-recovery.js";
 import {
 	discoverAllRunners,
 	type RunnerProcessTable,
@@ -77,26 +59,18 @@ import {
 	runnerProcessTable,
 } from "./runner-registry.js";
 import {
-	type Hold,
 	makeRunnerRetirement,
 	makeRunnerRunLifecycle,
 } from "./runner-retirement.js";
-import {
-	makeRunnerSendFeeder,
-	type OwnerSend,
-	type SendWritePermission,
-} from "./runner-send-feeder.js";
+import { makeRunnerSendGate } from "./runner-send-feeder.js";
 import { makeRunnerSends, type SendBinding } from "./runner-sends.js";
-import { CANCELLED_TURN, makeRunnerStarter } from "./runner-starter.js";
+import { makeRunnerStarter } from "./runner-starter.js";
 import { failRunnerTurn } from "./runner-turn-failure.js";
 import { makeSendScopes, type SendScope } from "./send-scope.js";
 import {
 	retrySettlementWrite,
 	type SendEvidence,
 	type SettlementTx,
-	sendRetryBackoff,
-	terminalFailureResult,
-	terminalTurnResult,
 	toStoreFault,
 } from "./send-settlement.js";
 import { settleSend } from "./send-settlement-outbox.js";
@@ -292,7 +266,7 @@ export const makeProcessSessionRunner = (
 					eventStore: store,
 					...settlement,
 					wakeReactor: wakeReactor(sessionId),
-					released: (input) => feeder.released(input),
+					holds: stops.holds,
 				});
 				return {
 					store,
@@ -568,6 +542,7 @@ export const makeProcessSessionRunner = (
 					commit: commitSettlement,
 					wake: wakeReactor,
 				},
+				sessionCommit,
 				evict: (retirement) =>
 					Effect.gen(function* () {
 						const record = stops.records.get(retirement.runnerId);
@@ -782,6 +757,21 @@ export const makeProcessSessionRunner = (
 			accountDisplayName,
 		});
 
+		const gate = yield* makeRunnerSendGate({
+			deps,
+			driver,
+			clock,
+			sql,
+			sends,
+			stops,
+			dispatch,
+			startStored,
+			sessionCommit,
+			settleObservedSend,
+			pauseSend,
+			nativeSession,
+		});
+
 		class ProcessSessionRunner implements SessionRunner {
 			setSendAdmission(admit: AdmitSend): void {
 				sends.setAdmission(admit);
@@ -876,12 +866,12 @@ export const makeProcessSessionRunner = (
 			readonly detachSessionEffect = detachSession;
 			readonly recoverEffect = recover(
 				undefined,
-				Effect.suspend(() => recoverOwnerSends()),
+				Effect.suspend(() => gate.recover()),
 			);
 
 			attachSessionsEffect(sessionIds: readonly string[]) {
 				const ids = new Set(sessionIds);
-				return recover(ids, recoverOwnerSends(ids));
+				return recover(ids, gate.recover(ids));
 			}
 
 			ownsRetirementCleanupEffect(
@@ -1105,597 +1095,9 @@ export const makeProcessSessionRunner = (
 				});
 			}
 
-			executeEffect(
-				command: Extract<SessionCommand, { type: "send-turn" }>,
-				send: SendScope,
-				recovered?: RunnerChild,
-			): Effect.Effect<TurnResult, SessionFailure>;
-			executeEffect(
-				command: Exclude<SessionCommand, { type: "send-turn" }>,
-				send?: SendScope,
-				recovered?: RunnerChild,
-			): Effect.Effect<void, SessionFailure>;
-			executeEffect(
-				command: SessionCommand,
-				send: SendScope,
-				recovered?: RunnerChild,
-			): Effect.Effect<TurnResult | undefined, SessionFailure>;
-			executeEffect(
-				command: SessionCommand,
-				send?: SendScope,
-				recovered?: RunnerChild,
-			): Effect.Effect<TurnResult | undefined, SessionFailure> {
-				if (command.type !== "send-turn")
-					return dispatch(command, send, recovered).pipe(Effect.as(undefined));
-				if (!send)
-					return Effect.die("Send command requires its admitted handle");
-				if (!sql || !command.input.runId)
-					return dispatch(command, send, recovered);
-				const runId = command.input.runId;
-				return Effect.gen({ self: this }, function* () {
-					const [run] = yield* sql<{
-						joined_into: string | null;
-						runner_id: string | null;
-						held_transmission: number | null;
-					}>`SELECT joined_into, runner_id, held_transmission
-						FROM provider_runs WHERE id = ${runId} AND session_id = ${command.input.sessionId}`.pipe(
-						retrySettlementWrite,
-						Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-					);
-					const legacy = yield* legacyRunnerRunQuery(
-						sql,
-						command.input.sessionId,
-						runId,
-					).pipe(
-						retrySettlementWrite,
-						Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-					);
-					if (run?.joined_into || legacy)
-						return yield* dispatch(command, send, recovered, undefined, legacy);
-					const commandId =
-						(yield* runSendCommandIdQuery(
-							sql,
-							command.input.sessionId,
-							runId,
-						).pipe(
-							retrySettlementWrite,
-							Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-						)) ?? command.input.inputId;
-					const pending = sends.pending(send) ?? {
-						sessionId: command.input.sessionId,
-						turnId:
-							command.input.continuation?.cutOffMessageId ??
-							command.input.inputId,
-						cancelled: yield* Deferred.make<void>(),
-					};
-					yield* sends.bindPending(send, command.sinkId, {
-						...pending,
-						owner: true,
-					});
-					const [claim] = yield* sql<{
-						request_sequence: number;
-						attempt_count: number;
-					}>`SELECT request_sequence, attempt_count
-						FROM provider_command_outbox WHERE session_id = ${command.input.sessionId}
-						AND run_id = ${runId} AND command_id = ${commandId} AND effect_type = 'send_turn'
-						AND (${command.input.commandAttempt ?? null} IS NULL OR attempt_count = ${command.input.commandAttempt ?? null})
-						ORDER BY request_sequence DESC LIMIT 1`.pipe(
-						retrySettlementWrite,
-						Effect.mapError((cause) => runnerFailure("read send claim", cause)),
-					);
-					const feederInput: OwnerSend = {
-						...(claim
-							? {
-									requestSequence: claim.request_sequence,
-									attempt: claim.attempt_count,
-								}
-							: {}),
-						sessionId: command.input.sessionId,
-						runId,
-						commandId,
-					};
-					const result = yield* feeder
-						.send(
-							feederInput,
-							(hold, permission) =>
-								Effect.gen(function* () {
-									yield* pauseSend("after-hold", {
-										...feederInput,
-										runnerId: hold.runner,
-										transmission: hold.transmission,
-									});
-									const [payload] = yield* retrySettlementWrite(sql<{
-										fallback: number;
-									}>`SELECT COALESCE(json_extract(payload_json, '$.nativeResumeFallback'), 0) AS fallback
-								FROM provider_command_outbox WHERE session_id = ${feederInput.sessionId} AND run_id = ${runId} AND command_id = ${commandId}
-								ORDER BY request_sequence DESC LIMIT 1`).pipe(
-										Effect.mapError((cause) =>
-											runnerFailure("read send mode", cause),
-										),
-									);
-									if (
-										(payload?.fallback === 1) !==
-										permission.nativeResumeFallback
-									)
-										return yield* transmitStoredOwner(
-											feederInput,
-											hold,
-											permission,
-										);
-									return yield* dispatch(
-										command,
-										send,
-										recovered,
-										hold,
-										false,
-										permission,
-									).pipe(
-										Effect.catchIf(
-											(failure) =>
-												runnerCommandReplied(failure) &&
-												!runnerDeliveryEvidence(failure) &&
-												!isClaudeResumeRefused(failure),
-											(failure) =>
-												Effect.succeed(terminalFailureResult(failure)),
-										),
-										Effect.map((reply) =>
-											reply
-												? {
-														...reply,
-														runnerSend: {
-															runnerId: hold.runner,
-															transmission: hold.transmission,
-														},
-													}
-												: reply,
-										),
-									);
-								}),
-							command.input.nativeResumeFallback === true,
-							send.close,
-						)
-						.pipe(
-							Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-						);
-					const [open] = yield* retrySettlementWrite(
-						sql`SELECT 1 FROM provider_runs WHERE id = ${runId} AND session_id = ${command.input.sessionId} AND status IN ('pending', 'running')`,
-					).pipe(
-						Effect.mapError((cause) =>
-							runnerFailure("read send lifetime", cause),
-						),
-					);
-					if (result?.status !== "completed" && (!result || !open))
-						yield* send.close;
-					return result ?? CANCELLED_TURN;
-				});
-			}
+			readonly executeEffect = gate.submit;
 		}
 		const runner = new ProcessSessionRunner();
-		const transmitStoredOwner = (
-			input: OwnerSend,
-			held: Extract<Hold, { _tag: "Held" }>,
-			permission: SendWritePermission,
-		): Effect.Effect<TurnResult | undefined, SessionFailure> =>
-			Effect.gen(function* () {
-				if (!sql || stops.closing) return yield* Effect.interrupt;
-				const accounts = yield* deps.accounts ?? Effect.succeed(undefined);
-				const [row] = yield* runningRunnerCommands(
-					sql,
-					driver.driverKind,
-					(accountId) =>
-						accounts?.accounts.find(({ id }) => id === accountId)?.driver ??
-						accounts?.deleted.find(({ id }) => id === accountId)?.driver ??
-						(accountId === driver.driverKind ? driver.driverKind : undefined),
-					input.sessionId,
-					false,
-					input,
-				);
-				if (!row) return;
-				const replayLock = yield* Semaphore.make(1);
-				let admitted: SendScope | undefined;
-				let first = true;
-				const sendPrepared = (
-					_id: string,
-					command: Extract<SessionCommand, { type: "send-turn" }>,
-				) =>
-					Effect.gen(function* () {
-						if (!admitted)
-							return yield* Effect.fail(
-								runnerFailure("transmit owner send", "Missing admitted send"),
-							);
-						if (!first) return yield* runner.executeEffect(command, admitted);
-						first = false;
-						const attempt = yield* Effect.result(
-							dispatch(
-								command,
-								admitted,
-								undefined,
-								held,
-								false,
-								permission,
-							).pipe(
-								Effect.catchIf(
-									(failure) =>
-										runnerCommandReplied(failure) &&
-										!runnerDeliveryEvidence(failure) &&
-										!isClaudeResumeRefused(failure),
-									(failure) => Effect.succeed(terminalFailureResult(failure)),
-								),
-							),
-						);
-						const resumeRejected =
-							attempt._tag === "Failure"
-								? isClaudeResumeRefused(attempt.failure)
-								: attempt.success?.nativeResumeRejected ||
-									isClaudeResumeRefused(attempt.success?.error);
-						if (driver.driverKind === "claude" && resumeRejected)
-							yield* retrySettlementWrite(
-								stops.release({
-									...input,
-									runnerId: held.runner,
-									transmission: held.transmission,
-									reason: "ResumeRejected",
-								}),
-							).pipe(
-								Effect.mapError((cause) =>
-									runnerFailure("release resume refusal", cause),
-								),
-							);
-						if (attempt._tag === "Failure")
-							return yield* Effect.fail(attempt.failure);
-						return attempt.success
-							? {
-									...attempt.success,
-									runnerSend: {
-										runnerId: held.runner,
-										transmission: held.transmission,
-									},
-								}
-							: attempt.success;
-					});
-				const outcome = yield* replayLegacyRunnerSend({
-					sql,
-					row,
-					driverKind: driver.driverKind,
-					replayLock,
-					...(driver.legacyPrepareTurnEffect
-						? { prepareTurnEffect: driver.legacyPrepareTurnEffect }
-						: {}),
-					deps: {
-						...(deps.accounts ? { accounts: deps.accounts } : {}),
-						autoSettleAfterDays: deps.autoSettleAfterDays,
-						recoveryForSession: deps.recoveryForSession,
-						sessionForkSdk: deps.sessionForkSdk,
-						claudeSettingsOverrides: deps.claudeSettingsOverrides,
-					},
-					admitReplay: (turn, sinkId, replay) =>
-						sends
-							.admit(
-								{
-									origin: { _tag: "Adopted" },
-									input: turn,
-									sinkId,
-									isEnded: runnerCommandEnded(
-										sql,
-										row.session_id,
-										row.command_id,
-										row.attempt_count,
-									),
-								},
-								(send) =>
-									Effect.gen(function* () {
-										admitted = send;
-										const pending = sends.pending(send) ?? {
-											sessionId: turn.sessionId,
-											turnId: turn.inputId,
-											cancelled: yield* Deferred.make<void>(),
-										};
-										yield* sends.bindPending(send, sinkId, {
-											...pending,
-											owner: true,
-										});
-										return yield* replay;
-									}),
-							)
-							.pipe(
-								Effect.map(
-									Option.getOrElse(() => ({
-										result: undefined,
-										nativeResumeFallback: false,
-									})),
-								),
-							),
-					liveSession: runner.getNativeSessionEffect(row.session_id),
-					resolveSinkId: (id, _inputId, attempt, fallback) =>
-						runnerSinkId(id, attempt, fallback),
-					send: sendPrepared,
-					sendRetained: sendPrepared,
-					closing: () => stops.closing,
-				}).pipe(
-					Effect.catch((failure) =>
-						Effect.gen(function* () {
-							if (stops.closing) return yield* Effect.interrupt;
-							if (!first) return yield* Effect.fail(failure);
-							const evidence: Extract<
-								SendEvidence,
-								{ readonly _tag: "failed" }
-							> = {
-								_tag: "failed",
-								observedAt: clock.currentTimeMillisUnsafe(),
-								failure,
-								send: {
-									sessionId: row.session_id,
-									runId: input.runId,
-									commandId: row.command_id,
-									requestSequence: row.request_sequence,
-									attempt: row.attempt_count,
-								},
-							};
-							yield* retrySettlementWrite(
-								Effect.gen(function* () {
-									const { lifecycle } = yield* sessionCommit(row.session_id);
-									yield* lifecycle.releaseRun(
-										{
-											sessionId: row.session_id,
-											runId: input.runId,
-											commandId: row.command_id,
-											runnerId: held.runner,
-											transmission: held.transmission,
-											reason: "NotSent",
-										},
-										() => Effect.void,
-										evidence,
-									);
-								}),
-							);
-							yield* admitted?.close ?? Effect.void;
-							return { result: undefined, nativeResumeFallback: false };
-						}),
-					),
-				);
-				const result = terminalTurnResult(outcome.result);
-				if (result && outcome.result?.runnerSend)
-					yield* settleObservedSend({
-						_tag: "replied",
-						observedAt: clock.currentTimeMillisUnsafe(),
-						result,
-						send: {
-							sessionId: row.session_id,
-							runId: input.runId,
-							commandId: row.command_id,
-							requestSequence: row.request_sequence,
-							attempt: row.attempt_count,
-							...outcome.result.runnerSend,
-						},
-					});
-				return outcome.result;
-			}).pipe(
-				Effect.mapError((cause) => runnerFailure("transmit owner send", cause)),
-			);
-
-		const awaitRun = (
-			input: Pick<OwnerSend, "sessionId" | "runId">,
-			includeCoverage = false,
-		) =>
-			Effect.gen(function* () {
-				if (!sql) return yield* Effect.never;
-				let ordinal = 0;
-				while (true) {
-					const snapshot = yield* Effect.result(
-						Effect.gen(function* () {
-							const { commit } = yield* sessionCommit(input.sessionId);
-							const changed = commit.committed();
-							const [run] = yield* sql<{
-								status: string;
-							}>`SELECT status FROM provider_runs WHERE id = ${input.runId} AND session_id = ${input.sessionId}`;
-							const ended =
-								!run ||
-								!["pending", "running"].includes(run.status) ||
-								(includeCoverage &&
-									(yield* stopCovers(sql, input.sessionId, input.runId)));
-							return { ended, changed };
-						}),
-					);
-					if (snapshot._tag === "Failure") {
-						const fault = toStoreFault(snapshot.failure);
-						if (fault._tag === "StoreRejected") return yield* fault;
-						yield* Effect.sleep(sendRetryBackoff(++ordinal));
-						continue;
-					}
-					ordinal = 0;
-					if (snapshot.success.ended) return;
-					yield* snapshot.success.changed;
-				}
-			});
-
-		const feeder = yield* makeRunnerSendFeeder({
-			hold: (input) =>
-				Effect.suspend(() =>
-					stops.closing
-						? Effect.interrupt
-						: pauseSend("before-hold", input).pipe(
-								Effect.andThen(
-									stops.holdRun(input.sessionId, input.runId, input.commandId),
-								),
-							),
-				),
-			start: startStored,
-			release: (input) => stops.release(input),
-			failed: (input, failure, held) => {
-				const observedAt = clock.currentTimeMillisUnsafe();
-				return Effect.gen(function* () {
-					if (!sql) return;
-					yield* retrySettlementWrite(
-						Effect.gen(function* () {
-							const [row] = yield* sql<{
-								request_sequence: number;
-								attempt_count: number;
-							}>`SELECT request_sequence, attempt_count FROM provider_command_outbox
-							WHERE session_id = ${input.sessionId} AND run_id = ${input.runId} AND command_id = ${input.commandId}
-							AND (${input.requestSequence ?? null} IS NULL OR request_sequence = ${input.requestSequence ?? null})
-							AND (${input.attempt ?? null} IS NULL OR attempt_count = ${input.attempt ?? null}) ORDER BY request_sequence DESC LIMIT 1`;
-							if (!row) return;
-							if (!held)
-								return yield* commitSettlement({
-									_tag: "failed",
-									observedAt,
-									failure,
-									send: {
-										...input,
-										requestSequence: row.request_sequence,
-										attempt: row.attempt_count,
-									},
-								});
-							// A held send is released unwritten and settled in one commit, so
-							// its ref is unheld even when the input was built by a release.
-							const { lifecycle } = yield* sessionCommit(input.sessionId);
-							yield* lifecycle.releaseRun(
-								{
-									sessionId: input.sessionId,
-									runId: input.runId,
-									commandId: input.commandId,
-									runnerId: held.runner,
-									transmission: held.transmission,
-									reason: "NotSent",
-								},
-								() => Effect.void,
-								{
-									_tag: "failed",
-									observedAt,
-									failure,
-									send: {
-										sessionId: input.sessionId,
-										runId: input.runId,
-										commandId: input.commandId,
-										requestSequence: row.request_sequence,
-										attempt: row.attempt_count,
-									},
-								},
-							);
-						}),
-					);
-					yield* wakeReactor(input.sessionId);
-				}).pipe(
-					Effect.mapError((cause) =>
-						runnerFailure("settle start refusal", cause),
-					),
-				);
-			},
-			awaitRun,
-			clean: (runnerId) =>
-				Effect.gen(function* () {
-					if (!receipts) return;
-					const { rows } = yield* receipts.runners();
-					const row = rows.find((candidate) => candidate.runnerId === runnerId);
-					if (!row) return;
-					// The reconciler owns an unavailable commit; this waits for it.
-					yield* stops.requestStop(
-						{ ...row, members: [] },
-						{ _tag: "CandidateAbandoned" },
-					);
-				}).pipe(Effect.mapError(toStoreFault)),
-			park: (predecessor) => {
-				const window = Effect.sleep(
-					Math.max(0, predecessor.until - clock.currentTimeMillisUnsafe()),
-				);
-				// The Stop state is read once, here. Only a Stop in progress has an
-				// end to await. An unloaded (Running), legacy (already Escalated) or
-				// ended (Gone, Settled) predecessor holds the gate until its window
-				// ends; awaiting it would poll or return at once and re-step. A
-				// rejected commit fails only the Stop's waiters, so the window ends
-				// the park.
-				const stop = stops.state(predecessor.runner)._tag;
-				return stop === "Requested" ||
-					stop === "Escalating" ||
-					stop === "Committing"
-					? Effect.raceFirst(
-							stops
-								.awaitStop(predecessor.runner, "Escalated")
-								.pipe(Effect.catch(() => Effect.never)),
-							window,
-						)
-					: window;
-			},
-			transmitAdopted: transmitStoredOwner,
-		});
-
-		const recoverOwnerSends = (sessionIds?: ReadonlySet<string>) =>
-			Effect.gen(function* () {
-				if (!sql || stops.closing) return;
-				const accounts = yield* deps.accounts ?? Effect.succeed(undefined);
-				const ownsPending = yield* currentPendingSendOwner;
-				const rows = yield* runningRunnerCommands(
-					sql,
-					driver.driverKind,
-					(accountId) =>
-						accounts?.accounts.find(({ id }) => id === accountId)?.driver ??
-						accounts?.deleted.find(({ id }) => id === accountId)?.driver ??
-						(accountId === driver.driverKind ? driver.driverKind : undefined),
-				);
-				for (const row of rows) {
-					if (
-						!row.run_id ||
-						(sessionIds && !sessionIds.has(row.session_id)) ||
-						ownsPending?.(
-							row.session_id,
-							row.command_id,
-							row.request_sequence,
-							row.attempt_count,
-						)
-					)
-						continue;
-					// As for recovered registrations, a send whose project is not
-					// served stays with the reactor's project gate; the project's
-					// attachment recovers it once it is served.
-					if (!(yield* deps.projectRootForSession(row.session_id))) continue;
-					const [unheld] =
-						yield* sql`SELECT 1 FROM provider_runs WHERE id = ${row.run_id} AND session_id = ${row.session_id}
-					AND joined_into IS NULL AND runner_id IS NULL AND status IN ('pending','running')`;
-					if (
-						!unheld ||
-						(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
-					)
-						continue;
-					const [rejected] = yield* sql<{
-						instance_id: string;
-						fork_refused: number;
-					}>`SELECT COALESCE(json_extract(command.payload_json, '$.account.id'), json_extract(command.payload_json, '$.instanceId'), command.provider_id) AS instance_id,
-					(COALESCE(json_extract(command.payload_json, '$.clearInheritedGoal'), 0) OR COALESCE(json_extract(command.payload_json, '$.forkSession'), 0) OR session.forked_from IS NOT NULL) AS fork_refused
-					FROM provider_command_outbox command JOIN sessions session ON session.id = command.session_id WHERE command.request_sequence = ${row.request_sequence}
-					AND COALESCE(json_extract(command.payload_json, '$.nativeResumeFallback'), 0) = 0
-					AND EXISTS (SELECT 1 FROM events WHERE session_id = command.session_id AND type = 'run.released'
-						AND json_extract(data, '$.runId') = command.run_id AND json_extract(data, '$.commandId') = command.command_id AND json_extract(data, '$.reason') = 'ResumeRejected')`;
-					if (rejected) {
-						const { commit } = yield* sessionCommit(row.session_id);
-						yield* commit.write(() =>
-							Effect.gen(function* () {
-								const [eligible] =
-									yield* sql`SELECT 1 FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
-								WHERE command.request_sequence = ${row.request_sequence} AND command.attempt_count = ${row.attempt_count} AND command.status = 'running'
-								AND run.runner_id IS NULL AND run.status IN ('pending', 'running')`;
-								if (!eligible) return;
-								yield* recordClaudeNativeResumeFallback(sql, {
-									sessionId: row.session_id,
-									instanceId: rejected.instance_id,
-									commandId: row.command_id,
-									requestSequence: row.request_sequence,
-									attempt: row.attempt_count,
-									forkRefused: rejected.fork_refused !== 0,
-								});
-							}),
-						);
-					}
-					yield* feeder.enqueue({
-						sessionId: row.session_id,
-						runId: row.run_id,
-						commandId: row.command_id,
-						requestSequence: row.request_sequence,
-						attempt: row.attempt_count,
-					});
-				}
-			}).pipe(
-				Effect.mapError((cause) => runnerFailure("recover owner sends", cause)),
-			);
 
 		const sessionRunner: SessionRunner & {
 			readonly recoverEffect: Effect.Effect<void, SessionFailure>;

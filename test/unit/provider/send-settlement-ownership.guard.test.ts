@@ -49,30 +49,32 @@ describe("send settlement ownership", () => {
 			/\b(?:ownerSends|restoringOwners|settleOwnerSendFailure)\b/,
 		);
 		expect(manager).not.toMatch(/while\s*\(draining\)/);
-		// Until the module split, the manager also composes upgrade and reconciler cadence.
+		// The feeder file is checked whole above; the Starter also composes upgrade
+		// and reconciler cadence, so only its send start is checked.
+		const starter = readFileSync(
+			join(root, "src/lib/provider/runner/runner-starter.ts"),
+			"utf8",
+		);
 		const parsed = ts.createSourceFile(
-			"manager.ts",
-			manager,
+			"starter.ts",
+			starter,
 			ts.ScriptTarget.Latest,
 			true,
 		);
-		const owners = new Set([
-			"start",
-			"transmitStoredOwner",
-			"feeder",
-			"recoverOwnerSends",
-		]);
+		const starts: string[] = [];
 		const visit = (node: ts.Node): void => {
 			if (
 				ts.isVariableDeclaration(node) &&
-				owners.has(node.name.getText(parsed))
+				node.name.getText(parsed) === "start"
 			)
-				expect(node.getText(parsed), node.name.getText(parsed)).not.toMatch(
-					/\b(?:runnerRetrySchedule|retryRunnerPersistence)\b|Effect\.(?:retry|repeat)\s*\(/,
-				);
+				starts.push(node.getText(parsed));
 			ts.forEachChild(node, visit);
 		};
 		visit(parsed);
+		expect(starts).toHaveLength(1);
+		expect(starts[0]).not.toMatch(
+			/\b(?:runnerRetrySchedule|retryRunnerPersistence)\b|Effect\.(?:retry|repeat)\s*\(/,
+		);
 	});
 
 	it("leaves runner SQL and the run gate entirely with the lifecycle owner", () => {

@@ -45,7 +45,7 @@ export const legacyAnswerCommandId = (entry: RunnerChild, commandId: string) =>
 		: `${commandId}:answer`;
 
 /** The feeder's write permission, as Dispatch consumes it, so Dispatch never imports the feeder. */
-interface WritePermission {
+export interface WritePermission {
 	readonly current: () => boolean;
 	/** Consume immediately before the first byte, without yielding before write. */
 	readonly consume: () => boolean;

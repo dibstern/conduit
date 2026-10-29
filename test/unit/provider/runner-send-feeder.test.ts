@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Fiber, Option, Scheduler } from "effect";
+import { Deferred, Effect, Fiber, Option, PubSub, Scheduler } from "effect";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import {
@@ -7,30 +7,83 @@ import {
 	runnerFailure,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { RunRelease } from "../../../src/lib/provider/runner/runner-retirement.js";
-import { makeRunnerSendFeeder } from "../../../src/lib/provider/runner/runner-send-feeder.js";
+import {
+	makeRunnerSendFeeder,
+	type OwnerSend,
+} from "../../../src/lib/provider/runner/runner-send-feeder.js";
 import {
 	StoreRejected,
 	StoreUnavailable,
 } from "../../../src/lib/provider/runner/send-settlement.js";
 
 type FeederOptions = Parameters<typeof makeRunnerSendFeeder>[0];
+/**
+ * Plays Retirement's current-hold owner: a Held hold sets its entry (a stub
+ * may set it earlier, as the in-permit write does), and `released` deletes
+ * it when it still names the released transmission, then publishes.
+ */
 const makeFeeder = (
 	options: Omit<
 		FeederOptions,
-		"start" | "clean" | "park" | "transmitAdopted"
+		| "hold"
+		| "start"
+		| "clean"
+		| "park"
+		| "transmitAdopted"
+		| "currentHold"
+		| "releases"
 	> & {
+		readonly hold: (
+			input: OwnerSend,
+			held: (transmission: number) => void,
+		) => ReturnType<FeederOptions["hold"]>;
 		readonly start: (
 			input: Parameters<FeederOptions["start"]>[0],
 		) => Effect.Effect<void, Parameters<FeederOptions["failed"]>[1]>;
 		readonly transmitAdopted?: FeederOptions["transmitAdopted"];
 	},
 ) =>
-	makeRunnerSendFeeder({
-		clean: () => Effect.void,
-		park: () => Effect.never,
-		transmitAdopted: () => Effect.die("Unexpected adopted transmission"),
-		...options,
-		start: (input) => options.start(input).pipe(Effect.as("Started" as const)),
+	Effect.gen(function* () {
+		const current = new Map<string, number>();
+		const key = (run: OwnerSend) =>
+			JSON.stringify([run.sessionId, run.runId, run.commandId]);
+		const releases = yield* PubSub.unbounded<RunRelease>();
+		const feeder = yield* makeRunnerSendFeeder({
+			clean: () => Effect.void,
+			park: () => Effect.never,
+			transmitAdopted: () => Effect.die("Unexpected adopted transmission"),
+			...options,
+			hold: (input) =>
+				Effect.suspend(() => {
+					let set = false;
+					return options
+						.hold(input, (transmission) => {
+							set = true;
+							current.set(key(input), transmission);
+						})
+						.pipe(
+							Effect.tap((hold) =>
+								Effect.sync(() => {
+									if (!set && hold._tag === "Held")
+										current.set(key(input), hold.transmission);
+								}),
+							),
+						);
+				}),
+			start: (input) =>
+				options.start(input).pipe(Effect.as("Started" as const)),
+			currentHold: (run) => current.get(key(run)),
+			releases,
+		});
+		return {
+			...feeder,
+			released: (input: RunRelease) =>
+				Effect.suspend(() => {
+					if (current.get(key(input)) === input.transmission)
+						current.delete(key(input));
+					return PubSub.publish(releases, input);
+				}).pipe(Effect.asVoid),
+		};
 	});
 
 it.effect(
@@ -460,6 +513,8 @@ for (const prerequisite of ["Cleaning", "predecessor"] as const)
 							prerequisites.push(predecessor.runner);
 						}),
 					transmitAdopted: () => Effect.die("Unexpected adopted transmission"),
+					currentHold: () => (holds >= 4 ? 1 : undefined),
+					releases: yield* PubSub.unbounded<RunRelease>(),
 				});
 				const sending = yield* feeder
 					.send(
@@ -681,10 +736,11 @@ it.effect(
 			let holds = 0;
 			const writes: string[] = [];
 			const feeder = yield* makeFeeder({
-				hold: () =>
+				hold: (_input, held) =>
 					Effect.gen(function* () {
 						holds++;
 						if (holds === 1) {
+							held(1);
 							yield* Deferred.succeed(committed, undefined);
 							yield* Deferred.await(reply);
 							return { _tag: "Held" as const, runner: "old", transmission: 1 };

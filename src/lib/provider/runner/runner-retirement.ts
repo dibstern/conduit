@@ -11,6 +11,7 @@ import {
 	FiberSet,
 	Layer,
 	Option,
+	PubSub,
 	Scheduler,
 	Schema,
 	type Semaphore,
@@ -80,9 +81,11 @@ import {
 	runnerProcessTable,
 } from "./runner-registry.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
+import type { OwnerSend } from "./runner-send-feeder.js";
 import { readRunnerSendJournal } from "./runner-send-journal.js";
 import {
 	type HeldSendRef,
+	retrySettlementWrite,
 	type SendEvidence,
 	type SettlementTx,
 	type StoreFault,
@@ -125,7 +128,19 @@ export const makeRunnerRunLifecycle = (
 		readonly commit: CommitAndSignal;
 		readonly eventStore: Pick<UnboundEventStoreEffect, "appendBatch">;
 		readonly wakeReactor?: Effect.Effect<void>;
-		readonly released?: (input: RunRelease) => Effect.Effect<void>;
+		/** Retirement's current holds; the hold and the release write them. */
+		readonly holds?: {
+			readonly held: (
+				run: {
+					readonly sessionId: string;
+					readonly runId: string;
+					readonly commandId: string;
+				},
+				runner: string,
+				transmission: number,
+			) => void;
+			readonly released: (input: RunRelease) => Effect.Effect<void>;
+		};
 	},
 ) => {
 	const { sql, commit, eventStore } = options;
@@ -281,6 +296,9 @@ export const makeRunnerRunLifecycle = (
 									),
 								]),
 							);
+							// Inside the commit permit: a release of this transmission commits
+							// only after this one, so its delete always finds the entry.
+							options.holds?.held(input, serving.runner_id, transmission);
 							return { _tag: "Held", runner: serving.runner_id, transmission };
 						}),
 					{
@@ -412,7 +430,8 @@ export const makeRunnerRunLifecycle = (
 						}),
 					{
 						afterCommit: Effect.gen(function* () {
-							if (released) yield* options.released?.(input) ?? Effect.void;
+							if (released)
+								yield* options.holds?.released(input) ?? Effect.void;
 							yield* Effect.forEach(followUps, (effect) => effect, {
 								discard: true,
 							});
@@ -1538,6 +1557,16 @@ export const makeRunnerRetirement = (
 			NonNullable<ReconcilerOptions["settlement"]>,
 			"driverKind" | "entry"
 		>;
+		readonly sessionCommit: (sessionId: string) => Effect.Effect<
+			{
+				readonly commit: Pick<CommitAndSignal, "committed">;
+				readonly lifecycle: Pick<
+					ReturnType<typeof makeRunnerRunLifecycle>,
+					"releaseRun"
+				>;
+			},
+			unknown
+		>;
 		readonly close: {
 			readonly lock: Semaphore.Semaphore;
 			readonly sends: Effect.Effect<void>;
@@ -1559,6 +1588,15 @@ export const makeRunnerRetirement = (
 		const attachments = new WeakMap<RunnerChild, RunnerAttachment>();
 		const endCommands = new Map<string, string>();
 		const recoveredRunnerIds = new Set<string>();
+		// The transmission each held run may write, until its release commits.
+		const currentHolds = new Map<
+			string,
+			{ readonly runner: string; readonly transmission: number }
+		>();
+		const releases = yield* PubSub.unbounded<RunRelease>();
+		const holdKey = (
+			run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
+		) => JSON.stringify([run.sessionId, run.runId, run.commandId]);
 		let recovering = false;
 		let closing = false;
 		const retirementOf = (runnerId: string): RunnerRetirement | undefined => {
@@ -1665,6 +1703,11 @@ export const makeRunnerRetirement = (
 								endCommands.delete(retirement.runnerId);
 								recoveredRunnerIds.delete(retirement.runnerId);
 								authority.forget(retirement.runnerId);
+								// A hold ended without a release (settled, joined, deleted)
+								// leaves its entry until its runner is pruned.
+								for (const [key, hold] of currentHolds)
+									if (hold.runner === retirement.runnerId)
+										currentHolds.delete(key);
 							}),
 						),
 					),
@@ -1738,6 +1781,189 @@ export const makeRunnerRetirement = (
 			/** The End command a runner's stop keeps answering, until it is pruned. */
 			endCommand: (runnerId: string) => endCommands.get(runnerId),
 			recoveredRunnerIds: recoveredRunnerIds as ReadonlySet<string>,
+			/** Without a store a hold is in memory only, so it is current at once. */
+			holdRun: options.holdRun
+				? stops.holdRun
+				: (sessionId: string, runId: string, commandId: string) =>
+						stops.holdRun(sessionId, runId, commandId).pipe(
+							Effect.tap((hold) =>
+								Effect.sync(() => {
+									if (hold._tag === "Held")
+										currentHolds.set(holdKey({ sessionId, runId, commandId }), {
+											runner: hold.runner,
+											transmission: hold.transmission,
+										});
+								}),
+							),
+						),
+			/** The lifecycle's writers: the hold's commit sets, a release deletes. */
+			holds: {
+				held: (
+					run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
+					runner: string,
+					transmission: number,
+				) => {
+					currentHolds.set(holdKey(run), { runner, transmission });
+				},
+				released: (input: RunRelease) =>
+					Effect.suspend(() => {
+						const key = holdKey(input);
+						if (currentHolds.get(key)?.transmission === input.transmission)
+							currentHolds.delete(key);
+						return PubSub.publish(releases, input);
+					}).pipe(Effect.asVoid),
+			},
+			currentHold: (
+				run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
+			) => currentHolds.get(holdKey(run))?.transmission,
+			/** Every committed release, for the feeder's re-enqueue only. */
+			releases,
+			/** Settles the send as failed; a held send is released in the same commit. */
+			refuse: (
+				input: OwnerSend,
+				failure: SessionFailure,
+				held?: Extract<Hold, { _tag: "Held" }>,
+			) => {
+				const {
+					sql,
+					commit: commitSettlement,
+					wake: wakeReactor,
+				} = options.settlement;
+				const observedAt = clock.currentTimeMillisUnsafe();
+				return Effect.gen(function* () {
+					if (!sql) return;
+					yield* retrySettlementWrite(
+						Effect.gen(function* () {
+							const [row] = yield* sql<{
+								request_sequence: number;
+								attempt_count: number;
+							}>`SELECT request_sequence, attempt_count FROM provider_command_outbox
+							WHERE session_id = ${input.sessionId} AND run_id = ${input.runId} AND command_id = ${input.commandId}
+							AND (${input.requestSequence ?? null} IS NULL OR request_sequence = ${input.requestSequence ?? null})
+							AND (${input.attempt ?? null} IS NULL OR attempt_count = ${input.attempt ?? null}) ORDER BY request_sequence DESC LIMIT 1`;
+							if (!row) return;
+							if (!held)
+								return yield* commitSettlement({
+									_tag: "failed",
+									observedAt,
+									failure,
+									send: {
+										...input,
+										requestSequence: row.request_sequence,
+										attempt: row.attempt_count,
+									},
+								});
+							// A held send is released unwritten and settled in one commit, so
+							// its ref is unheld even when the input was built by a release.
+							const { lifecycle } = yield* options.sessionCommit(
+								input.sessionId,
+							);
+							yield* lifecycle.releaseRun(
+								{
+									sessionId: input.sessionId,
+									runId: input.runId,
+									commandId: input.commandId,
+									runnerId: held.runner,
+									transmission: held.transmission,
+									reason: "NotSent",
+								},
+								() => Effect.void,
+								{
+									_tag: "failed",
+									observedAt,
+									failure,
+									send: {
+										sessionId: input.sessionId,
+										runId: input.runId,
+										commandId: input.commandId,
+										requestSequence: row.request_sequence,
+										attempt: row.attempt_count,
+									},
+								},
+							);
+						}),
+					);
+					yield* wakeReactor(input.sessionId);
+				}).pipe(
+					Effect.mapError((cause) =>
+						runnerFailure("settle start refusal", cause),
+					),
+				);
+			},
+			awaitRun: (
+				input: Pick<OwnerSend, "sessionId" | "runId">,
+				includeCoverage = false,
+			) =>
+				Effect.gen(function* () {
+					const { sql } = options.settlement;
+					if (!sql) return yield* Effect.never;
+					let ordinal = 0;
+					while (true) {
+						const snapshot = yield* Effect.result(
+							Effect.gen(function* () {
+								const { commit } = yield* options.sessionCommit(
+									input.sessionId,
+								);
+								const changed = commit.committed();
+								const [run] = yield* sql<{
+									status: string;
+								}>`SELECT status FROM provider_runs WHERE id = ${input.runId} AND session_id = ${input.sessionId}`;
+								const ended =
+									!run ||
+									!["pending", "running"].includes(run.status) ||
+									(includeCoverage &&
+										(yield* stopCovers(sql, input.sessionId, input.runId)));
+								return { ended, changed };
+							}),
+						);
+						if (snapshot._tag === "Failure") {
+							const fault = toStoreFault(snapshot.failure);
+							if (fault._tag === "StoreRejected") return yield* fault;
+							yield* Effect.sleep(sendRetryBackoff(++ordinal));
+							continue;
+						}
+						ordinal = 0;
+						if (snapshot.success.ended) return;
+						yield* snapshot.success.changed;
+					}
+				}),
+			clean: (runnerId: string) =>
+				Effect.gen(function* () {
+					if (!options.receipts) return;
+					const { rows } = yield* options.receipts.runners();
+					const row = rows.find((candidate) => candidate.runnerId === runnerId);
+					if (!row) return;
+					// The reconciler owns an unavailable commit; this waits for it.
+					yield* stops.requestStop(
+						{ ...row, members: [] },
+						{ _tag: "CandidateAbandoned" },
+					);
+				}).pipe(Effect.mapError(toStoreFault)),
+			park: (predecessor: {
+				readonly runner: string;
+				readonly until: number;
+			}) => {
+				const window = Effect.sleep(
+					Math.max(0, predecessor.until - clock.currentTimeMillisUnsafe()),
+				);
+				// The Stop state is read once, here. Only a Stop in progress has an
+				// end to await. An unloaded (Running), legacy (already Escalated) or
+				// ended (Gone, Settled) predecessor holds the gate until its window
+				// ends; awaiting it would poll or return at once and re-step. A
+				// rejected commit fails only the Stop's waiters, so the window ends
+				// the park.
+				const stop = stops.state(predecessor.runner)._tag;
+				return stop === "Requested" ||
+					stop === "Escalating" ||
+					stop === "Committing"
+					? Effect.raceFirst(
+							stops
+								.awaitStop(predecessor.runner, "Escalated")
+								.pipe(Effect.catch(() => Effect.never)),
+							window,
+						)
+					: window;
+			},
 			recover: (
 				recoverable: Parameters<typeof stops.recover>[0],
 			): ReturnType<typeof stops.recover> =>
