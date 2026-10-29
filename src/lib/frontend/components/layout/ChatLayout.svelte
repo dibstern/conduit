@@ -614,6 +614,11 @@
 	-->
 	<div id="compact-top-edge" class="top-edge-strip" aria-hidden="true"></div>
 
+	<!-- The folded Duo's side rail: the strip right of the page, beside the status
+	     column. The controls in it stay in their own components; style.css only
+	     moves their boxes here (conduit-test-tw49i.4). -->
+	<div id="duo-rail" aria-hidden="true"></div>
+
 	<!-- Fixed and full-viewport, so it lives outside #app: the phone list screen
 	     hides #app but still needs to show the connection state. -->
 	<ConnectOverlay />

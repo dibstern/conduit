@@ -1513,6 +1513,12 @@
 				{/snippet}
 			</TwoRowComposerLayout>
 		</ComposerFrame>
+		{#if sessionViewState.pose === "duo-folded-portrait" && currentChat().contextPercent > 0}
+			<div data-testid="context-hairline" data-warning={contextWarning ? "true" : undefined} class="context-hairline">
+				<span><i style:width="{Math.min(100, currentChat().contextPercent)}%"></i></span>
+				<b>{Math.round(currentChat().contextPercent)}% context</b>
+			</div>
+		{/if}
 		{#if composerPreferences.controls === "words"}
 			<div
 				data-testid="composer-words-row"
@@ -1569,4 +1575,10 @@
 <style>
 	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
 	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
+	/* The folded Duo's context reading: a hairline under the field, 8pt above the home indicator. */
+	.context-hairline { position: absolute; top: calc(100% + 6px); inset-inline: 12px; height: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; color: var(--color-text-secondary); }
+	.context-hairline[data-warning] { color: var(--color-status-amber); }
+	.context-hairline > span { position: relative; flex: 1; height: 2px; border-radius: 2px; overflow: hidden; background: var(--color-border); }
+	.context-hairline i { position: absolute; inset-block: 0; left: 0; border-radius: 2px; background: currentColor; }
+	.context-hairline b { font-size: 11px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>
