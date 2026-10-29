@@ -1832,7 +1832,10 @@ export class ClaudeEventTranslator {
 						partId: matchedTool.itemId,
 						result: resultContent || null,
 						duration: 0,
-						...(fileChanges.length > 0 ? { fileChanges } : {}),
+						// A failed call changed nothing; [] keeps the input fallback away.
+						...(fileChanges.length > 0 || block.is_error
+							? { fileChanges }
+							: {}),
 						...(path !== undefined
 							? {
 									metadata: {

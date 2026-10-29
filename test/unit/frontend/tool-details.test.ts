@@ -349,9 +349,13 @@ describe("wanted soon", () => {
 			...tool(id),
 			name: "Patch",
 			fileChanges: [{ path: "a.ts", kind: "update", patch: "preview" }],
+			presentation: {},
 			preview: { fileChangesBytes: Utf8Bytes.make(bytes) },
 		});
 		expect(shownCut(changed("a", 3 * MB))).toBe("file changes");
+		// Only Cursor cards render file changes inline, so only they load them.
+		const { presentation: _cursor, ...other } = changed("other", 3 * MB);
+		expect(shownCut(other)).toBeUndefined();
 		details.wantSoon(session, [
 			changed("a", 3 * MB),
 			changed("too-big", 3 * MB),

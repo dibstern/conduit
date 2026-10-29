@@ -4,6 +4,23 @@ import { ToolFileChangeSchema } from "../../src/lib/contracts/stored-event.js";
 import { deriveToolFileChanges } from "../../src/lib/tool-file-changes.js";
 
 describe("Tool File Change", () => {
+	it("derives an Edit only when its input declares text", () => {
+		const edit = (oldString: string, newString: string) =>
+			deriveToolFileChanges({
+				tool: "Edit",
+				filePath: "a",
+				oldString,
+				newString,
+			});
+		// Cursor stores Edit with both strings empty: nothing to derive.
+		expect(edit("", "")).toEqual([]);
+		expect(edit("", "new")).toEqual([
+			{ path: "a", kind: "add", before: "", after: "new" },
+		]);
+		expect(edit("old", "new")).toEqual([
+			{ path: "a", kind: "update", before: "old", after: "new" },
+		]);
+	});
 	it("retains empty creations and content-free patch declarations", () => {
 		const patch =
 			"*** Begin Patch\n*** Add File: empty\n*** Update File: unchanged\n*** Update File: old\n*** Move to: renamed\n*** End Patch";

@@ -9,10 +9,12 @@ export function deriveToolFileChanges(
 ): readonly ToolFileChange[] {
 	switch (input.tool) {
 		case "Edit":
+			// Cursor records Edit with empty strings: the input declares nothing.
+			if (!input.oldString && !input.newString) return [];
 			return [
 				{
 					path: input.filePath,
-					kind: "update",
+					kind: input.oldString === "" ? "add" : "update",
 					before: input.oldString,
 					after: input.newString,
 				},

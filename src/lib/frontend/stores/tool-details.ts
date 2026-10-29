@@ -51,7 +51,8 @@ const fullBytes = ({ preview }: ToolMessage): number =>
 export const shownCut = (
 	tool: ToolMessage,
 ): "command and output" | "output" | "command" | "file changes" | undefined => {
-	if (tool.preview?.fileChangesBytes !== undefined) return "file changes";
+	if (tool.presentation && tool.preview?.fileChangesBytes !== undefined)
+		return "file changes";
 	const output = tool.preview?.resultBytes !== undefined;
 	const command =
 		toolCommand(tool) !== undefined &&

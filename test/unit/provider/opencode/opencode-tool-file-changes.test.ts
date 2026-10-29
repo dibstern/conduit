@@ -67,7 +67,18 @@ describe("OpenCode tool file changes", () => {
 				{ path: "/src/main.ts", kind: "update", before: "old", after: "new" },
 			],
 		},
+		{
+			// OpenCode's edit with an empty oldString creates the file.
+			oldString: "",
+			metadata: {
+				filediff: { file: "/src/main.ts", before: "", after: "new" },
+			},
+			expected: [
+				{ path: "/src/main.ts", kind: "add", before: "", after: "new" },
+			],
+		},
 	])("prefers provider metadata and falls back to canonical input", ({
+		oldString = "old",
 		metadata,
 		expected,
 	}) => {
@@ -84,7 +95,7 @@ describe("OpenCode tool file changes", () => {
 						status: "completed",
 						input: {
 							filePath: "/src/main.ts",
-							oldString: "old",
+							oldString,
 							newString: "new",
 						},
 						metadata,

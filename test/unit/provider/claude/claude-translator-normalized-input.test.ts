@@ -134,9 +134,9 @@ describe("ClaudeEventTranslator — normalized tool input", () => {
 				new_string: "new",
 			},
 			failed: true,
-			expected: undefined,
+			expected: [],
 		},
-	])("records successful $name changes and excludes failed edits ($failed)", async ({
+	])("records successful $name changes and an empty list for failed edits ($failed)", async ({
 		name,
 		input,
 		result,

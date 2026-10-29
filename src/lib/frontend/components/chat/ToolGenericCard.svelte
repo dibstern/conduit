@@ -60,7 +60,7 @@
 	const bashCommand = $derived(toolCommand(message));
 	const hasLiveOutput = $derived(typeof message.metadata?.['output'] === "string");
 	const movedToBackground = $derived(message.metadata?.['movedToBackground'] === true);
-	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.metadata['fileChange'] || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
+	const cursorDetail = $derived(typeof message.metadata?.['cursorToolType'] === "string" && (message.fileChanges?.length || message.metadata['plan'] || message.metadata['computerUse'] || message.metadata['media'] || message.metadata['output'] !== undefined || ensureCanonical(message.name, message.input).tool === "Unknown"));
 
 	// Description preview (prefer input subtitle, then first line of result, then status)
 	const descText = $derived.by(() => {

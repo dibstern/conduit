@@ -98,7 +98,8 @@
 </script>
 
 <div class={className}>
-{#if shown.fileChanges?.length}
+<!-- Only Cursor cards render file changes inline; other providers' get f02e9.9's Diff action. -->
+{#if presentation && shown.fileChanges?.length}
 	{#each shown.fileChanges as change}
 	{@const patchLines = change.patch?.split("\n")}
 	<div data-testid="tool-file-change" class="my-1 overflow-x-auto">

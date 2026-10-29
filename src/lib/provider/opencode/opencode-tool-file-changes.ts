@@ -16,8 +16,10 @@ export function openCodeToolFileChanges(
 ): readonly ToolFileChange[] {
 	const patch =
 		typeof metadata?.["diff"] === "string" ? metadata["diff"] : undefined;
+	// OpenCode's edit with an empty oldString creates the file; its filediff says no kind.
+	const created = input.tool === "Edit" && input.oldString === "";
 	const changes = providerFileDiffs(metadata).flatMap((diff) =>
-		fileChange(diff, patch),
+		fileChange(diff, patch, created),
 	);
 	return changes.length > 0
 		? changes
@@ -38,7 +40,10 @@ function providerFileDiffs(
 	);
 }
 
-function changeKind(diff: OpenCodeToolFileDiff): ToolFileChange["kind"] {
+function changeKind(
+	diff: OpenCodeToolFileDiff,
+	created: boolean,
+): ToolFileChange["kind"] {
 	if (diff.movePath) return "move";
 	if (diff.type) return diff.type;
 	switch (diff.status) {
@@ -47,7 +52,7 @@ function changeKind(diff: OpenCodeToolFileDiff): ToolFileChange["kind"] {
 		case "deleted":
 			return "delete";
 		default:
-			return "update";
+			return created ? "add" : "update";
 	}
 }
 
@@ -66,11 +71,12 @@ function diffText(
 function fileChange(
 	diff: OpenCodeToolFileDiff,
 	patch: string | undefined,
+	created: boolean,
 ): readonly ToolFileChange[] {
 	const oldPath = diff.filePath ?? diff.path ?? diff.file;
 	const path = diff.movePath ?? oldPath;
 	if (!path) return [];
-	const kind = changeKind(diff);
+	const kind = changeKind(diff, created);
 	const change = { path, ...diffText(diff, patch) };
 	if (kind !== "move") return [{ ...change, kind }];
 	return oldPath ? [{ ...change, kind, oldPath }] : [];
