@@ -1,4 +1,5 @@
 {
+	"src/lib/frontend/stores/session-view.svelte.ts :: focusin": "watchKeyboard records whether a :read-write field has focus, the app-wide keyboard-open state the folded Duo lays out by. Observes only; does not dismiss surfaces, prevent defaults or move focus.",
 	"src/lib/frontend/actions/click-on-lift.ts :: click": "Drops the trusted compatibility click that follows a header control already activated on touch lift (iOS standalone loses clicks above y64), within 600ms and until the next pointerdown or keydown. Does not dismiss surfaces, move focus or handle Escape.",
 	"src/lib/frontend/actions/click-on-lift.ts :: keydown": "Ends the touch-lift click-drop window so a keyboard activation straight after a tap still lands. Does not intercept keys, implement Escape, move focus or dismiss a surface.",
 	"src/lib/frontend/actions/click-on-lift.ts :: mousedown": "Drops the trusted compatibility mousedown after a touch-lift activation so its default focus change cannot undo the focus a closing sheet restored to its trigger. Does not dismiss surfaces or move focus itself.",

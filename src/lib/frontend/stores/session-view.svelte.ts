@@ -1,6 +1,7 @@
 // State the session's own chrome needs but the transcript owns. Kept in one
 // place so the bar and the message list cannot disagree.
 
+import { tick, untrack } from "svelte";
 import { classifyDuoPose, type DuoPose } from "../utils/duo-pose.js";
 
 /**
@@ -120,6 +121,8 @@ export const sessionViewState = $state({
 	pose: (initiallyCompact ? "phone" : "desktop") as Pose,
 	/** Phone-sized pose: the session bar replaces the global header. */
 	compact: initiallyCompact,
+	/** Written only by watchKeyboard; rendered as #layout[data-keyboard="open"]. */
+	keyboardOpen: false,
 
 	/** Measured only by the composer's input wrapper. */
 	composerWidth: 0,
@@ -271,5 +274,57 @@ export function watchViewportPose(): () => void {
 		removeEventListener("resize", measure);
 		removeEventListener("orientationchange", measure);
 		probe.remove();
+	};
+}
+
+/** Runs before the keyboard flips and returns what to run once the flip renders. */
+type KeyboardHandoff = (open: boolean) => () => void;
+const noHandoff: KeyboardHandoff = () => () => {};
+let keyboardHandoff = noHandoff;
+
+/** Lets the composer measure its controls on both sides of the flip (FLIP). */
+export function setKeyboardHandoff(handoff: KeyboardHandoff): () => void {
+	keyboardHandoff = handoff;
+	return () => {
+		if (keyboardHandoff === handoff) keyboardHandoff = noHandoff;
+	};
+}
+
+function setKeyboardOpen(open: boolean): void {
+	if (open === sessionViewState.keyboardOpen) return;
+	const play = keyboardHandoff(open);
+	sessionViewState.keyboardOpen = open;
+	// tick resolves after the DOM update and before the next paint.
+	void tick().then(play);
+}
+
+const raisesKeyboard = (target: EventTarget | null) =>
+	target instanceof Element && target.matches(":read-write");
+// A blur names the field that takes focus next, so moving between fields never
+// flickers the keyboard closed.
+const followFocus = (event: FocusEvent) =>
+	setKeyboardOpen(
+		raisesKeyboard(
+			event.type === "focusin" ? event.target : event.relatedTarget,
+		),
+	);
+
+/**
+ * Track whether the on-screen keyboard is up. iOS shows it exactly while a
+ * field that takes typing has focus, and these devices have no hardware
+ * keyboard, so focus on a `:read-write` element is the signal. Not
+ * visualViewport heights: they lag the keyboard's slide, and the pose keeps
+ * reading the layout viewport. Any field counts, not only the composer: the
+ * keyboard covers the same screen whichever field raised it.
+ */
+export function watchKeyboard(): () => void {
+	// Untracked, so the effect that calls this does not re-run on every flip.
+	untrack(() => setKeyboardOpen(raisesKeyboard(document.activeElement)));
+	document.addEventListener("focusin", followFocus);
+	document.addEventListener("focusout", followFocus);
+	return () => {
+		document.removeEventListener("focusin", followFocus);
+		document.removeEventListener("focusout", followFocus);
+		setKeyboardOpen(false);
 	};
 }

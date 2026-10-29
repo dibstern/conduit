@@ -59,7 +59,7 @@
 	import { viewAlerts } from "../../stores/alerts.js";
 	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
-	import { isBarCollapsed, sessionViewState, watchViewportPose } from "../../stores/session-view.svelte.js";
+	import { isBarCollapsed, sessionViewState, watchKeyboard, watchViewportPose } from "../../stores/session-view.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
 	import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 	import { fetchCurrentVersion } from "../../stores/version.svelte.js";
@@ -411,6 +411,7 @@
 	// session's own bar replaces the global header. Kept here rather than in each
 	// consumer so the chrome cannot disagree with itself about the pose.
 	$effect(() => watchViewportPose());
+	$effect(() => watchKeyboard());
 
 	// Visual viewport tracking (keyboard avoidance when terminal is open)
 	// CSS dvh does NOT account for the virtual keyboard. We listen to the
@@ -515,7 +516,7 @@
 {#if firstRun}
 	<FirstRunProjects oncomplete={() => { firstRun = false; }} />
 {:else}
-<div id="layout" class={layoutClass} data-pose={sessionViewState.pose}>
+<div id="layout" class={layoutClass} data-pose={sessionViewState.pose} data-keyboard={sessionViewState.keyboardOpen ? "open" : undefined}>
 	<!--
 		iOS 26 paints a progressive blur under the status bar unless WebKit finds an
 		opaque fixed or sticky box at the top edge (hit-tested at x = width/2, y = 4).
