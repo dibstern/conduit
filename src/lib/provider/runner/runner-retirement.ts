@@ -538,6 +538,14 @@ export const makeRunnerStopReconciler = (options: {
 		const watching = new Set<string>();
 		const get = (runnerId: string): RunnerStop =>
 			states.get(runnerId) ?? { _tag: "Running" };
+		// Every Stop state write wakes awaitStop, so End resolves at the exit.
+		let stopChanged = Deferred.makeUnsafe<void>();
+		const setStop = (runnerId: string, state: RunnerStop) => {
+			states.set(runnerId, state);
+			const changed = stopChanged;
+			stopChanged = Deferred.makeUnsafe<void>();
+			Deferred.doneUnsafe(changed, Effect.void);
+		};
 		const serving = (sessionId: string) =>
 			[...rows.values()].find(
 				(row) =>
@@ -721,7 +729,7 @@ export const makeRunnerStopReconciler = (options: {
 						options.receipts
 					)
 						yield* options.receipts.stopProgress(next.record);
-					states.set(runnerId, next);
+					setStop(runnerId, next);
 					if (
 						next._tag === state._tag &&
 						!decision.actions.some((action) => action._tag === "Signal")
@@ -813,7 +821,7 @@ export const makeRunnerStopReconciler = (options: {
 				for (const row of rows.values())
 					if (row.sessionId === record.sessionId) rows.delete(row.runnerId);
 				for (const row of commit.session) rows.set(row.runnerId, row);
-				states.set(record.runnerId, stoppedState(record));
+				setStop(record.runnerId, stoppedState(record));
 				yield* options
 					.committed(record)
 					.pipe(
@@ -827,7 +835,7 @@ export const makeRunnerStopReconciler = (options: {
 				yield* Deferred.succeed(waiters, "Requested");
 				watch(record.runnerId);
 				for (const candidate of commit.candidates) {
-					states.set(candidate.runnerId, stoppedState(candidate));
+					setStop(candidate.runnerId, stoppedState(candidate));
 					watch(candidate.runnerId);
 				}
 			});
@@ -853,7 +861,7 @@ export const makeRunnerStopReconciler = (options: {
 					if (Exit.isSuccess(result)) {
 						if (result.value._tag === "Requested")
 							return yield* afterStop(result.value, waiters);
-						states.set(target.runnerId, { _tag: "Running" });
+						setStop(target.runnerId, { _tag: "Running" });
 						return yield* Deferred.succeed(waiters, "Ignored");
 					}
 					const cause = Option.getOrUndefined(
@@ -865,7 +873,7 @@ export const makeRunnerStopReconciler = (options: {
 						cause instanceof RunnerRetirementDecodeError ||
 						cause instanceof RunnerSlotError
 					) {
-						states.set(target.runnerId, { _tag: "Running" });
+						setStop(target.runnerId, { _tag: "Running" });
 						yield* Effect.logError(
 							`Runner stop commit rejected: runnerId=${target.runnerId}`,
 							result.cause,
@@ -888,7 +896,7 @@ export const makeRunnerStopReconciler = (options: {
 				"Requested" | "Ignored",
 				SessionFailure
 			>();
-			states.set(target.runnerId, { _tag: "Committing", waiters });
+			setStop(target.runnerId, { _tag: "Committing", waiters });
 			runFork(commitWorker(target, reason, waiters));
 			return waiters;
 		};
@@ -957,7 +965,7 @@ export const makeRunnerStopReconciler = (options: {
 						"Requested" | "Ignored",
 						SessionFailure
 					>();
-					states.set(input.runnerId, { _tag: "Committing", waiters });
+					setStop(input.runnerId, { _tag: "Committing", waiters });
 					const result = yield* Effect.exit(
 						// releaseRun invokes this only for the serving row its own
 						// transaction read, beside the matching release evidence.
@@ -966,7 +974,7 @@ export const makeRunnerStopReconciler = (options: {
 						),
 					);
 					if (Exit.isFailure(result)) {
-						states.set(input.runnerId, current);
+						setStop(input.runnerId, current);
 						// Joiners recheck and commit their own Stop.
 						yield* Deferred.succeed(waiters, "Ignored");
 						return yield* Effect.fail({
@@ -983,7 +991,7 @@ export const makeRunnerStopReconciler = (options: {
 					if (result.value.released && result.value.stop?._tag === "Requested")
 						yield* afterStop(result.value.stop, waiters);
 					else {
-						states.set(input.runnerId, current);
+						setStop(input.runnerId, current);
 						yield* Deferred.succeed(waiters, "Ignored");
 					}
 				}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true)),
@@ -1067,7 +1075,7 @@ export const makeRunnerStopReconciler = (options: {
 						if (options.recoverable && !(yield* options.recoverable(record)))
 							continue;
 						if (get(record.runnerId)._tag !== "Running") continue;
-						states.set(record.runnerId, stoppedState(record));
+						setStop(record.runnerId, stoppedState(record));
 						watch(record.runnerId);
 					}
 					// Startup registers these intents and does not wait on their
@@ -1109,23 +1117,24 @@ export const makeRunnerStopReconciler = (options: {
 								)
 							: Effect.succeed(state);
 					});
-					const wait = observe.pipe(
-						Effect.repeat({
-							while: (state) =>
-								state._tag !== "Settled" &&
-								(target !== "Escalated" ||
-									(state._tag !== "Escalated" && state._tag !== "Gone")),
-							schedule: runnerRetrySchedule,
-						}),
-						Effect.asVoid,
-					);
+					const until = (done: (state: RunnerStop) => boolean) =>
+						Effect.gen(function* () {
+							while (true) {
+								const changed = stopChanged;
+								const state = yield* observe;
+								if (done(state)) return state;
+								yield* Deferred.await(changed);
+							}
+						});
+					const wait = until(
+						(state) =>
+							state._tag === "Settled" ||
+							(target === "Escalated" &&
+								(state._tag === "Escalated" || state._tag === "Gone")),
+					).pipe(Effect.asVoid);
 					if (target === "Settled") return yield* wait;
-					const state = yield* observe.pipe(
-						Effect.repeat({
-							while: (state) =>
-								state._tag === "Running" || state._tag === "Committing",
-							schedule: runnerRetrySchedule,
-						}),
+					const state = yield* until(
+						(state) => state._tag !== "Running" && state._tag !== "Committing",
 					);
 					if ("record" in state) {
 						const deadline = stopWindowEnd(state.record);
