@@ -1061,10 +1061,28 @@ body:has(dialog:modal) {
 	padding-top: env(safe-area-inset-top, 0px);
 }
 
+/* A layer hanging from the live header across its content column, inside the
+   side safe areas: top sheets, their scrims and the Duo's toasts. belowHeader
+   (actions/drag-to-dismiss.ts) measures the header and column. */
+.below-header {
+	top: var(--sheet-top, 0px);
+	right: max(var(--sheet-right, 0px), env(safe-area-inset-right, 0px));
+	left: max(var(--sheet-left, 0px), env(safe-area-inset-left, 0px));
+}
+/* Toasts float in the header's band, so they end where its content does. */
+#toasts.below-header {
+	right: max(
+		var(--sheet-right, 0px),
+		env(safe-area-inset-right, 0px),
+		var(--duo-header-end, 0px)
+	);
+}
+
 /* Unfolded portrait reports a 61px top inset, but iOS's status row only fills
    the top right (x 465 and up, y 79 and down). Both headers start at the top
    instead, with 44px targets centred on y 32 and packed to end at x 457. */
-#layout[data-pose="duo-unfolded-portrait"] {
+/* On the root, so the toast layer outside #layout reads it too. */
+:root:has(#layout[data-pose="duo-unfolded-portrait"]) {
 	--duo-header-end: 212px;
 }
 #layout[data-pose="duo-unfolded-portrait"] #app,
