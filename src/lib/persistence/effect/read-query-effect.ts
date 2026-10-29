@@ -22,6 +22,8 @@ import {
 import type { ToolDetail } from "../../contracts/tool-wire.js";
 import type {
 	GoalDetails,
+	SessionDetailWindow,
+	SessionPromptSummary,
 	SessionTodos,
 	TodoItem,
 } from "../../contracts/ws-rpc.js";
@@ -420,11 +422,21 @@ export class TranscriptPageCursorNotFoundError extends Data.TaggedError(
 	readonly before: string;
 }> {}
 
+export interface TranscriptPosition {
+	readonly createdAt: number;
+	readonly id: string;
+}
+export interface TranscriptBounds {
+	readonly first: TranscriptPosition;
+	readonly last: TranscriptPosition;
+}
 interface SessionTranscriptPageOptions {
 	readonly before?: string;
 	readonly limit: number;
 	/** Read from the oldest message, or inclusively from the supplied cursor. */
-	readonly forward?: { readonly from?: string };
+	readonly forward?: { readonly from?: string; readonly exclusive?: boolean };
+	readonly bounds?: TranscriptBounds;
+	readonly windowKind?: "latest" | "historical";
 	/** Cut long tool outputs as the browser opens them (see previewParts). */
 	readonly previewTools?: boolean;
 }
@@ -638,8 +650,26 @@ export interface ReadQueryEffect {
 			readonly hasMore: boolean;
 			readonly version: number;
 			readonly cursor?: string;
+			readonly window?: SessionDetailWindow;
 		},
 		ReadQueryEffectError | SqlError | TranscriptPageCursorNotFoundError
+	>;
+	readonly readSessionPromptIndex: (
+		sessionId: string,
+		range?: { readonly after?: number; readonly through?: number },
+	) => Effect.Effect<
+		{
+			readonly rows: readonly {
+				readonly item: SessionPromptSummary;
+				readonly version: number;
+			}[];
+			readonly version: number;
+			readonly removed: readonly {
+				readonly id: string;
+				readonly version: number;
+			}[];
+		},
+		ReadQueryEffectError | SqlError
 	>;
 
 	/**
@@ -1808,6 +1838,82 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		return rows[0]?.value ?? 0;
 	});
 
+	const readSessionPromptIndex: ReadQueryEffect["readSessionPromptIndex"] = (
+		sessionId,
+		range,
+	) =>
+		sql.withTransaction(
+			Effect.gen(function* () {
+				const version = yield* readModelVersion;
+				const floor = range?.after ?? BEFORE_FIRST_VERSION;
+				const ceiling = range?.through ?? AFTER_LAST_VERSION;
+				const rows = yield* sql<{
+					id: string;
+					created_at: number;
+					preview: string;
+					is_inherited: number;
+					version: number;
+				}>`
+				SELECT id, created_at, is_inherited, version,
+				substr(text, CASE WHEN instr(text, '<user-message>' || char(10)) > 0
+					THEN instr(text, '<user-message>' || char(10)) + length('<user-message>' || char(10)) ELSE 1 END, 960) AS preview
+				FROM messages WHERE session_id = ${sessionId} AND role = 'user'
+				AND version > ${floor} AND version <= ${ceiling} AND NOT ${pendingRewindHides()}
+				ORDER BY created_at, id`;
+				const removed =
+					range === undefined
+						? []
+						: yield* sql<{ id: string; version: number }>`
+				SELECT message_id AS id, version FROM message_tombstones WHERE session_id = ${sessionId} AND version > ${floor} AND version <= ${ceiling}
+				UNION ALL SELECT id, version FROM messages WHERE session_id = ${sessionId} AND (role <> 'user' OR ${pendingRewindHides()}) AND version > ${floor} AND version <= ${ceiling}`;
+				return {
+					version,
+					removed,
+					rows: rows.map((row) => ({
+						version: row.version,
+						item: {
+							id: row.id,
+							createdAt: row.created_at,
+							isInherited: row.is_inherited === 1,
+							preview:
+								Array.from(
+									row.preview
+										.split("\n</user-message>")[0]
+										?.replace(/\s+/g, " ")
+										.trim() ?? "",
+								)
+									.slice(0, 240)
+									.join("") || "Attached files",
+						},
+					})),
+				};
+			}),
+		);
+
+	const readSessionWindowMetadata = (
+		sessionId: string,
+		messages: readonly MessageWithParts[],
+		kind: "latest" | "historical",
+	): Effect.Effect<SessionDetailWindow, SqlError> =>
+		Effect.gen(function* () {
+			const first = messages[0];
+			const last = messages.at(-1);
+			if (!first || !last) return { kind, hasEarlier: false, hasLater: false };
+			const [availability] = yield* sql<{
+				earlier: number;
+				later: number;
+			}>`SELECT
+			EXISTS(SELECT 1 FROM messages WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()} AND (created_at,id) < (${first.created_at},${first.id})) AS earlier,
+			EXISTS(SELECT 1 FROM messages WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()} AND (created_at,id) > (${last.created_at},${last.id})) AS later`;
+			return {
+				kind,
+				firstMessageId: first.id,
+				lastMessageId: last.id,
+				hasEarlier: availability?.earlier === 1,
+				hasLater: availability?.later === 1,
+			};
+		});
+
 	const readSessionTranscriptPage = (
 		sessionId: string,
 		options: SessionTranscriptPageOptions,
@@ -1817,6 +1923,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			readonly hasMore: boolean;
 			readonly version: number;
 			readonly cursor?: string;
+			readonly window?: SessionDetailWindow;
 		},
 		ReadQueryEffectError | SqlError | TranscriptPageCursorNotFoundError
 	> =>
@@ -1824,13 +1931,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			.withTransaction(
 				Effect.gen(function* () {
 					const version = yield* readModelVersion;
+					const bounds = options.bounds;
+					const inBounds =
+						bounds === undefined
+							? sql.literal("1")
+							: sql`(messages.created_at, messages.id) >= (${bounds.first.createdAt}, ${bounds.first.id}) AND (messages.created_at, messages.id) <= (${bounds.last.createdAt}, ${bounds.last.id})`;
 					const forward = options.forward !== undefined;
 					const cursorId = forward ? options.forward?.from : options.before;
 					const cursor =
 						cursorId !== undefined
 							? (yield* sql<{ created_at: number; id: string }>`
 									SELECT created_at, id FROM messages
-									WHERE session_id = ${sessionId} AND id = ${cursorId} AND NOT ${pendingRewindHides()}`)[0]
+									WHERE session_id = ${sessionId} AND id = ${cursorId} AND NOT ${pendingRewindHides()} AND ${inBounds}`)[0]
 							: undefined;
 					if (cursorId !== undefined && !cursor) {
 						return yield* new TranscriptPageCursorNotFoundError({
@@ -1847,7 +1959,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							? []
 							: yield* sql<{ created_at: number; id: string }>`
 								SELECT created_at, id FROM messages
-								WHERE session_id = ${sessionId} AND role = 'user' AND NOT ${pendingRewindHides()}
+								WHERE session_id = ${sessionId} AND role = 'user' AND NOT ${pendingRewindHides()} AND ${inBounds}
 								ORDER BY id IS (
 									SELECT id FROM turns
 									WHERE session_id = ${sessionId} AND state = 'running'
@@ -1862,10 +1974,10 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								SELECT messages.id, messages.created_at
 								FROM messages
 								WHERE messages.session_id = ${sessionId}
-									AND NOT ${pendingRewindHides()}
+									AND NOT ${pendingRewindHides()} AND ${inBounds}
 									AND (${cursor?.id ?? null} IS NULL
 										OR messages.created_at > ${cursor?.created_at ?? null}
-										OR (messages.created_at = ${cursor?.created_at ?? null} AND messages.id >= ${cursor?.id ?? null}))
+										OR (messages.created_at = ${cursor?.created_at ?? null} AND messages.id ${sql.literal(options.forward?.exclusive ? ">" : ">=")} ${cursor?.id ?? null}))
 								ORDER BY messages.created_at ASC, messages.id ASC
 								LIMIT ${options.limit + 1}`
 						: cursor
@@ -1873,7 +1985,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								SELECT messages.id, messages.created_at
 								FROM messages
 								WHERE messages.session_id = ${sessionId}
-									AND NOT ${pendingRewindHides()}
+									AND NOT ${pendingRewindHides()} AND ${inBounds}
 									AND (messages.created_at < ${cursor.created_at}
 										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
 								ORDER BY messages.created_at DESC, messages.id DESC
@@ -1882,7 +1994,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								SELECT messages.id, messages.created_at
 								FROM messages
 								WHERE messages.session_id = ${sessionId}
-									AND NOT ${pendingRewindHides()}
+									AND NOT ${pendingRewindHides()} AND ${inBounds}
 								ORDER BY messages.created_at DESC, messages.id DESC
 								LIMIT (
 									SELECT MAX(${options.limit}, COUNT(*)) + 1
@@ -1979,8 +2091,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						);
 					}
 					if (!forward) messages.reverse();
+					const window =
+						options.windowKind === undefined
+							? undefined
+							: yield* readSessionWindowMetadata(
+									sessionId,
+									messages,
+									options.windowKind,
+								);
 					return {
 						messages,
+						...(window === undefined ? {} : { window }),
 						hasMore: rows.length > messages.length,
 						version,
 						...(messages[0] === undefined ? {} : { cursor: messages[0].id }),
@@ -2726,6 +2847,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSessionSkillMessages,
 		getSessionHistoryMetadata,
 		readSessionTranscriptPage,
+		readSessionPromptIndex,
 		readSessionList,
 		readSessionTranscript,
 		readSessionTranscriptCatchUp,

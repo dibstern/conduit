@@ -3,6 +3,9 @@ import { ProjectSetupStateSchema } from "../../contracts/project-setup.js";
 import {
 	PartRemovalId,
 	type SessionDetailEnvelope,
+	type SessionDetailWindow,
+	type SessionDetailWindowRequest,
+	type SessionPromptSummary,
 } from "../../contracts/ws-rpc.js";
 import { makeResumeLedger, type ResumeLedger } from "../transport/resume.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
@@ -319,6 +322,8 @@ const withoutWaiting = (
 
 const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 	switch (item._tag) {
+		case "window":
+			return { ...entry, window: item.window, hasMore: item.window.hasEarlier };
 		case "message": {
 			const header = toHistoryMessage(item.message);
 			const held = entry.rows.find((old) => old.id === header.id);
@@ -414,6 +419,7 @@ export function applyTranscriptEnvelope(
 			const pending = new Map<string, PendingInput>();
 			let next: TranscriptEntry = {
 				...entry,
+				window: undefined,
 				rows: [],
 				waiting: new Map(),
 				partOrder,
@@ -446,6 +452,7 @@ export function applyTranscriptEnvelope(
 						break;
 					case "inbox":
 					case "rewind":
+					case "window":
 						next = withRow(next, item);
 						break;
 				}
@@ -465,7 +472,7 @@ export function applyTranscriptEnvelope(
 				waiting,
 				pending: [...pending.values()].sort(pendingOrder),
 				hwm: envelope.sequence,
-				hasMore: envelope.hasMore ?? false,
+				hasMore: next.window?.hasEarlier ?? envelope.hasMore ?? false,
 				...(envelope.cursor === undefined ? {} : { cursor: envelope.cursor }),
 			};
 			if (startedAt !== undefined)
@@ -701,7 +708,8 @@ function install(
 		historyState.hasMore = entry.hasMore;
 	// Context belongs to this slot. A private view never changes the primary's
 	// estimate; its read projection uses session context when it is available.
-	restoreContextFromMessages(slot.messages);
+	if (entry.window?.kind !== "historical")
+		restoreContextFromMessages(slot.messages);
 	reconcileInputs(sessionId, entry);
 }
 
@@ -773,6 +781,18 @@ export interface TranscriptView {
 	readonly sessionId: string | null;
 	readonly chat: Readonly<SessionMessages>;
 	readonly pageError: unknown;
+	readonly prompts: readonly SessionPromptSummary[];
+	readonly window: SessionDetailWindow;
+	readonly navigation: {
+		id: number;
+		target: { messageId: string } | "latest";
+		phase: "loading" | "placing";
+	} | null;
+	readonly transition: { id: number; kind: "replace" | "prepend" } | null;
+	navigate: (messageId: string) => void;
+	latest: () => void;
+	loadNewer: () => Promise<void>;
+	acknowledgePlacement: (id: number, placed?: boolean) => void;
 	loadOlder: () => Promise<void>;
 	dispose: () => void;
 	view: (project: ProjectRef, sessionId: string | null) => void;
@@ -789,55 +809,446 @@ export interface TranscriptView {
 }
 
 function transcriptView(primary: boolean): TranscriptView {
-	let currentSlot = $state.raw<ReturnType<
-		typeof getOrCreateSessionSlot
-	> | null>(null);
+	type Slot = ReturnType<typeof getOrCreateSessionSlot>;
+	type Body = {
+		entry: TranscriptEntry;
+		ledger: ResumeLedger;
+		request: SessionDetailWindowRequest | undefined;
+		fiber: Fiber.Fiber<void, unknown> | null;
+		frame: ReturnType<typeof setTimeout> | number | null;
+		alive: boolean;
+		ready: Promise<void>;
+		finish: () => void;
+	};
+	let currentSlot = $state.raw<Slot | null>(null);
 	let currentSessionId = $state<string | null>(null);
 	let pageError = $state.raw<unknown>(null);
+	let prompts = $state.raw<readonly SessionPromptSummary[]>([]);
+	let navigation = $state.raw<TranscriptView["navigation"]>(null);
+	let transition = $state.raw<TranscriptView["transition"]>(null);
+	let revision = $state(0);
+	let generation = 0;
 	let paging: Promise<void> | null = null;
+	let active: Body | null = null;
+	let pending: Body | null = null;
+	let indexFiber: Fiber.Fiber<void, unknown> | null = null;
+	let scheduledNavigation: {
+		timer: ReturnType<typeof setTimeout>;
+		run: () => void;
+		finish: () => void;
+	} | null = null;
+	let stopped: Promise<void> = Promise.resolve();
 	const empty = createEmptySessionMessages();
-
 	let viewed: {
 		project: ProjectRef;
 		sessionId: string | null;
-		/** Settles true once the first load completes, false if left first. */
 		loaded: Promise<boolean>;
 		settle: (loaded: boolean) => void;
 		requested: Promise<void>;
 		issue: () => void;
 	} | null = null;
-	let generation = 0;
-	let fiber: Fiber.Fiber<void, unknown> | null = null;
-	let pendingFrame: number | ReturnType<typeof setTimeout> | null = null;
-	/** This view's stops, chained: its feed starts only after every earlier
-	 *  feed of this view is confirmed dead, so two feeds never share a ledger. */
-	let stopped: Promise<void> = Promise.resolve();
 
-	function cancelFrame(): void {
-		if (pendingFrame === null) return;
+	function cancelFrame(body: Body): void {
+		if (body.frame === null) return;
 		if (
 			typeof cancelAnimationFrame === "function" &&
-			typeof pendingFrame === "number"
+			typeof body.frame === "number"
 		)
-			cancelAnimationFrame(pendingFrame);
-		else clearTimeout(pendingFrame);
-		pendingFrame = null;
+			cancelAnimationFrame(body.frame);
+		else clearTimeout(body.frame);
+		body.frame = null;
 	}
 
-	function stopFeed(): Promise<void> {
-		const old = fiber;
-		fiber = null;
-		cancelFrame();
-		stopped = stopped.then(async () => {
-			if (old) await runTransportEffect(Fiber.interrupt(old));
+	function interrupt(fiber: Fiber.Fiber<void, unknown> | null): void {
+		if (fiber)
+			stopped = stopped.then(() => runTransportEffect(Fiber.interrupt(fiber)));
+	}
+
+	function retire(body: Body | null): void {
+		if (!body) return;
+		body.alive = false;
+		cancelFrame(body);
+		body.finish();
+		interrupt(body.fiber);
+	}
+
+	function cancelPending(): void {
+		retire(pending);
+		pending = null;
+		if (currentSlot) currentSlot.messages.historyLoading = false;
+		if (primary) historyState.loading = false;
+		paging = null;
+	}
+
+	function cancelScheduled(): void {
+		if (!scheduledNavigation) return;
+		clearTimeout(scheduledNavigation.timer);
+		scheduledNavigation.finish();
+		scheduledNavigation = null;
+	}
+
+	function startIndex(project: string, sessionId: string, epoch: number): void {
+		let staged: Map<string, SessionPromptSummary> | null = null;
+		const ordered = (rows: Iterable<SessionPromptSummary>) =>
+			[...rows].sort(
+				(a, b) =>
+					a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+			);
+		void stopped.then(async () => {
+			if (epoch !== generation) return;
+			const runtime = await getRuntime();
+			if (epoch !== generation) return;
+			const fiber = runtime.runFork(
+				Effect.flatMap(WsRpcClients, (clients) =>
+					Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+						Stream.runForEach(
+							supervise(
+								subscriptions.sessionPromptIndex({ sessionId }),
+								(status) => {
+									if (
+										epoch === generation &&
+										(status._tag === "failed" || status._tag === "failing")
+									)
+										pageError = new Error(status.lastError);
+								},
+							),
+							(envelope) =>
+								Effect.sync(() => {
+									if (epoch !== generation) return;
+									switch (envelope._tag) {
+										case "snapshot":
+											staged = new Map(
+												envelope.rows.map((row) => [row.id, row]),
+											);
+											break;
+										case "snapshotChunk":
+											for (const row of envelope.rows) staged?.set(row.id, row);
+											break;
+										case "synchronized":
+											if (staged) prompts = ordered(staged.values());
+											staged = null;
+											break;
+										case "upsert": {
+											const next =
+												staged ?? new Map(prompts.map((row) => [row.id, row]));
+											next.set(envelope.item.id, envelope.item);
+											if (!staged) prompts = ordered(next.values());
+											break;
+										}
+										case "remove":
+											if (staged) staged.delete(envelope.id);
+											else
+												prompts = prompts.filter(
+													(row) => row.id !== envelope.id,
+												);
+											break;
+									}
+								}),
+						),
+					),
+				),
+			);
+			if (epoch === generation) indexFiber = fiber;
+			else interrupt(fiber);
 		});
-		return stopped;
+	}
+
+	function startBody(
+		request: SessionDetailWindowRequest | undefined,
+		navigationId?: number,
+		pageDirection?: "before" | "after",
+		saved: Promise<SavedTranscript | undefined> = Promise.resolve(undefined),
+	): Promise<void> {
+		const session = viewed;
+		const slot = currentSlot;
+		if (!session?.sessionId || !slot) return Promise.resolve();
+		const { project, sessionId } = session;
+		const epoch = generation;
+		const replacement = navigationId !== undefined;
+		let finish = () => {};
+		const body: Body = {
+			entry: replacement
+				? emptyTranscript(project)
+				: (slot.messages.transcript ?? emptyTranscript(project)),
+			ledger: replacement
+				? makeResumeLedger()
+				: (ledgers.get(slot.messages) ?? makeResumeLedger()),
+			request,
+			fiber: null,
+			frame: null,
+			alive: true,
+			ready: new Promise<void>((resolve) => {
+				finish = resolve;
+			}),
+			finish: () => finish(),
+		};
+		if (replacement) pending = body;
+		else {
+			active = body;
+			ledgers.set(slot.messages, body.ledger);
+		}
+		const current = () =>
+			epoch === generation &&
+			body.alive &&
+			(body === active || body === pending);
+		const publish = () => {
+			if (!current() || active !== body) return;
+			slot.messages.transcript = body.entry;
+			install(sessionId, slot, primary);
+		};
+		let opened: SavedSnapshot | undefined;
+		let subscribed = false;
+		let received = false;
+		void saved.then((record) => {
+			if (!current() || record?.project !== project || received) return;
+			opened = record.snapshot;
+			if (subscribed) {
+				body.entry = applyTranscriptEnvelope(body.entry, record.snapshot);
+				publish();
+			}
+		});
+		void stopped.then(async () => {
+			if (!current()) return;
+			const runtime = await getRuntime();
+			if (!current()) return;
+			let firstSubscription = true;
+			let unsaved: SavedSnapshot | undefined;
+			const fiber = runtime.runFork(
+				Effect.flatMap(WsRpcClients, (clients) =>
+					Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+						Stream.runForEach(
+							supervise(
+								Stream.suspend(() => {
+									const first = firstSubscription ? opened : undefined;
+									firstSubscription = false;
+									subscribed = true;
+									return subscriptions.sessionDetail({
+										sessionId,
+										ledger: body.ledger,
+										saved: first,
+										...(request ? { window: request } : {}),
+										onSubscribe: session.issue,
+									});
+								}),
+								(status) => {
+									if (!current()) return;
+									body.entry = { ...body.entry, status };
+									if (
+										body === pending &&
+										(status._tag === "failing" || status._tag === "failed")
+									) {
+										pageError = new Error(status.lastError);
+										if (navigation?.id === navigationId) navigation = null;
+										retire(body);
+										pending = null;
+									} else if (body === active)
+										slot.messages.transcript = body.entry;
+								},
+							),
+							(envelope) =>
+								Effect.sync(() => {
+									if (!current()) return;
+									received = true;
+									const before = body.entry;
+									body.entry = applyTranscriptEnvelope(before, envelope);
+									if (envelope._tag === "synchronized") {
+										if (body === pending) {
+											if (
+												pageDirection &&
+												body.entry.rows.length === 0 &&
+												active
+											) {
+												const window = view.window;
+												active.entry = {
+													...active.entry,
+													hasMore:
+														pageDirection === "before"
+															? false
+															: active.entry.hasMore,
+													window: {
+														...window,
+														...(pageDirection === "before"
+															? { hasEarlier: false }
+															: { hasLater: false }),
+													},
+												};
+												slot.messages.transcript = active.entry;
+												install(sessionId, slot, primary);
+												retire(body);
+												pending = null;
+												navigation = null;
+												return;
+											}
+											retire(active);
+											active = body;
+											pending = null;
+											ledgers.set(slot.messages, body.ledger);
+											transition = { id: ++revision, kind: "replace" };
+											const requested = navigation;
+											if (requested && requested.id === navigationId) {
+												const rows = body.entry.rows.filter(
+													(row) => row.role === "user",
+												);
+												const target =
+													pageDirection === "before"
+														? rows.at(-1)?.id
+														: pageDirection === "after"
+															? rows[0]?.id
+															: undefined;
+												navigation = {
+													...requested,
+													...(target ? { target: { messageId: target } } : {}),
+													phase: "placing",
+												};
+											}
+										}
+										cancelFrame(body);
+										publish();
+										session.settle(true);
+										body.finish();
+										if (primary && !request && unsaved) {
+											const snapshot = unsaved;
+											void saved.then((record) =>
+												current() && active === body
+													? saveTranscript(
+															sessionId,
+															project,
+															snapshot,
+															record?.project === project
+																? record.snapshot.resumePoint
+																: undefined,
+														)
+													: undefined,
+											);
+										}
+										unsaved = undefined;
+										return;
+									}
+									unsaved =
+										envelope._tag === "snapshot" && envelope !== opened
+											? envelope
+											: undefined;
+									// A replacement and each historical refresh become visible only at
+									// the synchronized barrier. The committed window remains readable.
+									if (body === pending || request) return;
+									slot.messages.transcript = body.entry;
+									const item =
+										envelope._tag === "upsert" ? envelope.item : undefined;
+									const messageId =
+										item?._tag === "part"
+											? item.messageId
+											: item?._tag === "message"
+												? item.message.id
+												: undefined;
+									const was = before.rows.find((row) => row.id === messageId);
+									const now = body.entry.rows.find(
+										(row) => row.id === messageId,
+									);
+									if (
+										item?._tag === "part" &&
+										item.part.tool?.toLowerCase() === "skill" &&
+										JSON.stringify(item.part.state) !==
+											JSON.stringify(
+												(
+													was?.parts ?? before.waiting.get(item.messageId)
+												)?.find((part) => part.id === item.part.id)?.state,
+											)
+									)
+										refreshSessionSkills(sessionId);
+									if (
+										primary &&
+										now?.role === "assistant" &&
+										!was &&
+										before.status._tag === "live"
+									)
+										advanceTurnIfNewMessage(
+											slot.activity,
+											slot.messages,
+											now.id,
+										);
+									if (
+										now?.role === "user" &&
+										now.parts?.length &&
+										!was?.parts?.length
+									)
+										refreshSessionSkills(sessionId);
+									if (
+										envelope._tag === "snapshot" ||
+										item?._tag === "pendingInput"
+									) {
+										cancelFrame(body);
+										publish();
+									} else if (body.frame === null) {
+										const render = () => {
+											body.frame = null;
+											publish();
+										};
+										body.frame =
+											typeof requestAnimationFrame === "function"
+												? requestAnimationFrame(render)
+												: setTimeout(render, FRAME_FALLBACK_DELAY_MS);
+									}
+								}),
+						),
+					),
+				),
+			);
+			if (current()) body.fiber = fiber;
+			else interrupt(fiber);
+		});
+		return body.ready;
+	}
+
+	function requestNavigation(
+		target: NonNullable<TranscriptView["navigation"]>["target"],
+		request?: SessionDetailWindowRequest,
+		direction?: "before" | "after",
+	): Promise<void> {
+		cancelPending();
+		pageError = null;
+		const id = ++revision;
+		const loaded =
+			target === "latest"
+				? view.window.kind === "latest"
+				: view.chat.transcript?.rows.some((row) => row.id === target.messageId);
+		navigation = {
+			id,
+			target,
+			phase: loaded && !direction ? "placing" : "loading",
+		};
+		if (loaded && !direction) {
+			cancelScheduled();
+			return Promise.resolve();
+		}
+		// Sample at most once per frame interval. A continuous drag keeps making
+		// progress; moves between samples replace only the queued target.
+		return new Promise<void>((resolve) => {
+			const run = () => {
+				if (navigation?.id !== id) {
+					resolve();
+					return;
+				}
+				void startBody(request, id, direction).then(resolve);
+			};
+			if (scheduledNavigation) {
+				scheduledNavigation.finish();
+				scheduledNavigation.run = run;
+				scheduledNavigation.finish = resolve;
+			} else {
+				const timer = setTimeout(() => {
+					const scheduled = scheduledNavigation;
+					scheduledNavigation = null;
+					scheduled?.run();
+				}, 16);
+				scheduledNavigation = { timer, run, finish: resolve };
+			}
+		});
 	}
 
 	const view: TranscriptView = {
 		id: Symbol("transcript-view"),
 		get generation() {
-			return generation;
+			return revision;
 		},
 		get sessionId() {
 			return primary ? placedSessionId() : currentSessionId;
@@ -884,11 +1295,68 @@ function transcriptView(primary: boolean): TranscriptView {
 				historyLoading: owned.historyLoading,
 			};
 		},
+		get prompts() {
+			return prompts;
+		},
+		get navigation() {
+			return navigation;
+		},
+		get transition() {
+			return transition;
+		},
 		get pageError() {
 			return pageError;
 		},
+		get window() {
+			const entry = view.chat.transcript;
+			return (
+				entry?.window ?? {
+					kind: "latest",
+					hasEarlier: entry?.hasMore ?? false,
+					hasLater: false,
+					...(entry?.rows[0] ? { firstMessageId: entry.rows[0].id } : {}),
+					...(entry?.rows.at(-1)
+						? { lastMessageId: entry.rows.at(-1)?.id }
+						: {}),
+				}
+			);
+		},
+		navigate: (messageId) => {
+			void requestNavigation(
+				{ messageId },
+				{ anchorMessageId: messageId, direction: "from" },
+			);
+		},
+		latest: () => {
+			void requestNavigation("latest");
+		},
+		acknowledgePlacement: (id, placed = true) => {
+			if (navigation?.id !== id || navigation.phase !== "placing") return;
+			navigation = null;
+			if (!placed)
+				pageError = new Error("This message is no longer available.");
+		},
 		dispose: () => view.view(viewed?.project ?? "", null),
+		loadNewer: () => {
+			const { lastMessageId, hasLater } = view.window;
+			return hasLater && lastMessageId
+				? requestNavigation(
+						{ messageId: lastMessageId },
+						{ anchorMessageId: lastMessageId, direction: "after" },
+						"after",
+					)
+				: Promise.resolve();
+		},
 		loadOlder: () => {
+			const window = view.window;
+			if (window.kind === "historical")
+				return window.hasEarlier && window.firstMessageId
+					? requestNavigation(
+							{ messageId: window.firstMessageId },
+							{ anchorMessageId: window.firstMessageId, direction: "before" },
+							"before",
+						)
+					: Promise.resolve();
 			if (primary && view.sessionId !== currentSessionId)
 				return Promise.resolve();
 			if (paging) return paging;
@@ -898,11 +1366,15 @@ function transcriptView(primary: boolean): TranscriptView {
 			if (!target || !id || !entry?.hasMore || !entry.rows[0])
 				return Promise.resolve();
 			const currentGeneration = generation;
+			const body = active;
+			const pageRevision = ++revision;
 			pageError = null;
 			target.messages.historyLoading = true;
 			if (primary && sessionState.currentId === id) historyState.loading = true;
 			const current = () =>
 				generation === currentGeneration &&
+				active === body &&
+				revision === pageRevision &&
 				currentSlot === target &&
 				paging === request;
 			const request = rpc("LoadMoreHistory", {
@@ -915,6 +1387,17 @@ function transcriptView(primary: boolean): TranscriptView {
 						target.messages.transcript,
 						response,
 					);
+					if (target.messages.transcript.window)
+						target.messages.transcript = {
+							...target.messages.transcript,
+							window: {
+								...target.messages.transcript.window,
+								firstMessageId: target.messages.transcript.rows[0]?.id,
+								hasEarlier: response.hasMore,
+							},
+						};
+					if (body) body.entry = target.messages.transcript;
+					transition = { id: pageRevision, kind: "prepend" };
 					install(id, target, primary);
 				})
 				.catch((error: unknown) => {
@@ -935,19 +1418,27 @@ function transcriptView(primary: boolean): TranscriptView {
 			if (viewed?.project === project && viewed.sessionId === sessionId) return;
 			viewed?.settle(false);
 			viewed?.issue();
-			let settle: (loaded: boolean) => void = () => {};
+			++generation;
+			++revision;
+			cancelScheduled();
+			cancelPending();
+			retire(active);
+			active = null;
+			interrupt(indexFiber);
+			indexFiber = null;
+			prompts = [];
+			navigation = null;
+			transition = null;
+			pageError = null;
+			let settle = (_loaded: boolean) => {};
+			let issue = () => {};
 			const loaded = new Promise<boolean>((resolve) => {
 				settle = resolve;
 			});
-			let issue: () => void = () => {};
 			const requested = new Promise<void>((resolve) => {
 				issue = resolve;
 			});
 			viewed = { project, sessionId, loaded, settle, requested, issue };
-			const currentGeneration = ++generation;
-			if (currentSlot) currentSlot.messages.historyLoading = false;
-			paging = null;
-			pageError = null;
 			currentSessionId = sessionId;
 			currentSlot = sessionId
 				? primary
@@ -958,201 +1449,38 @@ function transcriptView(primary: boolean): TranscriptView {
 						}
 				: null;
 			const slot = currentSlot;
-			// Only a session this page has not loaded yet opens from a saved page.
+			if (!sessionId || !slot) {
+				settle(false);
+				issue();
+				return;
+			}
 			let saved: Promise<SavedTranscript | undefined> =
 				Promise.resolve(undefined);
-			const draw = slot ? drawn.get(slot.messages) : undefined;
-			if (slot) drawn.delete(slot.messages);
-			if (slot && sessionId) {
-				if (draw?.project === project) {
-					// Drawn at load and placed by the server: resume from that page.
-					saved = Promise.resolve(draw);
-					ledgers.delete(slot.messages);
-				} else if (
-					!slot.messages.transcript ||
-					slot.messages.transcript.project !== project
-				) {
-					saved = primary
-						? openSavedTranscript(sessionId)
-						: Promise.resolve(undefined);
-					ledgers.delete(slot.messages);
-					slot.messages.transcript = emptyTranscript(project);
-					slot.messages.loadLifecycle = "loading";
-				} else {
-					// The cached copy is only as current as the feed that stopped when we
-					// left; it is not live again until the new feed synchronizes.
-					slot.messages.transcript = {
-						...slot.messages.transcript,
-						status: { _tag: "cold" },
-					};
-					install(sessionId, slot, primary);
-				}
+			const draw = drawn.get(slot.messages);
+			drawn.delete(slot.messages);
+			if (draw?.project === project) {
+				saved = Promise.resolve(draw);
+				ledgers.delete(slot.messages);
+			} else if (
+				!slot.messages.transcript ||
+				slot.messages.transcript.project !== project ||
+				slot.messages.transcript.window?.kind === "historical"
+			) {
+				saved = primary
+					? openSavedTranscript(sessionId)
+					: Promise.resolve(undefined);
+				ledgers.delete(slot.messages);
+				slot.messages.transcript = emptyTranscript(project);
+				slot.messages.loadLifecycle = "loading";
+			} else {
+				slot.messages.transcript = {
+					...slot.messages.transcript,
+					status: { _tag: "cold" },
+				};
+				install(sessionId, slot, primary);
 			}
-			let opened: SavedSnapshot | undefined;
-			let subscribed = false;
-			let received = false;
-			void saved.then((record) => {
-				if (
-					currentGeneration !== generation ||
-					record?.project !== project ||
-					!slot ||
-					received
-				)
-					return;
-				opened = record.snapshot;
-				if (subscribed && slot.messages.transcript) {
-					// A cold request is already in flight. Draw only until its first reply.
-					slot.messages.transcript = applyTranscriptEnvelope(
-						slot.messages.transcript,
-						record.snapshot,
-					);
-					install(sessionId ?? record.sessionId, slot, primary);
-				}
-			});
-			void stopFeed().then(async () => {
-				if (currentGeneration !== generation || !sessionId || !slot) return;
-				const runtime = await getRuntime();
-				if (currentGeneration !== generation) return;
-				const ledger = ledgers.get(slot.messages) ?? makeResumeLedger();
-				ledgers.set(slot.messages, ledger);
-				// Drawn first, once; a restarted feed resumes from what it applied.
-				let firstSubscription = true;
-				// The server's snapshot, saved once it synchronizes with no change
-				// between: only then is it exactly the rows at its sequence.
-				let unsaved: SavedSnapshot | undefined;
-				const next = runtime.runFork(
-					Effect.flatMap(WsRpcClients, (clients) =>
-						Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
-							Stream.runForEach(
-								supervise(
-									Stream.suspend(() => {
-										const first = firstSubscription ? opened : undefined;
-										firstSubscription = false;
-										subscribed = true;
-										return subscriptions.sessionDetail({
-											sessionId,
-											ledger,
-											saved: first,
-											onSubscribe: issue,
-										});
-									}),
-									(status) => {
-										if (
-											currentGeneration === generation &&
-											slot.messages.transcript
-										)
-											slot.messages.transcript = {
-												...slot.messages.transcript,
-												status,
-											};
-									},
-								),
-								(envelope) =>
-									Effect.sync(() => {
-										if (
-											currentGeneration !== generation ||
-											!slot.messages.transcript
-										)
-											return;
-										received = true;
-										const before = slot.messages.transcript;
-										const item =
-											envelope._tag === "upsert" ? envelope.item : undefined;
-										const messageId =
-											item?._tag === "part"
-												? item.messageId
-												: item?._tag === "message"
-													? item.message.id
-													: undefined;
-										const was = before.rows.find((row) => row.id === messageId);
-										// Skill names and running state follow the tool's input,
-										// output and status, which can arrive in separate updates.
-										if (
-											item?._tag === "part" &&
-											item.part.tool?.toLowerCase() === "skill" &&
-											JSON.stringify(item.part.state) !==
-												JSON.stringify(
-													(
-														was?.parts ?? before.waiting.get(item.messageId)
-													)?.find((old) => old.id === item.part.id)?.state,
-												)
-										)
-											refreshSessionSkills(sessionId);
-										if (
-											primary &&
-											envelope._tag === "synchronized" &&
-											unsaved
-										) {
-											const snapshot = unsaved;
-											// A restored server may be older than the saved page. Keep its
-											// CAS token even when the network won and nothing was drawn.
-											void saved.then((record) =>
-												currentGeneration === generation
-													? saveTranscript(
-															sessionId,
-															project,
-															snapshot,
-															record?.project === project
-																? record.snapshot.resumePoint
-																: undefined,
-														)
-													: undefined,
-											);
-										}
-										unsaved =
-											envelope._tag === "snapshot" && envelope !== opened
-												? envelope
-												: undefined;
-										const after = applyTranscriptEnvelope(before, envelope);
-										slot.messages.transcript = after;
-										const now = after.rows.find((row) => row.id === messageId);
-										if (
-											primary &&
-											now?.role === "assistant" &&
-											!was &&
-											before.status._tag === "live"
-										)
-											advanceTurnIfNewMessage(
-												slot.activity,
-												slot.messages,
-												now.id,
-											);
-										// A user row is new when it first has parts to show. A message
-										// may name a skill; the chip reloads the session's skills.
-										if (
-											now?.role === "user" &&
-											now.parts?.length &&
-											!was?.parts?.length
-										)
-											refreshSessionSkills(sessionId);
-										if (
-											envelope._tag === "snapshot" ||
-											envelope._tag === "synchronized" ||
-											item?._tag === "pendingInput"
-										) {
-											cancelFrame();
-											install(sessionId, slot, primary);
-											if (envelope._tag === "synchronized")
-												viewed?.settle(true);
-										} else if (pendingFrame === null) {
-											const render = () => {
-												pendingFrame = null;
-												if (currentGeneration === generation)
-													install(sessionId, slot, primary);
-											};
-											pendingFrame =
-												typeof requestAnimationFrame === "function"
-													? requestAnimationFrame(render)
-													: setTimeout(render, FRAME_FALLBACK_DELAY_MS);
-										}
-									}),
-							),
-						),
-					),
-				);
-				if (currentGeneration === generation) fiber = next;
-				else runtime.runFork(Fiber.interrupt(next));
-			});
+			startIndex(project, sessionId, generation);
+			void startBody(undefined, undefined, undefined, saved);
 		},
 		loaded: (project, sessionId) =>
 			viewed?.project === project && viewed.sessionId === sessionId

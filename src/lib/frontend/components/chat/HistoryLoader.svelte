@@ -1,4 +1,4 @@
-<!-- Headless component: owns IntersectionObserver for infinite scroll up. -->
+<!-- Automatically pages older rows only in the latest transcript window. -->
 <!-- Pages older projected rows through the transcript module. -->
 <!-- Renders nothing — all messages are rendered by MessageList's {#each}. -->
 
@@ -17,7 +17,7 @@
 
 	const chat = $derived(view.chat);
 	const canPage = $derived(
-		!!view.sessionId && chat.historyHasMore && !chat.historyLoading && !view.pageError,
+		view.window.kind === "latest" && view.navigation === null && !!view.sessionId && chat.historyHasMore && !chat.historyLoading && !view.pageError,
 	);
 
 	// An observer reports once on creation, then only on changes. A page that

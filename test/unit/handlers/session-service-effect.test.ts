@@ -212,6 +212,8 @@ describe("session handler metadata", () => {
 			readInboxState: () => Effect.succeed(undefined),
 			readStoreIdentity: () => Effect.succeed("store"),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			readSessionPromptIndex: () =>
+				Effect.succeed({ rows: [], removed: [], version: 0 }),
 			readSessionTranscriptPage: vi.fn(
 				(
 					_sessionId: string,

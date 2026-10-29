@@ -5,6 +5,12 @@ import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 const sessionId = "rail-session";
 const projectSlug = "e2e-replay";
 const start = Date.parse("2026-10-27T10:00:00Z");
+const summary = (index: number, inherited = false) => ({
+	id: `user-${index}`,
+	createdAt: start + index * 60_000,
+	preview: `Prompt ${index}: check this part of the layout.`,
+	isInherited: inherited,
+});
 const turn = (index: number) => [
 	{
 		_tag: "message",
@@ -62,6 +68,16 @@ for (const width of [1100, 390]) {
 					ViewSession: () => ({ ok: true }),
 				},
 				streams: {
+					SubscribeSessionPromptIndex: (payload) => [
+						{
+							_tag: "snapshot",
+							sequence: 1,
+							rows: Array.from({ length: 60 }, (_, i) =>
+								summary(i + 1, payload["sessionId"] === "rail-fork" && i < 30),
+							),
+						},
+						{ _tag: "synchronized" },
+					],
 					SubscribeSessionDetail: () => [
 						{ _tag: "snapshot", rows, sequence: 1, hasMore: false },
 						{ _tag: "synchronized" },
@@ -189,6 +205,11 @@ for (const width of [1100, 390]) {
 			).toBeInViewport();
 			// Prepend while captured: the tick under the pointer keeps its identity.
 			rpc.sendChunk(
+				"SubscribeSessionPromptIndex",
+				[{ _tag: "upsert", item: summary(0), sequence: 3 }],
+				sessionId,
+			);
+			rpc.sendChunk(
 				"SubscribeSessionDetail",
 				turn(0).map((item) => ({ _tag: "upsert", item, sequence: 3 })),
 				sessionId,
@@ -250,6 +271,14 @@ for (const width of [1100, 390]) {
 
 			// A replacement snapshot removes obsolete targets and preview state.
 			rpc.sendChunk(
+				"SubscribeSessionPromptIndex",
+				[
+					{ _tag: "snapshot", rows: [summary(1)], sequence: 4 },
+					{ _tag: "synchronized" },
+				],
+				sessionId,
+			);
+			rpc.sendChunk(
 				"SubscribeSessionDetail",
 				[{ _tag: "snapshot", rows: turn(1), sequence: 4, hasMore: false }],
 				sessionId,
@@ -258,12 +287,16 @@ for (const width of [1100, 390]) {
 			await expect(page.getByTestId("message-rail-preview")).toHaveCount(0);
 
 			await page.goto(`${harness.relayBaseUrl}/s/rail-fork`);
-			await expect(rail).toHaveAttribute("aria-valuemax", "30");
+			await expect(rail).toHaveAttribute("aria-valuemax", "60");
 			await rail.focus();
 			await page.keyboard.press("Home");
 			await expect(page.getByTestId("message-rail-preview")).toContainText(
-				"Prompt 31:",
+				"Prompt 1:",
 			);
+			await expect(
+				page.locator(".msg-user").filter({ hasText: "Prompt 1:" }),
+			).toBeInViewport();
+			// Selecting inherited history expands it; collapsing never removes its markers.
 			await page.getByRole("button", { name: "Prior conversation" }).click();
 			await expect(rail).toHaveAttribute("aria-valuemax", "60");
 			await rail.focus();
@@ -272,7 +305,7 @@ for (const width of [1100, 390]) {
 				"Prompt 1:",
 			);
 			await page.getByRole("button", { name: "Prior conversation" }).click();
-			await expect(rail).toHaveAttribute("aria-valuemax", "30");
+			await expect(rail).toHaveAttribute("aria-valuemax", "60");
 		});
 	});
 }

@@ -53,7 +53,7 @@
 	const failedImages = new SvelteSet<string>();
 </script>
 
-<div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
+<div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid} data-message-id={message.messageId}>
 	<AvatarPicker>
 		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start h-[28px] rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
 	</AvatarPicker>

@@ -466,7 +466,43 @@ export const HistoryMessageSchema = Schema.Struct({
  * - `part`: one part of the message `messageId`, placed among that message's
  *   parts by `sortOrder`.
  */
+export const SessionDetailWindowRequestSchema = Schema.Struct({
+	anchorMessageId: NonEmptyString,
+	direction: Schema.Literals(["from", "before", "after"]),
+});
+export type SessionDetailWindowRequest =
+	typeof SessionDetailWindowRequestSchema.Type;
+export const SessionDetailWindowSchema = Schema.Struct({
+	kind: Schema.Literals(["latest", "historical"]),
+	firstMessageId: Schema.optional(NonEmptyString),
+	lastMessageId: Schema.optional(NonEmptyString),
+	hasEarlier: Schema.Boolean,
+	hasLater: Schema.Boolean,
+});
+export type SessionDetailWindow = typeof SessionDetailWindowSchema.Type;
+export const SessionPromptSummarySchema = Schema.Struct({
+	id: NonEmptyString,
+	createdAt: Schema.Number,
+	preview: Schema.String,
+	isInherited: Schema.Boolean,
+});
+export type SessionPromptSummary = typeof SessionPromptSummarySchema.Type;
+export const SessionPromptIndexEnvelopeSchema = Schema.Union([
+	EnvelopeSchema(SessionPromptSummarySchema),
+	Schema.Struct({
+		_tag: Schema.Literal("snapshotChunk"),
+		rows: Schema.Array(SessionPromptSummarySchema),
+		sequence: Schema.Number,
+	}),
+]);
+export type SessionPromptIndexEnvelope =
+	typeof SessionPromptIndexEnvelopeSchema.Type;
+
 export const SessionDetailItemSchema = Schema.Union([
+	Schema.Struct({
+		_tag: Schema.Literal("window"),
+		window: SessionDetailWindowSchema,
+	}),
 	Schema.Struct({
 		_tag: Schema.Literal("message"),
 		message: HistoryMessageSchema,
@@ -3614,6 +3650,7 @@ export const SubscribeShell = Rpc.make("SubscribeShell", {
 export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	payload: {
 		sessionId: NonEmptyString,
+		window: Schema.optional(SessionDetailWindowRequestSchema),
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
 		// From a saved snapshot: the server resumes from this, not resumeBase.
@@ -3623,6 +3660,16 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	error: WsRpcError,
 	stream: true,
 });
+
+export const SubscribeSessionPromptIndex = Rpc.make(
+	"SubscribeSessionPromptIndex",
+	{
+		payload: { sessionId: NonEmptyString },
+		success: SessionPromptIndexEnvelopeSchema,
+		error: WsRpcError,
+		stream: true,
+	},
+);
 
 /** One session's todo list: the items its newest TodoWrite left behind. */
 export const SessionTodosSchema = Schema.Struct({
@@ -3953,6 +4000,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeRecaps,
 	SubscribeShell,
 	SubscribeSessionDetail,
+	SubscribeSessionPromptIndex,
 	SubscribeSessionTodos,
 	SubscribeSessionFamily,
 	SubscribePtys,

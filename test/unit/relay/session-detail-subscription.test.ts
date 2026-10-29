@@ -283,13 +283,19 @@ const subscribeMessages = (
 		decodeSessionDetail,
 		Stream.filter(
 			(envelope) =>
-				envelope._tag !== "upsert" || envelope.item._tag !== "rewind",
+				envelope._tag !== "upsert" ||
+				(envelope.item._tag !== "rewind" &&
+					(options.window !== undefined || envelope.item._tag !== "window")),
 		),
 		Stream.map((envelope) =>
 			envelope._tag === "snapshot"
 				? {
 						...envelope,
-						rows: envelope.rows.filter((row) => row._tag !== "rewind"),
+						rows: envelope.rows.filter(
+							(row) =>
+								row._tag !== "rewind" &&
+								(options.window !== undefined || row._tag !== "window"),
+						),
 					}
 				: envelope,
 		),
@@ -372,6 +378,204 @@ const runtimeEvent = (event: Record<string, unknown>): ProviderRuntimeEvent =>
 	decodeProviderRuntimeEvent({ ...RUNTIME_BASE, ...event });
 
 describe("subscribeSessionDetail", () => {
+	it.effect(
+		"prompt index follows projected rewind and undo without fetching bodies",
+		() =>
+			Effect.gen(function* () {
+				const { subscribeSessionPromptIndex } = yield* Effect.promise(
+					() =>
+						import(
+							"../../../src/lib/domain/relay/Services/session-prompt-index.js"
+						),
+				);
+				yield* recoverProjections;
+				yield* commit([
+					sessionCreated(SID),
+					messageCreated(SID, "rewind-a", "user"),
+					messageCreated(SID, "rewind-b", "user"),
+					messageCreated(SID, "rewind-c", "user"),
+				]);
+				const q =
+					yield* Queue.unbounded<
+						import("../../../src/lib/contracts/ws-rpc.js").SessionPromptIndexEnvelope
+					>();
+				yield* subscribeSessionPromptIndex({ sessionId: SID }).pipe(
+					Stream.runForEach((frame) => Queue.offer(q, frame)),
+					Effect.forkScoped,
+				);
+				const initial = yield* Queue.take(q);
+				if (initial._tag !== "snapshot") throw new Error("expected snapshot");
+				expect(initial.rows.map((row) => row.id)).toEqual([
+					"rewind-a",
+					"rewind-b",
+					"rewind-c",
+				]);
+				yield* Queue.take(q);
+				yield* commit([
+					canonicalEvent(
+						"session.rewound",
+						SID,
+						{ messageId: "rewind-b", previousMessageId: null },
+						{ provider: "claude", createdAt: at() },
+					),
+				]);
+				const removed: string[] = [];
+				while (removed.length < 2) {
+					const frame = yield* Queue.take(q);
+					if (frame._tag === "remove") removed.push(frame.id);
+				}
+				expect(removed).toEqual(["rewind-b", "rewind-c"]);
+				yield* commit([
+					canonicalEvent(
+						"session.rewind_undone",
+						SID,
+						{ previousMessageId: "rewind-b" },
+						{ provider: "claude", createdAt: at() },
+					),
+				]);
+				const restored = new Set<string>();
+				while (restored.size < 2) {
+					const frame = yield* Queue.take(q);
+					if (frame._tag === "upsert" && frame.item.id !== "rewind-a")
+						restored.add(frame.item.id);
+				}
+				expect([...restored]).toEqual(["rewind-b", "rewind-c"]);
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+	it.effect(
+		"prompt index chunks the complete session without transcript bodies",
+		() =>
+			Effect.gen(function* () {
+				const { subscribeSessionPromptIndex } = yield* Effect.promise(
+					() =>
+						import(
+							"../../../src/lib/domain/relay/Services/session-prompt-index.js"
+						),
+				);
+				yield* recoverProjections;
+				yield* establishSession(SID);
+				const sql = yield* SqlClient.SqlClient;
+				for (let i = 0; i < 260; i++)
+					yield* sql`INSERT INTO messages (id,session_id,role,text,created_at,updated_at) VALUES (${`idx-${String(i).padStart(3, "0")}`},${SID},'user',${`${"prefix".repeat(1000)}<user-message>\n${"😀".repeat(1000)}\n</user-message>`},${Math.floor(i / 2)},${i})`;
+				yield* sql`INSERT INTO messages (id,session_id,role,text,created_at,updated_at) VALUES ('assistant-index',${SID},'assistant',${"SECRET".repeat(10000)},999,999)`;
+				const frames = yield* subscribeSessionPromptIndex({
+					sessionId: SID,
+				}).pipe(
+					Stream.takeUntil((frame) => frame._tag === "synchronized"),
+					Stream.runCollect,
+				);
+				expect(frames[0]?._tag).toBe("snapshot");
+				expect(frames.at(-1)?._tag).toBe("synchronized");
+				expect(frames.some((frame) => frame._tag === "snapshotChunk")).toBe(
+					true,
+				);
+				const rows = frames.flatMap((frame) =>
+					frame._tag === "snapshot" || frame._tag === "snapshotChunk"
+						? frame.rows
+						: [],
+				);
+				expect(rows).toHaveLength(260);
+				expect(rows[0]?.id).toBe("idx-000");
+				expect(rows.at(-1)?.id).toBe("idx-259");
+				for (const row of rows) {
+					expect([...row.preview]).toHaveLength(240);
+					expect(row.preview.startsWith("😀")).toBe(true);
+				}
+				for (const frame of frames)
+					expect(Buffer.byteLength(JSON.stringify(frame))).toBeLessThanOrEqual(
+						64 * 1024,
+					);
+				expect(JSON.stringify(frames)).not.toContain("SECRET");
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+	it.effect(
+		"historical navigation keeps its interval while live messages change",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* establishSession(SID);
+				const sql = yield* SqlClient.SqlClient;
+				for (let i = 0; i < 120; i++)
+					yield* sql`INSERT INTO messages (id,session_id,role,text,created_at,updated_at) VALUES (${`nav-${String(i).padStart(3, "0")}`},${SID},'user','',${i},${i})`;
+				const { q } = yield* openDetail({
+					sessionId: SID,
+					window: { anchorMessageId: "nav-010", direction: "from" },
+				});
+				const first = yield* Queue.take(q);
+				if (first._tag !== "snapshot") throw new Error("expected snapshot");
+				const ids = first.rows.flatMap((row) =>
+					row._tag === "message" ? [row.message.id] : [],
+				);
+				expect(ids).toHaveLength(50);
+				expect(ids[0]).toBe("nav-010");
+				expect(ids.at(-1)).toBe("nav-059");
+				expect(first.rows.find((row) => row._tag === "window")).toEqual({
+					_tag: "window",
+					window: {
+						kind: "historical",
+						firstMessageId: "nav-010",
+						lastMessageId: "nav-059",
+						hasEarlier: true,
+						hasLater: true,
+					},
+				});
+				yield* Queue.take(q);
+				yield* commit([
+					textDelta(SID, "nav-119", "outside", "not in the old window"),
+				]);
+				const refreshed = yield* Queue.take(q);
+				if (refreshed._tag !== "snapshot")
+					throw new Error("expected refreshed snapshot");
+				expect(
+					refreshed.rows.flatMap((row) =>
+						row._tag === "message" ? [row.message.id] : [],
+					),
+				).toEqual(ids);
+				expect(JSON.stringify(refreshed)).not.toContain(
+					"not in the old window",
+				);
+				yield* Queue.take(q);
+				yield* commit([
+					textDelta(SID, "nav-010", "inside", "updated old prompt"),
+				]);
+				const updated = yield* Queue.take(q);
+				expect(JSON.stringify(updated)).toContain("updated old prompt");
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+	it.effect(
+		"historical adjacent pages exclude their anchor and reject a foreign target",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* establishSession(SID);
+				yield* establishSession("other-nav");
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO messages (id,session_id,role,text,created_at,updated_at) VALUES ('foreign-nav','other-nav','user','',0,0)`;
+				for (let i = 0; i < 120; i++)
+					yield* sql`INSERT INTO messages (id,session_id,role,text,created_at,updated_at) VALUES (${`adj-${String(i).padStart(3, "0")}`},${SID},'user','',${i},${i})`;
+				for (const [direction, expected] of [
+					["after", "adj-051"],
+					["before", "adj-000"],
+				] as const) {
+					const frames = yield* subscribeSessionDetail({
+						sessionId: SID,
+						window: { anchorMessageId: "adj-050", direction },
+					}).pipe(Stream.take(2), Stream.runCollect);
+					const first = frames[0];
+					if (first?._tag !== "snapshot") throw new Error("expected snapshot");
+					const ids = first.rows.flatMap((row) =>
+						row._tag === "message" ? [row.message.id] : [],
+					);
+					expect(ids[0]).toBe(expected);
+					expect(ids).not.toContain("adj-050");
+				}
+				const rejected = yield* subscribeSessionDetail({
+					sessionId: SID,
+					window: { anchorMessageId: "foreign-nav", direction: "from" },
+				}).pipe(Stream.take(1), Stream.runCollect, Effect.result);
+				expect(rejected._tag).toBe("Failure");
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
 	it.effect(
 		"cold start includes only the newest 50 messages and a paging cursor",
 		() =>

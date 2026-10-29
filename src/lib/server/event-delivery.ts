@@ -103,6 +103,8 @@ const sessionAudience = (
 /** Every streaming RPC chooses its address once, before its producer opens. */
 export const subscriptionAudiences = {
 	SubscribeShell: globalAudience,
+	SubscribeSessionPromptIndex: (request, producer) =>
+		sessionAudience(request.sessionId, producer),
 	SubscribeSessionDetail: (request, producer) =>
 		sessionAudience(request.sessionId, producer),
 	SubscribeSessionTodos: (request, producer) =>

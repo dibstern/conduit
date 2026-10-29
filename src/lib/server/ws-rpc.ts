@@ -35,6 +35,7 @@ import {
 } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
+import { subscribeSessionPromptIndex } from "../domain/relay/Services/session-prompt-index.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import * as Failure from "../effect/failure-classification.js";
@@ -163,9 +164,12 @@ const streamHandlers = {
 				? {}
 				: { resumeFromSequence: request.resumeFromSequence },
 		),
+	SubscribeSessionPromptIndex: (request) =>
+		subscribeSessionPromptIndex(request),
 	SubscribeSessionDetail: (request) =>
 		subscribeSessionDetailWithPresence({
 			sessionId: request.sessionId,
+			...(request.window === undefined ? {} : { window: request.window }),
 			...(request.resumeFromSequence === undefined
 				? {}
 				: { resumeFromSequence: request.resumeFromSequence }),

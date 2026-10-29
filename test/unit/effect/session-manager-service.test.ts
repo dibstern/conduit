@@ -239,6 +239,8 @@ function makeReadQueryEffect(
 		readPendingInputs: () => Effect.succeed({ rows: [], removed: [] }),
 		readInboxState: () => Effect.succeed(undefined),
 		readStoreIdentity: () => Effect.succeed("store"),
+		readSessionPromptIndex: () =>
+			Effect.succeed({ rows: [], removed: [], version: 0 }),
 		readSessionTranscriptPage: vi.fn(() =>
 			Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 		),

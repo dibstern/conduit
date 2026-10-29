@@ -60,6 +60,7 @@ function adapter() {
 		>[]
 	>();
 	const table: StubTable = {
+		SubscribeSessionPromptIndex: () => Stream.never,
 		SubscribeSessionDetail: ({ sessionId }) =>
 			Stream.unwrap(
 				makeRpcStream<SessionDetailEnvelope, WsRpcError>().pipe(
@@ -398,7 +399,13 @@ describe("transcript feed interface", () => {
 				wire.interrupted.includes(String(first.id)) &&
 				wire.interrupted.includes(String(second.id)),
 		);
-		expect(wire.requests.length - wire.interrupted.length).toBe(1);
+		expect(
+			wire.requests.filter(
+				(request) =>
+					request.tag === "SubscribeSessionDetail" &&
+					!wire.interrupted.includes(String(request.id)),
+			),
+		).toHaveLength(1);
 	});
 
 	it("resyncs from a fresh snapshot after a suffix length mismatch", async () => {
