@@ -21,8 +21,12 @@ const wide = `flowchart LR\n  ${["Plan the work", "Build the parts", "Test every
 // Taller than the 380px cap.
 const tallSteps = 10;
 const tall = `flowchart TD\n  ${Array.from({ length: tallSteps }, (_, n) => `S${n}[Step ${n + 1}]`).join(" --> ")}`;
+const maths = (build: string) =>
+	`flowchart LR\n  A["Plan $$\\frac{a}{b}$$"] --> B["Build ${build}"] --> C["Ship $$\\sum_{i=1}^{n} i$$"]`;
 const fixtures = {
 	"a flowchart diagram": [flowchart],
+	"a flowchart with maths labels": [maths("$$\\sqrt{x}$$")],
+	"a flowchart with one bad maths label": [maths("$$\\frac{a}$$")],
 	"a broken flowchart diagram": ["flowchart LR\n  Plan -->|oops Build"],
 	"an unknown diagram type": ["notadiagram\n  foo"],
 	"a sequence diagram": ["sequenceDiagram\n  Alice->>Bob: Plan"],
@@ -46,6 +50,9 @@ const noted = new WeakMap<Page, { svg: JSHandle<Element>; fill: string }>();
 const stalledDownloads = new WeakMap<Page, Promise<void>>();
 const subagents = new WeakMap<Page, string>();
 const scopes = new WeakMap<Page, string>();
+const mathsDownloads = new WeakMap<Page, { count: number }>();
+// Vite names the KaTeX chunk after its package.
+const katexChunk = /\/assets\/katex-[\w-]+\.js$/;
 
 const markdown = (sources: readonly string[]) =>
 	`${["Here is the plan:", ...sources.map((source) => `\`\`\`mermaid\n${source}\n\`\`\``)].join("\n\n")}\n`;
@@ -684,12 +691,87 @@ export const assistantDiagramsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert the diagram failed to load",
+		match: /^the diagram says the renderer failed to load$/,
+		run: ({ world }) =>
+			expect(diagram(world.page)).toContainText(
+				"The diagram renderer failed to load",
+			),
+	},
+	{
+		name: "count maths renderer downloads",
+		match: /^maths renderer downloads are counted$/,
+		run: ({ world }) => {
+			const downloads = { count: 0 };
+			mathsDownloads.set(world.page, downloads);
+			world.page.on("request", (request) => {
+				if (katexChunk.test(new URL(request.url()).pathname)) downloads.count++;
+			});
+		},
+	},
+	{
+		name: "assert maths renderer download count",
+		match: /^the maths renderer was downloaded (\d+) times?$/,
+		run: ({ world, match }) => {
+			const downloads = mathsDownloads.get(world.page);
+			if (!downloads) throw new Error("Maths downloads are not being counted");
+			expect(downloads.count).toBe(Number(match[1]));
+		},
+	},
+	{
+		name: "fail the maths renderer download once",
+		match: /^the maths renderer fails to download once$/,
+		run: ({ world }) =>
+			world.page.route(katexChunk, (route) => route.abort(), { times: 1 }),
+	},
+	{
+		name: "assert typeset maths labels",
+		match: /^the diagram typesets (\d+) maths labels( and shows no raw \$\$)?$/,
+		run: async ({ world, match }) => {
+			await expect(
+				drawing(world.page).locator(".pele-math .katex"),
+			).toHaveCount(Number(match[1]));
+			if (match[2]) await expect(drawing(world.page)).not.toContainText("$$");
+		},
+	},
+	{
+		name: "assert a label left as written",
+		match: /^the diagram shows the label (.+) as written$/,
+		run: ({ world, match }) =>
+			expect(drawing(world.page)).toContainText(match[1] ?? ""),
+	},
+	{
+		name: "assert maths labels fit their boxes",
+		match: /^every maths label fits inside its box$/,
+		run: async ({ world }) => {
+			// A wrong measurement, or one taken before KaTeX's fonts arrived, leaves the maths spilling out of its box.
+			const spills = await drawing(world.page).evaluate((svg) =>
+				[...svg.querySelectorAll(".pele-math")].flatMap((box) => {
+					const outer = box.getBoundingClientRect();
+					const inner = box.querySelector(".katex")?.getBoundingClientRect();
+					if (!inner) return ["no typeset maths"];
+					const fits =
+						inner.left >= outer.left - 1 &&
+						inner.right <= outer.right + 1 &&
+						inner.top >= outer.top - 1 &&
+						inner.bottom <= outer.bottom + 1;
+					return fits
+						? []
+						: [
+								`${inner.width}x${inner.height} in ${outer.width}x${outer.height}`,
+							];
+				}),
+			);
+			expect(spills).toEqual([]);
+		},
+	},
+	{
 		name: "press Retry on one failed diagram",
 		match: /^I press Retry on one failed diagram$/,
 		run: async ({ world }) => {
-			await diagram(world.page)
-				.nth(1)
+			await lastAssistant(world.page)
 				.getByRole("button", { name: "Retry", exact: true })
+				.first()
 				.click();
 		},
 	},

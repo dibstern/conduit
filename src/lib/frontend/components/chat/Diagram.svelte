@@ -1,7 +1,7 @@
 <!-- Draws one mermaid source with pele. Pele owns the zoom host; CSS owns its size, pele only measures it. -->
 <script lang="ts">
 	import type { DiagramType, Mounted } from "pele/lazy";
-	import { loadPele, nextRetry, resetIfZoomed, retry } from "../../utils/diagram-loader.js";
+	import { loadMath, loadPele, nextRetry, resetIfZoomed, retry } from "../../utils/diagram-loader.js";
 	import Button from "../ui/Button.svelte";
 	import CodeBlockHeader from "../ui/CodeBlockHeader.svelte";
 	import { openMediaViewer } from "../../stores/ui.svelte.js";
@@ -9,7 +9,7 @@
 	let { source, variant }: { source: string; variant: "inline" | "viewer" } = $props();
 
 	async function download(text: string) {
-		const pele = await loadPele();
+		const [pele, math] = await Promise.all([loadPele(), text.includes("$$") ? loadMath() : undefined]);
 		let type: DiagramType | null = null;
 		try {
 			type = pele.detectType(text);
@@ -17,7 +17,7 @@
 			// Unknown type: mount anyway so pele explains it in its error box.
 		}
 		await pele.load(type);
-		return pele;
+		return { pele, math };
 	}
 
 	// failed has no payload: pele draws its own error box, so we never hold a second copy.
@@ -42,9 +42,10 @@
 		const attempt = (): void => {
 			status = "loading";
 			download(text).then(
-				(pele) => {
+				({ pele, math }) => {
 					if (cancelled) return;
 					mounted = pele.mount(target, text, {
+						...(math && { math }),
 						// The viewer always offers zoom; inline only when the drawing was shrunk to fit.
 						zoom: variant === "viewer" || "auto",
 						onRender: () => {

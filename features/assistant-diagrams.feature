@@ -342,3 +342,43 @@ Scenario: with a file open, session search above the zoomed expanded diagram clo
   When I press Escape after focus drops out of session search
   Then session search is closed and the expanded diagram is still zoomed
   And the file viewer shows notes.md
+
+Scenario: TeX in diagram labels is typeset as maths
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And maths renderer downloads are counted
+  When the transcript contains a finished assistant message with a flowchart with maths labels
+  Then the assistant message draws the diagram
+  And the diagram typesets 3 maths labels and shows no raw $$
+  And every maths label fits inside its box
+  And the maths renderer was downloaded 1 time
+
+Scenario: one bad TeX expression stays as source while the rest of the diagram renders
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  When the transcript contains a finished assistant message with a flowchart with one bad maths label
+  Then the assistant message draws the diagram
+  And the diagram typesets 2 maths labels
+  And the diagram shows the label $$\frac{a}$$ as written
+
+Scenario: Retry recovers a diagram whose maths renderer failed to download
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And the maths renderer fails to download once
+  When the transcript contains a finished assistant message with a flowchart with maths labels
+  Then the diagram says the renderer failed to load
+  When I press Retry on one failed diagram
+  Then the assistant message draws the diagram
+  And the diagram typesets 3 maths labels and shows no raw $$
+
+Scenario: a diagram without maths never downloads the maths renderer
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And I open a composer session
+  And maths renderer downloads are counted
+  When the transcript contains a finished assistant message with a flowchart diagram
+  Then the assistant message draws the diagram
+  And the maths renderer was downloaded 0 times
