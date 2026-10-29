@@ -42,7 +42,7 @@ Scenario: Never suppresses high context warnings in the composer and picker
   When I open the model picker
   Then the picker context usage is not warned
 
-Scenario Outline: Claude Compact sends the slash command and yields to the transcript notice
+Scenario Outline: Claude Compact sends the slash command and yields to the transcript rule
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -54,7 +54,7 @@ Scenario Outline: Claude Compact sends the slash command and yields to the trans
   Then the Compact RPC sends exactly /compact for the current session
   When the mock relay starts compaction for the current session
   Then the composer context warning is not visible
-  And the transcript has a Compacting notice
+  And the transcript has a Compacting context rule
   When the mock relay <outcome> compaction for the current session
   Then the composer context warning is visible
   And the composer context warning reads Context <percent>% full. Compact soon to keep replies sharp.
@@ -88,7 +88,7 @@ Scenario Outline: OpenCode Compact sends the slash command and follows compactio
   Then the Compact RPC sends exactly /compact for the current session
   When the mock relay starts compaction for the current session
   Then the composer context warning is not visible
-  And the transcript has a Compacting notice
+  And the transcript has a Compacting context rule
   And the composer is busy after compaction
   When the mock relay <outcome> compaction for the current session with unreported token usage
   Then the composer context warning is <visibility>

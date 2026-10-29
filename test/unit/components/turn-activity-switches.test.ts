@@ -73,6 +73,7 @@ const turn: Turn = {
 	storeId: "turn",
 	user: { type: "user", uuid: "turn", text: "Check routing", createdAt: START },
 	segments: [segment],
+	preface: [],
 	notices: [],
 	live: false,
 };
