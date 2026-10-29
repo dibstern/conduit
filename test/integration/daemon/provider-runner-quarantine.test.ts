@@ -117,8 +117,20 @@ describe("durable controls on retired runners", () => {
 				]),
 			);
 			// Recovery stops the disconnected survivor and kills its verified process.
+			// Its run stays active until Gone, after the reaper exits too, settles it
+			// and prunes the row (C 6.5, 6.6, 6.8). A message sent sooner queues
+			// behind that run and its failure pauses the queue, as on main.
 			await vi.waitFor(
-				() => expect(() => process.kill(runner.pid, 0)).toThrow(),
+				() => {
+					expect(() => process.kill(runner.pid, 0)).toThrow();
+					expect(
+						store
+							.prepare(
+								"SELECT 1 FROM claude_runner_cursors WHERE runner_id = ?",
+							)
+							.get(runner.runnerId),
+					).toBeUndefined();
+				},
 				{
 					timeout: 10_000,
 				},
