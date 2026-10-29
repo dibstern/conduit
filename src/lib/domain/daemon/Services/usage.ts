@@ -177,6 +177,7 @@ const settleRead =
 						accountId: account.id,
 						harness: account.harness,
 						readAt,
+						startedAt,
 					});
 					return [
 						{ previous: record.reading, reading: settled.reading },
@@ -360,7 +361,7 @@ const makeRefresh =
 const makeReadings = (
 	state: UsageStateRef,
 	viewers: Ref.Ref<number>,
-	wakeAll: Effect.Effect<void>,
+	wake: Effect.Effect<void>,
 ) =>
 	Stream.unwrap(
 		Effect.gen(function* () {
@@ -382,30 +383,29 @@ const makeReadings = (
 					initial = false;
 					// changes has captured the snapshot and joined the update stream
 					// before this read can publish, so the snapshot always comes first.
-					return Effect.forkIn(wakeAll, subscriptionScope).pipe(Effect.asVoid);
+					return Effect.forkIn(wake, subscriptionScope).pipe(Effect.asVoid);
 				}),
 			);
 		}),
 	);
 
-/** Read the accounts whose wake has come, while someone is viewing or a plan window is full. */
-const makeWake =
-	(
-		state: UsageStateRef,
-		viewers: Ref.Ref<number>,
-		refresh: UsageService["refresh"],
-	) =>
-	(accountIds: readonly string[]) =>
-		Effect.gen(function* () {
-			const now = yield* Clock.currentTimeMillis;
-			const watching = yield* Ref.get(viewers);
-			const { accounts } = yield* SubscriptionRef.get(state);
-			const due = accountIds.filter((accountId) =>
-				shouldWake(accounts.get(accountId) ?? emptyAccountUsage, now, watching),
-			);
-			if (due.length > 0)
-				yield* refresh({ accountIds: due, maxAge: 0, wait: 0 });
-		});
+/** Read every configured account whose wake has come, while someone is viewing or a plan window is full. */
+const makeWake = (
+	state: UsageStateRef,
+	viewers: Ref.Ref<number>,
+	configured: UsageOptions["accounts"],
+	refresh: UsageService["refresh"],
+) =>
+	Effect.gen(function* () {
+		const accountIds = (yield* configured).map((account) => account.id);
+		const now = yield* Clock.currentTimeMillis;
+		const watching = yield* Ref.get(viewers);
+		const { accounts } = yield* SubscriptionRef.get(state);
+		const due = accountIds.filter((accountId) =>
+			shouldWake(accounts.get(accountId) ?? emptyAccountUsage, now, watching),
+		);
+		if (due.length > 0) yield* refresh({ accountIds: due, maxAge: 0, wait: 0 });
+	});
 
 const byOrder =
 	(order: readonly string[]) => (a: UsageAccount, b: UsageAccount) => {
@@ -532,8 +532,10 @@ export const makeUsage = (options: UsageOptions) =>
 					const wakeAt = accounts.get(accountId)?.wakeAt;
 					if (wakeAt === undefined) return;
 					yield* Effect.sleep(wakeAt - (yield* Clock.currentTimeMillis));
-					// The wake's own read restarts this timer, so it runs outside it.
-					yield* Effect.forkIn(wake([accountId]), scope);
+					// Every due account is read, so one added since anyone subscribed
+					// is picked up. The wake's own read restarts this timer, so it
+					// runs outside it.
+					yield* Effect.forkIn(wake, scope);
 				}),
 			).pipe(Effect.asVoid);
 		const refresh = makeRefresh(
@@ -542,17 +544,9 @@ export const makeUsage = (options: UsageOptions) =>
 			readAccount(state, scope, options.readers, saveHistory, schedule),
 			saveHistory,
 		);
-		const wake = makeWake(state, viewers, refresh);
+		const wake = makeWake(state, viewers, options.accounts, refresh);
 		return {
-			readings: makeReadings(
-				state,
-				viewers,
-				options.accounts.pipe(
-					Effect.flatMap((configured) =>
-						wake(configured.map((account) => account.id)),
-					),
-				),
-			),
+			readings: makeReadings(state, viewers, wake),
 			update: makeUpdate(
 				state,
 				options.accounts,

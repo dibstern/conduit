@@ -85,25 +85,37 @@ const keptReading = (record: AccountUsage, reading: UsageReading) =>
 		? { ...record.reading, stale: true }
 		: reading;
 
-// The next read after one settles at readAt. Failed reads in a row wait 30s,
-// doubling to 2m, then 5m like any other read.
+// A wake still to come, or Infinity. One already past was carried out or skipped.
+const comingWake = ({ wakeAt }: AccountUsage, now: number) =>
+	wakeAt !== undefined && wakeAt > now ? wakeAt : Infinity;
+
+// The next read after one that began at startedAt settled at readAt. Failed
+// reads in a row wait 30s, doubling to 2m, then 5m like any other read. A wake
+// set for after the read began still stands: the read can't answer for it.
 const nextRead = (
-	{ failures: before = 0 }: AccountUsage,
+	record: AccountUsage,
 	reading: UsageReading,
-	readAt: number,
+	{
+		readAt,
+		startedAt,
+	}: { readonly readAt: number; readonly startedAt: number },
 ) => {
+	const { failures: before = 0 } = record;
 	const failures = reading.status === "unknown" ? before + 1 : 0;
 	return {
 		failures,
-		wakeAt:
+		wakeAt: Math.min(
 			readAt +
-			(failures > 0 && failures < 4 ? 15_000 * 2 ** failures : 300_000),
+				(failures > 0 && failures < 4 ? 15_000 * 2 ** failures : 300_000),
+			comingWake(record, startedAt),
+		),
 	};
 };
 
 /**
  * Apply a finished read: the reading its callers get and the record it leaves,
- * with the account's next read scheduled from when this one settled.
+ * with the account's next read scheduled from when this one settled, or
+ * sooner if a wake was set since it began.
  * A read whose account was retired or read again since it started leaves the
  * record as it is.
  */
@@ -111,7 +123,12 @@ export const settle = (
 	record: AccountUsage,
 	result: Deferred.Deferred<UsageReading>,
 	read: UsageRead,
-	{ accountId, harness, readAt }: ReadingOrigin,
+	{
+		accountId,
+		harness,
+		readAt,
+		startedAt,
+	}: ReadingOrigin & { readonly startedAt: number },
 ): { readonly reading: UsageReading; readonly record: AccountUsage } => {
 	const { windows, series } =
 		harness === "codex" || !succeeded(read)
@@ -129,7 +146,7 @@ export const settle = (
 			...series,
 			inFlight: undefined,
 			reading: keptReading(record, reading),
-			...nextRead(record, reading, readAt),
+			...nextRead(record, reading, { readAt, startedAt }),
 		},
 	};
 };
@@ -217,10 +234,6 @@ export const live = (
 		inFlight: record.inFlight && { ...record.inFlight, overtaken: true },
 	};
 };
-
-// A wake still to come, or Infinity. One already past was carried out or skipped.
-const comingWake = ({ wakeAt }: AccountUsage, now: number) =>
-	wakeAt !== undefined && wakeAt > now ? wakeAt : Infinity;
 
 /** A finished turn's usage is read again in ten seconds, unless a wake to come is sooner. */
 export const afterTurn = (record: AccountUsage, now: number): AccountUsage => ({

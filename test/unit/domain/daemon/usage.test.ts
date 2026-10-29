@@ -37,7 +37,10 @@
 // runs; a viewer arriving after a skipped wake never reads, so the countdown
 // sits in the past; retryAt shows on a reading that hasn't failed, is missing
 // after a failure, or outlives the next success; the backoff holds back a
-// forced Refresh.
+// forced Refresh, or a forced read pushes back a wake still to come; a turn
+// that ends during a read is not read again after it, so a reading from
+// before the turn stands for five minutes; an account added while someone is
+// viewing is never read.
 import {
 	mkdtemp,
 	readdir,
@@ -78,6 +81,7 @@ import {
 	Usage,
 	type UsageHistorySnapshot,
 	UsageHistorySnapshotSchema,
+	type UsageService,
 } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { CodexAccountResources } from "../../../../src/lib/provider/codex/codex-account-resources.js";
@@ -543,8 +547,8 @@ const goodRead: UsageRead = {
 	windows: [{ kind: "five_hour", utilization: 41 }],
 };
 
-/** One Claude account whose reads return the script in turn, then fail; readAt logs when each started. */
-const scriptedAccount = (script: readonly UsageRead[]) =>
+/** One Claude account whose reads take `takes` ms and return the script in turn, then fail; readAt logs when each started. */
+const scriptedAccount = (script: readonly UsageRead[], takes = 0) =>
 	Effect.gen(function* () {
 		const readAt: number[] = [];
 		const service = yield* makeUsage({
@@ -554,15 +558,25 @@ const scriptedAccount = (script: readonly UsageRead[]) =>
 				cursor: unavailableReader,
 				claude: {
 					read: () =>
-						Effect.map(Clock.currentTimeMillis, (now) => {
-							readAt.push(now);
-							return script[readAt.length - 1] ?? failedRead;
+						Effect.gen(function* () {
+							readAt.push(yield* Clock.currentTimeMillis);
+							const read = script[readAt.length - 1] ?? failedRead;
+							yield* Effect.sleep(takes);
+							return read;
 						}),
 				},
 			},
 		});
 		return { service, readAt };
 	});
+
+/** The account's reading as a new viewer first sees it. */
+const published = (service: UsageService) =>
+	service.readings.pipe(
+		Stream.take(1),
+		Stream.runCollect,
+		Effect.map(([readings]) => readings?.[0]),
+	);
 
 const view = (service: { readonly readings: Stream.Stream<unknown> }) =>
 	Effect.forkChild(Stream.runDrain(service.readings), {
@@ -642,6 +656,43 @@ it.effect(
 		}),
 );
 
+it.effect.each([
+	["a quick", 3_000, 11_000],
+	["a slow", 15_000, 15_000],
+] as const)(
+	"a turn that ends during %s read is read again once both are past, not five minutes later",
+	([, takes, again]) =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount(
+				[goodRead, goodRead],
+				takes,
+			);
+			yield* view(service);
+			yield* TestClock.adjust("1 second");
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("1 minute");
+			expect(readAt).toEqual([0, again]);
+		}),
+);
+
+it.effect(
+	"a failed read that a turn ended during retries at the turn's read, and says so",
+	() =>
+		Effect.gen(function* () {
+			const { service, readAt } = yield* scriptedAccount([], 3_000);
+			yield* view(service);
+			yield* TestClock.adjust("1 second");
+			yield* service.turnEnded("account-1");
+			yield* TestClock.adjust("2 seconds");
+			expect(yield* published(service)).toMatchObject({
+				status: "unknown",
+				retryAt: 11_000,
+			});
+			yield* TestClock.adjust("8 seconds");
+			expect(readAt).toEqual([0, 11_000]);
+		}),
+);
+
 it.effect(
 	"reads each account five minutes after its own last read while viewed",
 	() =>
@@ -666,11 +717,7 @@ it.effect(
 			});
 			yield* view(service);
 			yield* TestClock.adjust("2 minutes");
-			yield* service.refresh({
-				accountIds: ["account-2"],
-				maxAge: 0,
-				wait: "until-settled",
-			});
+			yield* service.turnEnded("account-2");
 			yield* TestClock.adjust("11 minutes");
 			expect(reads.filter((read) => read.startsWith("account-1"))).toEqual([
 				"account-1@0",
@@ -679,15 +726,46 @@ it.effect(
 			]);
 			expect(reads.filter((read) => read.startsWith("account-2"))).toEqual([
 				"account-2@0",
-				"account-2@120",
-				"account-2@420",
-				"account-2@720",
+				"account-2@130",
+				"account-2@430",
+				"account-2@730",
 			]);
 		}),
 );
 
+it.effect("a wake also reads an account added while someone is viewing", () =>
+	Effect.gen(function* () {
+		const reads: string[] = [];
+		const configured = yield* Ref.make([
+			{ id: "account-1", harness: "claude" as const },
+		]);
+		const service = yield* makeUsage({
+			accounts: Ref.get(configured),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: (account) =>
+						Effect.map(Clock.currentTimeMillis, (now) => {
+							reads.push(`${account.id}@${now / 1000}`);
+							return goodRead;
+						}),
+				},
+			},
+		});
+		yield* view(service);
+		yield* TestClock.adjust("1 minute");
+		yield* Ref.update(configured, (accounts) => [
+			...accounts,
+			{ id: "account-2", harness: "claude" as const },
+		]);
+		yield* TestClock.adjust("4 minutes");
+		expect(reads).toEqual(["account-1@0", "account-1@300", "account-2@300"]);
+	}),
+);
+
 it.effect(
-	"puts retryAt on the stream only after a failed read, and a forced read ignores it",
+	"puts retryAt on the stream only after a failed read, and a forced read neither waits for it nor pushes it back",
 	() =>
 		Effect.gen(function* () {
 			const { service, readAt } = yield* scriptedAccount([
@@ -695,25 +773,20 @@ it.effect(
 				goodRead,
 				failedRead,
 			]);
-			const published = service.readings.pipe(
-				Stream.take(1),
-				Stream.runCollect,
-				Effect.map(([readings]) => readings?.[0]),
-			);
 			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
-			expect(yield* published).toMatchObject({
+			expect(yield* published(service)).toMatchObject({
 				status: "unknown",
 				retryAt: 30_000,
 			});
 			yield* TestClock.adjust("10 seconds");
 			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
-			expect(yield* published).not.toHaveProperty("retryAt");
+			expect(yield* published(service)).not.toHaveProperty("retryAt");
 			yield* TestClock.adjust("10 seconds");
 			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
-			expect(yield* published).toMatchObject({
+			expect(yield* published(service)).toMatchObject({
 				status: "available",
 				stale: true,
-				retryAt: 50_000,
+				retryAt: 30_000,
 			});
 			expect(yield* service.latest("account-1")).not.toHaveProperty("retryAt");
 			expect(readAt).toEqual([0, 10_000, 20_000]);
