@@ -22,6 +22,12 @@ interface DiffFixture {
 
 const fixtures = new WeakMap<Page, DiffFixture>();
 
+/** Row observer callbacks a step parks, and the paths each one saw come into view. */
+interface DiffObservations {
+	hold: boolean;
+	held: { seen: string[]; run: () => void }[];
+}
+
 /** Parks a stub until a step releases it. */
 async function held(fixture: DiffFixture): Promise<void> {
 	const reply = new Promise<void>((resolve) => {
@@ -391,6 +397,79 @@ export const sessionDiffHandlers: StepHandler[] = [
 				})
 				.click({ position: { x: 8, y: 6 } });
 			await expect(world.page).not.toHaveURL(before);
+		},
+	},
+	{
+		name: "holdable row observations",
+		match: /^row observations can be held$/,
+		run: async ({ world }) => {
+			// Rows build their observers when they mount, so this runs before the pane opens.
+			await world.page.evaluate(() => {
+				const native = window.IntersectionObserver;
+				const observations: DiffObservations = { hold: false, held: [] };
+				(
+					window as unknown as { diffObservations: DiffObservations }
+				).diffObservations = observations;
+				window.IntersectionObserver = class extends native {
+					constructor(
+						callback: IntersectionObserverCallback,
+						options?: IntersectionObserverInit,
+					) {
+						// No named arrows in here: tsx wraps them in a `__name` helper the page lacks.
+						super((entries, observer) => {
+							if (!observations.hold) return callback(entries, observer);
+							observations.held.push({
+								seen: entries
+									.filter((entry) => entry.isIntersecting)
+									.map((entry) => entry.target.getAttribute("data-path") ?? ""),
+								run: callback.bind(undefined, entries, observer),
+							});
+						}, options);
+					}
+				};
+			});
+		},
+	},
+	{
+		name: "hold row observations",
+		match: /^row observations are held$/,
+		run: async ({ world }) => {
+			await world.page.evaluate(() => {
+				(
+					window as unknown as { diffObservations: DiffObservations }
+				).diffObservations.hold = true;
+			});
+		},
+	},
+	{
+		name: "row observation held",
+		match: /^the (\S+) row was seen while observations are held$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() =>
+					world.page.evaluate(
+						(path) =>
+							(
+								window as unknown as { diffObservations: DiffObservations }
+							).diffObservations.held.some(({ seen }) => seen.includes(path)),
+						match[1] ?? "",
+					),
+				)
+				.toBe(true);
+		},
+	},
+	{
+		name: "release row observations",
+		match: /^the held row observations land$/,
+		run: async ({ world }) => {
+			await world.page.evaluate(() => {
+				const observations = (
+					window as unknown as { diffObservations: DiffObservations }
+				).diffObservations;
+				observations.hold = false;
+				for (const held of observations.held.splice(0)) held.run();
+			});
+			await settle(world.page);
 		},
 	},
 	{

@@ -152,3 +152,23 @@ Scenario Outline: A listing that lands after a session switch stays with its ses
 Examples:
   | count | first                 | other                 | path       |
   | 1     | Fix model selector UI | Add dark mode support | file-01.ts |
+
+Scenario Outline: A row that comes into view as the pane hides loads once the pane is shown
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  And row observations can be held
+  When I open the Diff right pane
+  Then the <first_path> diff shows its patch
+  When row observations are held
+  And I scroll the diff to <last_path>
+  Then the <last_path> row was seen while observations are held
+  When I select the Files right pane tab
+  And the held row observations land
+  Then the <last_path> patch was requested <hidden_requests> times
+  When I select the Diff right pane tab
+  And I scroll the diff to <last_path>
+  Then the <last_path> diff shows its patch
+
+Examples:
+  | count | first_path | last_path  | hidden_requests |
+  | 30    | file-01.ts | file-30.ts | 0               |
