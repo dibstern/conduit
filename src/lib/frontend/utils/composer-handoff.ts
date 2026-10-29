@@ -30,6 +30,14 @@ const BUDS: readonly ControlName[] = ["effort", "directory"];
 /** The send controls go last, wherever they start. */
 const TRAILING: readonly ControlName[] = ["stop", "send"];
 const BUD_SCALE = "scale(0.6)";
+/** The keyboard's slide: the whole stagger starts and lands inside it. */
+const CLOCK = 350;
+const STAGGER = 25;
+/** Closing is opening's time-reverse: cubic-bezier(x1, y1, x2, y2) runs backwards as (1-x2, 1-y2, 1-x1, 1-y1). */
+const EASING = {
+	opening: "cubic-bezier(0.32, 0.72, 0, 1)",
+	closing: "cubic-bezier(1, 0, 0.68, 0.28)",
+};
 
 const travel = ({ first, last }: HandoffControl) =>
 	Math.hypot(first.x - last.x, first.y - last.y);
@@ -80,8 +88,9 @@ function fadeThrough(control: HandoffControl, opening: boolean): Keyframe[] {
 
 /**
  * One 350ms clock, 25ms apart: the controls with least to travel go first,
- * Effort and Directory right behind Model, then Stop and Send. Closing plays the
- * same order backwards. Reduced motion crossfades everything at once in 150ms.
+ * Effort and Directory right behind Model, then Stop and Send, and Send lands as
+ * the clock ends. Closing plays the opening backwards, easing included. Reduced motion
+ * crossfades everything at once in 150ms.
  */
 export function planHandoff<C extends HandoffControl>(
 	controls: C[],
@@ -107,9 +116,9 @@ export function planHandoff<C extends HandoffControl>(
 		timing: reduced
 			? { duration: 150, easing: "ease", fill: "backwards", id: ID }
 			: {
-					delay: index * 25,
-					duration: 350,
-					easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+					delay: index * STAGGER,
+					duration: CLOCK - (order.length - 1) * STAGGER,
+					easing: opening ? EASING.opening : EASING.closing,
 					fill: "backwards",
 					id: ID,
 				},

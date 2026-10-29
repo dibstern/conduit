@@ -6,13 +6,15 @@
 // 1. The order is by DOM position, not by distance travelled.
 // 2. Send (or Stop then Send) is not last.
 // 3. Effort and Directory are ranked by their own distance instead of following Model.
-// 4. Closing replays the opening order instead of reversing it.
+// 4. Closing replays the opening order, or the opening easing, instead of
+//    playing the opening backwards.
 // 5. The stagger counts a control that is not on screen, leaving a gap.
 // 6. The model chip snaps from logo to full width instead of growing.
 // 7. A bud starts at its resting place instead of on Model, or ends visible.
 // 8. A folding bud is hidden by its parked visibility before it has shrunk.
 // 9. Reduced motion still moves a control while it can be seen.
 // 10. A missing Model drops Effort and Directory from the plan.
+// 11. The stagger runs past the keyboard's 350ms instead of ending with it.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -95,7 +97,7 @@ describe("planHandoff glide", () => {
 				(name, index) => ({
 					name,
 					delay: index * 25,
-					duration: 350,
+					duration: 225,
 					easing: "cubic-bezier(0.32, 0.72, 0, 1)",
 					fill: "backwards",
 					id: "duo-handoff",
@@ -104,12 +106,34 @@ describe("planHandoff glide", () => {
 		);
 	});
 
-	it("closes in the exact reverse order", () => {
-		expect(closing.map(({ control }) => control.name)).toEqual(
-			opening.map(({ control }) => control.name).reverse(),
-		);
-		expect(closing.map(({ timing }) => timing.delay)).toEqual(
-			opening.map(({ timing }) => timing.delay),
+	it("lands the whole stagger on the keyboard's 350ms clock, Send last", () => {
+		for (const plan of [opening, closing])
+			expect(
+				Math.max(
+					...plan.map(
+						({ timing }) => Number(timing.delay) + Number(timing.duration),
+					),
+				),
+			).toBe(350);
+	});
+
+	it("closes as the opening played backwards: order, clock and easing", () => {
+		expect(
+			closing.map(({ control, timing }) => ({
+				name: control.name,
+				start: timing.delay,
+				duration: timing.duration,
+				easing: timing.easing,
+			})),
+		).toEqual(
+			opening
+				.map(({ control, timing }) => ({
+					name: control.name,
+					start: 350 - Number(timing.delay) - Number(timing.duration),
+					duration: timing.duration,
+					easing: "cubic-bezier(1, 0, 0.68, 0.28)",
+				}))
+				.reverse(),
 		);
 	});
 
