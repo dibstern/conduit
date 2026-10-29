@@ -158,6 +158,10 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 			});
 			await openSessionRoute(page, SESSION);
 			await expect(panel(page, "3")).toBeVisible();
+			// The paused clock holds frames, and the message rail appears on one
+			// and pads the transcript. Land it now so no later step aims at a
+			// layout that shifts under the pointer.
+			await page.clock.runFor(32);
 		},
 	},
 	{
@@ -251,8 +255,6 @@ export const surfacingMinimiseHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const scope = panel(world.page, match[2] ?? "");
 			await scope.scrollIntoViewIfNeeded();
-			// The message rail appears on a frame and pads the transcript, so measure after it lands.
-			await world.page.clock.runFor(32);
 			const box = await scope
 				.locator('[data-step-id^="surfacing-agent-"]')
 				.first()
