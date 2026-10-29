@@ -2,13 +2,12 @@
 <!-- Command menu triggered by "/" prefix. -->
 
 <script lang="ts">
-	import Popover from "../ui/Popover.svelte";
 	import ComposerFrame from "../ui/ComposerFrame.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { accountLimit } from "../../../contracts/account-limit.js";
-	import { tick, untrack, type Snippet } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
 	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
@@ -83,7 +82,6 @@
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
-	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
@@ -101,20 +99,6 @@
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 	let composerWrapperEl: HTMLDivElement | undefined = $state();
-	let composerMoreOpen = $state(false);
-	$effect(() => {
-		const request = composerPickerState.request;
-		if (request && composerMoreOpen) {
-			request.opener = composerWrapperEl?.querySelector<HTMLElement>('[data-testid="model-picker-trigger"], [data-testid="composer-words-sheet-trigger"]') ?? request.opener;
-			composerMoreOpen = false;
-		}
-	});
-	$effect(() => {
-		sessionState.currentId;
-		sessionViewState.composerTier;
-		composerPreferences.controls;
-		composerMoreOpen = false;
-	});
 
 	const composerDraft = createComposerDraft({
 		key: () => {
@@ -1185,37 +1169,6 @@
 	</div>
 {/if}
 
-{#snippet phoneMore(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>, checkout?: Snippet, warning?: Snippet, attention = false)}
-	{#snippet phoneTrigger({ props }: { props: Record<string, unknown> })}{@render trigger({ props, attention })}{/snippet}
-	<!-- Focus the sheet on open; Tab gives a row its keyboard-only focus ring. -->
-	<Popover bind:open={composerMoreOpen} presentation="auto" initialFocus="content" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
-		<div class="divide-y divide-border-subtle">
-			{@render rows()}
-			<PermissionModeSelector variant="row" />
-			{@render checkout?.()}
-		</div>
-		{@render warning?.()}
-	</Popover>
-{/snippet}
-
-{#snippet composerPhoneControls(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>) }
-	{#if currentSession && composerDirectory}
-		{@const session = currentSession}
-		{#key session.id}
-			<GitIdentity
-				presentation="row"
-				directory={composerDirectory}
-			>
-				{#snippet children(attention, checkout, warning)}
-					{@render phoneMore(rows, trigger, checkout, warning, attention)}
-				{/snippet}
-			</GitIdentity>
-		{/key}
-	{:else}
-		{@render phoneMore(rows, trigger)}
-	{/if}
-{/snippet}
-
 <!-- While the textarea is focused the keyboard covers the home indicator, but iOS
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
      keyboard. Drop the inset then. Restore it only once the keyboard has slid away:
@@ -1455,7 +1408,7 @@
 							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker phoneControls={composerPhoneControls} />
+							<InstanceModelPicker />
 
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
@@ -1466,7 +1419,6 @@
 									<GitIdentity
 										presentation="control"
 										compact={sessionViewState.composerTier === "phone"}
-										directory={composerDirectory}
 									/>
 								{/key}
 							{/if}
@@ -1570,7 +1522,7 @@
 					{@render settingsStatus()}
 				{:else}
 				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 items-center gap-[5px]" class:flex-1={sessionViewState.composerTier === "phone"}>
-					<InstanceModelPicker variant="words" phoneControls={composerPhoneControls}>
+					<InstanceModelPicker variant="words">
 						{#snippet phoneMode()}<PermissionModeSelector variant="summary" />{/snippet}
 					</InstanceModelPicker>
 					{#if sessionViewState.composerTier !== "phone" && (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
@@ -1578,19 +1530,19 @@
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				{#if !sessionViewState.compact}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-[56px] flex-[0_1000000_auto] items-center justify-end gap-[5px]">
+				{#if !sessionViewState.compact || (currentSession && composerDirectory)}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex {sessionViewState.composerTier === 'phone' ? 'min-w-[66px]' : 'min-w-[56px]'} flex-[0_1000000_auto] items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
-						{#if composerDirectory && sessionViewState.composerTier !== "phone"}
+						{#if composerDirectory}
 							{#key session.id}
 								<GitIdentity
 									presentation="word"
-									directory={composerDirectory}
+									compact={sessionViewState.composerTier === "phone"}
 								/>
 							{/key}
 						{/if}
-						{#if currentChat().contextPercent > 0}
-							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
+						{#if sessionViewState.composerTier !== "phone" && currentChat().contextPercent > 0}
+							{#if composerDirectory}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
 							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0">{Math.round(currentChat().contextPercent)}%</span>
 						{/if}
 					{/if}

@@ -43,7 +43,7 @@ test.describe("InstanceModelPicker", () => {
 		);
 	});
 
-	test("opens the harness and model root on click", async ({ page }) => {
+	test("opens the session root on click", async ({ page }) => {
 		await page.goto(storyUrl("model-instancemodelpicker--closed"), {
 			waitUntil: "domcontentloaded",
 		});
@@ -53,9 +53,7 @@ test.describe("InstanceModelPicker", () => {
 
 		await page.getByTestId("model-picker-trigger").click();
 		await expect(page.getByTestId("model-picker")).toBeVisible();
-		await expect(page.getByTestId("model-picker")).toContainText(
-			"Harness & model",
-		);
+		await expect(page.getByTestId("model-picker")).toContainText("Session");
 		// A lone harness offers no choice, so the root skips that section.
 		await expect(page.getByTestId("picker-harness-section")).toHaveCount(0);
 		await expect(page.getByTestId("picker-row-model")).toBeVisible();

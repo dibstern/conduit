@@ -15,7 +15,7 @@ import type {
 	InstanceListResponse,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -537,6 +537,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		page.locator('[data-testid^="usage-footer-row-"][data-default="true"]'),
 	).toHaveCount(1);
 	await openPickerRoot(page, composerPick);
+	await openPickerAccounts(page);
 	await expect(page.getByTestId("picker-account-bravo")).toHaveAttribute(
 		"aria-checked",
 		"true",
@@ -556,6 +557,7 @@ test("deleting Claude defaults follows usage order and adding an account restore
 		"512k",
 	);
 	await capture("switched-account-catalogue-options");
+	await openPickerAccounts(page);
 	await page.getByTestId("picker-account-bravo").click();
 	await expect(composerPick).toHaveAttribute("data-instance-id", "bravo");
 	await expect(composerPick).toHaveAttribute("data-shown-effort", "low");

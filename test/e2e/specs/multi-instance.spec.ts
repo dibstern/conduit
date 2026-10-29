@@ -14,7 +14,7 @@ import {
 	singleInstanceInitMessages,
 	unboundInitMessages,
 } from "../fixtures/mockup-state.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { closeSettings } from "../helpers/settings.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -244,9 +244,11 @@ test.describe("Claude defaults", () => {
 				client,
 				client.getByTestId("model-picker-trigger").first(),
 			);
+			await openPickerAccounts(client);
 			await expect(
 				client.getByTestId("picker-account-personal"),
 			).toHaveAttribute("aria-checked", "true");
+			await client.getByTestId("picker-back").click();
 			await client.getByTestId("picker-row-model").click();
 			await expect(
 				client.locator('[data-model-id="personal-only"]'),
@@ -298,6 +300,7 @@ test.describe("Claude defaults", () => {
 				page,
 				page.getByTestId("model-picker-trigger").first(),
 			);
+			await openPickerAccounts(page);
 			const account = page.getByTestId("picker-account-claude");
 			if (activation === "click") await account.click();
 			else {
@@ -323,6 +326,7 @@ test.describe("Claude defaults", () => {
 				page.getByTestId("model-picker-trigger").first(),
 			);
 			// The default sorts first, even while this draft stays on its explicit pick.
+			await openPickerAccounts(page);
 			await expect(
 				page.getByTestId("picker-account-options").getByRole("radio").first(),
 			).toHaveAttribute("data-testid", "picker-account-personal");
@@ -330,6 +334,7 @@ test.describe("Claude defaults", () => {
 				"aria-checked",
 				"true",
 			);
+			await page.getByTestId("picker-back").click();
 			await page.getByTestId("picker-row-model").click();
 			await expect(
 				page.locator('[data-model-id="original-only"]'),
@@ -579,8 +584,9 @@ async function pickDraftInstance(
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible',
 	);
-	// Every fixture instance shares one harness, so the picker shows only account cards.
+	// Every fixture instance shares one harness, so open its Account drill-in.
 	await openPickerRoot(page, picker);
+	await openPickerAccounts(page);
 	await page.getByTestId(`picker-account-${instanceId}`).click();
 	await page.keyboard.press("Escape");
 	await expect(picker).toHaveAttribute("data-instance-id", instanceId);

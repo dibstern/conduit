@@ -18,7 +18,7 @@
 		storedEffortLabel, view = $bindable("root"), searchQuery = $bindable(""),
 		searchEl = $bindable(), backEl = $bindable(), filterModel,
 		subtitle, accountControls, contextUsage, rootExtras, extraView,
-		modelToolbar, modelNotice, modelLabelSuffix, modelAction, modelFooter,
+		modelToolbar, modelNotice, modelLabelSuffix, modelAction,
 	}: {
 		target: ModelSelectionTarget;
 		titleId: string;
@@ -41,7 +41,6 @@
 		modelNotice?: Snippet;
 		modelLabelSuffix?: Snippet<[model: Immutable<ModelInfo>]>;
 		modelAction?: Snippet<[model: Immutable<ModelInfo>]>;
-		modelFooter?: Snippet;
 	} = $props();
 	const selection = createModelSelectionState(() => target);
 	const activeModelId = $derived(selection.activeModelId);
@@ -296,7 +295,6 @@
 							</div>
 						{/each}
 					{/if}
-					{@render modelFooter?.()}
 				</div>
 			{/if}
 		</div>

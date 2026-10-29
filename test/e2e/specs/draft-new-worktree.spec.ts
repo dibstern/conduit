@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import type { Locator, Page } from "@playwright/test";
 import { WorktreeCreationError } from "../../../src/lib/contracts/worktree.js";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, type RpcMockControl } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -370,8 +370,14 @@ for (const mode of [
 			expect(request.payload).not.toHaveProperty("worktreeBase");
 			await rpc.waitForRequest(({ tag }) => tag === "input.submit");
 			const pill = await checkout(page);
-			await expect(pill).toContainText(branch);
-			await expect(pill.locator('[data-icon="worktree"]')).toBeVisible();
+			if (mode.hasTouch) {
+				await expect(pill).toContainText("app");
+				await expect(pill).toHaveAccessibleName(`Checkout: app / ${branch}`);
+				await expect(pill.locator('[data-icon="folder"]')).toBeVisible();
+			} else {
+				await expect(pill).toContainText(branch);
+				await expect(pill.locator('[data-icon="worktree"]')).toBeVisible();
+			}
 		});
 
 		test("picking another local branch sends its base in CreateSession", async ({
@@ -548,6 +554,7 @@ for (const mode of [
 					"New workspace",
 				);
 				await press(await checkout(page));
+				await press(page.getByTestId("picker-row-checkout"));
 				const rows = page.getByTestId("session-folder-git");
 				await expect(rows).toHaveCount(3);
 				for (const root of [main, api]) {
@@ -568,11 +575,7 @@ for (const mode of [
 				);
 				await page.keyboard.press("Escape");
 				if (mode.hasTouch) {
-					// The Composer sheet is modal, so close it before using the session bar.
-					await page.keyboard.press("Escape");
-					await expect(
-						page.getByRole("dialog", { name: "Composer" }),
-					).toBeHidden();
+					await expect(page.getByTestId("model-picker")).toBeHidden();
 					await press(page.getByTestId("session-bar-island-overflow"));
 					await press(page.getByTestId("overflow-view-files"));
 				} else {
@@ -711,8 +714,10 @@ for (const mode of [
 						`picker-harness-${provider === "claude" ? "claude" : "opencode"}`,
 					),
 				);
-				if (provider !== "claude")
+				if (provider !== "claude") {
+					await openPickerAccounts(page);
 					await press(page.getByTestId(`picker-account-${provider}`));
+				}
 				await page.keyboard.press("Escape");
 				await expect(picker).toHaveAttribute("data-instance-id", provider);
 				if (provider === "opencode") {

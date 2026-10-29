@@ -35,7 +35,6 @@ export type ButtonVariant =
 	| "composer-model"
 	| "composer-checkout"
 	| "composer-word"
-	| "composer-row"
 	| "picker-row"
 	| "provider-row"
 	| "composer-summary"
@@ -259,12 +258,6 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 			"group/composer-summary min-w-0 w-full gap-[5px] font-sans text-[12px] font-normal [&:focus-visible]:ring-0",
 		tone: "text-text-dimmer",
 		hoverFill: "hover:text-text",
-	},
-	"composer-row": {
-		chrome:
-			"min-h-[48px] w-full min-w-0 gap-[10px] rounded-none px-[4px] py-[8px] text-left text-[15px] font-normal font-sans focus-visible:ring-inset",
-		tone: "text-text",
-		hoverFill: "hover:bg-hover",
 	},
 	"picker-row": {
 		chrome:

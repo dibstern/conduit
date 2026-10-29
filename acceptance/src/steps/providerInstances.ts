@@ -27,6 +27,7 @@ import {
 	instanceSlug,
 	mockInstances,
 	openModelPicker,
+	openPickerAccounts,
 	requireRelayControl,
 	requireRpcControl,
 } from "./shared.js";
@@ -393,8 +394,15 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "assert the configured account names and order",
 		match: /^the picker account names are (.+)$/,
 		run: async ({ world, match }) => {
+			const names = listOf(match[1] ?? "");
+			if (names.length > 0) await openPickerAccounts(world.page);
+			else {
+				await expect(world.page.getByTestId("picker-row-account")).toHaveCount(
+					0,
+				);
+			}
 			await expect(world.page.getByTestId("picker-account-name")).toHaveText(
-				listOf(match[1] ?? ""),
+				names,
 			);
 		},
 	},
@@ -505,6 +513,9 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "assert no manufactured former built-in account",
 		match: /^no former built-in Claude account is displayed$/,
 		run: async ({ world }) => {
+			if (await world.page.getByTestId("picker-row-account").isVisible()) {
+				await openPickerAccounts(world.page);
+			}
 			await expect(world.page.getByTestId("picker-account-claude")).toHaveCount(
 				0,
 			);
@@ -1279,6 +1290,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 		name: "assert the picker selects the default account",
 		match: /^the picker selects the (.+) account$/,
 		run: async ({ world, match }) => {
+			await openPickerAccounts(world.page);
 			await expect(
 				world.page.getByTestId(
 					`picker-account-${accountIdForName(world.page, match[1] ?? "")}`,
@@ -1469,6 +1481,7 @@ export const providerInstancesHandlers: StepHandler[] = [
 			await world.page
 				.getByTestId(`picker-harness-${instance["driver"]}`)
 				.click();
+			await openPickerAccounts(world.page);
 			const railButton = world.page.getByTestId(
 				`picker-account-${instanceSlug(name)}`,
 			);

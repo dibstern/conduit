@@ -403,8 +403,8 @@ describe("InstanceModelPicker", () => {
 	it("reloads provider session through RPC", async () => {
 		const { getByTestId, getByTitle } = render(InstanceModelPicker);
 		await fireEvent.click(getByTitle("Switch model"));
-		await fireEvent.click(getByTestId("picker-row-model"));
-		await fireEvent.click(getByTitle("Reload skills and commands from disk"));
+		await fireEvent.keyDown(getByTestId("picker-more"), { key: "Enter" });
+		await fireEvent.click(getByTestId("picker-reload-skills"));
 
 		await waitFor(() => {
 			expect(reloadSessionSpy).toHaveBeenCalledWith("ReloadProviderSession", {

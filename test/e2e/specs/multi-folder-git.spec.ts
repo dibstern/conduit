@@ -132,7 +132,8 @@ for (const scenario of [
 		);
 		await expect(pill.locator('[data-part="dirty"]')).toHaveCount(0);
 		await pill.click();
-		const menu = page.getByRole("menu", { name: "Checkout" });
+		await page.getByTestId("picker-row-checkout").click();
+		const menu = page.getByTestId("checkout-details");
 		await expect(menu).toBeVisible();
 		const rows = menu.getByTestId("session-folder-git");
 		const folderDetails = git.folders.length > 1 || !gitPrimary;

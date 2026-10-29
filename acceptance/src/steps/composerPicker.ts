@@ -8,10 +8,12 @@ import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
 	openModelPicker,
+	openPickerAccounts,
 	pickerFixtureQuotaReads,
 	refetchModelCatalog,
 	requireRpcControl,
 	serveModelCatalog,
+	setSessionRowStatus,
 } from "./shared.js";
 
 const levels = ["low", "medium", "high", "xhigh", "max"];
@@ -167,6 +169,108 @@ export async function seedComposerPickerCatalog(
 
 export const composerPickerHandlers: StepHandler[] = [
 	{
+		name: "assert the root Account row name and usage",
+		match: /^the picker Account row reads (.+) with 5h (\d+)%$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("picker-row-account");
+			await expect(row).toContainText("Account");
+			await expect(row).toContainText(match[1] ?? "");
+			await expect(row.getByTestId("picker-row-account-meta")).toHaveText(
+				`5h ${match[2]}%`,
+			);
+			await expect(
+				world.page.getByTestId("picker-account-section"),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "open the Account drill-in",
+		match: /^I open the Account drill-in$/,
+		run: async ({ world }) => {
+			await openPickerAccounts(world.page);
+		},
+	},
+	{
+		name: "assert Account drill-in cards and Add account",
+		match: /^the Account drill-in shows account cards and Add account$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Account", exact: true }),
+			).toBeVisible();
+			await expect(
+				picker.getByTestId("picker-account-options").getByRole("radio"),
+			).toHaveCount(2);
+			await expect(picker.getByTestId("picker-account-add")).toHaveText(
+				"Add account",
+			);
+			await expect(picker.getByTestId("picker-account-add")).toBeVisible();
+			await expect(picker.getByTestId("picker-more")).toHaveCount(0);
+			await expect(picker.getByTestId("picker-back")).toBeVisible();
+		},
+	},
+	{
+		name: "assert Back restores Account row focus",
+		match: /^the Account row is focused$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-row-account")).toBeFocused();
+		},
+	},
+	{
+		name: "open the Session actions menu",
+		match: /^I open the Session actions menu$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-more").click();
+		},
+	},
+	{
+		name: "assert the Session actions reload item",
+		match: /^the Session actions menu offers Reload skills & commands$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-reload-skills")).toHaveText(
+				"Reload skills & commands",
+			);
+			await expect(
+				world.page.getByTestId("picker-reload-skills"),
+			).toBeVisible();
+			await expect(world.page.getByTestId("model-picker")).toBeVisible();
+		},
+	},
+	{
+		name: "press Escape in the Session actions menu",
+		match: /^I press Escape in the Session actions menu$/,
+		run: async ({ world }) => {
+			await world.page.keyboard.press("Escape");
+		},
+	},
+	{
+		name: "assert Escape closes only the Session actions menu",
+		match: /^only the Session actions menu is closed$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("picker-reload-skills")).toHaveCount(
+				0,
+			);
+			await expect(world.page.getByTestId("model-picker")).toBeVisible();
+			await expect(world.page.getByTestId("picker-more")).toBeFocused();
+		},
+	},
+	{
+		name: "reload skills and commands from Session actions",
+		match: /^I reload skills and commands from Session actions$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-reload-skills").click();
+			await requireRpcControl(world.page).waitForRequest(
+				(request) =>
+					request.tag === "ReloadProviderSession" &&
+					request.payload["sessionId"] ===
+						decodeURIComponent(
+							new URL(world.page.url()).pathname.split("/")[2] ?? "",
+						),
+			);
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
+		},
+	},
+	{
 		name: "assert desktop model chip returns to the picker root",
 		match: /^the picker root shows Harness and focuses Model$/,
 		run: async ({ world }) => {
@@ -226,6 +330,7 @@ export const composerPickerHandlers: StepHandler[] = [
 					picker.getByTestId(phone ? "picker-back" : "model-picker-search"),
 				).toBeFocused();
 			} else if (match[1] === "Account") {
+				await expect(picker.getByTestId("picker-back")).toBeVisible();
 				await expect(
 					picker.getByTestId("picker-account-section"),
 				).toBeVisible();
@@ -259,7 +364,7 @@ export const composerPickerHandlers: StepHandler[] = [
 	{
 		name: "view picker choices",
 		match:
-			/^I view (Harness|Model|Agent|Account|Instance) choices in the picker$/,
+			/^I view (Harness|Model|Agent|Account|Instance|Permissions|Checkout) choices in the picker$/,
 		run: async ({ world, match }) => {
 			await openModelPicker(world.page);
 			if (match[1] === "Harness") {
@@ -270,13 +375,14 @@ export const composerPickerHandlers: StepHandler[] = [
 				return;
 			}
 			if (match[1] === "Account" || match[1] === "Instance") {
+				await openPickerAccounts(world.page);
 				await expect(
 					world.page.getByTestId("picker-account-section"),
 				).toHaveAttribute("aria-label", match[1]);
 				await expect(
 					world.page.getByTestId("picker-account-options"),
 				).toBeVisible();
-				await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
+				await expect(world.page.getByTestId("picker-back")).toBeVisible();
 				return;
 			}
 			await world.page
@@ -307,7 +413,7 @@ export const composerPickerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const picker = world.page.locator("#model-picker");
 			await expect(picker).toBeVisible();
-			await expect(picker).toContainText("Harness & model");
+			await expect(picker).toContainText("Session");
 			await expect(
 				world.page.getByTestId(
 					`picker-harness-${(match[1] ?? "").toLowerCase()}`,
@@ -501,9 +607,10 @@ export const composerPickerHandlers: StepHandler[] = [
 				"font-size",
 				"12px",
 			);
-			await expect(
-				picker.getByRole("heading", { name: /^Harness & model/ }),
-			).toHaveCSS("font-size", "12px");
+			await expect(picker.getByRole("heading", { name: /^Session/ })).toHaveCSS(
+				"font-size",
+				"12px",
+			);
 		},
 	},
 	{
@@ -524,7 +631,13 @@ export const composerPickerHandlers: StepHandler[] = [
 					);
 				})
 				.toBe(true);
-			for (const row of ["model", "context", "effort", "agent"]) {
+			for (const row of [
+				"model",
+				"context",
+				"effort",
+				"agent",
+				"permissions",
+			]) {
 				const box = await world.page
 					.getByTestId(`picker-row-${row}`)
 					.boundingBox();
@@ -664,6 +777,208 @@ export const composerPickerHandlers: StepHandler[] = [
 				.filter({ hasText: match[1] ?? "" })
 				.click();
 			await expect(world.page.getByTestId("picker-row-model")).toBeEnabled();
+		},
+	},
+	{
+		name: "assert picker permission mode label",
+		match: /^the picker Permissions row reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("picker-row-permissions"),
+			).toContainText(match[1] ?? "");
+		},
+	},
+	{
+		name: "assert ranked picker permission modes and selection",
+		match:
+			/^the picker lists permission modes (.+) with (dontAsk|plan|ask|acceptEdits|auto|full) selected$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Permissions", exact: true }),
+			).toBeVisible();
+			const modes = (match[1] ?? "").split(", ");
+			const rows = picker.locator('[data-testid^="picker-permission-"]');
+			await expect(rows).toHaveCount(modes.length);
+			expect(
+				await rows.evaluateAll((items) =>
+					items.map((item) =>
+						item.getAttribute("data-testid")?.replace("picker-permission-", ""),
+					),
+				),
+			).toEqual(modes);
+			for (const mode of modes) {
+				await expect(
+					picker.getByTestId(`picker-permission-${mode}`),
+				).toHaveAttribute("aria-pressed", String(mode === match[2]));
+			}
+			await expect(picker.getByTestId("picker-permission-ask")).toContainText(
+				"Ask before edits",
+			);
+			await expect(
+				picker.getByTestId("picker-permission-acceptEdits"),
+			).toContainText("Still asks before commands");
+		},
+	},
+	{
+		name: "choose picker permission mode",
+		match:
+			/^I choose permission (dontAsk|plan|ask|acceptEdits|auto|full) in the picker$/,
+		run: async ({ world, match }) => {
+			await world.page.getByTestId(`picker-permission-${match[1]}`).click();
+			await expect(world.page.getByTestId("picker-back")).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("picker-row-permissions"),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "seed checkout branch rename capability",
+		match: /^the checkout branch can be renamed$/,
+		run: ({ world }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			if (!sessionId) throw new Error("Branch rename requires an open session");
+			setSessionRowStatus(world.page, sessionId, "idle", {
+				canRenameBranch: true,
+			});
+		},
+	},
+	{
+		name: "assert checkout chip opens the focused Session root",
+		match: /^the checkout chip opens Session with Checkout focused$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(picker).toBeVisible();
+			await expect(picker.getByTestId("picker-back")).toHaveCount(0);
+			await expect(picker.getByTestId("picker-row-checkout")).toBeFocused();
+		},
+	},
+	{
+		name: "assert Checkout drill-in details and branch rename",
+		match: /^the Checkout drill-in shows git tiles and Rename branch$/,
+		run: async ({ world }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Checkout", exact: true }),
+			).toBeVisible();
+			const details = picker.getByTestId("checkout-details");
+			await expect(details.getByTestId("checkout-ahead")).toHaveText("2ahead");
+			await expect(details.getByTestId("checkout-behind")).toHaveText(
+				"1behind",
+			);
+			await expect(details.getByTestId("checkout-changes")).toHaveText(
+				"3+12-4files changed",
+			);
+			await expect(details.getByTestId("session-branch-rename")).toBeVisible();
+		},
+	},
+	{
+		name: "assert picker checkout identity",
+		match: /^the picker Checkout row reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("picker-row-checkout")).toContainText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "seed checkout worktree choices",
+		match:
+			/^the checkout worktrees are account-chip at \/workspace\/conduit and main at \/workspace\/conduit-main$/,
+		run: ({ world }) => {
+			let directory = "/workspace/conduit";
+			requireRpcControl(world.page).setStubs({
+				ListWorktrees: () => ({
+					worktrees: [
+						{ path: "/workspace/conduit", branch: "account-chip", main: false },
+						{ path: "/workspace/conduit-main", branch: "main", main: true },
+					],
+					directory,
+				}),
+				MoveSessionWorkspace: ({ path }) => {
+					directory = path;
+					return { projectSlug: "myapp", directory };
+				},
+			});
+		},
+	},
+	{
+		name: "assert checkout worktree choices and current worktree",
+		match: /^the picker lists both checkout worktrees with (.+) checked$/,
+		run: async ({ world, match }) => {
+			const picker = world.page.getByTestId("model-picker");
+			await expect(
+				picker.getByRole("heading", { name: "Checkout", exact: true }),
+			).toBeVisible();
+			const rows = picker.getByTestId("picker-worktree");
+			await expect(rows).toHaveCount(2);
+			await expect(rows.nth(0)).toHaveAttribute(
+				"data-path",
+				"/workspace/conduit",
+			);
+			await expect(rows.nth(0)).toContainText("account-chip");
+			await expect(rows.nth(1)).toHaveAttribute(
+				"data-path",
+				"/workspace/conduit-main",
+			);
+			await expect(rows.nth(1)).toContainText("main · main worktree");
+			await expect(rows.nth(1)).toContainText("/workspace/conduit-main");
+			await expect(picker.getByTestId("current-worktree")).toHaveCount(1);
+			await expect(
+				rows.filter({ has: world.page.getByTestId("current-worktree") }),
+			).toHaveAttribute("data-path", match[1] ?? "");
+		},
+	},
+	{
+		name: "choose another checkout worktree",
+		match: /^I choose the picker worktree at (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("picker-worktree")
+				.filter({ hasText: match[1] ?? "" })
+				.click();
+			await expect(world.page.getByTestId("model-picker")).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert picker workspace mismatch warning and inline dismissal",
+		match:
+			/^the picker Checkout row has one warning and an inline mismatch notice for (.+)$/,
+		run: async ({ world, match }) => {
+			const row = world.page.getByTestId("picker-row-checkout");
+			const warning = row.getByTestId("picker-checkout-warning");
+			const label = `Workspace mismatch: Claude is working in ${match[1]}`;
+			await expect(warning).toHaveCount(1);
+			await expect(warning).toHaveAccessibleName(label);
+			await expect(warning).toHaveAttribute("title", label);
+			await expect(row.locator("svg.lucide-circle-alert")).toHaveCount(1);
+			const notice = world.page.getByTestId("picker-checkout-notice");
+			await expect(notice).toHaveCount(1);
+			await expect(notice).toHaveAttribute("data-kind", "mismatch");
+			await expect(notice).toContainText(label);
+			await expect(
+				notice.getByTestId("picker-checkout-notice-dismiss"),
+			).toHaveText("Dismiss");
+		},
+	},
+	{
+		name: "dismiss picker checkout notice",
+		match: /^I dismiss the picker checkout notice$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("picker-checkout-notice-dismiss").click();
+		},
+	},
+	{
+		name: "assert picker checkout notice and warning cleared",
+		match: /^the picker checkout warning and inline notice are cleared$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("picker-checkout-warning"),
+			).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("picker-checkout-notice"),
+			).toHaveCount(0);
+			await expect(world.page.getByTestId("picker-row-checkout")).toBeVisible();
 		},
 	},
 ];
