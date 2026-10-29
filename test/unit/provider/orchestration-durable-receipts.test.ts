@@ -6,7 +6,10 @@ import { Deferred, Effect, Fiber, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterAll, expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import {
 	type Account,
 	AccountIdSchema,
@@ -1228,6 +1231,7 @@ describe("OrchestrationEngine durable receipts", () => {
 								},
 							],
 						})),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					);
 					const instance = makeStubInstance("claude");
 					const engine = new OrchestrationEngine({
@@ -1315,6 +1319,7 @@ describe("OrchestrationEngine durable receipts", () => {
 									5,
 									{ defaultAccountIds: { [driver]: account.id } },
 								),
+								Effect.succeed(NO_OPENCODE_HEALTH),
 							),
 						),
 					);
@@ -1559,6 +1564,7 @@ describe("OrchestrationEngine durable receipts", () => {
 										5,
 										{ defaultAccountIds: { cursor: "control-account" } },
 									),
+									Effect.succeed(NO_OPENCODE_HEALTH),
 								),
 							),
 						);

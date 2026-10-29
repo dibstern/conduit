@@ -252,6 +252,9 @@
 	"test/e2e/specs/harness-message-navigation.spec.ts": {
 		"timeout-override": 1
 	},
+	"test/e2e/specs/harness-opencode-default.spec.ts": {
+		"timeout-override": 1
+	},
 	"test/e2e/specs/harness-overflow-fanout-pin.spec.ts": {
 		"retry-override": 1,
 		"timeout-override": 1
@@ -850,8 +853,8 @@
 		"real-wait": 1
 	},
 	"test/integration/daemon/opencode-instances-use.test.ts": {
-		"polling": 4,
-		"timeout-override": 4
+		"polling": 5,
+		"timeout-override": 5
 	},
 	"test/integration/daemon/opencode-launch-worktree.test.ts": {
 		"polling": 1,

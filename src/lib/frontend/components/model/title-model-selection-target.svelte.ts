@@ -5,7 +5,9 @@ import {
 } from "../../../contracts/title-generation.js";
 import { modelParameterChoices } from "../../../provider/turn-settings.js";
 import {
+	accountRefForSelection,
 	applyTitleGeneration,
+	defaultInstanceFor,
 	discoveryState,
 	getAvailableInstances,
 	getModelCatalogForInstance,
@@ -29,11 +31,7 @@ export function createTitleModelSelectionTarget() {
 	const accounts = $derived(getAvailableInstances());
 	const accountId = $derived.by(() => {
 		const ref = selection.account;
-		return ref._tag === "Id"
-			? ref.id
-			: accounts.find(
-					(account) => account.driver === ref.driver && account.isDefault,
-				)?.id;
+		return ref._tag === "Id" ? ref.id : defaultInstanceFor(ref.driver)?.id;
 	});
 	const inventory = $state({ loading: false, error: null as string | null });
 	let catalogRead:
@@ -90,13 +88,13 @@ export function createTitleModelSelectionTarget() {
 		saving = true;
 		localSelection = next;
 		try {
-			if (next?.account._tag === "Id") {
-				await loadCatalog(projectSlug, next.account.id);
+			const id = accountId;
+			if (next && id) {
+				await loadCatalog(projectSlug, id);
 				if (changingAccount) {
-					const models = getModelCatalogForInstance(
-						next.account.id,
-						projectSlug,
-					).flatMap((provider) => provider.models);
+					const models = getModelCatalogForInstance(id, projectSlug).flatMap(
+						(provider) => provider.models,
+					);
 					const previous = models.find(
 						(model) =>
 							model.provider === next?.providerId &&
@@ -182,14 +180,9 @@ export function createTitleModelSelectionTarget() {
 		get pending() {
 			return { model: saving, effort: saving, contextWindow: saving };
 		},
-		selectAccount(id) {
-			if (
-				!accounts.some(
-					(account) => account.id === id && account.available !== false,
-				)
-			)
-				return;
-			void save({ ...selection, account: { _tag: "Id", id } }, true);
+		selectAccount(accountSelection) {
+			const account = accountRefForSelection(accountSelection);
+			if (account) void save({ ...selection, account }, true);
 		},
 		selectModel(pick) {
 			if (!accountId) return;
@@ -198,7 +191,7 @@ export function createTitleModelSelectionTarget() {
 				?.models.find((model) => modelMatchesId(model, pick.modelId));
 			if (!model) return;
 			void save({
-				account: { _tag: "Id", id: accountId },
+				account: selection.account,
 				...pick,
 				effort: Result.isSuccess(
 					modelParameterChoices(model).resolve(selection.effort),
@@ -211,7 +204,6 @@ export function createTitleModelSelectionTarget() {
 			if (!accountId) return;
 			void save({
 				...selection,
-				account: { _tag: "Id", id: accountId },
 				effort,
 			});
 		},

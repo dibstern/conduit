@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { SqlClient } from "effect/sql";
 import { beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import {
 	AccountDirectory,
 	AccountDirectoryStateLive,
@@ -74,6 +77,7 @@ function orchestrationDeps(
 						configuredClaudeConfigDir("/tmp/g4zp-test-claude"),
 					),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			),
 		),
 		Layer.succeed(OpenCodeAPITag)(client),
@@ -301,6 +305,7 @@ describe("Orchestration wiring", () => {
 								5,
 								{ defaultAccountIds: { claude: "warm-account" } },
 							),
+							Effect.succeed(NO_OPENCODE_HEALTH),
 						),
 					),
 				),

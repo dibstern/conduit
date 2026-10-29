@@ -1,4 +1,15 @@
 {
+	"src/lib/frontend/components/overlays/ProvidersSettingsTab.svelte :: signedOut(account)": "Not a class: the amber sub-line condition widened from signed-out Codex to any unavailable account (unavailable(account)), so Cursor's reason shows too.",
+	"src/lib/frontend/components/overlays/InstancesSettingsTab.svelte :: font-semibold,gap-3,grid-cols-1,leading-[1.5],max-w-full,md:grid-cols-2,p-0,py-3,resize-y,sr-only,text-text-dimmer": {
+		"movedTo": "src/lib/frontend/components/overlays/AccountForm.svelte",
+		"requires": "<AccountForm {form} />",
+		"reason": "conduit-test-3fc0.1 extracts the unchanged account form markup; Instances still renders that form."
+	},
+	"src/lib/frontend/components/overlays/VisibilitySettingsTab.svelte :: flex-col,font-medium,gap-2,gap-[8px],gap-x-[12px],gap-y-[4px],max-md:min-h-[44px],max-md:min-w-[44px],max-md:text-[13px],mt-[16px],mx-[4px]": {
+		"movedTo": "src/lib/frontend/components/overlays/ModelVisibilityList.svelte",
+		"requires": "<ModelVisibilityList accountId={discoveryState.catalogAccountId} />",
+		"reason": "conduit-test-3fc0.2 extracts the unchanged visibility markup into the account-driven model list."
+	},
 	"src/lib/frontend/components/session/GitIdentity.svelte :: bg-accent/14,bg-success/10,bg-warning/10,border,border-border,break-all,break-words,flex-1,flex-wrap,folder.dirty,font-normal,font-semibold,gap-[6px],gap-[8px],gap-x-[12px],gap-x-[5px],gap-y-[8px],grid,grid-cols-[1fr_1fr_1.7fr],items-baseline,max-md:text-[17px],mb-[6px],ml-2,mt-[14px],mt-[2px],mt-[4px],mt-[8px],pb-[4px],place-items-center,pt-[6px],px-[10px],py-[2px],py-[6px],py-[9px],rounded-[10px],rounded-[12px],size-[34px],text-[12px],text-[15px],text-[17px],text-accent,text-error,text-right,text-text": {
 		"movedTo": "src/lib/frontend/components/session/CheckoutDetails.svelte",
 		"requires": "openPicker(\"checkout\")",
@@ -1231,5 +1242,6 @@
 	"src/lib/frontend/components/model/ModelVariant.svelte :: flex-1,inline-flex,text-right": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
 	"src/lib/frontend/components/session/GitIdentity.svelte :: gap-x-[10px],gap-y-[6px],justify-end,min-h-[50px],ml-auto,py-[3px],py-[8px],rounded-[7px],row": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
 	"src/lib/frontend/components/ui/ComposerModeControl.svelte :: flex-1,inline-flex,min-w-0,text-right,text-text-dimmer,text-text-secondary,truncate": "conduit-test-npk3y.2 deletes the phone Composer sheet and its rows; the Session panel's picker rows replace them, so these classes have no remaining call site.",
-	"src/lib/frontend/components/ui/button-recipes.ts :: min-h-[48px],px-[4px],py-[8px],text-[15px]": "conduit-test-npk3y.2 deletes the composer-row button recipe with the phone Composer sheet, its only user."
+	"src/lib/frontend/components/ui/button-recipes.ts :: min-h-[48px],px-[4px],py-[8px],text-[15px]": "conduit-test-npk3y.2 deletes the composer-row button recipe with the phone Composer sheet, its only user.",
+	"src/lib/frontend/components/input/InputArea.svelte :: max-h-[120px]": "conduit-test-tw49i.5 makes the field's cap max-h-[var(--composer-field-max,120px)]: still 120px everywhere, and the folded Duo's full composer sets the variable to 44px."
 }

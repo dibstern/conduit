@@ -77,7 +77,8 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
-	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
+	import { requestTranscriptFollow, sessionViewState, setKeyboardHandoff } from "../../stores/session-view.svelte.js";
+	import { prepareHandoff } from "../../utils/composer-handoff.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
@@ -311,13 +312,7 @@
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
 	const hasSendMenu = $derived((sendMode === "at-reset" || sendMode === "switch") && hasOtherClaudeAccount);
 	$effect(() => {
-		// A quota reply belongs to the session and menu opening that requested it.
-		currentSession?.id;
-		accountId;
-		composerProjectSlug;
-		usageState.readings;
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
-		claudeAccounts.invalidateSendQuotas();
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
@@ -501,6 +496,23 @@
 	const foldedDuo = $derived(sessionViewState.pose === "duo-folded-portrait");
 	// The folded Duo's rail holds the icon controls, whatever the saved preference.
 	const composerControls = $derived(foldedDuo ? "icons" : composerPreferences.controls);
+	let inputAreaEl: HTMLDivElement | undefined = $state();
+	// The keyboard hands the rail's controls to the full composer and back. A tap
+	// on a control must not blur the field: that would close the keyboard and send
+	// the controls back to the rail mid-tap. Menus that take focus still close it.
+	$effect(() => {
+		const root = inputAreaEl;
+		if (!foldedDuo || !root) return;
+		const keepKeyboardOpen = (event: MouseEvent) => {
+			if (sessionViewState.keyboardOpen && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
+		};
+		root.addEventListener("mousedown", keepKeyboardOpen);
+		const endHandoff = setKeyboardHandoff((open) => prepareHandoff(root, open));
+		return () => {
+			root.removeEventListener("mousedown", keepKeyboardOpen);
+			endHandoff();
+		};
+	});
 	let contextDismissed = $state(false);
 	let clearedGoalDismissed = $state(false);
 	const contextDismissalKey = $derived(`conduit:context-warning-dismissed:${sessionState.currentId ?? "draft"}`);
@@ -1179,6 +1191,7 @@
      inset at once lifts the button out from under the finger before the click. -->
 <div
 	id="input-area"
+	bind:this={inputAreaEl}
 	data-compact={sessionViewState.compact}
 	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
@@ -1302,7 +1315,7 @@
 					     revealCaret(), for edits the browser reveals before the row grows.
 					     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
 					     the textarea but not the mirror, which would wrap them differently. -->
-					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
+					<div class="max-h-[var(--composer-field-max,120px)] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
 						<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
@@ -1466,8 +1479,7 @@
 						<Menu
 							bind:open={sendMenuOpen}
 							onopenchange={(open) => {
-								if (open) void claudeAccounts.refreshQuotas("send");
-								else claudeAccounts.invalidateSendQuotas(false);
+								if (open) void claudeAccounts.readUsage();
 							}}
 							presentation={sessionViewState.compact ? "sheet" : "popover"}
 							side="top"
@@ -1501,6 +1513,8 @@
 						<Button variant="inverse" size="composer-action" icon="clock" iconSize={16} id="send" data-goal={isGoalCommand ? "true" : "false"} data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn">
 							{@render sendAtLabel()}
 						</Button>
+					{:else if isGoalCommand && sessionViewState.pose === "duo-folded-portrait"}
+						<Button variant="goal" size="composer-action" iconOnly icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn" />
 					{:else if isGoalCommand}
 						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
 					{:else}

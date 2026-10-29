@@ -3,7 +3,7 @@ import type { StepHandler } from "../runtime.js";
 import { headerTargetMisses } from "./shared.js";
 
 /** The rail's controls, found by what they are, not by where the rail put them. */
-const railControls: Record<string, string> = {
+export const railControls: Record<string, string> = {
 	Settle: "[data-testid='session-bar-settle']",
 	More: "[data-testid='session-bar-island-overflow']",
 	Send: "#send",
@@ -11,26 +11,43 @@ const railControls: Record<string, string> = {
 	Permissions: "[data-testid='permission-mode-badge']",
 	Model: "[data-testid='model-picker-trigger']",
 	Attach: "#attach-btn",
+	Effort: "[data-testid='variant-badge']",
+	Directory: "[data-testid='composer-checkout']",
 	New: "#new-session-btn",
 	Select: "[data-testid='list-bar-select']",
 	Theme: "[data-testid='list-bar-theme']",
 	Settings: "[data-testid='list-bar-settings']",
 };
-const RAIL_LEFT = 396;
-const SLOT = 44;
+export const RAIL_LEFT = 396;
+export const SLOT = 44;
 /** The status column: camera, island and glyphs, worst case with two Live Activities. */
 const STATUS_COLUMN = { left: 394, bottom: 253 };
 /** The home bar's top edge: y665 on the 678pt screen, 8pt below the 657pt viewport. */
 const HOME_INDICATOR_BELOW_VIEWPORT = 8;
-const INTERACTIVE =
+export const INTERACTIVE =
 	'button, a[href], input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [tabindex]:not([tabindex="-1"])';
 
 type Box = { x: number; y: number; width: number; height: number };
 
-async function boxOf(page: Page, selector: string): Promise<Box> {
+export async function boxOf(page: Page, selector: string): Promise<Box> {
 	const box = await page.locator(selector).boundingBox();
 	if (!box) throw new Error(`${selector} is not laid out`);
 	return box;
+}
+
+/** An icon's size, and how far its centre sits from its slot's, 0 within 1px. */
+async function iconInSlot(page: Page, slot: string, icon: string) {
+	const outer = await boxOf(page, slot);
+	const inner = await page.locator(slot).locator(icon).boundingBox();
+	if (!inner) throw new Error(`${slot} ${icon} is not laid out`);
+	const off = (a: number, b: number) =>
+		Math.abs(a - b) <= 1 ? 0 : Math.round((a - b) * 10) / 10;
+	return {
+		width: Math.round(inner.width),
+		height: Math.round(inner.height),
+		offCentreX: off(inner.x + inner.width / 2, outer.x + outer.width / 2),
+		offCentreY: off(inner.y + inner.height / 2, outer.y + outer.height / 2),
+	};
 }
 
 /** Every rendered interactive element's box, keyed by a readable name. */
@@ -123,6 +140,56 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 				);
 				expect(reachable, `${name} is covered`).toBe(true);
 			}
+		},
+	},
+	{
+		name: "bare rail icons",
+		match:
+			/^the rail's (.+) sit bare, each icon (\d+) px and centred in its slot$/,
+		run: async ({ world, match }) => {
+			const size = Number(match[2]);
+			for (const name of (match[1] ?? "").split(" and ")) {
+				const icon = {
+					Permissions: "svg",
+					Model: "[data-testid='harness-logo']",
+				}[name];
+				if (!icon) throw new Error(`No bare rail icon: ${name}`);
+				const slot = railControls[name] ?? "";
+				await expect(world.page.locator(slot)).toHaveCSS(
+					"background-color",
+					"rgba(0, 0, 0, 0)",
+				);
+				expect({ name, ...(await iconInSlot(world.page, slot, icon)) }).toEqual(
+					{ name, width: size, height: size, offCentreX: 0, offCentreY: 0 },
+				);
+			}
+		},
+	},
+	{
+		name: "goal icon alone in Send's slot",
+		match: /^Send shows the goal icon alone, centred in its slot$/,
+		run: async ({ world }) => {
+			const send = world.page.locator("#send");
+			await expect(send).toHaveAttribute("data-goal", "true");
+			await expect(send).toHaveText("");
+			const { offCentreX, offCentreY } = await iconInSlot(
+				world.page,
+				"#send",
+				"svg.lucide-target",
+			);
+			expect({ offCentreX, offCentreY }).toEqual({
+				offCentreX: 0,
+				offCentreY: 0,
+			});
+		},
+	},
+	{
+		name: "session filters clear the list header",
+		match: /^the session filters start (\d+) pixels below the list header$/,
+		run: async ({ world, match }) => {
+			const header = await boxOf(world.page, "#sidebar-header");
+			const filters = await boxOf(world.page, "#session-search > :first-child");
+			expect(filters.y - (header.y + header.height)).toBe(Number(match[1]));
 		},
 	},
 	{

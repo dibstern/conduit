@@ -6,7 +6,7 @@
 // store nobody is rendering. Duo poses are covered by duo-pose.test.ts and the
 // duo-pose acceptance feature.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const matchMediaState = vi.hoisted(() => {
 	let matches = false;
@@ -41,6 +41,7 @@ vi.hoisted(() => {
 const {
 	forceBarOpen,
 	isBarCollapsed,
+	isDuoChipRowFolded,
 	noteScrollGesture,
 	noteSessionChanged,
 	publishAtBottom,
@@ -110,6 +111,41 @@ describe("session bar collapse", () => {
 		noteSessionChanged();
 		publishAtBottom(true);
 		expect(isBarCollapsed()).toBe(false);
+	});
+});
+
+describe("folded Duo chip row", () => {
+	beforeEach(() => {
+		sessionViewState.compact = true;
+		sessionViewState.pose = "duo-folded-portrait";
+		sessionViewState.keyboardOpen = false;
+	});
+	afterEach(() => {
+		sessionViewState.pose = "desktop";
+		sessionViewState.keyboardOpen = false;
+	});
+
+	it("folds on a downward gesture and unfolds on an upward one", () => {
+		expect(isDuoChipRowFolded()).toBe(false);
+		noteScrollGesture("down");
+		expect(isDuoChipRowFolded()).toBe(true);
+		noteScrollGesture("up");
+		expect(isDuoChipRowFolded()).toBe(false);
+	});
+
+	it("folds while the keyboard is open, even after an upward gesture", () => {
+		noteScrollGesture("up");
+		sessionViewState.keyboardOpen = true;
+		expect(isDuoChipRowFolded()).toBe(true);
+		sessionViewState.keyboardOpen = false;
+		expect(isDuoChipRowFolded()).toBe(false);
+	});
+
+	it("never folds outside the folded portrait", () => {
+		noteScrollGesture("down");
+		sessionViewState.keyboardOpen = true;
+		sessionViewState.pose = "phone";
+		expect(isDuoChipRowFolded()).toBe(false);
 	});
 });
 

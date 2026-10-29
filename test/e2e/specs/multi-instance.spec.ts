@@ -112,7 +112,6 @@ function defaultAccountDaemon() {
 								: defaultId();
 					publishModels(id);
 					return {
-						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						instanceId: id,
 						providers: [],

@@ -14,6 +14,7 @@ import {
 	apply,
 	defaultFor,
 	list,
+	NO_OPENCODE_HEALTH,
 	resolve,
 } from "../../../src/lib/account-directory.js";
 import {
@@ -68,12 +69,14 @@ describe("account directory mutations", () => {
 			),
 		);
 		const account = Either.getOrThrow(
-			resolve(cleared, { _tag: "Id", id: "work" }),
+			resolve(cleared, { _tag: "Id", id: "work" }, NO_OPENCODE_HEALTH),
 		);
 		expect(account).toMatchObject({ driver: "claude", folder: login });
 		expect("configuredFolder" in account).toBe(false);
 		expect(
-			Either.getOrThrow(resolve(original, { _tag: "Id", id: "work" })),
+			Either.getOrThrow(
+				resolve(original, { _tag: "Id", id: "work" }, NO_OPENCODE_HEALTH),
+			),
 		).toMatchObject({
 			configuredFolder: "/accounts/work",
 			folder: configuredClaudeConfigDir("/accounts/work"),
@@ -101,7 +104,9 @@ describe("account directory mutations", () => {
 			),
 		);
 		expect(
-			Either.getOrThrow(resolve(updated, { _tag: "Id", id: "claude" })),
+			Either.getOrThrow(
+				resolve(updated, { _tag: "Id", id: "claude" }, NO_OPENCODE_HEALTH),
+			),
 		).toMatchObject({
 			name: "Personal",
 			configuredFolder: "/accounts/personal",
@@ -110,13 +115,17 @@ describe("account directory mutations", () => {
 			usageEligible: false,
 		});
 		expect(
-			Either.getOrThrow(resolve(original, { _tag: "Id", id: "claude" })),
+			Either.getOrThrow(
+				resolve(original, { _tag: "Id", id: "claude" }, NO_OPENCODE_HEALTH),
+			),
 		).toMatchObject({
 			name: "Claude",
 			folder: launchLogin,
 			usageEligible: true,
 		});
-		expect(Option.getOrThrow(defaultFor(updated, "claude")).id).toBe("claude");
+		expect(
+			Option.getOrThrow(defaultFor(updated, "claude", NO_OPENCODE_HEALTH)).id,
+		).toBe("claude");
 	});
 
 	it.each([
@@ -291,7 +300,9 @@ describe("account directory mutations", () => {
 		state = Either.getOrThrow(
 			apply(state, { _tag: "SetDefault", id: "personal" }, []),
 		);
-		expect(Option.getOrThrow(defaultFor(state, "claude")).id).toBe("personal");
+		expect(
+			Option.getOrThrow(defaultFor(state, "claude", NO_OPENCODE_HEALTH)).id,
+		).toBe("personal");
 		for (const [removed, promoted] of [
 			["personal", "work"],
 			["work", "claude"],
@@ -304,20 +315,25 @@ describe("account directory mutations", () => {
 					"claude",
 				]),
 			);
-			expect(Option.getOrUndefined(defaultFor(state, "claude"))?.id).toBe(
-				promoted,
-			);
+			expect(
+				Option.getOrUndefined(defaultFor(state, "claude", NO_OPENCODE_HEALTH))
+					?.id,
+			).toBe(promoted);
 			expect(state.deleted).toContainEqual({ id: removed, driver: "claude" });
-			const routed = resolve(state, { _tag: "Id", id: removed });
+			const routed = resolve(
+				state,
+				{ _tag: "Id", id: removed },
+				NO_OPENCODE_HEALTH,
+			);
 			if (promoted === undefined) expect(Either.isFailure(routed)).toBe(true);
 			else expect(Either.getOrThrow(routed).id).toBe(promoted);
 		}
 		const added = Either.getOrThrow(
 			apply(state, { _tag: "Add", name: "Personal", driver: "claude" }, []),
 		);
-		expect(Option.getOrThrow(defaultFor(added, "claude")).id).toBe(
-			"personal-2",
-		);
+		expect(
+			Option.getOrThrow(defaultFor(added, "claude", NO_OPENCODE_HEALTH)).id,
+		).toBe("personal-2");
 		expect(
 			Either.isFailure(
 				apply(
@@ -329,7 +345,7 @@ describe("account directory mutations", () => {
 		).toBe(true);
 	});
 
-	it("rejects unavailable and OpenCode defaults without changing state", () => {
+	it("accepts OpenCode defaults and rejects unavailable accounts", () => {
 		const state = accountsStateFromInstances(
 			[
 				{ id: "opencode", name: "OpenCode", driver: "opencode" },
@@ -337,11 +353,18 @@ describe("account directory mutations", () => {
 			],
 			launchLogin,
 		);
-		for (const id of ["missing", "opencode"])
+		expect(
+			Either.isSuccess(
+				apply(state, { _tag: "SetDefault", id: "opencode" }, []),
+			),
+		).toBe(true);
+		for (const id of ["missing"])
 			expect(
 				Either.isFailure(apply(state, { _tag: "SetDefault", id }, [])),
 			).toBe(true);
-		expect(Option.getOrThrow(defaultFor(state, "claude")).id).toBe("claude");
+		expect(
+			Option.getOrThrow(defaultFor(state, "claude", NO_OPENCODE_HEALTH)).id,
+		).toBe("claude");
 	});
 
 	it("rejects changing an account's type", () => {
@@ -459,7 +482,7 @@ describe("account directory mutations", () => {
 						const claudeAccounts = current.filter(
 							(account) => account.driver === "claude",
 						);
-						const selected = defaultFor(state, "claude");
+						const selected = defaultFor(state, "claude", NO_OPENCODE_HEALTH);
 						expect(Option.isSome(selected)).toBe(claudeAccounts.length > 0);
 						expect(Option.isSome(state.defaults.claude)).toBe(
 							claudeAccounts.length > 0,
@@ -475,11 +498,21 @@ describe("account directory mutations", () => {
 							).toBe(true);
 						}
 						if (change._tag === "SetDefault")
-							expect(Option.getOrThrow(selected).id).toBe(id);
+							expect(
+								current.find((account) => account.id === id)?.isDefault,
+							).toBe(true);
 						for (const deleted of state.deleted) {
-							const routed = resolve(state, { _tag: "Id", id: deleted.id });
-							const fallback = defaultFor(state, deleted.driver);
-							if (Option.isSome(fallback))
+							const routed = resolve(
+								state,
+								{ _tag: "Id", id: deleted.id },
+								NO_OPENCODE_HEALTH,
+							);
+							const fallback = defaultFor(
+								state,
+								deleted.driver,
+								NO_OPENCODE_HEALTH,
+							);
+							if (Option.isSome(fallback) && deleted.id !== "opencode")
 								expect(routed).toEqual(Either.succeed(fallback.value));
 							else expect(Either.isFailure(routed)).toBe(true);
 						}
@@ -495,7 +528,11 @@ describe("account directory mutations", () => {
 							const expectedDriver =
 								state.deleted.find((account) => account.id === legacyId)
 									?.driver ?? (legacyId === "opencode" ? "opencode" : "claude");
-							const routed = resolve(state, { _tag: "Id", id: legacyId });
+							const routed = resolve(
+								state,
+								{ _tag: "Id", id: legacyId },
+								NO_OPENCODE_HEALTH,
+							);
 							if (Either.isSuccess(routed))
 								expect(routed.success.driver).toBe(expectedDriver);
 						}
@@ -515,9 +552,13 @@ describe("account directory mutations", () => {
 							}
 						}
 						for (const { isDefault: _isDefault, ...account } of current) {
-							expect(resolve(state, { _tag: "Id", id: account.id })).toEqual(
-								Either.succeed(account),
-							);
+							expect(
+								resolve(
+									state,
+									{ _tag: "Id", id: account.id },
+									NO_OPENCODE_HEALTH,
+								),
+							).toEqual(Either.succeed(account));
 							if (account.driver === "claude") {
 								expect(account.folder.path.trim().length).toBeGreaterThan(0);
 								expect(account.folder).toEqual(

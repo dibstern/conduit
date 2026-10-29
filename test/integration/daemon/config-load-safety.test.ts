@@ -406,7 +406,8 @@ syncBuiltinESMExports();
 			const saved = Either.getOrThrow(
 				loadDaemonConfigResult(fixture.harness.configDir),
 			);
-			expect(saved.accountDefaults).toEqual({});
+			// The managed OpenCode server is the materialized OpenCode default.
+			expect(saved.accountDefaults).toEqual({ opencode: "opencode" });
 			expect(
 				saved.instances?.filter(({ driver }) => driver === "claude"),
 			).toEqual([]);

@@ -39,7 +39,10 @@ import {
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { accountsStateFromConfig } from "../../../../src/lib/account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../../../src/lib/account-directory.js";
 import { AccountSchema } from "../../../../src/lib/contracts/account.js";
 import type { UsageReading } from "../../../../src/lib/contracts/limit-recovery.js";
 import { defaultDaemonConfig } from "../../../../src/lib/daemon/config-persistence.js";
@@ -213,6 +216,7 @@ const withSwitchServices = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 				configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 			),
 		),
+		Effect.succeed(NO_OPENCODE_HEALTH),
 	);
 	return effect.pipe(
 		Effect.provideService(AccountDirectory, accountDirectory),

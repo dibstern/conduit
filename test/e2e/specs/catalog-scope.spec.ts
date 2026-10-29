@@ -46,7 +46,6 @@ async function setup(page: Page) {
 		return {
 			projectSlug: projectFor(scope),
 			instanceId: "opencode",
-			defaultOpenCodeInstanceId: "opencode",
 			providers: [
 				{
 					id: "opencode",

@@ -693,8 +693,15 @@ export const cursorToolsHandlers: StepHandler[] = [
 						throw new Error("The recording must render a video element");
 					// Playback exits the native loading animation without waiting for its cooldown.
 					await video.play();
-					video.pause();
-					video.currentTime = 0;
+					// Seeking before pause settles can leave Chromium at the stopped position.
+					await new Promise<void>((resolve) => {
+						video.addEventListener("pause", () => resolve(), { once: true });
+						video.pause();
+					});
+					await new Promise<void>((resolve) => {
+						video.addEventListener("seeked", () => resolve(), { once: true });
+						video.currentTime = 0;
+					});
 				});
 				await expect
 					.poll(() =>

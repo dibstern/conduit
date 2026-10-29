@@ -46,6 +46,8 @@ Scenario Outline: The rail holds the session's controls, and Send moves up for S
   When the open session starts working
   Then the rail reads Settle at 260, More at 308, Stop at 447, Permissions at 495, Model at 543, Attach at 591
   When I type keep going into the composer
+  And I close the keyboard
+  And the handoff settles
   Then the rail reads Settle at 260, More at 308, Send at 399, Stop at 447, Permissions at 495, Model at 543, Attach at 591
   And no control reaches into the status column
   And the duo-rail region visually matches <rail_working> at <threshold> percent
@@ -53,6 +55,31 @@ Scenario Outline: The rail holds the session's controls, and Send moves up for S
 Examples:
   | header        | rail        | composer        | rail_working        | threshold |
   | duo-fp-header | duo-fp-rail | duo-fp-composer | duo-fp-rail-working | 98        |
+
+Scenario Outline: Model and Permissions are bare icons centred in their slots, the logo's badge on its corner
+  Given the Claude accounts are claude as personal, self as work
+  Then the composer harness logo for claude shows P on its badge
+  And the rail's Permissions and Model sit bare, each icon 24 px and centred in its slot
+  And the duo-rail region visually matches <rail> at <threshold> percent
+
+Examples:
+  | rail               | threshold |
+  | duo-fp-rail-badged | 98        |
+
+Scenario Outline: Set goal puts the goal icon in Send's slot, above the keyboard and on the rail
+  When I type $goal Ship the release into the composer
+  And the handoff settles
+  Then Send shows the goal icon alone, centred in its slot
+  And the composer region visually matches <composer> at <threshold> percent
+  When I close the keyboard
+  And the handoff settles
+  Then the rail reads Send at 447, Permissions at 495, Model at 543, Attach at 591
+  And Send shows the goal icon alone, centred in its slot
+  And the duo-rail region visually matches <rail> at <threshold> percent
+
+Examples:
+  | composer          | rail             | threshold |
+  | duo-fp-kfull-goal | duo-fp-rail-goal | 98        |
 
 Scenario Outline: The context hairline turns amber at 80 percent
   When the mock relay reports context <percent> percent
@@ -95,3 +122,12 @@ Scenario Outline: The session list follows the same header and rail rules
 Examples:
   | header             | rail             | threshold |
   | duo-fp-list-header | duo-fp-list-rail | 98        |
+
+# A phone's list header has no edge, so the filters sit straight under it. This
+# header draws a hairline along its bottom edge, so the filters keep their own
+# 8pt above it, as they do below.
+Scenario: The session filters start below the list header's hairline
+  When I tap back to the session list
+  Then the session filters start 8 pixels below the list header
+  And the list header controls are centred at y 32 or lower with 22 pixels below
+  And no control reaches into the status column

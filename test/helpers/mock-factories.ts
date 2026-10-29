@@ -13,6 +13,7 @@
  *
  * Existing imperative helpers are preserved — many tests still depend on them.
  */
+
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +26,7 @@ import {
 	Stream,
 } from "effect";
 import { afterAll, vi } from "vitest";
+import { NO_OPENCODE_HEALTH } from "../../src/lib/account-directory.js";
 import type { Account } from "../../src/lib/contracts/account.js";
 import {
 	AccountIdSchema,
@@ -871,6 +873,7 @@ export function makeMockAccountDirectory(
 			),
 			deleted: [],
 		}),
+		Effect.succeed(NO_OPENCODE_HEALTH),
 	);
 }
 
@@ -1158,7 +1161,7 @@ export function makeTestHandlerLayer(
 		: OpenCodeModelServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						openCodeApiLayer,
+						accountDirectoryLayer,
 						openCodeInstancesLayer,
 						configLayer,
 						loggerLayer,

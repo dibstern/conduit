@@ -18,6 +18,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, vi } from "vitest";
+import { NO_OPENCODE_HEALTH } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	AccountDirectory,
@@ -823,7 +824,7 @@ describe("model handlers with Effect-native model service", () => {
 			expect(instances.use).not.toHaveBeenCalled();
 			expect(api.provider.list).toHaveBeenCalledOnce();
 		}).pipe(Effect.provide(OpenCodeModelServiceLive.pipe(Layer.provide(Layer.mergeAll(
-			Layer.succeed(OpenCodeAPITag)(api),
+			Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 			Layer.succeed(OpenCodeInstancesTag)(instances),
 			Layer.succeed(ConfigTag)(makeMockConfig()),
 			Layer.succeed(LoggerTag)(makeMockLogger()),
@@ -857,7 +858,7 @@ describe("model handlers with Effect-native model service", () => {
 			instances: [{ id: "work-claude", name: "Work Claude", port: 0, managed: false, driver: "claude" }],
 		}));
 		const deps = Layer.mergeAll(
-			AccountDirectoryFromConfigLive(configDir, configuredClaudeConfigDir(join(configDir, "login"))),
+			AccountDirectoryFromConfigLive(configDir, configuredClaudeConfigDir(join(configDir, "login")), Effect.succeed(NO_OPENCODE_HEALTH)),
 			Layer.succeed(OpenCodeAPITag)(api),
 			Layer.succeed(OpenCodeInstancesTag)(instances),
 			Layer.succeed(ConfigTag)(config),
@@ -935,7 +936,7 @@ describe("model handlers with Effect-native model service", () => {
 			const layer = OpenCodeModelServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag)(api),
+						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: api })),
 						Layer.succeed(ConfigTag)(makeMockConfig({ configDir, projectDir })),
 						Layer.succeed(LoggerTag)(logger),

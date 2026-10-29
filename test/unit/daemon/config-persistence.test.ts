@@ -299,7 +299,7 @@ describe("saveDaemonConfig", () => {
 
 		expect(loaded).toEqual({
 			...config,
-			accountDefaults: {},
+			accountDefaults: { opencode: "opencode" },
 			deletedAccounts: [],
 			worktreeCleanup: DEFAULT_WORKTREE_CLEANUP,
 		});

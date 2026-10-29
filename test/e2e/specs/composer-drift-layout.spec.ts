@@ -29,7 +29,6 @@ test("@drift-layout drift indicator never covers the composer controls on mobile
 	await mockWsRpc(page, {
 		stubs: {
 			GetModels: async () => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "myapp",
 				providers: modelExecutionProviders,
 				active: { model: "opus[1m]", provider: "claude" },

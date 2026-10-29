@@ -105,6 +105,7 @@
 	 */
 	const contentId = $props.id();
 	let contentNode = $state<HTMLElement | null>(null);
+	let triggerEl = $state<HTMLElement | null>(null);
 	let scrimInteractive = $state(false);
 	let scrimFade = $state({ progress: 0, settling: false });
 	const scrimStyle = $derived(sheetScrimStyle(scrimFade));
@@ -267,7 +268,7 @@
 </script>
 
 <DropdownMenu.Root bind:open onOpenChange={handleOpenChange}>
-	<DropdownMenu.Trigger>
+	<DropdownMenu.Trigger bind:ref={triggerEl}>
 		{#snippet child({ props })}
 			{@render trigger({ props: triggerProps(props) })}
 		{/snippet}
@@ -289,7 +290,7 @@
 						// Bits dismisses menus on Tab; dialog footers need native button traversal.
 						if (footer && event.key === "Tab") event.stopPropagation();
 						(props["onkeydowncapture"] as ((event: KeyboardEvent) => void) | undefined)?.(event);
-					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
+					}} onpointerdowncapture={(event: PointerEvent) => { openingClickDeadline = 0; (props["onpointerdowncapture"] as ((event: PointerEvent) => void) | undefined)?.(event); }} use:exemptFromBackgroundInert use:dragToDismiss={{ edge: sheetEdge, ondismiss: () => handleOpenChange(false), onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }} transition:sheetGlide|global={{ edge: sheetEdge, trigger: () => triggerEl, onprogress: (progress, settling) => { scrimFade = { progress, settling }; } }}>
 						<SheetChrome edge={sheetEdge} maxHeight={sheetEdge === "top" ? "max(0px, calc(100dvh - var(--sheet-top, 0px) - 64px))" : "90dvh"} {footer} bottomPadding={sheetBottomPadding} class={className} menuBody>
 							{#if footer}
 								<!-- Menu commands and footer switches have different required ARIA parents. -->

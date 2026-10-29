@@ -15,7 +15,7 @@ import {
 const composerMessages = new WeakMap<Page, string>();
 const sendTapPoints = new WeakMap<Page, { x: number; y: number }>();
 
-async function tapAt(
+export async function tapAt(
 	cdp: CDPSession,
 	point: { x: number; y: number },
 ): Promise<void> {

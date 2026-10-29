@@ -122,3 +122,42 @@ Scenario: A toast floats above an open header sheet
   Then an arrival toast says Usage footer session 2 needs approval
   And the toast floats above the open session sheet
   And no toast, sheet or scrim covers the status glyphs
+
+# conduit-test-tw49i.9. In a Duo pose a header drop-down grows out of the
+# control that opened it, wherever that control sits, and shrinks back into it
+# on close, on the same settle timing as the glide. The motion is read off the
+# running transition's first and last frames, never off mid-frame pixels.
+# sessions is the three-dot More menu.
+Scenario Outline: The <surface> drop-down grows out of its control and shrinks back into it in <pose>
+  Given the viewport is a duo <pose>
+  When I open the <surface> drop-down
+  Then the <surface> drop-down grew out of its control
+  When I press Escape in the <surface> drop-down
+  Then the <surface> drop-down shrank back into its control
+
+Examples:
+  | pose              | surface  |
+  | folded portrait   | sessions |
+  | folded landscape  | sessions |
+  | unfolded portrait | sessions |
+  | folded portrait   | tasks    |
+  | unfolded portrait | tasks    |
+
+Scenario Outline: A pull up still dismisses the tasks drop-down behind the header in <pose>
+  Given the viewport is a duo <pose>
+  When I open the tasks drop-down
+  And I drag the task sheet up by 180 pixels
+  Then the background tasks pull-down is closed
+  And the drop-down glided back up behind the header
+
+Examples:
+  | pose              |
+  | folded portrait   |
+  | unfolded portrait |
+
+Scenario: Off the Duo the three-dot menu still glides down from behind the header
+  Given the viewport is a phone
+  When I open the sessions drop-down
+  Then the drop-down glided down from behind the header
+  When I press Escape in the sessions drop-down
+  Then the drop-down glided back up behind the header

@@ -221,7 +221,10 @@ describe("account defaults and deletions survive persistence", () => {
 			} finally {
 				await daemon.stop();
 			}
-			expect(readSaved().accountDefaults).toEqual({ claude: "personal" });
+			expect(readSaved().accountDefaults).toEqual({
+				claude: "personal",
+				opencode: "remote",
+			});
 			expect(readSaved().deletedAccounts).toEqual([
 				{ id: "work", driver: "claude" },
 				{ id: "claude", driver: "claude" },
@@ -318,7 +321,7 @@ describe("account defaults and deletions survive persistence", () => {
 			await runtime.dispose();
 		}
 		const empty = readSaved();
-		expect(empty.accountDefaults).toEqual({});
+		expect(empty.accountDefaults).toEqual({ opencode: "opencode" });
 		expect(empty.deletedAccounts?.map(({ id }) => id)).toEqual([
 			"claude",
 			"personal",
@@ -390,7 +393,10 @@ describe("account defaults and deletions survive persistence", () => {
 			await runtime.dispose();
 		}
 		const saved = readSaved();
-		expect(saved.accountDefaults).toEqual({ claude: "personal" });
+		expect(saved.accountDefaults).toEqual({
+			claude: "personal",
+			opencode: "opencode",
+		});
 		expect(saved.deletedAccounts).toContainEqual({
 			id: "work",
 			driver: "claude",
@@ -465,7 +471,10 @@ describe("account defaults and deletions survive persistence", () => {
 			(error) => error,
 		);
 		const loaded = startup.config;
-		expect(loaded.accountDefaults).toEqual({ claude: "work" });
+		expect(loaded.accountDefaults).toEqual({
+			claude: "work",
+			opencode: "remote",
+		});
 		expect(startup.needsMigration).toBe(true);
 		await Effect.runPromise(
 			migrateDaemonConfig(loaded, configDir, startup.needsMigration),

@@ -40,16 +40,12 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ConfigTag } from "../../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { createSilentLogger } from "../../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { opencodeSessionCreatedRuntimeEvent } from "../../../../src/lib/provider/opencode/opencode-runtime-event-translator.js";
-import {
-	makeMockConfig,
-	makeMockOpenCodeAPI,
-} from "../../../helpers/mock-factories.js";
+import { makeMockOpenCodeAPI } from "../../../helpers/mock-factories.js";
 import { createTestProjectRelay as createProjectRelay } from "../../../helpers/project-relay.js";
 import {
 	makeSSEEvent,
@@ -58,17 +54,15 @@ import {
 
 const SESSION_ID = "sess-effect-runtime-ingress-001";
 
-// Failure modes: the selected instance's lifecycle uses the default alias while
-// established sessions retain its named binding, alias sessions also need to
-// settle, secondary stops must stay isolated, and permission/question waits
-// must remain pending. The real relay graph runs without listening on sockets.
-describe("selected OpenCode stop through the relay graph", () => {
+// Failure modes: stopping a named server settles managed sessions, stopping
+// managed settles named sessions, secondary stops leak across accounts, or
+// permission/question waits stop being pending. The relay uses no sockets.
+describe("concrete OpenCode stop through the relay graph", () => {
 	it.each([
-		{ selectedId: "managed-test", stoppedId: "managed-test" },
-		{ selectedId: "opencode", stoppedId: "opencode" },
-		{ selectedId: "managed-test", stoppedId: "secondary" },
-	])("settles $stoppedId with selected $selectedId while preserving other bindings and waits", async ({
-		selectedId,
+		{ stoppedId: "managed-test" },
+		{ stoppedId: "opencode" },
+		{ stoppedId: "secondary" },
+	])("settles only $stoppedId while preserving other bindings and waits", async ({
 		stoppedId,
 	}) => {
 		mkdirSync("test-results", { recursive: true });
@@ -86,7 +80,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 		) =>
 			Queue.offer(events, {
 				_tag: "event",
-				instanceId: instanceId === "opencode" ? selectedId : instanceId,
+				instanceId,
 				payload,
 				health: {
 					connected: false,
@@ -128,24 +122,24 @@ describe("selected OpenCode stop through the relay graph", () => {
 				configDir: dir,
 				persistenceDbPath: join(dir, "events.db"),
 				slug: "named-stop",
-				openCodeInstanceId: selectedId,
 				openCodeInstances: instances,
 				publishGlobalSetting: () => Effect.void,
 				log: createSilentLogger(),
 			});
 			const runtime = relay.effectRuntime.runtime;
 			const rows = [
-				{ id: "selected-work", provider: selectedId },
-				{ id: "alias-work", provider: "opencode" },
+				{ id: "named-work", provider: "managed-test" },
+				{ id: "managed-work", provider: "opencode" },
 				{ id: "secondary-work", provider: "secondary" },
-				{ id: "selected-permission", provider: selectedId },
-				{ id: "alias-question", provider: "opencode" },
+				{ id: "named-permission", provider: "managed-test" },
+				{ id: "managed-question", provider: "opencode" },
 			];
 			await runtime.runPromise(
 				Effect.gen(function* () {
 					const manager = yield* SessionManagerServiceTag;
 					const view = yield* OpenCodeInstancesTag;
-					// Receiving secondary lifecycle events requires a used/restored binding.
+					// Receiving lifecycle events requires a used/restored binding.
+					yield* view.use("opencode").pipe(Effect.scoped);
 					yield* view.use("secondary").pipe(Effect.scoped);
 					for (const row of rows) {
 						yield* manager.establishOpenCodeSession(
@@ -168,10 +162,10 @@ describe("selected OpenCode stop through the relay graph", () => {
 						);
 					}
 					yield* send(
-						selectedId,
+						"managed-test",
 						makeSSEEvent("permission.asked", {
 							id: "stop-permission",
-							sessionID: "selected-permission",
+							sessionID: "named-permission",
 							permission: "bash",
 							patterns: ["git *"],
 							metadata: {},
@@ -182,7 +176,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 						"opencode",
 						makeSSEEvent("question.asked", {
 							id: "stop-question",
-							sessionID: "alias-question",
+							sessionID: "managed-question",
 							questions: [],
 						}),
 					);
@@ -220,13 +214,7 @@ describe("selected OpenCode stop through the relay graph", () => {
 					rows
 						.map((row) => ({
 							...row,
-							status: (
-								stoppedId === selectedId
-									? row.provider === selectedId || row.provider === "opencode"
-									: row.provider === stoppedId
-							)
-								? "idle"
-								: "busy",
+							status: row.provider === stoppedId ? "idle" : "busy",
 						}))
 						.sort((a, b) => a.id.localeCompare(b.id)),
 				);
@@ -317,7 +305,7 @@ function makeFakeIngress(options?: {
 	) => Effect.Effect<number, ProviderRuntimeIngestionError>;
 }) {
 	// Stand-in for the sessions table: a committed session.created projects it.
-	const projected = new Set<string>();
+	const projected = new Map<string, string>();
 	const ingestion = {
 		ingest: vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1)),
 		ingestBatch: vi.fn(
@@ -329,8 +317,14 @@ function makeFakeIngress(options?: {
 					Effect.tap(() =>
 						Effect.sync(() => {
 							for (const event of events)
-								if (event.type === "session.created")
-									projected.add(event.sessionId);
+								if (
+									event.type === "session.created" &&
+									typeof event.data === "object" &&
+									event.data !== null &&
+									"provider" in event.data &&
+									typeof event.data.provider === "string"
+								)
+									projected.set(event.sessionId, event.data.provider);
 						}),
 					),
 					// Stand in for the durable boundary: only a batch that committed
@@ -347,7 +341,7 @@ function makeFakeIngress(options?: {
 			Effect.succeed(
 				strings.join("?").includes("FROM sessions") &&
 					projected.has(String(values[0]))
-					? [{ id: values[0] }]
+					? [{ id: values[0], provider: projected.get(String(values[0])) }]
 					: [],
 			)) as unknown as SqlClient.SqlClient,
 		projectionRunner: makeProjectionRunner(),
@@ -411,16 +405,12 @@ describe("EffectOpenCodeRuntimeIngress", () => {
 								),
 							}),
 					}),
-					Effect.provideService(
-						ConfigTag,
-						makeMockConfig({ openCodeInstanceId: selectedId }),
-					),
 				);
 			}),
 		);
 		let current = true;
 		const stopped = Effect.runPromiseExit(
-			stopIngress.onInstanceStopped("opencode", () => current),
+			stopIngress.onInstanceStopped(selectedId, () => current),
 		);
 		await Effect.runPromise(Deferred.await(entered));
 		current = false;

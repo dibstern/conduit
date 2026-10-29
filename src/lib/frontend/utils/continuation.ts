@@ -323,23 +323,6 @@ export function quotaReading(
 		: { used: "unknown" };
 }
 
-/** Missing readings are unknown after refresh and undefined while it runs. */
-export function accountQuota(
-	readings: ReadonlyMap<string, UsageReading> | undefined,
-	accountId: string,
-): UsageReading | undefined {
-	return readings === undefined
-		? undefined
-		: (readings.get(accountId) ?? {
-				accountId,
-				harness: "claude",
-				status: "unknown",
-				windows: [],
-				readAt: 0,
-				stale: false,
-			});
-}
-
 /**
  * The first "carries over" row: how many messages go across word for word, from
  * the same budget the handoff itself uses. `compact` is the phone wording.

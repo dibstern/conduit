@@ -31,6 +31,8 @@ import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { draftAttachmentFailureHandlers } from "./steps/draftAttachmentFailures.js";
 import { duoAlertsHandlers } from "./steps/duoAlerts.js";
+import { duoFoldedChipsHandlers } from "./steps/duoFoldedChips.js";
+import { duoFoldedKeyboardHandlers } from "./steps/duoFoldedKeyboard.js";
 import { duoFoldedPortraitHandlers } from "./steps/duoFoldedPortrait.js";
 import { duoPoseHandlers } from "./steps/duoPose.js";
 import { duoUnfoldedPortraitHandlers } from "./steps/duoUnfoldedPortrait.js";
@@ -45,6 +47,7 @@ import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { providerSettingsHandlers } from "./steps/providerSettings.js";
 import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionDiffHandlers } from "./steps/sessionDiff.js";
@@ -94,8 +97,10 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...phoneToastsHandlers,
 	...duoPoseHandlers,
 	...duoUnfoldedPortraitHandlers,
+	...duoFoldedKeyboardHandlers,
 	...duoFoldedPortraitHandlers,
 	...duoAlertsHandlers,
+	...duoFoldedChipsHandlers,
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
 	...rightPaneHandlers,
@@ -164,6 +169,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...visualHandlers,
 	...claudeSettingsHandlers,
 	...providerInstancesHandlers,
+	...providerSettingsHandlers,
 ];
 
 export const conduitVisualLifecycle: AcceptanceLifecycle = {

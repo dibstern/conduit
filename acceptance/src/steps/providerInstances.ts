@@ -547,7 +547,6 @@ export const providerInstancesHandlers: StepHandler[] = [
 				GetModels: () => {
 					publishClaudeCatalog(rpc, accountId);
 					return {
-						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						providers: [],
 						active: { model: "claude-sonnet-4-5", provider: "claude" },
@@ -1219,7 +1218,6 @@ export const providerInstancesHandlers: StepHandler[] = [
 					if (typeof accountId === "string" && account?.["driver"] === "claude")
 						publishClaudeCatalog(rpc, accountId);
 					return {
-						defaultOpenCodeInstanceId: "opencode",
 						projectSlug: "myapp",
 						providers: dualDriverProviders.filter(
 							(provider) => provider.id !== "claude",

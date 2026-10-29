@@ -17,7 +17,10 @@ import { RpcClientError } from "effect/rpc/RpcClientError";
 import { SocketCloseError } from "effect/socket/Socket";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
-import { accountsStateFromConfig } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import {
 	decodeProviderRuntimeEvent,
 	type ProviderRuntimeEvent,
@@ -96,6 +99,7 @@ const detailAccountsLayer = () =>
 					configuredClaudeConfigDir(join(isolatedRoot, "launch-login")),
 				),
 			),
+			Effect.succeed(NO_OPENCODE_HEALTH),
 		),
 	);
 
