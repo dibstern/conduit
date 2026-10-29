@@ -21,13 +21,15 @@
 	import { formatFileSize } from "../../utils/format.js";
 	import TextButton from "../ui/TextButton.svelte";
 
-	const { row }: { row: DiffRow } = $props();
+	// `reveal` changes each time this file is asked for, from a link, Back or a click.
+	const { row, reveal }: { row: DiffRow; reveal?: string | undefined } = $props();
 	const { folder, file } = $derived(row);
 	const patch = $derived(row.patch.kind === "ready" ? row.patch.patch : null);
 
 	let visible = $state(false);
 	let clicked = $state(false);
 	let host = $state<HTMLDivElement>();
+	let section = $state<HTMLElement>();
 	let view: FileDiff | undefined;
 
 	const wanted = $derived(
@@ -36,6 +38,13 @@
 
 	$effect(() => {
 		if (wanted && row.patch.kind === "idle") row.load();
+	});
+
+	// A reveal scrolls here and counts as the click a long diff waits for.
+	$effect(() => {
+		if (reveal === undefined || !section) return;
+		clicked = true;
+		return holdAtTop(section);
 	});
 
 	$effect(() => {
@@ -67,6 +76,31 @@
 		view?.setThemeType(type);
 	});
 
+	/**
+	 * Keeps a revealed row at the top of the pane while the rows around it load
+	 * and resize, until the pane is scrolled from there. Only the pane scrolls,
+	 * never the page around it.
+	 */
+	function holdAtTop(node: HTMLElement) {
+		const pane = node.parentElement;
+		if (!pane) return;
+		let held = pane.scrollTop;
+		const sizes = new ResizeObserver(() => {
+			pane.scrollTop += node.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+			held = pane.scrollTop;
+		});
+		for (const child of pane.children) sizes.observe(child);
+		const release = () => {
+			if (Math.abs(pane.scrollTop - held) > 1) stop();
+		};
+		const stop = () => {
+			sizes.disconnect();
+			pane.removeEventListener("scroll", release);
+		};
+		pane.addEventListener("scroll", release, { passive: true });
+		return stop;
+	}
+
 	/** Small diffs load as they near the viewport. */
 	function observe(node: HTMLElement) {
 		if (file.tier !== "auto" || file.binary) return;
@@ -83,7 +117,7 @@
 	}
 </script>
 
-<section data-testid="session-diff-file" data-path={file.path} class="border-b border-border-subtle" {@attach observe}>
+<section bind:this={section} data-testid="session-diff-file" data-path={file.path} data-folder={folder} class="border-b border-border-subtle" {@attach observe}>
 	<header class="flex items-center gap-2 px-3 py-1.5 text-xs">
 		<span class="min-w-0 flex-1 truncate font-mono text-text-secondary" title={file.path}>
 			{file.oldPath === undefined ? file.path : `${file.oldPath} → ${file.path}`}

@@ -7,6 +7,7 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { revealInDiff } from "../../stores/diff-selection.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -292,6 +293,22 @@
 				class={pane ? "fv-btn w-6 h-6 rounded-md shrink-0" : "fv-btn w-7 h-7 rounded-md shrink-0"}
 				onclick={handleCopy}
 			/>
+			{#if sessionViewState.filePreview && getCurrentSessionId()}
+				{@const { path, root } = sessionViewState.filePreview}
+				<Button
+					variant="ghost"
+					size="content"
+					tone="muted"
+					hoverFill="overlay"
+					iconOnly
+					icon="code"
+					iconSize={16}
+					ariaLabel="Show diff"
+					title="Show diff"
+					class={pane ? "fv-btn w-6 h-6 rounded-md shrink-0" : "fv-btn w-7 h-7 rounded-md shrink-0"}
+					onclick={() => revealInDiff(path, root)}
+				/>
+			{/if}
 			{#if pane && paneActions}{@render paneActions()}{/if}
 			{#if !pane}<Button
 				variant="ghost"

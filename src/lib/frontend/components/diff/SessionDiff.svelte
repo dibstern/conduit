@@ -1,5 +1,6 @@
 <!-- The Diff pane: the current session's unstaged changes, file by file. -->
 <script lang="ts">
+	import { getDiffReveal, getDiffScope } from "../../stores/diff-selection.js";
 	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { SessionDiffView } from "../../stores/session-diff.svelte.js";
 	import ConduitMark from "../ui/ConduitMark.svelte";
@@ -10,7 +11,10 @@
 
 	const sessionId = $derived(getCurrentSessionId());
 	// A new session is a new view, so a late reply lands only in the view that asked.
-	const view = $derived(sessionId ? new SessionDiffView(sessionId, { kind: "unstaged" }) : null);
+	// Its own derived, so a URL change that keeps the scope keeps the view and its patches.
+	const scope = $derived(getDiffScope());
+	const view = $derived(sessionId ? new SessionDiffView(sessionId, scope) : null);
+	const reveal = $derived(getDiffReveal());
 	// The pane stays mounted behind other tabs; only a shown pane lists or fetches.
 	$effect(() => (visible ? view?.watch() : undefined));
 
@@ -45,7 +49,10 @@
 				</p>
 			{:else}
 				{#each folder.rows as row (row.key)}
-					<DiffFile {row} />
+					<DiffFile
+						{row}
+						reveal={reveal?.path === row.file.path && (reveal.folder ?? row.folder) === row.folder ? reveal.nonce : undefined}
+					/>
 				{/each}
 			{/if}
 		{/each}
