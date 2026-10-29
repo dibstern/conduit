@@ -19,8 +19,8 @@ const RAIL_LEFT = 396;
 const SLOT = 44;
 /** The status column: camera, island and glyphs, worst case with two Live Activities. */
 const STATUS_COLUMN = { left: 394, bottom: 253 };
-/** iOS draws its 5pt home bar 8pt above the screen's bottom edge. */
-const HOME_INDICATOR_FROM_BOTTOM = 13;
+/** The home bar's top edge: y665 on the 678pt screen, 8pt below the 657pt viewport. */
+const HOME_INDICATOR_BELOW_VIEWPORT = 8;
 const INTERACTIVE =
 	'button, a[href], input, textarea, select, [role="button"], [role="link"], [role="menuitem"], [tabindex]:not([tabindex="-1"])';
 
@@ -81,15 +81,30 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const header =
 				match[1] === "session" ? "#session-bar" : "#sidebar-header";
-			const controls = await interactiveBoxes(world.page, header);
-			expect(controls.length).toBeGreaterThan(0);
-			const misplaced = controls
-				.filter(
-					({ box }) =>
-						box.y + box.height / 2 < Number(match[2]) ||
-						box.height / 2 < Number(match[3]),
-				)
-				.map(({ name, box }) => `${name} at y${box.y}, ${box.height} tall`);
+			expect(await interactiveBoxes(world.page, header)).not.toEqual([]);
+			// Hit-test the band's last pixel row: a target can outgrow its box.
+			const misplaced = await world.page.locator(header).evaluate(
+				(root, { selector, centre, below }) =>
+					[...root.querySelectorAll(selector)].flatMap((control) => {
+						const rect = control.getBoundingClientRect();
+						if (rect.width === 0 || !control.checkVisibility()) return [];
+						const x = rect.x + rect.width / 2;
+						const y = rect.y + rect.height / 2;
+						const name = control.id || control.getAttribute("data-testid");
+						if (y < centre - 0.5) return [`${name} centred at y${y}`];
+						const hit = document.elementFromPoint(x, y + below - 1);
+						return hit?.closest(selector) === control
+							? []
+							: [
+									`${name} ends above y${y + below}: ${hit?.id || hit?.tagName}`,
+								];
+					}),
+				{
+					selector: INTERACTIVE,
+					centre: Number(match[2]),
+					below: Number(match[3]),
+				},
+			);
 			expect(misplaced).toEqual([]);
 		},
 	},
@@ -167,7 +182,7 @@ export const duoFoldedPortraitHandlers: StepHandler[] = [
 			const hairline = await boxOf(page, "[data-testid='context-hairline']");
 			const height = await page.evaluate(() => innerHeight);
 			expect(hairline.y + hairline.height).toBe(
-				height - HOME_INDICATOR_FROM_BOTTOM - Number(match[1]),
+				height + HOME_INDICATOR_BELOW_VIEWPORT - Number(match[1]),
 			);
 		},
 	},

@@ -7,13 +7,17 @@ Feature: The folded iPhone Duo keeps its controls out from under the status colu
 # own controls bottom-up from the composer. The top ~30pt never produce a click,
 # so header targets sit low with room below them.
 #
-# Coordinates are the mockup's, on the full 466x678 screen. The 657pt viewport
-# the Duo also reports lacks a 21pt band at the top, so there the bottom group
-# keeps its distance from the home indicator rather than from the top.
+# Coordinates are CSS px in the installed app's measured 466x657 layout
+# viewport. The mockup draws the 678pt screen with the same y origin, so the
+# viewport ends at y657 and the home bar (y665 on the screen) sits 8pt below it.
+#
+# The pose comes after the app loads: the emulated insets do not survive a
+# navigation.
 
 Background:
-  Given the conduit app is served with the long-transcript mockup
-  And the viewport is a duo folded portrait at full height
+  Given the session loaded the skills "release-notes by you in turn 1; changelog-style by agent in turn 1"
+  And the conduit app is served with the long-transcript mockup
+  And the viewport is a duo folded portrait
 
 Scenario: Nothing tappable sits under the status column
   Then no control reaches into the status column
@@ -61,11 +65,23 @@ Examples:
   | 79      | grey   | duo-fp-composer-context   | 98        |
   | 80      | amber  | duo-fp-composer-warning   | 98        |
 
-Scenario: On the shorter viewport the bottom group keeps its distance from the home indicator
-  When the viewport is a duo folded portrait
-  And the mock relay reports context 41 percent
-  Then the rail reads Settle at 260, More at 308, Send at 426, Permissions at 474, Model at 522, Attach at 570
-  And the context hairline ends 8 pixels above the home indicator
+Scenario Outline: The hairline turns amber at 80 percent whatever the warning setting
+  When I open settings to the General section
+  And I choose <threshold> for composer context warnings
+  And the mock relay reports context <percent> percent
+  Then the context hairline reads <percent>% context in <colour>
+
+Examples:
+  | threshold | percent | colour |
+  | 90        | 80      | amber  |
+  | Never     | 85      | amber  |
+  | 60        | 79      | grey   |
+
+Scenario: Words controls still put the composer's controls in the rail
+  When I open settings to the General section
+  And I choose Words for composer controls
+  Then the rail reads Send at 447, Permissions at 495, Model at 543, Attach at 591
+  And the message field spans x 12 to 374 and y 587 to 639
   And no control reaches into the status column
 
 Scenario Outline: The session list follows the same header and rail rules

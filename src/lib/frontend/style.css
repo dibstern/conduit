@@ -1175,7 +1175,7 @@ body:has(dialog:modal) {
 	content: "";
 	position: absolute;
 	right: 20px;
-	bottom: 39px;
+	bottom: 18px;
 	width: 56px;
 	height: 200px;
 	border-radius: 18px;
@@ -1239,21 +1239,21 @@ body:has(dialog:modal) {
 	top: 308px;
 }
 #layout[data-pose="duo-folded-portrait"] :is(#attach-btn, #list-bar-settings) {
-	bottom: 43px;
+	bottom: 22px;
 }
 #layout[data-pose="duo-folded-portrait"]
 	:is([data-testid="model-picker-trigger"], [data-testid="list-bar-theme"]) {
-	bottom: 91px;
+	bottom: 70px;
 }
 #layout[data-pose="duo-folded-portrait"]
 	:is([data-testid="permission-mode-badge"], [data-testid="list-bar-select"]) {
-	bottom: 139px;
+	bottom: 118px;
 }
 #layout[data-pose="duo-folded-portrait"] :is(#send, #stop, #new-session-btn) {
-	bottom: 187px;
+	bottom: 166px;
 }
 #layout[data-pose="duo-folded-portrait"]:has(#stop) #send {
-	bottom: 235px;
+	bottom: 214px;
 }
 #layout[data-pose="duo-folded-portrait"]
 	:is(
@@ -1324,12 +1324,27 @@ body:has(dialog:modal) {
 	button {
 	clip-path: none;
 }
+/* Segments (skills, side threads) own the row's 44px (y 10 to 54), measured
+   from each button's centre, as in unfolded portrait. */
+#layout[data-pose="duo-folded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button {
+	clip-path: inset(calc(50% - 22px) 0);
+}
+#layout[data-pose="duo-folded-portrait"]
+	#session-bar[data-compact="true"][data-collapsed="false"]
+	.session-bar-segments
+	button::before {
+	top: calc(50% - 22px);
+	height: 44px;
+}
 
 /* The composer is the field alone; its controls are in the rail. The bottom
    padding holds the context hairline, 8pt above the home indicator, and it is
    the same with the keyboard up, so it has no keyboard delay to wait out. */
 #layout[data-pose="duo-folded-portrait"] #input-area[data-compact] {
-	padding: 8px 8px 39px 12px;
+	padding: 8px 8px 18px 12px;
 	transition: none;
 }
 #layout[data-pose="duo-folded-portrait"] #input-row {
