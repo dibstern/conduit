@@ -28,6 +28,7 @@ import {
 	SessionEventBusTag,
 } from "../../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../../../src/lib/persistence/effect/migrations.js";
 import { connectClaudeRunner } from "../../../../src/lib/provider/claude/claude-runner-connection.js";
 import { ClaudeRunnerSocket } from "../../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { makeClaudeRunnerWire } from "../../../../src/lib/provider/claude/claude-runner-wire.js";
@@ -920,11 +921,15 @@ it("migrates a legacy cursor while retaining its sequence and cached reply", asy
 	const f = await fixture();
 	await f.runtime.runPromise(f.sql`DROP TABLE claude_runner_cursors`);
 	await f.runtime.runPromise(
+		f.sql`DELETE FROM effect_sql_migrations WHERE migration_id = 89`,
+	);
+	await f.runtime.runPromise(
 		f.sql`CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}')`,
 	);
 	await f.runtime.runPromise(
 		f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, result_json) VALUES ('runner', 7, '{"children":[]}')`,
 	);
+	await f.runtime.runPromise(makeEffectSqlMigrator());
 	const migrated = await f.runtime.runPromise(makeRunnerReceiptStore(f.sql));
 	expect(
 		await f.runtime.runPromise(migrated.attach("runner", "replacement")),

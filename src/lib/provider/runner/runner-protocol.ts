@@ -8,9 +8,10 @@ import { isRecord } from "../../utils.js";
 import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
 import {
+	isLegacyRunner,
 	legacyRunnerAnswerCompletions,
 	legacyRunnerRetainedSends,
-} from "./runner-legacy-recovery.js";
+} from "./runner-legacy-classification.js";
 import type { RunnerUpgradeState } from "./runner-upgrade.js";
 import type {
 	SessionCommand,
@@ -503,11 +504,10 @@ export class RunnerSocket {
 					this.scopedCursorCredentials =
 						message.scopedCursorCredentials === true;
 					this.peerDriverKind = message.driverKind;
-					this.helloSends =
-						message.sendJournalAnswers === true
-							? (message.sendAnswers ?? [])
-							: legacyRunnerRetainedSends(message);
-					if (!this.peerSettlesAnswers && message.sendJournalAnswers !== true)
+					this.helloSends = isLegacyRunner(message)
+						? legacyRunnerRetainedSends(message)
+						: (message.sendAnswers ?? []);
+					if (!this.peerSettlesAnswers && isLegacyRunner(message))
 						for (const command of legacyRunnerAnswerCompletions(message))
 							if (command.commandId.endsWith(":answer"))
 								this.completedCommands.set(

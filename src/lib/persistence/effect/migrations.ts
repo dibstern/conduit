@@ -1584,6 +1584,53 @@ export const effectMigrationEntries = {
 		"held_transmission",
 		"ALTER TABLE provider_runs ADD COLUMN held_transmission INTEGER",
 	),
+	// Runner modules read this table, so it exists from migration time rather
+	// than from first use. This migration is its only schema owner: it upgrades
+	// tables older builds created in the order those builds added the columns,
+	// so every store ends with the same column order. journals_before_execution
+	// is NULL for a runner registered before it existed.
+	"0089_runner_cursors": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* executeSqlStatements(`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
+			runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}'
+		)`);
+		const existing = new Set(
+			(yield* sql<{
+				name: string;
+			}>`PRAGMA table_info(claude_runner_cursors)`).map(({ name }) => name),
+		);
+		for (const [name, definition] of [
+			["attachment_id", "TEXT NOT NULL DEFAULT ''"],
+			["retired_at", "INTEGER"],
+			["pid", "INTEGER"],
+			["start_time", "TEXT"],
+			["owned_run_ids", "TEXT NOT NULL DEFAULT '[]'"],
+			// Retired rows must remain recoverable after their registration vanishes.
+			["session_id", "TEXT NOT NULL DEFAULT ''"],
+			["signalled", "INTEGER NOT NULL DEFAULT 0"],
+			["driver_kind", "TEXT NOT NULL DEFAULT 'claude'"],
+			["retirement_state", "TEXT NOT NULL DEFAULT 'Watching'"],
+			["signal_state", "TEXT NOT NULL DEFAULT 'None'"],
+			["signal_members", "TEXT NOT NULL DEFAULT '[]'"],
+			["signal_sent_members", "TEXT NOT NULL DEFAULT '[]'"],
+			["reaper_pid", "INTEGER"],
+			["reaper_start_time", "TEXT"],
+			["member_snapshot", "TEXT NOT NULL DEFAULT '[]'"],
+			["signal_log", "TEXT NOT NULL DEFAULT '[]'"],
+			["stop_state", "TEXT NOT NULL DEFAULT 'Requested'"],
+			["stop_reason", "TEXT NOT NULL DEFAULT 'Provider process stopped'"],
+			["stop_started_at", "INTEGER"],
+			["role", "TEXT NOT NULL DEFAULT 'serving'"],
+			["journals_before_execution", "INTEGER"],
+		] as const) {
+			if (existing.has(name)) continue;
+			yield* sql.unsafe(
+				`ALTER TABLE claude_runner_cursors ADD COLUMN ${name} ${definition}`,
+			);
+			if (name === "signal_state")
+				yield* sql`UPDATE claude_runner_cursors SET signal_state = 'KillSent' WHERE signalled = 1`;
+		}
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

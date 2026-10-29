@@ -6,7 +6,7 @@ import { CLAUDE_SETTINGS_REPLAY_DEFERRED } from "./claude-runner-settings.js";
 import { normalizeClaudeLaunchInput } from "./claude-runner-wire.js";
 import { claudeLoginChange } from "./claude-sdk-env.js";
 
-export { stopRegisteredRunners as stopRegisteredClaudeRunners } from "../runner/process-session-runner.js";
+export { stopRegisteredRunners as stopRegisteredClaudeRunners } from "../runner/runner-retirement.js";
 
 /** Daemon-side Claude launch policy; process lifetime belongs to the host. */
 export const makeProcessClaudeSessionRunner = (

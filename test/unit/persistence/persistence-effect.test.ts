@@ -145,6 +145,7 @@ describe("Persistence Effect", () => {
 				tables: [
 					"attachment_blobs",
 					"attachment_uses",
+					"claude_runner_cursors",
 					"command_receipts",
 					"daemon_store_imports",
 					"draft_attachments",
@@ -365,6 +366,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 86, name: "events_provider_identity_indexes" },
 				{ migration_id: 87, name: "provider_run_holder" },
 				{ migration_id: 88, name: "provider_run_held_transmission" },
+				{ migration_id: 89, name: "runner_cursors" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

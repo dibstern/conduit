@@ -11,7 +11,6 @@ import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import type { TurnResult } from "../types.js";
 import type { RunnerSendAnswer } from "./runner-protocol.js";
 import type { StopReason } from "./runner-receipts.js";
-import { appendSendSettlement } from "./send-settlement-outbox.js";
 import type { SessionFailure } from "./session-runner.js";
 
 export class StoreUnavailable extends Data.TaggedError("StoreUnavailable")<{
@@ -204,73 +203,3 @@ export interface SettlementTx {
 	readonly afterCommit?: (effect: Effect.Effect<void>) => void;
 	readonly driverKind?: string;
 }
-
-export const settleSend = (
-	tx: SettlementTx,
-	evidence: SendEvidence,
-): Effect.Effect<void, StoreFault> =>
-	Effect.gen(function* () {
-		let normalized: NormalizedTerminalEvidence;
-		if (evidence._tag === "journal_finished") {
-			const { answer } = evidence;
-			if (
-				answer.result?.nativeResumeRejected ||
-				isClaudeResumeRefused(answer.failure ?? answer.result?.error)
-			)
-				return;
-			const result = answer.failure
-				? terminalFailureResult(answer.failure)
-				: terminalTurnResult(answer.result);
-			if (!result) return;
-			normalized = { _tag: "journal_finished", result };
-		} else normalized = evidence;
-		const { send } = evidence;
-		const { sql } = tx;
-		const [row] = yield* sql<{
-			request_sequence: number;
-			project_key: string;
-			session_id: string;
-			command_id: string;
-			attempt_count: number;
-			provider_id: string;
-			run_id: string;
-			payload_json: string;
-			runner_id: string | null;
-			held_transmission: number | null;
-		}>`SELECT command.request_sequence, command.project_key, command.session_id,
-			command.command_id, command.attempt_count, command.provider_id,
-			command.run_id, command.payload_json, run.runner_id, run.held_transmission
-			FROM provider_command_outbox command JOIN provider_runs run
-				ON run.id = command.run_id AND run.session_id = command.session_id
-			JOIN sessions session ON session.id = command.session_id AND session.project_id = command.project_key
-			WHERE command.request_sequence = ${send.requestSequence}
-				AND command.session_id = ${send.sessionId} AND command.command_id = ${send.commandId}
-				AND command.attempt_count = ${send.attempt} AND run.id = ${send.runId}
-				AND run.joined_into IS NULL AND run.status IN ('pending', 'running')
-				AND command.effect_type = 'send_turn'
-				AND command.request_sequence = (SELECT MAX(latest.request_sequence)
-					FROM provider_command_outbox latest WHERE latest.project_key = command.project_key
-					AND latest.command_id = command.command_id)`;
-		if (!row) return;
-		if ("runnerId" in send) {
-			if (
-				row.runner_id !== send.runnerId ||
-				row.held_transmission !== send.transmission
-			)
-				return;
-		} else if (row.runner_id !== null || row.held_transmission !== null) return;
-		const outcome = classify(normalized);
-		yield* appendSendSettlement(
-			tx,
-			row,
-			normalized,
-			outcome,
-			evidence.observedAt,
-		);
-		yield* tx.stamp((version) =>
-			sql<{ id: string }>`UPDATE sessions SET version = ${version}
-				WHERE id = ${send.sessionId} RETURNING id`.pipe(
-				Effect.map((rows) => rows.map(({ id }) => id)),
-			),
-		);
-	}).pipe(Effect.mapError(toStoreFault));

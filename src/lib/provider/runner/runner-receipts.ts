@@ -290,6 +290,8 @@ export interface RunnerCursorIdentity {
 	readonly startTime?: string | undefined;
 	readonly ownedRunIds?: readonly string[] | undefined;
 	readonly reaper?: RunnerMember | undefined;
+	/** Recorded at hello; see journalsBeforeExecution. */
+	readonly journalsBeforeExecution?: boolean | undefined;
 }
 
 /** Only the server consumes this context and writes the durable checkpoint. */
@@ -332,76 +334,15 @@ export const createRunnerPermissionReplies = (sql: SqlClient.SqlClient) =>
 		PRIMARY KEY (session_id, request_id)
 	)`;
 
-// Legacy provenance reads this table on stores that never built a receipt
-// store, so its readers create it too.
-export const createRunnerCursors = (sql: SqlClient.SqlClient) =>
-	sql`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
-		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}',
-		attachment_id TEXT NOT NULL DEFAULT '', retired_at INTEGER,
-		pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
-		session_id TEXT NOT NULL DEFAULT '', signalled INTEGER NOT NULL DEFAULT 0,
-		driver_kind TEXT NOT NULL DEFAULT 'claude', retirement_state TEXT NOT NULL DEFAULT 'Watching',
-		signal_state TEXT NOT NULL DEFAULT 'None', signal_members TEXT NOT NULL DEFAULT '[]', signal_sent_members TEXT NOT NULL DEFAULT '[]',
-		reaper_pid INTEGER, reaper_start_time TEXT, member_snapshot TEXT NOT NULL DEFAULT '[]', signal_log TEXT NOT NULL DEFAULT '[]',
-		stop_state TEXT NOT NULL DEFAULT 'Requested', stop_reason TEXT NOT NULL DEFAULT 'Provider process stopped', stop_started_at INTEGER,
-		role TEXT NOT NULL DEFAULT 'serving'
-	)`;
-
 export const makeRunnerReceiptStore = (
 	sql: SqlClient.SqlClient,
 	options: { readonly configDir?: string } = {},
 ) =>
 	Effect.gen(function* () {
-		yield* createRunnerCursors(sql);
-		const columns = yield* sql<{
-			name: string;
-		}>`PRAGMA table_info(claude_runner_cursors)`;
-		if (!columns.some(({ name }) => name === "attachment_id"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN attachment_id TEXT NOT NULL DEFAULT ''`;
-		if (!columns.some(({ name }) => name === "retired_at"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN retired_at INTEGER`;
-		if (!columns.some(({ name }) => name === "pid"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN pid INTEGER`;
-		if (!columns.some(({ name }) => name === "start_time"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN start_time TEXT`;
-		if (!columns.some(({ name }) => name === "owned_run_ids"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN owned_run_ids TEXT NOT NULL DEFAULT '[]'`;
-		// Retired rows must remain recoverable after their registration vanishes.
-		if (!columns.some(({ name }) => name === "session_id"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`;
-		if (!columns.some(({ name }) => name === "signalled"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN signalled INTEGER NOT NULL DEFAULT 0`;
-		if (!columns.some(({ name }) => name === "driver_kind"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN driver_kind TEXT NOT NULL DEFAULT 'claude'`;
-		if (!columns.some(({ name }) => name === "retirement_state"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN retirement_state TEXT NOT NULL DEFAULT 'Watching'`;
-		if (!columns.some(({ name }) => name === "signal_state")) {
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN signal_state TEXT NOT NULL DEFAULT 'None'`;
-			yield* sql`UPDATE claude_runner_cursors SET signal_state = 'KillSent' WHERE signalled = 1`;
-		}
-		if (!columns.some(({ name }) => name === "signal_members"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN signal_members TEXT NOT NULL DEFAULT '[]'`;
-		if (!columns.some(({ name }) => name === "signal_sent_members"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN signal_sent_members TEXT NOT NULL DEFAULT '[]'`;
-		if (!columns.some(({ name }) => name === "reaper_pid"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN reaper_pid INTEGER`;
-		if (!columns.some(({ name }) => name === "reaper_start_time"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN reaper_start_time TEXT`;
-		if (!columns.some(({ name }) => name === "member_snapshot"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN member_snapshot TEXT NOT NULL DEFAULT '[]'`;
-		if (!columns.some(({ name }) => name === "signal_log"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN signal_log TEXT NOT NULL DEFAULT '[]'`;
-		if (!columns.some(({ name }) => name === "stop_state"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN stop_state TEXT NOT NULL DEFAULT 'Requested'`;
-		if (!columns.some(({ name }) => name === "stop_reason"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN stop_reason TEXT NOT NULL DEFAULT 'Provider process stopped'`;
-		if (!columns.some(({ name }) => name === "stop_started_at"))
-			yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN stop_started_at INTEGER`;
+		// Migration 0089 owns the table and its columns.
 		yield* flushPendingWrites(
 			sql,
 			Effect.gen(function* () {
-				if (!columns.some(({ name }) => name === "role"))
-					yield* sql`ALTER TABLE claude_runner_cursors ADD COLUMN role TEXT NOT NULL DEFAULT 'serving'`;
 				const slotIndex =
 					yield* sql`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_runner_serving_session'`;
 				if (slotIndex.length === 0) {
@@ -816,12 +757,13 @@ export const makeRunnerReceiptStore = (
 				sql<{
 					sequence: number;
 					result_json: string;
-				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, driver_kind, reaper_pid, reaper_start_time)
-					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${identity?.startTime ?? null}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${identity?.reaper?.startTime ?? null})
+				}>`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, pid, start_time, driver_kind, reaper_pid, reaper_start_time, journals_before_execution)
+					VALUES (${runnerId}, 0, ${attachmentId}, ${identity?.sessionId ?? ""}, ${identity?.pid ?? null}, ${identity?.startTime ?? null}, ${identity?.driverKind ?? "claude"}, ${identity?.reaper?.pid ?? null}, ${identity?.reaper?.startTime ?? null}, ${identity?.journalsBeforeExecution === undefined ? null : Number(identity.journalsBeforeExecution)})
 					ON CONFLICT(runner_id) DO UPDATE SET attachment_id = excluded.attachment_id,
 					session_id = COALESCE(NULLIF(excluded.session_id, ''), claude_runner_cursors.session_id),
 					pid = COALESCE(excluded.pid, claude_runner_cursors.pid), start_time = COALESCE(excluded.start_time, claude_runner_cursors.start_time),
 					reaper_pid = COALESCE(excluded.reaper_pid, claude_runner_cursors.reaper_pid), reaper_start_time = COALESCE(excluded.reaper_start_time, claude_runner_cursors.reaper_start_time),
+					journals_before_execution = COALESCE(excluded.journals_before_execution, claude_runner_cursors.journals_before_execution),
 					driver_kind = CASE WHEN ${identity?.driverKind !== undefined} THEN excluded.driver_kind ELSE claude_runner_cursors.driver_kind END
 					WHERE claude_runner_cursors.retired_at IS NULL
 				RETURNING sequence, result_json`.pipe(

@@ -115,6 +115,13 @@ export const makeSendScopes = (
 				)
 					assignments.set(send, { _tag: "Queued" });
 			},
+			/** The last dispatch survives close, so native cleanup still knows its runner. */
+			dispatchedTo: (send: SendScope): string | undefined => {
+				const assignment = assignments.get(send);
+				return assignment?._tag === "Dispatched"
+					? assignment.runnerId
+					: undefined;
+			},
 			acquire: <A, E, R, R2>(
 				send: SendScope,
 				sinkId: string,

@@ -45,10 +45,8 @@ import {
 	claudeLoginChange,
 	configuredClaudeConfigDir,
 } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	RunnerSocket,

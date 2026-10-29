@@ -140,7 +140,7 @@ export function installRunnerStartupFixture(root: string): void {
 				active.deadline === undefined &&
 				delay ===
 					Number(process.env["CONDUIT_TEST_RUNNER_STARTUP_TIMEOUT_MS"]) &&
-				new Error().stack?.includes("process-session-runner")
+				new Error().stack?.includes("runner-starter")
 			) {
 				active.deadline = startedAt + delay;
 				record("parent-deadline", {

@@ -37,12 +37,10 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare-turn.js";
-import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-	stopRegisteredRunners,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
+import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerSendAnswer,
@@ -58,6 +56,7 @@ import {
 	registerRunner,
 	runnerProcessTable,
 } from "../../../src/lib/provider/runner/runner-registry.js";
+import { stopRegisteredRunners } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
 import type {
@@ -3200,6 +3199,89 @@ for (const outcome of ["retired", "exited"] as const)
 			),
 	);
 
+it.effect(
+	"keeps a restored binding on its runner across a reattach and releases it when the runner exits",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* setup;
+				const registered = yield* f.register("131313131313", 100_020, {
+					retired: false,
+				});
+				const connections: Array<
+					Parameters<ProcessRunnerDriver["connect"]>[0]
+				> = [];
+				f.connect.mockImplementation((options) =>
+					Effect.gen(function* () {
+						connections.push(options);
+						const connection = new RunnerSocket(
+							new Socket(),
+							() => {},
+							options.onClose,
+						);
+						let helloDone = false;
+						vi.spyOn(connection, "closed", "get").mockImplementation(
+							() => connections.length === 1 && helloDone,
+						);
+						vi.spyOn(connection, "write").mockImplementation(() => {});
+						vi.spyOn(connection, "commandEffect").mockReturnValue(
+							Effect.succeed(undefined),
+						);
+						vi.spyOn(connection, "destroy").mockImplementation(() => {});
+						yield* options.onHello(
+							{
+								type: "hello",
+								protocolVersion: 1,
+								buildId: runnerBuildId(),
+								stampsRunIds: true,
+								runnerId: options.runnerId,
+								sessionId: "s",
+								pid: options.pid ?? 0,
+								bindings: [
+									{ sinkId: "restored", sessionId: "s", released: false },
+								],
+								sendJournalAnswers: true,
+								sendAnswers: [],
+							},
+							connection,
+						);
+						helloDone = true;
+						return connection;
+					}),
+				);
+				yield* f.recover;
+				yield* TestClock.adjust("2 seconds");
+				// The first socket closed after its hello, so recovery reattached the same runner.
+				expect(connections.map((options) => options.runnerId)).toEqual([
+					registered.runnerId,
+					registered.runnerId,
+				]);
+				const reattached = connections[1];
+				if (!reattached)
+					return yield* Effect.fail(runnerFailure("test", "No reattach"));
+				const outputs: SessionOutput[] = [];
+				f.output.mockImplementation((output) =>
+					Effect.sync(() => {
+						outputs.push(output);
+						return {};
+					}),
+				);
+				f.processes.set(registered.pid, { state: "gone" });
+				reattached.onClose(runnerFailure("test socket", "Runner exited"));
+				yield* TestClock.adjust("4 seconds");
+				expect(
+					outputs.filter(
+						(output) =>
+							output.type === "release-sink" && output.sinkId === "restored",
+					),
+				).toHaveLength(1);
+				expect(
+					yield* f.manager.hasLiveProcessEffect("s", registered.runnerId),
+				).toBe(false);
+			}),
+		),
+);
+
 for (const deniedTerm of [false, true])
 	it.effect(
 		`releases a failed force-stop and starts the next message on a fresh runner (TERM refused: ${deniedTerm})`,
@@ -3624,6 +3706,10 @@ const continuationFixture = (
 					sends.push({ runnerId: connection.runnerId, command });
 					return behavior(connection, command);
 				});
+				// A real connection's hello claim records whether this runner journals.
+				yield* f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(options.journalCapable !== false)} WHERE runner_id = ${connection.runnerId}`.pipe(
+					Effect.orDie,
+				);
 				yield* connection.onHello(
 					{
 						type: "hello",
@@ -4001,6 +4087,8 @@ it.effect(
 
 // Discovery can disappear at full shutdown. Settle must classify exactly the
 // same durable transmission with and without its registration, after restart.
+// The runner's hello journalled, so an older evidence build with no journal is
+// still unreceived (BC-1).
 for (const discovery of [true, false])
 	for (const evidence of [
 		"absent",
@@ -4013,6 +4101,7 @@ for (const discovery of [true, false])
 			() =>
 				run(
 					Effect.gen(function* () {
+						const absent = evidence === "absent" || evidence === "older-build";
 						const f = yield* continuationFixture();
 						yield* f.seed("run");
 						yield* f.sql`UPDATE provider_command_outbox SET payload_json = ${JSON.stringify({ inputId: "send", prompt: "send", history: [], workspaceRoot: f.root, extraFolders: [], configDir: configuredClaudeConfigDir(f.root), folderSource: "account" })} WHERE command_id = 'send'`;
@@ -4069,23 +4158,18 @@ for (const discovery of [true, false])
 							yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`,
 						).toEqual([
 							{
-								status: evidence === "absent" ? "completed" : "failed",
-								error_code:
-									evidence === "absent" ? null : "delivery_indeterminate",
+								status: absent ? "completed" : "failed",
+								error_code: absent ? null : "delivery_indeterminate",
 							},
 						]);
 						expect(
 							yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run'`,
-						).toEqual([
-							{ status: evidence === "absent" ? "completed" : "error" },
-						]);
+						).toEqual([{ status: absent ? "completed" : "error" }]);
 						expect(
 							yield* f.sql`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
-						).toEqual(
-							evidence === "absent" ? [{ reason: "JournalAbsent" }] : [],
-						);
-						expect(f.delivered).toEqual(evidence === "absent" ? ["send"] : []);
-						expect(f.sends).toHaveLength(evidence === "absent" ? 2 : 1);
+						).toEqual(absent ? [{ reason: "JournalAbsent" }] : []);
+						expect(f.delivered).toEqual(absent ? ["send"] : []);
+						expect(f.sends).toHaveLength(absent ? 2 : 1);
 					}),
 				),
 		);
@@ -4896,16 +4980,12 @@ for (const provenance of ["direct", "joined"] as const)
 						yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, joined_into) VALUES ('old-joined','s','joined',1,'old-owner')`;
 					yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, owned_run_ids, retired_at) VALUES ('bad-json',0,'s','not-json',1),('bad-object',0,'s','{"run":"object-only"}',1)`;
 					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('object-only','s','pending',1)`;
-					expect(
-						yield* RunnerRecovery.legacyRunnerRunQuery(f.sql, "s", "old-owner"),
-					).toBe(true);
-					expect(
-						yield* RunnerRecovery.legacyRunnerRunQuery(
-							f.sql,
-							"s",
-							"object-only",
-						),
-					).toBe(false);
+					expect(yield* legacyRunnerRunQuery(f.sql, "s", "old-owner")).toBe(
+						true,
+					);
+					expect(yield* legacyRunnerRunQuery(f.sql, "s", "object-only")).toBe(
+						false,
+					);
 				}),
 			),
 	);
@@ -4960,9 +5040,7 @@ for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
 						}),
 					);
 					for (const runId of ["released", "modern", "queued", "discovered"])
-						expect(
-							yield* RunnerRecovery.legacyRunnerRunQuery(f.sql, "s", runId),
-						).toBe(false);
+						expect(yield* legacyRunnerRunQuery(f.sql, "s", runId)).toBe(false);
 				}),
 			),
 	);

@@ -484,8 +484,9 @@ it("imports complete projects without changing sources and rolls back rejected p
 		});
 		const seedSetup = new Database(alpha.sourcePath);
 		try {
+			// A source from a build before migration 0089 that never ran a runner.
 			seedSetup.exec(
-				"DROP TABLE claude_runner_cursors; DROP TABLE claude_runner_permission_replies; UPDATE sessions SET project_id = NULL WHERE id = 'ses_alpha'; UPDATE session_sidebar SET project_id = NULL WHERE session_id = 'ses_alpha'; UPDATE events SET project_id = NULL WHERE session_id = 'ses_alpha'; UPDATE command_receipts SET project_key = NULL;",
+				"DROP TABLE claude_runner_cursors; DROP TABLE claude_runner_permission_replies; DELETE FROM effect_sql_migrations WHERE migration_id = 89; UPDATE sessions SET project_id = NULL WHERE id = 'ses_alpha'; UPDATE session_sidebar SET project_id = NULL WHERE session_id = 'ses_alpha'; UPDATE events SET project_id = NULL WHERE session_id = 'ses_alpha'; UPDATE command_receipts SET project_key = NULL;",
 			);
 		} finally {
 			seedSetup.close();

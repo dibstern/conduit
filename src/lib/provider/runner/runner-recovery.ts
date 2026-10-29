@@ -1,23 +1,15 @@
 import { Clock, Context, Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
-import { AccountSchema } from "../../contracts/account.js";
-import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
-import type { InputDrafts } from "../../domain/relay/Services/input-drafts.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-} from "../../persistence/effect/claude-event-persist-effect.js";
-import {
-	type CommitAndSignalProject,
 	currentRunnerWriteOrigin,
 	flushPendingWrites,
 	makeUnboundCommitAndSignal,
 } from "../../persistence/effect/commit-and-signal.js";
 import {
-	makeEventStoreEffect,
 	makeUnboundEventStoreEffect,
 	UnboundEventStoreEffectTag,
 } from "../../persistence/effect/event-store-effect.js";
@@ -31,16 +23,12 @@ import {
 } from "../claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
-import { translateProviderRuntimeEventToDomain } from "../provider-runtime-event-to-domain.js";
 import type { TurnResult } from "../types.js";
+import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
-import { createRunnerCursors } from "./runner-receipts.js";
-import {
-	retrySettlementWrite,
-	type SendOutcome,
-	settleSend,
-} from "./send-settlement.js";
+import { retrySettlementWrite } from "./send-settlement.js";
+import { settleSend } from "./send-settlement-outbox.js";
 import type { DurableSessionTurn, SessionFailure } from "./session-runner.js";
 
 /** Same-daemon recovery keeps a row while its exact reactor attempt owns it. */
@@ -49,47 +37,6 @@ export const currentPendingSendOwner = Context.Reference<
 >("conduit/provider/currentPendingSendOwner", {
 	defaultValue: () => undefined,
 });
-
-/** One predicate for legacy provenance, also usable in correlated ledger reads. */
-export const legacyRunnerRunPredicate = (
-	sql: SqlClient.SqlClient,
-	sessionId: string,
-	runId: string | import("effect/sql/Statement").Fragment,
-) => sql`EXISTS (
-	SELECT 1 FROM provider_runs legacy_run
-	WHERE legacy_run.id = ${runId} AND legacy_run.session_id = ${sessionId}
-	AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id
-		AND type = 'run.released' AND json_extract(data, '$.runId') = legacy_run.id)
-	AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id
-		AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id
-		AND json_extract(data, '$.commandId') IS NOT NULL)
-	AND (EXISTS (
-		SELECT 1 FROM claude_runner_cursors legacy_cursor
-		JOIN json_each(CASE WHEN json_valid(legacy_cursor.owned_run_ids)
-			THEN CASE json_type(legacy_cursor.owned_run_ids) WHEN 'array' THEN legacy_cursor.owned_run_ids ELSE '[]' END
-			ELSE '[]' END) cohort
-		JOIN provider_runs legacy_owned ON legacy_owned.id = cohort.value AND legacy_owned.session_id = legacy_cursor.session_id
-		WHERE legacy_cursor.session_id = legacy_run.session_id AND cohort.type = 'text'
-			AND COALESCE(legacy_owned.joined_into, legacy_owned.id) = legacy_run.id
-	) OR EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id AND type = 'run.dispatched'
-		AND json_extract(data, '$.runId') = legacy_run.id AND json_extract(data, '$.commandId') IS NULL)
-		OR (legacy_run.started_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events
-			WHERE session_id = legacy_run.session_id AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id)))
-)`;
-
-export const legacyRunnerRunQuery = (
-	sql: SqlClient.SqlClient,
-	sessionId: string,
-	runId: string,
-) =>
-	createRunnerCursors(sql).pipe(
-		Effect.andThen(
-			sql<{
-				legacy: number;
-			}>`SELECT ${legacyRunnerRunPredicate(sql, sessionId, runId)} AS legacy`,
-		),
-		Effect.map(([row]) => row?.legacy === 1),
-	);
 
 /** Adoption checks durable completion before admitting a retained runner send. */
 export const runnerCommandEnded = (
@@ -219,226 +166,6 @@ export const runningRunnerCommands = (
 						);
 			}
 		return commands;
-	});
-
-/** The outbox adapter appends one terminal; projection settles the command. */
-export const settleRunnerCommandReply = (
-	sql: SqlClient.SqlClient,
-	row: Pick<
-		Effect.Success<ReturnType<typeof runningRunnerCommands>>[number],
-		| "request_sequence"
-		| "project_key"
-		| "session_id"
-		| "command_id"
-		| "attempt_count"
-		| "provider_id"
-		| "run_id"
-		| "payload_json"
-	>,
-	result: TurnResult | undefined,
-	failure: SessionFailure | undefined,
-	now: number,
-	outcome: SendOutcome,
-	options: {
-		readonly project: CommitAndSignalProject;
-		readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
-		readonly userMessageIdForInput?: (
-			driver: string,
-			inputId: string,
-		) => string | undefined;
-		readonly retryAt?: number;
-		readonly inputDrafts?: Pick<InputDrafts, "restoreChange">;
-		readonly afterCommit?: (effect: Effect.Effect<void>) => void;
-		readonly driverKind?: string;
-		readonly processLost?: boolean;
-		readonly covered?: boolean;
-	},
-) =>
-	Effect.gen(function* () {
-		if (!row.run_id) return;
-		const completed = outcome === "succeeded";
-		const retryable = outcome === "retryable";
-		const interrupted = outcome === "cancelled";
-		const code = completed
-			? null
-			: interrupted
-				? "interrupted"
-				: String(
-						failure?.code ??
-							result?.error?.code ??
-							result?.status ??
-							"provider_failure",
-					);
-		const message =
-			failure?.message ?? result?.error?.message ?? code ?? "provider_failure";
-		const payloadResult = !completed
-			? yield* Effect.result(
-					Schema.decodeUnknownEffect(
-						Schema.fromJsonString(
-							Schema.Struct({
-								prompt: Schema.String,
-								text: Schema.optionalKey(Schema.String),
-								inputId: Schema.optionalKey(Schema.String),
-								commandId: Schema.optionalKey(Schema.String),
-								userMessageId: Schema.optionalKey(Schema.String),
-								turnId: Schema.optionalKey(Schema.String),
-								continuation: Schema.optionalKey(Schema.Unknown),
-								account: Schema.optionalKey(AccountSchema),
-								images: Schema.optionalKey(Schema.Array(AttachmentRefSchema)),
-							}),
-						),
-					)(row.payload_json),
-				)
-			: undefined;
-		// An undecodable payload still settles; it only skips the payload's duties.
-		const payload =
-			payloadResult?._tag === "Success" ? payloadResult.success : undefined;
-		// Receipt and terminal stay in this caller-owned transaction.
-		yield* sql`UPDATE command_receipts
-			SET error = ${failure ? JSON.stringify(failure) : result?.error ? JSON.stringify(result.error) : null}
-			WHERE command_id = ${row.command_id} AND project_key = ${row.project_key}
-				AND status = 'side_effect_requested'
-				AND ${row.request_sequence} = (SELECT MAX(request_sequence) FROM provider_command_outbox
-					WHERE command_id = ${row.command_id} AND project_key = ${row.project_key})`;
-		if (completed && result?.providerStateUpdates.length) {
-			const state = yield* makeProviderStateEffect.pipe(
-				Effect.provideService(SqlClient.SqlClient, sql),
-				Effect.provideService(PersistenceProjectTag, {
-					projectId: row.project_key,
-				}),
-			);
-			yield* state.saveUpdates(
-				row.session_id,
-				result.providerStateUpdates.map(({ key, value }) => ({
-					key,
-					value: String(value),
-				})),
-			);
-		}
-		const inputId = payload
-			? payload.continuation === true
-				? (payload.commandId ?? row.command_id)
-				: (payload.inputId ??
-					payload.userMessageId ??
-					payload.commandId ??
-					payload.turnId ??
-					row.command_id)
-			: row.command_id;
-		const [placement] = yield* sql<{
-			placed: number;
-			shown: number;
-			steering: number;
-		}>`SELECT
-			EXISTS (SELECT 1 FROM turns WHERE session_id = ${row.session_id} AND run_id = ${row.run_id}) AS placed,
-			EXISTS (SELECT 1 FROM messages WHERE session_id = ${row.session_id} AND input_id = ${inputId}) AS shown,
-			EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${row.session_id}
-				AND input_id = ${row.command_id} AND state = 'steering') AS steering`;
-		// A failure placed here names its user message, as main's placement did.
-		let placedMessageId: string | undefined;
-		if (
-			payload &&
-			options.persistUserMessage &&
-			!placement?.placed &&
-			(!placement?.steering || code === "send_admission_timeout") &&
-			(!interrupted || options.covered)
-		) {
-			const continuation = payload.continuation;
-			const cutOffMessageId =
-				continuation === true
-					? payload.userMessageId
-					: isRecord(continuation) &&
-							typeof continuation["cutOffMessageId"] === "string"
-						? continuation["cutOffMessageId"]
-						: undefined;
-			const driver = payload.account?.driver ?? row.provider_id;
-			placedMessageId =
-				cutOffMessageId ??
-				options.userMessageIdForInput?.(driver, inputId) ??
-				inputId;
-			yield* options.persistUserMessage(row.session_id, payload.prompt, {
-				projectId: row.project_key,
-				project: options.project,
-				messageId: placedMessageId,
-				inputId,
-				runId: row.run_id,
-				provider: driver,
-				...(payload.images ? { images: payload.images } : {}),
-			});
-		}
-		// Exhaustion returns the text even when an earlier transmission placed it.
-		if (
-			outcome === "permanent" &&
-			payload &&
-			options.inputDrafts &&
-			(code === "provider_send_attempts_exhausted" ||
-				(!placement?.placed && !placement?.shown)) &&
-			!placement?.steering
-		) {
-			const change = options.inputDrafts.restoreChange(
-				{ session: row.session_id },
-				inputId,
-				payload.images ?? [],
-				payload.text ?? payload.prompt,
-				now,
-			);
-			yield* change.write.pipe(Effect.provideService(SqlClient.SqlClient, sql));
-			options.afterCommit?.(change.publish);
-		}
-		const store = yield* makeEventStoreEffect.pipe(
-			Effect.provideService(SqlClient.SqlClient, sql),
-			Effect.provideService(PersistenceProjectTag, {
-				projectId: row.project_key,
-			}),
-		);
-		const { events } = translateProviderRuntimeEventToDomain({
-			eventId: `provider-command-terminal:${row.request_sequence}:${row.attempt_count}`,
-			type: completed
-				? "turn.completed"
-				: interrupted
-					? "turn.interrupted"
-					: "turn.error",
-			providerId: options.processLost
-				? "conduit"
-				: (options.driverKind ?? row.provider_id),
-			sessionId: row.session_id,
-			runId: row.run_id,
-			providerRefs: {},
-			rawSource: {
-				kind: options.processLost
-					? "conduit.session-run-settlement"
-					: "runner.command-reply",
-			},
-			createdAt: now,
-			data: completed
-				? { messageId: `provider-command:${row.command_id}` }
-				: interrupted
-					? { messageId: "", reason: message }
-					: {
-							messageId: options.processLost
-								? ""
-								: (placedMessageId ?? `provider-command:${row.command_id}`),
-							error: message,
-							code,
-							retryable,
-							...(retryable && options.retryAt !== undefined
-								? { retryAt: options.retryAt }
-								: {}),
-						},
-		});
-		const idle = options.processLost
-			? translateProviderRuntimeEventToDomain({
-					eventId: `provider-command-idle:${row.request_sequence}:${row.attempt_count}`,
-					type: "session.status",
-					providerId: "conduit",
-					sessionId: row.session_id,
-					runId: row.run_id,
-					providerRefs: {},
-					rawSource: { kind: "conduit.session-run-settlement" },
-					createdAt: now,
-					data: { sessionId: row.session_id, status: "idle" },
-				}).events
-			: [];
-		yield* options.project(yield* store.appendBatch([...events, ...idle]));
 	});
 
 /** Attached runners claim admissions; live retirement cleanup owns its captured runs. */

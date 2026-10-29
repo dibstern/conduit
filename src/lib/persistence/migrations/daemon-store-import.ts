@@ -155,55 +155,13 @@ const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
 	["turn_recaps", [68, 69, 73]],
 	["sessions_goal_stuck", [69]],
 ]);
-const runnerTables: Readonly<Record<string, string>> = {
-	claude_runner_cursors: `CREATE TABLE claude_runner_cursors (
-		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
-		result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
-		retired_at INTEGER, pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
-		session_id TEXT NOT NULL DEFAULT '', signalled INTEGER NOT NULL DEFAULT 0,
-		driver_kind TEXT NOT NULL DEFAULT 'claude', retirement_state TEXT NOT NULL DEFAULT 'Watching',
-		signal_state TEXT NOT NULL DEFAULT 'None', signal_members TEXT NOT NULL DEFAULT '[]', signal_sent_members TEXT NOT NULL DEFAULT '[]',
-		reaper_pid INTEGER, reaper_start_time TEXT, member_snapshot TEXT NOT NULL DEFAULT '[]', signal_log TEXT NOT NULL DEFAULT '[]',
-		stop_state TEXT NOT NULL DEFAULT 'Requested', stop_reason TEXT NOT NULL DEFAULT 'Provider process stopped', stop_started_at INTEGER,
-		role TEXT NOT NULL DEFAULT 'serving')`,
-	claude_runner_permission_replies: `CREATE TABLE claude_runner_permission_replies (
-		session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
-		PRIMARY KEY (session_id, request_id))`,
-};
-
-// Runner cursor upgrades deliberately live outside the event-store migration
-// ledger. Normalise both the private source copy and the destination before the
-// importer's exact column comparison, retaining old checkpoints and retirements.
-function upgradeRunnerCursorColumns(db: DatabaseSync) {
-	if (!tables(db, "main").includes("claude_runner_cursors")) return;
-	const existing = new Set(
-		columns(db, "main", "claude_runner_cursors").map(({ name }) => name),
-	);
-	for (const [name, ddl] of Object.entries({
-		attachment_id: "TEXT NOT NULL DEFAULT ''",
-		retired_at: "INTEGER",
-		pid: "INTEGER",
-		start_time: "TEXT",
-		owned_run_ids: "TEXT NOT NULL DEFAULT '[]'",
-		session_id: "TEXT NOT NULL DEFAULT ''",
-		signalled: "INTEGER NOT NULL DEFAULT 0",
-		driver_kind: "TEXT NOT NULL DEFAULT 'claude'",
-		retirement_state: "TEXT NOT NULL DEFAULT 'Watching'",
-		signal_state: "TEXT NOT NULL DEFAULT 'None'",
-		signal_members: "TEXT NOT NULL DEFAULT '[]'",
-		signal_sent_members: "TEXT NOT NULL DEFAULT '[]'",
-		reaper_pid: "INTEGER",
-		reaper_start_time: "TEXT",
-		member_snapshot: "TEXT NOT NULL DEFAULT '[]'",
-		signal_log: "TEXT NOT NULL DEFAULT '[]'",
-		stop_state: "TEXT NOT NULL DEFAULT 'Requested'",
-		stop_reason: "TEXT NOT NULL DEFAULT 'Provider process stopped'",
-		stop_started_at: "INTEGER",
-		role: "TEXT NOT NULL DEFAULT 'serving'",
-	}))
-		if (!existing.has(name))
-			db.exec(`ALTER TABLE claude_runner_cursors ADD COLUMN ${name} ${ddl}`);
-}
+// Runner tables the importer copies. Migration 0089 owns claude_runner_cursors;
+// claude_runner_permission_replies is created on first use, so a destination
+// that never ran a runner lacks it.
+const runnerTables = [
+	"claude_runner_cursors",
+	"claude_runner_permission_replies",
+];
 
 // Legacy-only normalization for stores imported before runner slots existed.
 // Delete with the retained-runner compatibility paths in 32.13.
@@ -380,7 +338,7 @@ function verifyStore(
 			![
 				...copiedTables,
 				...singletonTables,
-				...Object.keys(runnerTables),
+				...runnerTables,
 				...retiredTables,
 				"_migrations",
 				"sqlite_stat1",
@@ -663,7 +621,7 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 		.filter(
 			(table) =>
 				copiedTables.some((name) => name === table) ||
-				Object.hasOwn(runnerTables, table),
+				runnerTables.includes(table),
 		)
 		.flatMap((table) =>
 			columns(db, schema, table)
@@ -795,7 +753,7 @@ function collisions(
 ): void {
 	const all = [
 		...copiedTables,
-		...Object.keys(runnerTables).filter((name) => names.includes(name)),
+		...runnerTables.filter((name) => names.includes(name)),
 	];
 	for (const table of all) {
 		if (table === "attachment_blobs") continue;
@@ -916,7 +874,7 @@ function copyProject(
 ): void {
 	for (const table of [
 		...copiedTables,
-		...Object.keys(runnerTables).filter((name) => names.includes(name)),
+		...runnerTables.filter((name) => names.includes(name)),
 	]) {
 		const fields = columns(db, "source", table)
 			.filter(({ hidden }) => hidden === 0)
@@ -1049,17 +1007,16 @@ function importOne(
 		const result = transaction(db, () => {
 			verifyStore(db, "main", project);
 			const names = verifySource(db, "source", project, true);
-			upgradeRunnerCursorColumns(db);
 			// Imported legacy checkpoints can share an empty session id. Restore
 			// the slot index in this same transaction after their one-time backfill.
 			db.exec("DROP INDEX IF EXISTS main.idx_runner_serving_session");
-			for (const [table, ddl] of Object.entries(runnerTables)) {
-				if (!names.includes(table)) continue;
-				if (!tables(db, "main").includes(table)) db.exec(ddl);
-			}
+			if (names.includes("claude_runner_permission_replies"))
+				db.exec(`CREATE TABLE IF NOT EXISTS main.claude_runner_permission_replies (
+					session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
+					PRIMARY KEY (session_id, request_id))`);
 			for (const table of [
 				...copiedTables,
-				...Object.keys(runnerTables).filter((name) => names.includes(name)),
+				...runnerTables.filter((name) => names.includes(name)),
 			]) {
 				if (
 					JSON.stringify(columns(db, "main", table)) !==
@@ -1294,8 +1251,6 @@ function withNormalisedSource(
 									);
 							}
 						}
-						upgradeRunnerCursorColumns(copy);
-						backfillRunnerRoles(copy, configDir);
 					} finally {
 						copy.close();
 					}
@@ -1339,9 +1294,11 @@ function withNormalisedSource(
 							"source-changed",
 							"Source changed during normalisation",
 						);
-					const copy = new DatabaseSync(copyPath, { readOnly: true });
+					const copy = new DatabaseSync(copyPath);
 					try {
 						verifyStore(copy, "main", project);
+						// Migration 0089 has given the copy every cursor column by now.
+						backfillRunnerRoles(copy, configDir);
 					} finally {
 						copy.close();
 					}

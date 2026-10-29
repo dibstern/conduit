@@ -72,10 +72,12 @@ import {
 } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+	isLegacyRunner,
+	legacyRunnerRunQuery,
+} from "../../../src/lib/provider/runner/runner-legacy-classification.js";
 import {
 	type RunnerCommandFailure,
 	type RunnerHello,
@@ -93,7 +95,6 @@ import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { legacyRunnerRunQuery } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registry.js";
 import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
@@ -211,6 +212,8 @@ const retirementFixture = (
 		const replacementGate = { hold: false };
 		const replacementConnecting = yield* Deferred.make<void>();
 		const replacementReady = yield* Deferred.make<void>();
+		// The next original attachment loses its socket during backlog replay.
+		const replayLoss = { armed: false };
 		const driver: ProcessRunnerDriver = {
 			driverKind,
 			legacyPrepareTurnEffect: (input) =>
@@ -275,6 +278,10 @@ const retirementFixture = (
 						destroy: () => destroyed(options.runnerId),
 						write: () => {},
 					} as unknown as RunnerSocket;
+					// A real connection's hello claim records that this runner journals.
+					yield* sql`UPDATE claude_runner_cursors SET journals_before_execution = 1 WHERE runner_id = ${options.runnerId}`.pipe(
+						Effect.orDie,
+					);
 					yield* options.onHello(
 						{
 							type: "hello",
@@ -307,6 +314,12 @@ const retirementFixture = (
 									: [],
 						},
 						connection,
+						replayLoss.armed && options.runnerId === runnerId
+							? Effect.sync(() => {
+									replayLoss.armed = false;
+									Object.assign(connection, { closed: true });
+								})
+							: undefined,
 					);
 					return connection;
 				}),
@@ -338,13 +351,19 @@ const retirementFixture = (
 				processes.get(pid) ?? { state: "gone" as const },
 			signal: () => {},
 		};
+		// A held gate parks every accounts read until the test opens it.
+		const accountsGate: { hold?: Deferred.Deferred<void> } = {};
 		const manager = yield* makeProcessSessionRunner(
 			{
 				daemonConfigDir: root,
-				accounts: Effect.succeed(
-					accountsStateFromInstances(
-						[{ id: "account", driver: driverKind, name: "Account" }],
-						configuredClaudeConfigDir(root),
+				accounts: Effect.suspend(() =>
+					accountsGate.hold ? Deferred.await(accountsGate.hold) : Effect.void,
+				).pipe(
+					Effect.as(
+						accountsStateFromInstances(
+							[{ id: "account", driver: driverKind, name: "Account" }],
+							configuredClaudeConfigDir(root),
+						),
 					),
 				),
 				projectRootForSession: () => Effect.succeed(root),
@@ -418,12 +437,94 @@ const retirementFixture = (
 			replacementGate,
 			replacementConnecting,
 			replacementReady,
+			replayLoss,
+			accountsGate,
 			outputs,
 			retained,
 			background,
 			output,
 		};
 	});
+
+it.effect(
+	"a lost attachment after replay fails the attach, not the retained send",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture(
+					false,
+					undefined,
+					(_accountId, work) => work,
+				);
+				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at)
+					VALUES (1, 'retained', 'test-project', 's', 'account', 'send_turn', '{}', 'running', 0, 1, 1)`;
+				f.replayLoss.armed = true;
+				const recovery = yield* Effect.forkChild(f.manager.recoverEffect);
+				yield* TestClock.adjust("10 seconds");
+				yield* Fiber.join(recovery);
+				expect(f.replayLoss.armed).toBe(false);
+				// Recovery retried the attach and the send stayed live.
+				expect(f.attachments).toHaveLength(2);
+				expect(f.outputs).toEqual([]);
+				expect(f.retained.has("retained")).toBe(true);
+			}),
+		),
+);
+
+it.effect("whole-manager recovery holds upgrades back until it ends", () =>
+	runRetirement(
+		Effect.gen(function* () {
+			const f = yield* retirementFixture(false);
+			const hold = yield* Deferred.make<void>();
+			const connect = vi.mocked(f.driver.connect).getMockImplementation();
+			if (!connect) return yield* Effect.die("missing connect");
+			// The previous build's runner parks recovery's owner-send sweep after it attaches.
+			vi.mocked(f.driver.connect).mockImplementationOnce((options) =>
+				connect({
+					...options,
+					onHello: (hello, connection, replay) =>
+						options
+							.onHello(
+								{ ...hello, buildId: "previous-build" },
+								connection,
+								replay,
+							)
+							.pipe(
+								Effect.tap(() =>
+									Effect.sync(() => {
+										f.accountsGate.hold = hold;
+									}),
+								),
+							),
+				}),
+			);
+			const recovery = yield* Effect.forkChild(f.manager.recoverEffect);
+			yield* TestClock.adjust(0);
+			const old = f.attachments[0];
+			if (!old?.onUpgradeState)
+				return yield* Effect.die("missing upgrade callback");
+			old.onUpgradeState({
+				quiescent: true,
+				revision: 1,
+				snapshot: {
+					input: {
+						...f.input,
+						configDir: configuredClaudeConfigDir(f.root),
+						folderSource: "implicitDefault",
+					},
+					options: {},
+				},
+			});
+			yield* TestClock.adjust("4 seconds");
+			expect(f.attachments).toHaveLength(1);
+			delete f.accountsGate.hold;
+			yield* Deferred.succeed(hold, undefined);
+			yield* Fiber.join(recovery);
+			yield* TestClock.adjust("4 seconds");
+			expect(f.attachments.length).toBeGreaterThan(1);
+		}),
+	),
+);
 
 it.effect(
 	"S7 recovery requeues a missing send without dispatch or visible events",
@@ -998,7 +1099,10 @@ const s7Fixture = (
 							configurable: true,
 							get: () => retained.sendCommands,
 						});
-						return options.onHello(retained, connection, replay);
+						return f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(!isLegacyRunner(retained))} WHERE runner_id = ${options.runnerId}`.pipe(
+							Effect.orDie,
+							Effect.andThen(options.onHello(retained, connection, replay)),
+						);
 					},
 				}),
 			);
@@ -8766,6 +8870,71 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT value FROM provider_state WHERE key = 'nativeThread:account'`,
 				).toEqual([{ value: "old-cursor" }]);
+			}),
+		),
+);
+
+// Failure mode: a key proved while the run was in a legacy cohort settles the run
+// after it has left the cohort, though it was never started or dispatched.
+it.effect(
+	"BC-2 legacy settlement rechecks the legacy predicate, not only the outbox claim",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				const input = yield* f.seed("cohort-left", 1, 0);
+				yield* f.sql`UPDATE provider_command_outbox SET status = 'running', attempt_count = 1`;
+				yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, owned_run_ids)
+					VALUES ('legacy-cohort', 0, 's', ${JSON.stringify([input.runId])})`;
+				const { runningRunnerCommands } = yield* Effect.promise(
+					() => import("../../../src/lib/provider/runner/runner-recovery.js"),
+				);
+				const [row] = yield* runningRunnerCommands(
+					f.sql,
+					"claude",
+					() => "claude",
+					"s",
+				);
+				if (!row) return yield* Effect.die("Missing recovery command");
+				const { LegacySendKey, settleLegacySend } = yield* Effect.promise(
+					() =>
+						import(
+							"../../../src/lib/provider/runner/send-settlement-outbox.js"
+						),
+				);
+				const key = yield* LegacySendKey.prove(f.sql, row);
+				if (!key) return yield* Effect.die("Missing legacy recovery key");
+				yield* f.sql`DELETE FROM claude_runner_cursors WHERE runner_id = 'legacy-cohort'`;
+				expect(yield* legacyRunnerRunQuery(f.sql, "s", input.runId)).toBe(
+					false,
+				);
+				const commit = yield* makeCommitAndSignal;
+				yield* commit.write((project, stamp) =>
+					settleLegacySend(
+						{
+							sql: f.sql,
+							project,
+							stamp,
+							persistUserMessage: f.persist.persistUserMessage,
+						},
+						key,
+						{
+							status: "completed",
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							providerStateUpdates: [],
+						},
+						undefined,
+						2,
+					),
+				);
+				expect(
+					yield* f.sql`SELECT status FROM provider_command_outbox`,
+				).toEqual([{ status: "running" }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed','turn.error','turn.interrupted')`,
+				).toEqual([]);
 			}),
 		),
 );

@@ -79,13 +79,13 @@ import {
 	classify,
 	retrySettlementWrite,
 	type SettlementTx,
-	settleSend,
 	terminalTurnResult,
 } from "./runner/send-settlement.js";
 import {
 	LegacySendKey,
 	settleDirectSend,
 	settleLegacySend,
+	settleSend,
 } from "./runner/send-settlement-outbox.js";
 import type { SessionFailure } from "./runner/session-runner.js";
 import { legacyStopOwnersQuery, stopCovers } from "./session-run-settlement.js";

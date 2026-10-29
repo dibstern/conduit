@@ -9,6 +9,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { RunRelease } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { runnerFailure } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
 	makeRunnerReceiptStore,
@@ -17,7 +18,6 @@ import {
 import {
 	makeRunnerRunLifecycle,
 	makeRunnerStopReconciler,
-	type RunRelease,
 } from "../../../src/lib/provider/runner/runner-retirement.js";
 
 // Failure modes 55-59, 70, 76, 81 and 82 at the Stop and release interfaces:
@@ -120,7 +120,6 @@ const harness = Effect.gen(function* () {
 		released: record("released"),
 		committed: record("committed"),
 		shutdown: record("shutdown"),
-		settle: (retired) => record("settle")(retired).pipe(Effect.as(true)),
 		evict: record("evict"),
 		prune: record("prune"),
 		notice: () => Effect.succeed(true),

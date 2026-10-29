@@ -49,10 +49,8 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import {
-	makeProcessSessionRunner,
-	type ProcessRunnerDriver,
-} from "../../../src/lib/provider/runner/process-session-runner.js";
+import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
+import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import {
 	type RunnerHello,
 	type RunnerSocket,
@@ -68,6 +66,7 @@ import * as runnerRegistry from "../../../src/lib/provider/runner/runner-registr
 import { prepareRunnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import { makeRunnerRunLifecycle } from "../../../src/lib/provider/runner/runner-retirement.js";
 import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
+import * as runnerSends from "../../../src/lib/provider/runner/runner-sends.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -807,6 +806,79 @@ for (const refusalReason of [undefined, "exiting", "retiring"] as const)
 					).toEqual([{ type: "turn.completed" }]);
 				}),
 			),
+	);
+
+// Design A open item 1: only the reconciler's release returns the run's sends
+// to the queue (Sends.released). A lifecycle release that bypasses it, the
+// stored owner's unwritten failure or the refusal of a held send, settles the
+// send in the same commit and requeues nothing, as on main.
+for (const path of ["reconciler", "stored-owner", "refusal"] as const)
+	it.effect(`only the reconciler's release requeues sends: ${path}`, () =>
+		runRetirement(
+			Effect.gen(function* () {
+				const requeued: unknown[] = [];
+				const make = runnerSends.makeRunnerSends;
+				const spy = vi
+					.spyOn(runnerSends, "makeRunnerSends")
+					.mockImplementation((deps) => {
+						const sends = make(deps);
+						const released = sends.released;
+						return Object.assign(sends, {
+							released: (input: Parameters<typeof released>[0]) => {
+								requeued.push(input);
+								released(input);
+							},
+						});
+					});
+				yield* Effect.addFinalizer(() => Effect.sync(() => spy.mockRestore()));
+				const f = yield* s7Fixture("claude");
+				// A running owner with no caller is fed to the stored owner on restart;
+				// its undecodable payload fails before the first byte.
+				yield* f.seed("release", 1, path === "stored-owner" ? 1 : 0, "unheld");
+				if (path === "stored-owner")
+					yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_remove(payload_json, '$.inputId')`;
+				yield* f.recover;
+				let sends = 0;
+				f.replaySend.execute = () =>
+					++sends > 1
+						? Effect.succeed(terminalResult())
+						: Effect.fail(
+								path === "refusal"
+									? {
+											operation: "send-turn",
+											code: "send_admission_timeout",
+											message: "admission timed out",
+											retryable: false,
+										}
+									: {
+											operation: "send-turn",
+											code: "not_sent",
+											message: "no bytes",
+											delivery: { _tag: "NotSent" },
+										},
+							);
+				if (path !== "stored-owner")
+					yield* f.reactor.runOnce().pipe(Effect.forkChild);
+				yield* TestClock.adjust("5 seconds");
+				expect(
+					yield* f.sql`SELECT DISTINCT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ reason: "NotSent" }]);
+				expect(
+					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([
+					path === "reconciler"
+						? { status: "completed", error_code: null }
+						: {
+								status: "failed",
+								error_code:
+									path === "refusal"
+										? "send_admission_timeout"
+										: "invalid_runner_turn",
+							},
+				]);
+				expect(requeued).toHaveLength(path === "reconciler" ? 1 : 0);
+			}),
+		),
 	);
 
 it.effect(

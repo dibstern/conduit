@@ -3,41 +3,12 @@ import { SqlClient } from "effect/sql";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
 import { createEventId } from "../../persistence/events.js";
-import { isRecord } from "../../utils.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
 import type {
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
 } from "./session-runner.js";
-
-export function observeRunnerTurn(
-	output: SessionOutput,
-	turn:
-		| {
-				sessionId: string;
-				runId?: string | undefined;
-				messageId: string;
-		  }
-		| undefined,
-): void {
-	if (
-		output.type !== "event" ||
-		!turn ||
-		output.event.sessionId !== turn.sessionId
-	)
-		return;
-	if (output.event.type === "run.started" && output.event.runId)
-		turn.runId = output.event.runId;
-	if (turn.runId && output.event.runId !== turn.runId) return;
-	if (
-		output.event.type === "message.created" &&
-		isRecord(output.event.data) &&
-		output.event.data["role"] === "assistant" &&
-		!turn.messageId
-	)
-		turn.messageId = String(output.event.data["messageId"]);
-}
 
 /** The same adapter error event, followed by interaction and busy-lease cleanup. */
 export function failRunnerTurn(

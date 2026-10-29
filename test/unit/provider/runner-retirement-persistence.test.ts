@@ -12,6 +12,7 @@ import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/sess
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { makeEffectSqlMigrator } from "../../../src/lib/persistence/effect/migrations.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	makeRunnerReceiptStore,
@@ -104,7 +105,6 @@ it.effect(
 					},
 					committed: () => Effect.void,
 					shutdown: () => Effect.void,
-					settle: () => Effect.succeed(true),
 					evict: () => Effect.void,
 					prune: () => Effect.void,
 					notice: () => Effect.succeed(true),
@@ -348,14 +348,69 @@ for (const status of ["pending", "running"] as const)
 	);
 
 it.effect(
-	"upgrades populated cursors without retiring or losing their checkpoint",
+	"migration 0089 upgrades populated cursors without retiring or losing their checkpoint",
 	() =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
+			// A store from a build before migration 0089, whose table stops at retirement_state.
+			yield* sql`DROP TABLE claude_runner_cursors`;
+			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 89`;
 			yield* sql`CREATE TABLE claude_runner_cursors (
 			runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
-			result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '')`;
-			yield* sql`INSERT INTO claude_runner_cursors VALUES ('runner', 7, '{"children":[]}', 'old')`;
+			result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
+			retired_at INTEGER, pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',
+			session_id TEXT NOT NULL DEFAULT '', signalled INTEGER NOT NULL DEFAULT 0,
+			driver_kind TEXT NOT NULL DEFAULT 'claude', retirement_state TEXT NOT NULL DEFAULT 'Watching')`;
+			yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, result_json, attachment_id) VALUES ('runner', 7, '{"children":[]}', 'old')`;
+			yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, signalled) VALUES ('signalled', 3, 1)`;
+			yield* makeEffectSqlMigrator();
+			expect(
+				(yield* sql<{
+					name: string;
+				}>`PRAGMA table_info(claude_runner_cursors)`).map(({ name }) => name),
+			).toEqual([
+				"runner_id",
+				"sequence",
+				"result_json",
+				"attachment_id",
+				"retired_at",
+				"pid",
+				"start_time",
+				"owned_run_ids",
+				"session_id",
+				"signalled",
+				"driver_kind",
+				"retirement_state",
+				"signal_state",
+				"signal_members",
+				"signal_sent_members",
+				"reaper_pid",
+				"reaper_start_time",
+				"member_snapshot",
+				"signal_log",
+				"stop_state",
+				"stop_reason",
+				"stop_started_at",
+				"role",
+				"journals_before_execution",
+			]);
+			expect(
+				yield* sql`SELECT runner_id, signal_state, role, journals_before_execution FROM claude_runner_cursors ORDER BY runner_id`,
+			).toEqual([
+				{
+					runner_id: "runner",
+					signal_state: "None",
+					role: "serving",
+					journals_before_execution: null,
+				},
+				{
+					runner_id: "signalled",
+					signal_state: "KillSent",
+					role: "serving",
+					journals_before_execution: null,
+				},
+			]);
+			yield* sql`DELETE FROM claude_runner_cursors WHERE runner_id = 'signalled'`;
 			const receipts = yield* makeRunnerReceiptStore(sql);
 			expect(yield* receipts.attach("runner", "new", retirement)).toEqual({
 				sequence: 7,
