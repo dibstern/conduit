@@ -15,6 +15,7 @@ import fs, {
 	mkdtempSync,
 	rmSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import fsPromises from "node:fs/promises";
@@ -79,6 +80,7 @@ import {
 	withPublishedProjectGit,
 } from "../../../src/lib/persistence/effect/session-git-publication.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
 
 const gitCommand = (directory: string, ...args: string[]) =>
 	execFileSync("git", args, {
@@ -222,6 +224,25 @@ const fixture = (extraFolders = false, linked = false) =>
 		};
 	});
 
+const projectDelivery = () => {
+	const delivery = new EventDelivery();
+	delivery.view({
+		sessions: new Set(),
+		projects: new Set(["project"]),
+		ptys: new Map(),
+	});
+	return delivery;
+};
+const viewedDelivery = () => {
+	const delivery = projectDelivery();
+	delivery.view({
+		sessions: new Set(["one"]),
+		projects: new Set(["project"]),
+		ptys: new Map(),
+	});
+	return delivery;
+};
+
 const settle = Effect.gen(function* () {
 	yield* TestClock.adjust(100);
 	yield* Effect.tryPromise(
@@ -294,6 +315,91 @@ const waitForDirty = <E, R>(
 const eventTimeout = 20_000;
 
 describe("daemon session git", { timeout: 60_000 }, () => {
+	// Failure modes: RPC names create demand; releasing a connection leaves polling;
+	// already-dirty edits with identical counts vanish; timestamp-only touches publish;
+	// explicit writes wait for cadence. Use the module with real git and Interests.
+	it.effect(
+		"refreshes equal-count edits only while connection Interests cover the folder",
+		() =>
+			Effect.gen(function* () {
+				const f = yield* fixture(false, true);
+				const path = join(f.workspaceDirectory, "tracked");
+				writeFileSync(path, "first\n");
+				const first = yield* f.service.read("one");
+				yield* settle;
+				yield* waitForIdle(f.metrics);
+				const delivery = new EventDelivery();
+				const release = f.activity.watchInterests(delivery);
+				delivery.view({
+					sessions: new Set(["one"]),
+					projects: new Set(["project"]),
+					ptys: new Map(),
+				});
+				const updates: number[] = [];
+				yield* f.service.changes.pipe(
+					Stream.runForEach((change) =>
+						Effect.sync(() => {
+							updates.push(change.version);
+						}),
+					),
+					Effect.forkScoped,
+				);
+				utimesSync(path, new Date(), new Date());
+				const before = (yield* f.metrics).spawnCount;
+				yield* TestClock.adjust(5_100);
+				yield* settle;
+				yield* waitForSpawns(f.metrics, before + dirtyRefresh);
+				expect(updates).toEqual([]);
+				writeFileSync(path, "other\n");
+				yield* TestClock.adjust(5_100);
+				yield* settle;
+				yield* waitForSpawns(f.metrics, before + 2 * dirtyRefresh);
+				const second = yield* f.service.read("one");
+				expect(second?.changes).toEqual(first?.changes);
+				expect(second?.fingerprint).not.toBe(first?.fingerprint);
+				expect(updates).toHaveLength(1);
+				release();
+				const closed = (yield* f.metrics).spawnCount;
+				writeFileSync(path, "third\n");
+				yield* withReadRequest(f.service.read("one"), "SubscribeShell");
+				yield* TestClock.adjust(120_000);
+				yield* settle;
+				yield* waitForIdle(f.metrics);
+				expect((yield* f.metrics).spawnCount).toBe(closed);
+				// A single project Interest also keeps linked Effective Folders fresh.
+				// The bounded safety net can visit the older project root first.
+				f.activity.watchInterests(projectDelivery());
+				yield* TestClock.adjust(30_100);
+				yield* settle;
+				yield* waitForIdle(f.metrics);
+				yield* TestClock.adjust(20_100);
+				yield* settle;
+				yield* waitForIdle(f.metrics);
+				expect((yield* f.service.read("one"))?.fingerprint).not.toBe(
+					second?.fingerprint,
+				);
+			}),
+	);
+	it.effect(
+		"invalidates WorkingTreeEdits writes immediately within the hint throttle",
+		() =>
+			Effect.gen(function* () {
+				const f = yield* fixture();
+				yield* f.service.read("one");
+				yield* settle;
+				yield* waitForIdle(f.metrics);
+				const before = (yield* f.metrics).spawnCount;
+				writeFileSync(join(f.repository, "tracked"), "changed");
+				yield* f.service.invalidate({ directory: f.repository });
+				yield* settle;
+				yield* waitForSpawns(f.metrics, before + dirtyRefresh);
+				expect((yield* f.service.read("one"))?.dirty).toBe(true);
+				writeFileSync(join(f.repository, "tracked"), "another");
+				yield* f.service.invalidate({ directory: f.repository });
+				yield* settle;
+				yield* waitForSpawns(f.metrics, before + 2 * dirtyRefresh);
+			}),
+	);
 	it.effect("leaves a dormant probed repository idle without spawns", () =>
 		Effect.gen(function* () {
 			const f = yield* fixture();
@@ -368,13 +474,13 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				writeFileSync(join(f.repository, ".git", "index"), index);
 				rmSync(dirty);
 				for (let index = 0; index < 30; index++)
-					yield* f.service.invalidate({ directory: f.repository });
+					yield* f.service.invalidate({ sessionId: "one" });
 				yield* TestClock.adjust(1_000);
 				yield* settle;
 				expect((yield* f.metrics).spawnCount - before.spawnCount).toBe(
 					dirtyRefresh,
 				);
-				yield* f.service.invalidate({ directory: f.repository });
+				yield* f.service.invalidate({ sessionId: "one" });
 				yield* TestClock.adjust(1_000);
 				yield* settle;
 				yield* waitForSpawns(f.metrics, before.spawnCount + dirtyRefresh + 1);
@@ -389,7 +495,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				const f = yield* fixture();
 				mkdirSync(join(f.repository, "nested"));
 				yield* f.service.read("one");
-				f.activity.viewers.set("one", 1);
+				f.activity.watchInterests(viewedDelivery());
 				f.activity.changed("one");
 				yield* settle;
 				const before = (yield* f.metrics).spawnCount;
@@ -634,6 +740,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				mkdirSync(join(f.repository, "nested"));
 				yield* f.service.read("one");
 				yield* settle;
+				f.activity.watchInterests(projectDelivery());
 				yield* withReadRequest(f.service.read("one"), "ListSessions");
 				yield* TestClock.adjust(300);
 				yield* settle;
@@ -787,6 +894,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 			yield* settle;
 			yield* waitForIdle(f.metrics);
 			const warm = yield* f.metrics;
+			f.activity.watchInterests(projectDelivery());
 			yield* withReadRequest(f.service.read("shared"), "SubscribeShell");
 			expect((yield* f.metrics).spawnCount - warm.spawnCount).toBe(0);
 			yield* TestClock.adjust(300);
@@ -817,6 +925,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 					.toBe(1),
 			);
 			const queued = yield* f.metrics;
+			f.activity.watchInterests(projectDelivery());
 			yield* withReadRequest(f.service.read("one"), "ListSessions");
 			yield* withReadRequest(f.service.read("shared"), "SubscribeShell");
 			expect((yield* f.metrics).spawnCount).toBe(queued.spawnCount);
@@ -868,7 +977,8 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 							.toBe(1),
 					);
 					const hint = f.service.invalidate({ directory: f.repository });
-					const listed = withReadRequest(hint, "GetProjects");
+					f.activity.watchInterests(projectDelivery());
+					const listed = withReadRequest(Effect.void, "GetProjects");
 					yield* hintFirst ? hint : listed;
 					yield* hintFirst ? listed : hint;
 					yield* TestClock.adjust(300);
@@ -961,6 +1071,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				yield* TestClock.adjust(60_000);
 				yield* settle;
 				expect((yield* f.metrics).spawnCount).toBe(dormant);
+				f.activity.watchInterests(projectDelivery());
 				yield* withReadRequest(f.service.read("one"), "ListSessions");
 				yield* TestClock.adjust(300);
 				yield* settle;
@@ -973,7 +1084,7 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				yield* settle;
 				yield* waitForSpawns(f.metrics, leading + 1);
 				expect(yield* f.service.read("one")).toMatchObject({ dirty: false });
-				f.activity.viewers.set("one", 1);
+				f.activity.watchInterests(viewedDelivery());
 				f.activity.changed("one");
 				yield* settle;
 				yield* waitForIdle(f.metrics);
@@ -981,7 +1092,8 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				yield* TestClock.adjust(5_000);
 				yield* settle;
 				yield* waitForSpawns(f.metrics, viewed + 1);
-				f.activity.viewers.delete("one");
+				f.activity.connectionInterests.clear();
+				f.activity.watchInterests(projectDelivery());
 				f.activity.changed("one");
 				yield* f.commit([
 					canonicalEvent("session.status", "one", {

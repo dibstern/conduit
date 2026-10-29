@@ -2,24 +2,33 @@ import { execFileSync, spawnSync } from "node:child_process";
 import {
 	mkdirSync,
 	mkdtempSync,
+	readFileSync,
 	realpathSync,
 	rmSync,
 	symlinkSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { Effect } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-	invalidateSessionGitRepository,
-	readSessionGit,
-} from "../../../src/lib/domain/daemon/Layers/session-git/git-reader.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeSessionGitReader } from "../../../src/lib/domain/daemon/Layers/session-git/git-reader.js";
 import {
 	makeSubprocess,
 	Subprocess,
 } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import { hasNoCommitsBeyondDefault } from "../../../src/lib/git/worktrees.js";
+
+let readSessionGit: ReturnType<typeof makeSessionGitReader>["read"];
+let invalidateSessionGitRepository: ReturnType<
+	typeof makeSessionGitReader
+>["invalidate"];
+beforeEach(() => {
+	const reader = makeSessionGitReader();
+	readSessionGit = reader.read;
+	invalidateSessionGitRepository = reader.invalidate;
+});
 
 const roots: string[] = [];
 const owners: ReturnType<typeof makeSubprocess>[] = [];
@@ -83,6 +92,89 @@ afterEach(async () => {
 });
 
 describe("readSessionGit", () => {
+	// Fingerprints must detect equal-count content edits, including untracked,
+	// renamed and oddly named files, without reacting to timestamps or writing git.
+	it.each([
+		"tracked",
+		"untracked",
+		"renamed",
+		"symlink",
+		"submodule",
+		"embedded",
+	])("fingerprints %s content without publishing a file list or changing the index", async (kind) => {
+		const directory = repo();
+		commit(directory, "tracked");
+		const name = ["submodule", "embedded"].includes(kind)
+			? "module"
+			: "space \tline\nfile";
+		if (["submodule", "embedded"].includes(kind)) {
+			const source = repo();
+			commit(source, "content");
+			if (kind === "submodule")
+				git(
+					directory,
+					"-c",
+					"protocol.file.allow=always",
+					"submodule",
+					"add",
+					"-q",
+					source,
+					name,
+				);
+			else git(directory, "clone", "-q", source, name);
+		}
+		if (kind === "renamed") git(directory, "mv", "tracked", name);
+		const path = join(
+			directory,
+			kind === "tracked" ? "tracked" : name,
+			...(["submodule", "embedded"].includes(kind) ? ["content"] : []),
+		);
+		if (kind === "symlink") symlinkSync("first-target", path);
+		else writeFileSync(path, "first\n");
+		const index = readFileSync(join(directory, ".git", "index"));
+		const first = await readSessionGit(directory);
+		expect(first).toHaveProperty(
+			"fingerprint",
+			expect.stringMatching(/^[a-f0-9]{64}$/),
+		);
+		if (kind === "symlink") {
+			rmSync(path);
+			symlinkSync("other-target", path);
+		} else writeFileSync(path, "other\n");
+		const second = await readSessionGit(directory);
+		expect(second?.changes).toEqual(first?.changes);
+		expect(second).not.toHaveProperty("fingerprint", first?.fingerprint);
+		if (kind !== "symlink") utimesSync(path, new Date(), new Date());
+		expect(await readSessionGit(directory)).toEqual(second);
+		expect(readFileSync(join(directory, ".git", "index"))).toEqual(index);
+		expect(second).not.toHaveProperty("files");
+	});
+	it.each([
+		"before",
+		"after status",
+	])("stops a cancelled read %s subprocess work", async (when) => {
+		const directory = repo();
+		commit(directory, "tracked");
+		writeFileSync(join(directory, "tracked"), "dirty");
+		const { owner, runner } = subprocess();
+		const controller = new AbortController();
+		if (when === "before") controller.abort();
+		const read = await readSessionGit(
+			directory,
+			undefined,
+			async (...args) => {
+				const answer = await runner(...args);
+				controller.abort();
+				return answer;
+			},
+			controller.signal,
+		);
+		expect(read).toBeUndefined();
+		expect(Effect.runSync(owner.metrics).spawnCount).toBe(
+			when === "before" ? 0 : 1,
+		);
+	});
+
 	// Failure modes: HEAD lives in a gitfile/commondir or packed ref; unborn and
 	// detached heads differ; a cache misses external ref changes or crosses repos;
 	// unusual ref storage needs git.
@@ -321,6 +413,7 @@ describe("readSessionGit", () => {
 		const head = commit(directory, "initial");
 		git(directory, "checkout", "--detach", "-q");
 		expect(await readSessionGit(directory)).toEqual({
+			fingerprint: expect.any(String),
 			head,
 			oid: git(directory, "rev-parse", "HEAD"),
 			dirty: false,
@@ -649,6 +742,7 @@ describe("readSessionGit", () => {
 	});
 	it("reads an empty repository without a head", async () => {
 		expect(await readSessionGit(repo())).toEqual({
+			fingerprint: expect.any(String),
 			branch: "main",
 			dirty: false,
 		});
@@ -659,6 +753,7 @@ describe("readSessionGit", () => {
 		git(directory, "add", "staged");
 		writeFileSync(join(directory, "untracked"), "untracked\n");
 		expect(await readSessionGit(directory)).toEqual({
+			fingerprint: expect.any(String),
 			branch: "main",
 			dirty: true,
 			changes: { files: 2, insertions: 0, deletions: 0 },

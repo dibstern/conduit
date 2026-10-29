@@ -86,7 +86,6 @@ interface Membership {
 	readonly workspace: SessionWorkspace | null;
 	readonly directories: readonly CanonicalDirectory[];
 	running: boolean;
-	listedUntil: number;
 }
 interface DirectoryState {
 	readonly directory: CanonicalDirectory;
@@ -105,7 +104,6 @@ interface DirectoryState {
 	lastRead: number;
 	lastHintRead: number;
 	lastProbe: number;
-	listedUntil: number;
 	present: boolean | undefined;
 	hinted: boolean;
 	/** A hint arrived since presence was last checked. */
@@ -141,11 +139,7 @@ export const makeSessionGit = Effect.gen(function* () {
 	const sessions = new Map<string, Membership>();
 	const pendingSessions = new Set<string>();
 	const pendingReads = new Set<string>();
-	const pendingListed = new Map<string, number>();
-	const pendingDirectories = new Map<
-		CanonicalDirectory,
-		{ listedUntil: number; invalidated: boolean }
-	>();
+	const pendingDirectories = new Set<CanonicalDirectory>();
 	let readQuietUntil = 0;
 	let lastSafetyNet = Number.NEGATIVE_INFINITY;
 	const decodeWorkspace = Schema.decodeUnknownOption(
@@ -220,16 +214,22 @@ export const makeSessionGit = Effect.gen(function* () {
 		});
 	}
 
-	const tier = (entry: DirectoryState, now: number): Tier => {
-		let listed = entry.listedUntil > now;
+	const tier = (entry: DirectoryState): Tier => {
+		if (Option.isNone(activity)) return "dormant";
+		const interests = [...activity.value.connectionInterests.values()];
+		let listed = interests.some((view) =>
+			[...entry.rootProjects].some((id) => view.projects.has(id)),
+		);
 		let running = false;
 		for (const id of entry.sessions) {
 			const session = sessions.get(id);
 			if (!session) continue;
-			if (Option.isSome(activity) && (activity.value.viewers.get(id) ?? 0) > 0)
-				return "viewed";
-			running ||= session.running;
-			listed ||= session.listedUntil > now;
+			const viewers = interests.filter((view) =>
+				view.projects.has(session.projectId),
+			);
+			if (viewers.some((view) => view.sessions.has(id))) return "viewed";
+			listed ||= viewers.length > 0;
+			running ||= viewers.length > 0 && session.running;
 		}
 		return running ? "running" : listed ? "listed" : "dormant";
 	};
@@ -430,7 +430,6 @@ export const makeSessionGit = Effect.gen(function* () {
 				lastRead: Number.NEGATIVE_INFINITY,
 				lastHintRead: Number.NEGATIVE_INFINITY,
 				lastProbe: Number.NEGATIVE_INFINITY,
-				listedUntil: 0,
 				present: undefined,
 				hinted: false,
 				presenceUnchecked: false,
@@ -560,7 +559,6 @@ export const makeSessionGit = Effect.gen(function* () {
 					workspace,
 					directories: keys,
 					running: row.status === "busy" || row.status === "retry",
-					listedUntil: previous?.listedUntil ?? 0,
 				};
 				yield* owner.acquire<void, never, never>(
 					Effect.acquireRelease(
@@ -673,13 +671,8 @@ export const makeSessionGit = Effect.gen(function* () {
 								reader.read(
 									entry.directory,
 									entry.git,
-									(command, args, options) =>
-										runner(
-											command,
-											args,
-											{ ...options, priority: "background" },
-											AbortSignal.any([signal, entry.abort.signal]),
-										),
+									runner,
+									AbortSignal.any([signal, entry.abort.signal]),
 								),
 							catch: (cause) => cause,
 						})
@@ -827,15 +820,9 @@ export const makeSessionGit = Effect.gen(function* () {
 				yield* checkPresence(entry);
 			}
 		const now = yield* Clock.currentTimeMillis;
-		for (const [key, { listedUntil, invalidated }] of pendingDirectories) {
-			if (listedUntil > 0 && now < readQuietUntil) continue;
+		for (const key of pendingDirectories) {
 			const entry = directories.get(key);
-			if (entry) {
-				entry.listedUntil = Math.max(entry.listedUntil, listedUntil);
-				// Stale published state is the schedule's job: refreshing every stale
-				// folder a list read touches would turn one sidebar read into a burst.
-				if (invalidated || (!entry.queued && !entry.published)) request(entry);
-			}
+			if (entry) request(entry, true);
 			pendingDirectories.delete(key);
 		}
 		const hints = new Set(pendingSessions);
@@ -845,18 +832,12 @@ export const makeSessionGit = Effect.gen(function* () {
 		for (const id of new Set([...hints, ...reads])) {
 			const session = yield* attach(id);
 			if (session) {
-				session.listedUntil = Math.max(
-					session.listedUntil,
-					pendingListed.get(id) ?? 0,
-				);
-				pendingListed.delete(id);
 				for (const key of session.directories) {
 					const entry = directories.get(key);
 					if (entry && (hints.has(id) || (!entry.queued && !entry.published)))
 						request(entry);
 				}
 			}
-			pendingListed.delete(id);
 		}
 		if (pendingReads.size === 0 && pendingDirectories.size === 0)
 			readQuietUntil = 0;
@@ -867,7 +848,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				entry.queued
 			)
 				continue;
-			const currentTier = tier(entry, now);
+			const currentTier = tier(entry);
 			const interval = intervals[currentTier];
 			if (
 				entry.forced ||
@@ -909,7 +890,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						if (
 							entry.projects.size === 0 ||
 							entry.abort.signal.aborted ||
-							now - entry.lastProbe < probeIntervals[tier(entry, now)]
+							now - entry.lastProbe < probeIntervals[tier(entry)]
 						)
 							continue;
 						entry.lastProbe = now;
@@ -1004,8 +985,6 @@ export const makeSessionGit = Effect.gen(function* () {
 				if (readRequest !== undefined) {
 					pendingReads.add(sessionId);
 					if (readQuietUntil === 0) readQuietUntil = now + 250;
-					if (/List|Shell/.test(readRequest))
-						pendingListed.set(sessionId, now + 60_000);
 					for (const key of sessions.get(sessionId)?.directories ?? []) {
 						const entry = directories.get(key);
 						if (entry) yield* checkPresence(entry);
@@ -1025,7 +1004,7 @@ export const makeSessionGit = Effect.gen(function* () {
 						request(entry, true);
 						yield* enqueue(entry);
 						yield* Deferred.await(entry.first);
-					} else if (now - entry.lastRead >= intervals[tier(entry, now)])
+					} else if (now - entry.lastRead >= intervals[tier(entry)])
 						request(entry);
 				}
 				return yield* readPublishedSessionGit(sessionId).pipe(
@@ -1041,21 +1020,10 @@ export const makeSessionGit = Effect.gen(function* () {
 			),
 		changes: Stream.fromPubSub(changes),
 		invalidate: (target) =>
-			Effect.gen(function* () {
+			Effect.sync(() => {
 				if ("directory" in target) {
 					const key = canonicalDirectory(target.directory);
-					const marker = yield* ReadRequest;
-					const listedUntil =
-						marker === "GetProjects"
-							? (yield* Clock.currentTimeMillis) + 60_000
-							: 0;
-					if (listedUntil > 0 && readQuietUntil === 0)
-						readQuietUntil = listedUntil - 60_000 + 250;
-					const pending = pendingDirectories.get(key);
-					pendingDirectories.set(key, {
-						listedUntil: Math.max(pending?.listedUntil ?? 0, listedUntil),
-						invalidated: pending?.invalidated === true || listedUntil === 0,
-					});
+					pendingDirectories.add(key);
 					return;
 				}
 				pendingSessions.add(target.sessionId);

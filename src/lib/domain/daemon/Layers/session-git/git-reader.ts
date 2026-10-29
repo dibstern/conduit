@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import {
+	createReadStream,
 	existsSync,
 	lstatSync,
 	readFileSync,
 	realpathSync,
 	statSync,
 } from "node:fs";
+import { lstat, readlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { SessionGit } from "../../../../shared-types.js";
 import {
@@ -13,6 +16,13 @@ import {
 } from "../../Services/subprocess.js";
 
 const GIT_COMMAND_TIMEOUT_MS = 2_000;
+const statusArgs = [
+	"status",
+	"--porcelain=v2",
+	"--branch",
+	"-z",
+	"--untracked-files=all",
+];
 const DEFAULT_REFS = [
 	"refs/remotes/origin/HEAD",
 	"refs/heads/main",
@@ -23,6 +33,7 @@ const execGit = (
 	directory: string,
 	runner: SubprocessRunner,
 	args: string[],
+	signal?: AbortSignal,
 ): Promise<string> => {
 	const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
 	for (const key of [
@@ -32,12 +43,17 @@ const execGit = (
 		"GIT_COMMON_DIR",
 	])
 		delete env[key];
-	return runner("git", ["--no-optional-locks", ...args], {
-		cwd: directory,
-		timeoutMs: GIT_COMMAND_TIMEOUT_MS,
-		priority: "background",
-		env,
-	}).then(({ stdout, stderr, exitCode }) => {
+	return runner(
+		"git",
+		["--no-optional-locks", ...args],
+		{
+			cwd: directory,
+			timeoutMs: GIT_COMMAND_TIMEOUT_MS,
+			priority: "background",
+			env,
+		},
+		signal,
+	).then(({ stdout, stderr, exitCode }) => {
 		if (exitCode !== 0)
 			throw Object.assign(new Error(stderr || `git exited ${exitCode}`), {
 				code: exitCode,
@@ -71,13 +87,16 @@ const operationAt = (gitDir: string): SessionGit["operation"] => {
 	return undefined;
 };
 
+const ignoreMissingFile = (error: NodeJS.ErrnoException): undefined => {
+	if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+	throw error;
+};
+
 const readOptional = (path: string): string | undefined => {
 	try {
 		return readFileSync(path, "utf8").trim();
 	} catch (error) {
-		const code = (error as NodeJS.ErrnoException).code;
-		if (code === "ENOENT" || code === "ENOTDIR") return undefined;
-		throw error;
+		return ignoreMissingFile(error as NodeJS.ErrnoException);
 	}
 };
 
@@ -184,15 +203,83 @@ const readGitFiles = (directory: string) => {
 		const headPath = join(gitDir, "HEAD");
 		if (!lstatSync(headPath).isFile()) return undefined;
 		const head = readFileSync(headPath, "utf8").trim();
-		if (isOid(head)) return { gitDir, common, oid: head, branch: undefined };
+		if (isOid(head))
+			return { root, gitDir, common, oid: head, branch: undefined };
 		if (!head.startsWith("ref: refs/heads/")) return undefined;
 		const ref = head.slice(5);
 		const oid = readRef(common, ref);
 		if (oid === null) return undefined;
-		return { gitDir, common, oid, branch: ref.slice(11) };
+		return { root, gitDir, common, oid, branch: ref.slice(11) };
 	} catch {
 		return undefined;
 	}
+};
+
+const porcelainEntries = (status: string) => {
+	// Rename records have a second NUL-delimited path, never another entry.
+	const lines: string[] = [];
+	const records = status.split("\0");
+	for (let i = 0; i < records.length; i++) {
+		const record = records[i] ?? "";
+		lines.push(record);
+		if (record.startsWith("2 ")) i++;
+	}
+	return lines;
+};
+
+// Status has index OIDs but no working-tree OIDs. Dirty bytes distinguish
+// repeated equal-count edits; timestamps and filesystem identities do not.
+const dirtyContentFingerprint = async (
+	file: string,
+	runner: SubprocessRunner,
+	signal: AbortSignal,
+): Promise<Buffer> => {
+	signal.throwIfAborted();
+	const info = await lstat(file).catch(ignoreMissingFile);
+	signal.throwIfAborted();
+	const content = createHash("sha256");
+	if (info?.isSymbolicLink()) content.update(await readlink(file));
+	else if (info?.isFile())
+		for await (const chunk of createReadStream(file, {
+			signal,
+		}))
+			content.update(chunk);
+	else if (info?.isDirectory()) {
+		const status = await execGit(file, runner, statusArgs, signal);
+		content.update(
+			await porcelainFingerprint(
+				file,
+				status,
+				porcelainEntries(status),
+				runner,
+				signal,
+			),
+		);
+	}
+	signal.throwIfAborted();
+	return content.digest();
+};
+
+const porcelainFingerprint = async (
+	root: string,
+	status: string,
+	lines: readonly string[],
+	runner: SubprocessRunner,
+	signal: AbortSignal,
+): Promise<string> => {
+	const fingerprint = createHash("sha256").update(status);
+	for (const line of lines) {
+		signal.throwIfAborted();
+		const path =
+			/^(?:1 (?:\S+ ){7}|2 (?:\S+ ){8}|u (?:\S+ ){9}|\? )([\s\S]*)$/.exec(
+				line,
+			)?.[1];
+		if (path !== undefined)
+			fingerprint.update(
+				await dirtyContentFingerprint(join(root, path), runner, signal),
+			);
+	}
+	return fingerprint.digest("hex");
 };
 
 export const makeSessionGitReader = () => {
@@ -263,20 +350,26 @@ export const makeSessionGitReader = () => {
 		directory: string,
 		previous?: SessionGit,
 		runner: SubprocessRunner = makeSubprocessRunner(),
+		signal: AbortSignal = new AbortController().signal,
 	): Promise<SessionGit | undefined> {
 		try {
+			signal.throwIfAborted();
+			const run: SubprocessRunner = (command, args, options, requestSignal) =>
+				runner(
+					command,
+					args,
+					options,
+					requestSignal ? AbortSignal.any([signal, requestSignal]) : signal,
+				);
 			// Fails outside a work tree. A huge change list can outgrow maxBuffer; the
 			// branch headers come first and one entry marks it dirty, so keep the cut output.
-			const status = await execGit(directory, runner, [
-				"status",
-				"--porcelain=v2",
-				"--branch",
-				"--untracked-files=all",
-			]).catch((error: { reason?: string; stdout?: string }) =>
-				error.reason === "output-limit" ? error.stdout : undefined,
+			const status = await execGit(directory, run, statusArgs).catch(
+				(error: { reason?: string; stdout?: string }) =>
+					error.reason === "output-limit" ? error.stdout : undefined,
 			);
 			if (status === undefined) return undefined;
-			const lines = status.split("\n");
+			signal.throwIfAborted();
+			const lines = porcelainEntries(status);
 			const header = (key: string) =>
 				lines
 					.find((line) => line.startsWith(`# ${key} `))
@@ -295,20 +388,21 @@ export const makeSessionGitReader = () => {
 					? files
 					: undefined;
 			const dirs = fast
-				? [fast.gitDir, fast.common, fast.oid?.slice(0, 7)]
+				? [fast.gitDir, fast.common, fast.root, fast.oid?.slice(0, 7)]
 				: (
 						await git(
 							directory,
-							runner,
+							run,
 							"rev-parse",
 							"--absolute-git-dir",
 							"--git-common-dir",
+							"--show-toplevel",
 							...(born ? ["--short", "HEAD"] : []),
 						)
 					)?.split("\n");
 			if (!dirs) return undefined;
-			const [gitDir, commonDir, head] = dirs;
-			if (!gitDir || !commonDir) return undefined;
+			const [gitDir, commonDir, root, head] = dirs;
+			if (!gitDir || !commonDir || !root) return undefined;
 			const common = isAbsolute(commonDir)
 				? resolve(commonDir)
 				: resolve(directory, commonDir);
@@ -320,9 +414,16 @@ export const makeSessionGitReader = () => {
 			const counts = header("branch.ab")?.match(/^\+(\d+) -(\d+)$/);
 			const upstream = header("branch.upstream");
 			const changed = lines.filter((line) => /^[12u?] /.test(line)).length;
+			const fingerprint = await porcelainFingerprint(
+				root,
+				status,
+				lines,
+				run,
+				AbortSignal.any([signal, AbortSignal.timeout(GIT_COMMAND_TIMEOUT_MS)]),
+			);
 			const shortstat =
 				changed && born
-					? await git(directory, runner, "diff", "HEAD", "--shortstat", "--")
+					? await git(directory, run, "diff", "HEAD", "--shortstat", "--")
 					: undefined;
 			const result: SessionGit = {
 				...(branch ? { branch } : {}),
@@ -331,6 +432,7 @@ export const makeSessionGitReader = () => {
 				...(upstream ? { upstream } : {}),
 				...(worktree ? { worktree } : {}),
 				dirty: changed > 0,
+				fingerprint,
 				// Untracked files add no lines; changed is a lower bound if status hit the output limit.
 				...(changed
 					? {
@@ -349,11 +451,7 @@ export const makeSessionGitReader = () => {
 				...(operation ? { operation } : {}),
 			};
 			if (!branch) return result;
-			const defaultBranches = await defaultRefs(
-				directory,
-				runner,
-				fast?.common,
-			);
+			const defaultBranches = await defaultRefs(directory, run, fast?.common);
 			if (defaultBranches.length === 0) return result;
 			if (
 				defaultBranches.some(
@@ -378,7 +476,7 @@ export const makeSessionGitReader = () => {
 			if (unmerged?.get(gitDir) === key) return { ...result, merged: false };
 			const containingDefaults: string[] = [];
 			for (const ref of defaultBranches) {
-				const ancestor = await execGit(directory, runner, [
+				const ancestor = await execGit(directory, run, [
 					"merge-base",
 					"--is-ancestor",
 					tip,
@@ -407,7 +505,7 @@ export const makeSessionGitReader = () => {
 				};
 			const reflog = await git(
 				directory,
-				runner,
+				run,
 				"reflog",
 				"show",
 				"--format=%H %gD",
@@ -429,14 +527,14 @@ export const makeSessionGitReader = () => {
 				for (const ref of containingDefaults) {
 					const previousDefault = await git(
 						directory,
-						runner,
+						run,
 						"rev-parse",
 						"--verify",
 						"-q",
 						`${ref}@{${createdAt}}`,
 					);
 					const base = previousDefault
-						? await git(directory, runner, "merge-base", tip, previousDefault)
+						? await git(directory, run, "merge-base", tip, previousDefault)
 						: undefined;
 					merged = base !== undefined && base !== tip;
 					if (merged) break;
@@ -452,7 +550,7 @@ export const makeSessionGitReader = () => {
 				for (const ref of containingDefaults) {
 					const ancestry = await git(
 						directory,
-						runner,
+						run,
 						"log",
 						"--ancestry-path",
 						"--format=%H %ct %P",
@@ -474,7 +572,7 @@ export const makeSessionGitReader = () => {
 					if (refMergedAt === undefined) {
 						const defaultReflog = await git(
 							directory,
-							runner,
+							run,
 							"reflog",
 							"show",
 							"--date=unix",
@@ -492,7 +590,7 @@ export const makeSessionGitReader = () => {
 						// An underestimate can miss an auto-settle, but cannot hide newer work.
 						const committedAt = await git(
 							directory,
-							runner,
+							run,
 							"log",
 							"-1",
 							"--format=%ct",
@@ -521,7 +619,3 @@ export const makeSessionGitReader = () => {
 
 	return { read: readSessionGit, invalidate: invalidateSessionGitRepository };
 };
-
-const defaultReader = makeSessionGitReader();
-export const readSessionGit = defaultReader.read;
-export const invalidateSessionGitRepository = defaultReader.invalidate;
