@@ -106,6 +106,7 @@
 		"@xterm/addon-search": "^0.16.0",
 		"better-sqlite3": "^13.0.3",
 		"bits-ui": "2.18.1",
+		"diff": "9.0.0",
 		"dompurify": "^3.3.1",
 		"effect": "4.0.5",
 		"ignore": "^7.0.5",

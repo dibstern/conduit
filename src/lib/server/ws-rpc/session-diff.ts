@@ -11,6 +11,7 @@ import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { recordedOwnershipForFolder } from "../../persistence/effect/session-worktree-ownership.js";
+import { toolFileChanges } from "../../persistence/tool-wire-projection.js";
 import { guardWorkspacePath } from "../../session/workspace-directories.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
@@ -46,8 +47,56 @@ const turnCapture = (sessionId: string, turnId: string) =>
 			: undefined;
 	});
 
+const parseJson = (text: string | null): unknown => {
+	try {
+		return text === null ? undefined : JSON.parse(text);
+	} catch {
+		return undefined;
+	}
+};
+
+/**
+ * A tool call's Tool File Changes, recorded by its provider or else read from
+ * its input, and the turn it ran in. Undefined for an unknown tool.
+ */
+const toolCallChanges = (sessionId: string, toolId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [part] = yield* sql<{
+			input: string | null;
+			status: string | null;
+			metadata: string | null;
+			turn_id: string | null;
+		}>`SELECT mp.input, mp.status, mp.metadata, m.turn_id FROM message_parts mp
+			JOIN messages m ON m.id = mp.message_id
+			WHERE (mp.call_id = ${toolId} OR (mp.call_id IS NULL AND mp.id = ${toolId}))
+			AND mp.type = 'tool' AND m.session_id = ${sessionId} LIMIT 1`;
+		if (!part) return undefined;
+		const metadata = parseJson(part.metadata);
+		const recorded = toolFileChanges(
+			part.status,
+			undefined,
+			typeof metadata === "object" &&
+				metadata !== null &&
+				"fileChanges" in metadata
+				? metadata.fileChanges
+				: undefined,
+		);
+		const changes =
+			recorded ??
+			toolFileChanges(part.status, parseJson(part.input), undefined);
+		return changes
+			? {
+					source: recorded ? ("provider" as const) : ("toolInput" as const),
+					changes,
+					turnId: part.turn_id,
+				}
+			: undefined;
+	});
+
 /** The session's folders as this request may read them; an unguarded one reads as missing.
- *  A branch scope also carries each folder's launch base, and a turn scope its run's capture. */
+ *  A branch scope also carries each folder's launch base, a turn scope its run's capture,
+ *  and a tool-call scope its changes, with its turn's capture when one claims a new file. */
 const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 	Effect.gen(function* () {
 		const { effectiveFolders } = yield* resolveSessionRequestFolders(sessionId);
@@ -71,11 +120,27 @@ const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 				Effect.orElseSucceed(() => ({ ...listed, present: false })),
 			);
 		});
-		const capture =
-			scope.kind === "turn"
-				? yield* turnCapture(sessionId, scope.turnId)
+		const toolCall =
+			scope.kind === "toolCall"
+				? yield* toolCallChanges(sessionId, scope.toolId)
 				: undefined;
-		return { id: sessionId, folders, ...(capture ? { capture } : {}) };
+		const capturedTurn =
+			scope.kind === "turn"
+				? scope.turnId
+				: toolCall?.changes.some(({ kind }) => kind === "add")
+					? toolCall.turnId
+					: null;
+		const capture = capturedTurn
+			? yield* turnCapture(sessionId, capturedTurn)
+			: undefined;
+		return {
+			id: sessionId,
+			folders,
+			...(capture ? { capture } : {}),
+			...(toolCall
+				? { toolCall: { source: toolCall.source, changes: toolCall.changes } }
+				: {}),
+		};
 	});
 
 export const subscribeSessionDiff = (request: {
