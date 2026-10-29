@@ -1,4 +1,4 @@
-<!-- One file of a session diff: fetches its patch by size tier and renders it with @pierre/diffs. -->
+<!-- One file of a session diff: asks for its patch by size tier and renders it with @pierre/diffs. -->
 <script module lang="ts">
 	import { FileDiff, parsePatchFiles } from "@pierre/diffs";
 	import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
@@ -15,46 +15,19 @@
 
 <script lang="ts">
 	import { untrack } from "svelte";
-	import {
-		SessionDiffError,
-		type SessionDiffFile,
-		type SessionDiffScope,
-	} from "../../../contracts/session-diff.js";
+	import type { DiffRow } from "../../stores/session-diff.svelte.js";
 	import { openFileViewer } from "../../stores/session-view.svelte.js";
 	import { themeState } from "../../stores/theme.svelte.js";
-	import { failureLine } from "../../transport/rpc-errors.js";
-	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { formatFileSize } from "../../utils/format.js";
 	import TextButton from "../ui/TextButton.svelte";
 
-	let {
-		sessionId,
-		scope,
-		revision,
-		listed,
-		folder,
-		file,
-		onGone,
-	}: {
-		sessionId: string;
-		scope: SessionDiffScope;
-		revision: string;
-		/** Counts landed listings: an unchanged folder re-lists the same revision. */
-		listed: number;
-		folder: string;
-		file: SessionDiffFile;
-		/** The listing's snapshot was collected; the owner re-lists. */
-		onGone: () => void;
-	} = $props();
+	const { row }: { row: DiffRow } = $props();
+	const { folder, file } = $derived(row);
+	const patch = $derived(row.patch.kind === "ready" ? row.patch.patch : null);
 
 	let visible = $state(false);
 	let clicked = $state(false);
-	let loading = $state(false);
-	let patch = $state<string | null>(null);
-	let failure = $state<string | null>(null);
 	let host = $state<HTMLDivElement>();
-	// The listing that answered Gone; the next one to land retries.
-	let goneAt: number | null = null;
 	let view: FileDiff | undefined;
 
 	const wanted = $derived(
@@ -62,32 +35,8 @@
 	);
 
 	$effect(() => {
-		if (!wanted || loading || patch !== null || failure !== null || listed === goneAt) return;
-		void load(revision, listed);
+		if (wanted && row.patch.kind === "idle") row.load();
 	});
-
-	async function load(at: string, landed: number) {
-		loading = true;
-		try {
-			const reply = await rpc("SessionDiffFile", {
-				sessionId,
-				scope,
-				revision: at,
-				folder,
-				path: file.path,
-				before: file.before,
-				after: file.after,
-			});
-			patch = reply.patch;
-		} catch (error) {
-			if (error instanceof SessionDiffError && error.reason === "gone") {
-				goneAt = landed;
-				onGone();
-			} else failure = failureLine(error, "Could not load this diff.");
-		} finally {
-			loading = false;
-		}
-	}
 
 	$effect(() => {
 		if (!host || patch === null) return;
@@ -158,8 +107,8 @@
 			<span>{file.insertions + file.deletions} changed lines.</span>
 			<TextButton underline="always" class="text-xs" onclick={() => (clicked = true)}>Load diff</TextButton>
 		</div>
-	{:else if failure !== null}
-		<p data-testid="session-diff-error" class="px-3 pb-2 text-xs text-error">{failure}</p>
+	{:else if row.patch.kind === "failed"}
+		<p data-testid="session-diff-error" class="px-3 pb-2 text-xs text-error">{row.patch.message}</p>
 	{:else if !file.binary}
 		<!-- Unloaded rows reserve roughly their patch's height (changed lines plus
 		     context, at pierre's 20px rows), so only nearby rows load and nothing jumps. -->

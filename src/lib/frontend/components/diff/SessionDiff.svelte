@@ -1,57 +1,30 @@
 <!-- The Diff pane: the current session's unstaged changes, file by file. -->
 <script lang="ts">
-	import type { SessionDiffListing } from "../../../contracts/session-diff.js";
 	import { getCurrentSessionId } from "../../stores/router.svelte.js";
-	import { sessionViewState } from "../../stores/session-view.svelte.js";
-	import { failureLine } from "../../transport/rpc-errors.js";
-	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { SessionDiffView } from "../../stores/session-diff.svelte.js";
 	import ConduitMark from "../ui/ConduitMark.svelte";
 	import DiffFile from "./DiffFile.svelte";
 
 	// Mounted as a right pane; it has no chrome of its own to close.
-	const _props: { pane?: boolean; onClose?: () => void } = $props();
+	const { visible = true }: { pane?: boolean; onClose?: () => void; visible?: boolean } = $props();
 
-	const scope = { kind: "unstaged" } as const;
 	const sessionId = $derived(getCurrentSessionId());
-	// A reply keeps the session it answered, so it never shows for another.
-	let reply = $state<{ id: string; listing: SessionDiffListing | null; failure: string | null } | null>(null);
-	const listing = $derived(reply?.id === sessionId ? reply.listing : null);
-	const failure = $derived(reply?.id === sessionId ? reply.failure : null);
-	let listed = $state(0);
-	// Only the newest listing call may land.
-	let latest = 0;
+	// A new session is a new view, so a late reply lands only in the view that asked.
+	const view = $derived(sessionId ? new SessionDiffView(sessionId, { kind: "unstaged" }) : null);
+	// The pane stays mounted behind other tabs; only a shown pane lists or fetches.
+	$effect(() => (visible ? view?.watch() : undefined));
 
-	async function list(id: string) {
-		const call = ++latest;
-		try {
-			const next = await rpc("SessionDiffList", { sessionId: id, scope });
-			if (call !== latest) return;
-			reply = { id, listing: next, failure: null };
-			listed += 1;
-		} catch (error) {
-			if (call === latest) reply = { id, listing: null, failure: failureLine(error, "Could not load the diff.") };
-		}
-	}
-
-	// The pane stays mounted behind other tabs; only a shown pane snapshots.
-	$effect(() => {
-		if (sessionId && sessionViewState.rightPaneView === "diff") void list(sessionId);
-	});
-
-	/** A collected snapshot re-lists silently; rows keep what they already show. */
-	function relist() {
-		if (sessionId) void list(sessionId);
-	}
-
-	const clean = $derived(listing?.folders.every((folder) => "files" in folder && folder.files.length === 0) ?? false);
+	const clean = $derived(
+		view?.state.kind === "listed" && view.state.folders.every((folder) => "rows" in folder && folder.rows.length === 0),
+	);
 </script>
 
 <div data-testid="session-diff" class="flex flex-1 min-h-0 flex-col overflow-y-auto">
-	{#if !sessionId}
+	{#if !view}
 		<p class="p-6 text-center text-sm text-text-dimmer">Open a session to see its changes.</p>
-	{:else if failure !== null}
-		<p data-testid="session-diff-error" class="p-6 text-center text-sm text-error">{failure}</p>
-	{:else if listing === null}
+	{:else if view.state.kind === "failed"}
+		<p data-testid="session-diff-error" class="p-6 text-center text-sm text-error">{view.state.message}</p>
+	{:else if view.state.kind === "loading"}
 		<div class="flex items-center justify-center py-8 text-sm text-text-dimmer">
 			<ConduitMark size={16} variant="running" />
 			<span class="ml-2">Loading...</span>
@@ -59,8 +32,9 @@
 	{:else if clean}
 		<p class="p-6 text-center text-sm text-text-dimmer">No unstaged changes.</p>
 	{:else}
-		{#each listing.folders as folder (folder.folder)}
-			{#if listing.folders.length > 1}
+		{@const folders = view.state.folders}
+		{#each folders as folder (folder.folder)}
+			{#if folders.length > 1}
 				<h3 class="truncate border-b border-border-subtle px-3 py-1.5 text-xs font-semibold text-text-muted" title={folder.folder}>
 					{folder.folder.split("/").at(-1)}
 				</h3>
@@ -70,8 +44,8 @@
 					{folder.error === "timeout" ? "Git took too long to read this folder." : "This folder's changes are unavailable."}
 				</p>
 			{:else}
-				{#each folder.files as file (`${file.path}\0${file.before}\0${file.after}`)}
-					<DiffFile {sessionId} {scope} revision={listing.revision} {listed} folder={folder.folder} {file} onGone={relist} />
+				{#each folder.rows as row (row.key)}
+					<DiffFile {row} />
 				{/each}
 			{/if}
 		{/each}

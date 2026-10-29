@@ -120,7 +120,7 @@
 					<div id={`right-pane-panel-${entry.id}`} role="tabpanel" aria-label={entry.label} class="relative flex flex-1 min-h-0 min-w-0" class:hidden={view !== entry.id} inert={view !== entry.id}>
 						<div class="flex flex-1 min-h-0 min-w-0" class:invisible={preview && entry.id === "files"} inert={preview && entry.id === "files"}>
 							{#await entry.loadPane() then { default: PaneView }}
-								<PaneView pane onClose={closePane} />
+								<PaneView pane visible={view === entry.id} onClose={closePane} />
 							{/await}
 							</div>
 						{#if entry.id === "files" && sessionViewState.filePreview}
