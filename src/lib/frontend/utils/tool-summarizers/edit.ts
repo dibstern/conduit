@@ -22,14 +22,6 @@ export const editSummarizer: ToolSummarizer<EditInput> = {
 			...(filePath && {
 				subtitle: stripRepoRoot(filePath, ctx.repoRoot),
 			}),
-			...(input.oldString &&
-				input.newString && {
-					expandedContent: {
-						kind: "diff" as const,
-						before: input.oldString,
-						after: input.newString,
-					},
-				}),
 		};
 	},
 };
