@@ -66,6 +66,12 @@ describe("durable controls on retired runners", () => {
 			// A surviving process whose socket was lost cannot be reattached.
 			unlinkSync(runner.socketPath);
 			store.exec("DROP TRIGGER hold_control");
+			// The retirement row is pruned once the stopped process is gone, so
+			// record it as its Stop escalates.
+			store.exec(`CREATE TABLE runner_stops (runner_id TEXT, retired INTEGER, attachment_id TEXT, pid INTEGER);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.retired_at IS NOT NULL, NEW.attachment_id, NEW.pid); END`);
 			await harness.restart();
 			await vi.waitFor(
 				() => {
@@ -98,16 +104,25 @@ describe("durable controls on retired runners", () => {
 				expect(
 					store
 						.prepare(
-							"SELECT retired_at, attachment_id, pid FROM claude_runner_cursors WHERE runner_id = ?",
+							"SELECT runner_id, retired, attachment_id, pid FROM runner_stops",
 						)
-						.get(runner.runnerId),
-				).toEqual({
-					retired_at: expect.any(Number),
-					attachment_id: "",
-					pid: runner.pid,
-				}),
+						.all(),
+				).toEqual([
+					{
+						runner_id: runner.runnerId,
+						retired: 1,
+						attachment_id: "",
+						pid: runner.pid,
+					},
+				]),
 			);
-			expect(() => process.kill(runner.pid, 0)).not.toThrow();
+			// Recovery stops the disconnected survivor and kills its verified process.
+			await vi.waitFor(
+				() => expect(() => process.kill(runner.pid, 0)).toThrow(),
+				{
+					timeout: 10_000,
+				},
+			);
 			evidence["promptsBeforeReplacement"] = store
 				.prepare(
 					"SELECT id, status, provider_process_id FROM pending_approvals WHERE session_id = ? ORDER BY id",

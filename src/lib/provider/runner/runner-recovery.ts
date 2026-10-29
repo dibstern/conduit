@@ -35,6 +35,7 @@ import { translateProviderRuntimeEventToDomain } from "../provider-runtime-event
 import type { TurnResult } from "../types.js";
 import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
+import { createRunnerCursors } from "./runner-receipts.js";
 import {
 	retrySettlementWrite,
 	type SendOutcome,
@@ -81,9 +82,12 @@ export const legacyRunnerRunQuery = (
 	sessionId: string,
 	runId: string,
 ) =>
-	sql<{
-		legacy: number;
-	}>`SELECT ${legacyRunnerRunPredicate(sql, sessionId, runId)} AS legacy`.pipe(
+	createRunnerCursors(sql).pipe(
+		Effect.andThen(
+			sql<{
+				legacy: number;
+			}>`SELECT ${legacyRunnerRunPredicate(sql, sessionId, runId)} AS legacy`,
+		),
 		Effect.map(([row]) => row?.legacy === 1),
 	);
 

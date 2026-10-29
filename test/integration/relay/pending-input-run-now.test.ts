@@ -467,7 +467,6 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 			const layer = Layer.unwrap(
 				Effect.gen(function* () {
 					const wired = yield* getOrchestrationLayer;
-					const dispatch = wired.engine.dispatchEffect.bind(wired.engine);
 					// Same-driver switches now warm before dispatch rather than end the session.
 					if (
 						scenario === "run-now-during-continuation" ||
@@ -488,16 +487,20 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								: prepare(sid, preparation),
 						);
 					}
-					// The Claude abort resolved after installing its fence waits for the test.
-					vi.spyOn(wired.engine, "dispatchEffect").mockImplementation(
-						(command) =>
-							command.type === "interrupt_turn" &&
-							scenario === "recover-registration-race"
-								? Effect.promise(async () => {
-										registrationStarted.resolve();
-										await releaseRegistration.promise;
-									}).pipe(Effect.andThen(dispatch(command)))
-								: dispatch(command),
+					// The accepted Stop's delivery waits for the test after its fence is installed.
+					const executeStop = wired.engine.executeAcceptedStopEffect.bind(
+						wired.engine,
+					);
+					vi.spyOn(
+						wired.engine,
+						"executeAcceptedStopEffect",
+					).mockImplementation((input) =>
+						scenario === "recover-registration-race"
+							? Effect.promise(async () => {
+									registrationStarted.resolve();
+									await releaseRegistration.promise;
+								}).pipe(Effect.andThen(executeStop(input)))
+							: executeStop(input),
 					);
 					const ingress = yield* makeEffectOpenCodeRuntimeIngress(
 						makeMockLogger(),
@@ -885,7 +888,9 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							expect(stopRequests).toEqual([]);
 							yield* inbox.start;
 							if (scenario === "recover-registration-race") {
-								yield* Effect.promise(() => registrationStarted.promise);
+								yield* Effect.promise(() => registrationStarted.promise).pipe(
+									Effect.timeout("3 seconds"),
+								);
 								yield* finish();
 								yield* client["input.submit"]({
 									sessionId,

@@ -452,44 +452,46 @@ syncBuiltinESMExports();
 				join(harness.root, "refuse-next-runner-start"),
 				"refuse once",
 			);
-			const runsBeforeTransientFailure = ownership(harness, sessionId).runs
-				.length;
-			const retried = await restored.send(
+			const runsBeforeStartFailure = ownership(harness, sessionId).runs.length;
+			// A start failure without `retryable` fails the send once, permanently.
+			const refused = await restored.send(
 				sessionId,
 				"replacement-start-refusal",
 			);
-			expect(retried.chunks.join("")).toBe(
-				responseChunks("replacement-start-refusal").join(""),
-			);
-			expect(retried.done).toMatchObject({ status: "idle" });
-			expect(retried.done).not.toMatchObject({ attention: "error" });
-			expect(JSON.stringify(await restored.history(sessionId))).not.toContain(
+			expect(refused.chunks).toEqual([]);
+			expect(refused.done).toMatchObject({
+				attention: "error",
+				status: "idle",
+			});
+			expect(JSON.stringify(await restored.history(sessionId))).toContain(
 				"Synthetic replacement spawn failure",
 			);
-			const retriedState = sendState(
+			const refusedState = sendState(
 				harness,
 				sessionId,
 				"replacement-start-refusal",
 			);
-			expect(retriedState.run).toMatchObject({
-				status: "completed",
-				held_transmission: 1,
+			expect(refusedState.run).toMatchObject({
+				status: "error",
+				held_transmission: null,
 			});
-			expect(retriedState.terminals.map(({ type }) => type)).toEqual([
-				"turn.completed",
+			expect(refusedState.terminals.map(({ type }) => type)).toEqual([
+				"turn.error",
 			]);
-			const retriedEnqueues = harness.marks.filter(
+			// No second start: the prompt never reached an agent and was not
+			// retried on another run.
+			const refusedEnqueues = harness.marks.filter(
 				(mark) =>
 					mark.kind === "enqueue" &&
 					mark.prompt === "replacement-start-refusal",
 			);
-			expect(retriedEnqueues).toHaveLength(1);
+			expect(refusedEnqueues).toEqual([]);
 			expect(ownership(harness, sessionId).runs).toHaveLength(
-				runsBeforeTransientFailure + 1,
+				runsBeforeStartFailure + 1,
 			);
-			evidence["continuedAfterTransientSpawnFailure"] = {
-				state: retriedState,
-				nativeEnqueues: retriedEnqueues.length,
+			evidence["failedOnceAfterStartFailure"] = {
+				state: refusedState,
+				nativeEnqueues: refusedEnqueues.length,
 			};
 			const next = await restored.send(sessionId, "after-retired-restart");
 			expect(next.chunks.join("")).toBe(

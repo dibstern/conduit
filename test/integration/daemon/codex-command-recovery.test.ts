@@ -299,12 +299,15 @@ describe("Codex unjournaled commands through daemon recovery", () => {
 			await Effect.runPromise(
 				after.rpc.CancelSession({ sessionId: id, commandId: randomUUID() }),
 			);
+			// The Stop covers the released, unheld run, which settles interrupted.
 			await vi.waitFor(
 				() =>
 					expect(snapshot(fixture, id).events).toContainEqual(
 						expect.objectContaining({
-							type: "turn.error",
-							data: expect.objectContaining({ code: "cancelled" }),
+							type: "turn.interrupted",
+							data: expect.objectContaining({
+								reason: "Stopped before delivery",
+							}),
 						}),
 					),
 				{ timeout: TIMEOUT },
