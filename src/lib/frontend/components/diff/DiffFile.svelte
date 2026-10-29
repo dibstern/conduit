@@ -166,3 +166,14 @@
 		<div bind:this={host} style:min-height={patch === null ? `${(file.insertions + file.deletions + 6) * 20}px` : undefined}></div>
 	{/if}
 </section>
+
+<style>
+	/* Conduit's code-block surface in both themes, not pierre's #fff and #000.
+	   Pierre sets --diffs-bg on its own host, so the override goes there too. */
+	section :global(diffs-container) {
+		--diffs-bg: var(--color-code-bg);
+		--diffs-light-bg: var(--color-code-bg);
+		--diffs-dark-bg: var(--color-code-bg);
+		background-color: var(--color-code-bg);
+	}
+</style>
