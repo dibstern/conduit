@@ -215,6 +215,12 @@ type ProviderCommandExecutionError =
 	| ProviderNotRegistered
 	| ProviderInstanceFailure;
 
+export type RunStarted = (run: {
+	readonly sessionId: string;
+	readonly runId: string;
+	readonly directories: readonly string[];
+}) => Effect.Effect<void>;
+
 export interface ProviderSideEffectReactorOptions {
 	readonly projectId?: string;
 	readonly secretAnswers?: SecretAnswers["Service"];
@@ -242,6 +248,8 @@ export interface ProviderSideEffectReactorOptions {
 	readonly projectContext?: (
 		projectId: string,
 	) => Option.Option<Context.Context<never>>;
+	/** Checkpoints the run's folders before the provider sees the turn. */
+	readonly runStarted?: RunStarted;
 	/** Optional deterministic override; defaults to the Effect Clock service. */
 	readonly nowMs?: () => number;
 	readonly retryBackoff?: (failureCount: number) => Duration.Input;
@@ -1778,6 +1786,15 @@ export class ProviderSideEffectReactor {
 					sessionId: payload.sessionId,
 					inputId: payload.inputId,
 				};
+				if (payload.runId && this.options.runStarted)
+					yield* this.options.runStarted({
+						sessionId: payload.sessionId,
+						runId: payload.runId,
+						directories: [
+							payload.workspaceRoot,
+							...(payload.extraFolders ?? []),
+						],
+					});
 				mark(turnKey, "reactor-start");
 				const send = (
 					prepared: PreparedTurn | undefined,

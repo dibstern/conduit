@@ -1186,6 +1186,8 @@ export const CANONICAL_EVENT_TYPES = Object.keys(
 	CanonicalEvents,
 ) as readonly CanonicalEventType[];
 
+export const RunChangesCapturedSchema =
+	CanonicalEvents["run.changes_captured"].payload;
 export const TextSurfacedPayloadSchema =
 	CanonicalEvents["text.surfaced"].payload;
 
