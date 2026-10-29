@@ -1,4 +1,5 @@
 // One (session, scope) Session Diff listing for one consumer: its answers, rows and patches.
+import { Effect, Fiber, Stream } from "effect";
 import { untrack } from "svelte";
 import {
 	SessionDiffError,
@@ -6,6 +7,9 @@ import {
 	type SessionDiffScope,
 } from "../../contracts/session-diff.js";
 import { failureLine } from "../transport/rpc-errors.js";
+import { getRuntime, runTransportEffect } from "../transport/runtime.js";
+import { WsRpcClients } from "../transport/shared-client.js";
+import { supervise } from "../transport/supervise.js";
 import { rpc } from "../transport/ws-rpc-client.js";
 
 /** `gone` holds the answer its fetch was made under; it renders like `loading`. */
@@ -54,6 +58,9 @@ export class SessionDiffView {
 	/** Landed listings. The revision hashes content, so it cannot tell two answers apart. */
 	#answer = 0;
 	#revision = "";
+	/** The live scope's latest pushed revision, while leased. */
+	#wanted: string | undefined;
+	#unfollow: (() => void) | undefined;
 	// Kept through a failed listing, so the next answer reuses the patches.
 	#rows = new Map<string, DiffRow>();
 
@@ -62,26 +69,74 @@ export class SessionDiffView {
 		readonly scope: SessionDiffScope,
 	) {}
 
-	/** Taken while the consumer is visible; taking it lists, so showing refreshes. */
+	/**
+	 * Taken while the consumer is visible; taking it lists, so showing refreshes. The
+	 * first lease opens the scope's live feed and the last one closes it.
+	 */
 	watch(): () => void {
 		untrack(() => {
 			this.#leases += 1;
 			void this.#list();
+			if (this.#leases === 1) this.#unfollow = this.#follow();
 		});
 		let held = true;
 		return () => {
-			if (held) this.#leases -= 1;
+			if (!held) return;
 			held = false;
+			this.#leases -= 1;
+			if (this.#leases > 0) return;
+			this.#unfollow?.();
+			this.#unfollow = undefined;
+			this.#wanted = undefined;
 		};
 	}
 
-	async #list() {
+	/** Every (re)subscription opens with the current revision, so a reconnect compares too. */
+	#follow(): () => void {
+		let stopped = false;
+		let feed: Fiber.Fiber<void> | undefined;
+		void getRuntime()
+			.then((runtime) => {
+				if (stopped) return;
+				feed = runtime.runFork(
+					Effect.flatMap(WsRpcClients, (clients) =>
+						Effect.flatMap(clients.forProject(""), ({ subscriptions }) =>
+							Stream.runForEach(
+								supervise(
+									Stream.suspend(() =>
+										subscriptions.sessionDiff({
+											sessionId: this.sessionId,
+											scope: this.scope,
+										}),
+									),
+									() => undefined,
+								),
+								({ revision }) =>
+									Effect.sync(() => {
+										this.#wanted = revision;
+										if (revision !== this.#revision) void this.#list(revision);
+									}),
+							),
+						),
+					),
+				);
+			})
+			.catch(() => undefined);
+		return () => {
+			stopped = true;
+			if (feed) void runTransportEffect(Fiber.interrupt(feed));
+		};
+	}
+
+	/** A pinned `revision` reuses the listing the server already made for it. */
+	async #list(revision?: string) {
 		if (this.#leases === 0 || this.#listing) return;
 		this.#listing = true;
 		try {
 			const listing = await rpc("SessionDiffList", {
 				sessionId: this.sessionId,
 				scope: this.scope,
+				...(revision === undefined ? {} : { revision }),
 			});
 			this.#answer += 1;
 			this.#revision = listing.revision;
@@ -118,6 +173,14 @@ export class SessionDiffView {
 			};
 		} finally {
 			this.#listing = false;
+			// A revision pushed while this list ran, and not the one it brought back.
+			const wanted = this.#wanted;
+			if (
+				wanted !== undefined &&
+				wanted !== revision &&
+				wanted !== this.#revision
+			)
+				void this.#list(wanted);
 		}
 	}
 

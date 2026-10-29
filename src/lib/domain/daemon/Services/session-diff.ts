@@ -1,4 +1,4 @@
-import { Context, type Effect, Layer } from "effect";
+import { Context, type Effect, Layer, type Stream } from "effect";
 import type {
 	SessionDiffError,
 	SessionDiffListing,
@@ -14,20 +14,34 @@ export interface SessionDiffFolder {
 	readonly present: boolean;
 }
 
+export interface SessionDiffSession {
+	readonly id: string;
+	readonly folders: readonly SessionDiffFolder[];
+}
+
 /**
  * Read-only per-file diffs for a session. It keeps no state of record: a
- * bounded memo of recent listings only proves that file() serves listed pairs.
+ * bounded memo of recent listings proves that file() serves listed pairs and
+ * answers a list pinned to a pushed revision without another snapshot.
  */
 export class SessionDiff extends Context.Service<
 	SessionDiff,
 	{
+		/** A remembered `revision` is answered from the memo; otherwise it snapshots. */
 		readonly list: (
-			session: {
-				readonly id: string;
-				readonly folders: readonly SessionDiffFolder[];
-			},
+			session: SessionDiffSession,
 			scope: SessionDiffScope,
+			revision?: string,
 		) => Effect.Effect<SessionDiffListing>;
+		/**
+		 * Each new revision of a live scope, re-listed once per SessionGit change
+		 * to one of the session's folders and shared by every subscriber. Nothing
+		 * snapshots while no one subscribes.
+		 */
+		readonly changes: (
+			session: SessionDiffSession,
+			scope: SessionDiffScope,
+		) => Stream.Stream<string>;
 		readonly file: (request: {
 			readonly sessionId: string;
 			readonly scope: SessionDiffScope;

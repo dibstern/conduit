@@ -11,6 +11,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { Effect, Fiber, Queue, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
@@ -21,7 +22,9 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // blob ids name the HEAD side instead of the index side; counts, the binary
 // flag or the size tier are wrong; file() serves an unlisted path, a forged
 // blob pair or a tooLarge file; a collected snapshot surfaces as a crash or an
-// empty patch rather than Gone; a re-list after Gone stays broken.
+// empty patch rather than Gone; a re-list after Gone stays broken. Live: a
+// device misses an external edit, devices open or get pushed different
+// revisions, or a pushed revision cannot be listed or names the old pair.
 const gitEnv = { ...process.env };
 for (const key of [
 	"GIT_DIR",
@@ -61,7 +64,8 @@ const lines = (count: number, label: string) =>
 
 describe("Session diff through the built daemon", () => {
 	let harness: ProcessHarness | undefined;
-	const evidence: Record<string, unknown> = {};
+	let evidence: Record<string, unknown> = {};
+	let artifact = "f02e9-2-session-diff";
 
 	afterEach(async ({ task }) => {
 		if (!harness) return;
@@ -75,10 +79,11 @@ describe("Session diff through the built daemon", () => {
 		} finally {
 			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
-				"test-results/f02e9-2-session-diff.json",
+				`test-results/${artifact}.json`,
 				`${JSON.stringify(evidence, null, 2).replaceAll(root, "<root>").replaceAll(fixture.root, "<root>")}\n`,
 			);
 			harness = undefined;
+			evidence = {};
 			vi.unstubAllEnvs();
 		}
 	});
@@ -264,5 +269,101 @@ describe("Session diff through the built daemon", () => {
 		evidence["repositoryUnchanged"] =
 			JSON.stringify(after) === JSON.stringify(before);
 		expect(after).toEqual(before);
+	});
+
+	it("opens a live scope on every device at one revision and pushes an external edit to all of them as one listable revision", async () => {
+		artifact = "f02e9-3-live-session-diff";
+		for (const key of [
+			"GIT_DIR",
+			"GIT_INDEX_FILE",
+			"GIT_WORK_TREE",
+			"GIT_COMMON_DIR",
+		])
+			vi.stubEnv(key, undefined);
+		harness = ProcessHarness.create({
+			managedOpenCode: true,
+			claudeReplay: { turns: ["pong-thinking-text-turn"], delayMs: 0 },
+		});
+		const fixture = harness;
+		const repo = fixture.projectDir;
+		git(repo, "init", "-b", "main");
+		writeFileSync(join(repo, "tracked.txt"), "one\n");
+		writeFileSync(join(repo, "steady.txt"), "steady\n");
+		git(repo, "add", ".");
+		git(
+			repo,
+			"-c",
+			"user.name=Diff test",
+			"-c",
+			"user.email=diff@example.test",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"commit",
+			"-m",
+			"Initial commit",
+		);
+		writeFileSync(join(repo, "steady.txt"), "steady edit\n");
+
+		await fixture.restart();
+		const socket = join(fixture.configDir, "relay.sock");
+		const first = await fixture.connect();
+		const devices = [first, await fixture.connect()];
+		const sessionId = await first.createSession("Live diff");
+		const scope = { kind: "unstaged" } as const;
+		const feeds = await Promise.all(
+			devices.map(async (browser) => {
+				const revisions = await Effect.runPromise(Queue.unbounded<string>());
+				const fiber = Effect.runFork(
+					Stream.runForEach(
+						browser.rpc.SubscribeSessionDiff({ sessionId, scope }),
+						({ revision }) => Queue.offer(revisions, revision),
+					),
+				);
+				return { fiber, next: () => Effect.runPromise(Queue.take(revisions)) };
+			}),
+		);
+		const next = () => Promise.all(feeds.map((feed) => feed.next()));
+
+		// Each device's first revision proves its subscription is live.
+		const opened = await next();
+		writeFileSync(join(repo, "tracked.txt"), "one\nTWO\n");
+		const pushed = await next();
+		await Effect.runPromise(
+			Fiber.interruptAll(feeds.map(({ fiber }) => fiber)),
+		);
+		evidence["revisions"] = { opened, pushed };
+		expect(new Set(opened).size).toBe(1);
+		expect(new Set(pushed).size).toBe(1);
+		expect(pushed[0]).not.toBe(opened[0]);
+
+		const list = (revision: string | undefined) =>
+			sendRpcRequest(socket, {
+				_tag: "SessionDiffList",
+				sessionId,
+				scope,
+				...(revision === undefined ? {} : { revision }),
+			});
+		const pairs = async (revision: string | undefined) => {
+			const listing = await list(revision);
+			expect(listing.revision).toBe(revision);
+			return Object.fromEntries(
+				listing.folders.flatMap((entry) =>
+					"files" in entry
+						? entry.files.map((file) => [file.path, file.after])
+						: [],
+				),
+			);
+		};
+		evidence["pairs"] = {
+			opened: await pairs(opened[0]),
+			pushed: await pairs(pushed[0]),
+		};
+		expect(evidence["pairs"]).toEqual({
+			opened: { "steady.txt": git(repo, "hash-object", "steady.txt") },
+			pushed: {
+				"steady.txt": git(repo, "hash-object", "steady.txt"),
+				"tracked.txt": git(repo, "hash-object", "tracked.txt"),
+			},
+		});
 	});
 });

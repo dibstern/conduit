@@ -12,13 +12,27 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect } from "effect";
+import {
+	Effect,
+	Fiber,
+	Layer,
+	PubSub,
+	Schedule,
+	Scheduler,
+	Stream,
+} from "effect";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { makeSessionDiff } from "../../../src/lib/domain/daemon/Layers/session-diff-layer.js";
 import { FolderTimeline } from "../../../src/lib/domain/daemon/Services/folder-timeline.js";
 import {
 	SessionDiff,
 	SessionDiffLive,
 } from "../../../src/lib/domain/daemon/Services/session-diff.js";
+import {
+	SessionGit,
+	type SessionGitChange,
+} from "../../../src/lib/domain/daemon/Services/session-git.js";
+import { Subprocess } from "../../../src/lib/domain/daemon/Services/subprocess.js";
 
 // Failure modes beyond the process E2E: a file's blobs, counts, size or tier
 // are wrong, swapped or misaligned after a rename's extra numstat paths; a
@@ -30,7 +44,11 @@ import {
 // store on first use; a folder without an index, a missing
 // folder or a non-git folder fails the whole listing; collect skips stores
 // left by an earlier run, prunes a snapshot still inside its grace period, or
-// keeps one past it so Gone never comes.
+// keeps one past it so Gone never comes; a live scope snapshots once per
+// subscriber instead of once per change, pushes an unchanged revision, reacts
+// to another session's change, or keeps snapshotting after its last subscriber
+// leaves, even one interrupted while it joined; a list pinned to a pushed
+// revision snapshots again.
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -76,11 +94,24 @@ function repository(files: Record<string, string>) {
 	return repo;
 }
 
+const sessionGit = (changes: Stream.Stream<SessionGitChange>) =>
+	Layer.succeed(SessionGit, {
+		read: () => Effect.succeed(undefined),
+		changes,
+		invalidate: () => Effect.void,
+	});
+
 const run = <A, E>(
 	program: Effect.Effect<A, E, SessionDiff | FolderTimeline>,
 ): Promise<A> =>
 	Effect.runPromise(
-		program.pipe(Effect.provide(SessionDiffLive(join(root, "config")))),
+		program.pipe(
+			Effect.provide(
+				SessionDiffLive(join(root, "config")).pipe(
+					Layer.provide(sessionGit(Stream.never)),
+				),
+			),
+		),
 	);
 
 const scope = { kind: "unstaged" } as const;
@@ -397,7 +428,13 @@ it("lists worktrees that share one repository together on first use", async () =
 					{ id: "s", folders: worktrees.map(present) },
 					scope,
 				);
-			}).pipe(Effect.provide(SessionDiffLive(join(root, `config-${attempt}`)))),
+			}).pipe(
+				Effect.provide(
+					SessionDiffLive(join(root, `config-${attempt}`)).pipe(
+						Layer.provide(sessionGit(Stream.never)),
+					),
+				),
+			),
 		);
 		expect(listing.folders.map((folder) => "files" in folder)).toEqual(
 			worktrees.map(() => true),
@@ -504,4 +541,211 @@ it("collect sweeps stores left by an earlier run, keeps a snapshot inside its gr
 	);
 
 	expect(outcomes).toEqual({ orphaned: false, kept: true, expired: "gone" });
+});
+
+it("opens a live scope with one snapshot, pushes each new revision to every subscriber, and stops when the last one leaves", async () => {
+	const repo = repository({ "tracked.txt": "one\n" });
+	writeFileSync(join(repo, "tracked.txt"), "two\n");
+	const published = Effect.runSync(PubSub.unbounded<SessionGitChange>());
+	// Each snapshot writes two trees: the index and the working tree.
+	let trees = 0;
+	const counted = Layer.effect(
+		Subprocess,
+		Effect.map(Subprocess, (real) => ({
+			...real,
+			run: (...call: Parameters<typeof real.run>) => {
+				if (call[1].includes("write-tree")) trees += 1;
+				return real.run(...call);
+			},
+		})),
+	);
+	const snapshots = () => trees / 2;
+	const session = { id: "s", folders: [present(repo)] };
+	const edit = (text: string) =>
+		Effect.sync(() => writeFileSync(join(repo, "tracked.txt"), text));
+	const change = (sessionId: string) =>
+		PubSub.publish(published, {
+			directory: repo,
+			sessionIds: [sessionId],
+			version: 1,
+		});
+	const until = (done: () => boolean) =>
+		Effect.sync(done).pipe(
+			Effect.repeat({
+				until: (ok) => ok,
+				schedule: Schedule.spaced("10 millis"),
+			}),
+			Effect.timeout("10 seconds"),
+		);
+	// Long enough for a stray list to snapshot or push.
+	const quiet = Effect.sleep("300 millis");
+	const blob = (text: string) =>
+		execFileSync("git", ["hash-object", "--stdin"], {
+			input: text,
+			encoding: "utf8",
+		}).trim();
+
+	const outcome = await Effect.runPromise(
+		Effect.gen(function* () {
+			const diff = yield* SessionDiff;
+			const seen: [string[], string[]] = [[], []];
+			const subscribe = (into: string[]) =>
+				diff.changes(session, scope).pipe(
+					Stream.runForEach((revision) =>
+						Effect.sync(() => into.push(revision)),
+					),
+					Effect.forkChild,
+				);
+			const first = yield* subscribe(seen[0]);
+			yield* until(() => seen[0].length === 1);
+			const second = yield* subscribe(seen[1]);
+			yield* until(() => seen[1].length === 1);
+			const opened = snapshots();
+
+			yield* change("s");
+			yield* until(() => snapshots() === 2);
+			yield* quiet;
+			const unchanged = seen.map((revisions) => revisions.length);
+
+			yield* edit("three\n");
+			yield* change("s");
+			yield* until(() => seen[0].length === 2 && seen[1].length === 2);
+			const pushed = seen[0][1] ?? "";
+			const beforePinned = snapshots();
+			const pinned = yield* diff.list(session, scope, pushed);
+			const pinnedSnapshots = snapshots() - beforePinned;
+
+			yield* change("t");
+			yield* quiet;
+			const otherSession = snapshots() - beforePinned;
+
+			yield* Fiber.interrupt(first);
+			yield* edit("four\n");
+			yield* change("s");
+			yield* until(() => seen[1].length === 3);
+			yield* quiet;
+			const oneLeft = seen.map((revisions) => revisions.length);
+
+			yield* Fiber.interrupt(second);
+			const beforeClosed = snapshots();
+			yield* edit("five\n");
+			yield* change("s");
+			yield* quiet;
+			const closed = snapshots() - beforeClosed;
+
+			const again: string[] = [];
+			const third = yield* subscribe(again);
+			yield* until(() => again.length === 1);
+			yield* Fiber.interrupt(third);
+			const reopened = yield* diff.list(session, scope, again[0]);
+
+			const after = (listing: typeof pinned) => {
+				const [folder] = listing.folders;
+				return folder && "files" in folder ? folder.files[0]?.after : undefined;
+			};
+			return {
+				opened,
+				joinedSame: seen[0][0] === seen[1][0],
+				unchanged,
+				pushedDiffers: pushed !== seen[0][0] && seen[1][1] === pushed,
+				pinnedRevision: pinned.revision === pushed,
+				pinnedAfter: after(pinned),
+				pinnedSnapshots,
+				otherSession,
+				oneLeft,
+				closed,
+				reopenedAfter: after(reopened),
+				reopenedSnapshots: snapshots() - beforeClosed,
+			};
+		}).pipe(
+			Effect.provide(
+				SessionDiffLive(join(root, "config")).pipe(
+					Layer.provide(sessionGit(Stream.fromPubSub(published))),
+					Layer.provide(counted),
+				),
+			),
+		),
+	);
+
+	expect(outcome).toEqual({
+		opened: 1,
+		joinedSame: true,
+		unchanged: [1, 1],
+		pushedDiffers: true,
+		pinnedRevision: true,
+		pinnedAfter: blob("three\n"),
+		pinnedSnapshots: 0,
+		otherSession: 0,
+		oneLeft: [2, 3],
+		closed: 0,
+		reopenedAfter: blob("five\n"),
+		reopenedSnapshots: 1,
+	});
+});
+
+it("stops snapshotting when a subscriber is interrupted at any step of joining", async () => {
+	const session = { id: "s", folders: [present("/repo")] };
+	// Interrupts the joining fiber after its nth operation, for every n up to past joining.
+	const leaks: number[] = [];
+	for (let interruptAt = 1; interruptAt <= 80; interruptAt += 1) {
+		let snapshots = 0;
+		let operations = 0;
+		let target: number | undefined;
+		const base = new Scheduler.MixedScheduler("async");
+		const scheduler: Scheduler.Scheduler = {
+			executionMode: "async",
+			makeDispatcher: () => base.makeDispatcher(),
+			shouldYield: (fiber) => {
+				if (fiber.id !== target || ++operations !== interruptAt) return false;
+				queueMicrotask(() => fiber.interruptUnsafe(fiber.id));
+				return true;
+			},
+		};
+		const leaked = await Effect.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const published = yield* PubSub.unbounded<SessionGitChange>();
+					const diff = yield* makeSessionDiff.pipe(
+						Effect.provideService(FolderTimeline, {
+							snapshot: () =>
+								Effect.sync(() => ({
+									store: "store",
+									prefix: "",
+									index: "index",
+									worktree: String(++snapshots),
+								})),
+							git: () =>
+								Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+							collect: () => Effect.void,
+						}),
+						Effect.provideService(SessionGit, {
+							read: () => Effect.succeed(undefined),
+							changes: Stream.fromPubSub(published),
+							invalidate: () => Effect.void,
+						}),
+					);
+					const joining = yield* Effect.withFiber((fiber) => {
+						target = fiber.id;
+						return Stream.runDrain(diff.changes(session, scope));
+					}).pipe(
+						Effect.provideService(Scheduler.Scheduler, scheduler),
+						Effect.forkChild,
+					);
+					yield* Effect.sleep("5 millis");
+					yield* Fiber.interrupt(joining);
+					yield* Effect.sleep("5 millis");
+					const before = snapshots;
+					yield* PubSub.publish(published, {
+						directory: "/repo",
+						sessionIds: ["s"],
+						version: 1,
+					});
+					yield* Effect.sleep("5 millis");
+					return snapshots > before;
+				}),
+			),
+		);
+		if (leaked) leaks.push(interruptAt);
+	}
+	expect(leaks).toEqual([]);
 });

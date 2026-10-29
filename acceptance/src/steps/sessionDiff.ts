@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { Stream } from "effect";
 import {
 	SessionDiffError,
 	type SessionDiffFile,
@@ -16,6 +17,13 @@ interface DiffFixture {
 	/** Patch requests whose revision another session listed. */
 	readonly foreign: string[];
 	lists: number;
+	/** The revision each listing asked for, if any. */
+	readonly asked: (string | undefined)[];
+	/** Bumped by a pair change, so the listing's revision follows its content. */
+	version: number;
+	/** Live subscriptions opened, and the session the latest one is for. */
+	subscriptions: number;
+	live: string;
 	holdList: boolean;
 	holdPatch: string | null;
 	release: (() => void) | null;
@@ -94,6 +102,9 @@ const changed = (path: string, insertions = 1, deletions = 1) =>
 		binary: false,
 	}) satisfies SessionDiffFile;
 
+const revisionOf = (fixture: DiffFixture, sessionId: string) =>
+	`rev-${sessionId}#${fixture.version}`;
+
 function seed(
 	page: Page,
 	files: SessionDiffFile[],
@@ -106,6 +117,10 @@ function seed(
 		gone: new Map(),
 		foreign: [],
 		lists: 0,
+		asked: [],
+		version: 0,
+		subscriptions: 0,
+		live: "",
 		holdList: false,
 		holdPatch: null,
 		release: null,
@@ -113,20 +128,23 @@ function seed(
 	};
 	fixtures.set(page, fixture);
 	requireRpcControl(page).setStubs({
-		SessionDiffList: async ({ sessionId }) => {
+		SessionDiffList: async ({ sessionId, revision }) => {
 			fixture.lists += 1;
+			fixture.asked.push(revision);
+			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
+			// A held listing answers with the snapshot taken when it was asked.
+			const listing = {
+				revision: revisionOf(fixture, sessionId),
+				folders: fixture.folders.map((folder) => ({
+					folder,
+					files: [...fixture.files],
+				})),
+			};
 			if (fixture.holdList) {
 				fixture.holdList = false;
 				await held(fixture);
 			}
-			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
-			return {
-				revision: `rev-${sessionId}`,
-				folders: fixture.folders.map((folder) => ({
-					folder,
-					files: fixture.files,
-				})),
-			};
+			return listing;
 		},
 		SessionDiffFile: async ({ path, sessionId, revision }) => {
 			fixture.requested.push(path);
@@ -134,7 +152,7 @@ function seed(
 				fixture.holdPatch = null;
 				await held(fixture);
 			}
-			if (revision !== `rev-${sessionId}`) {
+			if (!revision.startsWith(`rev-${sessionId}#`)) {
 				fixture.foreign.push(`${sessionId} ${revision} ${path}`);
 				throw new SessionDiffError({
 					reason: "not-listed",
@@ -155,6 +173,15 @@ function seed(
 						? patchFor(path, file.insertions, file.deletions)
 						: "",
 			};
+		},
+		// The server opens a live scope with its current revision.
+		SubscribeSessionDiff: ({ sessionId }) => {
+			fixture.subscriptions += 1;
+			fixture.live = sessionId;
+			return Stream.concat(
+				Stream.succeed({ revision: revisionOf(fixture, sessionId) }),
+				Stream.never,
+			);
 		},
 	});
 	return fixture;
@@ -246,6 +273,7 @@ export const sessionDiffHandlers: StepHandler[] = [
 				...file,
 				after: "5555555555555555555555555555555555555555",
 			};
+			fixture.version += 1;
 		},
 	},
 	{
@@ -389,6 +417,14 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "held diff listing asked",
+		match: /^the held diff listing has been asked for$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			await expect.poll(() => fixture.release !== null).toBe(true);
+		},
+	},
+	{
 		name: "release held diff reply",
 		match: /^the held diff (?:listing|patch) lands$/,
 		run: async ({ world }) => {
@@ -496,6 +532,47 @@ export const sessionDiffHandlers: StepHandler[] = [
 		match: /^every diff patch was requested with its own session's revision$/,
 		run: async ({ world }) => {
 			expect(requireFixture(world.page).foreign).toEqual([]);
+		},
+	},
+	{
+		name: "diff live",
+		match: /^the diff is (live|not live)$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const rpc = requireRpcControl(world.page);
+			await expect
+				.poll(() => rpc.hasStream("SubscribeSessionDiff", fixture.live))
+				.toBe(match[1] === "live");
+		},
+	},
+	{
+		name: "push diff revision",
+		match: /^the diff's current revision is pushed$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			requireRpcControl(world.page).sendChunk(
+				"SubscribeSessionDiff",
+				[{ revision: revisionOf(fixture, fixture.live) }],
+				fixture.live,
+			);
+		},
+	},
+	{
+		name: "listing pinned to pushed revision",
+		match: /^the last diff listing asked for the pushed revision$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			expect(fixture.asked.at(-1)).toBe(revisionOf(fixture, fixture.live));
+		},
+	},
+	{
+		name: "reconnect diff subscription",
+		match: /^the connection drops and the diff subscribes again$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			const opened = fixture.subscriptions;
+			requireRpcControl(world.page).closeSockets();
+			await expect.poll(() => fixture.subscriptions).toBe(opened + 1);
 		},
 	},
 	{

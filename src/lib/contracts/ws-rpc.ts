@@ -2645,9 +2645,19 @@ export const SessionDiffList = Rpc.make("SessionDiffList", {
 	payload: Schema.TaggedStruct("SessionDiffList", {
 		sessionId: NonEmptyString,
 		scope: SessionDiffScopeSchema,
+		// A pushed revision: answered from that snapshot when still remembered.
+		revision: Schema.optional(NonEmptyString),
 	}),
 	success: SessionDiffListingSchema,
 	error: WsRpcError,
+});
+
+/** Each new revision of a live (session, scope); held only while a view shows it. */
+export const SubscribeSessionDiff = Rpc.make("SubscribeSessionDiff", {
+	payload: { sessionId: NonEmptyString, scope: SessionDiffScopeSchema },
+	success: Schema.Struct({ revision: NonEmptyString }),
+	error: WsRpcError,
+	stream: true,
 });
 
 /** Serves only a file the listing named, by its folder, path and blob pair. */
@@ -4045,6 +4055,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeSessionPromptIndex,
 	SubscribeSessionTodos,
 	SubscribeSessionFamily,
+	SubscribeSessionDiff,
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,

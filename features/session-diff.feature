@@ -172,3 +172,93 @@ Scenario Outline: A row that comes into view as the pane hides loads once the pa
 Examples:
   | count | first_path | last_path  | hidden_requests |
   | 30    | file-01.ts | file-30.ts | 0               |
+
+
+Scenario Outline: An external change pushes a revision that re-lists once and fetches only the changed pair
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <last_path> diff shows its patch
+  And the diff is live
+  When the <changed_path> pair changes
+  And the diff's current revision is pushed
+  Then the diff was listed <lists> times
+  And the last diff listing asked for the pushed revision
+  And the <changed_path> patch was requested <changed_requests> times
+  And the <same_path> patch was requested <same_requests> times
+  And the <last_path> patch was requested <same_requests> times
+
+Examples:
+  | count | same_path  | changed_path | last_path  | lists | changed_requests | same_requests |
+  | 3     | file-01.ts | file-02.ts   | file-03.ts | 2     | 2                | 1             |
+
+Scenario Outline: A pushed revision the view already shows is skipped
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <path> diff shows its patch
+  And the diff is live
+  When the diff's current revision is pushed
+  Then the diff was listed <lists> times
+  And the <path> patch was requested <requests> times
+
+Examples:
+  | count | path       | lists | requests |
+  | 1     | file-01.ts | 1     | 1        |
+
+Scenario Outline: A reconnect compares revisions and fetches only the pairs that changed
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <last_path> diff shows its patch
+  And the diff is live
+  When the connection drops and the diff subscribes again
+  Then the diff was listed <unchanged_lists> times
+  When the <changed_path> pair changes
+  And the connection drops and the diff subscribes again
+  Then the diff was listed <changed_lists> times
+  And the <changed_path> patch was requested <changed_requests> times
+  And the <same_path> patch was requested <same_requests> times
+  And the <last_path> patch was requested <same_requests> times
+
+Examples:
+  | count | same_path  | changed_path | last_path  | unchanged_lists | changed_lists | changed_requests | same_requests |
+  | 3     | file-01.ts | file-02.ts   | file-03.ts | 1               | 2             | 2                | 1             |
+
+Scenario Outline: A hidden Diff pane closes its live feed and showing it opens one again
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the diff is live
+  When I select the Files right pane tab
+  Then the diff is not live
+  When the <path> pair changes
+  And I select the Diff right pane tab
+  Then the diff is live
+  And the diff was listed <lists> times
+  And the <path> patch was requested <requests> times
+
+Examples:
+  | count | path       | lists | requests |
+  | 1     | file-01.ts | 2     | 2        |
+
+Scenario Outline: A revision pushed while a listing runs lists again once that listing lands
+  Given the conduit app is served with the long-transcript mockup
+  And the session has <count> small unstaged files
+  When I open the Diff right pane
+  Then the <first_path> diff shows its patch
+  And the diff is live
+  When the next diff listing is held
+  And the <first_path> pair changes
+  And the diff's current revision is pushed
+  And the held diff listing has been asked for
+  And the <second_path> pair changes
+  And the diff's current revision is pushed
+  And the held diff listing lands
+  Then the diff was listed <lists> times
+  And the last diff listing asked for the pushed revision
+  And the <second_path> patch was requested <requests> times
+
+Examples:
+  | count | first_path | second_path | lists | requests |
+  | 2     | file-01.ts | file-02.ts  | 3     | 2        |
