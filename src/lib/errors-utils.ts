@@ -14,7 +14,11 @@ const GENERIC_EFFECT_ERROR_MESSAGE = "An error has occurred";
 
 function isMeaningfulErrorMessage(message: string): boolean {
 	const trimmed = message.trim();
-	return trimmed !== "" && trimmed !== GENERIC_EFFECT_ERROR_MESSAGE;
+	return (
+		trimmed !== "" &&
+		trimmed !== GENERIC_EFFECT_ERROR_MESSAGE &&
+		trimmed !== "An unknown error occurred"
+	);
 }
 
 function findCauseMessage(error: Error): string {

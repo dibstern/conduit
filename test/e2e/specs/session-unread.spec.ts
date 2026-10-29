@@ -216,6 +216,8 @@ async function openWindows(page: Page, browser: Browser, relayUrl: string) {
 }
 
 async function screenshotRow(page: Page, sessionId: string, name: string) {
+	// Pixel baselines are Darwin-only, like the Storybook visual suite.
+	if (process.platform !== "darwin") return;
 	await page.mouse.move(0, 0);
 	await expect(row(page, sessionId)).toHaveScreenshot(name, {
 		mask: [row(page, sessionId).locator(".session-item-meta")],

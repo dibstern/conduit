@@ -7,12 +7,19 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestLogger } from "../../../../src/lib/logger.js";
-import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import {
+	type ProbeDeps,
+	probeClaudeCapabilitiesEffect,
+} from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { claudeSdk as fakeSdk } from "../../../helpers/fake-claude-process-sdk.js";
 import { claudeSdk as replaySdk } from "../../../helpers/replay-claude-process-sdk.js";
+
+const probeClaudeCapabilities = (deps: ProbeDeps) =>
+	Effect.runPromise(probeClaudeCapabilitiesEffect(deps));
 
 describe.each([
 	["process", fakeSdk],

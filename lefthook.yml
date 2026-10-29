@@ -26,6 +26,8 @@ pre-commit:
     test-guards:
       env:
         NODE_OPTIONS: "--max-old-space-size=8192"
+        # Its own Vite cache, so a cold start cannot race the test command's.
+        CONDUIT_VITEST_CACHE_DIR: node_modules/.vite-guards
       # No file template: guards also run for docs-only and deletion-only commits.
       run: pnpm exec vitest run --project guards
     build:

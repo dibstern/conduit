@@ -202,6 +202,7 @@ const scenario = (store: Store) => {
 	let approvals = 0;
 	const parents = new Map<string, string | undefined>();
 	const sideThreads = new Set<string>();
+	const forkSources = new Map<string, string>();
 	const lastMessage = new Map<string, string>();
 	const pending: { id: string; sessionId: string; question: boolean }[] = [];
 	const background = new Map<string, SessionBackground>();
@@ -273,16 +274,21 @@ const scenario = (store: Store) => {
 		switch (command.kind) {
 			case "create": {
 				const { id, parent } = command;
-				// The parent must exist (a foreign key), but may close a cycle. A
-				// re-create without one keeps the stored parent, which the upsert
-				// checks again, so an orphan cannot be re-created (yeby).
+				// Match the upsert's placement: a legacy Fork names its source,
+				// not its parent. Fork sources and side-thread flags survive later
+				// creates. Re-check the retained parent of a synthetic orphan (yeby).
+				const source =
+					parent !== undefined && (command.fork || command.side)
+						? parent
+						: forkSources.get(id);
+				const side =
+					sideThreads.has(id) || (command.side && parent !== undefined);
+				const incomingParent =
+					command.fork && !command.side ? undefined : parent;
 				const next =
-					command.fork &&
-					!command.side &&
-					parent !== undefined &&
-					!sideThreads.has(id)
+					source !== undefined && !side
 						? undefined
-						: (parent ?? parents.get(id));
+						: (incomingParent ?? parents.get(id));
 				if (
 					(parent !== undefined && !parents.has(parent)) ||
 					(next !== undefined && !parents.has(next))
@@ -290,7 +296,8 @@ const scenario = (store: Store) => {
 					return undefined;
 				const message = `${id}-m${messages++}`;
 				parents.set(id, next);
-				if (command.side && parent !== undefined) sideThreads.add(id);
+				if (side) sideThreads.add(id);
+				if (source !== undefined) forkSources.set(id, source);
 				return run(
 					commit([
 						event("session.created", id, {
@@ -311,7 +318,10 @@ const scenario = (store: Store) => {
 			case "reparent": {
 				const { id, parent } = command;
 				if (!exists || !parents.has(parent)) return undefined;
-				parents.set(id, parent);
+				parents.set(
+					id,
+					forkSources.has(id) && !sideThreads.has(id) ? undefined : parent,
+				);
 				return run(
 					commit([
 						event("session.created", id, {
@@ -327,6 +337,7 @@ const scenario = (store: Store) => {
 				const { id, parent } = command;
 				if (!exists || parents.has(parent)) return undefined;
 				parents.set(id, parent);
+				forkSources.delete(id);
 				return run(orphan(id, parent));
 			}
 			case "delete": {
@@ -334,6 +345,10 @@ const scenario = (store: Store) => {
 				for (const gone of subtree(command.id)) {
 					parents.delete(gone);
 					sideThreads.delete(gone);
+					forkSources.delete(gone);
+					// Deleting a Source SET NULLs surviving Forks' source links.
+					for (const [fork, source] of forkSources)
+						if (source === gone) forkSources.delete(fork);
 					for (let index = pending.length - 1; index >= 0; index--)
 						if (pending[index]?.sessionId === gone) pending.splice(index, 1);
 				}
@@ -891,6 +906,17 @@ describe("sidebar table against the full computation", () => {
 			root("a"),
 		]);
 		await run([root("b"), { kind: "orphan", id: "b", parent: "a" }, root("b")]);
+	});
+
+	it("does not re-create an orphaned side thread through a legacy Fork", async () => {
+		// Found by seeds 1107721780 and -1748815384: the Fork names a source,
+		// so the side thread retains its missing parent.
+		await run([
+			root("d"),
+			child("a", "d", { side: true }),
+			{ kind: "orphan", id: "a", parent: "b" },
+			child("a", "a", { fork: true }),
+		]);
 	});
 
 	it("can delete the former parent of a synthetic orphaned side thread", async () => {

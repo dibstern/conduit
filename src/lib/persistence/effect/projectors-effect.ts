@@ -477,8 +477,13 @@ export const makeSessionProjector = defineProjector(() => {
 					return { stamped: [], removed: [], collections: [] };
 				const unownedStatus =
 					event.type === "session.status" && !event.metadata.runId;
-				if (terminal && unownedStatus) {
+				if (
+					unownedStatus &&
+					(terminal || event.metadata.source === "reconciliation-loop")
+				) {
 					// An orphan status observation may move; it cannot end owned work.
+					// The poller's guess is checked here, in the write transaction, so
+					// a session resumed after its query still keeps its new run.
 					const open =
 						yield* sql`SELECT 1 FROM provider_runs WHERE session_id = ${event.sessionId}
 					AND status IN ('pending', 'running') LIMIT 1`;
@@ -2089,23 +2094,33 @@ export const makeTurnProjector = defineProjector(() => ({
 				return { sessions: owners(written), messages: ids(written) };
 			}
 
+			let woken: readonly string[] = [];
 			if (
 				isEventType(event, "turn.completed") ||
 				isEventType(event, "message.completed")
 			) {
 				const tokens = event.data.tokens;
-				yield* sql`UPDATE turns SET
+				// A wake-up reply created after the turn settled is more of its work,
+				// so the turn now ends with it. An open turn's NULL end stays open.
+				const updated = yield* sql<{
+					id: string;
+					extended: number | null;
+				}>`UPDATE turns SET
 					cost = CASE WHEN ${event.data.providerCostTotalUsd !== undefined ? 1 : 0}
 						THEN COALESCE(cost, 0) + ${event.data.cost ?? 0}
 						ELSE COALESCE(${event.data.cost ?? null}, cost) END,
 					tokens_in = COALESCE(tokens_in + ${tokens?.input ?? null}, tokens_in, ${tokens?.input ?? null}),
-					tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null})
+					tokens_out = COALESCE(tokens_out + ${tokens?.output ?? null}, tokens_out, ${tokens?.output ?? null}),
+					completed_at = CASE WHEN (SELECT created_at FROM messages WHERE id = ${event.data.messageId}
+						AND session_id = ${event.sessionId}) > completed_at THEN ${event.createdAt} ELSE completed_at END
 					WHERE run_id = ${runId} AND session_id = ${event.sessionId}
 					AND id = COALESCE(${event.data.userMessageId ?? null},
 						(SELECT turn_id FROM messages WHERE id = ${event.data.messageId}
-						 AND session_id = ${event.sessionId}))`;
+						 AND session_id = ${event.sessionId}))
+					RETURNING id, completed_at = ${event.createdAt} AS extended`;
+				woken = updated.flatMap((row) => (row.extended ? [row.id] : []));
 				if (event.type === "message.completed")
-					return { sessions: [event.sessionId], messages: [] };
+					return { sessions: [event.sessionId], messages: woken };
 			}
 			if (!["pending", "running"].includes(run.status)) {
 				// A background task finishing after its run ended wakes Claude into
@@ -2121,7 +2136,7 @@ export const makeTurnProjector = defineProjector(() => ({
 						AND EXISTS (SELECT 1 FROM messages m JOIN provider_runs r ON r.id = ${runId}
 							WHERE m.id = ${event.data.messageId} AND m.session_id = ${event.sessionId}
 							AND m.created_at > r.completed_at)`;
-				return { sessions: [event.sessionId], messages: [] };
+				return { sessions: [event.sessionId], messages: woken };
 			}
 
 			const terminal = runTerminalStatus(event, event.provider);

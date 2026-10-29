@@ -193,6 +193,15 @@ describe("command outbox crash proof through the real daemon and stub SDK", () =
 					.prepare("SELECT status FROM command_receipts WHERE command_id = ?")
 					.get(target.command_id),
 			).toEqual({ status: "side_effect_requested" });
+			// Runners outlive a daemon SIGKILL by design: a still-live runner is
+			// reattached on restart and completes the End, so wait until it is gone.
+			if (kind === "end_session" && accepted) {
+				expect(harness.runnerPids()).not.toHaveLength(0);
+				await vi.waitFor(
+					() => expect(harness.remainingRunnerPids()).toEqual([]),
+					{ timeout: 10_000 },
+				);
+			}
 			await harness.kill();
 			await Promise.all([send, control]);
 			db.exec("DROP TRIGGER hold_control");

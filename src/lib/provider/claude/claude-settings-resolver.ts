@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 import { Effect, Schema } from "effect";
@@ -8,6 +7,7 @@ import {
 	type ResolvedClaudeSettings,
 	ResolvedClaudeSettingsSchema,
 } from "../../contracts/claude-settings.js";
+import { spawnOwnedSubprocess } from "../../domain/daemon/Services/subprocess.js";
 import { type ClaudeConfigDir, makeClaudeSdkEnv } from "./claude-sdk-env.js";
 
 const DEFAULT_TIMEOUT_MS = 5_000;
@@ -32,74 +32,91 @@ export type ClaudeSettingsChildRunner = (
 	request: ClaudeSettingsChildRequest,
 ) => Promise<ClaudeSettingsChildResult>;
 
-const runClaudeSettingsChild: ClaudeSettingsChildRunner = ({
+const runClaudeSettingsChild = ({
 	cwd,
 	env,
 	timeoutMs,
-	signal,
-}) =>
-	new Promise((resolve, reject) => {
-		const sdkModuleUrl = pathToFileURL(
-			createRequire(import.meta.url).resolve("@anthropic-ai/claude-agent-sdk"),
-		).href;
-		const script = [
-			`const { resolveSettings } = await import(${JSON.stringify(sdkModuleUrl)});`,
-			"const result = await resolveSettings({ cwd: process.cwd(), settingSources: ['user', 'project', 'local'] });",
-			`const keys = ${JSON.stringify(CLAUDE_DISPLAYABLE_SETTINGS_KEYS)};`,
-			"const display = Object.fromEntries(keys.map(key => {",
-			"  const { source, path, policyOrigin } = result.provenance[key] ?? {};",
-			"  return [key, { value: result.effective[key], source, path, policyOrigin }];",
-			"}));",
-			"process.stdout.write(JSON.stringify(display));",
-		].join("\n");
-		const child = spawn(
-			process.execPath,
-			["--input-type=module", "--eval", script],
-			{
-				cwd,
-				env,
-				stdio: ["ignore", "pipe", "pipe"],
-				...(signal ? { signal } : {}),
+}: ClaudeSettingsChildRequest) =>
+	Effect.acquireUseRelease(
+		Effect.try({
+			try: () => {
+				const sdkModuleUrl = pathToFileURL(
+					createRequire(import.meta.url).resolve(
+						"@anthropic-ai/claude-agent-sdk",
+					),
+				).href;
+				const script = [
+					`const { resolveSettings } = await import(${JSON.stringify(sdkModuleUrl)});`,
+					"const result = await resolveSettings({ cwd: process.cwd(), settingSources: ['user', 'project', 'local'] });",
+					`const keys = ${JSON.stringify(CLAUDE_DISPLAYABLE_SETTINGS_KEYS)};`,
+					"const display = Object.fromEntries(keys.map(key => {",
+					"  const { source, path, policyOrigin } = result.provenance[key] ?? {};",
+					"  return [key, { value: result.effective[key], source, path, policyOrigin }];",
+					"}));",
+					"process.stdout.write(JSON.stringify(display));",
+				].join("\n");
+				const owned = spawnOwnedSubprocess(
+					process.execPath,
+					["--input-type=module", "--eval", script],
+					{
+						cwd,
+						env,
+					},
+				);
+				owned.child.stdin.end();
+				return owned;
 			},
-		);
-		let stdout = "";
-		let stderr = "";
-		let outputBytes = 0;
-		let timedOut = false;
-		let outputTooLarge = false;
-		let settled = false;
+			catch: (cause) => cause,
+		}),
+		({ child }) =>
+			Effect.tryPromise({
+				try: () =>
+					new Promise<ClaudeSettingsChildResult>((resolve, reject) => {
+						let stdout = "";
+						let stderr = "";
+						let outputBytes = 0;
+						let timedOut = false;
+						let outputTooLarge = false;
+						let settled = false;
 
-		const append = (target: "stdout" | "stderr", chunk: Buffer): void => {
-			outputBytes += chunk.byteLength;
-			if (outputBytes > MAX_OUTPUT_BYTES) {
-				outputTooLarge = true;
-				child.kill("SIGKILL");
-				return;
-			}
-			if (target === "stdout") stdout += chunk.toString("utf8");
-			else stderr += chunk.toString("utf8");
-		};
+						const append = (
+							target: "stdout" | "stderr",
+							chunk: Buffer,
+						): void => {
+							outputBytes += chunk.byteLength;
+							if (outputBytes > MAX_OUTPUT_BYTES) {
+								outputTooLarge = true;
+								child.kill("SIGKILL");
+								return;
+							}
+							if (target === "stdout") stdout += chunk.toString("utf8");
+							else stderr += chunk.toString("utf8");
+						};
 
-		child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
-		child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
-		const timer = setTimeout(() => {
-			timedOut = true;
-			child.kill("SIGKILL");
-		}, timeoutMs);
+						child.stdout.on("data", (chunk: Buffer) => append("stdout", chunk));
+						child.stderr.on("data", (chunk: Buffer) => append("stderr", chunk));
+						const timer = setTimeout(() => {
+							timedOut = true;
+							child.kill("SIGKILL");
+						}, timeoutMs);
 
-		child.once("error", (cause) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			reject(cause);
-		});
-		child.once("close", (exitCode) => {
-			if (settled) return;
-			settled = true;
-			clearTimeout(timer);
-			resolve({ stdout, stderr, exitCode, timedOut, outputTooLarge });
-		});
-	});
+						child.once("error", (cause) => {
+							if (settled) return;
+							settled = true;
+							clearTimeout(timer);
+							reject(cause);
+						});
+						child.once("close", (exitCode) => {
+							if (settled) return;
+							settled = true;
+							clearTimeout(timer);
+							resolve({ stdout, stderr, exitCode, timedOut, outputTooLarge });
+						});
+					}),
+				catch: (cause) => cause,
+			}),
+		(owned) => Effect.promise(() => owned.stop()),
+	);
 
 export const resolveClaudeSettingsFromDisk = (
 	input: {
@@ -109,23 +126,30 @@ export const resolveClaudeSettingsFromDisk = (
 		readonly accountEnv?: Readonly<Record<string, string>>;
 		readonly timeoutMs?: number | undefined;
 	},
-	runChild: ClaudeSettingsChildRunner = runClaudeSettingsChild,
+	runChild?: ClaudeSettingsChildRunner,
 ): Effect.Effect<ResolvedClaudeSettings, ClaudeSettingsResolveError> =>
 	Effect.gen(function* () {
-		const result = yield* Effect.tryPromise({
-			try: (signal) =>
-				runChild({
-					cwd: input.workspaceRoot,
-					env: makeClaudeSdkEnv(input),
-					timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-					signal,
-				}),
-			catch: (cause) =>
-				new ClaudeSettingsResolveError({
-					reason: "spawn-failed",
-					message: `Claude settings resolver failed to start: ${String(cause)}`,
-				}),
-		});
+		const request = {
+			cwd: input.workspaceRoot,
+			env: makeClaudeSdkEnv(input),
+			timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+		};
+		const result = yield* (
+			runChild
+				? Effect.tryPromise({
+						try: (signal) => runChild({ ...request, signal }),
+						catch: (cause) => cause,
+					})
+				: runClaudeSettingsChild(request)
+		).pipe(
+			Effect.mapError(
+				(cause) =>
+					new ClaudeSettingsResolveError({
+						reason: "spawn-failed",
+						message: `Claude settings resolver failed to start: ${String(cause)}`,
+					}),
+			),
+		);
 
 		if (result.timedOut) {
 			return yield* new ClaudeSettingsResolveError({

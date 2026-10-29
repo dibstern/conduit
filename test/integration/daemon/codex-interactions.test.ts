@@ -161,7 +161,10 @@ describe("Codex interactions through the real daemon and detached runner", () =>
 				[upstream, downstream, "output"],
 			] as const) {
 				let held = false;
-				createInterface({ input: source }).on("line", (line) => {
+				// readline re-emits its input's errors; a daemon killed mid-write resets the socket.
+				const lines = createInterface({ input: source });
+				lines.on("error", () => source.destroy());
+				lines.on("line", (line) => {
 					const message: RunnerMessage = JSON.parse(line);
 					if (
 						blocking &&
