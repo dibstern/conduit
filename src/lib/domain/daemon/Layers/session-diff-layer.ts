@@ -8,6 +8,7 @@ import {
 	type SessionDiffFolder,
 	type SessionDiffListing,
 } from "../../../contracts/session-diff.js";
+import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import {
 	type FolderSnapshot,
 	FolderTimeline,
@@ -71,6 +72,7 @@ type Listed =
 			readonly folder: string;
 			readonly snapshot: FolderSnapshot;
 			readonly files: readonly SessionDiffFile[];
+			readonly shared?: true;
 	  }
 	| Extract<SessionDiffFolder, { readonly error: unknown }>;
 
@@ -155,42 +157,82 @@ export const makeSessionDiff = Effect.gen(function* () {
 			);
 		});
 
+	const unavailable = (folder: string) => (error: FolderTimelineError) =>
+		Effect.succeed<Listed>({
+			folder,
+			error: error.reason === "timeout" ? "timeout" : "unavailable",
+			message: error.message,
+		});
+
+	type Session = Parameters<SessionDiff["Service"]["list"]>[0];
+
+	/** A turn lists its run's capture: each changed path before and after, from the session's store. */
+	const listTurn = (session: Session, capture: RunChangesCaptured) =>
+		Effect.forEach(
+			capture.folders,
+			(captured) => {
+				const folder =
+					session.folders.find(
+						({ directory }) => directory === captured.directory,
+					)?.root ?? captured.directory;
+				if ("gap" in captured)
+					return Effect.succeed<Listed>({
+						folder,
+						error: captured.gap === "timeout" ? "timeout" : "unavailable",
+						message: captured.message,
+					});
+				const snapshot = {
+					store: timeline.sessionStore(session.id),
+					prefix: "",
+					index: captured.before,
+					worktree: captured.after,
+				};
+				return listFiles(snapshot).pipe(
+					Effect.map(
+						(files): Listed => ({
+							folder,
+							snapshot,
+							files,
+							...(captured.shared ? { shared: true as const } : {}),
+						}),
+					),
+					Effect.catch(unavailable(folder)),
+				);
+			},
+			{ concurrency: "unbounded" },
+		);
+
+	const listWorktree = (session: Session) =>
+		Effect.forEach(
+			session.folders,
+			(folder) =>
+				Effect.gen(function* (): Effect.fn.Return<Listed, FolderTimelineError> {
+					if (!folder.present)
+						return {
+							folder: folder.root,
+							error: "unavailable" as const,
+							message: `Folder is missing: ${folder.directory}`,
+						};
+					const snapshot = yield* timeline.snapshot(folder.directory);
+					return {
+						folder: folder.root,
+						snapshot,
+						files: yield* listFiles(snapshot),
+					};
+				}).pipe(Effect.catch(unavailable(folder.root))),
+			{ concurrency: "unbounded" },
+		);
+
 	return {
 		list: (session, scope) =>
 			Effect.gen(function* () {
-				const folders = yield* Effect.forEach(
-					session.folders,
-					(folder) =>
-						Effect.gen(function* (): Effect.fn.Return<
-							Listed,
-							FolderTimelineError
-						> {
-							if (!folder.present)
-								return {
-									folder: folder.root,
-									error: "unavailable" as const,
-									message: `Folder is missing: ${folder.directory}`,
-								};
-							const snapshot = yield* timeline.snapshot(folder.directory);
-							return {
-								folder: folder.root,
-								snapshot,
-								files: yield* listFiles(snapshot),
-							};
-						}).pipe(
-							Effect.catch((error) =>
-								Effect.succeed<Listed>({
-									folder: folder.root,
-									error:
-										error.reason === "timeout"
-											? ("timeout" as const)
-											: ("unavailable" as const),
-									message: error.message,
-								}),
-							),
-						),
-					{ concurrency: "unbounded" },
-				);
+				const notCaptured = scope.kind === "turn" && !session.capture;
+				const folders =
+					scope.kind !== "turn"
+						? yield* listWorktree(session)
+						: session.capture
+							? yield* listTurn(session, session.capture)
+							: [];
 				const scopeKey = JSON.stringify(scope);
 				const revision = createHash("sha256")
 					.update(
@@ -237,9 +279,14 @@ export const makeSessionDiff = Effect.gen(function* () {
 					folders: folders.map(
 						(folder): SessionDiffFolder =>
 							"snapshot" in folder
-								? { folder: folder.folder, files: folder.files }
+								? {
+										folder: folder.folder,
+										files: folder.files,
+										...(folder.shared ? { shared: true as const } : {}),
+									}
 								: folder,
 					),
+					...(notCaptured ? { notCaptured: true as const } : {}),
 				} satisfies SessionDiffListing;
 			}),
 		file: (request) =>

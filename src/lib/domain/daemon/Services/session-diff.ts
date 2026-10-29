@@ -4,6 +4,7 @@ import type {
 	SessionDiffListing,
 	SessionDiffScope,
 } from "../../../contracts/session-diff.js";
+import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import { makeSessionDiff } from "../Layers/session-diff-layer.js";
 import { FolderTimelineLive } from "./folder-timeline.js";
 
@@ -25,6 +26,8 @@ export class SessionDiff extends Context.Service<
 			session: {
 				readonly id: string;
 				readonly folders: readonly SessionDiffFolder[];
+				/** The turn's recorded run capture; a turn scope without one is not captured. */
+				readonly capture?: RunChangesCaptured;
 			},
 			scope: SessionDiffScope,
 		) => Effect.Effect<SessionDiffListing>;

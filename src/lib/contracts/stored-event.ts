@@ -240,6 +240,8 @@ const SessionGoalSchema = Schema.Struct({
 
 export type SessionGoalChangedPayload = PayloadOf<"session.goal_changed">;
 
+export type RunChangesCaptured = PayloadOf<"run.changes_captured">;
+
 export type SessionHandoffDeliveredPayload =
 	PayloadOf<"session.handoff_delivered">;
 
@@ -523,6 +525,12 @@ function retired<S extends Schema.Top>(reason: string, payload: S) {
 	return { status: "retired", reason, payload } as const;
 }
 
+/** One side of a Change Unit: the path's git mode and blob. */
+const ChangeSideSchema = Schema.Struct({
+	mode: Schema.String,
+	blob: Schema.String,
+});
+
 export const CanonicalEvents = {
 	"message.created": live(
 		Schema.Struct({
@@ -708,6 +716,36 @@ export const CanonicalEvents = {
 			inputId: Schema.String,
 			requestedRunId: Schema.String,
 			userMessageId: Schema.optionalKey(Schema.String),
+		}),
+	),
+	/** A run's Change Units per Effective Folder, between its start and end checkpoints. */
+	"run.changes_captured": live(
+		Schema.Struct({
+			runId: Schema.String,
+			folders: Schema.Array(
+				Schema.Union([
+					Schema.Struct({
+						directory: Schema.String,
+						/** Sparse trees of the changed paths, relative to the folder. */
+						before: Schema.String,
+						after: Schema.String,
+						/** Another session ran in this folder during the run. */
+						shared: Schema.Boolean,
+						changes: Schema.Array(
+							Schema.Struct({
+								path: Schema.String,
+								before: Schema.NullOr(ChangeSideSchema),
+								after: Schema.NullOr(ChangeSideSchema),
+							}),
+						),
+					}),
+					Schema.Struct({
+						directory: Schema.String,
+						gap: Schema.Literals(["timeout", "failed"]),
+						message: Schema.String,
+					}),
+				]),
+			),
 		}),
 	),
 	"turn.completed": live(

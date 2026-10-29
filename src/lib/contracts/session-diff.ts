@@ -1,8 +1,10 @@
 import { Schema } from "effect";
 
-/** Which change set a Session Diff shows. Branch, turn and tool-call scopes extend this union. */
+/** Which change set a Session Diff shows. Branch and tool-call scopes extend this union. */
 export const SessionDiffScopeSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("unstaged") }),
+	/** One finished turn's captured changes; `turnId` is the durable turns.id. */
+	Schema.Struct({ kind: Schema.Literal("turn"), turnId: Schema.String }),
 ]);
 export type SessionDiffScope = typeof SessionDiffScopeSchema.Type;
 
@@ -46,6 +48,8 @@ export const SessionDiffFolderSchema = Schema.Union([
 	Schema.Struct({
 		folder: Schema.String,
 		files: Schema.Array(SessionDiffFileSchema),
+		/** Turn scope: another session ran in this folder during the turn. */
+		shared: Schema.optionalKey(Schema.Literal(true)),
 	}),
 	Schema.Struct({
 		folder: Schema.String,
@@ -58,6 +62,8 @@ export type SessionDiffFolder = typeof SessionDiffFolderSchema.Type;
 export const SessionDiffListingSchema = Schema.Struct({
 	revision: Schema.String,
 	folders: Schema.Array(SessionDiffFolderSchema),
+	/** Turn scope: the turn's run has no capture, so it lists no folders. */
+	notCaptured: Schema.optionalKey(Schema.Literal(true)),
 });
 export type SessionDiffListing = typeof SessionDiffListingSchema.Type;
 

@@ -10,6 +10,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Emitted at the runtime input acceptance boundary",
 	},
+	"run.changes_captured": {
+		produced: false,
+		reason: "Recorded by the Folder Timeline's run-end checkpoint",
+	},
 	"message.created": { produced: true },
 	"text.delta": { produced: true },
 	"text.surfaced": {
