@@ -40,6 +40,7 @@ import {
 	savedHistory,
 	settle,
 	shouldWake,
+	waitedOut,
 } from "./account-usage.js";
 
 export { forecastUsage } from "./usage-forecast.js";
@@ -63,6 +64,8 @@ export interface UsageService {
 	readonly refresh: (options: {
 		readonly accountIds?: readonly string[];
 		readonly maxAge: Duration.Input;
+		/** How long to wait for a read in progress before answering with the current reading, marked checking. */
+		readonly wait: Duration.Input | "until-settled";
 	}) => Effect.Effect<readonly UsageReading[]>;
 	readonly turnEnded: (accountId: string) => Effect.Effect<void>;
 	readonly pickFailover: (
@@ -91,8 +94,6 @@ export type UsageHistorySnapshot = typeof UsageHistorySnapshotSchema.Type;
 
 type UsageState = {
 	readonly accounts: ReadonlyMap<string, AccountUsage>;
-	/** Bumped where the readings stream publishes: a refresh's end and a live update. */
-	readonly published: number;
 };
 type UsageStateRef = SubscriptionRef.SubscriptionRef<UsageState>;
 
@@ -136,7 +137,7 @@ const readUsage = (
 				});
 	}).pipe(
 		Effect.timeoutOrElse({
-			duration: "5 seconds",
+			duration: "30 seconds",
 			orElse: () =>
 				Effect.succeed<UsageRead>({
 					status: "unknown",
@@ -156,8 +157,15 @@ const readUsage = (
 const settleRead =
 	(
 		state: UsageStateRef,
+		saveHistory: Effect.Effect<void>,
 		account: UsageAccount,
-		result: Deferred.Deferred<UsageReading>,
+		{
+			result,
+			startedAt,
+		}: {
+			readonly result: Deferred.Deferred<UsageReading>;
+			readonly startedAt: number;
+		},
 	) =>
 	(read: UsageRead) =>
 		Effect.gen(function* () {
@@ -183,6 +191,15 @@ const settleRead =
 					...freed,
 				});
 			yield* Deferred.succeed(result, reading);
+			yield* Effect.logWarning("Usage read settled").pipe(
+				Effect.annotateLogs({
+					accountId: account.id,
+					durationMs: readAt - startedAt,
+					outcome: read.status,
+					...(read.reason ? { reason: read.reason } : {}),
+				}),
+			);
+			yield* saveHistory;
 		});
 
 const readAccount =
@@ -190,8 +207,19 @@ const readAccount =
 		state: UsageStateRef,
 		scope: Scope.Scope,
 		readers: UsageOptions["readers"],
+		saveHistory: Effect.Effect<void>,
 	) =>
-	(accountId: string, account: UsageAccount | undefined, maxAge: number) =>
+	(
+		accountId: string,
+		account: UsageAccount | undefined,
+		{
+			maxAge,
+			wait,
+		}: {
+			readonly maxAge: number;
+			readonly wait: Duration.Input | "until-settled";
+		},
+	) =>
 		account
 			? Effect.uninterruptibleMask((restore) =>
 					Effect.gen(function* () {
@@ -217,12 +245,37 @@ const readAccount =
 							yield* Effect.forkIn(
 								restore(
 									readUsage(readers, account).pipe(
-										Effect.flatMap(settleRead(state, account, pending)),
+										Effect.flatMap(
+											settleRead(state, saveHistory, account, {
+												result: pending,
+												startedAt: now,
+											}),
+										),
 									),
 								),
 								scope,
 							);
-						return yield* restore(Deferred.await(decision.result));
+						const settled = Deferred.await(decision.result);
+						return yield* restore(
+							wait === "until-settled"
+								? settled
+								: Effect.timeoutOrElse(settled, {
+										duration: wait,
+										orElse: () =>
+											SubscriptionRef.get(state).pipe(
+												Effect.map(({ accounts }) =>
+													waitedOut(
+														accounts.get(accountId) ?? emptyAccountUsage,
+														{
+															accountId,
+															harness: account.harness,
+															readAt: now,
+														},
+													),
+												),
+											),
+									}),
+						);
 					}),
 				)
 			: Clock.currentTimeMillis.pipe(
@@ -274,7 +327,7 @@ const makeRefresh =
 		read: ReturnType<typeof readAccount>,
 		saveHistory: Effect.Effect<void>,
 	): UsageService["refresh"] =>
-	({ accountIds, maxAge }) =>
+	({ accountIds, maxAge, wait }) =>
 		Effect.gen(function* () {
 			const configured = yield* accounts;
 			const readings = yield* Effect.forEach(
@@ -283,12 +336,10 @@ const makeRefresh =
 					read(
 						accountId,
 						configured.find((account) => account.id === accountId),
-						Duration.toMillis(maxAge),
+						{ maxAge: Duration.toMillis(maxAge), wait },
 					),
 				{ concurrency: 8 },
 			);
-			// Publish the latest completed reads, including a newer overlapping
-			// refresh, so a slow batch cannot replace a fresh account reading.
 			// Recheck eligibility after reads: account edits can happen in flight.
 			const liveIds = new Set((yield* accounts).map((account) => account.id));
 			yield* SubscriptionRef.update(state, (current) => ({
@@ -298,7 +349,6 @@ const makeRefresh =
 						liveIds.has(accountId) ? record : retired(record),
 					]),
 				),
-				published: current.published + 1,
 			}));
 			yield* saveHistory;
 			return accountIds === undefined
@@ -324,7 +374,7 @@ const makeReadings = (
 							subscribers++;
 							if (subscribers === 1)
 								sampler = yield* Effect.forkIn(
-									refresh({ maxAge: "5 minutes" }).pipe(
+									refresh({ maxAge: "5 minutes", wait: 0 }).pipe(
 										Effect.schedule(Schedule.fixed("5 minutes")),
 										Effect.asVoid,
 										Effect.interruptible,
@@ -346,19 +396,19 @@ const makeReadings = (
 				);
 				let initial = true;
 				return SubscriptionRef.changes(state).pipe(
-					Stream.changesWith((a, b) => a.published === b.published),
 					Stream.map(({ accounts }) =>
 						[...accounts.values()].flatMap(
 							(record) => publishedReading(record) ?? [],
 						),
 					),
+					Stream.changes,
 					Stream.tap(() => {
 						if (!initial) return Effect.void;
 						initial = false;
 						// changes has captured the snapshot and joined the update stream
 						// before this read can publish, so the snapshot always comes first.
 						return Effect.forkIn(
-							refresh({ maxAge: "5 minutes" }),
+							refresh({ maxAge: "5 minutes", wait: 0 }),
 							subscriptionScope,
 						).pipe(Effect.asVoid);
 					}),
@@ -391,7 +441,8 @@ const makeTurnEnded = (
 							]
 						: [false, current];
 				});
-				if (due) yield* refresh({ accountIds: [accountId], maxAge: 0 });
+				if (due)
+					yield* refresh({ accountIds: [accountId], maxAge: 0, wait: 0 });
 			});
 		const turnEnded: UsageService["turnEnded"] = (accountId) =>
 			Effect.gen(function* () {
@@ -442,6 +493,7 @@ const makePickFailover =
 				const [reading] = yield* refresh({
 					accountIds: [account.id],
 					maxAge: "30 seconds",
+					wait: "5 seconds",
 				});
 				if (
 					reading &&
@@ -472,8 +524,8 @@ const makeUpdate =
 			)
 				return;
 			const readAt = yield* Clock.currentTimeMillis;
-			yield* SubscriptionRef.update(state, (current) => ({
-				...withAccount(
+			yield* SubscriptionRef.update(state, (current) =>
+				withAccount(
 					current,
 					accountId,
 					live(current.accounts.get(accountId) ?? emptyAccountUsage, reading, {
@@ -482,8 +534,7 @@ const makeUpdate =
 						readAt,
 					}),
 				),
-				published: current.published + 1,
-			}));
+			);
 			yield* saveInBackground;
 		});
 
@@ -511,7 +562,6 @@ export const makeUsage = (options: UsageOptions) =>
 						: retired(restored(saved)),
 				]),
 			),
-			published: 0,
 		});
 		const saveHistory = yield* makeHistoryWriter(
 			state,
@@ -523,7 +573,7 @@ export const makeUsage = (options: UsageOptions) =>
 		const refresh = makeRefresh(
 			state,
 			options.accounts,
-			readAccount(state, scope, options.readers),
+			readAccount(state, scope, options.readers, saveHistory),
 			saveHistory,
 		);
 		const { readings, viewers } = yield* makeReadings(state, scope, refresh);
@@ -537,10 +587,7 @@ export const makeUsage = (options: UsageOptions) =>
 			),
 			latest: (accountId) =>
 				SubscriptionRef.get(state).pipe(
-					Effect.map(({ accounts }) => {
-						const record = accounts.get(accountId);
-						return record && publishedReading(record);
-					}),
+					Effect.map(({ accounts }) => accounts.get(accountId)?.reading),
 				),
 			refresh,
 			turnEnded: yield* makeTurnEnded(state, viewers, refresh),

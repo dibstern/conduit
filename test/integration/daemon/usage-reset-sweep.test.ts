@@ -404,7 +404,11 @@ it.effect(
 it.effect("does not resume from a cached pre-limit Usage Reading", () =>
 	withSweep((fixture) =>
 		Effect.gen(function* () {
-			yield* fixture.usage.refresh({ accountIds: ["claude"], maxAge: 0 });
+			yield* fixture.usage.refresh({
+				accountIds: ["claude"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			yield* at(start + 1000);
 			const project = yield* fixture.project();
 			yield* at(start + 2000);
@@ -725,7 +729,11 @@ it.effect(
 					resetsAt: null,
 				});
 				yield* at(start + 1000);
-				yield* fixture.usage.refresh({ accountIds: ["claude"], maxAge: 0 });
+				yield* fixture.usage.refresh({
+					accountIds: ["claude"],
+					maxAge: 0,
+					wait: "until-settled",
+				});
 				yield* Effect.forkScoped(project.policy);
 				yield* project.continuation.queueLimitPolicy("s1");
 				yield* project.store.readAllBySession("s1").pipe(
@@ -759,7 +767,11 @@ it.effect(
 					],
 				});
 				yield* at(start + 1000);
-				yield* fixture.usage.refresh({ accountIds: ["claude"], maxAge: 0 });
+				yield* fixture.usage.refresh({
+					accountIds: ["claude"],
+					maxAge: 0,
+					wait: "until-settled",
+				});
 				yield* Effect.forkScoped(project.policy);
 				yield* project.continuation.queueLimitPolicy("s1");
 				const recovery = yield* project.recovery.pipe(

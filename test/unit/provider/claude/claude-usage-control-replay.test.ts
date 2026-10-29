@@ -73,6 +73,7 @@ it.each([
 				const [result] = yield* service.refresh({
 					accountIds: ["captured-account"],
 					maxAge: 0,
+					wait: "until-settled",
 				});
 				expect(result?.status).toBe(status);
 				expect(result?.windows).toEqual(

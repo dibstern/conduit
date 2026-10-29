@@ -440,6 +440,7 @@ export const makeContinuation = Effect.gen(function* () {
 													.refresh({
 														accountIds: [account.id],
 														maxAge: due ? "5 minutes" : 0,
+														wait: "5 seconds",
 													})
 													.pipe(
 														Effect.map((readings) =>

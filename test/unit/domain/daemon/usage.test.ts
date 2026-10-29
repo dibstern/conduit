@@ -21,6 +21,13 @@
 // it; a failed read is persisted and shown after the next restart; a removed
 // account comes back; a restored reading stops the first refresh from reading;
 // a live update is lost on restart; the stored reading does not survive JSON.
+// Slow-read failures: a read still gives up at five seconds; a hung read is
+// never closed, leaks its process, or stays checking forever; a caller whose
+// wait ran out gets a failure, a reading that is not marked checking, or
+// cancels the read; the read never publishes or saves once its callers left;
+// failover or Refresh all ignore their wait; checking never shows or never
+// clears; one slow account holds back the others' readings; the settled-read
+// log is missing or repeats per caller.
 import {
 	mkdtemp,
 	readdir,
@@ -41,6 +48,7 @@ import {
 	Layer,
 	Logger,
 	Ref,
+	References,
 	Schema,
 	Stream,
 } from "effect";
@@ -101,19 +109,25 @@ it.effect("returns each account's cache until its maximum age is reached", () =>
 		const [first] = yield* service.refresh({
 			accountIds: ["account-1"],
 			maxAge: "30 seconds",
+			wait: "until-settled",
 		});
 		yield* TestClock.adjust("15 seconds");
-		yield* service.refresh({ accountIds: ["account-2"], maxAge: "30 seconds" });
+		yield* service.refresh({
+			accountIds: ["account-2"],
+			maxAge: "30 seconds",
+			wait: "until-settled",
+		});
 		yield* TestClock.adjust("14999 millis");
 		expect(
 			yield* service.refresh({
 				accountIds: ["account-1"],
 				maxAge: "30 seconds",
+				wait: "until-settled",
 			}),
 		).toEqual([first]);
 		expect(calls).toEqual(["account-1", "account-2"]);
 		yield* TestClock.adjust("1 millis");
-		yield* service.refresh({ maxAge: "30 seconds" });
+		yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" });
 		expect(calls).toEqual(["account-1", "account-2", "account-1"]);
 	}),
 );
@@ -142,16 +156,19 @@ it.effect(
 					},
 				},
 			});
-			const [previous] = yield* service.refresh({ maxAge: "30 seconds" });
+			const [previous] = yield* service.refresh({
+				maxAge: "30 seconds",
+				wait: "until-settled",
+			});
 			yield* TestClock.adjust("30 seconds");
-			yield* service.refresh({ maxAge: "30 seconds" });
+			yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" });
 			yield* TestClock.adjust("29999 millis");
-			expect(yield* service.refresh({ maxAge: "30 seconds" })).toEqual([
-				{ ...previous, stale: true },
-			]);
+			expect(
+				yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" }),
+			).toEqual([{ ...previous, stale: true }]);
 			expect(calls).toBe(2);
 			yield* TestClock.adjust("1 millis");
-			yield* service.refresh({ maxAge: "30 seconds" });
+			yield* service.refresh({ maxAge: "30 seconds", wait: "until-settled" });
 			expect(calls).toBe(3);
 		}),
 );
@@ -175,7 +192,7 @@ it.effect("turn end re-reads a full account without subscribers", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: "5 minutes" });
+		yield* service.refresh({ maxAge: "5 minutes", wait: "until-settled" });
 		yield* service.turnEnded("account-1");
 		yield* service.turnEnded("account-1");
 		yield* TestClock.adjust("10 seconds");
@@ -223,10 +240,10 @@ it.effect(
 					},
 				},
 			});
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("1 second");
-			yield* service.refresh({ maxAge: 0 });
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			expect(messages).toEqual([
 				[
 					"Usage window free before reset",
@@ -240,8 +257,8 @@ it.effect(
 		}).pipe(
 			Effect.provide(
 				Logger.layer([
-					Logger.make(({ message }) => {
-						messages.push(message);
+					Logger.make(({ logLevel, message }) => {
+						if (logLevel === "Info") messages.push(message);
 					}),
 				]),
 			),
@@ -290,20 +307,29 @@ it.effect(
 					},
 				},
 			});
-			const previous = yield* service.refresh({ maxAge: 0 });
-			const snapshots = yield* Stream.runCollect(
-				Stream.take(service.readings, 2),
+			const previous = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			const subscription = yield* Effect.forkChild(
+				Stream.runCollect(Stream.take(service.readings, 2)),
 			);
-			expect([...snapshots]).toEqual([previous, previous]);
+			yield* TestClock.adjust("1 minute");
 			expect(calls).toBe(1);
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect([...(yield* Fiber.join(subscription))]).toEqual([
+				previous,
+				[{ ...previous[0], checking: true }],
+			]);
 		}),
 );
 
 it.effect(
-	"emits the current snapshot before refreshing an expired subscription",
+	"emits the current snapshot, marks it checking while an expired subscription reads, then publishes the read",
 	() =>
 		Effect.gen(function* () {
 			let calls = 0;
+			const release = yield* Deferred.make<void>();
 			const service = yield* makeUsage({
 				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
 				readers: {
@@ -311,20 +337,33 @@ it.effect(
 					cursor: unavailableReader,
 					claude: {
 						read: () =>
-							Effect.sync(() => ({
-								status: "available",
-								windows: [{ kind: "five_hour", utilization: ++calls * 10 }],
-							})),
+							Effect.gen(function* () {
+								if (++calls > 1) yield* Deferred.await(release);
+								return {
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: calls * 10 }],
+								};
+							}),
 					},
 				},
 			});
-			const previous = yield* service.refresh({ maxAge: 0 });
+			const previous = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			yield* TestClock.adjust("5 minutes");
 			const snapshots = yield* Stream.runCollect(
-				Stream.take(service.readings, 2),
+				Stream.take(service.readings, 3).pipe(
+					Stream.tap(([reading]) =>
+						reading?.checking
+							? Deferred.succeed(release, undefined)
+							: Effect.void,
+					),
+				),
 			);
 			expect([...snapshots]).toEqual([
 				previous,
+				[{ ...previous[0], checking: true }],
 				[
 					{
 						...previous[0],
@@ -489,17 +528,22 @@ it.effect(
 					cursor: unavailableReader,
 				},
 			});
-			const [previous] = yield* service.refresh({ maxAge: 0 });
+			const [previous] = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			failed = true;
 			yield* TestClock.adjust("1 minute");
-			expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
-				{ status: "unknown" },
-			]);
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toMatchObject([{ status: "unknown" }]);
 			expect(
 				yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
 			).toEqual([[{ ...previous, stale: true }]]);
 			failed = false;
-			expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toMatchObject([
 				{ stale: false, readAt: yield* Clock.currentTimeMillis },
 			]);
 		}),
@@ -526,10 +570,15 @@ it.effect("retains a cached limit for failover after a read times out", () =>
 				cursor: unavailableReader,
 			},
 		});
-		const [previous] = yield* service.refresh({ maxAge: 0 });
+		const [previous] = yield* service.refresh({
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		timedOut = true;
-		const pending = yield* Effect.forkChild(service.refresh({ maxAge: 0 }));
-		yield* TestClock.adjust("5 seconds");
+		const pending = yield* Effect.forkChild(
+			service.refresh({ maxAge: 0, wait: "until-settled" }),
+		);
+		yield* TestClock.adjust("30 seconds");
 		expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 		expect(
 			yield* service.readings.pipe(Stream.take(1), Stream.runCollect),
@@ -553,7 +602,9 @@ it.effect("treats a harness without a reader as unavailable", () =>
 				cursor: unavailableReader,
 			},
 		});
-		expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
+		expect(
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+		).toMatchObject([
 			{
 				accountId: "codex-1",
 				harness: "codex",
@@ -672,9 +723,13 @@ it.effect("never picks unknown or stale accounts for failover", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		failed = true;
-		yield* service.refresh({ accountIds: ["stale"], maxAge: 0 });
+		yield* service.refresh({
+			accountIds: ["stale"],
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		expect(yield* service.latest("stale")).toMatchObject({
 			status: "available",
 			stale: true,
@@ -715,11 +770,19 @@ it.effect(
 				},
 			});
 			const first = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
 			yield* Deferred.await(started);
 			const second = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
 			yield* Effect.yieldNow;
 			yield* Fiber.interrupt(first);
@@ -746,7 +809,11 @@ it.effect(
 			];
 			expect(yield* Fiber.join(second)).toEqual(expected);
 			expect(
-				yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				yield* service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			).toEqual([
 				{
 					...expected[0],
@@ -767,7 +834,7 @@ it.effect(
 );
 
 it.effect(
-	"bounds the entire read at five seconds, releases it, and retries fresh",
+	"closes a read at thirty seconds, settles it unknown, and retries fresh",
 	() =>
 		Effect.gen(function* () {
 			const started = yield* Deferred.make<void>();
@@ -790,15 +857,20 @@ it.effect(
 				},
 			});
 			const first = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
 			yield* Deferred.await(started);
-			yield* TestClock.adjust("4999 millis");
+			yield* TestClock.adjust("29999 millis");
 			expect(
 				(yield* Effect.sync(() =>
 					Effect4PollOption.fromUndefinedOr(first.pollUnsafe()),
 				))._tag,
 			).toBe("None");
+			expect(released).toBe(0);
 			yield* TestClock.adjust("1 millis");
 			expect(yield* Fiber.join(first)).toEqual([
 				{
@@ -813,15 +885,296 @@ it.effect(
 			]);
 			expect(released).toBe(1);
 			const retry = yield* Effect.forkChild(
-				service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+				service.refresh({
+					accountIds: ["account-1"],
+					maxAge: 0,
+					wait: "until-settled",
+				}),
 			);
-			yield* TestClock.adjust("5 seconds");
+			yield* TestClock.adjust("30 seconds");
 			expect(yield* Fiber.join(retry)).toMatchObject([
 				{ status: "unknown", windows: [] },
 			]);
 			expect(calls).toBe(2);
 			expect(released).toBe(2);
 		}),
+);
+
+it.effect(
+	"gives a caller whose wait runs out the current reading marked checking, then publishes the read",
+	() =>
+		Effect.gen(function* () {
+			const release = yield* Deferred.make<void>();
+			let calls = 0;
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.gen(function* () {
+								if (++calls > 1) yield* Deferred.await(release);
+								return {
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: calls * 10 }],
+								};
+							}),
+					},
+				},
+			});
+			const [previous] = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
+			yield* TestClock.adjust("1 minute");
+			const waiting = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "5 seconds" }),
+			);
+			yield* TestClock.adjust("5 seconds");
+			expect(yield* Fiber.join(waiting)).toEqual([
+				{ ...previous, checking: true },
+			]);
+			expect(yield* service.latest("account-1")).toEqual(previous);
+			yield* Deferred.succeed(release, undefined);
+			expect(
+				yield* service.readings.pipe(
+					Stream.filter(([reading]) => !reading?.checking),
+					Stream.take(1),
+					Stream.runCollect,
+				),
+			).toMatchObject([
+				[{ readAt: 65_000, stale: false, windows: [{ utilization: 20 }] }],
+			]);
+			expect(calls).toBe(2);
+		}),
+);
+
+it.effect(
+	"gives a caller whose wait runs out before the first reading unknown, marked checking",
+	() =>
+		Effect.gen(function* () {
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "codex" }]),
+				readers: {
+					claude: unavailableReader,
+					codex: { read: () => Effect.never },
+					cursor: unavailableReader,
+				},
+			});
+			expect(yield* service.refresh({ maxAge: 0, wait: 0 })).toEqual([
+				{
+					accountId: "account-1",
+					harness: "codex",
+					status: "unknown",
+					windows: [],
+					readAt: 0,
+					stale: false,
+					checking: true,
+				},
+			]);
+			expect(yield* service.latest("account-1")).toBeUndefined();
+		}),
+);
+
+it.effect("answers failover within five seconds while a read is slow", () =>
+	Effect.gen(function* () {
+		let slow = false;
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "current", harness: "claude" },
+				{ id: "spare", harness: "claude" },
+			]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: () =>
+						slow
+							? Effect.never
+							: Effect.succeed({
+									status: "available",
+									windows: [{ kind: "five_hour", utilization: 20 }],
+								}),
+				},
+			},
+		});
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+		slow = true;
+		yield* TestClock.adjust("1 minute");
+		const failover = yield* Effect.forkChild(service.pickFailover("current"));
+		yield* TestClock.adjust("5 seconds");
+		expect(yield* Effect.sync(() => failover.pollUnsafe())).toBeDefined();
+		expect(yield* Fiber.join(failover)).toBe("spare");
+	}),
+);
+
+it.effect(
+	"waits until the read lands when the caller waits until settled",
+	() =>
+		Effect.gen(function* () {
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sleep("20 seconds").pipe(
+								Effect.as<UsageRead>({ status: "available", windows: [] }),
+							),
+					},
+				},
+			});
+			const all = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "until-settled" }),
+			);
+			yield* TestClock.adjust("19999 millis");
+			expect(yield* Effect.sync(() => all.pollUnsafe())).toBeUndefined();
+			yield* TestClock.adjust("1 millis");
+			expect(yield* Fiber.join(all)).toEqual([
+				{
+					accountId: "account-1",
+					harness: "claude",
+					status: "available",
+					windows: [],
+					readAt: 20_000,
+					stale: false,
+				},
+			]);
+		}),
+);
+
+it.effect("publishes each account's reading as its own read lands", () =>
+	Effect.gen(function* () {
+		const release = yield* Deferred.make<void>();
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([
+				{ id: "fast", harness: "claude" },
+				{ id: "slow", harness: "claude" },
+			]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: (account) =>
+						(account.id === "slow"
+							? Deferred.await(release)
+							: Effect.void
+						).pipe(Effect.as<UsageRead>({ status: "available", windows: [] })),
+				},
+			},
+		});
+		const all = yield* Effect.forkChild(
+			service.refresh({ maxAge: 0, wait: "until-settled" }),
+		);
+		expect(
+			yield* service.readings.pipe(
+				Stream.filter((readings) => readings.length > 0),
+				Stream.take(1),
+				Stream.runCollect,
+			),
+		).toEqual([[expect.objectContaining({ accountId: "fast", stale: false })]]);
+		expect(yield* Effect.sync(() => all.pollUnsafe())).toBeUndefined();
+		yield* Deferred.succeed(release, undefined);
+		expect(
+			(yield* Fiber.join(all)).map((reading) => reading.accountId),
+		).toEqual(["fast", "slow"]);
+	}),
+);
+
+it.effect(
+	"logs each settled read once with its account, duration and outcome",
+	() => {
+		const lines: unknown[] = [];
+		return Effect.gen(function* () {
+			const service = yield* makeUsage({
+				accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: () =>
+							Effect.sleep("7 seconds").pipe(
+								Effect.as<UsageRead>({
+									status: "unknown",
+									windows: [],
+									reason: "Not signed in",
+								}),
+							),
+					},
+				},
+			});
+			const first = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "until-settled" }),
+			);
+			const second = yield* Effect.forkChild(
+				service.refresh({ maxAge: 0, wait: "until-settled" }),
+			);
+			yield* TestClock.adjust("7 seconds");
+			yield* Fiber.join(first);
+			yield* Fiber.join(second);
+			expect(lines).toEqual([
+				{
+					logLevel: "Warn",
+					message: ["Usage read settled"],
+					annotations: {
+						accountId: "account-1",
+						durationMs: 7_000,
+						outcome: "unknown",
+						reason: "Not signed in",
+					},
+				},
+			]);
+		}).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make(({ logLevel, message, fiber }) => {
+						lines.push({
+							logLevel,
+							message,
+							annotations: fiber.getRef(References.CurrentLogAnnotations),
+						});
+					}),
+				]),
+			),
+		);
+	},
+);
+
+it.effect("saves a reading that lands after its caller stopped waiting", () =>
+	Effect.gen(function* () {
+		const saved = yield* Deferred.make<UsageHistorySnapshot>();
+		const service = yield* makeUsage({
+			accounts: Effect.succeed([{ id: "account-1", harness: "claude" }]),
+			readers: {
+				codex: unavailableReader,
+				cursor: unavailableReader,
+				claude: {
+					read: () =>
+						Effect.sleep("10 seconds").pipe(
+							Effect.as<UsageRead>({
+								status: "available",
+								windows: [{ kind: "five_hour", utilization: 10 }],
+							}),
+						),
+				},
+			},
+			history: {
+				load: Effect.succeed({}),
+				save: (snapshot) =>
+					snapshot["account-1"]?.reading
+						? Deferred.succeed(saved, snapshot)
+						: Effect.void,
+			},
+		});
+		yield* Effect.forkChild(service.refresh({ maxAge: 0, wait: 0 }));
+		yield* TestClock.adjust("10 seconds");
+		expect((yield* Deferred.await(saved))["account-1"]?.reading).toMatchObject({
+			readAt: 10_000,
+			windows: [{ utilization: 10 }],
+		});
+	}),
 );
 
 it.effect(
@@ -839,7 +1192,9 @@ it.effect(
 					cursor: unavailableReader,
 				},
 			});
-			expect(yield* service.refresh({ maxAge: 0 })).toEqual([
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toEqual([
 				{
 					accountId: "account-1",
 					harness: "claude",
@@ -877,6 +1232,7 @@ it.effect(
 				yield* service.refresh({
 					accountIds: ["removed", "account-1", "account-1"],
 					maxAge: 0,
+					wait: "until-settled",
 				}),
 			).toMatchObject([
 				{
@@ -916,10 +1272,16 @@ it.effect("drops the late result of an account removed during its read", () =>
 				},
 			},
 		});
-		const pending = yield* Effect.forkChild(service.refresh({ maxAge: 0 }));
+		const pending = yield* Effect.forkChild(
+			service.refresh({ maxAge: 0, wait: "until-settled" }),
+		);
 		yield* Deferred.await(started);
 		ids = ["account-1"];
-		yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 });
+		yield* service.refresh({
+			accountIds: ["account-1"],
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		yield* Deferred.succeed(release, undefined);
 		expect(
 			(yield* Fiber.join(pending)).map((reading) => reading.accountId),
@@ -970,10 +1332,18 @@ it.effect(
 					},
 				},
 			});
-			yield* service.refresh({ accountIds: ["codex-1"], maxAge: 0 });
+			yield* service.refresh({
+				accountIds: ["codex-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			yield* TestClock.adjust("1 minute");
 			failing = true;
-			yield* service.refresh({ accountIds: ["codex-1"], maxAge: 0 });
+			yield* service.refresh({
+				accountIds: ["codex-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			expect((yield* service.latest("codex-1"))?.stale).toBe(true);
 			yield* service.update("codex-1", "codex", {
 				status: "unknown",
@@ -1067,7 +1437,11 @@ it.effect("keeps a live reading over a read that started before it", () =>
 			},
 		});
 		const pending = yield* Effect.forkChild(
-			service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+			service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
 		);
 		yield* Deferred.await(started);
 		yield* service.update("account-1", "claude", {
@@ -1080,7 +1454,11 @@ it.effect("keeps a live reading over a read that started before it", () =>
 		expect(yield* Fiber.join(pending)).toEqual([live]);
 		expect(yield* service.latest("account-1")).toEqual(live);
 		expect(
-			yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+			yield* service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
 		).toMatchObject([{ windows: [{ kind: "five_hour", utilization: 20 }] }]);
 	}),
 );
@@ -1128,9 +1506,9 @@ it.effect(
 					},
 				},
 			});
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("1 second");
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			expect(messages).toEqual([
 				[
 					"Usage window free before reset",
@@ -1145,8 +1523,8 @@ it.effect(
 		}).pipe(
 			Effect.provide(
 				Logger.layer([
-					Logger.make(({ message }) => {
-						messages.push(message);
+					Logger.make(({ logLevel, message }) => {
+						if (logLevel === "Info") messages.push(message);
 					}),
 				]),
 			),
@@ -1192,6 +1570,7 @@ it.effect(
 			yield* service.refresh({
 				accountIds: ["account-1", "account-2"],
 				maxAge: 0,
+				wait: "until-settled",
 			});
 			for (const id of ids) yield* service.turnEnded(id);
 			yield* TestClock.adjust("10 seconds");
@@ -1306,14 +1685,19 @@ it.effect(
 				},
 			});
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).not.toHaveProperty("forecast");
 			yield* TestClock.adjust("5 minutes");
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).not.toHaveProperty("forecast");
 			yield* TestClock.adjust("599999 millis");
-			const beforeSpan = (yield* service.refresh({ maxAge: 0 }))[0]?.windows[0];
+			const beforeSpan = (yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			}))[0]?.windows[0];
 			expect(beforeSpan).toHaveProperty("history", [
 				{ at: 0, utilization: 10 },
 				{ at: 300_000, utilization: 10 },
@@ -1322,7 +1706,8 @@ it.effect(
 			expect(beforeSpan).not.toHaveProperty("forecast");
 			yield* TestClock.adjust("1 millis");
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).toHaveProperty("forecast", { kind: "under", atReset: 10 });
 		}),
 );
@@ -1357,13 +1742,17 @@ it.effect("forecasts a steady low burn separately for each window", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		yield* TestClock.adjust("20 minutes");
 		expect(
-			(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+			(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+				?.windows[0],
 		).not.toHaveProperty("forecast");
 		yield* TestClock.adjust("10 minutes");
-		const [reading] = yield* service.refresh({ maxAge: 0 });
+		const [reading] = yield* service.refresh({
+			maxAge: 0,
+			wait: "until-settled",
+		});
 		expect(reading?.windows[0]).toHaveProperty("forecast", {
 			kind: "under",
 			atReset: 70,
@@ -1404,12 +1793,13 @@ it.effect("forecasts a fast burn reaching the limit before reset", () =>
 				},
 			},
 		});
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		yield* TestClock.adjust("10 minutes");
-		yield* service.refresh({ maxAge: 0 });
+		yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 		yield* TestClock.adjust("10 minutes");
 		expect(
-			(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+			(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+				?.windows[0],
 		).toHaveProperty("forecast", { kind: "runs_out", at: 2_700_000 });
 	}),
 );
@@ -1453,16 +1843,19 @@ it.effect("loads history once and forecasts immediately after a restart", () =>
 		yield* Effect.scoped(
 			Effect.gen(function* () {
 				const first = yield* makeUsage(options);
-				yield* first.refresh({ maxAge: 0 });
+				yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* first.refresh({ maxAge: 0 });
+				yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* first.refresh({ maxAge: 0 });
+				yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 			}),
 		);
 		const second = yield* makeUsage(options);
 		yield* TestClock.adjust("10 minutes");
-		const window = (yield* second.refresh({ maxAge: 0 }))[0]?.windows[0];
+		const window = (yield* second.refresh({
+			maxAge: 0,
+			wait: "until-settled",
+		}))[0]?.windows[0];
 		expect(window).toHaveProperty("forecast", { kind: "under", atReset: 70 });
 		expect(window).toHaveProperty("history", [
 			{ at: 0, utilization: 10 },
@@ -1514,7 +1907,7 @@ it.effect(
 			yield* Effect.scoped(
 				Effect.gen(function* () {
 					const first = yield* makeUsage(options(["account-1", "account-2"]));
-					yield* first.refresh({ maxAge: 0 });
+					yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 					yield* first.update("account-2", "claude", {
 						status: "available",
 						windows: [{ kind: "seven_day", utilization: 12 }],
@@ -1545,9 +1938,13 @@ it.effect(
 				yield* second.readings.pipe(Stream.take(1), Stream.runCollect),
 			).toMatchObject([[restored, { accountId: "account-2", stale: true }]]);
 			const pending = yield* Effect.forkChild(
-				second.refresh({ accountIds: ["account-1"], maxAge: "5 minutes" }),
+				second.refresh({
+					accountIds: ["account-1"],
+					maxAge: "5 minutes",
+					wait: "until-settled",
+				}),
 			);
-			yield* TestClock.adjust("5 seconds");
+			yield* TestClock.adjust("30 seconds");
 			expect(yield* Fiber.join(pending)).toMatchObject([{ status: "unknown" }]);
 			expect(yield* second.latest("account-1")).toMatchObject(restored);
 			const removed = yield* makeUsage(options(["account-2"]));
@@ -1604,10 +2001,10 @@ it.effect(
 			yield* Effect.scoped(
 				Effect.gen(function* () {
 					const first = yield* makeUsage(options);
-					yield* first.refresh({ maxAge: 0 });
+					yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 					signedOut = true;
 					yield* TestClock.adjust("1 minute");
-					yield* first.refresh({ maxAge: 0 });
+					yield* first.refresh({ maxAge: 0, wait: "until-settled" });
 					expect(yield* first.latest("account-2")).toMatchObject({
 						stale: true,
 					});
@@ -1653,20 +2050,24 @@ for (const reset of ["later reset time", "utilization drop"] as const) {
 					},
 				},
 			});
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("10 minutes");
 			utilization = 20;
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			yield* TestClock.adjust("10 minutes");
 			utilization = 30;
 			expect(
-				(yield* service.refresh({ maxAge: 0 }))[0]?.windows[0],
+				(yield* service.refresh({ maxAge: 0, wait: "until-settled" }))[0]
+					?.windows[0],
 			).toHaveProperty("forecast");
 			yield* TestClock.adjust("1 minute");
 			if (reset === "later reset time")
 				resetsAt = new Date(7_200_000).toISOString();
 			else utilization = 5;
-			const window = (yield* service.refresh({ maxAge: 0 }))[0]?.windows[0];
+			const window = (yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			}))[0]?.windows[0];
 			expect(window).toHaveProperty("history", [
 				{ at: 1_260_000, utilization },
 			]);
@@ -1714,7 +2115,10 @@ it.effect(
 						),
 				},
 			});
-			const first = yield* service.refresh({ maxAge: 0 });
+			const first = yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			expect(first[0]?.windows[0]).toHaveProperty("history", [
 				{ at: 0, utilization: 10 },
 			]);
@@ -1723,19 +2127,30 @@ it.effect(
 			]);
 			expect(first[0]?.windows[2]).not.toHaveProperty("history");
 			expect(first[0]?.windows[3]).not.toHaveProperty("history");
-			expect(saves).toBe(1);
-			// An unknown read keeps the saved reading; an unavailable one drops it.
-			for (const [failure, saved] of [
-				["unknown", 1],
-				["unavailable", 2],
-			] as const) {
-				status = failure;
-				yield* TestClock.adjust("1 minute");
-				yield* service.refresh({ maxAge: 0 });
-				expect(saves).toBe(saved);
-			}
+			// An unknown read keeps the saved reading and writes nothing; an
+			// unavailable one drops it.
+			const succeeded = yield* Ref.get(stored);
+			expect(
+				Object.values(succeeded).map((saved) => saved.reading?.status),
+			).toEqual(["available", "available"]);
+			const savesBefore = saves;
+			status = "unknown";
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			expect(saves).toBe(savesBefore);
+			expect(yield* Ref.get(stored)).toEqual(succeeded);
+			status = "unavailable";
+			yield* TestClock.adjust("1 minute");
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
+			const unavailable = yield* Ref.get(stored);
+			expect(unavailable["account-1"]).not.toHaveProperty("reading");
+			expect(unavailable["account-2"]).not.toHaveProperty("reading");
 			status = "limited";
-			yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 });
+			yield* service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			});
 			const snapshot = yield* Ref.get(stored);
 			expect(snapshot["account-1"]?.five_hour?.points).toEqual([
 				{ at: 0, utilization: 10 },
@@ -1746,7 +2161,6 @@ it.effect(
 				{ at: 120_000, utilization: 20 },
 			]);
 			expect(snapshot["account-2"]?.five_hour?.points).toHaveLength(1);
-			expect(saves).toBe(3);
 		}),
 );
 
@@ -1780,7 +2194,10 @@ it.effect(
 				},
 			});
 			yield* TestClock.setTime(2016 * 60_000);
-			const window = (yield* service.refresh({ maxAge: 0 }))[0]?.windows[0];
+			const window = (yield* service.refresh({
+				maxAge: 0,
+				wait: "until-settled",
+			}))[0]?.windows[0];
 			if (!window || window.kind === "seven_day_model")
 				throw new Error("Missing plan window");
 			expect(window.history).toHaveLength(48);
@@ -1837,11 +2254,19 @@ it.effect("serializes saves without losing concurrent account history", () =>
 			},
 		});
 		const first = yield* Effect.forkChild(
-			service.refresh({ accountIds: ["account-1"], maxAge: 0 }),
+			service.refresh({
+				accountIds: ["account-1"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
 		);
 		yield* Deferred.await(started);
 		const second = yield* Effect.forkChild(
-			service.refresh({ accountIds: ["account-2"], maxAge: 0 }),
+			service.refresh({
+				accountIds: ["account-2"],
+				maxAge: 0,
+				wait: "until-settled",
+			}),
 		);
 		yield* Effect.yieldNow;
 		yield* Deferred.succeed(release, undefined);
@@ -1884,13 +2309,13 @@ it.effect(
 							: Ref.set(stored, snapshot),
 				},
 			});
-			expect(yield* service.refresh({ maxAge: 0 })).toMatchObject([
-				{ status: "available" },
-			]);
+			expect(
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" }),
+			).toMatchObject([{ status: "available" }]);
 			expect(yield* Ref.get(stored)).toEqual({});
 			failed = false;
 			status = "unknown";
-			yield* service.refresh({ maxAge: 0 });
+			yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			expect((yield* Ref.get(stored))["account-1"]?.five_hour?.points).toEqual([
 				{ at: 0, utilization: 10 },
 			]);
@@ -1949,11 +2374,11 @@ it.effect(
 			);
 			yield* Effect.gen(function* () {
 				const service = yield* Usage;
-				yield* service.refresh({ maxAge: 0 });
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* service.refresh({ maxAge: 0 });
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 				yield* TestClock.adjust("10 minutes");
-				yield* service.refresh({ maxAge: 0 });
+				yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			}).pipe(Effect.provide(layer, { local: true }));
 			const file = join(configDir, "usage-history.json");
 			const snapshot = yield* Effect.tryPromise(() =>
@@ -1974,7 +2399,7 @@ it.effect(
 			]);
 			const readings = yield* Effect.gen(function* () {
 				const service = yield* Usage;
-				return yield* service.refresh({ maxAge: 0 });
+				return yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 			}).pipe(Effect.provide(layer, { local: true }));
 			expect(readings[0]?.windows[0]).toHaveProperty("forecast", {
 				kind: "under",
@@ -2011,7 +2436,7 @@ it.effect(
 					);
 				const readings = yield* Effect.gen(function* () {
 					const service = yield* Usage;
-					return yield* service.refresh({ maxAge: 0 });
+					return yield* service.refresh({ maxAge: 0, wait: "until-settled" });
 				}).pipe(
 					Effect.provide(
 						UsageLive({

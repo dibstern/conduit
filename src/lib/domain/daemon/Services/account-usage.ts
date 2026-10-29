@@ -31,6 +31,13 @@ export type SavedUsage = {
 
 export const emptyAccountUsage: AccountUsage = {};
 
+/** Whose reading this is and when it was taken. */
+type ReadingOrigin = {
+	readonly accountId: string;
+	readonly harness: UsageHarness;
+	readonly readAt: number;
+};
+
 const succeeded = (reading: UsageRead) =>
 	reading.status === "available" || reading.status === "limited";
 
@@ -84,15 +91,7 @@ export const settle = (
 	record: AccountUsage,
 	result: Deferred.Deferred<UsageReading>,
 	read: UsageRead,
-	{
-		accountId,
-		harness,
-		readAt,
-	}: {
-		readonly accountId: string;
-		readonly harness: UsageHarness;
-		readonly readAt: number;
-	},
+	{ accountId, harness, readAt }: ReadingOrigin,
 ): { readonly reading: UsageReading; readonly record: AccountUsage } => {
 	const { windows, series } =
 		harness === "codex" || !succeeded(read)
@@ -174,15 +173,7 @@ const mergeWindows = (
 export const live = (
 	record: AccountUsage,
 	read: UsageRead,
-	{
-		accountId,
-		harness,
-		readAt,
-	}: {
-		readonly accountId: string;
-		readonly harness: UsageHarness;
-		readonly readAt: number;
-	},
+	{ accountId, harness, readAt }: ReadingOrigin,
 ): AccountUsage => {
 	const windows = mergeWindows(read.windows, record.reading?.windows);
 	const reading: UsageReading = {
@@ -220,10 +211,30 @@ export const shouldWake = ({ reading }: AccountUsage, viewers: number) => {
 	);
 };
 
-/** The Usage Reading published for an account. */
-export const publishedReading = (
+/** The Usage Reading published for an account, marked checking while a read is in progress. */
+export const publishedReading = ({
+	reading,
+	inFlight,
+}: AccountUsage): UsageReading | undefined =>
+	reading && inFlight ? { ...reading, checking: true } : reading;
+
+/** What a caller whose wait ran out gets: the published reading, or unknown before the first one. */
+export const waitedOut = (
 	record: AccountUsage,
-): UsageReading | undefined => record.reading;
+	{ accountId, harness, readAt }: ReadingOrigin,
+): UsageReading => {
+	const reading = publishedReading(record);
+	if (reading) return reading;
+	return {
+		accountId,
+		harness,
+		status: "unknown",
+		windows: [],
+		readAt,
+		stale: false,
+		checking: true,
+	};
+};
 
 /** A record whose account is no longer configured keeps only its saved history. */
 export const retired = ({
