@@ -38,6 +38,7 @@ import {
 } from "./session.svelte.js";
 import { viewFamily } from "./session-family-feed.js";
 import { getSessionScope } from "./session-scope.js";
+import { closeFileViewer } from "./session-view.svelte.js";
 import { viewTodos } from "./todo.svelte.js";
 import {
 	drawSavedTranscript,
@@ -46,7 +47,6 @@ import {
 	savedDraw,
 	viewTranscript,
 } from "./transcript.svelte.js";
-import { closeFileViewer } from "./ui.svelte.js";
 
 export type Shown =
 	| { readonly kind: "none" }

@@ -10,7 +10,7 @@ const meta = {
 	parameters: { layout: "padded", a11y: { test: "error" } },
 	beforeEach: () => {
 		sessionViewState.compact = false;
-		sessionViewState.filesOpen = false;
+		sessionViewState.rightPaneView = "closed";
 		closePanel();
 	},
 } satisfies Meta<typeof ViewsRail>;

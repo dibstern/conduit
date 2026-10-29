@@ -1,11 +1,12 @@
-<!-- File preview in the desktop Files pane or a full-screen phone overlay. -->
+<!-- File preview inside the shared right pane. -->
 
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser, applyGetFileContentResponse } from "../../stores/ws-listeners.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
-	import { showToast, uiState } from "../../stores/ui.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -17,14 +18,12 @@
 	let {
 		visible = false,
 		onClose,
-		overlay = false,
 		pane = false,
 		paneTitle,
 		paneActions,
 	}: {
 		visible?: boolean;
 		onClose?: () => void;
-		overlay?: boolean | undefined;
 		pane?: boolean;
 		paneTitle?: Snippet | undefined;
 		paneActions?: Snippet | undefined;
@@ -79,10 +78,10 @@
 	// DOM ref for the <code> element (for hljs)
 	let codeEl: HTMLElement | undefined = $state();
 
-	// A preview remounts when the viewport crosses the phone breakpoint.
+	// Fetch when the selection changes or the preview becomes visible.
 	$effect(() => {
-		const path = visible ? uiState.fileViewerPath : null;
-		const root = visible ? uiState.fileViewerRoot : null;
+		const path = visible ? sessionViewState.filePreview?.path : null;
+		const root = visible ? (sessionViewState.filePreview?.root ?? null) : null;
 		const requestId = ++fileContentRequestId;
 		if (!path) return;
 		const scope = fileTreeState.scope;
@@ -163,7 +162,7 @@
 		const unsub = onFileBrowser((reply) => {
 			if (reply.kind !== "content") return;
 			const msg = reply.response;
-			if ((!uiState.fileViewerPath || msg.path === uiState.fileViewerPath) && (msg.root ?? null) === uiState.fileViewerRoot) {
+			if ((!sessionViewState.filePreview?.path || msg.path === sessionViewState.filePreview?.path) && (msg.root ?? null) === (sessionViewState.filePreview?.root ?? null)) {
 				const rawContent = msg.content;
 				filePath = msg.path;
 				binary = msg.binary ?? false;
@@ -218,7 +217,7 @@
 </script>
 
 {#if visible && (filePath || loading || loadError)}
-	<div id="file-viewer" class="file-viewer-pane" class:phone-overlay={overlay}>
+	<div id="file-viewer" class="file-viewer-pane">
 		<div class={pane ? "flex h-9 shrink-0 items-center gap-2 border-b border-border-subtle px-2 py-1" : "flex min-h-[44px] shrink-0 items-center gap-2 border-b border-border-subtle px-4 py-2.5"}>
 			{#if pane && paneTitle}{@render paneTitle()}{/if}
 			<!-- Back to the file tree, which stays mounted behind the preview. -->

@@ -5,7 +5,10 @@ import {
 	fileTreeState,
 } from "../../stores/file-tree.svelte.js";
 import { attachedProjectState } from "../../stores/router.svelte.js";
-import { closeFileViewer, openFileViewer } from "../../stores/ui.svelte.js";
+import {
+	closeFileViewer,
+	openFileViewer,
+} from "../../stores/session-view.svelte.js";
 import {
 	applyGetFileContentResponse,
 	fileBrowserListeners,

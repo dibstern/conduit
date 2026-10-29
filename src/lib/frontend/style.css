@@ -1389,12 +1389,6 @@ body:has(dialog:modal) {
 	overflow: hidden;
 }
 
-.file-viewer-pane.phone-overlay {
-	position: fixed;
-	inset: 0;
-	z-index: var(--z-pane);
-}
-
 .file-viewer-body {
 	position: relative;
 	flex: 1;
