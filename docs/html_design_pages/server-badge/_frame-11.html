@@ -1,0 +1,274 @@
+<!doctype html><html><head><meta charset="utf-8"><script>(()=>{let t;try{t=parent!==window&&parent.document.documentElement.dataset.designTheme}catch(e){}t=t||localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');const h=document.documentElement;h.dataset.theme=t;h.style.setProperty('color-scheme',t,'important')})()</script><style>body{margin:0}html:not([data-theme=dark]) [data-theme-only=dark],html[data-theme=dark] [data-theme-only=light]{display:none!important}</style><meta name="viewport" content="width=390">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#fff;--surface:#fff;--alt:#f1f1f3;--sbbg:#f8f8f9;--hover:rgba(0,0,0,.045);--active:#ececef;--chip:rgba(0,0,0,.05);--tx:#0b0b0d;--tx2:#5d5d66;--dim:#868692;--accent:#4352d2;--goal:#0c786c;--done:#4c5bd4;--ok:#127136;--err:#bc1f1f;--ask:#984e00;--bd:#e3e3e7;--bds:#eeeef0;--code:#fafafa;--proj:#6f39ff;--pop:#fff;--shadow:0 10px 30px rgba(0,0,0,.13),0 1px 3px rgba(0,0,0,.08);--scrim:rgba(0,0,0,.28)}
+html[data-theme=dark]{--bg:#111113;--surface:#1a1a1d;--alt:#232327;--sbbg:#141416;--hover:rgba(255,255,255,.06);--active:#202024;--chip:rgba(255,255,255,.07);--tx:#ededf0;--tx2:#a1a1aa;--dim:#6e6e77;--accent:#8e9bff;--goal:#3fd0bf;--done:#8e9bff;--ok:#3ecf8e;--err:#ff6369;--ask:#ff9f0a;--bd:#2b2b31;--bds:#1f1f23;--code:#141416;--proj:#b07cff;--pop:#232327;--shadow:0 12px 34px rgba(0,0,0,.55);--scrim:rgba(0,0,0,.55)}
+*{box-sizing:border-box}
+body{margin:0;font:13px/1.45 Geist,system-ui,sans-serif;background:var(--bg);color:var(--tx);-webkit-font-smoothing:antialiased}
+code,.mono{font-family:"Geist Mono",ui-monospace,monospace}
+.stage{padding:18px;display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap}
+.cap{font:600 10.5px Geist,system-ui;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);margin:0 0 8px 2px}
+/* sidebar */
+.sb{width:300px;background:var(--sbbg);border:1px solid var(--bd);border-radius:12px;padding:10px 8px 12px;position:relative}
+.top{display:flex;gap:6px;margin-bottom:8px}
+.sel{display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;background:var(--chip);font-size:13px;white-space:nowrap}
+.search{flex:1;display:flex;align-items:center;gap:6px;height:30px;padding:0 9px;border-radius:8px;background:var(--chip);color:var(--dim);font-size:13px}
+.search kbd{margin-left:auto;font:10.5px "Geist Mono",monospace;color:var(--dim)}
+.chips{display:flex;gap:5px;margin:0 0 6px;flex-wrap:wrap}
+.chip{height:24px;display:inline-flex;align-items:center;gap:5px;padding:0 9px;border-radius:7px;background:var(--chip);font-size:12.5px;color:var(--tx)}
+.chip em{font:400 10.5px "Geist Mono",monospace;color:var(--dim);font-style:normal}
+.chip.on{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)}.chip.on em{color:var(--ok)}
+.gh{display:flex;align-items:center;gap:7px;height:30px;padding:0 8px;margin-top:6px;color:var(--tx2);font-size:13px;font-weight:500}
+.gh em{font:400 11px "Geist Mono",monospace;color:var(--dim);font-style:normal}
+.gh .chev{color:var(--dim);font-size:10px;width:10px}
+.row{display:grid;grid-template-columns:20px minmax(0,1fr) auto;column-gap:9px;row-gap:1px;padding:6px 8px;align-items:center;border-radius:8px;position:relative}
+.row.cur{background:var(--active)}
+.row>.gl{grid-row:span 2;justify-self:center;display:grid;place-items:center;position:relative}
+.row b{font-weight:400;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:6px;min-width:0}
+.row b>span.t{overflow:hidden;text-overflow:ellipsis}
+.row .rt{display:flex;align-items:center;gap:6px;justify-self:end}
+.row time{color:var(--dim);font:11px "Geist Mono",monospace;white-space:nowrap}
+.row .w{font-size:11.5px;font-style:normal;color:var(--goal)}
+.row .sub{grid-column:2/4;color:var(--dim);font-size:11.5px;display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden}
+.row .sub>i{width:7px;height:7px;border-radius:2px;background:var(--proj);flex:none}
+.row .sub code{font-size:11px;overflow:hidden;text-overflow:ellipsis}
+.more{color:var(--dim);font-size:12px;padding:4px 8px 0 37px}
+/* glyphs */
+.cm{width:16px;height:16px;display:block}
+.flow{animation:flow 1.4s cubic-bezier(.45,0,.55,1) infinite}
+@keyframes flow{from{stroke-dashoffset:30}to{stroke-dashoffset:-100}}
+.okc{width:14px;height:14px;border-radius:50%;display:grid;place-items:center;color:var(--ok);background:color-mix(in srgb,var(--ok) 18%,transparent)}
+.pip::after{content:"";position:absolute;right:-3px;bottom:-3px;width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px var(--sbbg)}
+.pip.bad::after{background:var(--err)}
+/* server badge */
+.srv{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px 0 5px;border-radius:999px;font:500 11px/1 "Geist Mono",monospace;color:var(--ok);background:color-mix(in srgb,var(--ok) 13%,transparent);white-space:nowrap;flex:none;cursor:pointer}
+.srv.bad{color:var(--err);background:color-mix(in srgb,var(--err) 13%,transparent)}
+.srv.off{color:var(--dim);background:var(--chip)}
+.srv.await{color:var(--tx2);background:transparent;box-shadow:inset 0 0 0 1px var(--bd)}
+.srv.bare{background:none;padding:0}
+.sv{width:9px;height:9px;border-radius:50%;border:1.4px solid currentColor;display:grid;place-items:center;flex:none}
+.sv::after{content:"";width:3px;height:3px;border-radius:50%;background:currentColor}
+.srv.live .sv{animation:beat 2.4s ease-in-out infinite}
+@keyframes beat{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 40%,transparent)}50%{box-shadow:0 0 0 3px transparent}}
+.x{width:9px;height:9px;display:grid;place-items:center;font:700 10px/1 Geist;flex:none}
+/* popover and card */
+.pop{background:var(--pop);border:1px solid var(--bd);border-radius:11px;box-shadow:var(--shadow);padding:6px;min-width:300px}
+.tip.flow-in{position:static;margin:-2px 0 12px 150px}
+.ph{display:flex;align-items:center;gap:8px;padding:6px 8px 8px;font-size:12px;font-weight:600;color:var(--tx2)}
+.ph .sp{flex:1}
+.it{display:grid;grid-template-columns:16px minmax(0,1fr) auto;column-gap:9px;padding:8px;border-radius:8px;align-items:start}
+.it:hover{background:var(--hover)}
+.it .sv,.it .x{margin-top:4px}
+.it .nm{font-size:13px;font-weight:500;display:flex;gap:7px;align-items:baseline}
+.it .nm code{font-size:12px;color:var(--tx2);font-weight:400}
+.it .ds{font:11.5px "Geist Mono",monospace;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.it .act{display:flex;gap:4px}
+.it.ok>.sv{color:var(--ok)}.it.bad>.x{color:var(--err)}.it.off>.sv{color:var(--dim)}
+.tag{font:500 10px Geist;padding:1px 5px;border-radius:4px;background:var(--chip);color:var(--tx2);letter-spacing:.02em}
+.btn{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 9px;border-radius:7px;background:var(--chip);color:var(--tx);font:500 12px Geist;border:0;white-space:nowrap}
+.btn.pri{background:var(--accent);color:#fff}
+.btn.ghost{background:none;color:var(--tx2)}
+.btn.icon{width:26px;padding:0;justify-content:center;color:var(--tx2);background:none}
+.btn.bad{color:var(--err)}
+.sep{height:1px;background:var(--bds);margin:4px 6px}
+.log{font:11px/1.5 "Geist Mono",monospace;background:var(--code);border:1px solid var(--bds);border-radius:7px;padding:7px 9px;color:var(--tx2);margin:6px 0 0;white-space:pre;overflow:hidden}
+.log .e{color:var(--err)}
+.note{font-size:11.5px;color:var(--dim);padding:2px 8px 6px}
+/* desktop shell */
+.app{display:flex;height:100vh;background:var(--bg)}
+.app>.sb{border-radius:0;border:0;border-right:1px solid var(--bd);height:100%;width:300px;flex:none}
+.main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+.bar{height:48px;display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--bds)}
+.bar .ttl{font-weight:500;font-size:14px}
+.bar code{font-size:11.5px;color:var(--dim)}
+.bar .sp{flex:1}
+.chat{flex:1;overflow:hidden;padding:22px 0}
+.col{max-width:720px;margin:0 auto;padding:0 24px;display:flex;flex-direction:column;gap:14px}
+.u{align-self:flex-end;background:var(--alt);padding:8px 12px;border-radius:12px;max-width:70%}
+.a{line-height:1.6;color:var(--tx)}
+.a p{margin:0 0 8px}
+.a a{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
+.tool{font:12px "Geist Mono",monospace;color:var(--dim);display:flex;gap:8px;align-items:center}
+.tool b{color:var(--tx2);font-weight:500}
+.comp{max-width:720px;width:calc(100% - 48px);margin:0 auto 18px;border:1px solid var(--bd);border-radius:14px;background:var(--surface);padding:10px 12px 8px}
+.comp .ph2{color:var(--dim);font-size:13.5px;padding:2px 2px 16px}
+.comp .tb{display:flex;align-items:center;gap:8px;color:var(--dim);font-size:12px}
+.send{margin-left:auto;width:28px;height:28px;border-radius:8px;background:var(--alt);display:grid;place-items:center;color:var(--dim)}
+.tray{max-width:720px;width:calc(100% - 48px);margin:0 auto -1px;display:flex;align-items:center;gap:10px;padding:6px 10px 7px 12px;border:1px solid var(--bd);border-bottom:0;border-radius:12px 12px 0 0;background:var(--sbbg);font-size:12.5px}
+.tray+.comp{border-top-left-radius:0;border-top-right-radius:0}
+/* phone */
+.phone{width:390px;height:780px;background:var(--bg);position:relative;overflow:hidden;display:flex;flex-direction:column}
+.phone .pt{height:52px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--bds);font-weight:600;font-size:16px}
+.phone .list{padding:8px 8px}
+.phone .row{padding:10px 8px}
+.phone .row b{font-size:15px}
+.phone .row .sub{font-size:12.5px}
+.scrim{position:absolute;inset:0;background:var(--scrim)}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--pop);border-radius:18px 18px 0 0;padding:8px 16px 26px;box-shadow:var(--shadow)}
+.grab{width:38px;height:5px;border-radius:3px;background:var(--bd);margin:0 auto 12px}
+.big{display:flex;align-items:center;justify-content:center;gap:8px;height:46px;border-radius:12px;font:600 15px Geist;background:var(--accent);color:#fff;width:100%}
+.big.sec{background:var(--chip);color:var(--tx)}
+.url{font:12px "Geist Mono",monospace;color:var(--dim);text-align:center;margin:8px 0 14px;word-break:break-all}
+.lk{display:inline-flex;align-items:center;gap:5px;padding:1px 7px 1px 6px;border-radius:6px;background:color-mix(in srgb,var(--ok) 11%,transparent);color:var(--ok);font:500 12.5px "Geist Mono",monospace;text-decoration:none!important;vertical-align:1px}
+.a a.lk{color:var(--ok)}
+.a a.lk-plain{color:var(--tx2);text-decoration:underline}
+.a a.lk.dead,.lk.dead{background:var(--chip);color:var(--dim)}
+.tip{position:absolute;background:var(--pop);border:1px solid var(--bd);border-radius:8px;box-shadow:var(--shadow);padding:7px 9px;font-size:11.5px;color:var(--tx2);width:280px;line-height:1.45}
+.tip code{color:var(--tx);font-size:11px}
+.lane{display:flex;flex-direction:column;gap:6px;width:300px}
+.lane .lb{font:500 11px "Geist Mono",monospace;color:var(--dim);padding-left:4px}
+
+/* competitor redraws */
+.k{font-family:system-ui,-apple-system,sans-serif}
+.k-src{font:10.5px/1.3 'Geist Mono',monospace;color:var(--dim);margin:0 0 8px}
+.k-stack{display:flex;flex-direction:column;gap:14px;padding:14px}
+.k-sb{width:290px;background:var(--sbbg);border:1px solid var(--bd);border-radius:10px;padding:6px}
+.k-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;font-size:13px;min-height:22px}
+.k-row.cur{background:var(--active)}
+.k-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.k-row .tm{font-size:11px;color:var(--dim)}
+.k-meta{display:flex;align-items:center;gap:3px;font-size:12px;line-height:16px;color:var(--dim);padding:0 8px 6px 30px;margin-top:-4px}
+.k-ic{width:14px;height:14px;flex:none;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.k-teal{color:light-dark(#0d9488,rgba(94,234,212,.9));animation:kp 2s ease-in-out infinite}
+@keyframes kp{50%{opacity:.45}}
+.k-shine{color:var(--tx2);animation:ks 1.6s linear infinite}
+@keyframes ks{50%{color:var(--tx)}}
+.k-spin{width:12px;height:12px;border:2px solid var(--bd);border-top-color:var(--accent);border-radius:50%;animation:kr 1s linear infinite;flex:none}
+@keyframes kr{to{transform:rotate(360deg)}}
+.k-card{border:1px solid var(--bd);background:var(--surface);border-radius:12px}
+.k-list>div{display:flex;align-items:center;gap:12px;padding:12px}
+.k-list>div+div{border-top:1px solid var(--bd)}
+.k-fav{width:28px;height:28px;border-radius:7px;background:var(--alt);display:grid;place-items:center;color:var(--tx2);flex:none}
+.k-p{font-size:14px;font-weight:500}.k-s{font-size:12px;color:var(--dim)}
+.k-mono{font-family:'Geist Mono',monospace}
+.k-btn{height:28px;padding:0 10px;border:1px solid var(--bd);border-radius:7px;background:var(--surface);color:var(--tx);font:500 12px system-ui;display:inline-flex;align-items:center;gap:6px}
+.k-muted{color:var(--dim)}
+.k-empty{text-align:center;padding:26px 18px;color:var(--dim);font-size:12.5px}
+.k-empty b{display:block;color:var(--tx);font-size:14px;font-weight:500;margin:6px 0 4px}
+.k-h{font:500 10px system-ui;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);padding:6px 8px 4px}
+.k-pop{background:var(--pop);border:1px solid var(--bd);border-radius:12px;box-shadow:var(--shadow);padding:4px}
+.k-it{display:flex;align-items:center;gap:8px;min-height:28px;padding:0 12px;font-size:14px;border-radius:6px}
+.k-it .act{margin-left:auto;display:flex;gap:6px;color:var(--dim)}
+.k-it .act svg{width:12px;height:12px}
+.k-badge{font:10px/12px system-ui;padding:0 4px;border-radius:2px;background:var(--alt);color:var(--dim)}
+.k-badge.bad{color:light-dark(#9d433b,#d8847b)}
+.k-dot{width:7px;height:7px;border-radius:50%;flex:none}
+.k-pane{border:1px solid var(--bd);border-radius:10px;background:var(--bg);overflow:hidden}
+.k-chrome{height:40px;display:flex;align-items:center;gap:6px;padding:0 8px;border-bottom:1px solid var(--bd);color:var(--tx2)}
+.k-addr{flex:1;height:28px;border-radius:14px;background:var(--alt);display:flex;align-items:center;padding:0 12px;font-size:12px;color:var(--dim)}
+.k-composer{border:1px solid var(--bd);border-radius:14px;background:var(--surface);padding:12px 14px;color:var(--dim);font-size:13px;height:44px}
+.k-note{font-size:11.5px;color:var(--dim);font-style:italic;padding:0 2px}
+
+/* views rail + Servers pane (conduit ViewsRail.svelte / session-views.ts) */
+.li{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.rail{width:44px;flex:none;border-left:1px solid var(--bds);background:var(--sbbg);display:flex;flex-direction:column;align-items:center;gap:6px;padding-top:10px}
+.rb{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--dim);position:relative}
+.rb.on{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+.rb.dis{opacity:.4}
+.rb .ct{position:absolute;top:-3px;right:-4px;min-width:15px;height:15px;padding:0 4px;box-sizing:border-box;border-radius:8px;font:600 9.5px/15px Geist;text-align:center;color:#fff;background:var(--accent)}
+.rb .ct.ok{background:var(--ok);color:var(--bg)}
+.rb .dot{position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px var(--sbbg)}
+.pane{width:380px;flex:none;border-left:1px solid var(--bds);background:var(--surface);display:flex;flex-direction:column}
+.pane .phd{height:34px;display:flex;align-items:center;gap:6px;padding:0 8px 0 12px;font-size:12px;font-weight:600;color:var(--tx2);border-bottom:1px solid var(--bds)}
+.pane .phd .sp{flex:1}.pane .phd .li{width:14px;height:14px;color:var(--dim)}
+.pane .phd .n{font-weight:400;color:var(--dim)}
+.svc{padding:12px;border-bottom:1px solid var(--bds);display:grid;gap:8px}
+.svc .h{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500}
+.svc .h .sv{color:var(--ok)}
+.svc .h code{font-size:12px;color:var(--tx2);font-weight:400}
+.svc .lnk{font:12px "Geist Mono",monospace;color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.svc .m{font:11px "Geist Mono",monospace;color:var(--dim)}
+.svc .acts{display:flex;gap:6px}
+.tipr{position:absolute;right:52px;background:var(--pop);border:1px solid var(--bd);box-shadow:var(--shadow);border-radius:7px;padding:4px 8px;font-size:12px;white-space:nowrap}
+.tipr kbd{font:11px "Geist Mono";color:var(--dim);margin-left:6px}
+.vc{border-radius:10px;background:var(--alt);position:relative;display:flex;flex-direction:column}
+.vc.on{box-shadow:inset 0 0 0 1.5px var(--accent)}
+.vc .bdg{position:absolute;top:-5px;right:-5px;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;background:var(--accent);color:var(--bg);font:600 11px Geist}
+.vc.dis{opacity:.45}
+.vc .pv{height:62px;margin:4px 4px 0;border-radius:7px;background:var(--bg);padding:6px;box-sizing:border-box;font:8.5px/1.5 "Geist Mono",monospace;color:var(--dim);overflow:hidden;white-space:nowrap}
+.vc .lb{display:flex;align-items:center;gap:5px;padding:6px 7px 8px;font-size:12.5px;font-weight:500;white-space:nowrap}
+.vc .lb .li{width:14px;height:14px}
+.vc.on .lb{color:var(--accent)}
+.sect{font-size:12.5px;color:var(--tx2);margin:16px 2px 8px}
+.tight .lb{font-size:11px;gap:3px;padding:6px 3px 8px;justify-content:center}.tight .lb .li{display:none}.tight .pv{font-size:7.5px}
+.big-acts .btn{height:36px;padding:0 14px;font-size:13.5px}
+.tile{height:58px;border-radius:12px;background:var(--alt);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;font-size:12.5px}
+</style>
+<script>
+const HK='<path d="M2 4h5a2 2 0 0 1 0 4H5" stroke="currentColor" fill="none" stroke-linecap="round"';
+const run=c=>`<svg class="cm" viewBox="0 0 16 16" style="color:${c}"><rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="currentColor" opacity=".16"/><g transform="translate(2.5 2)">${HK} stroke-width="1.6" opacity=".35"/>${HK} stroke-width="1.6" class="flow" pathLength="100" stroke-dasharray="30 100"/></g></svg>`;
+const G={
+ running:run('var(--accent)'),
+ monitoring:run('var(--goal)'),
+ idle:`<svg class="cm" viewBox="0 0 16 16" style="color:var(--dim)"><rect x="2" y="2" width="12" height="12" rx="3.2" fill="none" stroke="currentColor" stroke-width="1.2"/><g transform="translate(2.5 2)">${HK} stroke-width="1.4"/></g></svg>`,
+ unread:`<svg class="cm" viewBox="0 0 16 16" style="color:#fff"><rect x="1.5" y="1.5" width="13" height="13" rx="3.5" fill="var(--done)"/><g transform="translate(2.5 2)">${HK} stroke-width="1.6"/></g></svg>`,
+ settled:`<span class="okc"><svg viewBox="0 0 10 10" width="9" height="9"><path d="M2.2 5.2l1.9 1.9 3.8-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`,
+ ask:`<span style="width:14px;height:14px;border-radius:50%;border:1.5px solid var(--ask);display:grid;place-items:center"><span style="width:6px;height:6px;border-radius:50%;background:var(--ask)"></span></span>`
+};
+const SV=s=>s.st==='bad'?'<i class="x">✕</i>':'<i class="sv"></i>';
+const badge=(list,o={})=>{
+ if(!list)return'';
+ if(list.length>1){const st=list.some(s=>s.st==='bad')?'bad':'';return `<span class="srv ${st} ${o.cls||''}">${st?'<i class="x">✕</i>':'<i class="sv"></i>'}${o.long?list.length+' servers':list.length}</span>`}
+ const s=list[0];return `<span class="srv ${s.st||''} ${o.cls||''}">${SV(s)}${o.noport?'':(o.host?'localhost':'')+':'+s.port}${s.st==='off'?' stopped':''}</span>`;
+};
+// r: {g,t,p,b,m,word,s:[{port,st}],cur}; o.at: right|sub|title|pip|none
+function row(r,o={}){
+ const at=r.at||o.at||'right',bd=badge(r.s,o);
+ const pip=r.s&&at==='pip'?' pip'+(r.s.some(x=>x.st==='bad')?' bad':''):'';
+ const right=(at==='right'&&r.s?bd:'')+(r.word?`<em class="w">${r.word}</em>`:'')+((at==='right'&&r.s&&!o.keepTime)?'':`<time>${at==='pip'&&r.s?':'+r.s[0].port+' · ':''}${r.m||''}</time>`);
+ return `<div class="row ${r.cur?'cur':''}"><span class="gl${pip}">${G[r.g]}</span><b><span class="t">${r.t}</span>${at==='title'?bd:''}</b><span class="rt">${right}</span><span class="sub"><i></i>${r.p||'conduit'}${r.b?`<code>${r.b}</code>`:''}${at==='sub'?bd:''}</span></div>`;
+}
+const GLY={Running:G.running,Unread:G.unread,Idle:G.idle,'Needs you':G.ask,Serving:'<span class="srv bare" style="color:var(--ok)"><i class="sv"></i></span>'};
+function group(name,rows,o){return `<div class="gh"><span class="chev">⌄</span><span style="width:16px;display:grid;place-items:center">${(GLY[name]||'').replace('class="cm"','class="cm" style="width:14px;height:14px"')}</span>${name} <em>${rows.length}</em></div>`+rows.map(r=>row(r,o)).join('')}
+function sidebar(groups,o={}){
+ const chips=o.chips||[['Needs you',0],['Running',2],['Unread',1]];
+ return `<div class="top"><span class="sel">All projects <span style="color:var(--dim)">⌄</span></span><span class="search">⌕ Search<kbd>⌘K</kbd></span></div><div class="chips">${chips.map(c=>`<span class="chip ${c[2]||''}">${c[0]} <em>${c[1]}</em></span>`).join('')}</div>`+groups.map(g=>group(g[0],g[1],o)).join('');
+}
+const D={
+ fix:{g:'running',t:'Fix auth redirect loop',b:'fix/auth-loop',m:'2m 14s'},
+ ci:{g:'monitoring',t:'Watch CI on #482',b:'main',word:'Monitoring'},
+ price:{g:'unread',t:'Add pricing page',b:'feat/pricing',m:'4m',s:[{port:5173}]},
+ docs:{g:'idle',t:'Docs site rebuild',b:'docs/astro-5',m:'18m',s:[{port:3000},{port:3001}]},
+ vite:{g:'idle',t:'Upgrade Vite to 8',b:'chore/vite-8',m:'31m',s:[{port:4173,st:'bad'}]},
+ hook:{g:'idle',t:'Migrate payments webhook',b:'feat/webhooks',m:'1h'},
+};
+function std(o){return sidebar([['Running',[D.fix,D.ci]],['Unread',[{...D.price,cur:o&&o.cur}]],['Idle',[D.docs,D.vite,D.hook]]],o)}
+function serversPop(o={}){
+ return `<div class="pop" style="${o.style||''}"><div class="ph">Servers <span class="tag">Docs site rebuild</span><span class="sp"></span><span style="font-weight:400;color:var(--dim)">2 running</span></div>
+ <div class="it ok"><i class="sv"></i><div><div class="nm">astro dev <code>:3000</code></div><div class="ds">pnpm dev · up 18m · detected</div></div><div class="act"><span class="btn pri">Open</span><span class="btn icon">⧉</span><span class="btn icon">■</span></div></div>
+ <div class="it ok"><i class="sv"></i><div><div class="nm">api <code>:3001</code></div><div class="ds">node server.mjs · up 17m · marked by agent</div></div><div class="act"><span class="btn">Open</span><span class="btn icon">⧉</span><span class="btn icon">■</span></div></div>
+ ${o.stopped?`<div class="sep"></div><div class="it off"><i class="sv"></i><div><div class="nm" style="color:var(--tx2)">storybook <code>:6006</code></div><div class="ds">server stopped · exit 0 · 4m ago</div></div><div class="act"><span class="btn ghost">Dismiss</span></div></div>`:''}
+ ${o.remote?`<div class="note">Opens through Tailscale: <code>davids-mac-studio…ts.net:8471</code></div>`:''}</div>`;
+}
+
+const LI={terminal:'<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',code:'<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',files:'<path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/>',globe:'<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',chat:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',refresh:'<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/>',x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',copy:'<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',ext:'<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3"/>',stop:'<rect width="12" height="12" x="6" y="6" rx="1"/>',expand:'<path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/>'};
+const li=(n,st='')=>`<svg class="li" viewBox="0 0 24 24" style="${st}">${LI[n]}</svg>`;
+function rail(o={}){const b=(id,ic,extra='')=>`<span class="rb ${o.on===id?'on':''} ${id==='diff'?'dis':''}">${li(ic)}${extra}</span>`;
+ const sv=o.servers===0?(o.hideEmpty?'':b('diff','globe')):b('servers','globe',o.mark==='dot'?'<i class="dot"></i>':`<i class="ct ${o.mark==='ok'?'ok':''}">${o.servers??2}</i>`);
+ return `<div class="rail" style="${o.style||''}">${b('terminal','terminal')}${b('diff','code')}${b('files','files')}${sv}${o.tip?`<span class="tipr" style="top:${o.tipTop||118}px">${o.tip}</span>`:''}</div>`}
+function svc(name,port,meta,pri){return `<div class="svc"><div class="h"><i class="sv"></i>${name} <code>:${port}</code></div><div class="lnk">localhost:${port}</div><div class="m">${meta}</div><div class="acts"><span class="btn ${pri?'pri':''}">${li('ext','width:13px;height:13px')} Open</span><span class="btn">${li('copy','width:13px;height:13px')} Copy link</span><span class="sp" style="flex:1"></span><span class="btn ghost">${li('stop','width:12px;height:12px')} Stop</span></div></div>`}
+function serversPane(o={}){return `<div class="pane">${o.bare?'':`<div class="phd">Servers <span class="n">2 running</span><span class="sp"></span>${li('refresh')}${li('expand')}${li('x')}</div>`}${svc('astro dev',3000,'pnpm dev · up 18m · detected',true)}${svc('api',3001,'node server.mjs · up 17m · marked by agent')}${o.remote?`<div class="note" style="padding:10px 12px">Open goes through Tailscale: <code>davids-mac-studio…ts.net:8471</code></div>`:''}</div>`}
+function viewCards(o={}){const pv={chat:'<div style="height:5px;width:70%;background:var(--bd);border-radius:2px;margin:3px 0 5px auto"></div><div style="height:5px;width:85%;background:var(--bd);border-radius:2px;margin-bottom:5px"></div><div style="height:5px;width:60%;background:var(--bd);border-radius:2px"></div>',terminal:'<span style="color:var(--accent)">❯</span> pnpm test<br><span style="color:var(--ok)">✓ 43 passed</span><br><span style="color:var(--accent)">❯</span> git status',diff:'<span style="color:var(--ok)">+ const seen</span><br><span style="color:var(--err)">- row.count</span><br><span style="color:var(--ok)">+ m.at &gt; seen</span>',files:'▾ stores<br>&nbsp;&nbsp;unread.ts <span style="color:var(--ask)">M</span><br>▾ test',servers:'<span style="color:var(--ok)">◉</span> :3000 astro<br><span style="color:var(--ok)">◉</span> :3001 api'};
+ const v=[['chat','chat','Chat'],['terminal','terminal','Terminal'],['diff','code','Diff'],['files','files','Files'],['servers','globe','Servers']];
+ const ord=o.order||v.map(x=>x[0]);
+ return ord.map(k=>v.find(x=>x[0]===k)).map(([id,ic,lb])=>`<div class="vc ${id==='chat'?'on':''} ${id==='diff'?'dis':''}" style="${o.w?`width:${o.w}px;flex:none`:''}"><div class="pv">${pv[id]}</div><div class="lb">${li(ic)}${lb}</div>${id==='servers'?'<span class="bdg">2</span>':''}</div>`).join('')}
+
+const SHEET=(body)=>`<div class="phone"><div class="pt"><span style="color:var(--dim)">‹</span> Docs site rebuild<span style="flex:1"></span><span style="color:var(--dim)">⋯</span></div><div class="scrim"></div>
+<div class="sheet"><div class="grab"></div>
+<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><b style="font-size:17px">Docs site rebuild</b><span style="flex:1"></span><span class="btn icon" style="background:var(--chip);border-radius:50%">✕</span></div>
+<div style="font-size:12.5px;color:var(--dim);margin-bottom:14px"><span style="display:inline-block;width:7px;height:7px;border-radius:2px;background:var(--proj);margin-right:5px"></span>conduit · 8m ago</div>
+${body}
+<div class="sect">Triage</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px"><div class="tile">✓ Settle</div><div class="tile">☾ Snooze</div><div class="tile">⚲ Pin</div><div class="tile">◎ Unread</div></div>
+</div></div>`;
+function phoneSheet5(){return SHEET(`<div class="tight" style="padding-top:6px;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px">${viewCards()}</div>`)}
+function phoneSheetScroll(){return SHEET(`<div style="display:flex;gap:8px;overflow:hidden;margin:0 -16px 0 0;padding-top:6px">${viewCards({w:84,order:['chat','servers','terminal','diff','files']})}</div>`)}
+document.addEventListener('DOMContentLoaded',()=>document.querySelectorAll('[data-fill]').forEach(el=>{el.innerHTML=new Function('return '+el.dataset.fill)()}));
+</script>
+</head><body>
+<div class="phone"><div class="pt">Sessions</div><div class="list" data-fill="sidebar([['Running',[D.fix]],['Unread',[D.price]],['Idle',[D.docs]]],{at:'right'})"></div>
+<div class="scrim"></div><div class="sheet"><div class="grab"></div>
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:2px"><span class="srv live"><i class="sv"></i>:5173</span><b style="font-weight:600;font-size:16px">vite dev</b></div>
+<div style="color:var(--dim);font-size:13px;margin-bottom:14px">Add pricing page · up 4m</div>
+<div class="big">Open preview ↗</div><div class="url">https://davids-mac-studio.tail662561.ts.net:8471</div>
+<div style="display:flex;gap:8px"><div class="big sec" style="flex:1">Copy link</div><div class="big sec" style="flex:1;color:var(--err)">Stop</div></div></div></div>
+</body></html>
