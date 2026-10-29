@@ -83,7 +83,7 @@ export const UsageHistorySnapshotSchema = Schema.Record(
 	Schema.Struct({
 		five_hour: Schema.optional(usageHistorySeriesSchema),
 		seven_day: Schema.optional(usageHistorySeriesSchema),
-		/** The last successful reading, shown as stale after a restart. */
+		/** The reading while it is available or limited, shown as stale after a restart. */
 		reading: Schema.optional(UsageReadingSchema),
 	}),
 );

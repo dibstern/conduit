@@ -1555,6 +1555,85 @@ it.effect(
 		}),
 );
 
+it.effect(
+	"after a restart, a signed-out account's old reading isn't restored, and an available reading is restored as stale with transient fields stripped",
+	() =>
+		Effect.gen(function* () {
+			const file = yield* Ref.make("{}");
+			const json = Schema.fromJsonString(UsageHistorySnapshotSchema);
+			let signedOut = false;
+			let cold = false;
+			const options = {
+				accounts: Effect.succeed([
+					{ id: "account-1", harness: "claude" as const },
+					{ id: "account-2", harness: "claude" as const },
+				]),
+				readers: {
+					codex: unavailableReader,
+					cursor: unavailableReader,
+					claude: {
+						read: (account: { readonly id: string }) =>
+							cold
+								? Effect.never
+								: signedOut
+									? Effect.succeed<UsageRead>(
+											account.id === "account-1"
+												? {
+														status: "unavailable",
+														reason: "Signed out",
+														windows: [],
+													}
+												: { status: "unknown", windows: [] },
+										)
+									: Effect.succeed<UsageRead>({
+											status: "available",
+											windows: [{ kind: "seven_day", utilization: 30 }],
+										}),
+					},
+				},
+				history: {
+					load: Ref.get(file).pipe(
+						Effect.flatMap(Schema.decodeUnknownEffect(json)),
+					),
+					save: (snapshot: UsageHistorySnapshot) =>
+						Schema.encodeEffect(json)(snapshot).pipe(
+							Effect.flatMap((text) => Ref.set(file, text)),
+						),
+				},
+			};
+			yield* Effect.scoped(
+				Effect.gen(function* () {
+					const first = yield* makeUsage(options);
+					yield* first.refresh({ maxAge: 0 });
+					signedOut = true;
+					yield* TestClock.adjust("1 minute");
+					yield* first.refresh({ maxAge: 0 });
+					expect(yield* first.latest("account-2")).toMatchObject({
+						stale: true,
+					});
+				}),
+			);
+			const saved = yield* Ref.get(file).pipe(
+				Effect.flatMap(Schema.decodeUnknownEffect(json)),
+			);
+			expect(saved["account-1"]).not.toHaveProperty("reading");
+			expect(saved["account-2"]?.reading).toMatchObject({
+				status: "available",
+				readAt: 0,
+				stale: false,
+			});
+			cold = true;
+			const second = yield* makeUsage(options);
+			expect(yield* second.latest("account-1")).toBeUndefined();
+			expect(yield* second.latest("account-2")).toMatchObject({
+				accountId: "account-2",
+				status: "available",
+				readAt: 0,
+				stale: true,
+			});
+		}),
+);
+
 for (const reset of ["later reset time", "utilization drop"] as const) {
 	it.effect(`starts fresh history on a ${reset}`, () =>
 		Effect.gen(function* () {
@@ -1645,12 +1724,16 @@ it.effect(
 			expect(first[0]?.windows[2]).not.toHaveProperty("history");
 			expect(first[0]?.windows[3]).not.toHaveProperty("history");
 			expect(saves).toBe(1);
-			for (const failure of ["unknown", "unavailable"] as const) {
+			// An unknown read keeps the saved reading; an unavailable one drops it.
+			for (const [failure, saved] of [
+				["unknown", 1],
+				["unavailable", 2],
+			] as const) {
 				status = failure;
 				yield* TestClock.adjust("1 minute");
 				yield* service.refresh({ maxAge: 0 });
+				expect(saves).toBe(saved);
 			}
-			expect(saves).toBe(1);
 			status = "limited";
 			yield* service.refresh({ accountIds: ["account-1"], maxAge: 0 });
 			const snapshot = yield* Ref.get(stored);
@@ -1663,7 +1746,7 @@ it.effect(
 				{ at: 120_000, utilization: 20 },
 			]);
 			expect(snapshot["account-2"]?.five_hour?.points).toHaveLength(1);
-			expect(saves).toBe(2);
+			expect(saves).toBe(3);
 		}),
 );
 

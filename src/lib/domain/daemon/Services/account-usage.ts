@@ -10,8 +10,6 @@ import { type ForecastSeries, withForecasts } from "./usage-forecast.js";
 /** One account's usage. Its published reading and saved history are projections of it. */
 export type AccountUsage = {
 	readonly reading?: UsageReading;
-	/** The last available or limited reading, which the saved history keeps. */
-	readonly lastSuccessful?: UsageReading;
 	readonly lastAttemptAt?: number;
 	readonly inFlight?:
 		| {
@@ -112,7 +110,6 @@ export const settle = (
 			...series,
 			inFlight: undefined,
 			reading: keptReading(record, reading),
-			...(succeeded(reading) ? { lastSuccessful: reading } : {}),
 		},
 	};
 };
@@ -205,7 +202,6 @@ export const live = (
 	return {
 		...record,
 		reading,
-		...(succeeded(reading) ? { lastSuccessful: reading } : {}),
 		inFlight: record.inFlight && { ...record.inFlight, overtaken: true },
 	};
 };
@@ -247,7 +243,9 @@ export const savedHistory = (
 			{
 				...(record.five_hour ? { five_hour: record.five_hour } : {}),
 				...(record.seven_day ? { seven_day: record.seven_day } : {}),
-				...(record.lastSuccessful ? { reading: record.lastSuccessful } : {}),
+				...(record.reading && succeeded(record.reading)
+					? { reading: { ...record.reading, stale: false } }
+					: {}),
 			},
 		]),
 	);
@@ -255,7 +253,5 @@ export const savedHistory = (
 // Restored readings keep their read time and stay stale until a read lands.
 export const restored = ({ reading, ...series }: SavedUsage): AccountUsage => ({
 	...series,
-	...(reading
-		? { reading: { ...reading, stale: true }, lastSuccessful: reading }
-		: {}),
+	...(reading ? { reading: { ...reading, stale: true } } : {}),
 });
