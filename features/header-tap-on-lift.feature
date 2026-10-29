@@ -38,6 +38,7 @@ Scenario Outline: A touch that moves before it lifts is a drag, not a tap
 Examples:
   | distance | clicks |
   | 6        | 1      |
+  | 10       | 0      |
   | 14       | 0      |
 
 Scenario Outline: A touch held too long before it lifts is not a tap
