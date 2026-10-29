@@ -3201,6 +3201,89 @@ for (const outcome of ["retired", "exited"] as const)
 			),
 	);
 
+it.effect(
+	"keeps a restored binding on its runner across a reattach and releases it when the runner exits",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* setup;
+				const registered = yield* f.register("131313131313", 100_020, {
+					retired: false,
+				});
+				const connections: Array<
+					Parameters<ProcessRunnerDriver["connect"]>[0]
+				> = [];
+				f.connect.mockImplementation((options) =>
+					Effect.gen(function* () {
+						connections.push(options);
+						const connection = new RunnerSocket(
+							new Socket(),
+							() => {},
+							options.onClose,
+						);
+						let helloDone = false;
+						vi.spyOn(connection, "closed", "get").mockImplementation(
+							() => connections.length === 1 && helloDone,
+						);
+						vi.spyOn(connection, "write").mockImplementation(() => {});
+						vi.spyOn(connection, "commandEffect").mockReturnValue(
+							Effect.succeed(undefined),
+						);
+						vi.spyOn(connection, "destroy").mockImplementation(() => {});
+						yield* options.onHello(
+							{
+								type: "hello",
+								protocolVersion: 1,
+								buildId: runnerBuildId(),
+								stampsRunIds: true,
+								runnerId: options.runnerId,
+								sessionId: "s",
+								pid: options.pid ?? 0,
+								bindings: [
+									{ sinkId: "restored", sessionId: "s", released: false },
+								],
+								sendJournalAnswers: true,
+								sendAnswers: [],
+							},
+							connection,
+						);
+						helloDone = true;
+						return connection;
+					}),
+				);
+				yield* f.recover;
+				yield* TestClock.adjust("2 seconds");
+				// The first socket closed after its hello, so recovery reattached the same runner.
+				expect(connections.map((options) => options.runnerId)).toEqual([
+					registered.runnerId,
+					registered.runnerId,
+				]);
+				const reattached = connections[1];
+				if (!reattached)
+					return yield* Effect.fail(runnerFailure("test", "No reattach"));
+				const outputs: SessionOutput[] = [];
+				f.output.mockImplementation((output) =>
+					Effect.sync(() => {
+						outputs.push(output);
+						return {};
+					}),
+				);
+				f.processes.set(registered.pid, { state: "gone" });
+				reattached.onClose(runnerFailure("test socket", "Runner exited"));
+				yield* TestClock.adjust("4 seconds");
+				expect(
+					outputs.filter(
+						(output) =>
+							output.type === "release-sink" && output.sinkId === "restored",
+					),
+				).toHaveLength(1);
+				expect(
+					yield* f.manager.hasLiveProcessEffect("s", registered.runnerId),
+				).toBe(false);
+			}),
+		),
+);
+
 for (const deniedTerm of [false, true])
 	it.effect(
 		`releases a failed force-stop and starts the next message on a fresh runner (TERM refused: ${deniedTerm})`,

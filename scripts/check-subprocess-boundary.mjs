@@ -40,7 +40,13 @@ const remainingOneShotCallers = new Set(
 	].map((path) => resolve(path)),
 );
 // Shared spawn configuration for long-lived processes may reference types only.
-const processContracts = new Set([resolve("src/lib/daemon/daemon-types.ts")]);
+const processContracts = new Set(
+	[
+		"src/lib/daemon/daemon-types.ts",
+		// RunnerChild records the runner process process-session-runner.ts spawns.
+		"src/lib/provider/runner/runner-entry-lifecycle.ts",
+	].map((path) => resolve(path)),
+);
 
 function collectSourceFiles(directory) {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {

@@ -36,8 +36,9 @@ export interface RunnerUpgradeState {
 }
 
 export interface RunnerUpgrade {
-	state?: RunnerUpgradeState | undefined;
-	activity: number;
+	/** The runner's report and the change version; runner-entry-lifecycle.ts writes both. */
+	readonly state?: RunnerUpgradeState | undefined;
+	readonly activity: number;
 	inFlight: boolean;
 	failures: number;
 	retryAt: number;
