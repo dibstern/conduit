@@ -29,6 +29,27 @@ export type PoseInput = {
 /** Below this an inset counts as absent; landscape iPhone notches sit far above it. */
 const NO_INSET = 8;
 
+/** The right-edge strip every pose but unfolded portrait shows, with no left inset. */
+const hasStrip = ({ right, left }: PoseInput["insets"]): boolean =>
+	right >= 76 && right <= 92 && left < NO_INSET;
+
+const stripPose = (portrait: boolean, width: number): DuoPose | null => {
+	if (portrait) return width < 600 ? "duo-folded-portrait" : null;
+	return width < 768 ? "duo-folded-landscape" : "duo-unfolded-landscape";
+};
+
+/** Unfolded portrait's top status bar, no side insets, at its 600-767 width. */
+const isUnfoldedPortraitBand = (
+	width: number,
+	{ top, right, left }: PoseInput["insets"],
+): boolean =>
+	right < NO_INSET &&
+	left < NO_INSET &&
+	top >= 55 &&
+	top <= 67 &&
+	width >= 600 &&
+	width < 768;
+
 export function classifyDuoPose({
 	width,
 	height,
@@ -39,19 +60,8 @@ export function classifyDuoPose({
 	// Orientation comes from the same size it is checked against, so a rotation
 	// frame can never pair one pose's orientation with another's width.
 	const portrait = height >= width;
-	if (insets.right >= 76 && insets.right <= 92 && insets.left < NO_INSET) {
-		if (portrait) return width < 600 ? "duo-folded-portrait" : null;
-		return width < 768 ? "duo-folded-landscape" : "duo-unfolded-landscape";
-	}
-	if (
-		portrait &&
-		insets.right < NO_INSET &&
-		insets.left < NO_INSET &&
-		insets.top >= 55 &&
-		insets.top <= 67 &&
-		width >= 600 &&
-		width < 768
-	)
-		return "duo-unfolded-portrait";
-	return null;
+	if (hasStrip(insets)) return stripPose(portrait, width);
+	return portrait && isUnfoldedPortraitBand(width, insets)
+		? "duo-unfolded-portrait"
+		: null;
 }
