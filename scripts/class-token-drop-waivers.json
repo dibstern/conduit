@@ -1,11 +1,19 @@
 {
+	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: size-[8px]": {
+		"renamedTo": "size-[12px]",
+		"reason": "conduit-test-lchsn restores a legible question button while leaving its own band exposed. Transparent 24px targets resolve overlapping taps to the nearest marker."
+	},
+	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: text-[8px]": {
+		"renamedTo": "text-[10px]",
+		"reason": "conduit-test-lchsn restores a readable question glyph inside the 12px marker."
+	},
 	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: size-[19px]": {
-		"renamedTo": "size-[8px]",
-		"reason": "conduit-test-lchsn shrinks question markers to fit the activity strip. The 19px circles overlapped adjacent steps and each other in dense phone turns; the layout now reserves a 10px slot for each 8px marker."
+		"renamedTo": "size-[12px]",
+		"reason": "conduit-test-lchsn keeps question markers legible without overlap in dense phone turns. Each 12px face has an 18px coloured band and a transparent 24px hit extension."
 	},
 	"src/lib/frontend/components/ui/ActivityTimeline.svelte :: text-[12px]": {
-		"renamedTo": "text-[8px]",
-		"reason": "conduit-test-lchsn scales the question glyph with its intentionally smaller 8px hand-back marker."
+		"renamedTo": "text-[10px]",
+		"reason": "conduit-test-lchsn uses a legible 10px question glyph within the compact 12px hand-back marker."
 	},
 	"src/lib/frontend/components/chat/SurfacingCard.svelte :: card-at,card-body,card-foot,card-head,card-note,desktop-time,following,glyph,grow,h-[26px],max-md:h-[30px],max-md:size-[30px],md-content,needs-reply,px-[9px],read-toggle,rounded-[4px],select-text,size-[15px],size-[26px],surfacing-msg-card,text-[12.5px],text-[14px],type-label": {
 		"movedTo": "src/lib/frontend/components/chat/SurfacingMessageCard.svelte",

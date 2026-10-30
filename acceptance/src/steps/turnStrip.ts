@@ -12,12 +12,296 @@ import {
 	requireRpcControl,
 	setSessionRowStatus,
 } from "./shared.js";
+import { chooseShowStop } from "./turnActivityShow.js";
 
 type Part = typeof HistoryMessagePartSchema.Type;
 const SESSION = "sess-strip-bands";
 const START = PINNED_CLOCK_MS - 1_166_000;
 
 export const turnStripHandlers: StepHandler[] = [
+	{
+		name: "assert surfaced chips keep painted hit areas",
+		match:
+			/^surfaced message chips keep their painted hit area beside question markers$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("surfacing-minimise-toggle").click();
+			await expect(world.page.locator(".pin-lane")).toBeVisible();
+			const target = await world.page
+				.locator(".turn-activity")
+				.evaluate((panel) => {
+					for (const chip of panel.querySelectorAll<HTMLElement>(".pin-chip")) {
+						const box = chip.getBoundingClientRect();
+						for (const pin of panel.querySelectorAll<HTMLElement>(
+							"[data-hand-back]",
+						)) {
+							const face = pin.getBoundingClientRect();
+							const left = Math.max(box.left, face.left - 6);
+							const right = Math.min(box.right, face.right + 6);
+							if (right - left > 2)
+								return {
+									x: (left + right) / 2,
+									// Stay above the strip container's existing 1.5px
+									// overlap and inside the enlarged target's regression.
+									y: box.bottom - 3,
+									id: chip
+										.closest("[data-surface-part]")
+										?.getAttribute("data-surface-part"),
+								};
+						}
+					}
+					throw new Error(
+						"Fixture must put a surfaced chip beside a question target",
+					);
+				});
+			await world.page.mouse.click(target.x, target.y);
+			await expect(
+				world.page.locator(`[data-surface-part="${target.id}"]`),
+			).toHaveAttribute("aria-pressed", "true");
+			await expect(
+				world.page.getByRole("region", { name: "Turn Q&A", exact: true }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert exposed question paint",
+		match: /^every question band exposes its own colour around its marker$/,
+		run: async ({ world }) => {
+			const pins = world.page.getByTestId("turn-hand-back-pin");
+			expect(await pins.count()).toBeGreaterThan(0);
+			await pins.first().scrollIntoViewIfNeeded();
+			for (const pin of (await pins.all()).reverse()) {
+				const id = await pin.getAttribute("data-hand-back");
+				const paint = await pin.evaluate((marker, id) => {
+					const band = marker.parentElement?.querySelector<HTMLElement>(
+						`button[data-step-id="${id}"]`,
+					);
+					if (!band) throw new Error(`Missing question band ${id}`);
+					const box = band.getBoundingClientRect();
+					const face = marker.getBoundingClientRect();
+					// Include the opaque 1px ring in the marker's painted footprint.
+					const exposed =
+						Math.max(0, Math.min(box.right, face.left - 1) - box.left) +
+						Math.max(0, box.right - Math.max(box.left, face.right + 1));
+					const x =
+						face.left - 1 > box.left
+							? box.left + Math.min(exposed / 4, 0.5)
+							: box.right - Math.min(exposed / 4, 0.5);
+					const probe = document.createElement("span");
+					probe.style.backgroundColor = band.classList.contains("live-segment")
+						? "var(--color-accent)"
+						: "var(--color-act-other)";
+					band.append(probe);
+					const result = {
+						exposed,
+						actual: getComputedStyle(band).backgroundColor,
+						expected: getComputedStyle(probe).backgroundColor,
+						// Ignore transparent hit extensions, but include all opaque overlays.
+						visible:
+							document
+								.elementsFromPoint(x, box.top + box.height / 2)
+								.find((node) => {
+									if (node === band || node.contains(band)) return true;
+									const rect = node.getBoundingClientRect();
+									return (
+										x >= rect.left &&
+										x <= rect.right &&
+										getComputedStyle(node).backgroundColor !==
+											"rgba(0, 0, 0, 0)"
+									);
+								})
+								?.contains(band) ?? false,
+					};
+					probe.remove();
+					return result;
+				}, id);
+				expect(
+					paint.exposed,
+					`${id} exposed colour width`,
+				).toBeGreaterThanOrEqual(3.9);
+				expect(paint.visible, `${id} paint is unobscured`).toBe(true);
+				expect(paint.actual, `${id} own colour`).toBe(paint.expected);
+			}
+		},
+	},
+	{
+		name: "assert waiting question animation",
+		match: /^the waiting question band visibly breathes$/,
+		run: async ({ world }) => {
+			const band = world.page.locator(
+				'.surface-strip button[data-step-id$="/waiting"]',
+			);
+			await expect(band).toHaveClass(/live-segment/);
+			const pulse = await band.evaluate((node) => {
+				const animation = node.getAnimations()[0];
+				if (!animation) throw new Error("Waiting band has no animation");
+				const running = animation.playState;
+				animation.pause();
+				animation.currentTime = 0;
+				const high = Number(getComputedStyle(node).opacity);
+				animation.currentTime = 600;
+				const low = Number(getComputedStyle(node).opacity);
+				animation.play();
+				return { running, high, low };
+			});
+			expect(pulse.running).toBe("running");
+			expect(pulse.high - pulse.low).toBeGreaterThan(0.5);
+		},
+	},
+	{
+		name: "assert legible question targets and nearest taps",
+		match:
+			/^question markers have 24px targets and overlapping taps pick the nearest marker$/,
+		run: async ({ world }) => {
+			const pins = world.page.getByTestId("turn-hand-back-pin");
+			const boxes = await pins.evaluateAll((nodes) =>
+				nodes.map((node) => {
+					const box = node.getBoundingClientRect();
+					const extension = getComputedStyle(node, "::before");
+					const extra =
+						extension.content !== "none" && extension.content !== "normal";
+					return {
+						id: node.getAttribute("data-hand-back"),
+						x: box.x + box.width / 2,
+						y: box.y + box.height / 2,
+						width: box.width,
+						height: box.height,
+						font: Number.parseFloat(getComputedStyle(node).fontSize),
+						targetWidth: Math.max(
+							box.width,
+							extra ? Number.parseFloat(extension.width) : 0,
+						),
+						targetHeight: Math.max(
+							box.height,
+							extra ? Number.parseFloat(extension.height) : 0,
+						),
+					};
+				}),
+			);
+			for (const box of boxes) {
+				expect(box.targetWidth, `${box.id} hit width`).toBeGreaterThanOrEqual(
+					24,
+				);
+				expect(box.targetHeight, `${box.id} hit height`).toBeGreaterThanOrEqual(
+					24,
+				);
+				expect(box.width).toBeGreaterThanOrEqual(12);
+				expect(box.font).toBeGreaterThanOrEqual(10);
+			}
+			// Real pointer hit testing above/below the visible face, including both
+			// sides of each overlapping target's midpoint. Ties go to the left.
+			const taps = boxes.map((box) => ({
+				...box,
+				tapX: box.x,
+				tapY: box.y + 10,
+			}));
+			for (let i = 1; i < boxes.length; i++) {
+				const left = boxes[i - 1];
+				const right = boxes[i];
+				if (!left || !right || right.x - left.x >= 24) continue;
+				const middle = (left.x + right.x) / 2;
+				taps.push(
+					{ ...left, tapX: middle - 0.5, tapY: left.y - 10 },
+					{ ...right, tapX: middle + 0.5, tapY: right.y - 10 },
+				);
+			}
+			for (const [index, tap] of taps.entries()) {
+				const current = await world.page
+					.locator(`[data-hand-back="${tap.id}"]`)
+					.boundingBox();
+				if (!current) throw new Error(`Missing marker ${tap.id}`);
+				const point = {
+					x: current.x + current.width / 2 + tap.tapX - tap.x,
+					y: current.y + current.height / 2 + tap.tapY - tap.y,
+				};
+				if (index % 2 === 0) await world.page.mouse.click(point.x, point.y);
+				else
+					await world.page.evaluate(({ x, y }) => {
+						const target = document.elementFromPoint(x, y);
+						if (!target) throw new Error("Missing touch target");
+						for (const type of ["pointerdown", "pointerup"])
+							target.dispatchEvent(
+								new PointerEvent(type, {
+									bubbles: true,
+									cancelable: true,
+									pointerType: "touch",
+									pointerId: 1,
+									isPrimary: true,
+									button: 0,
+									clientX: x,
+									clientY: y,
+								}),
+							);
+					}, point);
+				await expect(
+					world.page.locator(`[data-qa-entry="${tap.id}"]`),
+				).toBeFocused();
+				await world.page.getByTestId("surfacing-minimise-toggle").click();
+				await expect(
+					world.page.getByTestId("surfacing-minimise-toggle"),
+				).toHaveAttribute("aria-expanded", "false");
+			}
+		},
+	},
+	{
+		name: "assert whole-turn compacted strip numbering and navigation",
+		match:
+			/^strip popovers and band jumps match every step of the compacted turn log$/,
+		run: async ({ world }) => {
+			const bands = world.page.locator(".surface-strip button[data-step-id]");
+			const ids = await bands.evaluateAll((nodes) =>
+				nodes.map((node) => node.getAttribute("data-step-id")),
+			);
+			const toggle = world.page.getByTestId("surfacing-minimise-toggle");
+			await toggle.click();
+			if (await world.page.getByTestId("surfacing-level").count())
+				await chooseShowStop(world.page, "Full log");
+			const rows = world.page.locator(
+				".step-log [data-log-part]:not(:has(.compaction-rule))",
+			);
+			await expect(rows).toHaveCount(ids.length);
+			expect(
+				await rows.evaluateAll((nodes) =>
+					nodes.map((node) => node.getAttribute("data-log-part")),
+				),
+			).toEqual(ids);
+			await toggle.click();
+			// Every work popover keeps the whole-log ordinal on both sides of
+			// compaction and hand-back boundaries, including the final batch.
+			for (const [index, id] of ids.entries()) {
+				if (id?.includes("question-") || id?.match(/band-\d+-0$/)) continue;
+				const box = await bands.nth(index).boundingBox();
+				if (!box) throw new Error(`Missing band ${id}`);
+				await world.page.mouse.move(
+					box.x + box.width / 2,
+					box.y + box.height / 2,
+				);
+				await expect(world.page.getByTestId("turn-step-popover")).toContainText(
+					`Step ${index + 1} of ${ids.length}`,
+				);
+			}
+			for (const id of [
+				"bands-agent/band-0-8",
+				"bands-agent/band-0-11",
+				...(ids.length === 90
+					? ["bands-agent/band-3-8", "bands-agent/band-6-32"]
+					: []),
+			]) {
+				await world.page.mouse.move(0, 0);
+				const box = await world.page
+					.locator(`.surface-strip button[data-step-id="${id}"]`)
+					.boundingBox();
+				if (!box) throw new Error(`Missing band ${id}`);
+				await world.page.mouse.click(
+					box.x + box.width / 2,
+					box.y + box.height / 2,
+				);
+				const row = world.page.locator(`[data-log-part="${id}"]`);
+				await expect(row).toBeFocused();
+				await expect(row).toBeInViewport();
+				await toggle.click();
+			}
+		},
+	},
 	{
 		name: "seed realistic strip bands",
 		match:
@@ -57,6 +341,8 @@ export const turnStripHandlers: StepHandler[] = [
 							type: "text",
 							text: `Checking batch ${group + 1}.`,
 							time,
+							surfacingOrdinal: group + 1,
+							surfacingProbabilities: { finding: 1 },
 						});
 					else if (index % 12 === 1 || index % 12 === 11)
 						parts.push({
@@ -242,7 +528,7 @@ export const turnStripHandlers: StepHandler[] = [
 				expect(
 					box?.width,
 					"Human waiting time must stay in a marker-sized slot",
-				).toBeLessThanOrEqual(12);
+				).toBeLessThanOrEqual(18.1);
 			}
 			const geometry = await strip.evaluate((element) => {
 				const nodes = [
@@ -329,8 +615,8 @@ export const turnStripHandlers: StepHandler[] = [
 					}),
 				);
 			for (const [index, pin] of pins.entries()) {
-				expect(pin.height).toBeLessThanOrEqual(8);
-				expect(pin.width).toBeLessThanOrEqual(8);
+				expect(pin.height).toBe(12);
+				expect(pin.width).toBe(12);
 				const previous = pins[index - 1];
 				if (previous)
 					expect(pin.left - previous.right).toBeGreaterThanOrEqual(2);

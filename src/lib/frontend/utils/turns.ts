@@ -822,7 +822,8 @@ export function stripLayout(
 		part.type === "system"
 			? 200 / pixels
 			: part.type === "tool" && isHandBack(part)
-				? 1000 / pixels
+				? // A 12px question face and its ring leave 4px of the band exposed.
+					1800 / pixels
 				: Math.max(0.35, 200 / pixels),
 	);
 	const floorTotal = floors.reduce((sum, floor) => sum + floor, 0);
