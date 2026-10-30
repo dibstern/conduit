@@ -224,6 +224,10 @@ Shipped bar behaviour is kept:
 
 - Jump-to-latest, keyboard or scrollbar arrival at the bottom closes the bar. The first is a follow command and the
   other two are reader scrolls.
+- `place("latest")` fires `onReaderFollow` when it moves `intent` to `bottom` from anything else. It tests `intent`,
+  not the derived `following` state: MessageList calls `place` before `acknowledgePlacement` clears navigation, so
+  `busy` is still true there. Its only callers are jump-to-latest and `requestTranscriptFollow` (composer send),
+  both reader commands. A send while `intent` is already `bottom` leaves the bar alone, as shipped.
 - Wheel and touch gestures still toggle the bar through the existing effect.
 - Collapse, clamp, fit and `reposition` settle never close it. They are not reader follows.
 
