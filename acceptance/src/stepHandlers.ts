@@ -83,6 +83,7 @@ import { turnHoverHandlers } from "./steps/turnHover.js";
 import { turnOpeningHandlers } from "./steps/turnOpening.js";
 import { turnPanelHandlers } from "./steps/turnPanel.js";
 import { turnQaHandlers } from "./steps/turnQa.js";
+import { turnStickyHandlers } from "./steps/turnSticky.js";
 import { turnUsageHandlers } from "./steps/turnUsage.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
@@ -129,6 +130,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...turnQaHandlers,
 	...turnActivityShowHandlers,
 	...turnPanelHandlers,
+	...turnStickyHandlers,
 	...turnUsageHandlers,
 	...turnHoverHandlers,
 	...turnOpeningHandlers,

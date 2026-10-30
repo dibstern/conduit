@@ -26,7 +26,7 @@
 	import SurfacingMessageCard from "./SurfacingMessageCard.svelte";
 	import { type PendingReveal } from "../../stores/turn-panel.svelte.js";
 
-	let { view, card, counts, live, regions = {}, strip, onpick, onlevel, onfold, onfollow, oncommand, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply = () => {}, onread = () => {}, onexplain = () => {}, context, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
+	let { view, card, counts, live, regions = {}, strip, layout, onpick, onlevel, onfold, onfollow, oncommand, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply = () => {}, onread = () => {}, onexplain = () => {}, context, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
 		scrubbing?: boolean;
 		pending?: PendingReveal | null;
 		onland?: (seq: number) => void;
@@ -35,7 +35,8 @@
 		counts: StopCounts;
 		live: boolean;
 		regions?: SurfacingRegions;
-		strip: Snippet<[string | null, Snippet]>;
+		strip: Snippet<[string | null, Snippet | undefined]>;
+		layout?: Snippet<[strip: Snippet, card: Snippet, details: Snippet]> | undefined;
 		onpick: (pin: SurfacePin) => void;
 		onlevel: (level: SurfaceLevel) => void;
 		onfold: () => void;
@@ -65,8 +66,11 @@
 	{/if}
 {/snippet}
 
-{@render strip(citedPart, messageCard)}
+{#snippet timeline()}
+	{@render strip(citedPart, layout ? undefined : messageCard)}
+{/snippet}
 
+{#snippet details()}
 {#if view.level === "final" || view.empty || view.notJudgedCount || markCount || notesFollow}
 <div class="axis-notes" data-testid="surfacing-notes">
 	{#if view.level === "final"}<span>{STOPS.final.menu} · {counts.all} hidden</span>{/if}
@@ -78,6 +82,14 @@
 {/if}
 {#if readState.kind === "failed" && (!card || readState.uuid === card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}
 <div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
+{/snippet}
+
+{#if layout}
+	{@render layout(timeline, messageCard, details)}
+{:else}
+	{@render timeline()}
+	{@render details()}
+{/if}
 
 <style>
 	.axis-notes { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin-top:4px; color:var(--color-text-dimmer); font:11.5px var(--font-mono); }

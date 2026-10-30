@@ -1,5 +1,112 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: A long turn keeps its collapse control above the log and collapses in place
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I scroll the transcript down by 150 pixels
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I collapse the stuck turn
+  Then the collapsed turn stays in view at the transcript top without a gap
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: A sticky turn head leaves with its own turn
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I scroll the transcript down by 150 pixels
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I scroll past the long turn
+  Then the long turn head and its collapse control are outside the transcript viewport
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: Stuck strips keep their hover previews above the log
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  And the stuck strip keeps its <jev> hover previews usable
+
+Examples:
+  | jev      |
+  | inactive |
+  | active   |
+
+Scenario Outline: Collapse still lands in place as the turn starts releasing its head
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll until the turn pushes its head slightly above the transcript top
+  Then the releasing head still has a clickable collapse control
+  When I collapse the stuck turn
+  Then the collapsed turn stays in view at the transcript top without a gap
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: Long inline content scrolls away while the controls and log remain usable
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the sticky session has a long expanded turn followed by a long reply
+  And the sticky turn has a long <content>
+  When I scroll into the middle of the long turn log
+  Then log rows are exposed below the stuck head
+  And the turn head and strip stay at the transcript top with the collapse control visible
+  When I collapse the stuck turn
+  Then the collapsed turn stays in view at the transcript top without a gap
+
+Examples:
+  | jev      | content          |
+  | active   | selected message |
+  | inactive | summary          |
+
+Scenario Outline: A stuck strip reveals a work row below its controls
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I open the first work step from the stuck strip
+  Then the highlighted work row is exposed below the stuck head
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
 Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
   Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off

@@ -115,6 +115,7 @@
 	type CardSlot = NonNullable<ComponentProps<typeof ActivityStrip>["cardSlot"]>;
 	let stripInteraction = $state<StripInteraction>({ hovered: null, scrubbing: false });
 	let stripWidth = $state(0);
+	let stickyHeadHeight = $state(0);
 	let citedStep = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
 	let headTooltip = $state(false);
@@ -224,9 +225,20 @@
 	});
 	const summaryVisible = $derived((!surfacingActive || !minimised) && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
 	function toggleMinimised() {
+		const root = scrollRoot;
+		const head = panelEl?.querySelector<HTMLElement>(".turn-activity-head");
+		const top = root ? root.getBoundingClientRect().top + root.clientTop + Number.parseFloat(getComputedStyle(root).paddingTop) : 0;
+		const stuck = fullLog && root && head && panelEl && panelEl.getBoundingClientRect().top < top && head.getBoundingClientRect().top <= top + 1 && head.getBoundingClientRect().bottom > top;
+		// Collapse changes the log's height. Guard the intentional landing from
+		// following/anchoring, then place the now-static head back where it was.
+		if (stuck) onjump?.();
 		if (panel.view.kind === "collapsed") panel.open();
 		else panel.collapse();
-		void tick().then(() => panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true }));
+		void tick().then(() => {
+			const collapsedHead = panelEl?.querySelector<HTMLElement>(".turn-activity-head");
+			if (stuck && collapsedHead) root.scrollTop += collapsedHead.getBoundingClientRect().top - top;
+			panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true });
+		});
 	}
 	// Track scalars so the live strip's clock cannot restart the read dwell.
 	const readTarget = $derived(cardSlot.kind === "selected" && cardSlot.card.read === false ? cardSlot.card.part.uuid : null);
@@ -518,13 +530,7 @@
 	<SurfacingMessageCard kind="preview" card={pin} />
 {/snippet}
 
-<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
-	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
-	<div class="md:ml-[42px]">
-		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
-		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
-			<div class="px-[12px] pt-[10px] pb-[2px] md:pb-[9px]">
+{#snippet turnHeading()}
 			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
 				<Tooltip interaction="passive" bind:open={headTooltip}>
 					{#snippet trigger({ props })}
@@ -560,28 +566,63 @@
 				{/if}
 					{#if onsummarize}<span class="hidden md:contents"><Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] shrink-0" onclick={onsummarize}>✦ Summary</Button></span>{/if}
 			</div>
+{/snippet}
+
+{#snippet stickyHead(strip: Snippet)}
+	<div bind:clientHeight={stickyHeadHeight} class="turn-activity-head turn-activity-sticky px-[12px] pt-[10px] {surfacingActive || summaryEnabled ? '' : 'pb-[2px] md:pb-[9px]'}">
+		{@render turnHeading()}
+		{@render strip()}
+	</div>
+{/snippet}
+
+{#snippet logLayout(strip: Snippet, card: Snippet, details: Snippet)}
+	{@render stickyHead(strip)}
+	<div class="px-[12px] pb-[2px] md:pb-[9px]">
+		{#if surface.card}
+			<div class="turn-inline-card relative mt-[10px] {cardSlot.kind === 'preview' ? 'opacity-0 pointer-events-none' : ''}" class:ask={surface.card.category === "ask" && !surface.card.pending}>
+				<i class="turn-card-caret" style:left="clamp(14px, {surface.card.x}%, calc(100% - 14px))"></i>
+				{@render card()}
+			</div>
+		{/if}
+		{@render details()}
+	</div>
+{/snippet}
+
+<div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
+	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
+	<div class="md:ml-[42px]">
+		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
+			<div class={fullLog ? "contents" : "turn-activity-head px-[12px] pt-[10px] pb-[2px] md:pb-[9px]"}>
+			{#if !fullLog}{@render turnHeading()}{/if}
 			{#if (usage || qa) && surfacingActive}
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "tab", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if minimised && surfacingActive}
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
 			{:else if surfacingActive}
-				<SurfacingCard view={surface} card={surface.card} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
+				<SurfacingCard layout={fullLog ? logLayout : undefined} view={surface} card={surface.card} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
 					{readState} bind:cardEl={readCardEl} onread={readMessage}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}
 					onpick={pick} onlevel={selectLevel}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
-					{#snippet strip(cited: string | null, card: Snippet)}
+					{#snippet strip(cited: string | null, card: Snippet | undefined)}
 						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} {preview} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pickFromStrip} onjump={stripJump} oncommand={surfaceCommand} />
 					{/snippet}
 				</SurfacingCard>
 			{:else}
 			<!-- The phone strip is a 44px tap target with its 4px bar centred; a summary row
 			     under it overlaps that empty area so it sits midway between bar and card edge. -->
+			{#snippet plainStrip()}
 			<div class="md:mt-[7px] {summaryEnabled ? 'max-md:-mb-[18px]' : ''}">
 				<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onjump={stripJump} />
 			</div>
-			{#if summaryEnabled}{@render summaryPanel(surface, hoverCitation)}{/if}
+			{/snippet}
+			{#if fullLog}{@render stickyHead(plainStrip)}{:else}{@render plainStrip()}{/if}
+			{#if summaryEnabled}
+				<div class={fullLog ? "px-[12px] pb-[2px] md:pb-[9px]" : "contents"}>{@render summaryPanel(surface, hoverCitation)}</div>
+			{/if}
 			{/if}
 			{#if onsummarize && !minimised}
 				<Button variant="ghost" size="content" tone="default" align="start" touchTarget class="md:hidden w-full -mt-[8px] mb-[10px] h-[38px] rounded-[11px] bg-bg pl-[12px] pr-[8px] gap-[8px] text-[14px] font-medium" onclick={onsummarize}>
@@ -600,7 +641,7 @@
 				{@const part = entry.part}
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+				<div class="focus:bg-selection focus:outline-none" style:scroll-margin-top={fullLog ? `calc(${stickyHeadHeight}px + 1.25rem)` : undefined} data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} onhandback={() => openQa(part.uuid)} />
 				</div>
 				{/if}
@@ -612,6 +653,11 @@
 </div>
 
 <style>
+	/* The scrollport's padding already clears the phone's floating session bar. */
+	.turn-activity-sticky { position:sticky; top:0; z-index:var(--z-raised); background:var(--color-turn-bg); border-radius:13px 13px 0 0; }
+	.turn-inline-card { --card-background:var(--color-bg); }
+	.turn-inline-card.ask { --card-border:color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg)); }
+	.turn-card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--card-border,var(--color-border)); border-left:1px solid var(--card-border,var(--color-border)); transform:translateX(-50%) rotate(45deg); }
 	.surface-head-chips { display:contents; }
 	.mark-toast { display:flex; align-items:center; gap:10px; width:fit-content; max-width:100%; min-height:34px; margin:10px auto 2px; padding:4px 5px 4px 14px; border-radius:999px; background:var(--color-inverse-bg); color:var(--color-inverse-text); font-size:13px; box-shadow:0 8px 24px rgb(0 0 0 / .22); }
 </style>
