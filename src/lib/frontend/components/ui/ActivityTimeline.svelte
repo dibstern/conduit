@@ -125,7 +125,21 @@
 	}
 	function pointerDown(event: PointerEvent) {
 		if (event.button !== 0 || !event.isPrimary || !trackEl) return;
-		const id = (event.target as Element).closest<HTMLElement>("[data-hand-back]")?.dataset["handBack"] ?? (event.target as Element).closest<HTMLElement>("[data-surface-part]")?.dataset["surfacePart"] ?? stepAt(xAt(event.clientX))?.id;
+		let question = (event.target as Element).closest<HTMLElement>("[data-hand-back]");
+		if (question && stripEl) {
+			// Overlapping transparent targets belong to the nearest face, with
+			// ties going left, rather than whichever button paints last.
+			let distance = Infinity;
+			for (const candidate of stripEl.querySelectorAll<HTMLElement>("[data-hand-back]")) {
+				const box = candidate.getBoundingClientRect();
+				const next = Math.abs(event.clientX - (box.left + box.width / 2));
+				if (next < distance) { question = candidate; distance = next; }
+			}
+			const box = question.getBoundingClientRect();
+			// The hit extension must still let a painted work band open its row.
+			if (distance > box.width / 2 + 1 && Math.abs(event.clientY - (box.top + box.height / 2)) <= 2) question = null;
+		}
+		const id = question?.dataset["handBack"] ?? (event.target as Element).closest<HTMLElement>("[data-surface-part]")?.dataset["surfacePart"] ?? stepAt(xAt(event.clientX))?.id;
 		if (!id) return;
 		// Suppress touch's later mouse-focus default; the reveal owns focus.
 		// Vertical scrolling still belongs to touch-action: pan-y.
@@ -229,7 +243,7 @@
 				<span data-step-id={seam.id} aria-hidden="true" class="absolute top-1/2 h-[10px] w-[2px] -translate-y-1/2 bg-text-secondary" style:left="{seam.left}%"></span>
 			{/each}
 			{#each handBacks as pin, index (pin.id)}
-				<Button variant="ghost" size="content" hoverFill="none" class="absolute top-1/2 z-[var(--z-raised)] flex size-[19px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[12px] text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(10px, {pin.x}%, calc(100% - 10px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
+				<Button variant="ghost" size="content" hoverFill="none" class="hand-back absolute top-1/2 z-[var(--z-raised)] flex size-[12px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[10px] leading-none text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(7px, {pin.x}%, calc(100% - 7px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
 			{/each}
 						{#if pinMarkers && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		{#if hovered && (hoveredStep && stepPreview || messagePreview && !pinMarkers)}<i data-testid="strip-hover-marker" class="strip-hover-marker" style:left="{hoverX}%"><Icon name="chevron-down" size={10} class="absolute top-full left-1/2 -translate-x-1/2" /></i>{/if}
@@ -263,6 +277,9 @@
 </div>
 
 <style>
+	.surface-strip :global(.hand-back)::before { content:""; position:absolute; inset:-6px; }
+	/* Keep the 24px target below the painted chips in the pin lane. */
+	.pin-lane + .surface-strip :global(.hand-back)::before { top:0; bottom:-12px; }
 	.surfacing-scrub { position:relative; margin-top:9px; touch-action:pan-y; outline:none; }
 	.surfacing-scrub:focus-visible { outline:1px solid var(--color-accent); border-radius:6px; }
 	/* Ticks paint behind every pill, so an upper row's long tick never strikes through a lower pill. */

@@ -5,7 +5,6 @@
 	import type { ComponentProps, Snippet } from "svelte";
 	import type { SurfacePin, SurfacePart } from "../../utils/surface-turn.js";
 	import { surfaceTime } from "../../utils/surface-turn.js";
-	import { logSteps } from "../../utils/turn-stops.js";
 	import {
 		type ActivityPart,
 		fmtDuration,
@@ -48,17 +47,17 @@
 
 	const positions = $derived(stripLayout(segment, turn, final, now, width));
 	const durations = $derived(stepDurations(segment, turn, final, now));
-	const steps = $derived(logSteps(turn));
-	const segments = $derived(steps.map((part) => {
-		const index = segment.activity.findIndex((candidate) => candidate.uuid === part.uuid);
-		return {
+	const steps = $derived(segment.activity.filter((part) => part.type !== "system"));
+	const segments = $derived(segment.activity.flatMap((part, index) => {
+		if (part.type === "system") return [];
+		return [{
 			id: part.uuid,
 			kind: part.type === "assistant" ? "message" as const : "step" as const,
 			left: positions[index]?.left ?? 0,
 			width: positions[index]?.width ?? 0,
 			label: title(part, index),
 			...segmentAppearance(part, running, final && turn.live && index === segment.activity.length - 1),
-		};
+		}];
 	}));
 
 	const seams = $derived(segment.activity.flatMap((part, index) => part.type === "system" ? [{ id: part.uuid, left: positions[index]?.left ?? 0, width: positions[index]?.width ?? 0 }] : []));

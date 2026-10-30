@@ -81,9 +81,11 @@ describe("MessageList session-view publication", () => {
 
 		// Content growth can leave the programmatic scroll away from the bottom.
 		// Its pending event must still be ignored by the controller.
-		scrollTo(transcript, 200);
+		Object.defineProperty(transcript, "scrollHeight", { value: 3000 });
+		transcript.dispatchEvent(new Event("scroll"));
+		flushSync();
 		expect(sessionViewState.atBottom).toBe(true);
-		vi.runOnlyPendingTimers();
+		// Moving from that written position is user intent, even in this frame.
 		scrollTo(transcript, 200);
 		expect(sessionViewState.atBottom).toBe(false);
 	});

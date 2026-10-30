@@ -28,7 +28,9 @@
 	const visibleEntries = $derived(logMounted || rowMode === "all" ? entries : entries.filter((entry) => entry.index >= earlierIndex));
 	async function toggleEarlier() {
 		const row = logEl ? [...logEl.querySelectorAll("[data-log-part]")].at(-1) : undefined;
-		const before = row?.getBoundingClientRect().top;
+		// Showing earlier steps pushes this row down. Hiding them keeps the
+		// clicked header in view; anchoring then would preserve an offscreen row.
+		const before = rowMode === "ticker" ? row?.getBoundingClientRect().top : undefined;
 		const scroller = logEl?.closest('[aria-label="Transcript"]');
 		choice = rowMode === "ticker" ? "all" : "ticker";
 		await tick();

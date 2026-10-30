@@ -1,10 +1,12 @@
 // Tests segmentTurns, turnStats/countsPhrase, step durations and economics.
 
+import { Effect, ManagedRuntime } from "effect";
 import { assert, describe, expect, it } from "vitest";
 import { segmentAppearance } from "../../../src/lib/frontend/components/chat/activity-style.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
+	HistoryMessage,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
@@ -37,6 +39,16 @@ import {
 	turnStats,
 	workingTime,
 } from "../../../src/lib/frontend/utils/turns.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	canonicalEvent,
+	type LiveEventType,
+} from "../../../src/lib/persistence/events.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 
 let seq = 0;
 const id = () => `m${++seq}`;
@@ -711,6 +723,233 @@ describe("stepWeights", () => {
 });
 
 describe("workingTime", () => {
+	it.each([
+		1_200, 2_000,
+	])("keeps stopped time unchanged by late completion accounting for work starting at %i", async (createdAt) => {
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(":memory:", "test-project"),
+		);
+		const event = <T extends LiveEventType>(
+			type: T,
+			data: Parameters<typeof canonicalEvent<T>>[2],
+			createdAt: number,
+		) =>
+			canonicalEvent(type, "timer", data, {
+				provider: "claude",
+				createdAt,
+				metadata: { runId: "r1" },
+			});
+		try {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const read = yield* ReadQueryEffectTag;
+					const store = yield* EventStoreEffectTag;
+					yield* commit([
+						event(
+							"session.created",
+							{ sessionId: "timer", provider: "claude", title: "Timer" },
+							1_000,
+						),
+					]);
+					yield* persist.persistEvents([
+						event("run.requested", { runId: "r1", inputId: "u1" }, 1_000),
+						event(
+							"message.created",
+							{
+								messageId: "u1",
+								sessionId: "timer",
+								role: "user",
+								inputId: "u1",
+							},
+							1_000,
+						),
+						event(
+							"text.delta",
+							{ messageId: "u1", partId: "prompt", text: "work" },
+							1_000,
+						),
+						event(
+							"run.started",
+							{ requestedRunId: "r1", inputId: "u1" },
+							1_000,
+						),
+						event(
+							"message.created",
+							{
+								messageId: "a1",
+								sessionId: "timer",
+								role: "assistant",
+								parentID: "u1",
+							},
+							1_100,
+						),
+						event(
+							"text.delta",
+							{ messageId: "a1", partId: "reply", text: "working" },
+							createdAt,
+						),
+						event("turn.interrupted", { messageId: "a1" }, 2_000),
+					]);
+					const readTurn = read.getSessionMessagesWithParts("timer").pipe(
+						Effect.map((rows) => {
+							const history = messageRowsToHistory(rows, { pageSize: 100 });
+							const turns = segmentTurns(
+								historyToChatMessages(history.messages),
+								false,
+							);
+							expect(turns).toHaveLength(1);
+							const [turn] = turns;
+							assert.exists(turn);
+							return turn;
+						}),
+					);
+					expect(workingTime(yield* readTurn, 20_000)).toBe(1_000);
+					yield* persist.persistEvent(
+						event(
+							"turn.completed",
+							{ messageId: "a1", tokens: { input: 100, output: 10 } },
+							10_000,
+						),
+					);
+					const turn = yield* readTurn;
+					expect((yield* store.readBySession("timer")).at(-1)?.type).toBe(
+						"message.completed",
+					);
+					expect(turn.user?.turnTiming).toEqual({
+						startedAt: 1_000,
+						endedAt: 2_000,
+						waits: [],
+					});
+					expect(turn.segments[0]?.end?.createdAt).toBe(10_000);
+					expect(workingTime(turn, 20_000)).toBe(1_000);
+					expect(economics(turn, 20_000).tokensIn).toBe(100);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it.each([
+		["result only", [], 1_000],
+		["unstamped reply", [say()], 1_000],
+		[
+			"new activity after an old reply",
+			[say("old", 1_200), read("/a.ts", 3_000)],
+			9_000,
+		],
+		[
+			"new reply after old activity",
+			[think(1_200), say("awake", 3_000)],
+			9_000,
+		],
+		["hand-back", [tool("AskUserQuestion", {}, { createdAt: 3_000 })], 9_000],
+	] satisfies [
+		string,
+		ChatMessage[],
+		number,
+	][])("requires a post-boundary start to extend persisted timing: %s", (_name, activity, expected) => {
+		const prompt = user(undefined, 1_000);
+		prompt.turnTiming = { startedAt: 1_000, endedAt: 2_000, waits: [] };
+		const [turn] = segmentTurns(
+			[prompt, ...activity, result({ createdAt: 10_000 })],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 20_000)).toBe(expected);
+	});
+
+	it("counts captured activity after the prompt's persisted end, including a live wake", () => {
+		// Minimized from ses_003b6997cc02487ba6857a647d16a308: the slash
+		// command settled in 25ms, before these three assistant messages.
+		// Keep the real message/first-part stamps; omit content and inner steps.
+		const messages: HistoryMessage[] = [
+			{
+				id: "19eae387-ec97-4a33-9294-a2e4cebd5607",
+				role: "user",
+				time: { created: 1_793_265_581_997 },
+				parts: [{ id: "prompt", type: "text", text: "[redacted]" }],
+				turnTiming: {
+					startedAt: 1_793_265_581_997,
+					endedAt: 1_793_265_582_022,
+					waits: [],
+				},
+			},
+			...[
+				{
+					id: "msg_011CgWHDGcGNEC7hkXeevzep",
+					created: 1_793_265_582_784,
+					completed: 1_793_265_647_312,
+					first: 1_793_265_582_792,
+					firstEnd: 1_793_265_583_189,
+					input: 14,
+				},
+				{
+					id: "msg_011CgWHLiTxcyQLGGEYf7vJB",
+					created: 1_793_265_683_711,
+					completed: 1_793_265_687_608,
+					first: 1_793_265_683_718,
+					firstEnd: 1_793_265_683_858,
+					input: 2,
+				},
+				{
+					id: "msg_011CgWJ3Yzqjv2JCoqJWXaSQ",
+					created: 1_793_266_237_681,
+					completed: 1_793_266_495_853,
+					first: 1_793_266_237_688,
+					firstEnd: 1_793_266_238_270,
+					input: 6,
+				},
+			].map(
+				({
+					id,
+					created,
+					completed,
+					first,
+					firstEnd,
+					input,
+				}): HistoryMessage => ({
+					id,
+					role: "assistant",
+					time: { created, completed },
+					tokens: { input },
+					parts: [
+						{
+							id: `${id}-first`,
+							type: "thinking",
+							text: "[redacted]",
+							time: { start: first, end: firstEnd },
+						},
+					],
+				}),
+			),
+		];
+		const chat = historyToChatMessages(messages);
+		const [turn] = segmentTurns(chat, false);
+		assert.exists(turn);
+		expect(turn.segments).toHaveLength(3);
+		// 65,315ms + 3,890ms + 258,165ms, excluding both idle gaps.
+		expect(workingTime(turn, 1_793_266_500_000)).toBe(327_370);
+		expect(economics(turn, 1_793_266_500_000).duration).toBe(327_370);
+		expect(workingTime(turn, 1_793_266_500_000, 1_793_266_000_000)).toBe(
+			69_205,
+		);
+
+		const [live] = segmentTurns(chat.slice(0, -1), true);
+		assert.exists(live);
+		expect(live.live).toBe(true);
+		expect(workingTime(live, 1_793_266_496_853)).toBe(328_370);
+		expect(workingTime(live, 1_793_266_497_853)).toBe(329_370);
+
+		// Without a live signal or final result, unfinished work cannot move
+		// the settled boundary merely because its parts have later stamps.
+		const [stopped] = segmentTurns(chat.slice(0, -1), false);
+		assert.exists(stopped);
+		expect(workingTime(stopped, 1_793_266_500_000)).toBe(69_205);
+	});
+
 	it("excludes every idle gap, starting after the result rather than the reply", () => {
 		const [turn] = segmentTurns(
 			[
@@ -947,7 +1186,7 @@ describe("workingTime", () => {
 		expect(workingTime(turn, 50_000)).toBe(10_000);
 	});
 
-	it("clips gaps to the persisted turn bounds", () => {
+	it("clips gaps to the persisted turn bounds when no work starts after the end", () => {
 		const prompt = user(undefined, 0);
 		prompt.turnTiming = { startedAt: 4_000, endedAt: 9_000, waits: [] };
 		const [turn] = segmentTurns(

@@ -581,8 +581,8 @@ test.describe("Scroll Controller — Streaming", () => {
 			.waitFor({ state: "hidden", timeout: 15_000 });
 		await waitForInitialMessages(page);
 
-		// A live turn with many steps and no reply yet shows only its newest
-		// steps until the reader opens the full log.
+		// Jev-off turns start collapsed. Once opened, a live turn shows only
+		// its newest steps until the reader opens the earlier steps.
 		wsMock.sendMessage({ type: "user_message", text: "Run every check" });
 		wsMock.sendMessage({ type: "status", status: "processing" });
 		const steps = 30;
@@ -603,12 +603,19 @@ test.describe("Scroll Controller — Streaming", () => {
 			});
 		}
 		const turn = page.locator("#messages .turn-activity").last();
+		await expect(turn.getByRole("slider")).toHaveAccessibleName(
+			`Activity timeline — ${steps} steps`,
+		);
+		await turn
+			.getByRole("button", { name: "Expand turn", exact: true })
+			.click();
 		const newest = turn.locator("[data-log-part]").last();
 		await expect(newest).toContainText(`check ${steps - 1}`);
+		await expect(turn.locator("[data-log-part]")).toHaveCount(3);
 		await waitForStableScroll(page);
 		await expect(newest).toBeInViewport();
 
-		const toggle = turn.locator(".turn-activity-toggle");
+		const toggle = turn.getByRole("button", { name: /earlier steps/ });
 		for (const expanded of ["true", "false", "true"]) {
 			await toggle.click();
 			await expect(toggle).toHaveAttribute("aria-expanded", expanded);

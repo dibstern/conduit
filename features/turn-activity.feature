@@ -1,5 +1,88 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Waiting question bands expose their breathing colour
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the turn log session has a waiting turn
+  Then every question band exposes its own colour around its marker
+  And the waiting question band visibly breathes
+
+Examples:
+  | jev      | viewport |
+  | inactive | desktop  |
+  | active   | desktop  |
+  | inactive | phone    |
+  | active   | phone    |
+
+Scenario Outline: Settled question bands retain their own colour
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the strip session has a multi-segment settled turn at 390 pixels
+  Then every question band exposes its own colour around its marker
+
+Examples:
+  | jev      |
+  | inactive |
+  | active   |
+
+Scenario Outline: Question markers have legible faces and nearest-marker touch targets
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the strip session has a <segments>-segment settled turn at 390 pixels
+  Then question markers have 24px targets and overlapping taps pick the nearest marker
+
+Examples:
+  | jev      | segments |
+  | inactive | multi    |
+  | active   | multi    |
+  | inactive | sparse   |
+  | active   | sparse   |
+
+Scenario Outline: Compacted turn strips use the whole log's order and numbering
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the strip session has a <segments>-segment settled turn at 390 pixels
+  Then strip popovers and band jumps match every step of the compacted turn log
+
+Examples:
+  | jev      | segments |
+  | inactive | multi    |
+  | active   | multi    |
+  | inactive | single   |
+  | active   | single   |
+
+Scenario: Surfaced chips keep their painted hit area beside question targets
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the strip session has a multi-segment settled turn at 390 pixels
+  Then surfaced message chips keep their painted hit area beside question markers
+
+Scenario Outline: Every step stays visible in long phone turns with Jev off or on
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the strip session has a <segments>-segment <phase> turn at 390 pixels
+  When I record the <segments>-segment <phase> strip with Jev <jev>
+  Then every strip step is a coloured band with compressed waits and non-overlapping markers
+
+Examples:
+  | jev      | segments | phase   |
+  | inactive | multi    | settled |
+  | inactive | multi    | live    |
+  | inactive | single   | settled |
+  | inactive | single   | live    |
+  | inactive | sparse   | settled |
+  | active   | multi    | settled |
+  | active   | multi    | live    |
+  | active   | single   | settled |
+  | active   | single   | live    |
+  | active   | sparse   | settled |
+
 Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
   Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
