@@ -285,11 +285,17 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 
 	/**
 	 * Moves the file out of reach in one rename, so a save after the guard is
-	 * never what a discard deletes: the moved file must still hash to the blob
-	 * the user saw, or it goes back. A file saved at the path meanwhile keeps
-	 * the path, and the moved one is kept where the refusal says.
+	 * never what a discard deletes, then writes. The moved file must still hash
+	 * to the blob the user saw, and it goes back if it does not or the write
+	 * fails. A file saved at the path meanwhile keeps the path, and the moved
+	 * one is kept where the refusal says. Uninterruptible, so it never stays hidden.
 	 */
-	const moveAside = (directory: string, path: string, expected: string) =>
+	const discardFile = (
+		directory: string,
+		path: string,
+		expected: string,
+		write: Effect.Effect<unknown, SessionDiffEditError>,
+	) =>
 		Effect.gen(function* () {
 			const file = join(directory, path);
 			const aside = (yield* git(directory, [
@@ -309,16 +315,7 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			const target = (yield* fs(() => lstat(aside))).isSymbolicLink()
 				? yield* fs(() => readlink(aside))
 				: undefined;
-			const blob = yield* git(
-				directory,
-				target === undefined
-					? ["hash-object", `--path=${path}`, aside]
-					: ["hash-object", "--no-filters", "--stdin"],
-				{},
-				target,
-			).pipe(Effect.orElseSucceed(() => ""));
-			if (blob.trim() === expected) return aside;
-			yield* fs(() =>
+			const putBack = fs(() =>
 				target === undefined ? link(aside, file) : symlink(target, file),
 			).pipe(
 				Effect.andThen(fs(() => rm(aside))),
@@ -329,8 +326,22 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 					),
 				),
 			);
-			return yield* stale(path);
-		});
+			yield* Effect.gen(function* () {
+				const blob = yield* git(
+					directory,
+					target === undefined
+						? ["hash-object", `--path=${path}`, aside]
+						: ["hash-object", "--no-filters", "--stdin"],
+					{},
+					target,
+				).pipe(Effect.orElseSucceed(() => ""));
+				if (blob.trim() !== expected) return yield* stale(path);
+				yield* write;
+			}).pipe(
+				Effect.catch((error) => Effect.andThen(putBack, Effect.fail(error))),
+			);
+			yield* fs(() => rm(aside, { force: true }));
+		}).pipe(Effect.uninterruptible);
 
 	const edit =
 		(
@@ -360,36 +371,29 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			});
 
 	return {
-		discard: edit((directory, request, { prefix, tracked }) =>
-			request.hunk
-				? Effect.flatMap(hunkOf(request, request.hunk), (patch) =>
-						apply(directory, prefix, patch, ["-R"]),
-					)
-				: Effect.gen(function* () {
-						const aside =
-							request.expected === null
-								? undefined
-								: yield* moveAside(directory, request.path, request.expected);
-						// Without --force git writes only paths that are absent, so a file saved since stays.
-						if (tracked.length > 0)
-							yield* git(
-								directory,
-								["checkout-index", "-z", "--stdin"],
-								{},
-								tracked.join("\0"),
-							).pipe(
-								Effect.mapError((error) =>
-									error.reason === "conflict" ? stale(request.path) : error,
-								),
-								Effect.ensuring(
-									aside === undefined
-										? Effect.void
-										: Effect.promise(() => rm(aside, { force: true })),
-								),
-							);
-						else if (aside !== undefined) yield* fs(() => rm(aside));
-					}),
-		),
+		discard: edit((directory, request, { prefix, tracked }) => {
+			if (request.hunk)
+				return Effect.flatMap(hunkOf(request, request.hunk), (patch) =>
+					apply(directory, prefix, patch, ["-R"]),
+				);
+			// Without --force git writes only paths that are absent, so a file saved since stays.
+			const checkout =
+				tracked.length === 0
+					? Effect.void
+					: git(
+							directory,
+							["checkout-index", "-z", "--stdin"],
+							{},
+							tracked.join("\0"),
+						).pipe(
+							Effect.mapError((error) =>
+								error.reason === "conflict" ? stale(request.path) : error,
+							),
+						);
+			return request.expected === null
+				? checkout
+				: discardFile(directory, request.path, request.expected, checkout);
+		}),
 		stage: edit((directory, request, { prefix, paths }) =>
 			request.hunk
 				? Effect.flatMap(hunkOf(request, request.hunk), (patch) =>

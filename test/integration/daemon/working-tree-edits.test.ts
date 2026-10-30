@@ -498,6 +498,31 @@ it("refuses an edit whose file is saved, or whose session starts a turn, after t
 	expect(invalidated).toEqual([]);
 });
 
+it("puts a discarded file back when git cannot write the index copy, leaving nothing aside", async () => {
+	const repo = repository({ "notes.txt": "one\n" });
+	writeFileSync(join(repo, ".gitattributes"), "notes.txt filter=broken\n");
+	git(repo, "config", "filter.broken.clean", "cat");
+	git(repo, "config", "filter.broken.smudge", "false");
+	git(repo, "config", "filter.broken.required", "true");
+	writeFileSync(join(repo, "notes.txt"), "two\n");
+
+	const result = await run(
+		Effect.gen(function* () {
+			const { files } = yield* list(repo);
+			const file = files["notes.txt"];
+			if (!file) throw new Error("notes.txt is not listed");
+			return yield* discard(fileEdit(repo, file));
+		}),
+	);
+
+	expect(result).not.toBe("ok");
+	expect(read(join(repo, "notes.txt"))).toBe("two\n");
+	expect(
+		readdirSync(join(repo, ".git")).filter((name) => name.includes("conduit")),
+	).toEqual([]);
+	expect(invalidated).toEqual([]);
+});
+
 it("discards a retargeted symlink to the link the index holds, and keeps one retargeted after the guard read it", async () => {
 	const repo = repository({ "a.txt": "a\n", "b.txt": "b\n" });
 	for (const name of ["link", "raced"]) {
