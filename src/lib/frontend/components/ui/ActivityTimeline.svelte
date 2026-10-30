@@ -229,7 +229,7 @@
 				<span data-step-id={seam.id} aria-hidden="true" class="absolute top-1/2 h-[10px] w-[2px] -translate-y-1/2 bg-text-secondary" style:left="{seam.left}%"></span>
 			{/each}
 			{#each handBacks as pin, index (pin.id)}
-				<Button variant="ghost" size="content" hoverFill="none" class="absolute top-1/2 z-[var(--z-raised)] flex size-[19px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[12px] text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(10px, {pin.x}%, calc(100% - 10px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
+				<Button variant="ghost" size="content" hoverFill="none" class="absolute top-1/2 z-[var(--z-raised)] flex size-[8px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[8px] leading-none text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(5px, {pin.x}%, calc(100% - 5px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
 			{/each}
 						{#if pinMarkers && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		{#if hovered && (hoveredStep && stepPreview || messagePreview && !pinMarkers)}<i data-testid="strip-hover-marker" class="strip-hover-marker" style:left="{hoverX}%"><Icon name="chevron-down" size={10} class="absolute top-full left-1/2 -translate-x-1/2" /></i>{/if}

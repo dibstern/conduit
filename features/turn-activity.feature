@@ -1,5 +1,26 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Every step stays visible in long phone turns with Jev off or on
+  Given message surfacing is <jev> at Most
+  And the conduit app is served with the connected mockup
+  And minimising uses the dark theme with Turns open Minimised
+  And the strip session has a <segments>-segment <phase> turn at 390 pixels
+  When I record the <segments>-segment <phase> strip with Jev <jev>
+  Then every strip step is a coloured band with compressed waits and non-overlapping markers
+
+Examples:
+  | jev      | segments | phase   |
+  | inactive | multi    | settled |
+  | inactive | multi    | live    |
+  | inactive | single   | settled |
+  | inactive | single   | live    |
+  | inactive | sparse   | settled |
+  | active   | multi    | settled |
+  | active   | multi    | live    |
+  | active   | single   | settled |
+  | active   | single   | live    |
+  | active   | sparse   | settled |
+
 Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
   Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off

@@ -781,8 +781,8 @@ export function stepDurations(
 }
 
 /**
- * Relative segment widths for the strip. Falls back to equal widths when
- * durations are unknown, so the strip still shows the shape of the work.
+ * Relative work widths. Waiting for a hand-back is not model work. Unknown
+ * durations fall back to equal widths; tooltips retain the actual durations.
  */
 export function stepWeights(
 	segment: Segment,
@@ -790,16 +790,20 @@ export function stepWeights(
 	final: boolean,
 	now: number,
 ): number[] {
-	return (
-		stepDurations(segment, turn, final, now)?.map((d) => Math.max(300, d)) ??
-		segment.activity.map(() => 1)
+	const durations = stepDurations(segment, turn, final, now);
+	return segment.activity.map((part, i) =>
+		part.type === "tool" && isHandBack(part)
+			? 0
+			: durations
+				? Math.max(300, durations[i] ?? 0)
+				: 1,
 	);
 }
 
 /**
  * Percentage coordinates shared by the strip and overlays such as message pins.
- * Gaps and compaction seams are included here, never added by the DOM. A small
- * floor keeps short steps visible; dense logs scale that floor to fit the track.
+ * Gaps and compaction seams are included here, never added by the DOM. Physical
+ * minimums keep short steps visible and reserve room for hand-back markers.
  */
 export function stripLayout(
 	segment: Segment,
@@ -810,30 +814,29 @@ export function stripLayout(
 ): { left: number; width: number }[] {
 	const count = segment.activity.length;
 	if (count === 0) return [];
-	const compactions = segment.activity.filter(
-		(part) => part.type === "system",
-	).length;
-	// Two physical pixels, shrinking only when the marks would consume the track.
-	const gap = Math.min(
-		200 / (trackWidth || 1000),
-		90 / Math.max(1, count - 1 + compactions),
+	const pixels = trackWidth || 1000;
+	// Dense strips spend at most 15% of their width on gaps.
+	const gap = Math.min(200 / pixels, 15 / Math.max(1, count - 1));
+	const available = 100 - gap * (count - 1);
+	const floors = segment.activity.map((part) =>
+		part.type === "system"
+			? 200 / pixels
+			: part.type === "tool" && isHandBack(part)
+				? 1000 / pixels
+				: Math.max(0.35, 200 / pixels),
 	);
-	const available = 100 - gap * (count - 1 + compactions);
-	const steps = count - compactions;
-	const floor = Math.min(0.35, available / Math.max(1, steps));
+	const floorTotal = floors.reduce((sum, floor) => sum + floor, 0);
+	const scale = Math.min(1, available / floorTotal);
 	const weights = stepWeights(segment, turn, final, now).map((weight, i) =>
 		segment.activity[i]?.type === "system" ? 0 : weight,
 	);
 	const total = weights.reduce((sum, weight) => sum + weight, 0);
-	const remaining = available - floor * steps;
+	const remaining = available - floorTotal * scale;
 	let left = 0;
 	return weights.map((weight, i) => {
 		const width =
-			segment.activity[i]?.type === "system"
-				? gap
-				: total === 0
-					? available / Math.max(1, steps)
-					: floor + (remaining * weight) / total;
+			(floors[i] ?? 0) * scale +
+			(total === 0 ? remaining / count : (remaining * weight) / total);
 		const position = { left, width: i === count - 1 ? 100 - left : width };
 		left += width + gap;
 		return position;
