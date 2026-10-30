@@ -130,7 +130,7 @@
 			const offset = (Number.parseFloat(style.paddingTop) || 0) -
 				(Number.parseFloat(style.scrollPaddingTop) || 0) + head.getBoundingClientRect().height + 12;
 			// CSS tracks phone chrome changes even when the head does not resize.
-			element.style.setProperty("--turn-reveal-margin", `calc(var(--turn-sticky-top, -1.25rem) + ${offset}px) 0 3.5rem`);
+			element.style.setProperty("--turn-reveal-margin", `calc(var(--turn-sticky-top, -1.25rem) + ${offset}px)`);
 		});
 		observer.observe(head, { box: "border-box" });
 		return () => observer.disconnect();
@@ -698,7 +698,8 @@
 	/* Sticky insets start inside scrollport padding; clear only visible chrome. */
 	.turn-activity-sticky { position:sticky; top:var(--turn-sticky-top, -1.25rem); z-index:var(--z-raised); background:var(--color-turn-bg); border-radius:13px 13px 0 0; }
 	.turn-inline-card { --card-background:var(--color-bg); }
-	.turn-head-card :global([data-log-part]), .turn-head-card :global([data-log-part] :is(a, button, input, select, textarea, [tabindex])), .turn-head-card :global([data-testid="surfacing-msg-card"]) { scroll-margin:var(--turn-reveal-margin, 0px); }
+	/* Latest clearance must exist before the first head resize observation. */
+	.turn-head-card :global([data-log-part]), .turn-head-card :global([data-log-part] :is(a, button, input, select, textarea, [tabindex])), .turn-head-card :global([data-testid="surfacing-msg-card"]) { scroll-margin:var(--turn-reveal-margin, 0px) 0 3.5rem; }
 	.turn-inline-card.ask { --card-border:color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg)); }
 	.turn-card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--card-border,var(--color-border)); border-left:1px solid var(--card-border,var(--color-border)); transform:translateX(-50%) rotate(45deg); }
 	.surface-head-chips { display:contents; }
