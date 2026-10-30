@@ -202,8 +202,11 @@ The pre-change `onjump?.()` calls in TurnActivity are deleted.
 
 The `onjump` prop keeps its prop-threaded path. It is renamed `onreposition` and typed as
 `ScrollController["reposition"]`. TurnActivity's default, used by stories with no controller, is
-`repositionWithoutController`. That function is exported from `scroll-controller.svelte.ts`, so the only code that
-writes the transcript's `scrollTop` stays in that module.
+`(step) => repositionWithoutController(scrollRoot, step)`, using TurnActivity's existing `scrollRoot` prop.
+`repositionWithoutController(root: HTMLElement | undefined, step)` is exported from `scroll-controller.svelte.ts`, so
+the only code that writes the transcript's `scrollTop` stays in that module. It runs `change()`, awaits `tick()`, then
+writes `root.scrollTop = top()` when `root` is defined and `top()` is not `null`. With no `root` it only runs the
+change: stories without a transcript do not scroll.
 
 ### 4. Phone bar from reader intent
 
