@@ -70,7 +70,27 @@ describe("ScrollController", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
 
-		it("notifies reader follows, but not growth, reset, fit or browser clamp", async () => {
+		it("notifies a latest command while navigation is busy only when intent changes", () => {
+			const onReaderFollow = vi.fn();
+			let busy = false;
+			const ctrl = createScrollController(
+				() => "ready",
+				() => ({ historical: false, busy, topClearance: 0, identity: 0 }),
+				{ onReaderFollow },
+			);
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			simulateScrollUp(div);
+			busy = true;
+			expect(ctrl.place("latest")).toBe(true);
+			expect(ctrl.state).toBe("detached");
+			expect(onReaderFollow).toHaveBeenCalledTimes(1);
+			ctrl.place("latest");
+			expect(onReaderFollow).toHaveBeenCalledTimes(1);
+			ctrl.detach();
+		});
+
+		it("notifies reader follows, but not growth, reset, fit, clamp or reposition", async () => {
 			const onReaderFollow = vi.fn();
 			const ctrl = createScrollController(() => "ready", undefined, {
 				onReaderFollow,
@@ -105,6 +125,12 @@ describe("ScrollController", () => {
 			Object.defineProperty(div, "scrollHeight", { value: 1000 });
 			div.scrollTop = 500;
 			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("following");
+			expect(onReaderFollow).toHaveBeenCalledTimes(2);
+
+			Object.defineProperty(div, "scrollHeight", { value: 2000 });
+			simulateScrollUp(div);
+			await ctrl.reposition({ top: () => 1500 });
 			expect(ctrl.state).toBe("following");
 			expect(onReaderFollow).toHaveBeenCalledTimes(2);
 			ctrl.detach();

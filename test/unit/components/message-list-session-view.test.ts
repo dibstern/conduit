@@ -26,7 +26,7 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("MessageList session-view publication", () => {
+describe("MessageList reader follow", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		openSessionForSetup("session-view-first", "project-a");
@@ -36,6 +36,7 @@ describe("MessageList session-view publication", () => {
 
 	afterEach(() => {
 		cleanup();
+		sessionViewState.compact = false;
 		vi.clearAllTimers();
 		vi.useRealTimers();
 	});
@@ -60,46 +61,66 @@ describe("MessageList session-view publication", () => {
 		flushSync();
 	}
 
-	it("publishes detach, re-follow and programmatic follow without false detach", async () => {
-		const { transcript, getByRole } = mountTranscript();
-		expect(sessionViewState.atBottom).toBe(true);
+	it("keeps the phone bar open when shrinking content clamps a detached reader to the bottom", () => {
+		sessionViewState.compact = true;
+		const { transcript } = mountTranscript();
+		scrollTo(transcript, 1440);
+		expect(sessionViewState.barOpen).toBe(true);
+		Object.defineProperty(transcript, "scrollHeight", { value: 1800 });
+		scrollTo(transcript, 1300);
+		expect(sessionViewState.barOpen).toBe(true);
+	});
+
+	it("closes the phone bar for reader arrival and jump-to-latest, without false detach", async () => {
+		sessionViewState.compact = true;
+		const { transcript, getByRole, queryByRole } = mountTranscript();
+		expect(sessionViewState.barOpen).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
 
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
+		expect(sessionViewState.barOpen).toBe(true);
 
 		scrollTo(transcript, 1500);
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(false);
 		vi.runOnlyPendingTimers();
 
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		sessionViewState.barOpen = true;
 		getByRole("button", { name: /Latest/ }).click();
 		flushSync();
 		await tick();
 		flushSync();
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(false);
 
 		// Content growth can leave the programmatic scroll away from the bottom.
 		// Its pending event must still be ignored by the controller.
 		Object.defineProperty(transcript, "scrollHeight", { value: 3000 });
+		sessionViewState.barOpen = true;
 		transcript.dispatchEvent(new Event("scroll"));
 		flushSync();
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(true);
 		// Moving from that written position is user intent, even in this frame.
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
+		expect(sessionViewState.barOpen).toBe(true);
 	});
 
-	it("counts loading as at-bottom even after detaching", () => {
-		const { transcript } = mountTranscript();
+	it("hides the jump control while loading without closing the phone bar", () => {
+		sessionViewState.compact = true;
+		const { transcript, getByRole, queryByRole } = mountTranscript();
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
 
 		for (const lifecycle of ["empty", "loading"] as const) {
 			getOrCreateSessionSlot("session-view-first").messages.loadLifecycle =
 				lifecycle;
 			flushSync();
-			expect(sessionViewState.atBottom).toBe(true);
+			expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+			expect(sessionViewState.barOpen).toBe(true);
 		}
 	});
 
@@ -107,15 +128,47 @@ describe("MessageList session-view publication", () => {
 		"loading",
 		"ready",
 	] as const)("resets a detached transcript when switching to a %s session", (lifecycle) => {
-		const { transcript } = mountTranscript();
+		sessionViewState.compact = true;
+		const { transcript, getByRole, queryByRole } = mountTranscript();
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
 
 		getOrCreateSessionSlot("session-view-next").messages.loadLifecycle =
 			lifecycle;
 		openSessionForSetup("session-view-next", "project-a");
 		flushSync();
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(true);
+	});
+
+	it("keeps the phone bar open when a turn collapses to fit", async () => {
+		sessionViewState.compact = true;
+		getOrCreateSessionSlot("session-view-first").messages.messages = [
+			{ type: "user", uuid: "collapse-prompt", text: "Check the files" },
+			{
+				type: "tool",
+				uuid: "collapse-tool",
+				id: "collapse-tool",
+				name: "Read",
+				input: { tool: "Read", filePath: "/a.ts" },
+				status: "completed",
+			},
+			{ type: "result", uuid: "collapse-result", cost: 0.01 },
+		];
+		const { transcript, getByTestId, getByRole, queryByRole } =
+			mountTranscript();
+		const toggle = getByTestId("surfacing-minimise-toggle");
+		if (toggle.getAttribute("aria-expanded") === "false")
+			await fireEvent.click(toggle);
+		scrollTo(transcript, 200);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
+		Object.defineProperty(transcript, "scrollHeight", { value: 500 });
+		transcript.scrollTop = 0;
+		await fireEvent.click(toggle);
+		await tick();
+		flushSync();
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(true);
 	});
 
 	it.each([

@@ -38,7 +38,6 @@
 	import {
 		noteScrollGesture,
 		noteSessionChanged,
-		publishAtBottom,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
 	import {
@@ -133,12 +132,16 @@
 		return () => clearTimeout(timer);
 	});
 
-	const scrollCtrl = createScrollController(() => chat.loadLifecycle, () => ({
-		historical: view.window.kind === "historical",
-		busy: view.navigation !== null,
-		topClearance,
-		identity: view.generation,
-	}));
+	const scrollCtrl = createScrollController(
+		() => chat.loadLifecycle,
+		() => ({
+			historical: view.window.kind === "historical",
+			busy: view.navigation !== null,
+			topClearance,
+			identity: view.generation,
+		}),
+		{ onReaderFollow: () => { if (primary) noteScrollGesture("down"); } },
+	);
 	let paneWidth = $state(0);
 	let forkCollapsed = $state(true);
 	$effect(() => {
@@ -189,18 +192,6 @@
 		const id = viewedSessionId;
 		untrack(() => scrollCtrl.resetForSession());
 		if (primary) untrack(() => noteSessionChanged(id));
-	});
-
-	// Publish for chrome outside the transcript (e.g. the session bar) so the app
-	// never grows a second, differently-tuned definition of "at the bottom".
-	// Hydration states count as pinned, otherwise the bar flaps on session open.
-	$effect(() => {
-		if (!primary) return;
-		const state = scrollCtrl.state;
-		publishAtBottom(
-			state === "following" || state === "loading",
-			scrollCtrl.preserveBar,
-		);
 	});
 
 	// The bar follows the reader's gesture, not scrollTop: the bar's own resize

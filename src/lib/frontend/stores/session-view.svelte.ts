@@ -101,9 +101,6 @@ function rememberRightPane(): void {
 }
 
 export const sessionViewState = $state({
-	/** Published by MessageList from its scroll controller. Loading
-	 *  counts as at-bottom while the transcript is hydrating. */
-	atBottom: true,
 	/** Composer requests; MessageList owns following and scroll placement. */
 	followRequest: 0,
 
@@ -160,22 +157,6 @@ export function isDuoChipRowFolded(): boolean {
 	);
 }
 
-/**
- * The only path by which `atBottom` is written from outside the store. It exists
- * because the false->true edge closes the bar (jump-to-latest is not a scroll
- * gesture), and an edge cannot be observed by a plain assignment at the call site.
- *
- * The edge is read off a private non-reactive copy, not off `atBottom` itself:
- * the caller is a Svelte `$effect`, and reading the same state it writes would
- * make that effect re-run itself once on every publish.
- */
-let lastAtBottom = true;
-export function publishAtBottom(next: boolean, preserveBar = false): void {
-	if (next && !lastAtBottom && !preserveBar) sessionViewState.barOpen = false;
-	lastAtBottom = next;
-	sessionViewState.atBottom = next;
-}
-
 export function requestTranscriptFollow(): void {
 	sessionViewState.followRequest++;
 }
@@ -192,8 +173,6 @@ export function noteScrollGesture(direction: "up" | "down"): void {
 /** Arrive at a new session with the full bar open, whatever the last one did. */
 export function noteSessionChanged(sessionId: string | null = null): void {
 	sessionViewState.barOpen = true;
-	// The new session's pin to the bottom is not a rising edge to close on.
-	lastAtBottom = true;
 	activeSessionId = sessionId;
 	const memory =
 		sessionId && !sessionViewState.compact

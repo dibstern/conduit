@@ -44,7 +44,6 @@ const {
 	isDuoChipRowFolded,
 	noteScrollGesture,
 	noteSessionChanged,
-	publishAtBottom,
 	sessionViewState,
 	watchViewportPose,
 } = await import("../../../src/lib/frontend/stores/session-view.svelte.js");
@@ -55,7 +54,6 @@ const { closePanel, openPanel, terminalState } = await import(
 beforeEach(() => {
 	matchMediaState.reset();
 	sessionViewState.compact = false;
-	publishAtBottom(true);
 	noteSessionChanged();
 	closePanel();
 	sessionViewState.filePreview = null;
@@ -68,7 +66,6 @@ describe("session bar collapse", () => {
 	});
 
 	it("arrives expanded, then follows the scroll gesture anywhere in the transcript", () => {
-		publishAtBottom(false);
 		expect(isBarCollapsed()).toBe(false);
 		noteScrollGesture("down");
 		expect(isBarCollapsed()).toBe(true);
@@ -82,34 +79,17 @@ describe("session bar collapse", () => {
 		expect(isBarCollapsed()).toBe(false);
 	});
 
-	it("reaching the bottom without a gesture collapses it", () => {
-		publishAtBottom(false);
-		publishAtBottom(true);
-		expect(isBarCollapsed()).toBe(true);
-	});
-
-	it("staying at the bottom or leaving it does not change it", () => {
-		publishAtBottom(true);
-		expect(isBarCollapsed()).toBe(false);
-		noteScrollGesture("down");
-		publishAtBottom(false);
-		expect(isBarCollapsed()).toBe(true);
-	});
-
 	it("the chevron expands it until the next downward gesture", () => {
 		noteScrollGesture("down");
 		forceBarOpen();
 		expect(isBarCollapsed()).toBe(false);
-		expect(sessionViewState.atBottom).toBe(true);
 		noteScrollGesture("down");
 		expect(isBarCollapsed()).toBe(true);
 	});
 
 	it("a session switch arrives expanded, even from a session scrolled up", () => {
 		noteScrollGesture("down");
-		publishAtBottom(false);
 		noteSessionChanged();
-		publishAtBottom(true);
 		expect(isBarCollapsed()).toBe(false);
 	});
 });

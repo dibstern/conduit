@@ -14,7 +14,6 @@ export interface ScrollController {
 	 *  unset it, so it answers "was the reader at the bottom before this?". */
 	readonly isPinned: boolean;
 	readonly activeMessageId: string | null;
-	readonly preserveBar: boolean;
 	place(target: { messageId: string } | "latest"): boolean;
 	attach(container: HTMLElement): void;
 	detach(): void;
@@ -141,7 +140,6 @@ export function createScrollController(
 ): ScrollController {
 	let container: HTMLElement | null = null;
 	let intent = $state<Intent>("bottom");
-	let preserveBar = $state(false);
 	let lastWrite: number | null = null;
 	let resetTimerScheduled = false; // guards against scheduling multiple reset frames
 	let repositionSequence = 0;
@@ -204,12 +202,13 @@ export function createScrollController(
 			container.clientTop +
 			getNavigation().topClearance +
 			24;
-		const atBottom =
+		const nearBottom =
 			container.scrollHeight - container.scrollTop - container.clientHeight <
 			REFOLLOW_THRESHOLD;
 		let row = rows[0];
 		for (const candidate of rows) {
-			if (!atBottom && candidate.getBoundingClientRect().top > threshold) break;
+			if (!nearBottom && candidate.getBoundingClientRect().top > threshold)
+				break;
 			row = candidate;
 		}
 		activeMessageId = row?.dataset["messageId"] ?? null;
@@ -301,7 +300,6 @@ export function createScrollController(
 		seenTop = top;
 		if (top === lastWrite) return;
 		lastWrite = null;
-		preserveBar = false;
 		// Read after the guards: our own scrolls record their layout, and reading here
 		// would absorb growth that landed before this queued event.
 		observe();
@@ -335,17 +333,13 @@ export function createScrollController(
 		get activeMessageId() {
 			return activeMessageId;
 		},
-		get preserveBar() {
-			return preserveBar;
-		},
 		place(target): boolean {
 			if (!container) return false;
-			preserveBar = false;
 			if (target === "latest") {
-				const wasFollowing = getState() === "following";
+				const wasBottom = intent === "bottom";
 				apply({ type: "latest" });
 				write(container.scrollHeight);
-				if (!wasFollowing && getState() === "following") onReaderFollow?.();
+				if (!wasBottom) onReaderFollow?.();
 				selectedTop = null;
 				scheduleMeasure();
 				return true;
@@ -413,7 +407,6 @@ export function createScrollController(
 		},
 
 		resetForSession(): void {
-			preserveBar = false;
 			activeMessageId = null;
 			selectedTop = null;
 			repositionSequence++;
@@ -425,7 +418,6 @@ export function createScrollController(
 
 		async reposition(step): Promise<void> {
 			const sequence = ++repositionSequence;
-			preserveBar = true;
 			apply({ type: "hold" });
 			try {
 				step.change?.();

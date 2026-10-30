@@ -382,7 +382,9 @@ describe("Task drawer transcript", () => {
 		sessionViewState.barOpen = true;
 		const drawer = mountDrawer();
 		await settle();
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(
+			within(parentView.container).getByRole("button", { name: /Latest/ }),
+		).toBeTruthy();
 		expect(sessionViewState.barOpen).toBe(true);
 		const child = within(drawer.pane).getByRole("region");
 		setScrollSize(child);
@@ -409,7 +411,9 @@ describe("Task drawer transcript", () => {
 		flushSync();
 		expect(parentView.getByRole("region")).toBe(parent);
 		expect(parent.scrollTop).toBe(200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(
+			within(parentView.container).getByRole("button", { name: /Latest/ }),
+		).toBeTruthy();
 		expect(sessionViewState.barOpen).toBe(true);
 		expect(sessionState.currentId).toBe(parentId);
 	});

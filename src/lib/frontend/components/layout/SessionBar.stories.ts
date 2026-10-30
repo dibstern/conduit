@@ -224,7 +224,6 @@ const meta = {
 		// the story that wants the collapse gets it.
 		sessionViewState.compact = true;
 		sessionViewState.composerWidth = 760;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = true;
 		sessionViewState.rightPaneView = "closed";
 		sessionSkillsState.sessionId = null;
@@ -846,7 +845,6 @@ export const AutoSettledCollapsed: Story = {
 			settledAutomatically: true,
 		});
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
@@ -962,7 +960,6 @@ export const OverflowMenuOpen: Story = {
 		answerAutoSettle,
 		() => {
 			sessionViewState.compact = true;
-			sessionViewState.atBottom = true;
 			sessionViewState.barOpen = false;
 		},
 	],
@@ -997,7 +994,6 @@ export const OverflowMenuDebug: Story = {
 		answerAutoSettle,
 		() => {
 			sessionViewState.compact = true;
-			sessionViewState.atBottom = true;
 			sessionViewState.barOpen = false;
 			featureFlags.debug = true;
 		},
@@ -1074,7 +1070,6 @@ export const Collapsed: Story = {
 	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
@@ -1487,7 +1482,6 @@ export const ExpandedByChevron: Story = {
 	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
@@ -1498,9 +1492,7 @@ export const ExpandedByChevron: Story = {
 		expect(canvasElement.querySelector("#session-bar-meta")).toBeVisible();
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.getByTestId("session-bar")).toHaveFocus();
-		// Still at the bottom: the chevron overrides the rule, it does not move
-		// the transcript.
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(sessionViewState.barOpen).toBe(true);
 	},
 };
 
@@ -1904,7 +1896,6 @@ export const CollapsedWithBanners: Story = {
 	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 		return showIslandBanners();
 	},
@@ -2095,7 +2086,6 @@ export const BackgroundTasks: Story = {
 			).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
 		}
 		setThemeMode(theme);
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 		await tick();
 		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(

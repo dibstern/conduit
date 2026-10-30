@@ -17,6 +17,7 @@ import ActivityStrip from "../../../src/lib/frontend/components/chat/ActivityStr
 import TurnActivity from "../../../src/lib/frontend/components/chat/TurnActivity.svelte";
 import { sessionMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { reveal } from "../../../src/lib/frontend/stores/reveal.svelte.js";
+import type { ScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
 import { primaryTranscript } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { setupTurnStory } from "../../../src/lib/frontend/stories/turn-setup.js";
 import type { Segment, Turn } from "../../../src/lib/frontend/utils/turns.js";
@@ -131,6 +132,12 @@ it("lands a turn reveal only in its own view of the same session", async () => {
 		chat,
 	};
 	const otherView = { ...sourceView, id: Symbol("other-view") };
+	const otherReposition = vi
+		.fn<ScrollController["reposition"]>()
+		.mockResolvedValue(undefined);
+	const sourceReposition = vi
+		.fn<ScrollController["reposition"]>()
+		.mockResolvedValue(undefined);
 	const other = render(TurnActivity, {
 		turn,
 		segment,
@@ -138,6 +145,7 @@ it("lands a turn reveal only in its own view of the same session", async () => {
 		sessionId: "session",
 		surfacing,
 		view: otherView,
+		onreposition: otherReposition,
 	});
 	const source = render(TurnActivity, {
 		turn,
@@ -146,9 +154,8 @@ it("lands a turn reveal only in its own view of the same session", async () => {
 		sessionId: "session",
 		surfacing,
 		view: sourceView,
+		onreposition: sourceReposition,
 	});
-	const scroll = vi.fn<(this: Element) => void>();
-	Element.prototype.scrollIntoView = scroll;
 
 	expect(
 		await reveal(
@@ -157,12 +164,9 @@ it("lands a turn reveal only in its own view of the same session", async () => {
 			source.container,
 		),
 	).toBe("landed");
-	expect(
-		scroll.mock.instances.some((node) => other.container.contains(node)),
-	).toBe(false);
-	expect(
-		scroll.mock.instances.some((node) => source.container.contains(node)),
-	).toBe(true);
+	expect(otherReposition).not.toHaveBeenCalled();
+	expect(sourceReposition).toHaveBeenCalled();
+	expect(other.container.contains(document.activeElement)).toBe(false);
 	expect(source.container.contains(document.activeElement)).toBe(true);
 });
 
