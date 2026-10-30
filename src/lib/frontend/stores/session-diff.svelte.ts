@@ -3,12 +3,13 @@ import { Effect, Fiber, Stream } from "effect";
 import { untrack } from "svelte";
 import {
 	type SessionDiffBase,
+	SessionDiffEditError,
 	SessionDiffError,
 	type SessionDiffFile,
 	type SessionDiffPatch,
 	type SessionDiffScope,
 } from "../../contracts/session-diff.js";
-import { failureLine } from "../transport/rpc-errors.js";
+import { failureLine, toastFailure } from "../transport/rpc-errors.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -31,6 +32,11 @@ export class DiffRow {
 		readonly file: SessionDiffFile,
 		/** Fetches the patch when idle, or retries once after a Gone. */
 		readonly load: () => void,
+		/** Discards or stages the file, or one hunk of its patch; only the unstaged scope can. */
+		readonly edit?: (
+			action: "discard" | "stage",
+			hunk?: number,
+		) => Promise<void>,
 	) {}
 }
 
@@ -146,6 +152,7 @@ export class SessionDiffView {
 	async #list(revision?: string) {
 		if (this.#leases === 0 || this.#listing) return;
 		this.#listing = true;
+		const pushed = this.#wanted;
 		try {
 			const listing = await rpc("SessionDiffList", {
 				sessionId: this.sessionId,
@@ -176,7 +183,15 @@ export class SessionDiffView {
 						].join("\0");
 						const row: DiffRow =
 							this.#rows.get(key) ??
-							new DiffRow(key, folder, file, () => void this.#fetch(row));
+							new DiffRow(
+								key,
+								folder,
+								file,
+								() => void this.#fetch(row),
+								this.scope.kind === "unstaged"
+									? (action, hunk) => this.#edit(row, action, hunk)
+									: undefined,
+							);
 						rows.set(key, row);
 						return row;
 					}),
@@ -201,10 +216,40 @@ export class SessionDiffView {
 			const wanted = this.#wanted;
 			if (
 				wanted !== undefined &&
+				wanted !== pushed &&
 				wanted !== revision &&
 				wanted !== this.#revision
 			)
 				void this.#list(wanted);
+		}
+	}
+
+	/**
+	 * Guarded by the blob the row shows, and a hunk by the listing its patch came
+	 * from. A write reaches every viewer through the live scope; Stale re-lists
+	 * here, and keyed rows keep the scroll.
+	 */
+	async #edit(row: DiffRow, action: "discard" | "stage", hunk?: number) {
+		const { file, folder } = row;
+		const request = {
+			sessionId: this.sessionId,
+			folder,
+			path: file.path,
+			...(file.oldPath !== undefined && { oldPath: file.oldPath }),
+			expected: file.after,
+			...(hunk !== undefined &&
+				file.before !== null && {
+					hunk: { revision: this.#revision, before: file.before, index: hunk },
+				}),
+		};
+		try {
+			await (action === "discard"
+				? rpc("SessionDiffDiscard", request)
+				: rpc("SessionDiffStage", request));
+		} catch (error) {
+			toastFailure(`Could not ${action} ${file.path}`)(error);
+			if (error instanceof SessionDiffEditError && error.reason === "stale")
+				void this.#list();
 		}
 	}
 
