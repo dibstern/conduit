@@ -204,9 +204,7 @@ test("same-session panes navigate independently and discard superseded targets",
 		.getByRole("slider", { name: "User messages" });
 	await expect(mainRail).toHaveAttribute("aria-valuemax", "120");
 	await expect(main.locator(".msg-user").last()).toContainText("Prompt 120:");
-	await page
-		.getByRole("button", { name: "1 background task", exact: true })
-		.click();
+	await page.getByRole("button", { name: /^1 background task(:|$)/ }).click();
 	await page
 		.getByTestId("background-tasks-panel")
 		.getByRole("button", { name: "Open Review navigation", exact: true })

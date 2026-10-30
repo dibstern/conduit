@@ -751,6 +751,16 @@ body:has(dialog:modal) {
 	grid-area: tasks;
 	margin-top: 8px;
 }
+/* The row scrolls sideways, so it clips its 30px button's 44px hit area: pad
+   the row around that area and cancel the padding with margins so the pills
+   keep their place. */
+#session-bar[data-compact="true"][data-collapsed="false"]
+	[data-testid="background-tasks-row"] {
+	padding-block: calc(-1 * var(--phone-task-hit-top))
+		calc(14px + var(--phone-task-hit-top));
+	margin-block: calc(8px + var(--phone-task-hit-top))
+		calc(-14px - var(--phone-task-hit-top));
+}
 @container session-controls (max-width: 175px) {
 	#session-bar-settle-label {
 		display: none;
@@ -900,15 +910,13 @@ body:has(dialog:modal) {
 }
 
 /* Desktop keeps title and controls on one row. Only the title track yields;
-   background tasks occupy their own track across the whole header. */
+   background tasks sit in the title's subline. */
 #session-bar[data-compact="false"] {
 	--session-bar-padding-y: 3.5px;
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) auto auto auto;
-	grid-template-rows: minmax(44px, auto) auto;
-	grid-template-areas:
-		"title meta connection more"
-		"tasks tasks tasks tasks";
+	grid-template-rows: minmax(44px, auto);
+	grid-template-areas: "title meta connection more";
 	container: session-bar / inline-size;
 	min-height: 52px;
 	column-gap: 8px;
@@ -918,17 +926,7 @@ body:has(dialog:modal) {
 }
 #session-bar[data-compact="false"]:has(#session-bar-back) {
 	grid-template-columns: auto minmax(0, 1fr) auto auto auto;
-	grid-template-areas:
-		"back title meta connection more"
-		"tasks tasks tasks tasks tasks";
-}
-/* Final's idle header is 52px: a 44px track, 7px padding and a 1px border. */
-#session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
-	grid-area: tasks;
-	margin-inline: -20px -10px;
-	/* Continue below the complete header, through its padding and bottom border. */
-	margin-block: calc(var(--session-bar-padding-y) + 1px)
-		calc(-1 * (var(--session-bar-padding-y) + 1px));
+	grid-template-areas: "back title meta connection more";
 }
 #session-bar[data-compact="false"] #session-bar-title-row {
 	min-width: 0;
@@ -953,7 +951,7 @@ body:has(dialog:modal) {
 }
 #session-bar[data-compact="false"]:has([data-testid="session-goal-subtitle"]) {
 	--session-bar-padding-y: 6.5px;
-	grid-template-rows: auto auto;
+	grid-template-rows: auto;
 }
 #session-bar[data-compact="false"] [data-testid="session-goal-subtitle"] {
 	font-size: 12.5px;
@@ -989,9 +987,6 @@ body:has(dialog:modal) {
 	#session-bar[data-compact="false"] {
 		column-gap: 4px;
 		padding-inline: 8px;
-	}
-	#session-bar[data-compact="false"] [data-testid="background-tasks-row"] {
-		margin-inline: -8px;
 	}
 }
 

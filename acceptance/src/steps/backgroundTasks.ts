@@ -454,20 +454,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("background-tasks-row");
 			const chips = row.getByTestId("background-task-chip");
-			if (/^\d+ background tasks?$/.test(match[1] ?? "")) {
-				expect(match[2], "Phone task summaries have no overflow pill").toBe(
-					"no more pill",
-				);
-				await expect(row.getByTestId("background-tasks-toggle")).toHaveText(
-					match[1] ?? "",
-				);
-				await expect(
-					row.getByTestId("background-tasks-row-stop-all"),
-				).toBeVisible();
-				await expect(chips).toHaveCount(0);
-				await expect(row.getByTestId("background-tasks-more")).toHaveCount(0);
-				return;
-			}
+			// The header only opens the pull-down; stopping lives there.
+			await expect(row.getByRole("button", { name: /^Stop / })).toHaveCount(0);
 			const expected = (match[1] ?? "")
 				.split(", ")
 				.map((label) => new RegExp(`^\\s*${label}`));

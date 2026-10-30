@@ -129,7 +129,7 @@ test.describe("Claude task drill-in", () => {
 		if (!replayer) throw new Error("no Claude replayer");
 		const steps = recorder(page, testInfo);
 		const tasksRow = page.getByRole("button", {
-			name: /^\d+ background tasks?$/,
+			name: /^\d+ background tasks?(:|$)/,
 		});
 		const panel = page.getByTestId("background-tasks-panel");
 		const drawer = page.getByTestId("task-drawer");
@@ -148,7 +148,7 @@ test.describe("Claude task drill-in", () => {
 			replayer.release();
 			await replayer.held();
 			await chat.waitForStreamingComplete();
-			await expect(tasksRow).toHaveAccessibleName("5 background tasks");
+			await expect(tasksRow).toHaveAccessibleName(/^5 background tasks: /);
 			await page.setViewportSize({ width: 1440, height: 350 });
 			await unfoldSteps(page);
 			const launchingShell = page
@@ -280,7 +280,7 @@ test.describe("Claude task drill-in", () => {
 		if (!replayer) throw new Error("no Claude replayer");
 		const steps = recorder(page, testInfo);
 		const tasksRow = page.getByRole("button", {
-			name: /^\d+ background tasks?$/,
+			name: /^\d+ background tasks?(:|$)/,
 		});
 		const panel = page.getByTestId("background-tasks-panel");
 		const launchRow = page.locator(

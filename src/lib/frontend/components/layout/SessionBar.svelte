@@ -550,8 +550,8 @@
 	</Popover>
 {/snippet}
 
-{#snippet tasksRow()}
-	<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
+{#snippet tasksRow(layout: "subtitle" | "swipe" | "strip")}
+	<BackgroundTasksRow tasks={backgroundTasks} {layout} onstopall={supportsTaskStop && layout === "strip" ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
 {/snippet}
 
 <!-- One border for the session controls. -->
@@ -687,7 +687,6 @@
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		</div>
-		{#if goalShown && !sessionViewState.compact}{@render goalLine()}{/if}
 		{#if duoFolded && session}<span data-testid="session-bar-subline" class="flex min-w-0 items-center gap-[6px] text-[12px] leading-[16px] text-text-secondary"><ProjectMark accent={getProjectAccent(session)} /><span class="truncate">{project?.title ?? getCurrentSlug()}</span>{#if chipsFolded && goalShown}<span data-testid="session-bar-subline-goal" class="duo-subline-mark" data-tone={goalButtonTone}><Icon name={goalIcon} size={12} /><span class="sr-only">Goal {desktopGoalLabel}</span></span>{/if}{#if chipsFolded && backgroundTasks.length > 0}<span class="duo-subline-mark"><ConduitMark size={11} variant="running" tone="inherit" /><span data-testid="session-bar-subline-tasks">{backgroundTasks.length}</span><span class="sr-only"> background {backgroundTasks.length === 1 ? "task" : "tasks"}</span></span>{/if}</span>{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
@@ -759,6 +758,13 @@
 			{/if}
 		{/if}
 	</div>
+	{#if !sessionViewState.compact && (goalShown || backgroundTasks.length > 0)}
+		<!-- Under the title line, so the pills get the full title column rather than the title's width. Beside pills the goal keeps at most 55% and they fill the rest; alone it takes the line. -->
+		<div class="flex min-w-0 items-center gap-[8px] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:max-w-[55%] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:shrink-0">
+			{#if goalShown}{@render goalLine()}{/if}
+			{#if backgroundTasks.length > 0}{@render tasksRow("subtitle")}{/if}
+		</div>
+	{/if}
 	</div>
 	{/if}
 
@@ -766,7 +772,7 @@
 		{#if !chipsFolded && (goalShown || backgroundTasks.length > 0)}
 			<div id="duo-chips" data-testid="duo-chips">
 				{#if goalShown}{@render goalSheet()}{/if}
-				{#if backgroundTasks.length > 0}{@render tasksRow()}{/if}
+				{#if backgroundTasks.length > 0}{@render tasksRow("strip")}{/if}
 			</div>
 		{/if}
 	{:else if sessionViewState.compact && !collapsed && goalShown}
@@ -805,7 +811,7 @@
 	{/if}
 
 	{@render overflowMenu()}
-	{#if backgroundTasks.length > 0 && !collapsed && !duoFolded}{@render tasksRow()}{/if}
+	{#if sessionViewState.compact && backgroundTasks.length > 0 && !collapsed && !duoFolded}{@render tasksRow("swipe")}{/if}
 
 	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
 		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] px-[16px] pt-[14px] pb-[12px]">

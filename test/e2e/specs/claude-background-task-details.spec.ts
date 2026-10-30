@@ -310,10 +310,10 @@ test.describe("Claude background task ages", () => {
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
 			await expect(
-				page.getByRole("button", { name: "4 background tasks", exact: true }),
+				page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 			).toBeVisible();
 			await page
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await report.record("original", snapshots.tasks);
 			const originalTasks = snapshots.tasks;
@@ -328,7 +328,7 @@ test.describe("Claude background task ages", () => {
 			await page.reload();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
 			await page
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await report.record("restored", snapshots.tasks);
 			expect(
@@ -385,7 +385,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(5);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				const panel = page.getByTestId("background-tasks-panel");
 				const row = (description: string) =>
@@ -419,13 +419,13 @@ for (const transcriptOnlySubagents of [false, true]) {
 				).toHaveCount(0);
 				await report.record("parent-result", snapshots.tasks);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				replayer.release();
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(6);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				await expect(
 					row("Sleep 40 seconds then print done marker").getByTestId(
@@ -456,7 +456,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await page.reload();
 				await expect.poll(() => snapshots.tasks.length).toBe(6);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				expect(snapshots.tasks).toEqual(original);
 				await expect(detail).toHaveAttribute("title", LONG_COMMAND);
@@ -470,7 +470,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await expect(panel).toHaveCount(1);
 				if (!(await panel.isVisible()))
 					await page
-						.getByRole("button", { name: /^\d+ background tasks?$/ })
+						.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 						.click();
 				await panel.getByRole("button", { name: "Open agent A" }).click();
 				const drawer = page.getByTestId("task-drawer");
@@ -529,10 +529,10 @@ test.describe("Claude ended stream task liveness", () => {
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
 			await page
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await expect(
-				page.getByRole("button", { name: "4 background tasks", exact: true }),
+				page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 			).toBeVisible();
 			await report.record("live-before-stream-end", snapshots.tasks);
 			const childId = snapshots.tasks.find(
@@ -599,7 +599,7 @@ test.describe("Claude ended stream task liveness", () => {
 			});
 			await expect(page.getByTestId("background-tasks-row")).toHaveCount(0);
 			await expect(
-				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+				page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 			).toHaveCount(0);
 			expect(snapshots.tasks).toEqual([]);
 		} finally {
