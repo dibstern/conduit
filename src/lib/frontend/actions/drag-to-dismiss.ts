@@ -149,13 +149,22 @@ function intoTrigger(
 	node: HTMLElement,
 	trigger: HTMLElement | null,
 ): string | undefined {
-	const control =
+	const box =
 		trigger?.closest("#layout[data-pose^='duo-']") &&
 		trigger.getClientRects()[0];
-	if (!control || node.style.transform !== "") return undefined;
+	if (!trigger || !box || node.style.transform !== "") return undefined;
+	// Only the visible part: the phone task row scrolls a button wider than itself.
+	let clip = { left: 0, right: innerWidth };
+	for (let el = trigger.parentElement; el; el = el.parentElement)
+		if (/auto|scroll/.test(getComputedStyle(el).overflowX)) {
+			clip = el.getBoundingClientRect();
+			break;
+		}
+	const left = Math.max(box.left, clip.left, 0);
+	const width = Math.min(box.right, clip.right, innerWidth) - left;
 	const sheet = node.getBoundingClientRect();
-	node.style.transformOrigin = `${control.left + control.width / 2 - sheet.left}px ${control.top + control.height / 2 - sheet.top}px`;
-	return `scale(${Math.min(1, Math.max(control.width / sheet.width, control.height / sheet.height))})`;
+	node.style.transformOrigin = `${left + width / 2 - sheet.left}px ${box.top + box.height / 2 - sheet.top}px`;
+	return `scale(${Math.min(1, Math.max(width / sheet.width, box.height / sheet.height))})`;
 }
 
 /**

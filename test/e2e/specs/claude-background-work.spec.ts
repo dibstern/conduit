@@ -126,10 +126,10 @@ test.describe("Claude background work", () => {
 				page
 					.getByTestId("background-tasks-row")
 					.getByTestId("background-task-chip"),
-			).toContainText("sleep 8");
+				"the pill names the task; its command shows on hover",
+			).toHaveAttribute("title", /sleep 8/);
 			const tasksButton = page.getByRole("button", {
-				name: "1 background task",
-				exact: true,
+				name: /^1 background task(:|$)/,
 			});
 			const age = page
 				.getByTestId("background-tasks-panel")
@@ -175,7 +175,7 @@ test.describe("Claude background work", () => {
 			).toHaveAttribute("aria-label", /^Done, unread/);
 			await expect(page.getByTestId("background-tasks-row")).toBeHidden();
 			await expect(
-				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+				page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 			).toHaveCount(0);
 			await record("shell-ended");
 		} finally {

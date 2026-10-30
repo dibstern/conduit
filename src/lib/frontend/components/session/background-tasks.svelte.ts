@@ -68,23 +68,57 @@ export function returnFromTask(): boolean {
 	return true;
 }
 
-const KINDS: Record<string, { icon: string; label: string }> = {
-	local_bash: { icon: "terminal", label: "shell" },
-	local_agent: { icon: "bot", label: "subagent" },
-	remote_agent: { icon: "bot", label: "remote agent" },
-	in_process_teammate: { icon: "bot", label: "teammate" },
-	local_workflow: { icon: "workflow", label: "workflow" },
-	monitor_mcp: { icon: "radar", label: "monitor" },
-	monitor_ws: { icon: "radar", label: "monitor" },
-	dream: { icon: "moon", label: "dream" },
+/** `hue` colours the header pills: one per kind, from the theme's category palette. */
+const KINDS: Record<string, { icon: string; label: string; hue: string }> = {
+	local_bash: {
+		icon: "terminal",
+		label: "shell",
+		hue: "var(--color-cat-replan)",
+	},
+	local_agent: {
+		icon: "bot",
+		label: "subagent",
+		hue: "var(--color-cat-scope)",
+	},
+	remote_agent: {
+		icon: "bot",
+		label: "remote agent",
+		hue: "var(--color-cat-scope)",
+	},
+	in_process_teammate: {
+		icon: "bot",
+		label: "teammate",
+		hue: "var(--color-cat-scope)",
+	},
+	local_workflow: {
+		icon: "workflow",
+		label: "workflow",
+		hue: "var(--color-cat-decision)",
+	},
+	monitor_mcp: {
+		icon: "radar",
+		label: "monitor",
+		hue: "var(--color-status-green)",
+	},
+	monitor_ws: {
+		icon: "radar",
+		label: "monitor",
+		hue: "var(--color-status-green)",
+	},
+	dream: { icon: "moon", label: "dream", hue: "var(--color-cat-scope)" },
 };
 
 export function taskKind(task: BackgroundTask): {
 	icon: string;
 	label: string;
+	hue: string;
 } {
 	return (
-		KINDS[task.type] ?? { icon: "zap", label: task.type.replaceAll("_", " ") }
+		KINDS[task.type] ?? {
+			icon: "zap",
+			label: task.type.replaceAll("_", " "),
+			hue: "var(--color-text-dimmer)",
+		}
 	);
 }
 

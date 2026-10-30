@@ -144,8 +144,9 @@ async function expectTasks(page: Page, descriptions: readonly string[]) {
 	const count = descriptions.length;
 	await expect(
 		page.getByRole("button", {
-			name: `${count} background ${count === 1 ? "task" : "tasks"}`,
-			exact: true,
+			name: new RegExp(
+				`^${count} background ${count === 1 ? "task" : "tasks"}(:|$)`,
+			),
 		}),
 	).toBeVisible();
 }
@@ -177,9 +178,11 @@ async function startTurn(
 		throw new Error("No task-stop query ID");
 	const queryId = held["queryId"];
 	await expect(
-		page.getByRole("button", { name: /^\d+ background tasks?$/ }),
-	).toHaveAccessibleName("4 background tasks");
-	await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
+		page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
+	).toHaveAccessibleName(/^4 background tasks: /);
+	await page
+		.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
+		.click();
 	await expectTasks(
 		page,
 		taskStopFixture.map((task) => task.description),
@@ -271,7 +274,7 @@ test("stops exactly one shell only after the SDK confirms it to both clients", a
 		await secondApp.goto(`${harness.baseUrl}/s/${sessionId}`);
 		await expect(second.getByTestId("background-tasks-row")).toBeVisible();
 		await second
-			.getByRole("button", { name: /^\d+ background tasks?$/ })
+			.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 			.click();
 		await steps.record("four-live-tasks");
 		await page
@@ -496,7 +499,7 @@ test("Stop all works after the foreground result and leaves the same query usabl
 		release(harness, "task-stop-confirm-all");
 		await expect(page.getByTestId("background-tasks-row")).toBeHidden();
 		await expect(
-			page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+			page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 		).toHaveCount(0);
 		await expect(
 			sidebarRow,
@@ -552,7 +555,7 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 		unlinkSync(failGate);
 		await new AppPage(second).goto(`${harness.baseUrl}/s/${sessionId}`);
 		await second
-			.getByRole("button", { name: /^\d+ background tasks?$/ })
+			.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 			.click();
 		await page
 			.getByTestId("background-tasks-panel")

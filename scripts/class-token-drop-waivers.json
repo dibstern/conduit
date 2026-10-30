@@ -1303,10 +1303,17 @@
 	"src/lib/frontend/components/overlays/MediaViewer.svelte :: max-h-[90vh],max-w-[92vw],rounded": "conduit-test-3g0c7.5: the image is now ZoomableImage's svg wrapper, which carries these as [&>svg]: variants; the height cap became calc(100dvh-8rem) so the 60px close-button strip fits.",
 	"src/lib/frontend/components/overlays/MediaViewer.svelte :: object-contain": "conduit-test-3g0c7.5: the image is drawn inside an svg sized to its natural aspect ratio, so there is nothing left to letterbox.",
 	"src/lib/frontend/components/overlays/MediaViewer.svelte :: mt-[60px]": "conduit-test-3g0c7.5: the close-button strip moved from the diagram box to the shared wrapper as pt-[60px], so images get it too.",
+	"src/lib/frontend/components/overlays/ImageLightbox.svelte :: bg-white/15,h-9,hover:bg-white/25,right-4,rounded-full,text-white,text-xl,top-4,w-9,z-[var(--z-raised)]": {
+		"movedTo": "src/lib/frontend/components/overlays/MediaViewer.svelte",
+		"reason": "conduit-test-3g0c7.5 deletes ImageLightbox; its close button moved unchanged into MediaViewer, which also grows it to 44px on compact screens."
+	},
+	"src/lib/frontend/components/overlays/ImageLightbox.svelte :: max-h-[90vh],max-w-[92vw],rounded": "conduit-test-3g0c7.5 deletes ImageLightbox: the image is now ZoomableImage's svg wrapper, which carries these as [&>svg]: variants.",
+	"src/lib/frontend/components/overlays/ImageLightbox.svelte :: object-contain": "conduit-test-3g0c7.5 deletes ImageLightbox: the image is drawn inside an svg sized to its natural aspect ratio, so there is nothing left to letterbox.",
 	"test/visual/build-health.spec.ts :: overlays-confirmmodal--hidden,overlays-mediaviewer--hidden,overlays-qrmodal--hidden,overlays-rewindbanner--inactive": "Not classes: Storybook story ids dropped from the EXPECTED_EMPTY_ROOT waiver list, which the recipe-continuation heuristic reads as a string array.",
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: italic": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: px-3": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: py-1": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-error": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
-	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-xs": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it."
+	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-xs": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: border-border-subtle,border-t,gap-[8px],max-w-[230px],min-h-[36px],ml-auto,pl-[20px],pr-[16px],text-[12.5px],text-text-secondary": "conduit-test-dsnbk replaces the bordered task row of chips with kind-coloured pills styled in the component's scoped CSS (desktop subline, phone swipe row)."
 }

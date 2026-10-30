@@ -144,7 +144,7 @@ test.describe("Claude running tasks", () => {
 		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
 		const pill = page.locator(".turn-running");
 		const tasksRow = page.getByRole("button", {
-			name: /^\d+ background tasks?$/,
+			name: /^\d+ background tasks?(:|$)/,
 		});
 		const sidebarRow = page.locator(
 			`#session-list [data-session-id="${sessionId}"]`,
@@ -161,9 +161,9 @@ test.describe("Claude running tasks", () => {
 			// The parent's result: the shell, both agents and agent A's first
 			// nested shell are live. The three launching steps still breathe.
 			await expect(pill).toHaveText(/^\s*4\s+running\s*$/);
-			await expect(tasksRow).toHaveAccessibleName("4 background tasks");
+			await expect(tasksRow).toHaveAccessibleName(/^4 background tasks: /);
 			await expect(
-				page.getByRole("button", { name: "4 background tasks", exact: true }),
+				page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 			).toBeVisible();
 			const atResult = await steps.record("parent-result");
 			expect.soft(atResult.breathing, "launching steps breathing").toBe(3);
@@ -178,9 +178,9 @@ test.describe("Claude running tasks", () => {
 				sidebarRow,
 				"background agents ran after the turn but the session did not read as monitoring",
 			).toHaveAttribute("aria-label", /^Monitoring/);
-			await expect(tasksRow).toHaveAccessibleName("5 background tasks");
+			await expect(tasksRow).toHaveAccessibleName(/^5 background tasks: /);
 			await expect(
-				page.getByRole("button", { name: "5 background tasks", exact: true }),
+				page.getByRole("button", { name: /^5 background tasks(:|$)/ }),
 			).toBeVisible();
 			await tasksRow.click();
 			await expect(page.getByTestId("background-tasks-panel")).toBeVisible();
@@ -249,7 +249,7 @@ test.describe("Claude running tasks", () => {
 			await expect(pill).toHaveCount(0);
 			await expect(tasksRow).toBeHidden();
 			await expect(
-				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+				page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 			).toHaveCount(0);
 			await expect(sidebarRow).not.toHaveAttribute("aria-label", /^Monitoring/);
 			const finished = await steps.record("finished");
