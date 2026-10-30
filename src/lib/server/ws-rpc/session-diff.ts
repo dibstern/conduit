@@ -85,13 +85,28 @@ const toolCallChanges = (sessionId: string, toolId: string) =>
 		const changes =
 			recorded ??
 			toolFileChanges(part.status, parseJson(part.input), undefined);
-		return changes
-			? {
-					source: recorded ? ("provider" as const) : ("toolInput" as const),
-					changes,
-					turnId: part.turn_id,
-				}
-			: undefined;
+		if (!changes) return undefined;
+		return {
+			source: recorded ? ("provider" as const) : ("toolInput" as const),
+			changes,
+			/** The turn whose capture checks a claimed new file, when one is claimed. */
+			addedIn: changes.some(({ kind }) => kind === "add") ? part.turn_id : null,
+		};
+	});
+
+/** A turn scope's capture, or a tool call's changes with its turn's capture when one claims a new file. */
+const scopeRecords = (sessionId: string, scope: SessionDiffScope) =>
+	Effect.gen(function* () {
+		const toolCall =
+			scope.kind === "toolCall"
+				? yield* toolCallChanges(sessionId, scope.toolId)
+				: undefined;
+		const turnId = scope.kind === "turn" ? scope.turnId : toolCall?.addedIn;
+		const capture = turnId ? yield* turnCapture(sessionId, turnId) : undefined;
+		return {
+			...(capture ? { capture } : {}),
+			...(toolCall ? { toolCall } : {}),
+		};
 	});
 
 /** The session's folders as this request may read them; an unguarded one reads as missing.
@@ -120,26 +135,10 @@ const sessionFolders = (sessionId: string, scope: SessionDiffScope) =>
 				Effect.orElseSucceed(() => ({ ...listed, present: false })),
 			);
 		});
-		const toolCall =
-			scope.kind === "toolCall"
-				? yield* toolCallChanges(sessionId, scope.toolId)
-				: undefined;
-		const capturedTurn =
-			scope.kind === "turn"
-				? scope.turnId
-				: toolCall?.changes.some(({ kind }) => kind === "add")
-					? toolCall.turnId
-					: null;
-		const capture = capturedTurn
-			? yield* turnCapture(sessionId, capturedTurn)
-			: undefined;
 		return {
 			id: sessionId,
 			folders,
-			...(capture ? { capture } : {}),
-			...(toolCall
-				? { toolCall: { source: toolCall.source, changes: toolCall.changes } }
-				: {}),
+			...(yield* scopeRecords(sessionId, scope)),
 		};
 	});
 
