@@ -126,8 +126,11 @@
 		const root = element.closest<HTMLElement>('[aria-label="Transcript"]');
 		if (!head || !root) return;
 		const observer = new ResizeObserver(() => {
-			const padding = Number.parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
-			element.style.setProperty("--turn-reveal-margin", `${turnHeadInset(head) - padding + 12}px 0 3.5rem`);
+			const style = getComputedStyle(root);
+			const offset = (Number.parseFloat(style.paddingTop) || 0) -
+				(Number.parseFloat(style.scrollPaddingTop) || 0) + head.getBoundingClientRect().height + 12;
+			// CSS tracks phone chrome changes even when the head does not resize.
+			element.style.setProperty("--turn-reveal-margin", `calc(var(--turn-sticky-top, -1.25rem) + ${offset}px) 0 3.5rem`);
 		});
 		observer.observe(head, { box: "border-box" });
 		return () => observer.disconnect();

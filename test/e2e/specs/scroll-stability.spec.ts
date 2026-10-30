@@ -418,6 +418,111 @@ test.describe("Scroll Stability — Mobile", () => {
 	test.describe.configure({ timeout: 45_000 });
 	test.use({ viewport: { width: 393, height: 852 } });
 
+	test("Tab exposes a log row beneath the sticky head after the phone bar expands", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const initMessages = createInitMessages(4);
+		const snapshot = initMessages.find(
+			(message) => message.type === "mock_transcript_snapshot",
+		);
+		if (!snapshot || !Array.isArray(snapshot["events"]))
+			throw new Error("Missing transcript fixture");
+		snapshot["events"].push({
+			type: "user_message",
+			text: "Check every log row after expanding the phone bar",
+		});
+		for (let index = 0; index < 30; index++) {
+			const id = `phone-focus-check-${index}`;
+			snapshot["events"].push(
+				{ type: "tool_start", id, name: "Bash" },
+				{
+					type: "tool_executing",
+					id,
+					name: "Bash",
+					input: { command: `check ${index}` },
+				},
+				{ type: "tool_result", id, content: "ok", is_error: false },
+			);
+		}
+		snapshot["events"].push({ type: "done", code: 0 });
+		await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await waitForInitialMessages(page);
+		await page.locator("#messages").dispatchEvent("wheel", { deltaY: 120 });
+		const bar = page.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		const turn = page.locator("#messages .turn-activity").last();
+		await turn
+			.getByRole("button", { name: "Expand turn", exact: true })
+			.click();
+		const rows = turn.locator("[data-log-part]");
+		await expect(rows).toHaveCount(30);
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		await waitForStableScroll(page);
+		const head = turn.locator(".turn-activity-sticky");
+		const collapsedHead = await head.evaluate((node) => ({
+			height: node.getBoundingClientRect().height,
+			top: Number.parseFloat(getComputedStyle(node).top),
+		}));
+		const row = rows.nth(4);
+		const focused = row.getByRole("button").first();
+		const collapsedHeadBottom = await head.evaluate(
+			(node) => node.getBoundingClientRect().bottom,
+		);
+		await focused.evaluate((node, headBottom) => {
+			const root = document.getElementById("messages");
+			if (!root) throw new Error("Missing transcript");
+			root.scrollTop += node.getBoundingClientRect().top - headBottom - 12;
+		}, collapsedHeadBottom);
+		await waitForStableScroll(page);
+		await page.getByTestId("session-bar-expand").click();
+		await expect(bar).toHaveAttribute("data-collapsed", "false");
+		await waitForStableScroll(page);
+		const expandedHead = await head.evaluate((node) => ({
+			height: node.getBoundingClientRect().height,
+			top: Number.parseFloat(getComputedStyle(node).top),
+		}));
+		expect(expandedHead.height).toBe(collapsedHead.height);
+		expect(expandedHead.top).toBeGreaterThan(collapsedHead.top);
+		const headBottom = await head.evaluate(
+			(node) => node.getBoundingClientRect().bottom,
+		);
+		expect(
+			await focused.evaluate((node) => node.getBoundingClientRect().top),
+		).toBeLessThan(headBottom);
+		await rows
+			.nth(3)
+			.getByRole("button")
+			.last()
+			.evaluate((node) => node.focus({ preventScroll: true }));
+		await page.keyboard.press("Tab");
+		await expect(focused).toBeFocused();
+		await waitForStableScroll(page);
+		const focusedTop = await focused.evaluate(
+			(node) => node.getBoundingClientRect().top,
+		);
+		const afterHeadBottom = await head.evaluate(
+			(node) => node.getBoundingClientRect().bottom,
+		);
+		await testInfo.attach("phone-expanded-bar-tab-focus.json", {
+			body: JSON.stringify({
+				collapsedHead,
+				expandedHead,
+				focusedTop,
+				headBottom: afterHeadBottom,
+			}),
+			contentType: "application/json",
+		});
+		await testInfo.attach("phone-expanded-bar-tab-focus.png", {
+			body: await page.screenshot({
+				path: testInfo.outputPath("phone-expanded-bar-tab-focus.png"),
+			}),
+			contentType: "image/png",
+		});
+		expect(focusedTop).toBeGreaterThanOrEqual(afterHeadBottom);
+	});
+
 	test("scroll position stays stable when background events arrive on inactive session", async ({
 		page,
 		relayUrl,
