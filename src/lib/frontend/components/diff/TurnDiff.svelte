@@ -5,7 +5,8 @@
 	import TextButton from "../ui/TextButton.svelte";
 	import DiffFile from "./DiffFile.svelte";
 
-	const { sessionId, turnId }: { sessionId: string; turnId: string } = $props();
+	// A step in the turn's log can open the list, so the caller may bind it.
+	let { sessionId, turnId, open = $bindable(false) }: { sessionId: string; turnId: string; open?: boolean } = $props();
 
 	const view = $derived(new SessionDiffView(sessionId, { kind: "turn", turnId }));
 	// A settled turn's capture never changes, so one lease while the footer shows lists it once.
@@ -13,7 +14,6 @@
 
 	const listed = $derived(view.state.kind === "listed" ? view.state : null);
 	const count = $derived(listed?.folders.reduce((total, folder) => total + ("rows" in folder ? folder.rows.length : 0), 0) ?? 0);
-	let open = $state(false);
 </script>
 
 <!-- Loading and failed turns show nothing: the entry is a shortcut, and the Diff pane reports errors. -->

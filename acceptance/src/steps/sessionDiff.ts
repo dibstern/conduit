@@ -86,7 +86,7 @@ async function settledAt(page: Page, read: () => number, expected: number) {
 }
 
 /** A patch whose first added line names its file, so a step can find it. */
-function patchFor(path: string, added = 1, removed = 1): string {
+export function patchFor(path: string, added = 1, removed = 1): string {
 	return [
 		`diff --git a/${path} b/${path}`,
 		"index 1111111..2222222 100644",
@@ -104,7 +104,7 @@ function patchFor(path: string, added = 1, removed = 1): string {
 	].join("\n");
 }
 
-const changed = (path: string, insertions = 1, deletions = 1) =>
+export const changed = (path: string, insertions = 1, deletions = 1) =>
 	({
 		path,
 		status: "modified",

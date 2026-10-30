@@ -34,6 +34,8 @@
 	import ToolFullDetail from "./ToolFullDetail.svelte";
 	import ToolItem from "./ToolItem.svelte";
 	import ShellToolDetail from "./ShellToolDetail.svelte";
+	import TextButton from "../ui/TextButton.svelte";
+	import ToolDiff from "../diff/ToolDiff.svelte";
 
 	let {
 		part,
@@ -46,6 +48,8 @@
 		onhandback,
 		live = false,
 		runningTasks = new Set<string>(),
+		sessionId,
+		onturndiff,
 	}: {
 		part: ActivityPart;
 		onhandback?: (() => void) | undefined;
@@ -58,9 +62,14 @@
 		live?: boolean;
 		/** Shared with the strip so status overrides use the same snapshot. */
 		runningTasks?: ReadonlySet<string>;
+		/** Lets a file-writing step open its own diff. */
+		sessionId?: string | undefined;
+		/** Opens the turn's diff; a shell step has no diff of its own. */
+		onturndiff?: (() => void) | undefined;
 	} = $props();
 
 	let expanded = $state(false);
+	let diffOpen = $state(false);
 
 	const style = $derived(partStyle(part));
 	const iconTone = $derived(segmentAppearance(part, runningTasks, live).tone);
@@ -226,6 +235,18 @@
 					{/if}
 				{/snippet}
 			</ToolFullDetail>
+		{/if}
+		{#if !launch && expanded && sessionId}
+			{#if ensureCanonical(part.name, part.input).tool === "Bash"}
+				{#if onturndiff}
+					<div class="ml-[22px] mr-[4px] mb-[4px]"><TextButton data-testid="tool-turn-diff" class="text-[11.5px]" onclick={onturndiff}>Turn diff</TextButton></div>
+				{/if}
+			{:else if part.fileChanges?.length}
+				<div class="ml-[22px] mr-[4px] mb-[4px]">
+					<TextButton data-testid="tool-diff-toggle" aria-expanded={diffOpen} class="text-[11.5px]" onclick={() => (diffOpen = !diffOpen)}>Diff</TextButton>
+					{#if diffOpen}<ToolDiff {sessionId} toolId={part.id} />{/if}
+				</div>
+			{/if}
 		{/if}
 	</div>
 {:else if part.type === "thinking"}
