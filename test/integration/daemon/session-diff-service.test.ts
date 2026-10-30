@@ -1138,3 +1138,54 @@ it("falls back to HEAD with a shallow notice when a shallow clone has no common 
 	});
 	expect(shallow.files).toEqual(["modified feature.txt"]);
 });
+
+// A tool call lists from its recorded changes without git: the source is
+// dropped, or left out of the revision so a provider and an input-derived
+// listing collide in the memo; the listed patch is not served; an uncaptured
+// turn lists folders instead of saying it was not captured.
+it("lists a tool call's changes with their source and serves them, and marks an uncaptured turn", async () => {
+	const folders = [present("/r")];
+	const changes = [
+		{ kind: "update", path: "/r/a.ts", patch: "@@\n-a\n+b" },
+	] as const;
+	const toolCall = { kind: "toolCall", toolId: "t" } as const;
+	const listed = await run(
+		Effect.gen(function* () {
+			const diff = yield* SessionDiff;
+			const provider = yield* diff.list(
+				{ id: "s", folders, toolCall: { source: "provider", changes } },
+				toolCall,
+			);
+			const input = yield* diff.list(
+				{ id: "s", folders, toolCall: { source: "toolInput", changes } },
+				toolCall,
+			);
+			const [folder] = provider.folders;
+			const file = folder && "files" in folder ? folder.files[0] : undefined;
+			const served = yield* diff.file({
+				sessionId: "s",
+				scope: toolCall,
+				revision: provider.revision,
+				folder: "/r",
+				path: "a.ts",
+				before: file?.before ?? null,
+				after: file?.after ?? null,
+			});
+			const turn = yield* diff.list(
+				{ id: "s", folders },
+				{ kind: "turn", turnId: "u" },
+			);
+			return { provider, input, served, turn };
+		}),
+	);
+
+	expect(listed.provider.source).toBe("provider");
+	expect(listed.input.source).toBe("toolInput");
+	expect(listed.input.revision).not.toBe(listed.provider.revision);
+	expect(listed.served.patch).toContain("\n@@ -1,1 +1,1 @@\n-a\n+b\n");
+	expect(listed.turn).toStrictEqual({
+		revision: expect.any(String),
+		folders: [],
+		notCaptured: true,
+	});
+});
