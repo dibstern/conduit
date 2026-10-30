@@ -22,7 +22,7 @@
 	import Icon from "../ui/Icon.svelte";
 	type TimelineProps = ComponentProps<typeof import("../ui/ActivityTimeline.svelte").default>;
 
-	let { turn, segment, final, now, running, width = $bindable(0), active = null, markers, cardSlot, card, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onjump, oncommand, phone = false }: {
+	let { turn, segment, final, now, running, width = $bindable(0), active = null, markers, cardSlot, card, openAsk, belowLevel, cited, preview, sliderText, oninteraction, onpick, onstep, oncommand, phone = false }: {
 		turn: Turn;
 		segment: Segment;
 		final: boolean;
@@ -40,7 +40,7 @@
 		sliderText?: string;
 		oninteraction?: TimelineProps["oninteraction"];
 		onpick?: (pin: SurfacePin) => void;
-		onjump?: (id: string) => void;
+		onstep?: (id: string) => void;
 		oncommand?: (event: KeyboardEvent) => void;
 		phone?: boolean;
 	} = $props();
@@ -89,4 +89,4 @@
 	{/if}
 {/snippet}
 
-<ActivityTimeline {segments} {seams} {handBacks} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {stepPreview} {sliderText} {oninteraction} {onpick} {onjump} {oncommand} {phone} />
+<ActivityTimeline {segments} {seams} {handBacks} bind:width {active} {markers} {cardSlot} {card} {openAsk} {belowLevel} {cited} {preview} {stepPreview} {sliderText} {oninteraction} {onpick} {onstep} {oncommand} {phone} />

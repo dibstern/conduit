@@ -21,7 +21,7 @@
 	import SurfacingSummary from "./SurfacingSummary.svelte";
 	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	import { createTurnPanel, landTurnTarget, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
-	import { showTurnTarget, turnHeadInset, type ScrollController } from "../../stores/scroll-controller.svelte.js";
+	import { repositionWithoutController, turnTargetTop, turnHeadInset, type ScrollController } from "../../stores/scroll-controller.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -70,7 +70,7 @@
 	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump = (target) => { if (target) showTurnTarget(target); }, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onreposition = (step) => repositionWithoutController(scrollRoot, step), numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
 		get viewId() { return view.id; },
 		get sessionId() { return sessionId; }, get turn() { return turn; },
 		get jev() { return surfacingActive; }, get processing() { return turn.live; },
@@ -94,7 +94,7 @@
 		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
-		onjump?: ScrollController["requestJump"] | undefined;
+		onreposition?: ScrollController["reposition"] | undefined;
 		numbered?: boolean;
 		latestTurn?: boolean;
 		newestSettledTurn?: boolean;
@@ -224,24 +224,27 @@
 		return selected ? { kind: "selected", card: selected } : { kind: "none" };
 	});
 	const summaryVisible = $derived((!surfacingActive || !minimised) && summaryEnabled && (summaryOpen && summaryOpen.storeId === storeTurnId ? summaryOpen.open : (!phone && !turn.live && latestTurn && (recap.versions.length > 0 || recap.generating || !!recap.error))));
-	function toggleMinimised() {
+	const repositionTarget = (node: HTMLElement) => onreposition({ top: () => turnTargetTop(node) });
+	async function toggleMinimised() {
 		const focused = document.activeElement;
 		const root = scrollRoot;
 		const head = panelEl?.querySelector<HTMLElement>(".turn-activity-head");
 		const top = root ? root.getBoundingClientRect().top + root.clientTop + Number.parseFloat(getComputedStyle(root).paddingTop) + (head && fullLog ? Number.parseFloat(getComputedStyle(head).top) : 0) : 0;
 		const stuck = fullLog && root && head && panelEl && panelEl.getBoundingClientRect().top < top && head.getBoundingClientRect().top <= top + 1 && head.getBoundingClientRect().bottom > top;
-		if (panel.view.kind === "collapsed") panel.open();
-		else {
-			onjump?.();
-			panel.collapse();
+		if (panel.view.kind === "collapsed") {
+			panel.open();
+			await tick();
 		}
-		void tick().then(() => {
-			const collapsedHead = panelEl?.querySelector<HTMLElement>(".turn-activity-head");
-			if (stuck && collapsedHead && collapsedHead.getBoundingClientRect().top < top) {
-				onjump?.(collapsedHead);
-			}
-			if (focused && !focused.isConnected) panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true });
-		});
+		else {
+			await onreposition({
+				change: () => panel.collapse(),
+				top: () => {
+					const collapsedHead = panelEl?.querySelector<HTMLElement>(".turn-activity-head");
+					return stuck && collapsedHead && collapsedHead.getBoundingClientRect().top < top ? turnTargetTop(collapsedHead) : null;
+				},
+			});
+		}
+		if (focused && !focused.isConnected) panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true });
 	}
 	// Track scalars so the live strip's clock cannot restart the read dwell.
 	const readTarget = $derived(cardSlot.kind === "selected" && cardSlot.card.read === false ? cardSlot.card.part.uuid : null);
@@ -313,9 +316,11 @@
 	}
 	// An open strip's pins are already on screen, so picking one keeps focus on the strip.
 	function selectPin(pin: SurfacePin) {
-		if (fullLog) onjump?.();
-		selection = { kind: "picked", uuid: pin.part.uuid };
-		if (fullLog) void tick().then(() => { if (readCardEl) onjump?.(readCardEl); });
+		if (fullLog) void onreposition({
+			change: () => { selection = { kind: "picked", uuid: pin.part.uuid }; },
+			top: () => readCardEl ? turnTargetTop(readCardEl) : null,
+		});
+		else selection = { kind: "picked", uuid: pin.part.uuid };
 	}
 	function acknowledgeMessage(seq: number) {
 		if (panel.pending?.seq !== seq || panel.target?.kind !== "message") return;
@@ -431,14 +436,15 @@
 		if (pin) pick(pin);
 		else void jumpTo(index);
 	}
-	function openQa(id: string) {
-		panel.qa();
-		void tick().then(() => {
-			const entry = panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`);
-			if (!qa || !entry) return;
-			onjump?.(entry);
-			entry.focus({ preventScroll: true });
+	async function openQa(id: string) {
+		await onreposition({
+			change: () => panel.qa(),
+			top: () => {
+				const entry = panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`);
+				return qa && entry ? turnTargetTop(entry) : null;
+			},
 		});
+		if (qa) panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`)?.focus({ preventScroll: true });
 	}
 	function stripChanged(interaction: StripInteraction) { stripInteraction = interaction; }
 	// A message with no card (never judged) goes through reveal(), which opens it in Full log.
@@ -631,21 +637,21 @@
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
 				<SurfacingCard layout={turnLayout} view={surface} card={surfacingActive && !minimised && !usage && !qa ? surface.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
-					{readState} bind:cardEl={readCardEl} onread={readMessage} onreveal={onjump}
+					{readState} bind:cardEl={readCardEl} onread={readMessage} onreveal={repositionTarget}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}
 					onpick={pick} onlevel={selectLevel}
 					onfold={foldMessage} onfollow={followLatest} oncommand={surfaceCommand}>
 					{#snippet strip(cited: string | null, card: Snippet | undefined)}
 						{#if (usage || qa) && surfacingActive}
-							<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "tab", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onjump={stripJump} oninteraction={stripChanged} />
+							<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} {preview} markers={{ kind: "dots", mode: "tab", dots: surface.messages }} openAsk={surface.openAsk} onpick={pickFromStrip} onstep={stripJump} oninteraction={stripChanged} />
 						{:else if minimised && surfacingActive}
-							<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onjump={stripJump} oninteraction={stripChanged} />
+							<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cardSlot} markers={{ kind: "dots", mode: "collapsed", dots: surface.messages }} openAsk={surface.openAsk} {preview} onpick={pick} onstep={stripJump} oninteraction={stripChanged} />
 						{:else if surfacingActive}
-						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} {preview} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pickFromStrip} onjump={stripJump} oncommand={surfaceCommand} />
+						<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} {phone} {cited} {card} {cardSlot} {preview} markers={{ kind: "pins", pins: surface.pins, selected: surface.card?.part.uuid ?? null }} openAsk={surface.openAsk} belowLevel={surface.belowLevel} sliderText={surface.sliderText} oninteraction={stripChanged} onpick={pickFromStrip} onstep={stripJump} oncommand={surfaceCommand} />
 						{:else}
 							<div class="md:mt-[7px] {summaryEnabled ? 'max-md:-mb-[18px]' : ''}">
-								<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onjump={stripJump} />
+								<ActivityStrip bind:width={stripWidth} {turn} {segment} {final} {now} {running} active={citedStep} oninteraction={stripChanged} onstep={stripJump} />
 							</div>
 						{/if}
 					{/snippet}
@@ -661,7 +667,7 @@
 				{@const part = entry.part}
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, scroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, scroll: repositionTarget }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} onhandback={() => openQa(part.uuid)} />
 				</div>
 				{/if}

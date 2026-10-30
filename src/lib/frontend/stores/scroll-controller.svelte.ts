@@ -1,7 +1,7 @@
 // State machine for chat scroll behavior. Derives scroll state from the chat
 // store's LoadLifecycle signal and user input events.
 
-import { untrack } from "svelte";
+import { tick, untrack } from "svelte";
 import type { LoadLifecycle } from "./chat.svelte.js";
 
 export type ScrollState = "loading" | "following" | "detached";
@@ -19,8 +19,10 @@ export interface ScrollController {
 	attach(container: HTMLElement): void;
 	detach(): void;
 	resetForSession(): void;
-	/** Suspend following before a reveal; sample its final position next frame. */
-	requestJump(target?: HTMLElement): void;
+	reposition(step: {
+		change?: () => void;
+		top: () => number | null;
+	}): Promise<void>;
 	onNewContent(): void;
 	onContainerResize(): void;
 	onPrepend(prevScrollHeight: number, prevScrollTop: number): void;
@@ -81,12 +83,9 @@ export function turnHeadInset(node: HTMLElement): number {
 }
 
 /** Keep a visible target still; expose the start of an oversized target. */
-export function showTurnTarget(node: HTMLElement): void {
+export function turnTargetTop(node: HTMLElement): number | null {
 	const root = node.closest<HTMLElement>('[aria-label="Transcript"]');
-	if (!root) {
-		node.scrollIntoView({ block: "nearest" });
-		return;
-	}
+	if (!root) return null;
 	const visibleTop =
 		root.getBoundingClientRect().top + root.clientTop + turnHeadInset(node);
 	const top = visibleTop + (node.matches(".turn-activity-head") ? 0 : 12);
@@ -110,11 +109,24 @@ export function showTurnTarget(node: HTMLElement): void {
 		box.bottom - cardBox.top <= revealBottom - top
 			? cardBox.top
 			: box.top;
-	if (start >= visibleTop && box.bottom <= bottom) return;
-	root.scrollTop +=
-		start < top || box.height > revealBottom - top
+	if (start >= visibleTop && box.bottom <= bottom) return null;
+	return (
+		root.scrollTop +
+		(start < top || box.height > revealBottom - top
 			? start - top
-			: box.bottom - revealBottom;
+			: box.bottom - revealBottom)
+	);
+}
+
+export async function repositionWithoutController(
+	root: HTMLElement | undefined,
+	step: Parameters<ScrollController["reposition"]>[0],
+): Promise<void> {
+	step.change?.();
+	if (!root) return;
+	await tick();
+	const top = step.top();
+	if (top !== null) root.scrollTop = top;
 }
 
 export function createScrollController(
@@ -132,7 +144,7 @@ export function createScrollController(
 	let preserveBar = $state(false);
 	let lastWrite: number | null = null;
 	let resetTimerScheduled = false; // guards against scheduling multiple reset frames
-	let jumpFrame: number | null = null;
+	let repositionSequence = 0;
 	let activeMessageId = $state<string | null>(null);
 	let selectedTop: number | null = null;
 	let mutation: MutationObserver | undefined;
@@ -227,11 +239,6 @@ export function createScrollController(
 		});
 	}
 
-	function cancelJump(): void {
-		if (jumpFrame !== null) cancelAnimationFrame(jumpFrame);
-		jumpFrame = null;
-	}
-
 	function getState(): ScrollState {
 		const lc = getLifecycle();
 		if (lc === "empty" || lc === "loading") return "loading";
@@ -276,7 +283,6 @@ export function createScrollController(
 		if (
 			!container ||
 			intent !== "reading" ||
-			jumpFrame !== null ||
 			container.scrollHeight > container.clientHeight
 		)
 			return false;
@@ -295,7 +301,6 @@ export function createScrollController(
 		seenTop = top;
 		if (top === lastWrite) return;
 		lastWrite = null;
-		if (jumpFrame !== null) return;
 		preserveBar = false;
 		// Read after the guards: our own scrolls record their layout, and reading here
 		// would absorb growth that landed before this queued event.
@@ -336,7 +341,6 @@ export function createScrollController(
 		place(target): boolean {
 			if (!container) return false;
 			preserveBar = false;
-			cancelJump();
 			if (target === "latest") {
 				const wasFollowing = getState() === "following";
 				apply({ type: "latest" });
@@ -400,7 +404,8 @@ export function createScrollController(
 			measureFrame = null;
 			lastWrite = null;
 			resetTimerScheduled = false;
-			cancelJump();
+			repositionSequence++;
+			apply({ type: "detach" });
 			if (container) {
 				container.removeEventListener("scroll", onScroll);
 				container = null;
@@ -411,29 +416,26 @@ export function createScrollController(
 			preserveBar = false;
 			activeMessageId = null;
 			selectedTop = null;
-			cancelJump();
+			repositionSequence++;
 			apply({ type: "reset" });
 			// Scroll immediately so the first paint of the new session is at the
 			// bottom, not at whatever scroll position the previous session had.
 			scrollToBottom();
 		},
 
-		requestJump(target): void {
-			if (!container) return;
-			cancelJump();
+		async reposition(step): Promise<void> {
+			const sequence = ++repositionSequence;
 			preserveBar = true;
-			apply({ type: "detach" });
-			if (target) showTurnTarget(target);
-			write(container.scrollTop);
-			// The reveal expands its DOM and scrolls after tick(). Suspend
-			// following until its final position has settled.
-			const identity = getNavigation().identity;
-			jumpFrame = requestAnimationFrame(() => {
-				jumpFrame = null;
-				if (!container || identity !== getNavigation().identity) return;
-				write(container.scrollTop);
-				settle();
-			});
+			apply({ type: "hold" });
+			try {
+				step.change?.();
+				await tick();
+				if (sequence !== repositionSequence) return;
+				const top = step.top();
+				if (top !== null) write(top);
+			} finally {
+				if (sequence === repositionSequence) settle();
+			}
 		},
 
 		onNewContent(): void {

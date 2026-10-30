@@ -29,7 +29,11 @@ vi.hoisted(() => {
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import type { LoadLifecycle } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { createScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
+import {
+	createScrollController,
+	repositionWithoutController,
+	turnTargetTop,
+} from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
 
 describe("ScrollController", () => {
 	let lifecycle: LoadLifecycle;
@@ -352,15 +356,14 @@ describe("ScrollController", () => {
 	describe("transcript windows", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
-		it("does not follow the physical bottom of a historical window", () => {
+		it("does not follow the physical bottom of a historical window", async () => {
 			const ctrl = createScrollController(
 				() => "ready",
 				() => ({ historical: true, busy: false, topClearance: 0, identity: 1 }),
 			);
 			const div = createScrollableDiv();
 			ctrl.attach(div);
-			ctrl.requestJump();
-			vi.runAllTimers();
+			await ctrl.reposition({ top: () => null });
 			expect(ctrl.state).toBe("detached");
 			div.scrollTop = 1500;
 			div.dispatchEvent(new Event("scroll"));
@@ -386,25 +389,55 @@ describe("ScrollController", () => {
 		});
 	});
 
-	describe("explicit jumps", () => {
+	describe("reposition transactions", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
+
+		it("honours a reader reaching the bottom in the next frame before queued growth", async () => {
+			const ctrl = createScrollController(() => "ready");
+			const div = createScrollableDiv();
+			let top = 200;
+			Object.defineProperty(div, "scrollTop", {
+				get: () => top,
+				set: (value: number) => {
+					top = Math.min(value, div.scrollHeight - div.clientHeight);
+				},
+			});
+			div.setAttribute("aria-label", "Transcript");
+			const target = document.createElement("div");
+			div.append(target);
+			ctrl.attach(div);
+			div.dispatchEvent(new Event("scroll"));
+			await ctrl.reposition({ top: () => turnTargetTop(target) });
+			vi.advanceTimersToNextFrame();
+			div.scrollTop = 1500;
+			Object.defineProperty(div, "scrollHeight", { value: 2100 });
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			div.dispatchEvent(new Event("scroll"));
+			vi.advanceTimersToNextFrame();
+			expect(ctrl.state).toBe("following");
+			expect(div.scrollTop).toBe(1600);
+			ctrl.detach();
+		});
 
 		it("preserves a pending reveal through content that temporarily fits", async () => {
 			const ctrl = makeController();
 			lifecycle = "ready";
 			const div = createScrollableDiv();
 			ctrl.attach(div);
-			ctrl.requestJump();
-			div.scrollTop = 0;
-			Object.defineProperty(div, "scrollHeight", { value: 500 });
-			div.append(document.createElement("span"));
-			await Promise.resolve();
-			expect(ctrl.isDetached).toBe(true);
-
-			Object.defineProperty(div, "scrollHeight", { value: 2000 });
-			div.append(document.createElement("span"));
-			await Promise.resolve();
+			await ctrl.reposition({
+				change: () => {
+					div.scrollTop = 0;
+					Object.defineProperty(div, "scrollHeight", { value: 500 });
+					div.append(document.createElement("span"));
+				},
+				top: () => {
+					expect(ctrl.isDetached).toBe(true);
+					Object.defineProperty(div, "scrollHeight", { value: 2000 });
+					return 0;
+				},
+			});
 			expect(div.scrollTop).toBe(0);
 			vi.advanceTimersToNextFrame();
 			expect(ctrl.isDetached).toBe(true);
@@ -417,7 +450,7 @@ describe("ScrollController", () => {
 			"before expansion",
 			"after expansion",
 			"after settling",
-		])("preserves the revealed row when new content arrives %s", (order) => {
+		])("preserves the revealed row when new content arrives %s", async (order) => {
 			const ctrl = makeController();
 			lifecycle = "ready";
 			const div = createScrollableDiv();
@@ -430,13 +463,16 @@ describe("ScrollController", () => {
 			});
 			ctrl.attach(div);
 			ctrl.resetForSession();
-			ctrl.requestJump();
-			div.dispatchEvent(new Event("scroll"));
-			if (order === "before expansion") ctrl.onNewContent();
-			Object.defineProperty(div, "scrollHeight", { value: 2033 });
-			if (order === "after expansion") ctrl.onNewContent();
-			ctrl.onContainerResize();
-			vi.advanceTimersToNextFrame();
+			await ctrl.reposition({
+				change: () => {
+					div.dispatchEvent(new Event("scroll"));
+					if (order === "before expansion") ctrl.onNewContent();
+					Object.defineProperty(div, "scrollHeight", { value: 2033 });
+					if (order === "after expansion") ctrl.onNewContent();
+					ctrl.onContainerResize();
+				},
+				top: () => null,
+			});
 			if (order === "after settling") ctrl.onNewContent();
 			expect(div.scrollTop).toBe(1500);
 			expect(ctrl.state).toBe("detached");
@@ -456,40 +492,101 @@ describe("ScrollController", () => {
 
 		it.each([
 			0, 4, 5, 33,
-		])("settles using the normal at-bottom rule with a %ipx gap, without a scroll event", (gap) => {
+		])("settles using the normal at-bottom rule with a %ipx gap, without a scroll event", async (gap) => {
 			const ctrl = makeController();
 			lifecycle = "ready";
 			const div = createScrollableDiv();
 			ctrl.attach(div);
-			ctrl.requestJump();
-			div.scrollTop = 1500 - gap;
-			vi.advanceTimersToNextFrame();
+			await ctrl.reposition({ top: () => 1500 - gap });
 			expect(ctrl.isPinned).toBe(gap < 5);
 			expect(ctrl.isDetached).toBe(gap >= 5);
 			ctrl.detach();
 		});
 
 		it.each([
-			"latest",
+			"reposition",
 			"resetForSession",
 			"detach",
-		] as const)("%s cancels a pending jump settlement", (method) => {
+		] as const)("%s supersedes a pending reposition", async (method) => {
 			const ctrl = makeController();
 			lifecycle = "ready";
 			const div = createScrollableDiv();
 			ctrl.attach(div);
-			ctrl.requestJump();
-			if (method === "latest") ctrl.place("latest");
+			const top = vi.fn(() => 200);
+			const pending = ctrl.reposition({ top });
+			if (method === "reposition") await ctrl.reposition({ top: () => 1400 });
 			else ctrl[method]();
-			if (method === "detach") {
-				ctrl.attach(createScrollableDiv());
-				ctrl.resetForSession();
-			}
-			// Growth after the newer request must not let the old jump detach it.
-			Object.defineProperty(div, "scrollHeight", { value: 3000 });
-			vi.advanceTimersToNextFrame();
-			expect(ctrl.state).toBe("following");
+			await pending;
+			expect(top).not.toHaveBeenCalled();
+			expect(ctrl.state).toBe(
+				method === "resetForSession" ? "following" : "detached",
+			);
+			expect(div.scrollTop).toBe(
+				method === "reposition"
+					? 1400
+					: method === "resetForSession"
+						? 2000
+						: 1500,
+			);
 			ctrl.detach();
+		});
+
+		it("keeps a fully visible picked card still when its change grows content below it", async () => {
+			const ctrl = createScrollController(() => "ready");
+			const div = createScrollableDiv();
+			div.setAttribute("aria-label", "Transcript");
+			const card = document.createElement("div");
+			card.getBoundingClientRect = () => new DOMRect(0, 100, 200, 80);
+			div.append(card);
+			ctrl.attach(div);
+			await ctrl.reposition({
+				change: () => {
+					Object.defineProperty(div, "scrollHeight", { value: 2200 });
+					div.append(document.createElement("span"));
+					ctrl.onNewContent();
+				},
+				top: () => turnTargetTop(card),
+			});
+			expect(div.scrollTop).toBe(1500);
+			expect(ctrl.state).toBe("detached");
+			ctrl.detach();
+		});
+
+		it("settles even when a synchronous change throws", async () => {
+			const ctrl = createScrollController(() => "ready");
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			await expect(
+				ctrl.reposition({
+					change: () => {
+						throw new Error("change failed");
+					},
+					top: () => 200,
+				}),
+			).rejects.toThrow("change failed");
+			expect(ctrl.state).toBe("following");
+			Object.defineProperty(div, "scrollHeight", { value: 2300 });
+			ctrl.onNewContent();
+			expect(div.scrollTop).toBe(2300);
+			ctrl.detach();
+		});
+
+		it.each([
+			true,
+			false,
+		])("repositions without a controller only with a transcript (root: %s)", async (withRoot) => {
+			const div = createScrollableDiv();
+			const change = vi.fn();
+			const top = vi.fn(() => 200);
+			const pending = repositionWithoutController(withRoot ? div : undefined, {
+				change,
+				top,
+			});
+			expect(change).toHaveBeenCalledOnce();
+			expect(div.scrollTop).toBe(1500);
+			await pending;
+			expect(div.scrollTop).toBe(withRoot ? 200 : 1500);
+			expect(top).toHaveBeenCalledTimes(withRoot ? 1 : 0);
 		});
 	});
 

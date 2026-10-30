@@ -30,7 +30,7 @@
 	import Icon from "./Icon.svelte";
 	import { FLOATING_ELEVATION_CLASSES } from "./floating-styles.js";
 
-	let { segments, seams = [], handBacks = [], width = $bindable(0), active = null, markers = { kind: "plain" }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, stepPreview, sliderText, oninteraction, onpick, onjump, oncommand }: {
+	let { segments, seams = [], handBacks = [], width = $bindable(0), active = null, markers = { kind: "plain" }, cardSlot = { kind: "none" }, card, openAsk = null, belowLevel = false, cited = null, phone = false, preview, stepPreview, sliderText, oninteraction, onpick, onstep, oncommand }: {
 		segments: readonly { id: string; left: number; width: number; label: string; tone: keyof typeof TONES; running?: boolean; kind?: "message" | "step" }[];
 		seams?: readonly { id: string; left: number; width: number }[];
 		handBacks?: readonly { id: string; x: number; label: string }[];
@@ -48,7 +48,7 @@
 		sliderText?: string | undefined;
 		oninteraction?: ((interaction: StripInteraction) => void) | undefined;
 		onpick?: ((pin: SurfacePin) => void) | undefined;
-		onjump?: ((id: string) => void) | undefined;
+		onstep?: ((id: string) => void) | undefined;
 		oncommand?: ((event: KeyboardEvent) => void) | undefined;
 	} = $props();
 	let gesture = $state<Gesture>({ kind: "idle", hovered: null });
@@ -104,7 +104,7 @@
 	function activateStep(id: string) {
 		const pin = markers.kind === "dots" ? markers.dots.find((pin) => pin.part.uuid === id) : undefined;
 		if (pin) onpick?.(pin);
-		else onjump?.(id);
+		else onstep?.(id);
 	}
 	function xAt(clientX: number): number {
 		const rect = stripEl?.getBoundingClientRect();
@@ -168,10 +168,10 @@
 		const previous = gesture;
 		clear();
 		if (trackEl?.hasPointerCapture(event.pointerId)) trackEl.releasePointerCapture(event.pointerId);
-		if (previous.kind === "pressed" && handBacks.some((pin) => pin.id === previous.id)) { onjump?.(previous.id); return; }
+		if (previous.kind === "pressed" && handBacks.some((pin) => pin.id === previous.id)) { onstep?.(previous.id); return; }
 		if (markers.kind === "pins") {
 			if (previous.kind === "dragging") { const pin = markers.pins.find((pin) => pin.part.uuid === previous.id); if (pin) onpick?.(pin); }
-			else { const group = groups.find((group) => group.leader.part.uuid === previous.id); if (group) pickGroup(group); else onjump?.(stepAt(xAt(event.clientX))?.id ?? previous.id); }
+			else { const group = groups.find((group) => group.leader.part.uuid === previous.id); if (group) pickGroup(group); else onstep?.(stepAt(xAt(event.clientX))?.id ?? previous.id); }
 		} else { cursor = stepAt(xAt(event.clientX))?.id ?? previous.id; activateStep(cursor); }
 	}
 	function keyboard(event: KeyboardEvent) {
@@ -245,7 +245,7 @@
 				<span data-step-id={seam.id} aria-hidden="true" class="absolute top-1/2 h-[10px] w-[2px] -translate-y-1/2 bg-text-secondary" style:left="{seam.left}%"></span>
 			{/each}
 			{#each handBacks as pin, index (pin.id)}
-				<Button variant="ghost" size="content" hoverFill="none" class="hand-back absolute top-1/2 z-[var(--z-raised)] flex size-[12px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[10px] leading-none text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(7px, {pin.x}%, calc(100% - 7px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onjump?.(pin.id); } }}>?</Button>
+				<Button variant="ghost" size="content" hoverFill="none" class="hand-back absolute top-1/2 z-[var(--z-raised)] flex size-[12px] -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-turn-bg font-mono text-[10px] leading-none text-status-ask ring-1 ring-status-ask pointer-events-auto" style="left:clamp(7px, {pin.x}%, calc(100% - 7px))" data-hand-back={pin.id} data-testid="turn-hand-back-pin" ariaLabel={`Q&A ${index + 1}: ${pin.label}`} onclick={(event) => { if (event.detail === 0) { clear(); onstep?.(pin.id); } }}>?</Button>
 			{/each}
 						{#if pinMarkers && anchor}<i class="surface-thumb" style:left={anchor}></i>{/if}
 		{#if hovered && (hoveredStep && stepPreview || messagePreview && !pinMarkers)}<i data-testid="strip-hover-marker" class="strip-hover-marker" style:left="{hoverX}%"><Icon name="chevron-down" size={10} class="absolute top-full left-1/2 -translate-x-1/2" /></i>{/if}

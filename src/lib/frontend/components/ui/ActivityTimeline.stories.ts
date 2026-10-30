@@ -41,7 +41,7 @@ const meta = {
 				running: true,
 			},
 		],
-		onjump: fn(),
+		onstep: fn(),
 	},
 } satisfies Meta<typeof ActivityTimeline>;
 export default meta;
@@ -103,7 +103,7 @@ export const TouchScrub: Story = {
 				coords: { ...coords, clientX: rect.left + rect.width * 0.56 },
 			},
 		]);
-		await expect(args["onjump"]).toHaveBeenLastCalledWith("error");
+		await expect(args["onstep"]).toHaveBeenLastCalledWith("error");
 		await expect(track).toHaveAttribute(
 			"aria-valuetext",
 			"Failed pnpm check · 1s",

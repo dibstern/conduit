@@ -189,7 +189,7 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	"layout-chatlayout--phone-top-colour | layout-chatlayout--sidebar-collapsed":
 		"on phone both show the same session with its sidebar collapsed; PhoneTopColour additionally asserts matching top-edge, header and browser theme colours, then restores the theme",
 	"ui-activitytimeline--default | ui-activitytimeline--live-fade | ui-activitytimeline--touch-scrub":
-		"TouchScrub changes aria-valuetext and emits onjump, LiveFade asserts the 1.2s fade duration that capture freezes; without emphasis all three paint the same segments",
+		"TouchScrub changes aria-valuetext and emits onstep, LiveFade asserts the 1.2s fade duration that capture freezes; without emphasis all three paint the same segments",
 
 	// Turn log redesign E (conduit-test-xdyjq.9). Each pair asserts different
 	// reveal() results or a different setup path that end in one Turn state.

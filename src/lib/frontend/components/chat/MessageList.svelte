@@ -620,7 +620,7 @@
 				get categorySet() { return messageSurfacing.categorySet; },
 			})}
 			<TurnActivity {panel} {view} scrollRoot={messagesEl} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
-				onjump={scrollCtrl.requestJump}
+				onreposition={scrollCtrl.reposition}
 				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
 				modelExecution={turn.user?.modelExecution} />

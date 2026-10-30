@@ -24,7 +24,10 @@ import {
 	touchSurfaceSession,
 } from "./message-surfacing.svelte.js";
 import { pendingQuestionFor } from "./permissions.svelte.js";
-import { showTurnTarget } from "./scroll-controller.svelte.js";
+import {
+	repositionWithoutController,
+	turnTargetTop,
+} from "./scroll-controller.svelte.js";
 import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
@@ -101,7 +104,12 @@ export function landTurnTarget(
 			}
 			if (!matches) return;
 			if (navigation === "scroll") {
-				(scroll ?? showTurnTarget)(node);
+				if (scroll) scroll(node);
+				else
+					void repositionWithoutController(
+						node.closest<HTMLElement>('[aria-label="Transcript"]') ?? undefined,
+						{ top: () => turnTargetTop(node) },
+					);
 				node.focus({ preventScroll: true });
 			}
 			ack(pending.seq);
