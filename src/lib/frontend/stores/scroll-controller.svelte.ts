@@ -41,7 +41,7 @@ export function createScrollController(
 	let container: HTMLElement | null = null;
 	let userDetached = $state(false);
 	let pinned = true;
-	let programmaticScrollCount = 0; // counter — prevents false detach from our own scrolls
+	let programmaticScrollTop: number | null = null;
 	let resetTimerScheduled = false; // guards against scheduling multiple reset frames
 	let jumpFrame: number | null = null;
 	let activeMessageId = $state<string | null>(null);
@@ -141,21 +141,20 @@ export function createScrollController(
 	function scrollToBottom(): void {
 		if (!container || getNavigation().historical || getNavigation().busy)
 			return;
-		programmaticScrollCount++;
 		pinned = true;
 		container.scrollTop = container.scrollHeight;
+		programmaticScrollTop = container.scrollTop;
 		observeBottomGap();
-		// Clear unconsumed slots (a scroll that moved nothing fires no event) on
-		// the next frame. A frame dispatches scroll events before it runs rAF
-		// callbacks, so this always lands after our own event. setTimeout(0) does
-		// not: it can run before the frame, and then rows that render in between
-		// make our own scroll read as the reader leaving the bottom.
+		// Expire the expected position on the next frame. A frame dispatches
+		// scroll events before rAF callbacks, so this lands after our own event.
+		// setTimeout(0) can run before the frame; rows that render in between
+		// would then make our own scroll read as the reader leaving the bottom.
 		if (!resetTimerScheduled) {
 			resetTimerScheduled = true;
 			const epoch = attachment;
 			requestAnimationFrame(() => {
 				if (epoch !== attachment) return;
-				programmaticScrollCount = 0;
+				programmaticScrollTop = null;
 				resetTimerScheduled = false;
 			});
 		}
@@ -179,14 +178,10 @@ export function createScrollController(
 		scheduleMeasure();
 		if (!container || jumpFrame !== null) return;
 
-		// If we triggered this scroll via scrollToBottom(), skip the detach
-		// check. Uses a counter so that multiple scrollToBottom() calls in
-		// the same frame each consume one slot instead of the second scroll
-		// event bypassing the guard entirely.
-		if (programmaticScrollCount > 0) {
-			programmaticScrollCount--;
-			return;
-		}
+		// Writes and user input can coalesce into one event. Only ignore it
+		// while the position still matches our write, including browser clamping.
+		if (container.scrollTop === programmaticScrollTop) return;
+		programmaticScrollTop = null;
 		// Read after the guards: our own scrolls record their layout, and reading here
 		// would absorb growth that landed before this queued event.
 		const distFromBottom = observeBottomGap();
@@ -299,6 +294,7 @@ export function createScrollController(
 			if (measureFrame?.handle !== undefined)
 				cancelAnimationFrame(measureFrame.handle);
 			measureFrame = null;
+			programmaticScrollTop = null;
 			resetTimerScheduled = false;
 			cancelJump();
 			if (container) {
@@ -334,7 +330,7 @@ export function createScrollController(
 			jumpFrame = requestAnimationFrame(() => {
 				jumpFrame = null;
 				if (!container || identity !== getNavigation().identity) return;
-				programmaticScrollCount = 0;
+				programmaticScrollTop = null;
 				const gap = observeBottomGap();
 				pinned = gap < REFOLLOW_THRESHOLD;
 				userDetached =
@@ -356,8 +352,8 @@ export function createScrollController(
 		},
 
 		// Anti-oscillation: resizing can change the container height and can
-		// fire a scroll event. Re-pin through scrollToBottom() so it consumes a
-		// programmaticScrollCount slot and is never counted as user intent.
+		// fire a scroll event. Re-pin through scrollToBottom() so the resulting
+		// position is recognised as our write rather than user intent.
 		// This is the single most likely thing a future reader deletes as redundant.
 		onContainerResize(): void {
 			if (getState() === "following") scrollToBottom();

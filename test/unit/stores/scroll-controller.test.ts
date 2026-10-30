@@ -162,11 +162,53 @@ describe("ScrollController", () => {
 			vi.advanceTimersToNextFrame();
 
 			ctrl.onNewContent();
-			Object.defineProperty(div, "scrollHeight", { value: 2400 });
+			Object.defineProperty(div, "scrollHeight", { value: 3000 });
 			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("following");
+			expect(ctrl.isPinned).toBe(true);
 			div.append(document.createElement("span"));
 			await Promise.resolve();
-			expect(div.scrollTop).toBe(2400);
+			expect(div.scrollTop).toBe(3000);
+			ctrl.detach();
+		});
+
+		// A no-op write emits no scroll event; multiple writes and a reader's
+		// scroll in one frame coalesce into one event at the reader's position.
+		// Neither may hide user intent or let subsequent growth snap back.
+		it.each([
+			false,
+			true,
+		])("detaches on a same-frame reader scroll after a bottom write (moved: %s)", (grew) => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			let top = div.scrollTop;
+			// jsdom does not clamp scrollTop as a browser does.
+			Object.defineProperty(div, "scrollTop", {
+				get: () => top,
+				set: (value: number) => {
+					top = Math.max(
+						0,
+						Math.min(value, div.scrollHeight - div.clientHeight),
+					);
+				},
+			});
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+			if (grew) Object.defineProperty(div, "scrollHeight", { value: 2400 });
+			ctrl.onNewContent();
+			ctrl.onContainerResize();
+			const readerTop = div.scrollTop - 400;
+			div.scrollTop = readerTop;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("detached");
+			expect(ctrl.isPinned).toBe(false);
+
+			Object.defineProperty(div, "scrollHeight", { value: 3000 });
+			ctrl.onNewContent();
+			ctrl.onContainerResize();
+			vi.advanceTimersToNextFrame();
+			expect(div.scrollTop).toBe(readerTop);
 			ctrl.detach();
 		});
 	});
@@ -350,7 +392,7 @@ describe("ScrollController", () => {
 		div.scrollTop = 200;
 		ctrl[method]();
 		expect(div.scrollTop).toBe(div.scrollHeight);
-		// This regression test must fail if the programmaticScrollCount guard is removed.
+		// The resulting scroll event must retain pinning.
 		div.dispatchEvent(new Event("scroll"));
 		expect(ctrl.isPinned).toBe(true);
 		expect(ctrl.state).toBe("following");
