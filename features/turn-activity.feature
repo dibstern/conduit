@@ -1,5 +1,58 @@
 Feature: One chronological turn log per Turn, across skills, hand-backs and wake Runs
 
+Scenario Outline: Collapsing a stuck turn that fits the viewport preserves the phone bar
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the sticky session has a long expanded turn followed by a short reply
+  When I scroll into the middle of the long turn log
+  And I open and remember the phone bar
+  And I collapse the stuck turn
+  Then the collapsed transcript fits its viewport and preserves the phone bar
+
+Examples:
+  | jev      |
+  | active   |
+  | inactive |
+
+Scenario Outline: Revealing a tall pin suspends bottom following through detail updates
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a short reply
+  And the sticky turn has a long first message
+  When I follow the bottom before picking the tall pin
+  And I pick surfaced message #1
+  Then the tall selected card stays revealed through a detail update
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario: A card hidden behind the sticky head is not read by dwell
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the sticky session has a long expanded turn followed by a long reply
+  When I hide the unread selected card behind the stuck head
+  Then dwell does not mark the covered card read
+  When I expose the covered card below the stuck head
+  Then dwell marks the exposed card read
+
+Scenario: Picking a fully visible Full log card preserves the scroll position
+  Given message surfacing is active at Key
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the surfacing session has a settled turn
+  When I open the plain turn log
+  And I remember the fully visible card position at the transcript start
+  And I pick surfaced message #3
+  Then the fully visible selected card has not moved the transcript
+
 Scenario Outline: A long turn keeps its collapse control above the log and collapses in place
   Given message surfacing is <jev> at Most
   And surfacing read tracking starts with none read and summaries off

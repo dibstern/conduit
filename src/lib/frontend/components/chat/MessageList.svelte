@@ -199,6 +199,7 @@
 		const state = scrollCtrl.state;
 		publishAtBottom(
 			state === "following" || state === "loading",
+			scrollCtrl.preserveBar,
 		);
 	});
 

@@ -24,6 +24,7 @@ import {
 	touchSurfaceSession,
 } from "./message-surfacing.svelte.js";
 import { pendingQuestionFor } from "./permissions.svelte.js";
+import { showTurnTarget } from "./scroll-controller.svelte.js";
 import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
@@ -64,50 +65,6 @@ export async function revealTurnTarget(
 	return landed;
 }
 
-/** Expose the start of an oversized target instead of aligning its bottom. */
-export function showTurnTarget(node: HTMLElement): void {
-	const turn = node.closest<HTMLElement>(".turn-head-card");
-	const head = turn?.querySelector<HTMLElement>(".turn-activity-sticky");
-	// Dimension bindings update later through ResizeObserver. A reveal must use
-	// the head's current size, including on the tick that opens Full log.
-	// The bottom margin clears the floating jump button and its touch target.
-	turn?.style.setProperty(
-		"--turn-reveal-margin",
-		head
-			? `calc(${head.getBoundingClientRect().height}px + var(--turn-sticky-top, 0px) + 12px) 0 3.5rem`
-			: "0px",
-	);
-	const root = node.closest<HTMLElement>('[aria-label="Transcript"]');
-	const style = getComputedStyle(node);
-	const clearance =
-		Number.parseFloat(style.scrollMarginTop) +
-		(root
-			? Number.parseFloat(getComputedStyle(root).scrollPaddingTop) || 0
-			: 0);
-	const bottomClearance = Number.parseFloat(style.scrollMarginBottom);
-	const box = node.getBoundingClientRect();
-	const card = turn?.querySelector<HTMLElement>(
-		'.turn-inline-card [data-testid="surfacing-msg-card"]',
-	);
-	const cardBox = card?.getBoundingClientRect();
-	// Opening the log can reveal a card and a nearby row together. Keep both
-	// readable when they fit, rather than sliding the new card under the head.
-	const keepCard =
-		root &&
-		card &&
-		card !== node &&
-		cardBox &&
-		cardBox.top < root.getBoundingClientRect().top + clearance &&
-		box.bottom - cardBox.top + clearance + bottomClearance <= root.clientHeight;
-	(keepCard ? card : node).scrollIntoView({
-		block:
-			keepCard ||
-			(root && box.height + clearance + bottomClearance > root.clientHeight)
-				? "start"
-				: "nearest",
-	});
-}
-
 /** Svelte action shared by the mounted log row and message card. */
 export function landTurnTarget(
 	node: HTMLElement,
@@ -116,7 +73,7 @@ export function landTurnTarget(
 		target: TurnTarget;
 		ack: (seq: number) => void;
 		navigation?: "scroll" | "in-place";
-		beforeScroll?: (() => void) | undefined;
+		scroll?: ((node: HTMLElement) => void) | undefined;
 	},
 ) {
 	let current = input;
@@ -126,13 +83,7 @@ export function landTurnTarget(
 		const seq = next.pending.seq;
 		// Updates can reach a kept log row before its parent loses `hidden`.
 		void tick().then(() => {
-			const {
-				pending,
-				target,
-				ack,
-				navigation = "scroll",
-				beforeScroll,
-			} = current;
+			const { pending, target, ack, navigation = "scroll", scroll } = current;
 			if (pending?.seq !== seq || !node.isConnected) return;
 			let matches: boolean;
 			switch (target.kind) {
@@ -150,8 +101,7 @@ export function landTurnTarget(
 			}
 			if (!matches) return;
 			if (navigation === "scroll") {
-				beforeScroll?.();
-				showTurnTarget(node);
+				(scroll ?? showTurnTarget)(node);
 				node.focus({ preventScroll: true });
 			}
 			ack(pending.seq);

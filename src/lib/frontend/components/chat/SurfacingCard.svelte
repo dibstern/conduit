@@ -26,9 +26,10 @@
 	import SurfacingMessageCard from "./SurfacingMessageCard.svelte";
 	import { type PendingReveal } from "../../stores/turn-panel.svelte.js";
 
-	let { view, card, counts, live, regions = {}, strip, layout, onpick, onlevel, onfold, onfollow, oncommand, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply = () => {}, onread = () => {}, onexplain = () => {}, context, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
+	let { view, card, counts, live, regions = {}, strip, layout, onpick, onlevel, onfold, onfollow, oncommand, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply = () => {}, onread = () => {}, onexplain = () => {}, context, replied = false, pending = null, onland = () => {}, onreveal, scrubbing = false }: {
 		scrubbing?: boolean;
 		pending?: PendingReveal | null;
+		onreveal?: ((node: HTMLElement) => void) | undefined;
 		onland?: (seq: number) => void;
 		view: SurfaceTurn;
 		card: SurfacePin | null;
@@ -62,7 +63,7 @@
 
 {#snippet messageCard()}
 	{#if card}
-	<SurfacingMessageCard kind="selected" {card} {view} {live} {regions} {context} {pending} {onland} {scrubbing} {readState} bind:cardEl {onreply} {onread} {onexplain} {replied} {oncommand} {onpick} {onfold} {onfollow} />
+	<SurfacingMessageCard kind="selected" {card} {view} {live} {regions} {context} {pending} {onland} {onreveal} {scrubbing} {readState} bind:cardEl {onreply} {onread} {onexplain} {replied} {oncommand} {onpick} {onfold} {onfollow} />
 	{/if}
 {/snippet}
 

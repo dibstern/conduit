@@ -14,13 +14,14 @@ export interface ScrollController {
 	 *  unset it, so it answers "was the reader at the bottom before this?". */
 	readonly isPinned: boolean;
 	readonly activeMessageId: string | null;
+	readonly preserveBar: boolean;
 	place(target: { messageId: string } | "latest"): boolean;
 	attach(container: HTMLElement): void;
 	detach(): void;
 	resetForSession(): void;
 	requestFollow(): void;
 	/** Suspend following before a reveal; sample its final position next frame. */
-	requestJump(): void;
+	requestJump(target?: HTMLElement): void;
 	onNewContent(): void;
 	onContainerResize(): void;
 	onPrepend(prevScrollHeight: number, prevScrollTop: number): void;
@@ -28,6 +29,71 @@ export interface ScrollController {
 
 const DETACH_THRESHOLD = 50; // px from bottom to trigger detach via scroll position
 const REFOLLOW_THRESHOLD = 5; // px from bottom to re-follow (tight to prevent accidental re-follow from casual scrolling)
+
+/** The scrollport area covered by the turn's sticky controls, including chrome. */
+export function turnHeadInset(node: HTMLElement): number {
+	const root = node.closest<HTMLElement>('[aria-label="Transcript"]');
+	const turn = node.closest<HTMLElement>(".turn-head-card");
+	const head = turn?.querySelector<HTMLElement>(".turn-activity-sticky");
+	if (!root) return 0;
+	const style = getComputedStyle(root);
+	const padding = Number.parseFloat(style.scrollPaddingTop) || 0;
+	const chrome = Number.parseFloat(
+		style.getPropertyValue("--phone-chrome-visible-height"),
+	);
+	const inset = head
+		? Math.max(
+				0,
+				(Number.parseFloat(style.paddingTop) || 0) +
+					(Number.parseFloat(getComputedStyle(head).top) || 0) +
+					head.getBoundingClientRect().height,
+			)
+		: Number.isFinite(chrome)
+			? Math.min(padding, chrome)
+			: padding;
+	turn?.style.setProperty(
+		"--turn-reveal-margin",
+		`${inset - padding + 12}px 0 3.5rem`,
+	);
+	return inset;
+}
+
+/** Keep a visible target still; expose the start of an oversized target. */
+export function showTurnTarget(node: HTMLElement): void {
+	const root = node.closest<HTMLElement>('[aria-label="Transcript"]');
+	if (!root) {
+		node.scrollIntoView({ block: "nearest" });
+		return;
+	}
+	const visibleTop =
+		root.getBoundingClientRect().top + root.clientTop + turnHeadInset(node);
+	const top = visibleTop + (node.matches(".turn-activity-head") ? 0 : 12);
+	const bottom =
+		root.getBoundingClientRect().top + root.clientTop + root.clientHeight;
+	const revealBottom =
+		bottom -
+		(Number.parseFloat(getComputedStyle(node).scrollMarginBottom) || 0);
+	const box = node.getBoundingClientRect();
+	// Opening a row can reveal its neighbouring card at the same time.
+	const card = node
+		.closest(".turn-head-card")
+		?.querySelector<HTMLElement>(
+			'.turn-inline-card [data-testid="surfacing-msg-card"]',
+		);
+	const cardBox = card?.getBoundingClientRect();
+	const start =
+		cardBox &&
+		card !== node &&
+		cardBox.top < top &&
+		box.bottom - cardBox.top <= revealBottom - top
+			? cardBox.top
+			: box.top;
+	if (start >= visibleTop && box.bottom <= bottom) return;
+	root.scrollTop +=
+		start < top || box.height > revealBottom - top
+			? start - top
+			: box.bottom - revealBottom;
+}
 
 export function createScrollController(
 	getLifecycle: () => LoadLifecycle,
@@ -40,6 +106,7 @@ export function createScrollController(
 ): ScrollController {
 	let container: HTMLElement | null = null;
 	let userDetached = $state(false);
+	let preserveBar = $state(false);
 	let pinned = true;
 	let programmaticScrollCount = 0; // counter — prevents false detach from our own scrolls
 	let resetTimerScheduled = false; // guards against scheduling multiple reset frames
@@ -187,6 +254,7 @@ export function createScrollController(
 			programmaticScrollCount--;
 			return;
 		}
+		preserveBar = false;
 		// Read after the guards: our own scrolls record their layout, and reading here
 		// would absorb growth that landed before this queued event.
 		const distFromBottom = observeBottomGap();
@@ -233,8 +301,12 @@ export function createScrollController(
 		get activeMessageId() {
 			return activeMessageId;
 		},
+		get preserveBar() {
+			return preserveBar;
+		},
 		place(target): boolean {
 			if (!container) return false;
+			preserveBar = false;
 			cancelJump();
 			if (target === "latest") {
 				userDetached = false;
@@ -308,6 +380,7 @@ export function createScrollController(
 		},
 
 		resetForSession(): void {
+			preserveBar = false;
 			activeMessageId = null;
 			selectedTop = null;
 			cancelJump();
@@ -318,16 +391,19 @@ export function createScrollController(
 		},
 
 		requestFollow(): void {
+			preserveBar = false;
 			cancelJump();
 			userDetached = false;
 			scrollToBottom();
 		},
 
-		requestJump(): void {
+		requestJump(target): void {
 			if (!container) return;
 			cancelJump();
+			preserveBar = true;
 			userDetached = true;
 			pinned = false;
+			if (target) showTurnTarget(target);
 			// The reveal expands its DOM and scrolls after tick(). Ignore both
 			// content and queued scroll events until that position has settled.
 			const identity = getNavigation().identity;

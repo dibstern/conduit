@@ -20,7 +20,8 @@
 	import { TurnRecapState } from "../../stores/turn-recap.svelte.js";
 	import SurfacingSummary from "./SurfacingSummary.svelte";
 	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
-	import { createTurnPanel, landTurnTarget, showTurnTarget, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
+	import { createTurnPanel, landTurnTarget, type TurnPanelState } from "../../stores/turn-panel.svelte.js";
+	import { showTurnTarget, turnHeadInset, type ScrollController } from "../../stores/scroll-controller.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -69,7 +70,7 @@
 	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onjump = (target) => { if (target) showTurnTarget(target); }, numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
 		get viewId() { return view.id; },
 		get sessionId() { return sessionId; }, get turn() { return turn; },
 		get jev() { return surfacingActive; }, get processing() { return turn.live; },
@@ -93,7 +94,7 @@
 		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
 		onsummarize?: (() => void) | undefined;
-		onjump?: (() => void) | undefined;
+		onjump?: ScrollController["requestJump"] | undefined;
 		numbered?: boolean;
 		latestTurn?: boolean;
 		newestSettledTurn?: boolean;
@@ -230,14 +231,14 @@
 		const top = root ? root.getBoundingClientRect().top + root.clientTop + Number.parseFloat(getComputedStyle(root).paddingTop) + (head && fullLog ? Number.parseFloat(getComputedStyle(head).top) : 0) : 0;
 		const stuck = fullLog && root && head && panelEl && panelEl.getBoundingClientRect().top < top && head.getBoundingClientRect().top <= top + 1 && head.getBoundingClientRect().bottom > top;
 		if (panel.view.kind === "collapsed") panel.open();
-		else panel.collapse();
+		else {
+			onjump?.();
+			panel.collapse();
+		}
 		void tick().then(() => {
 			const collapsedHead = panelEl?.querySelector<HTMLElement>(".turn-activity-head");
-			// Short logs can clamp to the bottom with the collapsed head already
-			// visible. Requesting a jump there would unnecessarily leave following.
 			if (stuck && collapsedHead && collapsedHead.getBoundingClientRect().top < top) {
-				onjump?.();
-				root.scrollTop += collapsedHead.getBoundingClientRect().top - top;
+				onjump?.(collapsedHead);
 			}
 			if (focused && !focused.isConnected) panelEl?.querySelector<HTMLElement>('[data-testid="surfacing-card"]')?.focus({ preventScroll: true });
 		});
@@ -253,12 +254,31 @@
 	});
 	$effect(() => {
 		if (!readCardEl) { readCardOnScreen = false; return; }
-		const observer = new IntersectionObserver((entries) => {
-			const entry = entries.at(-1);
-			readCardOnScreen = !!entry?.isIntersecting && entry.intersectionRect.width > 0 && entry.intersectionRect.height > 0;
-		});
-		observer.observe(readCardEl);
-		return () => observer.disconnect();
+		const card = readCardEl;
+		const root = scrollRoot;
+		let mounted = true;
+		void fullLog;
+		const measure = () => {
+			const box = card.getBoundingClientRect();
+			const viewport = root?.getBoundingClientRect();
+			const top = (viewport?.top ?? 0) + (root?.clientTop ?? 0) + turnHeadInset(card);
+			readCardOnScreen = card.getClientRects().length > 0 && box.width > 0 && box.height > 0
+				&& box.bottom > Math.max(0, top) && box.top < Math.min(window.innerHeight, viewport?.bottom ?? window.innerHeight)
+				&& box.right > Math.max(0, viewport?.left ?? 0) && box.left < Math.min(window.innerWidth, viewport?.right ?? window.innerWidth);
+		};
+		const observer = new IntersectionObserver(measure);
+		// Chrome measurements publish CSS in the same frame. Read after that tick.
+		const resize = new ResizeObserver(() => { void tick().then(() => { if (mounted) measure(); }); });
+		observer.observe(card);
+		resize.observe(card);
+		if (root) resize.observe(root);
+		const head = panelEl?.querySelector(".turn-activity-head");
+		if (head) resize.observe(head);
+		const chrome = root?.closest("#layout")?.querySelector("#session-chrome");
+		if (chrome) resize.observe(chrome);
+		root?.addEventListener("scroll", measure, { passive: true });
+		measure();
+		return () => { mounted = false; observer.disconnect(); resize.disconnect(); root?.removeEventListener("scroll", measure); };
 	});
 	// An unread card is read after 1s continuously visible, on screen and not scrubbed past.
 	$effect(() => {
@@ -293,8 +313,9 @@
 	}
 	// An open strip's pins are already on screen, so picking one keeps focus on the strip.
 	function selectPin(pin: SurfacePin) {
+		if (fullLog) onjump?.();
 		selection = { kind: "picked", uuid: pin.part.uuid };
-		if (fullLog) void tick().then(() => { if (readCardEl) showTurnTarget(readCardEl); });
+		if (fullLog) void tick().then(() => { if (readCardEl) onjump?.(readCardEl); });
 	}
 	function acknowledgeMessage(seq: number) {
 		if (panel.pending?.seq !== seq || panel.target?.kind !== "message") return;
@@ -415,7 +436,7 @@
 		void tick().then(() => {
 			const entry = panelEl?.querySelector<HTMLElement>(`[data-qa-entry="${CSS.escape(id)}"]`);
 			if (!qa || !entry) return;
-			entry.scrollIntoView({ block: "nearest" });
+			onjump?.(entry);
 			entry.focus({ preventScroll: true });
 		});
 	}
@@ -539,7 +560,7 @@
 					{#snippet trigger({ props })}
 						{@const headPhrase = phone && surfacingActive ? plural(stats.skills, "skill") : phrase}
 						<Button {...props} variant="ghost" size="content" tone="inherit" hoverFill="none" align="start" touchTarget
-							class="turn-activity-toggle gap-[6px] text-[13px] min-w-0" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Collapse turn"} aria-expanded={!minimised}
+							class="turn-activity-toggle rounded-[4px] focus-visible:ring-offset-2 focus-visible:ring-offset-turn-bg gap-[6px] text-[13px] min-w-0" data-testid="surfacing-minimise-toggle" ariaLabel={minimised ? "Expand turn" : "Collapse turn"} aria-expanded={!minimised}
 							onclick={toggleMinimised}>
 							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<ConduitMark size={16} variant="running" />
@@ -610,7 +631,7 @@
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div role={surfacingActive ? "group" : undefined} tabindex={surfacingActive ? 0 : undefined} aria-label={surfacingActive ? "Turn messages" : undefined} onkeydown={surfacingActive ? surfaceCommand : undefined} data-testid={surfacingActive ? "surfacing-card" : undefined} class="turn-head-card @container rounded-[14px] border border-border bg-turn-bg">
 				<SurfacingCard layout={turnLayout} view={surface} card={surfacingActive && !minimised && !usage && !qa ? surface.card : null} {counts} {live} pending={panel.pending} onland={acknowledgeMessage} scrubbing={stripInteraction.scrubbing} context={askContext} onexplain={(pin) => { void explainAsk(pin); }} regions={{ ...surfacingRegions, cardHead: markHead, cardFoot: markFoot, why: markWhy, belowStrip: markBelow }}
-					{readState} bind:cardEl={readCardEl} onread={readMessage}
+					{readState} bind:cardEl={readCardEl} onread={readMessage} onreveal={onjump}
 					markReadInAxis={!summaryEnabled} onmarkread={() => { void writeRead(surface.unreadPartIds, true); }}
 					onreply={replyTo} replied={cardSlot.kind === "selected" && cardSlot.card.number !== undefined && replies.has(cardSlot.card.number)}
 					onpick={pick} onlevel={selectLevel}
@@ -640,7 +661,7 @@
 				{@const part = entry.part}
 				{@const latestLiveStep = live && i === segment.activity.length - 1}
 				{@const category = surfacingActive && part.type === "assistant" ? surface.messages.find((message) => message.part.uuid === part.uuid) : undefined}
-				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, beforeScroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
+				<div class="focus:bg-selection focus:outline-none" data-log-part={part.uuid} use:landTurnTarget={{ pending: panel.pending, target: { kind: "step", id: part.uuid }, ack: panel.ack, scroll: onjump }} tabindex="-1" data-testid={part.type === "tool" && (part.status === "running" || part.status === "pending" || (latestLiveStep && part.result === undefined && part.status !== "error" && !part.isError)) ? "turn-running" : undefined}>
 					<ActivityRow {part} {liveTasks} {taskListedAt} runningTasks={running} live={latestLiveStep} duration={durations?.[i]} messageNumber={part.type === "assistant" ? messageNumber(i) : undefined} messageCategory={category} onmessage={category && canOpenSurfaceMessage(category.part, live) ? () => pick(category) : undefined} onhandback={() => openQa(part.uuid)} />
 				</div>
 				{/if}
