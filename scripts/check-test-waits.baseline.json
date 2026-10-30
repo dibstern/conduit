@@ -1598,7 +1598,7 @@
 	},
 	"test/unit/stores/transcript-navigation.test.ts": {
 		"polling": 1,
-		"real-wait": 8
+		"real-wait": 5
 	},
 	"test/visual/components.spec.ts": {
 		"real-wait": 4

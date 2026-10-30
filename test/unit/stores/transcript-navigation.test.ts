@@ -384,12 +384,20 @@ describe("full-session transcript navigation owner", () => {
 	});
 	it("coalesces scrub moves arriving in separate browser tasks", async () => {
 		await open();
-		view.navigate("u10");
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		view.navigate("u20");
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		view.navigate("u30");
-		await new Promise((resolve) => setTimeout(resolve, 100));
+		// Fake clock: under load, real tasks between moves can outlast the 16ms
+		// sampling window and split one scrub into three requests.
+		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+		try {
+			view.navigate("u10");
+			await vi.advanceTimersByTimeAsync(0);
+			view.navigate("u20");
+			await vi.advanceTimersByTimeAsync(0);
+			view.navigate("u30");
+			await vi.advanceTimersByTimeAsync(100);
+		} finally {
+			vi.useRealTimers();
+		}
+		await wait(() => requests("SubscribeSessionDetail").length >= 2);
 		expect(requests("SubscribeSessionDetail")).toHaveLength(2);
 		expect(requests("SubscribeSessionDetail")[1]?.payload).toMatchObject({
 			window: { anchorMessageId: "u30", direction: "from" },
