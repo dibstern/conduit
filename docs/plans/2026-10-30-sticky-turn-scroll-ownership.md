@@ -137,7 +137,11 @@ A scroll event belongs to the controller in exactly two cases:
 
 Every other event is the reader's.
 
-**R3 rule.** `extentFloor` is the smallest extent observed since the last consumed scroll event. A reader who
+**R3 rule.** `extentFloor` is the smallest extent observed since the later of the last consumed scroll event and
+the controller's last `write()`. A controller write resets it to the current extent: after a write the controller
+knows where the view is, so an older, smaller bottom is no longer one the reader can have reached. Without the reset
+the 506tp case (follow-write to 1900, then the reader scrolls up 400px to the old bottom 1500 in the same frame)
+would wrongly follow. A reader who
 reached any bottom that existed during that span reached the bottom. The controller follows, then writes to the
 new bottom.
 
@@ -363,7 +367,8 @@ Acceptance criteria and the first failing test for each ticket live on its bead.
 ## Risks
 
 - **`extentFloor` false follow.** A reader who scrolls up to exactly an old, smaller bottom after content grew could
-  re-follow. This needs growth and an upward reader scroll in the same frame, ending within 5px of the old extent.
+  re-follow. This needs growth with no controller write in between (so the reader was not following) and an upward
+  reader scroll in the same frame, ending within 5px of the old extent. The write reset rules out the 506tp case.
   Inferred to be rare. Not measured.
 - **Microtask assumption.** The transaction depends on `tick()` staying microtask-only. A Svelte change to `tick`
   would reopen R3. T2's tests assert that a reader scroll event in the next frame is honoured.
