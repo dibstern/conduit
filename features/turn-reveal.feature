@@ -26,20 +26,26 @@ Scenario: A message judged hidden opens directly too
   And the effective surfacing level is Answer
   And the messages region visually matches turn-reveal-hidden-verdict at 98 percent
 
-Scenario Outline: A never-judged message opens its Full log step
+Scenario: A never-judged message opens its Full log step on desktop
   Given message surfacing is active at Answer
   And the conduit app is served with the connected mockup
-  And the viewport is a <viewport>
+  And the surfacing session has a settled turn
+  When I open turn message #7 with digits and Enter
+  Then turn message #7 is focused in the Full log
+  And the selected message header is exposed below the turn head
+  And the session surfacing override is absent
+  And the messages region visually matches turn-reveal-unjudged-desktop at 98 percent
+
+# The card and target row cannot both fit above the floating Latest button.
+Scenario: A never-judged message opens its Full log step on phone
+  Given message surfacing is active at Answer
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
   And the surfacing session has a settled turn
   When I open turn message #7 with digits and Enter
   Then turn message #7 is focused in the Full log
   And the session surfacing override is absent
-  And the messages region visually matches turn-reveal-unjudged-<viewport> at 98 percent
-
-Examples:
-  | viewport |
-  | desktop  |
-  | phone    |
+  And the messages region visually matches turn-reveal-unjudged-phone at 98 percent
 
 Scenario: A citation opens its message without widening Answer
   Given message surfacing is active at Answer

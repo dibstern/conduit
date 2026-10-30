@@ -36,7 +36,7 @@
 		live: boolean;
 		regions?: SurfacingRegions;
 		strip: Snippet<[string | null, Snippet | undefined]>;
-		layout?: Snippet<[strip: Snippet, card: Snippet, details: Snippet]> | undefined;
+		layout?: Snippet<[strip: Snippet<[Snippet | undefined]>, card: Snippet, details: Snippet]> | undefined;
 		onpick: (pin: SurfacePin) => void;
 		onlevel: (level: SurfaceLevel) => void;
 		onfold: () => void;
@@ -66,8 +66,8 @@
 	{/if}
 {/snippet}
 
-{#snippet timeline()}
-	{@render strip(citedPart, layout ? undefined : messageCard)}
+{#snippet timeline(inlineCard: Snippet | undefined)}
+	{@render strip(citedPart, layout ? inlineCard : messageCard)}
 {/snippet}
 
 {#snippet details()}
@@ -87,7 +87,7 @@
 {#if layout}
 	{@render layout(timeline, messageCard, details)}
 {:else}
-	{@render timeline()}
+	{@render timeline(undefined)}
 	{@render details()}
 {/if}
 

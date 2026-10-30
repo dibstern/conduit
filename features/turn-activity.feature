@@ -107,6 +107,39 @@ Examples:
   | desktop  | active   |
   | phone    | active   |
 
+Scenario Outline: A stuck strip exposes the selected message header
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  And I pick surfaced message #1
+  Then the selected message header is exposed below the turn head
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A stuck strip exposes the header of a long selected message
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  And the sticky turn has a long selected message
+  When I scroll into the middle of the long turn log
+  And <selection>
+  Then the selected message header is exposed below the turn head
+
+Examples:
+  | viewport | selection                                  |
+  | desktop  | I pick surfaced message #1                 |
+  | phone    | I pick surfaced message #1                 |
+  | desktop  | I open message #1 from the Full log row     |
+  | phone    | I open message #1 from the Full log row     |
+
 Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
   Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
@@ -205,6 +238,7 @@ Scenario Outline: Jev-off turns keep a plain collapsed head and open Log and Usa
   When I expand the surfaced turn
   Then the Jev-off footer has Log 16 and Usage tabs with cost
   And the Jev-off Log shows <rows> plain rows
+  And the plain log starts immediately below the turn controls
   And the messages region visually matches turn-jev-off-open-<phase>-<viewport> at 98 percent
   When I select the turn Usage tab
   Then Usage replaces the card and log without selecting a Show stop
@@ -422,12 +456,16 @@ Scenario Outline: Interim streaming text keeps the live ticker and following car
   And the surfaced card shows #8 and announces its category and position
   When I open the live Full log from earlier steps
   Then the live log shows all 16 steps
+  When I remember the phone bar state
   When I collapse and reopen the panel choice turn
   Then the live log shows all 16 steps
+  And the phone bar state is unchanged
   When I hide the earlier live steps
   Then the Turn defaults to Full log with a three-step ticker
+  When I remember the phone bar state
   When I collapse the surfaced turn
   Then the collapsed live Turn keeps its Working head and strip only
+  And the phone bar state is unchanged
   And the Jump to live control is not visible
   And the messages region visually matches turn-live-collapsed-<viewport> at 98 percent
   When I expand the surfaced turn
@@ -592,6 +630,7 @@ Scenario Outline: Strip pins and steps have keyboard focus movement and activati
   And the surfacing session has a settled turn
   Then arrows move focus between strip pins and Enter picks the focused pin
   And arrows move focus between strip steps and Enter opens the focused step
+  And the selected message header is exposed below the turn head
   And the messages region visually matches turn-strip-keyboard-<viewport> at 98 percent
 
 Examples:
@@ -811,6 +850,7 @@ Scenario Outline: Full log uses All messages pins and cards without changing the
   When I pick surfaced message #3
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
+  And the selected message header is exposed below the turn head
   And the messages region visually matches turn-full-log-pins-<baseline>-<viewport> at 98 percent
   When I reload the surfacing session
   Then the effective surfacing level is <saved>
@@ -830,6 +870,7 @@ Scenario Outline: Full log treats an opened finding as visible at All messages
   And I open message #3 from the Full log row
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
+  And the selected message header is exposed below the turn head
   And the messages region visually matches turn-full-log-card-level-<baseline> at 98 percent
   When I reload the surfacing session
   Then the effective surfacing level is <saved>

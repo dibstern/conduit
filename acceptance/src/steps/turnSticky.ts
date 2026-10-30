@@ -16,6 +16,7 @@ import { chooseShowStop } from "./turnActivityShow.js";
 const panel = (page: Page) => page.locator("#messages .turn-activity").first();
 const head = (page: Page) => panel(page).locator(".turn-activity-head");
 const fixtures = new WeakMap<Page, (typeof HistoryMessageSchema.Type)[]>();
+const barStates = new WeakMap<Page, string | null>();
 
 async function openFullLog(page: Page) {
 	await expect(panel(page)).toBeVisible();
@@ -34,14 +35,73 @@ async function transcriptTop(page: Page) {
 	return page.locator("#messages").evaluate((root) => {
 		const chrome = document.querySelector("#session-chrome");
 		return Math.max(
-			root.getBoundingClientRect().top +
-				Number.parseFloat(getComputedStyle(root).paddingTop),
+			root.getBoundingClientRect().top + root.clientTop,
 			chrome?.getBoundingClientRect().bottom ?? 0,
 		);
 	});
 }
 
 export const turnStickyHandlers: StepHandler[] = [
+	{
+		name: "assert no empty space before the plain log",
+		match: /^the plain log starts immediately below the turn controls$/,
+		run: async ({ world }) => {
+			const controls = await head(world.page).boundingBox();
+			const log = await panel(world.page).locator(".step-log").boundingBox();
+			if (!controls || !log) throw new Error("Missing plain log geometry");
+			expect(log.y - controls.y - controls.height).toBeLessThanOrEqual(1);
+		},
+	},
+	{
+		name: "remember phone bar presentation",
+		match: /^I remember the phone bar state$/,
+		run: async ({ world }) => {
+			barStates.set(
+				world.page,
+				await world.page.locator("#session-bar").getAttribute("data-collapsed"),
+			);
+		},
+	},
+	{
+		name: "assert collapse preserves phone bar presentation",
+		match: /^the phone bar state is unchanged$/,
+		run: async ({ world }) => {
+			const previous = barStates.get(world.page);
+			if (previous == null) return;
+			await expect(world.page.locator("#session-bar")).toHaveAttribute(
+				"data-collapsed",
+				previous,
+			);
+		},
+	},
+	{
+		name: "assert selected message clearance below turn controls",
+		match: /^the selected message header is exposed below the turn head$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const card = panel(page).getByTestId("surfacing-msg-card");
+			await expect(card.locator(".card-head")).toBeInViewport({ ratio: 1 });
+			await expect
+				.poll(async () => {
+					const box = await card.boundingBox();
+					const controls = await head(page).boundingBox();
+					return box && controls
+						? box.y - controls.y - controls.height
+						: -Infinity;
+				})
+				.toBeGreaterThanOrEqual(6);
+			const caret = panel(page).locator(".turn-card-caret");
+			await expect
+				.poll(async () => {
+					const box = await caret.boundingBox();
+					const controls = await head(page).boundingBox();
+					return box && controls
+						? box.y - controls.y - controls.height
+						: -Infinity;
+				})
+				.toBeGreaterThanOrEqual(0);
+		},
+	},
 	{
 		name: "reveal a work row from the stuck strip preview",
 		match: /^I open the first work step from the stuck strip$/,
@@ -129,7 +189,9 @@ export const turnStickyHandlers: StepHandler[] = [
 				const messages = (fixtures.get(page) ?? []).map((message) => ({
 					...message,
 					parts: message.parts?.map((part) =>
-						part.id === "surfacing-part-56" ? { ...part, text } : part,
+						part.id === "surfacing-part-56" || part.id === "surfacing-part-1"
+							? { ...part, text }
+							: part,
 					),
 				}));
 				requireRpcControl(page).setDetailRows(
@@ -259,10 +321,13 @@ export const turnStickyHandlers: StepHandler[] = [
 			/^the turn head and strip stay at the transcript top with the collapse control visible$/,
 		run: async ({ world }) => {
 			const page = world.page;
-			const top = await transcriptTop(page);
 			await expect
-				.poll(async () => (await head(page).boundingBox())?.y)
-				.toBeCloseTo(top, 0);
+				.poll(
+					async () =>
+						((await head(page).boundingBox())?.y ?? Infinity) -
+						(await transcriptTop(page)),
+				)
+				.toBeCloseTo(0, 0);
 			const collapse = panel(page).getByRole("button", {
 				name: "Collapse turn",
 				exact: true,
@@ -273,7 +338,13 @@ export const turnStickyHandlers: StepHandler[] = [
 			).toBeInViewport({ ratio: 1 });
 			const button = await collapse.boundingBox();
 			if (!button) throw new Error("Missing collapse control");
-			expect(button.y).toBeGreaterThanOrEqual(top);
+			await expect
+				.poll(
+					async () =>
+						((await collapse.boundingBox())?.y ?? -Infinity) -
+						(await transcriptTop(page)),
+				)
+				.toBeGreaterThanOrEqual(0);
 			// A log row must not paint over the control or intercept its click.
 			expect(
 				await collapse.evaluate((node) => {
@@ -349,10 +420,13 @@ export const turnStickyHandlers: StepHandler[] = [
 			await expect(
 				panel(page).getByRole("button", { name: "Expand turn", exact: true }),
 			).toBeInViewport({ ratio: 1 });
-			const top = await transcriptTop(page);
 			await expect
-				.poll(async () => (await head(page).boundingBox())?.y)
-				.toBeCloseTo(top, 0);
+				.poll(
+					async () =>
+						((await head(page).boundingBox())?.y ?? Infinity) -
+						(await transcriptTop(page)),
+				)
+				.toBeCloseTo(0, 0);
 			const box = await panel(page).boundingBox();
 			const reply = await page
 				.locator("#messages .msg-assistant")
