@@ -433,8 +433,10 @@ it("refuses an edit whose file is saved, or whose session starts a turn, after t
 		"tracked.txt": "t1\n",
 		"staged.txt": "s1\n",
 		"busy.txt": "b1\n",
+		"gone.txt": "g1\n",
 	});
 	writeFileSync(join(repo, "tracked.txt"), "t2\n");
+	writeFileSync(join(repo, "gone.txt"), "g2\n");
 	writeFileSync(join(repo, "staged.txt"), "s2\n");
 	writeFileSync(join(repo, "busy.txt"), "b2\n");
 	writeFileSync(join(repo, "new.txt"), "new\n");
@@ -469,6 +471,10 @@ it("refuses an edit whose file is saved, or whose session starts a turn, after t
 					discard(edit("new.txt")),
 				),
 				stage: yield* raced(save("staged.txt"), stage(edit("staged.txt"))),
+				discardDeleted: yield* raced(
+					Effect.sync(() => rmSync(join(repo, "gone.txt"))),
+					discard(edit("gone.txt")),
+				),
 				turnStarts: yield* raced(
 					sql`UPDATE sessions SET status = 'busy' WHERE id = 's'`.pipe(
 						Effect.orDie,
@@ -483,11 +489,13 @@ it("refuses an edit whose file is saved, or whose session starts a turn, after t
 		discardTracked: "stale",
 		discardUntracked: "stale",
 		stage: "stale",
+		discardDeleted: "stale",
 		turnStarts: "busy",
 	});
 	for (const path of ["tracked.txt", "new.txt", "staged.txt"])
 		expect(read(join(repo, path))).toBe("saved\n");
 	expect(read(join(repo, "busy.txt"))).toBe("b2\n");
+	expect(existsSync(join(repo, "gone.txt"))).toBe(false);
 	expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
 	expect(git(repo, "status", "--porcelain", "--ignored")).not.toContain(
 		"conduit",
