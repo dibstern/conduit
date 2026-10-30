@@ -116,13 +116,13 @@ describe("Scroll behavior regression suite", () => {
 			ctrl.detach();
 		});
 
-		it("isDetached becomes false after requestFollow()", () => {
+		it('isDetached becomes false after place("latest")', () => {
 			const ctrl = makeCtrl();
 			const div = createScrollableDiv();
 			ctrl.attach(div);
 			simulateScrollUp(div);
 			expect(ctrl.isDetached).toBe(true);
-			ctrl.requestFollow();
+			ctrl.place("latest");
 			expect(ctrl.isDetached).toBe(false);
 			ctrl.detach();
 		});

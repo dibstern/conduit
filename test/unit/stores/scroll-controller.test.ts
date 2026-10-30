@@ -66,6 +66,140 @@ describe("ScrollController", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
 
+		it("notifies reader follows, but not growth, reset, fit or browser clamp", async () => {
+			const onReaderFollow = vi.fn();
+			const ctrl = createScrollController(() => "ready", undefined, {
+				onReaderFollow,
+			});
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			simulateScrollUp(div);
+			div.scrollTop = 1500;
+			div.dispatchEvent(new Event("scroll"));
+			div.dispatchEvent(new Event("scroll"));
+			expect(onReaderFollow).toHaveBeenCalledTimes(1);
+
+			simulateScrollUp(div);
+			ctrl.place("latest");
+			div.dispatchEvent(new Event("scroll"));
+			expect(onReaderFollow).toHaveBeenCalledTimes(2);
+			Object.defineProperty(div, "scrollHeight", { value: 2500 });
+			ctrl.onNewContent();
+			ctrl.resetForSession();
+
+			simulateScrollUp(div);
+			Object.defineProperty(div, "scrollHeight", { value: 500 });
+			div.scrollTop = 0;
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			expect(ctrl.state).toBe("following");
+
+			Object.defineProperty(div, "scrollHeight", { value: 2000 });
+			div.scrollTop = 1400;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("detached");
+			Object.defineProperty(div, "scrollHeight", { value: 1000 });
+			div.scrollTop = 500;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("following");
+			expect(onReaderFollow).toHaveBeenCalledTimes(2);
+			ctrl.detach();
+		});
+
+		it("settles a message placement clamped to the bottom without reader intent", () => {
+			const onReaderFollow = vi.fn();
+			const ctrl = createScrollController(() => "ready", undefined, {
+				onReaderFollow,
+			});
+			const div = createScrollableDiv();
+			let top = 200;
+			Object.defineProperty(div, "scrollTop", {
+				get: () => top,
+				set: (value: number) => {
+					top = Math.max(0, Math.min(value, 1500));
+				},
+			});
+			const row = document.createElement("div");
+			row.className = "msg-user";
+			row.dataset["messageId"] = "last";
+			row.getClientRects = () =>
+				[new DOMRect(0, 1900, 200, 50)] as unknown as DOMRectList;
+			row.getBoundingClientRect = () => new DOMRect(0, 1900, 200, 50);
+			div.append(row);
+			ctrl.attach(div);
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("detached");
+			expect(ctrl.place({ messageId: "last" })).toBe(true);
+			expect(div.scrollTop).toBe(1500);
+			expect(ctrl.state).toBe("following");
+			div.dispatchEvent(new Event("scroll"));
+			expect(onReaderFollow).not.toHaveBeenCalled();
+			ctrl.detach();
+		});
+
+		it("keeps the reading row and intent when earlier messages are prepended", () => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			simulateScrollUp(div);
+			Object.defineProperty(div, "scrollHeight", { value: 2400 });
+			ctrl.onPrepend(2000, 200);
+			vi.advanceTimersToNextFrame();
+			expect(div.scrollTop).toBe(600);
+			expect(ctrl.state).toBe("detached");
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("detached");
+			ctrl.detach();
+		});
+
+		it("also follows a reader reaching the current bottom after growth", async () => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			simulateScrollUp(div);
+			Object.defineProperty(div, "scrollHeight", { value: 2200 });
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			div.scrollTop = 1700;
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe("following");
+			ctrl.detach();
+		});
+
+		it.each([
+			1600, 1700,
+		])("follows a reader reaching the old bottom before growth to %i is consumed", async (extent) => {
+			const ctrl = makeController();
+			lifecycle = "ready";
+			const div = createScrollableDiv();
+			let top = 1500;
+			Object.defineProperty(div, "scrollTop", {
+				get: () => top,
+				set: (value: number) => {
+					top = Math.max(
+						0,
+						Math.min(value, div.scrollHeight - div.clientHeight),
+					);
+				},
+			});
+			ctrl.attach(div);
+			vi.advanceTimersToNextFrame();
+			simulateScrollUp(div);
+			expect(ctrl.state).toBe("detached");
+
+			div.scrollTop = 1500;
+			Object.defineProperty(div, "scrollHeight", { value: extent + 500 });
+			div.append(document.createElement("span"));
+			await Promise.resolve();
+			div.dispatchEvent(new Event("scroll"));
+
+			expect(ctrl.state).toBe("following");
+			expect(div.scrollTop).toBe(extent);
+			ctrl.detach();
+		});
+
 		it.each([
 			"latest",
 			"historical",
@@ -336,7 +470,7 @@ describe("ScrollController", () => {
 		});
 
 		it.each([
-			"requestFollow",
+			"latest",
 			"resetForSession",
 			"detach",
 		] as const)("%s cancels a pending jump settlement", (method) => {
@@ -345,7 +479,8 @@ describe("ScrollController", () => {
 			const div = createScrollableDiv();
 			ctrl.attach(div);
 			ctrl.requestJump();
-			ctrl[method]();
+			if (method === "latest") ctrl.place("latest");
+			else ctrl[method]();
 			if (method === "detach") {
 				ctrl.attach(createScrollableDiv());
 				ctrl.resetForSession();
@@ -379,7 +514,7 @@ describe("ScrollController", () => {
 	});
 
 	it.each([
-		"requestFollow",
+		"latest",
 		"onNewContent",
 	] as const)("a programmatic scroll from %s pins without reading as a user scroll", (method) => {
 		const ctrl = makeController();
@@ -388,9 +523,10 @@ describe("ScrollController", () => {
 		ctrl.attach(div);
 		simulateScrollUp(div);
 		expect(ctrl.isPinned).toBe(false);
-		ctrl.requestFollow();
+		ctrl.place("latest");
 		div.scrollTop = 200;
-		ctrl[method]();
+		if (method === "latest") ctrl.place("latest");
+		else ctrl[method]();
 		expect(div.scrollTop).toBe(div.scrollHeight);
 		// The resulting scroll event must retain pinning.
 		div.dispatchEvent(new Event("scroll"));
