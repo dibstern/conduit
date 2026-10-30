@@ -5,6 +5,7 @@ import { segmentAppearance } from "../../../src/lib/frontend/components/chat/act
 import type {
 	AssistantMessage,
 	ChatMessage,
+	HistoryMessage,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
@@ -711,6 +712,95 @@ describe("stepWeights", () => {
 });
 
 describe("workingTime", () => {
+	it("counts captured activity after the prompt's persisted end, including a live wake", () => {
+		// Minimized from ses_003b6997cc02487ba6857a647d16a308: the slash
+		// command settled in 25ms, before these three assistant messages.
+		// Keep the real message/first-part stamps; omit content and inner steps.
+		const messages: HistoryMessage[] = [
+			{
+				id: "19eae387-ec97-4a33-9294-a2e4cebd5607",
+				role: "user",
+				time: { created: 1_793_265_581_997 },
+				parts: [{ id: "prompt", type: "text", text: "[redacted]" }],
+				turnTiming: {
+					startedAt: 1_793_265_581_997,
+					endedAt: 1_793_265_582_022,
+					waits: [],
+				},
+			},
+			...[
+				{
+					id: "msg_011CgWHDGcGNEC7hkXeevzep",
+					created: 1_793_265_582_784,
+					completed: 1_793_265_647_312,
+					first: 1_793_265_582_792,
+					firstEnd: 1_793_265_583_189,
+					input: 14,
+				},
+				{
+					id: "msg_011CgWHLiTxcyQLGGEYf7vJB",
+					created: 1_793_265_683_711,
+					completed: 1_793_265_687_608,
+					first: 1_793_265_683_718,
+					firstEnd: 1_793_265_683_858,
+					input: 2,
+				},
+				{
+					id: "msg_011CgWJ3Yzqjv2JCoqJWXaSQ",
+					created: 1_793_266_237_681,
+					completed: 1_793_266_495_853,
+					first: 1_793_266_237_688,
+					firstEnd: 1_793_266_238_270,
+					input: 6,
+				},
+			].map(
+				({
+					id,
+					created,
+					completed,
+					first,
+					firstEnd,
+					input,
+				}): HistoryMessage => ({
+					id,
+					role: "assistant",
+					time: { created, completed },
+					tokens: { input },
+					parts: [
+						{
+							id: `${id}-first`,
+							type: "thinking",
+							text: "[redacted]",
+							time: { start: first, end: firstEnd },
+						},
+					],
+				}),
+			),
+		];
+		const chat = historyToChatMessages(messages);
+		const [turn] = segmentTurns(chat, false);
+		assert.exists(turn);
+		expect(turn.segments).toHaveLength(3);
+		// 65,315ms + 3,890ms + 258,165ms, excluding both idle gaps.
+		expect(workingTime(turn, 1_793_266_500_000)).toBe(327_370);
+		expect(economics(turn, 1_793_266_500_000).duration).toBe(327_370);
+		expect(workingTime(turn, 1_793_266_500_000, 1_793_266_000_000)).toBe(
+			69_205,
+		);
+
+		const [live] = segmentTurns(chat.slice(0, -1), true);
+		assert.exists(live);
+		expect(live.live).toBe(true);
+		expect(workingTime(live, 1_793_266_496_853)).toBe(328_370);
+		expect(workingTime(live, 1_793_266_497_853)).toBe(329_370);
+
+		// Without a live signal or final result, unfinished work cannot move
+		// the settled boundary merely because its parts have later stamps.
+		const [stopped] = segmentTurns(chat.slice(0, -1), false);
+		assert.exists(stopped);
+		expect(workingTime(stopped, 1_793_266_500_000)).toBe(69_205);
+	});
+
 	it("excludes every idle gap, starting after the result rather than the reply", () => {
 		const [turn] = segmentTurns(
 			[
@@ -947,7 +1037,7 @@ describe("workingTime", () => {
 		expect(workingTime(turn, 50_000)).toBe(10_000);
 	});
 
-	it("clips gaps to the persisted turn bounds", () => {
+	it("clips gaps at the persisted start and the latest completed segment", () => {
 		const prompt = user(undefined, 0);
 		prompt.turnTiming = { startedAt: 4_000, endedAt: 9_000, waits: [] };
 		const [turn] = segmentTurns(
@@ -960,7 +1050,7 @@ describe("workingTime", () => {
 			false,
 		);
 		assert.exists(turn);
-		expect(workingTime(turn, 50_000)).toBe(1_000);
+		expect(workingTime(turn, 50_000)).toBe(2_000);
 	});
 
 	it("keeps an empty turn's duration unknown", () => {

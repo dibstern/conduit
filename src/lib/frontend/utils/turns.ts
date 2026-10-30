@@ -674,12 +674,15 @@ export function workingTime(
 		startedAt,
 		turn.preface.at(-1)?.createdAt ?? startedAt,
 	);
-	let end = timing?.endedAt ?? (turn.live ? now : undefined);
-	if (end === undefined) {
-		for (const segment of turn.segments) {
-			const stamp = latestStamp(segment);
-			if (stamp !== undefined) end = Math.max(end ?? stamp, stamp);
-		}
+	let end = turn.live ? now : timing?.endedAt;
+	for (const segment of turn.segments) {
+		// A wake can outlive the prompt's persisted end. Only a confirmed
+		// segment end can extend it once stopped; late tool updates cannot.
+		const stamp =
+			timing?.endedAt === undefined
+				? latestStamp(segment)
+				: segment.end?.createdAt;
+		if (stamp !== undefined) end = Math.max(end ?? stamp, stamp);
 	}
 	if (end === undefined) return undefined;
 	if (until !== undefined) end = Math.min(end, until);
