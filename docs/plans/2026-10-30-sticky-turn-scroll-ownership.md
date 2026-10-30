@@ -259,6 +259,11 @@ ticket's first failing test is still a behaviour test.
 `turnHeadInset` becomes a pure read. One ResizeObserver on `.turn-activity-sticky` in TurnActivity writes
 `--turn-reveal-margin` on the turn. `turnTargetTop` and the read-dwell both read the inset. Neither writes it.
 
+`scroll-margin` is not inherited and the browser reads it from the element it scrolls into view. Tab focuses the
+button inside a `[data-log-part]` row, not the row. So the existing `scroll-margin` rule in TurnActivity also covers the
+row's focusable descendants: `[data-log-part] :is(a, button, input, select, textarea, [tabindex])`. One CSS rule, one
+variable, no per-element writes.
+
 ## Code this deletes
 
 - **`scroll-controller.svelte.ts`:**
