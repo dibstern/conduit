@@ -90,6 +90,15 @@ describe("listToolCall", () => {
 		expect(deleted.patch?.patch).toBe(
 			"diff --git a/gone.ts b/gone.ts\n--- a/gone.ts\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-x\n-y\n",
 		);
+		// A zero-context patch's numbered empty side is already in git's form.
+		const inserted = one({
+			kind: "update",
+			path: "/r/a.ts",
+			patch: "@@ -5,0 +6,1 @@\n+x\n@@ -9,1 +9,0 @@\n-y\n",
+		});
+		expect(inserted.patch?.patch).toContain(
+			"\n@@ -5,0 +6,1 @@\n+x\n@@ -9,1 +9,0 @@\n-y\n",
+		);
 	});
 
 	it("tiers by total changed lines and by size, never binary", () => {

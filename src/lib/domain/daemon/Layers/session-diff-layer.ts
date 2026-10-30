@@ -136,7 +136,9 @@ type MemoFolder = (
 const revisionOf = (folder: Listed) => {
 	if ("snapshot" in folder)
 		return [folder.folder, folder.snapshot, folder.from, folder.base];
-	if ("files" in folder) return [folder.folder, folder.files];
+	// A tool call's notes can change with its capture while its files do not.
+	if ("files" in folder)
+		return [folder.folder, folder.files, [...folder.patches]];
 	return [folder.folder, folder.error, folder.message];
 };
 

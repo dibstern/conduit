@@ -41,16 +41,21 @@ const splitHunks = (lines: readonly string[]) => {
 	return hunks;
 };
 
-/** Where a hunk starts; a header without numbers (apply_patch) continues from the last. */
-const hunkStart = (header: string, next: Start) => {
+/**
+ * Where a hunk's first line sits. A numbered empty side names the line before
+ * it, as git does; a header without numbers (apply_patch) continues from the last.
+ */
+const hunkStart = (header: string, next: Start, counts: Start) => {
 	const numbered = HUNK.exec(header.trimEnd());
 	if (!numbered) {
 		const context = header.slice(2).trim();
 		return { ...next, context: context ? ` ${context}` : "" };
 	}
+	const first = (at: string | undefined, lines: number) =>
+		Number(at) + (lines === 0 ? 1 : 0);
 	return {
-		old: Math.max(Number(numbered[1]), 1),
-		new: Math.max(Number(numbered[2]), 1),
+		old: first(numbered[1], counts.old),
+		new: first(numbered[2], counts.new),
 		context: numbered[3] ?? "",
 	};
 };
@@ -63,9 +68,9 @@ const hunks = (patch: string): Body | undefined => {
 	const from = (at: number, lines: number) => (lines === 0 ? at - 1 : at);
 	let next: Start = { old: 1, new: 1 };
 	const lines = split.flatMap(({ header, block }) => {
-		const at = hunkStart(header, next);
 		const olds = count(block, /^[ -]/);
 		const news = count(block, /^[ +]/);
+		const at = hunkStart(header, next, { old: olds, new: news });
 		next = { old: at.old + olds, new: at.new + news };
 		return [
 			`@@ -${from(at.old, olds)},${olds} +${from(at.new, news)},${news} @@${at.context}`,

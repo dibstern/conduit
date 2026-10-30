@@ -49,6 +49,7 @@
 		live = false,
 		runningTasks = new Set<string>(),
 		sessionId,
+		turnLive = false,
 		onturndiff,
 	}: {
 		part: ActivityPart;
@@ -64,6 +65,8 @@
 		runningTasks?: ReadonlySet<string>;
 		/** Lets a file-writing step open its own diff. */
 		sessionId?: string | undefined;
+		/** The step's turn is still running, so its run capture has not settled. */
+		turnLive?: boolean;
 		/** Opens the turn's diff; a shell step has no diff of its own. */
 		onturndiff?: (() => void) | undefined;
 	} = $props();
@@ -244,7 +247,8 @@
 			{:else if part.fileChanges?.length}
 				<div class="ml-[22px] mr-[4px] mb-[4px]">
 					<TextButton data-testid="tool-diff-toggle" aria-expanded={diffOpen} class="text-[11.5px]" onclick={() => (diffOpen = !diffOpen)}>Diff</TextButton>
-					{#if diffOpen}<ToolDiff {sessionId} toolId={part.id} />{/if}
+					<!-- A new view once the run settles, so its capture can check a Write. -->
+					{#if diffOpen}{#key turnLive}<ToolDiff {sessionId} toolId={part.id} />{/key}{/if}
 				</div>
 			{/if}
 		{/if}

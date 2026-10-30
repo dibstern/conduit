@@ -1141,8 +1141,9 @@ it("falls back to HEAD with a shallow notice when a shallow clone has no common 
 
 // A tool call lists from its recorded changes without git: the source is
 // dropped, or left out of the revision so a provider and an input-derived
-// listing collide in the memo; the listed patch is not served; an uncaptured
-// turn lists folders instead of saying it was not captured.
+// listing collide in the memo; a note the capture settles (a Write add that
+// was unchecked) leaves the revision unchanged; the listed patch is not
+// served; an uncaptured turn lists folders instead of saying it was not captured.
 it("lists a tool call's changes with their source and serves them, and marks an uncaptured turn", async () => {
 	const folders = [present("/r")];
 	const changes = [
@@ -1171,11 +1172,40 @@ it("lists a tool call's changes with their source and serves them, and marks an 
 				before: file?.before ?? null,
 				after: file?.after ?? null,
 			});
+			const write = {
+				source: "provider",
+				changes: [{ kind: "add", path: "/r/new.ts", after: "x\n" }],
+			} as const;
+			const unchecked = yield* diff.list(
+				{ id: "s", folders, toolCall: write },
+				toolCall,
+			);
+			const side = { mode: "100644", blob: "b" };
+			const checked = yield* diff.list(
+				{
+					id: "s",
+					folders,
+					toolCall: write,
+					capture: {
+						runId: "run",
+						folders: [
+							{
+								directory: "/r",
+								before: "t0",
+								after: "t1",
+								shared: false,
+								changes: [{ path: "new.ts", before: null, after: side }],
+							},
+						],
+					},
+				},
+				toolCall,
+			);
 			const turn = yield* diff.list(
 				{ id: "s", folders },
 				{ kind: "turn", turnId: "u" },
 			);
-			return { provider, input, served, turn };
+			return { provider, input, served, unchecked, checked, turn };
 		}),
 	);
 
@@ -1183,6 +1213,8 @@ it("lists a tool call's changes with their source and serves them, and marks an 
 	expect(listed.input.source).toBe("toolInput");
 	expect(listed.input.revision).not.toBe(listed.provider.revision);
 	expect(listed.served.patch).toContain("\n@@ -1,1 +1,1 @@\n-a\n+b\n");
+	expect(listed.checked.folders).toStrictEqual(listed.unchecked.folders);
+	expect(listed.checked.revision).not.toBe(listed.unchecked.revision);
 	expect(listed.turn).toStrictEqual({
 		revision: expect.any(String),
 		folders: [],
