@@ -100,7 +100,7 @@ export const subscribeSessionDiff = (request: {
 /** An edit of the unstaged scope, against the session's folders as the server resolves them. */
 const edit = (
 	action: "discard" | "stage",
-	{ sessionId, ...request }: SessionDiffEdit,
+	{ sessionId, _tag, ...request }: SessionDiffEdit & { readonly _tag: string },
 ) =>
 	Effect.gen(function* () {
 		const edits = yield* available(WorkingTreeEdits);

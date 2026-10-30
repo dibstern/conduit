@@ -333,16 +333,67 @@ it("refuses a hunk that no longer applies to the index as Conflict, leaving the 
 			writeFileSync(join(repo, "long.txt"), edited);
 			return [
 				readFileSync(join(repo, ".git", "index")),
-				yield* stage(hunkEdit(repo, revision, file, 0)),
+				yield* Effect.flatMap(WorkingTreeEdits, (edits) =>
+					edits.stage(hunkEdit(repo, revision, file, 0)),
+				).pipe(Effect.flip),
 			] as const;
 		}),
 	);
 
 	const [index, refused] = outcomes;
-	expect(refused).toBe("conflict");
+	// Git's stderr is no sentence for a toast.
+	expect(refused).toMatchObject({
+		reason: "conflict",
+		message: "The hunk no longer applies, so nothing was written",
+	});
 	expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
 	expect(existsSync(join(repo, ".git", "index.lock"))).toBe(false);
 	expect(read(join(repo, "long.txt"))).toBe(edited);
+	expect(invalidated).toEqual([]);
+});
+
+it("refuses a path that leaves the folder or that git would not list as Stale, and a hunk the patch lacks as Conflict, writing nothing", async () => {
+	const repo = repository({ "x.txt": "x\n", "sub/a.txt": "a\n" });
+	writeFileSync(join(repo, "x.txt"), "X\n");
+	writeFileSync(join(repo, "sub", "a.txt"), "A\n");
+	// The folder is inside its repository, so `..` still names a file git could write.
+	const folder = join(repo, "sub");
+	const edit = (path: string, blob: string): WorkingTreeEdit => ({
+		session: sessionOf(folder),
+		folder,
+		path,
+		expected: git(repo, "hash-object", blob),
+	});
+
+	const outcomes = await run(
+		Effect.gen(function* () {
+			const { revision, files } = yield* list(folder);
+			const file = files["a.txt"];
+			if (!file) throw new Error("a.txt is not listed");
+			return {
+				escaped: yield* discard(edit("../x.txt", "x.txt")),
+				dotted: yield* discard(edit("./a.txt", "sub/a.txt")),
+				missingHunk: yield* Effect.flatMap(WorkingTreeEdits, (edits) =>
+					edits.stage(hunkEdit(folder, revision, file, 1)),
+				).pipe(
+					Effect.flip,
+					Effect.map(({ reason, message }) => ({ reason, message })),
+				),
+			};
+		}),
+	);
+
+	expect(outcomes).toEqual({
+		escaped: "stale",
+		dotted: "stale",
+		missingHunk: {
+			reason: "conflict",
+			message: "a.txt has no such hunk to apply alone",
+		},
+	});
+	expect(read(join(repo, "x.txt"))).toBe("X\n");
+	expect(read(join(repo, "sub", "a.txt"))).toBe("A\n");
+	expect(git(repo, "diff", "--cached", "--name-only")).toBe("");
 	expect(invalidated).toEqual([]);
 });
 

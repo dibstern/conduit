@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { open, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
 import { Effect, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import {
@@ -23,9 +23,9 @@ const GIT_TIMEOUT_MS = 10_000;
 const refuse = (reason: SessionDiffEditError["reason"], message: string) =>
 	new SessionDiffEditError({ reason, message });
 
-/** A folder-relative path as git lists one, so it cannot name anything outside the folder. */
+/** A folder-relative path as git lists one, so it cannot name anything outside the folder.
+ *  An absolute path starts with an empty segment. */
 const listable = (path: string) =>
-	!isAbsolute(path) &&
 	!path.includes("\n") &&
 	path
 		.split("/")
@@ -220,6 +220,15 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 						file,
 					],
 					env,
+				).pipe(
+					Effect.mapError((error) =>
+						error.reason === "conflict"
+							? refuse(
+									"conflict",
+									"The hunk no longer applies, so nothing was written",
+								)
+							: error,
+					),
 				),
 			(file) => Effect.promise(() => rm(file, { force: true })),
 		);
