@@ -119,6 +119,19 @@
 	let citedStep = $state<string | null>(null);
 	let panelEl = $state<HTMLDivElement | undefined>();
 	let headTooltip = $state(false);
+	$effect(() => {
+		const element = panelEl;
+		if (!element || !fullLog) return;
+		const head = element.querySelector<HTMLElement>(".turn-activity-sticky");
+		const root = element.closest<HTMLElement>('[aria-label="Transcript"]');
+		if (!head || !root) return;
+		const observer = new ResizeObserver(() => {
+			const padding = Number.parseFloat(getComputedStyle(root).scrollPaddingTop) || 0;
+			element.style.setProperty("--turn-reveal-margin", `${turnHeadInset(head) - padding + 12}px 0 3.5rem`);
+		});
+		observer.observe(head, { box: "border-box" });
+		return () => observer.disconnect();
+	});
 
 	const settledNow = Date.now();
 	const now = $derived(final && turn.live ? clock.now : settledNow);
@@ -682,7 +695,7 @@
 	/* Sticky insets start inside scrollport padding; clear only visible chrome. */
 	.turn-activity-sticky { position:sticky; top:var(--turn-sticky-top, -1.25rem); z-index:var(--z-raised); background:var(--color-turn-bg); border-radius:13px 13px 0 0; }
 	.turn-inline-card { --card-background:var(--color-bg); }
-	.turn-head-card :global([data-log-part]), .turn-head-card :global([data-testid="surfacing-msg-card"]) { scroll-margin:var(--turn-reveal-margin, 0px); }
+	.turn-head-card :global([data-log-part]), .turn-head-card :global([data-log-part] :is(a, button, input, select, textarea, [tabindex])), .turn-head-card :global([data-testid="surfacing-msg-card"]) { scroll-margin:var(--turn-reveal-margin, 0px); }
 	.turn-inline-card.ask { --card-border:color-mix(in srgb,var(--color-status-ask) 65%,var(--color-bg)); }
 	.turn-card-caret { position:absolute; top:-6px; width:12px; height:12px; background:var(--card-background); border-top:1px solid var(--card-border,var(--color-border)); border-left:1px solid var(--card-border,var(--color-border)); transform:translateX(-50%) rotate(45deg); }
 	.surface-head-chips { display:contents; }

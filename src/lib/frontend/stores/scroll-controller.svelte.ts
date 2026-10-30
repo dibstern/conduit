@@ -75,10 +75,6 @@ export function turnHeadInset(node: HTMLElement): number {
 		: Number.isFinite(chrome)
 			? Math.min(padding, chrome)
 			: padding;
-	turn?.style.setProperty(
-		"--turn-reveal-margin",
-		`${inset - padding + 12}px 0 3.5rem`,
-	);
 	return inset;
 }
 

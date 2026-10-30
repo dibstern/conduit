@@ -339,6 +339,81 @@ test("revealing a trailing reply inside the follow hysteresis band holds positio
 	});
 });
 
+test("Tab exposes a log row beneath the sticky head before any reveal or dwell", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	const initMessages = createInitMessages(4);
+	const snapshot = initMessages.find(
+		(message) => message.type === "mock_transcript_snapshot",
+	);
+	if (!snapshot || !Array.isArray(snapshot["events"]))
+		throw new Error("Missing transcript fixture");
+	snapshot["events"].push({
+		type: "user_message",
+		text: "Check every log row",
+	});
+	for (let index = 0; index < 30; index++) {
+		const id = `focus-check-${index}`;
+		snapshot["events"].push(
+			{ type: "tool_start", id, name: "Bash" },
+			{
+				type: "tool_executing",
+				id,
+				name: "Bash",
+				input: { command: `check ${index}` },
+			},
+			{ type: "tool_result", id, content: "ok", is_error: false },
+		);
+	}
+	snapshot["events"].push({ type: "done", code: 0 });
+	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+	await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+	await waitForInitialMessages(page);
+	const turn = page.locator("#messages .turn-activity").last();
+	await turn.getByRole("button", { name: "Expand turn", exact: true }).click();
+	const rows = turn.locator("[data-log-part]");
+	await expect(rows).toHaveCount(30);
+	const row = rows.nth(4);
+	await row.evaluate((node) => {
+		const root = document.getElementById("messages");
+		if (!root) throw new Error("Missing transcript");
+		root.scrollTop +=
+			node.getBoundingClientRect().top - root.getBoundingClientRect().top - 10;
+	});
+	await waitForStableScroll(page);
+	const head = turn.locator(".turn-activity-sticky");
+	const headBottom = await head.evaluate(
+		(node) => node.getBoundingClientRect().bottom,
+	);
+	expect(
+		await row.evaluate((node) => node.getBoundingClientRect().top),
+	).toBeLessThan(headBottom);
+	await rows
+		.nth(3)
+		.getByRole("button")
+		.last()
+		.evaluate((node) => node.focus({ preventScroll: true }));
+	await page.keyboard.press("Tab");
+	await expect(row.getByRole("button").first()).toBeFocused();
+	await waitForStableScroll(page);
+	const rowTop = await row.evaluate((node) => node.getBoundingClientRect().top);
+	const afterHeadBottom = await head.evaluate(
+		(node) => node.getBoundingClientRect().bottom,
+	);
+	await testInfo.attach("sticky-tab-focus.json", {
+		body: JSON.stringify({ rowTop, headBottom: afterHeadBottom }),
+		contentType: "application/json",
+	});
+	await testInfo.attach("sticky-tab-focus.png", {
+		body: await page.screenshot({
+			path: testInfo.outputPath("sticky-tab-focus.png"),
+		}),
+		contentType: "image/png",
+	});
+	expect(rowTop).toBeGreaterThanOrEqual(afterHeadBottom);
+});
+
 test.describe("Scroll Stability — Mobile", () => {
 	test.describe.configure({ timeout: 45_000 });
 	test.use({ viewport: { width: 393, height: 852 } });
