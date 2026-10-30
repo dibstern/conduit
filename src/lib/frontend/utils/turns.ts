@@ -674,14 +674,22 @@ export function workingTime(
 		startedAt,
 		turn.preface.at(-1)?.createdAt ?? startedAt,
 	);
-	let end = turn.live ? now : timing?.endedAt;
+	const endedAt = timing?.endedAt;
+	let end = turn.live ? now : endedAt;
 	for (const segment of turn.segments) {
-		// A wake can outlive the prompt's persisted end. Only a confirmed
-		// segment end can extend it once stopped; late tool updates cannot.
+		// Work must start after the persisted end to establish a wake.
+		// Late completion accounting for pre-existing work cannot extend it.
+		if (
+			endedAt !== undefined &&
+			![...segment.activity, ...segment.reply, segment.handBack].some(
+				(part) => part?.createdAt !== undefined && part.createdAt > endedAt,
+			)
+		)
+			continue;
+		// Settled wakes still need a confirmed end; late tool updates cannot
+		// extend the boundary of unfinished work.
 		const stamp =
-			timing?.endedAt === undefined
-				? latestStamp(segment)
-				: segment.end?.createdAt;
+			endedAt === undefined ? latestStamp(segment) : segment.end?.createdAt;
 		if (stamp !== undefined) end = Math.max(end ?? stamp, stamp);
 	}
 	if (end === undefined) return undefined;
