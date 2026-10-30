@@ -44,6 +44,7 @@ import {
 	type SavedTranscript,
 	saveTranscript,
 } from "./saved-transcripts.js";
+import type { ScrollController } from "./scroll-controller.svelte.js";
 import { selection } from "./selection.svelte.js";
 import { sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
@@ -777,6 +778,7 @@ export function placeSavedDraw(
  *  viewed before. Each view (the open session, the task drawer) owns one. */
 export interface TranscriptView {
 	readonly id: symbol;
+	reposition?: ScrollController["reposition"] | undefined;
 	readonly generation: number;
 	readonly sessionId: string | null;
 	readonly chat: Readonly<SessionMessages>;

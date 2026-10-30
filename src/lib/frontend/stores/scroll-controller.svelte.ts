@@ -24,6 +24,7 @@ export interface ScrollController {
 	}): Promise<void>;
 	onNewContent(): void;
 	onContainerResize(): void;
+	onClearanceChange(delta: number): void;
 	onPrepend(prevScrollHeight: number, prevScrollTop: number): void;
 }
 
@@ -115,6 +116,13 @@ export function turnTargetTop(node: HTMLElement): number | null {
 			? start - top
 			: box.bottom - revealBottom)
 	);
+}
+
+export function anchorTop(row: Element, before: number): number | null {
+	const root = row.closest<HTMLElement>('[aria-label="Transcript"]');
+	return root && row.isConnected
+		? root.scrollTop + row.getBoundingClientRect().top - before
+		: null;
 }
 
 export async function repositionWithoutController(
@@ -449,6 +457,13 @@ export function createScrollController(
 		// This is the single most likely thing a future reader deletes as redundant.
 		onContainerResize(): void {
 			if (getState() === "following") scrollToBottom();
+		},
+
+		onClearanceChange(delta): void {
+			if (!container) return;
+			if (gap < REFOLLOW_THRESHOLD) {
+				if (getState() === "following") scrollToBottom();
+			} else write(container.scrollTop + delta);
 		},
 
 		onPrepend(prevScrollHeight: number, prevScrollTop: number): void {

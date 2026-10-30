@@ -181,8 +181,13 @@
 	// Attach/detach the controller to the scroll container
 	$effect(() => {
 		if (messagesEl) {
+			const renderedView = view;
 			scrollCtrl.attach(messagesEl);
-			return () => scrollCtrl.detach();
+			renderedView.reposition = scrollCtrl.reposition;
+			return () => {
+				renderedView.reposition = undefined;
+				scrollCtrl.detach();
+			};
 		}
 		return undefined;
 	});
@@ -253,8 +258,7 @@
 		const delta = appliedClearance === undefined ? 0 : topClearance - appliedClearance;
 		appliedClearance = topClearance;
 		if (delta === 0) return;
-		if (untrack(() => scrollCtrl.isPinned)) scrollCtrl.onContainerResize();
-		else scroller.scrollTop += delta;
+		untrack(() => scrollCtrl.onClearanceChange(delta));
 	});
 
 	// Scroll to bottom when the transcript becomes ready.

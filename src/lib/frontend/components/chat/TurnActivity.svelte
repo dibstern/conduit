@@ -658,7 +658,7 @@
 				</SurfacingCard>
 		{#if usage}<TurnUsage {turn} {bill} />{/if}
 		{#if qa || qaMounted}<div hidden={!qa} onclickcapture={panel.hold}><TurnQa handBacks={turnLog(turn).handBacks} {sessionId} /></div>{/if}
-		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries}>
+		<TurnLog class="step-log border-t border-border bg-bg px-[12px] py-[6px]" mode={minimised ? "collapsed" : usage ? "hidden" : fullLog ? "shown" : "hidden"} phase={panel.phase} pending={panel.pending} stepCount={counts.log} entries={logEntries} {onreposition}>
 			{#snippet row(entry: TurnLogEntry)}
 				{@const i = entry.index}
 				{#if entry.kind === "resumed"}

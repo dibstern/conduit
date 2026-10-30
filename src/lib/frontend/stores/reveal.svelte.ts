@@ -6,6 +6,7 @@ import {
 	messageSurfacing,
 	sessionJevEnabled,
 } from "./message-surfacing.svelte.js";
+import { repositionWithoutController } from "./scroll-controller.svelte.js";
 import { findSession } from "./session.svelte.js";
 import { primaryTranscript, type TranscriptView } from "./transcript.svelte.js";
 import { revealTurnTarget } from "./turn-panel.svelte.js";
@@ -114,7 +115,30 @@ export async function reveal(
 			`[data-uuid="${CSS.escape(target.uuid)}"]`,
 		);
 		if (element) {
-			element.scrollIntoView({ block: "center" });
+			const step = {
+				top: () => {
+					if (!scope) return null;
+					const box = element.getBoundingClientRect();
+					const viewport = scope.getBoundingClientRect();
+					const padding = getComputedStyle(scope);
+					const margin = getComputedStyle(element);
+					return (
+						scope.scrollTop +
+						box.top -
+						viewport.top -
+						scope.clientTop +
+						(box.height -
+							scope.clientHeight +
+							(Number.parseFloat(margin.scrollMarginBottom) || 0) -
+							(Number.parseFloat(margin.scrollMarginTop) || 0) +
+							(Number.parseFloat(padding.scrollPaddingBottom) || 0) -
+							(Number.parseFloat(padding.scrollPaddingTop) || 0)) /
+							2
+					);
+				},
+			};
+			if (view.reposition) await view.reposition(step);
+			else await repositionWithoutController(scope ?? undefined, step);
 			return "landed";
 		}
 		if (frame < 2)

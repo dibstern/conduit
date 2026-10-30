@@ -196,7 +196,8 @@ describe("full-session transcript navigation owner", () => {
 		const element = document.createElement("div");
 		element.dataset["uuid"] =
 			scenario === "uuid" ? "u9/user" : `u${target}/p${target}`;
-		element.scrollIntoView = vi.fn();
+		Object.defineProperty(root, "clientHeight", { value: 500 });
+		element.getBoundingClientRect = () => new DOMRect(0, 400, 100, 20);
 		root.append(element);
 		vi.stubGlobal("CSS", { escape: (value: string) => value });
 		const pending = reveal(
@@ -216,7 +217,7 @@ describe("full-session transcript navigation owner", () => {
 		if (scenario === "superseded") {
 			view.navigate("u11");
 			expect(await pending).toBe("missing");
-			expect(element.scrollIntoView).not.toHaveBeenCalled();
+			expect(root.scrollTop).toBe(0);
 		} else {
 			const page = snapshot([target], "historical");
 			if (page._tag !== "snapshot") throw new Error("expected snapshot");
@@ -235,7 +236,7 @@ describe("full-session transcript navigation owner", () => {
 				{ _tag: "synchronized" },
 			);
 			expect(await pending).toBe("landed");
-			expect(element.scrollIntoView).toHaveBeenCalledOnce();
+			expect(root.scrollTop).toBe(160);
 			if (scenario === "newer-part") expect(view.navigation).toBeNull();
 		}
 		vi.unstubAllGlobals();
@@ -250,7 +251,8 @@ describe("full-session transcript navigation owner", () => {
 		const root = document.createElement("div");
 		const element = document.createElement("div");
 		element.dataset["uuid"] = "u119/user";
-		element.scrollIntoView = vi.fn();
+		Object.defineProperty(root, "clientHeight", { value: 500 });
+		element.getBoundingClientRect = () => new DOMRect(0, 400, 100, 20);
 		root.append(element);
 		vi.stubGlobal("CSS", { escape: (value: string) => value });
 		expect(await reveal({ messageId: "u119" }, view, root)).toBe("landed");
@@ -260,7 +262,7 @@ describe("full-session transcript navigation owner", () => {
 		});
 		await new Promise((resolve) => setTimeout(resolve, 20));
 		expect(view.window.kind).toBe("latest");
-		expect(element.scrollIntoView).toHaveBeenCalledOnce();
+		expect(root.scrollTop).toBe(160);
 	});
 	it("keeps a retired historical target readable and retries through the owner", async () => {
 		await open();

@@ -257,6 +257,88 @@ const TURN_COUNT = 40;
 const SCROLL_UP_PX = 2000;
 const MAX_DRIFT_PX = 5;
 
+test("revealing a trailing reply inside the follow hysteresis band holds position during growth", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	await mockWsRpc(page, {
+		stubs: {
+			GetSessionSkills: () => ({
+				loads: [
+					{
+						name: "scroll-proof",
+						invokedBy: "agent",
+						turnOrdinal: TURN_COUNT + 1,
+						at: Date.now(),
+						running: false,
+						anchor: { messageId: "reveal-reply", partId: "reply-text" },
+					},
+				],
+			}),
+		},
+	});
+	const initMessages = createInitMessages(TURN_COUNT);
+	const snapshot = initMessages.find(
+		(message) => message.type === "mock_transcript_snapshot",
+	);
+	if (!snapshot || !Array.isArray(snapshot["events"]))
+		throw new Error("Missing transcript fixture");
+	snapshot["events"].push(
+		{ type: "user_message", text: "Check the scroll position" },
+		{
+			type: "delta",
+			messageId: "reveal-reply",
+			partId: "reply-text",
+			text: "Scroll proof reply",
+		},
+		{ type: "done", code: 0 },
+	);
+	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+	await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+	await waitForInitialMessages(page);
+	await page.addStyleTag({
+		content:
+			"#messages .msg-container { content-visibility: visible !important; }",
+	});
+	const reply = page.locator('[data-uuid="reveal-reply/reply-text"]');
+	await expect(reply).toBeVisible();
+	await reply.evaluate((node) => {
+		const root = document.getElementById("messages");
+		if (!root) throw new Error("Missing transcript");
+		root.style.scrollPadding = "0px";
+		node.style.scrollMargin = "0px";
+		const spacer = document.createElement("div");
+		spacer.id = "reveal-growth";
+		spacer.style.height = "500px";
+		root.append(spacer);
+		root.scrollTop = root.scrollHeight;
+		const box = node.getBoundingClientRect();
+		const viewport = root.getBoundingClientRect();
+		spacer.style.height = `${500 + (box.top + box.bottom - viewport.top - viewport.bottom) / 2 + 30}px`;
+	});
+	await waitForStableScroll(page);
+	await expect(page.locator("#scroll-btn")).toBeHidden();
+	await page.getByTestId("session-skills-chip").click();
+	await page.getByTestId("session-skills-row").click();
+	await waitForStableScroll(page);
+	const gap = await page
+		.locator("#messages")
+		.evaluate((root) => root.scrollHeight - root.clientHeight - root.scrollTop);
+	expect(gap).toBeGreaterThan(5);
+	expect(gap).toBeLessThan(50);
+	await expect(page.locator("#scroll-btn")).toBeVisible();
+	const before = await getScrollTop(page);
+	await page.locator("#reveal-growth").evaluate((spacer) => {
+		spacer.style.height = `${spacer.getBoundingClientRect().height + 200}px`;
+	});
+	await waitForStableScroll(page);
+	expect(await getScrollTop(page)).toBe(before);
+	await testInfo.attach("trailing-reply-reveal.png", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
 test.describe("Scroll Stability — Mobile", () => {
 	test.describe.configure({ timeout: 45_000 });
 	test.use({ viewport: { width: 393, height: 852 } });

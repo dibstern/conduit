@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { tick, type Snippet } from "svelte";
+	import type { Snippet } from "svelte";
 	import { on } from "svelte/events";
+	import { anchorTop, type ScrollController } from "../../stores/scroll-controller.svelte.js";
 	import type { PendingReveal } from "../../stores/turn-panel.svelte.js";
 	import { plural, type TurnLogEntry, type TurnPhase } from "../../utils/turns.js";
 	import Button from "../ui/Button.svelte";
 
-	let { class: className, mode, phase, pending, stepCount, entries, row }: {
+	let { class: className, mode, phase, pending, stepCount, entries, row, onreposition }: {
 		class: string;
 		mode: "collapsed" | "hidden" | "shown";
 		phase: TurnPhase;
@@ -13,6 +14,7 @@
 		stepCount: number;
 		entries: readonly TurnLogEntry[];
 		row: Snippet<[TurnLogEntry]>;
+		onreposition: ScrollController["reposition"];
 	} = $props();
 	// A Turn keeps its reader's choice through collapse and phase changes.
 	let choice = $state<"ticker" | "all" | null>(null);
@@ -27,16 +29,14 @@
 	$effect(() => { if (mode === "shown" && rowMode === "all") logMounted = true; });
 	const visibleEntries = $derived(logMounted || rowMode === "all" ? entries : entries.filter((entry) => entry.index >= earlierIndex));
 	async function toggleEarlier() {
-		const row = logEl ? [...logEl.querySelectorAll("[data-log-part]")].at(-1) : undefined;
-		// Showing earlier steps pushes this row down. Hiding them keeps the
-		// clicked header in view; anchoring then would preserve an offscreen row.
-		const before = rowMode === "ticker" ? row?.getBoundingClientRect().top : undefined;
-		const scroller = logEl?.closest('[aria-label="Transcript"]');
-		choice = rowMode === "ticker" ? "all" : "ticker";
-		await tick();
-		// A reveal or unmount supersedes this reader's scroll anchor.
-		if (before === undefined || mode !== "shown" || pending || !row?.isConnected || !scroller?.isConnected) return;
-		scroller.scrollTop += row.getBoundingClientRect().top - before;
+		const row = rowMode === "ticker"
+			? [...(logEl?.querySelectorAll("[data-log-part]") ?? [])].at(-1)
+			: logEl?.querySelector("button");
+		const before = row?.getBoundingClientRect().top;
+		await onreposition({
+			change: () => { choice = rowMode === "ticker" ? "all" : "ticker"; },
+			top: () => row && before !== undefined && mode === "shown" && !pending ? anchorTop(row, before) : null,
+		});
 	}
 
 	// Safari only paints :active when a touch listener covers the target.

@@ -70,6 +70,26 @@ describe("ScrollController", () => {
 		beforeEach(() => vi.useFakeTimers());
 		afterEach(() => vi.useRealTimers());
 
+		it.each([
+			200, 1470, 1500,
+		])("records clearance shifts at scrollTop %s without reader follow", (top) => {
+			const onReaderFollow = vi.fn();
+			const ctrl = createScrollController(() => "ready", undefined, {
+				onReaderFollow,
+			});
+			const div = createScrollableDiv();
+			ctrl.attach(div);
+			div.scrollTop = top;
+			div.dispatchEvent(new Event("scroll"));
+			Object.defineProperty(div, "scrollHeight", { value: 2060 });
+			ctrl.onClearanceChange(60);
+			expect(div.scrollTop).toBe(top === 1500 ? 2060 : top + 60);
+			div.dispatchEvent(new Event("scroll"));
+			expect(ctrl.state).toBe(top === 200 ? "detached" : "following");
+			expect(onReaderFollow).not.toHaveBeenCalled();
+			ctrl.detach();
+		});
+
 		it("notifies a latest command while navigation is busy only when intent changes", () => {
 			const onReaderFollow = vi.fn();
 			let busy = false;
