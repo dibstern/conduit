@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { open, rename, rm, writeFile } from "node:fs/promises";
+import {
+	link,
+	lstat,
+	open,
+	readlink,
+	rename,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Semaphore } from "effect";
@@ -22,6 +31,9 @@ const GIT_TIMEOUT_MS = 10_000;
 
 const refuse = (reason: SessionDiffEditError["reason"], message: string) =>
 	new SessionDiffEditError({ reason, message });
+
+const stale = (path: string) =>
+	refuse("stale", `${path} changed since it was listed`);
 
 /** A folder-relative path as git lists one, so it cannot name anything outside the folder.
  *  An absolute path starts with an empty segment. */
@@ -122,15 +134,15 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			const paths = [edit.oldPath, edit.path].filter(
 				(path) => path !== undefined,
 			);
-			const stale = refuse("stale", `${edit.path} changed since it was listed`);
-			if (!paths.every(listable)) return yield* stale;
+			const changed = stale(edit.path);
+			if (!paths.every(listable)) return yield* changed;
 			const snapshot = yield* timeline
 				.snapshot(directory, paths)
 				.pipe(
 					Effect.mapError((error) =>
 						error.reason === "timeout"
 							? refuse("timeout", error.message)
-							: stale,
+							: changed,
 					),
 				);
 			const { stdout } = yield* timeline
@@ -142,7 +154,7 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 						])
 						.join("\n"),
 				})
-				.pipe(Effect.mapError(() => stale));
+				.pipe(Effect.mapError(() => changed));
 			const blobs = stdout
 				.split("\n")
 				.map((line) => (/^[0-9a-f]+$/.test(line) ? line : null));
@@ -151,12 +163,11 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 				worktree(edit.path) !== edit.expected ||
 				(edit.oldPath !== undefined && worktree(edit.oldPath) !== null)
 			)
-				return yield* stale;
+				return yield* changed;
 			return {
 				prefix: snapshot.prefix,
 				paths,
 				tracked: paths.filter((_, n) => blobs[n * 2 + 1] !== null),
-				untracked: paths.filter((_, n) => blobs[n * 2 + 1] === null),
 			};
 		});
 
@@ -272,6 +283,55 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			);
 		});
 
+	/**
+	 * Moves the file out of reach in one rename, so a save after the guard is
+	 * never what a discard deletes: the moved file must still hash to the blob
+	 * the user saw, or it goes back. A file saved at the path meanwhile keeps
+	 * the path, and the moved one is kept where the refusal says.
+	 */
+	const moveAside = (directory: string, path: string, expected: string) =>
+		Effect.gen(function* () {
+			const file = join(directory, path);
+			const aside = (yield* git(directory, [
+				"rev-parse",
+				"--path-format=absolute",
+				"--git-path",
+				`conduit-discard-${randomUUID()}`,
+			])).trim();
+			yield* Effect.tryPromise({
+				try: () => rename(file, aside),
+				catch: (cause) =>
+					(cause as NodeJS.ErrnoException).code === "ENOENT"
+						? stale(path)
+						: refuse("unavailable", String(cause)),
+			});
+			// Git hashes a symlink's target text, and link() would follow one.
+			const target = (yield* fs(() => lstat(aside))).isSymbolicLink()
+				? yield* fs(() => readlink(aside))
+				: undefined;
+			const blob = yield* git(
+				directory,
+				target === undefined
+					? ["hash-object", `--path=${path}`, aside]
+					: ["hash-object", "--no-filters", "--stdin"],
+				{},
+				target,
+			).pipe(Effect.orElseSucceed(() => ""));
+			if (blob.trim() === expected) return aside;
+			yield* fs(() =>
+				target === undefined ? link(aside, file) : symlink(target, file),
+			).pipe(
+				Effect.andThen(fs(() => rm(aside))),
+				Effect.mapError(() =>
+					refuse(
+						"conflict",
+						`${path} changed since it was listed; what was there is kept at ${aside}`,
+					),
+				),
+			);
+			return yield* stale(path);
+		});
+
 	const edit =
 		(
 			write: (
@@ -291,29 +351,43 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 						"That folder is not one of this session's",
 					);
 				yield* Effect.gen(function* () {
-					yield* busy(request.session.id);
 					const guarded = yield* guard(folder.directory, request);
+					// After the guard's git reads, so a turn that starts during them refuses the edit.
+					yield* busy(request.session.id);
 					yield* write(folder.directory, request, guarded);
 				}).pipe(editing.withPermits(1));
 				yield* sessionGit.invalidate({ sessionId: request.session.id });
 			});
 
 	return {
-		discard: edit((directory, request, { prefix, tracked, untracked }) =>
+		discard: edit((directory, request, { prefix, tracked }) =>
 			request.hunk
 				? Effect.flatMap(hunkOf(request, request.hunk), (patch) =>
 						apply(directory, prefix, patch, ["-R"]),
 					)
 				: Effect.gen(function* () {
+						const aside =
+							request.expected === null
+								? undefined
+								: yield* moveAside(directory, request.path, request.expected);
+						// Without --force git writes only paths that are absent, so a file saved since stays.
 						if (tracked.length > 0)
 							yield* git(
 								directory,
-								["checkout-index", "--force", "-z", "--stdin"],
+								["checkout-index", "-z", "--stdin"],
 								{},
 								tracked.join("\0"),
+							).pipe(
+								Effect.mapError((error) =>
+									error.reason === "conflict" ? stale(request.path) : error,
+								),
+								Effect.ensuring(
+									aside === undefined
+										? Effect.void
+										: Effect.promise(() => rm(aside, { force: true })),
+								),
 							);
-						for (const path of untracked)
-							yield* fs(() => rm(join(directory, path)));
+						else if (aside !== undefined) yield* fs(() => rm(aside));
 					}),
 		),
 		stage: edit((directory, request, { prefix, paths }) =>
@@ -326,8 +400,32 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 						),
 					)
 				: swapIndex(directory, (index) =>
-						git(directory, ["add", "--all", "--", ...literal(paths)], {
-							GIT_INDEX_FILE: index,
+						Effect.gen(function* () {
+							const env = { GIT_INDEX_FILE: index };
+							yield* git(
+								directory,
+								["add", "--all", "--", ...literal(paths)],
+								env,
+							);
+							// git add read the file again; a save since the guard leaves the index untouched.
+							const staged = new Map(
+								(yield* git(
+									directory,
+									["ls-files", "--stage", "-z", "--", ...literal(paths)],
+									env,
+								))
+									.split("\0")
+									.filter((entry) => entry !== "")
+									.map((entry) => {
+										const [meta = "", path] = entry.split("\t");
+										return [path, meta.split(" ")[1]];
+									}),
+							);
+							if (
+								(staged.get(request.path) ?? null) !== request.expected ||
+								(request.oldPath !== undefined && staged.has(request.oldPath))
+							)
+								return yield* stale(request.path);
 						}),
 					),
 		),

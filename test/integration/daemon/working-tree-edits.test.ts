@@ -3,10 +3,13 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
+	readlinkSync,
 	realpathSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +25,10 @@ import {
 	SessionDiffLive,
 } from "../../../src/lib/domain/daemon/Services/session-diff.js";
 import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
+import {
+	Subprocess,
+	type SubprocessService,
+} from "../../../src/lib/domain/daemon/Services/subprocess.js";
 import {
 	type WorkingTreeEdit,
 	WorkingTreeEdits,
@@ -48,8 +55,11 @@ const GIT_KEYS = [
 	"GIT_COMMON_DIR",
 ];
 let root = "";
+/** Runs once, right after the guard's blob read: a save or a turn start in that window. */
+let afterGuardRead: Effect.Effect<unknown> | undefined;
 
 beforeEach(() => {
+	afterGuardRead = undefined;
 	for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
 	root = realpathSync(mkdtempSync(join(tmpdir(), "working-tree-edits-")));
 });
@@ -91,6 +101,26 @@ const indexed = (repo: string, path: string) => git(repo, "show", `:${path}`);
 const lines = (count: number, label = "line") =>
 	Array.from({ length: count }, (_, n) => `${label} ${n}\n`).join("");
 
+const racedSubprocess = Layer.effect(
+	Subprocess,
+	Effect.gen(function* () {
+		const base = yield* Subprocess;
+		return {
+			...base,
+			run: (command, args, options) =>
+				base.run(command, args, options).pipe(
+					Effect.tap(() => {
+						const race = args.includes("--batch-check=%(objectname)")
+							? afterGuardRead
+							: undefined;
+						if (race) afterGuardRead = undefined;
+						return race ?? Effect.void;
+					}),
+				),
+		} satisfies SubprocessService;
+	}),
+);
+
 const invalidated: string[] = [];
 const run = <A, E>(
 	program: Effect.Effect<
@@ -126,6 +156,7 @@ const run = <A, E>(
 							Layer.orDie,
 						),
 					),
+					Layer.provide(racedSubprocess),
 				),
 			),
 		),
@@ -395,6 +426,110 @@ it("refuses a path that leaves the folder or that git would not list as Stale, a
 	expect(read(join(repo, "sub", "a.txt"))).toBe("A\n");
 	expect(git(repo, "diff", "--cached", "--name-only")).toBe("");
 	expect(invalidated).toEqual([]);
+});
+
+it("refuses an edit whose file is saved, or whose session starts a turn, after the guard read it, writing nothing", async () => {
+	const repo = repository({
+		"tracked.txt": "t1\n",
+		"staged.txt": "s1\n",
+		"busy.txt": "b1\n",
+	});
+	writeFileSync(join(repo, "tracked.txt"), "t2\n");
+	writeFileSync(join(repo, "staged.txt"), "s2\n");
+	writeFileSync(join(repo, "busy.txt"), "b2\n");
+	writeFileSync(join(repo, "new.txt"), "new\n");
+	const index = readFileSync(join(repo, ".git", "index"));
+	const save = (path: string) =>
+		Effect.sync(() => writeFileSync(join(repo, path), "saved\n"));
+
+	const outcomes = await run(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const { files } = yield* list(repo);
+			const edit = (path: string) => {
+				const file = files[path];
+				if (!file) throw new Error(`${path} is not listed`);
+				return fileEdit(repo, file);
+			};
+			const raced = <A, R>(
+				race: Effect.Effect<unknown>,
+				effect: Effect.Effect<A, never, R>,
+			) =>
+				Effect.suspend(() => {
+					afterGuardRead = race;
+					return effect;
+				});
+			return {
+				discardTracked: yield* raced(
+					save("tracked.txt"),
+					discard(edit("tracked.txt")),
+				),
+				discardUntracked: yield* raced(
+					save("new.txt"),
+					discard(edit("new.txt")),
+				),
+				stage: yield* raced(save("staged.txt"), stage(edit("staged.txt"))),
+				turnStarts: yield* raced(
+					sql`UPDATE sessions SET status = 'busy' WHERE id = 's'`.pipe(
+						Effect.orDie,
+					),
+					discard(edit("busy.txt")),
+				),
+			};
+		}),
+	);
+
+	expect(outcomes).toEqual({
+		discardTracked: "stale",
+		discardUntracked: "stale",
+		stage: "stale",
+		turnStarts: "busy",
+	});
+	for (const path of ["tracked.txt", "new.txt", "staged.txt"])
+		expect(read(join(repo, path))).toBe("saved\n");
+	expect(read(join(repo, "busy.txt"))).toBe("b2\n");
+	expect(readFileSync(join(repo, ".git", "index"))).toEqual(index);
+	expect(git(repo, "status", "--porcelain", "--ignored")).not.toContain(
+		"conduit",
+	);
+	expect(
+		readdirSync(join(repo, ".git")).filter((name) => name.includes("conduit")),
+	).toEqual([]);
+	expect(invalidated).toEqual([]);
+});
+
+it("discards a retargeted symlink to the link the index holds, and keeps one retargeted after the guard read it", async () => {
+	const repo = repository({ "a.txt": "a\n", "b.txt": "b\n" });
+	for (const name of ["link", "raced"]) {
+		symlinkSync("a.txt", join(repo, name));
+		git(repo, "add", name);
+		rmSync(join(repo, name));
+		symlinkSync("b.txt", join(repo, name));
+	}
+
+	const outcomes = await run(
+		Effect.gen(function* () {
+			const { files } = yield* list(repo);
+			const edit = (path: string) => {
+				const file = files[path];
+				if (!file) throw new Error(`${path} is not listed`);
+				return fileEdit(repo, file);
+			};
+			const discarded = yield* discard(edit("link"));
+			afterGuardRead = Effect.sync(() => {
+				rmSync(join(repo, "raced"));
+				symlinkSync("saved.txt", join(repo, "raced"));
+			});
+			return { discarded, raced: yield* discard(edit("raced")) };
+		}),
+	);
+
+	expect(outcomes).toEqual({ discarded: "ok", raced: "stale" });
+	expect(readlinkSync(join(repo, "link"))).toBe("a.txt");
+	expect(readlinkSync(join(repo, "raced"))).toBe("saved.txt");
+	expect(
+		readdirSync(join(repo, ".git")).filter((name) => name.includes("conduit")),
+	).toEqual([]);
 });
 
 it("stages whole files as the blobs the user saw under git's index lock, and refuses while another git holds it", async () => {
