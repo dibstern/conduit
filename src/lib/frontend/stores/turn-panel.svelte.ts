@@ -24,6 +24,7 @@ import {
 	touchSurfaceSession,
 } from "./message-surfacing.svelte.js";
 import { pendingQuestionFor } from "./permissions.svelte.js";
+import { showTurnTarget } from "./scroll-controller.svelte.js";
 import { setTurnMinimised, turnMinimised } from "./turn-minimisation.svelte.js";
 
 export type TurnPanel<Stop extends ShowStop = ShowStop> =
@@ -72,7 +73,7 @@ export function landTurnTarget(
 		target: TurnTarget;
 		ack: (seq: number) => void;
 		navigation?: "scroll" | "in-place";
-		beforeScroll?: (() => void) | undefined;
+		scroll?: ((node: HTMLElement) => void) | undefined;
 	},
 ) {
 	let current = input;
@@ -82,13 +83,7 @@ export function landTurnTarget(
 		const seq = next.pending.seq;
 		// Updates can reach a kept log row before its parent loses `hidden`.
 		void tick().then(() => {
-			const {
-				pending,
-				target,
-				ack,
-				navigation = "scroll",
-				beforeScroll,
-			} = current;
+			const { pending, target, ack, navigation = "scroll", scroll } = current;
 			if (pending?.seq !== seq || !node.isConnected) return;
 			let matches: boolean;
 			switch (target.kind) {
@@ -106,8 +101,7 @@ export function landTurnTarget(
 			}
 			if (!matches) return;
 			if (navigation === "scroll") {
-				beforeScroll?.();
-				node.scrollIntoView({ block: "nearest" });
+				(scroll ?? showTurnTarget)(node);
 				node.focus({ preventScroll: true });
 			}
 			ack(pending.seq);

@@ -170,8 +170,8 @@ export function isDuoChipRowFolded(): boolean {
  * make that effect re-run itself once on every publish.
  */
 let lastAtBottom = true;
-export function publishAtBottom(next: boolean): void {
-	if (next && !lastAtBottom) sessionViewState.barOpen = false;
+export function publishAtBottom(next: boolean, preserveBar = false): void {
+	if (next && !lastAtBottom && !preserveBar) sessionViewState.barOpen = false;
 	lastAtBottom = next;
 	sessionViewState.atBottom = next;
 }

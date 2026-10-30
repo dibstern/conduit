@@ -32,7 +32,7 @@
 		active?: string | null;
 		markers?: TimelineProps["markers"];
 		cardSlot?: TimelineProps["cardSlot"];
-		card?: Snippet;
+		card?: Snippet | undefined;
 		openAsk?: SurfacePart | null;
 		belowLevel?: boolean;
 		cited?: string | null;

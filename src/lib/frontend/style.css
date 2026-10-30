@@ -796,6 +796,10 @@ body:has(dialog:modal) {
 #app.phone-session #messages {
 	padding-top: var(--phone-chrome-clearance, 0px);
 	scroll-padding-top: var(--phone-chrome-clearance, 0px);
+	--turn-sticky-top: calc(
+		var(--phone-chrome-visible-height, 0px) -
+		var(--phone-chrome-clearance, 0px)
+	);
 }
 
 #app.phone-session #session-bar[data-collapsed="true"] {

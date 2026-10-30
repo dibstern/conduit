@@ -332,6 +332,9 @@ export const turnHoverHandlers: StepHandler[] = [
 				'[data-log-part="surfacing-agent/surfacing-tool-1"]',
 			);
 			await expect(row).toBeInViewport();
+			await expect(
+				world.page.getByRole("textbox", { name: "Message", exact: true }),
+			).toHaveValue("");
 			await expect(row).toBeFocused();
 			const paint = await row.evaluate((element) => {
 				const probe = document.createElement("span");

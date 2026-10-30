@@ -83,6 +83,199 @@ Examples:
   | active   | single   | live    |
   | active   | sparse   | settled |
 
+Scenario Outline: Collapsing a stuck turn that fits the viewport preserves the phone bar
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the sticky session has a long expanded turn followed by a short reply
+  When I scroll into the middle of the long turn log
+  And I open and remember the phone bar
+  And I collapse the stuck turn
+  Then the collapsed transcript fits its viewport and preserves the phone bar
+
+Examples:
+  | jev      |
+  | active   |
+  | inactive |
+
+Scenario Outline: Revealing a tall pin suspends bottom following through detail updates
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a short reply
+  And the sticky turn has a long first message
+  When I follow the bottom before picking the tall pin
+  And I pick surfaced message #1
+  Then the tall selected card stays revealed through a detail update
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario: A card hidden behind the sticky head is not read by dwell
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the sticky session has a long expanded turn followed by a long reply
+  When I hide the unread selected card behind the stuck head
+  Then dwell does not mark the covered card read
+  When I expose the covered card below the stuck head
+  Then dwell marks the exposed card read
+
+Scenario: Picking a fully visible Full log card preserves the scroll position
+  Given message surfacing is active at Key
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the surfacing session has a settled turn
+  When I open the plain turn log
+  And I remember the fully visible card position at the transcript start
+  And I pick surfaced message #3
+  Then the fully visible selected card has not moved the transcript
+
+Scenario Outline: A long turn keeps its collapse control above the log and collapses in place
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I scroll the transcript down by 150 pixels
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I collapse the stuck turn
+  Then the collapsed turn stays in view at the transcript top without a gap
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: A sticky turn head leaves with its own turn
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I scroll the transcript down by 150 pixels
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I scroll past the long turn
+  Then the long turn head and its collapse control are outside the transcript viewport
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: Stuck strips keep their hover previews above the log
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  And the stuck strip keeps its <jev> hover previews usable
+
+Examples:
+  | jev      |
+  | inactive |
+  | active   |
+
+Scenario Outline: Collapse still lands in place as the turn starts releasing its head
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll until the turn pushes its head slightly above the transcript top
+  Then the releasing head still has a clickable collapse control
+  When I collapse the stuck turn
+  Then the collapsed turn stays in view at the transcript top without a gap
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: Long inline content scrolls away while the controls and log remain usable
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the sticky session has a long expanded turn followed by a long reply
+  And the sticky turn has a long <content>
+  When I scroll into the middle of the long turn log
+  Then log rows are exposed below the stuck head
+  And the turn head and strip stay at the transcript top with the collapse control visible
+  When I collapse the stuck turn
+  Then the collapsed turn stays in view at the transcript top without a gap
+
+Examples:
+  | jev      | content          |
+  | active   | selected message |
+  | inactive | summary          |
+
+Scenario Outline: A stuck strip reveals a work row below its controls
+  Given message surfacing is <jev> at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  Then the turn head and strip stay at the transcript top with the collapse control visible
+  When I open the first work step from the stuck strip
+  Then the highlighted work row is exposed below the stuck head
+
+Examples:
+  | viewport | jev      |
+  | desktop  | inactive |
+  | phone    | inactive |
+  | desktop  | active   |
+  | phone    | active   |
+
+Scenario Outline: A stuck strip exposes the selected message header
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  When I scroll into the middle of the long turn log
+  And I pick surfaced message #1
+  Then the selected message header is exposed below the turn head
+
+Examples:
+  | viewport |
+  | desktop  |
+  | phone    |
+
+Scenario Outline: A stuck strip exposes the header of a long selected message
+  Given message surfacing is active at Most
+  And surfacing read tracking starts with none read and summaries off
+  And the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the sticky session has a long expanded turn followed by a long reply
+  And the sticky turn has a long selected message
+  When I scroll into the middle of the long turn log
+  And <selection>
+  Then the selected message header is exposed below the turn head
+
+Examples:
+  | viewport | selection                                  |
+  | desktop  | I pick surfaced message #1                 |
+  | phone    | I pick surfaced message #1                 |
+  | desktop  | I open message #1 from the Full log row     |
+  | phone    | I open message #1 from the Full log row     |
+
 Scenario Outline: A message hover borrows the open or Usage slot without changing the selection
   Given message surfacing is active at Most
   And surfacing read tracking starts with none read and summaries off
@@ -181,6 +374,7 @@ Scenario Outline: Jev-off turns keep a plain collapsed head and open Log and Usa
   When I expand the surfaced turn
   Then the Jev-off footer has Log 16 and Usage tabs with cost
   And the Jev-off Log shows <rows> plain rows
+  And the plain log starts immediately below the turn controls
   And the messages region visually matches turn-jev-off-open-<phase>-<viewport> at 98 percent
   When I select the turn Usage tab
   Then Usage replaces the card and log without selecting a Show stop
@@ -398,12 +592,16 @@ Scenario Outline: Interim streaming text keeps the live ticker and following car
   And the surfaced card shows #8 and announces its category and position
   When I open the live Full log from earlier steps
   Then the live log shows all 16 steps
+  When I remember the phone bar state
   When I collapse and reopen the panel choice turn
   Then the live log shows all 16 steps
+  And the phone bar state is unchanged
   When I hide the earlier live steps
   Then the Turn defaults to Full log with a three-step ticker
+  When I remember the phone bar state
   When I collapse the surfaced turn
   Then the collapsed live Turn keeps its Working head and strip only
+  And the phone bar state is unchanged
   And the Jump to live control is not visible
   And the messages region visually matches turn-live-collapsed-<viewport> at 98 percent
   When I expand the surfaced turn
@@ -568,6 +766,7 @@ Scenario Outline: Strip pins and steps have keyboard focus movement and activati
   And the surfacing session has a settled turn
   Then arrows move focus between strip pins and Enter picks the focused pin
   And arrows move focus between strip steps and Enter opens the focused step
+  And the selected message header is exposed below the turn head
   And the messages region visually matches turn-strip-keyboard-<viewport> at 98 percent
 
 Examples:
@@ -787,6 +986,7 @@ Scenario Outline: Full log uses All messages pins and cards without changing the
   When I pick surfaced message #3
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
+  And the selected message header is exposed below the turn head
   And the messages region visually matches turn-full-log-pins-<baseline>-<viewport> at 98 percent
   When I reload the surfacing session
   Then the effective surfacing level is <saved>
@@ -806,6 +1006,7 @@ Scenario Outline: Full log treats an opened finding as visible at All messages
   And I open message #3 from the Full log row
   Then the surfaced card shows #3 and announces its category and position
   And the card has no below-stop note
+  And the selected message header is exposed below the turn head
   And the messages region visually matches turn-full-log-card-level-<baseline> at 98 percent
   When I reload the surfacing session
   Then the effective surfacing level is <saved>

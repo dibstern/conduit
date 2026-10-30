@@ -10,6 +10,7 @@
 		onexplain: (pin: SurfacePin) => void;
 		regions?: SurfacingRegions; context?: Snippet<[SurfacePin, () => void]> | undefined;
 		pending?: PendingReveal | null; onland?: (seq: number) => void;
+		onreveal?: ((node: HTMLElement) => void) | undefined;
 		scrubbing?: boolean; readState?: ReadState; replied?: boolean;
 		oncommand: (event: KeyboardEvent) => void;
 		onpick: (pin: SurfacePin) => void; onfold: () => void; onfollow: () => void;
@@ -35,7 +36,7 @@
 	</Surface>
 {:else if props.card}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<section bind:this={cardEl} use:landTurnTarget={{ pending: props.pending ?? null, target: { kind: "message", uuid: props.card.part.uuid }, ack: props.onland ?? (() => {}), navigation: props.scrubbing ? "in-place" : "scroll" }} class="surfacing-msg-card border rounded-[12px] outline-none" class:ask={props.card.category === "ask" && !props.card.pending} style:background="var(--card-background,var(--color-bg))" style:border-color="var(--card-border,var(--color-border))" style:--surface-colour={props.card.colour} style:--category-tint={props.card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={props.card.part.uuid} data-ordinal={props.card.number} aria-label={props.card.name} tabindex="-1" onkeydown={props.oncommand}>
+	<section bind:this={cardEl} use:landTurnTarget={{ pending: props.pending ?? null, target: { kind: "message", uuid: props.card.part.uuid }, ack: props.onland ?? (() => {}), navigation: props.scrubbing ? "in-place" : "scroll", scroll: props.onreveal }} class="surfacing-msg-card border rounded-[12px] outline-none" class:ask={props.card.category === "ask" && !props.card.pending} style:background="var(--card-background,var(--color-bg))" style:border-color="var(--card-border,var(--color-border))" style:--surface-colour={props.card.colour} style:--category-tint={props.card.builtinCategory ? "14%" : undefined} data-testid="surfacing-msg-card" data-part={props.card.part.uuid} data-ordinal={props.card.number} aria-label={props.card.name} tabindex="-1" onkeydown={props.oncommand}>
 		{@render body(props.card)}
 	</section>
 {/if}

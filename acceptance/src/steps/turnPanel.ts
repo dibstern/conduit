@@ -310,7 +310,24 @@ export const turnPanelHandlers: StepHandler[] = [
 			);
 			await expect(row).toBeVisible();
 			await expect(row).toBeFocused();
-			await expect(row).toBeInViewport();
+			await expect(row).toBeInViewport({ ratio: 1 });
+			const controls = await panel(world.page)
+				.locator(".turn-activity-head")
+				.boundingBox();
+			const box = await row.boundingBox();
+			if (!controls || !box) throw new Error("Missing revealed row geometry");
+			expect(box.y).toBeGreaterThanOrEqual(controls.y + controls.height);
+			expect(
+				await row.evaluate((node) => {
+					const box = node.getBoundingClientRect();
+					return node.contains(
+						document.elementFromPoint(
+							box.left + box.width / 2,
+							box.top + box.height / 2,
+						),
+					);
+				}),
+			).toBe(true);
 		},
 	},
 	{

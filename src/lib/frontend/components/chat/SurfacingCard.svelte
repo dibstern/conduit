@@ -26,16 +26,18 @@
 	import SurfacingMessageCard from "./SurfacingMessageCard.svelte";
 	import { type PendingReveal } from "../../stores/turn-panel.svelte.js";
 
-	let { view, card, counts, live, regions = {}, strip, onpick, onlevel, onfold, onfollow, oncommand, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply = () => {}, onread = () => {}, onexplain = () => {}, context, replied = false, pending = null, onland = () => {}, scrubbing = false }: {
+	let { view, card, counts, live, regions = {}, strip, layout, onpick, onlevel, onfold, onfollow, oncommand, onmarkread, readState = { kind: "idle" }, cardEl = $bindable(), markReadInAxis = false, onreply = () => {}, onread = () => {}, onexplain = () => {}, context, replied = false, pending = null, onland = () => {}, onreveal, scrubbing = false }: {
 		scrubbing?: boolean;
 		pending?: PendingReveal | null;
+		onreveal?: ((node: HTMLElement) => void) | undefined;
 		onland?: (seq: number) => void;
 		view: SurfaceTurn;
 		card: SurfacePin | null;
 		counts: StopCounts;
 		live: boolean;
 		regions?: SurfacingRegions;
-		strip: Snippet<[string | null, Snippet]>;
+		strip: Snippet<[string | null, Snippet | undefined]>;
+		layout?: Snippet<[strip: Snippet<[Snippet | undefined]>, card: Snippet, details: Snippet]> | undefined;
 		onpick: (pin: SurfacePin) => void;
 		onlevel: (level: SurfaceLevel) => void;
 		onfold: () => void;
@@ -61,12 +63,15 @@
 
 {#snippet messageCard()}
 	{#if card}
-	<SurfacingMessageCard kind="selected" {card} {view} {live} {regions} {context} {pending} {onland} {scrubbing} {readState} bind:cardEl {onreply} {onread} {onexplain} {replied} {oncommand} {onpick} {onfold} {onfollow} />
+	<SurfacingMessageCard kind="selected" {card} {view} {live} {regions} {context} {pending} {onland} {onreveal} {scrubbing} {readState} bind:cardEl {onreply} {onread} {onexplain} {replied} {oncommand} {onpick} {onfold} {onfollow} />
 	{/if}
 {/snippet}
 
-{@render strip(citedPart, messageCard)}
+{#snippet timeline(inlineCard: Snippet | undefined)}
+	{@render strip(citedPart, layout ? inlineCard : messageCard)}
+{/snippet}
 
+{#snippet details()}
 {#if view.level === "final" || view.empty || view.notJudgedCount || markCount || notesFollow}
 <div class="axis-notes" data-testid="surfacing-notes">
 	{#if view.level === "final"}<span>{STOPS.final.menu} · {counts.all} hidden</span>{/if}
@@ -78,6 +83,14 @@
 {/if}
 {#if readState.kind === "failed" && (!card || readState.uuid === card.part.uuid)}<p role="alert" class="mt-[4px] text-[12px] text-error">{readState.message}</p>{/if}
 <div data-surfacing-region="below-strip">{@render regions.belowStrip?.(view, (partId) => { citedPart = partId; })}</div>
+{/snippet}
+
+{#if layout}
+	{@render layout(timeline, messageCard, details)}
+{:else}
+	{@render timeline(undefined)}
+	{@render details()}
+{/if}
 
 <style>
 	.axis-notes { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; margin-top:4px; color:var(--color-text-dimmer); font:11.5px var(--font-mono); }

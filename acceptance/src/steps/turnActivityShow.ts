@@ -326,6 +326,7 @@ export const turnActivityShowHandlers: StepHandler[] = [
 			await expect(toggle).toHaveAccessibleName("Collapse turn");
 			await toggle.click();
 			await expect(toggle).toHaveAccessibleName("Expand turn");
+			await expect(toggle).toBeFocused();
 			for (const selector of [
 				".step-log",
 				'[data-testid="turn-show-bar"]',
@@ -336,9 +337,9 @@ export const turnActivityShowHandlers: StepHandler[] = [
 			await expect(
 				scope.locator('[aria-label^="Activity timeline"]'),
 			).toBeVisible();
-			await toggle.focus();
 			await world.page.keyboard.press("h");
 			await expect(toggle).toHaveAccessibleName("Collapse turn");
+			await expect(toggle).toBeFocused();
 		},
 	},
 	{

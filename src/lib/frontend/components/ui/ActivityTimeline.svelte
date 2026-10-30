@@ -22,6 +22,7 @@
 
 <script lang="ts">
 	import { onDestroy, tick } from "svelte";
+	import { suppressFollowupClick } from "../../actions/click-on-lift.js";
 	import { surfacePinRows, type SurfacePinGroup } from "../../utils/surface-turn.js";
 	import { MARK_GLYPHS } from "../../stores/surfacing-feedback.svelte.js";
 	import Button from "./Button.svelte";
@@ -163,6 +164,7 @@
 	}
 	function pointerUp(event: PointerEvent) {
 		if (gesture.kind === "idle") return;
+		suppressFollowupClick(event);
 		const previous = gesture;
 		clear();
 		if (trackEl?.hasPointerCapture(event.pointerId)) trackEl.releasePointerCapture(event.pointerId);
@@ -262,14 +264,14 @@
 		</div>
 	{/if}
 	{#if hoveredStep && stepPreview}
-		<div role="group" aria-label="Step preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" {@attach placeHover} bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" data-side={hoverPosition.side} onpointerup={() => { const id = hoveredStep.id; clear(); activateStep(id); }}>
+		<div role="group" aria-label="Step preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" {@attach placeHover} bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" data-side={hoverPosition.side} onpointerup={(event) => { suppressFollowupClick(event); const id = hoveredStep.id; clear(); activateStep(id); }}>
 			<i class="card-caret" style="left:{hoverPosition.caret};--card-background:var(--color-bg-alt)"></i>
 			<Surface variant="raised" radius="lg" padding="md" data-testid="turn-step-popover">{@render stepPreview(hoveredStep.id)}</Surface>
 		</div>
 	{/if}
 	{#if messagePreview && preview}
 		<div role="group" aria-label="Hover preview" class="hanging-card hover-card z-[var(--z-popover)] {FLOATING_ELEVATION_CLASSES}" {@attach placeHover} bind:clientHeight={hoverHeight} style="top:{hoverPosition.top}px;left:{hoverPosition.left}px;width:{hoverPosition.width}px" class:ask={messagePreview.category === "ask" && !messagePreview.pending} data-side={hoverPosition.side} data-testid="surfacing-minimised-peek" data-ordinal={messagePreview.number}
-			onpointerup={() => { const pin = messagePreview; clear(); if (pin) onpick?.(pin); }}>
+			onpointerup={(event) => { suppressFollowupClick(event); const pin = messagePreview; clear(); if (pin) onpick?.(pin); }}>
 			<i class="card-caret" style:left={hoverPosition.caret}></i>
 			{@render preview(messagePreview)}
 		</div>

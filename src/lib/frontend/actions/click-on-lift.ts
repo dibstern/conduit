@@ -39,6 +39,16 @@ function guardClicks(document: Document) {
 	document.addEventListener("keydown", keepNextClick, true);
 }
 
+/** A touch activation can move another control beneath the browser's later click. */
+export function suppressFollowupClick(event: PointerEvent): void {
+	if (!event.isPrimary || event.pointerType !== "touch") return;
+	const document =
+		event.target instanceof Node ? event.target.ownerDocument : null;
+	if (!document) return;
+	guardClicks(document);
+	dropClickUntil = event.timeStamp + 600;
+}
+
 type Press = {
 	pointerId: number;
 	x: number;
@@ -101,7 +111,7 @@ export function clickOnLift(node: HTMLElement): () => void {
 		press = undefined;
 		if (!isTap(pressed, event)) return;
 		pressed.control.click();
-		dropClickUntil = event.timeStamp + 600;
+		suppressFollowupClick(event);
 	}
 
 	node.addEventListener("pointerdown", pointerdown);

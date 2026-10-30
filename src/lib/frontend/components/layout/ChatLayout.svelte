@@ -99,6 +99,7 @@
 	let vvHeight = $state<number | null>(null);
 	let appEl: HTMLDivElement | undefined = $state(undefined);
 	let chromeHeight = $state(0);
+	let visibleChromeHeight = $state(0);
 	let sessionListScrollTop = 0;
 	let wasPhoneListScreen = false;
 
@@ -139,6 +140,7 @@
 	// finger, as scrollTop cannot go negative.
 	function measureChrome(chrome: HTMLElement) {
 		const observer = new ResizeObserver(() => {
+			visibleChromeHeight = chrome.getBoundingClientRect().height;
 			const collapsed = chrome.querySelector('#session-bar[data-collapsed="true"]') !== null;
 			chromeHeight = collapsed ? Math.max(chromeHeight, chrome.offsetHeight) : chrome.offsetHeight;
 		});
@@ -587,7 +589,7 @@
 		</div>
 
 		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->
-		<div class="relative flex flex-1 min-h-0 min-w-0" style={`--phone-chrome-clearance: ${topClearance}px`}>
+		<div class="relative flex flex-1 min-h-0 min-w-0" style={`--phone-chrome-clearance: ${topClearance}px; --phone-chrome-visible-height: ${visibleChromeHeight}px`}>
 			<RightPane>
 					<!-- Touches here clear the unread dot (conduit-test-hk9m.4). -->
 					<div class="flex flex-col flex-1 min-h-0" class:invisible={mobileMaximized} inert={mobileMaximized} {@attach trackSeen(sessionState.currentId)}>
