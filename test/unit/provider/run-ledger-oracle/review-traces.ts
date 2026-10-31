@@ -50,7 +50,12 @@ function admit(d: TraceDriver, inputId: string, runNow = false) {
 	if (runNow)
 		step(d, {
 			verb: "control",
-			control: { kind: "run_now", inputId, deadlineAt: d.now + 1_000 },
+			control: {
+				kind: "run_now",
+				commandId: `run-now-${inputId}`,
+				inputId,
+				deadlineAt: d.now + 1_000,
+			},
 		});
 	main(d, 0);
 	return admitted;

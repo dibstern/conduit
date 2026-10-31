@@ -6,6 +6,7 @@ import {
 	admit,
 	ask,
 	begin,
+	claimOf,
 	complete,
 	Driver,
 	fire,
@@ -123,6 +124,12 @@ describe.each([
 		);
 		expect(first).toBeDefined();
 		if (first === undefined) return;
+		// 3.4: a control's token is bound by its first outcome naming (commandId, transmission).
+		observe(d, tokenOf(first), {
+			kind: "effect_outcome",
+			outcome: { tag: "succeeded" },
+			transmission: claimOf(first),
+		});
 		const before = d.view();
 		const crossed = d.step({
 			verb: "observe",
@@ -205,6 +212,11 @@ describe.each([
 		running(d);
 		stop(d);
 		const interrupt = d.latest("interrupt");
+		observe(d, tokenOf(interrupt), {
+			kind: "effect_outcome",
+			outcome: { tag: "succeeded" },
+			transmission: claimOf(interrupt),
+		});
 		step(d, {
 			verb: "settle",
 			settlement: { kind: "session_ended", cause: "native_session_vanished" },
@@ -274,6 +286,7 @@ describe.each([
 			verb: "control",
 			control: {
 				kind: "answer",
+				commandId: "timeout-q",
 				interactionId: "q",
 				answer: { decision: "reject", reason: "timeout" },
 			},
@@ -286,20 +299,14 @@ describe.each([
 		).toEqual([]);
 	});
 
-	for (const target of ["input", "interaction", "native_session"] as const)
+	// 3.10: there is no interaction probe target; an answer's retry is main's.
+	for (const target of ["input", "native_session"] as const)
 		test(`[R1] an unanswered ${target} probe owns a deadline from issue and re-probes at it`, () => {
 			const d = new Driver("opencode", mode);
 			const a = running(d);
 			if (target === "input") {
 				const b = begin(d, "B", "steer");
 				observe(d, b.token, {
-					kind: "effect_outcome",
-					outcome: { tag: "delivery_unknown" },
-				});
-				fire(d);
-			} else if (target === "interaction") {
-				const answer = ask(d, a.token);
-				observe(d, tokenOf(answer), {
 					kind: "effect_outcome",
 					outcome: { tag: "delivery_unknown" },
 				});
@@ -585,6 +592,7 @@ describe.each([
 		const refused = observe(d, tokenOf(first), {
 			kind: "effect_outcome",
 			outcome: { tag: "permanent", code: "HTTP400" },
+			transmission: claimOf(first),
 		});
 		// 3.10, A (4386-4389, amends 10B): a permanent refusal ends the delivery and resolves the interaction.
 		expect(refused.issued).toEqual([]);
@@ -597,27 +605,87 @@ describe.each([
 		).toEqual([first]);
 	});
 
-	test("[10B] an ambiguous answer is reconciled by its probe and never retransmitted", () => {
+	test("[3.10] a retryable answer refusal names its transmission and code, and no answer is probed", () => {
 		const d = new Driver("opencode", mode);
 		const a = running(d);
 		const first = ask(d, a.token);
-		observe(d, tokenOf(first), {
+		const refused = observe(d, tokenOf(first), {
+			kind: "effect_outcome",
+			outcome: {
+				tag: "retryable",
+				retryAt: d.now + 50,
+				code: "answer_refused",
+			},
+			transmission: claimOf(first),
+		});
+		// 3.10: main owns the retry; the ledger issues nothing and arms no probe.
+		expect(refused.issued).toEqual([]);
+		expect(d.alarmAt).toBeUndefined();
+		expect(d.view().interactions).toEqual([
+			{
+				tag: "Pending",
+				interactionId: "q",
+				kind: "question",
+				lastRefusal: { attempt: claimOf(first), code: "answer_refused" },
+			},
+		]);
+		// 3.4: main writes no delivery_unknown for a control.
+		const before = d.view();
+		const unknown = d.step({
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: tokenOf(first, 2),
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+				transmission: claimOf(first, 2),
+			},
+		});
+		expect(unknown.tag).toBe("Rejected");
+		expect(d.view()).toEqual(before);
+		// 3.4: main's next transmission names n 2; its success settles the answer.
+		observe(d, tokenOf(first, 2), {
+			kind: "effect_outcome",
+			outcome: { tag: "succeeded" },
+			transmission: claimOf(first, 2),
+		});
+		expect(d.view().interactions).toMatchObject([
+			{ tag: "Answered", interactionId: "q" },
+		]);
+		expect(
+			d.issued.filter(({ effect }) => effect.kind === "deliver_answer"),
+		).toEqual([first]);
+		expect(d.issued.filter(({ effect }) => effect.kind === "probe")).toEqual(
+			[],
+		);
+	});
+
+	test("[F60] a retried input probe refused after its project is removed transmits nothing", () => {
+		const d = new Driver("opencode", mode);
+		running(d);
+		const b = begin(d, "B", "steer");
+		observe(d, b.token, {
 			kind: "effect_outcome",
 			outcome: { tag: "delivery_unknown" },
 		});
-		const recovered = fire(d);
-		expect(recovered.issued.map(({ effect }) => effect)).toMatchObject([
-			{ kind: "probe", target: { tag: "interaction", interactionId: "q" } },
-		]);
-		observe(d, tokenOf(d.latest("probe")), {
-			kind: "probe_result",
-			finding: { tag: "answer_consumed" },
+		fire(d);
+		const probe = d.latest("probe");
+		expect(probe.effect).toMatchObject({
+			target: { tag: "input", inputId: "B" },
 		});
-		expect(
-			d.issued.filter(({ effect }) => effect.kind === "deliver_answer"),
-		).toHaveLength(1);
-		expect(d.view().interactions).toMatchObject([
-			{ tag: "Answered", interactionId: "q", delivery: "settled" },
-		]);
+		observe(d, tokenOf(probe), {
+			kind: "effect_outcome",
+			outcome: { tag: "retryable", retryAt: d.now + 1 },
+		});
+		fire(d);
+		const retried = d.latest("probe");
+		expect(tokenOf(retried)).not.toBe(tokenOf(probe));
+		// H4 (3.11): the removed project refuses the retried probe.
+		const refused = observe(d, tokenOf(retried), {
+			kind: "effect_outcome",
+			outcome: { tag: "permanent", code: "project_inactive" },
+		});
+		expect(refused.issued).toEqual([]);
+		expect(transmissions(d, "B")).toHaveLength(1);
 	});
 });

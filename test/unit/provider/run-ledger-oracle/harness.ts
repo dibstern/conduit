@@ -212,9 +212,12 @@ export class TraceDriver {
 		const before = this.view();
 		const stepped = this.publicDriver.step(command, now);
 		const after = this.view();
+		// 3.13: a Main issue is its commandId and kind (an end's interrupt and end_session share one).
 		const same = (a: IssuedEffect, b: IssuedEffect) =>
-			a.tag === "Held"
-				? b.tag === "Held" && a.commandId === b.commandId
+			a.tag === "Main"
+				? b.tag === "Main" &&
+					a.commandId === b.commandId &&
+					a.effect.kind === b.effect.kind
 				: b.tag === "Tokened" && a.token === b.token;
 		// CONTRACT 1176-1178 (D60): decide issues only probe, stop_task and cancel_request; a main call
 		// (interrupt, end_session, deliver_answer, send_native_command) reaches the fake as a new `live` entry.
@@ -267,22 +270,26 @@ export class TraceDriver {
 		if (!("tag" in send)) return send;
 		const bound = this.host.bound(send);
 		// A gated hold has no transmission, so it binds no wire send (H4, 4.4).
-		if (send.tag === "Held" && this.host.isGated(bound.token)) return bound;
+		if (this.host.isHeld(send) && this.host.isGated(bound.token)) return bound;
 		const issue = this.issued.findIndex((item) =>
-			item.tag === "Held" && send.tag === "Held"
-				? item.commandId === send.commandId
+			item.tag === "Main" && send.tag === "Main"
+				? item.commandId === send.commandId &&
+					item.effect.kind === send.effect.kind
 				: item === send,
 		);
+		// 3.4: a control claim or a direct send is named by main's transmission, never by binding order.
+		const claimed = send.tag === "Main" && !this.host.isHeld(send);
 		if (
 			issue >= 0 &&
+			!claimed &&
 			!this.wireBindings.some((item) => item.send.token === bound.token)
 		) {
 			const n =
 				this.wireBindings.filter((item) => item.issue === issue).length + 1;
 			this.wireBindings.push({ issue, n, send: bound });
 		}
-		if (send.tag === "Held" && issue >= 0)
-			for (const binding of this.host.bindingsFor(send.commandId))
+		if (send.tag === "Main" && issue >= 0)
+			for (const binding of this.host.bindingsFor(send))
 				if (
 					!this.wireBindings.some(
 						(item) => item.send.token === binding.send.token,
@@ -297,7 +304,10 @@ export class TraceDriver {
 	}
 	bindTransmission(issue: number, transmission: number): void {
 		const held = this.issued[issue];
-		assert(held?.tag === "Held", "Only held issues have transmissions");
+		assert(
+			held !== undefined && this.host.isHeld(held),
+			"Only held issues have transmissions",
+		);
 		this.bound(held);
 		while (
 			!this.wireBindings.some(
@@ -317,7 +327,7 @@ export class TraceDriver {
 		return this.wireBindings;
 	}
 	redispatch(send: IssuedEffect): Send {
-		assert(send.tag === "Held", "Only holdRun retries a held send");
+		assert(this.host.isHeld(send), "Only holdRun retries a held send");
 		const held = { ...send };
 		const retry = this.bound(held);
 		this.host.issued([held]);
@@ -334,7 +344,7 @@ export class TraceDriver {
 		const bound = this.bound(send);
 		if (
 			"tag" in send &&
-			send.tag === "Held" &&
+			this.host.isHeld(send) &&
 			evidence.kind !== "run_dispatched" &&
 			!this.dispatched.has(bound.token)
 		) {
@@ -387,8 +397,8 @@ export class PublicNames {
 				!this.runs.has(send.effect.runId)
 			)
 				this.runs.set(send.effect.runId, `run:${this.runs.size}`);
-			if (send.tag === "Held")
-				this.commands.set(send.commandId, `held:${index}`);
+			if (send.tag === "Main" && !this.commands.has(send.commandId))
+				this.commands.set(send.commandId, `main:${index}`);
 			d.bound(send);
 		}
 		for (const binding of d.bindings)
@@ -405,8 +415,7 @@ export class PublicNames {
 					this.runs.set(value, `run:${this.runs.size}`);
 				return this.runs.get(value);
 			}
-			if (key === "token" || key === "attempt")
-				return this.tokens.get(value) ?? value;
+			if (key === "token") return this.tokens.get(value) ?? value;
 			if (key === "commandId") return this.commands.get(value) ?? value;
 			return value;
 		}
@@ -416,7 +425,10 @@ export class PublicNames {
 			return Object.fromEntries(
 				Object.entries(value).map(([field, item]) => [
 					field,
-					field === "commandId" && Reflect.get(value, "tag") !== "Held"
+					// Main's commandId names an issue; a lastRefusal attempt names one of its transmissions (3.10).
+					field === "commandId" &&
+					Reflect.get(value, "tag") !== "Main" &&
+					key !== "attempt"
 						? item
 						: this.normalize(item, field),
 				]),
@@ -439,7 +451,7 @@ export function translateCommand(
 		const runId =
 			settlement.kind === "unheld_outcome" ? settlement.runId : undefined;
 		const matches = (item: IssuedEffect) =>
-			item.tag === "Held" && item.commandId === settlement.commandId;
+			from.host.isHeld(item) && item.commandId === settlement.commandId;
 		const named = from.issued.reduce(
 			(found, item, i) =>
 				matches(item) && "runId" in item.effect && item.effect.runId === runId
@@ -449,7 +461,7 @@ export function translateCommand(
 		);
 		const issue = named >= 0 ? named : from.issued.findIndex(matches);
 		const target = to.issued[issue];
-		if (target?.tag !== "Held") return command;
+		if (target === undefined || !to.host.isHeld(target)) return command;
 		return settlement.kind === "unheld_outcome"
 			? {
 					verb: "settle",
@@ -478,10 +490,12 @@ export function translateCommand(
 		(item) => item.send.token === observation.token,
 	);
 	// Only a hold has transmissions; run_dispatched on another send is a Rejected-path input (3.4).
+	const held = binding && to.issued[binding.issue];
 	if (
 		binding &&
+		held &&
 		observation.kind === "run_dispatched" &&
-		to.issued[binding.issue]?.tag === "Held"
+		to.host.isHeld(held)
 	)
 		to.bindTransmission(binding.issue, observation.transmission);
 	const target =
@@ -496,7 +510,7 @@ export function translateCommand(
 			? observation.commandId
 			: undefined;
 	const commandIssue = from.issued.findIndex(
-		(issue) => issue.tag === "Held" && issue.commandId === commandId,
+		(issue) => from.host.isHeld(issue) && issue.commandId === commandId,
 	);
 	const targetCommand = to.issued[commandIssue];
 	// The two effect kinds have already been compared at issue.
@@ -505,7 +519,9 @@ export function translateCommand(
 		observation: {
 			...observation,
 			token: target.send.token,
-			...(commandId !== undefined && targetCommand?.tag === "Held"
+			...(commandId !== undefined &&
+			targetCommand !== undefined &&
+			to.host.isHeld(targetCommand)
 				? { commandId: targetCommand.commandId }
 				: {}),
 		} as Observation,
@@ -1175,7 +1191,7 @@ export class Coverage {
 							.reverse()
 							.find(
 								(item) =>
-									item.tag === "Held" &&
+									d.host.isHeld(item) &&
 									item.commandId === settlement.commandId &&
 									"runId" in item.effect &&
 									item.effect.runId === settlement.runId,
@@ -1209,8 +1225,7 @@ export class Coverage {
 				: undefined;
 		const effect =
 			held?.effect ??
-			d.issued.find((item) => item.tag === "Tokened" && item.token === token)
-				?.effect;
+			d.bindings.find((item) => item.send.token === token)?.send.effect;
 		if (!effect) return;
 		const notSent = gate.outcome.tag === "not_sent";
 		// Retryable and start-failure outcomes count above; the by-kind shapes are not_sent and removal.

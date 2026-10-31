@@ -5,6 +5,7 @@ import type {
 	IssuedEffect,
 	LedgerCommand,
 	LedgerView,
+	MainTransmission,
 	Observation,
 	ProviderKind,
 	RunEffect,
@@ -150,9 +151,9 @@ export const splitLabel = (
 		: { runnerId: match[1], querySeq: Number(match[2]) };
 };
 const runnerOf = (label: string): string => splitLabel(label).runnerId;
-type HeldIssue = Extract<IssuedEffect, { tag: "Held" }>;
+type MainIssue = Extract<IssuedEffect, { tag: "Main" }>;
 /** A runner-held issue is a start or a steer (3.13 IssuedEffect). */
-const heldRunId = ({ effect }: HeldIssue): string => {
+const heldRunId = ({ effect }: MainIssue): string => {
 	assert(
 		effect.kind === "start" || effect.kind === "steer",
 		"a Held issue is a start or a steer",
@@ -206,6 +207,8 @@ const probe = (variant: number, input: number): Probe => {
 		{ tag: "input_absent" },
 		{ tag: "native_idle" },
 		{ tag: "native_busy" },
+		// GAP (CONTRACT.md 1235-1236): 3.10 deletes the interaction probe, so these findings answer no
+		// probe; generated as inputs decide Rejects.
 		{ tag: "answer_consumed" },
 		{ tag: "answer_pending" },
 	] as const;
@@ -253,6 +256,23 @@ export class FakeProvider {
 		{ readonly send: Send; readonly transmission: number }
 	>();
 	private readonly transmissions = new Map<string, number>();
+	/**
+	 * Main's sends with no hold, by commandId and kind, latest last: a direct start's or steer's
+	 * per run.requested, a control's per claim (3.4).
+	 */
+	private readonly mainSends = new Map<string, Send[]>();
+	/** A control's claims per commandId, n from 1: its outbox row's attempt_count (3.4). */
+	private readonly claims = new Map<string, number>();
+	/** Each control claim's issue and main's name for it (3.4). */
+	private readonly mainTransmissions = new Map<
+		SendToken,
+		{ readonly issue: MainIssue; readonly name: MainTransmission }
+	>();
+	/** The outcome main wrote for each control claim; a repeat names the same (3.4, 2.1 row 215). */
+	private readonly controlOutcomes = new Map<
+		SendToken,
+		Extract<Evidence, { kind: "effect_outcome" }>["outcome"]
+	>();
 	private readonly holdBindings = new Map<
 		SendToken,
 		{
@@ -262,16 +282,10 @@ export class FakeProvider {
 		}
 	>();
 	private readonly sends = new Map<SendToken, NativeSend>();
-	private readonly pendingHeld = new Map<
-		SendToken,
-		Extract<IssuedEffect, { tag: "Held" }>
-	>();
+	private readonly pendingHeld = new Map<SendToken, MainIssue>();
 	private readonly pendingNativeCommands = new Map<SendToken, IssuedEffect>();
 	/** Held starts resolved by run_dispatched to the spawning runner; its process_started fixes their label (L2, REDESIGN r3-1). */
-	private readonly spawnHeld = new Map<
-		SendToken,
-		Extract<IssuedEffect, { tag: "Held" }>
-	>();
+	private readonly spawnHeld = new Map<SendToken, MainIssue>();
 	/** Holds whose run_dispatched the spawn already delivered; the start transmits no second one. */
 	private readonly spawnDispatched = new Set<SendToken>();
 	/** Holds whose run.dispatched the ledger has read (D50: until then an undispatched issue, never reached). */
@@ -319,7 +333,7 @@ export class FakeProvider {
 		readonly target:
 			| {
 					readonly tag: "Held";
-					readonly held: Extract<IssuedEffect, { tag: "Held" }>;
+					readonly held: MainIssue;
 					/** The runner the gated try was addressed to, if any (D49: an answer after its retirement). */
 					readonly runner: string | undefined;
 			  }
@@ -338,7 +352,7 @@ export class FakeProvider {
 	/** The latest Held answer delivered, for its shape (D49). */
 	lastUnheld:
 		| {
-				readonly held: Extract<IssuedEffect, { tag: "Held" }>;
+				readonly held: MainIssue;
 				readonly retired: boolean;
 		  }
 		| undefined;
@@ -406,9 +420,44 @@ export class FakeProvider {
 		return this.sends.get(send.token)?.label ?? this.label;
 	}
 
+	/**
+	 * A runner-held start or steer (3.4): a Main start or steer main did not send directly. A direct
+	 * send is OpenCode main's, registered at its run.requested (D60).
+	 */
+	isHeld(issued: IssuedEffect): issued is MainIssue & {
+		readonly effect: Extract<RunEffect, { kind: "start" | "steer" }>;
+	} {
+		return (
+			issued.tag === "Main" &&
+			(issued.effect.kind === "start" || issued.effect.kind === "steer") &&
+			!this.mainSends.has(`${issued.commandId}\u0000${issued.effect.kind}`)
+		);
+	}
+	/** 3.4: main claims a control's row; a claim shows only at its outcome, which names it. */
+	private claim(issue: MainIssue): Send {
+		const n = (this.claims.get(issue.commandId) ?? 0) + 1;
+		this.claims.set(issue.commandId, n);
+		const send: Send = {
+			token: tokened(`fake-main:${issue.commandId}:${n}`),
+			effect: issue.effect,
+		};
+		const key = `${issue.commandId}\u0000${issue.effect.kind}`;
+		this.mainSends.set(key, [...(this.mainSends.get(key) ?? []), send]);
+		this.mainTransmissions.set(send.token, {
+			issue,
+			name: { commandId: issue.commandId, transmission: n },
+		});
+		return send;
+	}
 	/** Repeated binding of one issue does not append another run.dispatched. */
 	bound(issued: IssuedEffect): Send {
 		if (issued.tag === "Tokened") return issued;
+		if (!this.isHeld(issued)) {
+			const latest = this.mainSends
+				.get(`${issued.commandId}\u0000${issued.effect.kind}`)
+				?.at(-1);
+			return latest ?? this.claim(issued);
+		}
 		const gated = this.gatedHolds.get(issued);
 		if (gated) return gated;
 		const previous = this.bindings.get(issued);
@@ -429,7 +478,7 @@ export class FakeProvider {
 		return held.send;
 	}
 
-	holdRun(issued: Extract<IssuedEffect, { tag: "Held" }>):
+	holdRun(issued: MainIssue):
 		| {
 				readonly tag: "Held";
 				readonly send: Send;
@@ -498,6 +547,13 @@ export class FakeProvider {
 		this.removing = source.removing;
 		this.survivor = source.survivor;
 		for (const label of source.restartLabels) this.restartLabels.add(label);
+		// D60: main is one host process, so its direct sends are the same for every ledger (3.4).
+		for (const [key, sends] of source.mainSends)
+			if (
+				!this.mainSends.has(key) &&
+				sends.every(({ token }) => !source.mainTransmissions.has(token))
+			)
+				this.mainSends.set(key, sends);
 	}
 	/** H4: a gate change applies to every send not yet transmitted; a transmitted send is never refused. */
 	setGate(gate: ProjectGate): void {
@@ -523,7 +579,7 @@ export class FakeProvider {
 	/** A pending try that met the gate or failed before holdRun: it never transmitted, so the cap does not count it (4.4, 4.8). */
 	private unhold(
 		token: SendToken,
-		held: Extract<IssuedEffect, { tag: "Held" }>,
+		held: MainIssue,
 		failure?: UnheldOutcome,
 	): void {
 		this.pendingHeld.delete(token);
@@ -535,7 +591,7 @@ export class FakeProvider {
 		this.gateHold(held, binding.send, failure);
 		if (held.effect.kind === "start") this.gatedStarts.add(heldRunId(held));
 	}
-	private gated(held: Extract<IssuedEffect, { tag: "Held" }>): boolean {
+	private gated(held: MainIssue): boolean {
 		if (
 			this.gate === "served" ||
 			this.retiredHolds.has(held.commandId) ||
@@ -550,11 +606,7 @@ export class FakeProvider {
 				: (owner ?? (this.alive ? this.label : undefined));
 		return address === undefined || !this.dead(runnerOf(address));
 	}
-	private gateHold(
-		held: Extract<IssuedEffect, { tag: "Held" }>,
-		send: Send,
-		failure?: UnheldOutcome,
-	): void {
+	private gateHold(held: MainIssue, send: Send, failure?: UnheldOutcome): void {
 		this.gatedHolds.set(held, send);
 		this.gatedTokens.set(send.token, { send, label: undefined });
 		const owner = this.ownerLabel(held);
@@ -606,26 +658,18 @@ export class FakeProvider {
 			};
 		}
 		const { token } = next.target;
-		return outcome.tag === "not_sent"
-			? {
-					verb: "observe",
-					observation: {
-						tag: "Answer",
-						token,
-						kind: "effect_outcome",
-						outcome,
-					},
-				}
-			: {
-					verb: "observe",
-					// TypeScript cannot correlate an opaque token with its kind's evidence.
-					observation: {
-						tag: "Answer",
-						token,
-						kind: "effect_outcome",
-						outcome,
-					} as Observation,
-				};
+		// 3.4: a gated control claim's outcome names its transmission.
+		const claimed = this.mainTransmissions.get(token);
+		return {
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token,
+				kind: "effect_outcome",
+				outcome,
+				...(claimed ? { transmission: claimed.name } : {}),
+			},
+		};
 	}
 	dispatch(send: Send): Extract<Evidence, { kind: "run_dispatched" }> {
 		const binding = this.holdBindings.get(send.token);
@@ -636,12 +680,22 @@ export class FakeProvider {
 			...binding,
 		};
 	}
+	/** An issue's transmissions: a hold's by its run.dispatched, a control's by its claims (3.4). */
 	bindingsFor(
-		commandId: string,
+		issue: MainIssue,
 	): readonly { readonly send: Send; readonly transmission: number }[] {
+		if (!this.isHeld(issue))
+			return (
+				this.mainSends.get(`${issue.commandId}\u0000${issue.effect.kind}`) ?? []
+			).map((send, index) => ({
+				send,
+				transmission:
+					this.mainTransmissions.get(send.token)?.name.transmission ??
+					index + 1,
+			}));
 		return [...this.holdBindings].flatMap(([token, binding]) => {
 			const send = this.sends.get(token)?.send;
-			return binding.commandId === commandId && send
+			return binding.commandId === issue.commandId && send
 				? [{ send, transmission: binding.transmission }]
 				: [];
 		});
@@ -945,11 +999,14 @@ export class FakeProvider {
 	}
 	/** The feeder reports `hold_exhausted` only for an unheld run, so never while a live runner still works one of its transmissions (4.3 steps 2-3). */
 	private heldElsewhere(commandId: string): boolean {
-		return this.bindingsFor(commandId).some(
-			({ send }) =>
-				this.sends.get(send.token)?.unfinished === true &&
-				!this.dead(runnerOf(this.labelFor(send))),
-		);
+		return [...this.holdBindings].some(([token, binding]) => {
+			const native = this.sends.get(token);
+			return (
+				binding.commandId === commandId &&
+				native?.unfinished === true &&
+				!this.dead(runnerOf(this.labelFor(native.send)))
+			);
+		});
 	}
 	private retireHold(commandId: string): void {
 		this.retiredHolds.add(commandId);
@@ -966,15 +1023,14 @@ export class FakeProvider {
 		return effects.map((effect) => {
 			const send = this.bound(effect);
 			// L2: a later transmission keeps the address its send took at issue; it is never re-addressed.
-			const first =
-				effect.tag === "Held"
-					? this.bindingsFor(effect.commandId).find(
-							(earlier) =>
-								earlier.send.token !== send.token &&
-								!this.unlaunchedTries.has(earlier.send.token) &&
-								runIdOf(earlier.send.effect) === runIdOf(effect.effect),
-						)?.send
-					: undefined;
+			const first = this.isHeld(effect)
+				? this.bindingsFor(effect).find(
+						(earlier) =>
+							earlier.send.token !== send.token &&
+							!this.unlaunchedTries.has(earlier.send.token) &&
+							runIdOf(earlier.send.effect) === runIdOf(effect.effect),
+					)?.send
+				: undefined;
 			const case2 = this.ownerLabel(effect);
 			const owner = case2 === undefined && first ? this.labelFor(first) : case2;
 			// L2: pending when its execution's start is, or, for case 3, when no process is current.
@@ -990,7 +1046,7 @@ export class FakeProvider {
 			if (!this.sends.has(send.token)) {
 				const heldRun = runIdOf(effect.effect);
 				if (
-					effect.tag === "Held" &&
+					this.isHeld(effect) &&
 					(this.retiredHolds.has(effect.commandId) ||
 						(typeof heldRun === "string" && this.terminals.has(heldRun)))
 				) {
@@ -1004,14 +1060,14 @@ export class FakeProvider {
 						? undefined
 						: label;
 				if (
-					effect.tag === "Tokened" &&
+					!this.isHeld(effect) &&
 					this.gate !== "served" &&
 					(gateAddress === undefined || !this.dead(runnerOf(gateAddress)))
 				) {
 					this.gateSend(send, gateAddress);
 					return send;
 				}
-				if (effect.tag === "Held" && pending) {
+				if (this.isHeld(effect) && pending) {
 					this.pendingHeld.set(send.token, effect);
 					return send;
 				}
@@ -1045,11 +1101,11 @@ export class FakeProvider {
 					transportRank: 0,
 				});
 				this.seenLabel(label);
-				if (effect.tag === "Held" && covered) this.coveredHolds.add(send.token);
+				if (this.isHeld(effect) && covered) this.coveredHolds.add(send.token);
 				// The feeder drops a covered owner send: holdRun returns Covered (H3). A spawn already
 				// delivered this hold's run_dispatched.
 				if (
-					effect.tag === "Held" &&
+					this.isHeld(effect) &&
 					!covered &&
 					!this.spawnDispatched.has(send.token)
 				) {
@@ -1075,7 +1131,11 @@ export class FakeProvider {
 					this.goalState === "cleared"
 				)
 					this.refusedCommands.set(send.token, "NoGoalExists");
-				else if (send.effect.kind === "send_native_command") {
+				else if (
+					send.effect.kind === "send_native_command" &&
+					// A later claim of a received command is the same command (3.4, 8.5).
+					!this.commands.has(send.effect.commandId)
+				) {
 					const queued = this.provider === "claude" && this.turning;
 					this.commands.set(send.effect.commandId, {
 						text: send.effect.text,
@@ -1295,6 +1355,34 @@ export class FakeProvider {
 	): void {
 		// Only this step's retirement is checked against this step's terminals.
 		this.retirement = undefined;
+		// 3.4: main writes one outcome per control claim and retries a retryable or not_sent outcome
+		// on its latest claim, while the issue is live, as a new claim.
+		if (
+			command.verb === "observe" &&
+			command.observation.tag === "Answer" &&
+			command.observation.kind === "effect_outcome" &&
+			command.observation.transmission !== undefined
+		) {
+			const { token, outcome } = command.observation;
+			const claimed = this.mainTransmissions.get(token);
+			if (claimed && !this.controlOutcomes.has(token)) {
+				this.controlOutcomes.set(token, outcome);
+				const { issue } = claimed;
+				if (
+					(outcome.tag === "retryable" || outcome.tag === "not_sent") &&
+					this.bindingsFor(issue).at(-1)?.send.token === token &&
+					after.live.some(
+						(item) =>
+							item.tag === "Main" &&
+							item.commandId === issue.commandId &&
+							item.effect.kind === issue.effect.kind,
+					)
+				) {
+					this.claim(issue);
+					this.issued([issue]);
+				}
+			}
+		}
 		// A gate answer names a send never transmitted: no host fact changes (H4), and a not_sent
 		// send nothing received is no native work.
 		if (isGateAnswer(command)) {
@@ -1368,8 +1456,10 @@ export class FakeProvider {
 				// H3: the feeder transmits a pending send only while it is still live.
 				const live = (effect: IssuedEffect) =>
 					before.live.some((item) =>
-						item.tag === "Held"
-							? effect.tag === "Held" && item.commandId === effect.commandId
+						item.tag === "Main"
+							? effect.tag === "Main" &&
+								item.commandId === effect.commandId &&
+								item.effect.kind === effect.effect.kind
 							: effect.tag === "Tokened" && item.token === effect.token,
 					);
 				const pending = [
@@ -2400,16 +2490,21 @@ export class FakeProvider {
 				ownLabel !== undefined &&
 				before.active?.tag === "Queued" &&
 				before.live.some((effect) => {
-					if (effect.tag !== "Tokened") return false;
+					if (effect.tag !== "Main" || effect.effect.kind !== "interrupt")
+						return false;
 					const kept = after.live.some(
-						(item) => item.tag === "Tokened" && item.token === effect.token,
+						(item) =>
+							item.tag === "Main" &&
+							item.commandId === effect.commandId &&
+							item.effect.kind === "interrupt",
 					);
-					const covered =
-						this.sends.get(effect.token) ?? this.gatedTokens.get(effect.token);
 					return (
 						!kept &&
-						covered?.send.effect.kind === "interrupt" &&
-						covered.label === ownLabel
+						this.bindingsFor(effect).some(({ send }) => {
+							const covered =
+								this.sends.get(send.token) ?? this.gatedTokens.get(send.token);
+							return covered?.label === ownLabel;
+						})
 					);
 				});
 			const unblocked = (view: LedgerView): unknown =>
@@ -2544,29 +2639,28 @@ export class FakeProvider {
 	): Send | undefined {
 		const known = snapshot.issued.map((issued) => this.bound(issued));
 		for (const issued of snapshot.issued)
-			if (issued.tag === "Held")
-				for (const binding of this.bindingsFor(issued.commandId))
+			if (issued.tag === "Main")
+				for (const binding of this.bindingsFor(issued))
 					if (!known.some((send) => send.token === binding.send.token))
 						known.push(binding.send);
 		const live = new Set(
 			snapshot.view.live.flatMap((issued) =>
-				issued.tag === "Tokened" ? [issued.token] : [],
+				issued.tag === "Tokened"
+					? [issued.token]
+					: this.bindingsFor(issued).map(({ send }) => send.token),
 			),
 		);
 		const held = new Set(
 			snapshot.view.live.flatMap((issued) =>
-				issued.tag === "Held" ? [issued.commandId] : [],
+				this.isHeld(issued) ? [issued.commandId] : [],
 			),
 		);
 		for (const [index, issued] of snapshot.issued.entries()) {
-			if (issued.tag === "Held" && held.has(issued.commandId)) {
+			if (this.isHeld(issued) && held.has(issued.commandId)) {
 				const send = known[index];
 				if (send) live.add(send.token);
 			}
 		}
-		for (const send of known)
-			if (held.has(this.holdBindings.get(send.token)?.commandId ?? ""))
-				live.add(send.token);
 		switch (action.selection) {
 			case 0:
 				return at(
@@ -2857,6 +2951,51 @@ export class FakeProvider {
 			return this.unsolicited(action, label);
 		const wire =
 			send?.token ?? `never-issued:${this.provider}:${this.serial++}`;
+		// 3.4: a control claim shows only at its outcome, which names its transmission, so its other
+		// evidence follows the outcome (main's receipt); a repeat names the same transmission.
+		// GAP (CONTRACT.md 460-461): provider evidence on a claim before main writes its outcome names a
+		// token decide cannot know yet; nearest reading: the fake delivers the outcome first.
+		const claimed = send && this.mainTransmissions.get(send.token);
+		const delivered = send && this.controlOutcomes.get(send.token);
+		const commandReceived =
+			send?.effect.kind === "send_native_command" &&
+			!this.refusedCommands.has(send.token) &&
+			this.commands.has(send.effect.commandId);
+		if (
+			send &&
+			claimed &&
+			(delivered === undefined ||
+				!(
+					(send.effect.kind === "deliver_answer" && action.variant % 3 === 0) ||
+					(commandReceived && (action.variant >= 51 || action.variant === 47))
+				))
+		) {
+			const refused = this.refusedCommands.get(send.token);
+			// 3.4: completed is succeeded, retryable_failed retryable with its retryAt and code, failed or
+			// cancelled permanent. A refused command is refused; a received one is never refused (D34).
+			const drawn =
+				refused !== undefined
+					? ({ tag: "permanent", code: refused } as const)
+					: action.variant % 3 === 1
+						? ({
+								tag: "retryable",
+								retryAt: now + (action.variant % 8 === 5 ? 100_000 : 100),
+								code:
+									send.effect.kind === "deliver_answer"
+										? "answer_refused"
+										: "TraceRetryable",
+							} as const)
+						: action.variant % 3 === 2 && !commandReceived
+							? ({ tag: "permanent", code: "TracePermanent" } as const)
+							: ({ tag: "succeeded" } as const);
+			return {
+				tag: "Answer",
+				token: send.token,
+				kind: "effect_outcome",
+				outcome: delivered ?? drawn,
+				transmission: claimed.name,
+			};
+		}
 		if (action.variant >= 16 && action.variant <= 21)
 			return {
 				tag: "Answer",
@@ -3035,9 +3174,16 @@ export class FakeProvider {
 			effect: Extract<RunEffect, { kind: "start" | "steer" }>,
 			commandId = `main-command:${this.serial++}`,
 		): IssuedEffect => {
-			const issue: IssuedEffect = direct
-				? { tag: "Tokened", token: tokened(runId), effect }
-				: { tag: "Held", commandId, effect };
+			// 3.13: a direct start or steer is Main under its input's id; its token is the runId (3.4).
+			const issue: IssuedEffect = {
+				tag: "Main",
+				commandId: direct ? effect.inputId : commandId,
+				effect,
+			};
+			if (direct)
+				this.mainSends.set(`${effect.inputId}\u0000${effect.kind}`, [
+					{ token: tokened(runId), effect },
+				]);
 			const [send] = this.issued([issue]);
 			assert(send);
 			this.mainIssues.push({ issue, token: send.token });
@@ -3130,6 +3276,37 @@ export class FakeProvider {
 								(send.effect.runId === open.runId ||
 									send.effect.runIds.includes(open.runId)),
 						);
+					// OpenCode's turn.error ends the turn and its query in one write: main's error terminal and the
+					// start's query_ended fold back to back, in either order, and the Run ends once (3.4, 3.8 GAP 5).
+					if (
+						direct &&
+						native &&
+						!native.ended &&
+						!this.unlaunchedTries.has(native.send.token) &&
+						Math.floor(action.variant / 5) % 3 === 1
+					) {
+						this.mainRun = undefined;
+						const ended: LedgerCommand = {
+							verb: "observe",
+							observation: {
+								tag: "Answer",
+								token: native.send.token,
+								kind: "query_ended",
+							},
+						};
+						const terminal = emit({
+							tag: "Main",
+							eventId: `main:${this.serial++}`,
+							kind: "run_terminal",
+							runId: open.runId,
+							outcome: "error",
+							code: "TraceTurnError",
+						});
+						const [first, second] =
+							action.input % 2 === 0 ? [ended, terminal] : [terminal, ended];
+						this.commit.push(second);
+						return first;
+					}
 					// Nearest reading: main's interrupt ends its run interrupted; the fake does not wait for the runner's confirmation.
 					// A failed reply also ends the send, so failure is read first; an unlaunched try never ran (D50).
 					const terminal =
@@ -3182,7 +3359,7 @@ export class FakeProvider {
 					open.issue = dispatch(
 						open.runId,
 						open.issue.effect,
-						open.issue.tag === "Held" ? open.issue.commandId : undefined,
+						this.isHeld(open.issue) ? open.issue.commandId : undefined,
 					);
 					const held = this.bound(open.issue).token;
 					const dispatched = this.dispatchFirst((n) => n.token === held);
@@ -3264,7 +3441,7 @@ export class FakeProvider {
 							held.effect.kind === "start" &&
 							snapshot.view.live.some(
 								(item) =>
-									item.tag === "Held" && item.commandId === held.commandId,
+									this.isHeld(item) && item.commandId === held.commandId,
 							),
 					)
 				: undefined;
@@ -3445,12 +3622,15 @@ export class FakeProvider {
 			case 2: {
 				// L6: deadlineAt is the commit's stop.deadlineAt, null for a commit L6 does not fold.
 				const deadlineAt = action.input % 3 === 0 ? null : now + 1_000;
+				// 3.4: a Control's commandId names main's outbox row, unique per Control.
+				const commandId = `control:${this.serial++}`;
 				const controls = [
-					{ kind: "stop", deadlineAt },
-					{ kind: "end", deadlineAt },
-					{ kind: "run_now", inputId, deadlineAt },
+					{ kind: "stop", commandId, deadlineAt },
+					{ kind: "end", commandId, deadlineAt },
+					{ kind: "run_now", commandId, inputId, deadlineAt },
 					{
 						kind: "answer",
+						commandId,
 						interactionId: this.interaction(snapshot, action.index),
 						answer: { allow: action.input % 2 === 0 },
 					},
@@ -3604,7 +3784,11 @@ export class FakeProvider {
 			case 10:
 				command = at(this.delivered, action.index) ?? {
 					verb: "control",
-					control: { kind: "stop", deadlineAt: now + 1_000 },
+					control: {
+						kind: "stop",
+						commandId: `control:${this.serial++}`,
+						deadlineAt: now + 1_000,
+					},
 				};
 				break;
 			case 11:
@@ -3612,6 +3796,7 @@ export class FakeProvider {
 					verb: "control",
 					control: {
 						kind: "answer",
+						commandId: `control:${this.serial++}`,
 						interactionId: this.interaction(snapshot, action.index),
 						answer: `answer:${action.input}`,
 					},
@@ -3686,7 +3871,7 @@ export class FakeProvider {
 				break;
 			case 24: {
 				const issue = at(
-					snapshot.issued.filter((item) => item.tag === "Held"),
+					snapshot.issued.filter((item) => this.isHeld(item)),
 					action.index,
 				);
 				if (!issue) {
@@ -3709,7 +3894,7 @@ export class FakeProvider {
 				// A run still held by a live runner is Busy, so holdRun binds no new transmission (4.3 step 2).
 				const dropped =
 					!snapshot.view.live.some(
-						(item) => item.tag === "Held" && item.commandId === issue.commandId,
+						(item) => this.isHeld(item) && item.commandId === issue.commandId,
 					) ||
 					owner === null ||
 					this.dead(runnerOf(issueLabel)) ||
@@ -3803,7 +3988,7 @@ export class FakeProvider {
 			}
 			case 25: {
 				const commandId = at(
-					snapshot.issued.filter((item) => item.tag === "Held"),
+					snapshot.issued.filter((item) => this.isHeld(item)),
 					action.index,
 				)?.commandId;
 				// D49: an unheld outcome naming a Run that never issued that queue key.

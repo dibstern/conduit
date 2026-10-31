@@ -84,9 +84,12 @@ function readNotifications(fake: FakeProvider): void {
 	for (const observation of fake.pendingObservations())
 		fake.observe({ verb: "observe", observation }, emptyView());
 }
-function held(kind: "start" | "steer", commandId: string = kind): IssuedEffect {
+function held(
+	kind: "start" | "steer",
+	commandId: string = kind,
+): Extract<IssuedEffect, { tag: "Main" }> {
 	return {
-		tag: "Held",
+		tag: "Main",
 		commandId,
 		effect:
 			kind === "start"
@@ -165,8 +168,8 @@ describe("fake provider round 8 contract decisions", () => {
 		started(fake, "newer:1");
 		const [interrupt] = fake.issued([
 			{
-				tag: "Tokened",
-				token: token("interrupt"),
+				tag: "Main",
+				commandId: "interrupt",
 				effect: { kind: "interrupt", runId: "R", runIds: ["R"] },
 			},
 		]);
@@ -183,8 +186,8 @@ describe("fake provider round 8 contract decisions", () => {
 		started(fake, "opencode:b2:0");
 		const [interrupt] = fake.issued([
 			{
-				tag: "Tokened",
-				token: token("interrupt"),
+				tag: "Main",
+				commandId: "interrupt",
 				effect: { kind: "interrupt", runId: "R", runIds: ["R"] },
 			},
 		]);
@@ -562,8 +565,8 @@ describe("fake provider round 3 alphabet", () => {
 			[],
 		);
 		const destroy: IssuedEffect = {
-			tag: "Tokened",
-			token: token("stale-kill"),
+			tag: "Main",
+			commandId: "stale-kill",
 			effect: { kind: "end_session", runId: null, label: "host:2" },
 		};
 		expect(() =>
@@ -636,8 +639,8 @@ describe("fake provider round 3 alphabet", () => {
 			[],
 		);
 		const destroy: IssuedEffect = {
-			tag: "Tokened",
-			token: token("stale-kill"),
+			tag: "Main",
+			commandId: "stale-kill",
 			effect: { kind: "end_session", runId: null, label: "host:2" },
 		};
 		expect(() =>
@@ -661,26 +664,22 @@ describe("fake provider round 3 alphabet", () => {
 		).toThrow(/LI5: destructive effect without confirmation/);
 	});
 
+	// 3.4: a control's outcome is main's, per (commandId, n); main writes no delivery_unknown for it.
 	it.each([
 		"succeeded",
 		"retryable",
 		"permanent",
-		"delivery_unknown",
-	] as const)("generates %s outcomes for a Run-less kill (D4)", (tag) => {
+	] as const)("generates %s outcomes for a Run-less kill (D4, 3.4)", (tag) => {
 		const fake = new FakeProvider("claude");
 		started(fake);
 		const issue: IssuedEffect = {
-			tag: "Tokened",
-			token: token("runless"),
+			tag: "Main",
+			commandId: "runless",
 			effect: { kind: "end_session", runId: null, label: "host-0:1" },
 		};
-		fake.issued([issue]);
-		const variant = [
-			"succeeded",
-			"retryable",
-			"permanent",
-			"delivery_unknown",
-		].indexOf(tag);
+		const [sent] = fake.issued([issue]);
+		assert(sent);
+		const variant = ["succeeded", "retryable", "permanent"].indexOf(tag);
 		const packet = fake.next(
 			{ ...action, variant },
 			{ issued: [issue], view: emptyView(), now: 0 },
@@ -689,8 +688,11 @@ describe("fake provider round 3 alphabet", () => {
 			packet.command.verb === "observe" &&
 				packet.command.observation.kind === "effect_outcome",
 		);
-		expect(packet.command.observation.token).toBe("runless");
-		expect(packet.command.observation.outcome.tag).toBe(tag);
+		expect(packet.command.observation).toMatchObject({
+			token: sent.token,
+			outcome: { tag },
+			transmission: { commandId: "runless", transmission: 1 },
+		});
 	});
 
 	it("fires successive silent probe transmission alarms without fabricating a response (D13)", () => {
@@ -775,13 +777,13 @@ describe("fake provider round 3 contract decisions", () => {
 			held("start"),
 			held("steer"),
 			{
-				tag: "Tokened",
-				token: token("interrupt"),
+				tag: "Main",
+				commandId: "interrupt",
 				effect: { kind: "interrupt", runId: "R", runIds: ["R"] },
 			},
 			{
-				tag: "Tokened",
-				token: token("close"),
+				tag: "Main",
+				commandId: "close",
 				effect: { kind: "end_session", runId: "R", label: "host-0:1" },
 			},
 		]);
@@ -811,8 +813,8 @@ describe("fake provider round 3 contract decisions", () => {
 			held("start"),
 			held("steer"),
 			{
-				tag: "Tokened",
-				token: token("interrupt"),
+				tag: "Main",
+				commandId: "interrupt",
 				effect: { kind: "interrupt", runId: "R", runIds: ["R"] },
 			},
 			// REDESIGN-7 removed close, the other query-scoped control.
@@ -990,8 +992,8 @@ describe("fake provider round 3 contract decisions", () => {
 			held("start"),
 			...(["first", "retry", "other"] as const).map(
 				(id): IssuedEffect => ({
-					tag: "Tokened",
-					token: token(id),
+					tag: "Main",
+					commandId: id,
 					effect: {
 						kind: "deliver_answer",
 						runId: "R",
@@ -1060,8 +1062,8 @@ describe("fake provider round 3 contract decisions", () => {
 		started(fake, "current:1");
 		const before = { ...emptyView(), anythingMayAct: true };
 		const destroy: IssuedEffect = {
-			tag: "Tokened",
-			token: token("kill"),
+			tag: "Main",
+			commandId: "kill",
 			effect: { kind: "end_session", runId: "R", label: "old:1" },
 		};
 		expect(() =>
@@ -1224,14 +1226,16 @@ describe("fake provider round 4 contract", () => {
 			);
 		if (phase === "coverage") {
 			const close: IssuedEffect = {
-				tag: "Tokened",
-				token: token("close"),
+				tag: "Main",
+				commandId: "close",
 				effect: { kind: "end_session", runId: "wake", label: "host-0:1" },
 			};
-			fake.issued([close]);
-			answer(fake, close, {
+			const [sent] = fake.issued([close]);
+			assert(sent);
+			answer(fake, sent, {
 				kind: "effect_outcome",
 				outcome: { tag: "succeeded" },
+				transmission: { commandId: "close", transmission: 1 },
 			});
 		}
 		const start = () =>
@@ -1260,8 +1264,8 @@ describe("fake provider round 4 contract", () => {
 			answer(fake, send, { kind: "started" });
 			fake.issued([
 				{
-					tag: "Tokened",
-					token: token("queued"),
+					tag: "Main",
+					commandId: "queued",
 					effect: {
 						kind: "send_native_command",
 						commandId: "queued",
@@ -1331,8 +1335,8 @@ describe("fake provider round 4 contract", () => {
 				},
 				[
 					{
-						tag: "Tokened",
-						token: token("kill-wake"),
+						tag: "Main",
+						commandId: "kill-wake",
 						effect: {
 							kind: "end_session",
 							runId: "wake-run",
@@ -1374,20 +1378,21 @@ describe("fake provider round 4 contract", () => {
 	it("holds an issued native command without inventing a process until process_started (8.5/D22)", () => {
 		const fake = new FakeProvider("claude");
 		const command: IssuedEffect = {
-			tag: "Tokened",
-			token: token("command"),
+			tag: "Main",
+			commandId: "command",
 			effect: {
 				kind: "send_native_command",
 				commandId: "command",
 				text: "/clear",
 			},
 		};
-		fake.issued([command]);
+		const [sent] = fake.issued([command]);
+		assert(sent);
 		expect(fake.groundTruth().processAlive).toBe(false);
 		expect(fake.groundTruth().unfinished).toEqual([]);
 		expect(fake.pendingObservations()).toEqual([]);
 		started(fake, "host-0:1", [command]);
-		expect(fake.groundTruth().unfinished).toEqual([command.token]);
+		expect(fake.groundTruth().unfinished).toEqual([sent.token]);
 		expect(fake.pendingObservations()).toEqual([
 			{
 				tag: "Unsolicited",
@@ -1400,8 +1405,8 @@ describe("fake provider round 4 contract", () => {
 	});
 
 	const refusedPause: IssuedEffect = {
-		tag: "Tokened",
-		token: token("pause"),
+		tag: "Main",
+		commandId: "pause",
 		effect: {
 			kind: "send_native_command",
 			commandId: "pause",
@@ -1410,9 +1415,11 @@ describe("fake provider round 4 contract", () => {
 	};
 	const refusal = {
 		tag: "Answer",
-		token: token("pause"),
+		// 3.4: the host composes a control's token from (commandId, n).
+		token: token("fake-main:pause:1"),
 		kind: "effect_outcome",
 		outcome: { tag: "permanent", code: "NoGoalExists" },
+		transmission: { commandId: "pause", transmission: 1 },
 	} as const;
 	it.each([
 		0, 1, 2, 3,
@@ -1469,8 +1476,8 @@ describe("fake provider round 4 contract", () => {
 	});
 
 	const close = (label: string | null): IssuedEffect => ({
-		tag: "Tokened",
-		token: token("destroy"),
+		tag: "Main",
+		commandId: "destroy",
 		effect: { kind: "end_session", runId: "R", label },
 	});
 	it.each([
@@ -1490,8 +1497,8 @@ describe("fake provider round 4 contract", () => {
 		fake.issued([
 			held("start"),
 			{
-				tag: "Tokened",
-				token: token("end"),
+				tag: "Main",
+				commandId: "end",
 				effect: { kind: "end_session", runId: null, label: "host-0:1" },
 			},
 		]);
@@ -1627,8 +1634,8 @@ describe("fake provider round 4 contract", () => {
 				{ ...emptyView(), anythingMayAct: true },
 				[
 					{
-						tag: "Tokened",
-						token: token("end"),
+						tag: "Main",
+						commandId: "end",
 						effect: { kind: "end_session", runId: "R", label: null },
 					},
 				],
@@ -1832,8 +1839,8 @@ describe("fake provider round 9 contract decisions", () => {
 		});
 		fake.issued([
 			{
-				tag: "Tokened",
-				token: token("close:1"),
+				tag: "Main",
+				commandId: "close:1",
 				effect: { kind: "end_session", runId: "R", label: null },
 			},
 		]);
@@ -1967,8 +1974,8 @@ describe("fake provider round 9 contract decisions", () => {
 	] as const)("never ends a %s native command's send by a command_lifecycle Answer, which is Rejected (D46, 8.5)", (provider) => {
 		const fake = new FakeProvider(provider);
 		const command: IssuedEffect = {
-			tag: "Tokened",
-			token: token("command"),
+			tag: "Main",
+			commandId: "command",
 			effect: {
 				kind: "send_native_command",
 				commandId: "c1",
@@ -1976,14 +1983,15 @@ describe("fake provider round 9 contract decisions", () => {
 			},
 		};
 		started(fake, "host-0:1", [command]);
-		fake.issued([command]);
-		expect(fake.groundTruth().unfinished).toContain(command.token);
-		answer(fake, command, {
+		const [sent] = fake.issued([command]);
+		assert(sent);
+		expect(fake.groundTruth().unfinished).toContain(sent.token);
+		answer(fake, sent, {
 			kind: "command_lifecycle",
 			commandId: "c1",
 			state: "completed",
 		});
-		expect(fake.groundTruth().unfinished).toContain(command.token);
+		expect(fake.groundTruth().unfinished).toContain(sent.token);
 	});
 
 	it.each([
@@ -2042,7 +2050,7 @@ describe("fake provider round 9 contract decisions", () => {
 		});
 		const start = (commandId: string) =>
 			({
-				tag: "Held",
+				tag: "Main",
 				commandId,
 				effect: {
 					kind: "start",
@@ -2432,7 +2440,7 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 		fake.setGate(gate);
 		const start = held("start");
 		fake.issued([start]);
-		expect(fake.bindingsFor("start")).toEqual([]);
+		expect(fake.bindingsFor(start)).toEqual([]);
 		expect(fake.pendingObservations()).toEqual([]);
 		expect(gateAnswer(fake)).toEqual(gatedHold("start", outcome));
 	});
@@ -2455,10 +2463,11 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 	it("never refuses a send already transmitted (H4)", () => {
 		const fake = new FakeProvider("claude");
 		started(fake);
-		const [send] = fake.issued([held("start"), probe]);
+		const start = held("start");
+		const [send] = fake.issued([start, probe]);
 		assert(send);
 		fake.setGate("removed");
-		expect(fake.bindingsFor("start")).toHaveLength(1);
+		expect(fake.bindingsFor(start)).toHaveLength(1);
 		const delivered = fake.pendingObservations();
 		expect(delivered).toHaveLength(1);
 		// 3.13 has no resume control: with nothing to deliver, time passes.
@@ -2962,8 +2971,8 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 		fake.issued([held("start")]);
 		lost(fake, "host-0");
 		const close: IssuedEffect = {
-			tag: "Tokened",
-			token: token("close"),
+			tag: "Main",
+			commandId: "close",
 			effect: { kind: "end_session", runId: "R", label: null },
 		};
 		expect(() =>
@@ -2984,13 +2993,16 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 		started(fake);
 		fake.issued([held("start")]);
 		const interrupt: IssuedEffect = {
-			tag: "Tokened",
-			token: token("interrupt"),
+			tag: "Main",
+			commandId: "interrupt",
 			effect: { kind: "interrupt", runId: "R", runIds: ["R"] },
 		};
 		const step = () =>
 			fake.assertStep(
-				{ verb: "control", control: { kind, deadlineAt: null } },
+				{
+					verb: "control",
+					control: { kind, commandId: kind, deadlineAt: null },
+				},
 				starting,
 				emptyView(),
 				[interrupt],
@@ -3223,7 +3235,7 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 		fake.issued([held("steer", "C")]);
 		const [send] = fake.issued([
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "C",
 				effect: { kind: "start", runId: "R2", inputId: "C", mode: "resume" },
 			},
@@ -3305,8 +3317,8 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 			settlement: { kind: "alarm_fired" },
 		} as const;
 		const close: IssuedEffect = {
-			tag: "Tokened",
-			token: token("close:R"),
+			tag: "Main",
+			commandId: "close:R",
 			effect: { kind: "end_session", runId: "R", label: null },
 		};
 		expect(() =>
@@ -3363,7 +3375,7 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 		fake.pendingObservations();
 		fake.issued([held("steer", "C")]);
 		const start: IssuedEffect = {
-			tag: "Held",
+			tag: "Main",
 			commandId: "C",
 			effect: { kind: "start", runId: "R2", inputId: "C", mode: "resume" },
 		};

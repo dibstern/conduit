@@ -9,9 +9,11 @@ import type {
 
 export type ProviderKind = "claude" | "codex" | "cursor" | "opencode";
 /**
- * Opaque host string, never parsed. Runner-held start or steer: each transmission's from its
- * run_dispatched (runId, commandId, transmission), n minted by holdRun (3.4, 4.11). A direct start:
- * its run.requested runId. Every other effect with no hold: from ctx.newId.
+ * Opaque host string, never parsed; its issuer's (3.4). An effect main issues: each transmission's
+ * from main's (commandId, transmission), a runner-held start or steer's from its run_dispatched (n
+ * minted by holdRun, 4.11), any other's from its effect_outcome's `transmission` (n the claimed
+ * outbox row's attempt_count); a direct start's is its run.requested runId. probe, stop_task and
+ * cancel_request: from ctx.newId.
  */
 export type SendToken = string & { readonly __brand: "SendToken" };
 /**
@@ -116,8 +118,15 @@ export type Evidence =
 	  }
 	| { readonly kind: "query_ended" }
 	| { readonly kind: "accounting" }
+	/**
+	 * transmission: present for an effect main issues with no hold but a direct start, its outbox
+	 * row's command_id and attempt_count from every writer of its outcome, a sweep's included; n 0
+	 * when no claim reached the row, which ends the issue never transmitted (3.4); absent for the
+	 * three effects decide issues.
+	 */
 	| {
 			readonly kind: "effect_outcome";
+			readonly transmission?: MainTransmission;
 			readonly outcome:
 				| { readonly tag: "succeeded" }
 				/** code: main's receipt error_code, an answer's lastRefusal (3.10). */
@@ -205,21 +214,35 @@ export type Evidence =
 			readonly answer: "running" | "finished" | "uncertain" | "absent";
 	  };
 
+/**
+ * commandId on each control main issues an effect for: its commit event's metadata.commandId, its
+ * outbox row's command_id (3.4).
+ */
 export type Control =
+	| {
+			readonly kind: "stop";
+			readonly commandId: string;
+			readonly deadlineAt: number | null;
+	  }
 	/**
 	 * deadlineAt: the commit's payload.stop.deadlineAt; null for a commit L6 does not fold (no
 	 * stop, or U2's retire), which opens and joins no deadline (L6).
 	 */
-	| { readonly kind: "stop"; readonly deadlineAt: number | null }
-	| { readonly kind: "end"; readonly deadlineAt: number | null }
-	/** The interrupt main's `interruptForInput` asks for (5.1, D58). */
+	| {
+			readonly kind: "end";
+			readonly commandId: string;
+			readonly deadlineAt: number | null;
+	  }
+	/** The interrupt main's `interruptForInput` asks for (5.1, D58); deadlineAt as stop's (L6). */
 	| {
 			readonly kind: "run_now";
+			readonly commandId: string;
 			readonly inputId: string;
 			readonly deadlineAt: number | null;
 	  }
 	| {
 			readonly kind: "answer";
+			readonly commandId: string;
 			readonly interactionId: string;
 			readonly answer: unknown;
 	  }
@@ -266,8 +289,9 @@ export type Settlement =
 	  };
 
 /**
- * decide issues only probe, stop_task and cancel_request (3.12); every other kind is a main call
- * the arm folds into `live` (3.5, 3.10, 8.4, 8.5).
+ * decide issues only probe, stop_task and cancel_request (3.12), each Tokened; every other kind
+ * is a main call the arm folds into `live` as Main (3.5, 3.10, 8.4, 8.5), a start or steer from its
+ * Main observation or its run.dispatched Answer, any other from its Control, and decide never issues.
  */
 export type RunEffect =
 	| {
@@ -304,7 +328,7 @@ export type RunEffect =
 			readonly runId: string | null;
 			readonly target:
 				| { readonly tag: "input"; readonly inputId: string }
-				| { readonly tag: "interaction"; readonly interactionId: string }
+				/** No answer probe: main's answer outcome is never Unknown (3.4, 3.10). */
 				| { readonly tag: "native_session" };
 	  }
 	| { readonly kind: "stop_task"; readonly key: TaskKey }
@@ -317,8 +341,9 @@ export type RunEffect =
 export interface DecideContext {
 	readonly now: number;
 	/**
-	 * Mints a wake Run's id and the tokens of effects with no hold (3.4) from the folded event's
-	 * sequence and a counter within the decision, so a replay mints the same ids; never repeats.
+	 * Mints a wake Run's id and the tokens of probe, stop_task and cancel_request (3.4) from the
+	 * folded event's sequence and a counter within the decision, so a replay mints the same ids;
+	 * never repeats.
 	 */
 	readonly newId: () => string;
 	readonly policy: {
@@ -329,18 +354,31 @@ export interface DecideContext {
 }
 
 export type IssuedEffect =
-	/** A runner-held start or steer main issued, folded from `run.dispatched` under its runId and commandId; holdRun binds n. */
+	/**
+	 * Every effect main issues (D60), named by its commandId, each transmission by main's
+	 * (commandId, transmission) (3.4): a runner-held start or steer from its run.dispatched, under
+	 * its runId; a direct start by its run.requested runId; any other from its effect_outcome. Hold
+	 * facts are valid only on a runner-held start or steer.
+	 */
 	| {
-			readonly tag: "Held";
+			readonly tag: "Main";
 			readonly commandId: string;
 			readonly effect: RunEffect;
 	  }
-	/** A direct start's token is its `run.requested` runId; every other effect with no hold gets its token from ctx.newId(). */
+	/** probe, stop_task and cancel_request, which decide issues; each token from ctx.newId(). */
 	| {
 			readonly tag: "Tokened";
 			readonly token: SendToken;
 			readonly effect: RunEffect;
 	  };
+/**
+ * Main's name for one transmission of an effect it issues: the commandId and its n (3.4); n 0 names
+ * none, only an issue's end before any claim.
+ */
+export interface MainTransmission {
+	readonly commandId: string;
+	readonly transmission: number;
+}
 export interface RunEnded {
 	readonly runId: string;
 	readonly outcome: RunOutcome;
@@ -405,8 +443,9 @@ export type InteractionView =
 			readonly tag: "Pending";
 			readonly interactionId: string;
 			readonly kind: "permission" | "question";
+			/** The refused answer transmission (3.10). */
 			readonly lastRefusal?: {
-				readonly attempt: SendToken;
+				readonly attempt: MainTransmission;
 				readonly code: string;
 			};
 	  }

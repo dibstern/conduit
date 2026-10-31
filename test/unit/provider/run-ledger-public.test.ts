@@ -49,8 +49,14 @@ describe("Run Ledger public model", () => {
 				delivery: "queue",
 				request: { text: "hello" },
 			},
-			{ verb: "control", control: { kind: "stop", deadlineAt: 30_100 } },
-			{ verb: "control", control: { kind: "end", deadlineAt: null } },
+			{
+				verb: "control",
+				control: { kind: "stop", commandId: "stop-1", deadlineAt: 30_100 },
+			},
+			{
+				verb: "control",
+				control: { kind: "end", commandId: "end-1", deadlineAt: null },
+			},
 			{
 				verb: "settle",
 				settlement: { kind: "process_lost", runnerId: "host", retiredAt: 99 },
@@ -120,11 +126,11 @@ describe("Run Ledger public model", () => {
 			kind: "input_accepted",
 		};
 		const held: IssuedEffect = {
-			tag: "Held",
+			tag: "Main",
 			commandId: "c1",
 			effect: { kind: "start", runId: "r1", inputId: "A", mode: "fresh" },
 		};
-		// @ts-expect-error A held effect has no token; holdRun binds it.
+		// @ts-expect-error A Main effect has no token; main names its transmissions (3.4).
 		const heldToken: IssuedEffect = { ...held, token };
 		const interruptMs: DecideContext["policy"] = {
 			settleMs: 1,

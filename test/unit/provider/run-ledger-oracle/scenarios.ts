@@ -8,6 +8,7 @@ import type {
 	LedgerCommand,
 	LedgerView,
 	MainRunEvent,
+	MainTransmission,
 	ProviderKind,
 	RunEffect,
 	RunEnded,
@@ -115,12 +116,25 @@ export function step(d: Driver, command: LedgerCommand, now?: number) {
 	return decision;
 }
 
-export function tokenOf(entry: IssuedEffect): SendToken {
+/**
+ * A send's token: decide's for a Tokened issue; for a Main control's claim n, the host composes it
+ * from (commandId, n) (3.4). A runner-held start or steer answers under its run.dispatched token.
+ */
+export function tokenOf(entry: IssuedEffect, n = 1): SendToken {
 	assert(
-		entry.tag === "Tokened",
-		"a Held send answers under its run.dispatched token",
+		entry.tag === "Tokened" ||
+			(entry.effect.kind !== "start" && entry.effect.kind !== "steer"),
+		"a Main start or steer answers under its run.requested or run.dispatched token",
 	);
-	return entry.token;
+	return entry.tag === "Tokened"
+		? entry.token
+		: (`${entry.commandId}:${n}` as SendToken);
+}
+
+/** 3.4: a Main control's effect_outcome names its claim n by main's (commandId, transmission). */
+export function claimOf(entry: IssuedEffect, n = 1): MainTransmission {
+	assert(entry.tag === "Main", "only a Main issue has transmissions");
+	return { commandId: entry.commandId, transmission: n };
 }
 
 export const observe = (
@@ -211,7 +225,10 @@ export function fire(d: Driver, at = d.alarmAt) {
 }
 
 export const stop = (d: Driver, deadlineAt: number | null = null) =>
-	step(d, { verb: "control", control: { kind: "stop", deadlineAt } });
+	step(d, {
+		verb: "control",
+		control: { kind: "stop", commandId: `stop-${d.next()}`, deadlineAt },
+	});
 
 export const terminal = (
 	d: Driver,
@@ -227,7 +244,12 @@ export function ask(d: Driver, token: SendToken, interactionId = "q") {
 	});
 	step(d, {
 		verb: "control",
-		control: { kind: "answer", interactionId, answer: "yes" },
+		control: {
+			kind: "answer",
+			commandId: `answer-${d.next()}`,
+			interactionId,
+			answer: "yes",
+		},
 	});
 	return d.latest("deliver_answer");
 }
@@ -616,6 +638,7 @@ export const scenarios: readonly OracleScenario[] = [
 					token: tokenOf(interrupt),
 					kind: "effect_outcome",
 					outcome: { tag: "succeeded" },
+					transmission: claimOf(interrupt),
 				},
 			});
 			expect(d.view().active?.tag).toBe("Starting");
@@ -656,7 +679,12 @@ export const scenarios: readonly OracleScenario[] = [
 			});
 			step(d, {
 				verb: "control",
-				control: { kind: "run_now", inputId: "B", deadlineAt: 9_000 },
+				control: {
+					kind: "run_now",
+					commandId: "run-now-B",
+					inputId: "B",
+					deadlineAt: 9_000,
+				},
 			});
 			// L6: a later commit joins the open deadline and moves nothing.
 			expect(d.alarmAt).toBe(5_000);
@@ -738,6 +766,7 @@ export const scenarios: readonly OracleScenario[] = [
 			const failed = observe(d, tokenOf(answer), {
 				kind: "effect_outcome",
 				outcome: { tag: "permanent", code: "HTTP400" },
+				transmission: claimOf(answer),
 			});
 			// 3.10 (amends 10B): no re-delivery and no probe; the interaction is resolved.
 			expect(failed.issued).toEqual([]);
@@ -760,6 +789,7 @@ export const scenarios: readonly OracleScenario[] = [
 			observe(d, tokenOf(answer), {
 				kind: "effect_outcome",
 				outcome: { tag: "retryable", retryAt: d.now + 50 },
+				transmission: claimOf(answer),
 			});
 			expect(d.view().interactions).toContainEqual(
 				expect.objectContaining({ tag: "Answered", interactionId: "q" }),
@@ -848,7 +878,12 @@ export const scenarios: readonly OracleScenario[] = [
 			const a = running(d);
 			step(d, {
 				verb: "control",
-				control: { kind: "run_now", inputId: "B", deadlineAt: null },
+				control: {
+					kind: "run_now",
+					commandId: "run-now-B",
+					inputId: "B",
+					deadlineAt: null,
+				},
 			});
 			expect(transmissions(d, "B")).toHaveLength(0);
 			expect(complete(d, a.token)).toHaveLength(1);
@@ -875,6 +910,7 @@ export const scenarios: readonly OracleScenario[] = [
 					token: tokenOf(interrupt),
 					kind: "effect_outcome",
 					outcome: { tag: "retryable", retryAt: d.now + 1 },
+					transmission: claimOf(interrupt),
 				},
 			});
 			expect(d.view().active?.tag).toBe("Starting");
@@ -891,6 +927,7 @@ export const scenarios: readonly OracleScenario[] = [
 			observe(d, tokenOf(answer), {
 				kind: "effect_outcome",
 				outcome: { tag: "retryable", retryAt: d.now + 1 },
+				transmission: claimOf(answer),
 			});
 			const result = observe(d, a.token, {
 				kind: "result",
@@ -1054,7 +1091,7 @@ export const scenarios: readonly OracleScenario[] = [
 			step(d, dispatched);
 			expect(d.view().live).toMatchObject([
 				{
-					tag: "Held",
+					tag: "Main",
 					commandId: "cmd-A",
 					effect: { kind: "start", inputId: "A" },
 				},
@@ -1079,8 +1116,9 @@ export const scenarios: readonly OracleScenario[] = [
 			main(d, requested, "requested-A");
 			expect(d.view().live).toMatchObject([
 				{
-					tag: "Tokened",
-					token: "main-A",
+					// 3.13: a direct start is Main under its input's id; its token is the runId (3.4).
+					tag: "Main",
+					commandId: "A",
 					effect: { kind: "start", inputId: "A" },
 				},
 			]);

@@ -214,9 +214,29 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 								: `main:run_started:${requested?.kind === "run_requested" && requested.inputId === e.inputId ? "own" : "joined"}`,
 				);
 			}
+			// 3.4: OpenCode's turn.error pair folds back to back, in either order.
+			const previous = real.packets.at(-2);
+			const prior =
+				previous?.verb === "observe" ? previous.observation : undefined;
+			if (
+				e.tag === "Main" &&
+				e.kind === "run_terminal" &&
+				e.code === "TraceTurnError" &&
+				prior?.tag === "Answer" &&
+				prior.kind === "query_ended"
+			)
+				hit("main:opencode_pair:query_ended_first");
+			if (
+				e.tag === "Answer" &&
+				e.kind === "query_ended" &&
+				prior?.tag === "Main" &&
+				prior.kind === "run_terminal" &&
+				prior.code === "TraceTurnError"
+			)
+				hit("main:opencode_pair:terminal_first");
 			if (e.tag === "Answer" && e.kind === "command_lifecycle") {
 				const held = real.issued.find(
-					(item) => item.tag === "Held" && item.commandId === e.commandId,
+					(item) => real.fake.isHeld(item) && item.commandId === e.commandId,
 				);
 				if (held) hit(`answer:command_lifecycle:${held.effect.kind}`);
 				if (held && real.fake.bound(held).token !== e.token)
@@ -271,7 +291,7 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 		const shapes: Record<string, number> = {};
 		const issued: IssuedEffect[] = [
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "old",
 				effect: {
 					kind: "start",
@@ -281,12 +301,12 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				},
 			},
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "current",
 				effect: { kind: "start", runId: "R", inputId: "B", mode: "fresh" },
 			},
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "steer",
 				effect: { kind: "steer", runId: "R", inputId: "C" },
 			},
@@ -300,13 +320,13 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				},
 			},
 			{
-				tag: "Tokened",
-				token: "end-run" as SendToken,
+				tag: "Main",
+				commandId: "end-run",
 				effect: { kind: "end_session", runId: "R", label: "host-0:1" },
 			},
 			{
-				tag: "Tokened",
-				token: "end-session" as SendToken,
+				tag: "Main",
+				commandId: "end-session",
 				effect: { kind: "end_session", runId: null, label: "host-0:1" },
 			},
 		];
@@ -345,13 +365,23 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 							if (command.observation.kind === "effect_outcome") {
 								const key = command.observation.outcome.tag;
 								outcomes[key] = (outcomes[key] ?? 0) + 1;
-								const token = command.observation.token;
-								const effect = real.issued.find(
-									(item) => real.fake.bound(item).token === token,
+								const { token, transmission } = command.observation;
+								// 3.4: a control's claims are its transmissions; a hold or a Tokened send has one token.
+								const effect = real.issued.find((item) =>
+									item.tag === "Main" && !real.fake.isHeld(item)
+										? real.fake
+												.bindingsFor(item)
+												.some(({ send }) => send.token === token)
+										: real.fake.bound(item).token === token,
 								)?.effect.kind;
 								if (effect)
 									outcomes[`${effect}:${key}`] =
 										(outcomes[`${effect}:${key}`] ?? 0) + 1;
+								if (transmission !== undefined)
+									for (const name of transmission.transmission > 1
+										? [`control:${key}`, "control:transmission>1"]
+										: [`control:${key}`])
+										outcomes[name] = (outcomes[name] ?? 0) + 1;
 							}
 						}
 					},
@@ -452,6 +482,18 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				"delivery_unknown",
 				"not_sent",
 			].map((outcome) => `outcome:end_session:${outcome}`),
+			// 3.4: a control's effect_outcome per (commandId, n), n from 1.
+			...[
+				"succeeded",
+				"permanent",
+				"retryable",
+				"not_sent",
+				"transmission>1",
+				"sweep_n0",
+			].map((outcome) => `outcome:control:${outcome}`),
+			// 3.4, 3.8 GAP 5: OpenCode's turn.error writes main's terminal and query_ended together.
+			"main:opencode_pair:query_ended_first",
+			"main:opencode_pair:terminal_first",
 		];
 		const adversarial: Record<string, string> = {
 			...(provider === "cursor" || provider === "opencode"
@@ -472,6 +514,8 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 					}),
 		};
 		const waiting: Record<string, string> = {
+			"outcome:control:sweep_n0":
+				"a sweep ending a control row never claimed (n 0, 3.4 line 465, build round 2c) is not generated yet",
 			...(provider === "opencode"
 				? {
 						"main:run_terminal:completed":
@@ -481,6 +525,16 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 		};
 		// D60: OpenCode's run_requested is its transmission; the others' is a held dispatch.
 		const notExpressible: Record<string, string> = {
+			"outcome:end_session:delivery_unknown":
+				"main writes no delivery_unknown for a control (3.4)",
+			...(provider === "opencode"
+				? {}
+				: {
+						"main:opencode_pair:query_ended_first":
+							"only OpenCode's turn.error ends a turn and its query in one write (3.4)",
+						"main:opencode_pair:terminal_first":
+							"only OpenCode's turn.error ends a turn and its query in one write (3.4)",
+					}),
 			...(provider === "opencode"
 				? {
 						"main:run_requested:held":
@@ -622,6 +676,8 @@ type HostEvent =
 			readonly verb: "issued";
 			readonly effect: IssuedEffect;
 			readonly token: SendToken;
+			/** A runner-held start or steer (3.13 Main, D60); a control claim is not held. */
+			readonly held: boolean;
 	  };
 /**
  * Independent host-fact checker over a generated packet log (6.9 H1, H2; 4.4 H3). It keeps its own
@@ -662,7 +718,7 @@ function hostFacts(
 				hit("issued:start-pending");
 				pendingRuns.add(effect.runId);
 			}
-			if (event.effect.tag === "Held") transmitted.set(event.token, serving);
+			if (event.held) transmitted.set(event.token, serving);
 			continue;
 		}
 		if (event.verb === "settle") {
@@ -760,18 +816,18 @@ class HostFactCommand implements fc.Command<{ now: number }, HostFactRun> {
 		const truth = fake.groundTruth();
 		const effect: IssuedEffect | undefined = [
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: `start:${n}`,
 				effect: { kind: "start", runId, inputId: `in:${n}`, mode: "fresh" },
 			} as const,
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: `steer:${n}`,
 				effect: { kind: "steer", runId, inputId: `in:${n}` },
 			} as const,
 			{
-				tag: "Tokened",
-				token: `end:${n}` as SendToken,
+				tag: "Main",
+				commandId: `end:${n}`,
 				effect: {
 					kind: "end_session",
 					runId,
@@ -783,7 +839,12 @@ class HostFactCommand implements fc.Command<{ now: number }, HostFactRun> {
 			real.issued.push(effect);
 			const [send] = fake.issued([effect]);
 			assert(send);
-			real.log.push({ verb: "issued", effect, token: send.token });
+			real.log.push({
+				verb: "issued",
+				effect,
+				token: send.token,
+				held: fake.isHeld(effect),
+			});
 		}
 		const view = {
 			...emptyView(),
@@ -799,7 +860,12 @@ class HostFactCommand implements fc.Command<{ now: number }, HostFactRun> {
 		// Main's own starts and steers (D60, 3.4) are sends the checker must see issued.
 		for (const { issue, token } of fake.takeMainIssues()) {
 			real.issued.push(issue);
-			real.log.push({ verb: "issued", effect: issue, token });
+			real.log.push({
+				verb: "issued",
+				effect: issue,
+				token,
+				held: fake.isHeld(issue),
+			});
 		}
 		real.log.push(packet.command);
 		fake.observe(packet.command, view);
@@ -972,12 +1038,12 @@ describe("trace driver mechanics", () => {
 		const left = new TraceDriver(
 			"claude",
 			"reference",
-			fixture([{ tag: "Held", commandId: "left", effect }]),
+			fixture([{ tag: "Main", commandId: "left", effect }]),
 		);
 		const right = new TraceDriver(
 			"claude",
 			"decider",
-			fixture([{ tag: "Held", commandId: "right", effect }]),
+			fixture([{ tag: "Main", commandId: "right", effect }]),
 		);
 		for (const d of [left, right])
 			d.step({ verb: "settle", settlement: { kind: "alarm_fired" } });
@@ -1110,7 +1176,7 @@ describe("trace driver mechanics", () => {
 	it("aligns held and tokened effects by issue order and translates only Answer tokens", () => {
 		const issued = (prefix: string): IssuedEffect[] => [
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: `${prefix}:command`,
 				effect: {
 					kind: "start",
@@ -1179,9 +1245,9 @@ describe("trace driver mechanics", () => {
 		} as const;
 		const mismatch = new DifferentialTrace(
 			"claude",
-			fixture([{ tag: "Held", commandId: "cmd", effect: start }]),
+			fixture([{ tag: "Main", commandId: "cmd", effect: start }]),
 			fixture([
-				{ tag: "Held", commandId: "cmd", effect: { ...start, inputId: "B" } },
+				{ tag: "Main", commandId: "cmd", effect: { ...start, inputId: "B" } },
 			]),
 		);
 		expect(() =>
@@ -1216,16 +1282,23 @@ describe("trace driver mechanics", () => {
 					text: "/goal clear",
 				},
 			});
-			const send = d.expected.issued.at(-1);
-			assert(send?.tag === "Tokened");
+			const issue = d.expected.issued.at(-1);
+			assert(issue?.tag === "Main");
+			// 3.4: main's claim of the native command is its transmission 1.
+			const claim = d.expected.host.bindingsFor(issue).at(-1);
+			assert(claim);
 			expect(() =>
 				d.step({
 					verb: "observe",
 					observation: {
 						tag: "Answer",
-						token: send.token,
+						token: claim.send.token,
 						kind: "effect_outcome",
 						outcome: { tag: "not_sent", retryAt: d.expected.now },
+						transmission: {
+							commandId: issue.commandId,
+							transmission: claim.transmission,
+						},
 					},
 				}),
 			).not.toThrow();
@@ -1322,7 +1395,7 @@ describe("fake provider scheduling and ground truth", () => {
 		const fake = liveFake("claude");
 		const [send] = fake.issued([
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "retired",
 				effect: { kind: "start", runId: "R", inputId: "A", mode: "resume" },
 			},
@@ -1352,7 +1425,7 @@ describe("fake provider scheduling and ground truth", () => {
 		const fake = liveFake("claude");
 		const [send] = fake.issued([
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "journal",
 				effect: { kind: "start", runId: "R", inputId: "A", mode: "resume" },
 			},
@@ -1395,12 +1468,12 @@ describe("fake provider scheduling and ground truth", () => {
 		const fake = liveFake(provider);
 		const [start, steer] = fake.issued([
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "A",
 				effect: { kind: "start", runId: "R", inputId: "A", mode: "resume" },
 			},
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "B",
 				effect: { kind: "steer", runId: "R", inputId: "B" },
 			},
@@ -1546,7 +1619,7 @@ describe("fake provider scheduling and ground truth", () => {
 		fake.setGoal();
 		const [start] = fake.issued([
 			{
-				tag: "Held",
+				tag: "Main",
 				commandId: "A",
 				effect: { kind: "start", runId: "R", inputId: "A", mode: "resume" },
 			},
@@ -1560,14 +1633,17 @@ describe("fake provider scheduling and ground truth", () => {
 			emptyView(),
 		);
 		fake.observe(
-			{ verb: "control", control: { kind: "stop", deadlineAt: null } },
+			{
+				verb: "control",
+				control: { kind: "stop", commandId: "stop", deadlineAt: null },
+			},
 			emptyView(),
 		);
 		expect(fake.groundTruth().goal).toBe("active");
 		fake.issued([
 			{
-				tag: "Tokened",
-				token: "clear" as SendToken,
+				tag: "Main",
+				commandId: "clear",
 				effect: {
 					kind: "send_native_command",
 					commandId: "clear",
@@ -1721,7 +1797,7 @@ describe("fake provider scheduling and ground truth", () => {
 	it("catches a planted LI1 overlapping start and LI3 second terminal", () => {
 		const fake = liveFake("claude");
 		const start: IssuedEffect = {
-			tag: "Held",
+			tag: "Main",
 			commandId: "A",
 			effect: { kind: "start", runId: "R", inputId: "A", mode: "resume" },
 		};

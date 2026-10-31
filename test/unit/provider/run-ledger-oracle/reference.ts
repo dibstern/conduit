@@ -57,7 +57,10 @@ type WorkEnd =
 	| "forced";
 
 interface Tx {
-	readonly token?: SendToken | undefined;
+	/** A control claim's token binds at its outcome, which names its transmission (3.4). */
+	token?: SendToken | undefined;
+	/** A control claim's transmission: its outbox row's attempt_count (3.4). */
+	readonly n?: number | undefined;
 	readonly seq: number;
 	readonly label: Label | null;
 	readonly runnerId: string | null;
@@ -233,9 +236,12 @@ interface World {
 		| {
 				readonly step: "retire" | "end_session";
 				readonly runId?: string | undefined;
+				readonly commandId?: string | undefined;
 		  }
 		| undefined;
-	pendingEnd?: { readonly runId: string } | undefined;
+	pendingEnd?:
+		| { readonly runId: string; readonly commandId: string }
+		| undefined;
 	snapshotEntry: number;
 	lastNotified?: TaskKey | undefined;
 }
@@ -577,9 +583,10 @@ function endRun(
 	step.ended.push({ runId: run.runId, ...ended });
 	if (world.confirm?.runId === run.runId) world.confirm = undefined;
 	// 8.4: end stops the Run, then issues end_session once it is Ended.
-	if (world.pendingEnd?.runId === run.runId) {
+	const end = world.pendingEnd;
+	if (end?.runId === run.runId) {
 		world.pendingEnd = undefined;
-		gateEndSession(world, step, run.runId);
+		gateEndSession(world, run.runId, end.commandId);
 	}
 }
 
@@ -623,7 +630,7 @@ function wakeEnd(
 /** 3.8: the one Run-end rule, with 3.6's unlaunch, to a fixpoint, then advance. */
 function reconcile(world: World, step: Step): void {
 	for (let moved = true; moved; ) {
-		moved = false;
+		const phases = world.runs.map((run) => run.phase).join();
 		for (const run of world.runs) {
 			if (run.phase === "Ended") continue;
 			if (run.phase === "Queued") {
@@ -632,25 +639,28 @@ function reconcile(world: World, step: Step): void {
 						outcome: "interrupted",
 						reason: { tag: "interrupted", forced: false },
 					});
-					moved = true;
 				}
 				continue;
 			}
 			if (run.origin === "wake") {
 				const ended = wakeEnd(world, run);
-				if (ended !== undefined) {
-					endRun(world, step, run, ended);
-					moved = true;
-				}
+				if (ended !== undefined) endRun(world, step, run, ended);
 				continue;
 			}
-			if (run.exec.endEvidence) {
+			// 3.8 GAP 5: a Run with a main run and no result ends only once main's terminal folded,
+			// unless 2.1 to 2.3 applies, so OpenCode's query_ended and turn.error fold either order.
+			const mains = [...world.mainRuns.values()].filter(
+				(main) => main.runId === run.runId,
+			);
+			const awaiting =
+				!run.exec.result &&
+				mains.length > 0 &&
+				mains.every((main) => main.open);
+			if (run.exec.endEvidence && !awaiting) {
 				endRun(world, step, run, fold(foldItems(world, run), run.asked));
-				moved = true;
 				continue;
 			}
 			if (!nothingMayAct(world, run)) continue;
-			moved = true;
 			const sends = deliverySends(world, run);
 			const code = refusal(world, run);
 			if (notYetDelivered(world, run) && !run.asked) {
@@ -721,15 +731,17 @@ function reconcile(world: World, step: Step): void {
 							? { tag: cause, code: firstCode.reason.code }
 							: { tag: cause },
 				});
-			} else endRun(world, step, run, fold(foldItems(world, run), run.asked));
+			} else if (!awaiting)
+				endRun(world, step, run, fold(foldItems(world, run), run.asked));
 		}
+		moved = world.runs.map((run) => run.phase).join() !== phases;
 	}
 	// 8.4: a gate releases once the tasks it reads are neither live nor unknown.
 	if (world.confirm !== undefined && taskView(world).tag === "none") {
 		const gate = world.confirm;
 		world.confirm = undefined;
-		if (gate.step === "end_session")
-			foldEndSession(world, step, gate.runId ?? null);
+		if (gate.step === "end_session" && gate.commandId !== undefined)
+			foldEndSession(world, gate.runId ?? null, gate.commandId);
 	}
 }
 
@@ -809,7 +821,19 @@ function transmit(
 		runnerId,
 		transport: { tag: "Issued" },
 		consumption: { tag: "None" },
-		unheld: token === undefined,
+		unheld: token === undefined && send.held,
+		// 3.4: a control's claims count per commandId, n from 1; the end Control's interrupt and
+		// end_session share one (GAP, CONTRACT.md 443-449 vs 8.4 2871-2878).
+		n:
+			token === undefined && !send.held
+				? 1 +
+					Math.max(
+						0,
+						...world.sends
+							.filter((item) => !item.held && item.commandId === send.commandId)
+							.flatMap((item) => item.txs.map((claim) => claim.n ?? 0)),
+					)
+				: undefined,
 		notSent: false,
 		released: false,
 		resumeRejected: false,
@@ -828,17 +852,34 @@ function transmit(
 	return tx;
 }
 
-/** A Tokened effect with no hold, its token from ctx.newId (3.13). */
-function fold1(world: World, step: Step, effect: RunEffect): Send {
+/** probe, stop_task or cancel_request: decide's, Tokened, its token from ctx.newId (3.12, 3.13). */
+function fold1(
+	world: World,
+	step: Step,
+	effect: Extract<
+		RunEffect,
+		{ kind: "probe" | "stop_task" | "cancel_request" }
+	>,
+): Send {
 	const send = issue(world, effect, false);
 	const token = step.newId() as SendToken;
 	transmit(world, send, token);
-	if (
-		effect.kind === "probe" ||
-		effect.kind === "stop_task" ||
-		effect.kind === "cancel_request"
-	)
-		step.effects.push({ tag: "Tokened", token, effect });
+	step.effects.push({ tag: "Tokened", token, effect });
+	return send;
+}
+
+/**
+ * 3.4: an effect main issues with no hold, under its Control's commandId; its first claim is open,
+ * named only at its outcome, and may act until then (3.5).
+ */
+function issueControl(
+	world: World,
+	effect: RunEffect,
+	commandId: string,
+): Send {
+	const send = issue(world, effect, false);
+	send.commandId = commandId;
+	transmit(world, send, undefined);
 	return send;
 }
 
@@ -885,18 +926,31 @@ function reprobe(world: World, step: Step, send: Send, probe: Probe): void {
 	};
 }
 
-function foldEndSession(world: World, step: Step, runId: string | null): void {
-	fold1(world, step, {
-		kind: "end_session",
-		runId,
-		label: currentLabel(world),
-	});
+function foldEndSession(
+	world: World,
+	runId: string | null,
+	commandId: string,
+): void {
+	issueControl(
+		world,
+		{ kind: "end_session", runId, label: currentLabel(world) },
+		commandId,
+	);
 }
 
 /** 8.4: the end_session step is confirm-gated with tasks live or unknown. */
-function gateEndSession(world: World, step: Step, runId: string | null): void {
-	if (taskView(world).tag === "none") foldEndSession(world, step, runId);
-	else world.confirm = { step: "end_session", runId: runId ?? undefined };
+function gateEndSession(
+	world: World,
+	runId: string | null,
+	commandId: string,
+): void {
+	if (taskView(world).tag === "none") foldEndSession(world, runId, commandId);
+	else
+		world.confirm = {
+			step: "end_session",
+			runId: runId ?? undefined,
+			commandId,
+		};
 }
 
 /** 3.4 session end: covers earlier sends; the next start is fresh. */
@@ -1029,9 +1083,9 @@ function requestInteraction(
 /** 3.10: the first answer decision wins (user or timeout). */
 function answerInteraction(
 	world: World,
-	step: Step,
 	interaction: Interaction,
 	answer: unknown,
+	commandId: string,
 ): void {
 	interaction.answer ??= answer;
 	const run = world.runs.find(
@@ -1044,13 +1098,17 @@ function answerInteraction(
 						send.txs.some((tx) => tx.label === interaction.label),
 				)),
 	);
-	const send = fold1(world, step, {
-		kind: "deliver_answer",
-		runId: run?.runId ?? null,
-		label: interaction.label,
-		interactionId: interaction.interactionId,
-		answer: interaction.answer,
-	});
+	const send = issueControl(
+		world,
+		{
+			kind: "deliver_answer",
+			runId: run?.runId ?? null,
+			label: interaction.label,
+			interactionId: interaction.interactionId,
+			answer: interaction.answer,
+		},
+		commandId,
+	);
 	interaction.deliveries.push(world.sends.indexOf(send));
 }
 
@@ -1334,6 +1392,32 @@ function answer(
 		world.provider !== "claude"
 	)
 		return rejected(`${observation.kind} is Claude's (3.4, 9, D46)`);
+	// 3.4: a control's outcome names its transmission, which binds the token the host composed.
+	if (
+		observation.kind === "effect_outcome" &&
+		observation.transmission !== undefined
+	) {
+		const named = observation.transmission;
+		if (observation.outcome.tag === "delivery_unknown")
+			return rejected("main writes no delivery_unknown for a control (3.4)");
+		// 3.4 (CONTRACT.md 465): n 0 ends an issue never claimed; no generated input names it yet.
+		const claim = world.sends
+			.filter((send) => !send.held && send.commandId === named.commandId)
+			.flatMap((send) => send.txs)
+			.find((tx) => tx.n === named.transmission);
+		if (claim === undefined) return noop("unknown transmission (3.4)");
+		const bound = world.tokens.get(observation.token);
+		if (claim.token === undefined && bound === undefined) {
+			claim.token = observation.token;
+			const send = world.sends.find((item) => item.txs.includes(claim));
+			if (send !== undefined)
+				world.tokens.set(observation.token, {
+					send: world.sends.indexOf(send),
+					tx: send.txs.indexOf(claim),
+				});
+		} else if (claim.token !== observation.token)
+			return rejected("a transmission names one token (3.4)");
+	}
 	const at = world.tokens.get(observation.token);
 	if (at === undefined) return noop("unknown or never-issued token (3.4)");
 	const send = world.sends[at.send];
@@ -1343,6 +1427,13 @@ function answer(
 	if (!producible(world, send, evidence))
 		return rejected(
 			`${send.effect.kind} cannot produce ${evidence.kind} evidence (3.4)`,
+		);
+	if (
+		evidence.kind === "effect_outcome" &&
+		(evidence.transmission !== undefined) !== (tx.n !== undefined)
+	)
+		return rejected(
+			"an effect_outcome names a transmission exactly for a control (3.4)",
 		);
 	const run = findRun(world, send.runId);
 	const live =
@@ -1536,11 +1627,10 @@ function openRecovery(world: World, step: Step, send: Send, tx: Tx): void {
 }
 function recoveryTarget(send: Send): Probe["target"] | undefined {
 	const effect = send.effect;
-	if (effect.kind === "start" || effect.kind === "steer")
-		return { tag: "input", inputId: effect.inputId };
-	if (effect.kind === "deliver_answer")
-		return { tag: "interaction", interactionId: effect.interactionId };
-	return undefined;
+	// 3.10: no answer probe; main retries an answer only at a retryable outcome.
+	return effect.kind === "start" || effect.kind === "steer"
+		? { tag: "input", inputId: effect.inputId }
+		: undefined;
 }
 
 function effectOutcome(
@@ -1600,7 +1690,12 @@ function effectOutcome(
 				}
 			}
 			break;
-		case "permanent":
+		case "permanent": {
+			// 3.4: an outcome with no live claim (the budget's exhaustion) names the latest claimed
+			// transmission, so the claim opened for the retry never happened.
+			const open = send.txs.at(-1);
+			if (tx.n !== undefined && open !== tx && open?.token === undefined)
+				send.txs.pop();
 			tx.permanent = outcome.code;
 			tx.resumeRejected = outcome.code === "native_resume_rejected";
 			tx.transport = joinTransport(tx.transport, {
@@ -1624,12 +1719,22 @@ function effectOutcome(
 				if (interaction !== undefined) interaction.resolved = true;
 			}
 			break;
+		}
 		case "delivery_unknown":
 			tx.transport = joinTransport(tx.transport, { tag: "Unknown" });
 			seal(tx);
 			openRecovery(world, step, send, tx);
 			return changed;
 	}
+	// 3.4: main claims a control's row again after a retrying outcome on its latest claim.
+	// GAP (CONTRACT.md 453-455 vs H4 1552-1553): 3.4's status mapping has no not_sent, yet H4 answers a
+	// send_native_command not_sent. Nearest reading: it names its claim's (commandId, n) and main claims n + 1.
+	if (
+		tx.n !== undefined &&
+		tx === send.txs.at(-1) &&
+		(outcome.tag === "retryable" || outcome.tag === "not_sent")
+	)
+		transmit(world, send, undefined);
 	seal(tx);
 	return changed;
 }
@@ -1662,9 +1767,6 @@ function probeResult(
 		finding.tag === "native_busy" ||
 		(target === "input" &&
 			(finding.tag === "input_present" || finding.tag === "input_absent")) ||
-		(target === "interaction" &&
-			(finding.tag === "answer_consumed" ||
-				finding.tag === "answer_pending")) ||
 		(target === "native_session" && finding.tag === "native_idle");
 	if (!fits)
 		return rejected(`${finding.tag} cannot answer a ${target} probe (3.4)`);
@@ -1709,27 +1811,6 @@ function probeResult(
 			if (subject !== undefined) {
 				// 9 (decided 2026-10-28): input_absent ends probing; a later acceptance beats it.
 				subject.absent = true;
-				subject.consumption = joinConsumption(subject.consumption, {
-					tag: "NotConsumed",
-					why: "absent",
-				});
-				seal(subject);
-			}
-			break;
-		case "answer_consumed":
-			if (subject !== undefined) {
-				subject.consumption = joinConsumption(subject.consumption, {
-					tag: "Accepted",
-				});
-				seal(subject);
-			}
-			if (probe.target.tag === "interaction") {
-				const interaction = interactionOf(world, probe.target.interactionId);
-				if (interaction !== undefined) interaction.resolved = true;
-			}
-			break;
-		case "answer_pending":
-			if (subject !== undefined) {
 				subject.consumption = joinConsumption(subject.consumption, {
 					tag: "NotConsumed",
 					why: "absent",
@@ -1876,8 +1957,11 @@ function mainEvent(
 			// 3.4: a direct send's run.requested is its transmission, its token the runId; a runner-held
 			// send's names its Run, and run.dispatched is its transmission.
 			const send = prior ?? issue(world, effect, !observation.direct);
-			if (observation.direct)
+			if (observation.direct) {
+				// 3.13: a direct start is Main under its input's id.
+				send.commandId ??= input.inputId;
 				transmit(world, send, observation.runId as SendToken);
+			}
 			return changed;
 		}
 		case "run_started": {
@@ -1947,6 +2031,7 @@ function commit(
 	step: Step,
 	by: InterruptBy,
 	deadlineAt: number | null,
+	commandId: string,
 ): void {
 	const run = activeRun(world);
 	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
@@ -1989,7 +2074,7 @@ function commit(
 			.filter(([, main]) => main.open && main.runId === run?.runId)
 			.map(([id]) => id);
 		const runId = acting ? (run?.runId ?? null) : null;
-		fold1(world, step, { kind: "interrupt", runId, runIds });
+		issueControl(world, { kind: "interrupt", runId, runIds }, commandId);
 		if (world.provider === "opencode") {
 			// 5.1 OpenCode Stop: main issues the native abort; the Stop issues cancel_request and a
 			// native_session probe together, the probe's deadline running from that issue (3.7).
@@ -2137,11 +2222,11 @@ function control(
 ): Outcome {
 	switch (command.kind) {
 		case "stop":
-			commit(world, step, "stop", command.deadlineAt);
+			commit(world, step, "stop", command.deadlineAt, command.commandId);
 			return changed;
 		case "run_now": {
 			// D58: the input is main's inbox's until its handoff; the ledger reads only the commit.
-			commit(world, step, "run_now", command.deadlineAt);
+			commit(world, step, "run_now", command.deadlineAt, command.commandId);
 			return changed;
 		}
 		case "end": {
@@ -2149,15 +2234,18 @@ function control(
 			if (run === undefined || run.phase === "Queued") {
 				if (run !== undefined) {
 					run.asked = true;
-					world.pendingEnd = { runId: run.runId };
+					world.pendingEnd = {
+						runId: run.runId,
+						commandId: command.commandId,
+					};
 					return changed;
 				}
 				// 8.4: with no Run, end_session{runId: null} at once, adding nothing to the stop deadline.
-				gateEndSession(world, step, null);
+				gateEndSession(world, null, command.commandId);
 				return changed;
 			}
-			world.pendingEnd = { runId: run.runId };
-			commit(world, step, "end", command.deadlineAt);
+			world.pendingEnd = { runId: run.runId, commandId: command.commandId };
+			commit(world, step, "end", command.deadlineAt, command.commandId);
 			return changed;
 		}
 		case "answer": {
@@ -2172,7 +2260,7 @@ function control(
 			});
 			if (delivering)
 				return noop("answered once: the first answer wins (3.10)");
-			answerInteraction(world, step, interaction, command.answer);
+			answerInteraction(world, interaction, command.answer, command.commandId);
 			return changed;
 		}
 		case "stop_tasks": {
@@ -2195,8 +2283,8 @@ function control(
 			if (command.snapshotEntry !== world.snapshotEntry)
 				return rejected("stale confirm (8.4)");
 			world.confirm = undefined;
-			if (gate.step === "end_session")
-				foldEndSession(world, step, gate.runId ?? null);
+			if (gate.step === "end_session" && gate.commandId !== undefined)
+				foldEndSession(world, gate.runId ?? null, gate.commandId);
 			return changed;
 		}
 		case "native_command": {
@@ -2206,11 +2294,15 @@ function control(
 				)
 			)
 				return rejected("native command already issued (8.5)");
-			const send = fold1(world, step, {
-				kind: "send_native_command",
-				commandId: command.commandId,
-				text: command.text,
-			});
+			const send = issueControl(
+				world,
+				{
+					kind: "send_native_command",
+					commandId: command.commandId,
+					text: command.text,
+				},
+				command.commandId,
+			);
 			world.nativeCommands.push({
 				commandId: command.commandId,
 				send: world.sends.indexOf(send),
@@ -2623,33 +2715,39 @@ export function viewLedger(state: ReferenceState): LedgerView {
 	const world = worldOf(state);
 	const run = activeRun(world);
 	const live: IssuedEffect[] = world.sends.flatMap((send): IssuedEffect[] => {
-		if (send.effect.kind === "probe") return [];
+		const effect = send.effect;
+		if (effect.kind === "probe") return [];
 		const acting = send.txs.filter((tx) => mayStillAct(world, send, tx));
-		if (send.held)
-			return acting.length > 0 && send.commandId !== undefined
-				? [{ tag: "Held", commandId: send.commandId, effect: send.effect }]
-				: [];
-		return acting.flatMap((tx): IssuedEffect[] =>
-			tx.token === undefined
-				? []
-				: [{ tag: "Tokened", token: tx.token, effect: send.effect }],
-		);
+		// 3.13: decide's own effects are Tokened per transmission; every effect main issues is Main.
+		if (effect.kind === "stop_task" || effect.kind === "cancel_request")
+			return acting.flatMap((tx): IssuedEffect[] =>
+				tx.token === undefined
+					? []
+					: [{ tag: "Tokened", token: tx.token, effect }],
+			);
+		return acting.length > 0 && send.commandId !== undefined
+			? [{ tag: "Main", commandId: send.commandId, effect }]
+			: [];
 	});
 	const tasks = taskView(world);
 	const interactions = world.interactions.flatMap((item): InteractionView[] => {
-		const delivery = item.deliveries
-			.map((index) => world.sends[index])
-			.at(-1)
-			?.txs.at(-1);
+		const send = item.deliveries.map((index) => world.sends[index]).at(-1);
+		const delivery = send?.txs.at(-1);
 		if (item.resolved && delivery === undefined) return [];
-		// 10B: a refused answer stays Pending, naming its attempt and code, while its delivery retries.
+		// 3.10 (10B): a refused answer stays Pending, naming the transmission its retryable outcome
+		// refused and that outcome's code, while its delivery retries.
+		const named = send?.txs.filter((tx) => tx.token !== undefined).at(-1);
 		const refused =
 			!item.resolved &&
-			delivery?.consumption.tag !== "Accepted" &&
-			delivery?.transport.tag === "Retrying" &&
-			delivery.refusal !== undefined &&
-			delivery.token !== undefined
-				? { attempt: delivery.token, code: delivery.refusal }
+			send?.commandId !== undefined &&
+			named?.n !== undefined &&
+			named.consumption.tag !== "Accepted" &&
+			named.retryable &&
+			named.refusal !== undefined
+				? {
+						attempt: { commandId: send.commandId, transmission: named.n },
+						code: named.refusal,
+					}
 				: undefined;
 		if (delivery === undefined || refused !== undefined)
 			return [
