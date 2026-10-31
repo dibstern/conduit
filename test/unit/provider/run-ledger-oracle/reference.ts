@@ -237,6 +237,8 @@ interface World {
 	readonly runners: Map<string, Runner>;
 	current: string | null;
 	readonly retirements: Set<string>;
+	/** Oracle edit (32.2.8), L1 (CONTRACT.md 349-350): runners retired before their process_started. */
+	readonly retiredUnstarted: Set<string>;
 	readonly wakes: Wake[];
 	readonly interactions: Interaction[];
 	readonly nativeCommands: NativeCommandRec[];
@@ -839,11 +841,7 @@ function issue(world: World, effect: RunEffect, held: boolean): Send {
 	};
 	world.sends.push(send);
 	// L1 item 1, L2: a held send addressed to a retired runner is covered at issue, never handed over.
-	if (
-		held &&
-		send.runnerId !== null &&
-		world.runners.get(send.runnerId)?.retired
-	)
+	if (held && send.runnerId !== null && isRetired(world, send.runnerId))
 		transmit(world, send, undefined).sealed = {
 			value: "never",
 			unconsumed: false,
@@ -883,7 +881,7 @@ function transmit(
 	};
 	send.txs.push(tx);
 	// L1 item 1, L2: a transmission to a retired address is covered at once, a reclaim's included.
-	if (runnerId !== null && world.runners.get(runnerId)?.retired) {
+	if (runnerId !== null && isRetired(world, runnerId)) {
 		seal(tx);
 		tx.ended ??= "process_lost";
 	}
@@ -1901,7 +1899,7 @@ function dispatched(
 	if (world.tokens.has(observation.token))
 		return noop("repeated run.dispatched");
 	const runner = world.runners.get(observation.runnerId);
-	if (runner?.retired === true)
+	if (isRetired(world, observation.runnerId))
 		return noop("no hold is written on a retired runner (4.3)");
 	// 3.4: run.dispatched names its Run by main's runId and the issue in that Run by commandId.
 	const run = findRun(world, world.mainRuns.get(observation.runId)?.runId);
@@ -2038,15 +2036,11 @@ function mainEvent(
 			const run = findRun(world, target?.runId);
 			if (input === undefined || run === undefined)
 				return noop("run.started for an unknown run");
-			if (input.runId === run.runId) {
-				// 3.9: a steer that outlived its Run starts its own Run here.
-				if (run.phase === "Ended") return noop();
-				return noop();
-			}
-			const from = findRun(world, input.runId);
 			if (run.phase === "Ended") {
 				// 3.9 (CONTRACT.md 975-980): a steer its Run's end left unconsumed is a Run of its own, its
-				// reservation's, Launched with its send.
+				// reservation's, Launched with its send. Oracle edit (32.2.8): this holds for a steer that
+				// joined that Run too (CONTRACT.md 978-981, "its host's run.started starts it"), which the
+				// same-Run noop below used to swallow.
 				const runId = input.reservation ?? observation.requestedRunId;
 				if (findRun(world, runId) !== undefined)
 					return noop(
@@ -2067,6 +2061,8 @@ function mainEvent(
 					world.mainRuns.set(runId, { runId: own.runId, open: true });
 				return changed;
 			}
+			if (input.runId === run.runId) return noop();
+			const from = findRun(world, input.runId);
 			if (from !== undefined) {
 				const at = from.inputs.indexOf(input.inputId);
 				if (at >= 0) from.inputs.splice(at, 1);
@@ -2383,13 +2379,18 @@ function control(
 	}
 }
 
+/** Oracle edit (32.2.8), L1 (CONTRACT.md 349-350, 6.1): retirement is final, a runner not yet started included. */
+const isRetired = (world: World, runnerId: string) =>
+	world.runners.get(runnerId)?.retired === true ||
+	world.retiredUnstarted.has(runnerId);
+
 /** L1: a runner retires at its process_lost or, for totality, another runner's process_started. */
 function retire(world: World, runnerId: string): void {
 	const runner = world.runners.get(runnerId);
 	if (runner !== undefined) {
 		runner.retired = true;
 		decideLostWork(world, runner.latest);
-	}
+	} else world.retiredUnstarted.add(runnerId);
 	if (world.current === runnerId) world.current = null;
 	const onRunner = (label: Label | null) =>
 		label !== null && splitLabel(label).runnerId === runnerId;
@@ -2486,7 +2487,7 @@ function settle(
 			const prior = world.runners.get(runnerId);
 			// L1: retired is final, and a live runner's start at or below its latest querySeq is an older label.
 			if (
-				prior?.retired === true ||
+				isRetired(world, runnerId) ||
 				(prior !== undefined &&
 					world.current === runnerId &&
 					querySeq <= splitLabel(prior.latest).querySeq)
@@ -2504,11 +2505,7 @@ function settle(
 					...send.txs.map((tx) => tx.runnerId),
 				]),
 			]))
-				if (
-					other !== null &&
-					other !== runnerId &&
-					world.runners.get(other)?.retired !== true
-				)
+				if (other !== null && other !== runnerId && !isRetired(world, other))
 					retire(world, other);
 			world.runners.set(runnerId, {
 				latest: settlement.label,
@@ -2628,6 +2625,7 @@ function emptyWorld(
 		runners: new Map(),
 		current: null,
 		retirements: new Set(),
+		retiredUnstarted: new Set(),
 		wakes: [],
 		interactions: [],
 		nativeCommands: [],

@@ -94,18 +94,12 @@ const has = (
 const claudeRules: ProviderDecisionRules = {
 	fences: startOrSteer,
 	idleCovers: () => false,
+	// Gap (CONTRACT.md 3086, 3092-3094): "cancelled before any started" is the transmission's
+	// NotConsumed{cancelled}, which may not act (3.5); following the oracle it is no work-ended
+	// evidence, so a later `started` joins it to Observed.
 	workEnded(evidence) {
-		const lifecycle = (state: "started" | "cancelled") =>
-			evidence.findIndex(
-				(item) => item.kind === "command_lifecycle" && item.state === state,
-			);
-		// Gap (CONTRACT.md 3092-3094): "cancelled before any started" is read from this send's
-		// evidence order; the oracle reads it as the transmission still unconsumed.
-		const cancelled = lifecycle("cancelled");
-		const started = lifecycle("started");
 		return (
 			has(evidence, "result") ||
-			(cancelled >= 0 && (started < 0 || cancelled < started)) ||
 			(evidence.some(
 				(item) => item.kind === "journal_answer" && item.answer === "absent",
 			) &&
@@ -117,20 +111,32 @@ const claudeRules: ProviderDecisionRules = {
 export const nativePolicies: ProviderPolicyTable = {
 	claude: {
 		tag: "Ready",
-		capabilities: { backgroundTasks: true, runnerHost: true },
+		capabilities: {
+			backgroundTasks: true,
+			runnerHost: true,
+			commandReceipts: true,
+		},
 		runEnd: "result",
 		intake: runnerIntake,
 		rules: claudeRules,
 	},
 	codex: {
 		tag: "Pending",
-		capabilities: { backgroundTasks: true, runnerHost: true },
+		capabilities: {
+			backgroundTasks: true,
+			runnerHost: true,
+			commandReceipts: false,
+		},
 		runEnd: "result",
 		ticket: "conduit-test-82tn.32.2.13",
 	},
 	cursor: {
 		tag: "Ready",
-		capabilities: { backgroundTasks: false, runnerHost: true },
+		capabilities: {
+			backgroundTasks: false,
+			runnerHost: true,
+			commandReceipts: false,
+		},
 		runEnd: "result",
 		intake: runnerIntake,
 		rules: {
@@ -141,7 +147,11 @@ export const nativePolicies: ProviderPolicyTable = {
 	},
 	opencode: {
 		tag: "Ready",
-		capabilities: { backgroundTasks: false, runnerHost: false },
+		capabilities: {
+			backgroundTasks: false,
+			runnerHost: false,
+			commandReceipts: false,
+		},
 		runEnd: "query_ended",
 		intake: openCodeIntake,
 		rules: {

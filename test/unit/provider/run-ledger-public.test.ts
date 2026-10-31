@@ -42,7 +42,7 @@ describe("Run Ledger public model", () => {
 			interactions: [],
 		};
 		expect(viewLedger(state)).toEqual(empty);
-		// 32.2.5 builds the plain path; later lanes' inputs reject as not yet built.
+		// No input writes the frozen state or mints an id.
 		const commands: readonly (readonly [
 			LedgerCommand,
 			"Accepted" | "Rejected",
@@ -99,7 +99,9 @@ describe("Run Ledger public model", () => {
 						tasks: [],
 					},
 				},
-				"Rejected",
+				// 8.1: a provider with no background tasks rejects a snapshot; on one that has them, a
+				// runner not started changes nothing (L1).
+				provider === "claude" || provider === "codex" ? "Accepted" : "Rejected",
 			],
 			[
 				{
@@ -163,7 +165,11 @@ describe("Run Ledger public model", () => {
 		};
 		const pending = {
 			tag: "Pending",
-			capabilities: { backgroundTasks: false, runnerHost: true },
+			capabilities: {
+				backgroundTasks: false,
+				runnerHost: true,
+				commandReceipts: false,
+			},
 			runEnd: "result",
 			ticket: "t",
 		} as const;

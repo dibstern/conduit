@@ -594,6 +594,8 @@ export type ProviderPolicy = {
 		readonly backgroundTasks: boolean;
 		/** 4.10: a runner hosts its Runs; L2 case 2 addresses a Run's sends to its execution's runner. */
 		readonly runnerHost: boolean;
+		/** D46, 9: command receipts and a wake's turn_ended are this provider's evidence (CONTRACT.md 519-520). */
+		readonly commandReceipts: boolean;
 	};
 	readonly runEnd: "result" | "query_ended";
 } & (

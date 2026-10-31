@@ -17,7 +17,9 @@ import {
 } from "./harness.js";
 import {
 	admit,
+	ask,
 	begin,
+	claimOf,
 	complete,
 	Driver,
 	fire,
@@ -29,12 +31,14 @@ import {
 	scenarios,
 	step,
 	stop,
+	tokenOf,
 	transmissions,
+	unsolicited,
 	visibleInput,
 } from "./scenarios.js";
 
 /** Inputs the 32.2.7 slice leaves to a later lane; a trace that reaches one stops there. */
-const notBuilt = /^not yet built \(32\.2\.(8|11)\): /;
+const notBuilt = /^not yet built \(32\.2\.11\): /;
 
 /** What the oracle and the real decider must agree on at every step (3.1). */
 const publicStep = (decision: Decision<unknown>, view: LedgerView) =>
@@ -106,7 +110,11 @@ describe("[32.2.5] plain Run path differential", () => {
 	const commandIds = ["c1", "c2"];
 	/** 32.2.7: Stop, Run now and end controls, each answered by main's (commandId, transmission) claims. */
 	const controlIds = ["s1", "s2"];
-	const claims = controlIds.flatMap((commandId) =>
+	/** 32.2.8: answer controls, claimed the same way, and the interactions they answer. */
+	const answerIds = ["a1", "a2"];
+	const interactionIds = ["q1", "q2"] as const;
+	const labels = ["r1:1", "r1:2", "r2:1", "r3:1"] as const;
+	const claims = [...controlIds, ...answerIds].flatMap((commandId) =>
 		[0, 1, 2].map((transmission) => ({ commandId, transmission })),
 	);
 	/** A generated answer to its round's own send. */
@@ -146,11 +154,26 @@ describe("[32.2.5] plain Run path differential", () => {
 			{ kind: "journal_answer", answer: "running" },
 			{ kind: "journal_answer", answer: "finished" },
 			{ kind: "journal_answer", answer: "uncertain" },
+			{
+				kind: "interaction_requested",
+				interactionId: "q1",
+				interactionKind: "permission",
+			},
+			{
+				kind: "interaction_requested",
+				interactionId: "q2",
+				interactionKind: "question",
+			},
+			{ kind: "interaction_resolved", interactionId: "q1" },
 		),
-		retryAt.map(
-			(at): Evidence => ({
+		fc.tuple(retryAt, fc.option(code, { nil: undefined })).map(
+			([at, refusal]): Evidence => ({
 				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: at },
+				outcome: {
+					tag: "retryable",
+					retryAt: at,
+					...(refusal === undefined ? {} : { code: refusal }),
+				},
 			}),
 		),
 		retryAt.map(
@@ -176,6 +199,19 @@ describe("[32.2.5] plain Run path differential", () => {
 		{ kind: "probe_result", finding: { tag: "native_idle" } },
 		{ kind: "probe_result", finding: { tag: "native_busy" } },
 	);
+	/** 9, D21: a held start's or steer's receipts, by its hold's commandId or another. */
+	const lifecycle = fc
+		.tuple(
+			fc.constantFrom(...commandIds),
+			fc.constantFrom("queued", "started", "completed", "cancelled" as const),
+		)
+		.map(
+			([commandId, state]): Evidence => ({
+				kind: "command_lifecycle",
+				commandId,
+				state,
+			}),
+		);
 	const answer = (
 		token: fc.Arbitrary<SendToken>,
 		kinds = evidence,
@@ -188,14 +224,93 @@ describe("[32.2.5] plain Run path differential", () => {
 		fc.oneof(
 			{
 				weight: 3,
-				arbitrary: fc.constantFrom(...inputs).map(
-					(inputId): LedgerCommand => ({
-						verb: "admit",
-						inputId,
-						delivery: "queue",
-						request: { text: inputId },
-					}),
-				),
+				arbitrary: fc
+					.tuple(
+						fc.constantFrom(...inputs),
+						fc.constantFrom("queue", "steer" as const),
+					)
+					.map(
+						([inputId, delivery]): LedgerCommand => ({
+							verb: "admit",
+							inputId,
+							delivery,
+							request: { text: inputId },
+						}),
+					),
+			},
+			{
+				// 3.9: main starts an input in the Run it requested, its own Run if that one ended.
+				weight: 1,
+				arbitrary: fc
+					.tuple(
+						fc.nat(5),
+						fc.constantFrom(...inputs),
+						fc.constantFrom(...runIds),
+					)
+					.map(
+						([event, inputId, requestedRunId]): LedgerCommand => ({
+							verb: "observe",
+							observation: {
+								tag: "Main",
+								eventId: `s${event}`,
+								kind: "run_started",
+								inputId,
+								requestedRunId,
+							},
+						}),
+					),
+			},
+			{
+				weight: 2,
+				arbitrary: fc
+					.tuple(
+						fc.constantFrom(...answerIds),
+						fc.constantFrom(...interactionIds),
+						fc.constantFrom("allow", "deny"),
+					)
+					.map(
+						([commandId, interactionId, reply]): LedgerCommand => ({
+							verb: "control",
+							control: {
+								kind: "answer",
+								commandId,
+								interactionId,
+								answer: reply,
+							},
+						}),
+					),
+			},
+			{
+				// 3.10, D61: an interaction its label names, and its native or confirming resolution.
+				weight: 1,
+				arbitrary: fc
+					.tuple(
+						fc.nat(5),
+						fc.constantFrom(...labels),
+						fc.constantFrom(...interactionIds),
+						fc.boolean(),
+					)
+					.map(
+						([event, label, interactionId, resolved]): LedgerCommand => ({
+							verb: "observe",
+							observation: resolved
+								? {
+										tag: "Unsolicited",
+										label,
+										eventId: `u${event}`,
+										kind: "interaction_resolved",
+										interactionId,
+									}
+								: {
+										tag: "Unsolicited",
+										label,
+										eventId: `u${event}`,
+										kind: "interaction_requested",
+										interactionId,
+										interactionKind: "question",
+									},
+						}),
+					),
 			},
 			{
 				weight: 3,
@@ -242,7 +357,7 @@ describe("[32.2.5] plain Run path differential", () => {
 					.tuple(
 						fc.constantFrom(...tokens.slice(runIds.length)),
 						fc.constantFrom(...runIds),
-						fc.constantFrom("r1", "r2"),
+						fc.constantFrom("r1", "r2", "r3"),
 						fc.constantFrom(...commandIds),
 						fc.integer({ min: 1, max: 3 }),
 					)
@@ -270,6 +385,10 @@ describe("[32.2.5] plain Run path differential", () => {
 			{
 				weight: 6,
 				arbitrary: answer(fc.constantFrom(...tokens)),
+			},
+			{
+				weight: 1,
+				arbitrary: answer(fc.constantFrom(...tokens), lifecycle),
 			},
 			{
 				weight: 3,
@@ -304,7 +423,13 @@ describe("[32.2.5] plain Run path differential", () => {
 						fc.constantFrom(...claims),
 						fc.oneof(
 							fc.constant({ tag: "succeeded" as const }),
-							retryAt.map((at) => ({ tag: "retryable" as const, retryAt: at })),
+							fc
+								.tuple(retryAt, fc.option(code, { nil: undefined }))
+								.map(([at, refusal]) => ({
+									tag: "retryable" as const,
+									retryAt: at,
+									...(refusal === undefined ? {} : { code: refusal }),
+								})),
 							code.map((permanent) => ({
 								tag: "permanent" as const,
 								code: permanent,
@@ -382,7 +507,7 @@ describe("[32.2.5] plain Run path differential", () => {
 								settlement: { kind: "process_lost", runnerId, retiredAt },
 							}),
 						),
-					fc.constantFrom("r1:1", "r1:2", "r2:1").map(
+					fc.constantFrom(...labels).map(
 						(label): LedgerCommand => ({
 							verb: "settle",
 							settlement: { kind: "process_started", label, reattached: false },
@@ -401,6 +526,45 @@ describe("[32.2.5] plain Run path differential", () => {
 				),
 			},
 		);
+
+	/** 3.10: an interaction requested, answered, and its answer's first claim settled. */
+	const interactionRound = (
+		commandId: string,
+		interactionId: string,
+		outcome: "succeeded" | "retryable" | "permanent",
+		eventId: string,
+	): LedgerCommand[] => [
+		{
+			verb: "observe",
+			observation: {
+				tag: "Unsolicited",
+				label: "r1:1",
+				eventId,
+				kind: "interaction_requested",
+				interactionId,
+				interactionKind: "permission",
+			},
+		},
+		{
+			verb: "control",
+			control: { kind: "answer", commandId, interactionId, answer: "allow" },
+		},
+		{
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: `${commandId}:1` as SendToken,
+				kind: "effect_outcome",
+				outcome:
+					outcome === "succeeded"
+						? { tag: "succeeded" }
+						: outcome === "retryable"
+							? { tag: "retryable", retryAt: 600, code: "Refused" }
+							: { tag: "permanent", code: "Refused" },
+				transmission: { commandId, transmission: 1 },
+			},
+		},
+	];
 
 	for (const [provider, seed] of [
 		["claude", 822501],
@@ -423,6 +587,14 @@ describe("[32.2.5] plain Run path differential", () => {
 							runnerId: fc.constantFrom("r1", "r2"),
 							commandId: fc.constantFrom(...commandIds),
 							held: fc.boolean(),
+							delivery: fc.constantFrom("queue", "queue", "steer" as const),
+							// 3.10: an interaction on r1's first label, answered, and the answer's claim outcome.
+							ask: fc.option(
+								fc.constantFrom("succeeded", "retryable", "permanent" as const),
+								{ nil: undefined },
+							),
+							// 3.7: the round's own send answered delivery_unknown, then its recovery deadline.
+							unknown: fc.boolean(),
 							noise: fc.array(
 								fc.tuple(
 									fc.oneof(
@@ -444,7 +616,7 @@ describe("[32.2.5] plain Run path differential", () => {
 								{
 									verb: "admit",
 									inputId: round.runId.slice(0, 1),
-									delivery: "queue",
+									delivery: round.delivery,
 									request: { text: round.runId },
 								},
 								{
@@ -474,9 +646,37 @@ describe("[32.2.5] plain Run path differential", () => {
 												},
 											} satisfies LedgerCommand,
 										]),
+								...(round.ask === undefined
+									? []
+									: interactionRound(
+											answerIds[index % 2] ?? "a1",
+											interactionIds[index % 2] ?? "q1",
+											round.ask,
+											`ask${index}`,
+										)),
 							];
 							return [
 								...skeleton.map((command) => [command, 1] as const),
+								...(round.unknown
+									? ([
+											[
+												{
+													verb: "observe",
+													observation: {
+														tag: "Answer",
+														token,
+														kind: "effect_outcome",
+														outcome: { tag: "delivery_unknown" },
+													},
+												},
+												1,
+											],
+											[
+												{ verb: "settle", settlement: { kind: "alarm_fired" } },
+												500,
+											],
+										] as const)
+									: []),
 								...round.noise.map(
 									([command, elapsed]) =>
 										[
@@ -529,9 +729,19 @@ describe("[32.2.5] plain Run path differential", () => {
 								if (
 									effect.kind === "interrupt" ||
 									effect.kind === "end_session" ||
-									effect.kind === "cancel_request"
+									effect.kind === "cancel_request" ||
+									effect.kind === "steer" ||
+									effect.kind === "deliver_answer"
 								)
 									reached.views.add(effect.kind);
+							// 3.10: interactions Pending, refused and Answered.
+							for (const interaction of stepped.view.interactions)
+								reached.views.add(
+									interaction.tag === "Pending" &&
+										interaction.lastRefusal !== undefined
+										? "lastRefusal"
+										: interaction.tag,
+								);
 							if (
 								active?.inputs.some(
 									({ state }) =>
@@ -578,6 +788,11 @@ describe("[32.2.5] plain Run path differential", () => {
 					"Interrupting",
 					"interrupt",
 					"end_session",
+					"steer",
+					"deliver_answer",
+					"Pending",
+					"lastRefusal",
+					"Answered",
 					...(provider === "opencode" ? ["Settling", "cancel_request"] : []),
 				]),
 			);
@@ -1233,6 +1448,185 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 				tag: "Accepted",
 				nativeMessageId: "native-A",
 			});
+		});
+	});
+});
+
+describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's acceptance criteria", () => {
+	/** The fixed traces that reach a wake or a background task, both 32.2.11's (scenarios.test.ts). */
+	const wakes = new Set(["L6-2", "L6-3", "PL-1", "PL-2", "PL-6"]);
+	const settle = (
+		d: Driver,
+		settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
+	) => step(d, { verb: "settle", settlement });
+	const lose = (d: Driver, runnerId: string) =>
+		settle(d, { kind: "process_lost", runnerId, retiredAt: d.now });
+	const answer = (d: Driver, interactionId: string, commandId: string) =>
+		d.step({
+			verb: "control",
+			control: { kind: "answer", commandId, interactionId, answer: "no" },
+		});
+	/** One label's interaction, read by the Run, and one its runner raised unsolicited (3.10). */
+	const twoPending = (d: Driver) => {
+		const a = running(d);
+		observe(d, a.token, {
+			kind: "interaction_requested",
+			interactionId: "q",
+			interactionKind: "permission",
+		});
+		unsolicited(d, {
+			kind: "interaction_requested",
+			interactionId: "p",
+			interactionKind: "question",
+		});
+		expect(d.view().interactions.map(({ tag }) => tag)).toEqual([
+			"Pending",
+			"Pending",
+		]);
+		return a;
+	};
+
+	// AC: per-provider harness runs green vs oracle for Claude, Cursor and OpenCode. The generated
+	// half is "<provider> generated plain-path traces agree with the oracle at every step" above.
+	it.each([
+		"claude",
+		"cursor",
+		"opencode",
+	] as const)("every fixed %s trace runs to its end in lockstep with the oracle, but for 32.2.11's wakes", (provider) => {
+		const fixed = scenarios.filter(
+			(candidate) => candidate.provider === provider,
+		);
+		expect(fixed.length).toBeGreaterThan(0);
+		for (const trace of fixed)
+			if (!wakes.has(trace.id)) agreed(provider, trace.run);
+	});
+
+	it("a sibling steer's unsettled delivery_unknown blocks its input's automatic resend until a probe settles it (32.2.6 AC3, 3.5)", () => {
+		agreed("opencode", (d) => {
+			running(d);
+			const b1 = begin(d, "B", "steer");
+			observe(d, b1.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			// 3.6: main tries B again under its own runId; the retryable sibling would return B to the queue.
+			const b2 = request(d, "B");
+			observe(d, b2.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 1 },
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({
+				tag: "Delivered",
+				certainty: "unknown",
+			});
+			const [probe] = fire(d).issued;
+			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
+			expect(probe.effect).toMatchObject({
+				kind: "probe",
+				target: { tag: "input", inputId: "B" },
+			});
+			expect(transmissions(d, "B")).toHaveLength(1);
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Queued" });
+		});
+	});
+
+	it("a runner retired before its process_started is recorded retired, and that process_started changes nothing (L1)", () => {
+		// CONTRACT.md 349-350: retirement is final and runnerIds are never reused.
+		agreed("claude", (d) => {
+			lose(d, "r2");
+			noLifecycleChange(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r2:1",
+					reattached: false,
+				},
+			});
+			step(d, {
+				verb: "control",
+				control: { kind: "end", commandId: "end-1", deadlineAt: null },
+			});
+			expect(d.latest("end_session").effect).toEqual({
+				kind: "end_session",
+				runId: null,
+				label: "r1:1",
+			});
+		});
+	});
+
+	it("a steer its Run's end left unconsumed is a Run of its own at main's run.started (3.9)", () => {
+		// CONTRACT.md 978-981: from that end it is a Run of its own, its reservation's, Launched.
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			complete(d, a.token);
+			expect(d.view().active).toBeUndefined();
+			main(d, { kind: "run_started", inputId: "B", requestedRunId: b.runId });
+			expect(d.view().active).toMatchObject({
+				runId: b.runId,
+				tag: "Running",
+			});
+			expect(
+				main(d, { kind: "run_terminal", runId: b.runId, outcome: "completed" })
+					.ended,
+			).toMatchObject([{ runId: b.runId, reason: { tag: "completed" } }]);
+		});
+	});
+
+	it("the first answer wins, and a refused answer stays Pending with its lastRefusal (3.10)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			const first = ask(d, a.token, "q1");
+			expect(first.effect).toMatchObject({
+				kind: "deliver_answer",
+				label: "r1:1",
+				interactionId: "q1",
+			});
+			const second = answer(d, "q1", "answer-again");
+			expect(second.issued).toEqual([]);
+			observe(d, tokenOf(first), {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 100, code: "Refused" },
+				transmission: claimOf(first),
+			});
+			expect(d.view().interactions).toEqual([
+				{
+					tag: "Pending",
+					interactionId: "q1",
+					kind: "question",
+					lastRefusal: { attempt: claimOf(first), code: "Refused" },
+				},
+			]);
+		});
+	});
+
+	it.each([
+		["its runner's retirement", (d: Driver) => lose(d, "r1")],
+		["a Stop's commit", (d: Driver) => stop(d)],
+		[
+			"the session's end",
+			(d: Driver) => {
+				step(d, {
+					verb: "control",
+					control: { kind: "end", commandId: "end-1", deadlineAt: null },
+				});
+				const end = d.latest("end_session");
+				observe(d, tokenOf(end), {
+					kind: "effect_outcome",
+					outcome: { tag: "succeeded" },
+					transmission: claimOf(end),
+				});
+			},
+		],
+	])("unanswered interactions resolve at %s (3.10)", (_when, resolve) => {
+		agreed("claude", (d) => {
+			twoPending(d);
+			resolve(d);
+			expect(d.view().interactions).toEqual([]);
 		});
 	});
 });

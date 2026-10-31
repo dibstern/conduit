@@ -23,36 +23,7 @@ import {
 type Mode = "reference" | "decider";
 
 /** Decider tests a later lane builds: each must fail with that lane's typed not-yet-built rejection. */
-const notBuilt: ReadonlyMap<string, string> = new Map([
-	[
-		"[10B] an answer confirmation cannot settle a different interaction on the same Run",
-		"32.2.8",
-	],
-	[
-		"[3.10] main's timeout reject folds as any answer; decide issues nothing and arms no timeout",
-		"32.2.8",
-	],
-	[
-		"[R1] an unanswered input probe owns a deadline from issue and re-probes at it",
-		"32.2.8",
-	],
-	[
-		"[10B] a permanent refusal resolves the interaction and nothing re-delivers it",
-		"32.2.8",
-	],
-	[
-		"[3.10] a retryable answer refusal names its transmission and code, and no answer is probed",
-		"32.2.8",
-	],
-	[
-		"[F60] a retried input probe refused after its project is removed transmits nothing",
-		"32.2.8",
-	],
-	[
-		"[D61] an answer's confirmation is unsolicited by its interaction, never an Answer on its control",
-		"32.2.8",
-	],
-]);
+const notBuilt: ReadonlyMap<string, string> = new Map();
 
 const check = (mode: Mode) => (name: string, run: () => void) => {
 	const ticket = notBuilt.get(name);

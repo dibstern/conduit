@@ -6,6 +6,7 @@ import type {
 	EndReason,
 	Evidence,
 	InputState,
+	InteractionView,
 	InterruptBy,
 	IssuedEffect,
 	Label,
@@ -56,6 +57,8 @@ interface Tx {
 	retryable: boolean;
 	permanent?: string | undefined;
 	retryAt?: number | undefined;
+	/** 3.10 lastRefusal: a retryable outcome's code. */
+	refusal?: string | undefined;
 	declined: boolean;
 	/** 9: an input_absent finding; a later acceptance beats it. */
 	absent: boolean;
@@ -84,11 +87,13 @@ interface Tx {
 }
 
 type StartEffect = Extract<RunEffect, { kind: "start" }>;
+type SteerEffect = Extract<RunEffect, { kind: "steer" }>;
 type ProbeEffect = Extract<RunEffect, { kind: "probe" }>;
 type ControlEffect = Extract<
 	RunEffect,
-	{ kind: "interrupt" | "end_session" | "cancel_request" }
+	{ kind: "interrupt" | "end_session" | "cancel_request" | "deliver_answer" }
 >;
+type SendEffect = StartEffect | SteerEffect | ProbeEffect | ControlEffect;
 
 /** A probe's target and what it covers, stored at issue (3.7, 3.12). */
 interface Probe {
@@ -100,15 +105,11 @@ interface Probe {
 }
 
 /**
- * Send (issue decision, 3.3): a start main issues (D60), a Stop's interrupt or an end_session main
- * issues under its Control, or a probe or cancel_request decide issues (3.12).
+ * Send (issue decision, 3.3): a start or steer main issues (D60), a Stop's interrupt, an
+ * end_session or an answer's deliver_answer main issues under its Control, or a probe or
+ * cancel_request decide issues (3.12).
  */
-interface Send<
-	Effect extends StartEffect | ProbeEffect | ControlEffect =
-		| StartEffect
-		| ProbeEffect
-		| ControlEffect,
-> {
+interface Send<Effect extends SendEffect = SendEffect> {
 	readonly seq: number;
 	readonly effect: Effect;
 	readonly held: boolean;
@@ -129,7 +130,25 @@ interface Send<
 	exhausted: boolean;
 	probe?: Probe | undefined;
 }
-type StartSend = Send<StartEffect>;
+
+/** 3.10: an interaction is its label's, Pending until resolved; the first answer wins. */
+interface Interaction {
+	readonly interactionId: string;
+	readonly kind: "permission" | "question";
+	readonly label: Label;
+	answer?: unknown;
+	/** Its deliver_answer sends, by index. */
+	readonly deliveries: number[];
+	resolved: boolean;
+}
+
+/** D53, 3.9: an admitted input; its reservation is main's first run.requested runId for it. */
+interface Input {
+	readonly delivery: "queue" | "steer";
+	runId?: string | undefined;
+	failed?: string | undefined;
+	reservation?: string | undefined;
+}
 
 interface FoldItem {
 	readonly seq: number;
@@ -176,7 +195,7 @@ interface Book {
 	/** Issue order of sends and transmissions (3.4 freshness, 10A). */
 	seq: number;
 	readonly runs: Run[];
-	readonly inputs: Map<string, { runId?: string; failed?: string }>;
+	readonly inputs: Map<string, Input>;
 	readonly sends: Send[];
 	/** Cache written only by record (3.2). */
 	readonly tokens: Map<string, { readonly send: number; readonly tx: number }>;
@@ -184,9 +203,15 @@ interface Book {
 	readonly seen: Set<string>;
 	/** The seq of the last session end or rejected resume (3.4). */
 	freshSince: number;
-	readonly runners: Map<string, { latest: Label; retired: boolean }>;
+	/** L1: a runner retired before it started has no label. */
+	readonly runners: Map<
+		string,
+		| { readonly retired: false; latest: Label }
+		| { readonly retired: true; readonly latest: Label | null }
+	>;
 	current: string | null;
 	readonly retirements: Set<string>;
+	readonly interactions: Interaction[];
 	/** L6: the one ledger stop deadline, over transmissions by their send and tx index. */
 	stop?:
 		| {
@@ -296,6 +321,12 @@ const sealedValue = (tx: Tx): Value => tx.sealed?.value ?? value(tx);
 function mayStillAct(book: Book, send: Send, tx: Tx): boolean {
 	const effect = send.effect;
 	if (tx.ended !== undefined || effect.kind === "probe") return false;
+	// 3.10: an answer's work ends when its interaction resolves.
+	if (
+		effect.kind === "deliver_answer" &&
+		interactionOf(book, effect.interactionId)?.resolved !== false
+	)
+		return false;
 	// D59: a runner provider's interrupt is no fence member; its work ends with the Run it names.
 	if (
 		effect.kind === "interrupt" &&
@@ -323,21 +354,34 @@ const runSends = (book: Book, run: Run) =>
 	book.sends.filter(
 		(send) => send.runId === run.runId && send.exec === run.exec.n,
 	);
-const isStart = (send: Send): send is StartSend => send.effect.kind === "start";
-/** Its starts: the sends that deliver (3.6); a Run's end waits for no probe (3.8 condition 2). */
+const isStart = (send: Send): send is Send<StartEffect> =>
+	send.effect.kind === "start";
+/** A start or steer: a send that delivers an input (3.6, 3.9). */
+const delivers = (send: Send): send is Send<StartEffect | SteerEffect> =>
+	send.effect.kind === "start" || send.effect.kind === "steer";
+/** Its starts and steers (3.6); a Run's end waits for no probe (3.8 condition 2). */
 const deliverySends = (book: Book, run: Run) =>
-	runSends(book, run).filter(isStart);
+	runSends(book, run).filter(delivers);
+const interactionOf = (book: Book, interactionId: string) =>
+	book.interactions.find((item) => item.interactionId === interactionId);
+/** 3.10: one of the interaction's answer deliveries may still act. */
+const delivering = (book: Book, interaction: Interaction) =>
+	interaction.deliveries.some((index) => {
+		const send = book.sends[index];
+		return send?.txs.some((tx) => mayStillAct(book, send, tx)) === true;
+	});
 const activeRun = (book: Book) =>
 	book.runs.find((run) => run.phase !== "Ended");
 const currentLabel = (book: Book): Label | null =>
 	book.current === null
 		? null
 		: (book.runners.get(book.current)?.latest ?? null);
-/** 3.8 condition 2's work: no probe or end_session, nor a runner provider's interrupt (D59). */
+/** 3.8 condition 2's work: no probe, answer or end_session, nor a runner provider's interrupt (D59, 3.10). */
 const runWork = (book: Book, run: Run) =>
 	runSends(book, run).filter(
 		(send) =>
 			send.effect.kind !== "probe" &&
+			send.effect.kind !== "deliver_answer" &&
 			send.effect.kind !== "end_session" &&
 			(send.effect.kind !== "interrupt" || rules(book).fences(send.effect)),
 	);
@@ -603,7 +647,7 @@ function deadlines(book: Book): Due[] {
 				...pending.deadline,
 				fire: (fact, step) => reprobe(book, fact, step, send, pending),
 			});
-		if (!isStart(send)) continue;
+		if (!delivers(send)) continue;
 		for (const tx of send.txs) {
 			const recovery = tx.recovery;
 			if (recovery !== undefined)
@@ -788,7 +832,7 @@ function addressAt(
 	return { runnerId: book.current, label: currentLabel(book) };
 }
 
-function issue<Effect extends StartEffect | ProbeEffect | ControlEffect>(
+function issue<Effect extends SendEffect>(
 	book: Book,
 	effect: Effect,
 	held: boolean,
@@ -806,14 +850,18 @@ function issue<Effect extends StartEffect | ProbeEffect | ControlEffect>(
 		exhausted: false,
 	};
 	book.sends.push(send);
+	// L1 item 1, L2: a held send addressed to a retired runner is covered at issue, never handed over.
+	if (
+		held &&
+		send.runnerId !== null &&
+		book.runners.get(send.runnerId)?.retired
+	)
+		transmit(book, send, undefined).sealed = {
+			value: "never",
+			unconsumed: false,
+		};
 	return send;
 }
-const start = (book: Book, run: Run, inputId: string, held: boolean) =>
-	issue(
-		book,
-		{ kind: "start", runId: run.runId, inputId, mode: nextMode(book) },
-		held,
-	);
 
 /**
  * 3.4: an effect main issues with no hold, under its Control's commandId; its first claim is open,
@@ -823,10 +871,11 @@ function issueControl(
 	book: Book,
 	effect: ControlEffect,
 	commandId: string,
-): void {
+): Send {
 	const send = issue(book, effect, false);
 	send.commandId = commandId;
 	transmit(book, send, undefined);
+	return send;
 }
 
 /** 3.7: probe transmission n's retry deadline is its issue plus max(probeMs, backoff(n)). */
@@ -876,9 +925,9 @@ function launch(run: Run): void {
 	run.exec = newExec(run.exec.n + 1);
 }
 
-/** D53: a start fails its input once, at a permanent outcome other than a rejected resume or Stop's own. */
+/** D53: a start or steer fails its input once, at a permanent outcome other than a rejected resume or Stop's own. */
 function failInput(book: Book, send: Send, tx: Tx): void {
-	if (!isStart(send) || tx.resumeRejected || tx.stopOwn) return;
+	if (!delivers(send) || tx.resumeRejected || tx.stopOwn) return;
 	const input = book.inputs.get(send.effect.inputId);
 	if (input?.runId === send.runId)
 		// Gap (CONTRACT.md 1521-1523): only hold_exhausted names a code; any other uncoded failure
@@ -886,9 +935,12 @@ function failInput(book: Book, send: Send, tx: Tx): void {
 		input.failed ??= tx.permanent ?? "provider_send_attempts_exhausted";
 }
 
-/** The first delivery-recovery probe: a start's deadline at the outcome plus probeMs (3.7, D20). */
+/**
+ * The first delivery-recovery probe: a start's or steer's deadline at the outcome plus probeMs
+ * (3.7, D20). An answer has no probe (3.10).
+ */
 function openRecovery(book: Book, fact: Fact, send: Send, tx: Tx): void {
-	if (isStart(send))
+	if (delivers(send))
 		tx.recovery ??= { at: fact.now + fact.policy.probeMs, opened: book.entry };
 }
 
@@ -912,6 +964,7 @@ function effectOutcome(
 		case "retryable":
 			tx.retryable = true;
 			tx.retryAt = outcome.retryAt;
+			tx.refusal = outcome.code;
 			tx.transport = joinTransport(tx.transport, {
 				tag: "Retrying",
 				at: outcome.retryAt,
@@ -944,6 +997,11 @@ function effectOutcome(
 				code: outcome.code,
 			});
 			failInput(book, send, tx);
+			// 3.10: a permanent refusal ends the answer's delivery, which resolves its interaction.
+			if (send.effect.kind === "deliver_answer") {
+				const interaction = interactionOf(book, send.effect.interactionId);
+				if (interaction !== undefined) interaction.resolved = true;
+			}
 			break;
 		}
 		case "delivery_unknown":
@@ -989,6 +1047,12 @@ function sessionEnd(book: Book, before: number): boolean {
 			runSends(book, run).some((send) => send.txs.some((tx) => tx.seq < before))
 		) {
 			run.exec.endedBy = "session_ended";
+			moved = true;
+		}
+	// 3.10: session end resolves every interaction.
+	for (const interaction of book.interactions)
+		if (!interaction.resolved) {
+			interaction.resolved = true;
 			moved = true;
 		}
 	return moved;
@@ -1077,11 +1141,11 @@ function liveness(
 }
 
 const evidenceTable: EvidenceTable = {
-	started: { class: "lifecycle", produces: isStart, merge: liveness },
-	activity: { class: "lifecycle", produces: isStart, merge: liveness },
+	started: { class: "lifecycle", produces: delivers, merge: liveness },
+	activity: { class: "lifecycle", produces: delivers, merge: liveness },
 	result: {
 		class: "lifecycle",
-		produces: isStart,
+		produces: delivers,
 		merge(book, fact, { send, tx, run }, evidence) {
 			tx.resulted = true;
 			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
@@ -1114,7 +1178,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	query_ended: {
 		class: "lifecycle",
-		produces: isStart,
+		produces: delivers,
 		merge(book, _fact, { tx, run, live }) {
 			// 9: query_ended ends only an owned execution's work, and its own by the work-ended column.
 			if (runEnd(book) !== "query_ended") return noop();
@@ -1130,7 +1194,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	input_accepted: {
 		class: "receipt",
-		produces: isStart,
+		produces: delivers,
 		merge(_book, _fact, { tx }, evidence) {
 			const nativeId = evidence.nativeMessageId;
 			if (
@@ -1150,7 +1214,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	input_declined: {
 		class: "receipt",
-		produces: isStart,
+		produces: delivers,
 		merge(_book, _fact, { tx }) {
 			const before = JSON.stringify(tx.consumption);
 			const moved = !tx.declined;
@@ -1167,7 +1231,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	accounting: {
 		class: "receipt",
-		produces: isStart,
+		produces: delivers,
 		merge(_book, _fact, { tx }) {
 			if (tx.accounted) return noop("a duplicate accounting receipt (12A)");
 			tx.accounted = true;
@@ -1336,18 +1400,35 @@ const evidenceTable: EvidenceTable = {
 	},
 	interaction_requested: {
 		class: "interaction",
-		produces: isStart,
-		merge: () => notBuilt("32.2.8", "interaction_requested"),
+		produces: delivers,
+		merge: (book, _fact, { tx }, evidence) =>
+			tx.label === null
+				? noop("an interaction needs a label (3.10)")
+				: requestInteraction(book, tx.label, evidence),
 	},
 	interaction_resolved: {
 		class: "interaction",
 		produces: never,
-		merge: () => notBuilt("32.2.8", "interaction_resolved"),
+		merge: () => rejected("interaction_resolved is never an answer (3.4, D61)"),
 	},
 	command_lifecycle: {
 		class: "command",
-		produces: isStart,
-		merge: () => notBuilt("32.2.8", "command_lifecycle"),
+		produces: delivers,
+		merge: (_book, _fact, { send, tx }, evidence) => {
+			// D21: a held start's or steer's receipt names its hold's commandId.
+			if (evidence.commandId !== send.commandId)
+				return rejected("a command receipt naming another commandId (D21)");
+			if (evidence.state === "cancelled" && tx.consumption.tag === "None") {
+				// 9: cancelled before started is NotConsumed{cancelled}, Stop's own.
+				tx.stopOwn = true;
+				tx.consumption = { tag: "NotConsumed", why: "cancelled" };
+			} else if (evidence.state === "started")
+				tx.consumption = joinConsumption(tx.consumption, {
+					tag: "Observed",
+				});
+			seal(tx);
+			return changed;
+		},
 	},
 	command_result: {
 		class: "command",
@@ -1376,6 +1457,24 @@ const evidenceTable: EvidenceTable = {
 	},
 };
 
+/** 3.10: an interaction belongs to the label its evidence names; it is requested once. */
+function requestInteraction(
+	book: Book,
+	label: Label,
+	evidence: Extract<Evidence, { kind: "interaction_requested" }>,
+): Outcome {
+	if (interactionOf(book, evidence.interactionId) !== undefined)
+		return noop("interaction already requested");
+	book.interactions.push({
+		interactionId: evidence.interactionId,
+		kind: evidence.interactionKind,
+		label,
+		deliveries: [],
+		resolved: false,
+	});
+	return changed;
+}
+
 /** Correlates `kind` with its evidence for the table lookup. */
 function merge<K extends Evidence["kind"]>(
 	book: Book,
@@ -1402,7 +1501,7 @@ function dispatched(
 	const run = findRun(book, book.mainRuns.get(evidence.runId)?.runId);
 	if (run === undefined) return noop("unknown or never-issued token (3.4)");
 	const heldSends = book.sends
-		.filter(isStart)
+		.filter(delivers)
 		.filter((send) => send.held && send.runId === run.runId);
 	let send = heldSends
 		.filter((item) => item.commandId === evidence.commandId)
@@ -1411,7 +1510,13 @@ function dispatched(
 		// 3.6 D50: a relaunch is a new transmission of the same issue, in a new execution.
 		if (run.phase === "Queued") {
 			launch(run);
-			send = start(book, run, send.effect.inputId, true);
+			send = issue(
+				book,
+				send.effect.kind === "start"
+					? { ...send.effect, mode: nextMode(book) }
+					: send.effect,
+				true,
+			);
 			send.commandId = evidence.commandId;
 		} else if (
 			run.phase === "Ended" &&
@@ -1452,6 +1557,63 @@ function dispatched(
 	return changed;
 }
 
+/** 3.4, 3.10: evidence no send produced, under the label it names. */
+function unsolicited(
+	book: Book,
+	observation: Extract<
+		Extract<LedgerCommand, { verb: "observe" }>["observation"],
+		{ tag: "Unsolicited" }
+	>,
+): Outcome {
+	const { label, kind } = observation;
+	const key = `${label}\u0000${observation.eventId}`;
+	if (book.seen.has(key)) return noop("repeated unsolicited observation");
+	const { capabilities } = nativePolicies[book.provider];
+	if (
+		(kind === "tasks_snapshot" || kind === "task_event") &&
+		!capabilities.backgroundTasks
+	)
+		return rejected(`${book.provider} reports no background tasks (8.1)`);
+	if (
+		(kind === "command_lifecycle" ||
+			kind === "command_result" ||
+			kind === "turn_ended") &&
+		!capabilities.commandReceipts
+	)
+		return rejected(`${kind} is Claude's (3.4, 9, D46)`);
+	// L1 (CONTRACT.md 353-355): a runner not started has no authority and changes nothing.
+	const { runnerId, querySeq } = splitLabel(label);
+	const runner = book.runners.get(runnerId);
+	if (runner === undefined || runner.latest === null)
+		return noop("a runner not started has no authority (L1)");
+	book.seen.add(key);
+	// 8.4, L5: a label newer than its live runner's latest raises it.
+	let raised = false;
+	if (!runner.retired && querySeq > splitLabel(runner.latest).querySeq) {
+		if (capabilities.backgroundTasks)
+			return notBuilt("32.2.11", "a raised label's background tasks");
+		runner.latest = label;
+		raised = true;
+	}
+	switch (kind) {
+		case "interaction_requested": {
+			const outcome = requestInteraction(book, label, observation);
+			return raised ? changed : outcome;
+		}
+		case "interaction_resolved": {
+			// D61: native or confirming an answer, by its interaction.
+			const interaction = interactionOf(book, observation.interactionId);
+			if (interaction === undefined || interaction.resolved)
+				return raised ? changed : noop();
+			interaction.resolved = true;
+			return changed;
+		}
+		default:
+			// 3.4 (CONTRACT.md 485-494): wake executions and native commands.
+			return notBuilt("32.2.11", `unsolicited ${kind}`);
+	}
+}
+
 function observe(
 	book: Book,
 	fact: Fact,
@@ -1459,7 +1621,7 @@ function observe(
 ): Outcome {
 	switch (observation.tag) {
 		case "Unsolicited":
-			return notBuilt("32.2.11", `unsolicited ${observation.kind}`);
+			return unsolicited(book, observation);
 		case "Main": {
 			const key = `main\u0000${observation.eventId}`;
 			if (book.seen.has(key)) return noop("repeated main observation (D60)");
@@ -1469,6 +1631,7 @@ function observe(
 					const input = book.inputs.get(observation.inputId);
 					if (input === undefined)
 						return noop("run.requested for an input never admitted");
+					input.reservation ??= observation.runId;
 					if (input.runId === undefined) {
 						if (activeRun(book) !== undefined)
 							return noop("run.requested while another Run is active");
@@ -1490,10 +1653,28 @@ function observe(
 						open: true,
 					});
 					if (run.phase === "Queued") launch(run);
+					// 3.9: a steer is delivered into its Run's live query unless it opens the Run.
 					const send =
 						deliverySends(book, run).find(
 							(item) => item.effect.inputId === observation.inputId,
-						) ?? start(book, run, observation.inputId, !observation.direct);
+						) ??
+						issue(
+							book,
+							input.delivery === "steer" &&
+								run.inputs[0] !== observation.inputId
+								? {
+										kind: "steer",
+										runId: run.runId,
+										inputId: observation.inputId,
+									}
+								: {
+										kind: "start",
+										runId: run.runId,
+										inputId: observation.inputId,
+										mode: nextMode(book),
+									},
+							!observation.direct,
+						);
 					if (observation.direct) {
 						// 3.13: a direct start is Main under its input's id, its token the runId (3.4).
 						send.commandId ??= observation.inputId;
@@ -1501,8 +1682,44 @@ function observe(
 					}
 					return changed;
 				}
-				case "run_started":
-					return notBuilt("32.2.8", "run.started");
+				case "run_started": {
+					const input = book.inputs.get(observation.inputId);
+					const run = findRun(
+						book,
+						book.mainRuns.get(observation.requestedRunId)?.runId,
+					);
+					if (input === undefined || run === undefined)
+						return noop("run.started for an unknown run");
+					if (run.phase === "Ended") {
+						// 3.9 (CONTRACT.md 978-981): a steer its Run's end left unconsumed, the Run's own joined
+						// steer included, is a Run of its own, its reservation's, Launched with its send.
+						const runId = input.reservation ?? observation.requestedRunId;
+						if (findRun(book, runId) !== undefined)
+							return noop(
+								"run.started for a steer whose reservation names an existing Run (3.9)",
+							);
+						book.runs.push({
+							runId,
+							inputs: [observation.inputId],
+							phase: "Launched",
+							asked: false,
+							exec: { ...newExec(1), evidence: true },
+						});
+						input.runId = runId;
+						for (const id of [observation.requestedRunId, runId])
+							book.mainRuns.set(id, { runId, open: true });
+						return changed;
+					}
+					if (input.runId === run.runId) return noop();
+					// 3.9: the input joins the Run main started it in.
+					const from = findRun(book, input.runId);
+					const at = from?.inputs.indexOf(observation.inputId) ?? -1;
+					if (at >= 0) from?.inputs.splice(at, 1);
+					if (!run.inputs.includes(observation.inputId))
+						run.inputs.push(observation.inputId);
+					input.runId = run.runId;
+					return changed;
+				}
 				case "run_terminal": {
 					const target = book.mainRuns.get(observation.runId);
 					if (target === undefined)
@@ -1526,6 +1743,14 @@ function observe(
 			break;
 		}
 		case "Answer": {
+			// D46 (CONTRACT.md 519-520): producibility is the kind's, so it precedes the token.
+			if (
+				(observation.kind === "command_lifecycle" ||
+					observation.kind === "command_result" ||
+					observation.kind === "turn_ended") &&
+				!nativePolicies[book.provider].capabilities.commandReceipts
+			)
+				return rejected(`${observation.kind} is Claude's (3.4, 9, D46)`);
 			if (
 				observation.kind === "run_dispatched" &&
 				!book.tokens.has(observation.token)
@@ -1604,8 +1829,8 @@ function observe(
 				observation.kind,
 				observation,
 			);
-			// 3.5, 9: a start's own work ends by its provider's work-ended column.
-			if (isStart(send) && rules(book).workEnded(tx.answers))
+			// 3.5, 9: a start's or steer's own work ends by its provider's work-ended column.
+			if (delivers(send) && rules(book).workEnded(tx.answers))
 				tx.ended ??= "evidence";
 			return outcome;
 		}
@@ -1614,8 +1839,11 @@ function observe(
 
 /** L1: a runner retires (its process_lost, or another runner's process_started). */
 function retire(book: Book, runnerId: string): void {
-	const runner = book.runners.get(runnerId);
-	if (runner !== undefined) runner.retired = true;
+	// L1 (CONTRACT.md 349-350): retirement is final, a runner not yet started included.
+	book.runners.set(runnerId, {
+		latest: book.runners.get(runnerId)?.latest ?? null,
+		retired: true,
+	});
 	if (book.current === runnerId) book.current = null;
 	const addressed = (send: Send, tx: Tx) =>
 		send.runnerId === runnerId || tx.runnerId === runnerId;
@@ -1647,6 +1875,10 @@ function retire(book: Book, runnerId: string): void {
 			)
 		)
 			run.exec.endedBy ??= "process_lost";
+	// 3.10: retirement resolves its labels' interactions.
+	for (const interaction of book.interactions)
+		if (splitLabel(interaction.label).runnerId === runnerId)
+			interaction.resolved = true;
 }
 
 function settle(
@@ -1696,12 +1928,14 @@ function settle(
 		case "process_started": {
 			const { runnerId, querySeq } = splitLabel(settlement.label);
 			const prior = book.runners.get(runnerId);
-			// L1: retired is final, and a live runner's start at or below its latest querySeq is older.
+			// L1 (CONTRACT.md 349-350, 6.1): retirement is final and runnerIds are never reused.
+			if (prior?.retired === true)
+				return noop("a retired runner's process_started changes nothing (L1)");
+			// L1: a live runner's start at or below its latest querySeq is an older label.
 			if (
-				prior?.retired === true ||
-				(prior !== undefined &&
-					book.current === runnerId &&
-					querySeq <= splitLabel(prior.latest).querySeq)
+				prior !== undefined &&
+				book.current === runnerId &&
+				querySeq <= splitLabel(prior.latest).querySeq
 			)
 				return noop("an older label's process_started changes nothing (L1)");
 			if (
@@ -1782,6 +2016,23 @@ function commit(
 	commandId: string,
 ): void {
 	const run = activeRun(book);
+	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
+	const labels = new Set(
+		book.sends.flatMap((send) =>
+			rules(book).fences(send.effect)
+				? send.txs.flatMap((tx) =>
+						tx.label !== null && mayStillAct(book, send, tx) ? [tx.label] : [],
+					)
+				: [],
+		),
+	);
+	for (const interaction of book.interactions)
+		if (
+			!interaction.resolved &&
+			labels.has(interaction.label) &&
+			!delivering(book, interaction)
+		)
+			interaction.resolved = true;
 	if (run !== undefined) {
 		run.asked = true;
 		if (run.phase !== "Queued") {
@@ -1879,8 +2130,39 @@ function control(
 				commit(book, fact, step, "end", command.deadlineAt, command.commandId);
 			return changed;
 		}
-		case "answer":
-			return notBuilt("32.2.8", "an interaction's answer");
+		case "answer": {
+			const interaction = interactionOf(book, command.interactionId);
+			if (interaction === undefined)
+				return rejected("no such interaction (3.10)");
+			if (interaction.resolved)
+				return noop("interaction already resolved (3.10)");
+			if (delivering(book, interaction))
+				return noop("answered once: the first answer wins (3.10)");
+			// 3.10: the first answer decision wins; a retry redelivers it under the new commandId.
+			interaction.answer ??= command.answer;
+			const run = book.runs.find(
+				(item) =>
+					item.phase !== "Ended" &&
+					book.sends.some(
+						(send) =>
+							send.runId === item.runId &&
+							send.txs.some((tx) => tx.label === interaction.label),
+					),
+			);
+			const send = issueControl(
+				book,
+				{
+					kind: "deliver_answer",
+					runId: run?.runId ?? null,
+					label: interaction.label,
+					interactionId: interaction.interactionId,
+					answer: interaction.answer,
+				},
+				command.commandId,
+			);
+			interaction.deliveries.push(book.sends.indexOf(send));
+			return changed;
+		}
 		case "stop_tasks":
 		case "confirm_escalation":
 		case "native_command":
@@ -1918,8 +2200,6 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 			const command = entry.command;
 			switch (command.verb) {
 				case "admit": {
-					if (command.delivery === "steer")
-						return notBuilt("32.2.8", "a steer's admission");
 					const prior = book.inputs.get(command.inputId);
 					if (
 						prior?.runId !== undefined &&
@@ -1927,7 +2207,15 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 					)
 						return rejected("input already admitted to an active Run");
 					// D58, 3.4: main's handoff; main's run.requested reserves the Run.
-					book.inputs.set(command.inputId, {});
+					const input: Input = { delivery: command.delivery };
+					book.inputs.set(command.inputId, input);
+					// 3.9 GAP (CONTRACT.md 984 leaves when a steer joins open): following the oracle, a
+					// steer joins the active Run at admission once it is Launched.
+					const run = activeRun(book);
+					if (command.delivery === "steer" && run?.phase === "Launched") {
+						run.inputs.push(command.inputId);
+						input.runId = run.runId;
+					}
 					return changed;
 				}
 				case "observe":
@@ -1984,6 +2272,7 @@ export function initialSessionLedgerState(
 		runners: new Map(),
 		current: null,
 		retirements: new Set(),
+		interactions: [],
 	});
 }
 
@@ -2177,6 +2466,49 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 		anythingMayAct: run !== undefined || live.length > 0,
 		lostWork: [],
 		nativeCommands: [],
-		interactions: [],
+		interactions: book.interactions.flatMap((item): InteractionView[] => {
+			const send = item.deliveries.map((index) => book.sends[index]).at(-1);
+			const delivery = send?.txs.at(-1);
+			if (item.resolved && delivery === undefined) return [];
+			// 3.10 (10B): a refused answer stays Pending, naming the transmission its retryable outcome
+			// refused and that outcome's code, while its delivery retries.
+			const named = send?.txs.filter((tx) => tx.token !== undefined).at(-1);
+			const refused =
+				!item.resolved &&
+				send?.commandId !== undefined &&
+				named?.n !== undefined &&
+				named.consumption.tag !== "Accepted" &&
+				named.retryable &&
+				named.refusal !== undefined
+					? {
+							attempt: { commandId: send.commandId, transmission: named.n },
+							code: named.refusal,
+						}
+					: undefined;
+			if (delivery === undefined || refused !== undefined)
+				return [
+					{
+						tag: "Pending",
+						interactionId: item.interactionId,
+						kind: item.kind,
+						...(refused === undefined ? {} : { lastRefusal: refused }),
+					},
+				];
+			return [
+				{
+					tag: "Answered",
+					interactionId: item.interactionId,
+					kind: item.kind,
+					delivery:
+						item.resolved || delivery.consumption.tag === "Accepted"
+							? "settled"
+							: delivery.transport.tag === "Sent"
+								? "sent"
+								: delivery.transport.tag === "Unknown"
+									? "unknown"
+									: "queued",
+				},
+			];
+		}),
 	};
 }
