@@ -9,9 +9,15 @@ import type {
 	LedgerView,
 	ProviderKind,
 	SendToken,
+	Task,
+	TaskKey,
+	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
+import { traceAction } from "./fake-provider.js";
 import {
+	DifferentialTrace,
 	driver,
+	policy,
 	referenceImplementation,
 	writeTraceArtifact,
 } from "./harness.js";
@@ -35,10 +41,31 @@ import {
 	transmissions,
 	unsolicited,
 	visibleInput,
+	wake,
 } from "./scenarios.js";
 
-/** Inputs the 32.2.7 slice leaves to a later lane; a trace that reaches one stops there. */
-const notBuilt = /^not yet built \(32\.2\.11\): /;
+/** Inputs the 32.2.11 slice leaves to a later lane; a trace that reaches one stops there. */
+const notBuilt = /^not yet built \(32\.2\.1[23]\): /;
+
+/** 8.2: a shell, a subagent under a native run_id, and an ambient monitor (kind and class from task_type). */
+const shell = {
+	key: { taskId: "t1" },
+	taskType: "local_bash",
+	description: "build",
+	ambient: false,
+};
+const subagent = {
+	key: { taskId: "t2", runId: "run-b" },
+	taskType: "local_agent",
+	description: "review",
+	ambient: false,
+};
+const monitor = {
+	key: { taskId: "t3", runId: "run-a" },
+	taskType: "monitor",
+	description: "watch",
+	ambient: true,
+};
 
 /** What the oracle and the real decider must agree on at every step (3.1). */
 const publicStep = (decision: Decision<unknown>, view: LedgerView) =>
@@ -114,8 +141,11 @@ describe("[32.2.5] plain Run path differential", () => {
 	const answerIds = ["a1", "a2"];
 	const interactionIds = ["q1", "q2"] as const;
 	const labels = ["r1:1", "r1:2", "r2:1", "r3:1"] as const;
-	const claims = [...controlIds, ...answerIds].flatMap((commandId) =>
-		[0, 1, 2].map((transmission) => ({ commandId, transmission })),
+	/** 32.2.11: native commands (8.5), claimed the same way. */
+	const nativeIds = ["n1", "n2"];
+	const claims = [...controlIds, ...answerIds, ...nativeIds].flatMap(
+		(commandId) =>
+			[0, 1, 2].map((transmission) => ({ commandId, transmission })),
 	);
 	/** A generated answer to its round's own send. */
 	const own = "own" as SendToken;
@@ -313,6 +343,69 @@ describe("[32.2.5] plain Run path differential", () => {
 					),
 			},
 			{
+				// 8.2, 8.3, 8.5: the background alphabet on a label, with no Send Token (3.4): snapshots, task
+				// events, wake turns, a Claude wake's own end, wake evidence and native command receipts (D61).
+				weight: 6,
+				arbitrary: fc
+					.tuple(
+						fc.nat(40),
+						fc.constantFrom(...labels),
+						fc.constantFrom<Unsolicited>(
+							{ kind: "tasks_snapshot", tasks: [] },
+							{ kind: "tasks_snapshot", tasks: [shell] },
+							{ kind: "tasks_snapshot", tasks: [monitor, subagent] },
+							{ kind: "task_event", key: subagent.key, event: "notification" },
+							{ kind: "task_event", key: shell.key, event: "completed" },
+							{ kind: "turn_started" },
+							{ kind: "turn_started", wakeTask: subagent.key },
+							{ kind: "turn_ended" },
+							{ kind: "activity" },
+							{ kind: "result", outcome: "completed" },
+							{ kind: "query_ended" },
+							...nativeIds.flatMap((commandId): Unsolicited[] => [
+								{ kind: "command_lifecycle", commandId, state: "queued" },
+								{ kind: "command_lifecycle", commandId, state: "started" },
+								{ kind: "command_result", commandId },
+							]),
+						),
+					)
+					.map(
+						([event, label, evidence]): LedgerCommand => ({
+							verb: "observe",
+							observation: {
+								tag: "Unsolicited",
+								label,
+								eventId: `w${event}`,
+								...evidence,
+							},
+						}),
+					),
+			},
+			{
+				// 8.4, 8.5: Stop tasks and main's native commands (D60).
+				weight: 3,
+				arbitrary: fc.oneof(
+					fc
+						.tuple(
+							fc.constantFrom(...nativeIds),
+							fc.constantFrom("/goal clear", "/goal pause"),
+						)
+						.map(
+							([commandId, text]): LedgerCommand => ({
+								verb: "control",
+								control: { kind: "native_command", commandId, text },
+							}),
+						),
+					fc.constantFrom<LedgerCommand>(
+						{ verb: "control", control: { kind: "stop_tasks", tasks: "all" } },
+						{
+							verb: "control",
+							control: { kind: "stop_tasks", tasks: [shell.key] },
+						},
+					),
+				),
+			},
+			{
 				weight: 3,
 				arbitrary: fc.tuple(fc.nat(5), fc.constantFrom(...runIds)).map(
 					([event, runId]): LedgerCommand => ({
@@ -507,10 +600,11 @@ describe("[32.2.5] plain Run path differential", () => {
 								settlement: { kind: "process_lost", runnerId, retiredAt },
 							}),
 						),
-					fc.constantFrom(...labels).map(
-						(label): LedgerCommand => ({
+					// 8.3: a reattach's tasks are unknown until its snapshot.
+					fc.tuple(fc.constantFrom(...labels), fc.boolean()).map(
+						([label, reattached]): LedgerCommand => ({
 							verb: "settle",
-							settlement: { kind: "process_started", label, reattached: false },
+							settlement: { kind: "process_started", label, reattached },
 						}),
 					),
 					fc.constantFrom<LedgerCommand>(
@@ -595,6 +689,20 @@ describe("[32.2.5] plain Run path differential", () => {
 							),
 							// 3.7: the round's own send answered delivery_unknown, then its recovery deadline.
 							unknown: fc.boolean(),
+							// 8.3: a self-started turn on r1's first label before the round's admit (CONTRACT.md
+							// 2808-2809: Cursor starts none).
+							wake: fc.boolean().map((wake) => wake && provider !== "cursor"),
+							// 8.5: a goal command after the round's request, and the receipts r1:1 gives it.
+							native: fc.option(
+								fc.constantFrom<readonly ("queued" | "started" | "result")[]>(
+									[],
+									["result"],
+									["started", "result"],
+									["queued", "started", "result"],
+									["queued"],
+								),
+								{ nil: undefined },
+							),
 							noise: fc.array(
 								fc.tuple(
 									fc.oneof(
@@ -613,6 +721,19 @@ describe("[32.2.5] plain Run path differential", () => {
 						const trace = rounds.flatMap((round, index) => {
 							const token = (direct ? round.runId : round.token) as SendToken;
 							const skeleton: LedgerCommand[] = [
+								...(round.wake
+									? [
+											{
+												verb: "observe",
+												observation: {
+													tag: "Unsolicited",
+													label: "r1:1",
+													eventId: `wake${index}`,
+													kind: "turn_started",
+												},
+											} satisfies LedgerCommand,
+										]
+									: []),
 								{
 									verb: "admit",
 									inputId: round.runId.slice(0, 1),
@@ -654,6 +775,38 @@ describe("[32.2.5] plain Run path differential", () => {
 											round.ask,
 											`ask${index}`,
 										)),
+								...(round.native === undefined
+									? []
+									: [
+											{
+												verb: "control",
+												control: {
+													kind: "native_command",
+													commandId: `goal${index}`,
+													text: "/goal clear",
+												},
+											} satisfies LedgerCommand,
+											...round.native.map(
+												(receipt): LedgerCommand => ({
+													verb: "observe",
+													observation: {
+														tag: "Unsolicited",
+														label: "r1:1",
+														eventId: `goal${index}-${receipt}`,
+														...(receipt === "result"
+															? {
+																	kind: "command_result",
+																	commandId: `goal${index}`,
+																}
+															: {
+																	kind: "command_lifecycle",
+																	commandId: `goal${index}`,
+																	state: receipt,
+																}),
+													},
+												}),
+											),
+										]),
 							];
 							return [
 								...skeleton.map((command) => [command, 1] as const),
@@ -724,6 +877,11 @@ describe("[32.2.5] plain Run path differential", () => {
 								reached.views.add("relaunched");
 							queued = active?.tag === "Queued" ? active.runId : undefined;
 							reached.views.add(active?.tag ?? "idle");
+							// 8.2 to 8.5: wake Runs, tasks and native commands.
+							if (active?.origin === "wake") reached.views.add("wake");
+							reached.views.add(`tasks:${stepped.view.tasks.tag}`);
+							for (const command of stepped.view.nativeCommands)
+								reached.views.add(`native:${command.tag}`);
 							// 3.13: main's Stop and end rows, and decide's own cancel_request, are live.
 							for (const { effect } of stepped.view.live)
 								if (
@@ -731,7 +889,9 @@ describe("[32.2.5] plain Run path differential", () => {
 									effect.kind === "end_session" ||
 									effect.kind === "cancel_request" ||
 									effect.kind === "steer" ||
-									effect.kind === "deliver_answer"
+									effect.kind === "deliver_answer" ||
+									effect.kind === "stop_task" ||
+									effect.kind === "send_native_command"
 								)
 									reached.views.add(effect.kind);
 							// 3.10: interactions Pending, refused and Answered.
@@ -794,6 +954,23 @@ describe("[32.2.5] plain Run path differential", () => {
 					"lastRefusal",
 					"Answered",
 					...(provider === "opencode" ? ["Settling", "cancel_request"] : []),
+					// 32.2.11: tasks, wake Runs and native commands (8.2 to 8.5).
+					"tasks:none",
+					"send_native_command",
+					"native:Sent",
+					"native:Unconfirmed",
+					"native:Failed",
+					...(provider === "cursor" ? [] : ["wake"]),
+					...(provider === "claude"
+						? [
+								"tasks:unknown",
+								"tasks:live",
+								"stop_task",
+								"native:Queued",
+								"native:Started",
+								"native:Completed",
+							]
+						: []),
 				]),
 			);
 			expect([...reached.ends]).toEqual(
@@ -1419,7 +1596,8 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 
 	it("a Stop or end with a deadlineAt and no label work outside main's runs opens no ledger stop deadline (L6)", () => {
 		// CONTRACT.md 793-794: with no such work the arm opens none. Work with no open main run is a wake
-		// execution (32.2.11) or a send of an ended main run, and main's terminal seals the latter.
+		// execution (the [32.2.11] block shows it opening) or a send of an ended main run, which main's
+		// terminal seals.
 		agreed("opencode", (d) => {
 			const a = running(d);
 			stop(d, 5_000);
@@ -1453,8 +1631,8 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 });
 
 describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's acceptance criteria", () => {
-	/** The fixed traces that reach a wake or a background task, both 32.2.11's (scenarios.test.ts). */
-	const wakes = new Set(["L6-2", "L6-3", "PL-1", "PL-2", "PL-6"]);
+	/** The fixed trace that reaches 32.2.12's confirm gate (scenarios.test.ts). */
+	const confirmGated = new Set(["PL-6"]);
 	const settle = (
 		d: Driver,
 		settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
@@ -1492,13 +1670,13 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 		"claude",
 		"cursor",
 		"opencode",
-	] as const)("every fixed %s trace runs to its end in lockstep with the oracle, but for 32.2.11's wakes", (provider) => {
+	] as const)("every fixed %s trace runs to its end in lockstep with the oracle, but for 32.2.12's confirm gate", (provider) => {
 		const fixed = scenarios.filter(
 			(candidate) => candidate.provider === provider,
 		);
 		expect(fixed.length).toBeGreaterThan(0);
 		for (const trace of fixed)
-			if (!wakes.has(trace.id)) agreed(provider, trace.run);
+			if (!confirmGated.has(trace.id)) agreed(provider, trace.run);
 	});
 
 	it("a sibling steer's unsettled delivery_unknown blocks its input's automatic resend until a probe settles it (32.2.6 AC3, 3.5)", () => {
@@ -1628,5 +1806,617 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 			resolve(d);
 			expect(d.view().interactions).toEqual([]);
 		});
+	});
+});
+
+describe("[32.2.11] core background tasks, wake Runs and native commands: the bead's acceptance criteria", () => {
+	type Snapshot = Extract<Unsolicited, { kind: "tasks_snapshot" }>;
+	const lose = (d: Driver, runnerId: string) =>
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "process_lost", runnerId, retiredAt: d.now },
+		});
+	const started = (d: Driver, label: string, reattached = false) =>
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "process_started", label, reattached },
+		});
+	const native = (d: Driver, commandId: string, text: string) =>
+		step(d, {
+			verb: "control",
+			control: { kind: "native_command", commandId, text },
+		});
+	const stopTasks = (d: Driver, tasks: "all" | readonly TaskKey[]) =>
+		d.step({ verb: "control", control: { kind: "stop_tasks", tasks } });
+	const snapshot = (d: Driver, tasks: Snapshot["tasks"], label = "r1:1") =>
+		unsolicited(d, { kind: "tasks_snapshot", tasks }, label);
+	/** A native command's receipt at `now`, unsolicited under its label (D61). */
+	const receipt = (
+		d: Driver,
+		evidence: Extract<
+			Unsolicited,
+			{ kind: "command_lifecycle" | "command_result" }
+		>,
+		now?: number,
+	) =>
+		step(
+			d,
+			{
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: d.label,
+					eventId: `receipt-${d.next()}`,
+					...evidence,
+				},
+			},
+			now,
+		);
+	const viewed = (
+		task: Snapshot["tasks"][number],
+		kind: string,
+		taskClass: Task["class"],
+	): Task => ({
+		...task,
+		kind,
+		class: taskClass,
+	});
+
+	it('Claude goal probe "Pause on idle did nothing": an idle native command issues at once, starts no Run and its zero-turn result completes it (8.5, LI6, LI8, LI10)', () => {
+		agreed("claude", (d) => {
+			const issued = native(d, "n1", "/goal pause").issued;
+			const sent = {
+				tag: "Main",
+				commandId: "n1",
+				effect: {
+					kind: "send_native_command",
+					commandId: "n1",
+					text: "/goal pause",
+				},
+			};
+			// LI6 (D60): in live and nativeCommands in the decision that folds its control.
+			expect(issued).toEqual([sent]);
+			expect(d.view()).toMatchObject({
+				live: [sent],
+				anythingMayAct: true,
+				nativeCommands: [
+					{
+						commandId: "n1",
+						tag: "Sent",
+						deadline: {
+							owner: "NativeCommand",
+							commandId: "n1",
+							at: d.now + policy.nativeCommandMs,
+						},
+					},
+				],
+			});
+			expect(d.view().active).toBeUndefined();
+			// LI10: a zero-turn result never ends or starts a Run.
+			const done = receipt(d, { kind: "command_result", commandId: "n1" });
+			expect(done.ended).toEqual([]);
+			expect(d.view().active).toBeUndefined();
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Completed" },
+			]);
+		});
+	});
+
+	it("Claude goal probe: a clear sent mid-turn is held by Claude, never times out while queued, then resumes with the time it had left (8.5)", () => {
+		const d = agreed("claude", (d) => {
+			running(d);
+			native(d, "n1", "/goal clear");
+			const issuedAt = d.now;
+			receipt(
+				d,
+				{ kind: "command_lifecycle", commandId: "n1", state: "queued" },
+				issuedAt + 300,
+			);
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Queued" },
+			]);
+			expect(d.alarmAt).toBeUndefined();
+			receipt(
+				d,
+				{ kind: "command_lifecycle", commandId: "n1", state: "started" },
+				issuedAt + 60_000,
+			);
+			expect(d.view().nativeCommands).toEqual([
+				{
+					commandId: "n1",
+					tag: "Started",
+					deadline: {
+						owner: "NativeCommand",
+						commandId: "n1",
+						at: issuedAt + 60_000 + policy.nativeCommandMs - 300,
+					},
+				},
+			]);
+			const done = receipt(d, { kind: "command_result", commandId: "n1" });
+			expect(done.ended).toEqual([]);
+			expect(d.view().active).toMatchObject({
+				tag: "Running",
+				origin: "input",
+			});
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Completed" },
+			]);
+		});
+		expect(d.coverage.races["a clear held by Claude"]).toBe(1);
+	});
+
+	it("Claude goal probe: an idle clear completes with no Run (8.5)", () => {
+		const d = agreed("claude", (d) => {
+			native(d, "n1", "/goal clear");
+			receipt(d, { kind: "command_result", commandId: "n1" });
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Completed" },
+			]);
+			expect(d.view().active).toBeUndefined();
+		});
+		expect(d.coverage.races["an idle clear"]).toBe(1);
+	});
+
+	it("a native command with no confirmation is Unconfirmed at its deadline, and a reply after it completes it (8.5)", () => {
+		agreed("claude", (d) => {
+			native(d, "n1", "/goal clear");
+			expect(d.alarmAt).toBe(d.now + policy.nativeCommandMs);
+			fire(d);
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Unconfirmed" },
+			]);
+			expect(d.alarmAt).toBeUndefined();
+			receipt(d, { kind: "command_result", commandId: "n1" }, d.now + 10_000);
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Completed" },
+			]);
+		});
+	});
+
+	it("a permanent effect_outcome gives Failed{code} and finishes the send; a native command never gets not_sent (8.5, D34)", () => {
+		const d = agreed("claude", (d) => {
+			native(d, "n1", "/goal clear");
+			const sent = d.latest("send_native_command");
+			expect(
+				d.step({
+					verb: "observe",
+					observation: {
+						tag: "Answer",
+						token: tokenOf(sent),
+						kind: "effect_outcome",
+						outcome: { tag: "not_sent", retryAt: d.now },
+						transmission: claimOf(sent),
+					},
+				}).tag,
+			).toBe("Rejected");
+			observe(d, tokenOf(sent), {
+				kind: "effect_outcome",
+				outcome: { tag: "permanent", code: "Refused" },
+				transmission: claimOf(sent),
+			});
+			expect(d.view()).toMatchObject({
+				live: [],
+				anythingMayAct: false,
+				nativeCommands: [{ commandId: "n1", tag: "Failed", code: "Refused" }],
+			});
+			expect(d.alarmAt).toBeUndefined();
+		});
+		expect(d.coverage.races["a native command refused at delivery"]).toBe(1);
+	});
+
+	it.each([
+		["process_lost", (d: Driver) => lose(d, "r1")],
+		[
+			"session_ended",
+			(d: Driver) =>
+				step(d, {
+					verb: "settle",
+					settlement: {
+						kind: "session_ended",
+						cause: "native_session_vanished",
+					},
+				}),
+		],
+	])("a covered native command gives Failed{%s} by its covering cause (8.5)", (code, cover) => {
+		agreed("claude", (d) => {
+			native(d, "n1", "/goal pause");
+			cover(d);
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Failed", code },
+			]);
+		});
+	});
+
+	it("a native command issued with no process is pending and resolves at the next process_started, whose loss covers it (L2 case 3, 8.5)", () => {
+		agreed("claude", (d) => {
+			lose(d, "r1");
+			native(d, "n1", "/goal pause");
+			expect(d.view()).toMatchObject({
+				tasks: { tag: "none" },
+				nativeCommands: [{ commandId: "n1", tag: "Sent" }],
+			});
+			started(d, "r2:1");
+			expect(d.view().nativeCommands).toMatchObject([
+				{ commandId: "n1", tag: "Sent" },
+			]);
+			lose(d, "r2");
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Failed", code: "process_lost" },
+			]);
+		});
+	});
+
+	it("snapshots and a wake turn start are accepted with no Send Token; the wake Run starts nothing and names the last task notified, by arrival order (3.4, 8.2, 8.3, LI9)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, [monitor, subagent]);
+			// run-b arrives before run-a: arrival order names the waking task, never run_id order.
+			unsolicited(d, {
+				kind: "task_event",
+				key: subagent.key,
+				event: "notification",
+			});
+			unsolicited(d, {
+				kind: "task_event",
+				key: monitor.key,
+				event: "notification",
+			});
+			const woken = wake(d);
+			expect(woken.issued).toEqual([]);
+			const active = d.view().active;
+			expect(active).toMatchObject({
+				origin: "wake",
+				wakeTask: monitor.key,
+				inputs: [],
+			});
+			// LI9: one wake Run per self-started turn; a repeat joins it.
+			expect(wake(d).issued).toEqual([]);
+			expect(d.view().active?.runId).toBe(active?.runId);
+		});
+	});
+
+	it("a turn_started during an active input Run joins it, with no wake Run (8.3)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			const joined = wake(d);
+			expect(joined.issued).toEqual([]);
+			expect(d.view().active).toMatchObject({
+				runId: a.runId,
+				origin: "input",
+			});
+		});
+	});
+
+	it("races: a wake turn while an input is queued, and a snapshot during Interrupting", () => {
+		// 8.3 (CONTRACT.md 2808-2809): Cursor starts no unsolicited turn, so wakes run on the others.
+		const queued = agreed("opencode", (d) => {
+			admit(d, "B");
+			wake(d);
+			expect(d.view().active).toMatchObject({ origin: "wake", inputs: [] });
+		});
+		expect(queued.coverage.races["a wake turn while an input is queued"]).toBe(
+			1,
+		);
+		const interrupting = agreed("claude", (d) => {
+			running(d);
+			stop(d);
+			expect(d.view().active).toMatchObject({ tag: "Interrupting" });
+			snapshot(d, []);
+		});
+		expect(interrupting.coverage.races["a snapshot during Interrupting"]).toBe(
+			1,
+		);
+	});
+
+	it("task kind and class come from task_type and ambient, in snapshot arrival order (8.2)", () => {
+		agreed("claude", (d) => {
+			expect(d.view().tasks).toEqual({ tag: "none" });
+			snapshot(d, [subagent, monitor, shell]);
+			expect(d.view().tasks).toEqual({
+				tag: "live",
+				label: "r1:1",
+				tasks: [
+					viewed(subagent, "subagent", "work"),
+					viewed(monitor, "monitor", "monitoring"),
+					viewed(shell, "shell", "work"),
+				],
+			});
+		});
+	});
+
+	it("tasks: none after a fresh launch and with no process, unknown on a reattach until its snapshot, and after a replacement only the new process's (8.3, 8.4)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, []);
+			lose(d, "r1");
+			expect(d.view().tasks).toEqual({ tag: "none" });
+			started(d, "r2:1", true);
+			expect(d.view().tasks).toEqual({ tag: "unknown", label: "r2:1" });
+			// A retired runner's late snapshot changes nothing (L1.4).
+			noLifecycleChange(d, {
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: "r1:1",
+					eventId: "late",
+					kind: "tasks_snapshot",
+					tasks: [shell],
+				},
+			});
+			snapshot(d, [monitor], "r2:1");
+			expect(d.view().tasks).toEqual({
+				tag: "live",
+				label: "r2:1",
+				tasks: [viewed(monitor, "monitor", "monitoring")],
+			});
+		});
+	});
+
+	it.each<Unsolicited>([
+		{ kind: "turn_started" },
+		{ kind: "tasks_snapshot", tasks: [shell] },
+		{ kind: "task_event", key: shell.key, event: "notification" },
+		{ kind: "activity" },
+		{ kind: "result", outcome: "completed" },
+		{ kind: "query_ended" },
+	])("LI7: older-label $kind changes neither authority nor liveness (8.3)", (evidence) => {
+		agreed("claude", (d) => {
+			snapshot(d, []);
+			// 8.4, L5: r1:2 raises the runner, ending r1:1's scope.
+			unsolicited(d, { kind: "activity" }, "r1:2");
+			snapshot(d, [], "r1:2");
+			running(d);
+			noLifecycleChange(d, {
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: "r1:1",
+					eventId: "older",
+					...evidence,
+				},
+			});
+		});
+	});
+
+	it('stop_tasks: "all" stops the live tasks and a named key its own; a task is gone only when a later snapshot omits it (8.4, LI8)', () => {
+		agreed("claude", (d) => {
+			snapshot(d, [shell, subagent]);
+			const all = stopTasks(d, "all");
+			assert(all.tag === "Accepted");
+			expect(all.issued.map(({ effect }) => effect)).toEqual([
+				{ kind: "stop_task", key: shell.key },
+				{ kind: "stop_task", key: subagent.key },
+			]);
+			expect(d.view().anythingMayAct).toBe(true);
+			unsolicited(d, { kind: "task_event", key: shell.key, event: "killed" });
+			expect(d.view().tasks).toMatchObject({ tasks: [shell, subagent] });
+			snapshot(d, [subagent]);
+			expect(d.view().tasks).toMatchObject({ tasks: [subagent] });
+		});
+		agreed("claude", (d) => {
+			snapshot(d, [shell, subagent]);
+			const named = stopTasks(d, [subagent.key]);
+			assert(named.tag === "Accepted");
+			expect(named.issued.map(({ effect }) => effect)).toEqual([
+				{ kind: "stop_task", key: subagent.key },
+			]);
+		});
+	});
+
+	it.each([
+		["none", "claude", () => {}],
+		[
+			"unknown",
+			"claude",
+			(d: Driver) => {
+				snapshot(d, []);
+				unsolicited(d, { kind: "activity" }, "r1:2");
+			},
+		],
+		["unsupported", "cursor", () => {}],
+		["unsupported", "opencode", () => {}],
+		["no current process", "claude", (d: Driver) => lose(d, "r1")],
+	] as const)("stop_tasks is rejected with tasks %s on %s and issues nothing (8.4)", (_tasks, provider, arrange) => {
+		agreed(provider, (d) => {
+			arrange(d);
+			const before = d.view();
+			expect(stopTasks(d, "all").tag).toBe("Rejected");
+			expect(d.view()).toEqual(before);
+		});
+	});
+
+	it("L6: a Stop with a wake Run opens the ledger stop deadline, a later Stop keeps it, and its alarm ends the wake forced", () => {
+		agreed("opencode", (d) => {
+			wake(d);
+			const runId = d.view().active?.runId;
+			stop(d, 5_000);
+			expect(d.view().active).toMatchObject({
+				origin: "wake",
+				deadline: { owner: "Stop", at: 5_000 },
+			});
+			stop(d, 9_000);
+			expect(d.view().active).toMatchObject({
+				deadline: { owner: "Stop", at: 5_000 },
+			});
+			// OpenCode's Stop probes (3.7) fire first; only the stop deadline ends the wake.
+			while ((d.alarmAt ?? 5_000) < 5_000) expect(fire(d).ended).toEqual([]);
+			expect(d.alarmAt).toBe(5_000);
+			expect(fire(d).ended).toMatchObject([
+				{ runId, reason: { tag: "interrupted", forced: true } },
+			]);
+			expect(d.view().active).toBeUndefined();
+		});
+		// Claude's alarm is the same; its wake Run's view shows no deadline (gap, CONTRACT.md 787-794).
+		agreed("claude", (d) => {
+			wake(d);
+			const runId = d.view().active?.runId;
+			stop(d, 5_000);
+			stop(d, 9_000);
+			expect(d.alarmAt).toBe(5_000);
+			expect(fire(d).ended).toMatchObject([
+				{ runId, reason: { tag: "interrupted", forced: true } },
+			]);
+			expect(d.alarmAt).toBeUndefined();
+		});
+	});
+
+	it("L6, REDESIGN-11: a hung wake past the deadline ends forced with no process loss, and main's input Run started meanwhile stays open", () => {
+		agreed("claude", (d) => {
+			wake(d);
+			const runId = d.view().active?.runId;
+			stop(d, 5_000);
+			const a = begin(d);
+			const fired = fire(d);
+			expect(fired.ended).toMatchObject([
+				{ runId, reason: { tag: "interrupted", forced: true } },
+			]);
+			expect(fired.ended).toHaveLength(1);
+			expect(d.view().active).toMatchObject({
+				runId: a.runId,
+				origin: "input",
+			});
+		});
+	});
+
+	it("a wake Run's interrupt is addressed to its turn_started label's runner and covered when that runner retires (3.3, L2 case 2)", () => {
+		agreed("claude", (d) => {
+			wake(d);
+			const runId = d.view().active?.runId;
+			stop(d);
+			expect(d.view().live).toMatchObject([
+				{ effect: { kind: "interrupt", runId } },
+			]);
+			expect(lose(d, "r1").ended).toMatchObject([
+				{ runId, reason: { tag: "process_lost" } },
+			]);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+	});
+
+	it("D59: a Claude wake's turn_ended is its own end, interrupted and not forced after a Stop; other providers' turn_ended is Rejected", () => {
+		agreed("claude", (d) => {
+			wake(d);
+			const runId = d.view().active?.runId;
+			stop(d, 5_000);
+			expect(unsolicited(d, { kind: "turn_ended" }).ended).toMatchObject([
+				{ runId, reason: { tag: "interrupted", forced: false } },
+			]);
+		});
+		agreed("opencode", (d) => {
+			wake(d);
+			expect(
+				d.step({
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: "r1:1",
+						eventId: "turn-ended",
+						kind: "turn_ended",
+					},
+				}).tag,
+			).toBe("Rejected");
+		});
+	});
+
+	it("a Pause native command plus a wake Run leaves foreground authority unchanged, and a Stop issues no native command (8.5)", () => {
+		const d = agreed("claude", (d) => {
+			native(d, "n1", "/goal pause");
+			wake(d);
+			const active = d.view().active;
+			expect(active).toMatchObject({ origin: "wake" });
+			const done = receipt(d, { kind: "command_result", commandId: "n1" });
+			expect(done.ended).toEqual([]);
+			expect(d.view().active).toEqual(active);
+			expect(stop(d).issued.map(({ effect }) => effect.kind)).not.toContain(
+				"send_native_command",
+			);
+		});
+		expect(
+			d.coverage.races[
+				"Pause native command plus wake Run leaves foreground authority unchanged"
+			],
+		).toBe(1);
+	});
+
+	it.each([
+		["claude", 821101],
+		["cursor", 821102],
+		["opencode", 821103],
+	] as const)("LI6 to LI10 hold against the fake on %s's generated traces, seed %i", (provider, seed) => {
+		// The fake checks LI1 to LI10 at every step (assertStep). A trace stops at a 32.2.12 or 32.2.13
+		// input, or is discarded where the oracle itself fails the fake (the pended convergence suite).
+		const seen: { last?: ReturnType<typeof decider.decide> } = {};
+		const recorded = {
+			...decider,
+			decide: (...args: Parameters<typeof decider.decide>) => {
+				seen.last = decider.decide(...args);
+				return seen.last;
+			},
+		};
+		const tally = { checked: 0, later: 0, oracle: 0 };
+		const kinds = new Set<string>();
+		fc.assert(
+			fc.property(fc.array(traceAction, { maxLength: 60 }), (actions) => {
+				const real = new DifferentialTrace(
+					provider,
+					referenceImplementation,
+					recorded,
+				);
+				try {
+					real.step({
+						verb: "settle",
+						settlement: {
+							kind: "process_started",
+							label: real.expected.label,
+							reattached: false,
+						},
+					});
+					for (const action of actions) {
+						const { expected } = real;
+						const packet = expected.host.next(action, {
+							issued: expected.issued,
+							view: expected.view(),
+							now: expected.now,
+							alarmAt: expected.alarmAt,
+						});
+						real.step(packet.command, packet.now);
+					}
+					tally.checked += 1;
+				} catch (error) {
+					if (real.actual.commands.length < real.expected.commands.length)
+						tally.oracle += 1;
+					else if (
+						seen.last?.tag === "Rejected" &&
+						notBuilt.test(seen.last.diagnostic)
+					)
+						tally.later += 1;
+					else throw error;
+				} finally {
+					for (const [kind, count] of Object.entries(
+						real.actual.coverage.kinds,
+					))
+						if (count > 0) kinds.add(kind);
+				}
+			}),
+			{ seed, numRuns: 200 },
+		);
+		writeTraceArtifact(`background-fake-${provider}-${seed}`, {
+			seed,
+			tally,
+			kinds: [...kinds].sort(),
+		});
+		expect(tally.checked).toBeGreaterThan(tally.later + tally.oracle);
+		expect([...kinds]).toEqual(
+			expect.arrayContaining([
+				"activity",
+				...(provider === "cursor" ? [] : ["turn_started"]),
+				...(provider === "claude"
+					? [
+							"tasks_snapshot",
+							"task_event",
+							"command_lifecycle",
+							"command_result",
+						]
+					: []),
+			]),
+		);
 	});
 });

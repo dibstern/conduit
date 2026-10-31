@@ -1221,9 +1221,17 @@ function unsolicited(
 				label,
 				tasks: observation.tasks.map((task) => ({
 					...task,
-					kind: task.taskType,
-					// 8.2 class: GAP (held loosely, server evidence is 32.33's)
-					class: task.ambient ? "monitoring" : "work",
+					// 8.2 (CONTRACT.md 2778-2781): kind from task_type; serving needs 8.7's servers (GAP, 32.33).
+					kind:
+						(
+							{
+								local_bash: "shell",
+								local_agent: "subagent",
+								local_workflow: "workflow",
+							} as Record<string, string>
+						)[task.taskType] ?? task.taskType,
+					class:
+						task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
 				})),
 			};
 			world.snapshotEntry++;
@@ -1896,8 +1904,12 @@ function dispatched(
 		readonly token: SendToken;
 	},
 ): Outcome {
-	if (world.tokens.has(observation.token))
-		return noop("repeated run.dispatched");
+	const bound = world.tokens.get(observation.token);
+	if (bound !== undefined)
+		// CONTRACT.md 527-528: a hold fact on a send with no hold is evidence it cannot produce.
+		return world.sends[bound.send]?.held
+			? noop("repeated run.dispatched")
+			: rejected("a send with no hold cannot produce run_dispatched (3.4)");
 	const runner = world.runners.get(observation.runnerId);
 	if (isRetired(world, observation.runnerId))
 		return noop("no hold is written on a retired runner (4.3)");
@@ -2877,6 +2889,22 @@ export function viewLedger(state: ReferenceState): LedgerView {
 	});
 	const nativeCommands = world.nativeCommands.map(
 		(command): NativeCommandView => {
+			// 8.5 (CONTRACT.md 2933-2934): Failed with the covering cause when covered.
+			const covers = (world.sends[command.send]?.txs ?? []).map(
+				(tx) => tx.ended,
+			);
+			const covered = covers.includes("session_ended")
+				? "session_ended"
+				: covers.includes("process_lost")
+					? "process_lost"
+					: undefined;
+			if (
+				covered !== undefined &&
+				command.state !== "Completed" &&
+				command.state !== "Cancelled" &&
+				command.state !== "Failed"
+			)
+				return { commandId: command.commandId, tag: "Failed", code: covered };
 			switch (command.state) {
 				case "Sent":
 				case "Started":

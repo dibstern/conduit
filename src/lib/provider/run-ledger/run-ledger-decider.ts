@@ -12,12 +12,16 @@ import type {
 	Label,
 	LedgerCommand,
 	LedgerView,
+	NativeCommandView,
 	ProviderDecisionRules,
 	ProviderKind,
 	RunEffect,
 	RunEnded,
 	RunOutcome,
 	SendToken,
+	Task,
+	TaskKey,
+	TasksView,
 	Transport,
 } from "./run-ledger-model.js";
 import { nativePolicies } from "./run-ledger-policy-adapters.js";
@@ -91,7 +95,15 @@ type SteerEffect = Extract<RunEffect, { kind: "steer" }>;
 type ProbeEffect = Extract<RunEffect, { kind: "probe" }>;
 type ControlEffect = Extract<
 	RunEffect,
-	{ kind: "interrupt" | "end_session" | "cancel_request" | "deliver_answer" }
+	{
+		kind:
+			| "interrupt"
+			| "end_session"
+			| "cancel_request"
+			| "deliver_answer"
+			| "stop_task"
+			| "send_native_command";
+	}
 >;
 type SendEffect = StartEffect | SteerEffect | ProbeEffect | ControlEffect;
 
@@ -171,9 +183,13 @@ interface Exec {
 	readonly fold: FoldItem[];
 }
 
-/** Run (decisions only, 3.3). */
+/** Run (decisions only, 3.3); a wake Run's id is decide's (8.3). */
 interface Run {
 	readonly runId: string;
+	readonly origin: "input" | "wake";
+	readonly wakeTask?: TaskKey | undefined;
+	/** 8.3: the labels whose wake executions are this wake Run's, oldest first. */
+	readonly wakeLabels: Label[];
 	readonly inputs: string[];
 	phase: "Queued" | "Launched" | "Interrupting" | "Ended";
 	/** 3.6: a Stop, Run now or end commit asked it to stop; its retries are withdrawn. */
@@ -186,6 +202,51 @@ interface Run {
 	/** The Tombstone (3.8). */
 	ended?: Pick<RunEnded, "outcome" | "reason"> | undefined;
 }
+
+/** 8.3: a label's wake execution, from its turn_started to its own end or coverage. */
+interface Wake {
+	readonly label: Label;
+	/** A repeat turn_started with no active Run re-arms it under the wake Run (CONTRACT.md 2837-2840). */
+	runId?: string | undefined;
+	/** Its turn_started's issue order; an end_session success covers only work before it (3.4). */
+	readonly seq: number;
+	ended?:
+		| "result"
+		| "own"
+		| "process_lost"
+		| "session_ended"
+		| "forced"
+		| undefined;
+	outcome?: FoldItem | undefined;
+}
+
+/** 8.5: a native command, a projection of its send. */
+interface NativeCommandRec {
+	readonly commandId: string;
+	readonly send: number;
+	state:
+		| "Sent"
+		| "Started"
+		| "Queued"
+		| "Unconfirmed"
+		| "Completed"
+		| "Cancelled"
+		| "Failed";
+	code?: string | undefined;
+	/** Time left while the provider reports it queued; the deadline resumes with it (8.5). */
+	remaining: number;
+	deadline?: { readonly at: number; readonly opened: number } | undefined;
+}
+
+/** 8.4, D44: a runner's latest snapshot and its label; a raised label's tasks are unknown. */
+type TaskState =
+	| { readonly tag: "Unknown"; readonly label: Label }
+	| { readonly tag: "Known"; readonly label: Label; readonly tasks: Task[] };
+
+/** L6: a stop item is a transmission, or a wake execution by index. */
+type StopItem =
+	| { readonly send: number; readonly tx: number }
+	| { readonly wake: number };
 
 interface Book {
 	readonly sessionId: string;
@@ -206,18 +267,22 @@ interface Book {
 	/** L1: a runner retired before it started has no label. */
 	readonly runners: Map<
 		string,
-		| { readonly retired: false; latest: Label }
+		| { readonly retired: false; latest: Label; tasks: TaskState }
 		| { readonly retired: true; readonly latest: Label | null }
 	>;
 	current: string | null;
 	readonly retirements: Set<string>;
 	readonly interactions: Interaction[];
-	/** L6: the one ledger stop deadline, over transmissions by their send and tx index. */
+	readonly wakes: Wake[];
+	readonly nativeCommands: NativeCommandRec[];
+	/** 8.3: the latest notification's task, a wake Run's wakeTask when its turn_started names none. */
+	lastNotified?: TaskKey | undefined;
+	/** L6: the one ledger stop deadline, over transmissions and wake executions. */
 	stop?:
 		| {
 				readonly at: number;
 				readonly opened: number;
-				readonly items: { readonly send: number; readonly tx: number }[];
+				readonly items: StopItem[];
 		  }
 		| undefined;
 }
@@ -327,6 +392,29 @@ function mayStillAct(book: Book, send: Send, tx: Tx): boolean {
 		interactionOf(book, effect.interactionId)?.resolved !== false
 	)
 		return false;
+	// 3.5, 8.4: a stop_task's work is its task, ended once the task is neither live nor unknown.
+	if (effect.kind === "stop_task") {
+		const tasks = taskView(book);
+		if (
+			tasks.tag === "none" ||
+			(tasks.tag === "live" &&
+				!tasks.tasks.some((task) => sameKey(task.key, effect.key)))
+		)
+			return false;
+	}
+	// 8.5: a native command's work ends at its completion, cancellation or failure.
+	if (effect.kind === "send_native_command") {
+		const state = book.nativeCommands.find(
+			(item) => item.commandId === effect.commandId,
+		)?.state;
+		if (
+			state === undefined ||
+			state === "Completed" ||
+			state === "Cancelled" ||
+			state === "Failed"
+		)
+			return false;
+	}
 	// D59: a runner provider's interrupt is no fence member; its work ends with the Run it names.
 	if (
 		effect.kind === "interrupt" &&
@@ -370,8 +458,41 @@ const delivering = (book: Book, interaction: Interaction) =>
 		const send = book.sends[index];
 		return send?.txs.some((tx) => mayStillAct(book, send, tx)) === true;
 	});
-const activeRun = (book: Book) =>
-	book.runs.find((run) => run.phase !== "Ended");
+const activeInputRun = (book: Book) =>
+	book.runs.find((run) => run.phase !== "Ended" && run.origin === "input");
+const activeWakeRun = (book: Book) =>
+	book.runs.find((run) => run.phase !== "Ended" && run.origin === "wake");
+/** The Run the view and a commit read: the input Run, else the wake Run (8.3). */
+const activeRun = (book: Book) => activeInputRun(book) ?? activeWakeRun(book);
+const sameKey = (a: TaskKey, b: TaskKey) =>
+	a.taskId === b.taskId && a.runId === b.runId;
+/** 8.4: the current runner's tasks; a pending address has none. */
+function taskView(book: Book): TasksView {
+	const runner =
+		book.current === null ? undefined : book.runners.get(book.current);
+	if (
+		runner === undefined ||
+		runner.retired ||
+		!nativePolicies[book.provider].capabilities.backgroundTasks
+	)
+		return { tag: "none" };
+	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest)
+		return { tag: "unknown", label: runner.latest };
+	return runner.tasks.tasks.length === 0
+		? { tag: "none" }
+		: { tag: "live", label: runner.latest, tasks: runner.tasks.tasks };
+}
+/**
+ * L5: whether ending a label's scope records lost work, the confirm gate's and lost work's
+ * ticket (32.2.12); a label whose tasks are known and empty records none.
+ */
+function losesWork(book: Book, label: Label): boolean {
+	const runner = book.runners.get(splitLabel(label).runnerId);
+	const tasks = runner?.retired === false ? runner.tasks : undefined;
+	return tasks === undefined || tasks.tag === "Unknown" || tasks.label !== label
+		? nativePolicies[book.provider].capabilities.backgroundTasks
+		: tasks.tasks.length > 0;
+}
 const currentLabel = (book: Book): Label | null =>
 	book.current === null
 		? null
@@ -387,6 +508,7 @@ const runWork = (book: Book, run: Run) =>
 	);
 /** L6: label work, the fence members that may still act. */
 const labelWorkOutstanding = (book: Book) =>
+	book.wakes.some((wake) => wake.ended === undefined) ||
 	book.sends.some(
 		(send) =>
 			rules(book).fences(send.effect) &&
@@ -517,6 +639,36 @@ interface RunSummary {
 	/** Reason 2.3: the covering cause, session ended before process lost. */
 	readonly covered?: "process_lost" | "session_ended" | undefined;
 	readonly fold: Pick<RunEnded, "outcome" | "reason">;
+	/** 8.3: a wake Run ends only with its latest label's wake execution, by that end. */
+	readonly wake?:
+		| { readonly ended?: Pick<RunEnded, "outcome" | "reason"> | undefined }
+		| undefined;
+}
+
+/** 8.3: a wake Run's end, read from its latest label's wake execution. */
+function wakeEnd(
+	book: Book,
+	run: Run,
+): Pick<RunEnded, "outcome" | "reason"> | undefined {
+	const latest = run.wakeLabels.at(-1);
+	const wake = book.wakes
+		.filter((item) => item.label === latest && item.runId === run.runId)
+		.at(-1);
+	switch (wake?.ended) {
+		case undefined:
+			return undefined;
+		case "process_lost":
+		case "session_ended":
+			return { outcome: "error", reason: { tag: wake.ended } };
+		case "forced":
+			return {
+				outcome: "interrupted",
+				reason: { tag: "interrupted", forced: true },
+			};
+		default:
+			// D59, 3.8 reason 2.1: a wake ended with no result after a Stop reads interrupted.
+			return fold(wake?.outcome === undefined ? [] : [wake.outcome], run.asked);
+	}
 }
 
 function summarize(book: Book, run: Run): RunSummary {
@@ -587,6 +739,7 @@ function summarize(book: Book, run: Run): RunSummary {
 			],
 			run.asked,
 		),
+		...(run.origin === "wake" ? { wake: { ended: wakeEnd(book, run) } } : {}),
 	};
 }
 
@@ -597,10 +750,8 @@ interface Due {
 }
 
 /** L6: a stop item is open while its transmission may still act. */
-function stopItemOpen(
-	book: Book,
-	item: { readonly send: number; readonly tx: number },
-): boolean {
+function stopItemOpen(book: Book, item: StopItem): boolean {
+	if ("wake" in item) return book.wakes[item.wake]?.ended === undefined;
 	const send = book.sends[item.send];
 	const tx = send?.txs[item.tx];
 	return send !== undefined && tx !== undefined && mayStillAct(book, send, tx);
@@ -618,11 +769,14 @@ function deadlines(book: Book): Due[] {
 			opened: stop.opened,
 			fire: () => {
 				// L6: the alarm forces only work no observer ended, and kills nothing.
-				for (const item of stop.items)
-					if (stopItemOpen(book, item)) {
-						const tx = book.sends[item.send]?.txs[item.tx];
-						if (tx !== undefined) tx.ended = "forced";
-					}
+				for (const item of stop.items) {
+					if (!stopItemOpen(book, item)) continue;
+					const forced =
+						"wake" in item
+							? book.wakes[item.wake]
+							: book.sends[item.send]?.txs[item.tx];
+					if (forced !== undefined) forced.ended = "forced";
+				}
 				book.stop = undefined;
 			},
 		});
@@ -675,6 +829,16 @@ function deadlines(book: Book): Due[] {
 				});
 		}
 	}
+	// 8.5: a native command's deadline drives only its view.
+	for (const command of book.nativeCommands)
+		if (command.deadline !== undefined)
+			due.push({
+				...command.deadline,
+				fire: () => {
+					command.deadline = undefined;
+					command.state = "Unconfirmed";
+				},
+			});
 	return due.sort((a, b) => a.at - b.at || a.opened - b.opened);
 }
 
@@ -705,6 +869,10 @@ function reconcile(situation: ReturnType<typeof read>): Entry | undefined {
 		// 3.6: a Run not yet launched ends interrupted at its commit.
 		if (run.queued) {
 			if (run.asked) return end(run.runId, interrupted(false));
+			continue;
+		}
+		if (run.wake !== undefined) {
+			if (run.wake.ended !== undefined) return end(run.runId, run.wake.ended);
 			continue;
 		}
 		if (run.endEvidence && !run.awaiting) return end(run.runId, run.fold);
@@ -806,8 +974,9 @@ const nextMode = (book: Book): "fresh" | "resume" =>
 
 /**
  * L2: a send's address at issue. Case 2: a send for a Run with an execution, on a runner-host
- * provider, goes to that execution's runner, pending while its start is. Case 3: every other send
- * (every OpenCode send) goes to the current process, or pending with none.
+ * provider, goes to that execution's runner, pending while its start is; a wake Run's runner is
+ * its latest turn_started label's. Case 3: every other send (every OpenCode send) goes to the
+ * current process, or pending with none.
  */
 function addressAt(
 	book: Book,
@@ -818,16 +987,19 @@ function addressAt(
 		run.phase !== "Queued" &&
 		nativePolicies[book.provider].capabilities.runnerHost
 	) {
+		const wake = run.wakeLabels.at(-1);
 		const start = runSends(book, run).find(
 			(send) => isStart(send) && !send.dropped,
 		);
-		if (start !== undefined)
-			return start.runnerId === null
-				? { runnerId: null, label: null, follows: start.seq }
-				: {
-						runnerId: start.runnerId,
-						label: book.runners.get(start.runnerId)?.latest ?? null,
-					};
+		const runnerId =
+			wake === undefined ? start?.runnerId : splitLabel(wake).runnerId;
+		if (start !== undefined && runnerId === null)
+			return { runnerId: null, label: null, follows: start.seq };
+		if (runnerId !== undefined && runnerId !== null)
+			return {
+				runnerId,
+				label: book.runners.get(runnerId)?.latest ?? null,
+			};
 	}
 	return { runnerId: book.current, label: currentLabel(book) };
 }
@@ -876,6 +1048,18 @@ function issueControl(
 	send.commandId = commandId;
 	transmit(book, send, undefined);
 	return send;
+}
+
+/** A cancel_request or stop_task decide issues, Tokened from ctx.newId (3.12, 3.13). */
+function issueTokened(
+	book: Book,
+	step: Step,
+	effect: Extract<ControlEffect, { kind: "cancel_request" | "stop_task" }>,
+): void {
+	const send = issue(book, effect, false);
+	const token = step.newId() as SendToken;
+	transmit(book, send, token);
+	step.effects.push({ tag: "Tokened", token, effect });
 }
 
 /** 3.7: probe transmission n's retry deadline is its issue plus max(probeMs, backoff(n)). */
@@ -997,6 +1181,16 @@ function effectOutcome(
 				code: outcome.code,
 			});
 			failInput(book, send, tx);
+			// 8.5: a permanent outcome, a refusal included, fails the native command with its code.
+			if (send.effect.kind === "send_native_command") {
+				const index = book.sends.indexOf(send);
+				const command = book.nativeCommands.find((item) => item.send === index);
+				if (command !== undefined) {
+					command.state = "Failed";
+					command.code = outcome.code;
+					command.deadline = undefined;
+				}
+			}
 			// 3.10: a permanent refusal ends the answer's delivery, which resolves its interaction.
 			if (send.effect.kind === "deliver_answer") {
 				const interaction = interactionOf(book, send.effect.interactionId);
@@ -1044,9 +1238,20 @@ function sessionEnd(book: Book, before: number): boolean {
 			run.phase !== "Ended" &&
 			run.exec.evidence &&
 			run.exec.endedBy === undefined &&
-			runSends(book, run).some((send) => send.txs.some((tx) => tx.seq < before))
+			(runSends(book, run).some((send) =>
+				send.txs.some((tx) => tx.seq < before),
+			) ||
+				book.wakes.some(
+					(wake) => wake.runId === run.runId && wake.seq < before,
+				))
 		) {
 			run.exec.endedBy = "session_ended";
+			moved = true;
+		}
+	// 8.3: it covers the wake executions opened before it.
+	for (const wake of book.wakes)
+		if (wake.seq < before && wake.ended === undefined) {
+			wake.ended = "session_ended";
 			moved = true;
 		}
 	// 3.10: session end resolves every interaction.
@@ -1108,6 +1313,9 @@ function rules(book: Book): ProviderDecisionRules {
 			};
 }
 const never = () => false;
+/** 3.4, 8.3, D61: background evidence and a native command's receipts are never an answer. */
+const unsolicitedOnly = () =>
+	rejected("unsolicited evidence is never an answer (3.4, 8.3, D61)");
 const held = (send: Send) => send.held;
 
 function liveness(
@@ -1243,9 +1451,10 @@ const evidenceTable: EvidenceTable = {
 		produces: (send) => !send.held,
 		merge: (book, fact, { send, tx }, evidence) =>
 			// 3.4 (CONTRACT.md 465-471, D48): not_sent is only a probe's, stop_task's or
-			// cancel_request's.
+			// cancel_request's; a native command never gets one (8.5).
 			evidence.outcome.tag === "not_sent" &&
 			send.effect.kind !== "probe" &&
+			send.effect.kind !== "stop_task" &&
 			send.effect.kind !== "cancel_request"
 				? rejected(`${send.effect.kind} cannot produce not_sent evidence (3.4)`)
 				: effectOutcome(book, fact, send, tx, evidence.outcome),
@@ -1392,6 +1601,8 @@ const evidenceTable: EvidenceTable = {
 									)
 								)
 									item.ended = "evidence";
+					// 8.3, D26: and every wake execution.
+					for (const wake of book.wakes) wake.ended ??= "own";
 					break;
 				}
 			}
@@ -1430,31 +1641,19 @@ const evidenceTable: EvidenceTable = {
 			return changed;
 		},
 	},
-	command_result: {
-		class: "command",
-		produces: never,
-		merge: () => notBuilt("32.2.11", "command_result"),
-	},
+	command_result: { class: "command", produces: never, merge: unsolicitedOnly },
 	tasks_snapshot: {
 		class: "background",
 		produces: never,
-		merge: () => notBuilt("32.2.11", "tasks_snapshot"),
+		merge: unsolicitedOnly,
 	},
-	task_event: {
-		class: "background",
-		produces: never,
-		merge: () => notBuilt("32.2.11", "task_event"),
-	},
+	task_event: { class: "background", produces: never, merge: unsolicitedOnly },
 	turn_started: {
 		class: "background",
 		produces: never,
-		merge: () => notBuilt("32.2.11", "turn_started"),
+		merge: unsolicitedOnly,
 	},
-	turn_ended: {
-		class: "background",
-		produces: never,
-		merge: () => notBuilt("32.2.11", "turn_ended"),
-	},
+	turn_ended: { class: "background", produces: never, merge: unsolicitedOnly },
 };
 
 /** 3.10: an interaction belongs to the label its evidence names; it is requested once. */
@@ -1557,9 +1756,11 @@ function dispatched(
 	return changed;
 }
 
-/** 3.4, 3.10: evidence no send produced, under the label it names. */
+/** 3.4, 3.10, 8.3: evidence no send produced, under the label it names. */
 function unsolicited(
 	book: Book,
+	fact: Fact,
+	step: Step,
 	observation: Extract<
 		Extract<LedgerCommand, { verb: "observe" }>["observation"],
 		{ tag: "Unsolicited" }
@@ -1587,41 +1788,232 @@ function unsolicited(
 	if (runner === undefined || runner.latest === null)
 		return noop("a runner not started has no authority (L1)");
 	book.seen.add(key);
-	// 8.4, L5: a label newer than its live runner's latest raises it.
+	// L1 item 4: a retired runner's labels are older, as is one below its latest querySeq.
+	const older = runner.retired || querySeq < splitLabel(runner.latest).querySeq;
+	// 8.4, L5, D44: a label newer than its live runner's latest raises it, ending the old label's
+	// scope; its tasks are unknown until its first snapshot.
 	let raised = false;
 	if (!runner.retired && querySeq > splitLabel(runner.latest).querySeq) {
-		if (capabilities.backgroundTasks)
-			return notBuilt("32.2.11", "a raised label's background tasks");
+		if (losesWork(book, runner.latest))
+			return notBuilt("32.2.12", "lost work at a raised label");
 		runner.latest = label;
+		runner.tasks = capabilities.backgroundTasks
+			? { tag: "Unknown", label }
+			: { tag: "Known", label, tasks: [] };
 		raised = true;
 	}
+	const unchanged = (diagnostic?: string) =>
+		raised ? changed : noop(diagnostic);
+	const wake = book.wakes.find(
+		(item) => item.label === label && item.ended === undefined,
+	);
 	switch (kind) {
+		case "tasks_snapshot":
+			// runner.retired narrows; older already includes it.
+			if (runner.retired || older)
+				return unchanged("older-label snapshot (L1.4)");
+			// 8.3: a snapshot replaces the set. 8.2 (CONTRACT.md 2778-2781) names the kind and class;
+			// gap: serving needs a linked server (8.7, not built), so none is serving yet.
+			runner.tasks = {
+				tag: "Known",
+				label,
+				tasks: observation.tasks.map((task) => ({
+					...task,
+					kind:
+						{
+							local_bash: "shell",
+							local_agent: "subagent",
+							local_workflow: "workflow",
+						}[task.taskType] ?? task.taskType,
+					class:
+						task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
+				})),
+			};
+			return changed;
+		case "task_event":
+			// 8.3: a notification names the waking task.
+			if (observation.event === "notification")
+				book.lastNotified = observation.key;
+			return changed;
+		case "turn_started": {
+			if (older) return unchanged("older label gives no wake Run (L1.4)");
+			const inputRun = activeInputRun(book);
+			const wakeRun = activeWakeRun(book);
+			// 8.3 (CONTRACT.md 2837-2840, D28): with no active Run a turn_started records a wake Run,
+			// opening its label's wake execution or re-arming one still outstanding as that Run's.
+			if (
+				wake !== undefined &&
+				(inputRun !== undefined ||
+					(wakeRun !== undefined && wake.runId === wakeRun.runId))
+			)
+				return unchanged(
+					"wake execution already outstanding under the active Run",
+				);
+			let runId: string | undefined;
+			if (inputRun === undefined) {
+				if (wakeRun === undefined) {
+					runId = step.newId();
+					book.runs.push({
+						runId,
+						origin: "wake",
+						wakeTask: observation.wakeTask ?? book.lastNotified,
+						wakeLabels: [label],
+						inputs: [],
+						phase: "Launched",
+						asked: false,
+						exec: { ...newExec(1), evidence: true },
+					});
+				} else {
+					wakeRun.wakeLabels.push(label);
+					runId = wakeRun.runId;
+				}
+			}
+			if (wake === undefined) book.wakes.push({ label, runId, seq: book.seq });
+			else wake.runId = runId;
+			return changed;
+		}
+		case "turn_ended":
+			// 8.3, D59: a Claude wake's own end.
+			if (wake === undefined)
+				return unchanged("no wake execution on its label (8.3)");
+			wake.ended = "own";
+			return changed;
+		case "activity":
+			return unchanged(
+				wake === undefined ? "no wake execution on its label (8.3)" : undefined,
+			);
+		case "result": {
+			if (wake === undefined) {
+				// 3.4: a Claude result naming none, with no wake, answers each started send with no result.
+				const started = book.sends
+					.filter(delivers)
+					.filter((send) =>
+						send.txs.some(
+							(tx) =>
+								tx.label === label &&
+								tx.consumption.tag !== "None" &&
+								!tx.resulted,
+						),
+					);
+				if (
+					!nativePolicies[book.provider].capabilities.commandReceipts ||
+					started.length === 0
+				)
+					return unchanged("no wake execution on its label (8.3)");
+				for (const send of started)
+					for (const tx of send.txs) {
+						if (tx.label !== label || tx.resulted) continue;
+						const run = findRun(book, send.runId);
+						const live =
+							run !== undefined &&
+							run.phase !== "Ended" &&
+							send.exec === run.exec.n &&
+							tx.ended === undefined;
+						tx.answers.push(observation);
+						evidenceTable.result.merge(
+							book,
+							fact,
+							{ send, tx, run, live },
+							observation,
+						);
+						if (rules(book).workEnded(tx.answers)) tx.ended ??= "evidence";
+					}
+				return changed;
+			}
+			// 9: OpenCode's wake ends at its query_ended or a covering idle probe.
+			if (runEnd(book) === "query_ended") return unchanged();
+			wake.ended = "result";
+			wake.outcome = {
+				seq: book.seq,
+				outcome: observation.outcome,
+				code: observation.error?.code,
+				retryable: observation.error?.retryable ?? false,
+			};
+			return changed;
+		}
+		case "query_ended": {
+			if (wake === undefined && runEnd(book) !== "query_ended")
+				return unchanged("no wake execution on its label (8.3)");
+			if (wake !== undefined) wake.ended = "own";
+			// 9: OpenCode's query end ends its label's fence members.
+			let moved = wake !== undefined;
+			if (runEnd(book) === "query_ended")
+				for (const send of book.sends)
+					if (rules(book).fences(send.effect))
+						for (const tx of send.txs)
+							if (tx.label === label && tx.ended === undefined) {
+								tx.ended = "evidence";
+								moved = true;
+							}
+			return moved ? changed : unchanged();
+		}
 		case "interaction_requested": {
+			// Gap (CONTRACT.md 1041-1044, L1 349-350): an interaction raised on a retired runner's
+			// label after its retirement stays Pending; the contract resolves only those Pending at the
+			// retirement, so this follows the oracle.
 			const outcome = requestInteraction(book, label, observation);
 			return raised ? changed : outcome;
 		}
 		case "interaction_resolved": {
 			// D61: native or confirming an answer, by its interaction.
 			const interaction = interactionOf(book, observation.interactionId);
-			if (interaction === undefined || interaction.resolved)
-				return raised ? changed : noop();
+			if (interaction === undefined || interaction.resolved) return unchanged();
 			interaction.resolved = true;
 			return changed;
 		}
-		default:
-			// 3.4 (CONTRACT.md 485-494): wake executions and native commands.
-			return notBuilt("32.2.11", `unsolicited ${kind}`);
+		case "command_lifecycle":
+		case "command_result": {
+			// D61 (CONTRACT.md 486-494): a native command's receipts are unsolicited, by its commandId.
+			const command = book.nativeCommands.find(
+				(item) => item.commandId === observation.commandId,
+			);
+			if (command === undefined)
+				return unchanged("a command receipt naming no native command (D61)");
+			// LI7 (CONTRACT.md 3430): older-label evidence changes nothing, its send's own label aside.
+			if (
+				older &&
+				!book.sends[command.send]?.txs.some((tx) => tx.label === label)
+			)
+				return unchanged("older-label command receipt (LI7)");
+			// 8.5: the deadline pauses while queued and resumes with the time it had left.
+			switch (
+				observation.kind === "command_result" ? "completed" : observation.state
+			) {
+				case "queued":
+					if (command.deadline !== undefined)
+						command.remaining = Math.max(0, command.deadline.at - fact.now);
+					command.deadline = undefined;
+					command.state = "Queued";
+					break;
+				case "started":
+					command.deadline ??= {
+						at: fact.now + command.remaining,
+						opened: book.entry,
+					};
+					command.state = "Started";
+					break;
+				case "completed":
+					command.deadline = undefined;
+					command.state = "Completed";
+					break;
+				case "cancelled":
+					command.deadline = undefined;
+					command.state = "Cancelled";
+			}
+			return changed;
+		}
 	}
 }
 
 function observe(
 	book: Book,
 	fact: Fact,
+	step: Step,
 	observation: Extract<LedgerCommand, { verb: "observe" }>["observation"],
 ): Outcome {
 	switch (observation.tag) {
 		case "Unsolicited":
-			return unsolicited(book, observation);
+			return unsolicited(book, fact, step, observation);
 		case "Main": {
 			const key = `main\u0000${observation.eventId}`;
 			if (book.seen.has(key)) return noop("repeated main observation (D60)");
@@ -1633,11 +2025,13 @@ function observe(
 						return noop("run.requested for an input never admitted");
 					input.reservation ??= observation.runId;
 					if (input.runId === undefined) {
-						if (activeRun(book) !== undefined)
+						if (activeInputRun(book) !== undefined)
 							return noop("run.requested while another Run is active");
 						// 3.4: the Run is reserved at main's run.requested, under main's runId.
 						book.runs.push({
 							runId: observation.runId,
+							origin: "input",
+							wakeLabels: [],
 							inputs: [observation.inputId],
 							phase: "Queued",
 							asked: false,
@@ -1700,6 +2094,8 @@ function observe(
 							);
 						book.runs.push({
 							runId,
+							origin: "input",
+							wakeLabels: [],
 							inputs: [observation.inputId],
 							phase: "Launched",
 							asked: false,
@@ -1838,7 +2234,11 @@ function observe(
 }
 
 /** L1: a runner retires (its process_lost, or another runner's process_started). */
-function retire(book: Book, runnerId: string): void {
+function retire(book: Book, runnerId: string): Outcome {
+	const runner = book.runners.get(runnerId);
+	// L1 item 3, L5: retiring records its latest label's lost work.
+	if (runner?.retired === false && losesWork(book, runner.latest))
+		return notBuilt("32.2.12", "lost work at a retirement");
 	// L1 (CONTRACT.md 349-350): retirement is final, a runner not yet started included.
 	book.runners.set(runnerId, {
 		latest: book.runners.get(runnerId)?.latest ?? null,
@@ -1875,10 +2275,15 @@ function retire(book: Book, runnerId: string): void {
 			)
 		)
 			run.exec.endedBy ??= "process_lost";
+	// L1 item 2: it ends its wake executions.
+	for (const wake of book.wakes)
+		if (splitLabel(wake.label).runnerId === runnerId)
+			wake.ended ??= "process_lost";
 	// 3.10: retirement resolves its labels' interactions.
 	for (const interaction of book.interactions)
 		if (splitLabel(interaction.label).runnerId === runnerId)
 			interaction.resolved = true;
+	return changed;
 }
 
 function settle(
@@ -1938,11 +2343,13 @@ function settle(
 				querySeq <= splitLabel(prior.latest).querySeq
 			)
 				return noop("an older label's process_started changes nothing (L1)");
+			// L5, D44: the runner's previous label becomes older, so its scope ends.
 			if (
-				settlement.reattached &&
-				nativePolicies[book.provider].capabilities.backgroundTasks
+				prior !== undefined &&
+				prior.latest !== settlement.label &&
+				losesWork(book, prior.latest)
 			)
-				return notBuilt("32.2.11", "a reattached runner's tasks");
+				return notBuilt("32.2.12", "lost work at a raised label");
 			// L1 totality (CONTRACT.md 346-349): another runner's process_started is the process_lost
 			// of every other runner, started or only named by a run.dispatched.
 			for (const other of new Set([
@@ -1956,9 +2363,20 @@ function settle(
 					other !== null &&
 					other !== runnerId &&
 					book.runners.get(other)?.retired !== true
-				)
-					retire(book, other);
-			book.runners.set(runnerId, { latest: settlement.label, retired: false });
+				) {
+					const retired = retire(book, other);
+					if (retired.tag === "Rejected") return retired;
+				}
+			// 8.3: a fresh launch has no tasks; a reattach's are unknown until its snapshot.
+			book.runners.set(runnerId, {
+				latest: settlement.label,
+				retired: false,
+				tasks:
+					settlement.reattached &&
+					nativePolicies[book.provider].capabilities.backgroundTasks
+						? { tag: "Unknown", label: settlement.label }
+						: { tag: "Known", label: settlement.label, tasks: [] },
+			});
 			book.current = runnerId;
 			// L2: a pending send resolves, once, to the next process_started's runner; a
 			// run_dispatched naming a runner not yet started fixes its label here.
@@ -1982,14 +2400,18 @@ function settle(
 			if (book.retirements.has(key))
 				return noop("process_lost already folded (6.5)");
 			book.retirements.add(key);
-			retire(book, settlement.runnerId);
-			return changed;
+			return retire(book, settlement.runnerId);
 		}
-		case "session_ended":
+		case "session_ended": {
+			// L5, 8.4 (CONTRACT.md 2884-2885): session_ended ends the latest label's scope.
+			const label = currentLabel(book);
+			if (label !== null && losesWork(book, label))
+				return notBuilt("32.2.12", "lost work at session_ended");
 			// 3.4: the native session ends at this fact and covers every send issued before it.
 			return sessionEnd(book, book.seq)
 				? changed
 				: noop("the native session already ended");
+		}
 	}
 }
 
@@ -2014,18 +2436,27 @@ function commit(
 	by: InterruptBy,
 	deadlineAt: number | null,
 	commandId: string,
-): void {
+): Outcome {
 	const run = activeRun(book);
+	// 8.4 (L3): a destructive step with tasks live or unknown waits on the confirm gate.
+	if (
+		taskView(book).tag !== "none" &&
+		(by === "end" || (run !== undefined && run.phase !== "Queued"))
+	)
+		return notBuilt("32.2.12", "the confirm gate");
 	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
-	const labels = new Set(
-		book.sends.flatMap((send) =>
+	const labels = new Set([
+		...book.wakes.flatMap((wake) =>
+			wake.ended === undefined ? [wake.label] : [],
+		),
+		...book.sends.flatMap((send) =>
 			rules(book).fences(send.effect)
 				? send.txs.flatMap((tx) =>
 						tx.label !== null && mayStillAct(book, send, tx) ? [tx.label] : [],
 					)
 				: [],
 		),
-	);
+	]);
 	for (const interaction of book.interactions)
 		if (
 			!interaction.resolved &&
@@ -2062,27 +2493,29 @@ function commit(
 		if (!nativePolicies[book.provider].capabilities.runnerHost) {
 			// 5.1 OpenCode Stop: the Stop issues cancel_request and a native_session probe together,
 			// the probe's deadline running from that issue (3.7).
-			const send = issue(book, { kind: "cancel_request", runId }, false);
-			const token = step.newId() as SendToken;
-			transmit(book, send, token);
-			step.effects.push({ tag: "Tokened", token, effect: send.effect });
+			issueTokened(book, step, { kind: "cancel_request", runId });
 			probe(book, fact, step, runId, { tag: "native_session" });
 		}
 	}
-	if (deadlineAt === null) return;
+	if (deadlineAt === null) return changed;
 	// L6: add the label work with no open main run to the one ledger stop deadline.
 	const hasOpenMain = (runId: string | null) =>
 		[...book.mainRuns.values()].some(
 			(main) => main.open && main.runId === runId,
 		);
-	const items = book.sends.flatMap((send, index) =>
-		rules(book).fences(send.effect) && !hasOpenMain(send.runId)
-			? send.txs.flatMap((tx, txIndex) =>
-					mayStillAct(book, send, tx) ? [{ send: index, tx: txIndex }] : [],
-				)
-			: [],
-	);
-	if (items.length === 0) return;
+	const items: StopItem[] = [
+		...book.wakes.flatMap((wake, index): StopItem[] =>
+			wake.ended === undefined ? [{ wake: index }] : [],
+		),
+		...book.sends.flatMap((send, index) =>
+			rules(book).fences(send.effect) && !hasOpenMain(send.runId)
+				? send.txs.flatMap((tx, txIndex): StopItem[] =>
+						mayStillAct(book, send, tx) ? [{ send: index, tx: txIndex }] : [],
+					)
+				: [],
+		),
+	];
+	if (items.length === 0) return changed;
 	const stop = book.stop;
 	book.stop =
 		stop === undefined || !stopOpen(book)
@@ -2094,11 +2527,12 @@ function commit(
 						...items.filter(
 							(item) =>
 								!stop.items.some(
-									(old) => old.send === item.send && old.tx === item.tx,
+									(old) => JSON.stringify(old) === JSON.stringify(item),
 								),
 						),
 					],
 				};
+	return changed;
 }
 
 function control(
@@ -2111,7 +2545,7 @@ function control(
 		case "stop":
 		case "run_now":
 			// D58: a Run now's input is main's inbox's until its handoff; the ledger reads the commit.
-			commit(
+			return commit(
 				book,
 				fact,
 				step,
@@ -2119,15 +2553,23 @@ function control(
 				command.deadlineAt,
 				command.commandId,
 			);
-			return changed;
 		case "end": {
 			// 8.4 (CONTRACT.md 2889-2898): with deadlineAt, main commits the Stop as this end_session;
 			// a later one (deadlineAt null) or one with no Run joins no deadline.
 			const run = activeRun(book);
-			if (run === undefined || command.deadlineAt === null)
-				endSession(book, run, command.commandId);
-			else
-				commit(book, fact, step, "end", command.deadlineAt, command.commandId);
+			if (run !== undefined && command.deadlineAt !== null)
+				return commit(
+					book,
+					fact,
+					step,
+					"end",
+					command.deadlineAt,
+					command.commandId,
+				);
+			// 8.4 (L3): both steps are confirm-gated with tasks live or unknown.
+			if (taskView(book).tag !== "none")
+				return notBuilt("32.2.12", "the confirm gate");
+			endSession(book, run, command.commandId);
 			return changed;
 		}
 		case "answer": {
@@ -2143,11 +2585,12 @@ function control(
 			const run = book.runs.find(
 				(item) =>
 					item.phase !== "Ended" &&
-					book.sends.some(
-						(send) =>
-							send.runId === item.runId &&
-							send.txs.some((tx) => tx.label === interaction.label),
-					),
+					(item.wakeLabels.includes(interaction.label) ||
+						book.sends.some(
+							(send) =>
+								send.runId === item.runId &&
+								send.txs.some((tx) => tx.label === interaction.label),
+						)),
 			);
 			const send = issueControl(
 				book,
@@ -2163,10 +2606,52 @@ function control(
 			interaction.deliveries.push(book.sends.indexOf(send));
 			return changed;
 		}
-		case "stop_tasks":
+		case "stop_tasks": {
+			// 8.4: "all" means the live tasks; unknown or none issues nothing.
+			const tasks = taskView(book);
+			if (tasks.tag !== "live")
+				return rejected(`stop_tasks with tasks ${tasks.tag} (8.4)`);
+			const keys =
+				command.tasks === "all"
+					? tasks.tasks.map((task) => task.key)
+					: command.tasks.filter((key) =>
+							tasks.tasks.some((task) => sameKey(task.key, key)),
+						);
+			if (keys.length === 0) return rejected("no live task named (8.4)");
+			for (const key of keys)
+				issueTokened(book, step, { kind: "stop_task", key });
+			return changed;
+		}
 		case "confirm_escalation":
-		case "native_command":
-			return notBuilt("32.2.11", `the ${command.kind} control`);
+			return notBuilt("32.2.12", "the confirm_escalation control");
+		case "native_command": {
+			if (
+				book.nativeCommands.some((item) => item.commandId === command.commandId)
+			)
+				return rejected("native command already issued (8.5)");
+			// 8.5 (L4, D60): a session send main issues, live and shown in the decision that folds it;
+			// its deadline starts at issue.
+			const send = issueControl(
+				book,
+				{
+					kind: "send_native_command",
+					commandId: command.commandId,
+					text: command.text,
+				},
+				command.commandId,
+			);
+			book.nativeCommands.push({
+				commandId: command.commandId,
+				send: book.sends.indexOf(send),
+				state: "Sent",
+				remaining: fact.policy.nativeCommandMs,
+				deadline: {
+					at: fact.now + fact.policy.nativeCommandMs,
+					opened: book.entry,
+				},
+			});
+			return changed;
+		}
 	}
 }
 
@@ -2211,7 +2696,7 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 					book.inputs.set(command.inputId, input);
 					// 3.9 GAP (CONTRACT.md 984 leaves when a steer joins open): following the oracle, a
 					// steer joins the active Run at admission once it is Launched.
-					const run = activeRun(book);
+					const run = activeInputRun(book);
 					if (command.delivery === "steer" && run?.phase === "Launched") {
 						run.inputs.push(command.inputId);
 						input.runId = run.runId;
@@ -2219,7 +2704,7 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 					return changed;
 				}
 				case "observe":
-					return observe(book, entry, command.observation);
+					return observe(book, entry, step, command.observation);
 				case "control":
 					return control(book, entry, step, command.control);
 				case "settle":
@@ -2273,6 +2758,8 @@ export function initialSessionLedgerState(
 		current: null,
 		retirements: new Set(),
 		interactions: [],
+		wakes: [],
+		nativeCommands: [],
 	});
 }
 
@@ -2408,16 +2895,29 @@ function activeView(book: Book, run: Run): ActiveRunView {
 			inputId,
 			state: inputState(book, run, inputId),
 		})),
-		origin: "input" as const,
+		...(run.origin === "input"
+			? { origin: "input" as const }
+			: run.wakeTask === undefined
+				? { origin: "wake" as const }
+				: { origin: "wake" as const, wakeTask: run.wakeTask }),
 	};
 	// L6: the stop deadline shows on a Queued Run with label work, else on the Run its items name.
+	// Gap (CONTRACT.md 787-794, 2837-2850): following the oracle, a Claude wake Run shows none.
 	const stop = book.stop;
 	const deadline =
 		stop !== undefined &&
 		stopOpen(book) &&
+		!(
+			run.origin === "wake" &&
+			nativePolicies[book.provider].capabilities.commandReceipts
+		) &&
 		(run.phase === "Queued"
 			? labelWorkOutstanding(book)
-			: stop.items.some((item) => book.sends[item.send]?.runId === run.runId))
+			: stop.items.some((item) =>
+					"wake" in item
+						? book.wakes[item.wake]?.runId === run.runId
+						: book.sends[item.send]?.runId === run.runId,
+				))
 			? { deadline: { owner: "Stop" as const, at: stop.at } }
 			: {};
 	if (run.phase === "Queued")
@@ -2446,7 +2946,7 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 		if (effect.kind === "probe") return [];
 		const acting = send.txs.filter((tx) => mayStillAct(book, send, tx));
 		// 3.13: decide's own effects are Tokened per transmission; every effect main issues is Main.
-		if (effect.kind === "cancel_request")
+		if (effect.kind === "cancel_request" || effect.kind === "stop_task")
 			return acting.flatMap((tx): IssuedEffect[] =>
 				tx.token === undefined
 					? []
@@ -2456,16 +2956,59 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 			? [{ tag: "Main", commandId: send.commandId, effect }]
 			: [];
 	});
+	const tasks = taskView(book);
 	return {
 		paused: false,
 		...(run === undefined ? {} : { active: activeView(book, run) }),
 		// D58: main's module computes the inbox (T2).
 		inbox: [],
 		live,
-		tasks: { tag: "none" },
-		anythingMayAct: run !== undefined || live.length > 0,
+		tasks,
+		// 8.3: a non-ended Run, a send that may still act, tasks live or unknown, or a wake execution.
+		anythingMayAct:
+			run !== undefined ||
+			live.length > 0 ||
+			tasks.tag !== "none" ||
+			book.wakes.some((wake) => wake.ended === undefined),
 		lostWork: [],
-		nativeCommands: [],
+		// 8.5: a projection of its send; Failed with the covering cause when covered.
+		nativeCommands: book.nativeCommands.map((command): NativeCommandView => {
+			const { commandId, state } = command;
+			const covers = (book.sends[command.send]?.txs ?? []).map(
+				(tx) => tx.ended,
+			);
+			const covered = covers.includes("session_ended")
+				? "session_ended"
+				: covers.includes("process_lost")
+					? "process_lost"
+					: undefined;
+			if (
+				covered !== undefined &&
+				state !== "Completed" &&
+				state !== "Cancelled" &&
+				state !== "Failed"
+			)
+				return { commandId, tag: "Failed", code: covered };
+			switch (state) {
+				case "Sent":
+				case "Started":
+					return command.deadline === undefined
+						? { commandId, tag: "Queued" }
+						: {
+								commandId,
+								tag: state,
+								deadline: {
+									owner: "NativeCommand",
+									commandId,
+									at: command.deadline.at,
+								},
+							};
+				case "Failed":
+					return { commandId, tag: "Failed", code: command.code ?? "failed" };
+				default:
+					return { commandId, tag: state };
+			}
+		}),
 		interactions: book.interactions.flatMap((item): InteractionView[] => {
 			const send = item.deliveries.map((index) => book.sends[index]).at(-1);
 			const delivery = send?.txs.at(-1);

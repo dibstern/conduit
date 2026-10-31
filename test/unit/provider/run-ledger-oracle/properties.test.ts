@@ -33,7 +33,7 @@ import {
 	translateCommand,
 	writeTraceArtifact,
 } from "./harness.js";
-import { pendingSuite } from "./pending.js";
+import { pendingCases, pendingSuite } from "./pending.js";
 import { main } from "./review-traces.js";
 import { Driver, scenarios } from "./scenarios.js";
 
@@ -2119,7 +2119,13 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				assert.equal(result.failed, false, String(result.errorInstance));
 			},
 		);
-		pendingSuite("[checkpoint] run-ledger-differential")(
+		// The differential also checks the oracle against the fake, so a seed pended for their
+		// convergence stays pended here.
+		const convergence = `[convergence] ${provider} oracle traces, seed ${seed}`;
+		const pended = pendingCases.has(convergence)
+			? convergence
+			: `[checkpoint] ${provider} run-ledger-differential`;
+		pendingSuite(pended)(
 			`real decider agrees at every step, seed ${seed}`,
 			({ task }) => {
 				const coverage = new Coverage();
