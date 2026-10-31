@@ -221,7 +221,7 @@ its number (rows 203, 204, 208 and 214 are deleted).
 | 211. A start Claude reports `cancelled` before `started` is Stop's own and returned behind the pause by the reactor's outcome body, which appends `input.requeued` when the cancelled intake lands, in the same write (4.8, D53) | ends it `interrupted` with no retry and its text dropped (`cancelled`, claude-runner-payload.ts 2495-2522; `interrupted`, orchestration-side-effect-reactor.ts 896-966 at 1ba91324) | S9.3 as amended: a stopped input that did not reach the agent returns to the inbox | 25scs: the reactor's outcome body (`recordSendReply`, orchestration-side-effect-reactor.ts 1065-1100 at 6c9ff950) |
 | 212. Tries within a reservation are capped at 5 (4.8) | caps controls, never a send (`maxControlAttempts`, orchestration-side-effect-reactor.ts 1216) | a send that always fails ends its input `failed` instead of looping | 25scs: `markRunning` reads the cap before its claim; 32.29: `holdRun`'s cap for a runner-held start or steer |
 | 213. A destructive step past the stop's deadline asks the user first while tasks are live or unknown (8.4); after a restart U2's restore asks the same confirm, keyed by the Stop's command id | retires the process without asking (`retireProcess`, provider-turn-service.ts 251-284) | background tasks are lost with the process | 25scs: U2's `retireProcess` reads the view before it retires; 32.25: the confirm (8.4) |
-| 215. Evidence events: each fact the arm needs that has no main event gets one, from its one observer (D59, 3.9): the write that writes main's terminal or status for that fact, or with none the write that ingests it: `process_started` (the lifecycle module's `register`, the swap commit's, 6.9, and OpenCode's reporter, 9), `process_lost` (each write that first sets a runner's `retired_at`, in its transaction, once per (runnerId, retiredAt), none for a runner whose session row is gone or has no project: `requestStop`'s raw write, `commitRetirement`'s raw upsert, and `persistRelease`'s `commitStop` inside the release commit; inside a `commitAndSignal` write it is projected with that write, and only a raw write appends it unprojected and marks the store for the next commit's recovery, 6.3, 6.5, 32.4; for OpenCode, `onInstanceStopped`'s `settleSessionRuns` batch, 9), `alarm_fired` (32.3's scheduler, a main-side fiber, 3.7), `effect_outcome` (each ledger effect's executor, with its status update; for every other effect main issues with no hold but a direct start, each writer of a claimed transmission's outcome, naming the row's `command_id` and claimed `attempt_count` (3.4): `recordControlOutcome` where its guarded update changes the row (`recordControlOutcome`, orchestration-side-effect-reactor.ts 2276-2380 at 6c9ff950), and `markCompleted` and `writeFailure` on a non-send row, moved from their raw transaction into the reactor's `write` body, as `recordControlOutcome`'s is (2299), so the event is projected with its status), `turn_started` (a Claude wake, where the payload sets `turnInFlight`, claude-runner-payload.ts 2187-2197 at 6c9ff950, while no send's `currentRunId` is set; a Codex successor), `turn_ended` (a Claude wake, at the payload's first clear of the `turnInFlight` its `turn_started` set; its result with no run, `endsCurrentRun`, 2301; its stream's end, `turnInFlight`, 2707; `cleanupSessionEffect`, 3089-3105; which a Stop with no foreground run reaches, `disposeSessionEffect`, 2763-2783 at 6c9ff950; the translator's `endTurn` when the wake's stream fails, claude-event-translator.ts 544-555 at 6c9ff950) and the direct `delivery_indeterminate` marker's event; main's projectors ignore them, and T2 masks them as one class | appends none: a Codex successor starts with no event (`executingTurnId`, codex-turn-lifecycle.ts 322-328 at 6c9ff950), a Claude wake sets and clears only its flag (`turnInFlight`, claude-runner-payload.ts 2187-2197, 2301, 2707, 3103 at 6c9ff950; the translator's `endTurn`, claude-event-translator.ts 544-555 at 6c9ff950), the direct marker writes no event (`delivery_indeterminate`, orchestration-side-effect-reactor.ts 916-955 at 6c9ff950), a runner's retirement sets `retired_at` with no event (`saveStop`, runner-receipts.ts 407-412 at 6c9ff950), a control's outcome writes only its outbox row and receipt (`markCompleted`, orchestration-side-effect-reactor.ts 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`, 2753-2783 at 6c9ff950), and a managed OpenCode stop settles its runs with no loss event (`settleSessionRuns`, opencode-runtime-ingress-service.ts 1758-1795 at 6c9ff950) | the arm reads only projected events (3.9) | 32.3: a runner's `process_started`, `alarm_fired`, `effect_outcome` (the three ledger effects' and every control's; a native command's from its executor, 8.5); 32.4: `process_lost` (6.5); 32.6: a Claude wake's `turn_started` and `turn_ended`, and the swap commit's `process_started`; 32.21: a Codex successor; 32.11: OpenCode's `process_started`, `onInstanceStopped`'s `process_lost`, and the direct marker |
+| 215. Evidence events: each fact the arm needs that has no main event gets one, from its one observer (D59, 3.9): the write that writes main's terminal or status for that fact, or with none the write that ingests it: `process_started` (the lifecycle module's `register`, the swap commit's, 6.9, and OpenCode's reporter, 9), `process_lost` (each write that first sets a runner's `retired_at`, in its transaction, once per (runnerId, retiredAt), none for a runner whose session row is gone or has no project: `requestStop`'s raw write, `commitRetirement`'s raw upsert, and `persistRelease`'s `commitStop` inside the release commit; inside a `commitAndSignal` write it is projected with that write, and only a raw write appends it unprojected and marks the store for the next commit's recovery, 6.3, 6.5, 32.4; for OpenCode, `onInstanceStopped`'s `settleSessionRuns` batch, 9), `alarm_fired` (32.3's scheduler, a main-side fiber, 3.7), `effect_outcome` (each ledger effect's executor, with its status update; for every other effect main issues with no hold but a direct start, each writer of its row's outcome, sweeps included, naming the row's `command_id` and `attempt_count`, 0 when no claim reached it (3.4): `recordControlOutcome` where its guarded update changes the row (`recordControlOutcome`, orchestration-side-effect-reactor.ts 2276-2380 at 6c9ff950), and `markCompleted` and `writeFailure` on a non-send row, moved from their raw transaction into the reactor's `write` body, as `recordControlOutcome`'s is (2299), so the event is projected with its status; the refusal sweep, `drain`'s removed-project cancel and pending-prompt retirement, for each control row their update changes, in the write body they already run in (`refuseProjectCommand`, 2607-2642; `drain`, 432-445; `cancelControls`, retire-pending-prompts.ts 30-32, 145-163 at 6c9ff950)), `turn_started` (a Claude wake, where the payload sets `turnInFlight`, claude-runner-payload.ts 2187-2197 at 6c9ff950, while no send's `currentRunId` is set; a Codex successor), `turn_ended` (a Claude wake, at the payload's first clear of the `turnInFlight` its `turn_started` set; its result with no run, `endsCurrentRun`, 2301; its stream's end, `turnInFlight`, 2707; `cleanupSessionEffect`, 3089-3105; which a Stop with no foreground run reaches, `disposeSessionEffect`, 2763-2783 at 6c9ff950; the translator's `endTurn` when the wake's stream fails, claude-event-translator.ts 544-555 at 6c9ff950) and the direct `delivery_indeterminate` marker's event; main's projectors ignore them, and T2 masks them as one class | appends none: a Codex successor starts with no event (`executingTurnId`, codex-turn-lifecycle.ts 322-328 at 6c9ff950), a Claude wake sets and clears only its flag (`turnInFlight`, claude-runner-payload.ts 2187-2197, 2301, 2707, 3103 at 6c9ff950; the translator's `endTurn`, claude-event-translator.ts 544-555 at 6c9ff950), the direct marker writes no event (`delivery_indeterminate`, orchestration-side-effect-reactor.ts 916-955 at 6c9ff950), a runner's retirement sets `retired_at` with no event (`saveStop`, runner-receipts.ts 407-412 at 6c9ff950), a control's outcome writes only its outbox row and receipt (`markCompleted`, orchestration-side-effect-reactor.ts 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`, 2753-2783 at 6c9ff950), as does a sweep that ends a control row (`refuseProjectCommand`, orchestration-side-effect-reactor.ts 2556-2660; `drain`, 385-470; `cancelControls`, retire-pending-prompts.ts 23, 145-163 at 6c9ff950), and a managed OpenCode stop settles its runs with no loss event (`settleSessionRuns`, opencode-runtime-ingress-service.ts 1758-1795 at 6c9ff950) | the arm reads only projected events (3.9) | 32.3: a runner's `process_started`, `alarm_fired`, `effect_outcome` (the three ledger effects' and every control's, a sweep's included; a native command's from its executor, 8.5); 32.4: `process_lost` (6.5); 32.6: a Claude wake's `turn_started` and `turn_ended`, and the swap commit's `process_started`; 32.21: a Codex successor; 32.11: OpenCode's `process_started`, `onInstanceStopped`'s `process_lost`, and the direct marker |
 | 216. Ledger effects: the reactor gains one executor per ledger effect (`probe`, `stop_task`, `cancel_request`) and a wake after the commit that inserts one, through the write's `afterCommit` (as `SettlementTx`'s `afterCommit`, orchestration-side-effect-reactor.ts 1088-1100 at 6c9ff950); the three are exempt from the session lane and from `armRetryWake` (3.12); T2 masks their three provider calls | rejects an effect type it has no executor for (`unknown_provider_command_effect`, orchestration-side-effect-reactor.ts 2108-2118 at 6c9ff950) and holds a row behind any earlier same-session row (`earlier`, orchestration-side-effect-reactor.ts 1292-1336 at 6c9ff950) | label work and lost work end only by these effects (3.5, 8.3) | 32.3: the reactor |
 
 Main already appends the terminal of every Run end the ledger decides: a retired runner's runs end
@@ -448,16 +448,27 @@ Only evidence and conduit's decisions, each once:
   increments under a guard on the count it read (orchestration-side-effect-reactor.ts 1352, 1364
   at 6c9ff950). A control's commit is immutable, so its `command_id` has one row
   (orchestration-command-commit.ts 207-223), and a recommit carries its `command_id`'s highest
-  count forward (295, 324), so a `(commandId, n)` never repeats. The writer of its outcome appends
-  `effect_outcome` naming that pair, with the status it writes (2.1 row 215): `completed` reads
-  `succeeded`; `retryable_failed`, `retryable` with `retryAt` its `next_attempt_at` and `code` its
-  `error_code`; `failed` or `cancelled`, `permanent` with its `error_code` (`recordControlOutcome`,
+  count forward (295, 324), so a `(commandId, n)` never repeats. Every writer of its row's outcome
+  appends `effect_outcome` naming the row's `command_id` and `attempt_count`, with the status it
+  writes (2.1 row 215): `completed` reads `succeeded`; `retryable_failed`, `retryable` with
+  `retryAt` its `next_attempt_at` and `code` its `error_code`; `failed` or `cancelled`, `permanent`
+  with its `error_code`. Its writers are the executor's (`recordControlOutcome`,
   orchestration-side-effect-reactor.ts 2276-2380; `markCompleted`, 2253-2274; `writeFailure`,
-  2753-2783 at 6c9ff950). The host composes the token from the pair, as from `run.dispatched`'s. A
-  claim appends no event, so a transmission shows only at its outcome, and its issue may still act
-  until then (3.5); an outcome written with no claim (the control budget's exhaustion, 698-710)
-  names the latest claimed transmission. `attempt_count` is the one count of these transmissions;
-  OPEN-2's rejected second count is one beside `run.dispatched` (4.11).
+  2753-2783 at 6c9ff950) and every sweep that ends an open control row: the refusal sweep
+  (`refuseProjectCommand`, 2556-2660), `drain`'s removed-project cancel (431-449) and pending-prompt
+  retirement (`cancelControls`, retire-pending-prompts.ts 23, 145-163 at 6c9ff950). So no issue
+  stays in `live` after its row ends. The host composes the token from the pair, as from
+  `run.dispatched`'s. A claim appends no event, so a transmission shows only at its outcome, and
+  its issue may still act until then (3.5). An outcome written with no live claim (the control
+  budget's exhaustion, 698-710, or a sweep of a row not `running`) names the latest claimed
+  transmission; another outcome on a transmission joins its chains (3.5). A row no claim reached
+  has `attempt_count` 0, so its outcome names `(commandId, 0)`: n 0 names no transmission, so the
+  arm reads it by its `commandId`, never as an unknown token (below), adds no chain and ends the
+  issue never transmitted (never handed over, 3.6). No other write ends a
+  control row: `acceptStopEffect`'s DELETE and the Run's end touch only send rows
+  (orchestration-engine.ts 858; projectors-effect.ts 1774 at 6c9ff950), and a recommit's delete
+  never meets a control, whose commit is immutable. `attempt_count` is the one count of these
+  transmissions; OPEN-2's rejected second count is one beside `run.dispatched` (4.11).
 - An observation **answers** a send (it names that send's token), is **unsolicited**
   (it names only the host label and an event id) or is main's (below). Unsolicited observations are background
   snapshots and task events, a turn start (a wake execution), process events, an
@@ -594,7 +605,8 @@ For a runner-held send these chains are never stored: they are a view over the h
     no hold row when it ended or when its runner retired, 3.4), or a release (4.5) or a rejected
     resume shows the host never handed it to the agent. A rejected resume is `run_released
     ResumeRejected` or `effect_outcome` permanent `native_resume_rejected`; a rule on permanent
-    outcomes excludes it by name ("a permanent outcome other than a rejected resume").
+    outcomes excludes it by name ("a permanent outcome other than a rejected resume"). An issue
+    main ended before any claim (its outcome names n 0, 3.4) has no transmission, so none reached.
   - **reached:** consumption Observed or Accepted.
   - **possibly reached:** any other, an issued try with no outcome and a held one with no release
     included. One with consumption NotConsumed{declined | absent | cancelled} (a decline, an absent finding or
@@ -904,12 +916,14 @@ For a runner-held send these chains are never stored: they are a view over the h
      1338-1424 at 6c9ff950), the direct marker (`delivery_indeterminate`, 916-955),
      `requeueLegacySend` and the resume fallback (`requeueLegacySend`, send-settlement-outbox.ts
      511-529; `settleLegacySend`, 412-475 at 6c9ff950), and `acceptStopEffect`'s
-     `retryable_failed` DELETE (`retryable_failed`, orchestration-engine.ts 858 at 6c9ff950). A
-     fact the arm needs with no main event gets an evidence event, appended by the unit that
-     observes it in the same write as the observation (2.1 row 215); main's projectors ignore
-     them. An effect executor's outcome is one, in the same write as its status update, a control's
-     included (`markCompleted`, 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`,
-     2753-2783; 3.4).
+     DELETE of a session's `retryable_failed` send rows (`retryable_failed`, orchestration-engine.ts
+     858 at 6c9ff950), in the write that appends each such row's `input.requeued` (812-856). A fact
+     the arm needs with no main event gets an evidence event, appended by the unit that observes it
+     in the same write as the observation (2.1 row 215); main's projectors ignore them. An effect
+     executor's outcome is one, in the same write as its status update, a control's included
+     (`markCompleted`, 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`, 2753-2783;
+     3.4), and so is the outcome of each sweep that ends a control row (the refusal sweep, `drain`
+     and pending-prompt retirement, 3.4, 3.12).
   2. Outbox rows for the effects main has no writer for (`probe`, `stop_task`, `cancel_request`):
      the arm inserts each with `command_id` `ledger:<run>:<effect>:<attempt>`,
      INSERT OR IGNORE against a partial unique index on (`project_key`, `command_id`) over those
@@ -999,10 +1013,11 @@ For a runner-held send these chains are never stored: they are a view over the h
   449-500; claude-runner-payload.ts 2351, 2997-3002, 3024-3034 at 1ba91324). An answer, in a stop
   or not, resolves its interaction at its delivery's confirmation or the host's own resolution, for
   Claude its native rejection at the interrupted result (4.6), whichever the host reports first, or
-  else when its delivery ends with no confirmation: its work ends (a permanent refusal or the cap,
-  4.8, its coverage, or the stop's deadline step, L6), as main deletes the entry when the answer is
-  taken (pending-interaction-service.ts 400-417, 419-430 at 1ba91324). OpenCode's abort carries no
-  interaction, and main resolves one only by OpenCode's reply event (opencode-provider-instance.ts
+  else when its delivery ends with no confirmation: its work ends (a permanent refusal, a sweep's
+  included, 3.4, or the cap, 4.8, its coverage, or the stop's deadline step, L6), as main deletes
+  the entry when the answer is taken (pending-interaction-service.ts 400-417, 419-430 at
+  1ba91324). OpenCode's abort carries no interaction, and main resolves one only by OpenCode's
+  reply event (opencode-provider-instance.ts
   702-724, opencode-runtime-event-translator.ts 242-266 at 1ba91324), so for OpenCode the commit's
   resolution is the ledger's (a 2.1 row). One still Pending when its runner is retired or its
   session ends (L1) is resolved then, where nothing can answer it, as main retires a replaced
@@ -1107,11 +1122,11 @@ For a runner-held send these chains are never stored: they are a view over the h
   rows to `cancelled`, `retirePendingPrompts`, retire-pending-prompts.ts 21, 149-151), the
   runner's settle, resume fallback and legacy requeue (`settleDirectSend`, send-settlement-outbox.ts
   329-376; `settleLegacySend`, 412-475; `requeueLegacySend`, 511-529), the Run's end
-  (`settleRunCommands`, projectors-effect.ts 1742-1789), and R2's `acceptStopEffect` (deletes
-  `retryable_failed`, orchestration-engine.ts 658, 858). The two migration-time DELETEs (`DELETE
+  (`settleRunCommands`, projectors-effect.ts 1742-1789), and R2's `acceptStopEffect` (deletes a
+  session's `retryable_failed` send rows, orchestration-engine.ts 658, 858). The two migration-time DELETEs (`DELETE
   FROM provider_command_outbox`, migrations.ts 971, 1047) sit outside the machine, and runner
   recovery's lock (`SET status = status`, runner-recovery.ts 356) writes no status. Main's writers
-  are not edited. T5-writers (32.3) holds the table of these writers' from and to statuses and fails on
+  keep their status transitions. T5-writers (32.3) holds the table of these writers' from and to statuses and fails on
   SQL text that writes outbox status outside it.
   - **`markCompleted` and `writeFailure` keep main's unguarded write.** Neither guards `status`
     (`markCompleted`, `writeFailure`: orchestration-side-effect-reactor.ts 2253-2274, 2753-2789).
@@ -1123,6 +1138,16 @@ For a runner-held send these chains are never stored: they are a view over the h
     status. Their status write is unchanged; only for a control row do they move into the reactor's
     `write` body, as `recordControlOutcome`'s is (2299), to append its `effect_outcome` (2.1 row
     215, 3.4).
+  - **A sweep that ends a control row appends its outcome.** The refusal sweep, `drain`'s
+    removed-project cancel and pending-prompt retirement already update in a `write` body
+    (orchestration-side-effect-reactor.ts 2607-2608, 432; retire-pending-prompts.ts 30-32 at
+    6c9ff950). For each control row its update changes, that body appends `effect_outcome` naming
+    the row's `command_id` and `attempt_count` (3.4): each `RETURNING` gains `attempt_count`
+    (orchestration-side-effect-reactor.ts 2642, 445; retire-pending-prompts.ts 159 at 6c9ff950);
+    `drain`'s body takes its `project` handle and appends under each row's `project_key`, as the
+    refusal sweep's store does (orchestration-side-effect-reactor.ts 2659-2663 at 6c9ff950); and
+    pending-prompt retirement appends before its return on no remaining prompt
+    (retire-pending-prompts.ts 43 at 6c9ff950). Their status write is unchanged.
 - Typed unions persist as one tag column. New tables add a CHECK on it. Existing tables (SQLite
   cannot add CHECK through ALTER) decode with Schema at the store and reject unknown rows, per row.
 - **Load.** On load the ledger rebuilds caches only for sessions with open work: a Run not Ended, an
@@ -1195,7 +1220,9 @@ export type Evidence =
   | { readonly kind: "query_ended" }
   | { readonly kind: "accounting" }
   // transmission: present for an effect main issues with no hold but a direct start, its outbox
-  // row's command_id and claimed attempt_count (3.4); absent for the three effects decide issues
+  // row's command_id and attempt_count from every writer of its outcome, a sweep's included; n 0
+  // when no claim reached the row, which ends the issue never transmitted (3.4); absent for the
+  // three effects decide issues
   | { readonly kind: "effect_outcome"; readonly transmission?: MainTransmission; readonly outcome:
       | { readonly tag: "succeeded" }
       | { readonly tag: "retryable"; readonly retryAt: number; readonly code?: string } // code: main's receipt error_code, an answer's lastRefusal (3.10)
@@ -1287,7 +1314,8 @@ export type IssuedEffect =
   | { readonly tag: "Main"; readonly commandId: string; readonly effect: RunEffect }
   // probe, stop_task and cancel_request, which decide issues; each token from ctx.newId().
   | { readonly tag: "Tokened"; readonly token: SendToken; readonly effect: RunEffect };
-// main's name for one transmission of an effect it issues: the commandId and its n (3.4)
+// main's name for one transmission of an effect it issues: the commandId and its n (3.4); n 0 names
+// none, only an issue's end before any claim
 export interface MainTransmission { readonly commandId: string; readonly transmission: number }
 export interface RunEnded { readonly runId: string; readonly outcome: RunOutcome; readonly reason: EndReason }
 export type RunOutcome = "completed" | "error" | "interrupted";
@@ -3534,7 +3562,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.18 (new) | the contract checks, run before a review round: the citation check over every main citation and its anchor (A.18 T1), and the reader sweep over CONTRACT.md and every bead 12.2 names, with the recount check (A.18 T3); the sweep reads the newest note of each bead as live text, never as history by policy (A.21); spec review rounds run after T1 and T3 exit 0 (A.20) | A.18, A.19, A.20, A.21 |
 | 32.2.19 (the spike, superseded) | the D58 spike and T5-writers, whose measured result fed REDESIGN-10's review round 1: the arm and a status table built in R2's real Layer graph (6c9ff950) over `:memory:` SQLite, running A.20's two traces. Run 2026-10-31: trace 1 held; trace 2 held with the owner rebuild (2b); the writer-list test against 3.12's 15 writers moves to 32.3's acceptance; the ledger effects' rows, the insert's key, the writer list and T5-writers' form were corrected in 3.9, 3.12 and A.20 | 3.1, 3.9, 3.12, L6, 5.3, A.20 |
 | D59 spike (new, child of 32.2) | the D59 spike, run before the next review round: the ledger stop deadline and the retirement's `process_lost` built in R2's real Layer graph (6c9ff950) over `:memory:` SQLite, passing A.21's wake, failed-step and restart traces; blocks 32.3, 32.2.17 and 32.2.9 | L6, 2.1, 6.5, A.21 |
-| 32.3 | the arm in the projection runner, folding with no outbox row on replay (3.1, 3.9, D58); the three ledger effects whole (2.1 row 216): the arm's insert keyed by the partial unique index, one reactor executor per type, a wake on the insert, all three exempt from the session lane (3.12); the evidence events `process_started` of a runner, `alarm_fired` and `effect_outcome` (every control's included, named by its row's `command_id` and claimed `attempt_count`, 3.4), and the scheduler fiber, which appends only `alarm_fired` and lives outside src/lib/provider (2.1 row 215, 3.7); every row 215 kind registered at each event-kind guard site, the provider tickets only appending theirs (4.1); the T5-writers table of outbox status writers (3.12); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test. Acceptance adds: the T5-writers test against 3.12's 15 writers and the effect executors; a direct send's fresh-run retry `run.requested` for an input already in a ledger Run folds as a transmission, never a reserve, and a runner-held send's only by its `run.dispatched` (3.4, D59); the ledger stop deadline on the session row, its `alarm_fired` from the scheduler after a restart with no U2 restore (L6); a non-terminal Claude `turn.completed` does not end the arm's Run (F18); the full-graph rebuild over a surviving process runner (A.20's trace 2 with the Layer graph rebuilt whole), where U2's restore makes one `stopping` entry with the row's `deadlineAt`, replay inserts no outbox row, and the host's terminal ends the stop and the Run once, with no `runner_stopped` failure and no `provider_process_gone` cancel; the migration and schema inventory snapshots updated deliberately, each diff checked to be the new tables and index only | 3.1, 3.7, 3.9, 3.12, 11.3, A.20 |
+| 32.3 | the arm in the projection runner, folding with no outbox row on replay (3.1, 3.9, D58); the three ledger effects whole (2.1 row 216): the arm's insert keyed by the partial unique index, one reactor executor per type, a wake on the insert, all three exempt from the session lane (3.12); the evidence events `process_started` of a runner, `alarm_fired` and `effect_outcome` (every control's included, from every writer of its row's outcome, sweeps included, named by its row's `command_id` and `attempt_count`, 0 when no claim reached it, 3.4), and the scheduler fiber, which appends only `alarm_fired` and lives outside src/lib/provider (2.1 row 215, 3.7); every row 215 kind registered at each event-kind guard site, the provider tickets only appending theirs (4.1); the T5-writers table of outbox status writers (3.12); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test. Acceptance adds: the T5-writers test against 3.12's 15 writers and the effect executors; a direct send's fresh-run retry `run.requested` for an input already in a ledger Run folds as a transmission, never a reserve, and a runner-held send's only by its `run.dispatched` (3.4, D59); the ledger stop deadline on the session row, its `alarm_fired` from the scheduler after a restart with no U2 restore (L6); a non-terminal Claude `turn.completed` does not end the arm's Run (F18); the full-graph rebuild over a surviving process runner (A.20's trace 2 with the Layer graph rebuilt whole), where U2's restore makes one `stopping` entry with the row's `deadlineAt`, replay inserts no outbox row, and the host's terminal ends the stop and the Run once, with no `runner_stopped` failure and no `provider_process_gone` cancel; a control row the refusal sweep, `drain`'s removed-project cancel or pending-prompt retirement ends appends one `effect_outcome` in that write, `(commandId, 0)` when no claim reached it, and leaves no `live` entry for its issue (3.4, 3.12); the migration and schema inventory snapshots updated deliberately, each diff checked to be the new tables and index only | 3.1, 3.7, 3.9, 3.12, 11.3, A.20 |
 | 25scs (new, child of the epic, blocked by 32.3) | the 2.1 rows whose unit reads the view: 202, 206, 207, 210, 211, 212 and 213's view read, in the reactor (`markRunning`, the outcome body), `requeueFailedSteers` and U2's `retireProcess`; R2's `acceptStopEffect` reads no view; 32.11 adds row 205's read (D59); needs 32.3 and the core tickets whose `decide` output a row reads (32.2.6, 32.2.8, 32.2.11, 32.2.12, 32.2.14); blocks 32.2.17 and 32.25 | 2.1 |
 | 32.4 | deadlines as data and the process watcher; A1 with the ledger: appends `process_lost` in each write that first sets `retired_at` (`requestStop`'s raw write, the release commit's `commitStop`, `commitRetirement`), its rows from one reader in runner-receipts.ts, and the store mark the next commit's recovery reads (2.1 row 215, 6.5, D59), after the stop commit's releases (L1, 4.5), beside main's settlement, which stays (6.5, D58); A3, A8, A15 with the ledger; Q26: durable process-loss recovery, including the uncommitted direct-Stop/live-reattachment limitation (7.2), with 32.6/32.8 | 3.7, 6.4, 6.5, 6.8, 7.2 |
 | 32.5 | stateless runner protocol; A11; the protocol bump with 32.19; Send Token identity on the wire, run ids as coverage labels only, `interrupt_turn` with runIds only, interrupting the turn running at receipt and the named runs' accepted unstarted commands, a later turn never (4.6); a joined steer's own `run.dispatched` and token (4.11) | 4.6, 4.9, 4.11, 9 |
@@ -4661,6 +4689,32 @@ rules and adds 81: 16 more (A.21).
   and main's `turn.error` arrive in one write, and with `query_ended` folded first condition 1's
   empty fold had no reading. Rejected: fixing the fold order within a write (an order every
   writer must keep, and the permutation gate, 32.2.17, would have to exempt it).
+
+**Decided (build round 2c, 2026-10-31)**
+
+A control row ended by a sweep. Build round 2b had each control outcome's writer append
+`effect_outcome` with main's `(commandId, n)`, but a sweep that ends a control row appended none,
+so the ledger kept that issue in `live` as possibly acting until something else ended it. This came
+from a contract pass on build round 2b's writer rule, not from a generator input kind; the
+generator has none for it yet. `acceptStopEffect`'s DELETE, named with the sweeps when the gap was
+raised, deletes only send rows (orchestration-engine.ts 858 at 6c9ff950; main's
+provider-turn-session.ts 384-385 at 862c9557), and a recommit's delete never meets an immutable
+control, so neither is a control outcome's writer.
+Build round 2c (contract, after redesign 11): 0 new decisions, 1 amend earlier ones, 0 came from
+new generator input kinds. Against HEAD, a replaced rule counting as one deletion and one addition,
+a move or a restatement as neither and a new reader or exception as an addition, it deletes 65
+rules and adds 82: 17 more (A.21).
+- Amends D60 and G7 (3.4, 3.6, 3.9, 3.12, 3.13, 2.1 row 215), as build round 2b amends them:
+  every writer that ends a control row writes its outcome, sweeps included, in one rule. The
+  refusal sweep, `drain`'s removed-project cancel and pending-prompt retirement append
+  `effect_outcome` in the write that sets the row's status, naming its `command_id` and
+  `attempt_count` and mapping the status as the executor's writers do. A row with a claimed
+  transmission names its latest; a row no claim reached names `(commandId, 0)`, n 0 naming no
+  transmission, and its outcome ends the issue never transmitted. Reason: one rule for all
+  row-ending writers leaves no `live` entry stuck, and copying the row's pair needs no branch.
+  Rejected: an optional `n` or a second field shape for an unclaimed row (two shapes for one name,
+  while the host still composes a token from it); a separate settlement kind for sweeps (a parallel
+  rule).
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
@@ -6306,7 +6360,9 @@ in-flight request`; `token minted in that decision`; `mints Run ids`; `mints tok
 retries and probes`; `issues a new start decision`; `start mode belongs to the ledger`; `other
 than a direct start`; `no 2.1 row names them`; `probes the input or interaction`; `interaction
 probe`; changed, `MainTransmission`; `(commandId, n)`;
-`newId`.
+`newId`; and from build round 2c, deleted, `writer of a claimed transmission's outcome`; `outcome
+written with no claim`; `writers are not edited`; changed, `retirePendingPrompts`; `claimed
+attempt_count`.
 D59 is new and each of its readers is written here; A.20's terms are carried so a stale reader of
 them stays swept.
 
@@ -6374,10 +6430,14 @@ Rule count against HEAD, by A.17's convention, itemized (T3 counts these bullets
   215, 3.9, 3.12); build round 2b.
 - Added: a Run with a main run and no result ends only once main's terminal for its run has
   folded, so either fold order gives one end (3.8, 5C); build round 2b.
-- Result: 65 deleted and 81 added, 16 net added, against A.20's 5.
+- Added: every writer that ends a control row appends its `effect_outcome`, the refusal sweep,
+  `drain` and pending-prompt retirement included; a row no claim reached names n 0 and ends its
+  issue never transmitted (3.4, 3.12, 2.1 row 215, D60); build round 2c.
+- Result: 65 deleted and 82 added, 17 net added, against A.20's 5.
 
-Net rule change, deleted minus added: -16 (65 minus 81); REDESIGN-11 withdraws 5 of A.20's
-additions and adds 8, net -3, build round 1 adds 1, build round 2 adds 6 and build round 2b adds 1.
+Net rule change, deleted minus added: -17 (65 minus 82); REDESIGN-11 withdraws 5 of A.20's
+additions and adds 8, net -3, build round 1 adds 1, build round 2 adds 6, build round 2b adds 1
+and build round 2c adds 1.
 Rewritten in place, counting nothing: 2.1's intro and rows 202 and 205; L6's stop, deadline step,
 restart and end; 3.7's derived deadlines and Starting clause; 3.4's Send Token, minter and
 `IssuedEffect` comments; 5.4; 6.5; 9; 3.12's writer list; the 12.2 rows; A.20's Run end cell. The
@@ -6397,7 +6457,10 @@ place, counting nothing: 3.6's `reconcile` order, its `Moved only by` and retry 
 ResumeRejected, 4.8's resume fallback and the model-gaps start mode entry; 8.5's issue; 3.9 item
 1's list of eventless writes; 3.12's unguarded-write note; the glossary's and 2's Send Token,
 transmission count and identity rows; 3.13's `SendToken`, `newId`, `RunEffect` and `Control`
-comments; and 12.2's 32.3 row.
+comments; and 12.2's 32.3 row. Build round 2c adds one amendment, and rewrites in place, counting
+nothing: 3.9 item 1's and 3.12's `acceptStopEffect` DELETE as send rows only; 3.10's answer end;
+3.12's `Main's writers` sentence; 3.13's `effect_outcome` and `MainTransmission` comments; and
+12.2's 32.3 row.
 
 <!-- src: REDESIGN-11 2026-10-31 (/private/tmp/r32-redesign-11); REDESIGN-10 review rounds 1 to 3 (ub, poteto, /private/tmp/r32-redesign-10/review-*-out.md); main at 1ba91324 (provider-turn-service.ts 202-405; 78 `provider_runs` query sites in 23 files); R2 at 6c9ff950 (orchestration-engine.ts 658-940; session-run-settlement.ts 27-59; orchestration-side-effect-reactor.ts 1606-1624; runner-receipts.ts 619-628); competitor survey: t3code, paseo, bb, monocode, capy, zeron (/private/tmp/r32-redesign-6/survey) -->
 
