@@ -62,8 +62,9 @@ interface Tx {
 	/** A control claim's transmission: its outbox row's attempt_count (3.4). */
 	readonly n?: number | undefined;
 	readonly seq: number;
-	readonly label: Label | null;
-	readonly runnerId: string | null;
+	/** Its send's address, or the runner its run.dispatched names; null while pending (L2). */
+	label: Label | null;
+	runnerId: string | null;
 	transport: Transport;
 	consumption: Consumption;
 	/** A runner-held try that ended before any hold (3.4): never handed over. */
@@ -106,7 +107,14 @@ interface Send {
 	commandId?: string | undefined;
 	readonly runId: string | null;
 	readonly exec: number;
-	readonly label: Label | null;
+	/** L2: addressed once, at issue; null while pending, then resolved once, never re-addressed. */
+	runnerId: string | null;
+	/** L2: the runner's latest label when the address is fixed; null while it has none. */
+	label: Label | null;
+	/** L2 case 2: a send of an execution whose start is pending resolves with that start. */
+	readonly follows?: Send | undefined;
+	/** L2, 3.6: a send of an execution an unlaunch dropped resolves no further. */
+	dropped: boolean;
 	readonly txs: Tx[];
 	withdrawn: boolean;
 	exhausted: boolean;
@@ -151,11 +159,16 @@ interface Input {
 	readonly delivery: "queue" | "steer";
 	runId?: string | undefined;
 	failed?: string | undefined;
+	/** 3.9 (CONTRACT.md 975-980): its send's run, main's run.requested runId; a steer that outlives its Run becomes that Run. */
+	reservation?: string | undefined;
 }
 
 interface Wake {
 	readonly label: Label;
-	readonly runId?: string | undefined;
+	/** 8.3 Wake Runs (CONTRACT.md 2837-2840): a repeat turn_started with no active Run re-arms it. */
+	runId?: string | undefined;
+	/** Its turn_started's decision; an end_session success covers only work before its issue (3.4). */
+	readonly seq: number;
 	ended?:
 		| "result"
 		| "own"
@@ -238,9 +251,6 @@ interface World {
 				readonly runId?: string | undefined;
 				readonly commandId?: string | undefined;
 		  }
-		| undefined;
-	pendingEnd?:
-		| { readonly runId: string; readonly commandId: string }
 		| undefined;
 	snapshotEntry: number;
 	lastNotified?: TaskKey | undefined;
@@ -582,12 +592,6 @@ function endRun(
 	run.exec.settle = undefined;
 	step.ended.push({ runId: run.runId, ...ended });
 	if (world.confirm?.runId === run.runId) world.confirm = undefined;
-	// 8.4: end stops the Run, then issues end_session once it is Ended.
-	const end = world.pendingEnd;
-	if (end?.runId === run.runId) {
-		world.pendingEnd = undefined;
-		gateEndSession(world, run.runId, end.commandId);
-	}
 }
 
 /** The first specific permanent code, or the cap (3.8 reason 2.2, 4.3). */
@@ -674,6 +678,7 @@ function reconcile(world: World, step: Step): void {
 				// 3.6 D50: unlaunch back to Queued; the execution's sends are dropped.
 				for (const send of sends)
 					for (const tx of send.txs) tx.ended ??= "dropped";
+				for (const send of runSends(world, run)) send.dropped = true;
 				run.retryAt = sends.flatMap((send) => send.txs).at(-1)?.retryAt;
 				run.phase = "Queued";
 				if (sends.some((send) => send.txs.some((tx) => tx.resumeRejected)))
@@ -785,25 +790,64 @@ function currentLabel(world: World): Label | null {
 		: (world.runners.get(world.current)?.latest ?? null);
 }
 
-function issue(
+/**
+ * L2: a send's address at issue. Case 2: a send for a Run or wake Run with an execution, on a
+ * runner-host provider, goes to that execution's runner, pending while its start is. Case 3:
+ * every other send (every OpenCode send) goes to the current process, or pending with none.
+ */
+function addressAt(
 	world: World,
-	effect: RunEffect,
-	held: boolean,
-	label: Label | null = currentLabel(world),
-): Send {
-	const run = findRun(world, "runId" in effect ? effect.runId : null);
+	runId: string | null,
+): Pick<Send, "runnerId" | "label" | "follows"> {
+	const run = findRun(world, runId);
+	if (
+		run !== undefined &&
+		run.phase !== "Queued" &&
+		world.provider !== "opencode"
+	) {
+		const wake = run.wakeLabels.at(-1);
+		const start = runSends(world, run).find(
+			(send) => send.effect.kind === "start" && !send.dropped,
+		);
+		const runnerId =
+			wake === undefined ? start?.runnerId : splitLabel(wake).runnerId;
+		if (start !== undefined && runnerId === null)
+			return { runnerId: null, label: null, follows: start };
+		if (runnerId !== undefined && runnerId !== null)
+			return {
+				runnerId,
+				label: world.runners.get(runnerId)?.latest ?? null,
+			};
+	}
+	return { runnerId: world.current, label: currentLabel(world) };
+}
+
+function issue(world: World, effect: RunEffect, held: boolean): Send {
+	const runId = "runId" in effect ? effect.runId : null;
+	const run = findRun(world, runId);
 	const send: Send = {
 		seq: world.seq++,
 		effect,
 		held,
 		runId: run?.runId ?? null,
 		exec: run?.exec.n ?? 0,
-		label,
+		...addressAt(world, runId),
+		dropped: false,
 		txs: [],
 		withdrawn: false,
 		exhausted: false,
 	};
 	world.sends.push(send);
+	// L1 item 1, L2: a held send addressed to a retired runner is covered at issue, never handed over.
+	if (
+		held &&
+		send.runnerId !== null &&
+		world.runners.get(send.runnerId)?.retired
+	)
+		transmit(world, send, undefined).sealed = {
+			value: "never",
+			unconsumed: false,
+		};
 	return send;
 }
 
@@ -811,7 +855,7 @@ function transmit(
 	world: World,
 	send: Send,
 	token: SendToken | undefined,
-	runnerId: string | null = world.current,
+	runnerId: string | null = send.runnerId,
 	label: Label | null = send.label,
 ): Tx {
 	const tx: Tx = {
@@ -822,17 +866,11 @@ function transmit(
 		transport: { tag: "Issued" },
 		consumption: { tag: "None" },
 		unheld: token === undefined && send.held,
-		// 3.4: a control's claims count per commandId, n from 1; the end Control's interrupt and
-		// end_session share one (GAP, CONTRACT.md 443-449 vs 8.4 2871-2878).
+		// 3.4 (CONTRACT.md 449-455): a control's claims count per row, n from 1; each row is its own
+		// issue under its own commandId.
 		n:
 			token === undefined && !send.held
-				? 1 +
-					Math.max(
-						0,
-						...world.sends
-							.filter((item) => !item.held && item.commandId === send.commandId)
-							.flatMap((item) => item.txs.map((claim) => claim.n ?? 0)),
-					)
+				? 1 + Math.max(0, ...send.txs.map((claim) => claim.n ?? 0))
 				: undefined,
 		notSent: false,
 		released: false,
@@ -844,6 +882,11 @@ function transmit(
 		resulted: false,
 	};
 	send.txs.push(tx);
+	// L1 item 1, L2: a transmission to a retired address is covered at once, a reclaim's included.
+	if (runnerId !== null && world.runners.get(runnerId)?.retired) {
+		seal(tx);
+		tx.ended ??= "process_lost";
+	}
 	if (token !== undefined)
 		world.tokens.set(token, {
 			send: world.sends.indexOf(send),
@@ -931,9 +974,10 @@ function foldEndSession(
 	runId: string | null,
 	commandId: string,
 ): void {
+	// Wire label (L2): end_session carries its address's label, null while it has none.
 	issueControl(
 		world,
-		{ kind: "end_session", runId, label: currentLabel(world) },
+		{ kind: "end_session", runId, label: addressAt(world, runId).label },
 		commandId,
 	);
 }
@@ -966,12 +1010,21 @@ function sessionEnd(
 				seal(tx);
 				tx.ended ??= cause;
 			}
+	// 3.4 (CONTRACT.md 535-537): an end_session success covers only what was issued before it.
 	for (const run of world.runs)
-		if (run.phase !== "Ended" && run.exec.evidence) run.exec.endedBy ??= cause;
-	for (const wake of world.wakes) wake.ended ??= cause;
+		if (
+			run.phase !== "Ended" &&
+			run.exec.evidence &&
+			(runSends(world, run).some((send) =>
+				send.txs.some((tx) => tx.seq < before),
+			) ||
+				world.wakes.some(
+					(wake) => wake.runId === run.runId && wake.seq < before,
+				))
+		)
+			run.exec.endedBy ??= cause;
+	for (const wake of world.wakes) if (wake.seq < before) wake.ended ??= cause;
 	for (const interaction of world.interactions) interaction.resolved = true;
-	const label = currentLabel(world);
-	if (label !== null) decideLostWork(world, label);
 }
 
 /** L5: each label's lost work is decided once, when its scope first ends. */
@@ -993,18 +1046,8 @@ function decideLostWork(world: World, label: Label): void {
 function noteLabel(world: World, label: Label): "older" | "current" {
 	const { runnerId, querySeq } = splitLabel(label);
 	const runner = world.runners.get(runnerId);
-	if (runner === undefined) {
-		world.runners.set(runnerId, {
-			latest: label,
-			retired: false,
-			tasks: reportsTasks(world.provider)
-				? { tag: "Unknown", label }
-				: { tag: "Known", label, tasks: [] },
-		});
-		world.current ??= runnerId;
-		return "current";
-	}
-	if (runner.retired) return "older";
+	// unsolicited() drops a runner not started before this (L1).
+	if (runner === undefined || runner.retired) return "older";
 	const latest = splitLabel(runner.latest).querySeq;
 	if (querySeq < latest) return "older";
 	if (querySeq > latest) {
@@ -1030,7 +1073,15 @@ function producible(world: World, send: Send, evidence: Evidence): boolean {
 		case "journal_answer":
 			return send.held;
 		case "effect_outcome":
-			return !send.held;
+			// 3.4 (CONTRACT.md 465-471, build round 2e D48) and 3.13: not_sent is an effect decide
+			// issues' only, a direct start's named by its runId included.
+			return (
+				!send.held &&
+				(evidence.outcome.tag !== "not_sent" ||
+					kind === "probe" ||
+					kind === "stop_task" ||
+					kind === "cancel_request")
+			);
 		case "started":
 		case "input_accepted":
 		case "input_declined":
@@ -1041,14 +1092,10 @@ function producible(world: World, send: Send, evidence: Evidence): boolean {
 		case "interaction_requested":
 			return kind === "start" || kind === "steer";
 		case "command_lifecycle":
+			// D61: a native command's receipts and every interaction_resolved are unsolicited.
 			return (
-				world.provider === "claude" &&
-				(kind === "start" || kind === "steer" || kind === "send_native_command")
+				world.provider === "claude" && (kind === "start" || kind === "steer")
 			);
-		case "command_result":
-			return kind === "send_native_command";
-		case "interaction_resolved":
-			return kind === "deliver_answer";
 		case "probe_result":
 			return kind === "probe";
 		default:
@@ -1157,19 +1204,10 @@ function unsolicited(
 		return rejected(
 			"only a Claude wake has a turn_ended (3.4, 2.1 row 215, 8.3)",
 		);
-	if (
-		observation.kind === "command_lifecycle" ||
-		observation.kind === "command_result"
-	) {
-		const command = world.nativeCommands.find(
-			(item) => item.commandId === observation.commandId,
-		);
-		if (command === undefined)
-			return rejected("a command receipt naming another commandId (D21)");
-		world.seen.add(key);
-		commandReceipt(world, step, command, observation);
-		return changed;
-	}
+	// L1 (CONTRACT.md 353-355): evidence under the label of a runner not started has no authority
+	// and changes nothing.
+	if (!world.runners.has(splitLabel(observation.label).runnerId))
+		return noop("a runner not started has no authority (L1)");
 	world.seen.add(key);
 	const label = observation.label;
 	const place = noteLabel(world, label);
@@ -1199,11 +1237,19 @@ function unsolicited(
 		case "turn_started": {
 			if (place === "older")
 				return noop("older label gives no wake Run (L1.4)");
-			if (wake !== undefined) return noop("wake execution already outstanding");
 			const userRun = activeInputRun(world);
 			const wakeRun = world.runs.find(
 				(run) => run.phase !== "Ended" && run.origin === "wake",
 			);
+			// 8.3 Wake Runs (CONTRACT.md 2837-2840, build round 2e D47/D28): with no active Run a
+			// turn_started records a wake Run, opening its label's wake execution or re-arming one still
+			// outstanding, which a joined Run's end leaves, as that Run's.
+			if (
+				wake !== undefined &&
+				(userRun !== undefined ||
+					(wakeRun !== undefined && wake.runId === wakeRun.runId))
+			)
+				return noop("wake execution already outstanding under the active Run");
 			let runId: string | undefined;
 			if (userRun === undefined) {
 				if (wakeRun !== undefined) {
@@ -1224,7 +1270,9 @@ function unsolicited(
 					runId = run.runId;
 				}
 			}
-			world.wakes.push({ label, runId });
+			if (wake === undefined)
+				world.wakes.push({ label, runId, seq: world.seq });
+			else wake.runId = runId;
 			return changed;
 		}
 		case "turn_ended":
@@ -1277,7 +1325,27 @@ function unsolicited(
 			return changed;
 		case "interaction_requested":
 			return requestInteraction(world, label, observation);
+		case "command_lifecycle":
+		case "command_result": {
+			// D61 (CONTRACT.md 486-494): a native command's receipts are unsolicited, by its commandId.
+			const command = world.nativeCommands.find(
+				(item) => item.commandId === observation.commandId,
+			);
+			// 3.4 (CONTRACT.md 517-523, build round 2e D61): a receipt naming no native command is an
+			// unknown token, its commandId its key.
+			if (command === undefined)
+				return noop("a command receipt naming no native command (D61)");
+			// LI7 (CONTRACT.md 3430): older-label evidence changes nothing, its send's own label aside.
+			if (
+				place === "older" &&
+				!world.sends[command.send]?.txs.some((tx) => tx.label === label)
+			)
+				return noop("older-label command receipt (LI7)");
+			commandReceipt(world, step, command, observation);
+			return changed;
+		}
 		case "interaction_resolved": {
+			// D61: native or confirming an answer, by its interaction.
 			const interaction = interactionOf(world, observation.interactionId);
 			if (interaction === undefined || interaction.resolved) return noop();
 			interaction.resolved = true;
@@ -1385,9 +1453,11 @@ function answer(
 	const evidence: Evidence = observation;
 	if (observation.kind === "run_dispatched")
 		return dispatched(world, observation);
-	// D46 (oracle round 10): producibility is the kind's, so it comes before the unknown-token rule.
+	// D46 (oracle round 10; build round 2e, CONTRACT.md 519-520): producibility is the kind's, so it
+	// comes before the unknown-token rule. Either command receipt off Claude is Rejected.
 	if (
 		(observation.kind === "command_lifecycle" ||
+			observation.kind === "command_result" ||
 			observation.kind === "turn_ended") &&
 		world.provider !== "claude"
 	)
@@ -1398,9 +1468,31 @@ function answer(
 		observation.transmission !== undefined
 	) {
 		const named = observation.transmission;
-		if (observation.outcome.tag === "delivery_unknown")
-			return rejected("main writes no delivery_unknown for a control (3.4)");
-		// 3.4 (CONTRACT.md 465): n 0 ends an issue never claimed; no generated input names it yet.
+		if (
+			observation.outcome.tag === "delivery_unknown" ||
+			observation.outcome.tag === "not_sent"
+		)
+			// 3.4 (CONTRACT.md 465-471, build round 2e D48): main's gate precedes its claim, so no row
+			// it runs gets either.
+			return rejected(
+				`main writes no ${observation.outcome.tag} for a transmission (3.4)`,
+			);
+		if (named.transmission === 0) {
+			// 3.4 (CONTRACT.md 474-477): n 0 names no transmission and needs no claim. The issue is
+			// found by commandId alone and ends never transmitted (never handed over, 3.6), adding no
+			// chain; it is unknown only when its commandId names no issue.
+			const issued = [...world.sends]
+				.reverse()
+				.find(
+					(send) =>
+						!send.held &&
+						send.commandId === named.commandId &&
+						send.txs.every((tx) => tx.token === undefined),
+				);
+			if (issued === undefined) return noop("n 0 names no issue (3.4)");
+			issued.txs.length = 0;
+			return changed;
+		}
 		const claim = world.sends
 			.filter((send) => !send.held && send.commandId === named.commandId)
 			.flatMap((send) => send.txs)
@@ -1424,6 +1516,9 @@ function answer(
 	const tx = send?.txs[at.tx];
 	if (send === undefined || tx === undefined)
 		return noop("unknown or never-issued token (3.4)");
+	if (tx.n !== undefined && evidence.kind !== "effect_outcome")
+		// D61 (CONTRACT.md 489-494, 517-518): a control main issues is answered only by its outcome.
+		return rejected(`${evidence.kind} on a control main issues (3.4, D61)`);
 	if (!producible(world, send, evidence))
 		return rejected(
 			`${send.effect.kind} cannot produce ${evidence.kind} evidence (3.4)`,
@@ -1564,45 +1659,17 @@ function answer(
 			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
 			seal(tx);
 			return changed;
-		case "command_lifecycle":
-		case "command_result": {
-			const commandId =
-				send.effect.kind === "send_native_command"
-					? send.effect.commandId
-					: send.commandId;
-			if (evidence.commandId !== commandId)
+		case "command_lifecycle": {
+			// D21: a held start's or steer's receipt names its hold's commandId.
+			if (evidence.commandId !== send.commandId)
 				return rejected("a command receipt naming another commandId (D21)");
-			if (send.effect.kind === "send_native_command") {
-				const command = world.nativeCommands.find(
-					(item) => item.commandId === commandId,
-				);
-				if (command !== undefined)
-					commandReceipt(world, step, command, evidence);
-				return changed;
-			}
-			if (evidence.kind === "command_lifecycle") {
-				if (evidence.state === "cancelled" && tx.consumption.tag === "None") {
-					// 9: cancelled before started is NotConsumed{cancelled}, Stop's own.
-					tx.stopOwn = true;
-					tx.consumption = { tag: "NotConsumed", why: "cancelled" };
-				} else if (evidence.state === "started")
-					tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
-				seal(tx);
-			}
-			return changed;
-		}
-		case "interaction_resolved": {
-			if (
-				send.effect.kind !== "deliver_answer" ||
-				send.effect.interactionId !== evidence.interactionId
-			)
-				return rejected(
-					"an answer confirmation names another interaction (10B)",
-				);
-			tx.consumption = joinConsumption(tx.consumption, { tag: "Accepted" });
+			if (evidence.state === "cancelled" && tx.consumption.tag === "None") {
+				// 9: cancelled before started is NotConsumed{cancelled}, Stop's own.
+				tx.stopOwn = true;
+				tx.consumption = { tag: "NotConsumed", why: "cancelled" };
+			} else if (evidence.state === "started")
+				tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
 			seal(tx);
-			const interaction = interactionOf(world, evidence.interactionId);
-			if (interaction !== undefined) interaction.resolved = true;
 			return changed;
 		}
 		case "probe_result":
@@ -1672,23 +1739,6 @@ function effectOutcome(
 				tag: "Retrying",
 				at: outcome.retryAt,
 			});
-			if (send.effect.kind === "send_native_command") {
-				const command = world.nativeCommands.find(
-					(item) => item.send === world.sends.indexOf(send),
-				);
-				// 8.5 (H4): a latest try that got not_sent shows Queued, its deadline paused with the time left.
-				if (
-					command !== undefined &&
-					(command.deadline !== undefined || command.state === "Unconfirmed")
-				) {
-					command.remaining =
-						command.deadline === undefined
-							? 0
-							: Math.max(0, command.deadline.at - step.now);
-					command.deadline = undefined;
-					command.state = "Queued";
-				}
-			}
 			break;
 		case "permanent": {
 			// 3.4: an outcome with no live claim (the budget's exhaustion) names the latest claimed
@@ -1726,13 +1776,11 @@ function effectOutcome(
 			openRecovery(world, step, send, tx);
 			return changed;
 	}
-	// 3.4: main claims a control's row again after a retrying outcome on its latest claim.
-	// GAP (CONTRACT.md 453-455 vs H4 1552-1553): 3.4's status mapping has no not_sent, yet H4 answers a
-	// send_native_command not_sent. Nearest reading: it names its claim's (commandId, n) and main claims n + 1.
+	// 3.4: main claims a control's row again after a retryable outcome on its latest claim.
 	if (
 		tx.n !== undefined &&
 		tx === send.txs.at(-1) &&
-		(outcome.tag === "retryable" || outcome.tag === "not_sent")
+		outcome.tag === "retryable"
 	)
 		transmit(world, send, undefined);
 	seal(tx);
@@ -1892,6 +1940,24 @@ function dispatched(
 		.filter((tx) => !tx.unheld).length;
 	if (observation.transmission !== holds + 1)
 		return rejected("run.dispatched transmission out of order (4.3)");
+	// L2: a pending held send resolves at its own run_dispatched to the runner it names, and a
+	// case 2 send following its start resolves with it.
+	if (send.runnerId === null) {
+		const start = send;
+		for (const item of world.sends)
+			if (
+				item === start ||
+				(item.follows === start && item.runnerId === null)
+			) {
+				for (const tx of item.txs)
+					if (tx.runnerId === null) {
+						tx.runnerId = observation.runnerId;
+						tx.label = runner?.latest ?? null;
+					}
+				item.runnerId = observation.runnerId;
+				item.label = runner?.latest ?? null;
+			}
+	}
 	transmit(
 		world,
 		send,
@@ -1930,6 +1996,7 @@ function mainEvent(
 			const input = world.inputs.get(observation.inputId);
 			if (input === undefined)
 				return noop("run.requested for an input never admitted");
+			input.reservation ??= observation.runId;
 			if (input.runId === undefined) {
 				if (activeInputRun(world) !== undefined)
 					return noop("run.requested while another Run is active");
@@ -1977,10 +2044,15 @@ function mainEvent(
 			}
 			const from = findRun(world, input.runId);
 			if (run.phase === "Ended") {
-				// 3.9: a steer its Run's end left unconsumed is a Run of its own, Launched with its send.
+				// 3.9 (CONTRACT.md 975-980): a steer its Run's end left unconsumed is a Run of its own, its
+				// reservation's, Launched with its send.
+				const runId = input.reservation ?? observation.requestedRunId;
+				if (findRun(world, runId) !== undefined)
+					return noop(
+						"run.started for a steer whose reservation names an existing Run (3.9)",
+					);
 				const own: Run = {
-					// 3.4: a steer's own Run takes main's requested runId.
-					runId: observation.requestedRunId,
+					runId,
 					origin: "input",
 					inputs: [input.inputId],
 					phase: "Launched",
@@ -1990,10 +2062,8 @@ function mainEvent(
 				};
 				world.runs.push(own);
 				input.runId = own.runId;
-				world.mainRuns.set(observation.requestedRunId, {
-					runId: own.runId,
-					open: true,
-				});
+				for (const runId of [observation.requestedRunId, own.runId])
+					world.mainRuns.set(runId, { runId: own.runId, open: true });
 				return changed;
 			}
 			if (from !== undefined) {
@@ -2069,7 +2139,8 @@ function commit(
 	// work, Stop issues nothing (REDESIGN-6 r2).
 	const acting =
 		run !== undefined && run.phase !== "Queued" && !nothingMayAct(world, run);
-	if (acting || labelWorkOutstanding(world)) {
+	// 8.4: an end's Stop row is its end_session, not an interrupt.
+	if (by !== "end" && (acting || labelWorkOutstanding(world))) {
 		const runIds = [...world.mainRuns.entries()]
 			.filter(([, main]) => main.open && main.runId === run?.runId)
 			.map(([id]) => id);
@@ -2082,7 +2153,9 @@ function commit(
 			probe(world, step, runId, { tag: "native_session" });
 		}
 	}
-	if (
+	// 8.4 (CONTRACT.md 2893-2895): an end commits its Stop as the end_session row itself.
+	if (by === "end") gateEndSession(world, run?.runId ?? null, commandId);
+	else if (
 		run !== undefined &&
 		run.phase === "Interrupting" &&
 		taskView(world).tag !== "none"
@@ -2230,22 +2303,13 @@ function control(
 			return changed;
 		}
 		case "end": {
+			// 8.4 (CONTRACT.md 2889-2898): each row is its own Control under its own commandId. With
+			// deadlineAt, main commits the Stop as this end_session; a later end_session (deadlineAt
+			// null) or one with no Run joins no deadline, and no Run issues end_session{runId: null}.
 			const run = activeRun(world);
-			if (run === undefined || run.phase === "Queued") {
-				if (run !== undefined) {
-					run.asked = true;
-					world.pendingEnd = {
-						runId: run.runId,
-						commandId: command.commandId,
-					};
-					return changed;
-				}
-				// 8.4: with no Run, end_session{runId: null} at once, adding nothing to the stop deadline.
-				gateEndSession(world, null, command.commandId);
-				return changed;
-			}
-			world.pendingEnd = { runId: run.runId, commandId: command.commandId };
-			commit(world, step, "end", command.deadlineAt, command.commandId);
+			if (run === undefined || command.deadlineAt === null)
+				gateEndSession(world, run?.runId ?? null, command.commandId);
+			else commit(world, step, "end", command.deadlineAt, command.commandId);
 			return changed;
 		}
 		case "answer": {
@@ -2391,6 +2455,21 @@ function settle(
 			});
 			world.current = runnerId;
 			world.snapshotEntry++;
+			// L2: a pending send resolves, once, to the next process_started's runner; a run_dispatched
+			// naming a runner not yet started fixes the label of that runner's process_started.
+			for (const send of world.sends)
+				if (
+					(send.runnerId === null && !send.dropped) ||
+					(send.runnerId === runnerId && send.label === null)
+				) {
+					for (const tx of send.txs)
+						if (tx.runnerId === send.runnerId && tx.label === null) {
+							tx.runnerId = runnerId;
+							tx.label = settlement.label;
+						}
+					send.runnerId = runnerId;
+					send.label = settlement.label;
+				}
 			return changed;
 		}
 		case "process_lost": {
@@ -2406,13 +2485,14 @@ function settle(
 			if (world.current === settlement.runnerId) world.current = null;
 			const onRunner = (label: Label | null) =>
 				label !== null && splitLabel(label).runnerId === settlement.runnerId;
-			// L1: coverage ends the runner's work and seals its transmissions.
+			const addressed = (send: Send, tx: Tx) =>
+				send.runnerId === settlement.runnerId ||
+				tx.runnerId === settlement.runnerId;
+			// L1 item 1: retiring covers every send addressed to it, whatever its tries got, and
+			// seals its transmissions.
 			for (const send of world.sends) {
 				for (const tx of send.txs)
-					if (
-						tx.runnerId === settlement.runnerId ||
-						(tx.runnerId === null && onRunner(tx.label))
-					) {
+					if (addressed(send, tx)) {
 						seal(tx);
 						tx.ended ??= "process_lost";
 					}
@@ -2420,7 +2500,7 @@ function settle(
 				if (
 					send.held &&
 					send.txs.length === 0 &&
-					onRunner(send.label) &&
+					send.runnerId === settlement.runnerId &&
 					run !== undefined &&
 					run.phase !== "Ended"
 				)
@@ -2435,9 +2515,7 @@ function settle(
 					run.phase !== "Ended" &&
 					run.exec.evidence &&
 					runSends(world, run).some((send) =>
-						send.txs.some(
-							(tx) => tx.runnerId === settlement.runnerId || onRunner(tx.label),
-						),
+						send.txs.some((tx) => addressed(send, tx)),
 					)
 				)
 					run.exec.endedBy ??= "process_lost";
@@ -2447,9 +2525,14 @@ function settle(
 				if (onRunner(interaction.label)) interaction.resolved = true;
 			return changed;
 		}
-		case "session_ended":
+		case "session_ended": {
 			sessionEnd(world, world.seq, "session_ended");
+			// L5, 8.4 (CONTRACT.md 2884-2885): session_ended ends the latest label's scope; an
+			// end_session success ends no label's scope.
+			const label = currentLabel(world);
+			if (label !== null) decideLostWork(world, label);
 			return changed;
+		}
 	}
 }
 

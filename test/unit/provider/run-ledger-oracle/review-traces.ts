@@ -70,7 +70,7 @@ export function main(d: TraceDriver, variant: 0 | 1 | 2 | 3) {
 		{ operation: 28, selection: 0, index: 0, variant, input: 0, advance: 0 },
 		{ issued: d.issued, view: d.view(), now: d.now, alarmAt: d.alarmAt },
 	);
-	if (command.verb === "observe") step(d, command);
+	return command.verb === "observe" ? step(d, command) : undefined;
 }
 
 function running(d: TraceDriver) {
@@ -118,6 +118,9 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			expect(completed.ended).toMatchObject([
 				{ outcome: "completed", reason: { tag: "completed" } },
 			]);
+			// D59, L6 (CONTRACT.md 777-783): B's work is main's until main's terminal ends A's run; then a
+			// Run now commit bounds it by the ledger stop deadline.
+			main(d, 2);
 			admit(d, "C", true);
 			expect(starts(d, "C")).toHaveLength(0);
 			fire(d);
@@ -193,8 +196,8 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
 			});
-			const ended = observe(d, b, { kind: "query_ended" });
-			expect(ended.ended).toHaveLength(1);
+			// GAP 5 (CONTRACT.md 871-876): with no result, the Run waits at query_ended for main's terminal.
+			expect(observe(d, b, { kind: "query_ended" }).ended).toEqual([]);
 			admit(d, "C", true);
 			const late = observe(d, b, { kind: "result", outcome: "completed" });
 			expect(late.ended).toEqual([]);
@@ -209,7 +212,7 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 				{ kind: "probe_result", finding: { tag: "native_idle" } },
 			);
 			// D60: C starts as main's claim once A's run ends.
-			main(d, 2);
+			expect(main(d, 2)?.ended).toHaveLength(1);
 			main(d, 0);
 			expect(starts(d, "C")).toHaveLength(1);
 			expect(released.ended).toEqual([]);
@@ -310,9 +313,10 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 				kind: "effect_outcome",
 				outcome: { tag: "delivery_unknown" },
 			});
-			const ended = observe(d, b, { kind: "query_ended" });
-			const endedRunId = ended.ended[0]?.runId;
-			assert(endedRunId !== undefined, "the source Run has ended");
+			const endedRunId = d.view().active?.runId;
+			assert(endedRunId !== undefined, "the source Run is active");
+			// GAP 5 (CONTRACT.md 871-876): with no result, the Run waits at query_ended for main's terminal.
+			expect(observe(d, b, { kind: "query_ended" }).ended).toEqual([]);
 			admit(d, "C", true);
 			const lost = step(d, {
 				verb: "settle",
@@ -332,56 +336,12 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			expect(late.ended).toEqual([]);
 		},
 	},
-	{
-		id: "R3-1",
-		title:
-			"[3.4, 3.5, 9] acceptance of B1 cannot retain an unaccepted failed B2 transmission",
-		provider: "opencode",
-		run(d) {
-			// HL-K R3 finding 1, art-hlk2h/run.log:1765-1766.
-			running(d);
-			admit(d, "B");
-			const b1 = d.latest("steer");
-			const outcomeAt = d.now;
-			observe(d, b1, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: outcomeAt + 1 },
-			});
-			fire(d, outcomeAt + 1_000);
-			const b2 = d.latest("steer");
-			expect(d.bound(b2).token).not.toBe(d.bound(b1).token);
-			observe(d, b1, { kind: "input_accepted", nativeMessageId: "native-B" });
-			observe(d, b2, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: d.now + 1 },
-			});
-			observe(d, b1, { kind: "query_ended" });
-			admit(d, "C", true);
-			fire(d);
-			observe(
-				d,
-				d.latest(
-					"probe",
-					(effect) =>
-						effect.kind === "probe" && effect.target.tag === "native_session",
-				),
-				{ kind: "probe_result", finding: { tag: "native_idle" } },
-			);
-			// D60: C starts as main's claim once A's run ends.
-			main(d, 2);
-			main(d, 0);
-			expect(starts(d, "C")).toHaveLength(1);
-			expect(
-				d.issued.filter(
-					({ effect }) => effect.kind === "steer" && effect.inputId === "B",
-				),
-			).toHaveLength(2);
-		},
-	},
+	// HL-K R3 finding 1 (B1's acceptance retains no failed B2) is scenarios.ts R3: its B2 is main's
+	// direct re-send (3.6, CONTRACT.md 692-698), which the fake's main does not draw.
 	{
 		id: "R4-1",
 		title:
-			"[3.4, 3.5, 9] input-present acceptance survives a permanent outcome for that same transmission",
+			"[3.4, 3.5, 3.9] an input-present transmission keeps its Run through a permanent outcome that fails its input",
 		provider: "opencode",
 		run(d) {
 			// HL-K R4 finding 1, art-hlk2r4/run.log:7538-7539.
@@ -403,14 +363,18 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 					finding: { tag: "input_present", nativeMessageId: "native-A" },
 				},
 			);
-			expect(input(d, "A")?.state.tag).toBe("Accepted");
+			// 3.4 (CONTRACT.md 1988), 3.5 (562-564): input_present is consumption Observed, not acceptance.
+			const observed = { tag: "Delivered", certainty: "sent" };
+			expect(input(d, "A")?.state).toEqual(observed);
 			const runId = d.view().active?.runId;
 			const failed = observe(d, a, {
 				kind: "effect_outcome",
 				outcome: { tag: "permanent", code: "LateTransportFailure" },
 			});
+			// 3.9 (CONTRACT.md 973-975): a permanent outcome fails the input, final; 3.5 (586-590): the
+			// Observed transmission may still act, so its Run neither ends nor releases the fence.
 			expect(failed.ended).toEqual([]);
-			expect(input(d, "A")?.state.tag).toBe("Accepted");
+			expect(input(d, "A")?.state.tag).toBe("Failed");
 			expect(d.view().active?.runId).toBe(runId);
 			expect(d.view().anythingMayAct).toBe(true);
 			expect(starts(d, "A")).toHaveLength(1);
@@ -419,7 +383,7 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 	{
 		id: "R4-2",
 		title:
-			"[3.5, 4.11, 9] journal-finished proof retains work without upgrading failed transport to Sent",
+			"[3.5, 4.11, 9] journal-finished proof retains work through a rejected resume's failed transport",
 		provider: "claude",
 		run(d) {
 			// HL-K R4 finding 2, art-hlk2r4/run.log:7541; 11.2 supplies its behavioural summary.
@@ -427,17 +391,20 @@ export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 			const a = d.latest("start");
 			observe(d, a, { kind: "journal_answer", answer: "finished" });
 			const runId = d.view().active?.runId;
+			// 3.4 (CONTRACT.md 465-471): a runner-held start has no effect_outcome; its failed transport is
+			// a rejected resume's release, Transport Failed (4.11, 1985).
 			const failed = observe(d, a, {
-				kind: "effect_outcome",
-				outcome: { tag: "permanent", code: "ObservedTransportFailure" },
+				kind: "run_released",
+				reason: "ResumeRejected",
 			});
 			expect(failed.ended).toEqual([]);
 			expect(d.view().active?.runId).toBe(runId);
-			expect(input(d, "A")?.state).not.toEqual({
+			// 3.9 (CONTRACT.md 913-916): the view shows the Observed input Delivered/sent, its transport
+			// Failed inside the chain; neither implies Accepted.
+			expect(input(d, "A")?.state).toEqual({
 				tag: "Delivered",
 				certainty: "sent",
 			});
-			expect(input(d, "A")?.state.tag).not.toBe("Accepted");
 			expect(d.view().anythingMayAct).toBe(true);
 			// 4.11: finished is consumption proof only; an actual result still owns Run end.
 			const ended = observe(d, a, { kind: "result", outcome: "completed" });
