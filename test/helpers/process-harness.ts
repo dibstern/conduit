@@ -60,6 +60,10 @@ import {
 	stopManagedOpenCode,
 } from "../../src/lib/instance/managed-opencode-process.js";
 import { projectStorageDir } from "../../src/lib/persistence/project-storage.js";
+import {
+	runnerMembersGone,
+	runnerProcessTable,
+} from "../../src/lib/provider/runner/runner-registry.js";
 import type {
 	ModelInfo,
 	ProviderAgentInfo,
@@ -174,6 +178,7 @@ export class ProcessHarness {
 	readonly browsers: ProcessBrowser[] = [];
 	readonly cliPids: number[] = [];
 	readonly rpcDiagnostics: RpcDecodeDiagnostics;
+	private cachedLegacyStoreWitness?: string;
 	private child: ChildProcess | undefined;
 	private exit: Promise<void> | undefined;
 	private logs = "";
@@ -202,6 +207,7 @@ export class ProcessHarness {
 	private runnerCleanup:
 		| Awaited<ReturnType<typeof cleanupTestClaudeRunners>>
 		| undefined;
+	private readonly runnerStartTimes = new Map<number, string>();
 
 	private constructor(
 		private dist?: string,
@@ -217,7 +223,6 @@ export class ProcessHarness {
 			idleDayMs?: number;
 			nonDefaultConfigDir?: boolean;
 			idleTimeoutMs?: number | null;
-			failureCleanupDelayMs?: number;
 			serverProtocolVersion?: number;
 			runnerHelloProtocolVersion?: number;
 			runnerHelloAfterFirst?: boolean;
@@ -271,6 +276,7 @@ export class ProcessHarness {
 		private readonly draftPreWarmTtlMs?: number,
 		private readonly managedOpenCodeStopGraceMs?: number,
 		private readonly deadline?: number,
+		private readonly legacyStoreWitness = false,
 	) {
 		this.root = realpathSync(mkdtempSync(rootPrefix));
 		this.rpcDiagnostics = new RpcDecodeDiagnostics(
@@ -329,11 +335,17 @@ export class ProcessHarness {
 		const clearTestEnv =
 			'for key in $(env | cut -d= -f1); do case "$key" in CONDUIT_TEST_*) unset "$key";; esac; done\n';
 		writeFileSync(join(this.root, "home/.profile"), clearTestEnv);
-		if (shellEnvProof)
+		if (shellEnvProof) {
+			// Keep real profile capture independent of host startup files and tools.
+			writeFileSync(
+				join(this.root, "home/.zshenv"),
+				"unsetopt GLOBAL_RCS\nexport PATH=/usr/bin:/bin\n",
+			);
 			writeFileSync(
 				join(this.root, "home/.zprofile"),
 				`${clearTestEnv}export CONDUIT_ENV_PROOF=server-cache\nexport ANTHROPIC_API_KEY=must-remove\nexport ANTHROPIC_MODEL=must-remove\nexport PATH="/tmp/conduit-cached-env-bin:$PATH"\n`,
 			);
+		}
 		if (foregroundCli && !dist)
 			throw new Error("Foreground CLI coverage requires a build");
 		if (managedOpenCode || foregroundCli) {
@@ -401,13 +413,120 @@ export class ProcessHarness {
 		writeFileSync(
 			join(this.root, "runner-identity-fixture.mjs"),
 			`import childProcess from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import fs, { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { registerHooks, syncBuiltinESMExports } from "node:module";
-import { join } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 const root = ${JSON.stringify(this.root)};
 if (process.env.HOME !== join(root, "home")) throw new Error("Runner identity fixture requires isolated HOME");
-if (process.env.CONDUIT_TEST_NATIVE_RUNNER_LOADER === "1") {
-  // Built runners need only erasable fixture types, not tsx's async loader on every JS import.
+${
+	legacyStoreWitness
+		? `// Witness native SQLite lifetimes, including C++ WAL/SHM writes invisible to JS fs hooks.
+const sqliteModule = await import("node:sqlite");
+const sqlite = sqliteModule.default;
+const { threadId } = await import("node:worker_threads");
+const witness = join(root, "legacy-store-witness.jsonl");
+const recordLegacyStore = (kind, entry = {}) => fs.appendFileSync(witness, JSON.stringify({
+  kind, pid: process.pid, threadId, handle: entry.handle, path: entry.path,
+}) + "\\n");
+const legacyPath = (value, sidecars = false) => {
+  if (Buffer.isBuffer(value)) value = value.toString("utf8");
+  if (typeof value === "string" && value.startsWith("file:")) value = new URL(value);
+  if (value instanceof URL) value = fileURLToPath(value);
+  if (typeof value !== "string" || value === ":memory:") return;
+  const absolute = resolve(value);
+  let parent = dirname(absolute);
+  const missing = [basename(absolute)];
+  for (;;) {
+    try { parent = fs.realpathSync(parent); break; }
+    catch (cause) {
+      if (!["ENOENT", "ENOTDIR"].includes(cause.code) || dirname(parent) === parent) throw cause;
+      missing.unshift(basename(parent));
+      parent = dirname(parent);
+    }
+  }
+  const path = join(parent, ...missing);
+  const names = sidecars ? ["events.db", "events.db-wal", "events.db-shm"] : ["events.db"];
+  if (!path.startsWith(root + sep) || !names.includes(basename(path))) return;
+  // Exact legacy layouts cover new fixture projects too, excluding shared, backup and temp stores.
+  if (dirname(dirname(path)) !== ${JSON.stringify(join(this.configDir, "projects"))} && basename(dirname(path)) !== ".conduit") return;
+  return relative(root, path);
+};
+let nextHandle = 0;
+const handles = new WeakMap();
+const NativeDatabaseSync = sqlite.DatabaseSync;
+sqlite.DatabaseSync = new Proxy(NativeDatabaseSync, {
+  construct(target, args, newTarget) {
+    const path = legacyPath(args[0]);
+    if (!path) return Reflect.construct(target, args, newTarget);
+    const entry = { handle: ++nextHandle, path, active: true };
+    recordLegacyStore("acquire", entry);
+    let db;
+    try { db = Reflect.construct(target, args, newTarget); }
+    catch (cause) { recordLegacyStore("failed", entry); throw cause; }
+    entry.active = db.isOpen;
+    handles.set(db, entry);
+    if (!entry.active) recordLegacyStore("dormant", entry);
+    return db;
+  },
+});
+for (const method of ["close", Symbol.dispose]) {
+  NativeDatabaseSync.prototype[method] = new Proxy(NativeDatabaseSync.prototype[method], {
+    apply(target, receiver, args) {
+      const result = Reflect.apply(target, receiver, args);
+      const entry = handles.get(receiver);
+      if (entry?.active) {
+        entry.active = false;
+        recordLegacyStore("close", entry);
+      }
+      return result;
+    },
+  });
+}
+NativeDatabaseSync.prototype.open = new Proxy(NativeDatabaseSync.prototype.open, {
+  apply(target, receiver, args) {
+    const previous = handles.get(receiver);
+    if (!previous) return Reflect.apply(target, receiver, args);
+    const entry = { handle: ++nextHandle, path: previous.path, active: true };
+    recordLegacyStore("acquire", entry);
+    let result;
+    try { result = Reflect.apply(target, receiver, args); }
+    catch (cause) { recordLegacyStore("failed", entry); throw cause; }
+    handles.set(receiver, entry);
+    return result;
+  },
+});
+fs.renameSync = new Proxy(fs.renameSync, {
+  apply(target, receiver, args) {
+    const path = legacyPath(args[1], true);
+    const result = Reflect.apply(target, receiver, args);
+    // Recording after native success also witnesses promotions straddling the epoch.
+    if (path) recordLegacyStore("promote", { handle: ++nextHandle, path });
+    return result;
+  },
+});
+// Node does not resync sqlite's named exports, so expose the proxy through a fresh ESM facade.
+const facadeURL = new URL("./legacy-store-sqlite.mjs", import.meta.url).href;
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "node:sqlite" && context.parentURL !== facadeURL && !context.conditions.includes("require"))
+      return { url: facadeURL, shortCircuit: true };
+    return nextResolve(specifier, context);
+  },
+  load(url, context, nextLoad) {
+    if (url !== facadeURL) return nextLoad(url, context);
+    return {
+      format: "module", shortCircuit: true,
+      source: 'import sqlite from "node:sqlite"; export default sqlite; ' +
+        Object.keys(sqliteModule).filter(name => name !== "default")
+          .map(name => 'export const ' + name + '=sqlite[' + JSON.stringify(name) + '];').join(" "),
+    };
+  },
+});
+`
+		: ""
+}if (process.env.CONDUIT_TEST_NATIVE_RUNNER_LOADER === "1") {
+  // Built daemons and runners need only erasable fixture types, not tsx's async loader on every JS import.
   registerHooks({
     resolve(specifier, context, nextResolve) {
       try { return nextResolve(specifier, context); }
@@ -424,18 +543,23 @@ if (process.env.CONDUIT_TEST_NATIVE_RUNNER_LOADER === "1") {
 }
 if (/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
   writeFileSync(join(root, "runner-argv-" + process.pid + ".json"), JSON.stringify(process.argv));
+  writeFileSync(join(root, "runner-birth-" + process.pid), process.pid + "-" + Date.now());
 }
 const executeFile = childProcess.execFileSync;
 childProcess.execFileSync = (command, args, options) => {
   try { return executeFile(command, args, options); }
   catch (cause) {
-    if (command !== "ps" || !Array.isArray(args) || !args.includes("command=") || cause.code !== "EPERM") throw cause;
+    if (command !== "ps" || !Array.isArray(args) || cause.code !== "EPERM") throw cause;
     const path = join(root, "runner-argv-" + args.at(-1) + ".json");
     if (!existsSync(path)) throw cause;
-    return process.execPath + " " + JSON.parse(readFileSync(path, "utf8")).slice(1).join(" ");
+    if (args.includes("command=")) return process.execPath + " " + JSON.parse(readFileSync(path, "utf8")).slice(1).join(" ");
+    const birth = join(root, "runner-birth-" + args.at(-1));
+    if (args.includes("lstart=") && args.includes("stat=") && existsSync(birth)) return readFileSync(birth, "utf8") + " S";
+    throw cause;
   }
 };
-syncBuiltinESMExports();\n`,
+syncBuiltinESMExports();
+${legacyStoreWitness ? 'recordLegacyStore("boot");\n' : ""}`,
 		);
 		if (foregroundCli && dist) {
 			writeFileSync(
@@ -625,6 +749,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			subagentPollTimeoutMs?: number;
 			rootPrefix?: string;
 			foregroundCli?: boolean;
+			/** Append native legacy-store acquisition and promotion evidence in the preload. */
+			legacyStoreWitness?: boolean;
 			autoStartOpenCode?: boolean;
 			opencodeRecording?: string;
 			claudeReplay?: ProcessHarness["claudeReplay"];
@@ -672,6 +798,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			options.draftPreWarmTtlMs,
 			options.managedOpenCodeStopGraceMs,
 			options.deadline,
+			options.legacyStoreWitness,
 		);
 	}
 
@@ -718,7 +845,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "OPENCODE_PURE"
 					| "CONDUIT_SERVER_BUILD_ID"
 					| "CONDUIT_SLOW_RPC_MS"
+					| "CONDUIT_TEST_SUBPROCESS_BUDGET"
 					| "CONDUIT_TEST_ADVANCE_BUS_CAPACITY"
+					| "CONDUIT_TEST_DRAFT_SEND_BEFORE_COMMIT_MS"
+					| "CONDUIT_TEST_RUNNER_SWAP_PAUSE"
+					| "CONDUIT_TEST_STOP_ACCEPT_PAUSE"
+					| "CONDUIT_TEST_SEND_CONTINUATION_PAUSE"
+					| "CONDUIT_TEST_DRAFT_PROMOTION_WRITE_FAILURE"
+					| "CONDUIT_TEST_DRAFT_WORKSPACE_FAILURE"
 					| "CONDUIT_TEST_RPC_DEFECT"
 					| "CONDUIT_TRACE_ENABLED"
 					| "CONDUIT_TRACE_FILE"
@@ -900,8 +1034,12 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			process.execPath,
 			[
 				"--disable-warning=DEP0205",
-				"--import",
-				pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+				...(this.dist && !this.realSdk
+					? []
+					: [
+							"--import",
+							pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href,
+						]),
 				"--import",
 				pathToFileURL(join(this.root, "runner-identity-fixture.mjs")).href,
 				...(this.foregroundCli
@@ -1090,13 +1228,6 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 								CONDUIT_TEST_DAEMON_CONFIG_DIR: this.configDir,
 							}
 						: {}),
-					...(this.runnerLifecycle?.failureCleanupDelayMs !== undefined
-						? {
-								CONDUIT_TEST_RUNNER_FAILURE_DELAY_MS: String(
-									this.runnerLifecycle.failureCleanupDelayMs,
-								),
-							}
-						: {}),
 					...(this.runnerLifecycle?.idleTimeoutMs !== undefined
 						? {
 								CONDUIT_TEST_RUNNER_IDLE_MS: String(
@@ -1225,6 +1356,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			let finished = false;
 			const timer = setTimeout(
 				() => {
+					if (child.pid !== undefined)
+						this.marks.push({
+							kind: "startup-phase",
+							phase: "startup-timeout",
+							pid: child.pid,
+							at: Date.now(),
+							elapsedMs: Math.round(performance.now() - startupAt),
+						});
 					finished = true;
 					fail(new Error(`Server startup timeout\n${this.logs}`));
 				},
@@ -1247,6 +1386,13 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			child.once("exit", onExit);
 			child.once("error", onError);
 			const ready = (value: Generation) => {
+				this.marks.push({
+					kind: "startup-phase",
+					phase: finished ? "ready-after-finish" : "ready-received",
+					pid: value.pid,
+					at: Date.now(),
+					elapsedMs: Math.round(performance.now() - startupAt),
+				});
 				if (finished) return;
 				finished = true;
 				clearTimeout(timer);
@@ -1278,6 +1424,18 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 						}
 					}
 				} else {
+					const pid = value["pid"];
+					if (
+						typeof pid === "number" &&
+						["runner-spawned", "runner-started", "query"].includes(
+							String(value["kind"]),
+						) &&
+						!this.runnerStartTimes.has(pid)
+					) {
+						const current = runnerProcessTable.inspect(pid);
+						if (current.state === "running" && current.startTime !== undefined)
+							this.runnerStartTimes.set(pid, current.startTime);
+					}
 					this.marks.push(value as unknown as ProcessMark);
 				}
 			});
@@ -1877,6 +2035,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 			disposed: this.disposed,
 			runnerCleanup: this.runnerCleanup,
 			managedCleanup: this.managedCleanup,
+			...(this.cachedLegacyStoreWitness !== undefined
+				? { legacyStoreWitness: this.cachedLegacyStoreWitness }
+				: {}),
 			ownedOpenCodePids: [...this.ownedOpenCodeProcesses.values()].flatMap(
 				(pids) => [...pids],
 			),
@@ -2002,7 +2163,30 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 	}
 
 	remainingRunnerPids(): number[] {
-		return this.runnerPids().filter(testRunnerAlive);
+		return this.runnerPids().filter((pid) => {
+			const startTime = this.runnerStartTimes.get(pid);
+			return startTime === undefined
+				? testRunnerAlive(pid)
+				: !runnerMembersGone(runnerProcessTable, [{ pid, startTime }]);
+		});
+	}
+
+	signalOwnedRunner(pid: number, signal: NodeJS.Signals): boolean {
+		const startTime = this.runnerStartTimes.get(pid);
+		const current = runnerProcessTable.inspect(pid);
+		if (
+			startTime === undefined ||
+			current.state !== "running" ||
+			current.startTime !== startTime
+		)
+			return false;
+		try {
+			process.kill(pid, signal);
+			return true;
+		} catch (cause) {
+			if (isRecord(cause) && cause["code"] === "ESRCH") return false;
+			throw cause;
+		}
 	}
 
 	assertNoRunners(): void {
@@ -2155,6 +2339,14 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		// can disappear and suspended runners cannot answer a shutdown handshake.
 		for (const pid of this.remainingRunnerPids()) {
 			try {
+				const startTime = this.runnerStartTimes.get(pid);
+				const current = runnerProcessTable.inspect(pid);
+				if (
+					startTime === undefined ||
+					current.state !== "running" ||
+					current.startTime !== startTime
+				)
+					continue;
 				process.kill(pid, "SIGKILL");
 			} catch (cause) {
 				if (!(isRecord(cause) && cause["code"] === "ESRCH"))
@@ -2167,6 +2359,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 				this.runnerPids(),
 				this.configDir,
 				this.projectDir,
+				this.runnerStartTimes,
 			);
 		} catch (cause) {
 			failures.push(cause);
@@ -2214,6 +2407,12 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 				failures,
 				`Harness cleanup failed; recovery retained at ${this.root}`,
 			);
+		if (this.legacyStoreWitness) {
+			this.cachedLegacyStoreWitness = readFileSync(
+				join(this.root, "legacy-store-witness.jsonl"),
+				"utf8",
+			);
+		}
 		// Keep registration/socket evidence if cleanup cannot prove termination.
 		rmSync(this.root, {
 			recursive: true,

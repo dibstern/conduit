@@ -3,15 +3,17 @@ import { isDeepStrictEqual } from "node:util";
 import { Context, Data, Effect, Result, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
-import { parseAttachmentDataUrl } from "../../attachment-data-url.js";
+import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { KnownProviderDriverKind } from "../../contracts/provider-instance.js";
 import { sessionCreatedLineage } from "../../contracts/session-ref.js";
+import type { DraftChange } from "../../domain/relay/Services/input-drafts.js";
 import {
 	resolveServerSessionPick,
 	sessionPickEvents,
 	storedSessionPick,
 } from "../../domain/relay/Services/session-pick.js";
 import type { ClaudeSubagentTranscriptSnapshot } from "../../provider/claude/types.js";
+import { currentRunnerOutput } from "../../provider/runner/runner-receipts.js";
 import {
 	isPickRejection,
 	type PickRejection,
@@ -21,12 +23,14 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 	EventId,
+	RunnerWriteOrigin,
 	type SessionHandoffDeliveredPayload,
 	type StoredEvent,
 } from "../events.js";
 import { boundProjectMismatch } from "./bind-event-store-effect.js";
 import {
 	type CommitAndSignalProject,
+	guardCurrentWrite,
 	makeUnboundCommitAndSignal,
 } from "./commit-and-signal.js";
 import {
@@ -78,7 +82,11 @@ export interface ClaudeEventPersistEffect {
 
 	readonly persistEvents: (
 		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean; readonly projectId?: string },
+		options?: {
+			readonly publish?: boolean;
+			readonly projectId?: string;
+			readonly draftChange?: DraftChange;
+		},
 	) => Effect.Effect<void, ClaudeEventPersistFailure>;
 
 	readonly persistUserMessage: (
@@ -95,7 +103,7 @@ export interface ClaudeEventPersistEffect {
 			/** The reservation this placement belongs to; this does not prove intake. */
 			readonly runId?: string;
 			readonly provider?: string;
-			readonly images?: readonly string[];
+			readonly images?: readonly AttachmentRef[];
 			/** Place an unsent input and its owned failure in one transaction. */
 			readonly failure?: {
 				readonly message: string;
@@ -547,8 +555,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 		event: CanonicalEvent,
 		options?: { readonly publish?: boolean; readonly projectId?: string },
 	): Effect.Effect<void, ClaudeEventPersistFailure> =>
-		commitAndSignal
-			.write(
+		Effect.gen(function* () {
+			const receipt = yield* currentRunnerOutput;
+			const runnerId = event.metadata[RunnerWriteOrigin];
+			return yield* commitAndSignal.write(
 				(project) =>
 					Effect.gen(function* () {
 						yield* requireLiveCreationRefs(event, "persistEvent");
@@ -565,13 +575,17 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 								);
 						yield* project(yield* appendEvents([event], options?.projectId));
 					}),
-				options,
-			)
-			.pipe(Effect.mapError(mapPersistError("persistEvent")));
+				{
+					...options,
+					runnerId: typeof runnerId === "string" ? runnerId : receipt?.runnerId,
+				},
+			);
+		}).pipe(Effect.mapError(mapPersistError("persistEvent")));
 
 	const persistHandoffDelivered: ClaudeEventPersistEffect["persistHandoffDelivered"] =
 		(sessionId, handoff, commandId, projectId, provider = "claude") =>
 			Effect.gen(function* () {
+				const receipt = yield* currentRunnerOutput;
 				const mismatch = boundProjectMismatch(eventStore.projectId, projectId);
 				if (mismatch) return yield* mismatch;
 				yield* requireSession(sessionId, "persistEvent", "existing-session");
@@ -586,28 +600,34 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 						),
 					},
 				);
-				yield* commitAndSignal.write((project) =>
-					Effect.gen(function* () {
-						const completed =
-							yield* sql`SELECT command_id FROM provider_command_outbox
+				yield* commitAndSignal.write(
+					(project) =>
+						Effect.gen(function* () {
+							const completed =
+								yield* sql`SELECT command_id FROM provider_command_outbox
 							WHERE command_id = ${commandId} AND session_id = ${sessionId} AND status = 'completed'`;
-						if (completed.length === 0) return;
-						const existing = yield* sql<{ event_id: string }>`SELECT event_id
+							if (completed.length === 0) return;
+							const existing = yield* sql<{ event_id: string }>`SELECT event_id
 							FROM events WHERE event_id = ${event.eventId} LIMIT 1`;
-						if (existing.length > 0) return;
-						yield* project(yield* eventStore.appendBatch([event], projectId));
-						if (handoff.instanceId)
-							yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}
+							if (existing.length > 0) return;
+							yield* project(yield* eventStore.appendBatch([event], projectId));
+							if (handoff.instanceId)
+								yield* sql`DELETE FROM provider_state WHERE session_id = ${sessionId}
 							AND key = ${heldCatchUpKey(handoff.instanceId)}`;
-					}),
+						}),
+					{ runnerId: receipt?.runnerId },
 				);
 			}).pipe(Effect.mapError(mapPersistError("persistHandoffDelivered")));
 
-	const persistEvents = (
-		events: readonly CanonicalEvent[],
-		options?: { readonly publish?: boolean; readonly projectId?: string },
-	): Effect.Effect<void, ClaudeEventPersistFailure> =>
+	const persistEvents: ClaudeEventPersistEffect["persistEvents"] = (
+		events,
+		options,
+	) =>
 		Effect.gen(function* () {
+			const receipt = yield* currentRunnerOutput;
+			const runnerId = events
+				.map((event) => event.metadata[RunnerWriteOrigin])
+				.find((id): id is string => typeof id === "string");
 			const mismatch = boundProjectMismatch(
 				eventStore.projectId,
 				options?.projectId,
@@ -618,6 +638,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 			yield* commitAndSignal.write(
 				(project) =>
 					Effect.gen(function* () {
+						yield* (options?.draftChange?.write ?? Effect.void).pipe(
+							Effect.provideService(SqlClient.SqlClient, sql),
+						);
 						for (const sessionId of new Set(
 							events.map((event) => event.sessionId),
 						))
@@ -638,9 +661,13 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 						} else
 							yield* project(yield* appendEvents(events, options?.projectId));
 					}),
-				options,
+				{ ...options, runnerId: runnerId ?? receipt?.runnerId },
 			);
-		}).pipe(Effect.mapError(mapPersistError("persistEvents")));
+			yield* guardCurrentWrite(options?.draftChange?.publish ?? Effect.void);
+		}).pipe(
+			Effect.uninterruptible,
+			Effect.mapError(mapPersistError("persistEvents")),
+		);
 
 	const persistUserMessage: ClaudeEventPersistEffect["persistUserMessage"] = (
 		sessionId,
@@ -724,19 +751,10 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 						),
 					);
 				}
-				const attachments = yield* Effect.try({
-					try: () =>
-						(alreadyPlaced ? [] : (options?.images ?? [])).map((url) => ({
-							...parseAttachmentDataUrl(url),
-							url,
-						})),
-					catch: (cause) =>
-						new ClaudeEventPersistEffectError({
-							operation: "persistUserMessage",
-							cause,
-						}),
-				});
-				for (const [index, attachment] of attachments.entries()) {
+				for (const [index, ref] of (alreadyPlaced
+					? []
+					: (options?.images ?? [])
+				).entries()) {
 					events.push(
 						canonicalEvent(
 							"file.attached",
@@ -744,11 +762,9 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 							{
 								messageId: userMsgId,
 								partId: `${userMsgId}-attachment-${index}`,
-								mime: attachment.mime,
-								...(attachment.name !== undefined
-									? { filename: attachment.name }
-									: {}),
-								url: attachment.url,
+								mime: ref.mime,
+								...(ref.name !== undefined ? { filename: ref.name } : {}),
+								source: ref,
 							},
 							{ provider, createdAt: now },
 						),
@@ -796,18 +812,23 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 				const stored = yield* appendEvents(events, options?.projectId);
 				yield* project(stored);
 			});
-		return (
-			options?.project
+		return Effect.gen(function* () {
+			const receipt = yield* currentRunnerOutput;
+			return yield* options?.project
 				? persist(options.project)
-				: commitAndSignal.write(persist, options)
-		).pipe(Effect.mapError(mapPersistError("persistUserMessage")));
+				: commitAndSignal.write(persist, {
+						...options,
+						runnerId: receipt?.runnerId,
+					});
+		}).pipe(Effect.mapError(mapPersistError("persistUserMessage")));
 	};
 
 	const ensureClaudeSubagentSession: ClaudeEventPersistEffect["ensureClaudeSubagentSession"] =
 		(input) =>
-			// Keep session seeding, append and projection in the seam's transaction.
-			commitAndSignal
-				.write(
+			Effect.gen(function* () {
+				const receipt = yield* currentRunnerOutput;
+				// Keep session seeding, append and projection in the seam's transaction.
+				return yield* commitAndSignal.write(
 					(project) =>
 						Effect.gen(function* () {
 							const provider = input.provider ?? "claude";
@@ -925,15 +946,20 @@ const makeClaudeEventPersistForStore = Effect.fn(function* (
 							);
 							yield* project(stored);
 						}),
-					input.projectId === undefined ? {} : { projectId: input.projectId },
-				)
-				.pipe(
-					Effect.mapError((cause) =>
-						isPickRejection(cause)
-							? cause
-							: mapPersistError("ensureClaudeSubagentSession")(cause),
-					),
+					{
+						...(input.projectId === undefined
+							? {}
+							: { projectId: input.projectId }),
+						runnerId: receipt?.runnerId,
+					},
 				);
+			}).pipe(
+				Effect.mapError((cause) =>
+					isPickRejection(cause)
+						? cause
+						: mapPersistError("ensureClaudeSubagentSession")(cause),
+				),
+			);
 
 	return {
 		persistHandoffDelivered,

@@ -591,7 +591,7 @@
 					onjump={scrollCtrl.requestJump}
 					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
-					model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
+					modelExecution={turn.user?.modelExecution} />
 			{/if}
 			<!-- Notices sit between the final work and reply: they are lifted out of
 			     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -607,7 +607,7 @@
 				<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
 					<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
 						hideHeader={reply === segment.reply[0] && (segment.activity.length > 0 || (final && turn.live))}
-						model={turn.user?.modelExecution?.actualModel ?? turn.user?.modelExecution?.requestedModel} />
+						modelExecution={turn.user?.modelExecution} />
 				</div>
 			{/each}
 			{#if segment.handBack}

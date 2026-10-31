@@ -2,24 +2,26 @@
 // instance. Sends a prompt that triggers tool use, then validates that
 // the SSE event stream delivers the expected state transitions in order.
 
+import { mkdirSync, writeFileSync } from "node:fs";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { ToolStatus } from "../../src/lib/shared-types.js";
-import {
-	authHeaders,
-	checkServerHealth,
-	OPENCODE_BASE_URL,
-} from "./helpers/server-connection.js";
+import { apiGet, checkServerHealth } from "./helpers/server-connection.js";
 import {
 	collectSSEEvents,
 	createTestSession,
 	deleteTestSession,
 	getSessionMessages,
+	type SSEEvent,
 	sendPrompt,
+	startSSECollection,
 	type TestSession,
 } from "./helpers/session-helpers.js";
 
 let serverAvailable = false;
 let testSession: TestSession | null = null;
+const collections: ReturnType<typeof startSSECollection>[] = [];
+let rawEvents: SSEEvent[] = [];
+let lastStatusSnapshot: Record<string, Record<string, unknown>> | undefined;
 
 beforeAll(async () => {
 	const health = await checkServerHealth();
@@ -30,9 +32,46 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-	if (testSession) {
-		await deleteTestSession(testSession.id);
+	const rest: Record<string, unknown> = {};
+	try {
+		if (testSession) {
+			const diagnosticSignal = AbortSignal.timeout(5_000);
+			for (const path of [
+				`/session/${testSession.id}/message`,
+				`/session/status?directory=${encodeURIComponent(testSession.directory ?? "")}`,
+			]) {
+				try {
+					const body = JSON.stringify(await apiGet(path, diagnosticSignal));
+					rest[path] = {
+						body: body.slice(0, 262144),
+						truncated: body.length > 262144,
+					};
+				} catch (error) {
+					rest[`${path}:error`] = String(error).slice(0, 2048);
+				}
+			}
+		}
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			"test-results/tool-sse-transitions.json",
+			JSON.stringify(
+				{
+					session: testSession,
+					collections: collections.map(({ events, evidence }) => ({
+						events,
+						evidence,
+					})),
+					lastStatusSnapshot,
+					rest,
+				},
+				null,
+				2,
+			),
+		);
+	} finally {
+		if (testSession) await deleteTestSession(testSession.id);
 	}
+	expect(Object.keys(rest).filter((key) => key.endsWith(":error"))).toEqual([]);
 });
 
 function skipIfNoServer() {
@@ -53,11 +92,6 @@ interface ToolPartEvent {
 	timestamp: number;
 }
 
-interface SSEEvent {
-	type: string;
-	properties: Record<string, unknown>;
-}
-
 /** Extract tool part events from a raw SSE event stream for a specific session. */
 function extractToolPartEvents(
 	events: SSEEvent[],
@@ -74,7 +108,9 @@ function extractToolPartEvents(
 		// Filter to our session
 		const evtSession =
 			(props["sessionID"] as string) ?? (part["sessionID"] as string) ?? "";
-		if (!evtSession.startsWith(sessionId.slice(0, 12))) continue;
+		if (evtSession !== sessionId) continue;
+		if (part["sessionID"] !== undefined && part["sessionID"] !== sessionId)
+			continue;
 
 		const state = part["state"] as Record<string, unknown> | undefined;
 		results.push({
@@ -84,7 +120,7 @@ function extractToolPartEvents(
 			hasInput: state?.["input"] != null,
 			hasOutput: !!(state?.["output"] as string),
 			hasMetadata: state?.["metadata"] != null,
-			timestamp: Date.now(),
+			timestamp: evt.receivedAt,
 		});
 	}
 
@@ -150,29 +186,33 @@ describe("Tool SSE Transition Validation (live)", () => {
 			// Create a fresh test session
 			testSession = await createTestSession("tool-transition-test");
 			expect(testSession.id).toBeTruthy();
+			expect(testSession.directory).toBeTruthy();
+			const sessionId = testSession.id;
 
 			// Track when idle is first seen — add a grace period after idle
 			// to capture any trailing tool completion events that arrive
 			// slightly after the status transition (network reordering).
 			let idleSeenAt = 0;
+			let toolSeen = false;
 
-			// Start SSE collection BEFORE sending the prompt.
-			// Timeout is generous for real LLM responses; the until callback
-			// breaks early on session.status:idle + 2s grace period.
-			const ssePromise = collectSSEEvents("/event", {
+			// Keep the existing deadline and five-second trailing-event grace.
+			const collection = startSSECollection("/event", {
 				timeoutMs: 110_000,
 				maxEvents: 1000,
 				until: (evt) => {
 					// Stop when we see session.status:idle after some tool events,
 					// but only after a short grace period to capture trailing events
-					if (evt.type === "session.status") {
+					if (
+						evt.type === "session.status" &&
+						evt.properties["sessionID"] === sessionId
+					) {
 						const props = evt.properties;
 						const status = props["status"] as
 							| Record<string, unknown>
 							| undefined;
-						if (status?.["type"] === "idle" && toolEvents.length > 0) {
+						if (status?.["type"] === "idle" && toolSeen) {
 							if (idleSeenAt === 0) {
-								idleSeenAt = Date.now();
+								idleSeenAt = evt.receivedAt;
 								return false; // Don't stop yet — wait for grace period
 							}
 						}
@@ -182,37 +222,28 @@ describe("Tool SSE Transition Validation (live)", () => {
 					if (idleSeenAt > 0 && Date.now() - idleSeenAt > 5_000) {
 						return true;
 					}
-					// Track tool events in real-time for the until check
-					if (evt.type === "message.part.updated") {
-						const part = evt.properties["part"] as
-							| Record<string, unknown>
-							| undefined;
-						if (part?.["type"] === "tool") {
-							// Simplified check - just count
-							toolEvents.push({
-								callID: "",
-								tool: "",
-								status: "pending",
-								hasInput: false,
-								hasOutput: false,
-								hasMetadata: false,
-								timestamp: Date.now(),
-							});
-						}
-					}
+					if (extractToolPartEvents([evt], sessionId).length > 0)
+						toolSeen = true;
 					return false;
 				},
 			});
 
-			// Send a prompt that triggers bash without requiring external-directory
-			// permission from the isolated OpenCode test instance.
-			await sendPrompt(
-				testSession.id,
-				"Use the bash tool to run exactly: printf 'tool-transition-test\\n'. Tell me the output.",
-			);
-
-			// Wait for SSE collection to complete
-			let events = await ssePromise;
+			collections.push(collection);
+			let events = collection.events;
+			rawEvents = events;
+			try {
+				await collection.ready;
+				expect(collection.evidence.stopReason).toBe("running");
+				// OpenCode still executes this command, through its actual bash tool.
+				await sendPrompt(
+					testSession.id,
+					"Use the bash tool to run exactly: printf 'tool-transition-test\\n'. Tell me the output.",
+				);
+				events = await collection.done;
+			} finally {
+				collection.stop();
+				await collection.done;
+			}
 
 			// Reset and properly extract
 			toolEvents = extractToolPartEvents(events, testSession.id);
@@ -238,7 +269,7 @@ describe("Tool SSE Transition Validation (live)", () => {
 				const followUpAccum: typeof events = [];
 				const followUpDeadline = Date.now() + 30_000;
 				const sessionId = testSession.id;
-				await collectSSEEvents("/event", {
+				const followUp = startSSECollection("/event", {
 					timeoutMs: 30_000,
 					maxEvents: 500,
 					until: (evt) => {
@@ -265,9 +296,17 @@ describe("Tool SSE Transition Validation (live)", () => {
 						return allTerminal || Date.now() > followUpDeadline;
 					},
 				});
+				collections.push(followUp);
+				try {
+					await followUp.done;
+				} finally {
+					followUp.stop();
+					await followUp.done;
+				}
 
 				// Merge follow-up events and re-extract
 				events = [...events, ...followUpAccum];
+				rawEvents = events;
 				toolEvents = extractToolPartEvents(events, testSession.id);
 				toolGroups = groupByCallID(toolEvents);
 			}
@@ -275,10 +314,13 @@ describe("Tool SSE Transition Validation (live)", () => {
 			// Must have captured some tool events
 			expect(toolEvents.length).toBeGreaterThan(0);
 			expect(toolGroups.size).toBeGreaterThan(0);
+			expect(toolGroups.size).toBe(1);
+			expect(toolEvents.every((event) => event.tool === "bash")).toBe(true);
 		}, 180_000);
 
 		it("every tool starts with pending or running", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			for (const [callID, events] of toolGroups) {
 				const firstStatus = events[0]?.status;
@@ -290,10 +332,25 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("every tool ends in a terminal state (completed or error)", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			for (const [callID, events] of toolGroups) {
 				const lastStatus = events[events.length - 1]?.status;
+				if (lastStatus === "running") {
+					expect(
+						rawEvents.some(
+							(event) =>
+								event.type === "session.status" &&
+								event.properties["sessionID"] === testSession?.id &&
+								(
+									event.properties["status"] as
+										| Record<string, unknown>
+										| undefined
+								)?.["type"] === "idle",
+						),
+					).toBe(true);
+				}
 				// "running" is acceptable when the session reached idle — OpenCode
 				// may not emit a final part.updated for every tool (e.g., bash
 				// tools that complete implicitly when the turn ends).
@@ -307,7 +364,8 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("all transitions follow valid forward order", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			for (const [callID, events] of toolGroups) {
 				const statuses = events.map((e) => e.status);
@@ -320,7 +378,8 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("no backward transitions occur (completed/error → pending/running)", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			const BACKWARD: Record<string, Set<string>> = {
 				completed: new Set(["pending", "running"]),
@@ -344,7 +403,8 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("completed tools have output or error content", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			for (const [callID, events] of toolGroups) {
 				const lastEvent = events.at(-1);
@@ -359,7 +419,8 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("running tools have input populated", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			for (const [callID, events] of toolGroups) {
 				const runningEvents = events.filter((e) => e.status === "running");
@@ -375,7 +436,8 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("callIDs are consistent across status updates for the same tool", () => {
-			if (skipIfNoServer() || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
 
 			for (const [callID, events] of toolGroups) {
 				for (const evt of events) {
@@ -385,7 +447,9 @@ describe("Tool SSE Transition Validation (live)", () => {
 		});
 
 		it("REST API final state matches SSE terminal state", async () => {
-			if (skipIfNoServer() || !testSession || toolGroups.size === 0) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
+			if (!testSession) throw new Error("Missing tool test session");
 			const sessionId = testSession.id;
 
 			await vi.waitFor(
@@ -437,37 +501,45 @@ describe("Tool SSE Transition Validation (live)", () => {
 		}, 30_000);
 
 		it("session becomes idle after all tools complete", async () => {
-			if (skipIfNoServer() || !testSession) return;
+			if (skipIfNoServer()) return;
+			expect(toolGroups.size).toBeGreaterThan(0);
+			if (!testSession) throw new Error("Missing tool test session");
 			const sessionId = testSession.id;
 
-			// Check SSE events already collected for a session.status idle event.
-			// The main SSE collection captured idle (that's what triggers the
-			// grace period), so we can skip expensive polling in most cases.
-			let lastStatus = "";
-
-			// Re-collect from the toolEvents parent scope — the ssePromise events
-			// were already processed. Check if any session.status event indicated idle.
-			// We need the raw SSE events, which were used to extract toolEvents.
-			// The "until" callback already detected idle to trigger the grace period,
-			// so if toolGroups has data, idle was seen.
-			if (toolGroups.size > 0) {
-				// The SSE collection only terminates after seeing idle + grace period,
-				// so if we have tool data, idle was observed via SSE.
-				lastStatus = "idle";
-			}
+			// Only exact-session native idle is a witness. Tool groups prove no status.
+			let lastStatus = rawEvents.some(
+				(event) =>
+					event.type === "session.status" &&
+					event.properties["sessionID"] === sessionId &&
+					(event.properties["status"] as Record<string, unknown> | undefined)?.[
+						"type"
+					] === "idle",
+			)
+				? "idle"
+				: "";
 
 			// Fallback: poll if SSE didn't capture idle (e.g., no tool events collected)
 			if (lastStatus !== "idle") {
 				await vi.waitFor(
 					async () => {
-						const statuses = (await (
-							await fetch(`${OPENCODE_BASE_URL}/session/status`, {
-								headers: { Accept: "application/json", ...authHeaders() },
-							})
-						).json()) as Record<string, { type: string }>;
+						if (!testSession?.directory)
+							throw new Error("Missing native session directory");
+						const statuses = await apiGet<
+							Record<string, Record<string, unknown>>
+						>(
+							`/session/status?directory=${encodeURIComponent(testSession.directory)}`,
+						);
+						lastStatusSnapshot = statuses;
+						if (
+							!statuses ||
+							typeof statuses !== "object" ||
+							Array.isArray(statuses)
+						) {
+							throw new Error("Invalid native session status map");
+						}
 						const sessionStatus = statuses[sessionId];
 						if (sessionStatus) {
-							lastStatus = sessionStatus.type;
+							lastStatus = String(sessionStatus["type"]);
 						} else {
 							// Session not in status map means idle
 							lastStatus = "idle";

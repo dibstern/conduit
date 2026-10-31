@@ -14,10 +14,16 @@
 // gets its own push, which would mask the sidebar stream this is about. Its
 // spoken status at each step is attached as a report, with a screenshot.
 
+import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { Effect } from "effect";
+import { responseChunks } from "../../helpers/fake-claude-process-sdk.js";
+import { test as processTest } from "../helpers/process-harness-fixture.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
+import { ChatPage } from "../page-objects/chat.page.js";
 
 test.describe("Claude background work", () => {
 	test.use({
@@ -41,16 +47,27 @@ test.describe("Claude background work", () => {
 		const sessionId = decodeURIComponent(
 			harness.projectUrl.slice("/s/".length),
 		);
-		// The stored row: its status and how many turns have ended.
+		// Wake-up results complete messages after the run's one terminal.
 		const stored = () => {
 			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
 			try {
 				const row = db
 					.prepare(
-						"SELECT status, (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS turnEnds FROM sessions s WHERE id = ?",
+						`SELECT status,
+						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type IN ('turn.completed', 'message.completed')) AS completedSegments,
+						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS terminals
+						 FROM sessions s WHERE id = ?`,
 					)
 					.get(sessionId);
-				return { status: row?.["status"], turnEnds: Number(row?.["turnEnds"]) };
+				return {
+					status: row?.["status"],
+					completedSegments: Number(row?.["completedSegments"]),
+					terminals: Number(row?.["terminals"]),
+					runs: db
+						.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+						.all(sessionId)
+						.map((run) => run["status"]),
+				};
 			} finally {
 				db.close();
 			}
@@ -87,7 +104,12 @@ test.describe("Claude background work", () => {
 
 			// The idle status is written just after the turn end, not with it.
 			// Wait for both, or the row is read while still busy from the turn.
-			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 1 });
+			await expect.poll(stored).toEqual({
+				status: "idle",
+				completedSegments: 1,
+				terminals: 1,
+				runs: ["completed"],
+			});
 			// The sidebar stream is ordered, so once the second window shows a
 			// rename made after that, it has had the idle status too.
 			await page.getByTestId("session-bar-overflow").click();
@@ -141,7 +163,12 @@ test.describe("Claude background work", () => {
 			// The shell ending wakes the SDK into a turn of its own. Read the row
 			// once that has settled too, not in the gap before it starts.
 			harness.claudeReplayer?.release();
-			await expect.poll(stored).toEqual({ status: "idle", turnEnds: 2 });
+			await expect.poll(stored).toEqual({
+				status: "idle",
+				completedSegments: 2,
+				terminals: 1,
+				runs: ["completed"],
+			});
 			await expect(
 				row,
 				"the background shell ended but the sidebar still says working",
@@ -166,16 +193,151 @@ test.describe("Claude background work", () => {
 	// sidebar leaving Monitoring are proven in harness-background-task-stop.spec.ts.
 });
 
-// The shell ending between turns, before the SDK's wake-up turn (the trace is
-// background-shell-turn cut there), restarts its Bash tool under a message id
-// no turn owns. Bug (conduit-test-jyr9.14): that reopened the finished turn
-// with no reply to close it, so the inbox queued every later message.
-// Failure cases: the turn reads as running again; the next message queues
-// instead of sending.
+processTest.describe("Claude wake-up turn inbox", () => {
+	processTest.use({ harnessOptions: { restartProof: true } });
+
+	processTest(
+		"queues a send visibly until the wake-up turn ends, then answers it",
+		async ({ page, harness }, testInfo) => {
+			const browser = await harness.connect();
+			const sessionId = await browser.createSession("Wake-up inbox");
+			const foreground = "notification-parent-turn";
+			const text = "queued-during-wake-up";
+			const inputId = randomUUID();
+			const app = new AppPage(page);
+			const chat = new ChatPage(page);
+			const ledger = () => {
+				const db = new DatabaseSync(join(harness.configDir, "events.db"), {
+					readOnly: true,
+				});
+				try {
+					return {
+						runs: db
+							.prepare(
+								"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+							)
+							.all(sessionId),
+						input: db
+							.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+							.get(inputId),
+						sent: db
+							.prepare(
+								"SELECT sequence FROM events WHERE session_id = ? AND type = 'input.sent' AND json_extract(data, '$.inputId') = ?",
+							)
+							.all(sessionId, inputId),
+					};
+				} finally {
+					db.close();
+				}
+			};
+			const report: Record<string, unknown> = {
+				bead: "conduit-test-s7zo",
+				sessionId,
+				inputId,
+				assertionsPassed: false,
+			};
+			try {
+				await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
+				await app.sendMessage(foreground);
+				await expect
+					.poll(() => ledger().runs)
+					.toEqual([{ status: "completed" }]);
+				await expect(page.getByTestId("background-task-chip")).toBeVisible();
+				writeFileSync(
+					join(harness.root, "release-notification-parent"),
+					"release",
+				);
+				await expect(
+					chat.assistantMessages.filter({
+						hasText: "Notification parent message.",
+					}),
+				).toBeVisible();
+				// The wake-up is held before its result and has no provider run of its own.
+				report["wakeUp"] = ledger();
+				expect(ledger().runs).toEqual([{ status: "completed" }]);
+				expect(
+					await Effect.runPromise(
+						browser.rpc["input.submit"]({
+							sessionId,
+							originId: browser.originId,
+							inputId,
+							text,
+							delivery: "queue",
+						}),
+					),
+				).toMatchObject({ ok: true });
+				await expect(page.getByTestId("pending-input-text")).toHaveText(text);
+				await expect(page.getByTestId("pending-input-state")).toHaveText(
+					"Queued",
+				);
+				await expect(chat.userMessages.filter({ hasText: text })).toHaveCount(
+					0,
+				);
+				report["queued"] = {
+					...ledger(),
+					chip: await page.getByTestId("pending-input-row").innerText(),
+				};
+				expect(ledger()).toMatchObject({
+					runs: [{ status: "completed" }],
+					input: { state: "queued" },
+					sent: [],
+				});
+				await page.reload();
+				await expect(page.getByTestId("pending-input-text")).toHaveText(text);
+				await expect(page.getByTestId("pending-input-state")).toHaveText(
+					"Queued",
+				);
+				writeFileSync(
+					join(harness.root, "release-notification-result"),
+					"release",
+				);
+				await expect(chat.userMessages.filter({ hasText: text })).toHaveCount(
+					1,
+				);
+				await expect(
+					chat.assistantMessages.filter({
+						hasText: responseChunks(text).join("").trim(),
+					}),
+				).toBeVisible();
+				await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
+				await expect
+					.poll(() => ledger().runs)
+					.toEqual([{ status: "completed" }, { status: "completed" }]);
+				expect(ledger().sent).toHaveLength(1);
+				const transcript = await browser.history(sessionId);
+				expect(
+					transcript.filter((message) => message.text === text),
+				).toHaveLength(1);
+				expect(
+					transcript.filter(
+						(message) => message.text === responseChunks(text).join(""),
+					),
+				).toHaveLength(1);
+				report["answered"] = {
+					...ledger(),
+					transcript: transcript.map(({ role, text }) => ({ role, text })),
+				};
+				report["assertionsPassed"] = true;
+			} finally {
+				const path = testInfo.outputPath("wake-up-inbox.json");
+				writeFileSync(path, JSON.stringify(report, null, 2));
+				await testInfo.attach("wake-up-inbox", {
+					path,
+					contentType: "application/json",
+				});
+			}
+		},
+	);
+});
+
+// A shell completion before the wake-up used to reopen the finished run, with
+// no owned terminal left to close it (conduit-test-jyr9.14). Include the complete
+// wake-up result: 85d8a0ca correctly queues the next input while native work runs.
+// Failure cases: the ended run reopens, or the next input never drains.
 test.describe("Claude background shell ending between turns", () => {
 	test.use({
 		claudeReplay: {
-			turns: ["background-shell-ends-between-turns", "pong-thinking-text-turn"],
+			turns: ["background-shell-turn", "pong-thinking-text-turn"],
 		},
 	});
 

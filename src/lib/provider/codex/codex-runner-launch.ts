@@ -30,7 +30,7 @@ export const makeCodexRunnerLaunch = (
 		},
 		executeEffect: (runner, command) =>
 			Effect.gen(function* () {
-				const result = yield* runner.executeEffect(command);
+				const result = yield* runner.executeNativeEffect(command);
 				resumeSessionId =
 					(yield* runner.getResumeSessionIdEffect?.(callbacks.sessionId) ??
 						Effect.succeed(undefined)) ?? undefined;

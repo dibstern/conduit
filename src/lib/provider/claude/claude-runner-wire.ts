@@ -7,6 +7,7 @@ import { ClaudeBoundaryError } from "../event-sink-errors.js";
 import type {
 	RunnerMessage,
 	RunnerWireCodec,
+	RunnerWireMessage,
 } from "../runner/runner-protocol.js";
 import type { RunnerSettingsSnapshot } from "../runner/runner-upgrade.js";
 import type { SessionTurn } from "../runner/session-runner.js";
@@ -228,7 +229,7 @@ export function makeClaudeRunnerWire(
 
 			return message;
 		},
-		encode(message: RunnerMessage, taggedConfigDir: boolean): string {
+		encode(message: RunnerWireMessage, taggedConfigDir: boolean): string {
 			let frame =
 				message.type === "command" && message.command.type === "send-turn"
 					? {

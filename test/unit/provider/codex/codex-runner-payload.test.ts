@@ -12,6 +12,10 @@ import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/provide
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeCodexSessionRunner } from "../../../../src/lib/provider/codex/codex-runner-payload.js";
 import { writeCodexSessionIdentity } from "../../../../src/lib/provider/codex/codex-session-store.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../../helpers/runner-provider-admission.js";
 
 describe("Codex runner preparation", () => {
 	it.effect(
@@ -58,8 +62,9 @@ describe("Codex runner preparation", () => {
 						return Effect.succeed({});
 					},
 				);
+				const admission = yield* makeRunnerAdmission(runner, "codex");
 				const send = (home: string) =>
-					runner.executeEffect({
+					admitRunnerCommand(admission, runner, {
 						type: "send-turn",
 						sinkId: "input",
 						aborted: false,

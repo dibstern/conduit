@@ -87,9 +87,13 @@ it.each([
 		await vi.waitFor(() => expect(turn.get(sessionId)?.state).toBe("running"), {
 			timeout: 30_000,
 		});
-		await vi.waitFor(() =>
-			expect(readFileSync(capture, "utf8")).toContain('"kind":"run.handle"'),
+		// The fake SDK holds the stream after its first delta. Until the daemon
+		// stores that delta, the runner may still be sending it, and killing the
+		// daemon first would spool it.
+		const delta = db.prepare<[string], { type: string }>(
+			"SELECT type FROM events WHERE session_id = ? AND type = 'thinking.delta'",
 		);
+		await vi.waitFor(() => expect(delta.get(sessionId)).toBeDefined());
 		const runner = fixture.marks.find(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);

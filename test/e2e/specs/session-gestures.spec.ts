@@ -1,6 +1,7 @@
 import type { Locator, Page } from "@playwright/test";
 import { createSession, type ReplayHarness } from "../helpers/e2e-harness.js";
 import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { settleSheet } from "../helpers/sheet-drag.js";
 
 test.use({
 	recording: "chat-simple",
@@ -522,10 +523,12 @@ test.describe("phone", () => {
 		await trigger.click();
 		const sheet = page.getByTestId("session-bar-island-menu");
 		await expect(sheet).toBeVisible();
+		await settleSheet(page);
 		const box = await sheet.boundingBox();
+		const header = await page.getByTestId("session-bar").boundingBox();
 		expect(box?.x).toBe(0);
 		expect(box?.width).toBe(393);
-		expect((box?.y ?? 0) + (box?.height ?? 0)).toBe(852);
+		expect(box?.y).toBe((header?.y ?? 0) + (header?.height ?? 0));
 		await expect(page.getByTestId("menu-sheet-scrim")).toBeVisible();
 		const overflowCommands = await sheet
 			.locator(

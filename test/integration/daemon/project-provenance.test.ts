@@ -64,10 +64,11 @@ function outbox(fixture: ProcessHarness, slug: string) {
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
-			.prepare(`SELECT command_id, status, attempt_count
+			.prepare(`SELECT command_id, effect_type, status, attempt_count
 			FROM provider_command_outbox WHERE project_key = ? ORDER BY request_sequence`)
 			.all(slug) as Array<{
 			command_id: string;
+			effect_type: string;
 			status: string;
 			attempt_count: number;
 		}>;
@@ -299,6 +300,8 @@ describe("Project provenance through the built daemon", () => {
 				for (const table of snapshot.tables)
 					for (const row of table.rows)
 						expect(row.project, table.table).toBe(slug);
+			// End stops its runner through requestStop and a reconciler shutdown
+			// (C 6.3), not a runner command; its completed row proves delivery.
 			for (const command of outbox(fixture, slug)) {
 				expect(
 					fixture.marks.filter(
@@ -306,7 +309,7 @@ describe("Project provenance through the built daemon", () => {
 							mark.kind === "runner-command" &&
 							mark.commandId === command.command_id,
 					),
-				).toHaveLength(1);
+				).toHaveLength(command.effect_type === "end_session" ? 0 : 1);
 			}
 			const approvalExecutions =
 				fixture.marks.filter(
@@ -356,7 +359,16 @@ describe("Project provenance through the built daemon", () => {
 				slug,
 				sessionId,
 				sessions,
-				history: await browser.history(sessionId),
+				// Schema 44 predates per-turn effort/context storage (30340031).
+				history: (await browser.history(sessionId)).map((message) => {
+					if (!message.modelExecution) return message;
+					const {
+						contextWindow: _contextWindow,
+						effort: _effort,
+						...modelExecution
+					} = message.modelExecution;
+					return { ...message, modelExecution };
+				}),
 			});
 		}
 		await fixture.terminate();

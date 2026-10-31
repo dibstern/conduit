@@ -11,6 +11,7 @@
 
 	const VARIANT_ICON = {
 		default: { name: "circle-alert", class: "text-text-secondary" },
+		success: { name: "check", class: "text-success" },
 		warn: { name: "triangle-alert", class: "text-warning" },
 		error: { name: "circle-x", class: "text-error" },
 		pinned: { name: "pin", class: "text-status-pinned" },

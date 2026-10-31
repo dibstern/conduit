@@ -40,7 +40,7 @@ describe("built runner startup deadlines", () => {
 			await harness.kill();
 			appendFileSync(
 				join(harness.root, "runner-identity-fixture.mjs"),
-				`\nimport { installRunnerStartupFixture } from ${JSON.stringify(new URL("../../helpers/runner-startup-fixture.ts", import.meta.url).href)};\ninstallRunnerStartupFixture(${JSON.stringify(harness.root)});\n`,
+				`\nconst { installRunnerStartupFixture } = await import(${JSON.stringify(new URL("../../helpers/runner-startup-fixture.ts", import.meta.url).href)});\ninstallRunnerStartupFixture(${JSON.stringify(harness.root)});\n`,
 			);
 			await harness.restart({ runnerStartupTimeoutMs: 3000 });
 			browser = await harness.connect(retainedSession);
@@ -53,6 +53,26 @@ describe("built runner startup deadlines", () => {
 			evidence["turn"] = turn;
 			evidence["parentOutcome"] =
 				turn.done["attention"] === "error" ? "turn-failed" : "turn-completed";
+			expect(turn.done["status"]).toBe("idle");
+			const enqueues = harness.marks.filter(
+				(mark) =>
+					mark.kind === "enqueue" && mark.prompt === "startup-deadline-turn",
+			);
+			const history = JSON.stringify(await browser.history(sessionId));
+			if (mode === "queued") {
+				expect(turn.chunks.join("")).toBe(
+					responseChunks("startup-deadline-turn").join(""),
+				);
+				expect(turn.done["attention"]).not.toBe("error");
+				expect(enqueues).toHaveLength(1);
+				expect(history).not.toContain("Runner startup timed out");
+			} else {
+				// An unflagged startup rejection settles once, without a resend.
+				expect(turn.chunks).toEqual([]);
+				expect(turn.done["attention"]).toBe("error");
+				expect(enqueues).toHaveLength(0);
+				expect(history).toContain("Runner startup timed out");
+			}
 			const proof = () =>
 				readFileSync(
 					join(harness?.root ?? "", "runner-startup-evidence.jsonl"),
@@ -72,12 +92,18 @@ describe("built runner startup deadlines", () => {
 				throw new Error("Missing deadline proof");
 			evidence["deadline"] = deadline;
 			const childPid = deadline["childPid"];
+			const selectedProof = () =>
+				proof().filter(
+					(mark) => mark["childPid"] === childPid || mark["pid"] === childPid,
+				);
 			if (mode === "queued") {
-				const sent = proof().find((mark) => mark["kind"] === "child-sent");
-				const blocked = proof().find(
+				const sent = selectedProof().find(
+					(mark) => mark["kind"] === "child-sent",
+				);
+				const blocked = selectedProof().find(
 					(mark) => mark["kind"] === "parent-blocked",
 				);
-				const unblocked = proof().find(
+				const unblocked = selectedProof().find(
 					(mark) => mark["kind"] === "parent-unblocked",
 				);
 				expect(sent?.["error"]).toBeNull();
@@ -95,55 +121,71 @@ describe("built runner startup deadlines", () => {
 					),
 				).toBeDefined();
 				expect(
-					proof().filter((mark) => mark["kind"] === "parent-kill"),
+					proof().filter(
+						(mark) =>
+							mark["kind"] === "parent-kill" && mark["childPid"] === childPid,
+					),
 				).toEqual([]);
 				expect(
-					proof().filter((mark) => mark["kind"] === "parent-exit"),
+					proof().filter(
+						(mark) =>
+							mark["kind"] === "parent-exit" && mark["childPid"] === childPid,
+					),
 				).toEqual([]);
 				expect(
-					proof().find((mark) => mark["kind"] === "parent-received")?.["at"],
+					selectedProof().find((mark) => mark["kind"] === "parent-received")?.[
+						"at"
+					],
 				).toBeGreaterThan(deadline["deadline"]);
 			} else {
-				expect(turn.done["attention"]).toBe("error");
-				expect(turn.chunks).toEqual([]);
 				if (mode === "eperm") {
 					expect(() => process.kill(childPid, 0)).not.toThrow();
 					expect(
-						proof().find((mark) => mark["kind"] === "parent-exit"),
+						proof().find(
+							(mark) =>
+								mark["kind"] === "parent-exit" && mark["childPid"] === childPid,
+						),
 					).toBeUndefined();
 					expect(
-						proof().find((mark) => mark["kind"] === "parent-kill"),
+						proof().find(
+							(mark) =>
+								mark["kind"] === "parent-kill" && mark["childPid"] === childPid,
+						),
 					).toMatchObject({ childPid, error: "EPERM" });
 				} else {
 					await vi.waitFor(
 						() =>
 							expect(
-								proof().find((mark) => mark["kind"] === "parent-exit"),
+								proof().find(
+									(mark) =>
+										mark["kind"] === "parent-exit" &&
+										mark["childPid"] === childPid,
+								),
 							).toBeDefined(),
 						{ timeout: 5000 },
 					);
 					expect(() => process.kill(childPid, 0)).toThrow();
 				}
 				expect(
-					proof().some(
+					selectedProof().some(
 						(mark) =>
 							mark["kind"] === "parent-kill" &&
 							mark["childPid"] === deadline["childPid"],
 					),
 				).toBe(true);
-				expect(proof().some((mark) => mark["kind"] === "parent-received")).toBe(
-					false,
-				);
+				expect(
+					selectedProof().some((mark) => mark["kind"] === "parent-received"),
+				).toBe(false);
 				await vi.waitFor(
 					() =>
-						expect(proof().some((mark) => mark["kind"] === "child-ready")).toBe(
-							true,
-						),
+						expect(
+							selectedProof().some((mark) => mark["kind"] === "child-ready"),
+						).toBe(true),
 					{ timeout: 10_000 },
 				);
-				expect(proof().some((mark) => mark["kind"] === "child-sent")).toBe(
-					false,
-				);
+				expect(
+					selectedProof().some((mark) => mark["kind"] === "child-sent"),
+				).toBe(false);
 				await vi.waitFor(
 					() =>
 						expect(harness?.logTail).toMatch(
@@ -156,7 +198,9 @@ describe("built runner startup deadlines", () => {
 					.filter((line) => line.includes("Runner startup timed out"));
 				expect(timeoutLines).toHaveLength(1);
 				const line = timeoutLines[0] ?? "";
-				const exit = proof().find((mark) => mark["kind"] === "parent-exit");
+				const exit = selectedProof().find(
+					(mark) => mark["kind"] === "parent-exit",
+				);
 				if (mode === "eperm") {
 					expect(line).toContain("exited=false");
 					expect(line).toContain("exitCode=not-exited signal=not-exited");
@@ -207,7 +251,7 @@ describe("built runner startup deadlines", () => {
 							typeof childPid === "number" &&
 							harness.remainingRunnerPids().includes(childPid)
 						) {
-							process.kill(childPid, "SIGKILL");
+							expect(harness.signalOwnedRunner(childPid, "SIGKILL")).toBe(true);
 							await vi.waitFor(
 								() =>
 									expect(readFileSync(path, "utf8")).toContain(

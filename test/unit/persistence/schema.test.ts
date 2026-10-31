@@ -45,6 +45,14 @@ describe("Schema Migration", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
+					[87, "provider_run_holder"],
+					[88, "provider_run_held_transmission"],
+					[89, "runner_cursors"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -110,6 +118,14 @@ describe("Schema Migration", () => {
 					[79, "sessions_goal_stuck"],
 					[80, "sessions_jev"],
 					[81, "provider_control_process"],
+					[82, "session_git_publication"],
+					[83, "attachment_store"],
+					[84, "session_draft_delete"],
+					[85, "turn_request_settings"],
+					[86, "events_provider_identity_indexes"],
+					[87, "provider_run_holder"],
+					[88, "provider_run_held_transmission"],
+					[89, "runner_cursors"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -135,8 +151,12 @@ describe("Schema Migration", () => {
 						AND name != 'effect_sql_migrations'
 					ORDER BY name`).map((r) => r.name);
 			expect(tables).toEqual([
+				"attachment_blobs",
+				"attachment_uses",
+				"claude_runner_cursors",
 				"command_receipts",
 				"daemon_store_imports",
+				"draft_attachments",
 				"events",
 				"input_drafts",
 				"message_part_read_state",
@@ -241,6 +261,11 @@ describe("Schema Migration", () => {
 			}));
 			expect(indexes).toEqual([
 				{
+					name: "idx_attachment_uses_hash",
+					table: "attachment_uses",
+					unique: false,
+				},
+				{
 					name: "idx_command_receipts_project",
 					table: "command_receipts",
 					unique: false,
@@ -251,12 +276,32 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_draft_attachments_hash",
+					table: "draft_attachments",
+					unique: false,
+				},
+				{
+					name: "idx_draft_attachments_key",
+					table: "draft_attachments",
+					unique: false,
+				},
+				{
 					name: "idx_events_lineage_forked_from",
 					table: "events",
 					unique: false,
 				},
 				{
 					name: "idx_events_lineage_parent",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_message_created_identity",
+					table: "events",
+					unique: false,
+				},
+				{
+					name: "idx_events_run_started_identity",
 					table: "events",
 					unique: false,
 				},
@@ -373,6 +418,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_provider_command_turns_session",
 					table: "provider_command_turns",
+					unique: false,
+				},
+				{
+					name: "idx_provider_runs_runner_status",
+					table: "provider_runs",
 					unique: false,
 				},
 				{

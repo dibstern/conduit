@@ -372,7 +372,8 @@ describe("provider run ownership through the isolated daemon", () => {
 		const fixture = await ProcessHarness.start({
 			claudeReplay: {
 				turns: [
-					"background-shell-ends-between-turns",
+					// 85d8a0ca queues inputs until the wake-up result releases the runner.
+					"background-shell-turn",
 					"pong-thinking-text-turn",
 				],
 			},
@@ -416,7 +417,7 @@ describe("provider run ownership through the isolated daemon", () => {
 					delivery: "queue",
 				}),
 			),
-		).toEqual({ ok: true, sessionId, handedOff: true });
+		).toMatchObject({ ok: true, sessionId });
 		await browser.waitForTurnEnd(sessionId, cursor, 15_000, nextInput);
 		const completed = ledger(fixture, sessionId);
 		expect(completed.turns.map(({ state }) => state)).toEqual([

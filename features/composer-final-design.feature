@@ -554,12 +554,12 @@ Scenario Outline: the dollar menu pins goal and reports compact context
   And the composer picker has the Claude catalog
   And the mock relay reports context 86 percent
   When I type $ into the composer
-  Then the built-in menu pins $goal first in teal
+  Then the built-in menu pins $goal first with a teal icon
   And the command menu offers $btw
   And the command menu offers $compact
   And the compact command reports 86% context
   And the command menu does not offer $review
-  And the command menu spans the composer width
+  And the compact command menu fits the composer width
   And the screen region visually matches <baseline> at <threshold> percent
 
 Examples:

@@ -6,6 +6,8 @@ import { RUNNER_PROTOCOL_VERSION } from "../../src/lib/provider/runner/runner-pr
 import {
 	prepareRunnerDirectory,
 	type RunnerRegistration,
+	runnerMembersGone,
+	runnerProcessTable,
 } from "../../src/lib/provider/runner/runner-registry.js";
 import { isRecord } from "../../src/lib/utils.js";
 
@@ -52,6 +54,9 @@ function registrations(
 				sessionId: value["sessionId"],
 				buildId: value["buildId"],
 				pid: value["pid"],
+				...(typeof value["startTime"] === "string"
+					? { startTime: value["startTime"] }
+					: {}),
 			});
 	}
 	return entries;
@@ -146,9 +151,10 @@ function attemptShutdown(
 async function waitForExit(
 	pids: readonly number[],
 	timeoutMs: number,
+	alive = testRunnerAlive,
 ): Promise<void> {
 	const deadline = Date.now() + timeoutMs;
-	while (pids.some(testRunnerAlive) && Date.now() < deadline)
+	while (pids.some(alive) && Date.now() < deadline)
 		await new Promise<void>((done) => setTimeout(done, 25));
 }
 
@@ -157,39 +163,63 @@ export async function cleanupTestClaudeRunners(
 	knownPids: readonly number[],
 	configDir = join(root, "config"),
 	projectDir = join(root, "project"),
+	knownStartTimes?: ReadonlyMap<number, string>,
 ) {
 	const entries = registrations(projectDir, configDir);
+	const identities = new Map(knownStartTimes);
+	for (const entry of entries)
+		if (entry.startTime !== undefined && !identities.has(entry.pid))
+			identities.set(entry.pid, entry.startTime);
+	const alive = (pid: number) => {
+		const startTime = identities.get(pid);
+		return startTime === undefined
+			? testRunnerAlive(pid)
+			: !runnerMembersGone(runnerProcessTable, [{ pid, startTime }]);
+	};
+	const signal = (pid: number, value: NodeJS.Signals) => {
+		const startTime = identities.get(pid);
+		const current = runnerProcessTable.inspect(pid);
+		if (
+			startTime === undefined ||
+			current.state !== "running" ||
+			current.startTime !== startTime
+		)
+			return;
+		process.kill(pid, value);
+	};
 	// Known PIDs come from processes owned by the test, even if registration vanished.
 	const ownedPids = new Set(knownPids);
 	const pids = [
 		...new Set([...knownPids, ...entries.map((entry) => entry.pid)]),
 	];
 	for (const entry of entries) {
-		if (!testRunnerAlive(entry.pid)) continue;
-		if (await requestShutdown(projectDir, entry)) ownedPids.add(entry.pid);
+		if (!alive(entry.pid)) continue;
+		if (await requestShutdown(projectDir, entry)) {
+			ownedPids.add(entry.pid);
+		}
 	}
-	await waitForExit(pids, 500);
+	await waitForExit(pids, 500, alive);
 	for (const pid of ownedPids) {
-		if (testRunnerAlive(pid)) {
+		if (alive(pid)) {
 			try {
-				process.kill(pid, "SIGTERM");
+				signal(pid, "SIGTERM");
 			} catch {
 				/* Already exited. */
 			}
-			await waitForExit([pid], 500);
-			if (testRunnerAlive(pid)) {
+			await waitForExit([pid], 500, alive);
+			if (alive(pid)) {
 				try {
-					process.kill(pid, "SIGKILL");
+					signal(pid, "SIGKILL");
 				} catch {
 					/* Already exited. */
 				}
 			}
 		}
 	}
-	await waitForExit(pids, 5000);
+	await waitForExit(pids, 5000, alive);
 	return {
 		configDir,
 		runnerPids: pids,
-		remainingPids: pids.filter(testRunnerAlive),
+		remainingPids: pids.filter(alive),
 	};
 }

@@ -15,6 +15,7 @@ import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/clau
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -47,6 +48,7 @@ it.each([
 			Effect.scoped(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
+					yield* makeRunnerReceiptStore(sql);
 					const ingestion = yield* ProviderRuntimeIngestionTag;
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
@@ -279,6 +281,7 @@ it.each([
 		await runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* makeRunnerReceiptStore(sql);
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const commit = yield* makeCommitAndSignal;

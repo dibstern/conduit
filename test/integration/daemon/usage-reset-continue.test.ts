@@ -20,6 +20,7 @@ import {
 	ContinuationTag,
 	makeContinuation,
 } from "../../../src/lib/domain/relay/Services/continuation.js";
+import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -145,6 +146,7 @@ const fixture = Effect.gen(function* () {
 	yield* TestClock.setTime(2_000);
 	const continuation = yield* makeContinuation;
 	const context = yield* Layer.build(SessionInboxLive).pipe(
+		Effect.provide(InputDraftsLive),
 		Effect.provideService(ContinuationTag, continuation),
 		Effect.provideService(Usage, usage),
 		Effect.provideService(ProviderTurnServiceTag, turns),

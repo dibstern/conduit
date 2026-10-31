@@ -95,7 +95,9 @@ export function effectiveDispatchFingerprint(
 		interactionMode: null,
 		workspaceRoot: input.workspaceRoot,
 		promptText: input.prompt,
-		imageDigests: (input.images ?? []).map(sha256Hex),
+		imageDigests: (input.images ?? []).map((image) =>
+			sha256Hex(canonicalJson(image)),
+		),
 		effectiveModel: effectiveModel(command, options),
 		providerOptions,
 		materialDefaults: input.account
@@ -136,4 +138,12 @@ export function controlFingerprintHash(
 	payload: ProviderControlPayload,
 ): string {
 	return `sha256:${sha256Hex(canonicalJson(payload))}`;
+}
+
+/** Stop identity is the caller's intent, never its derived cohort or control. */
+export function stopIntentFingerprintHash(input: {
+	readonly sessionId: string;
+	readonly commandId: string;
+}): string {
+	return `sha256:${sha256Hex(canonicalJson({ type: "stop_session", scope: "session", sessionId: input.sessionId, commandId: input.commandId }))}`;
 }

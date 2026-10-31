@@ -7,6 +7,7 @@ import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail, OpenCodeApiError } from "../../../errors.js";
 import type { Message, SessionStatus } from "../../../instance/sdk-types.js";
+import { makeAttachmentStore } from "../../../persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import {
@@ -20,6 +21,7 @@ import { createEventId } from "../../../persistence/events.js";
 import {
 	completedCompactionEvent,
 	isSettled,
+	openCodeAttachmentSource,
 	snapshotPayload,
 	synthesizeSnapshotEvent,
 } from "../../../provider/opencode/opencode-history-backfill.js";
@@ -767,7 +769,29 @@ export class EffectOpenCodeRuntimeIngress
 					.map(({ id }) => id),
 			);
 			const stored = new Map(projected.map((row) => [row.id, row]));
-			const settled = rest.filter(isSettled);
+			const attachments = yield* this.withSql(makeAttachmentStore);
+			const settled = yield* Effect.forEach(rest.filter(isSettled), (message) =>
+				Effect.map(
+					Effect.forEach(message.parts ?? [], (part) => {
+						if (part.type !== "file") return Effect.succeed(part);
+						const { url, source: providerSource, ...fields } = part;
+						return Effect.map(
+							openCodeAttachmentSource(
+								{ url, source: providerSource },
+								attachments,
+							),
+							(source) => ({
+								...fields,
+								...(source.attachmentHash !== undefined
+									? { mime: source.mime }
+									: {}),
+								source,
+							}),
+						);
+					}),
+					(parts): Message => ({ ...message, parts }),
+				),
+			);
 			const digests = new Map(
 				settled.map((message) => [message.id, snapshotPayload(message).digest]),
 			);
@@ -1045,6 +1069,7 @@ export class EffectOpenCodeRuntimeIngress
 				beforeCommit?: Effect.Effect<void, SqlError>;
 				beforeProject?: Effect.Effect<void, SqlError>;
 				settleSession?: boolean;
+				requeueFailedInputs?: false;
 			},
 		) => Effect.Effect<void>,
 	): Effect.Effect<void> {
@@ -1059,18 +1084,6 @@ export class EffectOpenCodeRuntimeIngress
 							if (this.stopped || !this.fetchSessionMessages) return;
 							const sessionId = command.session_id;
 							const instanceId = command.provider_id;
-							const requeue = Effect.gen({ self: this }, function* () {
-								const persist = yield* Effect.serviceOption(
-									ClaudeEventPersistEffectTag,
-								);
-								if (persist._tag === "Some")
-									yield* requeueFailedSteers(
-										this.sql,
-										persist.value,
-										sessionId,
-										command.command_id,
-									);
-							});
 							const [claim] = yield* this.sql<{
 								request_sequence: number;
 								latest_sequence: number;
@@ -1096,7 +1109,6 @@ export class EffectOpenCodeRuntimeIngress
 									AND EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = outbox.run_id
 										AND run.session_id = outbox.session_id AND run.status IN ('pending', 'running'))))`;
 							if (!claim) {
-								yield* requeue;
 								pending.delete(command);
 								return;
 							}
@@ -1297,6 +1309,7 @@ export class EffectOpenCodeRuntimeIngress
 											{
 												beforeProject: current(),
 												settleSession,
+												requeueFailedInputs: false,
 											},
 										);
 									} else
@@ -1320,10 +1333,10 @@ export class EffectOpenCodeRuntimeIngress
 												: [],
 											{
 												beforeProject: current(),
+												requeueFailedInputs: false,
 											},
 										);
-									// Publication owns its own CommitAndSignal transaction. A
-									// crash here is covered by the inbox startup requeue sweep.
+									// A failed input publication is retried by the project-local sweep.
 									const terminal = yield* this
 										.sql`SELECT 1 FROM provider_command_outbox WHERE project_key = ${this.projectId}
 										AND command_id = ${command.command_id} AND request_sequence = ${command.request_sequence}
@@ -1332,7 +1345,6 @@ export class EffectOpenCodeRuntimeIngress
 											AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = ${claim.run_id}
 												AND run.session_id = ${sessionId} AND run.status IN ('pending', 'running'))))`;
 									if (!terminal.length) return;
-									yield* requeue;
 									pending.delete(command);
 								}),
 							);
@@ -1494,6 +1506,27 @@ export class EffectOpenCodeRuntimeIngress
 				return { ok: false, reason: "no-session" } as const;
 			}
 			const translation = this.translator.forkSession(sessionId);
+			let normalizedEvent = event;
+			if (isPartUpdatedEvent(event) && event.properties.part?.type === "file") {
+				const { url, source: providerSource, ...part } = event.properties.part;
+				const source = yield* openCodeAttachmentSource(
+					{ url, source: providerSource },
+					yield* this.withSql(makeAttachmentStore),
+				);
+				normalizedEvent = {
+					...event,
+					properties: {
+						...event.properties,
+						part: {
+							...part,
+							...(source.attachmentHash !== undefined
+								? { mime: source.mime }
+								: {}),
+							source,
+						},
+					},
+				};
+			}
 			// Reconnect clears announcement state, not a native echo's recorded
 			// input. A repeated marker must never consume a new summarize bridge.
 			const compactionMessageId =
@@ -1509,7 +1542,11 @@ export class EffectOpenCodeRuntimeIngress
 				? null
 				: yield* Effect.try({
 						try: () =>
-							this.translator.translateInto(event, sessionId, translation),
+							this.translator.translateInto(
+								normalizedEvent,
+								sessionId,
+								translation,
+							),
 						catch: (cause) => cause,
 					});
 

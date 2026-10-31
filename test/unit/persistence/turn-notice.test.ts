@@ -145,10 +145,77 @@ describe("turn.notice through durable ingestion and transcript reload", () => {
 	});
 
 	it.each([
+		"running",
+		"ended",
+		"absent",
+	] as const)("persists and reloads a session-scoped info banner when the Run is %s", async (runState) => {
+		if (runState === "ended") {
+			await harness.ingest(
+				providerRuntimeEvent(
+					"turn.completed",
+					"s",
+					{ messageId: "assistant-a" },
+					{ runId: "run-a" },
+				),
+			);
+		} else if (runState === "absent") {
+			await harness.query("DELETE FROM provider_runs");
+		}
+		const before = await Promise.all([
+			harness.query("SELECT status, completed_at FROM provider_runs"),
+			harness.query("SELECT state, completed_at FROM turns"),
+			harness.query("SELECT status FROM provider_command_outbox"),
+			harness.query("SELECT status FROM command_receipts"),
+			harness.query("SELECT status FROM sessions WHERE id = 's'"),
+			harness.query(
+				"SELECT is_streaming FROM messages WHERE id = 'assistant-a'",
+			),
+		]);
+		await harness.ingest(providerRuntimeEvent("turn.notice", "s", { text }));
+		await harness.reproject(
+			(await harness.storedEvents("s")).filter(
+				(event) => event.type === "turn.notice",
+			),
+		);
+		expect(
+			await harness.query(
+				"SELECT type, text, metadata FROM message_parts WHERE metadata = '{\"notice\":true}'",
+			),
+		).toEqual([{ type: "text", text, metadata: '{"notice":true}' }]);
+		const history = messageRowsToHistory(
+			await harness.sessionMessagesWithParts("s"),
+			{ pageSize: 50 },
+		).messages;
+		expect(
+			history
+				.flatMap((message) => message.parts ?? [])
+				.filter((part) => part.type === "notice"),
+		).toMatchObject([{ type: "notice", text }]);
+		expect(
+			historyToChatMessages(history).filter(
+				(message) => message.type === "system",
+			),
+		).toEqual([
+			expect.objectContaining({ type: "system", variant: "info", text }),
+		]);
+		expect(
+			await Promise.all([
+				harness.query("SELECT status, completed_at FROM provider_runs"),
+				harness.query("SELECT state, completed_at FROM turns"),
+				harness.query("SELECT status FROM provider_command_outbox"),
+				harness.query("SELECT status FROM command_receipts"),
+				harness.query("SELECT status FROM sessions WHERE id = 's'"),
+				harness.query(
+					"SELECT is_streaming FROM messages WHERE id = 'assistant-a'",
+				),
+			]),
+		).toEqual(before);
+	});
+
+	it.each([
 		"ended",
 		"unaccepted",
 		"foreign",
-		"unowned",
 	] as const)("does not display a late or unaccepted notice (%s)", async (owner) => {
 		if (owner === "ended") {
 			await harness.ingest(
@@ -169,16 +236,14 @@ describe("turn.notice through durable ingestion and transcript reload", () => {
 				"turn.notice",
 				"s",
 				{ text },
-				owner === "unowned"
-					? {}
-					: {
-							runId:
-								owner === "ended"
-									? "run-a"
-									: owner === "unaccepted"
-										? "run-pending"
-										: "foreign-run",
-						},
+				{
+					runId:
+						owner === "ended"
+							? "run-a"
+							: owner === "unaccepted"
+								? "run-pending"
+								: "foreign-run",
+				},
 			),
 		);
 		expect(

@@ -7,6 +7,7 @@ import { Context, Effect, Layer, Option } from "effect";
 import { RpcSerialization, RpcServer } from "effect/rpc";
 import { SocketServer } from "effect/socket";
 import { WsRpcGroup } from "../contracts/ws-rpc.js";
+import { withReadRequestContext } from "../domain/daemon/Services/read-request.js";
 import { SERVER_BUILD_ID } from "../server/build-update.js";
 import type { WsRpcServerLayer } from "../server/ws-rpc.js";
 import { RpcCaller } from "../server/ws-rpc.js";
@@ -183,12 +184,14 @@ export const makeDaemonRpcSocketLayer = <R>(
 			}).pipe(
 				Effect.provideService(
 					RpcServer.Protocol,
-					options.onSuccessfulShutdownResponse
-						? withRpcShutdownResponse(
-								protocol,
-								options.onSuccessfulShutdownResponse,
-							)
-						: protocol,
+					withReadRequestContext(
+						options.onSuccessfulShutdownResponse
+							? withRpcShutdownResponse(
+									protocol,
+									options.onSuccessfulShutdownResponse,
+								)
+							: protocol,
+					),
 				),
 				Effect.provide(handlerLayer),
 				Effect.provideService(RpcCaller, { kind: "cli" }),

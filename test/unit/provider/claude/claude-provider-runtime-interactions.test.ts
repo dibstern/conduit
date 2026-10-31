@@ -147,7 +147,7 @@ async function persistentInteractions(permissionTimeoutMs?: number) {
 
 function detachedRunnerFactory(
 	started: Deferred.Deferred<string>,
-): typeof makeClaudeSessionRunner {
+): NonNullable<ClaudeProviderInstanceDeps["runnerFactory"]> {
 	return () => {
 		function executeEffect(
 			command: Extract<SessionCommand, { type: "send-turn" }>,

@@ -18,7 +18,10 @@ import * as Failure from "../../../effect/failure-classification.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { stopQuiescentSettledAgents } from "../../../session/stop-settled-agents.js";
 import { worktreeCleanupCandidateFilter } from "../../../session/worktree-cleanup-rules.js";
-import { cleanUpProjectWorktrees } from "../../../session/worktree-cleanup-sweep.js";
+import {
+	cleanUpProjectWorktrees,
+	type WorktreeCleanupRetry,
+} from "../../../session/worktree-cleanup-sweep.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
@@ -40,6 +43,10 @@ export const WorktreeCleanupLive = () =>
 			const bus = yield* DaemonEventBusTag;
 			const storeContext = yield* persistenceStoreContext;
 			const requests = yield* WorktreeCleanupQueueTag;
+			const retriesByProject = new Map<
+				string,
+				Map<string, WorktreeCleanupRetry>
+			>();
 			const getProjectFolders = allProjects.pipe(
 				Effect.provideService(ProjectRegistryTag, registry),
 				Effect.flatMap((projects) =>
@@ -53,7 +60,10 @@ export const WorktreeCleanupLive = () =>
 				),
 			);
 
-			const sweep = (slugs: Set<string> | undefined) =>
+			const sweep = (
+				slugs: Set<string> | undefined,
+				resetSlugs: Set<string> | undefined,
+			) =>
 				Effect.gen(function* () {
 					const report: {
 						removed: WorktreeCleanupEntry[];
@@ -65,13 +75,26 @@ export const WorktreeCleanupLive = () =>
 						failed: [],
 					};
 					const now = yield* Clock.currentTimeMillis;
-					const projects = (yield* allProjects.pipe(
+					const registeredProjects = yield* allProjects.pipe(
 						Effect.provideService(ProjectRegistryTag, registry),
-					)).filter(
+					);
+					const projects = registeredProjects.filter(
 						(project) => slugs === undefined || slugs.has(project.slug),
 					);
+					const registered = new Set(
+						registeredProjects.map(({ slug }) => slug),
+					);
+					for (const slug of retriesByProject.keys())
+						if (!registered.has(slug)) retriesByProject.delete(slug);
 					for (const project of projects) {
 						yield* Effect.gen(function* () {
+							let retries = retriesByProject.get(project.slug);
+							if (retries === undefined) {
+								retries = new Map();
+								retriesByProject.set(project.slug, retries);
+							}
+							if (resetSlugs === undefined || resetSlugs.has(project.slug))
+								retries.clear();
 							const getSetting = getEffectiveWorktreeCleanup(project.slug).pipe(
 								Effect.provideService(ProjectRegistryTag, registry),
 								Effect.provideService(DaemonConfigRefTag, configRef),
@@ -135,6 +158,7 @@ export const WorktreeCleanupLive = () =>
 								getSetting,
 								getProjectFolders,
 								now,
+								retries,
 							).pipe(Effect.provide(yield* context));
 							report.removed.push(...projectReport.removed);
 							report.kept.push(...projectReport.kept);
@@ -184,7 +208,19 @@ export const WorktreeCleanupLive = () =>
 								projectSlug === undefined ? [] : [projectSlug],
 							),
 						);
-				const report = yield* sweep(slugs).pipe(
+				const manual = batch.filter(
+					({ completion }) => completion !== undefined,
+				);
+				const resetSlugs = manual.some(
+					({ projectSlug }) => projectSlug === undefined,
+				)
+					? undefined
+					: new Set(
+							manual.flatMap(({ projectSlug }) =>
+								projectSlug === undefined ? [] : [projectSlug],
+							),
+						);
+				const report = yield* sweep(slugs, resetSlugs).pipe(
 					Effect.catchCause((cause) =>
 						Failure.isInterruptedOnly(cause)
 							? Effect.failCause(cause)

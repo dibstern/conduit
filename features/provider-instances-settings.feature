@@ -4,6 +4,31 @@ Feature: Named provider instances are managed in Settings and drive the composer
 Background:
   Given the conduit app is served with the connected mockup
 
+Scenario Outline: account logos identify each configured harness and align account names
+  Given the harness logo is viewed in the <tier> tier
+  And the configured Claude accounts are Personal and Work with default Personal
+  And a named OpenCode instance Staging OC is already configured
+  And a Cursor account is available with its live models
+  When I open settings to the Server section
+  Then the Accounts row Personal shows a claude logo with a letter badge
+  And the Accounts row Work shows a claude logo with a letter badge
+  And the Accounts row OpenCode shows a opencode logo with a letter badge
+  And the Accounts row Staging OC shows a opencode logo with a letter badge
+  And the Accounts row Cursor work shows a cursor logo without a letter badge
+  And the Accounts names Personal, Work, OpenCode, Staging OC and Cursor work are left aligned across harness groups
+
+Examples:
+  | tier  |
+  | wide  |
+  | phone |
+
+Scenario: a lone configured account has no identity letter badge
+  Given the configured Claude accounts are Personal with default Personal
+  When I open settings to the Server section
+  Then the Accounts row Personal shows a claude logo without a letter badge
+  And the Accounts row OpenCode shows a opencode logo without a letter badge
+  And the Accounts names Personal and OpenCode are left aligned across harness groups
+
 Scenario: the Server card shows daemon-wide status
   When I open settings to the Server section
   Then the Server card shows uptime, version, port and connected browsers

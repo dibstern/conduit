@@ -62,6 +62,7 @@ test("manual archive leaves both sidebars, requires search opt-in and restores o
 	await row(page, id).click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
 	await page.getByTestId("settled-shelf-toggle").click();
+	await row(page, id).click();
 	await row(page, id).click({ button: "right" });
 	await page.getByTestId("session-ctx-archive").click();
 	await expect(row(page, id)).toHaveCount(0);
@@ -188,6 +189,8 @@ test("the sweep archives old settled sessions once and leaves restored activity 
 	).trim();
 	await row(page, id).click({ button: "right" });
 	await page.getByTestId("session-ctx-settle").click();
+	await page.getByTestId("settled-shelf-toggle").click();
+	await row(page, id).click();
 	const old = Date.now() - 31 * 86_400_000;
 	const db = new Database(harness.eventsDbPath);
 	try {

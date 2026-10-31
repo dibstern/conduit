@@ -79,6 +79,7 @@ describe("one daemon orchestration engine", () => {
 		managedOpenCode = false,
 	) {
 		const fixture = ProcessHarness.create({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
 			managedOpenCode,
 			runnerLifecycle: { idleTimeoutMs: null },

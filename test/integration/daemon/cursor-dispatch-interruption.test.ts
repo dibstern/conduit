@@ -19,6 +19,10 @@ import { createTraceCursorSdkPort } from "../../../src/lib/provider/cursor/sdk-t
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import { connectRunner } from "../../../src/lib/provider/runner/runner-connection.js";
 import { cursorCredentialFixture } from "../../helpers/cursor-account-resources-fixture.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 beforeEach(() => mkdirSync("test-results/82tn9-5", { recursive: true }));
 
@@ -84,26 +88,25 @@ it.live(
 							return {};
 						}),
 				);
-				const sending = yield* runner
-					.executeEffect({
-						type: "send-turn",
-						sinkId: "input",
-						aborted: false,
-						input: {
-							sessionId: "session",
-							inputId: "input",
-							runId: "run",
-							prompt: "Say hello",
-							history: [],
-							providerState: {},
-							workspaceRoot: root,
-							extraFolders: [],
-							configDir: configuredClaudeConfigDir(root),
-							folderSource: "account",
-							model: { providerId: "cursor", modelId: "composer-2.5" },
-						},
-					})
-					.pipe(Effect.forkChild({ startImmediately: true }));
+				const admission = yield* makeRunnerAdmission(runner, "cursor");
+				const sending = yield* admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: "input",
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId: "input",
+						runId: "run",
+						prompt: "Say hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "cursor", modelId: "composer-2.5" },
+					},
+				}).pipe(Effect.forkChild({ startImmediately: true }));
 				yield* runner.executeEffect({
 					type: "interrupt",
 					sessionId: "session",
@@ -163,36 +166,45 @@ it.live.each(["opening", "preparation"] as const)(
 						}),
 						snapshotCommandSettings: () => ({}),
 						loginChange: () => "None",
-						recoverCommands: () => Effect.succeed([]),
 					},
 				);
+				const admission = yield* makeRunnerAdmission(runner, "cursor");
 				let prepared = false;
 				const outcome = yield* Effect.exit(
-					runner.withTurnEffect(
+					admission.admitSendEffect(
 						{
-							sessionId: "session",
-							inputId: "input",
-							runId: "run",
-							prompt: "Say hello",
-							history: [],
-							providerState: {},
-							workspaceRoot: root,
-							extraFolders: [],
-							configDir: configuredClaudeConfigDir(root),
-							folderSource: "account",
-							model: { providerId: "cursor", modelId: "composer-2.5" },
-							account: {
-								id: AccountIdSchema.make("cursor-a"),
-								driver: "cursor",
-								name: "A",
-								env: {},
-								usageEligible: false,
-							},
+							origin: { _tag: "Fresh" },
+							sinkId: "input",
+							input: { sessionId: "session", inputId: "input" },
 						},
-						"input",
-						Effect.sync(() => {
-							prepared = true;
-						}).pipe(Effect.andThen(Effect.interrupt)),
+						(send) =>
+							runner.withTurnEffect(
+								{
+									sessionId: "session",
+									inputId: "input",
+									runId: "run",
+									prompt: "Say hello",
+									history: [],
+									providerState: {},
+									workspaceRoot: root,
+									extraFolders: [],
+									configDir: configuredClaudeConfigDir(root),
+									folderSource: "account",
+									model: { providerId: "cursor", modelId: "composer-2.5" },
+									account: {
+										id: AccountIdSchema.make("cursor-a"),
+										driver: "cursor",
+										name: "A",
+										env: {},
+										usageEligible: false,
+									},
+								},
+								"input",
+								Effect.sync(() => {
+									prepared = true;
+								}).pipe(Effect.andThen(Effect.interrupt)),
+								send,
+							),
 					),
 				);
 				const failure = Exit.isFailure(outcome)

@@ -1,117 +1,106 @@
-import type { CanonicalEvent } from "../../contracts/stored-event.js";
-import type { ProviderKind } from "./run-ledger-model.js";
 import type {
-	NativePolicy,
-	NativeTerminal,
-	TerminalIdentity,
-} from "./run-ledger-policy.js";
+	Evidence,
+	Observation,
+	ProviderIntake,
+	ProviderKind,
+	ProviderPolicyTable,
+} from "./run-ledger-model.js";
 
-function classifyRunnerTerminal(
-	event: CanonicalEvent,
-	streamsSessionLifecycle: boolean,
-	identity: TerminalIdentity,
-): NativeTerminal | undefined {
+function terminalAnswer(
+	identity: Parameters<ProviderIntake["terminal"]>[2],
+	evidence: Extract<Evidence, { kind: "result" | "query_ended" }>,
+): Extract<Observation, { readonly tag: "Answer" }> {
+	return { tag: "Answer", token: identity.token, ...evidence };
+}
+
+const runnerTerminal: ProviderIntake["terminal"] = (
+	event,
+	streamsSessionLifecycle,
+	identity,
+) => {
 	if (
 		event.metadata.runId !== undefined &&
 		event.metadata.runId !== identity.runId
 	)
 		return undefined;
-	const { token } = identity;
 	switch (event.type) {
 		case "turn.interrupted":
-			return { kind: "result", token, outcome: "interrupted" };
-		case "turn.error":
-			return {
+			return terminalAnswer(identity, {
 				kind: "result",
-				token,
+				outcome: "interrupted",
+			});
+		case "turn.error":
+			return terminalAnswer(identity, {
+				kind: "result",
 				outcome: "error",
 				error: {
 					code: event.data.code ?? "provider_error",
 					retryable:
 						event.data.retryable === true && event.data.retryHandled !== true,
 				},
-			};
+			});
 		case "turn.completed":
 			return streamsSessionLifecycle
-				? { kind: "result", token, outcome: "completed" }
+				? terminalAnswer(identity, { kind: "result", outcome: "completed" })
 				: undefined;
 		default:
 			return undefined;
 	}
-}
+};
 
-function classifyOpenCodeTerminal(
-	event: CanonicalEvent,
-	_streamsSessionLifecycle: boolean,
-	identity: TerminalIdentity,
-): NativeTerminal | undefined {
+const openCodeTerminal: ProviderIntake["terminal"] = (
+	event,
+	_streamsSessionLifecycle,
+	identity,
+) => {
 	if (event.type !== "session.status")
-		return classifyRunnerTerminal(event, false, identity);
-	// A session-wide status is evidence only with an explicit resolved owner.
+		return runnerTerminal(event, false, identity);
+	// A native-session status cannot answer a query without its resolved owner.
 	if (event.metadata.runId !== identity.runId) return undefined;
-	const { token } = identity;
-	if (event.data.status === "idle") return { kind: "query_ended", token };
+	if (event.data.status === "idle")
+		return terminalAnswer(identity, { kind: "query_ended" });
 	if (event.data.status === "error")
-		return {
+		return terminalAnswer(identity, {
 			kind: "result",
-			token,
 			outcome: "error",
 			error: { code: "provider_error", retryable: false },
-		};
+		});
 	return undefined;
-}
-
-const claudePolicy: NativePolicy = {
-	runEnd: "result",
-	resultReleasesFence: false,
-	controlEffect: (by) => (by === "end" ? "end_session" : "interrupt"),
-	closeEffect: "close",
-	interruptFailure: "settle",
-	postTombstoneProbe: false,
-	fences: (effect) =>
-		[
-			"start",
-			"steer",
-			"interrupt",
-			"end_session",
-			"close",
-			"kill_and_respawn",
-			"quarantine",
-		].includes(effect.kind),
-	idleCovers: (effect) =>
-		claudePolicy.fences(effect) ||
-		(effect.kind === "probe" && effect.target.tag === "native_session"),
-	confirmsIdle: (effect) =>
-		["close", "kill_and_respawn", "end_session"].includes(effect.kind),
-	classifyTerminal: classifyRunnerTerminal,
 };
 
-const cursorPolicy: NativePolicy = {
-	...claudePolicy,
-	resultReleasesFence: true,
+/** Canonical-event intake is known independently of the unresolved decision rules. */
+export const nativeIntakes: {
+	readonly [P in ProviderKind]: ProviderIntake | undefined;
+} = {
+	claude: { terminal: runnerTerminal },
+	codex: undefined,
+	cursor: { terminal: runnerTerminal },
+	opencode: { terminal: openCodeTerminal },
 };
 
-const openCodePolicy: NativePolicy = {
-	...claudePolicy,
-	runEnd: "query_ended",
-	closeEffect: "cancel_request",
-	interruptFailure: "fence",
-	postTombstoneProbe: true,
-	fences: (effect) =>
-		["start", "steer", "interrupt", "cancel_request", "end_session"].includes(
-			effect.kind,
-		) ||
-		(effect.kind === "probe" && effect.target.tag === "native_session"),
-	confirmsIdle: () => false,
-	// HTTP requests and session-wide aborts can still execute after an idle sample.
-	idleCovers: (effect, deliveryConfirmed) =>
-		(effect.kind === "probe" && effect.target.tag === "native_session") ||
-		(deliveryConfirmed && openCodePolicy.fences(effect)),
-	classifyTerminal: classifyOpenCodeTerminal,
-};
-
-export const nativePolicies: Readonly<Record<ProviderKind, NativePolicy>> = {
-	claude: claudePolicy,
-	cursor: cursorPolicy,
-	opencode: openCodePolicy,
+export const nativePolicies: ProviderPolicyTable = {
+	claude: {
+		tag: "Pending",
+		capabilities: { backgroundTasks: true },
+		runEnd: "result",
+		ticket: "unresolved contract: Claude fence membership and idle proof",
+	},
+	codex: {
+		tag: "Pending",
+		capabilities: { backgroundTasks: true },
+		runEnd: "result",
+		ticket: "conduit-test-82tn.32.2.13",
+	},
+	cursor: {
+		tag: "Pending",
+		capabilities: { backgroundTasks: false },
+		runEnd: "result",
+		ticket: "unresolved contract: Cursor result releases native-session fence",
+	},
+	opencode: {
+		tag: "Pending",
+		capabilities: { backgroundTasks: false },
+		runEnd: "query_ended",
+		ticket: "unresolved contract: OpenCode fence membership and idle proof",
+	},
 };

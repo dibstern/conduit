@@ -168,7 +168,7 @@ describe("Canonical event schemas", () => {
 					partId: "file1",
 					mime: "image/png",
 					filename: "screenshot.png",
-					url: "data:image/png;base64,AAAA",
+					source: { url: "https://example.com/screenshot.png" },
 				},
 				metadata: {},
 				provider: "opencode",

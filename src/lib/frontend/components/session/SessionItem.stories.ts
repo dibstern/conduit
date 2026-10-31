@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fireEvent, fn, within } from "storybook/test";
+import { expectSessionGlyphAlignment } from "../../stories/glyph-alignment.js";
 import {
 	mockForkSession,
 	mockSession,
@@ -32,6 +33,9 @@ export const Inactive: Story = {
 		session: mockSession,
 		active: false,
 	},
+	play: async ({ canvasElement }) => {
+		await expectSessionGlyphAlignment(canvasElement);
+	},
 };
 
 export const Active: Story = {
@@ -62,6 +66,9 @@ export const Processing: Story = {
 	args: {
 		session: mockSessionProcessing,
 		active: true,
+	},
+	play: async ({ canvasElement }) => {
+		await expectSessionGlyphAlignment(canvasElement);
 	},
 };
 
@@ -159,6 +166,7 @@ export const WithBranch: Story = {
 		await expect(
 			within(canvasElement).getByText("feature/workspace"),
 		).toBeVisible();
+		await expectSessionGlyphAlignment(canvasElement);
 	},
 };
 
@@ -195,6 +203,7 @@ export const WithProject: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		await expect(within(canvasElement).getByText("myapp")).toBeVisible();
+		await expectSessionGlyphAlignment(canvasElement);
 	},
 };
 
@@ -292,6 +301,9 @@ export const Dense: Story = {
 		active: false,
 		projectLabel: "Conduit",
 		density: "dense",
+	},
+	play: async ({ canvasElement }) => {
+		await expectSessionGlyphAlignment(canvasElement);
 	},
 };
 

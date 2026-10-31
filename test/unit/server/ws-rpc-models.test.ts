@@ -132,12 +132,16 @@ describe("WsRpcServerLayer GetModels", () => {
 								requested_model: "sonnet",
 								expected_model: "claude-sonnet-5",
 								actual_model: "claude-fable-4-0",
+								effort: null,
+								context_window: null,
 							}
 						: sessionId === "match"
 							? {
 									requested_model: "sonnet",
 									expected_model: "claude-sonnet-5",
 									actual_model: "claude-sonnet-5",
+									effort: null,
+									context_window: null,
 								}
 							: sessionId === "window"
 								? {
@@ -148,11 +152,15 @@ describe("WsRpcServerLayer GetModels", () => {
 										requested_model: "opus[1m]",
 										expected_model: "claude-opus-5[1m]",
 										actual_model: "claude-opus-5",
+										effort: null,
+										context_window: null,
 									}
 								: {
 										requested_model: "agent-model",
 										expected_model: null,
 										actual_model: "claude-sonnet-5",
+										effort: null,
+										context_window: null,
 									},
 				),
 			);

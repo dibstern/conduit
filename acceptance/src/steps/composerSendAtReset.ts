@@ -390,7 +390,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			for (const [index, account] of accounts.entries()) {
 				await expect(rows.nth(index)).toHaveAttribute("data-account", account);
 				await expect(
-					rows.nth(index).getByTestId("account-dot"),
+					rows.nth(index).getByTestId("account-logo"),
 				).toHaveAttribute("data-account", account);
 			}
 		},
@@ -659,7 +659,7 @@ export const composerSendAtResetHandlers: StepHandler[] = [
 			await expect(button).toHaveAccessibleName(
 				`Send on ${match[1]?.replace(/^Send on /, "")}`,
 			);
-			await expect(button.getByTestId("account-dot")).toHaveAttribute(
+			await expect(button.getByTestId("account-logo")).toHaveAttribute(
 				"data-account",
 				match[2] ?? "",
 			);

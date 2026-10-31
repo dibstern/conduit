@@ -47,15 +47,21 @@ if (process.env["CONDUIT_E2E_SINGLE_PROCESS"] === "1") {
 	});
 }
 
-async function unlock(page: Page, pin: string): Promise<void> {
-	const input = page.getByPlaceholder(PIN_PLACEHOLDER, { exact: true });
-	await expect(input).toBeVisible();
-	await input.fill(pin);
-	await input.press("Enter");
-	await expect(input).toHaveCount(0);
+async function unlock(
+	page: Page,
+	pin: string,
+	harness: ProcessHarness,
+): Promise<void> {
 	const app = new AppPage(page);
-	await expect(app.layout).toBeAttached();
-	await expect(app.connectOverlay).toHaveCount(0, { timeout: 30_000 });
+	await app.mountWithoutProjects(harness, async () => {
+		const input = page.getByPlaceholder(PIN_PLACEHOLDER, { exact: true });
+		await expect(input).toBeVisible();
+		await input.fill(pin);
+		await input.press("Enter");
+		await expect(input).toHaveCount(0);
+		await expect(app.layout).toBeAttached();
+		await expect(app.connectOverlay).toHaveCount(0, { timeout: 30_000 });
+	});
 }
 
 async function openServerSettings(page: Page): Promise<void> {
@@ -90,13 +96,13 @@ test("changing the PIN proves the current PIN and signs out both open tabs", asy
 	harness,
 }, testInfo) => {
 	await page.goto(harness.baseUrl);
-	await unlock(page, CURRENT_PIN);
+	await unlock(page, CURRENT_PIN, harness);
 	await openServerSettings(page);
 	const security = page.getByTestId("server-security-settings");
 	await expect(security).toContainText("On · asked once on each new device");
 
 	const second = await context.newPage();
-	await new AppPage(second).goto(harness.baseUrl);
+	await new AppPage(second).mountWithoutProjects(harness);
 	await openServerSettings(second);
 	// The second tab must have a live browser socket before the mutation.
 	await expect(second.getByTestId("server-status-browsers")).toHaveText(
@@ -171,11 +177,11 @@ test("changing the PIN proves the current PIN and signs out both open tabs", asy
 	await page.getByPlaceholder(PIN_PLACEHOLDER).fill(CURRENT_PIN);
 	await page.getByPlaceholder(PIN_PLACEHOLDER).press("Enter");
 	await expect(page.getByText(/^Wrong PIN/)).toBeVisible();
-	await unlock(page, NEW_PIN);
+	await unlock(page, NEW_PIN, harness);
 	await openServerSettings(page);
 	await expect(security).toContainText("On · asked once on each new device");
 	await screenshot(page, `${testInfo.project.name}-new-pin-unlocked.png`);
-	await unlock(second, NEW_PIN);
+	await unlock(second, NEW_PIN, harness);
 });
 
 test("PIN lockout reports the daemon retry time inline", async ({
@@ -183,7 +189,7 @@ test("PIN lockout reports the daemon retry time inline", async ({
 	harness,
 }, testInfo) => {
 	await page.goto(harness.baseUrl);
-	await unlock(page, CURRENT_PIN);
+	await unlock(page, CURRENT_PIN, harness);
 	await openServerSettings(page);
 	await page.getByTestId("server-pin-remove-btn").click();
 	const current = page.getByTestId("server-pin-current");
@@ -211,7 +217,7 @@ test.describe("no PIN configured", () => {
 		browser,
 		harness,
 	}, testInfo) => {
-		await new AppPage(page).goto(harness.baseUrl);
+		await new AppPage(page).mountWithoutProjects(harness);
 		await openServerSettings(page);
 		const security = page.getByTestId("server-security-settings");
 		await expect(security).toContainText(
@@ -228,7 +234,7 @@ test.describe("no PIN configured", () => {
 		await expect(page.getByPlaceholder(PIN_PLACEHOLDER)).toBeVisible({
 			timeout: 30_000,
 		});
-		await unlock(page, NEW_PIN);
+		await unlock(page, NEW_PIN, harness);
 		await openServerSettings(page);
 		await page.getByTestId("server-pin-remove-btn").click();
 		await expect(page.getByTestId("server-pin-new")).toHaveCount(0);
@@ -252,7 +258,7 @@ test.describe("no PIN configured", () => {
 		const freshContext = await browser.newContext();
 		try {
 			const freshPage = await freshContext.newPage();
-			await new AppPage(freshPage).goto(harness.baseUrl);
+			await new AppPage(freshPage).mountWithoutProjects(harness);
 			await expect(freshPage.getByPlaceholder(PIN_PLACEHOLDER)).toHaveCount(0);
 		} finally {
 			await freshContext.close();

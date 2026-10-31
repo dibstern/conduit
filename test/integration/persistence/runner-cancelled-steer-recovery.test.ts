@@ -16,6 +16,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -54,6 +55,7 @@ it.each([
 		await runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* makeRunnerReceiptStore(sql);
 				const commit = yield* makeCommitAndSignal;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const persist = yield* ClaudeEventPersistEffectTag;
@@ -204,6 +206,7 @@ it.each(
 		await runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* makeRunnerReceiptStore(sql);
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const commit = yield* makeCommitAndSignal;

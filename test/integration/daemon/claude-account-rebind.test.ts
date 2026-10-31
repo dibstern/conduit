@@ -3,6 +3,7 @@
 // output/approval is attributed to the next account's run.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -15,6 +16,13 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 
 let harness: ProcessHarness | undefined;
 const proofs: Record<string, unknown>[] = [];
+/** CONTRACT 11.1: a covered never-received send produces one `turn.interrupted`. */
+const stoppedBeforeDelivery = (db: Database.Database, sessionId: string) =>
+	db
+		.prepare<[string], { count: number }>(
+			"SELECT COUNT(*) AS count FROM events WHERE session_id = ? AND type = 'turn.interrupted' AND json_extract(data, '$.reason') = 'Stopped before delivery'",
+		)
+		.get(sessionId)?.count;
 afterEach(async ({ task }) => {
 	if (!harness) return;
 	const fixture = harness;
@@ -31,7 +39,7 @@ afterEach(async ({ task }) => {
 		},
 	});
 	writeFileSync(
-		"/tmp/82tn9-3-r3-account-rebind.json",
+		join(tmpdir(), `82tn9-3-r3-account-rebind-${process.pid}.json`),
 		JSON.stringify(proofs, null, 2),
 	);
 	harness = undefined;
@@ -150,7 +158,16 @@ it.each([
 				(index === 4 ? "question_pending" : "permission_pending"),
 			cursor,
 		);
-		if (index === 4) await browser.rejectQuestion(request);
+		if (index === 4)
+			await Effect.runPromise(
+				browser.rpc.AnswerQuestion({
+					projectSlug: "process-test",
+					originId: browser.originId,
+					commandId: randomUUID(),
+					toolId: String(request["toolId"]),
+					answers: { "0": "Continue" },
+				}),
+			);
 		else await browser.answerApproval(request, "allow");
 		await pending;
 		const controller = discoverRunners(
@@ -259,6 +276,63 @@ it.each([
 			);
 			expect(late).toHaveLength(1);
 			expect(JSON.parse(late[0]?.metadata ?? "{}").runId).toBe(runs[0]?.id);
+		}
+		if (rejectResume) {
+			// Failure mode 73: the refused native resume releases transmission 1 and
+			// fresh preparation sends the same run once more as transmission 2.
+			const rejected = runs[2]?.id;
+			const ledger = events.flatMap(({ type, data }) => {
+				const payload = JSON.parse(data) as {
+					runId?: string;
+					transmission?: number;
+					reason?: string;
+				};
+				return (type === "run.dispatched" || type === "run.released") &&
+					payload.runId === rejected
+					? [
+							{
+								type,
+								transmission: payload.transmission,
+								reason: payload.reason,
+							},
+						]
+					: [];
+			});
+			const evidenceDir =
+				process.env["CONDUIT_RUNNER_EVIDENCE_DIR"] ??
+				join(tmpdir(), "conduit-runner-evidence");
+			mkdirSync(evidenceDir, { recursive: true });
+			writeFileSync(
+				join(
+					evidenceDir,
+					`case-73-resume-rejected-${rejectResume}-${process.pid}.json`,
+				),
+				JSON.stringify(
+					{
+						rejectResume,
+						runId: rejected,
+						ledger,
+						resumeRejected: sdk.filter(
+							(mark) => mark.kind === "resume-rejected",
+						),
+						commands: db
+							.prepare<[string], { run_id: string; status: string }>(
+								"SELECT run_id, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+							)
+							.all(sessionId),
+					},
+					null,
+					2,
+				),
+			);
+			expect(
+				sdk.filter((mark) => mark.kind === "resume-rejected"),
+			).toHaveLength(1);
+			expect(ledger).toEqual([
+				{ type: "run.dispatched", transmission: 1, reason: undefined },
+				{ type: "run.released", transmission: 1, reason: "ResumeRejected" },
+				{ type: "run.dispatched", transmission: 2, reason: undefined },
+			]);
 		}
 	} finally {
 		db.close();
@@ -803,14 +877,16 @@ it("cancels a login change held behind background work, then retries", async () 
 			launches,
 		});
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
+		// CONTRACT 4.3 step 1: a covered send is settled `interrupted`, "Stopped before delivery".
 		expect(beforeRelease).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
 		expect(command()).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
+		expect(stoppedBeforeDelivery(db, sessionId)).toBe(1);
 		expect(requests).toEqual([
 			"upgrade-background-work",
 			"retry-after-held-stop",
@@ -895,10 +971,11 @@ it.each([
 				.CancelSession({ sessionId, commandId: randomUUID() })
 				.pipe(Effect.timeoutOption("3 seconds")),
 		);
+		// CONTRACT 4.3 step 1: a covered send is settled `interrupted`, "Stopped before delivery".
 		await vi.waitFor(() =>
 			expect(command()).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			}),
 		);
 		const beforeRelease = command();
@@ -929,8 +1006,9 @@ it.each([
 		expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
 		expect(command()).toMatchObject({
 			status: "failed",
-			error_code: "cancelled",
+			error_code: "interrupted",
 		});
+		expect(stoppedBeforeDelivery(db, sessionId)).toBe(1);
 		expect(requests).toEqual(["retry-after-preparation-stop"]);
 	} finally {
 		writeFileSync(release, "release");
@@ -1091,14 +1169,16 @@ it.each([
 			expect(requests).toEqual(["upgrade-background-work"]);
 		} else if (action === "cancel" || action === "cancel-preparing") {
 			expect(cancel).toMatchObject({ _tag: "Some", value: "cancelled" });
+			// CONTRACT 4.3 step 1: a covered send is settled `interrupted`, "Stopped before delivery".
 			expect(beforeRelease).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			});
 			expect(command()).toMatchObject({
 				status: "failed",
-				error_code: "cancelled",
+				error_code: "interrupted",
 			});
+			expect(stoppedBeforeDelivery(db, sessionId)).toBe(1);
 			expect(requests).toEqual([
 				"upgrade-background-work",
 				"retry-after-recovered-cancel",

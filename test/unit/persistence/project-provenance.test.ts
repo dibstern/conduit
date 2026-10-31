@@ -132,6 +132,14 @@ describe("Bound project provenance", () => {
 			"0079_sessions_goal_stuck",
 			"0080_sessions_jev",
 			"0081_provider_control_process",
+			"0082_session_git_publication",
+			"0083_attachment_store",
+			"0084_session_draft_delete",
+			"0085_turn_request_settings",
+			"0086_events_provider_identity_indexes",
+			"0087_provider_run_holder",
+			"0088_provider_run_held_transmission",
+			"0089_runner_cursors",
 		]);
 	});
 

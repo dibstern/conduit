@@ -12,6 +12,7 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
@@ -70,6 +71,11 @@ describe("Claude late accounting after prompt reuse", () => {
 					const sql = yield* SqlClient.SqlClient;
 					const receipts = yield* makeRunnerReceiptStore(sql);
 					yield* receipts.attach("runner", "attachment");
+					const authority = yield* makeRunnerAuthority(receipts);
+					const { grants } = yield* authority.adopt(
+						[{ runnerId: "runner", sessionId: "retry-session" }],
+						"live",
+					);
 					let sequence = 0;
 					const ingestOutput = (
 						events: readonly ProviderRuntimeEvent[],
@@ -77,14 +83,18 @@ describe("Claude late accounting after prompt reuse", () => {
 					) =>
 						Effect.gen(function* () {
 							const committed = yield* Deferred.make<void>();
-							return yield* ingestion.ingestBatch(events).pipe(
-								Effect.provideService(currentRunnerOutput, {
-									runnerId: "runner",
-									attachmentId: "attachment",
-									sequence: outputSequence,
-									committed,
-									consumed: false,
-								}),
+							return yield* authority.guarded(
+								grants.get("runner"),
+								{ kind: "output" },
+								ingestion.ingestBatch(events).pipe(
+									Effect.provideService(currentRunnerOutput, {
+										runnerId: "runner",
+										attachmentId: "attachment",
+										sequence: outputSequence,
+										committed,
+										consumed: false,
+									}),
+								),
 							);
 						});
 					const sessionId = "retry-session";

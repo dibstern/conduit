@@ -6,6 +6,7 @@
 //   GET  /health, /api/status     — health check
 //   GET  /info                    — version info
 //   GET  /api/projects            — liveness probe (daemon lifecycle and HTTP router tests)
+//   GET  /p/:slug/attachments/:hash — authenticated immutable attachment bytes
 //   GET  /api/push/vapid-key      — VAPID public key
 //   POST /api/push/subscribe      — push subscription
 //   POST /api/push/unsubscribe    — push unsubscription
@@ -24,6 +25,7 @@ import {
 	withAuthGate,
 } from "../domain/server/Layers/auth-middleware.js";
 import { serveStaticFile } from "../domain/server/Services/static-file-handler.js";
+import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type {
 	ApiError,
 	DashboardProjectResponse,
@@ -58,6 +60,16 @@ export class ProjectsProvider extends Context.Service<
 	ProjectsProvider,
 	{ readonly getProjects: () => Effect.Effect<RouterProjectInfo[]> }
 >()("ProjectsProvider") {}
+
+export type HttpAttachmentReader = (
+	slug: string,
+	hash: string,
+) => ReturnType<AttachmentStore["get"]>;
+
+export class AttachmentsProvider extends Context.Service<
+	AttachmentsProvider,
+	{ readonly read: HttpAttachmentReader }
+>()("AttachmentsProvider") {}
 
 /** Health response provider — optionally overridden by daemon mode. */
 export class HealthProvider extends Context.Service<
@@ -323,6 +335,34 @@ const setupPageHandler = serveStaticFile("/index.html");
 
 const rootHandler = serveStaticFile("/index.html");
 
+const attachmentHandler = Effect.gen(function* () {
+	const params = yield* HttpRouter.params;
+	const hash = params["hash"];
+	if (!hash || !/^[a-f0-9]{64}$/.test(hash))
+		return yield* jsonError(404, "NOT_FOUND", "Attachment not found");
+	const attachments = yield* Effect.serviceOption(AttachmentsProvider);
+	if (Option.isNone(attachments))
+		return yield* jsonError(404, "NOT_FOUND", "Attachment not found");
+	return yield* attachments.value.read(params["slug"] ?? "", hash).pipe(
+		Effect.map(({ bytes, mime }) =>
+			HttpServerResponse.uint8Array(bytes, {
+				contentType: mime,
+				headers: {
+					"Cache-Control": "private, max-age=31536000, immutable",
+					"X-Content-Type-Options": "nosniff",
+					"Content-Security-Policy": "sandbox",
+					"Content-Disposition": mime.startsWith("image/")
+						? "inline"
+						: "attachment",
+				},
+			}),
+		),
+		Effect.catchTag("AttachmentMissing", () =>
+			jsonError(404, "NOT_FOUND", "Attachment not found"),
+		),
+	);
+});
+
 const projectRouteHandler = Effect.gen(function* () {
 	const params = yield* HttpRouter.params;
 	const rawSlug = params["slug"];
@@ -374,7 +414,7 @@ const staticCatchAllHandler = Effect.gen(function* () {
  * Effect-based HTTP router with all JSON API routes.
  *
  * Requires: ProjectsProvider (always).
- * Optional: HealthProvider, PushProvider, CaCertProvider, SetupInfoProvider.
+ * Optional: AttachmentsProvider, HealthProvider, PushProvider, CaCertProvider, SetupInfoProvider.
  *
  * Apply CORS middleware via `effectRouterWithCors` for production use.
  */
@@ -405,6 +445,8 @@ const protectedRoutes = Layer.mergeAll(
 	HttpRouter.add("POST", "/api/push/unsubscribe", pushUnsubscribeHandler),
 	HttpRouter.add("GET", "/", rootHandler),
 	HttpRouter.add("GET", "/s/:id", rootHandler),
+	HttpRouter.add("GET", "/p/:slug/attachments/:hash", attachmentHandler),
+	HttpRouter.add("GET", "/p/:slug/attachments/*", attachmentHandler),
 	HttpRouter.add("GET", "/p/:slug/*", projectRouteHandler),
 ).pipe(
 	Layer.provide(

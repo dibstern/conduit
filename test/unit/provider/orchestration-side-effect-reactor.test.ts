@@ -10,6 +10,11 @@ import {
 	Option,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import {
+	ConnectionError,
+	ConstraintError,
+	SqlError,
+} from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
@@ -25,6 +30,7 @@ import {
 	type ProviderRuntimeIngestion,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { makeAttachmentStore } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -38,12 +44,19 @@ import {
 	type ProviderSideEffectReactorOptions,
 } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import type { SendScope } from "../../../src/lib/provider/runner/send-scope.js";
+import type {
+	SessionCommand,
+	SessionFailure,
+	SessionRunner,
+} from "../../../src/lib/provider/runner/session-runner.js";
 import type {
 	EventSink,
 	PermissionResponse,
 	ProviderCapabilities,
 	ProviderInstance,
-	SendTurnInput,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 
@@ -201,6 +214,86 @@ describe("ProviderSideEffectReactor", () => {
 			}).pipe(Effect.provide(reactorTestLayer)),
 		);
 
+	for (const joined of [false, true])
+		for (const released of [false, true])
+			it.effect(
+				`runner-held uncertainty waits for its ledger outcome (joined=${joined}, released=${released})`,
+				() =>
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSendTurnOutbox(sql);
+						const owner = joined ? "owner-run" : "run:cmd-1";
+						if (joined) {
+							yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
+						VALUES (${owner}, 'session-1', 'running', 1)`;
+						}
+						const commit = yield* makeCommitAndSignal;
+						const commandId = joined ? "owner-command" : "cmd-1";
+						yield* commit([
+							canonicalEvent("run.dispatched", "session-1", {
+								runId: owner,
+								runnerId: "held-runner",
+								commandId,
+								transmission: 1,
+							}),
+							...(released
+								? [
+										canonicalEvent("run.released", "session-1", {
+											runId: owner,
+											runnerId: "held-runner",
+											commandId,
+											transmission: 1,
+											reason: "ResumeRejected",
+										}),
+									]
+								: []),
+						]);
+						const sent = yield* Deferred.make<void>();
+						const reply = yield* Deferred.make<void>();
+						const reactor = yield* makeReactor({
+							registry: new ProviderRegistry([
+								makeProvider(() =>
+									Deferred.succeed(sent, undefined).pipe(
+										Effect.andThen(Deferred.await(reply)),
+										Effect.as({
+											...completedTurn,
+											status: "indeterminate" as const,
+										}),
+									),
+								),
+							]),
+							outcomePollInterval: "10 millis",
+						});
+						const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+						yield* Deferred.await(sent);
+						if (joined)
+							yield* sql`UPDATE provider_runs SET status = 'joined', joined_into = ${owner}
+						WHERE id = 'run:cmd-1'`;
+						yield* Deferred.succeed(reply, undefined);
+						yield* TestClock.adjust("100 millis");
+						expect(caller.pollUnsafe()).toBeUndefined();
+						expect(
+							yield* sql`SELECT error_code FROM provider_command_outbox`,
+						).toEqual([{ error_code: null }]);
+						expect(yield* sql`SELECT error_code FROM command_receipts`).toEqual(
+							[{ error_code: null }],
+						);
+						yield* (yield* ProviderRuntimeIngestionTag).ingest({
+							eventId: "held-run-completed",
+							type: "turn.completed",
+							providerId: "claude",
+							sessionId: "session-1",
+							runId: owner,
+							providerRefs: {},
+							rawSource: { kind: "test.runner" },
+							createdAt: 3,
+							data: { messageId: "", duration: 1 },
+						});
+						yield* TestClock.adjust("10 millis");
+						expect((yield* Fiber.join(caller)).status).toBe("completed");
+					}).pipe(Effect.provide(reactorTestLayer)),
+			);
+
 	it.effect(
 		"places a claimed input and its failure before intake atomically",
 		() =>
@@ -214,9 +307,14 @@ describe("ProviderSideEffectReactor", () => {
 						title: "Named failure",
 					}),
 				]);
+				const attachmentStore = yield* makeAttachmentStore;
+				const ref = yield* attachmentStore.put(
+					"data:image/png;base64,aW1hZ2U=",
+				);
 				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json,
-				'$.images', json_array('data:image/png;base64,aW1hZ2U='))`;
+				'$.images', json(${JSON.stringify([ref])}))`;
 				const reactor = yield* makeReactor({
+					attachmentStore,
 					persistUserMessage: (yield* ClaudeEventPersistEffectTag)
 						.persistUserMessage,
 					registry: new ProviderRegistry([
@@ -302,7 +400,7 @@ describe("ProviderSideEffectReactor", () => {
 					expect(
 						yield* sql`SELECT run_id, state FROM turns WHERE id = 'cut-off'`,
 					).toEqual([{ run_id: "old-run", state: "completed" }]);
-					const send = vi.fn((input: SendTurnInput) =>
+					const send = vi.fn((input: ResolvedSendTurnInput) =>
 						Effect.gen(function* () {
 							expect(
 								yield* sql`SELECT run_id, state, started_at FROM turns WHERE id = 'cut-off'`,
@@ -367,15 +465,110 @@ describe("ProviderSideEffectReactor", () => {
 				const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
 				yield* TestClock.adjust("1 second");
 				expect(caller.pollUnsafe()).toBeDefined();
-				expect((yield* Fiber.join(caller)).status).toBe("error");
+				expect((yield* Fiber.join(caller)).status).toBe("interrupted");
 				expect(
 					yield* sql`SELECT status, started_at FROM provider_runs`,
-				).toEqual([{ status: "error", started_at: null }]);
+				).toEqual([{ status: "interrupted", started_at: null }]);
 				expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
 					{ status: "failed" },
 				]);
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
+	for (const fault of ["StoreRejected", "StoreUnavailable"] as const)
+		it.effect(`recall aborts local intake before ${fault} settlement`, () =>
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					const ingestion = yield* ProviderRuntimeIngestionTag;
+					yield* seedSendTurnOutbox(sql);
+					const sent = yield* Deferred.make<void>();
+					const abortSend = vi.fn();
+					function execute(
+						command: Extract<SessionCommand, { type: "send-turn" }>,
+						send: SendScope,
+					): Effect.Effect<TurnResult, SessionFailure>;
+					function execute(
+						command: Exclude<SessionCommand, { type: "send-turn" }>,
+						send?: SendScope,
+					): Effect.Effect<void, SessionFailure>;
+					function execute(
+						command: SessionCommand,
+						send: SendScope,
+					): Effect.Effect<TurnResult | undefined, SessionFailure>;
+					function execute(
+						command: SessionCommand,
+						_send?: SendScope,
+					): Effect.Effect<TurnResult | undefined, SessionFailure> {
+						return command.type === "send-turn"
+							? Deferred.succeed(sent, undefined).pipe(
+									Effect.andThen(Effect.never),
+								)
+							: Effect.succeed(undefined);
+					}
+					const provider = yield* makeRunnerProviderInstance(
+						{
+							accounts: Effect.succeed(
+								accountsStateFromInstances(
+									[],
+									configuredClaudeConfigDir("/tmp/test-claude-recall"),
+								),
+							),
+						},
+						{
+							driverKind: "claude",
+							discoverEffect: () => Effect.succeed(emptyCapabilities),
+							generateTextEffect: () => Effect.die("unused generation"),
+							prepareTurnEffect: (input) => Effect.succeed({ input }),
+						},
+						() =>
+							Effect.succeed({
+								hasLiveProcessEffect: () => Effect.succeed(false),
+								abortSend,
+								executeEffect: execute,
+							} satisfies SessionRunner),
+					);
+					let rejectWrites = false;
+					let failedWrites = 0;
+					const reactor = new ProviderSideEffectReactor({
+						projectId: "test-project",
+						sql,
+						ingestion,
+						registry: new ProviderRegistry([provider]),
+						write: (body, options) =>
+							commit.write(
+								(project, stamp) =>
+									Effect.gen(function* () {
+										if (rejectWrites) {
+											failedWrites++;
+											return yield* new SqlError({
+												reason:
+													fault === "StoreUnavailable"
+														? new ConnectionError({ cause: "recall outage" })
+														: new ConstraintError({
+																cause: "recall rejection",
+															}),
+											});
+										}
+										return yield* body(project, stamp);
+									}),
+								options,
+							),
+					});
+					yield* Effect.forkChild(
+						reactor.runCommand("cmd-1").pipe(Effect.result),
+					);
+					yield* Deferred.await(sent);
+					rejectWrites = true;
+					yield* TestClock.adjust("122 seconds");
+					expect(failedWrites).toBeGreaterThan(0);
+					expect(abortSend).toHaveBeenCalledTimes(1);
+					expect(
+						yield* sql`SELECT status, held_transmission FROM provider_runs`,
+					).toEqual([{ status: "pending", held_transmission: null }]);
+				}),
+			).pipe(Effect.provide(reactorTestLayer)),
+		);
 	for (const recall of [
 		"cancelled",
 		"indeterminate",
@@ -386,8 +579,8 @@ describe("ProviderSideEffectReactor", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql);
-				const sent = yield* Deferred.make<SendTurnInput>();
-				const sendTurn = vi.fn((input: SendTurnInput) =>
+				const sent = yield* Deferred.make<ResolvedSendTurnInput>();
+				const sendTurn = vi.fn((input: ResolvedSendTurnInput) =>
 					Deferred.succeed(sent, input).pipe(
 						Effect.andThen(
 							Effect.callback<void>((resume) => {
@@ -599,7 +792,7 @@ describe("ProviderSideEffectReactor", () => {
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* seedSendTurnOutbox(sql);
-			const dispatched = yield* Deferred.make<SendTurnInput>();
+			const dispatched = yield* Deferred.make<ResolvedSendTurnInput>();
 			const acknowledged = yield* Deferred.make<void>();
 			const reactor = yield* makeReactor({
 				registry: new ProviderRegistry([
@@ -919,6 +1112,77 @@ describe("ProviderSideEffectReactor", () => {
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
+	it.effect("wakes a retry already due when its wake is armed", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql);
+				yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000`;
+				let reads = 0;
+				const sendTurn = vi.fn(() => Effect.succeed(completedTurn));
+				const reactor = yield* makeReactor({
+					nowMs: () => (++reads === 1 ? 999 : 1000),
+					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+				});
+				yield* reactor.drain();
+				yield* TestClock.adjust("1 millis");
+				expect(sendTurn).toHaveBeenCalledTimes(1);
+				expect(yield* readOutboxRetryState(sql, 10)).toMatchObject({
+					status: "completed",
+					attempt_count: 2,
+				});
+			}),
+		).pipe(Effect.provide(reactorTestLayer)),
+	);
+
+	// S-a: a retry that falls due while another session holds the drain is woken
+	// at its retryAt, not left for the periodic drain.
+	it.effect("wakes a retry that falls due during a held drain", () =>
+		Effect.scoped(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const started = yield* Deferred.make<void>();
+				const finish = yield* Deferred.make<void>();
+				const calls: string[] = [];
+				for (const [commandId, requestSequence, sessionId] of [
+					["first", 10, "session-a"],
+					["other", 30, "session-b"],
+				] as const) {
+					yield* seedSendTurnOutbox(sql, { commandId, requestSequence });
+					yield* sql`UPDATE provider_command_outbox SET session_id = ${sessionId},
+					payload_json = json_set(payload_json, '$.sessionId', ${sessionId}, '$.prompt', ${commandId})
+					WHERE command_id = ${commandId}`;
+					yield* sql`INSERT OR IGNORE INTO sessions (id, project_id, provider, created_at, updated_at)
+						VALUES (${sessionId}, 'test-project', 'claude', 1, 1)`;
+					yield* sql`UPDATE provider_runs SET session_id = ${sessionId} WHERE id = ${`run:${commandId}`}`;
+				}
+				yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
+				attempt_count = 1, next_attempt_at = 1000 WHERE command_id = 'other'`;
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						makeProvider((input) =>
+							Effect.gen(function* () {
+								calls.push(input.prompt);
+								if (input.prompt === "first") {
+									yield* Deferred.succeed(started, undefined);
+									yield* Deferred.await(finish);
+								}
+								return completedTurn;
+							}),
+						),
+					]),
+				});
+				const held = yield* Effect.forkChild(reactor.drain());
+				yield* Deferred.await(started);
+				yield* TestClock.adjust("1 second");
+				expect(calls).toEqual(["first", "other"]);
+				yield* Deferred.succeed(finish, undefined);
+				yield* Fiber.join(held);
+			}),
+		).pipe(Effect.provide(reactorTestLayer)),
+	);
+
 	it.effect("does not overtake an earlier retry that is not due", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -932,7 +1196,7 @@ describe("ProviderSideEffectReactor", () => {
 			});
 			yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
 				attempt_count = 1, next_attempt_at = 1000 WHERE command_id = 'first'`;
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const reactor = yield* makeReactor({
@@ -971,7 +1235,7 @@ describe("ProviderSideEffectReactor", () => {
 					folderSource: "account",
 				}),
 			});
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const accountDirectory = makeAccountDirectory(
@@ -1012,7 +1276,7 @@ describe("ProviderSideEffectReactor", () => {
 	it.effect("executes committed side effects once after commit", () =>
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const getNativeSession = vi.fn((_sessionId: string) =>
@@ -1083,7 +1347,7 @@ describe("ProviderSideEffectReactor", () => {
 						},
 					],
 				};
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql, { providerId: "work-claude" });
@@ -1148,7 +1412,7 @@ describe("ProviderSideEffectReactor", () => {
 						resumeSessionId: "legacy-work-sdk-session",
 						claudeConfigDir: "/accounts/work",
 					})})) WHERE command_id = 'cmd-1'`;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				const reactor = yield* makeReactor({
@@ -1212,7 +1476,7 @@ describe("ProviderSideEffectReactor", () => {
 			const ingest = vi.fn((_event: ProviderRuntimeEvent) => Effect.succeed(1));
 			const sendTurn = vi.fn(
 				(
-					input: SendTurnInput,
+					input: ResolvedSendTurnInput,
 				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
 					input.eventSink.push(runtimeEvent).pipe(
 						Effect.as(completedTurn),
@@ -1271,7 +1535,7 @@ describe("ProviderSideEffectReactor", () => {
 			};
 			const sendTurn = vi.fn(
 				(
-					input: SendTurnInput,
+					input: ResolvedSendTurnInput,
 				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
 					input.eventSink.push(runtimeEvent).pipe(
 						Effect.as(completedTurn),
@@ -1374,7 +1638,7 @@ describe("ProviderSideEffectReactor", () => {
 			yield* seedSendTurnOutbox(sql);
 			yield* sql`UPDATE provider_command_outbox SET status = 'retryable_failed',
 				attempt_count = 1, next_attempt_at = 1000`;
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const reactor = yield* makeReactor({
@@ -1408,7 +1672,7 @@ describe("ProviderSideEffectReactor", () => {
 				yield* sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.inputId', command_id)`;
 				yield* sql`UPDATE provider_command_outbox SET status = 'running' WHERE command_id = 'old'`;
 				const release = yield* Deferred.make<void>();
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Deferred.await(release).pipe(Effect.as(completedTurn)),
 				);
 				const reactor = yield* makeReactor({
@@ -1457,7 +1721,7 @@ describe("ProviderSideEffectReactor", () => {
 				yield* seedSendTurnOutbox(sql);
 				const held = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				const reactor = yield* makeReactor({
@@ -1492,7 +1756,7 @@ describe("ProviderSideEffectReactor", () => {
 			yield* sql.unsafe(`CREATE TRIGGER fail_claim BEFORE UPDATE OF status
 				ON provider_command_outbox WHEN NEW.status = 'running'
 				BEGIN SELECT RAISE(FAIL, 'claim failed'); END`);
-			const sendTurn = vi.fn((_input: SendTurnInput) =>
+			const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 				Effect.succeed(completedTurn),
 			);
 			const reactor = yield* makeReactor({
@@ -1709,7 +1973,7 @@ describe("ProviderSideEffectReactor", () => {
 			let providerCalls = 0;
 			const sendTurn = vi.fn(
 				(
-					_input: SendTurnInput,
+					_input: ResolvedSendTurnInput,
 				): Effect.Effect<TurnResult, ProviderInstanceFailure> =>
 					Effect.suspend(() => {
 						providerCalls += 1;
@@ -1797,7 +2061,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql);
@@ -2041,7 +2305,7 @@ describe("ProviderSideEffectReactor", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const winnerStarted = yield* Deferred.make<void>();
 				const releaseWinner = yield* Deferred.make<void>();
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.gen(function* () {
 						yield* Deferred.succeed(winnerStarted, undefined);
 						yield* Deferred.await(releaseWinner);
@@ -2154,10 +2418,8 @@ describe("ProviderSideEffectReactor", () => {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql, { runId: "reserved-run" });
 
-				const ingest = vi.fn(() => Effect.succeed(1));
 				const reactor = yield* makeReactor({
 					registry: new ProviderRegistry(),
-					observe: ingest,
 				});
 
 				yield* reactor.runOnce();
@@ -2177,14 +2439,21 @@ describe("ProviderSideEffectReactor", () => {
 					attempt_count: 1,
 					error_code: "provider_not_registered",
 				});
-				expect(ingest).toHaveBeenCalledWith(
-					expect.objectContaining({
+				expect(
+					yield* sql`SELECT type, session_id,
+					json_extract(metadata, '$.runId') AS run_id,
+					json_extract(data, '$.code') AS code FROM events WHERE type = 'turn.error'`,
+				).toEqual([
+					{
 						type: "turn.error",
-						runId: "reserved-run",
-						sessionId: "session-1",
-						data: expect.objectContaining({ code: "provider_not_registered" }),
-					}),
-				);
+						session_id: "session-1",
+						run_id: "reserved-run",
+						code: "provider_not_registered",
+					},
+				]);
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'reserved-run'`,
+				).toEqual([{ status: "error" }]);
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
 
@@ -2193,7 +2462,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql, { payloadJson: "{not json" });
@@ -2225,7 +2494,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((_input: SendTurnInput) =>
+				const sendTurn = vi.fn((_input: ResolvedSendTurnInput) =>
 					Effect.succeed(completedTurn),
 				);
 				yield* seedSendTurnOutbox(sql, {
@@ -2256,7 +2525,7 @@ describe("ProviderSideEffectReactor", () => {
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const sendTurn = vi.fn((input: SendTurnInput) =>
+				const sendTurn = vi.fn((input: ResolvedSendTurnInput) =>
 					input.eventSink
 						.requestPermission({
 							requestId: "req-1",

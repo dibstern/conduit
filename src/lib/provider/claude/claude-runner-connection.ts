@@ -1,6 +1,7 @@
 import { Effect, Option } from "effect";
 import { defaultFor } from "../../account-directory.js";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
+import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { connectRunner } from "../runner/runner-connection.js";
 import {
@@ -20,11 +21,13 @@ export const connectClaudeRunner = (
 				? null
 				: claudeLaunchConfigFromAccounts(accounts);
 		const read = yield* Effect.serviceOption(ReadQueryEffectTag);
+		const attachments = yield* Effect.serviceOption(AttachmentStoreTag);
 		const readThread =
 			options.readThread ??
-			(read._tag === "Some"
+			(read._tag === "Some" && attachments._tag === "Some"
 				? yield* makeClaudeThreadRead.pipe(
 						Effect.provideService(ReadQueryEffectTag, read.value),
+						Effect.provideService(AttachmentStoreTag, attachments.value),
 					)
 				: undefined);
 		return yield* connectRunner({

@@ -76,14 +76,6 @@ describe("provider control retry classification", () => {
 			],
 			[
 				{
-					code: "runner_quarantined",
-					message: "PID still alive",
-					retryable: false,
-				},
-				false,
-			],
-			[
-				{
 					code: "provider_process_gone",
 					message: "Process replaced",
 					retryable: true,

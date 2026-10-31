@@ -163,8 +163,10 @@ it.each([
 			);
 			if (runner?.kind !== "runner-started")
 				throw new Error("No verified runner");
-			expect(readFileSync(`${runner.socketPath}.spool`, "utf8")).toContain(
-				`"type":"turn.${outcome === "error" ? "error" : "completed"}"`,
+			await vi.waitFor(() =>
+				expect(readFileSync(`${runner.socketPath}.spool`, "utf8")).toContain(
+					`"type":"turn.${outcome === "error" ? "error" : "completed"}"`,
+				),
 			);
 		}
 		expect(turn.get(sessionId)?.state).toBe("running");
@@ -243,7 +245,9 @@ it.each([
 			expected === "completed" ? "completed" : "failed",
 		);
 		if (outcome === "dead") {
-			expect(outbox?.error_code).toBe("account_unavailable");
+			// The runner held the send and died: indeterminate, never re-sent, so
+			// the missing account is never consulted.
+			expect(outbox?.error_code).toBe("delivery_indeterminate");
 		} else if (outcome === "error") {
 			expect(terminalEvents[0]?.data).toContain("offline provider failure");
 			expect(outbox?.error_code).not.toBe("account_unavailable");

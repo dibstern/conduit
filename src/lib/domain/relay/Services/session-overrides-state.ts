@@ -17,8 +17,10 @@ import {
 	Fiber,
 	FiberMap,
 	Layer,
+	MutableRef,
 	Ref,
 } from "effect";
+import { guardCurrentWrite } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	parseDefaultModel,
 	type RelaySettings,
@@ -99,17 +101,19 @@ const updateSession = (
 	Effect.gen(function* () {
 		const ref = yield* OverridesStateTag;
 		const config = yield* Effect.serviceOption(ConfigTag);
-		yield* Ref.update(ref, (state) => {
-			const entry = state.sessions.get(sessionId) ?? {};
-			const sessions = new Map(state.sessions);
-			sessions.set(sessionId, {
-				...update(entry),
-				...(entry.projectId === undefined && config._tag === "Some"
-					? { projectId: config.value.slug }
-					: {}),
-			});
-			return { ...state, sessions };
-		});
+		yield* guardCurrentWrite(() =>
+			MutableRef.update(ref.ref, (state) => {
+				const entry = state.sessions.get(sessionId) ?? {};
+				const sessions = new Map(state.sessions);
+				sessions.set(sessionId, {
+					...update(entry),
+					...(entry.projectId === undefined && config._tag === "Some"
+						? { projectId: config.value.slug }
+						: {}),
+				});
+				return { ...state, sessions };
+			}),
+		);
 	});
 
 const isCurrentProcessingTimeout = (

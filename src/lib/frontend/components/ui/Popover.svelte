@@ -165,7 +165,8 @@
 	const sheetContentProps: Omit<PopoverContentStaticProps, "child" | "children"> = $derived({
 		...rest,
 		id: rest.id ?? uid,
-		preventScroll: true,
+		// Bits' scroll lock also blocks body pointer events; nonmodal sheets leave the header usable.
+		preventScroll: modal,
 		preventOverflowTextSelection: false,
 		role: "dialog",
 		"aria-modal": modal ? true : undefined,

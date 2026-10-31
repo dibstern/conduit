@@ -39,6 +39,7 @@ import { sessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
+import { _resetRateLimit } from "../../stores/ws-send.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
 import { openSessionForSetup } from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
@@ -66,7 +67,8 @@ async function assertSwapStyles(
 	consumer: "FileMenu" | "CommandMenu",
 ) {
 	const radiusProbe = document.createElement("div");
-	radiusProbe.className = "rounded-lg";
+	// Final composer menus use the .vf .pop recipe in the redesign spec (4450d1b8).
+	radiusProbe.className = "rounded-[16px]";
 	const dropdownProbe = document.createElement("div");
 	dropdownProbe.className = "z-[var(--z-dropdown)]";
 	const popoverProbe = document.createElement("div");
@@ -1057,6 +1059,11 @@ export const GoalChecking: Story = {
 			canvas.getByTestId("composer-checking-goal"),
 		).toHaveTextContent("Checking goal");
 		await expect(
+			canvas
+				.getByTestId("composer-checking-goal")
+				.querySelector('[data-flow-glyph="running"]'),
+		).toBeVisible();
+		await expect(
 			canvas.queryByTestId("composer-status-elapsed"),
 		).not.toBeInTheDocument();
 		// The line above names the check; the box keeps its goal outline.
@@ -1395,7 +1402,15 @@ function narrowComposer(
 		tags: ["autodocs"],
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
+			// Each story owns its sends and the client limiter's queued callbacks.
+			_resetRateLimit();
 			const cleanup = setupWords(canvasElement, false);
+			const restoreDraftSync = replyRpc("SyncInputDraft", () => ({ ok: true }));
+			const restoreSubmit = replyRpc("input.submit", () => ({
+				ok: true,
+				sessionId: testId,
+				handedOff: mode !== "limited",
+			}));
 			setComposerPreferences({ controls: "icons" });
 			const readings = usageState.readings;
 			const limits = usageState.limits;
@@ -1459,6 +1474,9 @@ function narrowComposer(
 				];
 			}
 			return () => {
+				_resetRateLimit();
+				restoreSubmit();
+				restoreDraftSync();
 				Date.now = realNow;
 				chat.messages = previousMessages;
 				usageState.readings = readings;
@@ -2140,9 +2158,8 @@ export const DollarMenu: Story = {
 			expect(Math.abs(menuRect.left - composerRect.left)).toBeLessThanOrEqual(
 				1,
 			);
-			expect(Math.abs(menuRect.width - composerRect.width)).toBeLessThanOrEqual(
-				1,
-			);
+			// The Final $ panel is compact, and shrinks to fit a narrow composer.
+			expect(menuRect.width).toBeCloseTo(Math.min(340, composerRect.width), 0);
 		});
 	},
 };

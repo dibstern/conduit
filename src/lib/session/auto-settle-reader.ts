@@ -1,8 +1,10 @@
 import { Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../contracts/session-workspace.js";
-import { daemonSessionGitCache } from "../git/session-git.js";
+import { ReadRequest } from "../domain/daemon/Services/read-request.js";
+import { SessionGit } from "../domain/daemon/Services/session-git.js";
 import { deriveSessionSnooze } from "../persistence/effect/read-query-effect.js";
+import { readPublishedSessionGit } from "../persistence/effect/session-git-publication.js";
 import type { SessionRow } from "../persistence/read-model-types.js";
 import {
 	type AutoSettleFacts,
@@ -83,19 +85,27 @@ export const readPersistedAutoSettleFacts = (
 				);
 				if (directory !== projectDir) directoryBySession.set(row.id, directory);
 			}
-			for (const directory of new Set(directoryBySession.values()))
-				if (daemonSessionGitCache.isStale(directory))
-					yield* Effect.tryPromise(() =>
-						daemonSessionGitCache.refresh(directory),
-					).pipe(Effect.orElseSucceed(() => undefined));
 		}
+		const sessionGit = yield* Effect.serviceOption(SessionGit);
+		const gitBySession = new Map(
+			yield* Effect.forEach([...directoryBySession.keys()], (id) =>
+				(sessionGit._tag === "Some"
+					? sessionGit.value.read(id)
+					: readPublishedSessionGit(
+							id,
+							projectDir === undefined ? undefined : [projectDir],
+						)
+				).pipe(
+					Effect.provideService(ReadRequest, "ReadAutoSettle"),
+					Effect.map((git) => [id, git] as const),
+				),
+			),
+		);
 		return new Map(
 			rows.map((row) => [
 				row.id,
 				sessionRowToAutoSettleFacts(row, {
-					mergedAt: daemonSessionGitCache.peek(
-						directoryBySession.get(row.id) ?? "",
-					)?.mergedAt,
+					mergedAt: gitBySession.get(row.id)?.mergedAt,
 					latestTurn: turnBySession.get(row.id) ?? null,
 					latestUserMessageAt: userBySession.get(row.id) ?? null,
 					hasPendingApproval: pendingIds.has(row.id),

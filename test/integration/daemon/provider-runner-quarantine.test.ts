@@ -1,22 +1,29 @@
+import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { describe, expect, it, vi } from "vitest";
 import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
-import { ProcessHarness } from "../../helpers/process-harness.js";
+import {
+	ProcessHarness,
+	responseChunks,
+} from "../../helpers/process-harness.js";
 
-// A quarantined entry remains live but cannot accept controls. Its committed
-// answer must finish with a durable reason instead of hanging or being delivered.
-describe("durable controls on quarantined runners", () => {
-	it("cancels an undelivered answer and ends its receipt when restart quarantines its live target", async () => {
-		const harness = await ProcessHarness.start({ restartProof: true });
+// A retired process cannot receive controls. Committed answers for that exact
+// owner fail durably while a later send can use a fresh runner.
+describe("durable controls on retired runners", () => {
+	it("cancels an undelivered answer when restart retires its target and allows a replacement", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+		});
 		const evidence: Record<string, unknown> = { passed: false };
 		let db: Database.Database | undefined;
 		try {
 			const browser = await harness.connect();
-			const sessionId = await browser.createSession("Quarantined control");
+			const sessionId = await browser.createSession("Retired control");
 			const send = browser
-				.send(sessionId, "approval-quarantined-control")
+				.send(sessionId, "approval-retired-control")
 				.catch(() => undefined);
 			const request = await browser.waitFor(
 				(frame) => frame["type"] === "permission_pending",
@@ -43,7 +50,7 @@ describe("durable controls on quarantined runners", () => {
 				expect(controlQuery.get(sessionId)?.status).toBe("pending"),
 			);
 			const control = controlQuery.get(sessionId);
-			if (!control) throw new Error("Missing committed answer");
+			assert(control, "Missing committed answer");
 			store
 				.prepare(`INSERT INTO pending_approvals (id, session_id, type, status, provider_process_id, provider_request_id, created_at)
 				VALUES ('other-live-question', ?, 'question', 'pending', ?, 'native-other-question', 1)`)
@@ -55,10 +62,16 @@ describe("durable controls on quarantined runners", () => {
 				harness.projectDir,
 				harness.configDir,
 			).find((entry) => entry.runnerId === control.provider_process_id);
-			if (!runner) throw new Error("Missing target runner");
+			assert(runner, "Missing target runner");
 			// A surviving process whose socket was lost cannot be reattached.
 			unlinkSync(runner.socketPath);
 			store.exec("DROP TRIGGER hold_control");
+			// The retirement row is pruned once the stopped process is gone, so
+			// record it as its Stop escalates.
+			store.exec(`CREATE TABLE runner_stops (runner_id TEXT, retired INTEGER, attachment_id TEXT, pid INTEGER);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.retired_at IS NOT NULL, NEW.attachment_id, NEW.pid); END`);
 			await harness.restart();
 			await vi.waitFor(
 				() => {
@@ -70,7 +83,7 @@ describe("durable controls on quarantined runners", () => {
 							.get(control.command_id),
 					).toEqual({
 						status: "cancelled",
-						error_code: "provider_process_unavailable",
+						error_code: "provider_process_gone",
 					});
 					expect(
 						store
@@ -80,25 +93,49 @@ describe("durable controls on quarantined runners", () => {
 							.get(control.command_id),
 					).toEqual({
 						status: "side_effect_failed",
-						error_code: "provider_process_unavailable",
-						error: expect.stringContaining("quarantined"),
+						error_code: "provider_process_gone",
+						error: expect.any(String),
 					});
 				},
 				{ timeout: 15_000 },
 			);
-			expect(harness.logTail).toContain(`Session ${sessionId} is quarantined`);
-			expect(() => process.kill(runner.pid, 0)).not.toThrow();
-			expect(
-				store
-					.prepare(
-						"SELECT status, provider_process_id FROM pending_approvals WHERE id = 'other-live-question' AND session_id = ?",
-					)
-					.get(sessionId),
-			).toEqual({
-				status: "pending",
-				provider_process_id: control.provider_process_id,
-			});
-			evidence["prompts"] = store
+			expect(harness.logTail).toContain("Retired surviving runner");
+			await vi.waitFor(() =>
+				expect(
+					store
+						.prepare(
+							"SELECT runner_id, retired, attachment_id, pid FROM runner_stops",
+						)
+						.all(),
+				).toEqual([
+					{
+						runner_id: runner.runnerId,
+						retired: 1,
+						attachment_id: "",
+						pid: runner.pid,
+					},
+				]),
+			);
+			// Recovery stops the disconnected survivor and kills its verified process.
+			// Its run stays active until Gone, after the reaper exits too, settles it
+			// and prunes the row (C 6.5, 6.6, 6.8). A message sent sooner queues
+			// behind that run and its failure pauses the queue, as on main.
+			await vi.waitFor(
+				() => {
+					expect(() => process.kill(runner.pid, 0)).toThrow();
+					expect(
+						store
+							.prepare(
+								"SELECT 1 FROM claude_runner_cursors WHERE runner_id = ?",
+							)
+							.get(runner.runnerId),
+					).toBeUndefined();
+				},
+				{
+					timeout: 10_000,
+				},
+			);
+			evidence["promptsBeforeReplacement"] = store
 				.prepare(
 					"SELECT id, status, provider_process_id FROM pending_approvals WHERE session_id = ? ORDER BY id",
 				)
@@ -114,6 +151,31 @@ describe("durable controls on quarantined runners", () => {
 			);
 			expect(deliveries).toEqual([]);
 			expect(sdk.filter((mark) => mark["kind"] === "approval")).toEqual([]);
+			const restored = await harness.connect(sessionId);
+			expect(
+				(await restored.send(sessionId, "after-retired-control")).chunks.join(
+					"",
+				),
+			).toBe(responseChunks("after-retired-control").join(""));
+			const replacement = discoverRunners(
+				harness.projectDir,
+				harness.configDir,
+			).find(
+				(entry) =>
+					entry.sessionId === sessionId && entry.runnerId !== runner.runnerId,
+			);
+			assert(replacement);
+			expect(replacement.pid).not.toBe(runner.pid);
+			expect(
+				store
+					.prepare(
+						"SELECT status, provider_process_id FROM pending_approvals WHERE id = 'other-live-question' AND session_id = ?",
+					)
+					.get(sessionId),
+			).toEqual({
+				status: "resolved",
+				provider_process_id: control.provider_process_id,
+			});
 			evidence["deliveries"] = deliveries;
 			evidence["outbox"] = store
 				.prepare(
@@ -135,9 +197,9 @@ describe("durable controls on quarantined runners", () => {
 			evidence["logTail"] = harness.logTail;
 			await harness.dispose();
 			evidence["remainingRunnerPids"] = harness.remainingRunnerPids();
-			mkdirSync("/tmp/conduit-82tn27-2", { recursive: true });
+			mkdirSync("test-results/82tn-32-16", { recursive: true });
 			writeFileSync(
-				"/tmp/conduit-82tn27-2/quarantined-control.json",
+				"test-results/82tn-32-16/retired-control.json",
 				JSON.stringify(evidence, null, 2),
 			);
 			harness.assertNoRunners();

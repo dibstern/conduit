@@ -3,6 +3,7 @@ import { SqlClient } from "effect/sql";
 import * as Migrator from "effect/sql/Migrator";
 import type { SqlError } from "effect/sql/SqlError";
 import {
+	ATTACHMENT_STORE_MIGRATION,
 	BACKFILL_COMPACTION_MESSAGES_MIGRATION,
 	COMPACT_REDUNDANT_EVENTS_MIGRATION,
 	CURRENT_EVENT_STORE_MIGRATION,
@@ -12,6 +13,7 @@ import {
 	DURABLE_PROVIDER_COMMANDS_MIGRATION,
 	EVENTS_FORKED_FROM_INDEX_MIGRATION,
 	EVENTS_PARENT_ID_INDEX_MIGRATION,
+	EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION,
 	EVENTS_SESSION_TYPE_INDEX_MIGRATION,
 	EVENTS_UNSTAMPED_INDEX_MIGRATION,
 	FORK_POINT_TIMESTAMP_MIGRATION,
@@ -46,6 +48,8 @@ import {
 	SENT_ALERTS_MIGRATION,
 	SESSION_ATTENTION_MIGRATION,
 	SESSION_CASCADE_DELETES_MIGRATION,
+	SESSION_DRAFT_DELETE_MIGRATION,
+	SESSION_GIT_PUBLICATION_MIGRATION,
 	SESSION_GIT_PUBLISHED_MIGRATION,
 	SESSION_GOALS_MIGRATION,
 	SESSION_PICK_BACKFILL_MIGRATION,
@@ -82,6 +86,7 @@ import {
 	TOOL_RESULT_EVENT_REFS_MIGRATION,
 	TURN_MODEL_EXECUTION_MIGRATION,
 	TURN_RECAPS_MIGRATION,
+	TURN_REQUEST_SETTINGS_MIGRATION,
 } from "../schema.js";
 import {
 	NEVER_CUT_TOOL_NAMES,
@@ -386,6 +391,8 @@ const expectedTableColumns = {
 		"requested_model",
 		"expected_model",
 		"actual_model",
+		"effort",
+		"context_window",
 	],
 } as const;
 
@@ -670,13 +677,9 @@ const verifyExistingBaselineSchema: Effect.Effect<
 			(tableName === "turns" &&
 				sameStrings(
 					actualColumns,
-					expectedColumns.filter(
-						(column) =>
-							column !== "requested_model" &&
-							column !== "expected_model" &&
-							column !== "actual_model",
-					),
-				));
+					expectedColumns.slice(0, actualColumns.length),
+				) &&
+				expectedColumns.length - actualColumns.length <= 5);
 		if (!matchesKnownSchema) {
 			return yield* failSchemaMismatch(
 				`Existing event-store columns differ for ${tableName}. Expected ${expectedColumns.join(", ")}, got ${actualColumns.join(", ")}`,
@@ -1534,6 +1537,99 @@ export const effectMigrationEntries = {
 				.slice(1)
 				.join(";"),
 		);
+	}),
+	"0082_session_git_publication": Effect.gen(function* () {
+		for (const [index, column] of ["workspace_missing", "version"].entries()) {
+			const statement = splitSqlStatements(
+				readMigrationSql(SESSION_GIT_PUBLICATION_MIGRATION),
+			)[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing(
+					"session_git_published",
+					column,
+					statement,
+				);
+		}
+	}),
+	"0083_attachment_store": executeSqlStatements(
+		readMigrationSql(ATTACHMENT_STORE_MIGRATION),
+	),
+	"0084_session_draft_delete": executeSqlStatements(
+		readMigrationSql(SESSION_DRAFT_DELETE_MIGRATION),
+	),
+	"0085_turn_request_settings": Effect.gen(function* () {
+		for (const [index, column] of ["effort", "context_window"].entries()) {
+			const statement = splitSqlStatements(
+				readMigrationSql(TURN_REQUEST_SETTINGS_MIGRATION),
+			)[index];
+			if (statement)
+				yield* runAddColumnMigrationIfMissing("turns", column, statement);
+		}
+	}),
+	"0086_events_provider_identity_indexes": executeSqlStatements(
+		readMigrationSql(EVENTS_PROVIDER_IDENTITY_INDEXES_MIGRATION),
+	),
+	"0087_provider_run_holder": Effect.gen(function* () {
+		yield* runAddColumnMigrationIfMissing(
+			"provider_runs",
+			"runner_id",
+			"ALTER TABLE provider_runs ADD COLUMN runner_id TEXT",
+		);
+		yield* executeSqlStatements(
+			"CREATE INDEX IF NOT EXISTS idx_provider_runs_runner_status ON provider_runs(runner_id, status)",
+		);
+	}),
+	"0088_provider_run_held_transmission": runAddColumnMigrationIfMissing(
+		"provider_runs",
+		"held_transmission",
+		"ALTER TABLE provider_runs ADD COLUMN held_transmission INTEGER",
+	),
+	// Runner modules read this table, so it exists from migration time rather
+	// than from first use. This migration is its only schema owner: it upgrades
+	// tables older builds created in the order those builds added the columns,
+	// so every store ends with the same column order. journals_before_execution
+	// is NULL for a runner registered before it existed.
+	"0089_runner_cursors": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* executeSqlStatements(`CREATE TABLE IF NOT EXISTS claude_runner_cursors (
+			runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, result_json TEXT NOT NULL DEFAULT '{}'
+		)`);
+		const existing = new Set(
+			(yield* sql<{
+				name: string;
+			}>`PRAGMA table_info(claude_runner_cursors)`).map(({ name }) => name),
+		);
+		for (const [name, definition] of [
+			["attachment_id", "TEXT NOT NULL DEFAULT ''"],
+			["retired_at", "INTEGER"],
+			["pid", "INTEGER"],
+			["start_time", "TEXT"],
+			["owned_run_ids", "TEXT NOT NULL DEFAULT '[]'"],
+			// Retired rows must remain recoverable after their registration vanishes.
+			["session_id", "TEXT NOT NULL DEFAULT ''"],
+			["signalled", "INTEGER NOT NULL DEFAULT 0"],
+			["driver_kind", "TEXT NOT NULL DEFAULT 'claude'"],
+			["retirement_state", "TEXT NOT NULL DEFAULT 'Watching'"],
+			["signal_state", "TEXT NOT NULL DEFAULT 'None'"],
+			["signal_members", "TEXT NOT NULL DEFAULT '[]'"],
+			["signal_sent_members", "TEXT NOT NULL DEFAULT '[]'"],
+			["reaper_pid", "INTEGER"],
+			["reaper_start_time", "TEXT"],
+			["member_snapshot", "TEXT NOT NULL DEFAULT '[]'"],
+			["signal_log", "TEXT NOT NULL DEFAULT '[]'"],
+			["stop_state", "TEXT NOT NULL DEFAULT 'Requested'"],
+			["stop_reason", "TEXT NOT NULL DEFAULT 'Provider process stopped'"],
+			["stop_started_at", "INTEGER"],
+			["role", "TEXT NOT NULL DEFAULT 'serving'"],
+			["journals_before_execution", "INTEGER"],
+		] as const) {
+			if (existing.has(name)) continue;
+			yield* sql.unsafe(
+				`ALTER TABLE claude_runner_cursors ADD COLUMN ${name} ${definition}`,
+			);
+			if (name === "signal_state")
+				yield* sql`UPDATE claude_runner_cursors SET signal_state = 'KillSent' WHERE signalled = 1`;
+		}
 	}),
 } satisfies Record<
 	string,

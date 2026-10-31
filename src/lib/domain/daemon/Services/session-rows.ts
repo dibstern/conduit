@@ -3,31 +3,24 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
-	type createSessionGitCache,
-	withCachedSessionGit,
-} from "../../../git/session-git.js";
-import {
 	type ReadQueryEffect,
 	ReadQueryEffectError,
 	ReadQueryEffectTag,
 	type SessionScope,
 } from "../../../persistence/effect/read-query-effect.js";
+import { readPublishedSessionGit } from "../../../persistence/effect/session-git-publication.js";
 import { sessionRunOwnersQuery } from "../../../provider/session-run-settlement.js";
-import {
-	effectiveSessionFolders,
-	effectiveWorkingDirectory,
-} from "../../../session/session-workspace.js";
 import type { SessionInfo } from "../../../shared-types.js";
 import { withSessionWorktreeStatus } from "../../relay/Services/session-workspace.js";
 import { AccountDirectory } from "./account-directory.js";
+import { ReadRequest } from "./read-request.js";
 import { resolveSessionAccountIds } from "./session-accounts.js";
 import { SessionActivityTag } from "./session-activity.js";
+import { SessionGit } from "./session-git.js";
 
 export interface SessionRowsScope {
 	readonly slug: string;
 	readonly folders: readonly [string, ...string[]];
-	readonly gitCache?: ReturnType<typeof createSessionGitCache>;
-	readonly refreshGit?: boolean;
 }
 
 type SessionListOptions = Omit<
@@ -46,6 +39,7 @@ export const makeSessionRows = (
 		const sql = yield* SqlClient.SqlClient;
 		const accounts = yield* AccountDirectory;
 		const activity = yield* SessionActivityTag;
+		const sessionGit = yield* Effect.serviceOption(SessionGit);
 		const projects = () => ("projects" in scope ? scope.projects() : [scope]);
 		const [first, ...rest] = projects();
 		const sessionScope: SessionScope | undefined = first && {
@@ -93,40 +87,6 @@ export const makeSessionRows = (
 				const bySlug = new Map(
 					scopes.map((project) => [project.slug, project]),
 				);
-				// Cold project reads have no relay git-change signal to warm this cache.
-				for (const project of scopes) {
-					if (!project.refreshGit || !project.gitCache) continue;
-					const cache = project.gitCache;
-					const directories = new Set(
-						sessions.flatMap((session) =>
-							owners && owners.get(session.id) !== project.slug
-								? []
-								: [
-										effectiveWorkingDirectory(
-											project.folders[0],
-											session.workspace,
-										),
-										...effectiveSessionFolders(
-											project.folders,
-											session.workspace,
-										).map(({ directory }) => directory),
-									],
-						),
-					);
-					yield* Effect.forEach(
-						[...directories].filter((directory) => cache.isStale(directory)),
-						(directory) =>
-							Effect.tryPromise({
-								try: () => cache.refresh(directory),
-								catch: (cause) =>
-									new ReadQueryEffectError({
-										operation: "sessionRows.git",
-										cause,
-									}),
-							}),
-						{ concurrency: 4, discard: true },
-					);
-				}
 				const accountIds = yield* resolveSessionAccountIds(
 					sessions.map(({ id }) => id),
 				).pipe(
@@ -167,16 +127,28 @@ export const makeSessionRows = (
 									});
 						const compacting = activity.compactions.compactingOf(session.id);
 						const retrying = activity.retries.retryingOf(session.id);
-						const enriched = yield* withSessionWorktreeStatus(
-							withCachedSessionGit(
-								{
-									...session,
-									projectSlug: project.slug,
-									accountId: accountIds.get(session.id) ?? null,
-								},
-								project.folders,
-								project.gitCache,
+						const git = yield* (
+							sessionGit._tag === "Some"
+								? sessionGit.value.read(session.id)
+								: readPublishedSessionGit(session.id, project.folders)
+						).pipe(
+							Effect.provideService(ReadRequest, "ListSessions"),
+							Effect.provideService(SqlClient.SqlClient, sql),
+							Effect.mapError(
+								(cause) =>
+									new ReadQueryEffectError({
+										operation: "sessionRows.git",
+										cause,
+									}),
 							),
+						);
+						const enriched = yield* withSessionWorktreeStatus(
+							{
+								...session,
+								git,
+								projectSlug: project.slug,
+								accountId: accountIds.get(session.id) ?? null,
+							},
 							{
 								slug: project.slug,
 								projectDir: project.folders[0],
@@ -213,27 +185,27 @@ export const makeSessionRows = (
 			list: (options?: SessionListOptions) =>
 				sessionScope === undefined
 					? Effect.succeed([])
-					: page(options).pipe(
-							Effect.flatMap(({ value, owners }) => decorate(value, owners)),
+					: sql.withTransaction(
+							page(options).pipe(
+								Effect.flatMap(({ value, owners }) => decorate(value, owners)),
+							),
 						),
 			/**
-			 * Reads `alongside` in the page's transaction, so it must stay SQL-only.
-			 * Decoration runs git and worktree checks, so it waits for the commit:
-			 * the daemon has one SQL connection and every other query queues behind it.
+			 * The row, its companion count and published git share one SQL snapshot.
 			 */
 			listWith: <A, E, R>(
 				options: SessionListOptions | undefined,
 				alongside: Effect.Effect<A, E, R>,
 			) =>
-				sql
-					.withTransaction(Effect.all([alongside, page(options)]))
-					.pipe(
+				sql.withTransaction(
+					Effect.all([alongside, page(options)]).pipe(
 						Effect.flatMap(([companion, { value, owners }]) =>
 							decorate(value, owners).pipe(
 								Effect.map((sessions) => ({ sessions, companion })),
 							),
 						),
 					),
+				),
 			read: (
 				range?: Omit<
 					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[1]>,
@@ -262,22 +234,27 @@ export const makeSessionRows = (
 								removedSince: 0,
 							})),
 						)
-					: readOwned(
-							readQuery.readSessionList(sessionScope, { ...range, ...overlay }),
-							(list) => list.rows.map(({ item }) => item),
-						).pipe(
-							Effect.flatMap(({ value: list, owners }) =>
-								decorate(
-									list.rows.map(({ item }) => item),
-									owners,
-								).pipe(
-									Effect.map((items) => ({
-										...list,
-										rows: Arr.zip(list.rows, items).map(([row, item]) => ({
-											...row,
-											item,
+					: sql.withTransaction(
+							readOwned(
+								readQuery.readSessionList(sessionScope, {
+									...range,
+									...overlay,
+								}),
+								(list) => list.rows.map(({ item }) => item),
+							).pipe(
+								Effect.flatMap(({ value: list, owners }) =>
+									decorate(
+										list.rows.map(({ item }) => item),
+										owners,
+									).pipe(
+										Effect.map((items) => ({
+											...list,
+											rows: Arr.zip(list.rows, items).map(([row, item]) => ({
+												...row,
+												item,
+											})),
 										})),
-									})),
+									),
 								),
 							),
 						),

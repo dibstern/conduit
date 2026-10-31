@@ -446,6 +446,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await expect(detail).toHaveAttribute("title", LONG_COMMAND);
 				await report.record("restored-details", snapshots.tasks);
 				await page.setViewportSize({ width: 1440, height: 900 });
+				await expect(panel).toHaveCount(1);
 				if (!(await panel.isVisible()))
 					await page
 						.getByRole("button", { name: /^\d+ background tasks?$/ })

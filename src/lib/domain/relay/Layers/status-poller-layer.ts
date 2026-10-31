@@ -28,7 +28,6 @@ import {
 	LoggerTag,
 	StatusPollerTag,
 } from "../Services/services.js";
-import { SessionGitServiceTag } from "../Services/session-git-service.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
 	DEFAULT_RECONCILIATION_INTERVAL_MS,
@@ -73,7 +72,6 @@ export const StatusPollerLive: Layer.Layer<
 > = Layer.effect(
 	StatusPollerTag,
 	Effect.gen(function* () {
-		const scope = yield* Effect.scope;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 		const stateRef = yield* PollerStateTag;
@@ -85,7 +83,6 @@ export const StatusPollerLive: Layer.Layer<
 		const eventStore = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
 		const liveTaskList = yield* Effect.serviceOption(LiveTaskListTag);
 		// The corrective event is the poller's only write, and it moves the read
 		// model, so it goes through the seam that projects and announces together.
@@ -198,15 +195,6 @@ export const StatusPollerLive: Layer.Layer<
 				reportFailure("Status poller poll failed", cause),
 			),
 		);
-		const refreshGit = (
-			Option.isSome(sessionGit)
-				? sessionGit.value.refresh({ staleOnly: true })
-				: Effect.void
-		).pipe(
-			Effect.catchCause((cause) =>
-				reportFailure("Git state refresh failed", cause),
-			),
-		);
 		const forkPoll = runPoll.pipe(
 			Effect.forkChild({ uninterruptible: "inherit" }),
 			Effect.asVoid,
@@ -262,7 +250,6 @@ export const StatusPollerLive: Layer.Layer<
 						Effect.gen(function* () {
 							if (yield* Ref.get(started)) {
 								yield* runPoll;
-								yield* refreshGit;
 							}
 						}),
 					),
@@ -279,14 +266,6 @@ export const StatusPollerLive: Layer.Layer<
 					yield* Ref.set(started, true);
 					if (!wasStarted) {
 						yield* runPoll;
-						// Persisted git can serve browsers while the relay scope refreshes it.
-						yield* Effect.forkIn(
-							Effect.interruptible(refreshGit).pipe(
-								Effect.withSpan("statusPoller.initialGitRefresh"),
-							),
-							scope,
-							{ uninterruptible: "inherit" },
-						);
 					}
 				}),
 			stop: () => Ref.set(started, false),

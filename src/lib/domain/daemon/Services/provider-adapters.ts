@@ -8,6 +8,7 @@ import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { ProviderRegistry } from "../../../provider/provider-registry.js";
 import type { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
+import type { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import type { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
 import type { OrchestrationEngineTag } from "../../relay/Services/services.js";
@@ -17,6 +18,7 @@ import type { SessionWorkspaceTag } from "../../relay/Services/session-workspace
 /** Project-owned services borrowed only while that project's relay is alive. */
 export type ProviderAdapterProjectContext =
 	| SqlClient.SqlClient
+	| InputDraftsTag
 	| PersistenceProjectTag
 	| ClaudeEventPersistEffectTag
 	| EventStoreEffectTag

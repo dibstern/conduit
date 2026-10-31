@@ -60,16 +60,9 @@ function carryScope(pathname: string, search: string): string {
 
 const transitionLog: RouteTransition[] = [];
 
-let lastDraft: { id: string; text: string } | null = null;
-
-/** The composer reports its draft so routing needs no access to draft storage. */
-export function noteDraftNavigation(draft: typeof lastDraft): void {
-	lastDraft = draft;
-}
-
-/** Starting again reuses an empty draft and leaves a nonempty draft at its own URL. */
+/** Starting a new Draft always allocates an independent key. */
 export function getNewDraftId(): string {
-	return lastDraft?.text === "" ? lastDraft.id : crypto.randomUUID();
+	return crypto.randomUUID();
 }
 
 function recordTransition(from: string, to: string): void {

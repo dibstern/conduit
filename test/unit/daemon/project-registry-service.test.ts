@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Fiber, Layer, Option } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterAll, afterEach, expect } from "vitest";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
@@ -30,7 +31,6 @@ import {
 	type RelayCache,
 	RelayCacheTag,
 } from "../../../src/lib/domain/daemon/Services/relay-cache.js";
-import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonStoreTestLayer } from "../../helpers/daemon-rpc.js";
 
@@ -77,7 +77,7 @@ const testLayer = Layer.mergeAll(
 
 describe("projectInfos", () => {
 	it.effect(
-		"lazily backfills identities once and refreshes them on save",
+		"keeps registered identities stable across reads and refreshes them on save",
 		() => {
 			const directory = realpathSync(
 				mkdtempSync(join(tmpdir(), "conduit-registry-identity-")),
@@ -90,7 +90,7 @@ describe("projectInfos", () => {
 				{ cwd: directory },
 			);
 			return Effect.gen(function* () {
-				yield* addWithoutRelay({ ...testProject, folders: [directory] });
+				const registered = yield* saveProject({ folders: [directory] });
 				const repositoryIdentities = {
 					[directory]: {
 						key: "github.com/owner/repo",
@@ -111,7 +111,7 @@ describe("projectInfos", () => {
 					repositoryIdentities,
 				);
 				const saved = yield* saveProject({
-					slug: testProject.slug,
+					slug: registered.project.slug,
 					folders: [directory],
 				});
 				// A non-hosted origin falls back to the repository's own git dir.
@@ -162,7 +162,7 @@ describe("projectInfos", () => {
 	});
 
 	it.effect(
-		"includes cached git for a project and omits it for an uncached one",
+		"includes published git for a project and omits it for an unpublished one",
 		() => {
 			const directory = mkdtempSync(join(tmpdir(), "conduit-registry-git-"));
 			fixtureDirs.push(directory);
@@ -196,10 +196,10 @@ describe("projectInfos", () => {
 			};
 
 			return Effect.gen(function* () {
-				const git = yield* Effect.promise(() =>
-					daemonSessionGitCache.refresh(directory),
-				);
-				expect(git).toMatchObject({ branch: "main", dirty: false });
+				const sql = yield* SqlClient.SqlClient;
+				const git = { branch: "main", dirty: false };
+				yield* sql`INSERT INTO session_git_published (directory, git, version)
+					VALUES (${realpathSync(directory)}, ${JSON.stringify(git)}, 1)`;
 				yield* addWithoutRelay(cached);
 				yield* addWithoutRelay(uncached);
 				const projects = yield* projectInfos;

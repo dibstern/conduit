@@ -21,8 +21,8 @@ import type {
 	RunnerSettingsSnapshot,
 } from "../runner/runner-upgrade.js";
 import type {
+	NativeSessionRunner,
 	SessionFailure,
-	SessionRunner,
 } from "../runner/session-runner.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -42,6 +42,7 @@ import {
 import {
 	applyClaudeSdkProcessLogin,
 	type ClaudeLaunchConfig,
+	claudeLoginChange,
 	makeClaudeSdkEnv,
 	sameClaudeLogin,
 } from "./claude-sdk-env.js";
@@ -104,7 +105,7 @@ export const makeClaudeRunnerLaunch = (
 			claudeLaunchConfigFromAccounts();
 		let launchSettings: RunnerSettingsSnapshot["claudeSettingsOverrides"];
 		let resumeSessionId: string | undefined;
-		let sessionRunner: SessionRunner | undefined;
+		let sessionRunner: NativeSessionRunner | undefined;
 		let liveConfiguration: RunnerLiveQueryConfiguration | undefined;
 		const createQuery: NonNullable<ClaudeSessionRunnerDeps["queryFactory"]> = (
 			params,
@@ -338,6 +339,7 @@ export const makeClaudeRunnerLaunch = (
 			capabilities: {
 				stopsTasks: true,
 				taggedConfigDir: true,
+				declaresLogin: true,
 				...(process.env["NODE_ENV"] === "test" &&
 				process.env["CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND"]
 					? {}
@@ -349,6 +351,22 @@ export const makeClaudeRunnerLaunch = (
 				...(liveConfiguration ? { liveConfiguration } : {}),
 				...(frozenSnapshot ? { frozen: true } : {}),
 			}),
+			changesAccount: (command) => {
+				if (!snapshot) return false;
+				const input = normalizeClaudeLaunchInput(
+					{
+						...command.input,
+						shellConfig: command.input.shellConfig ?? command.shellConfig,
+					},
+					defaultLaunchConfig,
+				);
+				return (
+					claudeLoginChange(
+						{ ...snapshot.input, root: snapshot.input.workspaceRoot },
+						{ ...input, root: input.workspaceRoot },
+					) === "Account"
+				);
+			},
 			makeRunner: (config, emit) =>
 				Effect.gen(function* () {
 					if (config.claudeLaunchConfig !== undefined)
@@ -457,6 +475,7 @@ export const makeClaudeRunnerLaunch = (
 								? { subagentPollTimeoutMs: testSubagentPollTimeoutMs }
 								: {}),
 							onSubagentFinalizationComplete: reportUpgradeState,
+							onSourceDelivery: callbacks.sourceDelivery,
 							isBackgroundBusy: () => callbacks.isBackgroundBusy(1),
 							onTurnStateChanged: (_sessionId, inFlight) =>
 								callbacks.turnStateChanged(inFlight),
@@ -631,7 +650,7 @@ export const makeClaudeRunnerLaunch = (
 							Effect.succeed(undefined))
 					)
 						return;
-					const result = yield* runner.executeEffect(command).pipe(
+					const result = yield* runner.executeNativeEffect(command).pipe(
 						Effect.tap(() => {
 							const frozen = frozenSnapshot;
 							const resolver = settingsResolver;

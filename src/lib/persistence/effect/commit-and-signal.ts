@@ -1,4 +1,14 @@
-import { Data, Effect, Option, Ref, Semaphore } from "effect";
+import {
+	Context,
+	Data,
+	Deferred,
+	Effect,
+	Option,
+	Ref,
+	Schedule,
+	Scheduler,
+	Semaphore,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { ReadModelAdvance } from "../../contracts/read-model-advance.js";
@@ -13,12 +23,13 @@ import {
 } from "../events.js";
 import { SESSION_SUBTREE_SQL } from "../projectors/session-handlers.js";
 import { boundProjectMismatch } from "./bind-event-store-effect.js";
-import type { EventStoreError } from "./event-store-effect.js";
 import {
 	EventStoreEffectTag,
+	EventStoreError,
 	type UnboundEventStoreEffect,
 	UnboundEventStoreEffectTag,
 } from "./event-store-effect.js";
+import { requeueFailedSteers } from "./input-requeue-effect.js";
 import type { ProjectionRunnerError } from "./projection-runner-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
 import { mergeTouches } from "./projectors-effect.js";
@@ -31,6 +42,43 @@ export type CommitAndSignalFailure =
 	| EventStoreError
 	| ProjectionRunnerError
 	| SqlError;
+
+/** Generic final authorization supplied by the owner of a bounded write. */
+export const currentWriteAuthorization = Context.Reference<
+	| {
+			readonly runnerId: string;
+			readonly check: Effect.Effect<void>;
+			readonly guarded: <A, E = never, R = never>(
+				op: Effect.Effect<A, E, R> | (() => A),
+			) => Effect.Effect<Option.Option<A>, E, R>;
+	  }
+	| undefined
+>("conduit/currentWriteAuthorization", { defaultValue: () => undefined });
+
+/** Kept separate from authority so a context-losing fork cannot become a daemon write. */
+export const currentRunnerWriteOrigin = Context.Reference<string | undefined>(
+	"conduit/currentRunnerWriteOrigin",
+	{ defaultValue: () => undefined },
+);
+
+export class MissingWriteAuthorization extends Data.TaggedError(
+	"MissingWriteAuthorization",
+)<{ readonly runnerId: string }> {}
+
+/** Continue a runner's memory or durable work under its bound authority. */
+export const guardCurrentWrite = <A, E = never, R = never>(
+	op: Effect.Effect<A, E, R> | (() => A),
+): Effect.Effect<Option.Option<A>, E, R> =>
+	Effect.gen(function* () {
+		const authorization = yield* currentWriteAuthorization;
+		if (authorization) return yield* authorization.guarded(op);
+		const runnerId = yield* currentRunnerWriteOrigin;
+		if (runnerId)
+			return yield* Effect.die(new MissingWriteAuthorization({ runnerId }));
+		const action: Effect.Effect<A, E, R> =
+			typeof op === "function" ? Effect.sync(op) : op;
+		return yield* Effect.map(action, Option.some);
+	});
 
 /**
  * The seam was entered inside a transaction it does not own.
@@ -72,9 +120,13 @@ export class ProjectOutsideSeamTransaction extends Data.TaggedError(
 }> {}
 
 export interface CommitAndSignalOptions {
+	/** Runner-derived callers declare their origin even if fiber context was lost. */
+	readonly runnerId?: string | undefined;
 	/** Required when appending before the session has an owner row. */
 	readonly projectId?: string;
 	readonly publish?: boolean;
+	/** The caller publishes failed inputs separately and owns their retry. */
+	readonly requeueFailedInputs?: false;
 	readonly endedRunEvents?: Set<string>;
 	/** Runs after projection, inside the append transaction, before COMMIT. */
 	readonly beforeCommit?: Effect.Effect<void, SqlError>;
@@ -115,6 +167,9 @@ export interface CommitAndSignal {
 		options?: CommitAndSignalOptions,
 	): Effect.Effect<void, CommitAndSignalFailure>;
 
+	/** Capture the next successful store commit before reading its durable rows. */
+	readonly committed: () => Effect.Effect<void>;
+
 	/**
 	 * For the append sites a plain `appendBatch` does not describe: an idempotent
 	 * `INSERT OR IGNORE INTO events`, or a write that has to seed and then verify
@@ -138,17 +193,155 @@ export interface CommitAndSignal {
 // Factories are also created per command, so the permit belongs to the SQL
 // client, not an individual writer. Weak keys retain no closed persistence stack.
 const commitPermits = new WeakMap<SqlClient.SqlClient, Semaphore.Semaphore>();
+const commitSignals = new WeakMap<
+	SqlClient.SqlClient,
+	Deferred.Deferred<void>
+>();
 
-const makeCommitAndSignalWithStore = Effect.fn(function* (
-	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
-) {
-	const sql = yield* SqlClient.SqlClient;
+const nextCommit = (sql: SqlClient.SqlClient) => {
+	let signal = commitSignals.get(sql);
+	if (signal === undefined) {
+		signal = Deferred.makeUnsafe<void>();
+		commitSignals.set(sql, signal);
+	}
+	return signal;
+};
+
+const signalCommitted = (sql: SqlClient.SqlClient) =>
+	Effect.suspend(() => {
+		const signal = nextCommit(sql);
+		commitSignals.set(sql, Deferred.makeUnsafe<void>());
+		return Deferred.succeed(signal, undefined).pipe(Effect.asVoid);
+	});
+
+export interface PendingWrite {
+	readonly apply: Effect.Effect<void, SqlError>;
+	readonly committed?: (() => void) | undefined;
+}
+
+const pendingWrites = new WeakMap<
+	SqlClient.SqlClient,
+	Map<unknown, PendingWrite>
+>();
+
+const commitPermit = (sql: SqlClient.SqlClient) => {
 	let permit = commitPermits.get(sql);
 	if (permit === undefined) {
 		permit = Semaphore.makeUnsafe(1);
 		commitPermits.set(sql, permit);
 	}
-	const withPermit = permit.withPermits(1);
+	return permit;
+};
+
+/** Synchronous enqueue: owners need not wait for a connection or its permit. */
+export const queuePendingWrite = (
+	sql: SqlClient.SqlClient,
+	key: unknown,
+	write: PendingWrite,
+) => {
+	let pending = pendingWrites.get(sql);
+	if (pending === undefined) {
+		pending = new Map();
+		pendingWrites.set(sql, pending);
+	}
+	pending.set(key, write);
+};
+
+const applyPendingWrites = (sql: SqlClient.SqlClient) =>
+	Effect.gen(function* () {
+		const applied = new Map<unknown, PendingWrite>();
+		while (true) {
+			const pending = [...(pendingWrites.get(sql)?.entries() ?? [])].filter(
+				([key, write]) => applied.get(key) !== write,
+			);
+			if (pending.length === 0) return applied;
+			for (const [key, write] of pending) {
+				if (pendingWrites.get(sql)?.get(key) !== write) continue;
+				yield* write.apply;
+				applied.set(key, write);
+			}
+		}
+	});
+
+const clearCommittedWrites = (
+	sql: SqlClient.SqlClient,
+	applied: ReadonlyMap<unknown, PendingWrite>,
+) => {
+	const pending = pendingWrites.get(sql);
+	for (const [key, write] of applied) {
+		if (pending?.get(key) === write) pending.delete(key);
+		write.committed?.();
+	}
+};
+
+/** Standalone flushes and optional owner maintenance share the seam's permit. */
+export const flushPendingWrites = <E = never, R = never>(
+	sql: SqlClient.SqlClient,
+	operation: Effect.Effect<void, E, R> = Effect.void,
+	options: Pick<CommitAndSignalOptions, "runnerId"> = {},
+) =>
+	Effect.gen(function* () {
+		const authority = yield* currentWriteAuthorization;
+		const runnerId = options.runnerId ?? (yield* currentRunnerWriteOrigin);
+		if (runnerId !== undefined && authority?.runnerId !== runnerId)
+			return yield* Effect.die(new MissingWriteAuthorization({ runnerId }));
+		const ambient = yield* Effect.serviceOption(sql.transactionService);
+		if (Option.isSome(ambient))
+			return yield* Effect.die(
+				new NestedCommitAndSignal({ depth: ambient.value[1] }),
+			);
+		yield* commitPermit(sql).withPermits(1)(
+			sql
+				.withTransaction(
+					Effect.gen(function* () {
+						yield* operation;
+						const applied = yield* applyPendingWrites(sql);
+						yield* authority?.check ?? Effect.void;
+						return applied;
+					}),
+				)
+				.pipe(
+					Effect.provideService(Scheduler.PreventSchedulerYield, true),
+					Effect.tap((applied) =>
+						signalCommitted(sql).pipe(
+							Effect.andThen(
+								Effect.sync(() => clearCommittedWrites(sql, applied)),
+							),
+						),
+					),
+					Effect.asVoid,
+				),
+		);
+	}).pipe(Effect.uninterruptible);
+
+const scheduledFlushes = new WeakSet<SqlClient.SqlClient>();
+
+/** Coalesce standalone maintenance, independent of the caller's transaction and grant. */
+export const schedulePendingWriteFlush = (sql: SqlClient.SqlClient) =>
+	Effect.gen(function* () {
+		if (scheduledFlushes.has(sql)) return;
+		scheduledFlushes.add(sql);
+		yield* flushPendingWrites(sql).pipe(
+			Effect.tapError((error) =>
+				Effect.logWarning("Pending write flush failed; retrying", error),
+			),
+			Effect.retry({ schedule: Schedule.spaced("1 second") }),
+			Effect.provideService(currentWriteAuthorization, undefined),
+			Effect.provideService(currentRunnerWriteOrigin, undefined),
+			Effect.updateContext((context: Context.Context<never>) =>
+				Context.omit(sql.transactionService)(context),
+			),
+			Effect.ensuring(Effect.sync(() => scheduledFlushes.delete(sql))),
+			Effect.provideService(Scheduler.PreventSchedulerYield, true),
+			Effect.forkDetach,
+		);
+	}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true));
+
+const makeCommitAndSignalWithStore = Effect.fn(function* (
+	eventStore: UnboundEventStoreEffect & { readonly projectId?: string },
+) {
+	const sql = yield* SqlClient.SqlClient;
+	const withPermit = commitPermit(sql).withPermits(1);
 	const withCommitPermit = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 		contentionMetrics
 			? contentionMetrics.withCommitPermit(withPermit, effect)
@@ -175,6 +368,10 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 				// Refuse before any write: the seam publishes on the strength of
 				// owning the COMMIT, and inside someone else's transaction it does
 				// not own one.
+				const authority = yield* currentWriteAuthorization;
+				const runnerId = options.runnerId ?? (yield* currentRunnerWriteOrigin);
+				if (runnerId !== undefined && authority?.runnerId !== runnerId)
+					return yield* Effect.die(new MissingWriteAuthorization({ runnerId }));
 				const ambient = yield* Effect.serviceOption(sql.transactionService);
 				if (Option.isSome(ambient))
 					return yield* Effect.die(
@@ -198,7 +395,8 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 								.recover()
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 						}
-						const result = yield* sql.withTransaction(
+						let flushedWrites: ReadonlyMap<unknown, PendingWrite> = new Map();
+						const transaction = sql.withTransaction(
 							Effect.gen(function* () {
 								const seam = Option.getOrUndefined(
 									yield* Effect.serviceOption(sql.transactionService),
@@ -355,9 +553,37 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 									Math.max(0, ...advances.map((advance) => advance.version)),
 									projects ? yield* Ref.get(projects) : undefined,
 								).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+								yield* options.beforeCommit ?? Effect.void;
+								// Returning an unplaced failed steer belongs to its durable
+								// terminal fact unless its caller owns independent publication.
+								if (options.requeueFailedInputs !== false)
+									yield* requeueFailedSteers(
+										sql,
+										{
+											persistEvents: (events) =>
+												eventStore
+													.appendBatch(events, options.projectId)
+													.pipe(Effect.flatMap(project)),
+										},
+										undefined,
+										undefined,
+										eventStore.projectId ?? options.projectId,
+									);
+								flushedWrites = yield* applyPendingWrites(sql);
+								// Pending writes can suspend: authorize only after the last one.
+								yield* authority?.check ?? Effect.void;
 								return result;
 							}),
 						);
+						const result = yield* transaction.pipe(
+							// SQL's COMMIT runs in withTransaction's finalizer, after the
+							// body context is restored. Cover the whole wrapper so no
+							// automatic yield can admit a revocation after the final flush.
+							// Explicit async body waits still suspend normally.
+							Effect.provideService(Scheduler.PreventSchedulerYield, true),
+						);
+						yield* signalCommitted(sql);
+						clearCommittedWrites(sql, flushedWrites);
 						observeTurnTimelineCommit(stored);
 						const { stamped, removed, collections } = mergeTouches(
 							advances.map((advance) => ({
@@ -440,11 +666,13 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 							options.projectId,
 						);
 						yield* project(appended);
-						yield* options.beforeCommit ?? Effect.void;
 					}),
 				options,
 			),
-		{ write },
+		{
+			write,
+			committed: () => Deferred.await(nextCommit(sql)),
+		},
 	);
 
 	return commitAndSignal;

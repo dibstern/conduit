@@ -202,6 +202,12 @@ function toHistoryMessage(source: WireMessage): HistoryMessage {
 						...(modelExecution.expectedModel === undefined
 							? {}
 							: { expectedModel: modelExecution.expectedModel }),
+						...(modelExecution.effort === undefined
+							? {}
+							: { effort: modelExecution.effort }),
+						...(modelExecution.contextWindow === undefined
+							? {}
+							: { contextWindow: modelExecution.contextWindow }),
 						...(modelExecution.drifted === undefined
 							? {}
 							: { drifted: modelExecution.drifted }),

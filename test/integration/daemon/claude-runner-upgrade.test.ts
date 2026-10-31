@@ -1,11 +1,15 @@
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
+	appendFileSync,
 	existsSync,
 	mkdirSync,
 	readFileSync,
+	rmSync,
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -21,6 +25,9 @@ import {
 const OLD_BUILD = "85kb-13-before-rebuild";
 const NEW_BUILD = "85kb-13-after-rebuild";
 const WARM_DELAY_MS = 600;
+const evidenceDirectory =
+	process.env["CONDUIT_RUNNER_EVIDENCE_DIR"] ??
+	join(tmpdir(), "conduit-runner-evidence");
 
 // Failure cases: refusing a compatible old build, switching during a turn or
 // before spool acknowledgment, a send waiting for replacement initialization,
@@ -42,6 +49,24 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 	});
 	try {
 		return {
+			runners: db
+				.prepare(
+					"SELECT runner_id, role, retired_at FROM claude_runner_cursors WHERE session_id = ? ORDER BY sequence",
+				)
+				.all(sessionId) as Array<{
+				runner_id: string;
+				role: "serving" | "candidate";
+				retired_at: number | null;
+			}>,
+			runs: db
+				.prepare(
+					"SELECT id, status, runner_id FROM provider_runs WHERE session_id = ? ORDER BY rowid",
+				)
+				.all(sessionId) as Array<{
+				id: string;
+				status: string;
+				runner_id: string | null;
+			}>,
 			session: db
 				.prepare("SELECT status FROM sessions WHERE id = ?")
 				.get(sessionId) as { status: string },
@@ -248,50 +273,61 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 	}> = [];
 	afterEach(async (context) => {
 		for (const { harness, artifact, details } of fixtures) {
-			const sdk = sdkProof(harness);
-			const beforeCleanup = harness.proof();
-			const durable =
-				typeof details["sessionId"] === "string"
-					? persisted(harness, details["sessionId"])
-					: undefined;
+			let sdk: ProcessMark[] = [];
+			let beforeCleanup: ReturnType<ProcessHarness["proof"]> | undefined;
+			let durable: ReturnType<typeof persisted> | undefined;
 			try {
-				const release = join(harness.root, "release-held-initialization");
-				if (
-					sdk.some((mark) => mark.kind === "initialization-held") &&
-					!existsSync(release)
-				)
-					writeFileSync(release, "cleanup release");
-				if (sdk.some((mark) => mark.kind === "subagent-finalizer"))
-					writeFileSync(
-						join(harness.root, "release-subagent-finalizer"),
-						"cleanup release",
-					);
-				await harness.dispose();
-				expect(harness.remainingRunnerPids()).toEqual([]);
+				sdk = sdkProof(harness);
+				beforeCleanup = harness.proof();
+				durable =
+					typeof details["sessionId"] === "string"
+						? persisted(harness, details["sessionId"])
+						: undefined;
 			} finally {
-				mkdirSync("test-results", { recursive: true });
-				writeFileSync(
-					`test-results/85kb-13-${artifact}.json`,
-					JSON.stringify(
-						{
-							test: context.task.name,
-							assertionErrors:
-								context.task.result?.errors?.map((error) => error.message) ??
-								[],
-							...details,
-							sdk,
-							durable,
-							beforeCleanup,
-							cleanup: {
-								runnerPids: harness.runnerPids(),
-								remainingRunnerPids: harness.remainingRunnerPids(),
-								proof: harness.proof(),
+				try {
+					for (const phase of ["after-prepare", "after-commit"])
+						rmSync(
+							join(harness.root, `conduit-test-hold-runner-swap-${phase}`),
+							{ force: true },
+						);
+					const release = join(harness.root, "release-held-initialization");
+					if (
+						sdk.some((mark) => mark.kind === "initialization-held") &&
+						!existsSync(release)
+					)
+						writeFileSync(release, "cleanup release");
+					if (sdk.some((mark) => mark.kind === "subagent-finalizer"))
+						writeFileSync(
+							join(harness.root, "release-subagent-finalizer"),
+							"cleanup release",
+						);
+					await harness.dispose();
+					expect(harness.remainingRunnerPids()).toEqual([]);
+				} finally {
+					mkdirSync(evidenceDirectory, { recursive: true });
+					writeFileSync(
+						join(evidenceDirectory, `85kb-13-${artifact}-${randomUUID()}.json`),
+						JSON.stringify(
+							{
+								test: context.task.name,
+								assertionErrors:
+									context.task.result?.errors?.map((error) => error.message) ??
+									[],
+								...details,
+								sdk,
+								durable,
+								beforeCleanup,
+								cleanup: {
+									runnerPids: harness.runnerPids(),
+									remainingRunnerPids: harness.remainingRunnerPids(),
+									proof: harness.proof(),
+								},
 							},
-						},
-						null,
-						2,
-					),
-				);
+							null,
+							2,
+						),
+					);
+				}
 			}
 		}
 		fixtures.length = 0;
@@ -318,10 +354,199 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		});
 		const details: Record<string, unknown> = {};
 		fixtures.push({ harness, artifact, details });
+		appendFileSync(
+			join(harness.root, "runner-identity-fixture.mjs"),
+			"\nsetTimeout(() => process.exit(0), 120_000).unref();\n",
+		);
 		const browser = await harness.connect();
 		await browser.setAutoSettle(null);
 		return { harness, browser, details };
 	}
+
+	it.each([
+		"after-prepare",
+		"after-commit",
+	] as const)("recovers the committed serving row after SIGKILL %s and reuses its query", async (phase) => {
+		const {
+			harness,
+			browser: initial,
+			details,
+		} = await start(`swap-crash-${phase}`, {
+			deadline: performance.now() + 60_000,
+		});
+		const sessionId = await initial.createSession(`Swap crash ${phase}`);
+		details["sessionId"] = sessionId;
+		const before = `swap-before-${phase}`;
+		await initial.send(sessionId, before);
+		await completed(harness, sessionId, [before]);
+		const old = runnerFor(harness, sessionId);
+		await harness.kill();
+		const gate = join(harness.root, `conduit-test-hold-runner-swap-${phase}`);
+		writeFileSync(gate, "pause");
+		await harness.restart({
+			buildId: NEW_BUILD,
+			serviceEnvironment: { CONDUIT_TEST_RUNNER_SWAP_PAUSE: phase },
+		});
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) =>
+							mark.kind === "runner-swap-paused" && mark.phase === phase,
+					),
+				).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const paused = sdkProof(harness).find(
+			(mark) => mark.kind === "runner-swap-paused" && mark.phase === phase,
+		);
+		assert(paused?.kind === "runner-swap-paused");
+		const candidateQuery = queryFor(harness, paused.newPid);
+		expect(
+			sdkProof(harness).some(
+				(mark) =>
+					mark.kind === "initialization-ready" &&
+					mark.queryId === candidateQuery.queryId,
+			),
+		).toBe(true);
+		const atCrash = persisted(harness, sessionId);
+		details["atCrash"] = atCrash;
+		details["paused"] = paused;
+		expect(
+			atCrash.runners
+				.filter((row) => row.role === "serving" && row.retired_at === null)
+				.map((row) => row.runner_id),
+		).toEqual([
+			phase === "after-commit" ? paused.newRunnerId : paused.oldRunnerId,
+		]);
+		await harness.kill();
+		rmSync(gate);
+		if (phase === "after-prepare")
+			writeFileSync(
+				join(harness.root, "hold-next-initialization"),
+				"hold recovery's next upgrade",
+			);
+		const adoptionStart = harness.marks.length;
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const expectedPid = phase === "after-commit" ? paused.newPid : old.pid;
+		expect(
+			harness.marks
+				.slice(adoptionStart)
+				.some(
+					(mark) => mark.kind === "runner-started" && mark.pid === expectedPid,
+				),
+		).toBe(true);
+		const after = `swap-after-${phase}`;
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
+		);
+		await completed(harness, sessionId, [before, after]);
+		const expectedQuery =
+			phase === "after-commit" ? candidateQuery : queryFor(harness, old.pid);
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "enqueue" && mark.prompt === after,
+			),
+		).toMatchObject([{ queryId: expectedQuery.queryId }]);
+		await vi.waitFor(
+			() =>
+				expect(() =>
+					process.kill(phase === "after-commit" ? old.pid : paused.newPid, 0),
+				).toThrow(),
+			{ timeout: 10_000 },
+		);
+		expect(
+			persisted(harness, sessionId).runs.every(
+				(run) => run.status === "completed",
+			),
+		).toBe(true);
+		details["expectedPid"] = expectedPid;
+		details["reusedQuery"] = expectedQuery.queryId;
+	}, 60_000);
+
+	it.each([
+		"after-prepare",
+		"after-commit",
+	] as const)("dispatches a send racing the swap %s to exactly one terminal run", async (phase) => {
+		const {
+			harness,
+			browser: initial,
+			details,
+		} = await start(`swap-send-${phase}`, {
+			deadline: performance.now() + 60_000,
+		});
+		const sessionId = await initial.createSession(`Swap send ${phase}`);
+		details["sessionId"] = sessionId;
+		const before = `swap-race-before-${phase}`;
+		await initial.send(sessionId, before);
+		await completed(harness, sessionId, [before]);
+		await harness.kill();
+		const gate = join(harness.root, `conduit-test-hold-runner-swap-${phase}`);
+		writeFileSync(gate, "pause");
+		await harness.restart({
+			buildId: NEW_BUILD,
+			serviceEnvironment: { CONDUIT_TEST_RUNNER_SWAP_PAUSE: phase },
+		});
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).some(
+						(mark) =>
+							mark.kind === "runner-swap-paused" && mark.phase === phase,
+					),
+				).toBe(true),
+			{ timeout: 10_000 },
+		);
+		const paused = sdkProof(harness).find(
+			(mark) => mark.kind === "runner-swap-paused" && mark.phase === phase,
+		);
+		assert(paused?.kind === "runner-swap-paused");
+		const browser = await harness.connect(sessionId);
+		const after = `swap-racing-${phase}`;
+		const sent = browser.send(sessionId, after);
+		if (phase === "after-prepare") {
+			await vi.waitFor(
+				() =>
+					expect(
+						sdkProof(harness).some(
+							(mark) => mark.kind === "enqueue" && mark.prompt === after,
+						),
+					).toBe(true),
+				{ timeout: 10_000 },
+			);
+		} else {
+			await vi.waitFor(
+				() => expect(persisted(harness, sessionId).commands).toHaveLength(2),
+				{ timeout: 10_000 },
+			);
+			expect(
+				sdkProof(harness).some(
+					(mark) => mark.kind === "enqueue" && mark.prompt === after,
+				),
+			).toBe(false);
+		}
+		rmSync(gate);
+		expect((await sent).chunks.join("")).toBe(responseChunks(after).join(""));
+		await completed(harness, sessionId, [before, after]);
+		const expectedPid =
+			phase === "after-commit" ? paused.newPid : paused.oldPid;
+		const expectedRunner =
+			phase === "after-commit" ? paused.newRunnerId : paused.oldRunnerId;
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "enqueue" && mark.prompt === after,
+			),
+		).toMatchObject([{ queryId: queryFor(harness, expectedPid).queryId }]);
+		const runs = persisted(harness, sessionId).runs;
+		expect(runs).toHaveLength(2);
+		expect(runs[1]).toMatchObject({
+			runner_id: expectedRunner,
+			status: "completed",
+		});
+		details["paused"] = paused;
+		details["terminalRuns"] = runs;
+	}, 60_000);
 
 	it("re-adopts an idle old build, acknowledges its spool, and upgrades without another turn", async () => {
 		const {
@@ -856,8 +1081,8 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await vi.waitFor(
 			() => {
 				const state = persisted(harness, sessionId);
-				// Notification output retains its completed run's ownership.
-				expect(state.session.status).toBe("idle");
+				// A wake-up stays busy while retaining its completed run's ownership.
+				expect(state.session.status).toBe("busy");
 				expect(state.turns).toEqual([{ state: "completed" }]);
 				expect(
 					state.events.some(
@@ -905,7 +1130,7 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		await new Promise<void>((done) => setTimeout(done, 250));
 		expect(() => process.kill(old.pid, 0)).not.toThrow();
 		expect(persisted(harness, sessionId)).toMatchObject({
-			session: { status: "idle" },
+			session: { status: "busy" },
 			turns: [{ state: "completed" }],
 			commands: [{ status: "completed" }],
 		});
@@ -930,8 +1155,15 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 			expect(state.commands).toHaveLength(1);
 			expect(state.commands[0]?.status).toBe("completed");
 			expect(
-				state.events.filter((event) => event.type === "turn.completed"),
+				state.events.filter(
+					(event) =>
+						event.type === "turn.completed" ||
+						event.type === "message.completed",
+				),
 			).toHaveLength(2);
+			expect(
+				state.events.filter((event) => event.type === "turn.completed"),
+			).toHaveLength(1);
 			expect(
 				state.events.filter(
 					(event) =>
@@ -1049,6 +1281,73 @@ describe("Claude runner upgrades at turn boundaries through built dist", () => {
 		details["abandonedCandidate"] = abandoned;
 		details["heldCandidate"] = held;
 		details["replacement"] = replacement;
+	}, 40_000);
+
+	it("failure mode 75: with no serving runner left, an abandoned candidate is cleaned before the next send starts fresh", async () => {
+		const {
+			harness,
+			details,
+			browser: initial,
+		} = await start("cleaning-no-serving");
+		const sessionId = await initial.createSession("Cleaning without serving");
+		details["sessionId"] = sessionId;
+		const before = "upgrade-before-cleaning";
+		await initial.send(sessionId, before);
+		await completed(harness, sessionId, [before]);
+		const old = runnerFor(harness, sessionId);
+		await harness.kill();
+		await harness.restart({
+			buildId: NEW_BUILD,
+			queryInitializationDelayMs: 5000,
+		});
+		await vi.waitFor(
+			() =>
+				expect(
+					sdkProof(harness).filter((mark) => mark.kind === "query"),
+				).toHaveLength(2),
+			{ timeout: 5000 },
+		);
+		const candidate = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.pid !== old.pid,
+		);
+		assert(candidate?.kind === "query");
+		const abandoned = runnerFor(harness, sessionId, candidate.pid);
+		await harness.kill();
+		process.kill(old.pid, "SIGKILL");
+		await vi.waitFor(() => expect(() => process.kill(old.pid, 0)).toThrow(), {
+			timeout: 5000,
+		});
+		expect(() => process.kill(candidate.pid, 0)).not.toThrow();
+		details["runnersBeforeRestart"] = persisted(harness, sessionId).runners;
+		// This proves the outcome, not the gate's Cleaning answer: recover itself
+		// may stop the unretired candidate (CandidateAbandoned) before the send
+		// reaches the gate. The Cleaning path is covered by unit tests only.
+		await harness.restart({ buildId: NEW_BUILD });
+		const browser = await harness.connect(sessionId);
+		const after = "upgrade-after-cleaning";
+		expect((await browser.send(sessionId, after)).chunks.join("")).toBe(
+			responseChunks(after).join(""),
+		);
+		expect(() => process.kill(candidate.pid, 0)).toThrow();
+		expect(existsSync(abandoned.socketPath)).toBe(false);
+		const enqueue = sdkProof(harness).find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === after,
+		);
+		assert(enqueue?.kind === "enqueue");
+		const fresh = sdkProof(harness).find(
+			(mark) => mark.kind === "query" && mark.queryId === enqueue.queryId,
+		);
+		assert(fresh?.kind === "query");
+		expect([old.pid, candidate.pid]).not.toContain(fresh.pid);
+		expect(
+			sdkProof(harness).filter(
+				(mark) => mark.kind === "enqueue" && mark.queryId === candidate.queryId,
+			),
+		).toEqual([]);
+		await completed(harness, sessionId, [before, after]);
+		details["oldRunner"] = old;
+		details["abandonedCandidate"] = abandoned;
+		details["freshQuery"] = fresh;
 	}, 40_000);
 
 	it("review regression: persists a pending subagent finalizer before upgrading", async () => {

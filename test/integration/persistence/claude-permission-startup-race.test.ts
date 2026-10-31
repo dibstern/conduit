@@ -5,7 +5,14 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Layer, ManagedRuntime, Result } from "effect";
+import {
+	Deferred,
+	Effect,
+	Layer,
+	ManagedRuntime,
+	Option,
+	Result,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
@@ -34,6 +41,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import { makeRecoveredEventSink } from "../../../src/lib/provider/runner/runner-event-sink.js";
 import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
 import {
@@ -193,6 +201,11 @@ describe("Claude permission ownership during startup cleanup", () => {
 						),
 					]);
 					const committed = yield* Deferred.make<void>();
+					const authority = yield* makeRunnerAuthority();
+					const { grants } = yield* authority.adopt(
+						[{ runnerId: processId, sessionId }],
+						"live",
+					);
 					return {
 						sql,
 						pending,
@@ -207,23 +220,37 @@ describe("Claude permission ownership during startup cleanup", () => {
 								cleanupPending,
 							),
 						),
-						ask: sink
-							.requestPermission({
-								requestId: "provider-request",
-								sessionId,
-								turnId: "recovered-turn",
-								providerItemId: "provider-request",
-								toolName: "Bash",
-								toolInput: { command: "echo live" },
-							})
+						ask: authority
+							.guarded(
+								grants.get(processId),
+								{ kind: "output" },
+								sink
+									.requestPermission({
+										requestId: "provider-request",
+										sessionId,
+										turnId: "recovered-turn",
+										providerItemId: "provider-request",
+										toolName: "Bash",
+										toolInput: { command: "echo live" },
+									})
+									.pipe(
+										Effect.provideService(currentRunnerOutput, {
+											runnerId: processId,
+											sequence: 1,
+											attachmentId: "",
+											committed,
+											consumed: true,
+										}),
+									),
+							)
 							.pipe(
-								Effect.provideService(currentRunnerOutput, {
-									runnerId: processId,
-									sequence: 1,
-									attachmentId: "",
-									committed,
-									consumed: true,
-								}),
+								Effect.flatMap(
+									Option.match({
+										onNone: () =>
+											Effect.die("Live permission fixture lost its grant"),
+										onSome: Effect.succeed,
+									}),
+								),
 							),
 					};
 				}),

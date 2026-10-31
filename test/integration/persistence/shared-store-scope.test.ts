@@ -5,16 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import Database from "better-sqlite3";
-import {
-	Cause,
-	Effect,
-	Exit,
-	Fiber,
-	Layer,
-	ManagedRuntime,
-	Ref,
-	Stream,
-} from "effect";
+import { Effect, Layer, ManagedRuntime, PubSub, Ref, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Statement from "effect/sql/Statement";
 import {
@@ -26,7 +17,10 @@ import {
 	it,
 	vi,
 } from "vitest";
-import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
+import {
+	DEFAULT_WORKTREE_CLEANUP,
+	WorktreeRecoveryError,
+} from "../../../src/lib/contracts/worktree.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	countRunningProjectSessions,
@@ -42,9 +36,11 @@ import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemo
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
-import { SessionGitLive } from "../../../src/lib/domain/relay/Layers/session-git-layer.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
-import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
+import {
+	AlertsLive,
+	AlertsTag,
+} from "../../../src/lib/domain/relay/Services/alerts.js";
 import { makeContinuation } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
@@ -63,7 +59,6 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../../../src/lib/domain/relay/Services/session-attention.js";
-import { SessionGitServiceTag } from "../../../src/lib/domain/relay/Services/session-git-service.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { restoreSessionSettings } from "../../../src/lib/domain/relay/Services/session-model-settings.js";
 import {
@@ -82,7 +77,6 @@ import {
 	SSEStreamTag,
 } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import { LocalPtyServiceTag } from "../../../src/lib/domain/relay/Services/terminal-service.js";
-import { daemonSessionGitCache } from "../../../src/lib/git/session-git.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -115,8 +109,8 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import {
-	recoverRunnerCommands,
 	runningRunnerCommands,
+	settleRunnerCommand,
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
 import * as relayStartup from "../../../src/lib/relay/project-relay-startup.js";
@@ -124,6 +118,7 @@ import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.j
 import {
 	cleanUpProjectWorktrees,
 	readWorktreeCleanupPaths,
+	type WorktreeCleanupRetry,
 } from "../../../src/lib/session/worktree-cleanup-sweep.js";
 import { projectManifest } from "../../helpers/daemon-store-import-manifest.js";
 import {
@@ -546,15 +541,12 @@ describe("shared-store relay project scope", () => {
 		]);
 	});
 
-	// Failure modes: a foreign persister rejects the requeue, retries append it
-	// twice, or cancellation/shutdown requeues a command whose replay is unfinished.
+	// Failure modes: a foreign persister rejects the requeue or repeated settlement
+	// appends the same input.requeued event twice.
 	it.each([
 		"failed",
-		"interrupted",
-		"closing",
-		"retry",
 		"empty",
-	] as const)("session-targeted recovery requeues failed steers through their stored owner: %s", async (mode) => {
+	] as const)("session-targeted settlement requeues failed steers through their stored owner: %s", async (mode) => {
 		await store.runtime.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
@@ -587,69 +579,23 @@ describe("shared-store relay project scope", () => {
 							]),
 						);
 					}
-					let closing = mode === "closing";
-					let interrupted = mode === "interrupted";
-					let failedAttempt = 1;
-					const recover = recoverRunnerCommands(sql, sessionId, "claude", {
-						driverForAccount: () => "claude",
-						decodeInput: () => ({
+					yield* sql`UPDATE provider_command_outbox SET status = 'failed', error_code = 'runner_stopped'
+						WHERE command_id = ${commandId} AND attempt_count = 1`;
+					for (let repeat = 0; repeat < 2; repeat++)
+						yield* settleRunnerCommand(
+							sql,
+							B,
 							sessionId,
-							inputId: commandId,
-							prompt: "steer",
-							workspaceRoot: store.root,
-							extraFolders: [],
-							history: [],
-							providerState: {},
-						}),
-						replay: () =>
-							interrupted
-								? Effect.interrupt
-								: Effect.fail({
-										operation: "recover",
-										message: "runner stopped",
-										code: "runner_stopped",
-									}),
-						resolveSinkId: (command) => command,
-						closing: () => closing,
-						failTurn: () =>
-							sql`UPDATE provider_command_outbox SET status = 'failed', error_code = 'runner_stopped'
-						WHERE command_id = ${commandId} AND attempt_count = ${failedAttempt}`.pipe(
-								Effect.asVoid,
-								Effect.orDie,
-							),
-					});
-					const [command] = yield* recover;
-					expect(command).toBeDefined();
-					if (!command) return;
-					if (mode === "retry") {
-						yield* sql`UPDATE provider_command_outbox SET attempt_count = 2 WHERE command_id = ${commandId}`;
-					} else if (interrupted) {
-						const fiber = yield* Effect.forkChild(command.wait);
-						const exit = yield* Fiber.await(fiber);
-						expect(
-							Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause),
-						).toBe(true);
-					}
-					if (mode === "closing" || mode === "retry") yield* command.wait;
-					if (
-						mode === "closing" ||
-						mode === "interrupted" ||
-						mode === "retry"
-					) {
-						expect(
-							yield* sql`SELECT state FROM pending_inputs WHERE input_id = ${commandId}`,
-						).toEqual([{ state: "steering" }]);
-						expect(
-							yield* sql`SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'input.requeued'`,
-						).toEqual([]);
-					}
-					closing = false;
-					interrupted = false;
-					if (mode === "retry") failedAttempt = 2;
-					const [current] = yield* recover;
-					if (!current) throw new Error("Missing recovered command");
-					yield* current.wait;
-					yield* current.wait;
+							commandId,
+							1,
+							undefined,
+							{
+								operation: "settle",
+								message: "runner stopped",
+								code: "runner_stopped",
+							},
+							"claude",
+						);
 					expect(
 						yield* sql`SELECT state FROM pending_inputs WHERE input_id = ${commandId}`,
 					).toEqual(mode === "empty" ? [] : [{ state: "queued" }]);
@@ -667,10 +613,13 @@ describe("shared-store relay project scope", () => {
 	it("unclaimed Claude runner settlement changes only A", async () => {
 		const before = daemonStoreManifest(store.filename);
 		const failures: string[] = [];
-		await store.runtime.runPromise(
+		// A modern run settles through Send Settlement (C 4.7), which ends A's
+		// command durably instead of calling the legacy failTurn sink.
+		const settled = await store.runtime.runPromise(
 			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
 				yield* settleUnclaimedRunnerCommands(
-					yield* SqlClient.SqlClient,
+					sql,
 					new Set(),
 					"claude",
 					() => "claude",
@@ -679,12 +628,19 @@ describe("shared-store relay project scope", () => {
 							failures.push(turn.sessionId);
 						}),
 				);
+				return yield* sql<{
+					command_id: string;
+					status: string;
+				}>`SELECT command_id, status FROM provider_command_outbox WHERE project_key = ${A} AND command_id = ${`${A}-runner-command`}`;
 			}),
 		);
+		expect(settled).toEqual([
+			{ command_id: `${A}-runner-command`, status: "failed" },
+		]);
 		record(
 			"settle-unclaimed-claude-commands",
 			before,
-			failures.filter((session) => session.startsWith(`${A}-`)).length,
+			settled.length,
 			failures.filter((session) => session.startsWith(`${B}-`)).length,
 		);
 	});
@@ -798,11 +754,46 @@ describe("shared-store relay project scope", () => {
 		);
 	});
 
-	it("worktree cleanup removes only A's eligible checkout", async () => {
+	// Failures: retries run early, never stop, alert repeatedly, leak between
+	// projects, survive manual/state resets, or a stale PTY cwd permits removal.
+	it.each([
+		"success",
+		"retries",
+		"stale-terminal",
+		"contained-stale-terminal",
+	] as const)("worktree cleanup: %s", async (scenario) => {
 		for (const project of [A, B])
 			mkdirSync(join(store.root, `${project}-launch`));
+		const gitDir = join(store.root, "alpha-git");
+		if (scenario === "retries") {
+			mkdirSync(join(gitDir, "refs", "heads"), { recursive: true });
+			writeFileSync(
+				join(store.root, `${A}-launch`, ".git"),
+				`gitdir: ${gitDir}\n`,
+			);
+			writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/main\n");
+			writeFileSync(join(gitDir, "refs", "heads", "main"), "original\n");
+			writeFileSync(join(gitDir, "index"), "index\n");
+			writeFileSync(join(gitDir, "locked"), "locked\n");
+		}
 		const before = daemonStoreManifest(store.filename);
 		const removed: string[] = [];
+		const inspect = vi.fn(() => {
+			if (scenario === "retries") {
+				// A failed Git command can create and remove temporary metadata.
+				writeFileSync(join(gitDir, "temporary"), "attempt\n");
+				rmSync(join(gitDir, "temporary"));
+			}
+			return scenario === "retries"
+				? Effect.fail(
+						new WorktreeRecoveryError({
+							reason: "git-failed",
+							path: store.root,
+							message: "locked checkout",
+						}),
+					)
+				: Effect.succeed({ head: "launch-head" });
+		});
 		const unused = () => Effect.die("Unexpected cleanup service call");
 		const worktrees: WorktreeServiceTag["Service"] = {
 			withCheckoutUse: (effect) => effect,
@@ -816,7 +807,7 @@ describe("shared-store relay project scope", () => {
 			recreateAll: unused,
 			create: unused,
 			rollback: unused,
-			inspectCheckoutCleanup: () => Effect.succeed({ head: "launch-head" }),
+			inspectCheckoutCleanup: inspect,
 			removeCheckout: (folder) =>
 				Effect.sync(() => {
 					removed.push(folder.sessionId);
@@ -844,11 +835,32 @@ describe("shared-store relay project scope", () => {
 			start: Effect.void,
 		};
 		const localPty: LocalPtyServiceTag["Service"] = {
-			list: () => Effect.succeed([]),
+			list: () =>
+				Effect.succeed(
+					scenario.includes("stale-terminal")
+						? [
+								{
+									id: "stale",
+									title: "stale",
+									command: "sh",
+									pid: 123,
+									status: "running" as const,
+									cwd: join(
+										store.root,
+										scenario === "contained-stale-terminal"
+											? `${A}-launch`
+											: "unrelated",
+										"removed",
+									),
+								},
+							]
+						: [],
+				),
 			attach: unused,
 			create: unused,
 		};
-		await store.runtime.runPromise(
+		const retries = new Map<string, WorktreeCleanupRetry>();
+		const sweep = (now: number) =>
 			cleanUpProjectWorktrees(
 				Effect.succeed({
 					...DEFAULT_WORKTREE_CLEANUP,
@@ -856,8 +868,68 @@ describe("shared-store relay project scope", () => {
 					settledAfterDays: 0,
 				}),
 				Effect.succeed([]),
-				NOW,
+				now,
+				retries,
+			);
+		await store.runtime.runPromise(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const alerts = yield* AlertsTag;
+					const subscription = yield* PubSub.subscribe(alerts);
+					const first = yield* sweep(NOW);
+					if (scenario === "retries") {
+						expect(first.failed).toHaveLength(1);
+						const hour = 3_600_000;
+						for (let attempt = 1; attempt < 5; attempt++) {
+							const due = NOW + (2 ** attempt - 1) * hour;
+							expect((yield* sweep(due - 1)).kept[0]?.reason).toContain(
+								"Retry",
+							);
+							expect(inspect).toHaveBeenCalledTimes(attempt);
+							yield* sweep(due);
+							expect(inspect).toHaveBeenCalledTimes(attempt + 1);
+						}
+						for (let i = 0; i < 3; i++) yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(5);
+						const delivered = yield* PubSub.takeUpTo(subscription, 100);
+						expect(delivered).toHaveLength(1);
+						expect(delivered[0]).toMatchObject({
+							kind: "warning",
+							sessionId: id(A, "worktree"),
+						});
+						expect(delivered[0]?.message).toContain("locked checkout");
+						// A symbolic HEAD's target can move without changing HEAD or index.
+						writeFileSync(join(gitDir, "refs", "heads", "main"), "changed\n");
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(6);
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(6);
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`UPDATE sessions SET settled_at = ${NOW} WHERE id = ${id(A, "worktree")}`;
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(7);
+						rmSync(join(gitDir, "locked"));
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(8);
+						mkdirSync(join(store.root, `${A}-launch`, "changed"));
+						yield* sweep(NOW + 100 * hour);
+						expect(inspect).toHaveBeenCalledTimes(9);
+						inspect.mockImplementationOnce(() =>
+							Effect.succeed({ head: "fixed" }),
+						);
+						expect((yield* sweep(NOW + 101 * hour)).removed).toHaveLength(1);
+						expect(retries.size).toBe(0);
+						expect(yield* PubSub.takeUpTo(subscription, 100)).toEqual([]);
+					} else if (scenario.includes("stale-terminal")) {
+						expect(first.failed[0]?.reason).toContain("WorkspaceMoveError");
+						expect((yield* sweep(NOW)).kept[0]?.reason).toContain("Retry");
+						expect(removed).toEqual([]);
+					} else {
+						expect(first.failed).toEqual([]);
+					}
+				}),
 			).pipe(
+				Effect.provide(AlertsLive),
 				Effect.provideService(ConfigTag, config()),
 				Effect.provideService(WorktreeServiceTag, worktrees),
 				Effect.provideService(SessionWorkspaceTag, workspace),
@@ -872,12 +944,13 @@ describe("shared-store relay project scope", () => {
 				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),
 		);
-		record(
-			"worktree-cleanup",
-			before,
-			removed.filter((session) => session === id(A, "worktree")).length,
-			removed.filter((session) => session.startsWith(`${B}-`)).length,
-		);
+		if (scenario === "success")
+			record(
+				"worktree-cleanup",
+				before,
+				removed.filter((session) => session === id(A, "worktree")).length,
+				removed.filter((session) => session.startsWith(`${B}-`)).length,
+			);
 	});
 
 	it("session pick backfill completes only A's candidate", async () => {
@@ -1126,33 +1199,6 @@ describe("shared-store relay project scope", () => {
 			dispatched.filter((session) => session === id(A, "continuation")).length,
 			dispatched.filter((session) => session.startsWith(`${B}-`)).length,
 		);
-	});
-
-	it("session Git refresh stamps only A's sessions and sidebar", async () => {
-		const before = daemonStoreManifest(store.filename);
-		vi.spyOn(daemonSessionGitCache, "refresh").mockResolvedValue({
-			branch: "refreshed",
-		});
-		const own = await store.runtime.runPromise(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const [beforeRow] = yield* sql<{
-					version: number;
-				}>`SELECT version FROM sessions WHERE id = ${id(A, "settings")}`;
-				yield* (yield* SessionGitServiceTag).refresh();
-				const [afterRow] = yield* sql<{
-					version: number;
-				}>`SELECT version FROM sessions WHERE id = ${id(A, "settings")}`;
-				return Number((afterRow?.version ?? 0) > (beforeRow?.version ?? 0));
-			}).pipe(
-				Effect.provide(
-					SessionGitLive.pipe(
-						Layer.provide(Layer.succeed(ConfigTag)(config())),
-					),
-				),
-			),
-		);
-		record("session-git-refresh", before, own);
 	});
 
 	for (const sweep of ["dropped-part", "reconnect"] as const) {

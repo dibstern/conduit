@@ -199,13 +199,8 @@ for (const mode of [
 		test.use({ viewport: mode.viewport, hasTouch: mode.hasTouch });
 		const press = (target: Locator) =>
 			mode.hasTouch ? target.tap() : target.click();
-		// Phones keep the session checkout in the Composer sheet.
-		const checkout = async (page: Page) => {
-			const target = page.getByTestId("composer-checkout");
-			if (mode.hasTouch && !(await target.isVisible()))
-				await press(page.getByTestId("model-picker-trigger"));
-			return target;
-		};
+		const checkout = (page: Page) =>
+			page.getByTestId("composer-icons-left").getByTestId("composer-checkout");
 		// The Composer sheet is modal, so close it before using the session bar.
 		const backToList = async (page: Page) => {
 			await page.keyboard.press("Escape");

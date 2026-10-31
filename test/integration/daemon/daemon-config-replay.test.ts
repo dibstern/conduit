@@ -67,7 +67,7 @@ for (const [owner, key] of [[fs, "readFileSync"], [fs, "readFile"], [promises, "
       const boundary = stack.includes("config-persistence-layer") ? "writer"
         : stack.includes("daemon-foreground") || stack.includes("process-harness-server") ? "startup" : "runtime";
       appendFileSync(root + "/config-reads.ndjson", JSON.stringify({ pid: process.pid, api: key, boundary, stack }) + "\\n");
-      const legacyDaemon = existsSync(root + "/rollback-daemon") && !/claude-session-runner\.(js|ts)$/.test(process.argv[1] ?? "");
+      const legacyDaemon = existsSync(root + "/rollback-daemon") && !/claude-session-runner.(js|ts)$/.test(process.argv[1] ?? "");
       if (boundary === "runtime" && !legacyDaemon && !existsSync(root + "/legacy-launch")) throw new Error("Runtime daemon config read forbidden");
     }
     return original.apply(this, args);
@@ -82,6 +82,10 @@ Socket.prototype.write = function (...args) {
     if (messages) {
       for (const message of messages) {
         if (message.type === "hello" && message.config && existsSync(root + "/legacy-launch")) delete message.config.autoSettleAfterDays;
+        if (message.type === "hello" && message.runnerId && existsSync(root + "/legacy-recovery")) {
+          delete message.sendJournalAnswers;
+          delete message.sendAnswers;
+        }
         if (message.type !== "command" || message.command?.type !== "send-turn") continue;
         if (existsSync(root + "/legacy-peer")) {
           delete message.command.autoSettleAfterDays;
@@ -204,6 +208,11 @@ for (const mode of [
 				await browser.setAutoSettle(1);
 			if (mode === "legacy-send")
 				writeFileSync(join(fixture.root, "legacy-peer"), "omit metadata");
+			if (mode === "legacy-send" || mode === "legacy-command")
+				writeFileSync(
+					join(fixture.root, "legacy-recovery"),
+					"main journal replay",
+				);
 			await fixture.kill();
 			await held;
 			if (mode === "rollback")
@@ -226,17 +235,31 @@ for (const mode of [
 				startupTimeoutMs: 90_000,
 				serviceEnvironment,
 			});
-			await vi.waitFor(() => expect(sends(fixture)).toHaveLength(2), {
-				timeout: 15_000,
-			});
-			const replay = sends(fixture)[1];
-			expect(replay?.commandId).toBe(original?.commandId);
-			if (mode === "restart") expect.soft(replay?.days).toBeNull();
-			else if (mode === "legacy-command") expect(replay?.days).toBe(1);
-			else expect(replay?.hasPolicy).toBe(false);
-			writeFileSync(join(fixture.root, "release-upgrade-turn"), "release");
+			if (mode === "restart") {
+				// SEND-SCOPE-6 S10.1 adopts the journal answer without another send.
+				expect(sends(fixture)).toEqual([original]);
+				expect(original?.hasPolicy).toBe(true);
+				expect(original?.days).toBeNull();
+			} else {
+				await vi.waitFor(() => expect(sends(fixture)).toHaveLength(2), {
+					timeout: 15_000,
+				});
+				const replay = sends(fixture)[1];
+				expect(replay?.commandId).toBe(original?.commandId);
+				if (mode === "legacy-command") expect(replay?.days).toBe(1);
+				else expect(replay?.hasPolicy).toBe(false);
+			}
 			const db = new Database(fixture.daemonStorePath(), { readonly: true });
 			try {
+				if (mode === "restart")
+					expect(
+						db
+							.prepare(
+								"SELECT json_type(payload_json, '$.autoSettleAfterDays') AS policy FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+							)
+							.all(sessionId),
+					).toEqual([{ policy: "null" }]);
+				writeFileSync(join(fixture.root, "release-upgrade-turn"), "release");
 				await vi.waitFor(
 					() =>
 						expect(
@@ -251,6 +274,7 @@ for (const mode of [
 			} finally {
 				db.close();
 			}
+			if (mode === "restart") expect(sends(fixture)).toEqual([original]);
 			await setTimeout(1400);
 			evidence = {
 				mode,
@@ -543,14 +567,20 @@ it("retains Cursor's admitted command snapshot through restart without runtime c
 		startupTimeoutMs: 90_000,
 		serviceEnvironment,
 	});
-	await vi.waitFor(() => expect(sends(fixture)).toHaveLength(2), {
-		timeout: 15_000,
-	});
-	expect(sends(fixture).map(({ days }) => days)).toEqual([null, null]);
-	expect(sends(fixture)[1]?.commandId).toBe(sends(fixture)[0]?.commandId);
-	rmSync(gate);
+	// SEND-SCOPE-6 S10.1 adopts the journal answer without sending metadata again.
+	expect(
+		sends(fixture).map(({ hasPolicy, days }) => ({ hasPolicy, days })),
+	).toEqual([{ hasPolicy: true, days: null }]);
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
+		expect(
+			db
+				.prepare(
+					"SELECT json_type(payload_json, '$.autoSettleAfterDays') AS policy FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+				)
+				.all(sessionId),
+		).toEqual([{ policy: "null" }]);
+		rmSync(gate);
 		await vi.waitFor(
 			() =>
 				expect(
@@ -565,6 +595,7 @@ it("retains Cursor's admitted command snapshot through restart without runtime c
 	} finally {
 		db.close();
 	}
+	expect(sends(fixture)).toHaveLength(1);
 	const active = runner;
 	await setTimeout(1400);
 	evidence = {

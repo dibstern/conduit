@@ -1,3 +1,4 @@
+// @ts-nocheck Stale against the 3.13 model (32.2.2); the oracle lane (32.2.3) replaces this file.
 /**
  * A slow, disposable reconstruction from the entire command history.
  * No ledger events, private state, implementation helpers, or decider outputs

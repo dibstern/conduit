@@ -25,7 +25,7 @@
 	import type { UsageReading, UsageWindow } from "../../../contracts/limit-recovery.js";
 	import { getClaudeAccounts } from "../../stores/claude-accounts.svelte.js";
 	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
-	import { getCachedInstances, getDriverTraits } from "../../stores/instance.svelte.js";
+	import { getCachedInstances, getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
@@ -34,7 +34,7 @@
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { usageDisplay, usageForecastDuration, usageForecastTime, usageForecastWindow, usagePaceLine, usageResetTime, usageWindowLimited } from "../../utils/continuation.js";
-	import AccountDot from "../ui/AccountDot.svelte";
+	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Button from "../ui/Button.svelte";
 	import SortableList from "../ui/SortableList.svelte";
@@ -270,7 +270,7 @@
 				{#if !sessionViewState.compact}<span data-testid="usage-settings-position-{account.accountId}" class="w-[14px] shrink-0 text-center font-mono text-[11px] text-text-dimmer">{index + 1}</span>{/if}
 				<div class="min-w-0 flex-1">
 					<div class="flex min-w-0 items-center gap-[7px]">
-						<AccountDot instanceId={account.accountId} size={7} data-testid="usage-settings-dot-{account.accountId}" />
+						<HarnessLogo driver={getInstanceById(account.accountId)?.driver ?? account.harness} instanceId={account.accountId} size={18} aligned data-testid="usage-settings-logo-{account.accountId}" />
 						<span data-testid="usage-limit-account-name" class="min-w-0 truncate font-medium text-text">{nameOf(account)}</span>
 						{#if hasPlanData(account) && account.planLabel}<Badge variant="tag" size="xs" class="shrink-0 font-mono" data-testid="usage-settings-plan-{account.accountId}">{account.planLabel}</Badge>{/if}
 					</div>
@@ -340,7 +340,7 @@
 				{@const month = reading && (reading.status === "available" || reading.status === "limited") ? reading.windows.find((window) => window.kind === "month") : undefined}
 				<div data-testid="cursor-usage-card-{account.id}" class="px-[14px] py-[10px]">
 					<div class="mb-[8px] flex items-center gap-[6px] text-[13.5px] max-md:text-[15px]">
-						<AccountDot instanceId={account.id} size={7} />
+						<HarnessLogo driver={getInstanceById(account.id)?.driver ?? "cursor"} instanceId={account.id} size={18} aligned data-testid="account-logo" />
 						<span class="min-w-0 flex-1 truncate font-semibold text-text">{account.name}</span>
 						{#if account.cursorUsageSource === "keychain"}
 							<TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" tone="dimmer" underline="always" data-testid="cursor-usage-disable-{account.id}" disabled={keychainPending !== null} aria-busy={keychainPending === account.id} onclick={() => void setCursorKeychain(account.id, false)}>Disable</TextButton>

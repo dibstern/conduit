@@ -33,6 +33,7 @@ describe("Claude accepted run ownership", () => {
 		const queuedHandoff = Deferred.makeUnsafe<void>();
 		const resumeBackground = Deferred.makeUnsafe<void>();
 		const acceptNext = Deferred.makeUnsafe<void>();
+		const backgroundResults = Deferred.makeUnsafe<void>();
 		const messages = readFileSync(
 			join(
 				import.meta.dirname,
@@ -60,6 +61,11 @@ describe("Claude accepted run ownership", () => {
 						);
 					await harness.ingest(event);
 					events.push(event);
+					if (
+						event.type === "turn.completed" &&
+						events.filter((item) => item.type === "turn.completed").length === 4
+					)
+						Effect.runSync(Deferred.succeed(backgroundResults, undefined));
 				},
 				catch: (cause) => new EventSinkIngestionError({ cause }),
 			});
@@ -166,11 +172,12 @@ describe("Claude accepted run ownership", () => {
 				await Effect.runPromise(Deferred.await(queuedHandoff));
 				Effect.runSync(Deferred.succeed(resumeBackground, undefined));
 			}
-			await vi.waitFor(() =>
-				expect(
-					events.filter((event) => event.type === "turn.completed"),
-				).toHaveLength(4),
-			);
+			// Background results continue after send resolves; wait for ingestion,
+			// independently of how quickly the captured trace reaches the store.
+			await Effect.runPromise(Deferred.await(backgroundResults));
+			expect(
+				events.filter((event) => event.type === "turn.completed"),
+			).toHaveLength(4);
 			const completions = events.filter(
 				(
 					event,

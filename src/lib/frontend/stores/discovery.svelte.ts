@@ -1318,7 +1318,15 @@ export function getModelDisplayName(modelId: string): string {
 	const model = getAllModels().find((candidate) =>
 		modelMatchesId(candidate, modelId),
 	);
-	return model ? formatModelName(model) : modelId;
+	if (model) return formatModelName(model);
+	const id = modelId
+		.replace(/\[1m\]$/i, "")
+		.replace(/-\d{8}$/, "")
+		.replace(/^[^/]+\//, "");
+	const claude = /^claude-([a-z]+)-(\d+)(?:-(\d+))?$/.exec(id);
+	if (!claude) return id;
+	const [, family = "", major, minor] = claude;
+	return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${major}${minor ? `.${minor}` : ""}`;
 }
 
 /** Check if a provider is configured. */

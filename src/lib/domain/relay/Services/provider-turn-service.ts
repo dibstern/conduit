@@ -16,6 +16,7 @@ import {
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
+import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
 import type {
 	ClaudeEventPersistEffectTag,
@@ -63,6 +64,7 @@ import type { SessionTitleServiceTag } from "./session-title-service.js";
 import type { SessionWorkspaceTag } from "./session-workspace.js";
 
 export interface ProviderTurnServiceSendInput {
+	readonly draftChange?: import("./input-drafts.js").DraftChange;
 	/** Continuation admission may already have resolved this immutable snapshot. */
 	readonly account?: Account;
 	readonly clientId: string;
@@ -71,7 +73,7 @@ export interface ProviderTurnServiceSendInput {
 	readonly text: string;
 	/** Hidden resumption of the original request, with no new user message. */
 	readonly continuation?: { readonly cutOffMessageId: string };
-	readonly images?: readonly string[];
+	readonly images?: readonly AttachmentRef[];
 	readonly model?: {
 		readonly providerID: string;
 		readonly modelID: string;
@@ -135,7 +137,7 @@ export interface ProviderTurnService {
 		result: string | null,
 		answers?: Record<string, unknown>,
 	) => Effect.Effect<
-		void,
+		boolean,
 		Effect.Error<ReturnType<typeof completeRecoveredQuestion>>
 	>;
 	readonly prepareTurnSession: (
@@ -262,6 +264,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 					});
 				yield* (yield* OrchestrationEngineTag).dispatchEffect({
 					type: "end_session",
+					stop: snapshot,
 					retireProcess: true,
 					retireRunIds: snapshot.owners.map(({ runId }) => runId),
 					commandId: `${input.commandId}:retire`,
@@ -269,16 +272,8 @@ const makeProviderTurnService = Effect.gen(function* () {
 					targetProviderId: target.provider_id,
 					providerProcessId: target.provider_process_id,
 				});
-				// The runner's confirmed-exit path owns settlement, including sends
-				// whose provider intake never arrived.
-				if (yield* running)
-					return yield* new ProviderInstanceFailure({
-						providerId: target.provider_id,
-						operation: "interrupt_turn",
-						cause: new Error(
-							"Stop unconfirmed: provider process loss was not confirmed",
-						),
-					});
+				// Release is final even if a survivor remains. Retirement settles its
+				// captured cohort detached; Stop must not wait on that SQL work.
 				return;
 			}
 			yield* settleSessionRuns(

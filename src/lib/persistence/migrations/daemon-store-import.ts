@@ -19,7 +19,14 @@ import {
 import { basename, join, resolve, sep } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { Data, Effect } from "effect";
+import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
+import { Data, Effect, Layer } from "effect";
+import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
+import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
+import { releaseCopiedInputDraftClaims } from "../../domain/relay/Services/input-drafts.js";
+import { legacyRunnerRanking } from "../../provider/runner/runner-registry.js";
+import { makeAttachmentStore } from "../attachment-store.js";
 import {
 	makePersistenceEffectLayer,
 	makePersistenceStoreLayer,
@@ -28,8 +35,11 @@ import {
 import { effectMigrationEntries } from "../effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../effect/projection-runner-effect.js";
 import { createAllEffectProjectors } from "../effect/projectors-effect.js";
-import { inputDraftClaimMarker } from "../input-drafts.js";
 import { daemonStorePath } from "../project-storage.js";
+import {
+	type AttachmentNormalisationSummary,
+	normaliseInlineAttachments,
+} from "./normalise-inline-attachments.js";
 
 export interface ProjectStoreSource {
 	readonly projectId: string;
@@ -85,9 +95,12 @@ export interface ProjectStoreImportResult {
 	readonly error?: DaemonStoreImportError;
 	readonly backup?: string;
 	readonly backupError?: DaemonStoreImportError;
+	readonly attachmentNormalisation?: AttachmentNormalisationSummary;
 }
 
 const copiedTables = [
+	"attachment_blobs",
+	"draft_attachments",
 	"events",
 	"sessions",
 	"provider_runs",
@@ -126,6 +139,8 @@ const singletonTables = [
 	"session_pick_backfill_state",
 	"store_identity",
 	"effect_sql_migrations",
+	// Derived by destination triggers; never copied from a source store.
+	"attachment_uses",
 	"daemon_store_imports",
 	"sqlite_sequence",
 ];
@@ -140,14 +155,56 @@ const deployedRedesignMigrationIds = new Map<string, readonly number[]>([
 	["turn_recaps", [68, 69, 73]],
 	["sessions_goal_stuck", [69]],
 ]);
-const runnerTables: Readonly<Record<string, string>> = {
-	claude_runner_cursors: `CREATE TABLE claude_runner_cursors (
-		runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
-		result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '')`,
-	claude_runner_permission_replies: `CREATE TABLE claude_runner_permission_replies (
-		session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
-		PRIMARY KEY (session_id, request_id))`,
-};
+// Runner tables the importer copies. Migration 0089 owns claude_runner_cursors;
+// claude_runner_permission_replies is created on first use, so a destination
+// that never ran a runner lacks it.
+const runnerTables = [
+	"claude_runner_cursors",
+	"claude_runner_permission_replies",
+];
+
+// Legacy-only normalization for stores imported before runner slots existed.
+// Delete with the retained-runner compatibility paths in 32.13.
+function backfillRunnerRoles(db: DatabaseSync, configDir: string) {
+	if (!tables(db, "main").includes("claude_runner_cursors")) return;
+	const registry = legacyRunnerRanking(configDir);
+	const live = rows<{
+		runner_id: string;
+		session_id: string;
+		sequence: number;
+	}>(
+		db,
+		"SELECT runner_id, session_id, sequence FROM claude_runner_cursors WHERE retired_at IS NULL AND role = 'serving' ORDER BY sequence DESC, rowid DESC",
+	);
+	const sessions = new Map<string, typeof live>();
+	for (const row of live)
+		sessions.set(row.session_id, [
+			...(sessions.get(row.session_id) ?? []),
+			row,
+		]);
+	for (const candidates of sessions.values()) {
+		const rank = (id: string) =>
+			registry.get(id)?.role === "candidate"
+				? 2
+				: registry.get(id)?.role === "retiring"
+					? 1
+					: 0;
+		candidates.sort(
+			(a, b) =>
+				rank(a.runner_id) - rank(b.runner_id) ||
+				(registry.get(b.runner_id)?.registeredAt ?? 0) -
+					(registry.get(a.runner_id)?.registeredAt ?? 0) ||
+				b.sequence - a.sequence,
+		);
+		for (const row of candidates.slice(1))
+			db.prepare(
+				"UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = ?",
+			).run(row.runner_id);
+	}
+	db.exec(
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_runner_serving_session ON claude_runner_cursors(session_id) WHERE retired_at IS NULL AND role = 'serving'",
+	);
+}
 // Tables older builds created and later stopped using without dropping them.
 // Nothing reads them, so the import leaves them behind instead of rejecting.
 const retiredTables = [
@@ -281,7 +338,7 @@ function verifyStore(
 			![
 				...copiedTables,
 				...singletonTables,
-				...Object.keys(runnerTables),
+				...runnerTables,
 				...retiredTables,
 				"_migrations",
 				"sqlite_stat1",
@@ -564,13 +621,15 @@ function sessionIds(db: DatabaseSync, schema: string): string {
 		.filter(
 			(table) =>
 				copiedTables.some((name) => name === table) ||
-				Object.hasOwn(runnerTables, table),
+				runnerTables.includes(table),
 		)
 		.flatMap((table) =>
 			columns(db, schema, table)
 				.filter(
 					({ name }) =>
-						name === "session_id" ||
+						// A runner cursor names its session but owns none; main's
+						// cursor table had no session_id column.
+						(name === "session_id" && table !== "claude_runner_cursors") ||
 						(table === "sessions" && name === "id") ||
 						(table === "input_drafts" && name === "draft_key"),
 				)
@@ -596,6 +655,17 @@ function excludeSharedSessions(
 			db,
 			`SELECT s.id FROM (${sessionIds(db, "main")}) s JOIN (${sessionIds(db, "daemon")}) d ON s.id = d.id ORDER BY s.id`,
 		).map(({ id }) => id);
+		// A daemon that could not import this history may still have stopped its
+		// runner; that retirement supersedes the copy's earlier cursor row.
+		if (
+			tables(db, "main").includes("claude_runner_cursors") &&
+			columns(db, "daemon", "claude_runner_cursors").some(
+				({ name }) => name === "retired_at",
+			)
+		)
+			db.exec(
+				"DELETE FROM main.claude_runner_cursors WHERE runner_id IN (SELECT runner_id FROM daemon.claude_runner_cursors WHERE retired_at IS NOT NULL)",
+			);
 		if (shared.length === 0) return shared;
 		db.exec("CREATE TEMP TABLE shared_sessions (id TEXT PRIMARY KEY)");
 		const insert = db.prepare("INSERT INTO shared_sessions VALUES (?)");
@@ -603,6 +673,7 @@ function excludeSharedSessions(
 		// Capture references before deleting their owners. Parent/fork links are
 		// deliberately absent: a non-shared child must resolve to the first owner.
 		db.exec(`
+			CREATE TEMP TABLE shared_drafts AS SELECT draft_key AS id FROM input_drafts WHERE kind = 'session' AND draft_key IN shared_sessions;
 			CREATE TEMP TABLE shared_events AS SELECT sequence AS id FROM events WHERE session_id IN shared_sessions;
 			CREATE TEMP TABLE shared_turns AS SELECT id FROM turns WHERE session_id IN shared_sessions;
 			CREATE TEMP TABLE shared_messages AS SELECT id FROM messages WHERE session_id IN shared_sessions OR turn_id IN shared_turns;
@@ -615,6 +686,7 @@ function excludeSharedSessions(
 		`);
 		const references: Readonly<Record<string, string>> = {
 			session_id: "shared_sessions",
+			draft_key: "shared_drafts",
 			message_id: "shared_messages",
 			turn_id: "shared_turns",
 			command_id: "shared_commands",
@@ -681,9 +753,10 @@ function collisions(
 ): void {
 	const all = [
 		...copiedTables,
-		...Object.keys(runnerTables).filter((name) => names.includes(name)),
+		...runnerTables.filter((name) => names.includes(name)),
 	];
 	for (const table of all) {
+		if (table === "attachment_blobs") continue;
 		const key = columns(db, "source", table)
 			.filter(({ pk }) => pk > 0)
 			.map(({ name }) => name);
@@ -801,7 +874,7 @@ function copyProject(
 ): void {
 	for (const table of [
 		...copiedTables,
-		...Object.keys(runnerTables).filter((name) => names.includes(name)),
+		...runnerTables.filter((name) => names.includes(name)),
 	]) {
 		const fields = columns(db, "source", table)
 			.filter(({ hidden }) => hidden === 0)
@@ -884,7 +957,7 @@ function copyProject(
 				`ROW_NUMBER() OVER (ORDER BY rowid) + ${offsets.rowid[table] ?? 0}`;
 		}
 		db.prepare(
-			`INSERT INTO main.${table} (${fields.map(quote).join(", ")}) SELECT ${fields.map((field) => expressions[field] ?? quote(field)).join(", ")} FROM source.${table} ORDER BY rowid`,
+			`INSERT ${table === "attachment_blobs" ? "OR IGNORE " : ""}INTO main.${table} (${fields.map(quote).join(", ")}) SELECT ${fields.map((field) => expressions[field] ?? quote(field)).join(", ")} FROM source.${table} ORDER BY rowid`,
 		).run(
 			...(fields.includes("project_id") || fields.includes("project_key")
 				? [project.projectId]
@@ -934,13 +1007,16 @@ function importOne(
 		const result = transaction(db, () => {
 			verifyStore(db, "main", project);
 			const names = verifySource(db, "source", project, true);
-			for (const [table, ddl] of Object.entries(runnerTables)) {
-				if (!names.includes(table)) continue;
-				if (!tables(db, "main").includes(table)) db.exec(ddl);
-			}
+			// Imported legacy checkpoints can share an empty session id. Restore
+			// the slot index in this same transaction after their one-time backfill.
+			db.exec("DROP INDEX IF EXISTS main.idx_runner_serving_session");
+			if (names.includes("claude_runner_permission_replies"))
+				db.exec(`CREATE TABLE IF NOT EXISTS main.claude_runner_permission_replies (
+					session_id TEXT NOT NULL, request_id TEXT NOT NULL, response_json TEXT NOT NULL,
+					PRIMARY KEY (session_id, request_id))`);
 			for (const table of [
 				...copiedTables,
-				...Object.keys(runnerTables).filter((name) => names.includes(name)),
+				...runnerTables.filter((name) => names.includes(name)),
 			]) {
 				if (
 					JSON.stringify(columns(db, "main", table)) !==
@@ -1004,17 +1080,9 @@ function importOne(
 					"Translated counters exceed the safe integer range",
 				);
 			copyProject(db, project, names, offsets);
+			backfillRunnerRoles(db, configDir);
 			// Release only copied claims, before another connection can claim these rows.
-			db.prepare(`DELETE FROM main.input_drafts
-				WHERE promoted_session_id = ? AND text = ''
-				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
-				inputDraftClaimMarker,
-			);
-			db.prepare(`UPDATE main.input_drafts SET promoted_session_id = NULL
-				WHERE promoted_session_id = ?
-				AND draft_key IN (SELECT draft_key FROM source.input_drafts)`).run(
-				inputDraftClaimMarker,
-			);
+			releaseCopiedInputDraftClaims(db);
 			options.checkpoint?.("import-copied", project.projectId);
 			for (const table of ["events", "projection_failures"]) {
 				const target =
@@ -1188,9 +1256,29 @@ function withNormalisedSource(
 					}
 					return before;
 				});
-				yield* Effect.gen(function* () {
+				const attachmentNormalisation = yield* Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const destination = daemonStorePath(configDir);
+					// A seed promotes this copy, so its blobs already live at their
+					// destination. Runtime imports put directly into the shared store.
+					const summary = existsSync(destination)
+						? yield* Effect.gen(function* () {
+								return yield* normaliseInlineAttachments(
+									sql,
+									yield* makeAttachmentStore,
+								);
+							}).pipe(
+								Effect.provide(
+									SqliteNode.layer({
+										filename: destination,
+										busyTimeout: 5000,
+									}).pipe(Layer.provide(Reactivity.layer)),
+								),
+							)
+						: yield* normaliseInlineAttachments(sql, yield* AttachmentStoreTag);
 					const runner = yield* ProjectionRunnerEffectTag;
 					if (!(yield* runner.isRecovered())) yield* runner.recover();
+					return summary;
 				}).pipe(
 					Effect.provide(
 						makePersistenceEffectLayer(copyPath, project.projectId),
@@ -1206,13 +1294,15 @@ function withNormalisedSource(
 							"source-changed",
 							"Source changed during normalisation",
 						);
-					const copy = new DatabaseSync(copyPath, { readOnly: true });
+					const copy = new DatabaseSync(copyPath);
 					try {
 						verifyStore(copy, "main", project);
+						// Migration 0089 has given the copy every cursor column by now.
+						backfillRunnerRoles(copy, configDir);
 					} finally {
 						copy.close();
 					}
-					return use(copyPath, before);
+					return { ...use(copyPath, before), attachmentNormalisation };
 				});
 			}),
 		(copyPath) =>
@@ -1490,6 +1580,13 @@ export function formatDaemonStoreImportReport(
 					: `, ${result.importedEvents} events`) +
 				(result.sharedSessions?.length
 					? `, shared sessions left out: ${result.sharedSessions.join(",")}`
+					: "") +
+				(result.attachmentNormalisation &&
+				(Object.values(result.attachmentNormalisation.rowsChanged).some(
+					(count) => count > 0,
+				) ||
+					result.attachmentNormalisation.rowsSkipped > 0)
+					? `, attachments ${JSON.stringify(result.attachmentNormalisation)}`
 					: "") +
 				(result.error
 					? `, error ${result.error.kind}: ${result.error.message}`

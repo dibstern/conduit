@@ -179,6 +179,8 @@ export const mockAppHandlers: StepHandler[] = [
 						? { head: branch }
 						: {
 								branch,
+								head: "6b11104",
+								oid: "6b11104a9c2e88d27395d13c706d876fbab99aa1",
 								...(kind === "worktree" ? { worktree: project } : {}),
 							};
 			const projects = [
@@ -215,6 +217,8 @@ export const mockAppHandlers: StepHandler[] = [
 				git: {
 					...row?.git,
 					dirty: true,
+					upstream: `origin/${row?.git?.branch ?? "main"}`,
+					changes: { files: 3, insertions: 12, deletions: 4 },
 					ahead: Number(match[1]),
 					behind: Number(match[2]),
 					...(match[3] ? { operation: "rebase" as const } : {}),

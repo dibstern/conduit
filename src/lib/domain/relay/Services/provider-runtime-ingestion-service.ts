@@ -1,28 +1,22 @@
-import {
-	Context,
-	Deferred,
-	Effect,
-	Layer,
-	Ref,
-	Schema,
-	Semaphore,
-} from "effect";
+import { Context, Deferred, Effect, Layer, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../../contracts/providers/provider-runtime-event.js";
 import { sessionCreatedLineage } from "../../../contracts/session-ref.js";
+import { RunnerWriteOrigin } from "../../../contracts/stored-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
 import { makeAppendEventsWithClaudeTurnCosts } from "../../../persistence/effect/claude-event-persist-effect.js";
 import {
 	type CommitAndSignalProject,
+	currentRunnerWriteOrigin,
+	guardCurrentWrite,
 	makeCommitAndSignal,
 } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
-import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
@@ -46,6 +40,10 @@ import {
 	currentRunnerPermissionReply,
 	ownsRunnerAttachment,
 } from "../../../provider/runner/runner-receipts.js";
+import {
+	type RunSettlementOwner,
+	settleSessionRuns,
+} from "../../../provider/session-run-settlement.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
@@ -103,6 +101,14 @@ export interface ProviderRuntimeIngestion {
 			/** Runs inside the append transaction, before any projection. */
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
+			/** Read current owners and settle them inside the append transaction. */
+			readonly settleRuns?: {
+				readonly sessionId: string;
+				readonly reason: string;
+				readonly owners: Effect.Effect<readonly RunSettlementOwner[], SqlError>;
+				readonly errorCode?: string;
+			};
+			readonly requeueFailedInputs?: false;
 			readonly afterCommit?: Effect.Effect<void>;
 			readonly endedRunEvents?: Set<string>;
 		},
@@ -170,21 +176,14 @@ export const makeProviderRuntimeIngestionLive = (
 			const services = yield* Effect.context<
 				EventStoreEffectTag | ProjectionRunnerEffectTag | SqlClient.SqlClient
 			>();
-			const mapperStateRef = yield* Ref.make(
-				emptyProviderRuntimeDomainMapperState,
-			);
+			let mapperState = emptyProviderRuntimeDomainMapperState;
 			const ingestSemaphore = yield* Semaphore.make(1);
 
 			const ingestBatch = (
 				events: readonly ProviderRuntimeEvent[],
-				ingestOptions: {
-					readonly sessionPicks?: ReadonlyMap<string, TurnSettings>;
-					readonly publishToBus?: boolean;
-					readonly publishToRelay?: boolean;
-					readonly beforeProject?: Effect.Effect<void, SqlError>;
-					readonly beforeCommit?: Effect.Effect<void, SqlError>;
-					readonly afterCommit?: Effect.Effect<void>;
-					readonly endedRunEvents?: Set<string>;
+				ingestOptions: NonNullable<
+					Parameters<ProviderRuntimeIngestion["ingestBatch"]>[1]
+				> & {
 					readonly onPrompt?: (id: string) => Effect.Effect<void>;
 				} = {},
 			): Effect.Effect<number, ProviderRuntimeIngestionError> =>
@@ -216,11 +215,21 @@ export const makeProviderRuntimeIngestionLive = (
 					return yield* ingestSemaphore.withPermits(1)(
 						Effect.gen(function* () {
 							const context = yield* currentRunnerOutput;
+							const attributedRunnerId = events
+								.map((event) => event[RunnerWriteOrigin])
+								.find((id): id is string => typeof id === "string");
+							const runnerId =
+								attributedRunnerId ??
+								context?.runnerId ??
+								(events.some((event) =>
+									event.rawSource.kind.startsWith("runner."),
+								)
+									? ((yield* currentRunnerWriteOrigin) ?? "unidentified-runner")
+									: undefined);
 							const permissionReply = yield* currentRunnerPermissionReply;
 							const receipt =
 								context && !context.consumed ? context : undefined;
-							const currentState = yield* Ref.get(mapperStateRef);
-							let nextState = currentState;
+							let nextState = mapperState;
 							let domainEvents: CanonicalEvent[] = [];
 							const promptIds: string[] = [];
 							const seedableSessions = new Set(
@@ -232,15 +241,19 @@ export const makeProviderRuntimeIngestionLive = (
 									event.type.startsWith("permission.") ||
 									event.type.startsWith("question.");
 								let redelivered = false;
+								let reconcileLegacyPrompt = false;
 								if (promptEvent) {
 									const data = isRecord(event.data) ? event.data : {};
 									const providerRequestId = requestId(event, data);
 									const processId = event.providerRefs.providerProcessId;
+									const type = event.type.startsWith("permission.")
+										? "permission"
+										: "question";
 									let [stored] = processId
 										? yield* sql<{
 												id: string;
 												status: string;
-											}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND provider_process_id = ${processId} AND provider_request_id = ${providerRequestId}`
+											}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND type = ${type} AND provider_process_id = ${processId} AND provider_request_id = ${providerRequestId}`
 										: [];
 									// Reconciled asks from any provider must retain legacy ids.
 									// Unknown resolutions still require the process reference or
@@ -251,10 +264,19 @@ export const makeProviderRuntimeIngestionLive = (
 											context?.consumed ||
 											nextState.promptIds?.has(promptKey(event)))
 									) {
-										[stored] = yield* sql<{
+										const [legacy] = yield* sql<{
 											id: string;
 											status: string;
-										}>`SELECT id, status FROM pending_approvals WHERE session_id = ${event.sessionId} AND id = ${providerRequestId} AND provider_process_id IS NULL`;
+											provider_request_id: string | null;
+										}>`SELECT id, status, provider_request_id FROM pending_approvals WHERE session_id = ${event.sessionId} AND type = ${type} AND id = ${providerRequestId} AND provider_process_id IS NULL`;
+										stored = legacy;
+										// A current OpenCode ask proves the legacy id's native owner.
+										reconcileLegacyPrompt =
+											event.providerId === "opencode" &&
+											processId?.startsWith("opencode:") === true &&
+											event.type.endsWith(".asked") &&
+											legacy?.status === "pending" &&
+											legacy.provider_request_id === null;
 									}
 									// A late answer from a replaced process cannot resolve an
 									// unrelated legacy row that happens to have its request id.
@@ -277,7 +299,8 @@ export const makeProviderRuntimeIngestionLive = (
 											),
 										};
 										redelivered =
-											event.type.endsWith(".asked") ||
+											(event.type.endsWith(".asked") &&
+												!reconcileLegacyPrompt) ||
 											stored.status === "resolved";
 									}
 								}
@@ -334,7 +357,22 @@ export const makeProviderRuntimeIngestionLive = (
 									)
 										promptIds.push(domain.data.id);
 								}
-								if (!redelivered) domainEvents.push(...result.events);
+								if (!redelivered)
+									domainEvents.push(
+										...result.events.map((domain) =>
+											reconcileLegacyPrompt &&
+											(domain.type === "permission.asked" ||
+												domain.type === "question.asked")
+												? {
+														...domain,
+														metadata: {
+															...domain.metadata,
+															source: "conduit.control-reconciliation",
+														},
+													}
+												: domain,
+										),
+									);
 								nextState = result.state;
 							}
 
@@ -346,7 +384,6 @@ export const makeProviderRuntimeIngestionLive = (
 							const completedAccounts = new Set<string>();
 							let skippedLimits = 0;
 							const beforeCommit = Effect.gen(function* () {
-								yield* ingestOptions.beforeCommit ?? Effect.void;
 								if (permissionReply) {
 									yield* createRunnerPermissionReplies(sql);
 									yield* sql`INSERT OR REPLACE INTO claude_runner_permission_replies (session_id, request_id, response_json) VALUES (${permissionReply.sessionId}, ${permissionReply.requestId}, ${JSON.stringify(permissionReply.response)})`;
@@ -395,59 +432,85 @@ export const makeProviderRuntimeIngestionLive = (
 												);
 												continue;
 											}
-											yield* options.pendingInteractions.recordQuestionRequest({
-												requestId: event.data.id,
-												sessionId: event.sessionId ?? event.data.sessionId,
-												delivery: "async",
-												questions: questions.value,
-												...(event.data.providerProcessId
-													? { providerProcessId: event.data.providerProcessId }
-													: {}),
-												...(event.data.providerRequestId
-													? { providerRequestId: event.data.providerRequestId }
-													: {}),
-												...(event.data.providerId
-													? { providerId: event.data.providerId }
-													: {}),
-												...(event.data.toolUseId
-													? { toolCallId: event.data.toolUseId }
-													: {}),
-												...(event.data.messageId
-													? { messageId: event.data.messageId }
-													: {}),
-												...(event.data.partId
-													? { partId: event.data.partId }
-													: {}),
-											});
+											yield* guardCurrentWrite(
+												options.pendingInteractions.recordQuestionRequest({
+													requestId: event.data.id,
+													sessionId: event.sessionId ?? event.data.sessionId,
+													delivery: "async",
+													questions: questions.value,
+													...(event.data.providerProcessId
+														? {
+																providerProcessId: event.data.providerProcessId,
+															}
+														: {}),
+													...(event.data.providerRequestId
+														? {
+																providerRequestId: event.data.providerRequestId,
+															}
+														: {}),
+													...(event.data.providerId
+														? { providerId: event.data.providerId }
+														: {}),
+													...(event.data.toolUseId
+														? { toolCallId: event.data.toolUseId }
+														: {}),
+													...(event.data.messageId
+														? { messageId: event.data.messageId }
+														: {}),
+													...(event.data.partId
+														? { partId: event.data.partId }
+														: {}),
+												}),
+											);
 										}
 									}
 									for (const id of draftsToForget)
-										yield* drafts
-											.forget(id)
-											.pipe(
-												Effect.catch((cause) =>
-													Effect.logError(
-														`Could not forget input draft ${id}: ${cause}`,
+										yield* guardCurrentWrite(
+											drafts
+												.forget(id)
+												.pipe(
+													Effect.catch((cause) =>
+														Effect.logError(
+															`Could not forget input draft ${id}: ${cause}`,
+														),
 													),
 												),
-											);
-									yield* Ref.set(mapperStateRef, nextState);
+										);
+									yield* guardCurrentWrite(() => {
+										mapperState = nextState;
+									});
 									for (const id of promptIds)
-										yield* ingestOptions.onPrompt?.(id) ?? Effect.void;
+										yield* guardCurrentWrite(
+											ingestOptions.onPrompt?.(id) ?? Effect.void,
+										);
 									if (options.usage)
 										for (const accountId of completedAccounts)
-											yield* options.usage.turnEnded(accountId);
+											yield* guardCurrentWrite(
+												options.usage.turnEnded(accountId),
+											);
 									for (const sessionId of acceptedLimits)
-										yield* continuation.queueLimitPolicy(sessionId);
-									yield* ingestOptions.afterCommit ?? Effect.void;
+										yield* guardCurrentWrite(
+											continuation.queueLimitPolicy(sessionId),
+										);
+									yield* guardCurrentWrite(
+										ingestOptions.afterCommit ?? Effect.void,
+									);
 								}
 								if (receipt) {
 									receipt.consumed = true;
 									yield* Deferred.succeed(receipt.committed, undefined);
-									if (appended) receipt.onCommitted?.();
+									if (appended)
+										yield* guardCurrentWrite(() => receipt.onCommitted?.());
 								}
 							});
 							const commitOptions = {
+								...(ingestOptions.requeueFailedInputs === false
+									? { requeueFailedInputs: ingestOptions.requeueFailedInputs }
+									: {}),
+								...(ingestOptions.beforeCommit
+									? { beforeCommit: ingestOptions.beforeCommit }
+									: {}),
+								runnerId,
 								publish: ingestOptions.publishToBus ?? true,
 								endedRunEvents,
 								afterCommit,
@@ -464,6 +527,29 @@ export const makeProviderRuntimeIngestionLive = (
 													? yield* commitRunnerOutput(sql, receipt)
 													: yield* ownsRunnerAttachment(sql, context);
 											if (!appended) return;
+											if (ingestOptions.settleRuns) {
+												const settlement = ingestOptions.settleRuns;
+												const settlements = yield* settleSessionRuns(
+													sql,
+													settlement.sessionId,
+													settlement.reason,
+													Effect.succeed,
+													{
+														owners: yield* settlement.owners,
+														...(settlement.errorCode
+															? { errorCode: settlement.errorCode }
+															: {}),
+													},
+												);
+												for (const event of settlements) {
+													const result = translateProviderRuntimeEventToDomain(
+														event,
+														nextState,
+													);
+													domainEvents.push(...result.events);
+													nextState = result.state;
+												}
+											}
 											// Check under the same write permit and transaction as local
 											// deletion. Neither seeding nor publication may revive a deletion.
 											const sessionIds = new Set(
@@ -674,23 +760,6 @@ export const makeProviderRuntimeIngestionLive = (
 											}
 											if (pending.length > 0)
 												yield* project(yield* appendEvents(pending));
-											// Orphan settlement must commit its unplaced steers too;
-											// a terminal run no longer triggers startup recovery.
-											for (const event of accepted)
-												if (
-													event.type === "turn.error" &&
-													event.data.code === "runner_stopped"
-												)
-													yield* requeueFailedSteers(
-														sql,
-														{
-															persistEvents: (events) =>
-																Effect.gen(function* () {
-																	yield* project(yield* appendEvents(events));
-																}),
-														},
-														event.sessionId,
-													);
 											yield* beforeCommit;
 										}),
 									commitOptions,
@@ -698,16 +767,24 @@ export const makeProviderRuntimeIngestionLive = (
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
 							if (!appended) return 0;
 							if (options.surfacing)
-								yield* options.surfacing.observe(domainEvents);
+								yield* guardCurrentWrite(
+									options.surfacing.observe(domainEvents),
+								);
 
 							// A compaction in progress and a retry live in memory, not the
 							// log (C1). Stamp their rows so the shell re-reads them.
+							const transientSessions = yield* guardCurrentWrite(
+								() =>
+									new Set([
+										...(options.compactions?.observe(domainEvents) ?? []),
+										...(options.retries?.observe(domainEvents) ?? []),
+									]),
+							);
 							yield* Effect.forEach(
-								new Set([
-									...(options.compactions?.observe(domainEvents) ?? []),
-									...(options.retries?.observe(domainEvents) ?? []),
-								]),
-								announceBackgroundWork,
+								transientSessions._tag === "Some"
+									? transientSessions.value
+									: [],
+								(id) => guardCurrentWrite(announceBackgroundWork(id)),
 								{ discard: true },
 							).pipe(
 								Effect.provide(services),
@@ -723,11 +800,13 @@ export const makeProviderRuntimeIngestionLive = (
 								options.relayPublisher &&
 								ingestOptions.publishToRelay !== false
 							) {
-								yield* publishRelayMessages(
-									domainEvents.filter((event) =>
-										endedRunEvents.has(event.eventId),
+								yield* guardCurrentWrite(
+									publishRelayMessages(
+										domainEvents.filter((event) =>
+											endedRunEvents.has(event.eventId),
+										),
+										options.relayPublisher,
 									),
-									options.relayPublisher,
 								);
 							}
 

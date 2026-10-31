@@ -97,7 +97,7 @@ test("Power runs its command, shares the inline editor, persists edits and stops
 }, testInfo) => {
 	const daemonPid = harness.generations.at(-1)?.pid;
 	if (!daemonPid) throw new Error("No daemon generation");
-	await new AppPage(page).goto(harness.baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	await openServer(page);
 	const power = page.getByTestId("server-power-settings");
 	const toggle = power.getByRole("switch", {
@@ -181,7 +181,9 @@ test("Power runs its command, shares the inline editor, persists edits and stops
 			keepAwakeArgs: ["601"],
 		});
 
-	await page.reload();
+	await new AppPage(page).mountWithoutProjects(harness, async () => {
+		await page.reload();
+	});
 	await expect(new AppPage(page).connectOverlay).toHaveCount(0);
 	await openServer(page);
 	await expect(toggle).toHaveAttribute("aria-checked", "true");
@@ -257,7 +259,7 @@ test("an argument containing spaces survives Edit and Save", async ({
 		command: "systemd-inhibit",
 		args,
 	});
-	await new AppPage(page).goto(harness.baseUrl);
+	await new AppPage(page).mountWithoutProjects(harness);
 	await openServer(page);
 	await expect(page.getByTestId("server-power-command-value")).toHaveText(
 		"systemd-inhibit --what=idle --who=conduit '--why=Conduit relay running' sleep infinity",

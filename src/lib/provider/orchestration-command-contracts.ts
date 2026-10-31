@@ -110,7 +110,7 @@ export const ProviderControlPayloadSchema = Schema.Union([
 		...controlTarget,
 		type: Schema.Literal("interrupt_turn"),
 		turnIds: Schema.optionalKey(Schema.Array(Schema.String)),
-		stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+		stop: Schema.optionalKey(Schema.NullOr(ProviderStopSnapshotSchema)),
 	}),
 	Schema.Struct({
 		...controlTarget,
@@ -138,7 +138,7 @@ export const ProviderControlPayloadSchema = Schema.Union([
 	Schema.Struct({
 		...controlTarget,
 		type: Schema.Literal("end_session"),
-		stop: Schema.optionalKey(ProviderStopSnapshotSchema),
+		stop: Schema.optionalKey(Schema.NullOr(ProviderStopSnapshotSchema)),
 		retireProcess: Schema.optionalKey(Schema.Literal(true)),
 		retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		targetProviderId: Schema.optionalKey(Schema.String),

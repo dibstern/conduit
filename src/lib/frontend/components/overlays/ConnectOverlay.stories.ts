@@ -32,8 +32,8 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 /**
- * Overlay visible — shows animated logo and "Connecting to Conduit server..."
- * status text. Simulates the disconnected/connecting state.
+ * Overlay visible: rain on the dot grid, the still logo tile whose hook fires
+ * when a drop lands on it, and the cycling "Connecting…" verb.
  */
 export const Connecting: Story = {
 	play: async ({ canvasElement }) => {
@@ -41,30 +41,12 @@ export const Connecting: Story = {
 		await expect(hero).toBeInTheDocument();
 		if (!hero) return;
 		const mark = hero.querySelector("[data-conduit-mark]");
-		await expect(mark).toBeInTheDocument();
 		await expect(mark?.getBoundingClientRect().width).toBe(96);
-		const ripples = hero.querySelectorAll("[data-flow-ripple]");
-		const sparkles = hero.querySelectorAll("[data-flow-sparkle]");
-		await expect(ripples).toHaveLength(2);
-		await expect(sparkles).toHaveLength(3);
-		const packet = hero.querySelector("[data-flow-packet]");
-		await expect(packet).toBeInTheDocument();
-		const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-		for (const element of [
-			...ripples,
-			...sparkles,
-			...(packet ? [packet] : []),
-		]) {
-			if (reduced) {
-				await expect(getComputedStyle(element).animationName).toBe("none");
-			} else {
-				await expect(getComputedStyle(element).animationName).not.toBe("none");
-			}
-		}
+		await expect(hero.querySelectorAll("[data-flow-ripple]")).toHaveLength(0);
+		await expect(hero.querySelector("[data-flow-packet]")).toBeInTheDocument();
+		await expect(canvasElement.querySelector("canvas")).toBeInTheDocument();
 		await expect(canvasElement.textContent).toContain("conduit");
-		await expect(canvasElement.textContent).toContain(
-			"Connecting to Conduit server...",
-		);
+		await expect(canvasElement.textContent).toContain("Connecting…");
 	},
 };
 

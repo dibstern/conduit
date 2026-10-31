@@ -538,12 +538,16 @@ function seedDrafts() {
 	draftList.rows = [
 		{
 			draftId: "d1",
+			imageCount: 0,
+			fileCount: 0,
 			projectSlug: "conduit",
 			firstLine: "Plan the next release, starting with the drafts work",
 			updatedAt: now - 120_000,
 		},
 		{
 			draftId: "d2",
+			imageCount: 0,
+			fileCount: 0,
 			projectSlug: "api",
 			firstLine:
 				"Refactor the relay stack so each provider adapter owns its own poller",
@@ -551,6 +555,8 @@ function seedDrafts() {
 		},
 		{
 			draftId: "d3",
+			imageCount: 0,
+			fileCount: 0,
 			projectSlug: "conduit",
 			firstLine: "Why does the replay suite flake on the second run?",
 			updatedAt: now - 86_400_000,

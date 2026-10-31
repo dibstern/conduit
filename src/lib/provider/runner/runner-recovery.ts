@@ -1,25 +1,83 @@
-import { Effect } from "effect";
+import { Clock, Context, Effect, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
 import {
-	ClaudeEventPersistEffectTag,
-	makeClaudeEventPersistEffect,
-} from "../../persistence/effect/claude-event-persist-effect.js";
+	currentRunnerWriteOrigin,
+	flushPendingWrites,
+	makeUnboundCommitAndSignal,
+} from "../../persistence/effect/commit-and-signal.js";
 import {
-	EventStoreEffectTag,
-	makeEventStoreEffect,
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
 } from "../../persistence/effect/event-store-effect.js";
-import { requeueFailedSteers } from "../../persistence/effect/input-requeue-effect.js";
 import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
+import { isRecord } from "../../utils.js";
+import {
+	ClaudeConfigDirSchema,
+	configuredClaudeConfigDir,
+} from "../claude/claude-sdk-env.js";
+import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { TurnResult } from "../types.js";
-import { runnerSinkId } from "./runner-protocol.js";
+import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
+import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
-import type { SessionFailure, SessionTurn } from "./session-runner.js";
+import { retrySettlementWrite } from "./send-settlement.js";
+import { settleSend } from "./send-settlement-outbox.js";
+import type { DurableSessionTurn, SessionFailure } from "./session-runner.js";
+
+/** Same-daemon recovery keeps a row while its exact reactor attempt owns it. */
+export const currentPendingSendOwner = Context.Reference<
+	OrchestrationEngine["ownsPendingSend"] | undefined
+>("conduit/provider/currentPendingSendOwner", {
+	defaultValue: () => undefined,
+});
+
+/** Adoption checks durable completion before admitting a retained runner send. */
+export const runnerCommandEnded = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+	commandId: string,
+	attempt?: number,
+) =>
+	sql<{
+		status: string;
+		attempt_count: number;
+		run_state: string | null;
+		run_id: string | null;
+		turn_state: string | null;
+	}>`
+	SELECT outbox.status, outbox.attempt_count, owner.status AS run_state, outbox.run_id, turns.state AS turn_state
+	FROM provider_command_outbox outbox
+	LEFT JOIN provider_runs reservation ON reservation.id = outbox.run_id AND reservation.session_id = outbox.session_id
+	LEFT JOIN provider_runs owner ON owner.id = COALESCE(reservation.joined_into, reservation.id) AND owner.session_id = outbox.session_id
+	LEFT JOIN turns ON turns.session_id = outbox.session_id
+		AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
+	WHERE outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
+		AND outbox.session_id = ${sessionId} AND outbox.command_id = ${commandId}
+	ORDER BY outbox.request_sequence DESC LIMIT 1`.pipe(
+		Effect.map(([row]) =>
+			row
+				? (attempt !== undefined && row.attempt_count !== attempt) ||
+					(row.status !== "running" && row.status !== "completed") ||
+					// Modern commands acknowledge intake before the send ends. Their
+					// resolved run owns completion, not an older retry/continuation turn.
+					(row.run_state !== null
+						? row.run_state !== "pending" && row.run_state !== "running"
+						: row.status !== "running" ||
+							(row.run_id === null &&
+								row.turn_state !== null &&
+								row.turn_state !== "pending" &&
+								row.turn_state !== "running"))
+				: attempt !== undefined,
+		),
+		Effect.mapError((cause) => runnerFailure("check recovered command", cause)),
+	);
 
 export const runningRunnerCommands = (
 	sql: SqlClient.SqlClient,
@@ -27,6 +85,8 @@ export const runningRunnerCommands = (
 	driverForAccount: (accountId: string) => string | undefined,
 	sessionId?: string,
 	includeInactive = false,
+	ownerSend?: { readonly runId: string; readonly commandId: string },
+	includeHeld = false,
 ) =>
 	Effect.gen(function* () {
 		const project = yield* Effect.serviceOption(PersistenceProjectTag);
@@ -35,6 +95,9 @@ export const runningRunnerCommands = (
 			sessionId === undefined
 				? sql`(${projectId} IS NULL OR outbox.project_key = ${projectId})`
 				: sql`outbox.session_id = ${sessionId} AND outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})`;
+		const owner = ownerSend
+			? sql`outbox.command_id = ${ownerSend.commandId} AND COALESCE(run.joined_into, run.id) = ${ownerSend.runId}`
+			: sql`1`;
 		const rows = yield* sql<{
 			request_sequence: number;
 			project_key: string;
@@ -56,105 +119,56 @@ export const runningRunnerCommands = (
 		LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
-		WHERE ${scope}
-			AND (outbox.status = 'running' OR (${includeInactive}
+		WHERE ${scope} AND ${owner}
+			AND (outbox.status = 'running' OR (${includeHeld}
+				AND run.status IN ('pending', 'running') AND run.runner_id IS NOT NULL
+				AND run.held_transmission IS NOT NULL) OR (${includeInactive}
 				AND outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
 				AND run.status IN ('pending', 'running')))
 			AND outbox.effect_type = 'send_turn'
 		ORDER BY outbox.request_sequence`;
-		return rows.filter(
+		const commands = rows.filter(
 			(row) => driverForAccount(row.provider_id) === driverKind,
 		);
-	});
-
-type RunningCommand = Effect.Success<
-	ReturnType<typeof runningRunnerCommands>
->[number];
-
-/** Reattach admitted commands to their payload without serializing live steers. */
-export const recoverRunnerCommands = <T extends SessionTurn>(
-	sql: SqlClient.SqlClient,
-	sessionId: string,
-	driverKind: string,
-	options: {
-		readonly driverForAccount: (accountId: string) => string | undefined;
-		readonly decodeInput: (row: RunningCommand) => T;
-		readonly replay: (
-			row: RunningCommand,
-			input: T,
-		) => Effect.Effect<TurnResult | undefined, SessionFailure>;
-		readonly resolveSinkId: (
-			commandId: string,
-			inputId: string,
-			attempt: number,
-			nativeResumeFallback?: boolean,
-		) => string;
-		readonly closing: () => boolean;
-		readonly failTurn: (
-			sinkId: string,
-			failure: SessionFailure,
-		) => Effect.Effect<void>;
-	},
-) =>
-	Effect.gen(function* () {
-		const rows = yield* runningRunnerCommands(
-			sql,
-			driverKind,
-			options.driverForAccount,
-			sessionId,
-		);
-		return rows.map((row) => {
-			const input: T = {
-				...options.decodeInput(row),
-				runId: row.run_id ?? undefined,
-			};
-			const sinkId = options.resolveSinkId(
-				row.command_id,
-				input.inputId,
-				row.attempt_count,
-				input.nativeResumeFallback,
-			);
-			return {
-				sinkId,
-				input,
-				messageId: row.assistant_message_id ?? "",
-				...(row.run_id ? { runId: row.run_id } : {}),
-				wait: Effect.gen(function* () {
-					// The connection restores retained sinks and native output independently.
-					// An unknown delivery must never become a second send after restart.
-					if (row.error_code === "delivery_indeterminate") return;
-					const execution = yield* Effect.result(options.replay(row, input));
-					if (options.closing()) return;
-					if (execution._tag === "Failure") {
-						yield* options.failTurn(sinkId, execution.failure);
-						return yield* settleRunnerCommand(
-							sql,
-							row.project_key,
-							sessionId,
-							row.command_id,
-							row.attempt_count,
-							undefined,
-							execution.failure,
-							driverKind,
+		if (driverKind === "claude")
+			for (const row of commands) {
+				const payload = yield* Schema.decodeUnknownEffect(
+					Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
+				)(row.payload_json).pipe(
+					Effect.mapError(
+						(cause) =>
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "validate stored folders",
+								cause,
+							}),
+					),
+				);
+				const nativeThread = payload["nativeThread"];
+				for (const folder of [
+					payload["configDir"],
+					...(isRecord(nativeThread) ? [nativeThread["configDir"]] : []),
+				])
+					if (folder !== undefined)
+						yield* Schema.decodeUnknownEffect(ClaudeConfigDirSchema)(
+							typeof folder === "string"
+								? configuredClaudeConfigDir(folder)
+								: folder,
+						).pipe(
+							Effect.mapError(
+								(cause) =>
+									new ProviderInstanceFailure({
+										providerId: "claude",
+										operation: "validate stored folders",
+										cause,
+									}),
+							),
 						);
-					}
-					const result = execution.success;
-					yield* settleRunnerCommand(
-						sql,
-						row.project_key,
-						sessionId,
-						row.command_id,
-						row.attempt_count,
-						result,
-						undefined,
-						driverKind,
-					);
-				}),
-			};
-		});
+			}
+		return commands;
 	});
 
-/** A live runner, including a candidate or retiree, owns its session's admissions. */
+/** Attached runners claim admissions; live retirement cleanup owns its captured runs. */
 export const settleUnclaimedRunnerCommands = <E>(
 	sql: SqlClient.SqlClient,
 	claimedSessions: ReadonlySet<string>,
@@ -177,6 +191,10 @@ export const settleUnclaimedRunnerCommands = <E>(
 	) => Effect.Effect<RunnerRecoveryDependencies | undefined>,
 	sessionIds?: ReadonlySet<string>,
 	ownsPendingSend?: OrchestrationEngine["ownsPendingSend"],
+	ownsRetirementCleanup?: (
+		sessionId: string,
+		runId: string,
+	) => Effect.Effect<boolean, SqlError>,
 ) =>
 	Effect.gen(function* () {
 		for (const row of yield* runningRunnerCommands(
@@ -190,6 +208,21 @@ export const settleUnclaimedRunnerCommands = <E>(
 		)) {
 			if (sessionIds && !sessionIds.has(row.session_id)) continue;
 			if (claimedSessions.has(row.session_id)) continue;
+			const unclaimed = Effect.suspend(() =>
+				row.run_id && ownsRetirementCleanup
+					? ownsRetirementCleanup(row.session_id, row.run_id).pipe(
+							Effect.flatMap((owned) =>
+								owned ? Effect.interrupt : Effect.void,
+							),
+						)
+					: Effect.void,
+			);
+			if (
+				row.run_id &&
+				ownsRetirementCleanup &&
+				(yield* ownsRetirementCleanup(row.session_id, row.run_id))
+			)
+				continue;
 			const recovery = yield* recoveryForSession?.(row.session_id) ??
 				Effect.succeed(undefined);
 			if (recoveryForSession && !recovery) continue;
@@ -199,11 +232,111 @@ export const settleUnclaimedRunnerCommands = <E>(
 				code: "runner_stopped",
 				retryable: false,
 			};
+			const [requested] = yield* sql<{
+				joined_into: string | null;
+			}>`SELECT run.joined_into
+				FROM provider_command_outbox command JOIN provider_runs run
+					ON run.id = command.run_id AND run.session_id = command.session_id
+				WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}`;
+			if (
+				row.run_id &&
+				requested?.joined_into === null &&
+				!(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
+			) {
+				const projector = yield* Effect.serviceOption(
+					ProjectionRunnerEffectTag,
+				);
+				if (projector._tag === "None") continue;
+				const eventStore = yield* makeUnboundEventStoreEffect.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				);
+				const commit = yield* makeUnboundCommitAndSignal.pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+					Effect.provideService(UnboundEventStoreEffectTag, eventStore),
+					Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+				);
+				const evidence = {
+					_tag: "failed" as const,
+					send: {
+						sessionId: row.session_id,
+						runId: row.run_id,
+						commandId: row.command_id,
+						requestSequence: row.request_sequence,
+						attempt: row.attempt_count,
+					},
+					failure,
+					observedAt: yield* Clock.currentTimeMillis,
+				};
+				const followUps: Effect.Effect<void>[] = [];
+				yield* retrySettlementWrite(
+					commit.write(
+						(project, stamp) =>
+							Effect.gen(function* () {
+								followUps.length = 0;
+								if (
+									ownsPendingSend?.(
+										row.session_id,
+										row.command_id,
+										row.request_sequence,
+										row.attempt_count,
+									)
+								)
+									return;
+								if (
+									ownsRetirementCleanup &&
+									(yield* ownsRetirementCleanup(
+										row.session_id,
+										evidence.send.runId,
+									))
+								)
+									return;
+								if (
+									yield* legacyRunnerRunQuery(
+										sql,
+										row.session_id,
+										evidence.send.runId,
+									)
+								)
+									return;
+								yield* settleSend(
+									{
+										sql,
+										project,
+										stamp,
+										driverKind,
+										...(recovery
+											? {
+													persistUserMessage:
+														recovery.persist.persistUserMessage,
+												}
+											: {}),
+										...(recovery?.inputDrafts
+											? { inputDrafts: recovery.inputDrafts }
+											: {}),
+										afterCommit: (effect) => followUps.push(effect),
+									},
+									evidence,
+								);
+							}),
+						{
+							projectId: row.project_key,
+							afterCommit: Effect.suspend(() =>
+								Effect.forEach(followUps, (effect) => effect, {
+									discard: true,
+								}),
+							),
+						},
+					),
+				);
+				yield* recovery?.wakeReactor ?? Effect.void;
+				continue;
+			}
 			const settled = yield* failTurn(
 				runnerSinkId(
 					row.command_id,
 					row.attempt_count,
-					(JSON.parse(row.payload_json) as SessionTurn).nativeResumeFallback,
+					(JSON.parse(row.payload_json) as DurableSessionTurn)
+						.nativeResumeFallback,
 				),
 				{
 					sessionId: row.session_id,
@@ -216,6 +349,7 @@ export const settleUnclaimedRunnerCommands = <E>(
 				},
 				failure,
 				Effect.gen(function* () {
+					yield* unclaimed;
 					// Acquire the write lock and compare the snapshot in the same
 					// ingestion transaction that would append the orphan terminal.
 					const [current] =
@@ -274,6 +408,7 @@ export const settleRunnerCommand = (
 	result: TurnResult | undefined,
 	failure: SessionFailure | undefined,
 	driverKind: string,
+	runnerId?: string,
 ) =>
 	Effect.gen(function* () {
 		const succeeded =
@@ -304,36 +439,26 @@ export const settleRunnerCommand = (
 				})),
 			);
 		});
-		yield* sql.withTransaction(saveState);
-	}).pipe(
-		Effect.tap(() =>
-			Effect.gen(function* () {
-				const projector = yield* Effect.serviceOption(
-					ProjectionRunnerEffectTag,
-				);
-				if (projector._tag === "None") {
-					const persist = yield* Effect.serviceOption(
-						ClaudeEventPersistEffectTag,
-					);
-					if (persist._tag === "Some")
-						yield* requeueFailedSteers(
-							sql,
-							persist.value,
-							sessionId,
-							commandId,
-						);
-					return;
-				}
-				const eventStore = yield* makeEventStoreEffect.pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
-					Effect.provideService(PersistenceProjectTag, { projectId }),
-				);
-				const persist = yield* makeClaudeEventPersistEffect.pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
-					Effect.provideService(EventStoreEffectTag, eventStore),
-					Effect.provideService(ProjectionRunnerEffectTag, projector.value),
-				);
-				yield* requeueFailedSteers(sql, persist, sessionId, commandId);
-			}),
-		),
-	);
+		const origin = runnerId ?? (yield* currentRunnerWriteOrigin);
+		const projector = yield* Effect.serviceOption(ProjectionRunnerEffectTag);
+		// Minimal state-only runners have no projection capability. Their terminal
+		// ingestion already owns any input reconciliation through the seam.
+		if (projector._tag === "None")
+			return yield* flushPendingWrites(
+				sql,
+				saveState,
+				origin ? { runnerId: origin } : {},
+			);
+		const eventStore = yield* makeUnboundEventStoreEffect.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+		);
+		const commit = yield* makeUnboundCommitAndSignal.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+			Effect.provideService(UnboundEventStoreEffectTag, eventStore),
+			Effect.provideService(ProjectionRunnerEffectTag, projector.value),
+		);
+		yield* commit.write(() => saveState, {
+			projectId,
+			...(origin ? { runnerId: origin } : {}),
+		});
+	});

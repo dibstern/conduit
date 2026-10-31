@@ -412,7 +412,7 @@ describe("Claude session process runner", () => {
 			throw new Error("Missing runner/server proof");
 		const boundMs = 15_000;
 		const started = performance.now();
-		process.kill(runner.pid, "SIGSTOP");
+		expect(harness.signalOwnedRunner(runner.pid, "SIGSTOP")).toBe(true);
 		try {
 			await browser.shutdown();
 			await vi.waitFor(
@@ -437,7 +437,7 @@ describe("Claude session process runner", () => {
 			);
 			// A failing regression must not leave a stopped child behind.
 			try {
-				process.kill(runner.pid, "SIGKILL");
+				harness.signalOwnedRunner(runner.pid, "SIGKILL");
 			} catch {
 				// Successful shutdown already reaped the child.
 			}
@@ -454,7 +454,7 @@ describe("Claude session process runner", () => {
 		const first = harness.marks.find((mark) => mark.kind === "runner-started");
 		if (first?.kind !== "runner-started")
 			throw new Error("Missing runner proof");
-		process.kill(first.pid, "SIGKILL");
+		expect(harness.signalOwnedRunner(first.pid, "SIGKILL")).toBe(true);
 		await vi.waitFor(
 			() => {
 				expect(() => process.kill(first.pid, 0)).toThrow();
@@ -529,6 +529,21 @@ describe("Claude session process runner", () => {
 				{ timeout: 5000 },
 			);
 			expect(existsSync(runner.socketPath)).toBe(false);
+			// A Gone runner settles and its retirement row is removed (6.5, 6.6).
+			await vi.waitFor(() => {
+				const db = new Database(harness.daemonStorePath(), { readonly: true });
+				try {
+					expect(
+						db
+							.prepare(
+								"SELECT runner_id FROM claude_runner_cursors WHERE session_id = ?",
+							)
+							.all(sessionId),
+					).toEqual([]);
+				} finally {
+					db.close();
+				}
+			});
 			expect(harness.generations.at(-1)?.exitCode).toBeUndefined();
 		} finally {
 			mkdirSync("test-results/process-harness", { recursive: true });
@@ -543,6 +558,134 @@ describe("Claude session process runner", () => {
 					null,
 					2,
 				),
+			);
+		}
+	}, 45_000);
+
+	it("queues a send during a wake-up turn and answers after it ends", async () => {
+		const harness = await ProcessHarness.start({ restartProof: true });
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Wake-up queue");
+		const inputId = randomUUID();
+		const text = "queued-during-wake-up";
+		const report: Record<string, unknown> = {
+			bead: "conduit-test-s7zo",
+			sessionId,
+			inputId,
+			assertionsPassed: false,
+		};
+		const inbox = () => {
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
+			try {
+				return {
+					runs: db
+						.prepare(
+							"SELECT status FROM provider_runs WHERE session_id = ? ORDER BY requested_at, rowid",
+						)
+						.all(sessionId),
+					input: db
+						.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+						.get(inputId),
+				};
+			} finally {
+				db.close();
+			}
+		};
+		try {
+			await browser.send(sessionId, "notification-parent-turn");
+			await settled(harness, sessionId, 1);
+			writeFileSync(
+				join(harness.root, "release-notification-parent"),
+				"release",
+			);
+			await vi.waitFor(async () => {
+				expect(
+					(await browser.history(sessionId)).some(
+						(message) => message.text === "Notification parent message.",
+					),
+				).toBe(true);
+			});
+			report["wakeUp"] = inbox();
+			expect(inbox().runs).toEqual([{ status: "completed" }]);
+			expect(
+				await Effect.runPromise(
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId,
+						text,
+						delivery: "queue",
+					}),
+				),
+			).toMatchObject({ ok: true });
+			report["queued"] = inbox();
+			expect(inbox()).toEqual({
+				runs: [{ status: "completed" }],
+				input: { state: "queued" },
+			});
+			await vi.waitFor(() =>
+				expect(browser.frames.map(({ message }) => message)).toContainEqual(
+					expect.objectContaining({
+						type: "session_detail",
+						sessionId,
+						_tag: "upsert",
+						item: {
+							_tag: "pendingInput",
+							input: expect.objectContaining({
+								inputId,
+								state: "queued",
+								request: expect.objectContaining({ text }),
+							}),
+						},
+					}),
+				),
+			);
+			report["queuedBrowserFrames"] = browser.frames
+				.map(({ message }) => message)
+				.filter(
+					(frame) =>
+						frame["type"] === "session_detail" && frame["_tag"] === "upsert",
+				);
+			expect(
+				(await browser.history(sessionId)).filter(
+					(message) => message.text === text,
+				),
+			).toEqual([]);
+			writeFileSync(
+				join(harness.root, "release-notification-result"),
+				"release",
+			);
+			await vi.waitFor(
+				async () => {
+					const transcript = await browser.history(sessionId);
+					expect(
+						transcript.filter((message) => message.text === text),
+					).toHaveLength(1);
+					expect(
+						transcript.filter(
+							(message) => message.text === responseChunks(text).join(""),
+						),
+					).toHaveLength(1);
+				},
+				{ timeout: 10_000 },
+			);
+			await settled(harness, sessionId, 2);
+			expect(inbox()).toEqual({
+				runs: [{ status: "completed" }, { status: "completed" }],
+				input: { state: "removed" },
+			});
+			report["answered"] = {
+				...inbox(),
+				transcript: await browser.history(sessionId),
+				persisted: persisted(harness, sessionId),
+			};
+			report["assertionsPassed"] = true;
+		} finally {
+			mkdirSync("test-results/process-harness", { recursive: true });
+			writeFileSync(
+				"test-results/process-harness/s7zo-wake-up-inbox.json",
+				JSON.stringify(report, null, 2),
 			);
 		}
 	}, 45_000);
@@ -575,9 +718,8 @@ describe("Claude session process runner", () => {
 		writeFileSync(join(harness.root, "release-notification-parent"), "release");
 		await vi.waitFor(() => {
 			const state = persisted(harness, sessionId);
-			// Run ownership contract, docs/plans/2026-10-19-run-ownership.md:5,15:
-			// delayed output retains its ended run; adapter activity cannot make it busy.
-			expect(state.session.status).toBe("idle");
+			// 4d3d157b keeps wake-up activity busy without reopening its ended run.
+			expect(state.session.status).toBe("busy");
 			expect(state.turns).toMatchObject([{ state: "completed" }]);
 			expect(
 				state.events.some(
@@ -667,6 +809,16 @@ describe("Claude session process runner", () => {
 				() => {
 					const state = persisted(harness, sessionId);
 					expect(state.session.status).toBe("idle");
+					expect(
+						state.events
+							.slice(held.events.length)
+							.filter((event) => event.type === "session.status"),
+					).toEqual([
+						expect.objectContaining({
+							data: { sessionId, status: "idle" },
+							metadata: notification.metadata,
+						}),
+					]);
 					expect(
 						sdkProof(harness).filter(
 							(mark) =>

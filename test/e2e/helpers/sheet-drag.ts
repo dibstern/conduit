@@ -2,8 +2,12 @@ import type { Locator, Page } from "@playwright/test";
 
 /** Drop-down sheets glide in; geometry read mid-glide is not the resting place. */
 export async function settleSheet(page: Page) {
-	await page.evaluate(() =>
-		Promise.allSettled(
+	await page.evaluate(async () => {
+		// The entry glide starts next frame, so an earlier animation snapshot can be empty.
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
+		await Promise.allSettled(
 			document
 				.getAnimations()
 				.filter(
@@ -12,8 +16,12 @@ export async function settleSheet(page: Page) {
 						animation.playState === "running",
 				)
 				.map((animation) => animation.finished),
-		),
-	);
+		);
+		// Header ResizeObserver placement follows the transition's final layout.
+		await new Promise<void>((resolve) =>
+			requestAnimationFrame(() => resolve()),
+		);
+	});
 }
 
 // Chromium's trusted input pipeline includes native scrolling and pointercancel;

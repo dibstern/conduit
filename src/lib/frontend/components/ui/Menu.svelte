@@ -203,6 +203,21 @@
 		});
 	}
 
+	/**
+	 * The second mount first unmounts the first, which runs close-auto-focus
+	 * while the menu is still open and moves focus from the item to the
+	 * trigger; a key pressed then toggles the menu shut instead of choosing
+	 * the item. The move must still happen, since the next mount remembers
+	 * the trigger as where a real close returns focus, so the item takes
+	 * focus back in a microtask, before any key can arrive.
+	 */
+	function keepItemFocusOnRemount(event: Event) {
+		const focused = contentNode?.ownerDocument.activeElement;
+		if (open && focused instanceof HTMLElement && contentNode?.contains(focused))
+			queueMicrotask(() => { if (open && focused.isConnected) focused.focus(); });
+		rest.onCloseAutoFocus?.(event);
+	}
+
 	const portalProps: DropdownMenuPortalProps = $derived.by(() => {
 		const target = dialogTarget?.() ?? portalTo;
 		return target === undefined ? {} : { to: target };
@@ -214,6 +229,7 @@
 		...rest,
 		id: contentId,
 		onOpenAutoFocus: focusContentOnce,
+		onCloseAutoFocus: keepItemFocusOnRemount,
 		...(side === undefined ? {} : { side }),
 		align,
 		sideOffset,
@@ -235,6 +251,7 @@
 		...rest,
 		id: contentId,
 		onOpenAutoFocus: focusContentOnce,
+		onCloseAutoFocus: keepItemFocusOnRemount,
 		preventScroll: false,
 		loop: true,
 		preventOverflowTextSelection: false,

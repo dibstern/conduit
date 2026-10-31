@@ -5,7 +5,7 @@ import {
 	type SessionStateProjectionNotifier,
 	SessionStateProjectionNotifierTag,
 } from "../../../persistence/effect/session-state-projection-notifier.js";
-import { SessionGitServiceTag } from "../Services/session-git-service.js";
+import { SessionGit } from "../../daemon/Services/session-git.js";
 import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
 
 const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
@@ -19,97 +19,98 @@ const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
 	);
 };
 
-export const makeSessionStateProjectionNotifierLive = (
-	refreshSessionGit: () => Promise<void> = async () => {},
-): Layer.Layer<
+export const SessionStateProjectionNotifierLive: Layer.Layer<
 	SessionStateProjectionNotifierTag,
 	never,
 	SessionManagerServiceTag
-> =>
-	Layer.effect(
-		SessionStateProjectionNotifierTag,
-		Effect.gen(function* () {
-			const scope = yield* Scope.Scope;
-			const sessionManagerService = yield* SessionManagerServiceTag;
-			const sessionGit = yield* Effect.serviceOption(SessionGitServiceTag);
-			const broadcastPending = yield* Ref.make(false);
+> = Layer.effect(
+	SessionStateProjectionNotifierTag,
+	Effect.gen(function* () {
+		const scope = yield* Scope.Scope;
+		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionGit = yield* Effect.serviceOption(SessionGit);
+		const broadcastPending = yield* Ref.make(false);
 
-			// One lineage refresh per burst. A streaming turn projects thousands of
-			// deltas, and the parent map and session count only have to be right at
-			// the end of them. The sidebar and family feeds follow the store
-			// themselves.
-			const refreshLineage = Effect.sleep("150 millis").pipe(
-				// Release the slot BEFORE reading lineage, not after the refresh.
-				// A state change that lands while a refresh is in flight has to arm
-				// a fresh cycle: if the slot stayed taken until the refresh finished,
-				// that change would be dropped with nothing left to ever read it,
-				// which is the exact staleness this service exists to prevent. Paying
-				// for it with an occasional redundant read is a good trade.
-				Effect.andThen(Ref.set(broadcastPending, false)),
-				// Suspended so each refresh builds its own effect. The same effect
-				// value is forked repeatedly, and refreshSessionLineage happens to be
-				// lazy today; relying on that would make a future eager read here
-				// apply one frozen snapshot forever.
-				Effect.andThen(
-					Effect.suspend(() => sessionManagerService.refreshSessionLineage()),
-				),
-				Effect.catchCause((cause) =>
-					logFailure("Failed to refresh session lineage", cause),
-				),
-				// Only reachable if the fiber is interrupted during the sleep, e.g. at
-				// runtime teardown. Without it an interrupt there would leave the slot
-				// taken and silence every later broadcast.
-				Effect.ensuring(Ref.set(broadcastPending, false)),
-			);
+		// One lineage refresh per burst. A streaming turn projects thousands of
+		// deltas, and the parent map and session count only have to be right at
+		// the end of them. The sidebar and family feeds follow the store
+		// themselves.
+		const refreshLineage = Effect.sleep("150 millis").pipe(
+			// Release the slot BEFORE reading lineage, not after the refresh.
+			// A state change that lands while a refresh is in flight has to arm
+			// a fresh cycle: if the slot stayed taken until the refresh finished,
+			// that change would be dropped with nothing left to ever read it,
+			// which is the exact staleness this service exists to prevent. Paying
+			// for it with an occasional redundant read is a good trade.
+			Effect.andThen(Ref.set(broadcastPending, false)),
+			// Suspended so each refresh builds its own effect. The same effect
+			// value is forked repeatedly, and refreshSessionLineage happens to be
+			// lazy today; relying on that would make a future eager read here
+			// apply one frozen snapshot forever.
+			Effect.andThen(
+				Effect.suspend(() => sessionManagerService.refreshSessionLineage()),
+			),
+			Effect.catchCause((cause) =>
+				logFailure("Failed to refresh session lineage", cause),
+			),
+			// Only reachable if the fiber is interrupted during the sleep, e.g. at
+			// runtime teardown. Without it an interrupt there would leave the slot
+			// taken and silence every later broadcast.
+			Effect.ensuring(Ref.set(broadcastPending, false)),
+		);
 
-			const armBroadcast = Effect.gen(function* () {
-				const alreadyPending = yield* Ref.getAndSet(broadcastPending, true);
-				if (!alreadyPending) {
-					// Arming happens inside the uninterruptible commit, and a fork inherits
-					// that. Without this the scope-close interrupt waits out the sleep.
-					yield* Effect.forkIn(Effect.interruptible(refreshLineage), scope, {
-						uninterruptible: "inherit",
-					});
-				}
-			});
+		const armBroadcast = Effect.gen(function* () {
+			const alreadyPending = yield* Ref.getAndSet(broadcastPending, true);
+			if (!alreadyPending) {
+				// Arming happens inside the uninterruptible commit, and a fork inherits
+				// that. Without this the scope-close interrupt waits out the sleep.
+				yield* Effect.forkIn(Effect.interruptible(refreshLineage), scope, {
+					uninterruptible: "inherit",
+				});
+			}
+		});
 
-			return {
-				sessionStateProjected: (sessionId, eventType) =>
-					Effect.gen(function* () {
-						if (
-							eventType === "turn.completed" ||
-							eventType === "turn.error" ||
-							eventType === "turn.interrupted"
-						) {
-							yield* Effect.forkIn(
-								Effect.interruptible(
-									(Option.isSome(sessionGit)
-										? sessionGit.value.refresh({ sessionId })
-										: Effect.tryPromise(() => refreshSessionGit())
-									).pipe(
-										Effect.catchCause((cause) =>
-											logFailure("Failed to refresh session git state", cause),
-										),
-										Effect.andThen(armBroadcast),
+		return {
+			sessionStateProjected: (sessionId, eventType) =>
+				Effect.gen(function* () {
+					// Tool results only flag git work. Lineage has not changed, and
+					// the daemon scheduler coalesces these hints before reading git.
+					if (eventType === "tool.completed") {
+						if (Option.isSome(sessionGit))
+							yield* sessionGit.value.invalidate({ sessionId });
+						return;
+					}
+					if (
+						eventType === "turn.completed" ||
+						eventType === "turn.error" ||
+						eventType === "turn.interrupted"
+					) {
+						yield* Effect.forkIn(
+							Effect.interruptible(
+								(Option.isSome(sessionGit)
+									? sessionGit.value.invalidate({ sessionId })
+									: Effect.void
+								).pipe(
+									Effect.catchCause((cause) =>
+										logFailure("Failed to refresh session git state", cause),
 									),
+									Effect.andThen(armBroadcast),
 								),
-								scope,
-								{ uninterruptible: "inherit" },
-							);
-						} else {
-							yield* armBroadcast;
-						}
-					}).pipe(
-						Effect.catchCause((cause) =>
-							logFailure(
-								`Failed to handle projected session state for ${sessionId}`,
-								cause,
 							),
+							scope,
+							{ uninterruptible: "inherit" },
+						);
+					} else {
+						yield* armBroadcast;
+					}
+				}).pipe(
+					Effect.catchCause((cause) =>
+						logFailure(
+							`Failed to handle projected session state for ${sessionId}`,
+							cause,
 						),
 					),
-			} satisfies SessionStateProjectionNotifier;
-		}),
-	);
-
-export const SessionStateProjectionNotifierLive =
-	makeSessionStateProjectionNotifierLive();
+				),
+		} satisfies SessionStateProjectionNotifier;
+	}),
+);

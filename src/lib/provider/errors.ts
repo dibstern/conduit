@@ -46,6 +46,7 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 	readonly cause: unknown;
 	/** A concrete remedy the account picker can present, or a process fence. */
 	readonly code?:
+		| "attachment_missing"
 		| "auth_required"
 		| "codex_version_unsupported"
 		| "provider_process_gone"
@@ -95,7 +96,6 @@ function isTransientProviderError(cause: unknown): boolean {
 		switch (cause.code) {
 			case "provider_process_gone":
 			case "provider_process_unavailable":
-			case "runner_quarantined":
 				return false;
 			case "ECONNREFUSED":
 			case "ECONNRESET":
@@ -178,6 +178,7 @@ export class MissingPendingInteractions extends Data.TaggedError(
 }
 
 export type OrchestrationError =
+	| import("../contracts/ws-rpc.js").DraftAttachmentMissing
 	| ProviderNotRegistered
 	| SessionProviderNotBound
 	| DuplicateCommand

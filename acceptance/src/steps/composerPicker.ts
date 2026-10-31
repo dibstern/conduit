@@ -1,4 +1,8 @@
 import { expect, type Page } from "@playwright/test";
+import type {
+	ContextWindowOption,
+	GetModelsResponse,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { PHONE_VIEWPORT } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
@@ -11,11 +15,11 @@ import {
 } from "./shared.js";
 
 const levels = ["low", "medium", "high", "xhigh", "max"];
-const contextOptions = [
+const contextOptions: ContextWindowOption[] = [
 	{ value: "200k", label: "200K", isDefault: true },
 	{ value: "1m", label: "1M" },
 ];
-const providers = [
+const providers: GetModelsResponse["providers"] = [
 	{
 		id: "claude",
 		name: "Claude",
@@ -85,12 +89,41 @@ export async function seedComposerPickerCatalog(
 			},
 		},
 	});
-	await serveModelCatalog(page, {
+	const catalog = {
 		providers,
 		active: { model, provider },
 		contextWindow: { contextWindow: "200k", options },
 		variant: { variant: "", variants: claude ? levels : [] },
+	};
+	requireRpcControl(page).setStubs({
+		SwitchModel: ({ modelId, providerId }) => {
+			const selected = providers
+				.find((group) => group.id === providerId)
+				?.models.find((candidate) => candidate.id === modelId);
+			if (!selected)
+				throw new Error(`Unknown picker model ${providerId}/${modelId}`);
+			const selectedOptions = [...(selected.contextWindowOptions ?? [])];
+			catalog.active = { model: modelId, provider: providerId };
+			catalog.variant = {
+				variant: "",
+				variants: [...(selected.variants ?? [])],
+			};
+			catalog.contextWindow = {
+				contextWindow:
+					selectedOptions.find((option) => option.isDefault)?.value ??
+					selectedOptions[0]?.value ??
+					"",
+				options: selectedOptions,
+			};
+			return {
+				projectSlug: "myapp",
+				...catalog.active,
+				...catalog.variant,
+				contextWindow: catalog.contextWindow,
+			};
+		},
 	});
+	await serveModelCatalog(page, catalog);
 	if (new URL(page.url()).pathname.startsWith("/s/")) {
 		// Cancellation scenarios deliberately pair a bound session with another
 		// harness's model. Deliver that synthetic catalog with its session reply;
@@ -630,6 +663,7 @@ export const composerPickerHandlers: StepHandler[] = [
 				.locator("#model-picker .model-item")
 				.filter({ hasText: match[1] ?? "" })
 				.click();
+			await expect(world.page.getByTestId("picker-row-model")).toBeEnabled();
 		},
 	},
 ];

@@ -11,8 +11,8 @@ import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 /**
  * Reject the Claude permissions a crash left pending.
  *
- * A recovered turn can ask before its waiter registers. Its current live or
- * quarantined process still owns that ask. Leaving orphaned asks pending would
+ * A recovered turn can ask before its waiter registers. Its current runner
+ * still owns that ask. Leaving orphaned asks pending would
  * keep the session "needing you". OpenCode recovers its own
  * permissions, so ownership comes from the provider that recorded the ask,
  * regardless of the session's current provider.
@@ -71,6 +71,8 @@ export const resolveOrphanedClaudePermissions = Effect.gen(function* () {
 	const stale: (typeof orphans)[number][] = [];
 	for (const row of orphans) {
 		if (liveRequests.has(`${row.session_id}:${row.id}`)) continue;
+		// The explicit process ID checks execution authority. A retired physical
+		// survivor no longer owns its prompts, even while its PID remains alive.
 		if (
 			row.provider_process_id !== null &&
 			claude instanceof RunnerProviderInstance &&

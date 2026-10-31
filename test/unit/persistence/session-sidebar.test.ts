@@ -62,9 +62,10 @@
 // 25. A resume from before tombstones were kept (a store upgraded under the
 //     device) or from past the store's version (a store reset or restored) is
 //     caught up rather than rebased, and keeps rows that are gone.
-// 26. The model re-creates a session whose model parent is missing: the
-//     upsert re-checks the dangling parent and the foreign key fails
-//     (conduit-test-yeby).
+// 26. The model re-creates a session whose stored parent is missing, or
+//     mistakes which parent the upsert keeps (a Side Thread re-created as a
+//     legacy Fork keeps its own): the upsert re-checks the dangling parent and
+//     the foreign key fails (conduit-test-yeby, seed 1186852895).
 // 27. A rebuild deletes a session the store kept (an orphan write is no
 //     event, so the replay takes it with its old parent) and no device is
 //     told, or the oracle judges deletion by the model, which still has it.
@@ -275,13 +276,14 @@ const scenario = (store: Store) => {
 				const { id, parent } = command;
 				// The parent must exist (a foreign key), but may close a cycle. A
 				// re-create without one keeps the stored parent, which the upsert
-				// checks again, so an orphan cannot be re-created (yeby).
+				// checks again, so an orphan cannot be re-created (yeby). A legacy Fork
+				// sends no parent: a Side Thread, whose flag sticks, keeps its stored
+				// one, and any other row takes none.
 				const next =
-					command.fork &&
-					!command.side &&
-					parent !== undefined &&
-					!sideThreads.has(id)
-						? undefined
+					command.fork && !command.side && parent !== undefined
+						? sideThreads.has(id)
+							? parents.get(id)
+							: undefined
 						: (parent ?? parents.get(id));
 				if (
 					(parent !== undefined && !parents.has(parent)) ||
@@ -891,6 +893,15 @@ describe("sidebar table against the full computation", () => {
 			root("a"),
 		]);
 		await run([root("b"), { kind: "orphan", id: "b", parent: "a" }, root("b")]);
+		// Seed 1186852895, without the padding the minimum length adds: a legacy
+		// Fork sends no parent, so a Side Thread, whose flag sticks, keeps its
+		// stored one.
+		await run([
+			root("b"),
+			child("b", "b", { side: true }),
+			{ kind: "orphan", id: "b", parent: "a" },
+			child("b", "b", { fork: true }),
+		]);
 	});
 
 	it("can delete the former parent of a synthetic orphaned side thread", async () => {

@@ -11,6 +11,7 @@
 //
 // Failure cases: the pencil is unreachable on touch, shows in select mode, or
 // opens an empty dialog; Save is enabled before a change or drops the slug;
+// cancelling a pending New folder creates it on disk;
 // a New folder from Edit is not created; the project or its storage does not
 // persist, or a .conduit folder lands in a project folder; the session runs
 // outside the main folder or the provider never learns the extra folders.
@@ -91,12 +92,63 @@ for (const provider of providers) {
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 
+			// A browse-created folder stays off disk when Add project is cancelled.
+			const cancelled = join(root, "cancelled-browse-folder");
+			await app.goto(harness.baseUrl);
+			await openScopeMenu(page);
+			await page.getByRole("menuitem", { name: "Add a project…" }).click();
+			const pendingDialog = page.getByRole("dialog", {
+				name: "Add a project",
+				exact: true,
+			});
+			const pendingInput = pendingDialog.getByRole("combobox", {
+				name: "Add folder",
+			});
+			await pendingInput.fill(`${root}/`);
+			await pendingDialog
+				.getByRole("option", {
+					name: /New folder (?:in .+…|here)$/,
+					exact: true,
+				})
+				.click();
+			await expect(pendingInput).toBeFocused();
+			await expect
+				.poll(() =>
+					pendingInput.evaluate((element: HTMLInputElement) =>
+						element.value.slice(
+							element.selectionStart ?? 0,
+							element.selectionEnd ?? 0,
+						),
+					),
+				)
+				.toBe("untitled folder");
+			await page.keyboard.type("cancelled-browse-folder");
+			await pendingDialog
+				.getByRole("option", {
+					name: 'New folder "cancelled-browse-folder"',
+					exact: true,
+				})
+				.click();
+			await expect(pendingDialog.getByTestId("project-folder-chip")).toHaveText(
+				/new/,
+			);
+			expect(existsSync(cancelled)).toBe(false);
+			await shot("0-pending-folder-cancel");
+			await pendingDialog
+				.getByRole("button", {
+					name: testInfo.project.name === "mobile" ? "Close" : "Cancel",
+					exact: true,
+				})
+				.click();
+			await expect(pendingDialog).toBeHidden();
+			expect(existsSync(cancelled)).toBe(false);
+
 			// 1. A New folder (git init) plus an existing folder holding the marker.
 			await app.goto(harness.baseUrl);
 			await openScopeMenu(page);
 			await page.getByRole("menuitem", { name: "Add a project…" }).click();
 			const addDialog = page.getByRole("dialog", {
-				name: "Add project",
+				name: "Add a project",
 				exact: true,
 			});
 			await expect(addDialog).toBeVisible();
@@ -110,7 +162,7 @@ for (const provider of providers) {
 			await addDialog
 				.getByRole("option", { name: existing, exact: true })
 				.click();
-			await expect(addDialog.getByTestId("project-folder-row")).toHaveCount(2);
+			await expect(addDialog.getByTestId("project-folder-chip")).toHaveCount(2);
 			await shot("1-add-folders");
 
 			// 2. The existing folder becomes main, and the name follows it.
@@ -118,7 +170,7 @@ for (const provider of providers) {
 				.getByRole("button", { name: `Make main: ${existing}` })
 				.click();
 			await expect(
-				addDialog.getByTestId("project-folder-row").first(),
+				addDialog.getByTestId("project-folder-chip").first(),
 			).toHaveAttribute("aria-label", `Main folder: ${existing}`);
 			await expect(addDialog.getByLabel("Project name")).toHaveValue(
 				"edit-app",
@@ -194,9 +246,11 @@ for (const provider of providers) {
 			await expect(editDialog.getByLabel("Project name")).toHaveValue(
 				"edit-app",
 			);
-			await expect(editDialog.getByTestId("project-folder-row")).toHaveCount(2);
+			await expect(editDialog.getByTestId("project-folder-chip")).toHaveCount(
+				2,
+			);
 			await expect(
-				editDialog.getByTestId("project-folder-row").first(),
+				editDialog.getByTestId("project-folder-chip").first(),
 			).toHaveAttribute("aria-label", `Main folder: ${existing}`);
 			const save = editDialog.getByRole("button", { name: /^Save/ });
 			await expect(save).toBeDisabled();

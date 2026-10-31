@@ -1,10 +1,13 @@
-import { Effect } from "effect";
+import { Effect, Option, Schema } from "effect";
+import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
+import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import { historicalMessageText } from "../historical-message-text.js";
 import type { ClaudeThreadReadInput, ClaudeThreadReadResult } from "./types.js";
 
 export const makeClaudeThreadRead = Effect.gen(function* () {
 	const read = yield* ReadQueryEffectTag;
+	const attachmentStore = yield* AttachmentStoreTag;
 	return (
 		sessionId: string,
 		input: ClaudeThreadReadInput,
@@ -28,12 +31,36 @@ export const makeClaudeThreadRead = Effect.gen(function* () {
 				limit: limit + 1,
 				forward: input.cursor === undefined ? {} : { from: input.cursor },
 			});
-			const first = page.messages[0];
+			const messages = page.messages.slice(0, limit);
+			const hashes = new Set<string>();
+			for (const message of messages) {
+				if (message.role !== "user") continue;
+				for (const part of message.parts) {
+					if (part.type !== "file") continue;
+					const attachment = Schema.decodeUnknownOption(
+						Schema.fromJsonString(
+							Schema.Struct({ source: AttachmentRefSchema }),
+						),
+					)(part.rest_payload ?? part.metadata);
+					if (Option.isSome(attachment))
+						hashes.add(attachment.value.source.attachmentHash);
+				}
+			}
+			const attachments = new Map<string, Uint8Array>();
+			for (const hash of hashes) {
+				const blob = yield* attachmentStore
+					.get(hash)
+					.pipe(
+						Effect.catchTag("AttachmentMissing", () =>
+							Effect.succeed(undefined),
+						),
+					);
+				if (blob) attachments.set(hash, blob.bytes);
+			}
+			const first = messages[0];
 			if (
 				offset >
-				(first
-					? historicalMessageText(first, { includeAttachments: true }).length
-					: 0)
+				(first ? historicalMessageText(first, { attachments }).length : 0)
 			)
 				return {
 					code: "InvalidOffset",
@@ -45,11 +72,9 @@ export const makeClaudeThreadRead = Effect.gen(function* () {
 			>["items"][number][] = [];
 			// One budget per reply keeps a full page inside the SDK's tool-output cap.
 			let budget = 20_000;
-			for (const [index, message] of page.messages.slice(0, limit).entries()) {
+			for (const [index, message] of messages.entries()) {
 				if (budget === 0) return { items, nextCursor: message.id };
-				const text = historicalMessageText(message, {
-					includeAttachments: true,
-				});
+				const text = historicalMessageText(message, { attachments });
 				const start = index === 0 ? offset : 0;
 				let end = Math.min(text.length, start + budget);
 				// Keep a Unicode surrogate pair together at the page boundary.

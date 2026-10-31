@@ -9,6 +9,7 @@ const SIDEBAR_STORAGE_KEY = "sidebar-collapsed";
 const SETTLED_SHELF_STORAGE_KEY = "settled-shelf-open";
 const SNOOZED_SHELF_STORAGE_KEY = "snoozed-shelf-open";
 const DRAFTS_TRAY_STORAGE_KEY = "drafts-tray-open";
+const USAGE_FOOTER_STORAGE_KEY = "usage-footer-collapsed";
 const SIDEBAR_WIDTH_KEY = "sidebar-width";
 const TERMINAL_SETTINGS_SEEN_KEY = "terminal-settings-seen";
 
@@ -43,6 +44,7 @@ export const uiState = $state({
 	},
 	// Open unless the user closed it: drafts are their own unsent text.
 	draftsTrayOpen: safeGetItem(DRAFTS_TRAY_STORAGE_KEY) !== "false",
+	usageFooterCollapsed: safeGetItem(USAGE_FOOTER_STORAGE_KEY) === "true",
 	// Cleanup and bulk settle share one row-selection mode, entered from either sidebar surface.
 	selectMode: false,
 	sidebarWidth: Number(safeGetItem(SIDEBAR_WIDTH_KEY)) || SIDEBAR_DEFAULT_WIDTH,
@@ -154,6 +156,15 @@ export function setSnoozedShelfOpen(open: boolean): void {
 	uiState.snoozedShelfOpen = open;
 	try {
 		localStorage.setItem(SNOOZED_SHELF_STORAGE_KEY, String(open));
+	} catch {
+		/* Storage may be unavailable; keep the in-memory preference. */
+	}
+}
+
+export function setUsageFooterCollapsed(collapsed: boolean): void {
+	uiState.usageFooterCollapsed = collapsed;
+	try {
+		localStorage.setItem(USAGE_FOOTER_STORAGE_KEY, String(collapsed));
 	} catch {
 		/* Storage may be unavailable; keep the in-memory preference. */
 	}

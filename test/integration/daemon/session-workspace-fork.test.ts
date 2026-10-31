@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { SessionWorkspaceChangedPayloadSchema } from "../../../src/lib/persistence/events.js";
+import type { SessionGit } from "../../../src/lib/shared-types.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -216,6 +217,12 @@ describe("Forked session workspaces through the built daemon", () => {
 					},
 		);
 		forkId = fork.sessionId;
+		await browser.waitFor(
+			(frame) =>
+				frame["type"] === "session_row" &&
+				frame["id"] === forkId &&
+				(frame["git"] as SessionGit | undefined)?.branch === "feature/fork",
+		);
 		const child = (await list()).sessions.find(({ id }) => id === forkId);
 		// A Side Thread is contained by its Source; a Fork is a Family Root.
 		expect(child?.parentID).toBe(sideThread ? parentId : undefined);

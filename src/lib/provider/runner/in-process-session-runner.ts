@@ -2,13 +2,19 @@ import { randomUUID } from "node:crypto";
 import { Effect, type Scope } from "effect";
 import type { TurnResult } from "../types.js";
 import type { RunnerPayload } from "./runner-payload.js";
+import { currentRunnerProcessId } from "./runner-receipts.js";
 import { RunnerSinkBindings } from "./runner-sink-bindings.js";
+import {
+	makeSendScopes,
+	type SendScope,
+	type SendScopes,
+} from "./send-scope.js";
 import type {
+	NativeSessionRunner,
 	SessionCommand,
 	SessionFailure,
 	SessionOutput,
 	SessionOutputReply,
-	SessionRunner,
 } from "./session-runner.js";
 
 export const makeInProcessSessionRunner = (
@@ -18,12 +24,24 @@ export const makeInProcessSessionRunner = (
 	emit: (
 		output: SessionOutput,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>,
-): Effect.Effect<SessionRunner, never, Scope.Scope> =>
+): Effect.Effect<NativeSessionRunner, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const scope = yield* Effect.scope;
-		const sinks = new RunnerSinkBindings(emit);
+		const processId = randomUUID();
+		const sinks = new RunnerSinkBindings((output) =>
+			emit(output).pipe(
+				Effect.provideService(currentRunnerProcessId, processId),
+			),
+		);
 		const payload = yield* makePayload(sinks);
-		const runner = new InProcessSessionRunner(payload, sinks, scope);
+		const sendScopes = yield* makeSendScopes();
+		const runner = new InProcessSessionRunner(
+			payload,
+			sinks,
+			scope,
+			sendScopes,
+			processId,
+		);
 		yield* Effect.addFinalizer(() =>
 			runner.executeEffect({ type: "shutdown" }).pipe(Effect.ignore),
 		);
@@ -31,9 +49,8 @@ export const makeInProcessSessionRunner = (
 	});
 
 /** Executes sends concurrently: only the payload decides how a steer is admitted. */
-export class InProcessSessionRunner implements SessionRunner {
+export class InProcessSessionRunner implements NativeSessionRunner {
 	private readonly sessions = new Set<string>();
-	private readonly processId = randomUUID();
 	getControlProcessIdEffect(
 		sessionId: string,
 	): Effect.Effect<string | undefined> {
@@ -45,13 +62,24 @@ export class InProcessSessionRunner implements SessionRunner {
 		private readonly payload: RunnerPayload,
 		private readonly sinks: RunnerSinkBindings,
 		private readonly scope: Scope.Scope,
+		readonly sendScopes: SendScopes,
+		private readonly processId: string,
 	) {}
+	retainsSend(send: SendScope): boolean {
+		return this.sinks.retainsSend(send);
+	}
+	abortSend(send: SendScope): void {
+		this.sinks.abortSend(send);
+	}
+
 	hasLiveProcessEffect(
 		sessionId: string,
 		processId?: string,
 	): Effect.Effect<boolean> {
 		return Effect.sync(
-			() => processId === undefined && this.sessions.has(sessionId),
+			() =>
+				(processId === undefined || processId === this.processId) &&
+				this.sessions.has(sessionId),
 		);
 	}
 	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
@@ -83,23 +111,47 @@ export class InProcessSessionRunner implements SessionRunner {
 
 	executeEffect(
 		command: Extract<SessionCommand, { type: "send-turn" }>,
+		send: SendScope,
 	): Effect.Effect<TurnResult, SessionFailure>;
 	executeEffect(
 		command: Exclude<SessionCommand, { type: "send-turn" }>,
+		send?: SendScope,
 	): Effect.Effect<void, SessionFailure>;
 	executeEffect(
 		command: SessionCommand,
+		send: SendScope,
 	): Effect.Effect<TurnResult | undefined, SessionFailure>;
 	executeEffect(
 		command: SessionCommand,
+		send?: SendScope,
+	): Effect.Effect<TurnResult | undefined, SessionFailure> {
+		if (command.type === "send-turn" && !send)
+			return Effect.die("Send command requires its admitted handle");
+		return this.executeCommand(command, send);
+	}
+
+	executeNativeEffect(
+		command: SessionCommand,
+	): Effect.Effect<TurnResult | undefined, SessionFailure> {
+		return this.executeCommand(command);
+	}
+
+	private executeCommand(
+		command: SessionCommand,
+		send?: SendScope,
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			switch (command.type) {
 				case "send-turn": {
+					const handle = send;
+					if (handle?.assignment._tag === "Closed")
+						return yield* Effect.interrupt;
+					if (handle) this.sendScopes.dispatch(handle, this.processId);
 					this.sessions.add(command.input.sessionId);
 					const sink = this.sinks.makeSessionSink(
 						command.sinkId,
 						command.input.sessionId,
+						handle,
 					);
 					const controller = this.sinks.controller(command.sinkId);
 					if (!controller)
@@ -126,6 +178,8 @@ export class InProcessSessionRunner implements SessionRunner {
 				case "answer-question":
 				case "interaction-failed":
 				case "abort":
+					if (command.type === "abort" && send?.assignment._tag === "Closed")
+						return;
 					return yield* this.sinks.settle(command);
 				case "resolve-permission":
 					if (
@@ -161,6 +215,7 @@ export class InProcessSessionRunner implements SessionRunner {
 					return yield* this.payload.interrupt(
 						command.sessionId,
 						command.turnIds,
+						command.control?.requestedAt,
 					);
 				case "apply-live-settings":
 					return yield* this.payload.applySettings(

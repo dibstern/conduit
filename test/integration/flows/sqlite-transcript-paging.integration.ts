@@ -1,8 +1,18 @@
 import Database from "better-sqlite3";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { createRelayHarness } from "../helpers/relay-harness.js";
 
 describe("SQLite transcript paging over WebSocket", () => {
+	beforeEach(() => {
+		__setProbeOverrideForTesting(async () => ({
+			models: [],
+			commands: [],
+			agents: [],
+		}));
+	});
+	afterEach(() => __setProbeOverrideForTesting(undefined));
+
 	it("keeps two clients' older-page cursors independent", async () => {
 		const harness = await createRelayHarness();
 		try {

@@ -28,6 +28,7 @@ import {
 	runnerBuildId,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
 	prepareRunnerDirectory,
 	registerRunner,
@@ -103,6 +104,15 @@ it("retries an unperformed prompt retirement and caches a successful zero result
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
 						VALUES (${sessionId}, 'test-project', 'claude', 1, 1)`;
+					// The cursor row, not the registry file, grants the serving slot.
+					const receipts = yield* makeRunnerReceiptStore(sql);
+					expect(
+						yield* receipts.register(
+							runnerId,
+							{ sessionId, pid: process.pid },
+							"serving",
+						),
+					).toBe("Registered");
 					const recovery: RunnerRecoveryDependencies = {
 						projectId: "test-project",
 						ingestion: yield* ProviderRuntimeIngestionTag,
@@ -134,7 +144,6 @@ it("retries an unperformed prompt retirement and caches a successful zero result
 							},
 							snapshotCommandSettings: () => ({}),
 							loginChange: () => "None",
-							recoverCommands: () => Effect.succeed([]),
 						},
 					);
 					const detach = runner.detachSessionEffect?.bind(runner);

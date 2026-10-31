@@ -1,5 +1,62 @@
-import type { Deferred } from "effect";
-import type { SessionFailure } from "./session-runner.js";
+import type { ChildProcess } from "node:child_process";
+import { type Cause, Deferred, Effect, type Semaphore } from "effect";
+import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
+import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
+import type { RunnerHello, RunnerSocket } from "./runner-protocol.js";
+import type { RunnerMember } from "./runner-receipts.js";
+import type { currentPendingSendOwner } from "./runner-recovery.js";
+import type {
+	RunnerSourceDelivery,
+	RunnerUpgrade,
+	RunnerUpgradeState,
+} from "./runner-upgrade.js";
+import type {
+	SessionFailure,
+	SessionOutput,
+	SessionTurn,
+} from "./session-runner.js";
+
+/** Read-only outside this module, which is the only writer of every field. */
+export interface RunnerChild {
+	readonly recoveringCommands?: boolean;
+	readonly ownsPendingSend?: Effect.Success<typeof currentPendingSendOwner>;
+	readonly attachmentId?: string | undefined;
+	readonly registeredAt?: number;
+	readonly sessionId: string;
+	readonly registrationRoot?: string;
+	readonly launch?:
+		| Pick<SessionTurn, "workspaceRoot" | "extraFolders">
+		| undefined;
+	readonly launchSnapshot?: RunnerUpgradeState["snapshot"];
+	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
+	readonly drained: Deferred.Deferred<void>;
+	readonly socketPath: string;
+	readonly outputs: Semaphore.Semaphore;
+	readonly lifecycle: RunnerEntryLifecycle;
+	readonly runnerId: string;
+	/** Exit callbacks run in the construction runtime, after recovery returns. */
+	readonly ingestion?: ProviderRuntimeIngestion | undefined;
+	readonly pendingInteractions?: PendingInteractionService | undefined;
+	readonly pid?: number | undefined;
+	readonly startTime?: string | undefined;
+	readonly reaper?: RunnerMember | undefined;
+	readonly child?: ChildProcess;
+	readonly connection?: RunnerSocket;
+	readonly buildId?: string;
+	readonly capabilities?: {
+		readonly stopsTasks: boolean;
+		readonly rebindsAccount: boolean;
+		readonly settlesAnswers: boolean;
+		readonly declaresLogin: boolean;
+	};
+	readonly interactionSinks?: ReadonlyMap<string, string>;
+	readonly ownedRunIds?: ReadonlySet<string>;
+	/** One verified terminal delivery, including its release-sink unwind. */
+	readonly sourceDelivery?: RunnerSourceDelivery | undefined;
+	readonly upgrade: RunnerUpgrade;
+}
+
+type Writable<T> = { -readonly [K in keyof T]: T[K] };
 
 type Activity =
 	| {
@@ -247,4 +304,228 @@ export const nextRunnerLifecycle = (
 		default:
 			return state;
 	}
+};
+
+// Notification is private to admission; it never changes account eligibility.
+const waiters = new WeakMap<RunnerChild, Set<Deferred.Deferred<void>>>();
+export const notifyEntry = (entry: RunnerChild): void => {
+	const armed = [...(waiters.get(entry) ?? [])];
+	// Completing a Deferred can synchronously register its next observation.
+	waiters.delete(entry);
+	for (const waiter of armed) Deferred.doneUnsafe(waiter, Effect.void);
+};
+/** Completes `changed` at the entry's next notification. */
+export const watch = (entry: RunnerChild, changed: Deferred.Deferred<void>) => {
+	const armed = waiters.get(entry) ?? new Set();
+	waiters.set(entry, armed.add(changed));
+};
+export const unwatch = (entry: RunnerChild, changed: Deferred.Deferred<void>) =>
+	waiters.get(entry)?.delete(changed);
+
+// Every lifecycle write goes through this boundary; reduction itself is pure.
+export const transition = (
+	entry: RunnerChild,
+	event: RunnerEntryTransition,
+) => {
+	const writable: Writable<RunnerChild> = entry;
+	const ending = entry.lifecycle.end;
+	writable.lifecycle = nextRunnerLifecycle(entry.lifecycle, event);
+	if (!canReconfigure(entry.lifecycle)) writable.sourceDelivery = undefined;
+	notifyEntry(entry);
+	return event._tag === "FinishEnd" && ending?.pending === 1
+		? ending.released
+		: undefined;
+};
+
+/** A spawned child's or adopted hello's pid; the first start time read for a pid stays. */
+export const bindProcess = (
+	entry: RunnerChild,
+	process: {
+		readonly child?: ChildProcess;
+		readonly pid: number | undefined;
+		readonly startTime: (pid: number) => string | undefined;
+	},
+) => {
+	const writable: Writable<RunnerChild> = entry;
+	if (process.child) writable.child = process.child;
+	writable.pid = process.pid;
+	if (process.pid !== undefined)
+		writable.startTime ??= process.startTime(process.pid);
+};
+
+/** A verified hello. The socket attaches only while the caller still owns the entry. */
+export const connect = (
+	entry: RunnerChild,
+	attachment: {
+		readonly hello: RunnerHello;
+		readonly connection: RunnerSocket;
+		readonly attachmentId: string | undefined;
+		readonly startTime: (pid: number) => string | undefined;
+		readonly owns: () => boolean;
+	},
+) => {
+	const { hello, connection } = attachment;
+	const writable: Writable<RunnerChild> = entry;
+	bindProcess(entry, { pid: hello.pid, startTime: attachment.startTime });
+	writable.reaper = hello.reaper;
+	if (attachment.owns() && !connection.closed) {
+		writable.connection = connection;
+		writable.attachmentId = attachment.attachmentId;
+	}
+	transition(entry, { _tag: "Verify" });
+};
+
+/** The attached runner's build, capabilities and newest reported state. */
+export const identify = (entry: RunnerChild, hello: RunnerHello) => {
+	const writable: Writable<RunnerChild> = entry;
+	const upgrade: Writable<RunnerUpgrade> = entry.upgrade;
+	writable.buildId = hello.buildId;
+	writable.capabilities = {
+		stopsTasks: hello.stopsTasks === true,
+		rebindsAccount: hello.rebindsAccount === true,
+		settlesAnswers: hello.settlesAnswers === true,
+		declaresLogin: hello.declaresLogin === true,
+	};
+	const observed = entry.upgrade.state;
+	const helloState = hello.upgradeState;
+	const latest =
+		observed && (!helloState || observed.revision >= helloState.revision)
+			? observed
+			: helloState;
+	const snapshot =
+		latest?.snapshot ??
+		observed?.snapshot ??
+		helloState?.snapshot ??
+		entry.launchSnapshot;
+	upgrade.state = latest
+		? { ...latest, ...(snapshot ? { snapshot } : {}) }
+		: undefined;
+	notifyEntry(entry);
+};
+
+/**
+ * Keeps a terminal delivery only while this reconfigurable runner owns its
+ * send, or while it is the same delivery already held. Does not notify.
+ */
+export const observeDelivery = (
+	entry: RunnerChild,
+	delivery: RunnerSourceDelivery | undefined,
+	owned: boolean,
+) => {
+	const writable: Writable<RunnerChild> = entry;
+	const previous = entry.sourceDelivery;
+	// A released sink may disappear while its already-verified delivery unwinds.
+	const retained =
+		delivery &&
+		previous &&
+		previous.generation === delivery.generation &&
+		previous.sinkId === delivery.sinkId &&
+		previous.commandId === delivery.commandId &&
+		previous.inputId === delivery.inputId &&
+		previous.runId === delivery.runId;
+	writable.sourceDelivery =
+		delivery?.sessionId === entry.sessionId &&
+		delivery.runnerId === entry.runnerId &&
+		canReconfigure(entry.lifecycle) &&
+		(owned || retained)
+			? delivery
+			: undefined;
+};
+
+/** Applies a state report unless it is older than the held one. */
+export const upgradeState = (
+	entry: RunnerChild,
+	state: RunnerUpgradeState,
+	owned: boolean,
+): boolean => {
+	const upgrade: Writable<RunnerUpgrade> = entry.upgrade;
+	const held = entry.upgrade.state;
+	if (held && state.revision < held.revision) return false;
+	observeDelivery(entry, state.sourceDelivery, owned);
+	const snapshot = state.snapshot ?? held?.snapshot ?? entry.launchSnapshot;
+	// Only snapshots are omitted when unchanged. An omitted cursor is cleared.
+	upgrade.state = { ...state, ...(snapshot ? { snapshot } : {}) };
+	notifyEntry(entry);
+	return true;
+};
+
+/** Bumps the version an upgrade attempt compares against; returns the new one. */
+export const touch = (entry: RunnerChild): number => {
+	const upgrade: Writable<RunnerUpgrade> = entry.upgrade;
+	return ++upgrade.activity;
+};
+
+export const ownRun = (entry: RunnerChild, runId: string) => {
+	const writable: Writable<RunnerChild> = entry;
+	writable.ownedRunIds = new Set(entry.ownedRunIds).add(runId);
+};
+
+export const ownPendingSends = (
+	entry: RunnerChild,
+	owner: RunnerChild["ownsPendingSend"],
+) => {
+	const writable: Writable<RunnerChild> = entry;
+	writable.ownsPendingSend = owner;
+};
+
+/** Routes interaction resolutions to the sink whose request is still open. */
+export const trackInteraction = (entry: RunnerChild, output: SessionOutput) => {
+	const writable: Writable<RunnerChild> = entry;
+	if (
+		output.type === "question-request" ||
+		output.type === "permission-request"
+	) {
+		writable.interactionSinks = new Map(entry.interactionSinks).set(
+			`${output.type}:${output.request.requestId}`,
+			output.sinkId,
+		);
+		return;
+	}
+	if (
+		!entry.interactionSinks ||
+		(output.type !== "cancel-interaction" && output.type !== "release-sink")
+	)
+		return;
+	const cancelled =
+		output.type === "cancel-interaction"
+			? [
+					`question-request:${output.requestId}`,
+					`permission-request:${output.requestId}`,
+				]
+			: undefined;
+	writable.interactionSinks = new Map(
+		[...entry.interactionSinks].filter(
+			([key, sinkId]) =>
+				sinkId !== output.sinkId ||
+				(cancelled !== undefined && !cancelled.includes(key)),
+		),
+	);
+};
+
+/** The entry stops delivering. Idempotent. */
+export const end = (entry: RunnerChild) => {
+	const writable: Writable<RunnerChild> = entry;
+	writable.sourceDelivery = undefined;
+	notifyEntry(entry);
+};
+
+/** Wakes the entry's waiters: ready fails with the cause, drained and an End release settle. */
+export const releaseWaiters = (
+	entry: RunnerChild,
+	cause: Cause.Cause<SessionFailure>,
+) =>
+	Effect.gen(function* () {
+		notifyEntry(entry);
+		yield* Deferred.failCause(entry.ready, cause);
+		yield* Deferred.succeed(entry.drained, undefined);
+		const ending = entry.lifecycle.end;
+		if (ending) yield* Deferred.succeed(ending.released, undefined);
+	});
+
+/** Ends the entry and lets go of its connection and child, without stopping the process. */
+export const detach = (entry: RunnerChild, failure?: SessionFailure) => {
+	end(entry);
+	entry.connection?.destroy(failure);
+	entry.child?.unref();
+	if (entry.child?.connected) entry.child.disconnect();
 };

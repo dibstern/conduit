@@ -147,7 +147,7 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 						provider_id: string;
 						effect_type: string;
 					}>`UPDATE provider_command_outbox
-						SET status = 'cancelled', error_code = 'provider_process_gone', next_attempt_at = NULL, updated_at = ${now}
+						SET status = 'cancelled', payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END, error_code = 'provider_process_gone', next_attempt_at = NULL, updated_at = ${now}
 						WHERE effect_type <> 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
 							AND (${"sessionId" in scope ? (scope.exceptCommandId ?? null) : null} IS NULL
 								OR command_id <> ${"sessionId" in scope ? (scope.exceptCommandId ?? null) : null})

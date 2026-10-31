@@ -89,6 +89,7 @@ it("targets the displayed non-default account for status, logout, login and canc
 				credential: {
 					apiKey: `[REDACTED:${id}]`,
 					backendUrl: "https://api2.cursor.sh",
+					email: `${id}@example.test`,
 					createdAtMs: Date.now(),
 				},
 			},

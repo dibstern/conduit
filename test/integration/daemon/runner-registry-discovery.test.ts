@@ -10,12 +10,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	discoverAllRunners,
 	prepareRunnerDirectory,
 	type RunnerRegistration,
 	registerRunner,
+	runnerProcessTable,
 } from "../../../src/lib/provider/runner/runner-registry.js";
 
 // Failure modes: a retained long-path directory loses its temporary alias, or
@@ -35,6 +36,7 @@ describe("daemon runner discovery", () => {
 	});
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		rmSync(socketDirectory, { force: true });
 		rmSync(root, { recursive: true, force: true });
 	});
@@ -49,12 +51,21 @@ describe("daemon runner discovery", () => {
 			buildId: "retained-build",
 			pid: process.pid,
 		} satisfies RunnerRegistration;
+		const registeredAt = 1_792_699_200_000;
+		const startTime = "Fri Oct 23 12:00:00 2026";
+		vi.spyOn(runnerProcessTable, "inspect").mockReturnValue({
+			state: "running",
+			startTime,
+		});
+		vi.spyOn(Date, "now").mockReturnValue(registeredAt);
 		registerRunner(registration);
 		writeFileSync(`${registration.socketPath}.spool`, "retained output");
 		rmSync(socketDirectory);
 		expect(existsSync(socketDirectory)).toBe(false);
 
-		expect(discoverAllRunners(configDir)).toEqual([registration]);
+		expect(discoverAllRunners(configDir)).toEqual([
+			{ ...registration, registeredAt, startTime },
+		]);
 		expect(readlinkSync(socketDirectory)).toBe(target);
 		expect(readFileSync(`${registration.socketPath}.spool`, "utf8")).toBe(
 			"retained output",
@@ -73,5 +84,26 @@ describe("daemon runner discovery", () => {
 			"Unsafe runner socket alias",
 		);
 		expect(readFileSync(otherFile, "utf8")).toBe("other owner's data");
+	});
+
+	it("discovers host registration without taking authority from a legacy sidecar", () => {
+		const registration = {
+			driverKind: "claude",
+			runnerId: "0123456789ab",
+			sessionId: "live-session",
+			socketPath: join(socketDirectory, "0123456789ab"),
+			buildId: "live-build",
+			pid: process.pid,
+			registeredAt: 1_792_699_200_000,
+			startTime: "Fri Oct 23 12:00:00 2026",
+		} satisfies RunnerRegistration;
+		registerRunner(registration);
+		// SQL owns retirement. Old files cannot replace a host's registration.
+		writeFileSync(
+			`${registration.socketPath}.retired`,
+			JSON.stringify({ ...registration, role: "retired", sessionId: "stale" }),
+		);
+
+		expect(discoverAllRunners(configDir)).toEqual([registration]);
 	});
 });

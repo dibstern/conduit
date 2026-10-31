@@ -9,7 +9,10 @@ import {
 	makeMockOpenCodeAPI,
 	makeTestHandlerLayer,
 } from "../../helpers/mock-factories.js";
-import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
+import {
+	withDispatchEffect,
+	withDurableStopAcceptance,
+} from "../../helpers/orchestration-engine-test-double.js";
 
 const rpcClient = Effect.gen(function* () {
 	return yield* RpcTest.makeClient(WsRpcGroup);
@@ -26,6 +29,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 		api.session.abort = abort as typeof api.session.abort;
 
 		return Effect.gen(function* () {
+			yield* withDurableStopAcceptance(engine);
 			const client = yield* rpcClient;
 
 			const result = yield* client.CancelSession({
@@ -88,6 +92,7 @@ describe("WsRpcServerLayer CancelSession", () => {
 		api.session.abort = abort as typeof api.session.abort;
 
 		return Effect.gen(function* () {
+			yield* withDurableStopAcceptance(engine);
 			const client = yield* rpcClient;
 
 			const result = yield* client.CancelSession({

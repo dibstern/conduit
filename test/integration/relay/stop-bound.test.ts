@@ -2,7 +2,15 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Context, Effect, Fiber, Layer, Option, Stream } from "effect";
+import {
+	Context,
+	Deferred,
+	Effect,
+	Fiber,
+	Layer,
+	Option,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
@@ -154,6 +162,11 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					const api = makeMockOpenCodeAPI({
 						promptProcessId: "opencode:silent-stop",
 					});
+					const replacementStarted = Deferred.makeUnsafe<void>();
+					api.session.prompt = vi.fn(() => {
+						Deferred.doneUnsafe(replacementStarted, Effect.void);
+						return Promise.resolve();
+					});
 					let acknowledgeAbort = () => {};
 					if (acknowledgement !== "before-terminal")
 						api.session.abort = vi.fn(
@@ -255,8 +268,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 							else yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
 						}
 						yield* stopped;
-						yield* TestClock.adjust(500);
-						yield* flushDispatch;
+						yield* Deferred.await(replacementStarted);
 						expect(api.session.prompt).toHaveBeenCalledOnce();
 						expect(turns.turnFences("session-1").stopping).toBe(false);
 						expect(
@@ -298,12 +310,14 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					promptProcessId: "opencode:stop-bound-original",
 				});
 				let failOriginalSend: ((cause: Error) => void) | undefined;
+				const originalStarted = Deferred.makeUnsafe<void>();
 				api.session.prompt = vi
 					.fn(() => Promise.reject<void>(new Error("replacement send failed")))
 					.mockImplementationOnce(
 						() =>
 							new Promise<void>((_resolve, reject) => {
 								failOriginalSend = reject;
+								Effect.runSync(Deferred.succeed(originalStarted, undefined));
 							}),
 					);
 				let acknowledgeAbort: (() => void) | undefined;
@@ -325,7 +339,7 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 						delivery: "queue",
 						request: { text: "original" },
 					});
-					yield* flushDispatch;
+					yield* Deferred.await(originalStarted);
 					expect(api.session.prompt).toHaveBeenCalledOnce();
 					const [original] = yield* sql<{ run_id: string }>`SELECT run_id
 						FROM provider_command_outbox WHERE command_id = 'original'`;

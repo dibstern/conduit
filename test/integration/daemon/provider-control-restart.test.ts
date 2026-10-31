@@ -221,6 +221,12 @@ describe("durable controls across daemon replacement", () => {
 				WHEN NEW.effect_type = 'end_session' AND (NEW.status = '${delivered ? "completed" : "running"}'
 					OR (${Number(replaced)} = 1 AND NEW.status = 'cancelled'))
 				BEGIN SELECT RAISE(IGNORE); END`);
+			// End stops its runner through one requestStop; the reconciler sends
+			// shutdown as the row enters Escalating, which survives pruning here.
+			db.exec(`CREATE TABLE runner_stops (runner_id TEXT, stop_reason TEXT);
+				CREATE TRIGGER record_runner_stop AFTER UPDATE OF stop_state ON claude_runner_cursors
+				WHEN NEW.stop_state = 'Escalating' AND OLD.stop_state <> 'Escalating'
+				BEGIN INSERT INTO runner_stops VALUES (NEW.runner_id, NEW.stop_reason); END`);
 			const controller = new AbortController();
 			const reload = browser.reloadSession(sessionId, controller.signal).then(
 				() => "completed",
@@ -345,24 +351,16 @@ describe("durable controls across daemon replacement", () => {
 				},
 				{ timeout: 15_000 },
 			);
-			const sdk = readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
-				.trim()
-				.split("\n")
-				.map((line) => JSON.parse(line) as Record<string, unknown>);
-			const deliveries = sdk.filter(
-				(mark) =>
-					mark["kind"] === "runner-control" &&
-					mark["commandId"] === end.command_id,
-			);
+			const deliveries = db
+				.prepare("SELECT runner_id, stop_reason FROM runner_stops")
+				.all();
 			expect(deliveries).toEqual(
 				replaced
 					? []
 					: [
 							{
-								kind: "runner-control",
-								commandId: end.command_id,
-								type: "end-session",
-								runnerId: end.provider_process_id,
+								runner_id: end.provider_process_id,
+								stop_reason: JSON.stringify({ _tag: "EndSession" }),
 							},
 						],
 			);

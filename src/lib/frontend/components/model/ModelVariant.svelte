@@ -14,6 +14,7 @@
 	import { sessionState } from "../../stores/session.svelte.js";
 	import { getActiveModel } from "../../stores/discovery.svelte.js";
 	import { resolveModelParameters } from "./model-parameters.js";
+	import { effortLevels as knownLevels } from "./effort-levels.js";
 
 	let { onOpen, variant = "icons", children, wordLabel }: {
 		onOpen?: (() => void) | undefined;
@@ -38,13 +39,6 @@
 		? parameterState.variantUnavailable ? 0 : (parameterEffort?.options.findIndex((option) => option.value === currentEffort) ?? -1) + 1
 		: currentVariant ? variants.indexOf(currentVariant) + 1 : 0);
 
-	const knownLevels = [
-		{ value: "low", name: "Low", label: "LOW", description: "Quick, light reasoning" },
-		{ value: "medium", name: "Medium", label: "MEDIUM", description: "Balanced" },
-		{ value: "high", name: "High", label: "HIGH", description: "Thinks harder, slower" },
-		{ value: "xhigh", name: "Extra high", label: "XHIGH", description: "Deeper still, for hard problems" },
-		{ value: "max", name: "Max", label: "MAX", description: "Most thorough, slowest" },
-	];
 	const currentLevel = $derived(knownLevels.find((level) => level.value === currentEffort));
 	const levelName = $derived(currentLevel?.name ?? (currentEffort || (parameters ? displayedWord : undefined) || "Default"));
 	const microLabel = $derived(
@@ -81,8 +75,9 @@
 			data-testid="composer-more-effort"
 			onclick={() => openPicker("effort")}
 		>
-			<span data-part="label" class="w-[64px] shrink-0 text-[11px] text-text-muted">Effort</span>
-			<span data-part="value" class="flex min-w-0 flex-1 items-center gap-[7px] font-semibold">{#if !parameters || levels > 0}<EffortMeter {levels} {filled} />{/if}{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
+			<Icon name="sliders-horizontal" size={16} class="shrink-0 text-text-dimmer" />
+			<span data-part="label" class="flex-1">Effort</span>
+			<span data-part="value" class="min-w-0 truncate text-right text-text-secondary">{displayedWord ?? (variants.length === 0 && !currentVariant ? "Unavailable" : parameters ? levelName : currentVariant || "Default")}</span>
 			<span data-part="chevron" class="inline-flex shrink-0 text-text-dimmer"><Icon name="chevron-right" size={10} /></span>
 		</Button>
 {/snippet}

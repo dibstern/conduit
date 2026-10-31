@@ -47,7 +47,20 @@ export class DurableCommandCommitRepository {
 		},
 		projectId = this.projectId,
 	): ReturnType<DurableCommandCommitRepository["commit"]> {
-		const { payload, commandId, providerId, nowMs, requestSequence } = input;
+		const {
+			payload: requestedPayload,
+			commandId,
+			providerId,
+			nowMs,
+			requestSequence,
+		} = input;
+		// Only controls predating this build omit the Stop marker. JSON null
+		// explicitly records that a new control is not the user's Stop.
+		const payload =
+			requestedPayload.type === "interrupt_turn" ||
+			requestedPayload.type === "end_session"
+				? { ...requestedPayload, stop: requestedPayload.stop ?? null }
+				: { ...requestedPayload, stop: null };
 		const opts = {
 			provider: providerId,
 			createdAt: nowMs,
@@ -62,7 +75,7 @@ export class DurableCommandCommitRepository {
 					{
 						providerProcessId: payload.providerProcessId,
 						...(payload.turnIds ? { turnIds: payload.turnIds } : {}),
-						...(payload.stop ? { stop: payload.stop } : {}),
+						stop: payload.stop ?? null,
 					},
 					opts,
 				);
@@ -73,7 +86,7 @@ export class DurableCommandCommitRepository {
 					payload.sessionId,
 					{
 						providerProcessId: payload.providerProcessId,
-						...(payload.stop ? { stop: payload.stop } : {}),
+						stop: payload.stop ?? null,
 						...(payload.retireRunIds
 							? { retireRunIds: payload.retireRunIds }
 							: {}),

@@ -37,7 +37,10 @@ import {
 import type { OpenCodeTerminalService } from "../domain/relay/Services/terminal-service.js";
 import * as Failure from "../effect/failure-classification.js";
 import type { Logger } from "../logger.js";
-import { notificationContent } from "../notification-content.js";
+import {
+	type GoalStuckNotification,
+	notificationContent,
+} from "../notification-content.js";
 import type {
 	PushDeliveryReport,
 	PushNotificationSender,
@@ -212,11 +215,15 @@ export function sendPushForEvent(
  * relay messages had, because the service worker (sw.ts) and the alert
  * ledger's persisted kinds still key on them.
  */
-const pushKind = (msg: RelayMessage | Approval): string =>
+const pushKind = (
+	msg: RelayMessage | Approval | GoalStuckNotification,
+): string =>
 	"_tag" in msg
-		? msg._tag === "permission"
-			? "permission_request"
-			: "ask_user"
+		? msg._tag === "goal_stuck"
+			? "goal_stuck"
+			: msg._tag === "permission"
+				? "permission_request"
+				: "ask_user"
 		: msg.type === "done" && msg.error !== undefined
 			? "error"
 			: msg.type;
@@ -236,9 +243,15 @@ class PushSendFailure extends Data.TaggedError("PushSendFailure")<{
  * Anonymous idle hints cannot identify a completed turn and do not claim one.
  */
 const pushAlert = (
-	msg: RelayMessage | Approval,
+	msg: RelayMessage | Approval | GoalStuckNotification,
 	sessionId: string | undefined,
 ): SessionAlert | undefined => {
+	if ("_tag" in msg && msg._tag === "goal_stuck")
+		return {
+			sessionId: msg.sessionId,
+			kind: "goal_stuck",
+			originId: msg.originId,
+		};
 	if (sessionId == null) return undefined;
 	if ("_tag" in msg)
 		return msg._tag === "permission"
@@ -286,7 +299,7 @@ const pushAlert = (
  */
 export const sendPushForEventEffect = (
 	pushManager: PushSender,
-	msg: RelayMessage | Approval,
+	msg: RelayMessage | Approval | GoalStuckNotification,
 	log: Logger,
 	context?: PushEventContext,
 ): Effect.Effect<void> =>

@@ -1,4 +1,3 @@
-import { parseAttachmentDataUrl } from "../attachment-data-url.js";
 import type {
 	MessagePartRow,
 	MessageWithParts,
@@ -22,7 +21,7 @@ function objectJson(value: string | null): Record<string, unknown> {
 function historicalPart(
 	part: MessagePartRow,
 	summarizeTools = false,
-	includeAttachments = false,
+	attachments?: ReadonlyMap<string, Uint8Array>,
 ): string {
 	if (part.type === "tool" && summarizeTools)
 		return `Tool: ${part.tool_name ?? "unknown"} (${part.status ?? "unknown"})`.replace(
@@ -38,7 +37,7 @@ function historicalPart(
 		case "file_change":
 			return `File change: ${part.text}`;
 		case "file": {
-			if (!includeAttachments) return "";
+			if (!attachments) return "";
 			const metadata = {
 				...objectJson(part.metadata),
 				...objectJson(part.rest_payload ?? null),
@@ -51,17 +50,20 @@ function historicalPart(
 				typeof metadata["mime"] === "string"
 					? metadata["mime"]
 					: "application/octet-stream";
-			const url = metadata["url"];
-			if (typeof url !== "string") return `Attachment: ${name} (${mime})`;
+			const source = metadata["source"];
+			const bytes =
+				source !== null &&
+				typeof source === "object" &&
+				"attachmentHash" in source &&
+				typeof source.attachmentHash === "string"
+					? attachments.get(source.attachmentHash)
+					: undefined;
+			const label = `Attachment: ${name} (${mime}${bytes ? `, ${bytes.byteLength} bytes` : ""})`;
+			if (!bytes || mime !== "text/plain") return label;
 			try {
-				const attachment = parseAttachmentDataUrl(url);
-				const bytes = Buffer.from(attachment.data, "base64");
-				const label = `Attachment: ${name} (${mime}, ${bytes.length} bytes)`;
-				return attachment.mime === "text/plain"
-					? `${label}\n${new TextDecoder("utf-8", { fatal: true }).decode(bytes)}`
-					: label;
+				return `${label}\n${new TextDecoder("utf-8", { fatal: true }).decode(bytes)}`;
 			} catch {
-				return `Attachment: ${name} (${mime})`;
+				return label;
 			}
 		}
 		case "tool": {
@@ -102,9 +104,9 @@ export const historicalMessageText = (
 	message: MessageWithParts,
 	options?: {
 		readonly summarizeTools?: boolean;
-		/** Name the user's attachments and inline their text. ThreadRead only:
+		/** Name the user's attachments and inline fetched text. ThreadRead only:
 		 *  handoffs and resends never carry attachments. */
-		readonly includeAttachments?: boolean;
+		readonly attachments?: ReadonlyMap<string, Uint8Array>;
 	},
 ): string =>
 	message.parts.length > 0
@@ -113,7 +115,7 @@ export const historicalMessageText = (
 					historicalPart(
 						part,
 						options?.summarizeTools,
-						options?.includeAttachments === true && message.role === "user",
+						message.role === "user" ? options?.attachments : undefined,
 					),
 				)
 				.filter(Boolean)

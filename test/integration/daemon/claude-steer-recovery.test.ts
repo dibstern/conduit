@@ -412,6 +412,12 @@ it("returns a declined steer to the front and ignores duplicate or obsolete reco
 						sessionId,
 						status: "busy",
 					}),
+					// Inbox liveness comes from the owned run, including in this
+					// ordering fixture while the real drain is subscribed.
+					canonicalEvent("run.requested", sessionId, {
+						runId: "decline-foreground",
+						inputId: "foreground",
+					}),
 					...(["older", "declined"] as const).map((inputId) =>
 						canonicalEvent("input.admitted", sessionId, {
 							sessionId,

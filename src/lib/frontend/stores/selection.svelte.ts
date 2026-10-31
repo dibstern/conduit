@@ -134,7 +134,9 @@ export const selection = {
 		if (project) params.set(DRAFT_PROJECT_PARAM, project);
 		else params.delete(DRAFT_PROJECT_PARAM);
 		const path = `/draft/${draftId}${params.size ? `?${params}` : "?"}`;
-		if (route.page === "chat" && route.draftId === draftId) replaceRoute(path);
+		// New from a Draft replaces its history entry: Back returns to where the
+		// Draft was started, and a nonempty Draft stays reachable in the sidebar.
+		if (route.page === "chat" && route.draftId) replaceRoute(path);
 		else navigate(path);
 	},
 	moveDraft(project: string | null): void {

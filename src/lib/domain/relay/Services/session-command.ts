@@ -66,6 +66,7 @@ import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
+import type { DraftChange } from "./input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { inheritRead, markSeen } from "./session-attention.js";
@@ -174,11 +175,9 @@ export interface SessionUpstreamAdapter {
 	) => Effect.Effect<void, Cause.UnknownError>;
 }
 
-export interface ApplySessionCommandOptions {
+export type ApplySessionCommandOptions = {
 	readonly pick?: TurnSettings;
 	readonly source?: AutoTitleSource;
-	/** Join a caller's canonical commit, without publishing before that commit. */
-	readonly project?: CommitAndSignalProject;
 	/** A standalone commit may decline before append, under its write permit and transaction. */
 	readonly beforeWrite?: Effect.Effect<boolean, SqlError>;
 	/**
@@ -187,7 +186,10 @@ export interface ApplySessionCommandOptions {
 	 * end-session and named-instance cleanup into the command seam.
 	 */
 	readonly upstreamAdapter?: SessionUpstreamAdapter | null;
-}
+} & ( // A joined commit's caller owns publication; Draft changes require this seam's commit.
+	| { readonly project: CommitAndSignalProject; readonly draftChange?: never }
+	| { readonly project?: undefined; readonly draftChange?: DraftChange }
+);
 
 export const openCodeUpstreamAdapter = (
 	api: OpenCodeAPI,
@@ -365,28 +367,36 @@ export const applySessionCommand = (
 				];
 				return yield* eventStore.appendBatch(events);
 			});
-			yield* (
-				options.beforeWrite !== undefined
-					? commitAndSignal.write((project) =>
-							Effect.gen(function* () {
-								applied = yield* options.beforeWrite ?? Effect.succeed(true);
-								if (applied) yield* project(yield* append);
-							}),
-						)
-					: options.project
-						? Effect.flatMap(append, options.project)
-						: commitAndSignal.write((project) =>
-								Effect.flatMap(append, project),
+			const write = (project: CommitAndSignalProject) =>
+				Effect.gen(function* () {
+					yield* project(yield* append);
+					yield* (options.draftChange?.write ?? Effect.void).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+				});
+			yield* Effect.gen(function* () {
+				yield* (
+					options.beforeWrite !== undefined
+						? commitAndSignal.write((project) =>
+								Effect.gen(function* () {
+									applied = yield* options.beforeWrite ?? Effect.succeed(true);
+									if (applied) yield* write(project);
+								}),
 							)
-			).pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionCommandError({
-							operation: `${command.type}.commit`,
-							cause,
-						}),
-				),
-			);
+						: options.project
+							? Effect.flatMap(append, options.project)
+							: commitAndSignal.write(write)
+				).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionCommandError({
+								operation: `${command.type}.commit`,
+								cause,
+							}),
+					),
+				);
+				if (applied) yield* options.draftChange?.publish ?? Effect.void;
+			}).pipe(Effect.uninterruptible);
 			if (!applied) return;
 		}
 
@@ -502,6 +512,7 @@ export const createOpenCodeSession = (
 	reservedSessionId?: string,
 	permissionMode?: SessionPermissionMode,
 	directory?: string,
+	draftChange?: (sessionId: string) => DraftChange,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -538,7 +549,10 @@ export const createOpenCodeSession = (
 						...(permissionMode === undefined ? {} : { permissionMode }),
 					},
 				},
-				{ pick: settings },
+				{
+					pick: settings,
+					...(draftChange ? { draftChange: draftChange(session.id) } : {}),
+				},
 			);
 
 			return session;

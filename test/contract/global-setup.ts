@@ -5,12 +5,30 @@ import {
 	type SpawnedOpenCode,
 	spawnOpenCode,
 } from "../e2e/helpers/opencode-spawner.js";
+import { startControlledOpenCodeInference } from "../helpers/controlled-opencode-inference.js";
 
 let instance: SpawnedOpenCode | undefined;
+let inference:
+	| Awaited<ReturnType<typeof startControlledOpenCodeInference>>
+	| undefined;
 
 export async function setup(): Promise<void> {
 	console.log("[contract] Starting ephemeral OpenCode instance...");
-	instance = await spawnOpenCode({ timeoutMs: 60_000 });
+	try {
+		inference = await startControlledOpenCodeInference(
+			"test-results/controlled-contract-inference.json",
+		);
+		instance = await spawnOpenCode({ timeoutMs: 60_000, env: inference.env });
+		await inference.assertOpenCodeConfig(instance.url);
+	} catch (error) {
+		try {
+			instance?.stop();
+			instance = undefined;
+		} finally {
+			await inference?.close();
+		}
+		throw error;
+	}
 
 	// Point contract test helpers at the ephemeral instance.
 	// server-connection.ts reads OPENCODE_URL at import time;
@@ -25,9 +43,22 @@ export async function setup(): Promise<void> {
 }
 
 export async function teardown(): Promise<void> {
-	if (instance) {
-		console.log("[contract] Stopping ephemeral OpenCode instance...");
-		instance.stop();
-		instance = undefined;
+	try {
+		inference?.writeEvidence();
+	} finally {
+		try {
+			if (instance) {
+				console.log("[contract] Stopping ephemeral OpenCode instance...");
+				instance.stop();
+				instance = undefined;
+			}
+		} finally {
+			await inference?.close();
+		}
+	}
+	if (inference?.errors.length) {
+		throw new Error(
+			`Controlled inference failed: ${inference.errors.join("; ")}`,
+		);
 	}
 }

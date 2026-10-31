@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect, Layer, Schedule, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -40,6 +40,8 @@ let proof: Record<string, unknown> | undefined;
 const proofs: Record<string, unknown>[] = [];
 
 afterEach(async () => {
+	// Restore inspect first: cleanup refuses to signal an unverifiable runner.
+	vi.restoreAllMocks();
 	if (harness) {
 		await harness.dispose();
 		expect(harness.remainingRunnerPids()).toEqual([]);
@@ -54,7 +56,6 @@ afterEach(async () => {
 		harness = undefined;
 	}
 	vi.unstubAllEnvs();
-	vi.restoreAllMocks();
 });
 
 // Failures: the relay's project rejects A's retained runner, restored bindings
@@ -392,7 +393,10 @@ it.each([
 	}
 }, 60_000);
 
-it("retires prompts through the stored owner when adoption is refused and sends after restart", async () => {
+it.each([
+	false,
+	true,
+])("retires prompts through the stored owner when adoption is refused and sends after restart, unverifiable $0", async (unverifiable) => {
 	const fixture = ProcessHarness.create({
 		dist: "dist",
 		restartProof: true,
@@ -412,21 +416,55 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 	await fixture.kill();
 	await sending;
 	// The sandbox denies ps in this Vitest process. Use the same isolated,
-	// runner-written argv evidence as the process harness's identity fallback.
+	// runner-written evidence as the process harness's identity fallback.
 	vi.spyOn(runnerRegistry, "runnerPidMatchesRegistration").mockImplementation(
 		(registration) => {
-			const argv = JSON.parse(
-				readFileSync(
-					join(fixture.root, `runner-argv-${registration.pid}.json`),
-					"utf8",
+			const argv = Schema.decodeUnknownSync(Schema.Array(Schema.String))(
+				JSON.parse(
+					readFileSync(
+						join(fixture.root, `runner-argv-${registration.pid}.json`),
+						"utf8",
+					),
 				),
-			) as string[];
+			);
 			return (
 				argv.includes(registration.socketPath) &&
 				argv.includes(registration.runnerId)
 			);
 		},
 	);
+	const registrations = discoverRunners(fixture.projectDir, fixture.configDir);
+	expect(registrations).toHaveLength(1);
+	const identities = new Map(
+		registrations.map((registration) => {
+			const birth = readFileSync(
+				join(fixture.root, `runner-birth-${registration.pid}`),
+				"utf8",
+			);
+			expect(birth.startsWith(`${registration.pid}-`)).toBe(true);
+			return [registration.pid, registration.startTime ?? birth];
+		}),
+	);
+	vi.spyOn(runnerRegistry.runnerProcessTable, "inspect").mockImplementation(
+		(pid) => {
+			if (!runnerRegistry.runnerPidAlive(pid)) return { state: "gone" };
+			const startTime = identities.get(pid);
+			return unverifiable || startTime === undefined
+				? { state: "unknown" }
+				: { state: "running", startTime };
+		},
+	);
+	// Retirement observes through the batch form; it must see the same evidence.
+	vi.spyOn(runnerRegistry.runnerProcessTable, "inspectMany").mockImplementation(
+		(pids) =>
+			new Map(
+				pids.map((pid) => [
+					pid,
+					runnerRegistry.runnerProcessTable.inspect(pid),
+				]),
+			),
+	);
+	const signals = vi.spyOn(runnerRegistry.runnerProcessTable, "signal");
 	const store = makePersistenceStoreLayer(fixture.daemonStorePath());
 	const persistence = makePersistenceProjectLayer("project-b").pipe(
 		Layer.provideMerge(store),
@@ -511,7 +549,17 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 						projectId: "process-test",
 					}),
 				);
-				expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(false);
+				if (unverifiable) {
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(true);
+					expect(signals).not.toHaveBeenCalled();
+					for (const registration of registrations)
+						expect(
+							yield* runner.hasLiveProcessEffect(
+								sessionId,
+								registration.runnerId,
+							),
+						).toBe(false);
+				}
 				expect(
 					yield* sql`SELECT status FROM pending_approvals WHERE session_id = ${sessionId}`,
 				).toEqual([
@@ -529,12 +577,48 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 					}),
 				);
 				expect(yield* ownerPending.listPendingQuestions(sessionId)).toEqual([]);
-				expect(
-					yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
-				).toEqual([{ status: "failed" }]);
-				expect(
-					yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
-				).toEqual([{ status: "error" }]);
+				// The Stop is detached from recovery; observe its durable result
+				// before closing the fixture's store. An unverifiable leader is never
+				// signalled and its window ends at Escalated (F19); its runs settle at
+				// Gone (6.5), so they stay open while it lives.
+				if (unverifiable) {
+					yield* sql<{
+						stop_state: string;
+					}>`SELECT stop_state FROM claude_runner_cursors WHERE session_id = ${sessionId} AND retired_at IS NOT NULL`.pipe(
+						Effect.repeat({
+							while: (rows) =>
+								!rows.some((row) => row.stop_state === "Escalated"),
+							schedule: Schedule.spaced("10 millis"),
+						}),
+						Effect.timeout("5 seconds"),
+					);
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(true);
+					expect(signals).not.toHaveBeenCalled();
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "running" }]);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "running" }]);
+				} else {
+					yield* sql<{
+						status: string;
+					}>`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`.pipe(
+						Effect.repeat({
+							while: (rows) => rows.some((row) => row.status === "running"),
+							schedule: Schedule.spaced("10 millis"),
+						}),
+						Effect.timeout("5 seconds"),
+					);
+					expect(yield* runner.hasLiveProcessEffect(sessionId)).toBe(false);
+					expect(signals).toHaveBeenCalled();
+					expect(
+						yield* sql`SELECT status FROM provider_command_outbox WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "failed" }]);
+					expect(
+						yield* sql`SELECT status FROM provider_runs WHERE session_id = ${sessionId}`,
+					).toEqual([{ status: "error" }]);
+				}
 				expect(
 					yield* sql`SELECT project_id FROM events WHERE session_id = ${sessionId} AND type IN ('question.resolved', 'permission.resolved')`,
 				).toEqual([
@@ -556,12 +640,32 @@ it("retires prompts through the stored owner when adoption is refused and sends 
 	);
 	vi.unstubAllEnvs();
 	await fixture.restart();
+	// A survivor's run settles at Gone (6.5). Restart restarts its retries at
+	// 10, 30 and 60 s (6.7), so the first retry must find it gone before 30 s.
+	await vi.waitFor(
+		() => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM provider_runs WHERE session_id = ? AND status IN ('pending', 'running')",
+						)
+						.all(sessionId),
+				).toEqual([]);
+			} finally {
+				db.close();
+			}
+		},
+		{ timeout: 30_000, interval: 50 },
+	);
 	const restored = await fixture.connect(sessionId);
 	expect(
 		(await restored.send(sessionId, "after-adoption-refusal")).done["status"],
 	).toBe("idle");
 	proof = {
 		scenario: "cross-project adoption refusal",
+		unverifiable,
 		sessionId,
 		promptResolutions: 3,
 		sentAfterRestart: true,

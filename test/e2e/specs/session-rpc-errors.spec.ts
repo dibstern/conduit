@@ -60,7 +60,9 @@ async function openSession(
 	];
 	const rpc = await mockWsRpc(page, {
 		streams: {
-			SubscribeInputDraft: () => [{ _tag: "synchronized", text: draft }],
+			SubscribeInputDraft: () => [
+				{ _tag: "synchronized", text: draft, attachments: [] },
+			],
 		},
 		stubs: {
 			ResolveSession: () => ({ projectSlug }),

@@ -104,7 +104,7 @@ describe("Button", () => {
 		expect(button.hasAttribute("disabled")).toBe(false);
 		expect(button.getAttribute("aria-disabled")).toBe("true");
 		expect(button.getAttribute("aria-busy")).toBe("true");
-		expect(button.querySelector("svg.animate-spin")).not.toBeNull();
+		expect(button.querySelector('[data-flow-glyph="running"]')).not.toBeNull();
 
 		await fireEvent.click(button);
 		expect(onclick).not.toHaveBeenCalled();

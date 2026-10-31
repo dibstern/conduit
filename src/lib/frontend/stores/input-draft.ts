@@ -1,6 +1,6 @@
 // The viewed session's stored composer draft, followed by live changes.
 
-import { Effect, FiberHandle, Scope, Stream } from "effect";
+import { Effect, FiberHandle, Option, Scope, Stream } from "effect";
 import type { InputDraftKey } from "../../contracts/ws-rpc.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
@@ -27,13 +27,15 @@ export const applyInputDraft = (
 		handleDraftRetired(key, envelope.promotedSessionId);
 		return;
 	}
-	// The writing tab already shows its own text.
-	if (envelope._tag === "synchronized" || !isOwnBrowserClientId(envelope.from))
-		handleInputSyncReceived({
-			key,
-			...envelope,
-			...(envelope._tag === "synchronized" ? { initial: true } : {}),
-		});
+	// Own text already appears locally; attachment echoes still acknowledge saves.
+	handleInputSyncReceived({
+		key,
+		...envelope,
+		...(envelope._tag !== "synchronized" && isOwnBrowserClientId(envelope.from)
+			? { text: undefined }
+			: {}),
+		...(envelope._tag === "synchronized" ? { initial: true } : {}),
+	});
 };
 
 let viewed: { project: string; key: InputDraftKey | null } | null = null;
@@ -47,6 +49,24 @@ async function makeFollower() {
 }
 
 let follower: ReturnType<typeof makeFollower> | undefined;
+
+/** Reconcile a refused selection without replacing the user's composer text. */
+export async function refreshInputDraftAttachments(
+	project: string,
+	key: InputDraftKey,
+): Promise<void> {
+	const envelope = await runTransportEffect(
+		Effect.gen(function* () {
+			const clients = yield* WsRpcClients;
+			const { subscriptions } = yield* clients.forProject(project);
+			return yield* subscriptions
+				.inputDraft({ key })
+				.pipe(Stream.runHead, Effect.timeout("10 seconds"));
+		}),
+	);
+	if (Option.isSome(envelope) && envelope.value._tag !== "promoted")
+		handleInputSyncReceived({ key, attachments: envelope.value.attachments });
+}
 
 /** Follow one session's draft; a `null` session stops. */
 export function viewInputDraft(

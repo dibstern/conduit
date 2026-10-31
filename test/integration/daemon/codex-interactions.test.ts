@@ -84,21 +84,21 @@ function sessionRows(fixture: ProcessHarness, sessionId: string) {
 				.all(name)
 				.map((column) => column.name);
 			const predicate =
-				name === "sessions"
-					? "id = ?"
-					: columns.includes("session_id")
-						? "session_id = ?"
-						: columns.includes("message_id")
-							? "message_id IN (SELECT id FROM messages WHERE session_id = ?)"
-							: name === "input_drafts"
-								? "draft_key LIKE ? OR promoted_session_id = ?"
-								: name === "claude_runner_cursors"
-									? "1 = 1"
+				name === "claude_runner_cursors"
+					? "1 = 1"
+					: name === "sessions"
+						? "id = ?"
+						: columns.includes("session_id")
+							? "session_id = ?"
+							: columns.includes("message_id")
+								? "message_id IN (SELECT id FROM messages WHERE session_id = ?)"
+								: name === "input_drafts"
+									? "draft_key LIKE ? OR promoted_session_id = ?"
 									: undefined;
 			if (!predicate) continue;
 			const quote = (identifier: string) =>
 				`"${identifier.replaceAll('"', '""')}"`;
-			// This isolated fixture has one runner. Its reply cache has no session_id.
+			// This isolated fixture has one runner; inspect its entire reply cache.
 			const parameters =
 				name === "claude_runner_cursors"
 					? []

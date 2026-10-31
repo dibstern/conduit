@@ -4,6 +4,12 @@ import type { SqlClient } from "effect/sql";
 // but it cannot replace the work the provider is still running or pause its queue.
 // A failure since the latest handoff keeps the queue paused even when a steer
 // handed off before that failure subsequently completes.
+// CONTRACT 3.9: only an ordinary Stop pauses, and the inbox drains once the
+// active Run ends. So a plain End (stop null: reload, switch, cleanup) since
+// the latest handoff clears the pause only when that End's own turn ended
+// interrupted after it, and nothing else since the handoff failed or stopped
+// (turn.error, interrupt.requested, an End with a stop). Every other stop or
+// failure keeps main's pause, the "no worse than main" bar of CONTRACT 7.4.
 export const inboxRunStatusQuery = (
 	sql: SqlClient.SqlClient,
 	sessionId: string,
@@ -21,7 +27,22 @@ export const inboxRunStatusQuery = (
 		ORDER BY (run.status IN ('pending', 'running')) DESC,
 			requested.requested_at DESC, requested.rowid DESC LIMIT 1)
 	SELECT (SELECT status FROM selected_run) AS status,
-		((SELECT stopped FROM selected_run) AND NOT EXISTS (
+		((SELECT stopped FROM selected_run) AND NOT (
+			EXISTS (SELECT 1 FROM events ended JOIN events interrupted
+				ON interrupted.session_id = ended.session_id
+				WHERE ended.session_id = ${sessionId} AND ended.type = 'session.end_requested'
+					AND json_extract(ended.data, '$.stop') IS NULL
+					AND interrupted.type = 'turn.interrupted'
+					AND interrupted.sequence > ended.sequence
+					AND ended.sequence > COALESCE((SELECT MAX(sequence) FROM events
+						WHERE session_id = ${sessionId} AND type = 'input.sent'), 0))
+			AND NOT EXISTS (SELECT 1 FROM events stop WHERE stop.session_id = ${sessionId}
+				AND (stop.type IN ('interrupt.requested', 'turn.error')
+					OR (stop.type = 'session.end_requested'
+						AND json_extract(stop.data, '$.stop') IS NOT NULL))
+				AND stop.sequence > COALESCE((SELECT MAX(sequence) FROM events
+					WHERE session_id = ${sessionId} AND type = 'input.sent'), 0))
+		) AND NOT EXISTS (
 			SELECT 1 FROM events admitted JOIN events released
 				ON released.session_id = admitted.session_id
 			WHERE admitted.session_id = ${sessionId} AND admitted.type = 'input.admitted'

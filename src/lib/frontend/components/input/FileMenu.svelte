@@ -102,6 +102,7 @@
 <div id="file-menu" class:hidden={!isVisible}>
 	{#if isVisible}
 		<DetachedListbox
+			appearance="final"
 			id={listboxId}
 			ariaLabel="File suggestions"
 			aria-busy={loading}

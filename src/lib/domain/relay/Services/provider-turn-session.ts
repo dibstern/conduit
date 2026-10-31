@@ -1,24 +1,13 @@
-import { Clock, Effect, Schema } from "effect";
-import { SqlClient } from "effect/sql";
+import { Effect } from "effect";
 import type { Account } from "../../../contracts/account.js";
 import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverTraits,
 } from "../../../contracts/provider-instance.js";
 import { formatErrorDetail } from "../../../errors.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { canonicalEvent, createEventId } from "../../../persistence/events.js";
-import { ProviderInstanceFailure } from "../../../provider/errors.js";
-import {
-	ProviderControlPayloadSchema,
-	STOP_ABORT_WAIT_MS,
-} from "../../../provider/orchestration-command-contracts.js";
-import {
-	legacyStopOwnersQuery,
-	sessionRunOwnersQuery,
-} from "../../../provider/session-run-settlement.js";
+import { createEventId } from "../../../persistence/events.js";
+import { STOP_ABORT_WAIT_MS } from "../../../provider/orchestration-command-contracts.js";
 import { CurrentEventDelivery } from "../../../server/event-delivery.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
@@ -49,49 +38,22 @@ export const completeRecoveredQuestion = (
 	answers: Record<string, unknown> = {},
 ) =>
 	Effect.gen(function* () {
-		let messageId = question.messageId;
-		let partId = question.partId ?? question.toolCallId ?? question.requestId;
-		if (!messageId) {
-			const readQuery = yield* ReadQueryEffectTag;
-			const tool = readQuery.getPendingClaudeQuestionTool
-				? yield* readQuery.getPendingClaudeQuestionTool(
-						question.sessionId,
-						question.toolCallId ?? question.requestId,
-					)
-				: undefined;
-			if (!tool)
-				return yield* Effect.fail(
-					new Error(
-						`Pending Claude question tool not found: ${question.requestId}`,
-					),
-				);
-			messageId = tool.message_id;
-			partId = tool.id;
-		}
+		const pending = yield* PendingInteractionServiceTag;
+		// Claim retirement before any I/O so racing sends warn only once.
+		if (!(yield* pending.markQuestionResolved(question.requestId)))
+			return false;
+		const readQuery = yield* ReadQueryEffectTag;
 		const ingestion = yield* ProviderRuntimeIngestionTag;
-		const completedEvent = {
+		const log = yield* LoggerTag;
+		const resolvedEvent = {
 			eventId: createEventId(),
-			type: "tool.completed" as const,
+			type: "question.resolved" as const,
 			providerId: CLAUDE_PROVIDER_ID,
 			sessionId: question.sessionId,
 			providerRefs: {
-				providerToolUseId: question.toolCallId ?? question.requestId,
-			},
-			rawSource: { kind: "relay.recovered-question" },
-			createdAt: Date.now(),
-			data: {
-				messageId,
-				partId,
-				result,
-				duration: 0,
-			},
-		};
-		const resolvedEvent = {
-			...completedEvent,
-			eventId: createEventId(),
-			type: "question.resolved" as const,
-			providerRefs: {
-				...completedEvent.providerRefs,
+				...(question.toolCallId
+					? { providerToolUseId: question.toolCallId }
+					: {}),
 				...(question.providerProcessId
 					? { providerProcessId: question.providerProcessId }
 					: {}),
@@ -99,30 +61,72 @@ export const completeRecoveredQuestion = (
 					? { providerRequestId: question.providerRequestId }
 					: {}),
 			},
+			rawSource: { kind: "relay.recovered-question" },
+			createdAt: Date.now(),
 			data: { id: question.providerRequestId ?? question.requestId, answers },
 		};
-		if (question.messageId) {
-			// A fresh mapper has not seen the stored tool start. Seed its identity
-			// so completion updates the existing card without an Unknown tool.
-			yield* ingestion.ingestBatch([
-				{
-					...completedEvent,
+		const completed = yield* Effect.result(
+			Effect.gen(function* () {
+				// Stored message/part ids can outlive the open tool too.
+				const tool =
+					question.toolCallId && readQuery.getPendingClaudeQuestionTool
+						? yield* readQuery.getPendingClaudeQuestionTool(
+								question.sessionId,
+								question.toolCallId,
+							)
+						: undefined;
+				if (!tool) return false;
+				const completedEvent = {
+					...resolvedEvent,
 					eventId: createEventId(),
-					type: "tool.started",
+					type: "tool.completed" as const,
 					data: {
-						messageId,
-						partId,
-						toolName: "AskUserQuestion",
-						callId: question.toolCallId ?? question.requestId,
-						input: { tool: "AskUserQuestion", questions: question.questions },
+						messageId: tool.message_id,
+						partId: tool.id,
+						result,
+						duration: 0,
 					},
-				},
-				completedEvent,
-				resolvedEvent,
-			]);
-		} else {
-			yield* ingestion.ingestBatch([completedEvent, resolvedEvent]);
-		}
+				};
+				const events = [completedEvent, resolvedEvent];
+				if (question.messageId) {
+					// A fresh mapper needs the stored identity before completion.
+					yield* ingestion.ingestBatch([
+						{
+							...completedEvent,
+							eventId: createEventId(),
+							type: "tool.started",
+							data: {
+								messageId: tool.message_id,
+								partId: tool.id,
+								toolName: "AskUserQuestion",
+								callId: question.toolCallId,
+								input: {
+									tool: "AskUserQuestion",
+									questions: question.questions,
+								},
+							},
+						},
+						...events,
+					]);
+				} else {
+					yield* ingestion.ingestBatch(events);
+				}
+				return true;
+			}),
+		);
+		if (completed._tag === "Success" && completed.success) return true;
+		// Old interaction bookkeeping must never reject a new input. Retire the
+		// durable card as well, without recreating or overwriting a closed tool.
+		yield* ingestion
+			.ingest({
+				...resolvedEvent,
+				data: { ...resolvedEvent.data, answers: {} },
+			})
+			.pipe(Effect.ignore);
+		log.warn(
+			`Recovered Claude question is no longer answerable: session=${question.sessionId} request=${question.requestId} toolCallId=${question.toolCallId ?? "missing"}${completed._tag === "Failure" ? `: ${formatErrorDetail(completed.failure)}` : ""}`,
+		);
+		return false;
 	});
 
 const resolvePendingClaudeQuestions = (
@@ -141,7 +145,6 @@ const resolvePendingClaudeQuestions = (
 		for (const question of pendingQuestions) {
 			if (!question.recovered) continue;
 			yield* completeRecoveredQuestion(question, null);
-			yield* pendingInteractionService.markQuestionResolved(question.requestId);
 		}
 		if (pendingQuestions.some((question) => !question.recovered)) {
 			const stop = {
@@ -245,231 +248,21 @@ export const prepareTurnSession = (
 	});
 
 export const prepareStop = (input: ProviderTurnServiceInterruptInput) =>
-	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const [stored] = yield* sql<{
-			payload_json: string;
-			provider_id: string;
-			requested_at: number;
-		}>`SELECT payload_json, provider_id, requested_at
-			FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
-			AND effect_type IN ('interrupt_turn', 'end_session')`;
-		const replay = stored
-			? yield* Effect.try({
-					try: () =>
-						Schema.decodeSync(
-							Schema.fromJsonString(ProviderControlPayloadSchema),
-						)(stored.payload_json),
-					catch: (cause) =>
-						new ProviderInstanceFailure({
-							providerId: "conduit",
-							operation: "recoverStop",
-							cause,
-						}),
-				})
-			: undefined;
-		if (
-			(replay?.type === "interrupt_turn" || replay?.type === "end_session") &&
-			replay.stop
-		)
-			return replay.stop;
-		const deadlineAt = (yield* Clock.currentTimeMillis) + STOP_ABORT_WAIT_MS;
-		const commit = yield* makeCommitAndSignal;
-		const store = yield* EventStoreEffectTag;
-		const providerId =
-			stored?.provider_id ??
-			(yield* (yield* OrchestrationEngineTag).getProviderForSessionEffect(
-				input.sessionId,
-			));
-		const account = providerId
-			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
-			: undefined;
-		const keepsPendingSteers = account
-			? PROVIDER_DRIVERS[account.driver].keepsPendingSteersOnInterrupt
-			: false;
-		if (
-			stored &&
-			(replay?.type === "interrupt_turn" || replay?.type === "end_session")
-		) {
-			// A predecessor Stop has no snapshot. Recover only its original inputs,
-			// without recapturing reservations or changing the immutable payload.
-			const turnIds =
-				replay.type === "interrupt_turn" ? (replay.turnIds ?? []) : [];
-			const owners = yield* legacyStopOwnersQuery(
-				sql,
-				input.sessionId,
-				input.commandId,
-			);
-			return {
-				deadlineAt: stored.requested_at + STOP_ABORT_WAIT_MS,
-				owners,
-				turnIds,
-				runnerBacked:
-					account !== undefined &&
-					!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer,
-				retainedSteers: false,
-			};
-		}
-		// Close unused reservations and return handoffs in one transaction,
-		// serialized against the claim UPDATE so the drain cannot steal them.
-		const { owners, retainedSteers } = yield* commit.write((project) =>
-			Effect.gen(function* () {
-				const snapshot = yield* sessionRunOwnersQuery(sql, input.sessionId, {
-					confirmedStop: true,
-					excludeRetainedSteers: keepsPendingSteers,
-				});
-				const rows = yield* sql<{
-					command_id: string;
-					run_id: string;
-					provider_id: string;
-					status: string;
-					sent_sequence: number | null;
-				}>`SELECT command.command_id, command.run_id, command.provider_id, command.status,
-				(SELECT MAX(sequence) FROM events WHERE session_id = command.session_id
-					AND type = 'input.sent' AND json_extract(data, '$.inputId') = command.command_id) AS sent_sequence
-				FROM provider_command_outbox command
-				WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
-					AND command.status IN ('pending', 'retryable_failed')`;
-				const events = rows.flatMap((row) => [
-					...(row.status === "pending"
-						? [
-								canonicalEvent(
-									"turn.interrupted",
-									input.sessionId,
-									{
-										messageId: "",
-										reason: "Stopped before delivery",
-										code: "interrupted",
-									},
-									{
-										provider: row.provider_id,
-										metadata: { runId: row.run_id },
-									},
-								),
-							]
-						: []),
-					...(row.sent_sequence === null
-						? []
-						: [
-								canonicalEvent(
-									"input.requeued",
-									input.sessionId,
-									{
-										sessionId: input.sessionId,
-										inputId: row.command_id,
-										sentSequence: row.sent_sequence,
-										reason: "failed",
-									},
-									{ metadata: { runId: row.run_id } },
-								),
-							]),
-				]);
-				if (events.length) yield* project(yield* store.appendBatch(events));
-				// These attempts already ended through their native terminal. Return
-				// their retry schedule to the inbox, as recommit would withdraw it.
-				yield* sql`DELETE FROM provider_command_outbox WHERE session_id = ${input.sessionId}
-					AND effect_type = 'send_turn' AND status = 'retryable_failed'`;
-				return snapshot;
-			}),
-		);
-
-		const identities =
-			owners.length === 0
-				? []
-				: yield* sql<{ input_id: string | null }>`
-			SELECT COALESCE(json_extract(command.payload_json, '$.continuation.cutOffMessageId'),
-				json_extract(command.payload_json, '$.inputId'), command.command_id) AS input_id
-			FROM provider_command_outbox command JOIN provider_runs requested
-				ON requested.id = command.run_id AND requested.session_id = command.session_id
-			WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
-				AND command.status = 'running' AND COALESCE(requested.joined_into, requested.id)
-				IN ${sql.in(owners.map(({ runId }) => runId))}
-			UNION SELECT COALESCE(message.input_id, turn.user_message_id) AS input_id
-			FROM turns turn LEFT JOIN messages message
-				ON message.id = turn.user_message_id AND message.session_id = turn.session_id
-			WHERE turn.session_id = ${input.sessionId}
-				AND turn.run_id IN ${sql.in(owners.map(({ runId }) => runId))}`;
-		return {
-			deadlineAt,
-			runnerBacked:
-				account !== undefined &&
-				!PROVIDER_DRIVERS[account.driver].runsOpenCodeServer,
-			owners,
-			retainedSteers,
-			turnIds: [
-				...new Set(
-					identities.flatMap(({ input_id }) => (input_id ? [input_id] : [])),
-				),
-			],
-		};
-	});
+	Effect.flatMap(OrchestrationEngineTag, (engine) =>
+		engine.acceptStopEffect(input),
+	);
 
 export const interruptTurn = (
 	input: ProviderTurnServiceInterruptInput,
-	snapshot: Effect.Success<ReturnType<typeof prepareStop>>,
+	_snapshot: Effect.Success<ReturnType<typeof prepareStop>>,
 ) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
 		log.info(`client=${input.clientId} session=${input.sessionId} Aborting`);
 		yield* clearProcessingTimeout(input.sessionId);
-		const sql = yield* SqlClient.SqlClient;
-
 		const engine = yield* OrchestrationEngineTag;
-		const [stored] = yield* sql<{
-			payload_json: string;
-		}>`SELECT payload_json FROM provider_command_outbox
-			WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
-			AND effect_type IN ('interrupt_turn', 'end_session')`;
-		if (stored) {
-			const payload = yield* Effect.try({
-				try: () =>
-					Schema.decodeSync(
-						Schema.fromJsonString(ProviderControlPayloadSchema),
-					)(stored.payload_json),
-				catch: (cause) =>
-					new ProviderInstanceFailure({
-						providerId: "conduit",
-						operation: "recoverStop",
-						cause,
-					}),
-			});
-			yield* engine.dispatchEffect({ ...payload, commandId: input.commandId });
-			return;
-		}
-		const providerId = yield* engine.getProviderForSessionEffect(
-			input.sessionId,
-		);
-		const account = providerId
-			? yield* (yield* AccountDirectory).resolve({ _tag: "Id", id: providerId })
-			: undefined;
-		const usesOpenCode =
-			!account || PROVIDER_DRIVERS[account.driver].runsOpenCodeServer;
-		if (
-			account &&
-			!usesOpenCode &&
-			!PROVIDER_DRIVERS[account.driver].interruptViaEngine
-		)
-			return;
-		const fullStop =
-			!usesOpenCode &&
-			(yield* sql<{
-				indeterminate: number;
-			}>`
-				SELECT EXISTS (SELECT 1 FROM provider_command_outbox command
-					JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
-					WHERE command.session_id = ${input.sessionId} AND command.effect_type = 'send_turn'
-					AND command.status = 'running' AND command.error_code = 'delivery_indeterminate'
-						AND run.id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
-					AND run.status IN ('pending', 'running')) AS indeterminate`)[0]
-				?.indeterminate === 1;
 		const interruptResult = yield* Effect.result(
-			engine.dispatchEffect({
-				type: fullStop ? "end_session" : "interrupt_turn",
-				...(!fullStop ? { turnIds: snapshot.turnIds } : {}),
-				commandId: input.commandId,
-				sessionId: input.sessionId,
-				stop: snapshot,
-			}),
+			engine.executeAcceptedStopEffect(input),
 		);
 		const processGone =
 			interruptResult._tag === "Failure" &&

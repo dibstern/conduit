@@ -311,7 +311,11 @@ export const composerWordsHandlers: StepHandler[] = [
 				await expect(branch).toHaveCount(0);
 			else await expect(branch).toHaveText(match[2]);
 			await expect(
-				checkout.locator(`[data-icon="${match[3]}"] svg`),
+				checkout.locator(
+					match[3] === "branch"
+						? '[data-icon="branch"] svg, :scope > svg.lucide-git-branch'
+						: `[data-icon="${match[3]}"] svg`,
+				),
 			).toBeVisible();
 		},
 	},
@@ -393,8 +397,49 @@ export const composerWordsHandlers: StepHandler[] = [
 			/^the composer checkout menu shows uncommitted changes and upstream 2 ahead and 1 behind$/,
 		run: async ({ world }) => {
 			const menu = world.page.getByTestId("composer-checkout-menu");
-			await expect(menu).toContainText("uncommitted");
-			await expect(menu).toContainText("↑2 ↓1");
+			await expect(menu.getByTestId("checkout-ahead")).toHaveText("2ahead");
+			await expect(menu.getByTestId("checkout-behind")).toHaveText("1behind");
+			await expect(menu.getByTestId("checkout-changes")).toHaveText(
+				"3+12-4files changed",
+			);
+			await expect(
+				menu.getByRole("menuitem", { name: "Copy worktree path" }),
+			).toContainText("Worktree");
+			await expect(
+				menu.getByRole("menuitem", { name: "Copy commit hash" }),
+			).toContainText("6b11104");
+		},
+	},
+	{
+		name: "copy a checkout value without closing the menu",
+		match: /^I tap the checkout (Branch copy control|HEAD row)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.context()
+				.grantPermissions(["clipboard-read", "clipboard-write"]);
+			const menu = world.page.getByTestId("composer-checkout-menu");
+			const control =
+				match[1] === "HEAD row"
+					? menu.getByRole("menuitem", { name: "Copy commit hash" })
+					: menu.getByRole("menuitem", { name: "Copy branch name" });
+			await control.click();
+			await expect(menu).toBeVisible();
+		},
+	},
+	{
+		name: "assert a checkout copy toast and system clipboard",
+		match:
+			/^the checkout shows (Branch copied|Commit hash copied) and the clipboard contains (.+)$/,
+		run: async ({ world, match }) => {
+			const toast = world.page
+				.locator('[data-testid="toast"], [data-testid="session-sheet-toast"]')
+				.filter({ hasText: match[1] ?? "" });
+			await expect(toast).toBeVisible();
+			await expect(toast).toHaveAttribute("data-variant", "success");
+			await expect(toast.locator("svg").first()).toBeVisible();
+			await expect
+				.poll(() => world.page.evaluate(() => navigator.clipboard.readText()))
+				.toBe(match[2]);
 		},
 	},
 	{

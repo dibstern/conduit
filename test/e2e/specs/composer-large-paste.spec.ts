@@ -5,7 +5,7 @@
 // paste took ~320ms to settle and 16MB took ~5s, linear in size.
 //
 // Past HIGHLIGHT_MAX_CHARS the composer drops both: the mirror is emptied and
-// the textarea paints its own text, and the height is pinned to the cap without
+// the textarea scrolls its own text, with height pinned to the cap without
 // measuring. This asserts that mechanism (a timing assertion would flake).
 //
 // Uses WS + RPC mocks — no real relay needed.
@@ -36,11 +36,11 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 }) => {
 	const textarea = page.locator("#input");
 
-	// A small draft is mirrored: the textarea's own text stays transparent.
+	// The textarea paints text; the small draft's mirror paints decorations.
 	await textarea.fill("/commit the fix");
 	const mirror = page.locator("#input-row div.mirror");
 	await expect(mirror).toHaveText("/commit the fix");
-	await expect(textarea).toHaveClass(/text-transparent/);
+	await expect(textarea).toHaveClass(/\btext-text\b/);
 
 	// One input event, like a paste. Playwright's fill() types 116KB through
 	// the protocol and takes ~20s on its own, even into a bare textarea.
@@ -51,8 +51,8 @@ test("@large-paste a pasted log dump bypasses the highlight mirror", async ({
 
 	// The mirror is emptied — it never lays the draft out a second time…
 	await expect(mirror).toHaveText("");
-	// …and the textarea shows its own text instead, so the draft stays visible.
-	await expect(textarea).not.toHaveClass(/text-transparent/);
+	// …and native scrolling takes over without a second layout of the draft.
+	await expect(textarea).toHaveClass(/\boverflow-y-auto\b/);
 	// CSS pins the row to the cap without reading scrollHeight.
 	await expect(textarea.locator("..")).toHaveClass(/h-\[120px\]/);
 	// Height is pinned to the cap without measuring the draft.
@@ -83,13 +83,13 @@ for (const at of ["end", "middle"] as const) {
 			},
 			[line, caretLine, at] as const,
 		);
-		await expect(textarea).toHaveClass(/text-transparent/);
+		await expect(textarea).toHaveClass(/\boverflow-hidden\b/);
 
 		// One character through the native editing path.
 		await textarea.evaluate(() =>
 			document.execCommand("insertText", false, "z"),
 		);
-		await expect(textarea).not.toHaveClass(/text-transparent/);
+		await expect(textarea).toHaveClass(/\boverflow-y-auto\b/);
 
 		// Every line fits the width, so the caret's line sits at a known offset.
 		// ComposerFrame uses 22.5px lines with asymmetric padding here; derive
@@ -136,7 +136,7 @@ test("@large-paste typing into a pasted log dump never lays the draft out again"
 		el.value = draft;
 		el.dispatchEvent(new Event("input", { bubbles: true }));
 	}, LARGE_DRAFT);
-	await expect(textarea).not.toHaveClass(/text-transparent/);
+	await expect(textarea).toHaveClass(/\boverflow-y-auto\b/);
 
 	await page.keyboard.type("tail");
 	await page.keyboard.press("Shift+Enter");

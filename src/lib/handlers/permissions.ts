@@ -37,6 +37,7 @@ import { fixupConfigFile } from "../instance/opencode-config-fixup.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { retirePendingPrompts } from "../persistence/effect/retire-pending-prompts.js";
 import {
 	type CanonicalEvent,
@@ -542,6 +543,8 @@ export const handlePermissionResponse = (
 		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
 		const stored = yield* readPromptReference(requestId, "permission");
 		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:"))
+			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (Option.isSome(engineOption)) {
 			const pending =
@@ -606,9 +609,6 @@ export const handlePermissionResponse = (
 			}
 			yield* restartProcessingTimeout(sessionId, stored?.run_id);
 			return;
-		}
-		if (stored?.provider_process_id?.startsWith("opencode:")) {
-			yield* resolveOpenCodeQuestionTarget(stored.session_id, stored);
 		}
 		const resultOption =
 			yield* pendingInteractions.resolvePermissionFromBrowser(
@@ -677,7 +677,7 @@ export const handlePermissionResponse = (
 					),
 				);
 				if (replied._tag === "Failure" && stored?.provider_process_id) {
-					yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+					yield* resolveOpenCodePromptTarget(sessionId, stored);
 					return yield* Effect.fail(replied.failure);
 				}
 				if (replied._tag === "Success" && stored) {
@@ -706,7 +706,7 @@ export const handlePermissionResponse = (
 		}
 	}).pipe(Effect.scoped);
 
-const resolveOpenCodeQuestionTarget = (
+const resolveOpenCodePromptTarget = (
 	sessionId: string,
 	prompt?: StoredPromptReference,
 ) =>
@@ -716,10 +716,22 @@ const resolveOpenCodeQuestionTarget = (
 		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
 		const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
-		const directory =
-			workspace._tag === "Some"
-				? yield* workspace.value.get(sessionId)
+		const call =
+			prompt && engine._tag === "Some"
+				? yield* engine.value.resolveSessionCallContextEffect(
+						sessionId,
+						undefined,
+						{
+							...(prompt.run_id ? { runId: prompt.run_id } : {}),
+							prompt: { id: prompt.id, kind: prompt.type },
+						},
+					)
 				: undefined;
+		const directory =
+			call?.workspaceRoot ??
+			(workspace._tag === "Some"
+				? yield* workspace.value.get(sessionId)
+				: undefined);
 		if (engine._tag === "None" || instances._tag === "None") {
 			if (
 				providerProcessId &&
@@ -729,8 +741,14 @@ const resolveOpenCodeQuestionTarget = (
 			return { client: defaultClient, directory };
 		}
 		const instanceId =
-			yield* engine.value.getProviderForSessionEffect(sessionId);
-		const selectedId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+			call?.account.id ??
+			(yield* engine.value.getProviderForSessionEffect(sessionId));
+		const boundId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+		const selectedId =
+			!call && boundId === MANAGED_OPENCODE_ACCOUNT_ID
+				? (Option.getOrUndefined(yield* Effect.serviceOption(ConfigTag))
+						?.openCodeInstanceId ?? boundId)
+				: boundId;
 		const running = providerProcessId
 			? yield* instances.value.ifRunning(selectedId, directory)
 			: Option.some(yield* instances.value.use(selectedId, directory));
@@ -767,6 +785,8 @@ export const handleAskUserResponse = (
 			wsHandler.getClientSession(clientId),
 		);
 		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:"))
+			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
 		const pendingInteractionsOption = yield* Effect.serviceOption(
 			PendingInteractionServiceTag,
 		);
@@ -831,6 +851,30 @@ export const handleAskUserResponse = (
 				message: "Secret answers require the secure command service.",
 			});
 		if (Option.isSome(engineOption)) {
+			if (pendingQuestion?.recovered) {
+				const read = Option.getOrUndefined(
+					yield* Effect.serviceOption(ReadQueryEffectTag),
+				);
+				const openTool = yield* Effect.result(
+					pendingQuestion.toolCallId && read?.getPendingClaudeQuestionTool
+						? read.getPendingClaudeQuestionTool(
+								sessionId,
+								pendingQuestion.toolCallId,
+							)
+						: Effect.succeed(undefined),
+				);
+				if (read && (openTool._tag === "Failure" || !openTool.success)) {
+					const turns = Option.getOrUndefined(
+						yield* Effect.serviceOption(ProviderTurnServiceTag),
+					);
+					if (turns?.completeRecoveredQuestion)
+						yield* turns.completeRecoveredQuestion(pendingQuestion, null);
+					return yield* new WsRpcError({
+						message:
+							"This question is no longer answerable. Send a new message to continue.",
+					});
+				}
+			}
 			yield* engineOption.value.dispatchEffect({
 				type: "resolve_question",
 				commandId: payload.commandId ?? createCommandId(),
@@ -859,6 +903,40 @@ export const handleAskUserResponse = (
 			) {
 				if (pendingQuestion?.recovered) return yield* expirePrompt(stored);
 			}
+			if (pendingQuestion?.recovered) {
+				const answerText = pendingQuestion.questions
+					.map(
+						(question, index) =>
+							`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
+					)
+					.join("\n");
+				const turnsOption = yield* Effect.serviceOption(ProviderTurnServiceTag);
+				const turns = Option.getOrUndefined(turnsOption);
+				if (!turns?.completeRecoveredQuestion) {
+					return yield* new WsRpcError({
+						message:
+							"This question cannot be answered right now. Send a new message to continue.",
+					});
+				}
+				const completed = yield* turns.completeRecoveredQuestion(
+					pendingQuestion,
+					answerText,
+					answers,
+				);
+				if (!completed)
+					return yield* new WsRpcError({
+						message:
+							"This question is no longer answerable. Send a new message to continue.",
+					});
+				yield* sendMessageToSession({
+					clientId,
+					sessionId: pendingQuestion.sessionId || sessionId,
+					text: answerText,
+					commandId: payload.commandId ?? createCommandId(),
+				});
+				// The follow-up send owns its new timeout, not this recovered prompt.
+				return;
+			}
 			const resolvedOption =
 				yield* pendingInteractionsOption.value.resolveQuestionFromBrowser(
 					toolId,
@@ -867,47 +945,6 @@ export const handleAskUserResponse = (
 			const resolved = Option.getOrUndefined(resolvedOption);
 			if (resolved) {
 				const questionSessionId = resolved.sessionId || sessionId;
-				if (resolved.question.recovered) {
-					const answerText = resolved.question.questions
-						.map(
-							(question, index) =>
-								`Answer to your question "${question.question}": ${answers[String(index)] ?? ""}`,
-						)
-						.join("\n");
-					const turnsOption = yield* Effect.serviceOption(
-						ProviderTurnServiceTag,
-					);
-					const turns = Option.getOrUndefined(turnsOption);
-					if (!turns?.completeRecoveredQuestion) {
-						yield* pendingInteractionsOption.value.recoverPendingQuestions([
-							resolved.question,
-						]);
-						return yield* Effect.fail(
-							new Error("Recovered question turn service unavailable"),
-						);
-					}
-					const completed = yield* Effect.result(
-						turns.completeRecoveredQuestion(
-							resolved.question,
-							answerText,
-							answers,
-						),
-					);
-					if (completed._tag === "Failure") {
-						yield* pendingInteractionsOption.value.recoverPendingQuestions([
-							resolved.question,
-						]);
-						return yield* Effect.fail(completed.failure);
-					}
-					yield* sendMessageToSession({
-						clientId,
-						sessionId: questionSessionId,
-						text: answerText,
-						commandId: payload.commandId ?? createCommandId(),
-					});
-					// The follow-up send owns its new timeout, not this recovered prompt.
-					return;
-				}
 				const engineOption = yield* Effect.serviceOption(
 					OrchestrationEngineTag,
 				);
@@ -938,7 +975,7 @@ export const handleAskUserResponse = (
 		)
 			return yield* expirePrompt(stored);
 		// OpenCode REST API path with fallback for legacy prompt rows.
-		const { client, directory } = yield* resolveOpenCodeQuestionTarget(
+		const { client, directory } = yield* resolveOpenCodePromptTarget(
 			sessionId,
 			stored,
 		);
@@ -958,7 +995,7 @@ export const handleAskUserResponse = (
 		}
 		if (stored?.provider_request_id) {
 			if (stored.provider_process_id)
-				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+				yield* resolveOpenCodePromptTarget(sessionId, stored);
 			return yield* new WsRpcError({
 				message: `OpenCode could not answer this question: ${String(replyResult.failure)}`,
 			});
@@ -1036,6 +1073,8 @@ export const handleQuestionReject = (
 			wsHandler.getClientSession(clientId),
 		);
 		if (stored?.status === "resolved") return;
+		if (stored?.provider_process_id?.startsWith("opencode:"))
+			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
 		const pendingInteractionsOption = yield* Effect.serviceOption(
 			PendingInteractionServiceTag,
 		);
@@ -1059,11 +1098,18 @@ export const handleQuestionReject = (
 			return yield* resolveAsyncQuestion(pendingQuestion, null);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
 		if (Option.isSome(engineOption)) {
+			const call = yield* engineOption.value.resolveSessionCallContextEffect(
+				sessionId,
+				undefined,
+				{
+					...(stored?.run_id ? { runId: stored.run_id } : {}),
+					prompt: { id: stored?.id ?? toolId, kind: "question" },
+				},
+			);
 			const providerId =
-				yield* engineOption.value.getProviderForSessionEffect(sessionId);
-			if (
-				getProviderDriver(providerId)?.interactionSink === "permission-asking"
-			)
+				call?.account.driver ??
+				(yield* engineOption.value.getProviderForSessionEffect(sessionId));
+			if (providerId === "claude")
 				return yield* new WsRpcError({
 					message:
 						"Claude questions require an answer before the turn can continue.",
@@ -1107,9 +1153,7 @@ export const handleQuestionReject = (
 								questionSessionId,
 							)
 						: undefined;
-				if (
-					getProviderDriver(providerId)?.interactionSink === "permission-asking"
-				) {
+				if (providerId === "claude") {
 					log.warn(
 						`client=${clientId} session=${questionSessionId} refused to skip Claude question ${toolId}`,
 					);
@@ -1167,7 +1211,7 @@ export const handleQuestionReject = (
 		)
 			return yield* expirePrompt(stored);
 		// OpenCode REST API path with fallback for legacy prompt rows.
-		const { client, directory } = yield* resolveOpenCodeQuestionTarget(
+		const { client, directory } = yield* resolveOpenCodePromptTarget(
 			sessionId,
 			stored,
 		);
@@ -1182,7 +1226,7 @@ export const handleQuestionReject = (
 		}
 		if (stored?.provider_request_id) {
 			if (stored.provider_process_id)
-				yield* resolveOpenCodeQuestionTarget(sessionId, stored);
+				yield* resolveOpenCodePromptTarget(sessionId, stored);
 			return yield* new WsRpcError({
 				message: `OpenCode could not reject this question: ${String(rejectResult.failure)}`,
 			});

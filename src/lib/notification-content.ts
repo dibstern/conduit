@@ -10,13 +10,33 @@ export interface NotificationContent {
 	tag: string;
 }
 
+/** Push-only notification; this is not part of the browser WebSocket protocol. */
+export interface GoalStuckNotification {
+	readonly _tag: "goal_stuck";
+	readonly sessionId: string;
+	readonly originId: string;
+	readonly reason: string;
+}
+
 /**
  * Derive notification content from a relay message or a pending approval.
  * Returns `null` for message types that don't warrant a notification.
  */
 export function notificationContent(
-	msg: RelayMessage | Approval,
+	msg: RelayMessage | Approval | GoalStuckNotification,
 ): NotificationContent | null {
+	if ("_tag" in msg && msg._tag === "goal_stuck") {
+		const reason = msg.reason.trim();
+		return {
+			title: "Goal waiting on you",
+			body: reason
+				? reason.length > 140
+					? `${reason.slice(0, 139)}…`
+					: reason
+				: "The goal keeps asking to continue. Reply to resume.",
+			tag: "opencode-done",
+		};
+	}
 	if ("_tag" in msg)
 		return msg._tag === "permission"
 			? {

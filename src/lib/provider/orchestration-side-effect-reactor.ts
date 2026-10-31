@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	Clock,
-	type Context,
+	Context,
 	Data,
 	Duration,
 	Effect,
@@ -11,10 +11,12 @@ import {
 	Ref,
 	Schedule,
 	Schema,
+	Scope,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { AccountSchema } from "../contracts/account.js";
+import { AttachmentRefSchema } from "../contracts/attachment-ref.js";
 import { AccountUnroutable } from "../contracts/limit-recovery.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
@@ -29,16 +31,17 @@ import {
 } from "../domain/daemon/Services/secret-answers.js";
 import { mark } from "../domain/daemon/Services/turn-timeline.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
+import {
+	type InputDrafts,
+	InputDraftsTag,
+} from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
 import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../effect/failure-classification.js";
-import {
-	type ClaudeEventPersistEffect,
-	ClaudeEventPersistEffectTag,
-} from "../persistence/effect/claude-event-persist-effect.js";
+import type { AttachmentStore } from "../persistence/attachment-store.js";
+import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
 import type { CommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../persistence/effect/event-store-effect.js";
-import { requeueFailedSteers } from "../persistence/effect/input-requeue-effect.js";
 import {
 	makeProviderStateEffect,
 	ProviderStateEffectTag,
@@ -70,10 +73,26 @@ import type {
 } from "./orchestration-engine.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
-import { legacyStopOwnersQuery } from "./session-run-settlement.js";
+import { resolveTurnImages } from "./resolve-turn-images.js";
+import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
+import {
+	classify,
+	retrySettlementWrite,
+	type SettlementTx,
+	terminalTurnResult,
+} from "./runner/send-settlement.js";
+import {
+	LegacySendKey,
+	settleDirectSend,
+	settleLegacySend,
+	settleSend,
+} from "./runner/send-settlement-outbox.js";
+import type { SessionFailure } from "./runner/session-runner.js";
+import { legacyStopOwnersQuery, stopCovers } from "./session-run-settlement.js";
 import type {
 	EventSink,
 	ProviderCall,
+	ResolvedSendTurnInput,
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
@@ -97,6 +116,7 @@ const controlErrorSchema = Schema.Struct({
 	operation: Schema.String,
 	code: Schema.optionalKey(
 		Schema.Literals([
+			"attachment_missing",
 			"auth_required",
 			"provider_process_gone",
 			"provider_process_unavailable",
@@ -126,6 +146,7 @@ interface ProviderCommandOutboxRow {
 	readonly run_id: string | null;
 	readonly provider_process_id: string | null;
 	readonly attempt_count: number;
+	readonly requested_at: number;
 	readonly status: "pending" | "running" | "retryable_failed";
 }
 
@@ -210,10 +231,12 @@ type ProviderCommandExecutionError =
 	| ProviderInstanceFailure;
 
 export interface ProviderSideEffectReactorOptions {
+	readonly scope?: Scope.Scope;
 	readonly projectId?: string;
 	readonly secretAnswers?: SecretAnswers["Service"];
 	readonly sql: SqlClient.SqlClient;
 	readonly registry: ProviderRegistry;
+	readonly attachmentStore?: Pick<AttachmentStore, "get">;
 	readonly ingestion: Pick<ProviderRuntimeIngestion, "ingest" | "ingestBatch">;
 	readonly write: CommitAndSignal["write"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
@@ -293,6 +316,9 @@ export class ProviderSideEffectReactor {
 	private readonly liveCommands = new Set<string>();
 	private readonly drainingSessions = new Set<string>();
 	private readonly admission = Semaphore.makeUnsafe(1);
+	private retryWake:
+		| { readonly due: number; fiber?: Fiber.Fiber<void, never> }
+		| undefined;
 
 	constructor(private readonly options: ProviderSideEffectReactorOptions) {}
 
@@ -374,7 +400,7 @@ export class ProviderSideEffectReactor {
 				// neither adapter recovery nor pending selection can settle those.
 				const commands = yield* this.options.sql<ProviderCommandOutboxRow>`
 					SELECT request_sequence, command_id, project_key, session_id, provider_id,
-						effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 					FROM provider_command_outbox
 					WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 						AND status IN ('pending', 'running', 'retryable_failed')
@@ -413,7 +439,7 @@ export class ProviderSideEffectReactor {
 								provider_id: string;
 								effect_type: string;
 							}>`UPDATE provider_command_outbox
-						SET status = 'cancelled', error_code = 'project_inactive', next_attempt_at = NULL, updated_at = ${now}
+						SET status = 'cancelled', payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END, error_code = 'project_inactive', next_attempt_at = NULL, updated_at = ${now}
 						WHERE effect_type <> 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
 							AND project_key NOT IN ${this.options.sql.in(projects)}
 						RETURNING command_id, project_key, provider_id, effect_type`;
@@ -427,6 +453,8 @@ export class ProviderSideEffectReactor {
 					.pipe(Effect.mapError(storeFailure("cancelInactiveControls")));
 			}
 			const heads = yield* this.nextPendingRequests();
+			// Arm before running heads too: a held turn can outlast a later retryAt.
+			yield* this.armRetryWake(makeInteractions);
 			yield* Effect.forEach(
 				heads,
 				(head) =>
@@ -469,7 +497,65 @@ export class ProviderSideEffectReactor {
 					),
 				{ concurrency: Math.max(1, heads.length), discard: true },
 			);
+			yield* this.armRetryWake(makeInteractions);
 		});
+	}
+
+	private armRetryWake(
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+	): Effect.Effect<void, ProviderCommandStoreFailure> {
+		return this.admission.withPermit(
+			Effect.gen({ self: this }, function* () {
+				const currentScope = yield* Effect.serviceOption(Scope.Scope);
+				const scope =
+					this.options.scope ??
+					(Option.isSome(currentScope) ? currentScope.value : undefined);
+				if (!scope) return;
+				const now = yield* this.currentTimeMillis();
+				const [next] = yield* this.options.sql<{
+					due: number | null;
+				}>`SELECT MIN(next_attempt_at) AS due
+				FROM provider_command_outbox candidate
+				WHERE status = 'retryable_failed' AND next_attempt_at IS NOT NULL
+					AND (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
+					AND (next_attempt_at > ${now}
+						OR command_id NOT IN ${this.options.sql.in([...this.liveCommands])})
+					AND ((effect_type <> 'send_turn' AND provider_process_id IS NOT NULL)
+						OR session_id NOT IN ${this.options.sql.in([...this.drainingSessions])})
+					AND NOT EXISTS (
+						SELECT 1 FROM provider_command_outbox earlier
+						WHERE earlier.status IN ('pending', 'running', 'retryable_failed') AND (
+							(candidate.effect_type <> 'send_turn' AND candidate.provider_process_id IS NOT NULL
+								AND earlier.effect_type <> 'send_turn' AND earlier.provider_process_id = candidate.provider_process_id
+								AND earlier.request_sequence < candidate.request_sequence)
+							OR ((candidate.effect_type = 'send_turn' OR candidate.provider_process_id IS NULL)
+								AND earlier.project_key = candidate.project_key AND earlier.session_id = candidate.session_id
+								AND (earlier.request_sequence < candidate.request_sequence OR earlier.status = 'running')))
+					)`.pipe(Effect.mapError(storeFailure("scheduleRetry")));
+				const due = next?.due ?? undefined;
+				if (due === this.retryWake?.due) return;
+				if (this.retryWake?.fiber) yield* Fiber.interrupt(this.retryWake.fiber);
+				this.retryWake = undefined;
+				if (due === undefined) return;
+				const wake: { readonly due: number; fiber?: Fiber.Fiber<void, never> } =
+					{ due };
+				this.retryWake = wake;
+				wake.fiber = yield* Effect.forkIn(
+					Effect.sleep(Math.max(0, due - now)).pipe(
+						Effect.andThen(
+							Effect.sync(() => {
+								if (this.retryWake === wake) this.retryWake = undefined;
+							}),
+						),
+						Effect.andThen(this.drain(makeInteractions)),
+						Effect.catch((cause) =>
+							Effect.logError("Provider command retry wake failed", cause),
+						),
+					),
+					scope,
+				);
+			}),
+		);
 	}
 
 	private withDrainSession<A, E, R>(
@@ -527,26 +613,6 @@ export class ProviderSideEffectReactor {
 				return yield* Effect.fail(result.failure);
 			}
 			if (result._tag === "Success" && result.success === undefined) return 0;
-			if (
-				result._tag === "Success" &&
-				result.success?.status === "steer-declined"
-			) {
-				yield* this.withProjectContext(
-					row.project_key,
-					Effect.gen({ self: this }, function* () {
-						const persist = yield* Effect.serviceOption(
-							ClaudeEventPersistEffectTag,
-						);
-						if (persist._tag === "Some")
-							yield* requeueFailedSteers(
-								this.options.sql,
-								persist.value,
-								row.session_id,
-								row.command_id,
-							).pipe(Effect.mapError(storeFailure("requeueDeclinedSteer")));
-					}),
-				);
-			}
 			return 1;
 		});
 	}
@@ -723,6 +789,7 @@ export class ProviderSideEffectReactor {
 			liveContext?: LiveSendContext | undefined;
 		},
 	): Effect.Effect<TurnResult | undefined, ProviderCommandExecutionError> {
+		let ownedSend: string | undefined;
 		return Effect.gen({ self: this }, function* () {
 			if (this.options.isProjectReady) {
 				const active = yield* Effect.result(
@@ -759,6 +826,8 @@ export class ProviderSideEffectReactor {
 				return yield* this.durableOutcome(row.command_id);
 			}
 			row = claimed;
+			if (row.effect_type === "send_turn")
+				ownedSend = `${row.request_sequence}:${row.attempt_count}`;
 			const cancellation = new AbortController();
 			const delivery = this.runProviderEffect(
 				row,
@@ -777,17 +846,31 @@ export class ProviderSideEffectReactor {
 							const wait = Fiber.join(pending);
 							// Recall only Conduit's queue. Missing acknowledgement is uncertainty,
 							// never permission to cancel native work or retry the command.
-							const recall = Effect.sync(() => cancellation.abort()).pipe(
-								Effect.andThen(wait),
-								Effect.timeoutOrElse({
-									duration: "1 second",
-									orElse: () =>
-										Effect.succeed({
-											...REACTOR_COMPLETED_RESULT,
-											status: "indeterminate" as const,
-										}),
-								}),
-							);
+							const recall = Effect.gen({ self: this }, function* () {
+								cancellation.abort();
+								const observedAt = yield* this.currentTimeMillis();
+								yield* this.recordSendReply(
+									row,
+									undefined,
+									{
+										operation: "awaitIntake",
+										code: "processing_timeout",
+										message: "Input recalled before intake",
+									},
+									observedAt,
+									"unheld_runner",
+								);
+								return yield* wait.pipe(
+									Effect.timeoutOrElse({
+										duration: "1 second",
+										orElse: () =>
+											Effect.succeed({
+												...REACTOR_COMPLETED_RESULT,
+												status: "indeterminate" as const,
+											}),
+									}),
+								);
+							});
 							return yield* Effect.raceFirst(
 								wait,
 								this.durableOutcome(row.command_id).pipe(
@@ -824,14 +907,6 @@ export class ProviderSideEffectReactor {
 								}),
 							);
 						}),
-			).pipe(
-				Effect.ensuring(
-					Effect.sync(() =>
-						this.executingSends.delete(
-							`${row.request_sequence}:${row.attempt_count}`,
-						),
-					),
-				),
 			);
 			if (
 				row.effect_type === "send_turn" &&
@@ -841,10 +916,28 @@ export class ProviderSideEffectReactor {
 				yield* this.options
 					.write((_project, stamp) =>
 						Effect.gen({ self: this }, function* () {
+							// Direct providers keep their nonterminal uncertainty marker.
+							// Runner sends wait for Settle, including between released holds.
 							const marked = yield* this.options
 								.sql`UPDATE provider_command_outbox
 						SET error_code = 'delivery_indeterminate' WHERE request_sequence = ${row.request_sequence}
-						AND status = 'running' AND attempt_count = ${row.attempt_count} RETURNING command_id`;
+						AND status = 'running' AND attempt_count = ${row.attempt_count}
+						AND NOT EXISTS (
+							SELECT 1 FROM provider_runs send
+							JOIN provider_runs owner ON owner.id = COALESCE(send.joined_into, send.id)
+							WHERE send.id = provider_command_outbox.run_id
+							AND (owner.runner_id IS NOT NULL OR owner.held_transmission IS NOT NULL)
+						)
+						AND NOT EXISTS (
+							SELECT 1 FROM events WHERE session_id = ${row.session_id}
+							AND type = 'run.dispatched' AND (
+								json_extract(data, '$.commandId') = ${row.command_id}
+								OR json_extract(data, '$.runId') = (
+									SELECT COALESCE(joined_into, id) FROM provider_runs
+									WHERE id = provider_command_outbox.run_id
+								)
+							)
+						) RETURNING command_id`;
 							if (marked.length) {
 								yield* this.options
 									.sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate'
@@ -871,6 +964,8 @@ export class ProviderSideEffectReactor {
 				failure instanceof ProviderInstanceFailure &&
 				failure.code === "runner_detached"
 			) {
+				if (ownedSend) this.executingSends.delete(ownedSend);
+				ownedSend = undefined;
 				// Ownership is already released. A replacement that skipped this
 				// attempt while it was unwinding now needs to attach its runner.
 				yield* this.options.recoverDetachedSession?.(row.session_id) ??
@@ -889,6 +984,8 @@ export class ProviderSideEffectReactor {
 			if (
 				failure ||
 				turn?.status === "cancelled" ||
+				turn?.status === "error" ||
+				turn?.status === "interrupted" ||
 				turn?.status === "steer-declined" ||
 				(row.effect_type !== "send_turn" &&
 					turn?.status !== "completed" &&
@@ -905,112 +1002,190 @@ export class ProviderSideEffectReactor {
 				const failedAt = yield* this.currentTimeMillis();
 				const cause =
 					failure instanceof ProviderInstanceFailure ? failure.cause : failure;
-				const retryable = failure
-					? isRetryableProviderFailure(failure)
-					: turn?.status !== "steer-declined" &&
-						turn?.error?.retryable === true &&
-						turn.error.retryHandled !== true;
+				const rawFailure = failure
+					? providerSessionFailure(failure)
+					: undefined;
 				const code = failure
 					? providerFailureCode(failure)
 					: (turn?.error?.code ?? turn?.status ?? "provider_failure");
-				const retryAt = retryable
-					? failedAt +
-						Duration.toMillis(
-							(this.options.retryBackoff ?? defaultRetryBackoff)(
-								row.attempt_count,
-							),
-						)
-					: undefined;
+				const message =
+					typeof cause === "object" &&
+					cause !== null &&
+					"message" in cause &&
+					typeof cause.message === "string"
+						? cause.message
+						: (turn?.error?.message ?? code);
 				if (row.effect_type === "send_turn") {
-					const [owner] = yield* this.options.sql<{
-						run_id: string;
-					}>`
-						SELECT COALESCE(joined_into, id) AS run_id
-						FROM provider_runs WHERE id = ${row.run_id} AND session_id = ${row.session_id}`.pipe(
-						Effect.mapError(storeFailure("failedRunOwner")),
+					yield* this.recordSendReply(
+						row,
+						turn,
+						rawFailure ? { ...rawFailure, message, code } : undefined,
+						failedAt,
 					);
-					const interrupted =
-						code === "interrupted" || turn?.status === "steer-declined";
-					const [placement] = yield* this.options.sql<{
-						placed: number;
-						steering: number;
-					}>`SELECT
-						EXISTS (SELECT 1 FROM turns WHERE session_id = ${row.session_id}
-							AND run_id = ${owner?.run_id ?? null}) AS placed,
-						EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${row.session_id}
-							AND input_id = ${row.command_id} AND state = 'steering') AS steering`.pipe(
-						Effect.mapError(storeFailure("failedPlacement")),
-					);
-					const payload =
-						this.options.persistUserMessage &&
-						!placement?.placed &&
-						!placement?.steering &&
-						!interrupted
-							? yield* this.parseSendTurnPayload(row).pipe(
-									Effect.orElseSucceed(() => undefined),
-								)
-							: undefined;
-					if (owner && payload && this.options.persistUserMessage) {
-						const driver = payload.account?.driver ?? row.provider_id;
-						yield* this.options
-							.persistUserMessage(row.session_id, payload.prompt, {
-								messageId:
-									payload.continuation?.cutOffMessageId ??
-									this.options.registry
-										.getInstance(driver)
-										?.userMessageIdForInput?.(payload.inputId) ??
-									payload.inputId,
-								inputId: payload.inputId,
-								runId: owner.run_id,
-								provider: driver,
-								...(payload.images ? { images: payload.images } : {}),
-								failure: {
-									message:
-										cause instanceof Error
-											? cause.message
-											: (turn?.error?.message ?? code),
-									code,
-									retryable,
-									retryAt,
-								},
-							})
-							.pipe(Effect.mapError(storeFailure("failedPlacement")));
-					} else if (owner)
-						yield* this.options.ingestion
-							.ingest({
-								eventId: `provider-command-terminal:${row.request_sequence}:${claimed.attempt_count}`,
-								type:
-									code === "interrupted" || turn?.status === "steer-declined"
-										? "turn.interrupted"
-										: "turn.error",
-								providerId: row.provider_id,
-								sessionId: row.session_id,
-								runId: owner.run_id,
-								providerRefs: {},
-								rawSource: { kind: "conduit.provider-command" },
-								createdAt: failedAt,
-								data: {
-									messageId: `provider-command:${row.command_id}`,
-									error:
-										cause instanceof Error
-											? cause.message
-											: (turn?.error?.message ?? code),
-									code,
-									retryable,
-									retryAt,
-								},
-							})
-							.pipe(Effect.mapError(storeFailure("failedRun")));
-				} else yield* this.writeFailure(row, retryable, code, failedAt);
+				} else {
+					const terminal = terminalTurnResult(turn);
+					const retryable = rawFailure
+						? classify({ _tag: "failed", failure: rawFailure }) === "retryable"
+						: terminal !== undefined &&
+							classify({ _tag: "replied", result: terminal }) === "retryable";
+					yield* this.writeFailure(row, retryable, code, failedAt);
+				}
 			} else if (row.effect_type !== "send_turn")
 				yield* this.markCompleted(row, yield* this.currentTimeMillis());
+			if (
+				row.effect_type === "send_turn" &&
+				!failure &&
+				(turn === undefined || turn.status === "completed")
+			)
+				yield* this.recordSendReply(
+					row,
+					turn,
+					undefined,
+					yield* this.currentTimeMillis(),
+				);
+
 			if (result._tag === "Failure") {
 				if (row.effect_type !== "send_turn")
 					return yield* Effect.fail(result.failure);
-				return { ...REACTOR_COMPLETED_RESULT, status: "error" };
+				return {
+					...REACTOR_COMPLETED_RESULT,
+					status: "error",
+				} satisfies TurnResult;
 			}
 			return result.success;
-		});
+		}).pipe(
+			Effect.ensuring(
+				Effect.sync(() => {
+					if (ownedSend) this.executingSends.delete(ownedSend);
+				}),
+			),
+		);
+	}
+
+	private recordSendReply(
+		row: ProviderCommandOutboxRow,
+		result: TurnResult | undefined,
+		failure: SessionFailure | undefined,
+		now: number,
+		scope: "all" | "unheld_runner" = "all",
+	) {
+		return Effect.gen({ self: this }, function* () {
+			const followUps: Effect.Effect<void>[] = [];
+			yield* retrySettlementWrite(
+				this.options.write(
+					(project, stamp) =>
+						Effect.gen({ self: this }, function* () {
+							followUps.length = 0;
+							const projectContext = this.options.projectContext?.(
+								row.project_key,
+							);
+							const drafts =
+								projectContext === undefined
+									? yield* Effect.serviceOption(InputDraftsTag)
+									: Option.isSome(projectContext)
+										? Context.getOption(projectContext.value, InputDraftsTag)
+										: Option.none<InputDrafts>();
+							const tx: SettlementTx = {
+								sql: this.options.sql,
+								project,
+								stamp,
+								...(this.options.persistUserMessage
+									? { persistUserMessage: this.options.persistUserMessage }
+									: {}),
+								userMessageIdForInput: (driver, inputId) =>
+									this.options.registry
+										.getInstance(driver)
+										?.userMessageIdForInput?.(inputId),
+								...(Option.isSome(drafts) ? { inputDrafts: drafts.value } : {}),
+								afterCommit: (effect) => followUps.push(effect),
+							};
+							if (!row.run_id) return;
+							const [run] = yield* this.options.sql<{
+								runner_id: string | null;
+								held_transmission: number | null;
+								provider: string;
+							}>`SELECT run.runner_id, run.held_transmission, session.provider FROM provider_runs run
+						JOIN sessions session ON session.id = run.session_id
+						WHERE run.id = ${row.run_id} AND run.session_id = ${row.session_id}
+							AND run.status IN ('pending', 'running')`;
+							if (!run) return;
+							const payload = yield* this.parseSendTurnPayload(row).pipe(
+								Effect.catch(() => Effect.succeed(undefined)),
+							);
+							const driver =
+								payload?.account?.driver ??
+								(this.options.registry.getInstance(row.provider_id)
+									? row.provider_id
+									: run.provider);
+							const settlementTx: SettlementTx = {
+								...tx,
+								driverKind: driver,
+							};
+							if (
+								!(
+									this.options.registry.getInstance(driver) instanceof
+									RunnerProviderInstance
+								)
+							) {
+								if (scope === "unheld_runner") return;
+								return yield* settleDirectSend(
+									settlementTx,
+									row,
+									result,
+									failure,
+									now,
+									Duration.toMillis(
+										(this.options.retryBackoff ?? defaultRetryBackoff)(
+											row.attempt_count,
+										),
+									),
+								);
+							}
+							const legacy = yield* LegacySendKey.prove(this.options.sql, row);
+							if (legacy) {
+								if (scope === "unheld_runner") return;
+								return yield* settleLegacySend(
+									settlementTx,
+									legacy,
+									result,
+									failure,
+									now,
+								);
+							}
+							const send = {
+								sessionId: row.session_id,
+								runId: row.run_id,
+								commandId: row.command_id,
+								requestSequence: row.request_sequence,
+								attempt: row.attempt_count,
+							};
+							if (failure) {
+								// A transport failure after a hold is owned by reply recovery or Settle.
+								return yield* settleSend(settlementTx, {
+									_tag: "failed",
+									send,
+									failure,
+									observedAt: now,
+								});
+							}
+							const terminal = terminalTurnResult(result);
+							if (terminal && result?.runnerSend)
+								yield* settleSend(settlementTx, {
+									_tag: "replied",
+									send: { ...send, ...result.runnerSend },
+									result: terminal,
+									observedAt: now,
+								});
+						}),
+					{
+						afterCommit: Effect.suspend(() =>
+							Effect.forEach(followUps, (effect) => effect, { discard: true }),
+						),
+					},
+				),
+			);
+			yield* this.armRetryWake();
+		}).pipe(Effect.mapError(storeFailure("settleRunnerReply")));
 	}
 
 	/**
@@ -1124,7 +1299,7 @@ export class ProviderSideEffectReactor {
 			const nowMs = yield* this.currentTimeMillis();
 			return yield* this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 			FROM provider_command_outbox AS candidate
 			WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 				AND (${sessionId ?? null} IS NULL OR session_id = ${sessionId ?? null})
@@ -1174,7 +1349,7 @@ export class ProviderSideEffectReactor {
 				Effect.gen({ self: this }, function* () {
 					const [claimed] = yield* this.options.sql<ProviderCommandOutboxRow>`
 				UPDATE provider_command_outbox SET status = 'running',
-					attempt_count = attempt_count + 1, next_attempt_at = NULL, updated_at = ${updatedAt},
+					attempt_count = attempt_count + 1, error_code = NULL, next_attempt_at = NULL, updated_at = ${updatedAt},
 					run_id = CASE WHEN effect_type = 'send_turn' AND NOT EXISTS (
 						SELECT 1 FROM provider_runs WHERE id = provider_command_outbox.run_id
 							AND session_id = provider_command_outbox.session_id AND status IN ('pending', 'running')
@@ -1196,7 +1371,7 @@ export class ProviderSideEffectReactor {
 					))
 					AND (status = 'pending' OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 				RETURNING request_sequence, command_id, project_key, session_id, provider_id,
-					effect_type, payload_json, run_id, provider_process_id, attempt_count, status`;
+					effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at`;
 					if (claimed?.run_id === runId) {
 						const store = yield* makeEventStoreEffect.pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
@@ -1310,7 +1485,7 @@ export class ProviderSideEffectReactor {
 					payload.type === "interrupt_turn" || payload.type === "end_session"
 						? payload.stop
 						: undefined;
-				const stopOwners = stop?.owners.length
+				const candidates = stop
 					? stop.owners
 					: !stop &&
 							payload.type === "interrupt_turn" &&
@@ -1321,6 +1496,13 @@ export class ProviderSideEffectReactor {
 								row.command_id,
 							).pipe(Effect.mapError(storeFailure("recoverStopCohort")))
 						: undefined;
+				const stopOwners = candidates
+					? yield* Effect.filter(candidates, ({ runId }) =>
+							stopCovers(this.options.sql, row.session_id, runId).pipe(
+								Effect.mapError(storeFailure("stopCoverage")),
+							),
+						)
+					: undefined;
 				const stopRunning = stopOwners?.length
 					? this.options.sql<{ running: number }>`
 						SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${row.session_id}
@@ -1406,6 +1588,16 @@ export class ProviderSideEffectReactor {
 				const context = {
 					commandId: row.command_id,
 					providerProcessId: row.provider_process_id,
+					...(payload.type === "interrupt_turn"
+						? {
+								...(stop
+									? { stopRunIds: stop.owners.map(({ runId }) => runId) }
+									: {}),
+								requestedAt: stop
+									? stop.deadlineAt - STOP_ABORT_WAIT_MS
+									: row.requested_at,
+							}
+						: {}),
 					...(payload.type === "end_session" && payload.retireRunIds
 						? { retireRunIds: payload.retireRunIds }
 						: {}),
@@ -1651,24 +1843,31 @@ export class ProviderSideEffectReactor {
 			}
 			if (row.effect_type === "send_turn") {
 				const payload = yield* this.parseSendTurnPayload(row);
-				if (payload.continuation)
-					yield* this.options.ingestion
-						.ingest({
-							eventId: `continuation-placement:${payload.runId}`,
-							type: "message.created",
-							providerId: row.provider_id,
-							sessionId: payload.sessionId,
-							runId: payload.runId,
-							providerRefs: {},
-							rawSource: { kind: "conduit.continuation" },
-							createdAt: yield* this.currentTimeMillis(),
-							data: {
+				if (payload.continuation) {
+					const placementId = `continuation-placement:${payload.runId}`;
+					const [placed] = yield* this.options.sql<{ event_id: string }>`
+						SELECT event_id FROM events WHERE project_id = ${row.project_key}
+							AND session_id = ${payload.sessionId} AND event_id = ${placementId}
+						LIMIT 1`.pipe(Effect.mapError(storeFailure("placeContinuation")));
+					if (!placed)
+						yield* this.options.ingestion
+							.ingest({
+								eventId: placementId,
+								type: "message.created",
+								providerId: row.provider_id,
 								sessionId: payload.sessionId,
-								messageId: payload.continuation.cutOffMessageId,
-								role: "user",
-							},
-						})
-						.pipe(Effect.mapError(storeFailure("placeContinuation")));
+								runId: payload.runId,
+								providerRefs: {},
+								rawSource: { kind: "conduit.continuation" },
+								createdAt: yield* this.currentTimeMillis(),
+								data: {
+									sessionId: payload.sessionId,
+									messageId: payload.continuation.cutOffMessageId,
+									role: "user",
+								},
+							})
+							.pipe(Effect.mapError(storeFailure("placeContinuation")));
+				}
 				const admittedAccount = liveContext?.account ?? payload.account;
 				const currentAccount = this.options.accountDirectory
 					? yield* this.options.accountDirectory
@@ -1712,9 +1911,10 @@ export class ProviderSideEffectReactor {
 						}
 					: currentAccount;
 				const driver = account?.driver ?? row.provider_id;
-				const call =
+				const instance = yield* this.options.registry.getInstanceEffect(driver);
+				const prepareCall = yield* Effect.cached(
 					liveContext?.shellEnv === undefined && this.options.resolveCallContext
-						? yield* this.options.resolveCallContext({
+						? this.options.resolveCallContext({
 								sessionId: payload.sessionId,
 								projectId: row.project_key,
 								...(account ? { account } : {}),
@@ -1724,7 +1924,12 @@ export class ProviderSideEffectReactor {
 								prepareShellEnv: true,
 								requireRoutableAccount: true,
 							})
-						: undefined;
+						: Effect.succeed(undefined),
+				);
+				const call =
+					instance instanceof RunnerProviderInstance
+						? undefined
+						: yield* prepareCall;
 				const shellEnv = liveContext?.shellEnv ?? call?.shellEnv;
 				const shellConfig =
 					liveContext?.shellEnv !== undefined
@@ -1740,7 +1945,6 @@ export class ProviderSideEffectReactor {
 					? undefined
 					: (interactions ?? makeInteractions?.(payload.sessionId, driver));
 				const instanceId = account?.id ?? payload.instanceId ?? row.provider_id;
-				const instance = yield* this.options.registry.getInstanceEffect(driver);
 				const turnKey = {
 					sessionId: payload.sessionId,
 					inputId: payload.inputId,
@@ -1750,10 +1954,26 @@ export class ProviderSideEffectReactor {
 					prepared: PreparedTurn | undefined,
 					nativeResumeFallback: boolean,
 				) =>
-					Effect.suspend(() => {
+					Effect.gen({ self: this }, function* () {
 						mark(turnKey, "history-ready");
-						return instance.sendTurnEffect({
-							...payload,
+						const input = yield* resolveTurnImages(
+							payload,
+							this.options.attachmentStore,
+						).pipe(
+							Effect.mapError(
+								(cause) =>
+									new ProviderInstanceFailure({
+										providerId: row.provider_id,
+										operation: "resolveTurnImages",
+										...(cause._tag === "AttachmentMissing"
+											? { code: "attachment_missing" as const }
+											: {}),
+										cause,
+									}),
+							),
+						);
+						const sendInput: ResolvedSendTurnInput = {
+							...input,
 							...(shellEnv ? { shellEnv } : {}),
 							...(shellConfig !== undefined ? { shellConfig } : {}),
 							awaitIntake: this.awaitIntake(row),
@@ -1786,7 +2006,10 @@ export class ProviderSideEffectReactor {
 								currentInteractions,
 							),
 							abortSignal: abortSignal ?? new AbortController().signal,
-						});
+						};
+						return yield* instance instanceof RunnerProviderInstance
+							? instance.sendTurnEffect(sendInput, prepareCall)
+							: instance.sendTurnEffect(sendInput);
 					});
 				const result = getProviderDriver(driver)?.supportsNativeResume
 					? yield* Effect.gen({ self: this }, function* () {
@@ -1932,7 +2155,7 @@ export class ProviderSideEffectReactor {
 	> {
 		return this.options.sql<ProviderCommandOutboxRow>`
 			SELECT request_sequence, command_id, project_key, session_id, provider_id,
-			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status
+			       effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 			FROM provider_command_outbox
 			WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 				AND command_id = ${commandId} AND status IN ('pending', 'retryable_failed')
@@ -2037,7 +2260,7 @@ export class ProviderSideEffectReactor {
 				Effect.all([
 					sql`
 					UPDATE provider_command_outbox
-					SET status = 'completed', updated_at = ${updatedAt}
+					SET status = 'completed', payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END, updated_at = ${updatedAt}
 					WHERE request_sequence = ${row.request_sequence}
 						AND project_key = ${row.project_key}`,
 					sql`
@@ -2114,7 +2337,7 @@ export class ProviderSideEffectReactor {
 								})
 							: null;
 						const changed = yield* this.options
-							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, error_code = ${errorCode}, next_attempt_at = ${nextAttemptAt}, updated_at = ${updatedAt}
+							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END, error_code = ${errorCode}, next_attempt_at = ${nextAttemptAt}, updated_at = ${updatedAt}
 				WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 					AND (status = 'running' OR (${row.attempt_count >= maxControlAttempts} AND status IN ('pending', 'retryable_failed')))
 					AND attempt_count = ${row.attempt_count} RETURNING command_id`;
@@ -2368,6 +2591,7 @@ export class ProviderSideEffectReactor {
 							.endSessionEffect(row.session_id, undefined, {
 								commandId: `project-inactive:${row.command_id}:${row.attempt_count}`,
 								providerProcessId: owner.success,
+								projectRemoved: true,
 							})
 							.pipe(
 								Effect.catch((cause) =>
@@ -2411,6 +2635,7 @@ export class ProviderSideEffectReactor {
 						const changed = yield* this.options
 							.sql`UPDATE provider_command_outbox
 					SET status = ${code === "project_inactive" ? "cancelled" : "failed"}, error_code = ${code},
+						payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END,
 						next_attempt_at = NULL, updated_at = ${now}, run_id = ${unstarted?.id ?? row.run_id}
 					WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 						AND attempt_count = ${row.attempt_count} AND status IN ('pending', 'running', 'retryable_failed')
@@ -2540,6 +2765,7 @@ export class ProviderSideEffectReactor {
 			sql`
 					UPDATE provider_command_outbox
 					SET status = ${retryable ? "retryable_failed" : "failed"},
+					    payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END,
 					    error_code = ${errorCode},
 					    next_attempt_at = ${nextAttemptAt},
 					    updated_at = ${updatedAt}
@@ -2684,11 +2910,19 @@ export class ProviderSideEffectReactor {
 	}
 }
 
-function isRetryableProviderFailure(error: unknown): boolean {
-	if (error instanceof ProviderInstanceFailure) {
-		return isRecord(error.cause) && error.cause["retryable"] === true;
-	}
-	return isRecord(error) && error["retryable"] === true;
+function providerSessionFailure(error: unknown): SessionFailure {
+	const cause = error instanceof ProviderInstanceFailure ? error.cause : error;
+	return {
+		operation: "send-turn",
+		message:
+			isRecord(cause) && typeof cause["message"] === "string"
+				? cause["message"]
+				: String(cause),
+		code: providerFailureCode(error),
+		...(isRecord(cause) && typeof cause["retryable"] === "boolean"
+			? { retryable: cause["retryable"] }
+			: {}),
+	};
 }
 
 function providerFailureCode(error: unknown): string {
@@ -2718,6 +2952,8 @@ function isSendTurnOutboxPayload(
 		typeof value["inputId"] === "string" &&
 		typeof value["prompt"] === "string" &&
 		(value["history"] === undefined || Array.isArray(value["history"])) &&
+		(value["images"] === undefined ||
+			Schema.is(Schema.Array(AttachmentRefSchema))(value["images"])) &&
 		(value["rewind"] === undefined ||
 			(isRecord(value["rewind"]) &&
 				(value["rewind"]["resumeSessionAt"] === null ||

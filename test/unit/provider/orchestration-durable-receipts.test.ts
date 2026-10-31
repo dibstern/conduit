@@ -31,6 +31,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreError } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -57,6 +58,7 @@ import { createRunnerPermissionReplies } from "../../../src/lib/provider/runner/
 import type {
 	PermissionResponse,
 	ProviderInstance,
+	ResolvedSendTurnInput,
 	TurnResult,
 } from "../../../src/lib/provider/types.js";
 import { createMockEventSink } from "../../helpers/mock-sdk.js";
@@ -81,7 +83,7 @@ const COMPLETED: TurnResult = {
 // Receipts can strand if fixtures return an adapter result without provider
 // intake/end, skip projection, or omit the committed command's reservation.
 function finishTurn(
-	input: SendTurnCommand["input"],
+	input: ResolvedSendTurnInput,
 	providerId: string,
 	result = COMPLETED,
 	createdAt = 1000,
@@ -149,7 +151,7 @@ function makeStubInstance(
 				commands: [],
 			}),
 		),
-		sendTurnEffect: vi.fn((input: SendTurnCommand["input"]) =>
+		sendTurnEffect: vi.fn((input: ResolvedSendTurnInput) =>
 			finishTurn(input, providerId, COMPLETED, createdAt),
 		),
 		interruptTurnEffect: vi.fn(() => Effect.void),
@@ -388,6 +390,102 @@ function controlProvider(instance: ProviderInstance, kind: ControlKind) {
 }
 
 describe("OrchestrationEngine durable controls", () => {
+	it.effect(
+		"C1 accepts Stop once and replays its stored cohort after later intake",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const instance = makeStubInstance("opencode");
+				const engine = yield* makeEngine(instance, { sql });
+				engine.bindSession("session-1", "opencode");
+				const commit = yield* makeCommitAndSignal;
+				const requested = (runId: string) =>
+					canonicalEvent(
+						"run.requested",
+						"session-1",
+						{ runId, inputId: runId },
+						{ provider: "opencode", metadata: { runId } },
+					);
+				yield* commit([requested("first")]);
+				const input = { commandId: "c1-stop", sessionId: "session-1" };
+				const accepted = yield* engine.acceptStopEffect(input);
+				expect(accepted.owners).toEqual([{ runId: "first" }]);
+				yield* commit([requested("later")]);
+				expect(yield* engine.acceptStopEffect(input)).toEqual(accepted);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM provider_command_outbox WHERE command_id = 'c1-stop'`,
+				).toEqual([{ n: 1 }]);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'interrupt.requested'`,
+				).toEqual([{ n: 1 }]);
+				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
+				yield* engine.executeAcceptedStopEffect(input);
+				expect(instance.interruptTurnEffect).toHaveBeenCalledOnce();
+				yield* engine.shutdownEffect();
+			}).pipe(Effect.provide(makeFixtureLayer())),
+	);
+
+	it.effect(
+		"C1 rolls pending settlement back with failed control acceptance",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const options = yield* makeDurableOptions({ sql });
+				const engine = new OrchestrationEngine({
+					registry: new ProviderRegistry([makeStubInstance("opencode")]),
+					durableCommands: {
+						...options,
+						write: (body, settings) =>
+							options.write(
+								(project, stamp) =>
+									body(project, stamp).pipe(
+										Effect.andThen(
+											Effect.fail(
+												new EventStoreError({
+													operation: "append",
+													cause: "injected Stop commit failure",
+												}),
+											),
+										),
+									),
+								settings,
+							),
+					},
+				});
+				engine.bindSession("session-1", "opencode");
+				yield* (yield* makeCommitAndSignal)([
+					canonicalEvent(
+						"run.requested",
+						"session-1",
+						{ runId: "pending", inputId: "pending" },
+						{ provider: "opencode", metadata: { runId: "pending" } },
+					),
+				]);
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
+				VALUES (1, 'c1-pending', 'test-project', 'session-1', 'opencode', 'send_turn', '{}', 'pending', 'pending', 1, 1)`;
+				const result = yield* Effect.result(
+					engine.acceptStopEffect({
+						commandId: "c1-failed-stop",
+						sessionId: "session-1",
+					}),
+				);
+				expect(result._tag).toBe("Failure");
+				expect(
+					yield* sql`SELECT status FROM provider_runs WHERE id = 'pending'`,
+				).toEqual([{ status: "pending" }]);
+				expect(
+					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'c1-pending'`,
+				).toEqual([{ status: "pending" }]);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM command_receipts WHERE command_id = 'c1-failed-stop'`,
+				).toEqual([{ n: 0 }]);
+				expect(
+					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type IN ('interrupt.requested', 'turn.interrupted')`,
+				).toEqual([{ n: 0 }]);
+				yield* engine.shutdownEffect();
+			}).pipe(Effect.provide(makeFixtureLayer())),
+	);
+
 	for (const kind of ["permission", "question"] as const) {
 		it.effect(
 			`${kind} recovery registers legacy and outbox-owned answers without delivering either`,
@@ -587,6 +685,7 @@ describe("OrchestrationEngine durable controls", () => {
 					const context = {
 						commandId: command.commandId,
 						providerProcessId: "process-1",
+						...(command.type === "interrupt_turn" ? { requestedAt: 1000 } : {}),
 					};
 					switch (command.type) {
 						case "interrupt_turn":
@@ -1246,7 +1345,7 @@ describe("OrchestrationEngine durable receipts", () => {
 						}),
 					});
 					const delivered = instance.sendTurnEffect.mock.calls[0]?.[0] as
-						| SendTurnCommand["input"]
+						| ResolvedSendTurnInput
 						| undefined;
 					const observed = {
 						account: delivered?.account,
@@ -1705,6 +1804,7 @@ describe("OrchestrationEngine durable receipts", () => {
 							.soft(instance.interruptTurnEffect)
 							.toHaveBeenCalledExactlyOnceWith("session-1", undefined, call, {
 								commandId: "control-stop",
+								requestedAt: 1000,
 								providerProcessId: explicitProcessTarget
 									? "control-process"
 									: "absent:control-stop",
@@ -2061,7 +2161,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				);
 				yield* new OrchestrationEngine(options).drainSideEffects();
 				const delivered = instance.sendTurnEffect.mock.calls.at(-1)?.[0] as
-					| SendTurnCommand["input"]
+					| ResolvedSendTurnInput
 					| undefined;
 				reviewEvidence["redelivery"] = {
 					currentOverride: delivered?.shellEnv?.["ANTHROPIC_AUTH_TOKEN"],
@@ -2093,8 +2193,35 @@ describe("OrchestrationEngine durable receipts", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const instance = makeStubInstance("opencode");
-				instance.sendTurnEffect.mockImplementationOnce(() =>
-					Effect.succeed({ ...COMPLETED, status: "indeterminate" }),
+				const durable = yield* makeDurableOptions({ sql });
+				instance.sendTurnEffect.mockImplementationOnce(
+					(input: ResolvedSendTurnInput) =>
+						durable
+							.write((_project, stamp) =>
+								Effect.gen(function* () {
+									// Inject the reconciler's existing fact at this reader/admission seam.
+									yield* sql`UPDATE provider_command_outbox SET error_code = 'delivery_indeterminate' WHERE run_id = ${input.runId} AND status = 'running'`;
+									yield* sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate' WHERE command_id IN (SELECT command_id FROM provider_command_outbox WHERE run_id = ${input.runId} AND status = 'running')`;
+									yield* stamp((version) =>
+										sql<{
+											id: string;
+										}>`UPDATE sessions SET version = ${version} WHERE id = ${input.sessionId} RETURNING id`.pipe(
+											Effect.map((rows) => rows.map(({ id }) => id)),
+										),
+									);
+								}),
+							)
+							.pipe(
+								Effect.as({ ...COMPLETED, status: "indeterminate" as const }),
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: "opencode",
+											operation: "fixtureReconciler",
+											cause,
+										}),
+								),
+							),
 				);
 				const engine = yield* makeEngine(instance, { sql });
 				expect((yield* engine.dispatchEffect(sendTurnCommand())).status).toBe(
@@ -2110,7 +2237,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				yield* TestClock.adjust("10 millis");
 				expect(instance.sendTurnEffect).toHaveBeenCalledOnce();
 				const first = instance.sendTurnEffect.mock
-					.calls[0]?.[0] as SendTurnCommand["input"];
+					.calls[0]?.[0] as ResolvedSendTurnInput;
 				yield* finishTurn(first, "opencode");
 				yield* engine.drainSideEffects();
 				expect(instance.sendTurnEffect).toHaveBeenCalledTimes(2);
@@ -2127,8 +2254,35 @@ describe("OrchestrationEngine durable receipts", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const instance = makeStubInstance("opencode");
-				instance.sendTurnEffect.mockReturnValue(
-					Effect.succeed({ ...COMPLETED, status: "indeterminate" }),
+				const durable = yield* makeDurableOptions({ sql });
+				instance.sendTurnEffect.mockImplementation(
+					(input: ResolvedSendTurnInput) =>
+						durable
+							.write((_project, stamp) =>
+								Effect.gen(function* () {
+									// C1 leaves this durable fact to Settle; the fake provider has no runner.
+									yield* sql`UPDATE provider_command_outbox SET error_code = 'delivery_indeterminate' WHERE run_id = ${input.runId} AND status = 'running'`;
+									yield* sql`UPDATE command_receipts SET error_code = 'delivery_indeterminate' WHERE command_id IN (SELECT command_id FROM provider_command_outbox WHERE run_id = ${input.runId} AND status = 'running')`;
+									yield* stamp((version) =>
+										sql<{
+											id: string;
+										}>`UPDATE sessions SET version = ${version} WHERE id = ${input.sessionId} RETURNING id`.pipe(
+											Effect.map((rows) => rows.map(({ id }) => id)),
+										),
+									);
+								}),
+							)
+							.pipe(
+								Effect.as({ ...COMPLETED, status: "indeterminate" as const }),
+								Effect.mapError(
+									(cause) =>
+										new ProviderInstanceFailure({
+											providerId: "opencode",
+											operation: "fixtureReconciler",
+											cause,
+										}),
+								),
+							),
 				);
 				const command = sendTurnCommand();
 				const first = yield* makeEngine(instance, { sql });
@@ -2218,14 +2372,14 @@ describe("OrchestrationEngine durable receipts", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const committed = yield* Deferred.make<void>();
 			const allowClaim = yield* Deferred.make<void>();
-			const started = yield* Deferred.make<SendTurnCommand["input"]>();
+			const started = yield* Deferred.make<ResolvedSendTurnInput>();
 			const instance = makeStubInstance("opencode");
 			const cancellation = new AbortController();
 			const command = sendTurnCommand({ abortSignal: cancellation.signal });
 			let signal: AbortSignal | undefined;
 			const result: TurnResult = { ...COMPLETED, cost: 7 };
 			instance.sendTurnEffect.mockImplementation(
-				(input: SendTurnCommand["input"]) =>
+				(input: ResolvedSendTurnInput) =>
 					Effect.gen(function* () {
 						signal = input.abortSignal;
 						yield* input.eventSink.push({
@@ -2565,7 +2719,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				let providerCalls = 0;
 				const instance = makeStubInstance("opencode");
 				instance.sendTurnEffect.mockImplementation(
-					(input: SendTurnCommand["input"]) =>
+					(input: ResolvedSendTurnInput) =>
 						Effect.suspend(() => {
 							providerCalls += 1;
 							if (providerCalls === 1) {
@@ -2622,7 +2776,7 @@ describe("OrchestrationEngine durable receipts", () => {
 				const instance = makeStubInstance("opencode");
 				// Provider declares failure on the SUCCESS channel.
 				instance.sendTurnEffect.mockImplementation(
-					(input: SendTurnCommand["input"]) =>
+					(input: ResolvedSendTurnInput) =>
 						finishTurn(input, "opencode", errorTurn),
 				);
 				const engine = yield* makeEngine(instance, { sql });

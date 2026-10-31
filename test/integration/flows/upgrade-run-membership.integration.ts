@@ -20,17 +20,12 @@ import {
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import { runnerFailure } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
-	runnerFailure,
-	runnerSinkId,
-} from "../../../src/lib/provider/runner/runner-protocol.js";
-import {
-	recoverRunnerCommands,
 	runningRunnerCommands,
 	settleUnclaimedRunnerCommands,
 } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
-import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
 
 const roots: string[] = [];
 const cases: Array<{ case: string; outcome: "passed" }> = [];
@@ -39,7 +34,7 @@ const runId = "legacy-run:test-project:1";
 // Open a real pre-0078 file, then let the ordinary persistence layer upgrade it.
 // Failures: upgrade invents an interruption/intake, a dead runner cannot close
 // its linked turn, idle without an OpenCode result becomes success, or legacy
-// successful replay closes the command while its turn remains interrupted.
+// retained output closes the command while its turn remains interrupted.
 async function legacyStore(
 	provider: "claude" | "cursor" | "opencode",
 	accepted: boolean,
@@ -148,100 +143,65 @@ for (const driver of ["claude", "cursor"] as const) {
 			}).pipe(Effect.provide(dependencies)),
 		);
 	});
-	for (const status of driver === "claude"
-		? (["completed", "joined"] as const)
-		: (["completed"] as const)) {
-		it(`a live pre-upgrade ${driver} ${status} reply completes its migrated turn through stamped output`, async () => {
-			const accepted = driver === "cursor";
-			const dependencies = await legacyStore(driver, accepted);
-			await Effect.runPromise(
-				Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					const ingestion = yield* ProviderRuntimeIngestionTag;
-					const recoveries = yield* recoverRunnerCommands(sql, "s", driver, {
-						driverForAccount: (id) => id,
-						decodeInput: () =>
-							makeBaseSendTurnInput({ sessionId: "s", inputId: "input" }),
-						resolveSinkId: (
-							commandId,
-							_inputId,
-							attempt,
-							nativeResumeFallback,
-						) => runnerSinkId(commandId, attempt, nativeResumeFallback),
-						closing: () => false,
-						failTurn: () =>
-							Effect.die(new Error("Unexpected legacy runner failure")),
-						replay: () =>
-							ingestion
-								.ingestBatch([
-									{
-										eventId: "old-reply",
-										runId,
-										type: "message.created",
-										providerId: driver,
-										sessionId: "s",
-										providerRefs: {},
-										rawSource: { kind: "old-runner" },
-										createdAt: 40,
-										data: {
-											sessionId: "s",
-											messageId: "reply",
-											role: "assistant",
-											parentID: "input",
-										},
-									},
-									{
-										eventId: "old-result",
-										runId,
-										type: "turn.completed",
-										providerId: driver,
-										sessionId: "s",
-										providerRefs: {},
-										rawSource: { kind: "old-runner" },
-										createdAt: 50,
-										data: { messageId: "reply" },
-									},
-								])
-								.pipe(
-									Effect.as({
-										status,
-										cost: 0,
-										tokens: { input: 0, output: 0 },
-										durationMs: 10,
-										providerStateUpdates: [],
-									}),
-									Effect.mapError((cause) =>
-										runnerFailure("test replay", cause),
-									),
-								),
-					});
-					expect(recoveries).toHaveLength(1);
-					yield* recoveries[0]?.wait ??
-						Effect.die(new Error("Missing recovery"));
-					expect(yield* outcome).toMatchObject({
-						turns: [
-							{
-								state: "completed",
-								run_id: runId,
-								started_at: accepted ? 12 : null,
-							},
-						],
-						runs: [{ status: "completed" }],
-						commands: [{ status: "completed" }],
-						receipts: [{ status: "side_effect_completed" }],
-						inbox: { paused: false },
-					});
-					expect(
-						yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
-					).toEqual([]);
-					expect(
-						yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.completed' ORDER BY sequence`,
-					).toEqual([{ run_id: runId }]);
-					cases.push({ case: `live-${driver}-${status}`, outcome: "passed" });
-				}).pipe(Effect.provide(dependencies)),
-			);
-		});
-	}
+	it(`a live pre-upgrade ${driver} retained output completes its migrated turn`, async () => {
+		const accepted = driver === "cursor";
+		const dependencies = await legacyStore(driver, accepted);
+		await Effect.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const ingestion = yield* ProviderRuntimeIngestionTag;
+				yield* ingestion.ingestBatch([
+					{
+						eventId: "old-reply",
+						runId,
+						type: "message.created",
+						providerId: driver,
+						sessionId: "s",
+						providerRefs: {},
+						rawSource: { kind: "old-runner" },
+						createdAt: 40,
+						data: {
+							sessionId: "s",
+							messageId: "reply",
+							role: "assistant",
+							parentID: "input",
+						},
+					},
+					{
+						eventId: "old-result",
+						runId,
+						type: "turn.completed",
+						providerId: driver,
+						sessionId: "s",
+						providerRefs: {},
+						rawSource: { kind: "old-runner" },
+						createdAt: 50,
+						data: { messageId: "reply" },
+					},
+				]);
+				expect(yield* outcome).toMatchObject({
+					turns: [
+						{
+							state: "completed",
+							run_id: runId,
+							started_at: accepted ? 12 : null,
+						},
+					],
+					runs: [{ status: "completed" }],
+					commands: [{ status: "completed" }],
+					receipts: [{ status: "side_effect_completed" }],
+					inbox: { paused: false },
+				});
+				expect(
+					yield* sql`SELECT type FROM events WHERE type = 'run.started'`,
+				).toEqual([]);
+				expect(
+					yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'turn.completed' ORDER BY sequence`,
+				).toEqual([{ run_id: runId }]);
+				cases.push({ case: `live-${driver}-completed`, outcome: "passed" });
+			}).pipe(Effect.scoped, Effect.provide(dependencies)),
+		);
+	});
 }
 
 for (const result of ["missing", "error", "success"] as const) {

@@ -1,14 +1,16 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Fiber, Result } from "effect";
+import { Deferred, Effect, Fiber, Option, Result } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeCursorSessionRunner } from "../../../../src/lib/provider/cursor/cursor-runner-payload.js";
 import type { CursorSdkPort } from "../../../../src/lib/provider/cursor/sdk-port.js";
+import type { SendScope } from "../../../../src/lib/provider/runner/send-scope.js";
 import type { SessionTurn } from "../../../../src/lib/provider/runner/session-runner.js";
 import { cursorCredentialFixture } from "../../../helpers/cursor-account-resources-fixture.js";
+import { makeRunnerAdmission } from "../../../helpers/runner-provider-admission.js";
 
 const rows = readFileSync(
 	join(import.meta.dirname, "../../../fixtures/cursor-sdk-traces/basic.jsonl"),
@@ -140,6 +142,8 @@ describe("Cursor accepted run ownership", () => {
 								lifecycle.push(inFlight ? "busy" : "idle");
 							},
 						);
+						const admission = yield* makeRunnerAdmission(runner, "cursor");
+						let activeSend: SendScope | undefined;
 						const send = (inputId: string, runId: string) => {
 							const input: SessionTurn = {
 								sessionId: "session",
@@ -154,12 +158,23 @@ describe("Cursor accepted run ownership", () => {
 								folderSource: "account",
 								model: { providerId: "cursor", modelId: "composer-2.5" },
 							};
-							return runner.executeEffect({
-								type: "send-turn",
-								sinkId: inputId,
-								aborted: false,
-								input,
-							});
+							return admission
+								.admitSendEffect(
+									{ origin: { _tag: "Fresh" }, sinkId: inputId, input },
+									(handle) => {
+										activeSend = handle;
+										return runner.executeEffect(
+											{
+												type: "send-turn",
+												sinkId: inputId,
+												aborted: false,
+												input,
+											},
+											handle,
+										);
+									},
+								)
+								.pipe(Effect.map(Option.getOrThrow));
 						};
 						const accepted = () =>
 							events.filter((event) => event.type === "run.started");
@@ -184,7 +199,12 @@ describe("Cursor accepted run ownership", () => {
 									).toBe(true),
 								),
 							);
-							yield* runner.executeEffect({ type: "abort", sinkId: "input-a" });
+							if (!activeSend)
+								return yield* Effect.die("Missing admitted send");
+							yield* runner.executeEffect(
+								{ type: "abort", sinkId: "input-a" },
+								activeSend,
+							);
 							const response = yield* Effect.result(
 								Fiber.join(first).pipe(Effect.timeout("1 second")),
 							);

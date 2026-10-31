@@ -24,7 +24,7 @@ describe("Run Ledger e2e regressions", () => {
 	);
 	it.todo("RL-059: Keep Stop visible for a delivery-unknown retained steer");
 	it.todo(
-		"RL-065: Quarantine a failed runner stop without disabling its project",
+		"RL-065: Release the native-session fence when killing a runner fails",
 	);
 	it.todo("RL-078: Recover Stop deadlines independently of delivery receipts");
 	it.todo("RL-081: Bound question-replacement interruption");

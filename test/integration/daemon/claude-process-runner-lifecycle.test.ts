@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -8,29 +8,39 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { createServer, type Socket } from "node:net";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Cause, Deferred, Effect, Fiber } from "effect";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { Cause, Deferred, Effect, Fiber, Layer, Schedule } from "effect";
+import { SqlClient } from "effect/sql";
+import { afterEach, assert, describe, expect, it, vi } from "vitest";
+import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
 	runnerIdleFailure,
+	runnerSinkId,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
+import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
 	discoverRunners,
 	registerRunner,
 	runnerDirectory,
+	runnerProcessTable,
 } from "../../../src/lib/provider/runner/runner-registry.js";
+import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import {
 	cleanupTestClaudeRunners,
 	testRunnerAlive,
 } from "../../helpers/claude-runner-cleanup.js";
+import { createMockEventSink } from "../../helpers/mock-sdk.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -151,6 +161,10 @@ describe("Claude runner admission socket probes", () => {
 			`${process.env["NODE_OPTIONS"] ?? ""} --import=${import.meta.resolve("tsx")}`,
 		);
 		vi.stubEnv(
+			"NODE_OPTIONS",
+			`${process.env["NODE_OPTIONS"] ?? ""} --import ${pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href}`,
+		);
+		vi.stubEnv(
 			"CONDUIT_TEST_CLAUDE_QUERY_MODULE",
 			pathToFileURL(resolve("test/helpers/fake-claude-process-sdk.ts")).href,
 		);
@@ -236,26 +250,25 @@ describe("Claude runner admission socket probes", () => {
 					if (message.command.type === "send-turn") {
 						pending = message;
 						Deferred.doneUnsafe(received, Effect.void);
-					} else if (message.command.type === "end-session") {
-						peer.write({ type: "idle-exit" });
-						if (pending)
-							peer.write({
-								type: "command-reply",
-								commandId: pending.commandId,
-								failure: runnerIdleFailure(),
-							});
-						peer.write({
-							type: "command-reply",
-							commandId: message.commandId,
-							failure: runnerIdleFailure(),
-						});
 					} else if (message.command.type === "shutdown") {
-						void exited.then(() =>
+						// An idle runner races its own exit against the stop.
+						if (mode === "idle") {
+							peer.write({ type: "idle-exit" });
+							if (pending)
+								peer.write({
+									type: "command-reply",
+									commandId: pending.commandId,
+									failure: runnerIdleFailure(),
+								});
+						}
+						// A real runner's socket closes when its process exits.
+						void exited.then(() => {
 							peer.write({
 								type: "command-reply",
 								commandId: message.commandId,
-							}),
-						);
+							});
+							socket.end();
+						});
 						child.kill("SIGTERM");
 					} else
 						peer.write({ type: "command-reply", commandId: message.commandId });
@@ -296,7 +309,7 @@ describe("Claude runner admission socket probes", () => {
 					type: "output",
 					outputId: "probe-release",
 					sequence: 1,
-					output: { type: "release-sink", sinkId: "probe-send" },
+					output: { type: "release-sink", sinkId: runnerSinkId("probe-user") },
 				});
 			},
 			get attempts() {
@@ -306,21 +319,93 @@ describe("Claude runner admission socket probes", () => {
 				rejecting = false;
 				if (delayedPeer) replyHello(delayedPeer);
 			},
-			make: makeProcessClaudeSessionRunner(
-				{
-					projectRootForSession: () =>
-						Effect.succeed(orphan ? undefined : workspaceRoot),
-					daemonConfigDir: configDir,
-				},
-				(output) =>
-					Effect.sync(() => {
-						outputs.push(output);
-						return {};
-					}),
-			),
+			make: Effect.gen(function* () {
+				// CONTRACT 6.9: the cursor row, not the registry file, grants the
+				// serving slot. The active session lets runner user messages persist.
+				const services = yield* Layer.build(
+					makePersistenceEffectLayer(":memory:", "probe-project"),
+				);
+				if (!orphan)
+					yield* Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at)
+							VALUES (${sessionId}, 'probe-project', 'claude', 1, 1)`;
+						yield* sql`INSERT INTO session_providers (id, session_id, provider, activated_at)
+							VALUES (${sessionId}, ${sessionId}, 'claude', 1)`;
+						const receipts = yield* makeRunnerReceiptStore(sql);
+						expect(
+							yield* receipts.register(
+								runnerId,
+								{
+									sessionId,
+									pid,
+									startTime: runnerProcessTable.inspect(pid).startTime,
+								},
+								"serving",
+							),
+						).toBe("Registered");
+					}).pipe(Effect.provide(services));
+				let retained:
+					| Effect.Success<ReturnType<typeof makeProcessClaudeSessionRunner>>
+					| undefined;
+				const instance = yield* makeRunnerProviderInstance(
+					{
+						daemonConfigDir: configDir,
+						accounts: Effect.succeed(
+							accountsStateFromInstances(
+								[],
+								configuredClaudeConfigDir(join(root, "claude")),
+							),
+						),
+					},
+					{
+						driverKind: "claude",
+						discoverEffect: () => Effect.die("unused discovery"),
+						generateTextEffect: () => Effect.die("unused text generation"),
+						prepareTurnEffect: (input) => Effect.succeed({ input }),
+					},
+					(emit) =>
+						makeProcessClaudeSessionRunner(
+							{
+								projectRootForSession: () =>
+									Effect.succeed(orphan ? undefined : workspaceRoot),
+								daemonConfigDir: configDir,
+							},
+							(output, sessionId, send) =>
+								Effect.sync(() => outputs.push(output)).pipe(
+									Effect.andThen(emit(output, sessionId, send)),
+								),
+						).pipe(
+							Effect.tap((runner) =>
+								Effect.sync(() => {
+									retained = runner;
+								}),
+							),
+						),
+				).pipe(Effect.provide(services));
+				if (!retained) return yield* Effect.die("missing probe runner");
+				const runner = retained;
+				const execute = vi.spyOn(runner, "executeEffect");
+				return Object.assign(runner, {
+					sendHandle: () =>
+						execute.mock.calls.find(
+							([command]) => command.type === "send-turn",
+						)?.[1],
+					sendTurnEffect: (
+						command: Extract<SessionCommand, { type: "send-turn" }>,
+					) =>
+						instance.sendTurnEffect({
+							...command.input,
+							eventSink: createMockEventSink(),
+							abortSignal: command.aborted
+								? AbortSignal.abort()
+								: new AbortController().signal,
+						}),
+				});
+			}),
 			send: {
 				type: "send-turn" as const,
-				sinkId: "probe-send",
+				sinkId: runnerSinkId("probe-user"),
 				aborted: false,
 				input: {
 					sessionId,
@@ -362,10 +447,36 @@ describe("Claude runner admission socket probes", () => {
 			await fixture.exited;
 			for (const socket of fixture.sockets) socket.destroy();
 			await new Promise<void>((done) => fixture.server.close(() => done()));
+			// A respawned runner can still be booting with no registration; its argv
+			// names this fixture's private config directory. Q28 keeps runners
+			// detached from the test process, so stop each by exact identity. One ps
+			// read binds pid and start time, closing the pid-reuse window.
+			const booting = new Map(
+				execFileSync("ps", ["-axo", "pid=,stat=,lstart=,command="], {
+					encoding: "utf8",
+					// The registry compares lstart in the C locale.
+					env: { ...process.env, LC_ALL: "C" },
+				})
+					.split("\n")
+					.filter((line) => line.includes(`${fixture.configDir}/`))
+					.flatMap((line) => {
+						const match =
+							/^\s*(\d+)\s+(\S+)\s+(\S+\s+\S+\s+\d+\s+\S+\s+\d+)\s/.exec(line);
+						return match?.[1] &&
+							match[2] &&
+							match[3] &&
+							!match[2].startsWith("Z")
+							? [[Number(match[1]), match[3]] as const]
+							: [];
+					}),
+			);
+			for (const pid of booting.keys()) fixture.runnerPids.add(pid);
 			const cleanup = await cleanupTestClaudeRunners(
 				fixture.root,
 				[...fixture.runnerPids],
 				fixture.configDir,
+				undefined,
+				booting,
 			);
 			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
@@ -383,8 +494,8 @@ describe("Claude runner admission socket probes", () => {
 					2,
 				),
 			);
-			for (const pid of fixture.runnerPids)
-				expect(testRunnerAlive(pid)).toBe(false);
+			// Identity-aware: a stopped runner awaiting its reap is gone.
+			expect(cleanup.remainingPids).toEqual([]);
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
 		vi.unstubAllEnvs();
@@ -399,15 +510,24 @@ describe("Claude runner admission socket probes", () => {
 				Effect.gen(function* () {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
+					// CONTRACT 6.9: a registry-only runner holds no serving slot; its
+					// identity hello and retirement are forked, so await the stop.
+					yield* Effect.suspend(() =>
+						testRunnerAlive(fixture.child.pid ?? 0)
+							? Effect.fail("alive")
+							: Effect.void,
+					).pipe(
+						Effect.retry(Schedule.spaced("25 millis")),
+						Effect.timeout("5 seconds"),
+					);
 					expect(fixture.helloRoots).toEqual([fixture.configDir]);
 					expect(fixture.commands).toEqual(["shutdown"]);
-					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
 				}),
 			),
 		);
 	}, 15_000);
 
-	it("releases a pending send's retained sink when its caller is cancelled", async () => {
+	it("releases a pending send's retained sink once when release races caller cancellation", async () => {
 		const fixture = await probe("idle");
 		probes.push(fixture);
 		await Effect.runPromise(
@@ -416,28 +536,32 @@ describe("Claude runner admission socket probes", () => {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
 					const send = yield* Effect.forkChild(
-						runner.executeEffect(fixture.send),
+						runner.sendTurnEffect(fixture.send),
 					);
 					yield* Deferred.await(fixture.received);
 					fixture.releaseSink();
 					yield* Deferred.await(fixture.released).pipe(
 						Effect.timeout("2 seconds"),
 					);
-					expect(fixture.outputs).not.toContainEqual({
-						type: "release-sink",
-						sinkId: "probe-send",
-					});
-					yield* Fiber.interrupt(send);
+					expect(runner.sendHandle()?.assignment._tag).toBe("Closed");
 					expect(fixture.outputs).toContainEqual({
 						type: "release-sink",
-						sinkId: "probe-send",
+						sinkId: fixture.send.sinkId,
 					});
+					yield* Fiber.interrupt(send);
+					expect(
+						fixture.outputs.filter(
+							(output) =>
+								output.type === "release-sink" &&
+								output.sinkId === fixture.send.sinkId,
+						),
+					).toHaveLength(1);
 				}),
 			),
 		);
 	}, 15_000);
 
-	it("settles end-session and respawns an unaccepted send refused by idle exit", async () => {
+	it("settles end-session without respawning an unaccepted send refused by idle exit", async () => {
 		const fixture = await probe("idle");
 		probes.push(fixture);
 		await Effect.runPromise(
@@ -446,7 +570,7 @@ describe("Claude runner admission socket probes", () => {
 					const runner = yield* fixture.make;
 					yield* runner.recoverEffect;
 					const send = yield* Effect.forkChild(
-						runner.executeEffect(fixture.send),
+						runner.sendTurnEffect(fixture.send),
 					);
 					yield* Deferred.await(fixture.received);
 					const end = yield* Effect.forkChild(
@@ -465,16 +589,24 @@ describe("Claude runner admission socket probes", () => {
 					});
 					// End succeeds only after the old process has actually stopped.
 					expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(false);
-					expect(fixture.commands).toEqual([
-						"send-turn",
-						"end-session",
-						"shutdown",
-					]);
+					// CONTRACT 6.3: end-session is requestStop(EndSession), not a native command.
+					expect(fixture.commands).toEqual(["send-turn", "shutdown"]);
+					// CONTRACT 4.5: the idle reply is Refused{exiting}, handed back to the
+					// direct caller, and the EndSession starts no replacement. The probe
+					// has no feeder, so F32's Covered path is not exercised here.
 					expect(
-						(yield* Fiber.join(send).pipe(Effect.timeout("10 seconds"))).status,
-					).toBe("accepted");
+						yield* Fiber.join(send).pipe(
+							Effect.flip,
+							Effect.timeout("10 seconds"),
+						),
+					).toMatchObject({
+						cause: {
+							code: "runner_idle_exit",
+							delivery: { _tag: "Refused", reason: "exiting" },
+						},
+					});
 					fixture.recordPids();
-					expect([...fixture.runnerPids]).toHaveLength(2);
+					expect([...fixture.runnerPids]).toEqual([fixture.child.pid]);
 					expect(
 						fixture.outputs.some(
 							(output) =>
@@ -501,7 +633,7 @@ describe("Claude runner admission socket probes", () => {
 					const recovery = yield* Effect.forkChild(runner.recoverEffect);
 					yield* Deferred.await(fixture.received);
 					const send = yield* Effect.forkChild(
-						runner.executeEffect({
+						runner.sendTurnEffect({
 							...fixture.send,
 							aborted: mode === "already-aborted",
 							input: {
@@ -514,12 +646,18 @@ describe("Claude runner admission socket probes", () => {
 					);
 					if (mode !== "already-aborted") {
 						yield* Effect.sleep("20 millis");
-						if (mode === "abort")
-							yield* runner.executeEffect({
-								type: "abort",
-								sinkId: fixture.send.sinkId,
-							});
-						else {
+						if (mode === "abort") {
+							const handle = runner.sendHandle();
+							if (!handle)
+								return yield* Effect.die("missing admitted send handle");
+							yield* runner.executeEffect(
+								{
+									type: "abort",
+									sinkId: fixture.send.sinkId,
+								},
+								handle,
+							);
+						} else {
 							yield* Effect.forkChild(
 								runner.executeEffect({
 									type: "interrupt",
@@ -656,7 +794,7 @@ describe("Claude runner admission socket probes", () => {
 					);
 					yield* Deferred.await(fixture.received);
 					const send = yield* Effect.forkChild(
-						Effect.exit(runner.executeEffect(fixture.send)),
+						Effect.exit(runner.sendTurnEffect(fixture.send)),
 					);
 					yield* Effect.sleep("25 millis");
 					if (phase === "dead") {
@@ -669,18 +807,40 @@ describe("Claude runner admission socket probes", () => {
 						Effect.timeout("10 seconds"),
 					);
 					fixture.recordPids();
-					if (phase === "dead") {
+					if (phase === "interrupted") {
+						expect(result._tag).toBe("Failure");
+						if (result._tag === "Failure")
+							expect(Cause.hasInterruptsOnly(result.cause)).toBe(true);
+						expect([...fixture.runnerPids]).toHaveLength(1);
+						expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
+						// The abandoned entry must not answer later sends with that
+						// interruption. CONTRACT 6.7: the next send retires the survivor
+						// and starts a serving runner, as for dead and live adoption.
+						const followUp = yield* runner
+							.sendTurnEffect({
+								...fixture.send,
+								sinkId: runnerSinkId("probe-follow-up"),
+								input: { ...fixture.send.input, inputId: "probe-follow-up" },
+							})
+							.pipe(Effect.timeout("20 seconds"));
+						expect(followUp).toMatchObject({ status: "accepted" });
+						fixture.recordPids();
+						expect([...fixture.runnerPids]).toHaveLength(2);
+						yield* Effect.tryPromise(() => fixture.exited).pipe(
+							Effect.timeout("10 seconds"),
+						);
+					} else {
+						// CONTRACT 6.7: a survivor no longer holds the session or refuses
+						// sends; the waiting send starts a serving runner. 6.3: retiring
+						// the live survivor is requestStop, which stops its process.
 						expect(result).toMatchObject({
 							_tag: "Success",
 							value: { status: "accepted" },
 						});
 						expect([...fixture.runnerPids]).toHaveLength(2);
-					} else {
-						expect(result._tag).toBe("Failure");
-						if (phase === "interrupted" && result._tag === "Failure")
-							expect(Cause.hasInterruptsOnly(result.cause)).toBe(true);
-						expect([...fixture.runnerPids]).toHaveLength(1);
-						expect(testRunnerAlive(fixture.child.pid ?? 0)).toBe(true);
+						yield* Effect.tryPromise(() => fixture.exited).pipe(
+							Effect.timeout("10 seconds"),
+						);
 					}
 				}),
 			),
@@ -922,9 +1082,15 @@ describe("built-dist Claude runner lifecycle", () => {
 				() => "completed",
 				() => "interrupted",
 			);
-			await harness.waitForMark(
-				(mark) =>
-					mark.kind === "runner-end-selected" && mark.sessionId === sessionId,
+			// CONTRACT 6.3: End is requestStop(EndSession), not a runner command;
+			// its claimed outbox row is the admission point.
+			await waitFor(
+				harness,
+				() =>
+					expect(snapshot(harness, sessionId).ends).toEqual([
+						expect.objectContaining({ status: "running" }),
+					]),
+				{ timeout: 5_000 },
 			);
 			controller.abort();
 			expect(await reload).toBe("interrupted");
@@ -943,29 +1109,37 @@ describe("built-dist Claude runner lifecycle", () => {
 			expect(
 				harness.marks.filter(
 					(mark) =>
-						mark.kind === "runner-command" && mark.type === "end-session",
+						mark.kind === "runner-command" &&
+						(mark.type === "end-session" || mark.type === "shutdown"),
 				),
 			).toEqual([]);
 		} finally {
 			process.kill(hello.pid, "SIGCONT");
 		}
+		// CONTRACT 6.3: End stops the unready runner with requestStop(EndSession).
+		// 4.3 and 4.4: the send outside its cohort finds Unserved{predecessor}, so
+		// the feeder holds it on a new runner and it is delivered once.
 		expect((await first).done["status"]).toBe("idle");
-		const firstCompleted = snapshot(harness, sessionId).events.some(
-			(event) => event.type === "turn.completed",
+		const [ended, runner] = harness.marks.filter(
+			(mark) => mark.kind === "runner-started",
 		);
-		const runner = started(harness);
-		expect(runner.socketPath.endsWith(`/${ends[0]?.provider_process_id}`)).toBe(
+		assert(
+			ended?.kind === "runner-started" && runner?.kind === "runner-started",
+			"Missing runner proof",
+		);
+		expect(ended.socketPath.endsWith(`/${ends[0]?.provider_process_id}`)).toBe(
 			true,
 		);
+		expect(runner.pid).not.toBe(ended.pid);
 		const next = await browser.send(sessionId, "after-interrupted-end");
 		expect(next.done["status"]).toBe("idle");
 		expect(next.chunks.join("")).toBe(
 			responseChunks("after-interrupted-end").join(""),
 		);
-		expect(started(harness).pid).not.toBe(runner.pid);
-		expect(() => process.kill(runner.pid, 0)).toThrow();
-		expect(existsSync(runner.socketPath)).toBe(false);
-		expect(() => process.kill(started(harness).pid, 0)).not.toThrow();
+		expect(started(harness).pid).toBe(runner.pid);
+		expect(() => process.kill(ended.pid, 0)).toThrow();
+		expect(existsSync(ended.socketPath)).toBe(false);
+		expect(() => process.kill(runner.pid, 0)).not.toThrow();
 		await waitFor(harness, () => {
 			const state = snapshot(harness, sessionId);
 			expect(state.ends).toEqual([
@@ -976,19 +1150,15 @@ describe("built-dist Claude runner lifecycle", () => {
 				},
 			]);
 			expect(state.commands).toEqual([
-				{ status: firstCompleted ? "completed" : "failed" },
+				{ status: "completed" },
 				{ status: "completed" },
 			]);
 			expect(state.receipts).toEqual([
-				{
-					status: firstCompleted
-						? "side_effect_completed"
-						: "side_effect_failed",
-				},
+				{ status: "side_effect_completed" },
 				{ status: "side_effect_completed" },
 			]);
 			expect(state.turns).toEqual([
-				{ state: firstCompleted ? "completed" : "error" },
+				{ state: "completed" },
 				{ state: "completed" },
 			]);
 			expect(state.session).toEqual({ status: "idle" });
@@ -996,9 +1166,16 @@ describe("built-dist Claude runner lifecycle", () => {
 		});
 		expect(
 			harness.marks.filter(
-				(mark) => mark.kind === "runner-command" && mark.type === "end-session",
+				(mark) =>
+					mark.kind === "runner-command" &&
+					(mark.type === "end-session" || mark.type === "shutdown"),
 			),
-		).toEqual([expect.objectContaining({ commandId: ends[0]?.command_id })]);
+		).toEqual([
+			expect.objectContaining({
+				commandId: `runner-stop:${ends[0]?.provider_process_id}`,
+				type: "shutdown",
+			}),
+		]);
 		expect(
 			snapshot(harness, sessionId).events.filter(
 				(event) => event.type === "session.end_requested",
@@ -1006,7 +1183,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		).toEqual([
 			{
 				type: "session.end_requested",
-				data: { providerProcessId: ends[0]?.provider_process_id },
+				data: { providerProcessId: ends[0]?.provider_process_id, stop: null },
 			},
 		]);
 	});
@@ -1212,32 +1389,27 @@ describe("built-dist Claude runner lifecycle", () => {
 		"crash",
 		"reload",
 	])("finishes %s cleanup before starting a replacement turn", async (phase) => {
-		const { harness, browser, sessionId } = await start({
-			failureCleanupDelayMs: 5000,
-		});
+		const { harness, browser, sessionId } = await start();
 		const failed = browser.send(sessionId, "approval-overlap-crash");
 		await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
 		);
+		let cursor: number;
+		let replacement: ReturnType<typeof browser.send>;
 		if (phase === "crash") {
+			// The replacement queues behind the open turn before the crash, so the
+			// turn's failure pauses the queue. Resume is what starts the
+			// replacement, once that cleanup has finished.
+			replacement = browser.send(sessionId, "approval-overlap-recovery");
+			await waitFor(harness, () =>
+				expect(snapshot(harness, sessionId).queued).toHaveLength(1),
+			);
 			process.kill(started(harness).pid, "SIGKILL");
 			await waitFor(harness, () =>
 				expect(JSON.stringify(harness.proof())).toContain(
 					"Claude runner failed",
 				),
 			);
-		} else {
-			await browser.reloadSession(sessionId);
-			// The reload interrupts the turn, and an interrupted turn advances no
-			// turn-end version, so this send never settles; the ledger shows it.
-			failed.catch(() => undefined);
-		}
-		let cursor = browser.frames.length;
-		const replacement = browser.send(sessionId, "approval-overlap-recovery");
-		if (phase === "crash") {
-			// The crashed turn stays open until its cleanup ends it, so the send
-			// queues behind it and the turn's failure pauses the queue. Resume
-			// is what starts the replacement, once that cleanup has finished.
 			await failed;
 			const paused = snapshot(harness, sessionId);
 			expect(paused.session).toEqual({ status: "idle" });
@@ -1247,6 +1419,13 @@ describe("built-dist Claude runner lifecycle", () => {
 			if (!queued) throw new Error("Missing the queued replacement");
 			cursor = browser.frames.length;
 			await browser.sendNow(sessionId, queued.inputId);
+		} else {
+			await browser.reloadSession(sessionId);
+			// The reload interrupts the turn, and an interrupted turn advances no
+			// turn-end version, so this send never settles; the ledger shows it.
+			failed.catch(() => undefined);
+			cursor = browser.frames.length;
+			replacement = browser.send(sessionId, "approval-overlap-recovery");
 		}
 		const approval = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
@@ -1436,11 +1615,20 @@ describe("built-dist Claude runner lifecycle", () => {
 		expect(JSON.stringify(harness.proof())).toMatch(failure);
 		expect(harness.logTail).not.toMatch(/Failed to create relay/);
 		const state = snapshot(harness, sessionId);
-		expect(
-			JSON.stringify(
-				state.events.filter((event) => event.type === "turn.error"),
-			),
-		).toMatch(failure);
+		// CONTRACT 4.9 and 7.3: a refused runner's uncertain held send settles as
+		// delivery_indeterminate, never re-sent; the refusal is still proven above.
+		expect(state.events.filter((event) => event.type === "turn.error")).toEqual(
+			[
+				expect.objectContaining({
+					data: expect.objectContaining({
+						code: "delivery_indeterminate",
+						error:
+							"The runner may have received this message. Retry it explicitly.",
+						retryable: false,
+					}),
+				}),
+			],
+		);
 		const reply = await restored.send(sessionId, "after-adoption-refusal");
 		expect(reply.done["status"]).toBe("idle");
 		expect(reply.chunks.join("")).toBe(

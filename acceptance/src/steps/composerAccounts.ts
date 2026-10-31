@@ -56,8 +56,8 @@ export const composerAccountsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert card name and account identity dot",
-		match: /^the picker card (\S+) is named (.+) and shows its AccountDot$/,
+		name: "assert card name and account logo",
+		match: /^the picker card (\S+) is named (.+) and shows its account logo$/,
 		run: async ({ world, match }) => {
 			const radio = card(world.page, match[1] ?? "");
 			await expect(radio).toHaveAttribute("aria-label", match[2] ?? "");
@@ -68,11 +68,26 @@ export const composerAccountsHandlers: StepHandler[] = [
 				"text-overflow",
 				"ellipsis",
 			);
-			await expect(radio.getByTestId("account-dot")).toHaveAttribute(
+			await expect(radio.getByTestId("account-logo")).toHaveAttribute(
 				"data-account",
 				match[1] ?? "",
 			);
-			await expect(radio.getByTestId("account-dot")).toBeVisible();
+			await expect(radio.getByTestId("account-logo")).toBeVisible();
+			const badge = radio.getByTestId("harness-logo-badge");
+			if (await badge.count()) {
+				const cardBox = await radio.boundingBox();
+				const badgeBox = await badge.boundingBox();
+				if (!cardBox || !badgeBox)
+					throw new Error("Missing card or badge bounds");
+				expect(badgeBox.x).toBeGreaterThanOrEqual(cardBox.x);
+				expect(badgeBox.y).toBeGreaterThanOrEqual(cardBox.y);
+				expect(badgeBox.x + badgeBox.width).toBeLessThanOrEqual(
+					cardBox.x + cardBox.width,
+				);
+				expect(badgeBox.y + badgeBox.height).toBeLessThanOrEqual(
+					cardBox.y + cardBox.height,
+				);
+			}
 		},
 	},
 	{
@@ -402,17 +417,23 @@ export const composerAccountsHandlers: StepHandler[] = [
 		match: /^the Account row has (a|no) right-edge fade$/,
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("picker-account-options");
-			await expect(row).toHaveAttribute(
-				"data-fade",
-				match[1] === "a" ? "true" : "false",
-			);
-			const mask = await row.evaluate(
-				(element) => getComputedStyle(element).maskImage,
-			);
-			if (match[1] === "a") {
-				expect(mask).toContain("linear-gradient");
-				expect(mask).toContain("28px");
-			} else expect(mask).toBe("none");
+			// The row measures its fade after opening and again after scrolling to
+			// the selection, so read the attribute and mask together and only once
+			// they hold across two frames.
+			const settled = () =>
+				// No named inner functions: tsx wraps them in a __name helper the
+				// page does not have.
+				row.evaluate(async (element) => {
+					const before = `${element.dataset["fade"]}|${getComputedStyle(element).maskImage}`;
+					await new Promise((resolve) =>
+						requestAnimationFrame(() => requestAnimationFrame(resolve)),
+					);
+					const after = `${element.dataset["fade"]}|${getComputedStyle(element).maskImage}`;
+					return after === before ? after : "unsettled";
+				});
+			if (match[1] === "a")
+				await expect.poll(settled).toMatch(/^true\|.*linear-gradient.*28px/);
+			else await expect.poll(settled).toBe("false|none");
 		},
 	},
 	{

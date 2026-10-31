@@ -1452,7 +1452,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					...(event.data.filename != null
 						? { filename: event.data.filename }
 						: {}),
-					url: event.data.url,
+					source: event.data.source,
 				});
 				yield* sql`
 					INSERT INTO message_parts
@@ -1498,15 +1498,16 @@ export const makeMessageProjector = defineProjector(() => ({
 			}
 
 			if (isEventType(event, "turn.notice")) {
-				if (!event.metadata.runId) return [];
-				const [owner] = yield* sql<{
-					id: string;
-				}>`SELECT run.id FROM provider_runs requested
+				if (event.metadata.runId) {
+					const [owner] = yield* sql<{
+						id: string;
+					}>`SELECT run.id FROM provider_runs requested
 					JOIN provider_runs run ON run.id = COALESCE(requested.joined_into, requested.id)
 						AND run.session_id = requested.session_id
 					WHERE requested.id = ${event.metadata.runId} AND requested.session_id = ${event.sessionId}
 						AND run.status = 'running' AND run.started_at IS NOT NULL`;
-				if (!owner) return [];
+					if (!owner) return [];
+				}
 				const messageId = `turn-notice-${event.sequence}`;
 				yield* sql`INSERT INTO messages
 					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
@@ -1784,6 +1785,7 @@ function settleRunCommands(
 				: null;
 			yield* sql`UPDATE provider_command_outbox
 				SET status = ${status === "completed" ? "completed" : retryable ? "retryable_failed" : "failed"},
+					payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END,
 					error_code = ${code}, next_attempt_at = ${retryAt}, updated_at = ${event.createdAt}
 				WHERE request_sequence = ${command.request_sequence} AND project_key = ${command.project_key}`;
 			yield* sql`UPDATE command_receipts
@@ -1800,6 +1802,8 @@ export const makeTurnProjector = defineProjector(() => ({
 	name: "turn",
 	handles: [
 		"run.requested",
+		"run.dispatched",
+		"run.released",
 		"run.started",
 		"message.created",
 		"message.snapshot",
@@ -1823,6 +1827,21 @@ export const makeTurnProjector = defineProjector(() => ({
 			)
 				return { sessions: [], messages: [] };
 			const sql = yield* SqlClient.SqlClient;
+			if (isEventType(event, "run.dispatched")) {
+				yield* sql`UPDATE provider_runs SET runner_id = ${event.data.runnerId},
+					held_transmission = ${event.data.transmission ?? null}
+					WHERE session_id = ${event.sessionId} AND id = ${event.data.runId}
+					AND EXISTS (SELECT 1 FROM provider_runs owner
+						WHERE owner.id = ${event.data.runId} AND owner.session_id = ${event.sessionId}
+						AND owner.status IN ('pending', 'running'))`;
+				return { sessions: [], messages: [] };
+			}
+			if (isEventType(event, "run.released")) {
+				yield* sql`UPDATE provider_runs SET runner_id = NULL, held_transmission = NULL
+					WHERE id = ${event.data.runId} AND session_id = ${event.sessionId}
+					AND runner_id = ${event.data.runnerId} AND held_transmission = ${event.data.transmission}`;
+				return { sessions: [], messages: [] };
+			}
 			if (isEventType(event, "run.requested")) {
 				yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
 					VALUES (${event.data.runId}, ${event.sessionId}, 'pending', ${event.createdAt})
@@ -1852,7 +1871,8 @@ export const makeTurnProjector = defineProjector(() => ({
 					started_at: number | null;
 					completed_at: number | null;
 				}>`
-					SELECT status, started_at, completed_at FROM provider_runs WHERE id = ${runId} AND session_id = ${event.sessionId}`;
+					SELECT status, started_at, completed_at
+					FROM provider_runs WHERE id = ${runId} AND session_id = ${event.sessionId}`;
 				if (!resolved || resolved.status === "joined")
 					return { sessions: [], messages: [] };
 				const open =
@@ -1933,7 +1953,17 @@ export const makeTurnProjector = defineProjector(() => ({
 							AND prior.session_id = turns.session_id AND prior.status IN ('completed', 'error', 'interrupted'))
 						AND EXISTS (SELECT 1 FROM provider_runs next WHERE next.id = excluded.run_id
 							AND next.session_id = excluded.session_id AND next.status IN ('pending', 'running')))) RETURNING session_id`;
-				return { sessions: owners(written), messages: [] };
+				// input.admitted freezes the request in pending_inputs. A native
+				// message id can differ from its input id, which owns these settings.
+				const settings = yield* sql<OwnedRow>`UPDATE turns
+					SET effort = NULLIF(json_extract(input.request, '$.variant'), ''),
+						context_window = NULLIF(json_extract(input.request, '$.contextWindow'), '')
+					FROM pending_inputs input
+					WHERE input.input_id = ${event.data.inputId ?? event.data.messageId}
+						AND input.session_id = turns.session_id
+						AND turns.id = ${event.data.messageId} AND turns.session_id = ${event.sessionId}
+					RETURNING session_id`;
+				return { sessions: owners([...written, ...settings]), messages: [] };
 			}
 
 			if (
@@ -2234,11 +2264,18 @@ export const makeApprovalProjector = defineProjector(() => ({
 						INSERT INTO pending_approvals
 						(id, session_id, type, status, tool_name, input, details, version, created_at, provider_process_id, provider_request_id)
 						VALUES (${id}, ${sessionId}, 'permission', 'pending', ${toolName}, ${encodeJson(input)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
-						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version
+						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version,
+							provider_process_id = excluded.provider_process_id, provider_request_id = excluded.provider_request_id
 						WHERE ${event.metadata.source === "conduit.control-reconciliation"}
 							AND pending_approvals.session_id = excluded.session_id
-							AND pending_approvals.provider_process_id = excluded.provider_process_id
-							AND pending_approvals.provider_request_id IS excluded.provider_request_id
+							AND pending_approvals.type = excluded.type
+							AND ((pending_approvals.provider_process_id = excluded.provider_process_id
+								AND pending_approvals.provider_request_id IS excluded.provider_request_id)
+								OR (pending_approvals.status = 'pending'
+									AND pending_approvals.provider_process_id IS NULL
+									AND pending_approvals.provider_request_id IS NULL
+									AND excluded.provider_process_id LIKE 'opencode:%'
+									AND excluded.provider_request_id = pending_approvals.id))
 						RETURNING session_id, created_at`;
 			}
 
@@ -2263,11 +2300,18 @@ export const makeApprovalProjector = defineProjector(() => ({
 						INSERT INTO pending_approvals
 						(id, session_id, type, status, input, details, version, created_at, provider_process_id, provider_request_id)
 						VALUES (${id}, ${sessionId}, 'question', 'pending', ${encodeJson(questions)}, ${encodeJson(details)}, ${ctx.version}, ${event.createdAt}, ${providerProcessId ?? null}, ${providerRequestId ?? null})
-						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version
+						ON CONFLICT(id) DO UPDATE SET status = 'pending', decision = NULL, resolved_at = NULL, version = excluded.version,
+							provider_process_id = excluded.provider_process_id, provider_request_id = excluded.provider_request_id
 						WHERE ${event.metadata.source === "conduit.control-reconciliation"}
 							AND pending_approvals.session_id = excluded.session_id
-							AND pending_approvals.provider_process_id = excluded.provider_process_id
-							AND pending_approvals.provider_request_id IS excluded.provider_request_id
+							AND pending_approvals.type = excluded.type
+							AND ((pending_approvals.provider_process_id = excluded.provider_process_id
+								AND pending_approvals.provider_request_id IS excluded.provider_request_id)
+								OR (pending_approvals.status = 'pending'
+									AND pending_approvals.provider_process_id IS NULL
+									AND pending_approvals.provider_request_id IS NULL
+									AND excluded.provider_process_id LIKE 'opencode:%'
+									AND excluded.provider_request_id = pending_approvals.id))
 						RETURNING session_id, created_at`;
 			}
 

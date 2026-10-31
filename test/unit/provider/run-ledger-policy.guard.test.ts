@@ -4,7 +4,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const directory = join(process.cwd(), "src/lib/provider/run-ledger");
-const providerNames = new Set(["claude", "cursor", "opencode"]);
+const providerNames = new Set(["claude", "codex", "cursor", "opencode"]);
 
 function sourceFiles(path: string): string[] {
 	return readdirSync(path, { withFileTypes: true }).flatMap((entry) => {
@@ -61,9 +61,9 @@ describe("Run Ledger native-policy boundary", () => {
 		expect(
 			providerLiterals(
 				"run-ledger-decider.ts",
-				'// "claude"\nconst a = "claude"; const b = \'cursor\'; const c = `opencode`;',
+				'// "claude"\nconst a = "claude"; const b = \'cursor\'; const c = `opencode`; const d = "codex";',
 			),
-		).toHaveLength(3);
+		).toHaveLength(4);
 	});
 
 	it("permits only the public ProviderKind type and policy adapters", () => {

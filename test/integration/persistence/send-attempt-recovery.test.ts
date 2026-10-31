@@ -16,6 +16,7 @@ import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-eng
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
 import { settleUnclaimedRunnerCommands } from "../../../src/lib/provider/runner/runner-recovery.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
@@ -43,6 +44,7 @@ it.each([
 		Effect.scoped(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
+				yield* makeRunnerReceiptStore(sql);
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([
@@ -273,6 +275,7 @@ it.each([
 			Effect.scoped(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
+					yield* makeRunnerReceiptStore(sql);
 					const ingestion = yield* ProviderRuntimeIngestionTag;
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
@@ -310,7 +313,7 @@ it.each([
 					const entered = yield* Deferred.make<void>();
 					const active = new Set<number>();
 					let concurrent = 0;
-					const aborted = new Set<number>();
+					const retried = new Set<number>();
 					let calls = 0;
 					const registry = new ProviderRegistry([
 						{
@@ -325,11 +328,6 @@ it.each([
 									active.add(index);
 									concurrent = Math.max(concurrent, active.size);
 									if (index < attempts - 1) {
-										input.abortSignal.addEventListener(
-											"abort",
-											() => aborted.add(index),
-											{ once: true },
-										);
 										yield* input.eventSink.push(
 											providerRuntimeEvent(
 												"turn.error",
@@ -344,6 +342,7 @@ it.each([
 												{ eventId: `retry-${index}`, runId },
 											),
 										);
+										retried.add(index);
 									} else yield* Deferred.succeed(entered, undefined);
 									const release = releases[index];
 									const returnedGate = returned[index];
@@ -443,14 +442,13 @@ it.each([
 					const workers = [yield* Effect.forkChild(first)];
 					for (let index = 1; index < attempts; index++) {
 						yield* Effect.gen(function* () {
-							while (!aborted.has(index - 1)) yield* Effect.sleep("1 millis");
+							while (!retried.has(index - 1)) yield* Effect.sleep("1 millis");
 						}).pipe(Effect.timeout("3 seconds"));
-						if (attempts === 3) {
-							// Exercise a third overlapping delivery directly at the executor seam;
-							// the live engine waiter serializes additional foreground retries.
-							yield* sql`UPDATE provider_command_outbox SET status = 'pending', error_code = NULL WHERE command_id = 'command'`;
-							yield* sql`UPDATE command_receipts SET status = 'side_effect_requested', error_code = NULL WHERE command_id = 'command'`;
-						}
+						// The emitted retryAt is already due. Let the reactor claim that
+						// durable retry, including when its wake wins this dispatch race.
+						// Gate on the retry, not the older attempt's abort: a newer claim
+						// can erase the failed receipt before that attempt's recall sees it.
+
 						const delivery: Effect.Effect<void, unknown> =
 							attempts === 3
 								? reactor.runCommand("command").pipe(Effect.asVoid)

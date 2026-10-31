@@ -589,8 +589,8 @@ it("removing a Claude scope aborts its actual in-flight SDK capability probe", a
 });
 
 // A failed reattachment must release the previous attachment's account demand.
-// Later successful adoption opens one new generation, and releases it once.
-it("quarantining a Claude reattachment releases its account scope before successful readoption", async () => {
+// A retired registration cannot reacquire account demand on restart.
+it("retiring a Claude reattachment releases its account scope across restart", async () => {
 	const root = mkdtempSync("/tmp/cqs-");
 	roots.push(root);
 	const state = accountsStateFromInstances(
@@ -628,7 +628,6 @@ it("quarantining a Claude reattachment releases its account scope before success
 		snapshot: { input: launch, options: {} },
 	};
 	const sockets = new Set<Socket>();
-	let peer: ClaudeRunnerSocket | undefined;
 	let rejecting = false;
 	let opens = 0;
 	let closes = 0;
@@ -664,7 +663,6 @@ it("quarantining a Claude reattachment releases its account scope before success
 			},
 			() => {},
 		);
-		peer = connection;
 	});
 	try {
 		await new Promise<void>((done, fail) => {
@@ -691,7 +689,7 @@ it("quarantining a Claude reattachment releases its account scope before success
 							};
 						}),
 				});
-				for (const phase of ["quarantine", "readopt"] as const) {
+				for (const phase of ["retire", "restart"] as const) {
 					yield* Effect.scoped(
 						Effect.gen(function* () {
 							const runners: SessionRunner[] = [];
@@ -716,24 +714,19 @@ it("quarantining a Claude reattachment releases its account scope before success
 							)
 								throw new Error("Missing process runner lifecycle");
 							yield* runner.recoverEffect;
-							yield* instance.preWarmSessionEffect(launch);
-							yield* Effect.sleep(80);
-							expect(opens).toBe(phase === "quarantine" ? 1 : 2);
-							expect(closes).toBe(phase === "quarantine" ? 0 : 1);
-							if (phase === "quarantine") {
+							if (phase === "retire")
+								yield* instance.preWarmSessionEffect(launch);
+							expect(opens).toBe(1);
+							expect(closes).toBe(phase === "retire" ? 0 : 1);
+							if (phase === "retire") {
 								rejecting = true;
 								yield* instance.releaseSessionsEffect([sessionId]);
 								yield* runner.attachSessionsEffect([sessionId]);
 								expect(
 									yield* runner.getSessionFailureEffect?.(sessionId) ??
 										Effect.succeed(undefined),
-								).toMatchObject({ code: "runner_quarantined" });
+								).toBeUndefined();
 								expect(yield* runner.hasDemandEffect(sessionId)).toBe(false);
-							} else {
-								peer?.write({
-									type: "upgrade-state",
-									state: { ...busy, quiescent: true },
-								});
 							}
 							yield* Effect.tryPromise(() =>
 								vi.waitFor(() => expect(closes).toBe(opens), { timeout: 2000 }),
