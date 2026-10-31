@@ -45,11 +45,14 @@ function publicImplementation(
 	);
 }
 const oracle: unknown = oracleModule;
+// Fail loud: an oracle missing the four public functions fails every importer, never skips.
+assert(
+	publicImplementation(oracle),
+	"32.2.3 oracle has not exported the four public functions",
+);
 /** The oracle reads `unheld_outcome` (D49) and a stop commit's releases (3.13) natively. */
-export const referenceImplementation:
-	| LedgerImplementation<unknown, unknown>
-	| undefined = publicImplementation(oracle) ? oracle : undefined;
-export const oracleAvailable = referenceImplementation !== undefined;
+export const referenceImplementation: LedgerImplementation<unknown, unknown> =
+	oracle;
 /** settleMs is the contract's 7 s (3.7); probeMs and nativeCommandMs are test policy, this folder's one constant. */
 export const policy: DecideContext["policy"] = {
 	settleMs: 7_000,
@@ -62,6 +65,16 @@ export interface StepResult {
 	readonly ended: readonly RunEnded[];
 	readonly alarmAt?: number;
 	readonly diagnostic?: string;
+}
+/** What Coverage.record reads of a trace: TraceDriver, and each scenario Driver for the race gate. */
+export interface CoverageReader {
+	readonly provider: ProviderKind;
+	/** The current runner label (3.3). */
+	readonly label: string;
+	/** The send an Answer's token names, and the label it was addressed to (3.4, L2). */
+	answered(
+		token: SendToken,
+	): { readonly send: Send; readonly label: string } | undefined;
 }
 export interface PublicDriver {
 	step(command: LedgerCommand, now: number): Decision<unknown>;
@@ -192,13 +205,7 @@ export class TraceDriver {
 			this.publicDriver = driver(implementation, provider, mode);
 		else if (mode === "decider")
 			this.publicDriver = driver(production, provider, mode);
-		else {
-			assert(
-				referenceImplementation,
-				"32.2.3 oracle has not exported the four public functions",
-			);
-			this.publicDriver = driver(referenceImplementation, provider, mode);
-		}
+		else this.publicDriver = driver(referenceImplementation, provider, mode);
 	}
 	step(
 		command: LedgerCommand,
@@ -212,7 +219,8 @@ export class TraceDriver {
 		const before = this.view();
 		const stepped = this.publicDriver.step(command, now);
 		const after = this.view();
-		// 3.13: a Main issue is its commandId and kind (an end's interrupt and end_session share one).
+		// 3.4, 8.4 (CONTRACT.md 449-455, 2889-2898): a Main issue is its row's commandId and kind; an
+		// end's Stop row and a later end_session are separate Controls under distinct commandIds.
 		const same = (a: IssuedEffect, b: IssuedEffect) =>
 			a.tag === "Main"
 				? b.tag === "Main" &&
@@ -235,6 +243,7 @@ export class TraceDriver {
 				? { ...stepped, effects: [...stepped.effects, ...folded] }
 				: { ...stepped, effects: [], ended: [] };
 		this.log.push(...result.effects);
+		this.coverage.recordShapes(command, before, after, result, this);
 		this.coverage.record(command, before, after, result, this);
 		this.host.assertVerdict(command, result.tag);
 		if (result.tag === "Accepted")
@@ -245,6 +254,7 @@ export class TraceDriver {
 				result.effects,
 				result.ended,
 				this.replay(),
+				now,
 			);
 		return result;
 	}
@@ -265,6 +275,15 @@ export class TraceDriver {
 	}
 	get label(): string {
 		return this.host.label;
+	}
+	answered(
+		token: SendToken,
+	): { readonly send: Send; readonly label: string } | undefined {
+		for (const issue of this.issued) this.bound(issue);
+		const send = this.wireBindings.find(
+			(item) => item.send.token === token,
+		)?.send;
+		return send && { send, label: this.host.labelFor(send) };
 	}
 	bound(send: IssuedEffect | Send): Send {
 		if (!("tag" in send)) return send;
@@ -640,11 +659,7 @@ export const generatedShapes = [
 	// Round 13, H4 and 4.4: each gate answer by send kind (input-kinds.md).
 	"not_sent Held start",
 	"not_sent Held steer",
-	"not_sent no-hold start",
-	"not_sent no-hold steer",
 	"not_sent probe",
-	"not_sent interrupt",
-	"not_sent native command",
 	"not_sent other send",
 	"removed Held start",
 	"removed Held steer",
@@ -687,8 +702,6 @@ export const generatedShapes = [
 	"Q28 adoption with not_received",
 	"Q28 journal settle",
 	"Q28 removed with a surviving runner",
-	"native clock paused at not_sent",
-	"native clock resumed at re-issue",
 ] as const;
 export type GeneratedShape = (typeof generatedShapes)[number];
 export class Coverage {
@@ -708,6 +721,8 @@ export class Coverage {
 		string,
 		{ readonly runId: string; readonly inputId: string }
 	>();
+	/** Admitted inputs main has not yet requested (D58). */
+	private readonly queuedInputs = new Set<string>();
 	private readonly clearCommands = new Set<string>();
 	private readonly pauseCommands = new Map<string, { wakeRunId?: string }>();
 	/** Snapshot entries a query replacement made stale (D45). */
@@ -720,33 +735,42 @@ export class Coverage {
 	private readonly stopped = new Set<string>();
 	/** Runs that went back to Queued (D50), until they launch again. */
 	private readonly unlaunched = new Set<string>();
+	/** How many of the trace's issues the relaunch count has read. */
+	private seenIssues = 0;
 	/** This runner's release Answers by token and reason, until its process_lost (3.13, 4.5). */
 	private readonly releases = new Map<SendToken, string>();
-	/** Native commands a not_sent try paused (D48). */
-	private readonly pausedNative = new Set<string>();
 	record(
 		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView,
 		result: StepResult,
-		d: TraceDriver,
+		d: CoverageReader,
 	): void {
 		const hit = (name: NamedRace) => {
 			this.races[name]++;
 		};
-		this.recordShapes(command, before, after, result, d);
+		// D58: an admitted input waits in main's inbox, which the ledger does not model, until its
+		// run.requested (3.4).
+		if (result.tag === "Accepted" && command.verb === "admit")
+			this.queuedInputs.add(command.inputId);
+		if (
+			result.tag === "Accepted" &&
+			command.verb === "observe" &&
+			command.observation.tag === "Main" &&
+			command.observation.kind === "run_requested"
+		)
+			this.queuedInputs.delete(command.observation.inputId);
 		if (command.verb === "observe" && result.tag === "Accepted") {
 			const e = command.observation;
 			this.kinds[e.kind]++;
-			for (const issue of d.issued) d.bound(issue);
-			const send =
-				e.tag === "Answer"
-					? d.bindings.find((item) => item.send.token === e.token)?.send
-					: undefined;
+			const answered = e.tag === "Answer" ? d.answered(e.token) : undefined;
+			const send = answered?.send;
 			// An Answer's label is its send's address (3.4, L2); only Unsolicited frames carry one.
-			const label =
-				e.tag === "Unsolicited" ? e.label : send && d.host.labelFor(send);
-			if (label !== d.label) return;
+			const label = e.tag === "Unsolicited" ? e.label : answered?.label;
+			if (label !== d.label) {
+				for (const terminal of result.ended) this.ended.add(terminal.runId);
+				return;
+			}
 			const runId =
 				send && "runId" in send.effect ? send.effect.runId : undefined;
 			if (e.kind === "effect_outcome") {
@@ -803,7 +827,7 @@ export class Coverage {
 			if (
 				e.kind === "turn_started" &&
 				!before.active &&
-				before.inbox.length &&
+				this.queuedInputs.size > 0 &&
 				after.active?.origin === "wake"
 			)
 				hit("a wake turn while an input is queued");
@@ -900,7 +924,8 @@ export class Coverage {
 			this.clearCommands.add(command.control.commandId);
 		for (const terminal of result.ended) this.ended.add(terminal.runId);
 	}
-	private recordShapes(
+	/** Generated shapes read the fake's ground truth, so only a TraceDriver records them. */
+	recordShapes(
 		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView,
@@ -1008,18 +1033,14 @@ export class Coverage {
 						: outcome === "retryable" || outcome === "not_sent"
 							? outcome
 							: undefined;
+		// D60, 3.6: main's relaunch is a new issue of the unlaunched Run's start, drawn after its unlaunch.
+		for (const { effect } of d.issued.slice(this.seenIssues))
+			if (effect.kind === "start" && this.unlaunched.delete(effect.runId))
+				hit("relaunch after unlaunch");
+		this.seenIssues = d.issued.length;
 		if (unlaunchedRun !== undefined && trigger !== undefined) {
 			this.unlaunched.add(unlaunchedRun);
 			hit(`unlaunch by ${trigger}`);
-		}
-		for (const { effect } of result.effects) {
-			if (effect.kind === "start" && this.unlaunched.delete(effect.runId))
-				hit("relaunch after unlaunch");
-			if (
-				effect.kind === "send_native_command" &&
-				this.pausedNative.delete(effect.commandId)
-			)
-				hit("native clock resumed at re-issue");
 		}
 		// D50: Stop, Run now or End on a Run nothing may act for yet.
 		if (
@@ -1139,6 +1160,17 @@ export class Coverage {
 			}
 			if (e.kind === "turn_started" && d.host.isRestartLabel(e.label))
 				hit("Registering restart turn");
+			// D61 (CONTRACT.md 486-494): a native command's receipts are unsolicited, by its commandId.
+			if (
+				(e.kind === "command_lifecycle" || e.kind === "command_result") &&
+				result.tag === "Accepted" &&
+				d.issued.some(
+					({ effect }) =>
+						effect.kind === "send_native_command" &&
+						effect.commandId === e.commandId,
+				)
+			)
+				hit(`native-token ${e.kind}`);
 			return;
 		}
 		if (e.tag === "Main") return;
@@ -1153,10 +1185,6 @@ export class Coverage {
 			result.ended.some(({ runId }) => runId === startRun)
 		)
 			hit("input Run ended by its start under a joined turn");
-		if (send?.effect.kind === "send_native_command") {
-			if (e.kind === "command_lifecycle") hit("native-token command_lifecycle");
-			if (e.kind === "command_result") hit("native-token command_result");
-		}
 		if (
 			e.kind === "effect_outcome" &&
 			e.outcome.tag === "permanent" &&
@@ -1249,13 +1277,12 @@ export class Coverage {
 			);
 		else if (!notSent)
 			hit(native ? "removed native command" : "removed no-hold send");
-		else if (effect.kind === "start") hit("not_sent no-hold start");
-		else if (steer) hit("not_sent no-hold steer");
-		else if (effect.kind === "probe") hit("not_sent probe");
-		else if (effect.kind === "interrupt") hit("not_sent interrupt");
-		else if (native) hit("not_sent native command");
-		else hit("not_sent other send");
-		if (!notSent) return;
+		// 3.4 (465-471, round 2d): no row main's executor runs gets a not_sent, so a no-hold start's,
+		// steer's, interrupt's or native command's is Rejected, no shape.
+		else if (result.tag === "Accepted")
+			hit(effect.kind === "probe" ? "not_sent probe" : "not_sent other send");
+		// A Rejected not_sent is an adversarial input (3.4), no gate shape.
+		if (!notSent || result.tag !== "Accepted") return;
 		const runId = "runId" in effect ? effect.runId : null;
 		if (runId !== null && this.joinedRuns.has(runId)) {
 			hit("not_sent after a joined turn");
@@ -1267,21 +1294,6 @@ export class Coverage {
 				!result.ended.some((terminal) => terminal.runId === runId)
 			)
 				hit("joined Run's not_sent start retried in its execution");
-		}
-		// D48 amended: a not_sent try shows the native command Queued; its confirmation clock pauses.
-		if (
-			effect.kind === "send_native_command" &&
-			before.nativeCommands.some(
-				(c) =>
-					c.commandId === effect.commandId &&
-					(c.tag === "Sent" || c.tag === "Started"),
-			) &&
-			after.nativeCommands.some(
-				(c) => c.commandId === effect.commandId && c.tag === "Queued",
-			)
-		) {
-			hit("native clock paused at not_sent");
-			this.pausedNative.add(effect.commandId);
 		}
 		// One effect across its tries: an unlaunched start relaunches under a new commandId (3.6), and
 		// Run-less native commands differ only by commandId (8.5).

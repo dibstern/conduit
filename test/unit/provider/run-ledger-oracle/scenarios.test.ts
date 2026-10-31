@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { TraceDriver } from "./harness.js";
 import { pendingSuite } from "./pending.js";
 import type { Mutation } from "./reference.js";
+import { reviewTraces } from "./review-traces.js";
 import { Driver, scenarios, sourceOnlyCases } from "./scenarios.js";
 
 describe("[step1] Run Ledger catalogue scenarios", () => {
@@ -16,6 +18,15 @@ describe("[step1] Run Ledger catalogue scenarios", () => {
 	for (const scenario of sourceOnlyCases) {
 		it.todo(`${scenario.title} (${scenario.id}). ${scenario.reason}`);
 	}
+});
+
+// Review traces run on the fake's TraceDriver, so every step also meets the fake's ground truth.
+describe("Run Ledger review traces", () => {
+	for (const trace of reviewTraces)
+		pendingSuite(`[convergence] review trace ${trace.id}`)(
+			`${trace.title} (${trace.id})`,
+			() => trace.run(new TraceDriver(trace.provider)),
+		);
 });
 
 describe("[step1] reference mutation sensitivity", () => {

@@ -12,6 +12,7 @@ import type {
 	RunEnded,
 	SendToken,
 	TaskKey,
+	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
@@ -136,6 +137,8 @@ interface NativeSend {
 	covered: boolean;
 	ended: boolean;
 	notConsumed: boolean;
+	/** A release shows the host never handed it over (3.5, 4.5); a rejected resume ranks as permanent. */
+	released: boolean;
 	transportRank: number;
 }
 
@@ -207,14 +210,10 @@ const probe = (variant: number, input: number): Probe => {
 		{ tag: "input_absent" },
 		{ tag: "native_idle" },
 		{ tag: "native_busy" },
-		// GAP (CONTRACT.md 1235-1236): 3.10 deletes the interaction probe, so these findings answer no
-		// probe; generated as inputs decide Rejects.
-		{ tag: "answer_consumed" },
-		{ tag: "answer_pending" },
 	] as const;
 	return {
 		kind: "probe_result",
-		finding: findings[variant % 6] ?? findings[0],
+		finding: findings[variant % 4] ?? findings[0],
 	};
 };
 
@@ -272,6 +271,20 @@ export class FakeProvider {
 	private readonly controlOutcomes = new Map<
 		SendToken,
 		Extract<Evidence, { kind: "effect_outcome" }>["outcome"]
+	>();
+	/** Control rows a sweep ended before any claim, by commandId and kind: n 0, no transmission (3.4). */
+	private readonly swept = new Map<string, Send>();
+	/** A sweep with no open row ends the next fresh control row before any claim, at n 0, with this code (3.12). */
+	private sweepArmed: string | undefined;
+	/** Each `end` Control drawn with a Run active, by how main commits its rows (3.4, 8.4, round 2d). */
+	readonly ends = new WeakMap<
+		LedgerCommand,
+		"after_stop" | "as_stop" | "retire"
+	>();
+	/** Each sweep outcome the fake wrote, with its shape and the issue it ends (3.4, 3.12). */
+	readonly sweeps = new WeakMap<
+		LedgerCommand,
+		{ readonly shape: string; readonly issue: MainIssue }
 	>();
 	private readonly holdBindings = new Map<
 		SendToken,
@@ -388,6 +401,8 @@ export class FakeProvider {
 	private readonly unlaunchedTries = new Set<SendToken>();
 	/** Closes and end_sessions whose success was read: a duplicate success covers nothing (3.8, 3.2). */
 	private readonly destroyed = new Set<SendToken>();
+	/** Sends each end commit found, by its commandId: its success covers only those (3.4 535-537). */
+	private readonly endScopes = new Map<string, ReadonlySet<SendToken>>();
 	/** The removal macro's runner, whose process_lost precedes the gate (H4, 6.3). */
 	private removing:
 		| { readonly runner: string; readonly gate: ProjectGate }
@@ -398,6 +413,16 @@ export class FakeProvider {
 	/** Labels of a Registering restart's adoption; a turn of its own follows each (H4, 6.1). */
 	private readonly restartLabels = new Set<string>();
 	private turning = false;
+	/**
+	 * LI8 (CONTRACT.md 3437-3440, build round 2e D59): the session's ledger stop deadline, opened at
+	 * the first Stop, Run now or end commit's deadlineAt and closed once the ledger holds nothing may
+	 * act or its alarm fires (L6). The work running when it fires is forced: the alarm kills nothing,
+	 * so the native turn may run on, but anythingMayAct no longer counts it.
+	 */
+	private stopAt: number | undefined;
+	private forcedTurn = false;
+	private readonly forcedExecutions = new Set<WakeExecution>();
+	private readonly forcedSends = new Set<SendToken>();
 	/** Actions left in a not-served retry storm: each one answers a queued gate answer or fires the alarm (4.8). */
 	private gateStorm = 0;
 	private stormAnswered = false;
@@ -449,14 +474,57 @@ export class FakeProvider {
 		});
 		return send;
 	}
+	/**
+	 * A sweep ends a control row as main's writers do, `cancelled` or `failed` read `permanent` with its
+	 * code, naming the row's latest claim, or `(commandId, 0)` when no claim reached it (3.4, 3.12).
+	 * The refusal sweep and drain's removed-project cancel write the same input, so one shape covers both.
+	 */
+	private sweep(issue: MainIssue, code: string): LedgerCommand {
+		const latest = this.bindingsFor(issue).at(-1);
+		const send: Send = latest?.send ?? {
+			token: tokened(`fake-main:${issue.commandId}:0`),
+			effect: issue.effect,
+		};
+		if (!latest)
+			this.swept.set(`${issue.commandId}\u0000${issue.effect.kind}`, send);
+		const command: LedgerCommand = {
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: send.token,
+				kind: "effect_outcome",
+				outcome: { tag: "permanent", code },
+				transmission: {
+					commandId: issue.commandId,
+					transmission: latest?.transmission ?? 0,
+				},
+			},
+		};
+		// A row no longer `running` (its latest claim already has an outcome) names that claim (3.4).
+		this.sweeps.set(command, {
+			shape: !latest
+				? `${code}:n0`
+				: this.controlOutcomes.has(latest.send.token)
+					? "not_running"
+					: `${code}:claimed`,
+			issue,
+		});
+		return command;
+	}
 	/** Repeated binding of one issue does not append another run.dispatched. */
 	bound(issued: IssuedEffect): Send {
 		if (issued.tag === "Tokened") return issued;
 		if (!this.isHeld(issued)) {
-			const latest = this.mainSends
-				.get(`${issued.commandId}\u0000${issued.effect.kind}`)
-				?.at(-1);
-			return latest ?? this.claim(issued);
+			const key = `${issued.commandId}\u0000${issued.effect.kind}`;
+			const latest = this.mainSends.get(key)?.at(-1) ?? this.swept.get(key);
+			if (latest) return latest;
+			// 3.4: main's gate runs before its claim, so a removed project's refusal sweep ends a fresh row
+			// at n 0, as pending-prompt retirement does a row committed to a gone process (3.12).
+			const code = this.sweepArmed;
+			if (code === undefined) return this.claim(issued);
+			this.sweepArmed = undefined;
+			this.commit.push(this.sweep(issued, code));
+			return this.swept.get(key) ?? this.claim(issued);
 		}
 		const gated = this.gatedHolds.get(issued);
 		if (gated) return gated;
@@ -554,6 +622,18 @@ export class FakeProvider {
 				sends.every(({ token }) => !source.mainTransmissions.has(token))
 			)
 				this.mainSends.set(key, sends);
+		// 4.3: a replaying host reads run.dispatched as the source emits it, so a hold the source's ledger
+		// has read is never dropped here as unread at a reissue or its Run's end.
+		const dispatchKey = (n: Observation) =>
+			n.tag === "Answer" && n.kind === "run_dispatched"
+				? `${n.commandId}\u0000${n.transmission}`
+				: undefined;
+		const queued = new Set(source.notifications.map(dispatchKey));
+		const kept = this.notifications.filter((n) => {
+			const k = dispatchKey(n);
+			return k === undefined || queued.has(k);
+		});
+		this.notifications.splice(0, this.notifications.length, ...kept);
 	}
 	/** H4: a gate change applies to every send not yet transmitted; a transmitted send is never refused. */
 	setGate(gate: ProjectGate): void {
@@ -565,12 +645,22 @@ export class FakeProvider {
 			return;
 		}
 		for (const [token, held] of [...this.pendingHeld]) this.unhold(token, held);
-		for (const [token, effect] of [...this.pendingNativeCommands]) {
-			this.pendingNativeCommands.delete(token);
-			this.gateSend(this.bound(effect));
-		}
+		// 3.4 (round 2d): a row main runs gets no not_sent; it waits at main's gate while not served.
+		if (gate === "removed")
+			for (const [token, effect] of [...this.pendingNativeCommands]) {
+				this.pendingNativeCommands.delete(token);
+				this.gateSend(this.bound(effect));
+			}
 		for (const token of [...this.unbound]) {
 			const native = this.sends.get(token);
+			if (
+				gate === "not_served" &&
+				native &&
+				[...this.mainSends.values()].some((sends) =>
+					sends.includes(native.send),
+				)
+			)
+				continue;
 			this.unbound.delete(token);
 			this.sends.delete(token);
 			if (native) this.gateSend(native.send);
@@ -790,15 +880,17 @@ export class FakeProvider {
 		].map(runnerOf);
 	}
 	/**
-	 * D50 "reached", from what the ledger has read: a joined turn, or a transmission of the Run's
-	 * current execution that is not NotConsumed and not Retrying or Failed with consumption None. A
-	 * hold whose run.dispatched the ledger has not read is an undispatched issue, which has not reached.
+	 * D50 "reached or possibly reached", from what the ledger has read: a wake Run's turn, or a
+	 * transmission of the Run's current execution that is not never handed over (3.5): not a release
+	 * and not Retrying or Failed with consumption None. A decline, an absent finding or a cancel before
+	 * started is unconsumed, so possibly reached. A hold whose run.dispatched the ledger has not read is
+	 * an undispatched issue, which has not reached. A wake joined to a user Run is never its delivery (8.3).
 	 */
 	reached(runId: string): boolean {
 		return (
-			this.executions.some((x) => x.runId === runId) ||
+			this.wakeExecutions.has(runId) ||
 			[...this.sends.values()].some(
-				({ send, accepted, deliveryConfirmed, notConsumed, transportRank }) =>
+				({ send, accepted, deliveryConfirmed, released, transportRank }) =>
 					(send.effect.kind === "start" || send.effect.kind === "steer") &&
 					send.effect.runId === runId &&
 					!this.unlaunchedTries.has(send.token) &&
@@ -807,7 +899,7 @@ export class FakeProvider {
 						this.dispatchRead.has(send.token)) &&
 					(accepted ||
 						deliveryConfirmed ||
-						(!notConsumed && transportRank !== 1 && transportRank !== 2)),
+						(!released && transportRank !== 1 && transportRank !== 2)),
 			) ||
 			// A hold dispatched to a runner not yet started may have reached (3.6).
 			[...this.spawnHeld].some(
@@ -836,6 +928,12 @@ export class FakeProvider {
 				send.effect.runId === runId
 			)
 				this.unlaunchedTries.add(send.token);
+		// A gated try of the dropped execution was never transmitted: its relaunch is main's re-send (4.8).
+		const gated =
+			this.mainRun?.runId === runId
+				? this.gatedHolds.get(this.mainRun.issue)
+				: undefined;
+		if (gated) this.unlaunchedTries.add(gated.token);
 		// 4.4 H3: holdRun returns Ended for a pending try of the dropped execution, so the feeder drops it.
 		for (const [token, held] of this.pendingHeld)
 			if (heldRunId(held) === runId) {
@@ -1022,6 +1120,8 @@ export class FakeProvider {
 		const alive = aliveAtIssue;
 		return effects.map((effect) => {
 			const send = this.bound(effect);
+			// A swept row never reaches the executor: nothing transmits it (3.4).
+			if ([...this.swept.values()].includes(send)) return send;
 			// L2: a later transmission keeps the address its send took at issue; it is never re-addressed.
 			const first = this.isHeld(effect)
 				? this.bindingsFor(effect).find(
@@ -1053,7 +1153,8 @@ export class FakeProvider {
 					this.retireHold(effect.commandId);
 					return send;
 				}
-				// H4: every send meets the gate before any adapter call (4.4).
+				// H4: every send meets the gate before any adapter call (4.4). Main's gate runs before its
+				// claim and writes nothing while not served, so a row main runs waits there (3.4, round 2d).
 				const gateAddress = isDestruction(send.effect)
 					? this.targetOf(send.effect)
 					: pending
@@ -1061,6 +1162,7 @@ export class FakeProvider {
 						: label;
 				if (
 					!this.isHeld(effect) &&
+					(effect.tag === "Tokened" || this.gate === "removed") &&
 					this.gate !== "served" &&
 					(gateAddress === undefined || !this.dead(runnerOf(gateAddress)))
 				) {
@@ -1098,6 +1200,7 @@ export class FakeProvider {
 					covered,
 					ended: false,
 					notConsumed: false,
+					released: false,
 					transportRank: 0,
 				});
 				this.seenLabel(label);
@@ -1244,6 +1347,17 @@ export class FakeProvider {
 			...(wakeTask ? { wakeTask } : {}),
 		});
 	}
+	/** D12: an interaction's resolution settles every transmission of its answers. */
+	private resolveAnswers(interactionId: string): void {
+		for (const answer of this.sends.values())
+			if (
+				answer.send.effect.kind === "deliver_answer" &&
+				answer.send.effect.interactionId === interactionId
+			) {
+				answer.ended = true;
+				answer.unfinished = false;
+			}
+	}
 	private completeCommand(commandId: string): void {
 		const command = this.commands.get(commandId);
 		if (!command || command.state === "completed") return;
@@ -1285,27 +1399,31 @@ export class FakeProvider {
 	): void {
 		for (const x of this.executions)
 			if (x.label === label && (runId === undefined || x.runId === runId)) {
+				// Its label's query_ended or, but for OpenCode, its result ends it, first wins (8.3, D25 amended).
 				if (
 					kind === undefined ||
-					kind === (this.provider === "opencode" ? "query_ended" : "result")
+					kind === "query_ended" ||
+					this.provider !== "opencode"
 				)
 					x.live = false;
-				if (
-					kind === undefined ||
-					(this.provider === "claude" && kind === "query_ended") ||
-					(this.provider !== "claude" &&
-						this.provider !== "opencode" &&
-						kind === "result")
-				)
+				// OpenCode keeps the fence for a covering probe (D26).
+				if (kind === undefined || this.provider !== "opencode")
 					x.fenced = false;
 			}
 	}
-	private retireLabel(label: string): void {
+	private retireLabel(
+		label: string,
+		issuedBefore?: ReadonlySet<SendToken>,
+	): void {
 		this.wakeLabels.delete(label);
 		this.endExecutions(label);
 		for (const send of this.sends.values()) {
 			// A pending send is addressed to the next process, not to the label it was issued under (L2 case 3).
-			if (send.label === label && !this.unbound.has(send.send.token)) {
+			if (
+				send.label === label &&
+				!this.unbound.has(send.send.token) &&
+				(issuedBefore === undefined || issuedBefore.has(send.send.token))
+			) {
 				const binding = this.holdBindings.get(send.send.token);
 				// An unlaunched try's hold lives on in its relaunch (3.6).
 				if (binding && !this.unlaunchedTries.has(send.send.token))
@@ -1355,8 +1473,8 @@ export class FakeProvider {
 	): void {
 		// Only this step's retirement is checked against this step's terminals.
 		this.retirement = undefined;
-		// 3.4: main writes one outcome per control claim and retries a retryable or not_sent outcome
-		// on its latest claim, while the issue is live, as a new claim.
+		// 3.4: main writes one outcome per control claim and retries a retryable outcome on its latest
+		// claim, while the issue is live, as a new claim.
 		if (
 			command.verb === "observe" &&
 			command.observation.tag === "Answer" &&
@@ -1365,11 +1483,17 @@ export class FakeProvider {
 		) {
 			const { token, outcome } = command.observation;
 			const claimed = this.mainTransmissions.get(token);
-			if (claimed && !this.controlOutcomes.has(token)) {
+			// 3.4 (round 2d): a control's not_sent or delivery_unknown is Rejected, no outcome of its claim.
+			if (
+				claimed &&
+				!this.controlOutcomes.has(token) &&
+				outcome.tag !== "not_sent" &&
+				outcome.tag !== "delivery_unknown"
+			) {
 				this.controlOutcomes.set(token, outcome);
 				const { issue } = claimed;
 				if (
-					(outcome.tag === "retryable" || outcome.tag === "not_sent") &&
+					outcome.tag === "retryable" &&
 					this.bindingsFor(issue).at(-1)?.send.token === token &&
 					after.live.some(
 						(item) =>
@@ -1378,8 +1502,14 @@ export class FakeProvider {
 							item.effect.kind === issue.effect.kind,
 					)
 				) {
-					this.claim(issue);
-					this.issued([issue]);
+					// 3.4: main's gate runs before its next claim, so a removed project's refusal sweep ends the
+					// `retryable_failed` row naming the claim this outcome closed.
+					if (this.gate === "removed")
+						this.commit.push(this.sweep(issue, "project_inactive"));
+					else {
+						this.claim(issue);
+						this.issued([issue]);
+					}
 				}
 			}
 		}
@@ -1399,12 +1529,20 @@ export class FakeProvider {
 				native.unfinished = false;
 			return;
 		}
-		// D58: main's inbox holds the inputs the ledger accepted.
-		if (command.verb === "admit")
-			this.mainInbox.push({
-				inputId: command.inputId,
-				delivery: command.delivery,
-			});
+		// D58: main's inbox holds the inputs the ledger accepted, one entry per inputId: a re-admit of
+		// an unclaimed input replaces its entry, so main claims it once.
+		if (command.verb === "admit") {
+			const entry = { inputId: command.inputId, delivery: command.delivery };
+			const at = this.mainInbox.findIndex(
+				(item) => item.inputId === command.inputId,
+			);
+			if (at < 0) this.mainInbox.push(entry);
+			else this.mainInbox[at] = entry;
+		}
+		// 3.4 (CONTRACT.md 535-537): an end_session success covers the sends issued before its issue,
+		// which is its end commit.
+		if (command.verb === "control" && command.control.kind === "end")
+			this.endScopes.set(command.control.commandId, new Set(this.sends.keys()));
 		// L6, D58: a Stop, End or Run now is the projection of main's stop commit, which interrupts main's open run.
 		if (
 			command.verb === "control" &&
@@ -1512,7 +1650,24 @@ export class FakeProvider {
 		if (command.verb !== "observe") return;
 		const observation = command.observation;
 		// D60: main's run events are this host's own acts, already applied when main wrote them.
-		if (observation.tag === "Main") return;
+		if (observation.tag === "Main") {
+			// 3.8 GAP 5, 9: OpenCode's turn.error ends the turn and its query in one write, so main's error
+			// terminal is the native turn's end whichever of the pair folds first.
+			if (
+				this.provider === "opencode" &&
+				observation.kind === "run_terminal" &&
+				observation.code === "TraceTurnError"
+			)
+				for (const native of this.sends.values())
+					if (
+						native.send.effect.kind === "start" &&
+						native.send.effect.runId === observation.runId
+					) {
+						native.ended = true;
+						native.unfinished = false;
+					}
+			return;
+		}
 		if (this.older(observation) && !this.wakeEnd(observation)) return;
 		if (observation.tag === "Unsolicited") {
 			// Evidence its provider cannot produce is Rejected and never raises the querySeq (L1, 3.4):
@@ -1597,6 +1752,9 @@ export class FakeProvider {
 				} else if (native) native.state = state;
 			} else if (observation.kind === "command_result") {
 				this.finishCommand(observation.commandId);
+			} else if (observation.kind === "interaction_resolved") {
+				// D61: natively or confirming an answer, an interaction's resolution settles its answers (3.4, 3.10).
+				this.resolveAnswers(observation.interactionId);
 			} else if (observation.kind === "result") {
 				if (!this.wakeLabels.has(observation.label)) return;
 				this.endExecutions(observation.label, "result");
@@ -1639,6 +1797,20 @@ export class FakeProvider {
 			this.spawnDispatched.add(observation.token);
 			return;
 		}
+		// 3.4: an outcome naming n 0 ends its issue by commandId alone: main finished the row, so no claim
+		// of it still acts, a native command's included (8.5).
+		if (
+			observation.kind === "effect_outcome" &&
+			observation.transmission?.transmission === 0
+		)
+			for (const [token, { name }] of this.mainTransmissions) {
+				const claimed = this.sends.get(token);
+				if (name.commandId !== observation.transmission.commandId || !claimed)
+					continue;
+				claimed.unfinished = false;
+				if (claimed.send.effect.kind === "send_native_command")
+					this.commands.delete(claimed.send.effect.commandId);
+			}
 		const native = this.sends.get(observation.token);
 		// The answered send's address owns the label (3.4, L2).
 		if (!native) return;
@@ -1691,8 +1863,12 @@ export class FakeProvider {
 					!this.destroyed.has(native.send.token)
 				) {
 					this.destroyed.add(native.send.token);
-					// 3.4: a Run-less session end covers every send of the native session, so its runner's
-					// older labels too (a reattach bumps querySeq without retiring, L1).
+					// 3.4: a Run-less session end covers every send of the native session issued before it,
+					// so its runner's older labels too (a reattach bumps querySeq without retiring, L1).
+					const scope = this.endScopes.get(
+						this.mainTransmissions.get(native.send.token)?.issue.commandId ??
+							"",
+					);
 					for (const label of effect.runId === null
 						? new Set(
 								[...this.sends.values()]
@@ -1702,7 +1878,7 @@ export class FakeProvider {
 									),
 							)
 						: [native.label])
-						this.retireLabel(label);
+						this.retireLabel(label, scope);
 					// Tasks change only by task evidence, a start or a loss: L5 at a later scope end reads
 					// the label's latest snapshot, and a destruction that went to pending recorded nothing.
 					if (native.label === this.label) this.turning = false;
@@ -1710,6 +1886,8 @@ export class FakeProvider {
 			}
 			return;
 		}
+		// D61: any kind but effect_outcome on a control main issues is Rejected: no host fact (3.4).
+		if (this.mainTransmissions.has(observation.token)) return;
 		if (effect.kind === "probe" && observation.kind === "probe_result") {
 			native.unfinished = false;
 			if (effect.target.tag === "input") {
@@ -1774,39 +1952,9 @@ export class FakeProvider {
 		}
 		if (
 			observation.kind === "interaction_resolved" &&
-			(effect.kind === "deliver_answer" ||
-				effect.kind === "start" ||
-				effect.kind === "steer") &&
-			(effect.kind !== "deliver_answer" ||
-				observation.interactionId === effect.interactionId)
+			(effect.kind === "start" || effect.kind === "steer")
 		) {
-			for (const answer of this.sends.values())
-				if (
-					answer.send.effect.kind === "deliver_answer" &&
-					answer.send.effect.interactionId === observation.interactionId
-				) {
-					answer.ended = true;
-					answer.unfinished = false;
-				}
-			return;
-		}
-		if (effect.kind === "send_native_command") {
-			// command_lifecycle from any provider but Claude is Rejected (D46, 3.4).
-			if (
-				(observation.kind !== "command_result" &&
-					(observation.kind !== "command_lifecycle" ||
-						this.provider !== "claude")) ||
-				observation.commandId !== effect.commandId
-			)
-				return;
-			const state =
-				observation.kind === "command_result" ? "completed" : observation.state;
-			if (state === "completed" || state === "cancelled")
-				this.finishCommand(observation.commandId);
-			else {
-				const native = this.commands.get(observation.commandId);
-				if (native) native.state = state;
-			}
+			this.resolveAnswers(observation.interactionId);
 			return;
 		}
 		if (effect.kind !== "start" && effect.kind !== "steer") return;
@@ -1837,7 +1985,10 @@ export class FakeProvider {
 			case "run_released":
 				if (observation.reason === "ResumeRejected") {
 					native.transportRank = Math.max(native.transportRank, 2);
-				} else native.notConsumed = true;
+				} else {
+					native.notConsumed = true;
+					native.released = true;
+				}
 				this.refreshQuery(native);
 				// D50: a release that leaves the Run never reached unlaunches it; a dropped execution's try no longer moves it.
 				if (!this.unlaunchedTries.has(observation.token))
@@ -1986,7 +2137,7 @@ export class FakeProvider {
 		}
 	}
 
-	/** 3.4: evidence its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; command_lifecycle from any provider but Claude, D46) is Rejected. */
+	/** 3.4: evidence its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; command_lifecycle from any provider but Claude, D46; any but an effect_outcome on a control, D61) is Rejected. */
 	assertVerdict(command: LedgerCommand, tag: "Accepted" | "Rejected"): void {
 		if (
 			command.verb === "observe" &&
@@ -2000,16 +2151,18 @@ export class FakeProvider {
 				"Rejected",
 				"3.4: task evidence from Cursor or OpenCode is not Rejected (8.1)",
 			);
-		// D46: producibility belongs to the kind, so it holds for any tag and any token.
+		// D46 (round 2e): producibility belongs to the kind, so it holds for either command receipt,
+		// any tag and any token (3.4 519-520).
 		if (
 			command.verb === "observe" &&
-			command.observation.kind === "command_lifecycle" &&
+			(command.observation.kind === "command_lifecycle" ||
+				command.observation.kind === "command_result") &&
 			this.provider !== "claude"
 		)
 			assert.equal(
 				tag,
 				"Rejected",
-				"D46: command_lifecycle from a provider but Claude is not Rejected (3.4)",
+				`D46: ${command.observation.kind} from a provider but Claude is not Rejected (3.4, round 2e)`,
 			);
 		// 3.4: only Claude's payload has a wake turn_ended (2.1 row 215, 8.3).
 		if (
@@ -2022,6 +2175,23 @@ export class FakeProvider {
 				"Rejected",
 				"3.4: turn_ended from a provider but Claude is not Rejected (8.3)",
 			);
+		// D61, round 2d: a control main issues is answered only by its effect_outcome, and never by a
+		// not_sent or delivery_unknown, as main's gate precedes its claim (3.4). Only that outcome shows
+		// the claim, so before it the token is unknown: Accepted, no events.
+		if (
+			command.verb === "observe" &&
+			command.observation.tag === "Answer" &&
+			this.mainTransmissions.has(command.observation.token) &&
+			(command.observation.kind === "effect_outcome"
+				? command.observation.outcome.tag === "not_sent" ||
+					command.observation.outcome.tag === "delivery_unknown"
+				: this.controlOutcomes.has(command.observation.token))
+		)
+			assert.equal(
+				tag,
+				"Rejected",
+				`D61: ${command.observation.kind === "effect_outcome" ? `a control's ${command.observation.outcome.tag}` : `${command.observation.kind} on a control's token`} is not Rejected (3.4, round 2d)`,
+			);
 	}
 	/** Assertions depend only on views, outputs and native facts observed above. */
 	assertStep(
@@ -2031,7 +2201,23 @@ export class FakeProvider {
 		effects: readonly IssuedEffect[],
 		ended: readonly RunEnded[],
 		replayed?: LedgerView,
+		now?: number,
 	): void {
+		// 3.4: no issue stays in live after its row ends, and an outcome written after the sweep joins
+		// chains but revives nothing. Lane 3a reads n 0 by commandId alone.
+		const sweep = this.sweeps.get(command);
+		if (sweep)
+			assert(
+				!after.live.some(
+					(item) =>
+						item.tag === "Main" &&
+						item.commandId === sweep.issue.commandId &&
+						item.effect.kind === sweep.issue.effect.kind,
+				),
+				sweep.shape.endsWith(":n0")
+					? `a sweep's n 0 outcome left its issue in live (3.4, ${sweep.shape})`
+					: `a swept control row stays in live (3.4, ${sweep.shape})`,
+			);
 		// D50: a not_sent or retryable try unlaunches a not-yet-delivered Run; a reached one retries in its execution.
 		if (
 			command.verb === "settle" &&
@@ -2452,20 +2638,6 @@ export class FakeProvider {
 				refusedCommand,
 				"LI6: refused native command is not Failed with the outcome's code (D34)",
 			);
-		// 8.5: a native command whose latest try got not_sent shows Queued (H4).
-		if (
-			gatedCommand !== undefined &&
-			command.verb === "observe" &&
-			command.observation.tag === "Answer" &&
-			command.observation.kind === "effect_outcome" &&
-			command.observation.outcome.tag === "not_sent"
-		)
-			assert.equal(
-				after.nativeCommands.find(({ commandId }) => commandId === gatedCommand)
-					?.tag,
-				"Queued",
-				"LI6: a native command whose latest try got not_sent is not Queued (8.5, H4)",
-			);
 		checked.push("LI6");
 		if (older) {
 			// The release issues the waiting Run's start; that Run stays active, Queued or Interrupting.
@@ -2532,10 +2704,45 @@ export class FakeProvider {
 		}
 		checked.push("LI7");
 		this.issued(effects, this.label, aliveAtIssue);
+		// D59, 9: a Claude, Codex or Cursor interrupt is no member; its work ends once every Run it names
+		// has ended, and at once when it names none.
+		if (this.provider !== "opencode")
+			for (const native of this.sends.values()) {
+				const { effect } = native.send;
+				if (
+					effect.kind === "interrupt" &&
+					(effect.runId === null || this.terminals.has(effect.runId))
+				) {
+					native.ended = true;
+					native.unfinished = false;
+				}
+			}
+		if (
+			command.verb === "control" &&
+			(command.control.kind === "stop" ||
+				command.control.kind === "end" ||
+				command.control.kind === "run_now") &&
+			command.control.deadlineAt !== null
+		)
+			this.stopAt ??= command.control.deadlineAt;
+		if (
+			command.verb === "settle" &&
+			command.settlement.kind === "alarm_fired" &&
+			now !== undefined &&
+			this.stopAt !== undefined &&
+			now >= this.stopAt
+		) {
+			this.forcedTurn = this.turning;
+			for (const x of this.executions) if (x.live) this.forcedExecutions.add(x);
+			for (const native of this.sends.values())
+				if (native.unfinished) this.forcedSends.add(native.send.token);
+			this.stopAt = undefined;
+		}
 		const current = this.groundTruth();
 		if (!after.anythingMayAct) {
 			assert.equal(
-				current.runningTurn,
+				(this.turning && !this.forcedTurn) ||
+					this.executions.some((x) => x.live && !this.forcedExecutions.has(x)),
 				false,
 				"LI8: running native turn hidden by anythingMayAct",
 			);
@@ -2546,6 +2753,7 @@ export class FakeProvider {
 				current.unfinished.filter((token) => {
 					const effect = this.sends.get(token)?.send.effect;
 					return (
+						!this.forcedSends.has(token) &&
 						effect?.kind !== "probe" &&
 						!(
 							effect?.kind === "stop_task" &&
@@ -2572,6 +2780,8 @@ export class FakeProvider {
 				"LI8: live native tasks hidden by anythingMayAct",
 			);
 		}
+		if (!after.anythingMayAct) this.stopAt = undefined;
+		if (!this.turning) this.forcedTurn = false;
 		checked.push("LI8");
 		if (
 			command.verb === "observe" &&
@@ -2661,26 +2871,30 @@ export class FakeProvider {
 				if (send) live.add(send.token);
 			}
 		}
+		// A row a sweep ended before any claim has no transmission to answer (3.4).
+		const selectable = known.filter(
+			(send) => ![...this.swept.values()].includes(send),
+		);
 		switch (action.selection) {
 			case 0:
 				return at(
-					known.filter(({ token }) => live.has(token)),
+					selectable.filter(({ token }) => live.has(token)),
 					action.index,
 				);
 			case 1:
 				return at(
-					known.filter(({ token }) => !live.has(token)),
+					selectable.filter(({ token }) => !live.has(token)),
 					action.index,
 				);
 			case 2:
 				return at(
-					known.slice(0, Math.max(1, Math.ceil(known.length / 4))),
+					selectable.slice(0, Math.max(1, Math.ceil(selectable.length / 4))),
 					action.index,
 				);
 			case 3:
 				return undefined;
 			default:
-				return at([...known].reverse(), action.index);
+				return at([...selectable].reverse(), action.index);
 		}
 	}
 	private interaction(snapshot: ProviderSnapshot, index: number): string {
@@ -2951,48 +3165,75 @@ export class FakeProvider {
 			return this.unsolicited(action, label);
 		const wire =
 			send?.token ?? `never-issued:${this.provider}:${this.serial++}`;
-		// 3.4: a control claim shows only at its outcome, which names its transmission, so its other
-		// evidence follows the outcome (main's receipt); a repeat names the same transmission.
-		// GAP (CONTRACT.md 460-461): provider evidence on a claim before main writes its outcome names a
-		// token decide cannot know yet; nearest reading: the fake delivers the outcome first.
 		const claimed = send && this.mainTransmissions.get(send.token);
-		const delivered = send && this.controlOutcomes.get(send.token);
-		const commandReceived =
-			send?.effect.kind === "send_native_command" &&
-			!this.refusedCommands.has(send.token) &&
-			this.commands.has(send.effect.commandId);
-		if (
-			send &&
-			claimed &&
-			(delivered === undefined ||
-				!(
-					(send.effect.kind === "deliver_answer" && action.variant % 3 === 0) ||
-					(commandReceived && (action.variant >= 51 || action.variant === 47))
-				))
-		) {
+		if (send && claimed) {
+			const { effect } = send;
 			const refused = this.refusedCommands.get(send.token);
+			// D61: a control main issues is answered only by its effect_outcome (3.4). An answer's
+			// confirming interaction_resolved and a native command's receipts are unsolicited, named by
+			// the interaction or the commandId, so they come before or after that outcome alike. One input
+			// in thirteen names the control's token instead, which decide Rejects once that outcome shows
+			// the claim.
+			const states = ["queued", "started", "completed", "cancelled"] as const;
+			const evidence: Unsolicited | undefined =
+				effect.kind === "deliver_answer"
+					? action.variant % 3 === 0 && effect.label === this.label
+						? {
+								kind: "interaction_resolved",
+								interactionId: effect.interactionId,
+							}
+						: undefined
+					: effect.kind === "send_native_command" &&
+							refused === undefined &&
+							!this.gatedTokens.has(send.token) &&
+							(action.variant === 47 || action.variant >= 51)
+						? action.variant === 47
+							? { kind: "command_result", commandId: effect.commandId }
+							: {
+									kind: "command_lifecycle",
+									commandId: effect.commandId,
+									state: states[(action.variant - 51) % 4] ?? "queued",
+								}
+						: undefined;
+			if (evidence)
+				return action.input === 12
+					? { tag: "Answer", token: send.token, ...evidence }
+					: {
+							tag: "Unsolicited",
+							label: this.label,
+							eventId: this.eventId(),
+							...evidence,
+						};
+			const commandReceived =
+				effect.kind === "send_native_command" &&
+				refused === undefined &&
+				this.commands.has(effect.commandId);
 			// 3.4: completed is succeeded, retryable_failed retryable with its retryAt and code, failed or
-			// cancelled permanent. A refused command is refused; a received one is never refused (D34).
+			// cancelled permanent; a repeat names the same transmission. A refused command is refused; a
+			// received one is never refused (D34). Main writes no not_sent for a control (round 2d), so one
+			// naming its transmission is an input decide Rejects.
 			const drawn =
 				refused !== undefined
 					? ({ tag: "permanent", code: refused } as const)
-					: action.variant % 3 === 1
-						? ({
-								tag: "retryable",
-								retryAt: now + (action.variant % 8 === 5 ? 100_000 : 100),
-								code:
-									send.effect.kind === "deliver_answer"
-										? "answer_refused"
-										: "TraceRetryable",
-							} as const)
-						: action.variant % 3 === 2 && !commandReceived
-							? ({ tag: "permanent", code: "TracePermanent" } as const)
-							: ({ tag: "succeeded" } as const);
+					: action.variant % 16 === 7 && action.input % 2 === 0
+						? ({ tag: "not_sent", retryAt: now + 100 } as const)
+						: action.variant % 3 === 1
+							? ({
+									tag: "retryable",
+									retryAt: now + (action.variant % 8 === 5 ? 100_000 : 100),
+									code:
+										effect.kind === "deliver_answer"
+											? "answer_refused"
+											: "TraceRetryable",
+								} as const)
+							: action.variant % 3 === 2 && !commandReceived
+								? ({ tag: "permanent", code: "TracePermanent" } as const)
+								: ({ tag: "succeeded" } as const);
 			return {
 				tag: "Answer",
 				token: send.token,
 				kind: "effect_outcome",
-				outcome: delivered ?? drawn,
+				outcome: this.controlOutcomes.get(send.token) ?? drawn,
 				transmission: claimed.name,
 			};
 		}
@@ -3002,96 +3243,27 @@ export class FakeProvider {
 				token: tokened(wire),
 				...probe(action.variant - 16, action.input),
 			};
-		if (send?.effect.kind === "probe")
+		// D48 (round 2e): main's gate precedes its claim, so a direct start or steer never gets a
+		// not_sent (3.4 468-471). One input in thirteen sends one anyway, an input decide Rejects.
+		if (
+			send &&
+			action.variant % 16 === 7 &&
+			action.input % 13 === 0 &&
+			[...this.mainSends.values()].some((sends) => sends.includes(send))
+		)
+			return {
+				tag: "Answer",
+				token: tokened(wire),
+				kind: "effect_outcome",
+				outcome: { tag: "not_sent", retryAt: now + 100 },
+			};
+		// decide's own effects (3.12), a probe, a cancel_request or a stop_task, answer their outcome.
+		if (send && send.effect.kind !== "start" && send.effect.kind !== "steer")
 			return {
 				tag: "Answer",
 				token: tokened(wire),
 				...outcome(action.variant, now),
 			};
-		if (send?.effect.kind === "deliver_answer")
-			return {
-				tag: "Answer",
-				token: tokened(wire),
-				...(action.variant % 3 === 0
-					? ({
-							kind: "interaction_resolved",
-							interactionId: send.effect.interactionId,
-						} as const)
-					: outcome(action.variant, now)),
-			};
-		if (send?.effect.kind === "send_native_command") {
-			const refused = this.refusedCommands.get(send.token);
-			const commandId = send.effect.commandId;
-			// 8.5: a received command answers its lifecycle and result on its own token; D21: some name
-			// another command.
-			const named =
-				action.input % 3 === 2
-					? ([...this.commands.keys()].find((id) => id !== commandId) ??
-						`never-issued:${action.input}`)
-					: commandId;
-			if (refused === undefined && this.commands.has(commandId)) {
-				const states = ["queued", "started", "completed", "cancelled"] as const;
-				if (action.variant >= 51)
-					return {
-						tag: "Answer",
-						token: tokened(wire),
-						kind: "command_lifecycle",
-						commandId: named,
-						state: states[(action.variant - 51) % 4] ?? "queued",
-					};
-				if (action.variant === 47)
-					return {
-						tag: "Answer",
-						token: tokened(wire),
-						kind: "command_result",
-						commandId: named,
-					};
-			}
-			const answer = outcome(action.variant, now);
-			return {
-				tag: "Answer",
-				token: tokened(wire),
-				// A refused command answers its refusal; a received one cannot then be refused (3.4, D34).
-				...(refused !== undefined
-					? ({
-							kind: "effect_outcome",
-							outcome: { tag: "permanent", code: refused },
-						} as const)
-					: answer.outcome.tag === "permanent" &&
-							this.commands.has(send.effect.commandId)
-						? outcome(0, now)
-						: answer),
-			};
-		}
-		if (send && send.effect.kind !== "start" && send.effect.kind !== "steer") {
-			const result = outcome(action.variant, now);
-			switch (send.effect.kind) {
-				case "interrupt":
-					return {
-						tag: "Answer",
-						token: tokened(wire),
-						...result,
-					};
-				case "end_session":
-					return {
-						tag: "Answer",
-						token: tokened(wire),
-						...result,
-					};
-				case "cancel_request":
-					return {
-						tag: "Answer",
-						token: tokened(wire),
-						...result,
-					};
-				case "stop_task":
-					return {
-						tag: "Answer",
-						token: tokened(wire),
-						...result,
-					};
-			}
-		}
 		const query = this.queryEvidence(action, snapshot, now, send);
 		// 4.5, 4.11: a runner-held resume the provider rejected is released ResumeRejected; the
 		// effect_outcome form stays for odd inputs, as evidence the oracle must also read.
@@ -3309,10 +3481,16 @@ export class FakeProvider {
 					}
 					// Nearest reading: main's interrupt ends its run interrupted; the fake does not wait for the runner's confirmation.
 					// A failed reply also ends the send, so failure is read first; an unlaunched try never ran (D50).
+					// OpenCode's result leaves its send open: a covering idle after an accepted, unstopped turn
+					// is its session.idle, which main writes as turn.completed (3.5, D26, 4.11).
 					const terminal =
 						native?.transportRank === 2
 							? ({ outcome: "error", code: "TracePermanent" } as const)
-							: native?.ended === true &&
+							: (native?.ended === true ||
+										(direct &&
+											!stopped &&
+											native?.accepted === true &&
+											native.covered)) &&
 									!this.unlaunchedTries.has(native.send.token)
 								? ({ outcome: "completed" } as const)
 								: !stopped
@@ -3600,15 +3778,20 @@ export class FakeProvider {
 						? 12
 						: action.operation
 		) {
-			case -1:
-				// The storm's alarm fires at the earliest deadline: the retry backs off (3.7).
+			case -1: {
+				// The storm's alarm fires at the earliest deadline: the retry backs off (3.7). A not_sent start
+				// re-sends without a bound (4.8), so main relaunches its unlaunched one (3.6) in the alarm's place.
+				// The gated hold is read, not bound: bound() would hold or claim an untried issue.
 				if (!stormAnswer && snapshot.alarmAt !== undefined)
 					now = Math.max(now, snapshot.alarmAt);
-				command = stormAnswer ?? {
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				};
+				const gated = this.mainRun && this.gatedHolds.get(this.mainRun.issue);
+				command =
+					stormAnswer ??
+					(gated && this.unlaunchedTries.has(gated.token)
+						? this.main({ ...action, variant: 3 })
+						: { verb: "settle", settlement: { kind: "alarm_fired" } });
 				break;
+			}
 			case 0:
 			case 1:
 				// D58: main's handoff; a steer delivery is main's send into an open run (3.9).
@@ -3646,10 +3829,49 @@ export class FakeProvider {
 						text: "/goal clear",
 					},
 				] as const;
-				command = {
-					verb: "control",
-					control: controls[action.variant % controls.length] ?? controls[0],
-				};
+				const control =
+					controls[action.variant % controls.length] ?? controls[0];
+				command = { verb: "control", control };
+				// 3.4, 8.4 (round 2d): each outbox row is its own Control under the commandId main gave it. With
+				// a Run active, `end`'s Stop commits as a stop or as an end_session (an end with its
+				// deadlineAt); a later end_session, U2's retire under `<Stop id>:retire` included, follows as
+				// its own end Control.
+				if (
+					control.kind === "end" &&
+					(snapshot.view.active !== undefined || this.mainRun !== undefined)
+				) {
+					const shape =
+						action.input % 3 === 0
+							? "after_stop"
+							: action.input % 3 === 1
+								? "as_stop"
+								: "retire";
+					const stop: LedgerCommand = {
+						verb: "control",
+						control: {
+							kind: shape === "as_stop" ? "end" : "stop",
+							commandId,
+							deadlineAt: now + 1_000,
+						},
+					};
+					command = stop;
+					if (shape === "as_stop") this.ends.set(stop, shape);
+					else {
+						const later: LedgerCommand = {
+							verb: "control",
+							control: {
+								kind: "end",
+								commandId:
+									shape === "retire"
+										? `${commandId}:retire`
+										: `control:${this.serial++}`,
+								deadlineAt: null,
+							},
+						};
+						this.ends.set(later, shape);
+						this.commit.push(later);
+					}
+				}
 				break;
 			}
 			case 3:
@@ -3756,7 +3978,7 @@ export class FakeProvider {
 				);
 				break;
 			case 8:
-				command = this.projectMacro(action);
+				command = this.projectMacro(action, snapshot);
 				break;
 			case 9: {
 				// Even variants deliver host messages: 0 mod 4 a gate answer first, 2 mod 4 a notification first.
@@ -4100,7 +4322,10 @@ export class FakeProvider {
 	 * advance (removal finishing, a re-add's import window, served again), a not-served window, a
 	 * Registering restart whose adopted runner starts a turn of its own, and session ends.
 	 */
-	private projectMacro(action: TraceAction): LedgerCommand {
+	private projectMacro(
+		action: TraceAction,
+		snapshot: ProviderSnapshot,
+	): LedgerCommand {
 		const alarm = {
 			verb: "settle",
 			settlement: { kind: "alarm_fired" },
@@ -4271,6 +4496,95 @@ export class FakeProvider {
 								},
 					);
 				return loss;
+			}
+			case 5: {
+				// 3.12: a sweep ends its open control rows in one write. Removed, the refusal sweep or drain's
+				// removed-project cancel ends each `project_inactive`; otherwise pending-prompt retirement ends
+				// each row committed to a gone process `provider_process_gone`.
+				const removed = this.gate === "removed";
+				const rows = snapshot.issued.filter((issued): issued is MainIssue => {
+					if (
+						issued.tag !== "Main" ||
+						this.isHeld(issued) ||
+						issued.effect.kind === "start" ||
+						issued.effect.kind === "steer" ||
+						this.swept.has(`${issued.commandId}\u0000${issued.effect.kind}`)
+					)
+						return false;
+					const latest = this.bindingsFor(issued).at(-1)?.send;
+					const outcome = latest && this.controlOutcomes.get(latest.token);
+					// Open: `pending`, `running` or `retryable_failed` (3.12).
+					if (outcome?.tag === "succeeded" || outcome?.tag === "permanent")
+						return false;
+					const address = latest
+						? (this.sends.get(latest.token)?.label ??
+							this.gatedTokens.get(latest.token)?.label)
+						: isDestruction(issued.effect)
+							? issued.effect.label
+							: this.ownerLabel(issued);
+					return (
+						removed ||
+						(typeof address === "string" && this.dead(runnerOf(address)))
+					);
+				});
+				const [row] = rows;
+				if (!row) {
+					// No open row yet: the sweep ends the next one, committed while removed or to a gone process.
+					this.sweepArmed = removed
+						? "project_inactive"
+						: this.lostRunners.size > 0
+							? "provider_process_gone"
+							: undefined;
+					if (this.sweepArmed !== undefined) return alarm;
+					return {
+						verb: "settle",
+						settlement: {
+							kind: "session_ended",
+							cause: "native_session_vanished",
+						},
+					};
+				}
+				const latest = this.bindingsFor(row).at(-1);
+				const running =
+					latest !== undefined && !this.controlOutcomes.has(latest.send.token);
+				const [first = alarm, ...rest] = rows.map((issued) =>
+					this.sweep(
+						issued,
+						removed ? "project_inactive" : "provider_process_gone",
+					),
+				);
+				this.commit.push(...rest);
+				// `markCompleted` and `writeFailure` write from any status: a claim the sweep raced writes its
+				// own outcome after it, on the same transmission, joining its chains (3.4, 3.5).
+				const late =
+					action.input % 3 === 1
+						? ({ tag: "succeeded" } as const)
+						: ({
+								tag: "retryable",
+								retryAt: this.clock + 100,
+								code: "TraceRetryable",
+							} as const);
+				if (running && action.input % 3 !== 0) {
+					const raced: LedgerCommand = {
+						verb: "observe",
+						observation: {
+							tag: "Answer",
+							token: latest.send.token,
+							kind: "effect_outcome",
+							outcome: late,
+							transmission: {
+								commandId: row.commandId,
+								transmission: latest.transmission,
+							},
+						},
+					};
+					this.sweeps.set(raced, {
+						shape: `adversarial:${late.tag}`,
+						issue: row,
+					});
+					this.commit.push(raced);
+				}
+				return first;
 			}
 			default:
 				return {

@@ -16,7 +16,14 @@ import type {
 	SendToken,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import { driver, type PublicDriver, policy } from "./harness.js";
+import type { Send } from "./fake-provider.js";
+import {
+	Coverage,
+	type CoverageReader,
+	driver,
+	type PublicDriver,
+	policy,
+} from "./harness.js";
 import type { Mutation } from "./reference.js";
 import * as reference from "./reference.js";
 
@@ -26,12 +33,17 @@ export type Stepped = Decision<unknown> & {
 };
 
 /** Drives one session through public commands and reads only public outputs. */
-export class Driver {
+export class Driver implements CoverageReader {
 	now = 100;
+	label = "r1:1";
 	readonly issued: IssuedEffect[] = [];
 	readonly ended: RunEnded[] = [];
+	/** Races this scenario reached, for the fixed catalogue race gate. */
+	readonly coverage = new Coverage();
 	private serial = 0;
 	private readonly ledger: PublicDriver;
+	/** 3.4: a runner-held send's run.dispatched token and a direct send's runId name its Main issue. */
+	private readonly commandIds = new Map<SendToken, string>();
 
 	constructor(
 		readonly provider: ProviderKind,
@@ -73,10 +85,53 @@ export class Driver {
 		return this.ledger.view();
 	}
 
+	/** A Tokened issue by its token; a Main one by its run.dispatched token, direct runId or claim (3.4). */
+	answered(
+		token: SendToken,
+	): { readonly send: Send; readonly label: string } | undefined {
+		const commandId =
+			this.commandIds.get(token) ?? token.slice(0, token.lastIndexOf(":"));
+		const entry = [...this.issued]
+			.reverse()
+			.find((item) =>
+				item.tag === "Tokened"
+					? item.token === token
+					: item.commandId === commandId,
+			);
+		return (
+			entry && { send: { token, effect: entry.effect }, label: this.label }
+		);
+	}
+
 	step(command: LedgerCommand, now = this.now + 1): Stepped {
 		this.now = now;
+		const before = this.view();
 		const decision = this.ledger.step(command, now);
-		if (decision.tag === "Rejected") return { ...decision, issued: [] };
+		if (decision.tag === "Rejected") {
+			this.coverage.record(
+				command,
+				before,
+				before,
+				{ ...decision, effects: [], ended: [] },
+				this,
+			);
+			return { ...decision, issued: [] };
+		}
+		const observation =
+			command.verb === "observe" ? command.observation : undefined;
+		if (observation?.tag === "Answer" && observation.kind === "run_dispatched")
+			this.commandIds.set(observation.token, observation.commandId);
+		if (
+			observation?.tag === "Main" &&
+			observation.kind === "run_requested" &&
+			observation.direct
+		)
+			this.commandIds.set(observation.runId as SendToken, observation.inputId);
+		if (
+			command.verb === "settle" &&
+			command.settlement.kind === "process_started"
+		)
+			this.label = command.settlement.label;
 		this.ended.push(...decision.ended);
 		// LI1, LI6 (D60): decide issues only probe, stop_task and cancel_request; a start or steer reaches `live`
 		// from its Main observation or run.dispatched Answer (D60), so issued work reads both.
@@ -90,6 +145,13 @@ export class Driver {
 			},
 		);
 		this.issued.push(...issued);
+		this.coverage.record(
+			command,
+			before,
+			this.view(),
+			{ ...decision, effects: issued },
+			this,
+		);
 		return { ...decision, issued };
 	}
 
@@ -447,6 +509,113 @@ export const scenarios: readonly OracleScenario[] = [
 				}),
 			);
 			expect(transmissions(d, "A")).toHaveLength(1);
+			// 3.5 (CONTRACT.md 562-564, 599-604): the probe's input_present settles the unknown delivery as
+			// Observed, with no resend.
+			const probe = recovered.issued.find(
+				({ effect }) => effect.kind === "probe",
+			);
+			assert(probe, "the recovery probe is issued");
+			observe(d, tokenOf(probe), {
+				kind: "probe_result",
+				finding: { tag: "input_present", nativeMessageId: "native-A" },
+			});
+			expect(visibleInput(d, "A")?.state).not.toEqual({
+				tag: "Delivered",
+				certainty: "unknown",
+			});
+			expect(transmissions(d, "A")).toHaveLength(1);
+		},
+	},
+	{
+		id: "R5",
+		title:
+			"[R5] a refused start transmission keeps the native fence while an accepted sibling acts",
+		provider: "claude",
+		run(d) {
+			const a = begin(d);
+			const [first] = transmissions(d, "A");
+			assert(first?.tag === "Main", "a runner-held start is Main");
+			// 3.6 (CONTRACT.md 692-697): a possibly reached start with an absent finding is tried again
+			// as a new transmission of the same Run, never unlaunched.
+			observe(d, a.token, { kind: "delivery_indeterminate" });
+			observe(d, a.token, { kind: "journal_answer", answer: "absent" });
+			const retry = "hold-A-retry" as SendToken;
+			observe(d, retry, {
+				kind: "run_dispatched",
+				runId: a.runId,
+				runnerId: "r1",
+				commandId: first.commandId,
+				transmission: 2,
+			});
+			// 3.5 (CONTRACT.md 597-600), section 9 (3129-3131): a later acceptance beats the absent finding.
+			observe(d, a.token, {
+				kind: "input_accepted",
+				nativeMessageId: "native-A",
+			});
+			// 3.5 (CONTRACT.md 594-595, 605-606): the sibling's refusal neither fails the input nor
+			// releases the fence while the accepted transmission may still act.
+			const refused = observe(d, retry, {
+				kind: "run_released",
+				reason: { tag: "Refused", why: "interrupted" },
+			});
+			expect(refused.ended).toEqual([]);
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-A",
+			});
+			expect(d.view()).toMatchObject({
+				anythingMayAct: true,
+				active: { runId: a.runId, tag: "Starting" },
+			});
+		},
+	},
+	{
+		id: "R3",
+		title:
+			"[R3] acceptance of one transmission retains only that transmission, not a failed sibling",
+		provider: "opencode",
+		run(d) {
+			running(d);
+			const b1 = begin(d, "B", "steer");
+			observe(d, b1.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 1 },
+			});
+			// 3.6 (CONTRACT.md 692-698): main tries B again, a new transmission under its own runId (3.4).
+			const b2 = request(d, "B");
+			expect(b2.token).not.toBe(b1.token);
+			observe(d, b1.token, {
+				kind: "input_accepted",
+				nativeMessageId: "native-B",
+			});
+			// 3.5 (CONTRACT.md 601-602): b2's retryable outcome with consumption None ends b2's work;
+			// b1's acceptance keeps only b1's, and the input stays Accepted (594-595).
+			observe(d, b2.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 1 },
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-B",
+			});
+			expect(transmissions(d, "B")).toHaveLength(1);
+			const stopped = stop(d, d.now + 1_000);
+			expect(d.view().live).toContainEqual(
+				expect.objectContaining({
+					effect: expect.objectContaining({ kind: "steer", inputId: "B" }),
+				}),
+			);
+			const probe = stopped.issued.find(
+				({ effect }) => effect.kind === "probe",
+			);
+			assert(probe, "an OpenCode Stop probes the native session (5.1)");
+			// 9 (CONTRACT.md 3101-3102): the idle covers the confirmed sends, A's and b1; nothing of B is
+			// retained past it.
+			observe(d, tokenOf(probe), {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().live).toEqual([]);
 		},
 	},
 	{
@@ -944,10 +1113,8 @@ export const scenarios: readonly OracleScenario[] = [
 					},
 				},
 			]);
-			observe(d, tokenOf(answer), {
-				kind: "interaction_resolved",
-				interactionId: "q",
-			});
+			// D61: the confirmation is unsolicited, by its interaction.
+			unsolicited(d, { kind: "interaction_resolved", interactionId: "q" });
 			expect(observe(d, a.token, { kind: "query_ended" }).ended).toEqual([]);
 			// 3.7: the answer's retry is main's; the ledger issued it once.
 			expect(
@@ -1059,6 +1226,242 @@ export const scenarios: readonly OracleScenario[] = [
 				},
 			});
 			expect(late.ended).toEqual([]);
+		},
+	},
+	{
+		id: "PL-1",
+		title:
+			"[L1] a retired runner is final: its later process_started changes nothing and the next runner is current",
+		provider: "claude",
+		run(d) {
+			const lose = (runnerId: string) =>
+				step(d, {
+					verb: "settle",
+					settlement: { kind: "process_lost", runnerId, retiredAt: d.now },
+				});
+			const end = () =>
+				step(d, {
+					verb: "control",
+					control: {
+						kind: "end",
+						commandId: `end-${d.next()}`,
+						deadlineAt: null,
+					},
+				});
+			lose("r1");
+			// L1 (CONTRACT.md 349-353): retired is final, so its later process_started is an older label.
+			noLifecycleChange(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r1:2",
+					reattached: true,
+				},
+			});
+			// L2 case 3 (CONTRACT.md 372-375): with no current process the end_session is pending.
+			end();
+			expect(d.latest("end_session").effect).toMatchObject({
+				runId: null,
+				label: null,
+			});
+			step(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r2:1",
+					reattached: false,
+				},
+			});
+			step(d, {
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: "r2:1",
+					eventId: `u-${d.next()}`,
+					kind: "tasks_snapshot",
+					tasks: [],
+				},
+			});
+			end();
+			expect(d.latest("end_session").effect).toMatchObject({
+				runId: null,
+				label: "r2:1",
+			});
+		},
+	},
+	{
+		id: "PL-2",
+		title: "[8.3/D41] a killed runner's label wakes no Run",
+		provider: "claude",
+		run(d) {
+			step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			// D41 (CONTRACT.md 3851), 8.3 (2817-2833): a retired runner's labels are older, so a
+			// turn_started on one starts no wake execution and opens no wake Run.
+			wake(d, "r1:1");
+			expect(d.view().active).toBeUndefined();
+			expect(d.view().anythingMayAct).toBe(false);
+			// L1 (353-355): nor does a label of a runner not started.
+			wake(d, "r2:1");
+			expect(d.view().active).toBeUndefined();
+		},
+	},
+	{
+		id: "PL-3",
+		title:
+			"[L5] a retirement records may-have-been-lost for an unsnapshotted label and nothing for a Known-empty one",
+		provider: "claude",
+		run(d) {
+			const lose = (driver: Driver, runnerId: string) =>
+				step(driver, {
+					verb: "settle",
+					settlement: { kind: "process_lost", runnerId, retiredAt: driver.now },
+				});
+			// L5 (CONTRACT.md 2902-2907): a fresh launch is Known with none live, so it records nothing.
+			lose(d, "r1");
+			expect(d.view().lostWork).toEqual([]);
+
+			// A reattach leaves its label's tasks unknown (8.3), so retiring it may have lost them.
+			const reattached = new Driver(d.provider);
+			step(reattached, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r1:2",
+					reattached: true,
+				},
+			});
+			lose(reattached, "r1");
+			expect(reattached.view().lostWork).toEqual([
+				{ label: "r1:2", tag: "unknown" },
+			]);
+
+			// Every Cursor and OpenCode label is Known with none live (8.3).
+			for (const provider of ["cursor", "opencode"] as const) {
+				const other = new Driver(provider);
+				lose(other, "r1");
+				expect(other.view().lostWork).toEqual([]);
+			}
+		},
+	},
+	{
+		id: "PL-4",
+		title:
+			"[D50] a stop commit's release read before its process_lost unlaunches the Run, and the relaunch addresses the next runner",
+		provider: "claude",
+		run(d) {
+			const a = begin(d);
+			const [first] = transmissions(d, "A");
+			assert(first?.tag === "Main", "a runner-held start is Main");
+			// L1 (CONTRACT.md 361-364), D50 (660-672): the commit's release precedes its process_lost.
+			observe(d, a.token, {
+				kind: "run_released",
+				reason: { tag: "Refused", why: "retiring" },
+			});
+			const lost = step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			expect(lost.ended).toEqual([]);
+			expect(d.view().active).toMatchObject({ tag: "Queued", runId: a.runId });
+			step(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r2:1",
+					reattached: false,
+				},
+			});
+			// 3.4: main relaunches under the same commandId, a new transmission of the same Run.
+			const relaunch = "hold-A-relaunch" as SendToken;
+			observe(d, relaunch, {
+				kind: "run_dispatched",
+				runId: a.runId,
+				runnerId: "r2",
+				commandId: first.commandId,
+				transmission: 2,
+			});
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Dispatching" });
+			observe(d, relaunch, { kind: "started" });
+			// L2: the relaunch is r2's, so r2's retirement covers it and ends the reached Run.
+			const relost = step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r2", retiredAt: d.now },
+			});
+			expect(relost.ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+		},
+	},
+	{
+		id: "PL-5",
+		title:
+			"[L2 case 3] an OpenCode start with no current process is pending and resolves to the next process_started",
+		provider: "opencode",
+		run(d) {
+			step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			const a = begin(d);
+			observe(d, a.token, { kind: "started" });
+			step(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r2:1",
+					reattached: false,
+				},
+			});
+			// L2 (CONTRACT.md 372-379): resolved once to r2, so r2's retirement covers it (L1 item 1).
+			const lost = step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r2", retiredAt: d.now },
+			});
+			expect(lost.ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+		},
+	},
+	{
+		id: "PL-6",
+		title:
+			"[D32] a Run-less end_session gated on live tasks goes to pending when the current process retires",
+		provider: "claude",
+		run(d) {
+			unsolicited(d, {
+				kind: "tasks_snapshot",
+				tasks: [
+					{
+						key: { taskId: "t1" },
+						taskType: "local_bash",
+						description: "watch",
+						ambient: false,
+					},
+				],
+			});
+			step(d, {
+				verb: "control",
+				control: { kind: "end", commandId: "end-1", deadlineAt: null },
+			});
+			expect(d.view().pendingConfirm).toMatchObject({ step: "end_session" });
+			expect(
+				d.issued.filter(({ effect }) => effect.kind === "end_session"),
+			).toEqual([]);
+			// 8.4 (CONTRACT.md 2873-2875), D32 (3842): the current process retiring releases the gate,
+			// and the step, addressed when it issues, goes to pending.
+			step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			expect(d.view().pendingConfirm).toBeUndefined();
+			expect(d.latest("end_session")).toMatchObject({
+				tag: "Main",
+				commandId: "end-1",
+				effect: { runId: null, label: null },
+			});
 		},
 	},
 	{

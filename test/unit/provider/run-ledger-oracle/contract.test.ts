@@ -17,6 +17,7 @@ import {
 	stop,
 	tokenOf,
 	transmissions,
+	unsolicited,
 	visibleInput,
 } from "./scenarios.js";
 
@@ -113,7 +114,8 @@ describe.each([
 		expect(d.view()).toEqual(before);
 	});
 
-	test("[10B] an answer confirmation cannot settle a different interaction on the same Run", () => {
+	test("[D61] an answer's confirmation is unsolicited by its interaction, never an Answer on its control", () => {
+		// D61 (CONTRACT.md 486-494, 517-518): a control main issues is answered only by its outcome.
 		const d = new Driver("claude", mode);
 		const a = running(d);
 		ask(d, a.token, "q1");
@@ -122,26 +124,33 @@ describe.each([
 			({ effect }) =>
 				effect.kind === "deliver_answer" && effect.interactionId === "q1",
 		);
-		expect(first).toBeDefined();
-		if (first === undefined) return;
-		// 3.4: a control's token is bound by its first outcome naming (commandId, transmission).
+		assert(first !== undefined, "q1's deliver_answer is issued");
 		observe(d, tokenOf(first), {
 			kind: "effect_outcome",
 			outcome: { tag: "succeeded" },
 			transmission: claimOf(first),
 		});
 		const before = d.view();
-		const crossed = d.step({
+		const answered = d.step({
 			verb: "observe",
 			observation: {
 				tag: "Answer",
 				token: tokenOf(first),
 				kind: "interaction_resolved",
-				interactionId: "q2",
+				interactionId: "q1",
 			},
 		});
-		expect(crossed.tag).toBe("Rejected");
+		expect(answered.tag).toBe("Rejected");
 		expect(d.view()).toEqual(before);
+		unsolicited(d, { kind: "interaction_resolved", interactionId: "q1" });
+		const settled = d
+			.view()
+			.interactions.flatMap((item) =>
+				item.tag === "Answered" && item.delivery === "settled"
+					? [item.interactionId]
+					: [],
+			);
+		expect(settled).toEqual(["q1"]);
 	});
 
 	test("[8C] a lost process ends an uncertain Run and the ledger never resends its input", () => {
