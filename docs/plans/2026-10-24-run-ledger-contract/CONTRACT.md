@@ -65,9 +65,11 @@ Source names used in the comments:
   delivery unknown.
 - **Send Token.** Identifies one transmission of a Run Effect. A retry is a new transmission with a
   new token; tokens are never reused. It is an opaque host string, never parsed. Deadlines are not
-  sends and carry no token. For a runner-held start or steer it identifies `(commandId, n)`, with
-  `n` minted by `holdRun`'s `run.dispatched` (4.11). A direct start's token is its `run.requested`
-  runId; for every other effect with no hold, `ctx.newId` mints it (3.4).
+  sends and carry no token. Whoever issues an effect names its transmissions (3.4). An effect main
+  issues is named by main's `(commandId, n)`: for a runner-held start or steer `n` is minted by
+  `holdRun`'s `run.dispatched` (4.11); for any other but a direct start, `n` is its claimed outbox
+  row's `attempt_count`, carried by its `effect_outcome`; a direct start's is its `run.requested`
+  runId. `ctx.newId` mints only the tokens of the effects decide issues (3.4).
 - **Steer.** A Run Input admitted while a Run is active, to redirect that Run.
 - **Tombstone.** The durable fact that a Run is Ended. Nothing later reopens it or changes it.
 - **Run Ledger.** The sole owner of Run state for every provider. Verbs: admit, observe, control,
@@ -141,14 +143,15 @@ built runner path; the ledger chain must not add a second owner for them (sectio
 |---|---|---|---|
 | Run decisions and Tombstones | Run Ledger, the arm's fold (3.8); main's run state (`provider_runs`, its terminal projection, Send Settlement) stays main's, run whole (D58) | the arm, from main's projected events in their writer's transaction (D58) | the units 2.1 names, through the ledger view (3.9); main's readers read main's run state, as main |
 | Run Input records (an input's Run and its sends) | Run Ledger | the ledger's arm, from main's events in their writer's transaction (D58) | the units 2.1 names, reading the ledger view in their own body (3.9) |
+| A Run's id | main: the `runId` of the `run.requested` that reserves it (3.4); a wake Run's, the ledger's `ctx.newId` (8.3) | the send commit and `markRunning` (orchestration-command-commit.ts 308-310; orchestration-side-effect-reactor.ts 1338-1345 at 6c9ff950) | the arm names the Run by it and by any later `run.requested` for its input |
 | The inbox: admission, queued inputs, order, the mark, `steering`, the pause | main's inbox module, run whole (D58) | main's arms and code, fed by main's own events (3.9) | main's `readView` and `decideInbox` |
 | Steer association with a Run | `joined_into`, main's `run.started` arm (D58) | main's run joining | `holdRun`'s owner resolution (4.3); the arm folds the projected `run.started` that sets it, and never reads or writes the column (3.9) |
 | Send issue decisions and their evidence (sends with no hold) | Run Ledger | the arm (3.9) | views; a runner-held send stores none: its chains are a view over its hold facts (4.11) |
-| Send Token | opaque host string, never parsed; runner-held start and steer: bound to `(commandId, n)` with `n` from `run.dispatched`; every effect with no hold: Run Ledger | `holdRun` binds the transmission (runner-held); `decide` via `ctx.newId` (no hold) | runner journal (dedup) |
+| Send Token | opaque host string, never parsed; its issuer's (3.4): an effect main issues is bound to main's `(commandId, n)`, `n` from `run.dispatched` for a runner-held start or steer and the claimed outbox row's `attempt_count` for any other but a direct start, whose token is its `run.requested` runId; `probe`, `stop_task` and `cancel_request`: Run Ledger | `holdRun` binds the transmission (runner-held); `markRunning`'s claim counts `attempt_count` (orchestration-side-effect-reactor.ts 1352 at 6c9ff950); `decide` via `ctx.newId` (the three ledger effects) | runner journal (dedup); the arm, through each transmission's `effect_outcome` (2.1 row 215) |
 | A Run Effect's outcome and status | the outbox row (`provider_command_outbox`); its status machine is main's, each writer guarding its own SQL (3.12, D58) | each status writer listed in 3.12; the arm inserts only the three effects' rows (3.12) | the reactor (`nextPendingRequests`), U2's startup restore; never the arm, which reads only events (3.9) |
 | Coverage (did Stop cover this run) | main's `stopCovers` over the committed Stop control row's `payload.stop.owners` (session-run-settlement.ts 98 at 6c9ff950), run whole (D58) | the engine's Stop acceptance | `stopCovers`: `holdRun`, the reactor's stop-owner read, runner retirement; the arm reads the stop commit's projected `interrupt.requested` (`commitControl`, orchestration-engine.ts 911-924 at 6c9ff950) only to bound the work outside its owners (L6) |
 | Hold: `provider_runs.runner_id`, `held_transmission` | projection of `run.dispatched` and `run.released` | `run.dispatched`: `holdRun`, called only by the feeder; `run.released`: `release` (feeder path, reconciler, adoption) | stop, Settle, swap commit, holder queries; the decider reads hold facts as evidence (4.11) |
-| Transmission count | the event stream (count of `run.dispatched` per `commandId`) | `holdRun` | the cap: the only cap for a runner-held start or steer (4.8) |
+| Transmission count | the event stream (count of `run.dispatched` per `commandId`) for a runner-held start or steer; the outbox row's `attempt_count` for any other effect main issues | `holdRun`; `markRunning` | the cap: the only cap for a runner-held start or steer (4.8); `maxControlAttempts` for a control (orchestration-side-effect-reactor.ts 274, 1365 at 6c9ff950) |
 | Run end for a retired runner's runs | main's retirement settlement, run whole (D58): per-send Send Settlement at Gone, and `settleRuns` for legacy or sendless owners | the reconciler (`settlement.commit`, runner-retirement.ts 855-910 at 6c9ff950; `settleRuns`, runner-retirement.ts 932-943 at 6c9ff950) | prune (6.8); the arm folds its projected terminals |
 | `delivery_indeterminate`, runner-held rows | the reconciler's Settle | Settle only | reactor; the decider reads it as a hold fact (4.11) |
 | `delivery_indeterminate`, direct-provider rows | the reactor's marker (D58) | reactor only | reactor; the arm folds only its evidence event (2.1, 3.9) |
@@ -184,9 +187,11 @@ built runner path; the ledger chain must not add a second owner for them (sectio
 | Liveness ("may anything still act") | Run Ledger (`anythingMayAct`) | derived | worktree sweep, archive and delete, status poller, runner record deletion |
 | Host idle | runner host (`HostIdle`) | host | idle exit |
 
-Each layer owns one identity: the daemon owns `runnerId`, the host owns `querySeq`, `holdRun`'s
-`run.dispatched` owns a runner-held Send Token's `n`, the ledger owns every other Send Token, the
-send module owns the assignment, the database owns the serving runner.
+Each layer owns one identity: the daemon owns `runnerId`, the host owns `querySeq`, the issuer of
+an effect owns its Send Tokens (main's `(commandId, n)` for every effect main issues, `holdRun`'s
+`run.dispatched` minting a runner-held start or steer's `n`, and main's send commit or
+`markRunning` every other's; the ledger's `ctx.newId` for the three it issues), the send module owns the assignment, the database
+owns the serving runner.
 
 <!-- src: RA §1, §2, §3, §8; AUDIT A2, A3, A4, A8; AUDIT-2 A19, A20, T11; SEND-SCOPE S1, S2; SEND-SCOPE-2 S5; SEND-SCOPE-3 S6; SEND-SCOPE-5 S8, S9.1; STOP-INTENT S1, S2, S3, S5; SWAP S5 refined, S7, M; CONT Data shape, C1, C2, C3; BG Decision 1; FB §1, §2; review 2026-10-28 (H1, H3, H4, H10, H11); model-gaps 2026-10-28; SETTLE Data shape, S1, S2, S3, S5, Verified requirements 5 -->
 
@@ -216,7 +221,7 @@ its number (rows 203, 204, 208 and 214 are deleted).
 | 211. A start Claude reports `cancelled` before `started` is Stop's own and returned behind the pause by the reactor's outcome body, which appends `input.requeued` when the cancelled intake lands, in the same write (4.8, D53) | ends it `interrupted` with no retry and its text dropped (`cancelled`, claude-runner-payload.ts 2495-2522; `interrupted`, orchestration-side-effect-reactor.ts 896-966 at 1ba91324) | S9.3 as amended: a stopped input that did not reach the agent returns to the inbox | 25scs: the reactor's outcome body (`recordSendReply`, orchestration-side-effect-reactor.ts 1065-1100 at 6c9ff950) |
 | 212. Tries within a reservation are capped at 5 (4.8) | caps controls, never a send (`maxControlAttempts`, orchestration-side-effect-reactor.ts 1216) | a send that always fails ends its input `failed` instead of looping | 25scs: `markRunning` reads the cap before its claim; 32.29: `holdRun`'s cap for a runner-held start or steer |
 | 213. A destructive step past the stop's deadline asks the user first while tasks are live or unknown (8.4); after a restart U2's restore asks the same confirm, keyed by the Stop's command id | retires the process without asking (`retireProcess`, provider-turn-service.ts 251-284) | background tasks are lost with the process | 25scs: U2's `retireProcess` reads the view before it retires; 32.25: the confirm (8.4) |
-| 215. Evidence events: each fact the arm needs that has no main event gets one, from its one observer (D59, 3.9): the write that writes main's terminal or status for that fact, or with none the write that ingests it: `process_started` (the lifecycle module's `register`, the swap commit's, 6.9, and OpenCode's reporter, 9), `process_lost` (each write that first sets a runner's `retired_at`, in its transaction, once per (runnerId, retiredAt), none for a runner whose session row is gone or has no project: `requestStop`'s raw write, `commitRetirement`'s raw upsert, and `persistRelease`'s `commitStop` inside the release commit; inside a `commitAndSignal` write it is projected with that write, and only a raw write appends it unprojected and marks the store for the next commit's recovery, 6.3, 6.5, 32.4; for OpenCode, `onInstanceStopped`'s `settleSessionRuns` batch, 9), `alarm_fired` (32.3's scheduler, a main-side fiber, 3.7), `effect_outcome` (each ledger effect's executor, with its status update), `turn_started` (a Claude wake, where the payload sets `turnInFlight`, claude-runner-payload.ts 2187-2197 at 6c9ff950, while no send's `currentRunId` is set; a Codex successor), `turn_ended` (a Claude wake, at the payload's first clear of the `turnInFlight` its `turn_started` set; its result with no run, `endsCurrentRun`, 2301; its stream's end, `turnInFlight`, 2707; `cleanupSessionEffect`, 3089-3105; which a Stop with no foreground run reaches, `disposeSessionEffect`, 2763-2783 at 6c9ff950; the translator's `endTurn` when the wake's stream fails, claude-event-translator.ts 544-555 at 6c9ff950) and the direct `delivery_indeterminate` marker's event; main's projectors ignore them, and T2 masks them as one class | appends none: a Codex successor starts with no event (`executingTurnId`, codex-turn-lifecycle.ts 322-328 at 6c9ff950), a Claude wake sets and clears only its flag (`turnInFlight`, claude-runner-payload.ts 2187-2197, 2301, 2707, 3103 at 6c9ff950; the translator's `endTurn`, claude-event-translator.ts 544-555 at 6c9ff950), the direct marker writes no event (`delivery_indeterminate`, orchestration-side-effect-reactor.ts 916-955 at 6c9ff950), a runner's retirement sets `retired_at` with no event (`saveStop`, runner-receipts.ts 407-412 at 6c9ff950), and a managed OpenCode stop settles its runs with no loss event (`settleSessionRuns`, opencode-runtime-ingress-service.ts 1758-1795 at 6c9ff950) | the arm reads only projected events (3.9) | 32.3: a runner's `process_started`, `alarm_fired`, `effect_outcome`; 32.4: `process_lost` (6.5); 32.6: a Claude wake's `turn_started` and `turn_ended`, and the swap commit's `process_started`; 32.21: a Codex successor; 32.11: OpenCode's `process_started`, `onInstanceStopped`'s `process_lost`, and the direct marker |
+| 215. Evidence events: each fact the arm needs that has no main event gets one, from its one observer (D59, 3.9): the write that writes main's terminal or status for that fact, or with none the write that ingests it: `process_started` (the lifecycle module's `register`, the swap commit's, 6.9, and OpenCode's reporter, 9), `process_lost` (each write that first sets a runner's `retired_at`, in its transaction, once per (runnerId, retiredAt), none for a runner whose session row is gone or has no project: `requestStop`'s raw write, `commitRetirement`'s raw upsert, and `persistRelease`'s `commitStop` inside the release commit; inside a `commitAndSignal` write it is projected with that write, and only a raw write appends it unprojected and marks the store for the next commit's recovery, 6.3, 6.5, 32.4; for OpenCode, `onInstanceStopped`'s `settleSessionRuns` batch, 9), `alarm_fired` (32.3's scheduler, a main-side fiber, 3.7), `effect_outcome` (each ledger effect's executor, with its status update; for every other effect main issues with no hold but a direct start, each writer of a claimed transmission's outcome, naming the row's `command_id` and claimed `attempt_count` (3.4): `recordControlOutcome` where its guarded update changes the row (`recordControlOutcome`, orchestration-side-effect-reactor.ts 2276-2380 at 6c9ff950), and `markCompleted` and `writeFailure` on a non-send row, moved from their raw transaction into the reactor's `write` body, as `recordControlOutcome`'s is (2299), so the event is projected with its status), `turn_started` (a Claude wake, where the payload sets `turnInFlight`, claude-runner-payload.ts 2187-2197 at 6c9ff950, while no send's `currentRunId` is set; a Codex successor), `turn_ended` (a Claude wake, at the payload's first clear of the `turnInFlight` its `turn_started` set; its result with no run, `endsCurrentRun`, 2301; its stream's end, `turnInFlight`, 2707; `cleanupSessionEffect`, 3089-3105; which a Stop with no foreground run reaches, `disposeSessionEffect`, 2763-2783 at 6c9ff950; the translator's `endTurn` when the wake's stream fails, claude-event-translator.ts 544-555 at 6c9ff950) and the direct `delivery_indeterminate` marker's event; main's projectors ignore them, and T2 masks them as one class | appends none: a Codex successor starts with no event (`executingTurnId`, codex-turn-lifecycle.ts 322-328 at 6c9ff950), a Claude wake sets and clears only its flag (`turnInFlight`, claude-runner-payload.ts 2187-2197, 2301, 2707, 3103 at 6c9ff950; the translator's `endTurn`, claude-event-translator.ts 544-555 at 6c9ff950), the direct marker writes no event (`delivery_indeterminate`, orchestration-side-effect-reactor.ts 916-955 at 6c9ff950), a runner's retirement sets `retired_at` with no event (`saveStop`, runner-receipts.ts 407-412 at 6c9ff950), a control's outcome writes only its outbox row and receipt (`markCompleted`, orchestration-side-effect-reactor.ts 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`, 2753-2783 at 6c9ff950), and a managed OpenCode stop settles its runs with no loss event (`settleSessionRuns`, opencode-runtime-ingress-service.ts 1758-1795 at 6c9ff950) | the arm reads only projected events (3.9) | 32.3: a runner's `process_started`, `alarm_fired`, `effect_outcome` (the three ledger effects' and every control's; a native command's from its executor, 8.5); 32.4: `process_lost` (6.5); 32.6: a Claude wake's `turn_started` and `turn_ended`, and the swap commit's `process_started`; 32.21: a Codex successor; 32.11: OpenCode's `process_started`, `onInstanceStopped`'s `process_lost`, and the direct marker |
 | 216. Ledger effects: the reactor gains one executor per ledger effect (`probe`, `stop_task`, `cancel_request`) and a wake after the commit that inserts one, through the write's `afterCommit` (as `SettlementTx`'s `afterCommit`, orchestration-side-effect-reactor.ts 1088-1100 at 6c9ff950); the three are exempt from the session lane and from `armRetryWake` (3.12); T2 masks their three provider calls | rejects an effect type it has no executor for (`unknown_provider_command_effect`, orchestration-side-effect-reactor.ts 2108-2118 at 6c9ff950) and holds a row behind any earlier same-session row (`earlier`, orchestration-side-effect-reactor.ts 1292-1336 at 6c9ff950) | label work and lost work end only by these effects (3.5, 8.3) | 32.3: the reactor |
 
 Main already appends the terminal of every Run end the ledger decides: a retired runner's runs end
@@ -397,18 +402,34 @@ Only evidence and conduit's decisions, each once:
 
 ### 3.4 Correlation and evidence
 
-- Every transmission of a Run Effect has a fresh Send Token: a `Tokened` `IssuedEffect` carries it,
-  a `Held` one's is its hold's (`holdRun` binds `n`, 3.13). A retry is a new transmission with a new
-  token. Main issues every start and steer, and each transmission has one
-  observer (D59). The arm folds `run.dispatched` (a hold) as a runner-held send's transmission,
-  `holdRun` minting `n`, and `run.requested` (a fresh claim) as a direct send's (OpenCode: the
-  session's driver sets `runsOpenCodeServer`, provider-instance.ts 145 at 6c9ff950; read as
-  `runsOpenCodeServer`, orchestration-engine.ts 749-751 at 6c9ff950), its token minted in that
-  decision. A runner-held send's `run.requested` names the ledger Run its input belongs to and is
-  no transmission; its try before any hold has no token (below). A claim whose run is still open
-  writes no event and is not a transmission (3.9 item 1). The token is an opaque host string,
-  never parsed; `run_dispatched{runnerId, commandId, transmission}` binds it by `commandId` and
-  transmission, including redispatch of an already-bound issue. A `commandId` reissued keeps its
+- Every transmission of a Run Effect has a fresh Send Token, and whoever issues the effect names
+  its transmissions, as main names its Run ids (below). Decide issues only `probe`, `stop_task` and
+  `cancel_request` (3.12), each a `Tokened` `IssuedEffect` whose token `ctx.newId` mints. Main
+  issues every other effect (D60), which the arm folds into `live` as a `Main` `IssuedEffect` named
+  by its `commandId` (3.13), each transmission by main's `(commandId, n)` (below). A retry is a new
+  transmission with a new token. Each transmission has one observer (D59). The arm folds
+  `run.dispatched` (a hold) as a runner-held send's transmission, `holdRun` minting `n`, and
+  `run.requested` (a fresh claim) as a direct send's (OpenCode: the session's driver sets
+  `runsOpenCodeServer`, provider-instance.ts 145 at 6c9ff950; read as `runsOpenCodeServer`,
+  orchestration-engine.ts 749-751 at 6c9ff950), its token that runId. A runner-held send's
+  `run.requested` names the ledger Run its input belongs to and is no transmission; its try before
+  any hold has no token (below). A claim whose run is still open writes no event and is not a
+  transmission (3.9 item 1).
+- **A Run's id is main's.** A user Run's id is the `runId` of the `run.requested` that reserves it:
+  main mints it with the send's run (orchestration-command-commit.ts 308-310;
+  `markRunning`, orchestration-side-effect-reactor.ts 1338-1345 at 6c9ff950) and appends it after
+  `input.sent` in the same write (orchestration-command-commit.ts 206-239 at 6c9ff950), so the
+  Run is reserved there, never at admit. A later `run.requested` for an input its Run still
+  holds (main's retry on a fresh run, 4.8) reserves nothing and names that Run too; main
+  observations and hold facts name a Run by any of its ids, and an unknown one is Accepted with no
+  events and a diagnostic. A steer's own Run takes the steer's `runId` (3.9). `ctx.newId` mints
+  only a wake Run's id (it has no main run, 8.3) and the tokens of the three effects decide issues.
+- The token is an opaque host string, never parsed. `run_dispatched{runId, runnerId, commandId,
+  transmission}` binds it: `runId` names the Run (`holdRun`'s owner run, `joined_into` or its
+  own, runner-retirement.ts 135-205, 270-282 at 6c9ff950), and `commandId` names the issue in that
+  Run, the start or steer of the input whose id it is, as main's send `commandId` is its input id
+  (provider-turn-dispatch.ts 679, 853-856; orchestration-command-commit.ts 340-344 at 6c9ff950);
+  redispatch of an already-bound issue included. A `commandId` reissued keeps its
   count within its input's reservation (4.8), and a transmission belongs to the latest issue of its
   `commandId` before it was held; one naming a retired runner belongs to the latest issue before
   that runner retired, or to none (an unknown token, below), since no hold is written on a
@@ -419,6 +440,24 @@ Only evidence and conduit's decisions, each once:
   latest issue of that `commandId`, the one the feeder stepped (it steps one key at a time); with
   no such issue it is an unknown token (below), and for an Ended Run it is late evidence (3.8),
   never another Run's. `unheld_outcome` reads as that try's `effect_outcome` (3.5).
+- **An effect main issues with no hold** (`interrupt`, `end_session`, `deliver_answer`,
+  `send_native_command`; a direct start is named by its `run.requested` runId, above) is named by
+  its outbox row. Its `commandId` is the row's `command_id`, which its commit's event carries
+  (`metadata`, orchestration-command-commit.ts 67 at 6c9ff950) and its Control names
+  (3.13). Its transmission `n` is the row's `attempt_count`, which each `markRunning` claim
+  increments under a guard on the count it read (orchestration-side-effect-reactor.ts 1352, 1364
+  at 6c9ff950). A control's commit is immutable, so its `command_id` has one row
+  (orchestration-command-commit.ts 207-223), and a recommit carries its `command_id`'s highest
+  count forward (295, 324), so a `(commandId, n)` never repeats. The writer of its outcome appends
+  `effect_outcome` naming that pair, with the status it writes (2.1 row 215): `completed` reads
+  `succeeded`; `retryable_failed`, `retryable` with `retryAt` its `next_attempt_at` and `code` its
+  `error_code`; `failed` or `cancelled`, `permanent` with its `error_code` (`recordControlOutcome`,
+  orchestration-side-effect-reactor.ts 2276-2380; `markCompleted`, 2253-2274; `writeFailure`,
+  2753-2783 at 6c9ff950). The host composes the token from the pair, as from `run.dispatched`'s. A
+  claim appends no event, so a transmission shows only at its outcome, and its issue may still act
+  until then (3.5); an outcome written with no claim (the control budget's exhaustion, 698-710)
+  names the latest claimed transmission. `attempt_count` is the one count of these transmissions;
+  OPEN-2's rejected second count is one beside `run.dispatched` (4.11).
 - An observation **answers** a send (it names that send's token), is **unsolicited**
   (it names only the host label and an event id) or is main's (below). Unsolicited observations are background
   snapshots and task events, a turn start (a wake execution), process events, an
@@ -450,7 +489,8 @@ Only evidence and conduit's decisions, each once:
   revives Run lifecycle.
 - An unknown or never-issued token: Accepted, no events, a diagnostic. Evidence of a kind the send
   or its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; `command_lifecycle`
-  from any provider but Claude, 9, D46), a contradicting native id, or a command receipt naming another commandId (D21):
+  from any provider but Claude, 9, D46; `turn_ended` from any provider but Claude, 2.1 row 215,
+  8.3), a contradicting native id, or a command receipt naming another commandId (D21):
   Rejected, a diagnostic, no state change. A Send Token carries no kind, so this check is
   decide's, never the type's (3.13). No throws
   and no new error types.
@@ -542,8 +582,9 @@ For a runner-held send these chains are never stored: they are a view over the h
 
 ### 3.6 Run machine
 
-- Moved only by `reconcile`: reserve to Queued (only with no active Run); launch to Launched (a new
-  execution; the only fold reset); unlaunch back to Queued (below); interrupt to Interrupting
+- Moved only by `reconcile`, from what main issued and the arm folded into `live` (D60, 3.4):
+  reserve to Queued (only with no active Run); launch to Launched (a new execution, at main's start
+  entering `live`; the only fold reset); unlaunch back to Queued (below); interrupt to Interrupting
   (Stop's interrupt, only while something of the Run may still act, 5.1); tombstone to
   Ended (absorbing; outcome from the fold at that moment); a wake Run (8.3) and a steer's Run of
   its own (3.9) are recorded Launched outside it, with no start effect.
@@ -617,25 +658,28 @@ For a runner-held send these chains are never stored: they are a view over the h
   notice; its Queued Run shows the unlaunching outcome's `retryAt`, when it has one, as a field (3.7, 3.13). A full stop or a project removal closes the relay scopes, and so interrupts every feeder
   (4.4), before `stopRegisteredRunners` awaits the Stops; the relaunch its stop commit decides is
   never held during the stop, and the restart scan holds it when the project next serves.
-- A Run that reached or possibly reached the agent never unlaunches. A transmission of its start or
-  steer is tried again at its retry, a new transmission of the same ledger Run, whatever main's
-  runId, direct or runner-held, when it never left
-  conduit (`not_sent`, or a start failure before any hold, H4), was released or, a start, declined
-  (but not a `ResumeRejected` release, Stop's own outcome, or after a session end, 3.4, 4.8), or
-  got a retryable outcome with consumption None or an absent finding (3.5): no host fact
-  stops a runner-held re-send, which `holdRun` binds as transmission `n + 1` of
-  the same run (4.3). The send has a **retry pending** from that outcome until its next
-  transmission issues, or an acceptance (3.5), Stop, Run now or `end` (5.1, 8.4), its coverage (3.5), the cap
-  (4.8) or its Run's end withdraws it; "due" is only a
-  deadline's time arriving (3.7). A start's retry waits for the fence (below). An Interrupting Run
-  issues no retry (5.1).
+- A Run that reached or possibly reached the agent never unlaunches. Main tries a transmission of
+  its start or steer again at its retry, and the arm folds it into `live` (3.4), a new transmission
+  of the same ledger Run, whatever main's runId, direct or runner-held, when it never left conduit
+  (`not_sent`, or a start failure before any hold, H4), was released or, a start, declined (but not
+  a `ResumeRejected` release, Stop's own outcome, or after a session end, 3.4, 4.8), or got a
+  retryable outcome with consumption None or an absent finding (3.5): no host fact stops a
+  runner-held re-send, which `holdRun` binds as transmission `n + 1` of the same run (4.3). The
+  send has a **retry pending** from that outcome until its next transmission issues, or an
+  acceptance (3.5), Stop, Run now or `end` (5.1, 8.4), its coverage (3.5), the cap (4.8) or its
+  Run's end withdraws it; "due" is only a deadline's time arriving (3.7). A start's retry waits for
+  the fence, which `markRunning` reads in the view (below; 2.1 row 202). Stop or Run now withdraws
+  an Interrupting Run's retries (5.1).
 - Derived labels: Launched with no evidence shows as Starting; with activity, Running. Settling means
-  an OpenCode-style policy has a result with no later activity.
+  an OpenCode-style policy has a result with no later activity; past Settling's deadline the Run
+  shows Running, with no deadline, until its `native_session` probe's finding or its end (3.8).
 - `reconcile` rule order: expired deadlines; Run end and unlaunch (3.8, above); interrupts (5.1);
-  answers, retries and probes (no retry for an Interrupting Run; a start's retry only if the fence
-  is clear); steers; advance (reserve the input main's Drain arm hands off,
-  3.9; launch a Queued Run when the fence is clear). A probe is sent only when a deadline calls for one, never at the outcome
-  itself or on every decision.
+  probes, `stop_task` and `cancel_request`, the only effects decide issues (3.4, D60); advance
+  (reserve the Run a reserving `run.requested` names, 3.4, 3.9; launch a Queued Run whose start
+  main issued). Starts, steers, retries and answers are main's, and reach `live` only through Main
+  observations, `run.dispatched` Answers and Controls (3.4); `reconcile` reads them there and
+  issues none. A probe is sent only when a deadline or an OpenCode Stop (5.1) calls for one,
+  never at the outcome itself or on every decision.
 - The native-session fence (3.5 `fenceHolds`, L6, section 9) holds every start transmission, a
   launched Run's own start retry included, while some label has work; the retried start's own
   earlier tries hold it only while they may still act (3.5), and none may while its retry is
@@ -648,13 +692,13 @@ For a runner-held send these chains are never stored: they are a view over the h
 ### 3.7 Deadlines and the alarm
 
 - Deadlines are data on the obligation they bound. They are not sends and carry no token.
-- Each deadline is tagged by its owner (a Run's Settling, a probe, an interaction, a native
+- Each deadline is tagged by its owner (a Run's Settling, a probe, a delivery recovery, a native
   command, a stop's work, L6) with a required target; a stop's target is its session row, so it
   carries no field (3.13).
 - Derived deadlines: the stop's is R2's `deadlineAt`, which U2 fires for its owner runs, and the
   ledger stop deadline's is the opening commit's `stop.deadlineAt`, which the ledger's alarm fires
   for the work outside them (L6); Settling, fixed at the result; each probe (below);
-  permission timeouts; native command confirmation (which does not run while the provider reports
+  delivery recovery (below); native command confirmation (which does not run while the provider reports
   the command queued, or while its latest try got `not_sent`, H4).
 - Starting, Running and label work have no deadline. Before a Stop or Run now commit (L6) a Run ends
   by its evidence or coverage (3.8) or the user's Stop, as on main, which never ends a silent turn and
@@ -678,7 +722,10 @@ For a runner-held send these chains are never stored: they are a view over the h
   ledger deadline. A probe's deadline stays at its issue plus `max(probeMs, backoff(n))`,
   raised to `retryAt` when a retryable outcome names a later one (D20); `n` is the probe's
   transmissions so far; backoff is 1 s, 2 s, 4 s, 8 s, capped at 30 s.
-- Delivery recovery probes the input or interaction. Idle proof after an OpenCode abort (5.1) or
+- Delivery recovery probes the input; an answer's outcome is never Unknown (3.4, 3.10). A send's
+  Unknown outcome (`delivery_unknown`, `delivery_indeterminate`) opens its recovery deadline (owner
+  Send) at that outcome plus `probeMs` (D20); it fires the probe unless the send's consumption is
+  Observed or Accepted or its work has ended by then. Idle proof after an OpenCode abort (5.1) or
   Settling's expiry probes `native_session`.
 - An Accepted decision carries `alarmAt`: the earliest open deadline after its events, or absent
   when none is open. A Rejected decision leaves the alarm alone.
@@ -774,7 +821,8 @@ For a runner-held send these chains are never stored: they are a view over the h
   Condition 2 needs no authority of its own: outcomes, releases, rejected resumes and coverage
   count as recorded (3.6), and lifecycle evidence as 3.4 says. On a Run not yet delivered it
   unlaunches the Run instead (3.6). The end reason follows the condition that ended the Run:
-  1. condition 1: the fold (5C), so a result beats a Stop's interrupt fallback;
+  1. condition 1: the fold (5C), so a result beats a Stop's interrupt fallback; with no result in
+     it, as 2.4;
   2. condition 2: the first that applies:
      1. Stop, Run now or `end` asked (5.1, 8.4), or one of its sends is NotConsumed{cancelled} (9):
         `interrupted`, forced when the ledger stop deadline's alarm ended its work (L6);
@@ -785,7 +833,20 @@ For a runner-held send these chains are never stored: they are a view over the h
         execution evidence and no Run-end evidence (a wake Run's, 8.3) lost its runner (L1) or its
         session: its covering cause, `session ended` (3.4) before `process lost` (L1), with the
         fold's first specific code when it has one (10A);
-     4. otherwise the fold (5C).
+     4. otherwise the fold (5C); with no result in it, main's terminal for its run (its outcome
+        and code, D60; `error` reads `provider_error`, not retryable), as main ends a turn with no result as an error (claude-runner-payload.ts
+        2120-2126, codex-runner-payload.ts 878-892, cursor-runner-payload.ts 922-932 at
+        6c9ff950); with neither (a wake Run), `completed`, as main's wake turn (8.3).
+- **No result, either order (GAP 5).** A Run with a main run (one its `run.requested` reserved,
+  3.4) whose fold has no result ends, by either condition, only once main's terminal for its run
+  has folded, unless reason 2.1, 2.2 or 2.3 applies; the reason is then that terminal's. So the
+  fold order of OpenCode's `query_ended` and main's `turn.error` in one write never changes the
+  end. `query_ended` first: condition 1 holds, the Run waits, and the next fold, the terminal's,
+  ends it `provider_error` with main's code. The terminal first: the Run ends at once by
+  condition 2 if nothing of it may still act, else at `query_ended`'s fold by condition 1, each
+  with that terminal's reason and code, in the same write. A
+  Claude, Codex or Cursor user Run has no such pair: its no-result end is main's terminal under
+  condition 2, as `query_ended` ends none of its executions (9).
 - **Outcome fold (5C)**, within one execution: failure beats success; specific beats generic;
   completion beats an interrupt fallback; a `delivery_unknown` outcome is a failure, code
   `delivery_indeterminate`, as Send Settlement ends it (4.7). The fold is order-independent. Only
@@ -840,14 +901,15 @@ For a runner-held send these chains are never stored: they are a view over the h
      never outbox status. Main writes that append no event are not evidence: `markRunning`'s
      steer claims and its claims of a row whose run is still open (a claim with no open run mints
      its run and appends `run.requested`, 3.4) (`markRunning`, orchestration-side-effect-reactor.ts
-     1338-1424 at 6c9ff950), the direct marker (`delivery_indeterminate`, 916-955), control `markCompleted`
-     and `writeFailure` (`markCompleted`, 2253-2274; `writeFailure`, 2753-2783),
+     1338-1424 at 6c9ff950), the direct marker (`delivery_indeterminate`, 916-955),
      `requeueLegacySend` and the resume fallback (`requeueLegacySend`, send-settlement-outbox.ts
      511-529; `settleLegacySend`, 412-475 at 6c9ff950), and `acceptStopEffect`'s
      `retryable_failed` DELETE (`retryable_failed`, orchestration-engine.ts 858 at 6c9ff950). A
      fact the arm needs with no main event gets an evidence event, appended by the unit that
      observes it in the same write as the observation (2.1 row 215); main's projectors ignore
-     them. An effect executor's outcome is one, in the same write as its status update.
+     them. An effect executor's outcome is one, in the same write as its status update, a control's
+     included (`markCompleted`, 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`,
+     2753-2783; 3.4).
   2. Outbox rows for the effects main has no writer for (`probe`, `stop_task`, `cancel_request`):
      the arm inserts each with `command_id` `ledger:<run>:<effect>:<attempt>`,
      INSERT OR IGNORE against a partial unique index on (`project_key`, `command_id`) over those
@@ -909,29 +971,37 @@ For a runner-held send these chains are never stored: they are a view over the h
   Run that reads it, or null. Main lists and resolves interactions by session and native request
   id, never by run (pending-interaction-service.ts 146, 173;
   orchestration-side-effect-reactor.ts 1564-1577, 1633 at 1ba91324).
-- A permission or question is answered once: the first answer decision wins (user or timeout).
-- A permission that times out is answered with exactly `{ decision: "reject", reason: "timeout" }`,
-  also across a restart.
+- A permission or question is answered once: the first answer decision wins (user or main's
+  timeout).
+- A permission's timeout is main's: main resolves it rejected and sends that answer as any other
+  (`PermissionTimeoutLive`, timer-wiring.ts 20-40; `takeTimedOutPermissions`,
+  pending-interaction-service.ts 603-700 at 6c9ff950). The ledger folds it as any answer and holds
+  no timeout deadline.
 - An answer is delivered exactly once, also across daemon and runner restarts; transient failures
   retry with backoff; delivery is the interaction's work, never a Run's.
 - Answer refusal (10B): the interaction stays Pending with `lastRefusal` naming the exact answer
-  attempt and refusal code while its delivery retries (below). The submitted answer is kept. If consumption of an earlier transmission
-  is ambiguous, it is reconciled by probe before a retransmit with a fresh token.
+  transmission, main's `(commandId, transmission)` (3.4), and refusal code while its delivery
+  retries (below); both are the transmission's `retryable` outcome's, the code main's receipt
+  `error_code` (orchestration-side-effect-reactor.ts 2320-2346 at 6c9ff950). The submitted answer
+  is kept. Main retries an answer only at a `retryable` outcome; one whose consumption is
+  ambiguous (`provider_control_timeout`) fails its row, a `permanent` outcome, and main reopens the
+  prompt as a new request only where it finds the answer unconsumed (a runner's `not_received` or
+  `gone`, OpenCode's prompt still listed or its process gone; `readFailedControlPrompt`,
+  orchestration-side-effect-reactor.ts 2383-2552 at 6c9ff950), so decide probes no answer before a
+  retry.
 - Answer delivery state (queued, sent, unknown, settled) is derived, not stored.
 - An interaction's resolution, by any transmission or natively, ends the work of every
   `deliver_answer` transmission for that interaction.
-- An interaction still Pending on a label with work at a Stop or Run now commit (L6)
-  is resolved at that commit (a permission rejected, a question with no answers) unless a
-  `deliver_answer` transmission of it may still act (3.5), and no `deliver_answer` issues for it
-  after, as main cancels only the unanswered ones when it interrupts
-  (pending-interaction-service.ts 400-415, 449-500; claude-runner-payload.ts 2351, 2997-3002,
-  3024-3034 at 1ba91324). An answer, in a stop or not, resolves its interaction at its delivery's
-  confirmation or the host's own resolution, for Claude its native rejection at the interrupted
-  result (4.6), whichever the host reports first, or else when its delivery ends with no
-  confirmation: its work ends (a permanent refusal or the cap, 4.8, its coverage, or the stop's
-  deadline step, L6) or its probe ends past the cap with no finding (3.7), as main deletes the
-  entry when the answer is taken (pending-interaction-service.ts 400-417, 419-430 at 1ba91324).
-  OpenCode's abort carries no
+- An interaction still Pending on a label with work at a Stop or Run now commit (L6) is resolved at
+  that commit (a permission rejected, a question with no answers) unless a `deliver_answer`
+  transmission of it may still act (3.5), and no `deliver_answer` issues for it after, as main
+  cancels only the unanswered ones when it interrupts (pending-interaction-service.ts 400-415,
+  449-500; claude-runner-payload.ts 2351, 2997-3002, 3024-3034 at 1ba91324). An answer, in a stop
+  or not, resolves its interaction at its delivery's confirmation or the host's own resolution, for
+  Claude its native rejection at the interrupted result (4.6), whichever the host reports first, or
+  else when its delivery ends with no confirmation: its work ends (a permanent refusal or the cap,
+  4.8, its coverage, or the stop's deadline step, L6), as main deletes the entry when the answer is
+  taken (pending-interaction-service.ts 400-417, 419-430 at 1ba91324). OpenCode's abort carries no
   interaction, and main resolves one only by OpenCode's reply event (opencode-provider-instance.ts
   702-724, opencode-runtime-event-translator.ts 242-266 at 1ba91324), so for OpenCode the commit's
   resolution is the ledger's (a 2.1 row). One still Pending when its runner is retired or its
@@ -939,8 +1009,8 @@ For a runner-held send these chains are never stored: they are a view over the h
   process's prompts (retire-pending-prompts.ts 44-58 at 1ba91324). An async question (Codex
   AskUserQuestion, `delivery: async`, answered by a new message) is never resolved by a commit,
   retirement or session end, as main excludes it (pending-interaction-service.ts 481,
-  retire-pending-prompts.ts 39; codex-item-mapper.ts 528-585 at 1ba91324). It is resolved, as
-  main, by the next accepted send admitted after it (handlers/permissions.ts 443-465;
+  retire-pending-prompts.ts 39; codex-item-mapper.ts 528-585 at 1ba91324). It is resolved, as main,
+  by the next accepted send admitted after it (handlers/permissions.ts 443-465;
   ws-rpc/conversation.ts 214-217 at 1ba91324); its answer is a steer that falls back to queue
   (permissions.ts 837-867).
 
@@ -1050,7 +1120,9 @@ For a runner-held send these chains are never stored: they are a view over the h
     recovery can move its `running` row first; main's write then sets the status the waiter
     already returned, and its receipt matches. A `running` guard would leave the row `cancelled`
     beside a `side_effect_completed` receipt, so the T5-writers table allows both writes from every
-    status and no 2.1 row names them.
+    status. Their status write is unchanged; only for a control row do they move into the reactor's
+    `write` body, as `recordControlOutcome`'s is (2299), to append its `effect_outcome` (2.1 row
+    215, 3.4).
 - Typed unions persist as one tag column. New tables add a CHECK on it. Existing tables (SQLite
   cannot add CHECK through ALTER) decode with Schema at the store and reject unknown rows, per row.
 - **Load.** On load the ledger rebuilds caches only for sessions with open work: a Run not Ended, an
@@ -1071,9 +1143,11 @@ sketches in this folder are history.
 
 ```ts
 export type ProviderKind = "claude" | "codex" | "cursor" | "opencode";
-// Opaque host string, never parsed. Runner-held start or steer: bound by run_dispatched's
-// commandId and transmission, n minted by holdRun (4.11). A direct start: its run.requested runId.
-// Every other effect with no hold: from ctx.newId.
+// Opaque host string, never parsed; its issuer's (3.4). An effect main issues: each transmission's
+// from main's (commandId, transmission), a runner-held start or steer's from its run_dispatched (n
+// minted by holdRun, 4.11), any other's from its effect_outcome's `transmission` (n the claimed
+// outbox row's attempt_count); a direct start's is its run.requested runId. probe, stop_task and
+// cancel_request: from ctx.newId.
 export type SendToken = string & { readonly __brand: "SendToken" };
 export type Label = string; // `runnerId:querySeq`, or `runnerId` for an older host; split at the last `:` only by L1 and 3.4
 
@@ -1096,7 +1170,7 @@ export type Observation =
   | ({ readonly tag: "Unsolicited"; readonly label: Label; readonly eventId: string } & Unsolicited)
   // main's run events the arm folds (3.4, D60); run.dispatched and run.released are Answers (4.11)
   | ({ readonly tag: "Main"; readonly eventId: string } & (
-      // 3.4: direct (runsOpenCodeServer) is a transmission, its token the runId; else names its input's Run
+      // 3.4: reserves its input's Run under runId, or names the Run that holds it; direct (runsOpenCodeServer) is also a transmission, its token the runId
       | { readonly kind: "run_requested"; readonly runId: string; readonly inputId: string; readonly direct: boolean }
       // 3.9: joins its input to requestedRunId's Run, or starts a steer's own Run
       | { readonly kind: "run_started"; readonly inputId: string; readonly requestedRunId: string }
@@ -1114,15 +1188,17 @@ export type Evidence =
   | { readonly kind: "input_declined"; readonly reason: string }
   | { readonly kind: "activity" }
   | { readonly kind: "interaction_requested"; readonly interactionId: string;
-      readonly interactionKind: "permission" | "question"; readonly timeoutAt?: number }
+      readonly interactionKind: "permission" | "question" }
   | { readonly kind: "interaction_resolved"; readonly interactionId: string }
   | { readonly kind: "result"; readonly outcome: RunOutcome;
       readonly error?: { readonly code: string; readonly retryable: boolean } }
   | { readonly kind: "query_ended" }
   | { readonly kind: "accounting" }
-  | { readonly kind: "effect_outcome"; readonly outcome:
+  // transmission: present for an effect main issues with no hold but a direct start, its outbox
+  // row's command_id and claimed attempt_count (3.4); absent for the three effects decide issues
+  | { readonly kind: "effect_outcome"; readonly transmission?: MainTransmission; readonly outcome:
       | { readonly tag: "succeeded" }
-      | { readonly tag: "retryable"; readonly retryAt: number }
+      | { readonly tag: "retryable"; readonly retryAt: number; readonly code?: string } // code: main's receipt error_code, an answer's lastRefusal (3.10)
       | { readonly tag: "permanent"; readonly code: string } // includes "native_resume_rejected"
       | { readonly tag: "not_sent"; readonly retryAt: number } // host never called the provider (H4); retryAt is the outcome time, main's backoff spaces the re-send (3.7)
       | { readonly tag: "delivery_unknown" } }
@@ -1144,8 +1220,8 @@ export type Evidence =
   | { readonly kind: "command_result"; readonly commandId: string }
   // hold facts of a runner-held send (4.11): read from the existing event stream, never copied
   // into a second store. The opaque token identifies this commandId and transmission.
-  | { readonly kind: "run_dispatched"; readonly runnerId: string;
-      readonly commandId: string; readonly transmission: number }
+  | { readonly kind: "run_dispatched"; readonly runId: string; readonly runnerId: string;
+      readonly commandId: string; readonly transmission: number } // runId names the Run, commandId its issue (3.4)
   | { readonly kind: "run_released";
       readonly reason: { readonly tag: "Refused"; readonly why: "exiting" | "retiring" | "interrupted" }
         | "NotSent" | "JournalAbsent" | "ResumeRejected" }
@@ -1155,9 +1231,11 @@ export type Evidence =
   | { readonly kind: "journal_answer"; readonly answer: "running" | "finished" | "uncertain" | "absent" };
 
 export type Control =
-  | { readonly kind: "stop"; readonly deadlineAt: number | null } | { readonly kind: "end"; readonly deadlineAt: number | null } // deadlineAt: the commit's payload.stop.deadlineAt; null for a commit L6 does not fold (no stop, or U2's retire), which opens and joins no deadline (L6)
-  | { readonly kind: "run_now"; readonly inputId: string; readonly deadlineAt: number | null } // the interrupt main's `interruptForInput` asks for (5.1, D58); deadlineAt as stop's (L6)
-  | { readonly kind: "answer"; readonly interactionId: string; readonly answer: unknown }
+  // commandId on each control main issues an effect for: its commit event's metadata.commandId, its outbox row's command_id (3.4)
+  | { readonly kind: "stop"; readonly commandId: string; readonly deadlineAt: number | null }
+  | { readonly kind: "end"; readonly commandId: string; readonly deadlineAt: number | null } // deadlineAt: the commit's payload.stop.deadlineAt; null for a commit L6 does not fold (no stop, or U2's retire), which opens and joins no deadline (L6)
+  | { readonly kind: "run_now"; readonly commandId: string; readonly inputId: string; readonly deadlineAt: number | null } // the interrupt main's `interruptForInput` asks for (5.1, D58); deadlineAt as stop's (L6)
+  | { readonly kind: "answer"; readonly commandId: string; readonly interactionId: string; readonly answer: unknown }
   | { readonly kind: "stop_tasks"; readonly tasks: "all" | readonly TaskKey[] }
   | { readonly kind: "confirm_escalation"; readonly snapshotEntry: number }
   | { readonly kind: "native_command"; readonly commandId: string; readonly text: string };
@@ -1175,8 +1253,8 @@ export type Settlement =
   | { readonly kind: "session_ended"; readonly cause: "native_session_vanished" }; // no producer at 1ba91324 or 6c9ff950: unbuilt (3.4)
 
 // decide issues only probe, stop_task and cancel_request (3.12), each Tokened; every other kind
-// is a main call the arm folds into `live` (3.5, 3.10, 8.4, 8.5), a start or steer from its Main
-// observation or its run.dispatched Answer, and decide never issues
+// is a main call the arm folds into `live` as Main (3.5, 3.10, 8.4, 8.5), a start or steer from its
+// Main observation or its run.dispatched Answer, any other from its Control, and decide never issues
 export type RunEffect =
   | { readonly kind: "start"; readonly runId: string; readonly inputId: string;
       readonly mode: "resume" | "fresh" }
@@ -1192,22 +1270,25 @@ export type RunEffect =
   | { readonly kind: "cancel_request"; readonly runId: string | null } // OpenCode Stop fallback; fence stays held
   | { readonly kind: "probe"; readonly runId: string | null; readonly target:
       | { readonly tag: "input"; readonly inputId: string }
-      | { readonly tag: "interaction"; readonly interactionId: string }
-      | { readonly tag: "native_session" } }
+      | { readonly tag: "native_session" } } // no answer probe: main's answer outcome is never Unknown (3.4, 3.10)
   | { readonly kind: "stop_task"; readonly key: TaskKey }
   | { readonly kind: "send_native_command"; readonly commandId: string; readonly text: string };
 
 export interface DecideContext {
   readonly now: number;
-  readonly newId: () => string; // mints Run ids and the tokens of effects with no hold from the folded event's sequence and a counter within the decision, so a replay mints the same ids; never repeats
+  readonly newId: () => string; // mints a wake Run's id and the tokens of probe, stop_task and cancel_request (3.4) from the folded event's sequence and a counter within the decision, so a replay mints the same ids; never repeats
   readonly policy: { readonly settleMs: number; readonly probeMs: number; readonly nativeCommandMs: number };
 }
 
 export type IssuedEffect =
-  // A runner-held start or steer main issued, folded from `run.dispatched` under its commandId; holdRun binds n.
-  | { readonly tag: "Held"; readonly commandId: string; readonly effect: RunEffect }
-  // A direct start's token is its `run.requested` runId; every other effect with no hold gets its token from ctx.newId().
+  // Every effect main issues (D60), named by its commandId, each transmission by main's (commandId, transmission) (3.4):
+  // a runner-held start or steer from its run.dispatched, under its runId; a direct start by its run.requested runId;
+  // any other from its effect_outcome. Hold facts are valid only on a runner-held start or steer.
+  | { readonly tag: "Main"; readonly commandId: string; readonly effect: RunEffect }
+  // probe, stop_task and cancel_request, which decide issues; each token from ctx.newId().
   | { readonly tag: "Tokened"; readonly token: SendToken; readonly effect: RunEffect };
+// main's name for one transmission of an effect it issues: the commandId and its n (3.4)
+export interface MainTransmission { readonly commandId: string; readonly transmission: number }
 export interface RunEnded { readonly runId: string; readonly outcome: RunOutcome; readonly reason: EndReason }
 export type RunOutcome = "completed" | "error" | "interrupted";
 export type EndReason = // 3.8
@@ -1230,11 +1311,11 @@ type Consumption = { tag: "None" }
                  | { tag: "Observed" } | { tag: "Accepted" };
 
 // Deadlines: tagged by owner, with a required target; alarmAt is the earliest
-type DeadlineOwner = "Run" | "Send" | "Interaction" | "NativeCommand" | "Stop"; // Run: Settling only; Stop: the ledger stop deadline, one per session row, its target the row, no field (3.7, L6)
+type DeadlineOwner = "Run" | "Send" | "NativeCommand" | "Stop"; // Run: Settling only; Send: a probe or a delivery recovery (3.7); Stop: the ledger stop deadline, one per session row, its target the row, no field (3.7, L6)
 
 export type InteractionView =
   | { readonly tag: "Pending"; readonly interactionId: string; readonly kind: "permission" | "question";
-      readonly lastRefusal?: { readonly attempt: SendToken; readonly code: string } }
+      readonly lastRefusal?: { readonly attempt: MainTransmission; readonly code: string } } // the refused answer transmission (3.10)
   | { readonly tag: "Answered"; readonly interactionId: string; readonly kind: "permission" | "question";
       readonly delivery: "queued" | "sent" | "unknown" | "settled" };
 
@@ -1262,8 +1343,8 @@ type TaskKey = { taskId: string; runId?: string };
 type Tasks = { tag: "Unknown"; label: Label } | { tag: "Known"; label: Label; tasks: ReadonlyMap<TaskKey, Task> }; // per runner
 ```
 
-`lastRefusal`'s field names are illustrative; the rule is that it names the exact answer attempt and
-refusal code.
+`lastRefusal` names the exact answer transmission, main's `(commandId, transmission)` read from
+the `retryable` `effect_outcome` that refused it, and its refusal code (3.4, 3.10).
 
 <!-- src: MODEL; HLK step 1, step 3, Rules (10B); RULINGS R3; FB §2 (model changes: live, project_active, Dispatching, lastRefusal, diagnostic, quarantine removed); D1-1; BG Decision 2; RA §2, §7; AUDIT A1, A3, A11; AUDIT-2 T5, T6, T7, T8, T9, T10; SEND-SCOPE-5 S9.1, S9.4; review 2026-10-28 (H1, H2); model-gaps 2026-10-28; REDESIGN 2026-10-28 (02-options-and-pick.md) L2, L3; REDESIGN-5 r2 (InputState `Failed`, as a declined steer re-queues, poteto r2 P3-3; NotConsumed{cancelled}, ub r2 F-F); REDESIGN-6 (InputState Cancelled and no `Accepted.cancelled`; DeadlineOwner Label replaces Wake and Tombstone; ub r3 P3-5, poteto r3 P2-2); REDESIGN-6 r1 (livenessMs default; closeMs spaces column steps; `interrupt` carries every label with work and a null runId with no active Run; a column step no Run reads has a null runId; ub r1 P1-A, P1-C, poteto r1 P1-A, P3-6); REDESIGN-6 r2 (livenessMs and the policy comments gone; `probe`, `cancel_request` nullable runId; `deliver_answer` names the label; interaction Unsolicited kinds; EndReason; LedgerView interactions; ub r2 P1-3, P2-1, P2-4, poteto r2 P1-2, P3-1, P3-2); REDESIGN-7 (`close` deleted; `interrupt` names the labels its commit adds with their sends' runs, `latestRunId` gone; `closeMs` gone; `deadline_expired` gone; DeadlineOwner Stop replaces Label, Run is Settling only; ub r3 P1-B, P2-B, poteto r3 P1-2, P2-1); REDESIGN-10 r1 (decide issues only the four ledger effects, the other kinds are main calls the arm folds; the interrupt carries runIds only; a Stop's deadline step is never `kill_and_respawn`; ub r1 P2-8, poteto r1 P2-5, P2-9) -->
 
@@ -1562,9 +1643,10 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
     instead. `Unreadable` (unreadable directory, corrupt record) and any older-build runner mean
     `delivery_indeterminate`, never a release. `Present` settles from the journal answer (4.9).
   - **ResumeRejected.** The runner reports that the provider rejected native resume before
-    executing the input. `prepare-turn` releases; the ledger issues a new start decision with
-    mode `fresh` and the same `commandId`. The feeder does not re-hold the release itself;
-    `holdRun` binds the new decision as transmission `n + 1`, counting toward the cap (4.8).
+    executing the input. `prepare-turn` releases; main issues a new start with mode `fresh` and the
+    same `commandId` (D60), which the arm folds into `live` (3.4). The feeder does not re-hold the
+    release itself; `holdRun` binds the new decision as transmission `n + 1`, counting toward the
+    cap (4.8).
 - **A stop commit carries the releases it has evidence for.** Every stop commit, for any
   `StopReason`, appends the release of each transmission held on that runner for which its evidence
   read (before the transaction, 6.3; a store-fault retry reads again) finds evidence: `Refused` for
@@ -1766,18 +1848,17 @@ release(run, runner, commandId, transmission, reason): Effect<void, StoreFault>
   project not served, H4) ends only its try: a start's Run moves by 3.6.
 - **The resume fallback is a new transmission.** A rejected native resume ends that transmission
   (released `ResumeRejected` for a runner send) and is a session end (3.4). On a Run not yet
-  delivered the ledger issues a new start decision under the same `commandId`, mode `fresh` (its
-  relaunch, 3.6); `holdRun` binds it as `n + 1`. After a transmission that possibly reached the
-  agent the Run ends `session ended` (3.8), and its input follows its place (3.9), its next start
-  `fresh` (3.4). The
-  feeder does not re-hold the release itself. Until 32.5, its existing fallback marker keeps the
-  runner's deduplication key distinct; from 32.5 it is transmission `n + 1`, so its token is
-  distinct with no marker (9). A rejection of the fresh transmission is terminal and visible. No
-  payload marker decides the outcome.
-- **Decided (model-gaps, 2026-10-28): start mode belongs to the ledger.** The start effect carries
+  delivered main issues a new start under the same `commandId`, mode `fresh` (its relaunch, 3.6;
+  D60), which the arm folds into `live`; `holdRun` binds it as `n + 1`. After a transmission that
+  possibly reached the agent the Run ends `session ended` (3.8), and its input follows its place
+  (3.9), its next start `fresh` (3.4). The feeder does not re-hold the release itself. Until 32.5,
+  its existing fallback marker keeps the runner's deduplication key distinct; from 32.5 it is
+  transmission `n + 1`, so its token is distinct with no marker (9). A rejection of the fresh
+  transmission is terminal and visible. No payload marker decides the outcome.
+- **Decided (model-gaps, 2026-10-28): start mode is on the start.** The start effect carries
   `mode: "resume" | "fresh"`. `resume` uses the host's native cursor if it has one; the ledger
-  never knows the cursor. The ledger issues `fresh` after session end (3.4), a rejected resume
-  included. The fresh
+  never knows the cursor. Main issues the start (D60), `fresh` after session end (3.4), a rejected
+  resume included, and the ledger reads the mode from the start it folds into `live`. The fresh
   transmission starts a new native session and clears the stale cursor. Rejected: the host picks
   mode at dispatch (two owners); inferring mode from `n` (`NotSent` also makes `n + 1`).
 
@@ -1880,12 +1961,15 @@ has its own token and chains, and the issue folds over its transmissions. The ho
 by the token, and `sinkId` carries it. Rejected: a shared `commandId:n` codec (parses the opaque
 brand and is ambiguous with `:`); a structural token (breaks equality and map keys);
 the outbox `request_sequence` plus attempt (a recommit changes
-`request_sequence`), and the outbox command id plus a separate attempt counter (a second count of
-the same transmissions).
+`request_sequence`), and the outbox command id plus a separate attempt counter for a runner-held
+start or steer (a second count of the same transmissions). For any other effect main issues, the
+outbox `attempt_count` is the only count, so it names them (3.4).
 
 **One minter and one cap.** For a runner-held start or steer, `holdRun`'s `run.dispatched` is the
-only minter of `n` and `holdRun` is the only cap (4.3). `ctx.newId` mints tokens only for effects
-with no hold other than a direct start, whose token is its `run.requested` runId (3.4). Nothing else counts transmissions.
+only minter of `n` and `holdRun` is the only cap (4.3). For any other effect main issues,
+`markRunning`'s claim is the only minter of `n` (`attempt_count`, reactor 1352 at 6c9ff950) and
+`maxControlAttempts` or main's send budget the only cap (3.4). `ctx.newId` mints only a wake Run's
+id and the tokens of probe, stop_task and cancel_request (3.4). Nothing else counts transmissions.
 
 **Joined steers (from 32.5).** A joined steer gets its own `run.dispatched` per transmission, keyed
 by the steer's `commandId` and naming its owner's runner; its opaque token identifies that transmission.
@@ -1916,8 +2000,9 @@ stands: the owner's holder carries it and the reactor re-sends it.
   `acceptStopEffect`'s requeue, paused, as main's (provider-turn-session.ts 329-388 at 1ba91324). This
   amends SEND-SCOPE-5 S9.3 (Q25 = E), which returned a stopped start's text to the composer; the
   user ratified it on 2026-10-30.
-- **OpenCode** has no runner to retire. Its Stop is: cancel the in-flight request, issue the native
-  abort, probe `native_session`, and hold the native-session fence until `query_ended`, a covering
+- **OpenCode** has no runner to retire. Its Stop is: main issues the native abort; the Stop's
+  decision issues `cancel_request` and `probe native_session` together, the probe's retry deadline
+  running from that issue (3.7); and the native-session fence holds until `query_ended`, a covering
   idle probe (D26) or the stop's deadline step, which ends its work and so its Run (L6, 3.8).
 - **Live or unknown background tasks** put a confirm gate in front of destruction (8.4). An ignored
   interrupt with live or unknown tasks stays Interrupting with a pending confirm, and the stop's
@@ -2781,9 +2866,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
 
 - **A native command is a session send (L4).** L2 case 3 addresses it: to the current process, or
   to pending when there is none. The ledger never waits for `process_started`; the feeder spawns
-  for it (H3, 4.4). It issues in the decision that admits it, after already-issued sends and ahead
-  of queued inputs, so issue order alone puts it first and its confirmation never holds back a
-  start.
+  for it (H3, 4.4). Main issues it (D60), named by main's `(commandId, n)` (3.4); it enters
+  `live` and `nativeCommands` in the decision
+  that folds its `native_command` control, after already-issued sends and ahead of queued inputs,
+  so issue order alone puts it first and its confirmation never holds back a start.
 - **Its view is a projection of its send:** `Sent` while unfinished; `Queued`, `Started`,
   `Completed` or `Cancelled` from receipts; `Unconfirmed` when its deadline fires; `Failed` with
   the covering cause (`process_lost` or `session_ended`) when covered; `Failed`
@@ -2945,6 +3031,8 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   | Cursor | start, steer | the native `wait()` result | none |
   | OpenCode | start, steer, `cancel_request`, abort | `query_ended`, then a covering probe (a trusted covering idle probe alone is work ended, 3.5; D26) | `probe native_session` returning `native_idle`; omission from `session.statuses` counts only after `session.get` confirms the identity; `retry` is busy |
 
+  - A Claude, Codex or Cursor interrupt is no member: its work ends when every Run it names has
+    ended, as main ends them (D59), and at once when it names none.
   - Claude's `command_lifecycle` for a held start or steer is an Answer naming that
     transmission's token. `cancelled` before any `started` is NotConsumed{cancelled} for that
     transmission, Stop's own: never retried, its input placed by D53 (3.5, 4.8, 3.9); after `started` it is Observed and ends nothing. Its `commandId` must equal
@@ -3184,7 +3272,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 - F59. Question q answered with E; E gets a retryable outcome; result (error ActualFailure); E
   retried; then q's delayed confirmation of the first transmission arrives, then `query_ended`. The
   Run ends as error with ActualFailure, not completed.
-- F60. An uncertain answer's interaction probe is scheduled for retry, then the project is
+- F60. An uncertain send's input probe is scheduled for retry, then the project is
   removed. The retry fires and its probe is refused (H4); nothing is transmitted.
 - F61. The settlement deadline after a result is the one armed at the result. No later evidence
   extends it except evidence this contract says extends it.
@@ -3268,8 +3356,8 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   times. Evidence targets live, stale and never-issued tokens and arrives after Runs end. Providers:
   Claude, Codex, Cursor and OpenCode.
 - **Ledger invariants** against a fake provider as ground truth:
-  - LI1: no start while the fake holds accepted, unended work or a running wake turn on that
-    native session.
+  - LI1: no start enters `live` (from a direct `run_requested` or a `run_dispatched`) while the
+    fake holds accepted, unended work or a running wake turn on that native session.
   - LI2: evidence the fake could deliver in either order yields the same `viewLedger` once
     both arrive. When one order decides a Tombstone between the two facts and the other does
     not, that Run may be absent from `active` in one view, and its outcome may differ, and with
@@ -3284,7 +3372,8 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   - LI5: live or unknown tasks are never destroyed without a confirm that matches the latest
     snapshot, except unplanned loss; lost work is recorded at most once per label, in the decision
     that ends its scope, and never for a label `Known` to have no live task (L5, 8.4).
-  - LI6: a native command is issued in the requesting decision, alive process or not.
+  - LI6: a native command enters `live` and `nativeCommands` in the decision that folds its
+    `native_command` control, alive process or not.
   - LI7: older-label evidence never changes authority or liveness; a send's own label is never older
     for that send (3.4).
   - LI8: `anythingMayAct` is false only when the fake has no running turn, no unfinished send other
@@ -3445,7 +3534,7 @@ Behavioural statements the rebuilt decider must make impossible to violate:
 | 32.2.18 (new) | the contract checks, run before a review round: the citation check over every main citation and its anchor (A.18 T1), and the reader sweep over CONTRACT.md and every bead 12.2 names, with the recount check (A.18 T3); the sweep reads the newest note of each bead as live text, never as history by policy (A.21); spec review rounds run after T1 and T3 exit 0 (A.20) | A.18, A.19, A.20, A.21 |
 | 32.2.19 (the spike, superseded) | the D58 spike and T5-writers, whose measured result fed REDESIGN-10's review round 1: the arm and a status table built in R2's real Layer graph (6c9ff950) over `:memory:` SQLite, running A.20's two traces. Run 2026-10-31: trace 1 held; trace 2 held with the owner rebuild (2b); the writer-list test against 3.12's 15 writers moves to 32.3's acceptance; the ledger effects' rows, the insert's key, the writer list and T5-writers' form were corrected in 3.9, 3.12 and A.20 | 3.1, 3.9, 3.12, L6, 5.3, A.20 |
 | D59 spike (new, child of 32.2) | the D59 spike, run before the next review round: the ledger stop deadline and the retirement's `process_lost` built in R2's real Layer graph (6c9ff950) over `:memory:` SQLite, passing A.21's wake, failed-step and restart traces; blocks 32.3, 32.2.17 and 32.2.9 | L6, 2.1, 6.5, A.21 |
-| 32.3 | the arm in the projection runner, folding with no outbox row on replay (3.1, 3.9, D58); the three ledger effects whole (2.1 row 216): the arm's insert keyed by the partial unique index, one reactor executor per type, a wake on the insert, all three exempt from the session lane (3.12); the evidence events `process_started` of a runner, `alarm_fired` and `effect_outcome`, and the scheduler fiber, which appends only `alarm_fired` and lives outside src/lib/provider (2.1 row 215, 3.7); every row 215 kind registered at each event-kind guard site, the provider tickets only appending theirs (4.1); the T5-writers table of outbox status writers (3.12); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test. Acceptance adds: the T5-writers test against 3.12's 15 writers and the effect executors; a direct send's fresh-run retry `run.requested` for an input already in a ledger Run folds as a transmission, never a reserve, and a runner-held send's only by its `run.dispatched` (3.4, D59); the ledger stop deadline on the session row, its `alarm_fired` from the scheduler after a restart with no U2 restore (L6); a non-terminal Claude `turn.completed` does not end the arm's Run (F18); the full-graph rebuild over a surviving process runner (A.20's trace 2 with the Layer graph rebuilt whole), where U2's restore makes one `stopping` entry with the row's `deadlineAt`, replay inserts no outbox row, and the host's terminal ends the stop and the Run once, with no `runner_stopped` failure and no `provider_process_gone` cancel; the migration and schema inventory snapshots updated deliberately, each diff checked to be the new tables and index only | 3.1, 3.7, 3.9, 3.12, 11.3, A.20 |
+| 32.3 | the arm in the projection runner, folding with no outbox row on replay (3.1, 3.9, D58); the three ledger effects whole (2.1 row 216): the arm's insert keyed by the partial unique index, one reactor executor per type, a wake on the insert, all three exempt from the session lane (3.12); the evidence events `process_started` of a runner, `alarm_fired` and `effect_outcome` (every control's included, named by its row's `command_id` and claimed `attempt_count`, 3.4), and the scheduler fiber, which appends only `alarm_fired` and lives outside src/lib/provider (2.1 row 215, 3.7); every row 215 kind registered at each event-kind guard site, the provider tickets only appending theirs (4.1); the T5-writers table of outbox status writers (3.12); A5, A7, A14, A18, A19, T9, T12, the per-session row of A8; owns the SQLite event-order test. Acceptance adds: the T5-writers test against 3.12's 15 writers and the effect executors; a direct send's fresh-run retry `run.requested` for an input already in a ledger Run folds as a transmission, never a reserve, and a runner-held send's only by its `run.dispatched` (3.4, D59); the ledger stop deadline on the session row, its `alarm_fired` from the scheduler after a restart with no U2 restore (L6); a non-terminal Claude `turn.completed` does not end the arm's Run (F18); the full-graph rebuild over a surviving process runner (A.20's trace 2 with the Layer graph rebuilt whole), where U2's restore makes one `stopping` entry with the row's `deadlineAt`, replay inserts no outbox row, and the host's terminal ends the stop and the Run once, with no `runner_stopped` failure and no `provider_process_gone` cancel; the migration and schema inventory snapshots updated deliberately, each diff checked to be the new tables and index only | 3.1, 3.7, 3.9, 3.12, 11.3, A.20 |
 | 25scs (new, child of the epic, blocked by 32.3) | the 2.1 rows whose unit reads the view: 202, 206, 207, 210, 211, 212 and 213's view read, in the reactor (`markRunning`, the outcome body), `requeueFailedSteers` and U2's `retireProcess`; R2's `acceptStopEffect` reads no view; 32.11 adds row 205's read (D59); needs 32.3 and the core tickets whose `decide` output a row reads (32.2.6, 32.2.8, 32.2.11, 32.2.12, 32.2.14); blocks 32.2.17 and 32.25 | 2.1 |
 | 32.4 | deadlines as data and the process watcher; A1 with the ledger: appends `process_lost` in each write that first sets `retired_at` (`requestStop`'s raw write, the release commit's `commitStop`, `commitRetirement`), its rows from one reader in runner-receipts.ts, and the store mark the next commit's recovery reads (2.1 row 215, 6.5, D59), after the stop commit's releases (L1, 4.5), beside main's settlement, which stays (6.5, D58); A3, A8, A15 with the ledger; Q26: durable process-loss recovery, including the uncommitted direct-Stop/live-reattachment limitation (7.2), with 32.6/32.8 | 3.7, 6.4, 6.5, 6.8, 7.2 |
 | 32.5 | stateless runner protocol; A11; the protocol bump with 32.19; Send Token identity on the wire, run ids as coverage labels only, `interrupt_turn` with runIds only, interrupting the turn running at receipt and the named runs' accepted unstarted commands, a later turn never (4.6); a joined steer's own `run.dispatched` and token (4.11) | 4.6, 4.9, 4.11, 9 |
@@ -3682,7 +3771,7 @@ port.
 **Decided (integration round 3, attrib-r3)**
 
 - D16: derived from L1: a kill retires its runner at issue, covering its sends, its own included (3.3, 5.1).
-- D17: removed by D48: a native command has no project case; it issues in the requesting decision (LI6), and a refusal makes it `Failed` (D34, 3.11).
+- D17: removed by D48: a native command has no project case; it enters `live` in the decision that folds its control (LI6), and a refusal makes it `Failed` (D34, 3.11).
 - D18: an outstanding wake execution is a native-session fence member until its work ends, its runner retires or the session ends (8.3, 9).
 - D19: derived from L4: a native command is a session send with no Run, so never a Run's barrier; its deadline drives only its view (8.5).
 - D20: a retry is anchored where its obligation opens: the outcome for a send, the issue for a probe; `retryAt` only raises it (3.7).
@@ -4470,6 +4559,108 @@ and adds 69: 9 more (A.21).
 - Amends D43 (8.4, 3.13): `PendingConfirm.step` is `retire` or `end_session`; a restart is a
   retire, then main's relaunch. Reason: 3.13 named no step values, and no effect is a restart (M6).
   Rejected: a `restart` step (a step no effect issues).
+
+**Decided (build round 2, 2026-10-31)**
+
+Twelve gaps from the 32.2.4 harness lane (G5 to G8) and the 32.2.3 oracle lane (GAP 2 to GAP 9),
+found building against D60. GAP 9 and G5 are one gap. One is decided by the text as it stood: G8,
+since 3.4 rejects evidence of a kind its provider cannot produce and row 215 gives `turn_ended`
+one observer, a Claude wake's payload; a Codex wake ends at its result (codex-turn-lifecycle.ts
+331-353 at 6c9ff950), Cursor starts no unsolicited turn (9) and OpenCode's wake ends at a covering
+idle probe (D26), so 3.4's list now names it and a non-Claude `turn_ended` is Rejected, not ended.
+The stale readers it fixes count nothing: 8.5's issue, D17's entry and 3.6's advance. G5, G6 and
+G7 came from the new `Main` generator kinds and G8 from the `turn_ended` kind; the oracle's eight
+came from catalogue scenarios and contract tests.
+Build round 2 (contract, after redesign 11): 0 new decisions, 10 amend earlier ones, 4 came from
+new generator input kinds. Against HEAD, a replaced rule counting as one deletion and one addition,
+a move or a restatement as neither and a new reader or exception as an addition, it deletes 63
+rules and adds 78: 15 more (A.21).
+- Amends D60 (3.4, 3.13): `run_dispatched` carries main's `runId`, which names the Run, and its
+  `commandId` names the issue in that Run, the start or steer of the input whose id it is; each
+  transmission of a `Held` issue gets its token from its `run.dispatched` (G5, GAP 9). Reason:
+  the Observation dropped the stored event's `runId` (stored-event.ts 690-696; runner-retirement.ts
+  270-282 at 6c9ff950), so nothing bound a hold to its Run. Rejected: a ledger `commandId` map (a
+  second store of main's binding); binding by `commandId` alone (a joined steer's hold names its
+  owner's Run).
+- Amends D60 (2, 3.4, 3.6, 3.13, 4.11): a user Run's id is main's, the `runId` of the
+  `run.requested` that reserves it, and the Run is reserved there, never at admit; a later
+  `run.requested` for an input its Run holds names that Run; `ctx.newId` mints only a wake Run's
+  id and the tokens of effects with no hold other than a direct start (G7). Reason: main mints the
+  run and appends `run.requested` after `input.sent` in one write (orchestration-command-commit.ts
+  206-239, 308-310 at 6c9ff950), and nothing said who names a Run. Rejected: a ledger-minted Run
+  id (a second name for main's run, which every Main observation would need mapped).
+- Amends LI1 and LI6 (11.2, 8.5): a start and a native command are read from `live`, as main
+  issues them (D60; G6). Reason: both rows expected decide to issue them. Rejected: none.
+- Amends D20 (3.7, 3.13): a send's Unknown outcome opens its recovery probe's deadline, owner
+  Send, at that outcome plus `probeMs`; it fires unless the send is Observed, Accepted or ended
+  (GAP 2). Reason: no deadline opened the first recovery probe, and none may issue at the outcome.
+  Rejected: a probe at the outcome (3.6 forbids it).
+- Amends the SPEC Stop (5.1, 3.6): OpenCode's Stop decision issues `cancel_request` and `probe
+  native_session` together, the probe's deadline from that issue; main issues the abort (GAP 3).
+  Reason: 3.6 allowed a probe only at a deadline. Rejected: a probe after the abort's outcome
+  (the abort is main's, and its outcome may never come).
+- Amends HLK 11A (3.6): past Settling's deadline a Run shows Running, with no deadline, until its
+  probe's finding or its end (GAP 4). Reason: Settling needs a Run deadline, and the expired one
+  left no view. Rejected: an optional Settling deadline (a type change for one state).
+- Amends 5C (3.8): condition 2's last end reason, with no result, is main's terminal for the Run's
+  run, `error` read as `provider_error`, and with neither, `completed` (GAP 5). Reason: main ends a
+  turn with no result as an error (claude-runner-payload.ts 2120-2126, codex-runner-payload.ts
+  878-892, cursor-runner-payload.ts 922-932 at 6c9ff950), and an empty fold had no reading.
+  Rejected: `completed` for every Run (the oracle's reading, which differs from main).
+- Amends D59 (9): a Claude, Codex or Cursor interrupt is no fence member, and its work ends when
+  every Run it names has ended, at once when it names none (GAP 6). Reason: the table gave it no
+  rule. Rejected: none.
+- Amends RULINGS R2 (3.7, 3.10, 3.13): a permission's timeout is main's, and the ledger holds no
+  timeout deadline; `timeoutAt` and the `Interaction` deadline owner are deleted (GAP 7). Reason:
+  under D60 decide issues no answer, and main already times permissions out and answers them
+  (timer-wiring.ts 20-40; pending-interaction-service.ts 603-700 at 6c9ff950). Rejected: decide
+  issuing the timeout answer (a second issuer of main's answer).
+- Amends HLK 10B (3.10, 3.13): an `effect_outcome` `retryable` carries main's receipt
+  `error_code`, which an answer's `lastRefusal` shows (GAP 8). Reason: main records the code at
+  each retryable try (orchestration-side-effect-reactor.ts 2320-2346 at 6c9ff950), and no
+  evidence carried it. Rejected: deleting `lastRefusal` (main produces its code).
+
+**Decided (build round 2b, 2026-10-31)**
+
+The three risks build round 2 left open. A separate block, as build round 2 is to build round 1:
+each round's header counts only its own bullets, and A.21 carries the running total. Item 3 is
+decided by the text as it stood: D60 has decide issue only `probe`, `stop_task` and
+`cancel_request`, so 3.6's `reconcile` order, its retry bullets, 4.5's and 4.8's fresh start and
+the model-gaps start mode entry were stale readers; they now read main's starts, steers, retries
+and answers from `live`. The stale readers it fixes count nothing. None came from a new generator
+input kind; the first needs one the generator lacks: a control's `effect_outcome` with main's
+`transmission`, and each Control's `commandId`.
+Build round 2b (contract, after redesign 11): 0 new decisions, 3 amend earlier ones, 0 came from
+new generator input kinds. Against HEAD, a replaced rule counting as one deletion and one addition,
+a move or a restatement as neither and a new reader or exception as an addition, it deletes 65
+rules and adds 81: 16 more (A.21).
+- Amends D60 and G7 (2, 3.4, 3.13, 4.11, 2.1 row 215): whoever issues an effect names its
+  transmissions. Every effect main issues is a `Main` `IssuedEffect` named by its `commandId`, each
+  transmission by main's `(commandId, n)`: `n` from `run.dispatched` for a runner-held start or
+  steer, else the claimed outbox row's `attempt_count`, which `markRunning` increments under a
+  guard (orchestration-side-effect-reactor.ts 1352, 1364 at 6c9ff950), and which each control
+  outcome's writer carries in `effect_outcome`'s `transmission`; a direct start keeps its
+  `run.requested` runId. `ctx.newId` mints only a wake Run's id and the tokens of the three effects
+  decide issues. Reason: main issues `interrupt`, `end_session`, `deliver_answer` and
+  `send_native_command` (D60), yet 3.13 gave them a ledger token main never sees, and main's
+  receipt is keyed by `command_id`, one per control (orchestration-command-commit.ts 207-223 at
+  6c9ff950) across its retries. Rejected: main carrying a ledger token (a second name for main's
+  transmission, in a payload main never reads); keying by `command_id` alone (not unique across
+  retries); a new main counter (`attempt_count` already counts these, and OPEN-2 rejects a second
+  count, 4.11).
+- Amends HLK 10B (3.10, 3.13): `lastRefusal.attempt` is main's `(commandId, transmission)`, read
+  from the `retryable` outcome that refused it, and decide probes no answer, so the probe's
+  `interaction` target is deleted (3.7, F60). Reason:
+  main retries an answer only at a `retryable` outcome; an ambiguous one fails its row, a
+  `permanent` outcome, and main reopens the prompt only where it finds the answer unconsumed
+  (`readFailedControlPrompt`, orchestration-side-effect-reactor.ts 2383-2552 at 6c9ff950).
+  Rejected: a ledger probe before main's retry (decide issues no answer, D60).
+- Amends 5C (3.8): a Run with a main run and no result in its fold ends, by either condition, only
+  once main's terminal for its run has folded, unless reason 2.1, 2.2 or 2.3 applies, its reason
+  that terminal's; condition 1's no-result reason reads as 2.4. Reason: OpenCode's `query_ended`
+  and main's `turn.error` arrive in one write, and with `query_ended` folded first condition 1's
+  empty fold had no reading. Rejected: fixing the fold order within a write (an order every
+  writer must keep, and the permutation gate, 32.2.17, would have to exempt it).
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
@@ -6049,6 +6240,19 @@ observer of that end, so the payload now appends `turn_ended` (8.3). A runner's 
 appends one event: R2's fence test expects none (`before`, runner-retirement-fence.test.ts 9299 at
 6c9ff950) and now expects the retirement's `process_lost` after it, because the write that sets
 `retired_at` is the loss's one observer (6.5; the D59 spike pass 2, measured).
+Build round 2 replaces six: LI1 and LI6 read `live` (main's starts and native commands, folded),
+not a start or native command decide issued, since under D60 decide issues neither; another
+provider's `turn_ended` is Rejected (3.4), not a wake's end, since only Claude's payload has a wake
+turn (row 215); a Run with no result ends with main's terminal for its run (`provider_error` when
+main reports an error), not `completed`, since main ends such a turn as an error (claude-runner-payload.ts
+2120-2126 at 6c9ff950); a send's Unknown outcome probes at the outcome plus `probeMs`; an OpenCode
+Stop's probe goes out in the Stop's decision; and no expectation has the ledger answer a permission
+on timeout, since main's `PermissionTimeoutLive` does (timer-wiring.ts 20-40 at 6c9ff950).
+Build round 2b replaces three: a control's outcome arrives as `effect_outcome` naming main's
+`(commandId, transmission)`, not a `ctx.newId` token, and `lastRefusal.attempt` is that pair; no
+expectation has decide probe an answer before a retry; and a Run whose fold has no result ends
+only once main's terminal for its run has folded, with that terminal's reason, in either fold
+order of `query_ended` and `turn.error`.
 
 Risks: only a Stop or Run now commit opens or joins the ledger stop deadline (L6), and a user
 Stop or Run now always makes one: `acceptStopEffect` always sets `stop` with a `deadlineAt`
@@ -6092,7 +6296,17 @@ and from the D59 spike gate, `turn_ended`; `ingestion batch`; `beforeCommit`; `n
 `unprojected`; and from REDESIGN-11 review round 1, `forced`; `` one per `deadlineAt` ``;
 `released`; `retirement commit`; `` `end` commit ``; `interruptMs`; `Run-less`; and from build
 round 1, deleted, `EvidenceFor`; `SendToken<K>`; `wrong kind for a Send Token`; `ctx.replaying`;
-`deadline step does`; changed, `run_now`; `Tokened`; `PendingConfirm.step`.
+`deadline step does`; changed, `run_now`; `Tokened`; `PendingConfirm.step`; and from build
+round 2, deleted, `requesting decision`; `issues in the decision that admits`; `cancel the
+in-flight request`; `token minted in that decision`; `mints Run ids`; `mints tokens only`;
+`timeoutAt`; `reason: "timeout"`; `permission timeouts`; `"Send" | "Interaction"`; changed,
+`run_dispatched{runnerId`; `bound by run_dispatched's`; `Drain arm hands off`;
+`"retryable"; readonly retryAt: number }`; and from build round 2b, deleted, `readonly tag:
+"Held"`; `attempt: SendToken`; `reconciled by probe`; `retransmit with a fresh token`; `answers,
+retries and probes`; `issues a new start decision`; `start mode belongs to the ledger`; `other
+than a direct start`; `no 2.1 row names them`; `probes the input or interaction`; `interaction
+probe`; changed, `MainTransmission`; `(commandId, n)`;
+`newId`.
 D59 is new and each of its readers is written here; A.20's terms are carried so a stale reader of
 them stays swept.
 
@@ -6125,12 +6339,48 @@ Rule count against HEAD, by A.17's convention, itemized (T3 counts these bullets
   `process_started`, while main leaves them open (L1, 9).
 - Added: main's run events enter decide as `Main` observations named by main's event id, a repeat
   Accepted with no events (3.4, 3.13, D60); build round 1.
-- Result: 60 deleted and 69 added, 9 net added, against A.20's 5.
+- Deleted HEAD rule: a hold bound to its issue by `commandId` and transmission alone (3.4); build
+  round 2, replaced below.
+- Deleted HEAD rule: the ledger mints a user Run's id and reserves it at admit (3.4, 3.6, 3.13);
+  build round 2, replaced below.
+- Deleted HEAD rule: the ledger's permission timeout deadline and answer (3.7, 3.10, 3.13); build
+  round 2.
+- Added: a hold names its Run by `runId` and its issue by `commandId` (3.4, 3.13, D60); build
+  round 2.
+- Added: a user Run's id is its reserving `run.requested`'s `runId`, main's, reserved there (3.4,
+  3.6, D60); build round 2.
+- Added: a send's Unknown outcome opens its recovery probe's deadline at the outcome plus
+  `probeMs` (3.7, D20); build round 2.
+- Added: OpenCode's Stop decision issues its `native_session` probe with `cancel_request` (5.1,
+  3.6); build round 2.
+- Added: past Settling's deadline a Run shows Running with no deadline (3.6, 11A); build round 2.
+- Added: with no result, condition 2 reads main's terminal for the Run's run (3.8, 5C); build
+  round 2.
+- Added: with no result and no main terminal, condition 2 reads `completed` (3.8, 5C); build round
+  2.
+- Added: a runner provider's interrupt's work ends when every Run it names has ended (9, D59);
+  build round 2.
+- Added: `retryable` carries main's receipt code, which `lastRefusal` shows (3.10, 3.13, 10B);
+  build round 2.
+- Deleted HEAD rule: the ledger mints the Send Token of each effect with no hold, `ctx.newId`
+  (3.4, 3.13, 4.11); build round 2b, replaced below.
+- Deleted HEAD rule: an ambiguous answer is reconciled by a probe before its retry, the probe's
+  `interaction` target (3.7, 3.10, 3.13); build round 2b.
+- Added: whoever issues an effect names its transmissions, so each one main issues is main's
+  `(commandId, n)`, `n` the outbox `attempt_count` with no hold (3.4, 3.13, 4.11, D60); build
+  round 2b.
+- Added: each writer of a control's outcome appends its `effect_outcome` with main's
+  `(commandId, n)` and the status it writes, `markCompleted` and `writeFailure` included (2.1 row
+  215, 3.9, 3.12); build round 2b.
+- Added: a Run with a main run and no result ends only once main's terminal for its run has
+  folded, so either fold order gives one end (3.8, 5C); build round 2b.
+- Result: 65 deleted and 81 added, 16 net added, against A.20's 5.
 
-Net rule change, deleted minus added: -9 (60 minus 69); REDESIGN-11 withdraws 5 of A.20's additions
-and adds 8, net -3, and build round 1 adds 1. Rewritten in place, counting nothing: 2.1's intro and rows 202 and 205; L6's
-stop, deadline step, restart and end; 3.7's derived deadlines and Starting clause; 3.4's Send
-Token, minter and `IssuedEffect` comments; 5.4; 6.5; 9; 3.12's writer list; the 12.2 rows; A.20's Run end cell. The
+Net rule change, deleted minus added: -16 (65 minus 81); REDESIGN-11 withdraws 5 of A.20's
+additions and adds 8, net -3, build round 1 adds 1, build round 2 adds 6 and build round 2b adds 1.
+Rewritten in place, counting nothing: 2.1's intro and rows 202 and 205; L6's stop, deadline step,
+restart and end; 3.7's derived deadlines and Starting clause; 3.4's Send Token, minter and
+`IssuedEffect` comments; 5.4; 6.5; 9; 3.12's writer list; the 12.2 rows; A.20's Run end cell. The
 D54, SPEC Stop, D43, SPEC Deadlines, 82tn.32.2.14, D4 and D28 entries are rewritten in place and
 stay amendments (30). Review round 1 rewrites in place, counting nothing and adding no decision or
 amendment: L6's Stop or Run now commit, its one deadline per session row and its retirement order;
@@ -6139,7 +6389,15 @@ amendment: L6's Stop or Run now commit, its one deadline per session row and its
 D54, D59, FB §4 and D4 entries. Build round 1 adds D60 and five amendments, and rewrites in place,
 counting nothing: 3.2's policy, 3.4's kind check, 3.6's unlaunch view and wake, 3.7's Stop target
 and Queued retry, 3.13's comments, `run_now` and `PendingConfirm.step`, 8.2's and 12.2's server
-pointer, 8.4's step, LI2's unlaunch sentence, and 3.12's and 4.7's replay.
+pointer, 8.4's step, LI2's unlaunch sentence, and 3.12's and 4.7's replay. Build round 2 adds ten
+amendments, and rewrites in place, counting nothing: 3.4's kind check (`turn_ended`), 3.13's
+`SendToken`, `newId`, `IssuedEffect` and `run_requested` comments, 2's Run id row, 4.11's minter,
+8.5's issue, D17's entry and LI1 and LI6. Build round 2b adds three amendments, and rewrites in
+place, counting nothing: 3.6's `reconcile` order, its `Moved only by` and retry bullets; 4.5's
+ResumeRejected, 4.8's resume fallback and the model-gaps start mode entry; 8.5's issue; 3.9 item
+1's list of eventless writes; 3.12's unguarded-write note; the glossary's and 2's Send Token,
+transmission count and identity rows; 3.13's `SendToken`, `newId`, `RunEffect` and `Control`
+comments; and 12.2's 32.3 row.
 
 <!-- src: REDESIGN-11 2026-10-31 (/private/tmp/r32-redesign-11); REDESIGN-10 review rounds 1 to 3 (ub, poteto, /private/tmp/r32-redesign-10/review-*-out.md); main at 1ba91324 (provider-turn-service.ts 202-405; 78 `provider_runs` query sites in 23 files); R2 at 6c9ff950 (orchestration-engine.ts 658-940; session-run-settlement.ts 27-59; orchestration-side-effect-reactor.ts 1606-1624; runner-receipts.ts 619-628); competitor survey: t3code, paseo, bb, monocode, capy, zeron (/private/tmp/r32-redesign-6/survey) -->
 
