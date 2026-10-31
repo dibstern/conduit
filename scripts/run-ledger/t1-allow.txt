@@ -1,0 +1,188 @@
+# T1 allow list: <key>TAB<class>TAB<reason>. See t1-cite-check.py for the key and the classes.
+# anchorless and unbound: the contract is frozen (2026-10-31), so these citations could not be given
+# the anchor A.18 T1 asks for, or a file; each is a follow-up for the next contract edit. The reason
+# names the CONTRACT.md lines where the key occurred at check-in (cbbed5c7).
+runner-retirement.ts 758-787 at 1ba91324	stale	section 6 table cites R2 recovery with no commit, so it resolves at 1ba91324, where the file does not exist; at 6c9ff950 `recover` is at 1432. Follow-up: re-cite at 6c9ff950 (line 2673)
+process-session-runner.ts 3973-4045 at 1ba91324	stale	section 6 table cites R2 failure cleanup with no commit; the file has 3837 lines at 1ba91324 and 911 at 6c9ff950. Follow-up: re-cite at 6c9ff950 (line 2673)
+process-session-runner.ts 3835-3854 at 1ba91324	stale	same unnamed commit as 3973-4045. Follow-up: re-cite at 6c9ff950 (line 2681)
+provider-turn-session.ts 384-385 at 6c9ff950	unchecked	build round 2c cites main at 862c9557, a commit T1 does not load; checked by hand: the DELETE is send_turn and retryable_failed only (line 4727)
+ThreadServersPanel.tsx 97 at 1ba91324	external	t3code a27ec88bfa, a competitor repository, not conduit (line 3016)
+runner-retirement.ts 958-1007 at 1ba91324	history	A.13 option O1 cites R2 at no named commit; history, not a live claim (line 4977)
+orchestration-command-commit.ts 308-310 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 146, 418
+orchestration-side-effect-reactor.ts 1338-1345 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 146
+orchestration-side-effect-reactor.ts 1352 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 150
+session-run-settlement.ts 98 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 152
+orchestration-side-effect-reactor.ts 274, 1365 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 154
+orchestration-side-effect-reactor.ts 2299 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 224
+commit-and-signal.ts 49-50, 67-68 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 269
+orchestration-command-commit.ts 206-239 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 418
+provider-turn-dispatch.ts 679, 853-856 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 427
+orchestration-command-commit.ts 340-344 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 427
+orchestration-side-effect-reactor.ts 1352, 1364 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443, 4697
+orchestration-engine.ts 858 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443, 4727
+projectors-effect.ts 1774 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443
+orchestration-command-commit.ts 207-223 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443, 4697
+orchestration-command-commit.ts 295 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443
+orchestration-command-commit.ts 324 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443
+orchestration-side-effect-reactor.ts 431-449 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 443
+claude-runner-payload.ts 1830-1834, 2262-2297 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 501, 4474
+runner-entry-lifecycle.ts 144-176 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 544
+claude-runner-payload.ts 1103-1129 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 544
+prepare-turn.ts 166, 185, 207-220 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 544
+continuation.ts 690-700 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 544
+opencode-runtime-ingress-service.ts 972-1011 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 645, 4164
+session-run-settlement.ts 69-76 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 645, 4164
+runner-retirement.ts 152-178 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 664
+orchestration-side-effect-reactor.ts 1337-1375 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 664
+provider-turn-dispatch.ts 970-976 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 734, 4234
+session-overrides-state.ts 62 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 734, 4234
+provider-turn-service.ts 202-313 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 771
+provider-turn-service.ts 363-374 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 771, 4234
+provider-turn-service.ts 376-405 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 771
+env.ts 147-150 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 829
+session-status-poller.ts 25-26 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 829
+claude-runner-payload.ts 2120-2126 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 851, 4665, 6423
+codex-runner-payload.ts 878-892 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 851, 4665
+cursor-runner-payload.ts 922-932 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 851, 4665
+provider-turn-service.ts 202-405 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 917
+projectors-effect.ts 2155-2176 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 917
+codex-turn-lifecycle.ts 239-245, 339-360 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 917
+claude-runner-payload.ts 2274-2299 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 917
+projectors-effect.ts 2137-2150 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 917
+orchestration-engine.ts 812-856 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 917
+claude-runner-payload.ts 2524-2539 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 978
+projectors-effect.ts 1881 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 978
+pending-interaction-service.ts 146, 173 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1001
+orchestration-side-effect-reactor.ts 1564-1577, 1633 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1001
+orchestration-side-effect-reactor.ts 2320-2346 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1015, 4678
+pending-interaction-service.ts 400-415, 449-500 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028, 4517
+claude-runner-payload.ts 2351, 2997-3002, 3024-3034 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028, 4517
+pending-interaction-service.ts 400-417, 419-430 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028, 4517
+opencode-provider-instance.ts 702-724 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028
+opencode-runtime-event-translator.ts 242-266 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028, 5422
+retire-pending-prompts.ts 44-58 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028
+pending-interaction-service.ts 481 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028, 4517
+retire-pending-prompts.ts 39 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028, 4517
+codex-item-mapper.ts 528-585 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028
+handlers/permissions.ts 443-465 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028
+ws-rpc/conversation.ts 214-217 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028
+permissions.ts 837-867 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1028
+orchestration-side-effect-reactor.ts 2607-2608, 432 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1128
+retire-pending-prompts.ts 30-32 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1128
+orchestration-side-effect-reactor.ts 2642, 445 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1128
+retire-pending-prompts.ts 159 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1128
+orchestration-side-effect-reactor.ts 2659-2663 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1128
+retire-pending-prompts.ts 43 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1128
+runner-retirement.ts 159-178 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1506
+runner-host.ts 241, 378-381, 819-823, 864-870 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1740
+claude-runner-payload.ts 2958-2972 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1753, 4505
+claude-runner-payload.ts 2420 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1753, 4505, 5405
+codex-runner-payload.ts 301 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1850
+cursor-runner-payload.ts 310-313 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1850
+provider-instance.ts 165-168 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1850, 4423
+cursor-runner-payload.ts 1103-1110 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1850
+cursor-runner-payload.ts 1133-1142 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1850
+cursor-runner-payload.ts 1166 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1850
+provider-turn-session.ts 363-375 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1871
+session-inbox.ts 670 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1871
+provider-turn-dispatch.ts 804-821 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1871
+provider-turn-session.ts 342-343 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1871
+runner-retirement.ts 152-215 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 1871, 5509
+provider-turn-session.ts 329-388 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2033, 4164, 4204, 4295, 5078
+orchestration-engine.ts 658-940 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2080
+runner-retirement.ts 1009, 2195, 2207 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2386
+runner-retirement-fence.test.ts 6260 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2386, 6416
+orchestration-side-effect-reactor.ts 344-363 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2673
+cursor-runner-payload.ts 262-264, 314 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2805
+claude-runner-payload.ts 2235-2245, 2257-2294, 2413-2414, 2755-2775 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2820
+orchestration-engine.ts 884-898 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2893, 4779
+session-manager-service.ts 498-509 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2893, 4779
+stop-settled-agents.ts 39-44 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2893, 4779
+reload.ts 52-61 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 2893, 4779
+provider-turn-service.ts 286-313 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 3101, 4234, 4338, 4495
+claude-runner-payload.ts 2169-2174 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 3101
+claude-runner-payload.ts 2121-2126 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 3101
+orchestration-engine.ts 658-669 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 3555
+PendingInputTray.svelte 103 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 3669
+process-session-runner.ts 975, 2331-2335, 3707-3711 at 3aa43c60	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 3974
+prepare-turn.ts 166, 185 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4164
+session-inbox.ts 245-250 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4204
+projectors-effect.ts 2479-2500 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4204
+session-inbox.ts 575-600 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4204
+projectors-effect.ts 2501-2521 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4204
+runner-turn-failure.ts 85-117 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4204
+runner-turn-failure.ts 75-84 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4204, 5766
+orchestration-engine.ts 739 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234
+provider-turn-service.ts 251-284 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234, 4234, 4338, 4547
+session-run-settlement.ts 68-72 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234
+claude-runner-payload.ts 2235-2245, 2413-2414 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234
+orchestration-side-effect-reactor.ts 790-830, 1945-1975 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234
+provider-turn-service.ts 286-292 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234
+provider-turn-service.ts 213 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4234
+session-inbox.ts 286-293 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4276
+runner-retirement.ts 178 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4303
+orchestration-side-effect-reactor.ts 1337, 1372 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4303, 5588
+claude-runner-payload.ts 2820-2833 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4338
+projectors-effect.ts 1737-1756 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4338, 5057
+process-session-runner.ts 3229-3235, 3514 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4372
+InputArea.svelte 470 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4423
+claude-runner-payload.ts 1853, 2413-2414 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4444
+claude-runner-payload.ts 2995-3034 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4517, 5405
+claude-runner-payload.ts 2532-2539 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4567
+provider-turn-session.ts 301-303 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4567
+codex-turn-lifecycle.ts 331-353 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4625
+stored-event.ts 690-696 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4638
+runner-retirement.ts 270-282 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4638
+orchestration-command-commit.ts 206-239, 308-310 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4645
+timer-wiring.ts 20-40 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4673
+pending-interaction-service.ts 603-700 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4673
+orchestration-command-commit.ts 149-160 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4779
+claude-runner-payload.ts 2059-2060 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4845
+types.ts 114 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4845
+claude-runner-payload.ts 2196, 2301 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4852
+runner-host.ts 131-135 at 3aa43c60	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4968
+runner-host.ts 258-270 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4976
+runner-host.ts 369-381 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4976
+runner-host.ts 819-826 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4976
+runner-host.ts 683 at 3aa43c60	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4981
+runner-recovery.ts 125-126 at 3aa43c60	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4981
+runner-host.ts 713-714 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4981
+session-inbox.ts 276 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4991
+process-session-runner.ts 3706-3713 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4991, 5069
+claude-runtime-turn.ts 174-205 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 4991
+session-inbox.ts 240-250 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5078
+provider-turn-service.ts 363-371 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5312
+session-inbox.ts 272-284, 322-337, 561 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5422
+session-inbox.ts 260-284 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5422
+claude-runner-payload.ts 2892 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5509
+claude-runner-payload.ts 2820 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5509
+claude-runner-payload.ts 2828 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5509
+inbox-run-status-query.ts 34-46 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5928
+projectors-effect.ts 2155-2176 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 5983
+codex-runner-payload.ts 1063-1076, 1133-1143, 1146-1167 at 1ba91324	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 6087
+session-run-settlement.ts 27-59 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 6423
+timer-wiring.ts 20-40 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 6423
+background-liveness.ts 103-105 at 6c9ff950	anchorless	no backticked anchor before it in its segment; CONTRACT.md line 6423
+- 2607-2642	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 224
+- 432-445	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 224
+- 698-710	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 443, 4791
+- 207-222	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 771
+- 2774-2792	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 771
+- 2253-2274	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 917
+- 2276-2380	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 917
+- 2753-2783	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 917
+- 385-470	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 917
+- 2299	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 1128
+- 2338-2356	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 1753
+- 2997-3002	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 1753
+- 3024-3034	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 1753
+- 310-313	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 1850
+- 792-799	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 1850
+- 329-388	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 4338
+- 2340	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 4791
+- 2637	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 4791
+- 274	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 4791
+- 1365	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 4791
+- 11	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 5312
+- 32	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 5597
+- 27	unbound	bare range bound to no cited file in its clause; CONTRACT.md line 5836

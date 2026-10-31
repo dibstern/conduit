@@ -1,0 +1,2046 @@
+# T3 reader sweep allow list (scripts/run-ledger/t3-reader-sweep.py; CONTRACT.md A.18 T3, A.21).
+# Each entry: substring<TAB>class, class one of history, rejected, unrelated, pointer, owner; 40 or more characters.
+# Carried from the REDESIGN-11 prototype allow list, pruned to entries a hit uses. Section comments below are its history.
+# A hit in a bead's newest note needs every entry on its line to be owner or pointer.
+the stop is open, with wake work gained since the first; an interaction Pending at a Stop commit;	history
+F40, F51): a late release after `process_lost` had no trigger for its re-send, or re-sent past	history
+M9's (one stopping entry per session ending at its owners' end or its step,	history
+# REDESIGN-8 bead notes and retitles (current text), added after the bead writes
+revises D51, D53, D54 and both amendments in place (A.18).	pointer
+`stopping` entry owns it (provider-turn-service.ts 363-371 at 1ba91324). Each holder had its own	history
+model of main (one `stopping` entry per session that ends when its retirement returns or its	history
+`owner runs`; `363-371`; `Run-less`; `Stop or Run now`; `32.2.18`; `D54`.	history
+2, 3.8 condition 2 reading the deadline step (an OpenCode Run's end), a message sent with no	history
+(cited at L6's End and in D54) plus 2.1 rows 203 to 205; D55 is main's Cancel arm; D51's arms are	pointer
+
+
+2312: B marked while stopping, the marked clause unpauses (inbox-run-status-	pointer
+kill's issue, before its process_lost (marked, runs next); a steer during a	pointer
+(SendNow hands the head off). A message sent while stopping holds is marked	pointer
+kill the deadline step issued with no process_lost yet) is marked	pointer
+admission position, behind the pause (D53), sent by D51's decider.	pointer
+inbox.paused is not moved into the ledger: paused is derived (D51).	pointer
+message sent while stopping holds is marked (input.interrupt_requested) when	pointer
+
+
+# REDESIGN-8 r2 (2026-10-31): contract lines reviewed against the r2 text (pointer); superseded bead lines (history);
+# 32.27's goal phases (unrelated); r2 pending notes, one entry inside each wrapped line with a term (history).
+| 207. A steer whose send fails is `failed`, final, with its text back i	pointer
+the latest send for D51's stop term (main writes run.request	history
+B is marked while stopping holds, so the marked clause unpau	history
+stop is open': a message sent while stopping holds (D51).	history
+
+# REDESIGN-9 (round 17) hits
+| 206. A steer that possibly reached the agent when a runner failure ended its Run is placed as sent	pointer
+A.19's; under D57 the oracle's inbox expectations are computed by main's module, so A.19's list	history
+### A.19 REDESIGN-9 The inbox is main's module (2026-10-31): D57 + the wire replay	history
+reads, and who writes it. D57 removes the derivation: the inbox is main's module, unchanged, and	history
+inbox stays main's module (D57). Options f	history
+work. Chosen (D57). Broken at: a ledger outcome with no main writer (a failed steer, a stopped	history
+twice (the seam at the view, D51, against at the writers, D57; the check by prose, by token, by	history
+- Deleted from A.18's additions: D51 as main's `decideInbox` over a ledger view, replaced by D57.	history
+the pause (3.9), now main's module (D57).	history
+| Steering | main's inbox module (D57) |	history
+| Pause, decided and displayed | main's inbox module (D57) |	history
+| Admission, Run now, Resume, the mark | main's inbox module (D57) |	history
+conduit-82tn3223; under D57 main's module computes them, so this list confirms, not decides:	history
+the old module unchanged as a part of the new one, as D57 does.	history
+| e: the inbox stays main's module | chosen (D57) |	history
+the session inbox's own order and pause state (it becomes a read view of the	history
+reactor claim/refusal/delivery_indeterminate writes, requeueFailedSteers,	history
+columns (3.9 D57, 12.2). Supersedes 'the session inbox's own order and pause	pointer
+pause, 3.9) (the inbox stays main's module) and 'requeueFailedSteers,' in	pointer
+the list of writers to delete (main's requeueFailedSteers stays; the ledger	pointer
+requeueFailedSteers. Pattern note: 1 and 3 are work the deleted replay did	history
+the outbox failed) skips requeueFailedSteers, input stuck steering; (2) the	history
+included, is main's inbox module (D57). Supersedes 'Admission steers only	pointer
+checked (D57). At each step it compares main's readView over each database,	pointer
+(D57); the public model stores no pause and derives none: main's	pointer
+(D57), so main's code computes every inbox expectation. 3.13 and the oracle	pointer
+12.2 assigns this ticket. Every D51 in this bead's notes reads D57 (the	pointer
+requeueFailedSteers and native projection settling undelivered sends with	history
+run.requested row. A message during a Codex wake Run joins it as a Run Input	history
+REDESIGN-9 (2026-10-31, contract-after-r9.md): owns D57's writers (3.9): the	pointer
+message.created, Stop's requeue, requeueFailedSteers, steerDeclined), D53 as	pointer
+next message with no error. Replaces' requeueFailedSteers (main's	pointer
+requeueFailedSteers stays and the ledger calls it; a steer that possibly	pointer
+wrong (K6 19 of 39). Chosen: D57, the inbox is main's module at 1ba91324,	pointer
+inbox module (D57): a steer joins a wake Run as main's does, and a message	pointer
+that arrives as the Run ends returns to the inbox as the next message, once,	history
+module (D57). Supersedes 'that arrives as the Run ends returns to the inbox	pointer
+main's inbox module (D57); Stop and Run now commits are L6. Supersedes	pointer
+scoped to D57's soundness, core state and the tickets, and any later round	pointer
+CLAUDE.md's three spec review rounds run now (scoped to D57 soundness, core	history
+shared). Seam (both): D57 reuses main's decider and read SQL but not main's	history
+failure must use requeueFailedSteers at the front, stopping ends before	history
+# REDESIGN-9 review round 1 (2026-10-31): contract readers of the changed terms and the notes-r1 lines, as bd show wraps them.
+`started_at`, `completed_at` and `joined_into` (main's `run.requested`, `run.started` and	owner
+the ledger reaches it only as main's run seam (D57); a replay of the same provider wire through	history
+Kept as D57's write side, limited to the run lifecycle events at the ledger's own commits; a	history
+main's Cancel arm removes the input (D55, D57; review round 1).	history
+- Added: D57, the inbox is main's module and the ledger is its run seam (3.9; the seam rewritten	history
+D57's writer list as the seam (every write it names is main's writer, now on main's trigger);	history
+now D57's. REDESIGN-9 itself rewrote in place, counting nothing: D53's writers (an amendment	history
+| Input state | queued, steering and removed: main's `pending_inputs` (D57); failed: the ledger's Run Input ou	history
+| The view main's decider reads | main's `readView` over the read surface the seam's events feed (D57) |	history
+| Trace to main | none: both sides read main's own translators' events, and main's projector arms write the re	history
+`interrupted` and main's stop term pauses (D57).	history
+runner failure's unreached steer returns to the inbox front, paused (`requeueFailedSteers`);	history
+| d: the ledger feeds main's module as its run seam | chosen, as D57's write side |	history
+Gone-time Settle, outbox status writes, joined_into or stopCovers as	history
+[ ] Deleted: the outbox, stopCovers and the Stop cohort, joined_into, and	history
+payload.stop.owners, stopCovers, legacyStopOwnersQuery, joined_into,	history
+over :memory: SQLite, and writes its read surface through main's writers	history
+ledger writes the inbox's read surface only through main's writers	history
+reused unchanged, and the ledger writes its read surface only through main's	history
+Supersedes 'Gone-time Settle, outbox status writes, joined_into or	history
+stopCovers as' applicable: joined_into and the send_turn row's status stay	history
+main's projector arms', fed by the seam (3.9 D57); this ticket deletes its	history
+D57). It is provider_runs status, requested_at, started_at, completed_at and	history
+joined_into (main's run.requested, run.started and terminal arms); the	history
+turnFences, fenceLifts, turnEnds and the bus advances (the seam). This	history
+send_turn rows and joined_into stay as the read surface) and '[ ] Deleted:	history
+the outbox, stopCovers and the Stop cohort, joined_into, and' (deleted: the	history
+time Settle, outbox status writes, joined_into or stopCovers as' applicable:	history
+joined_into and the send_turn row's status stay main's projector arms', fed	history
+by the seam (3.9 D57); this ticket deletes its provider's legacy recovery	history
+L6's window as main's inbox reads it: turnFences stopping holds from the	history
+joins through the seam's run.started (D57).	history
+the read surface (3.9 D57, each value with its main writer), readInboxState,	history
+unreached steer at the inbox front; a Stop and two sends between a kill's	pointer
+file's blob hash checked (3.9 D57): SessionInboxLive and the ReadQuery Layer	history
+surface through main's writers' (D57): as main's run seam it writes, in each	history
+code reacting, and requeueFailedSteers at start, the drain's re-abort and	history
+failure's unreached steer returns to the inbox front, paused	history
+(requeueFailedSteers); a Stop in the kill window reads stopping until each	history
+owns main's run seam (3.9 D57): the ledger provides ProviderTurnServiceTag	history
+(sendTurn admit, beginStop the Stop commit, turnFences and fenceLifts the	history
+surface only through main's writers' and '(run.requested for every send, a	history
+requeueFailedSteers, steerDeclined) (the seam above). Owns the steer that	history
+turn/steer). Row 206: main's requeueFailedSteers returns the steer to the	history
+applied. One seam: D57's writer list was a hand account, so the ledger is	history
+rule over five cases, each as main; row 206 cites requeueFailedSteers at the	history
+steer into a wake Run joins it through the seam's run.started; joined_into	pointer
+stays main's run.started arm's column (D57). Supersedes 'stays for the rest	history
+Claude adapter's commits feed main's run seam (3.9 D57): run.started for a	history
+writes, joined_into or stopCovers as' applicable: joined_into and the	history
+D57); this ticket deletes its provider's legacy recovery classification,	history
+(D57). Supersedes 'Run's completed end stays steering and runs as its own	history
+Stop commit is the seam's beginStop (3.9 D57): it writes, for each send not	history
+surface only through main's' writers (the ledger is main's run seam, 3.9 D57).	history
+run, HLK 9B and AUDIT-2 as pointers to D57, 3.6's advance, 3.7's `stopping`, 3.13's comments, 9's	history
+through main's writers' (D57): as main's run seam it writes, in each commit,	history
+bead's notes reads D57. REDESIGN-9 r1 (spec review	history
+derived (D51).' (main's module computes it, D57). REDESIGN-9	history
+D57. REDESIGN-9 r1 (spec review round 1, 2026-10-31	history
+D57). review round 1 fix applied (2026-10-31): 15	history
+2. Review round 2 rewrote in place, counting nothing: D57 without the seam's `turnEnds` publish	history
+(the host's); the Stop commit's restated writes as a call to `prepareStop`; L6's `stopping`	history
+check; 5.3's fourth step as that call; the oracle's inbox deleted (a 32.2.3 scope cut); D53's placers and D57'	history
+| `input.requeued` | main's code: `prepareStop` at the Stop commit, `requeueFailedSteers` at 3.9's triggers |	history
+| Run lifecycle events; the Tag's `sendTurn`, `beginStop` and `turnFences` `stopping` | the ledger, as main's 	history
+ProviderTurnServiceTag is the oracle's (its run seam); ProviderRegistry is	history
+main's run seam (provides ProviderTurnServiceTag, writes run.requested,	history
+writes, requeueFailedSteers,' (settleRunCommands and requeueFailedSteers	history
+status; send_turn rows are read surface). Supersedes 'turnFences,	history
+stopping is the seam's; fenceLifts and the hold are main's code; turnEnds is	history
+wake Run' joins through the seam's run.started (D57) (a Run of its own,	history
+seam's ProviderTurnServiceTag (on the oracle side, an adapter over the	history
+oracle stays pure and models no inbox (3.9 D57, A.19): its own inbox fields	history
+'ProviderTurnServiceTag is the oracle's (its run seam); ProviderRegistry	history
+owns the replaced rows of 3.9's service boundary: the Tag's sendTurn (admit)	history
+and beginStop (the Stop commit, calling main's prepareStop in its	history
+send outcome with main's literals; main's requeueFailedSteers at each	history
+are sendTurn, beginStop and turnFences stopping; fenceLifts is main's code;	history
+'requeueFailedSteers stays and the ledger calls it' (each trigger is in	history
+prepareStop; requeueFailedSteers runs at each replaced trigger, and row 207	history
+runner-payload.ts 2561-2580). Supersedes 'inbox module (D57): a steer joins	pointer
+it through the seam's run.started; joined_into' (a Run of its own;	pointer
+joined_into stays main's column). The label work is unchanged.	pointer
+
+# REDESIGN-10 (D58): hits of the round 18 Terms. Body uses of changed terms are pointers; A.19, A.20 and superseded bead text are history.
+| Coverage (did Stop cover this run) | main's `stopCovers` over the comm	owner
+1. **Covered?** If `stopCovers(session, run)` (5.2): when the run has no	pointer
+on the hold, `run.released`, the feeder, `stopCovers` (5.2) and the jour	pointer
+`acceptStopEffect`'s requeue, paused, as main's (provider-turn-session.t	pointer
+- One predicate, `stopCovers(session, run)`, answers it. It is main's, i	pointer
+The engine owns control acceptance: R2's `acceptStopEffect` (orchestrati	pointer
+- Coverage has one owner at every point in the build order, `stopCovers`	pointer
+it claims an outbox row (`markRunning`), calls the provider adapter, and	pointer
+- F44. A send recommitted after a Stop: `stopCovers` reads the cohort, n	pointer
+on the hold, `run.released`, the feeder, `stopCovers` and the journal an	pointer
+| 32.8 | Stop, interrupt and Run now; `interrupt_turn` built in R2's `ac	pointer
+| 32.13 | deletes the old run-state copies: `owned_run_ids` and the fall	pointer
+| Q26 | SEND-SCOPE-5 | C: the Run Ledger is that owner; R1 and R2 land f	pointer
+| OPEN-3 | A: the ledger replaces the Stop cohort at 32.13; `stopCovers`	pointer
+HLK 9B and AUDIT-2 amendments in place as pointers to D57 (A.19). REDESI	history
+and has no Layer, Tag, transaction or fiber. This replaces D57. Reason:	history
+- Amends SPEC (Schema, 3.12): there is no Run Effects table; the outbox	history
+(D58). Reason: the switch moved `running` away from `markRunning`, its o	pointer
+- Amends OPEN-3 (5.4): the ledger does not replace the Stop cohort; `sto	pointer
+a requeue or a decline) is the plainest. The seam is the inbox's read su	history
+Methods: seam placement (at main's run seam, not at main's view); depth	history
+pure`; `stops being pure`; `imported`; `stop's open and end`; changed, `	history
+`sendTurn`; `beginStop`; `ProviderTurnServiceTag`; `never claims`; `vend	history
+- Added: the read surface keeps main's schema and projector arms through	history
+- Added: the service boundary, each main service that writes or wakes th	history
+claim guard at each switch ticket included (3.9, 3.12; review round 2).	history
+| Each main service writing or waking the module's reads | 3.9's service	history
+Open risks: main's module needs a SQLite read surface and Effect layers	history
+grows a dependency on main's persistence; the read surface's columns can	history
+| seam placement: at main's run seam | chosen |	history
+(`markRunning` 1189-1260, the one `running` writer; `nextPendingRequests	history
+(`acceptStopEffect`, orchestration-engine.ts 658-940 at 6c9ff950); U10 t	history
+| r2 ub P2-D: the claim guard on the wrong ticket | K5 | U4 | 3.12: no g	history
+| r3 ub P1-1, poteto P1-2: `running` with no writer once the claim moved	history
+| r3 poteto P2-5: clearing `retryable_failed` with no owner after a swit	history
+| a: round 3's narrow fixes to D57 and its table | U2 (Tag, ledger; clos	history
+write bodies); M2 the deletion test (deleting D57, the service boundary	history
+- D57 is deleted: main's units run whole, so nothing reaches main's inbo	history
+- The service boundary table is deleted: no main service is replaced, so	history
+Stop after delivery: Claude, one start delivered (`markRunning`, then th	history
+Stop; `acceptStopEffect` selects no row (the send is `running`), commits	history
+calls (A.19's comparison set shrinks); effect expectations read outbox r	history
+table; coverage expectations read `stopCovers` at every ticket, with no	history
+- Deleted from A.19's additions: D57, the inbox is main's module and the	history
+status write outside main's projection and its stopCovers use, as	history
+3.9's service boundary for Cursor: from this switch, the guard that main	history
+outbox rows, the reactor's markRunning stays the one writer of running,	history
+in one' transaction (no backfill) and '3.9's service boundary for Cursor	history
+rows). Its stopCovers use stays (5.4). The rest of the ticket is unchang	pointer
+3.9's service boundary for OpenCode: from this switch, the guard that ma	history
+service boundary for OpenCode: from this switch, the guard that main's'	history
+stopCovers use stays (5.4). The process reporter is unchanged.	pointer
+owners, stopCovers and legacyStopOwnersQuery (§5.2, §5.4).	history
+ledger's control stop instead of stopCovers.	history
+payload.stop.owners or calls stopCovers (§5.4)	history
+files): Delete every other writer of an effect's status: settleRunComman	history
+REDESIGN-9 (2026-10-31, contract-after-r9.md): the inbox's read surface	history
+writers, not the' columns: the read surface stays main's schema and	history
+settleRunCommands); pending_inputs (the input arms); messages.input_id	history
+outbox's dispatch, stopCovers and the Stop cohort, and). Supersedes 'Gon	history
+projection and its stopCovers use, as applicable.	history
+outbox's send_turn rows are main's read surface, written by the seam's s	history
+'files): Delete every other writer of an effect's status: settleRunComma	history
+payload.stop.owners, stopCovers, run joining, steer-declined reservation	pointer
+status write through the transition function (3.12). This ticket deletes	pointer
+joined_into, payload.stop.' owners, stopCovers and legacyStopOwnersQuery	history
+control stop instead of stopCovers.', '[ ] Coverage is read only from th	history
+stopCovers (both stay), '[ ] The interpreter-only effect-status test cov	history
+'outbox's dispatch, stopCovers and the Stop cohort, and' and 'provider;	history
+[ ] One transition function; no site outside it assigns lifecycle state	unrelated
+send_admission_timeout; markRunning keeps the active run_id. Review roun	history
+C+J+K: Run Ledger stopCovers predicate checked inside holdRun; holdRun	history
+writer of delivery_indeterminate; reactor uses stopCovers and never reco	history
+report.md: stopCovers treats non-Stop end_session as legacy Stop; strand	history
+SEND-CONTINUATION amendment built as written: C1 (stopCovers from	history
+wake executions and label work is recorded by the arm in acceptStopEffec	history
+markRunning to read the fence in the ledger's view, and the intake recal	history
+compares main's readView over each database,' (it compares the read surf	history
+stopCovers at every ticket, and the stop is main's entry with the ledger	history
+• One Stop rule for inbox rows and claimed rows (§5.4). It reads stopCov	pointer
+Stop covering both leaves neither re-sent, decided through stopCovers (§	pointer
+rows (stopCovers). Until then holdRun's loop owns re-sends.	history
+uncertainty, outbox re-sends and one Stop rule reading stopCovers until	history
+stopCovers at every ticket (5.4, OPEN-3 amended); rows 210 and 212 chang	pointer
+the reactor's outcome body and markRunning, through the outbox's transit	history
+the ledger's control stop after it;' (stopCovers stays the one owner) an	history
+'uncertainty, outbox re-sends and one Stop rule reading stopCovers until	history
+acceptStopEffect's. Steer association stays main's joined_into, folded b	history
+run seam replaces is not drawn; main's requeue of stranded steers runs f	history
+applied. One table, 3.9's service boundary: each main service that write	history
+replaces D57: the ledger lives inside main's writes, as one projector ar	history
+its own body, and the outbox's transition function, which every status	history
+Supersedes 'One table, 3.9's service boundary: each main service that wr	history
+or' wakes (no main service is replaced, so there is no such table) and '	history
+3.9's service boundary for Codex: from this switch, the guard that main'	history
+one' transaction (no backfill) and '3.9's service boundary for Codex: fr	history
+Decided (§2, §3.12): the Run Effects table is added empty, written only	history
+[ ] The Run Effects table exists, is empty after migration and no provid	history
+at 32.6/32.10/32.11/32.21), Round 2 audit header (merged); added: Run	history
+SQLite schema, four verbs, deadlines as data, empty Run Effects table) n	history
+and the outbox's transition function with T5 (only that module writes ou	history
+'Decided (§2, §3.12): the Run Effects table is added empty, written only	history
+the ledger (no such table), '[ ] The Run Effects table exists, is empty	history
+'(Run Effects table added empty)' (deps.txt retitles it). The four verbs	history
+stopCovers use, as applicable. REDESIGN-9 r2 (spec review round 2, 2026-	history
+3.9's service boundary for Claude: from this switch, the guard that main	history
+in one' transaction (no backfill) and '3.9's service boundary for Claude	history
+but is not read for coverage before 32.13. Until then stopCovers over	history
+stopCovers only; nothing reads the control stop record for coverage (§5.	pointer
+consulted' (OPEN-3 §5.4: stopCovers stays the coverage owner until 32.13	history
+acceptStopEffect body (5.3), the ledger's arm recording the stop's items	history
+coverage stays stopCovers over payload.stop.owners at every ticket (OPEN	pointer
+then stopCovers over' (it is never read for coverage) and '32.13 switche	history
+the outbox's transition function. Run A.20's two traces	history
+every status write through the transition function. T5: only the transition	history
+# REDESIGN-10 spike fix (2026-10-31): contract readers rewritten or checked against the spike gate (pointer); 32.2.19's description and earlier notes superseded or recorded by notes-spike (history); notes-spike lines (history).
+INSERT OR IGNORE against a partial unique index on (`project_key`	pointer
+insert (`pending`), `markRunning` (`running`, its only writer,	pointer
+1338-1424), `markCompleted` and `writeFailure` (from any status, as main)	pointer
+the refusal sweep (open rows to `cancelled` or `failed`, it deletes nothing,	pointer
+(`settleRunCommands`, projectors-effect.ts 1742-1789), and R2's `acceptStopEffect` (deletes	pointer
+- **`markCompleted` and `writeFailure` keep main's unguarded write.**	pointer
+(`markCompleted`, `writeFailure`: orchestration-side-effect-reactor.ts 2253-2274	pointer
+holds no drain lock, so the refusal sweep, project deactivation or control	pointer
+ledger's projector arm inside main's project, the keyed INSERT OR IGNORE of	history
+writers, not 8, plus the cancelled status, the refusal sweep updates rather	history
+contradicted 3.12; the spike's running guards on markCompleted and	history
+writeFailure change main's behaviour (CONTRACT.md 3.12 now keeps main's	history
+statuses from the function, CONTRACT.md 3.12) and 'the keyed INSERT OR	history
+next send (broke 10 Run-now-after-Stop scenarios), INSERT OR IGNORE needs a	history
+inserted), the keyed INSERT OR IGNORE of the effects main has no writer for,	history
+supersedes, in the REDESIGN-10 note, 'the keyed INSERT OR IGNORE of the	history
+with command_id ledger:<run>:<effect>:<attempt>, INSERT OR IGNORE against a	history
+transition function, which writes nothing itself, and the writer list	history
+equals 3.12's (15 writers; markCompleted and writeFailure keep main's	history
+
+# REDESIGN-10 r1 (spec review round 1): generated per hit; classes reviewed by section and line
+nt; the stop commit's possibly-written set (4.5; a hold	unrelated
+tside a stop commit (including a refusal's release once	unrelated
+y | the stop commit's release evidence (4.5, 6.3); gone	unrelated
+by the stop commit's post-commit step (6.11) and daemon	unrelated
+lve` is `record`. There are no whole-state snapshot even	unrelated
+only by `record`. Drift is caught through the public int	unrelated
+`process_started`, `process_lost` and query-ended eviden	pointer
+first `process_started`; its latest `querySeq` is the h	pointer
+`process_started` and later unsolicited labels, counting	pointer
+nner's `process_started` (only for totality: the host re	pointer
+`process_started` changes nothing, and a host never reus	pointer
+`process_started` of a live runner is the same process r	pointer
+Retiring moves no Run itself: a Run moves only once its	unrelated
+ans no `process_started` since it issued, and a covered	pointer
+e next `process_started`, to that runner. A case 2 send	pointer
+`process_started` addresses them. Their work has already	pointer
+ith no `process_started` yet fixes the label of that run	pointer
+stop's deadline step (L6): later evidence on the send i	pointer
+d, that stop commit's releases read first (4.5; another	unrelated
+nner's `process_started` counts, carrying none, L1). A s	pointer
+(4.5, a stop commit's included, L1), a rejected resume o	unrelated
+nch its stop commit decides is never held during the sto	unrelated
+sed to `retryAt` when a retryable outcome names a later	pointer
+ppends `alarm_fired` (a settlement with no token). The d	pointer
+main's `stopping` entry in U2, the provider turn service	owner
+`stopping`, its Stop entries and their restore (provider	pointer
+stop's deadline step ends its work and its Run ends as	pointer
+ows are exempt from the session lane in `nextPendingRequ	owner
+eadonly retryAt: number } | { readonly tag: "permanent";	pointer
+eadonly retryAt: number } // host never called the provi	pointer
+kind: "alarm_fired" } | { readonly kind: "hold_exhauste	pointer
+eadonly retryAt: number } } | { readonly kind: "process_	pointer
+kind: "process_started"; readonly label: Label; readonl	pointer
+in the stop commit's post-commit step (6.11). That scop	unrelated
+unner's stop commit's post-commit step and closes it the	unrelated
+nner; a stopping runner of the session, if any | { _tag:	unrelated
+e and a Stop commit exclude each other in the database:	unrelated
+lease a stop commit carries is the reconciler's (6.3).	unrelated
+and the stop commit releases `NotSent` every hold it rea	unrelated
+if the stop commit carried it (below). Once that stop h	unrelated
+by the stop commit (below, 4.6). No other reply code is	unrelated
+e, or a stop commit reads its hold outside the runner's	unrelated
+- **A stop commit carries the releases it has evidence f	unrelated
+Failure`: an announced idle exit is a stop commit (6.3).	unrelated
+tside a stop commit, the reconciler for one a stop commi	unrelated
+stop's deadline step (L6), not the interrupt. On receip	pointer
+`retryAt`; the reactor re-sends on a fresh run (4.8). -	pointer
+tcome; `retryAt` is a lower bound (3.7). The cap is 5 tr	pointer
+Stop commit. The ledger folds a retryable outcome (3.6);	pointer
+stop's deadline step ends it (L6). An actual terminal j	pointer
+ed by a stop commit, 4.5), at its native interrupted res	unrelated
+stop's deadline step, which ends its work and so its Ru	pointer
+deadline step alone never destroys them. - Stop is not a	pointer
+- `legacyStopOwnersQuery` (outbox order) is a read-only	pointer
+pe it. `legacyStopOwnersQuery` stays main's at every tic	pointer
+ds it (`legacyStopOwnersQuery`, orchestration-engine.ts	pointer
+- **`process_started` is reported each time a serving ru	pointer
+ich its stop commit's post-commit step closes (6.11); it	unrelated
+- **Deleted:** `withEntryOutput`, `currentCommitGuard`,	unrelated
+ts on a Stop commit. `recover` registers the Stops it re	unrelated
+ands. A Stop commit decodes the runner's row and also: -	unrelated
+in the stop commit's post-commit step (6.11). - Each ac	unrelated
+mes the stopping predecessor and its window end in `Unse	unrelated
+ejected Stop commit ends only that wait, and the window	unrelated
+a Stop commit covers it (4.4). No other code scans the s	unrelated
+- **Deleted:** `entry.stopRetryable`, the `nextStopped`	unrelated
+and the Stop commit exclude each other (4.3).	unrelated
+Request-stop commit owns its full in-transaction row/rol	unrelated
+ds R's `process_started` after old's `process_lost` (6.1	pointer
+f old's stop commit; it is not a second closer. Its memo	unrelated
+- **Deleted:** the registry role as truth, the `newestRu	unrelated
+cess's `process_started` is reported only after its pred	pointer
+re R's `process_started`, the retiring commit records `p	pointer
+:** the stop commit's post-commit step, together with `r	unrelated
+stop commit's post-commit step and closes it the same wa	unrelated
+ore its stop commits, that commit carries these releases	unrelated
+art the stop commit released `JournalAbsent` has unlaunc	unrelated
+- **Deleted:** `background-liveness.ts`; the ambient fil	unrelated
+kind: "process_started"; label: Label; reattached: bool	pointer
+does a `process_started` settlement; an effect's outcome	pointer
+top and wake labels:** 3.7 L6. - **Wake Runs.** A `turn_started` folded	pointer
+stop's deadline step never destroys on its own. A confir	pointer
+hot, a `process_started`, or the current process retirin	pointer
+stop's deadline step when the stop ends (L6, D43): what	pointer
+dence, `process_started` settlements, and the decision t	pointer
+ts for `process_started`; the feeder spawns for it (H3,	pointer
+stop's deadline step (L6) | - **Effect interpreter.** M	pointer
+nd lane exemption are 32.3's (3.12, 2.1 rows 215, 216).	pointer
+tored. `process_started` is reported when a session bind	pointer
+stop's deadline step ends it (L6), as main ends its Sto	pointer
+13. The Stop commit fails and is not retried: - Any row	pointer
+ces the Stop commit: it is either held by the runner and	pointer
+ore the stop commits, that commit carries the `JournalAb	unrelated
+`Idle` stop commit releases it `NotSent` (4.4, 4.5), de	unrelated
+ndoned` Stop commit: the reconciler commits it after the	unrelated
+cleanup Stop commit: as F71, with no caller retry. - F74	unrelated
+ed user Stop commit: the runner serves until the commit	unrelated
+ind one stopping predecessor: both delivered, in order.	unrelated
+e only, per provider, over the full public alphabet: use	unrelated
+s, and `alarm_fired` at arbitrary times. Evidence target	pointer
+fires `alarm_fired` at `alarmAt` and at arbitrary other	pointer
+hority, stopping, process labels, session gates and proj	unrelated
+Code's `process_started`, labelled with the instance's `	owner
+4.4); a stop commit carries the releases it has evidence	unrelated
+ter the stop commit's releases, for every `StopReason`;	unrelated
+Stop commit (V); who serves is read in the transaction (	history
+, whose deadline step escalates it (L6, 8.4). - D5: toke	history
+probe; `retryAt` only raises it (3.7). - D21: a command	history
+ct; LI8 exempts unfinished probes (8.3). Rejected: count	history
+ons: a `process_started` retires every other runner, sta	history
+later `process_started` of a live runner is a reattach;	history
+ts and `process_started` replace tasks; older wake execu	history
+runner `process_started` is a reattach (L1). A replaced	history
+ts and `process_started`. Reason: after a replacement th	history
+er of a stop commit's releases), D48 (3.6) and the claus	history
+(the stop commit's release evidence; a refusal joins or	history
+main's `stopping` entry; the ledger owns its items) and	pointer
+ir lane exemption, evidence events, the OpenCode deadlin	pointer
+deadline step with items and the restart's confirm, 2.1	pointer
+deadline step with a wake execution outstanding (L6). RE	pointer
+after a Stop commit; an answer in delivery at a Stop com	pointer
+stop's deadline step. Its review round 2 needs four mor	pointer
+penCode deadline step with items and no owner runs; a se	pointer
+rivate `stopping` with two owners (ub r3 P1-1, P2-A, P2-	pointer
+other than `uncertain` are, 4.11); or its runner's `proc	pointer
+ore its stop commit's `Refused` release (A.11's wait, it	pointer
+e next `process_started` the feeder steps the same send	pointer
+yet delivered ends `interrupted` at once, with no effect	pointer
+ort and wake labels missed (ub r1 P1-A, poteto r1 P1-A);	pointer
+, and a stop commit's releases ride on its `process_lost	unrelated
+ore its stop commit, so a start the commit then released	unrelated
+caps no send (4.8). A connection's first `retiring` refu	unrelated
+stop's deadline step is dropped when the stop ends, at	pointer
+stop's deadline step (L6). REDESIGN-10 review round 1 d	pointer
+stop's deadline step or a label becoming older (L5); ma	pointer
+while `stopping` holds is decided by main's inbox (D58)	pointer
+main's `stopping` wait read them, so deleting them split	pointer
+at the stop commit (2026-10-29): A + M1 + M3 + M5 + N +	history
+ease. A stop commit turned that state into ledger facts	history
+d every stop commit carries the releases its evidence al	history
+on the stop commit's releases | chosen: the permission	history
+r1): a stop commit's `process_lost` carries its release	history
+r2): a stop commit carries the refusals its evidence re	history
+stop commit's releases, the send's own answer). So "neve	history
+unner's stop commit or its Run's committed Stop | chosen	history
+e next `process_started`; round 1's `session_ended` case	history
+am (the stop commit, then the seal) and the findings mov	history
+the stop commit's release at a connection's first `retir	history
+ne, the deadline step and the end (L6, D54); Runs, sends	history
+e, so a deadline step escalates it (poteto P2-1, D4 amen	history
+ng; the deadline step, not a probe column, ends OpenCode	history
+hen the deadline step ended its work; `end` in reason 2.	history
+stop's deadline step as a kill (L2 item 1); D51 loses `	history
+nce the deadline step had issued, which review round 2 d	history
+or the deadline step arrives (K2, an item with no owner	history
+cap`; `deadline step`; `has issued`; `before the step`;	history
+c`; `` `stopping` entry ``; `stop_unconfirmed`; `owner r	history
+deadline step, 4.6's at-receipt interrupt with its comma	history
+adline, deadline step and end (at its items' end, the st	history
+ugh the deadline step reaches it (L6); the fence holds b	history
+ps one `stopping` entry per session, joined by later Sto	history
+olds a `stopping` state until the stop settles and close	history
+main's `stopping` | | a: the round 3 reviews' narrow fix	history
+: bb, a stopping state that closes the whole session | r	history
+main's `stopping` entry (cited at L6's End and in D54) p	history
+, L6's `stopping` window, S9.3 and SPEC One active run (	history
+`busy` per provider | | r1 5. The stop's membership and	history
+main's `stopping` window as a read of L6 | | r1 6. Delet	history
+d wires per provider and case; kept as recorded fixtures	history
+; L6's `stopping` window (main's, through each kill's `p	history
+it as `stopping` until each kill's `process_lost` or fa	history
+while `stopping` holds, which lifts the decided pause b	history
+while `stopping` holds, marked at Submit; a known id ad	history
+reads `stopping` and opens no stop. - The titles at 322	history
+lifts `stopping`. Open risks: main's module needs a SQL	history
+`stopping` 202, `lifts` 205-206, the owners wait 207-222	owner
+6 ends `stopping` before main in the kill window | K4 |	history
+rivate `stopping` with two owners | K2 | U2 | L6: U2's a	history
+U4, U5 per provider, both machines live | four switches	history
+s U2's `stopping` entry; the ledger owns its items, fold	owner
+`acceptStopEffect`'s projection; the deadline is `deadli	owner
+list is deleted: main's projector arms write what main r	owner
+s R2's `acceptStopEffect` body, run whole (5.3). | State	owner
+op and `stopping` | U2's entry; its items, the ledger (L	owner
+(INSERT OR IGNORE, keyed, never while `replaying`), the	history
+es one `stopping` entry with the row's `deadlineAt`; rep	history
+penCode deadline step with items and no owners ends the	owner
+outbox one provider at a time, with a table, an authori	history
+ledger one provider at a time, each switch making `proc	history
+making `processLost` a no-op (section 2, 6.5, 12.1, 32.6	history
+atabase uniqueness constraint on one active Run (3.1). -	history
+` names wake labels (4.6, OPEN-5). - Deleted from A.19's	history
+t` rows exempt from the session lane and `armRetryWake`	owner
+uler's `alarm_fired` (2.1 row 215, 3.9). - Added: an Ope	owner
+penCode deadline step with items ends them through `sett	owner
+of the deadline step (L6, 3.13) and the interrupt's run	owner
+such a Stop commits, the runner's row is unretired, so	unrelated
+Switch for Cursor, as 32.6 does for Claude (§2, §3.12, §	history
+as 32.6 for Claude; processLost is a no-op for Cursor.	history
+d): the switch for Cursor moves run state to the ledger'	history
+Switch for OpenCode (§2, §3.12, §4.10): Run Effects, run	history
+process_started for the session's server instance (daemo	history
+reports process_started{reattached: true} with the same	history
+process_started). An unmanaged server's restart is invis	history
+stop's deadline step or its own evidence (L6, 8.3). Sup	history
+OpenCode Run or wake execution ends by its evidence or t	history
+stop's deadline step). REDESIGN-9 r1 (spec review round	history
+d): the switch for OpenCode moves run state to the ledge	history
+rsedes 'Switch for OpenCode (§2, §3.12, §4.10): Run Effe	history
+H4 gate exemption: the project gate never applies to kil	history
+lies to kill_and_respawn. The interpreter runs a kill th	history
+3.8 (L6 deadline step). Drop both acceptance lines namin	history
+unters (stopping, stopSignalled, ending, idleExiting, ve	unrelated
+Ending, Stopping, Failed, Retired. Each state carries on	unrelated
+without stopping, startupTimedOut with verified, ending	unrelated
+iew (P1 Stop commit failure permanently fails entry.stop	history
+failed Stop commit aborts settleExitedRuns, evict queue	history
+(failed Stop commit strands settlement; killEntry succes	history
+stopping fixes and redesigning autonomously. Pattern: pe	history
+failed Stop commit; forced-stop TERM-KILL grace asserti	history
+andoned Stop commit leaves no retry obligation (:3470).	history
+failed Stop commit; who-serves read in the transaction;	history
+§3.8). process_started (fresh and reattached) as a Sett	pointer
+he next process_started; [ ] covered gives Failed{proces	history
+_lost | kill_and_respawn | session_ended} by its coverin	history
+ed; one deadline step; end when every item ends). Accept	history
+and its deadline step kills their runner; main's entry w	history
+adline, deadline step, end); this ticket owns label work	history
+ill its deadline step issued has its process_lost, as ma	history
+d reads stopping. A steer into a wake Run joins through	history
+d reads stopping. A steer into a wake Run' joins through	history
+main's stopping entry waits on them (rows 203, 204, L6)	history
+idence (process_started or a snapshot with no live or un	history
+stop's deadline step (8.4, D43), dropped at the stop's	history
+stop's deadline step (D43); the 8.4 confirm gate is 2.1	pointer
+rect is per provider (CONTRACT 4.10, 9 table). REDESIGN-	history
+e, then kill_and_respawn (9); a Codex wake ends at its l	history
+deadline step Codex gets kill_and_respawn, as main retir	pointer
+states, per provider (Claude, Codex, Cursor, OpenCode),	unrelated
+stop's deadline step, which ends every OpenCode send, e	history
+penCode deadline step ends every send, execution and wak	history
+and its deadline step (L6). Owns 2.1 row 202: a start wa	history
+stop's deadline step is main's process retirement. Fenc	history
+ter the stop commit's releases (4.5), for every StopReas	history
+.29.3's stop commit appends. 12.2 row: '32.2.16 (R2 runt	history
+stop's deadline step as L2 item 1's kill.	history
+fails. stopping, switching, turnInFlight, usageResetsAt	history
+nd busy per provider, Claude and Codex wake Runs include	history
+stopping and busy. Supersedes the r1 note's field list '	history
+', and 'stopping, switching, turnInFlight, usageResetsAt	history
+stopping entry restored with the row's deadlineAt, repla	history
+vation; process_started as a Settlement naming the runne	pointer
+Model: kill_and_respawn.runId nullable, command_lifecyc	history
+kill_and_respawn and end_session carry a label (close: i	history
+rect is per provider (§4.10, §9 table). Either add it to	history
+process_started reattached; L1 label split documented on	history
+derived per provider, r1-2). Remaining errors are oracle	history
+_sent { retryAt } (CONTRACT 3.4): the host never called	history
+t_sent; retryAt }; Settlement :153-154 still lists proje	history
+p's one deadline step, L6). REDESIGN-8 r2 (spec review r	history
+udgets, retryAt, journal finished outcome, end-session o	history
+nactive exemption). Old expectations were wrong because	history
+ent (H4 exemption). (c) 3.7's backoff ordinal n counts b	history
+every Run end with main's codes (the ends it decides inc	history
+w reads stopping until each kill's process_lost or its f	history
+delRun) per provider (Claude, Codex, Cursor, OpenCode) o	unrelated
+result, process_started (fresh and reattached), stop_tas	pointer
+s, vary retryAt, drop task inputs for Cursor/OpenCode, a	history
+unner's process_started (label fixed at that process_sta	history
+at that process_started); a case 2 send while its execut	history
+penCode process_started/process_lost per server instance	history
+attach (process_started reattached true) with tasks Know	history
+nce as process_lost then process_started under a new id.	history
+process_started (fresh spawn, register before hello), in	history
+before process_started and a deadline expiry in between	history
+reports process_started before any frame of that process	history
+control/process_started rows by dropping their 'while in	history
+ome for kill_and_respawn. review r3-2 (U): harness gener	history
+te; LI3 exemption must not extend to Interrupting Runs.	history
+failed stop commit, and the gate is 32.29. Generator in	history
+ion the stop commit released is a no-op (4.5). A later r	history
+he next process_started of a send a pending kill covered	history
+ng at a Stop commit; a Run-less end reaching the stop's	history
+stop's deadline step, interaction resolved at the commi	history
+stop's deadline step; a long wake behind a declined sta	history
+wake's turn_started on a held label just before and just	history
+ry at a Stop commit; an async question at a Stop commit	history
+commit and at a retirement; an end_session issued after	history
+atched, process_started or kill addresses it). The Queue	history
+stop's deadline step ended it (3.7 L6, 3.8). REDESIGN-7	history
+ror and retryAt, the projection moves the outbox row to	history
+process_started (L2); a covered send is never transmitte	history
+next process_started; a pending kill's sends never resol	history
+are deleted: the input is queued by D53. REDESIGN-6: fen	history
+to the stop commit; no send cleanup deadline. REDESIGN-	history
+stop's deadline step (L6). A capped probe ends with no	history
+process_started, counted as its process_lost; retiring c	pointer
+§6.1); kill_and_respawn as release (§5.1); Claude proces	history
+unner's process_started with no prior loss retires the f	pointer
+he next process_started is not retired [ ] Fixed trace f	pointer
+ity and stopping: kill coverage is L1 (retire at issued	history
+lost a, process_started b) b is live with authority.	history
+ore its process_started is not started: not live, no lab	history
+close/kill_and_respawn/end_session to it carry null; if	history
+d to R; process_started(R) then fixes the execution labe	history
+SIGN-7: stopping is the session's one stop (3.7 L6, D54)	history
+it; the deadline step is a kill_and_respawn per runner (	history
+nce its deadline step issues; a later Stop or end_sessio	history
+t while stopping holds (a stop open, a Run Interrupting,	history
+the deadline step). No Starting deadline (3.7), no proje	history
+process_started/process_lost like any runner (§9 OpenCod	history
+with a process_started, never assume one.	history
+stop's deadline step ends its work as coverage does. Cu	history
+nd, the Stop commit's turn.interrupted then input.requeu	history
+n Ledger redesign: core authority and stopping P1 BLOCKS	history
+armAt + alarm_fired). Model pinned for step 1 by orchest	history
+emoved; kill_and_respawn outcome = runner released; Run	history
+eported process_started/process_lost, now per instance w	history
+process_started per adoption with reattached). All appli	history
+before process_started is 'not started': not live, null	history
+ork; P2 process_started reported when a serving runner b	history
+precede process_started (fresh spawn, swap gap). All app	history
+ss_lost/process_started. Spec declared ready for oracle/	history
+unner's Stop commits, never refuses a transmitted send;	history
+pawn is exempt from the project gate, or a restart-time	history
+D50 removed; 4.8 fresh-Run and 4.4 same-execution re-hol	history
+in Idle stop commit; recovery abandoned uses confirmed-e	history
+l); the stop commit converted it to ledger facts while t	history
+ler); a stop commit carries the releases it has evidence	history
+R2 stop commits carry run.released only; one write-fiber	history
+eto 3): stop commit NotSent evidence misses a hold made	history
+ter its stop committed has no owner; ResumeRejected re-h	history
+ore the stop commit's releases. Second consecutive mater	history
+try and Stop committed); one wait for every coverage und	history
+kill's process_started does not stop transmission, idle	history
+s), one deadline step (kill_and_respawn per runner, conf	history
+(kill_and_respawn per runner, confirm-gated; OpenCode li	history
+ts end. Deleted: work episode, exhaustion, fence- expiry	history
+and one deadline step; label work has no clock), plus me	history
+in ends stopping at the step); Stop commit resolves answ	history
+deadline step issues; a later commit or end_session open	history
+main's stopping entry (provider-turn-service.ts 294-321,	history
+main's stopping entry as ending at its step (it ends wh	history
+ads the deadline step; a killed Run ends by 3.8; main's	history
+stopping citations corrected; reach is 'issued before th	history
+main's stopping entry also ends when its owner runs end	history
+t; L6's stopping holds through each kill's process_lost;	history
+stopping are the seam's; its hold, switching, fenceLifts	history
+ed; the Stop commit calls prepareStop; requeueFailedStee	history
+n; L6's stopping also ends when a kill's requestStop fai	history
+kill_and_respawn, stop_task, cancel_request; keyed by Ru	history
+main's stopping entry and the ledger owns its items (L6	history
+lane exemption, OpenCode deadline step with no owners, p	history
+ity and stopping P1 ↳ ○ conduit-test-82tn.32.2.17: Run L	history
+Switch for Codex, as 32.6 does for Claude (§2, §3.12, §6	history
+7 as 32.6 for Claude; processLost is a no-op for Codex.	history
+d): the switch for Codex moves run state to the ledger's	history
+process_started (fresh or reattached). SessionActivity i	pointer
+reads "Stopping now will end: pnpm test (shell), ... Co	unrelated
+"stopping"; stuck?: boolean } (seam added by conduit-tes	history
+failed Stop commit independently of caller cancellation	pointer
+stop commit carries the releases it has evidence for, an	history
+E2E: R2 stop commits append run.released only; process_l	history
+2); the four verbs admit / observe / control / settle, e	history
+fill is per provider at 32.6/32.10/32.11/32.21), Round 2	history
+Owns the CONTRACT 11.3 Event-order test (real SQLite, th	history
+(probe, kill_and_respawn, stop_task, cancel_request) who	history
+and an exemption from the reactor's lane order so they	history
+kes one stopping entry with the row's deadlineAt, replay	history
+oment a kill_and_respawn addressed to it is issued (L1).	history
+process_started{reattached} for that runner; process_los	pointer
+kill_and_respawn before its project is served. H4's proj	history
+lies to kill_and_respawn (3.11), and every project is Re	history
+settle(processLost); they are the only process checks t	history
+erseded Stop commits in its reconciler scope. A crash be	history
+.5); R2 stop commits carry run.released only. Spec r3: f	history
+ids and wake labels and no input ids (§4.6) [ ] A joined	history
+n ids + wake labels and no input ids, fallback as n+1, o	history
+ids and wake labels and no input ids (§4.6)' and 'interr	history
+Switch for Claude (CONTRACT.md §2, §3.12, §6.5): • Run E	history
+[ ] processLost is a no-op for Claude; the retirement co	history
+its for process_started to issue a native command.	history
+reports process_started once per adoption with the hello	history
+yields process_started{reattached: true} and tasks Unkno	history
+ption': process_started is reported each time a serving	history
+ld} and process_started{R} land in the swap commit, and	history
+process_started{reattached: true} and tasks Unknown unti	history
+d): the switch for Claude moves run state to the ledger'	history
+kill_and_respawn counts as released whatever its outcome	history
+rom the Stop commit, naming the covered runs and wake la	history
+wake labels and no input ids (§4.6). Decided (OPEN-3, §5	history
+[ ] interrupt_turn built from the Stop commit carries ru	history
+ids and wake labels and no input ids (two criteria).	history
+ids and wake labels' (now each label its commit adds, wi	history
+and one deadline step, kill_and_respawn of each runner h	history
+stopping from the stop's opening commit through its end	history
+ill its deadline step issued has its process_lost (L6),	history
+main's stopping entry (L6). The control stop records th	history
+stop's deadline step or a probe past its cap ends deliv	pointer
+tion 'Switch for Cursor, as 32.6 does for Claude (§2, §3	history
+;' / 'processLost is a no-op for Cursor.'; the paragraph	history
+switch for Cursor moves' / 'run state to the ledger's fo	history
+tion 'Switch for OpenCode (§2, §3.12, §4.10): Run Effect	history
+switch for OpenCode' / 'moves run state to the ledger's	history
+none. legacyStopOwnersQuery stays, with payload.stop.own	pointer
+s and stopCovers (5.2, 5.4); Send Settlement's status wr	pointer
+acceptStopEffect (orchestration-engine.ts 801 at 6c9ff95	pointer
+rm in acceptStopEffect's': the arm folds the stop's item	history
+top's deadline step (D43); the 8.4 confirm gate is 2.1 r	pointer
+202 (markRunning reads the fence in the view before its	pointer
+deadline step (L6). Owns 2.1 row 202: a' and, in the RED	history
+'markRunning to read the fence in the ledger's view, and	history
+nCode deadline step with items ends them through U2's Op	pointer
+the transition function. T5: only the transition' / 'fun	history
+acceptStopEffect (U2's body) reads stopCovers and writes	pointer
+'acceptStopEffect's. Steer association stays main's join	history
+tion 'Switch for Codex, as 32.6 does for Claude (§2, §3.	history
+;' / 'processLost is a no-op for Codex.'; the paragraph	history
+: the switch for Codex moves' / 'run state to the ledger	history
+with four verbs (the arm in main's writes and the outbo	history
+utbox transition function)' (deps.txt retitles it), the	history
+; the four verbs admit / observe / control / settle, eac	history
+e, ''(Run Effects table added empty)' (deps.txt retitles	history
+. The four verbs run' / 'inside main's write, never in a	history
+nd an exemption from' / 'the reactor's lane order so the	history
+are exempt from the session lane and from armRetryWake,	pointer
+'transition function, which writes nothing itself, and t	history
+t are exempt from the lane and from armRetryWake (CONTRA	pointer
+ettle(processLost); they are the only process checks': t	history
+top's deadline step (L6), not the interrupt. At receipt	pointer
+s and wake labels and no input ids (§4.6)', 'interrupt_t	pointer
+tion 'Switch for Claude (CONTRACT.md §2, §3.12, §6.5):'	history
+] processLost is a no-op for Claude; the retirement comm	history
+: the switch for Claude moves' / 'run state to the ledge	history
+m the Stop commit, naming the covered runs and' / 'wake	history
+/ 'wake labels and no input ids (§4.6).', '[ ] interrupt	history
+Stop commit carries run ids and wake' / 'labels and no i	history
+m the Stop commit with run ids and wake labels and': the	history
+R2's acceptStopEffect body (5.3) with run ids and no in	pointer
+212. Tries within a reservation are capped at 5 (4.8) | caps controls	pointer
+conduit-test-82tn.32.2.7: Run Ledger redesign: core authority and stopping	unrelated
+effects row 216 with kill_and_respawn in the lane, row 214	history
+kill_and_respawn has no issuer or a failed kill never ends its Run	history
+deadline step with absent id ends nothing, retry run.requested	history
+
+# REDESIGN-10 r2 (spec review round 2): generated per hit by scripts/gen-allow-r2.py (32.8 note added after). CONTRACT body readers of the round 2 terms checked against the r2 text (pointer); defining lines (owner); Appendix A history; older bead text (history); notes-r2 lines as bd will wrap them (pointer, or history where they quote a deleted term).
+ | main's retirement settlement, run whole (D58): per-send S	owner
+three are exempt from the session lane and from `armRetryWak	owner
+gh main's retirement settlement, per-send Send Settlement at	owner
+sed`, or `requeueLegacySend` for a legacy send (`requeueLega	pointer
+oss first, H1, 6.9; it counts as the `process_lost` of every	pointer
+`process_started`. A send is covered when its address is ret	pointer
+`unheld_outcome` reads as that try's `effect_outcome` (3.5).	pointer
+d that input; `effect_outcome` names the effect's own token;	pointer
+`effect_outcome` maps onto transport: succeeded to Sent, `de	pointer
+cted` or `effect_outcome` permanent `native_resume_rejected`	pointer
+`requeueLegacySend` for a legacy send (its row back to `retr	pointer
+`requeueLegacySend`, send-settlement-outbox.ts 511-529 at 6c	pointer
+the projected release or `process_lost` event.	pointer
+`process_lost` while a start or steer of it is unsealed (3.6	pointer
+erDeclined`, `requeueFailedSteers` and `readInboxState`; the	pointer
+rites that append no event are not evidence: `markRunning`'s	pointer
+`, 3.4) (`markRunning`, orchestration-side-effect-reactor.ts	pointer
+`requeueLegacySend` and the resume fallback (`requeueLegacyS	pointer
+, so U2's deadline step and restart recovery retire whatever	pointer
+nCode, which only a full stop ends (then `process_lost`, 9),	pointer
+ { readonly kind: "process_lost"; readonly runnerId: string;	owner
+nly tag: "process_lost" | "session_ended"; readonly code?: s	owner
+`process_lost`, `delivery_unknown`); `classify` maps normali	pointer
+with a terminal result, `failed`, `covered`, `process_lost`,	pointer
+runner_reply`, read as `effect_outcome` or `result` (4.11) |	pointer
+observe` `effect_outcome` `delivery_unknown`; runner-held: S	pointer
+jected | `effect_outcome` `permanent`, code `native_resume_r	pointer
+d send's `effect_outcome` `permanent`; runner-held: Send Set	pointer
+| runner lost | `settle` `process_lost` |	pointer
+ a direct send, `markRunning` reads it before its claim (2.1	pointer
+nner's `command-reply` event | `effect_outcome` / `result` |	pointer
+658-669 at 6c9ff950) reads `stopCovers` and writes	pointer
+- **`process_lost` is recorded with `retired_at` (decided OP	owner
+r (L1, 3.3), beside main's retirement settlement of its held	owner
+after old's `process_lost` (6.1). - On fail	pointer
+cessor's `process_lost`, and before any of its frames (6.1):	pointer
+ records `process_lost` (6.5), and a candidate reports nothi	pointer
+ At every ticket main's retirement settlement ends a retired	owner
+g cause (`process_lost` or `session_ended`) when covered; `F	pointer
+ermanent `effect_outcome`, a refusal included (H4), which al	pointer
+o pause | 5.1, retirement at the stop's deadline step (L6) |	pointer
+ | none | 5.1, retirement at the stop's deadline step (L6) |	pointer
+t `Gone`. Ledger chain: R's runs are Ended `process_lost` in	pointer
+deadline step, the retired runner's Run's end (3.8).	pointer
+`acceptStopEffect` (U9, R2's engine, orchestration-engine.ts	pointer
+`stopCovers` and writes the owners into `payload.stop.owners	pointer
+top whose deadline step cannot retire (a restart before reat	pointer
+all three exempt from the session lane (3.12); the evidence 	pointer
+reactor (`markRunning`, the outcome body), `requeueFailedSte	pointer
+N-4 | A: `process_lost` in the commit that sets `retired_at`	history
+hat need no contract change: a permanent `effect_outcome` on	history
+of 3.13 (`process_lost` carries its releases), 4.3 (the swit	history
+deadline step that cannot retire ends its items, a fresh-run	history
+`process_lost` for an input already queued; an acceptance af	history
+een a kill's issue and its `process_lost`; an answer refused	history
+sage sent after a kill's issue, before its `process_lost`; a	history
+ and its `process_lost`. Its review round 2 needs five more:	history
+effect and needs one more: a runner stop whose deadline step	history
+y 2 at the cap and then `process_lost` ended `refused` where	history
+`process_lost`, read first. A pending kill covers the sends 	history
+`effect_outcome` code `project_inactive` (4.7), only after r	history
+ only as `process_lost` and refusals: launched runner-held R	history
+`process_lost` when their execution reached the agent and ot	history
+the ledger as `process_lost` and refusals | chosen (basis) |	history
+| N2: `process_lost` before the releases | rejected: it ends	history
+ work, but coverage (a kill, a pending kill, `process_lost`,	history
+se against its runner's `process_lost`, and Run-end evidence	history
+`JournalAbsent` read after its runner's `process_lost` (F40,	history
+ late release after `process_lost` now commute for the Run |	history
+ its own `process_lost` (3.6); D53 and D55 read no stop stat	history
+ its kill's `process_lost`, or for OpenCode at nothing), and	history
+s kill's `process_lost` while a start or steer is unsealed (	history
+ and its `process_lost` finds none of that runner's work and	history
+ and its `process_lost` opens no stop, where main's joins th	history
+shows no deadline until its `process_lost`.	history
+`requeueFailedSteers`; `joined_into`; `turnFences`; `inbox f	history
+`process_lost`); row 206's main column; row 207 (`input.canc	history
+s at the `process_lost` commit, not at a restart; a steer du	history
+ntil its `process_lost`, the same-driver failover, the cover	history
+er, main `requeueFailedSteers` | K6 | U6 | D58: main's write	history
+| Coverage | main's `stopCovers` (5.2, 5.4) |	owner
+ the items (2.1 row 214); a runner deadline step that cannot	pointer
+ule: the `kill_and_respawn` effect and its executor (5.1, 3.	history
+ a runner deadline step that cannot retire ends its items th	history
+its `effect_outcome` (3.7). - Added: aft	history
+unguarded `markCompleted` and `writeFailure` are main's; and	history
+ound 2's `process_lost` write (row 215, L6), the retirement 	history
+• process_lost for Cursor runs moves to the retirement commi	history
+unner's Cursor runs are Ended process_lost in the retirement	history
+process_lost in the retirement commit, Gone-time settlement 	history
+ailed with its run open (requeueLegacySend, send-settlement-	history
+determinate become the ledger's for' and '• process_lost for	history
+'s Cursor runs are Ended process_lost in the retirement', '[	history
+ning) and process_lost when it is replaced or exits. Accepta	history
+cement ends launched Runs process_lost and records lost work	history
+RL changes; process_lost only on stop/replace or supervisor-	history
+ce mid-Run ends that Run process_lost and the next send runs	history
+cessId>:0'. A URL change is a replacement (process_lost then	history
+run open (requeueLegacySend, send-settlement-outbox.ts 511-5	history
+process_lost in the retirement commit (32.4). Verify that pa	history
+ (runner-held) or effect_outcome not_sent before any adapter	history
+ running one; assert the running Run ends process_lost, both	history
+nswer is an effect_outcome while its send is live, permanent	history
+ a not-served project gets effect_outcome not_sent for every	pointer
+: OPEN-4 (process_lost in the retirement commit, §6.5), OPEN	history
+ged (D17); [ ] a permanent effect_outcome gives Failed{code}	history
+d has its process_lost, as main's entry holds until its reti	history
+1-284, 305-313); supersedes 'issued has its process_lost, as	history
+is main's deadlineAt and the step main's process retirement,	pointer
+ ] a Cursor kill or an OpenCode process_lost records none; [	history
+is process_lost plus H4 refusal as for Claude.	history
+exactly the Run Ledger label rule (L5, process_lost), so the	history
+process_lost moves its input, by D53; before the provider's 	history
+e and its process_lost; an OpenCode unsolicited run.started.	history
+effect_outcome permanent with code project_inactive or proje	history
+(3.13), superseding the spec r1 field shape: process_lost is	history
+nsmission's value as sealed; DeadlineOwner gains Wake (3.7);	history
+process_lost.released[] and run.released (3.13, poteto P2-E)	history
+DESIGN-6: DeadlineOwner is Run | Label | Send | Interaction 	history
+persedes the REDESIGN-6 note's DeadlineOwner Interaction: no	history
+DeadlineOwner Stop | Run (Settling only) | Send | Interactio	history
+oracle must encode S9.1 evidence mapping (new effect_outcome	history
+effect_outcome is never re-sent (4.8, F65, F67). A refused s	history
+ed first: process_lost{runnerId, released} reads its release	history
+process_lost.released carries {token, reason}, each read fir	history
+odel gaps: effect_outcome lacks not_sent; process_lost lacks	history
+process_lost or an answer, no immediate lose; (3) session_en	history
+ Run ends at its kill's process_lost; OpenCode reach is Runs	history
+kill's process_lost (L6). Supersedes 'main hands M off as id	history
+process_lost or its failed requestStop (L6); a steer admitte	history
+ss, except one explicit totality property), let process_lost	history
+ (3.3 Execution); process_lost while a confirm gate is open;	history
+process_lost of the serving runner, then a host fake that an	history
+ter spawn or interpreter claim with effect_outcome permanent	history
+send ends only by process_lost or provider evidence. Runner-	history
+policies: process_lost of every runner of the project first,	history
+nCode: no process_lost (removal does not stop managed OpenCo	history
+w r2-1: harness. The generator emits effect_outcome not_sent	history
+ing} after idle-exit / JournalAbsent, then process_lost, one	history
+a release after process_lost for same transmission is stale;	history
+process_lost carries released tokens (3.13). A release after	history
+uperseding the spec r1 note's 'process_lost carries released	history
+ generator input is process_lost{runnerId, released: {token,	history
+rator kind, not a host fact (H3); add kinds: h (process_lost	history
+(d) a late release before and after process_lost: expect the	history
+elease before process_lost unlaunches the Run, with no pause	history
+process_lost; expect process lost. REDESIGN-	history
+nds needed: a release after its runner's process_lost for an	history
+op-commit process_lost with NotSent for a not-yet-delivered 	history
+process_lost; answer refused permanently and answer unknown 	history
+nds between a kill's issue and its process_lost. Build order	history
+(H4) is a permanent effect_outcome with None: the Run ends	history
+kill's process_lost, interrupted, forced; end in reason 2.1 	history
+effect_outcome/result; hello not_received -> probe_result in	history
+nknown -> effect_outcome delivery_unknown (never re-sent); d	history
+> settle project_inactive or effect_outcome permanent. S9.3:	history
+'s permanent effect_outcome. No project-specific delivery or	history
+e observed as effect_outcome not_sent (4.7 table, 4.11 hold-	history
+ superseding the r3-2 (U) note's 'observed as effect_outcome	history
+nts or bumps them; L1: a runner retires at its process_lost,	history
+to it, ends its executions (launched Runs end process_lost),	history
+hingMayAct); process_lost ends launched Runs process_lost; a	history
+process_lost; a pending kill covers only pending sends issue	history
+bel; [ ] fixed trace: run_dispatched{R} then process_lost{R}	history
+s the Run process_lost and records no lost work; [ ] fixed t	history
+arrive as process_lost (L1): they cover addressed sends and 	history
+ched Runs process_lost. 3.8 end reason 'project inactive' is	history
+the next runner; other launched Runs end process_lost unless	history
+share: [ ] Fixed trace: process_lost{R, released:[t]}, where	history
+s lost. [ ] A release of t after that process_lost is stale.	history
+cription's 'launched Runs end process_lost' is superseded by	history
+ession) and is replaced by: [ ] Fixed trace: process_lost{R,	history
+ed the agent on R (an execution event), then process_lost{R,	history
+instance, process_lost (9); otherwise transmitted OpenCode s	history
+-side-effect-reactor.ts 548), a process_lost end (as runner-	history
+ true } option on requeueFailedSteers that commitAndSignal's	pointer
+effect_outcome on send_native_command -> Failed{code}, send 	history
+in the swap commit right after the old runner's process_lost	history
+inactive leaving the ledger (only process_lost/refusal), and	history
+permanent effect_outcome (4.7), retiring a live runner first	history
+emoval reaches the ledger only as process_lost and refusals.	history
+new effect_outcome variant not_sent, retried every 30s under	history
+releases vs process_lost, failed release-driven stop had two	history
+applied: process_lost{runnerId, released}; refusal registers	history
+process_lost.released carries {token, reason}; process_lost 	history
+ inbox. Decide whether process_lost pauses, and who owns the	history
+end), oracle LI3 (dropped sends cannot act), f (process_lost	history
+: h kind (process_lost released NotSent for not-yet-delivere	history
+ runner's process_lost recorded with releases read first, or	history
+Covered second coverage source, late release vs process_lost	history
+cond coverage source; late release vs process_lost; recount.	history
+ts, blocks 32.2.17. My calls: process_lost on 32.4; the one-	history
+process_lost named in the wrong write, Stop deadline double 	history
+• process_lost for Codex runs moves to the retirement commit	history
+runner's Codex runs are Ended process_lost in the retirement	history
+ity flip, process_lost in retirement commit, Gone-time settl	history
+(requeueLegacySend, send-settlement-outbox.ts 511-529 at 6c9	pointer
+ A retired runner's Codex runs are Ended process_lost in the	history
+tion, superseding the spec r1 note's 'its process_lost names	history
+process_lost{runnerId, released} is 32.4's (6.5). The refusi	history
+deadlineAt, replay inserts no outbox row, and the host's ter	pointer
+process_lost is recorded in the retirement commit (6.5).	history
+tired_at also records process_lost{runnerId}, covering every	history
+unner's ledger-owned runs are Ended process_lost in the same	history
+header (merged); added: OPEN-4 decision (process_lost in the	history
+: A1 builds process_lost{runnerId, released}; the retirement	history
+perseding the spec r1 note: A1 builds process_lost{runnerId,	history
+release after its runner's process_lost moves only its input	history
+the process_lost evidence event in the commit that sets reti	owner
+are Ended process_lost in the same' (main appends the termin	history
+• process_lost for Claude runs moves to the retirement commi	history
+Ended process_lost: Absent (JournalAbsent) re-sends the pend	history
+unner's Claude runs are Ended process_lost in the retirement	history
+is settle(process_lost). Bind issued tokens and unbound star	history
+determinate moves to Run Effects, process_lost in retirement	history
+n the swap commit for a candidate (after old's process_lost,	history
+): for runs the feeder observes not served as effect_outcome	history
+ead after process_lost returns its input to the inbox at its	history
+rminate become the ledger's for', '• process_lost for Claude	history
+ Claude runs are Ended process_lost in the retirement', '[ ]	history
+(requeueLegacySend, send-settlement-' / 'outbox.ts 511-529 a	pointer
+er's runs end through main's retirement settlement, per-send	pointer
+ returns by the projected run.released, or requeueLegacySend	pointer
+d with' / 'its run open (requeueLegacySend, send-settlement-	pointer
+es Failed{process_lost | kill_and_respawn | session_ended} b	history
+process_lost or session_ended (CONTRACT.md 8.5); the ledger 	pointer
+ptance adds: a runner deadline step that cannot retire (Stop	pointer
+deadline step cannot retire (a restart before reattach, then	pointer
+ title's 'the outbox transition function in R2's Layer graph	history
+persedes 'DeadlineOwner Stop | Run (Settling only) | Send | 	pointer
+Command': DeadlineOwner is Run (Settling only) | Send | Inte	pointer
+mmand, and the stop's deadline is U2's deadlineAt, which the	pointer
+kill_and_respawn.runId' / 'nullable' and 'Only close,' / 'ki	history
+R2's acceptStopEffect (U2's body) reads stopCovers and write	pointer
+runner retires at its process_lost or, for totality, another	pointer
+runner's process_started, L1), 'a kill addressed to pending'	pointer
+'kill_and_respawn as release (§5.1)'; the acceptance items '	history
+tires its runner at issue' through 'the next process_started	pointer
+etired' (kept: process_lost ends launched Runs, and a second	pointer
+runner's process_started with no prior loss retires the firs	pointer
+(§9).'; and, in the REDESIGN-7 note, 'the deadline step is a	pointer
+kill_and_respawn per' / 'runner (L2 item 1)': a runner stop'	history
+open' / '(requeueLegacySend, send-settlement-outbox.ts 511-5	pointer
+retirement settlement, per-send Send Settlement at Gone (set	pointer
+eased, or requeueLegacySend for a legacy send (send-settleme	pointer
+ '(probe, kill_and_respawn, stop_task, cancel_request) whole	history
+'are exempt from the session lane and from armRetryWake, and	pointer
+idence event kind of row 215 (process_started, process_lost,	pointer
+alarm_fired, effect_outcome, turn_started and the direct mar	pointer
+s at U2's deadline step (L6). Supersedes this ticket's scope	pointer
+6c9ff950)': there is no provider switch (D58, 6.5): main's r	pointer
+or sendless owners (932-943). A1 appends process_lost in the	pointer
+'kill_and_respawn counts as released whatever its outcome, t	history
+and' / 'never blocks the next send.' and, in the later note,	pointer
+step, kill_and_respawn of each runner' / 'holding an item, c	history
+top's deadline is U2's deadlineAt, and its last step is U2's	pointer
+observing unit for OpenCode's process_lost (when conduit stops	owner
+ticket lands it beside the reporter's process_started.	owner
+notes: read D57. REDESIGN-10 r2 (spec review round 2	history
+failed deadline step cannot end wake or label items with no main run	history
+
+# REDESIGN-11 (2026-10-31): entries for A.21, the round 19 D59 text, superseded bead lines and the pending notes (raw and 76-column wrapped).
+its number (rows 203, 204, 208 and 214 are deleted).	pointer
+ests it: `process_started` (the lifecycle module's `register	owner
+the ledger at the next id's `process_started` (L1, 9), while	pointer
+utor records `effect_outcome` `retryable` with `retryAt` its	pointer
+- **Deadline step.** The stop's deadline step names both end	owner
+ork, their aborts' included), and the ledger stop deadline's	owner
+rt.** The ledger stop deadline is on the session row (below)	owner
+nd.** The ledger stop deadline closes when its work has ende	owner
+ile it is open a Run with work in it shows its `deadlineAt`,	pointer
+ events (`run.requested`, `run.started` with its join, termi	pointer
+acks, and T5-writers (32.3) checks that the arm imports no m	pointer
+(`recordControlOutcome`, orchestration-side-effect-reactor.t	pointer
+Send`, 412-475; `requeueLegacySend`, 511-529), the Run's end	pointer
+ceipt, so the T5-writers table allows both writes from every	pointer
+ion handle. It never calls ingestion, `settleSessionRuns` or	pointer
+de_effect_failed`, which a later claim's `run.requested` can	pointer
+gh main's `stopping` entry; its commit's `deadlineAt` bounds	pointer
+projected `stop` only to open the ledger stop deadline (L6).	pointer
+coverage, its runner's retirement (L1) or its session's end 	pointer
+n whole: the ledger neither holds nor escalates it, and U2's	pointer
+ession's servers are unknown, not absent: auto-settle waits.	unrelated
+attaches it; `process_lost` when conduit stops that process,	owner
+in `onInstanceStopped`'s settlement batch (`managedStopped`,	owner
+ext id's `process_started` (L1), and its Runs stay open in m	owner
+e arm writes ledger-owned tables. T5-writers (32.3) fails if	pointer
+to status outside the T5-writers table (3.12).	pointer
+` reads a stop commit's projected `stop` only to open the le	pointer
+ed by the ledger stop deadline (L6, D59); the stop's deadlin	pointer
+spike and T5-writers, whose measured result fed REDESIGN-10'	pointer
+dger owns its items) and adds two amendments, of SPEC (Schem	history
+2.2.17: a restart between a Stop commit and its `deadlineAt`	pointer
+pen Runs; a runner-held fresh-run retry, its `run.requested`	pointer
+alone and ends as main: U2's `stopping` entry with its owner	owner
+runs, `deadlineAt`, step and restore, `settleSessionRuns` an	owner
+send and `run.requested` only for a direct one (3.4); `proce	owner
+`settleSessionRuns` batch (9). This deletes 2.1 rows 203, 20	owner
+p end with its `absent:` case and 3.4's double fold. Reason:	owner
+ transmissions and two `process_lost` writers (round 2); and	owner
+`settleSessionRuns` never ends (`sessionRunOwnersQuery`, ses	owner
+ main run is main's `stopping` entry's, run whole: its owner	pointer
+e main's `deadlineAt`, the opening Stop's `requested_at` plu	pointer
+739 at 6c9ff950), never moved, and one deadline step at that	pointer
+sode, the stop's items), and each holder's anchor or re-arm 	history
+the stop's items invisible to main's settlement and restore 	history
+uns: its `stopping` entry per session, holding only its Stop	pointer
+un's owner runs to main's `stopping` entry and every label's	pointer
+other work to the ledger stop deadline (L6, D59), naming	pointer
+it to the ledger stop deadline (L6), and no Tombstone cleanu	pointer
+wing its `deadlineAt` (3.7, D54). Reason: the cleanup had no	pointer
+REDESIGN-6 deleted (poteto r3 P2-1), and main retries a cont	pointer
+its items, not its step, so an item gained after the step wa	history
+ 3.8: the stop's items are work, not Runs, so it ends when i	history
+ign): the stop's items (work, never a Run) and its end (at i	history
+nd (ub P1-1) | K6 | `run.requested` written for every send |	history
+tire ends its items through `settleSessionRuns` (L6, 2.1 row	history
+`D57`; `run seam`; `service boundary`; `read surface`; `Run 	history
+`ProviderTurnServiceTag`; `claim guard`; `runs it as any row	history
+module`; `transition function`; changed, `acceptStopEffect`;	history
+`stopCovers`; `markCompleted`; `writeFailure`; `refusal swee	history
+deleted, `per provider`; `Switch for`; `outbox path`; `four 	history
+`Deleted:`; `wake labels`; `uniqueness constraint`; `one pro	history
+changed, `exempt`; `stopping`; `legacyStopOwnersQuery`; `dea	history
+`alarm_fired`; `Stop commit`; `retryAt`; and from review rou	history
+`retry claims`; `wake_started`; `retirement transaction`; ch	history
+lement`; `effect_outcome`; `requeueLegacySend`; `requeueFail	history
+`DeadlineOwner`. D58 is new and each of its readers is writt	history
+(L6, 2.1 row 214). - Added: a fresh-run 	history
+ claim's `run.requested` folds as a transmission of the ledg	history
+s with the stop's items as two records of the same work, and	history
+a: a lane-exempt send claims before the kill | K4 | J | the 	pointer
+eto P2-9: wake labels in the payload | K2 | J | U2's payload	history
+| r2 N1: `absent:` and the stale step | K2 | J | deleted: no	history
+ D59: the ledger stop deadline on the session row, no U2 res	pointer
+OpenCode `process_lost` writers | K2 | J | D59: `onInstanceS	pointer
+le` with `retryAt`; ub row 215 and poteto P3-2 are section 9	pointer
+he id at the next `process_started` (L1); ub 1166 and poteto	pointer
+movables: row 214 and its hand-off, L6's `absent:` case, 5.4	history
+ected; every one of those readers moves per provider, so two	history
+el alone, per provider | U3, U4, U5, U11 per provider | the 	history
+one | the stop commit's `deadlineAt` (R2's engine, read by t	pointer
+eting the stop's items, row 214, the failed-step end and 3.4	history
+ against `process_lost`, against a late `turn_ended`, agains	pointer
+- Row 214 is deleted: no ledger work ends at U2's step, so a	history
+ stop as U2's entry and adds the ledger stop deadline (3.7).	pointer
+view holds: no stop item; coverage stays `stopCovers` (5.4).	pointer
+d reason | 3.8; forced at the ledger stop deadline's alarm |	pointer
+| Seal | 3.6 (D52); only `process_lost` seals |	pointer
+stop and `stopping` | U2's entry, whole, with its owner runs	pointer
+p | U2's `deadlineAt` and `retireProcess` for owner runs; th	pointer
+ers, each its own SQL guard (3.12); T5-writers checks them |	pointer
+.2.3) and T5-writers (32.3), not gating; K3 by T3's Terms an	pointer
+te and the fake runner host: the arm folding a stop commit's	pointer
+`stop.deadlineAt` into the session row, the scheduler's `ala	pointer
+`acceptStopEffect` commits `interrupt_turn` with no owners; 	pointer
+`deadlineAt`; U2's restore restores nothing (no open owner r	pointer
+Expectation changes: A.20's two added expectations are repla	pointer
+ through `settleSessionRuns`; the owner runs end as main's s	pointer
+both its `run.requested` and `holdRun`'s `run.dispatched` fo	pointer
+ke emits one `process_lost` per OpenCode stop, so its counts	pointer
+t (the commit's `deadlineAt` the arm reads, and the evidence	pointer
+ions: the stop's items beside main's entry, U2's step retiri	history
+`settleSessionRuns` (2.1 row 214). - Deleted	history
+`settleSessionRuns`, the `absent:` case included (L6, 2.1 ro	history
+h-run claim's `run.requested` folds as a transmission (3.4);	pointer
+`run.requested` only for a direct one (3.4).	pointer
+`process_started`, while main leaves them open (L1, 9).	pointer
+stop, deadline step, restart and end; 3.7's derived deadline	pointer
+ends at its items' end or its step; work gained after a comm	history
+ecutions and rows 203-204. A steer into a wake Run counts as	history
+o main run: the seam writes no run.requested, run.started or	history
+rows 203 and 204 move to conduit-test-25scs (CONTRACT.md 2.1	history
+stop's items in the control row's projection (L6), and this 	history
+REDESIGN-7 r2: D43: a gated step is dropped when the stop en	history
+ough U2's OpenCode branch (row 214, 32.11). Fence membership	history
+unconfirmed, an absent: process id, or end_session failing	history
+process_gone or provider_process_unavailable) ends its items	history
+through settleSessionRuns with the items' runs, as the OpenC	history
+d L6, 2.1 row 214). Trace: a daemon restart before reattach,	history
+steer writes run.requested), not a hand mapping. Every other	pointer
+Ledger column changes, never steering; rows 203 and 204 mask	history
+item's Run ending stop_unconfirmed (row 214); a non-terminal	history
+eadline), its items ended through settleSessionRuns (L6, row	history
+run.requested, turnInFlight), and T1 fails unless that token	pointer
+Oracle: stop items are work; the stop ends at its items' end	history
+run.requested per send, run.started (the join included), a t	history
+owning its items (D58, A.20). The owner table is A.20's. Its	history
+ds main's relaunch and every retry, a fresh run.requested or	history
+(run.requested for every send, a Run's native terminal proje	history
+n lifecycle events in its commit (run.requested, run.started	history
+run.requested (projectors-effect.ts:1853) can erase it first	history
+ixed once in L6: the stop ends at its items' end or once its	history
+ r1's terms. Seam: the stop's items are Runs, whose end lags	history
+(run.requested per send_turn incl. steers and Codex busy sen	history
+its items (L6); Stop coverage, run joining and joined_into s	history
+ observed in the reactor's recordControlOutcome not U2, U2's	history
+s: a fresh-run retry run.requested for an input already in a	history
+ecords the stop's items and is never read for coverage: Stop	history
+3 (8.4, L6); a runner step that cannot retire ends its items	history
+through settleSessionRuns (row 214). There is no quarantine.	history
+26-10-31, contract-after-r11.md): OpenCode's process_lost is	pointer
+only when conduit stops the instance, in onInstanceStopped's	pointer
+settleSessionRuns batch (managedStopped, sse-wiring.ts 887-8	pointer
+next id's process_started (L1), ending its Runs process lost	pointer
+persedes 'process_lost when it is replaced or exits', 'A URL	pointer
+lacement (process_lost then' / 'process_started).' and, in t	pointer
+ r2 (lead) note, 'observing unit for OpenCode's process_lost	pointer
+14 read': row 214 is deleted; 32.2.11, 32.2.14 and 32.2.8 fe	pointer
+th no open main run bounded by the ledger stop deadline, and	pointer
+deadline step that cannot retire (a daemon restart before re	pointer
+settleSessionRuns call from the ledger; its tests run on the	pointer
+ 'ends at its items' end or its step; work gained after a co	history
+ it': the ledger stop deadline closes when its work has ende	pointer
+ersedes 'clock, wake executions and rows 203-204.' and 'rows	history
+ to conduit-test-25scs': rows 203 and 204 are deleted (2.1);	history
+'stop's items in the control row's projection (L6), and this	history
+ with no open main run to the ledger stop deadline, and this	pointer
+2 note, 'acceptance adds: a runner deadline step that cannot	pointer
+rk at U2's step). Supersedes 'An OpenCode deadline step with	pointer
+hem through U2's OpenCode branch (row 214, 32.11).': row 214	history
+leted; an OpenCode deadline step ends its owner runs as main	pointer
+onfirmed) and the ledger stop deadline's alarm ends the rest	pointer
+persedes 'rows 203 and 204 mask' / 'stopping and busy.': row	history
+tem's Run ending stop_unconfirmed (row 214);' and 'its items	history
+d through settleSessionRuns (L6, row 214),': the catalogue h	history
+orced by the ledger stop deadline's alarm, and a runner stop	pointer
+th no ledger call to settleSessionRuns (CONTRACT.md L6). The	pointer
+Runs at the next id's process_started while main leaves them	pointer
+'kill_and_respawn outcome is never not_sent (H4 exemption).'	history
+10 note, 'stopCovers at every ticket, and the stop is main's	pointer
+ ledger' / 'owning its items (D58, A.20). The owner table is	history
+step for work with no open main run and ends that work force	pointer
+end's its run.requested (3.4). The other oracle expectations	pointer
+nt outcome for kill_and_respawn.': the ledger issues no kill	history
+ut kinds A.21 names: a restart between a Stop commit and its	pointer
+deadlineAt with only a wake open; a managed OpenCode stop wi	pointer
+its one process_lost in onInstanceStopped's batch; an OpenCo	pointer
+ith open Runs, ended at the next id's process_started; and a	pointer
+ fresh-run retry, its run.requested then its run.dispatched,	pointer
+ one transmission. The fake still emits one process_lost per	pointer
+n's relaunch and every retry, a fresh run.requested or' / 'a	pointer
+ send and run.requested only for a direct one, so a runner-h	pointer
+eturns.': acceptStopEffect reads no view and the view has no	pointer
+erage stays stopCovers (5.4), and this ticket's decide reads	pointer
+a stop commit's projected stop only to open the ledger stop 	pointer
+REDESIGN-11 (2026-10-31, contract-after-r11.md): owns the le	pointer
+CT.md L6, 12.2, D59): one per stop commit's stop.deadlineAt,	pointer
+the session row and ended by its alarm_fired as forced work-	history
+membership (row 203: wake executions and label work, with' /	pointer
+on a join between main's provider_runs and the ledger's Runs	history
+ork with no open main run, one ledger stop deadline per stop	pointer
+commit's deadlineAt, kept on the session row and ended by it	pointer
+eld send, run.requested only for a direct one, requestStop's	pointer
+batch, onInstanceStopped's batch). D59 removes 2.1 rows 203,	history
+the stop's items, U2's wait on them, the failed-step end and	history
+sedes, in the REDESIGN-10 note, 'The stop is main's stopping	pointer
+edger owns' / 'its items (L6);': the ledger holds no item of	history
+el alone, per provider: two machines live per provider until	history
+rsedes 'Acceptance adds: a fresh-run retry run.requested for	pointer
+nd a direct send's its run.requested, each a transmission of	pointer
+fires the ledger stop deadline from the session row, so a re	pointer
+, 3.7). T5 is renamed T5-writers, the table of outbox status	pointer
+process_lost only when the mutation sets retired_at; that ba	pointer
+rding the stop's items' / 'inside its projection;' and 'cont	history
+cords the stop's items and is never read for coverage': the 	history
+p item; a stop commit's projected stop only opens the ledger	pointer
+ich stays stopCovers over payload.stop.owners (CONTRACT.md L	pointer
+persedes 'a runner step that cannot retire ends its items' /	history
+'through settleSessionRuns (row 214).': row 214 is deleted; 	history
+poteto P3-3 is the `newId` comment; ub's 32.32 edge, T5's rename to T5-writers is in	history
+conduit-test-82tn.32.3: Run Ledger: the arm in main's writes, the three ledger effects and	owner
+arm folding a stop commit's stop.deadlineAt into the session row as the	owner
+ledger stop deadline over label work with no open main run, 32.3's scheduler	owner
+firing its alarm_fired, and requestStop as one ingestion batch whose	history
+execution running with no main run, then Stop; acceptStopEffect commits	owner
+interrupt_turn with no owners; at deadlineAt the alarm ends the wake's work	history
+alarm ends the wake's work; no settleSessionRuns call from the ledger. Trace	owner
+same database before deadlineAt; U2's restore restores nothing, the	owner
+process_lost only in the batch that sets retired_at, and a replay inserts no	history
+conduit-test-82tn.32.3 · Run Ledger: the arm in main's writes, the three ledger effects an	owner
+# D59 spike gate parts 1 and 2 (2026-10-31): new hits; the retirement's process_lost is decided (6.5).
+Claude wake's `turn_ended`, not forced, 8.3), a	pointer
+`turn_ended` (8.3) ends its work by its own end and the alar	owner
+session has not ended and neither its `turn_ended` (8.3) nor	pointer
+arted" | "turn_ended" | "command_lifecycle" | "command_resul	pointer
+| { readonly kind: "turn_ended" } // a Claude wake's (8.3)	owner
+ receipt `beforeCommit`, the f4 stopgap fences, the `.retire	unrelated
+ { kind: "turn_ended" } // a Claude wake's end (2.1 row 215)	pointer
+hain (9); for Claude its `turn_ended` (2.1 row 215), its own	owner
+ `interrupted` at a Claude `turn_ended` after a Stop with no	pointer
+ted` and `turn_ended`, and the swap commit's `process_starte	pointer
+rver ended, by its `alarm_fired` as forced work-ended facts,	owner
+`turn_ended` ending its work not forced, and a Queued Run la	pointer
+, before `deadlineAt`; at `deadlineAt` the alarm forces noth	pointer
+d before `deadlineAt` (the D59 spike's trace W, measured); t	pointer
+ of that end, so the payload now appends `turn_ended` (8.3).	pointer
+dded: the ledger stop deadline's alarm forces only work no o	pointer
+s at its `turn_ended`, from the payload's `turnInFlight` fla	pointer
+pt isCurrent callback, ingestion's receipt beforeCommit, the	unrelated
+beforeCommit is requestStopMutation. Trace W (wake): Claude,	history
+ingestion batch (cannot be built; one write ties retirement 	history
+e test 6260 red). Fixes decided: a wake ends at a turn_ended	pointer
+r that appends a runner's process_lost from retired_at, with	history
+one ingestion batch whose beforeCommit is requestStopMutatio	owner
+turn_ended at the first clear of the turnInFlight its turn_s	pointer
+turn with no owners; at deadlineAt the alarm ends the wake's	history
+rk-': the ledger stop deadline is kept on the session row an	pointer
+and for work no observer ended at its alarm_fired, as forced	pointer
+deadlineAt, kept on the session row and ended by its alarm_f	history
+, and its turn_ended, at the first clear of that flag (its r	pointer
+# D59 spike gate part 2 (2026-10-31): contract lines and the notes-spikefix2 notes, wrapped.
+cede its `process_lost` in that transaction and are read fir	owner
+and only `process_lost` seals (3.6), so that order changes n	owner
+1). A runner's `process_lost` from a raw retirement write is	owner
+h a body, unprojected, and the next `commitAndSignal` recove	owner
+`status IN (from)` except `markCompleted` and `writeFailure`	owner
+ and its `process_lost` (2.1 row 215) follows them in that t	owner
+ also appends `process_lost{runnerId, retiredAt}` (3.13, 2.1	owner
+ends one `process_lost` per (runnerId, retiredAt) in its own	owner
+w write appends it unprojected and marks the store; the next	owner
+ound: the ledger stop deadline and the retirement's `process	pointer
+ appends `process_lost` in each write that first sets `retir	pointer
+n its transaction (6.5); OpenCode's is `onInstanceStopped`'s	owner
+ N3: the `process_lost` write | K6 | J | each write that fir	history
+`process_lost` in the transaction that sets `retired_at`. Tr	pointer
+ends one `process_lost` in its transaction, and a replay ins	pointer
+rement's `process_lost`, three options the D59 spike gate tu	pointer
+rement's `process_lost` after it, because the write that set	pointer
+irement's `process_lost` (6.5) carries these, one line each:	pointer
+ prune a `process_lost`, and its once-per key is the event r	pointer
+alarm if `turn_ended` keys on no `currentRunId`; row 215 key	pointer
+- Added: `process_lost` in each write that first sets `retir	pointer
+Run Ledger: D59 spike, the ledger stop deadline and the retirement's process_lost	pointer
+turn_ended, its own end and not forced (8.3), so under a Sto	pointer
+d appends turn_ended at the first clear of the turnInFlight 	pointer
+cision 2: process_lost {runnerId, retiredAt} is appended by 	history
+unprojected and marks the store, so the next commitAndSignal	pointer
+iring its alarm_fired, and requestStop as one ingestion batc	pointer
+'beforeCommit is requestStopMutation.': the retirement's pro	pointer
+ as above; 'interrupt_turn with no owners; at deadlineAt the	pointer
+ runner's process_lost from retired_at, with' / 'retirement 	pointer
+'process_lost only in the batch that sets retired_at, and a 	pointer
+process_lost in its transaction, and a replay inserts no out	pointer
+ike keyed turn_ended on no currentRunId, so a wake that took	pointer
+turn_ended site (claude-event-translator.ts 544-555 at 6c9ff	pointer
+uld prune a process_lost whose once-per key is the event row	history
+y sequence, as the unfenced turn_ended in P-order is (32.6);	history
+runner's process_lost from retired_at, with' / 'retirement l	pointer
+turn_ended on no currentRunId, so a wake that took a merged 	pointer
+de wake's turn_ended, 8.3, not forced, its wake Run interrup	pointer
+d ended by its alarm_fired as forced work-': the ledger stop	pointer
+de wake's turn_ended at its Stop's dispose, 8.3), and for wo	pointer
+ed at its alarm_fired, as forced work-ended facts (CONTRACT.	pointer
+ed by its alarm_fired as forced work-': the ledger stop dead	pointer
+turn_ended at its Stop's dispose, 8.3), and for work no obse	pointer
+alarm_fired, as forced work-ended facts (CONTRACT.md L6, 12.	pointer
+and 3 measured them. A Claude wake ends at its turn_ended at	pointer
+.1 row 215, 8.3, L6); a runner's process_lost is appended by	pointer
+, in the REDESIGN-11 note, 'commit's deadlineAt, kept on the	pointer
+nd ended by its alarm_fired as': that deadline closes at its	pointer
+send, run.requested only for a direct one, requestStop's' / 	pointer
+onInstanceStopped's batch)': a runner's loss is observed by 	pointer
+N-11 note, 'commit's deadlineAt, kept on the session row and	pointer
+ed by its alarm_fired as': that deadline closes at its work'	pointer
+one, requestStop's' / 'batch, onInstanceStopped's batch)': a	pointer
+ends only alarm_fired and lives outside src/lib/provider (12	pointer
+ppends no process_lost and has no nudge or start scan, since	pointer
+alarm_fired. Supersedes 'alarm_fired, effect_outcome, turn_s	pointer
+r's event) is': the registered kinds also include turn_ended	pointer
+pdates them. T5-writers: the spike's hand copy of the writer	pointer
+requeueLegacySend, and markCompleted, writeFailure and retir	history
+only alarm_fired and lives outside src/lib/provider (12.2); 	pointer
+process_lost and has no nudge or start scan, since each writ	pointer
+effect_outcome, turn_started and the direct marker's event) 	pointer
+ also include turn_ended (row 215). A catch-up fold of a raw	history
+ A1 appends process_lost {runnerId, retiredAt} in each write	pointer
+ a raw write appends it unprojected and marks the store, and	pointer
+edes 'A1 builds requestStop as' / 'one ingestion batch whose	pointer
+beforeCommit is requestStopMutation, as retirement' / 'passe	pointer
+ent.ts 933-943 at 6c9ff950), appending' / 'process_lost only	pointer
+'the process_lost evidence event in the commit that sets ret	pointer
+A1 builds process_lost{runnerId,' / 'released: {token, reaso	pointer
+irement's process_lost after the events before it. Acceptanc	pointer
+ppends it unprojected and marks the store, and the next comm	pointer
+requestStop as' / 'one ingestion batch whose beforeCommit is	pointer
+3-943 at 6c9ff950), appending' / 'process_lost only when the	pointer
+the REDESIGN-10 r1 note, 'the process_lost evidence event in	pointer
+s, in the spec r2 note, 'A1 builds process_lost{runnerId,' /	pointer
+9 now expects the retirement's process_lost after the events	pointer
+2197 at 6c9ff950), and its turn_ended, at the first clear of	pointer
+appends turn_ended (claude-event-translator.ts 544-555 at 6c	owner
+ takes a merged steer, then Stop: turn_ended at the dispose,	owner
+d and missed this); a wake's stream fails: turn_ended at the	pointer
+ailure also clears that flag and appends turn_ended (claude-	owner
+hen Stop: turn_ended at the dispose, and the wake's work end	pointer
+am fails: turn_ended at the translator's endTurn (E13). The 	pointer
+the runner receipt store: `requestStop`, `commitStop` and `commitRetirement`, each first set	owner
+is requestStopMutation.': the retirement's process_lost in its own	history
+# REDESIGN-11 review round 1 (fix-r1): r1 owner, pointer, history and unrelated entries; 35 entries whose lines changed were dropped
+ and `run.released` | `run.dispatched`: `holdRun`, called on	unrelated
+, and the ledger stop deadline bounds the work open at it wi	owner
+| 32.11: `acceptStopEffect` (`acceptStopEffect`, orchestrati	owner
+ession, enforced by the decider. A violation is a diagnostic	unrelated
+ate after COMMIT and before the permit is released. External	unrelated
+ its `run_released`, so a Run they leave not yet delivered r	unrelated
+ed`, `run_released`, `delivery_indeterminate`, `runner_reply	unrelated
+sumed{declined | absent | released | cancelled} < Observed <	unrelated
+tConsumed{released}, which a later acceptance beats (the joi	unrelated
+r handed it to the agent. A rejected resume is `run_released	unrelated
+ through the `process_lost` of the write that first sets its	pointer
+ an unlaunch: it returns by the projected `run.released`, or	unrelated
+ure before any hold, H4), was released or, a start, declined	unrelated
+ is R2's `deadlineAt`, which U2 fires for its owner runs, an	owner
+ledger stop deadline's is the opening commit's `stop.deadlin	owner
+ence, its coverage or the ledger stop deadline's alarm (L6).	owner
+- **Ledger stop deadline.** The arm folds each **Stop or Run	owner
+nd_requested` of `acceptStopEffect`, whose `stop` is set and	owner
+63 at 6c9ff950), a Run-less `end_session` included, and U2's	owner
+he session row's one ledger stop deadline, opening it at its	owner
+`stop.deadlineAt` when none is open; a later commit joins it	owner
+while the ledger stop deadline is open adds its work to that	owner
+ entry's `deadlineAt`; the fence opens earlier, never later.	owner
+`alarm_fired` at its own time for the rest. The alarm forces	owner
+ct (3.5), forced (3.8): it kills nothing, appends no main ev	owner
+ds its runner's work by the `process_lost` of the write that	owner
+ the arm folding its coverage (L1). The `process_lost` takes	owner
+nch or seal, and of the reason only `forced`: work the alarm	owner
+ first is forced, and work the `process_lost` ended first is	owner
+the ledger stop deadline's alarm (L6) has ended its work).	owner
+rrupted`, forced when the ledger stop deadline's alarm ended	owner
+forced when the ledger stop deadline's alarm ended its work 	owner
+ appends `process_lost` (L1, 6.5), whose Runs end or unlaunc	pointer
+| { readonly kind: "run_released"; readonly 	unrelated
+ readonly deadlineAt: number | null } | { readonly kind: "en	owner
+| { readonly tag: "interrupted"; readonly forced: boolean }	owner
+ed"; why: "declined" | "absent" | "released" | "cancelled" }	unrelated
+by `run.released`. The `run.started` projector does not writ	unrelated
+"run.released":   { runId; runnerId; commandId; transmission	unrelated
+ while that held transmission has not been released. It does	unrelated
+is released (the capability's watermark), the release being 	unrelated
+ends `run.released`. Its projector clears the hold only when	unrelated
+nt and is released, and the next `holdRun` returns `Covered`	unrelated
+e send is released as Refused, and 4.3 step 1 settles it the	unrelated
+, so a hold made after the read is unwritten and released. A	unrelated
+ssion the commit released is stale. The commit appends these	unrelated
+`) | `run.released` `NotSent`, read as Consumption NotConsum	unrelated
+tConsumed{released} (3.6, 4.11), never a decline: `exiting` 	unrelated
+(released `ResumeRejected` for a runner send) and is a sessi	unrelated
+8) | `run.released` `NotSent` or `JournalAbsent`, read as No	unrelated
+| `not_received` | `absent` | released `NotSent` |	unrelated
+ater `run.released` for that transmission | Transport Issued	unrelated
+| released `NotSent` or `JournalAbsent` | the `run.released`	unrelated
+| released `Refused` (`exiting`, `retiring`, `interrupted`) 	unrelated
+| released `ResumeRejected` | the `run.released` event | Tra	unrelated
+ once the ledger stop deadline's alarm has ended its work (f	owner
+at case. `process_lost` is appended by the write that first 	pointer
+e window. A revoked runner's memory is released by its entry	unrelated
+`process_lost` of the write that first sets the runner's `re	pointer
+it's `run.released` events precede it in that transaction, s	unrelated
+ step, after COMMIT and before the permit is released (3.1):	unrelated
+dispatched to: a released send is re-held for a successor.	unrelated
+at first sets its `retired_at` appends `process_lost` (6.5),	pointer
+eived` is released `NotSent`; anything else stays held (the 	unrelated
+mit the durable send with origin `Adopted` (4.2). A released	unrelated
+A control is not acknowledged before the retirement commit |	unrelated
+d by the `process_lost` of the write that first set `retired	pointer
+ledger stop deadline's alarm (L6); any other execution still	owner
+ effects: released by the current process retiring, a Run-le	pointer
+stops the Run (5.1), through a Stop commit (L6), then issues	owner
+d or U2's deadline step has retired its owner runs (L6); wit	owner
+no Run, it issues `end_session{runId: null}` at once, which 	owner
+pted, not forced: only the ledger stop deadline's alarm forc	owner
+ts idle: refused `exiting`, released, runner stopped `Idle`,	unrelated
+e user stopped: released, `Covered`, settled "Stopped before	unrelated
+released, the runner stopped, the send delivered once on a n	unrelated
+rrupted`, released, settled "Stopped before delivery"; the a	unrelated
+rejected: released `ResumeRejected`, the fresh fallback tran	unrelated
+idle-exit` is released `Refused{exiting}` in the same commit	unrelated
+`not_received`, released `NotSent`, delivered once.	unrelated
+happens before the retirement commit succeeds.	unrelated
+ query's fence is released; retained transport failures kept	unrelated
+ through the provider instance: every held resource released	unrelated
+en, as the hold plus `run.released`, not a new outbox code |	unrelated
+et, so a hold made after the read is released and an earlier	unrelated
+hold of a released start from the switch (before it the rele	unrelated
+the ledger stop deadline (one per session row, opened by a S	owner
+ledger stop deadline's alarm only), `process_lost`'s type an	owner
+ut kind the generator lacks: a stop commit's `process_lost`,	history
+action by `run.released` events holding `NotSent` for both a	history
+a Run-less `end` reaching the stop's deadline. Its review ro	history
+nded by the one ledger stop deadline per session row, at the	owner
+`stop.deadlineAt` of the Stop or Run now commit that opened 	owner
+ough the `process_lost` of the write that first sets its run	pointer
+row's one ledger stop deadline, opened at the first such com	owner
+e alarm's forced work-ended facts; work gained after a commi	owner
+.8), 5.1's forced close and second deadline, round 16's wake	history
+send's cleanup, a wake, a Tombstone cleanup, a forced close,	history
+C), and a Run-less end with no deadline (poteto r3 P2-1); RE	history
+tConsumed{released}, never a decline, and permanent only as 	unrelated
+released onto that query (poteto r1 P1-3, ub r1 P2-4). Rejec	unrelated
+ (8.4): a Run-less `end_session` is main's control, run whol	owner
+holds nor escalates it, and its commit opens no ledger stop 	owner
+itten, so released) and a restart hold with no write evidenc	unrelated
+ed by a release read as NotConsumed{released} (3.6, 4.11), a	unrelated
+ew one; a release is NotConsumed{released} everywhere (4.9).	unrelated
+irement or session end, NotConsumed{released}, a usage limit	unrelated
+tConsumed{released} | rejected: unchecked against D50's unla	unrelated
+ombstone cleanup, a forced close, a scope end), in 3.4, 3.7,	history
+e. Each r3 finding is a reading of it: a forced end runs the	history
+acceptance's Tombstone cleanup (3.8), 5.1's forced close and	history
+e it; Cursor's forced-end kill was counted with 5.1's forced	history
+ fixes (a forced-end exception in 8.3, the wake rule copied 	history
+ Cursor's forced end closes first (poteto r1 P2-G) | rejecte	history
+errupted, forced`; `Interrupted forced`; `proceeds normally`	history
+that no observer ended; no `settleSessionRuns` call from the	pointer
+er ended, forced. Main's reason: `sessionRunOwnersQuery` sel	pointer
+forced end); for work with no main run it now issues none an	pointer
+mit opens or joins the ledger stop deadline (L6), and a user	owner
+kes one: `acceptStopEffect` always sets `stop` with a `deadl	owner
+her control's commit (`stop: null`, a Run-less `end_session`	owner
+(`legacyStopOwnersQuery`, orchestration-engine.ts 726-753 at	owner
+er call; the alarm and a retirement's `process_lost` end the	owner
+her order, but the work is forced only when the alarm folded	owner
+`process_lost`, so its Runs stay unsealed (row 215; the D59 	owner
+: the one ledger stop deadline per session row, at the `stop	owner
+d and not forced, `interrupted` after a Stop with no result 	owner
+`forced` as the alarm's alone (3.8, 5.1, 8.3); 3.7's stop bu	owner
+`process_lost`, policy and `DeadlineOwner`; rows 202 and 205	owner
+forced) and the fence stays held until retirement covers the	history
+ds it as the Run's outcome (interrupted, forced), never as a	pointer
+ves to the retirement commit, and Gone-time'; the acceptance	history
+ project's relay forced into Error, Stop; the runner process	unrelated
+en Stop's forced kill of a Claude/Cursor runner fails, the s	unrelated
+n, full claude-process-runner and upgrade files, forced-stop	unrelated
+t; P2 runner-forced-stop fixture skips descendant cleanup if	unrelated
+ leak and record prunes; P1 retirement commit failure before	unrelated
+ispatch_attempt; run.released event (replay-safe, ABA-safe);	unrelated
+ve a send released outside its live loop (reconciler Journal	unrelated
+forced-stop TERM-KILL grace assertion removed). Opus 1xP1+5x	unrelated
+weakened forced-stop assertions. Codex (/private/tmp/r2-impl	unrelated
+(run.released with Refused|NotSent|JournalAbsent|ResumeRejec	unrelated
+/Run now/end commits and a Run-less end_session; deadline at	history
+e alarm's forced end, so the blocked Queued Run launches, al	pointer
+ess_gone) and the alarm ends the wake's work forced, with no	pointer
+upersedes, in the REDESIGN-11 note, 'the alarm's forced end,	history
+ evidence or by the alarm's forced end, also after a restart	pointer
+runnerId, released: readonly {token: SendToken, reason: Refu	history
+t}[]}. The model carries it; the decider reads each released	history
+ that one decision, as its run_released (L1), so Consumption	history
+IGN-5: Consumption why gains released (3.13); a send with no	history
+Refused{why: exiting|retiring|interrupted} on run_released,	history
+close effect; policy {interruptMs, settleMs (7000), probeMs,	history
+forced; the fence opens and a Queued Run launches once main'	history
+he wake's own end, not forced (CONTRACT.md 2.1 row 215, 8.3,	pointer
+the wake's work' / 'forced; the fence opens and a Queued Run	history
+ stays refused when Stop, Run now or a forced close ends its	history
+me decision. A released not-yet-delivered Run unlaunches and	history
+eding the spec r1 oracle note's 'reads its released tokens':	history
+run_released (L1); Refused folds NotConsumed{declined}, NotS	history
+released; no unheld_outcome; project_inactive/active still p	history
+tConsumed{released}, never a decline (4.11). The oracle has 	history
+forced end runs the label's column once, never re-armed; Cod	history
+n 2 reads the step (OpenCode Run ends forced at the step); a	history
+ alarm (reference.ts's forced end; L6, D59); the owner table	pointer
+work forced at the ledger': the oracle's stop deadline issue	pointer
+ult, 3.8), and what no observer ended is forced at the alarm	pointer
+hed (LI2 vs D50); (3) Run-less end_session success coverage:	history
+released[] NotSent for a not-yet-delivered start and its ste	history
+n a reserved input; alarm at a label deadline after a forced	history
+e after a forced end'. Now: a try waits for its answer, or f	history
+ect: OpenCode Run Ends forced at the step and the Queued Run	history
+interrupted, forced at condition 3 (3.8).	history
+note's 'forced at condition 3'. Acceptance: a stream of acti	history
+e of an unreleased transmission after it finds its Run Ended	history
+t-yet-delivered Run with no released token (L1 item 2, 3.6).	history
+released:[{t, NotSent}]}, where t is the only transmission o	history
+released:[]}. A ends process lost. The other spec r1 checkbo	history
+bstone; failed steer released after run end, late acceptance	history
+released; Run ends Interrupted forced; native fence released	history
+permit is released; P2 Candidate host turns Serving on any n	unrelated
+t 2 amends; P2 forced end of Queued Run has no kill target).	history
+after the retirement commit, worse than main; P2 3.6 predica	history
+REDESIGN-5): 4 material findings (ub N1: a forced end leaves	history
+ cleanup, forced close, scope end). Second pattern: one fact	history
+first Stop, Run now or end commit or a Run-less end_session,	history
+forced work-ended facts; each evidence fact has one observer	history
+distinct after overlap, 0 P1; all on join 1, the arm's read 	history
+it's stop.deadlineAt: one deadline vs one per deadlineAt, Ru	history
+2 retire commit folded as adding, two meanings of forced, no	history
+ carrying deadlineAt, released[] second source; plus 32.2.19	history
+umeRejected (4.4). From the switch a released key steps only	unrelated
+from provider runs, one active run per session enforced by a	unrelated
+that event, effects run after the permit is released, caches	unrelated
+ter COMMIT and before the permit is released, and a rollback	unrelated
+m provider runs, one active run per session enforced by a' /	unrelated
+per session is enforced by the decider, and a violation is a	unrelated
+unner. Settlement is decided once, in the retirement commit,	history
+retirement commit for ledger-owned runs; runner-held provide	history
+released: {token, reason}[]} in the retirement commit from t	owner
+s issue (4.4). holdRun never re-holds a released run with no	history
+ row 215, 3.9, 6.5, 12.2). The release commit's run.released	pointer
+retirement commit from that commit's': the stored event is {	owner
+At}, and the releases are the run.released events before it.	pointer
+released; upgrade-activate, mark switched and old's entry-sc	unrelated
+es to the retirement commit (the' and '• After the switch, S	history
+ a Stop over only a wake ends it at the dispose, not forced,	pointer
+he wake's work ends not forced (E2; the spike keyed it on no	pointer
+The next send after a forced close or respawn starts cleanly	unrelated
+SIGN-6: a forced end runs its labels' one stop sequence (L6)	history
+runner, confirm-gated; a Run-less end_session joins or opens	pointer
+ ends the rest, forced (L6). The Run now and end rules hold.	pointer
+interrupted," / 'forced)' and the note "intake records it as	pointer
+ome (interrupted, forced), never as a": intake records it as	pointer
+come, interrupted and not forced, since only the ledger stop	pointer
+Run-less end_session; deadline at' / 'the opening commit + 3	history
+oved; one deadline step; end when every': the session row's 	history
+stop.deadlineAt, never moved, and ends at its alarm only the	history
+then kill_and_respawn (9)' and 'at the stop's' / 'deadline s	pointer
+kill_and_respawn, as main retires the process' / '(ptsvc 251	pointer
+ their work is the ledger stop deadline's and ends forced at	pointer
+ctive until sealed by that runner's process_lost (3.5, 3.6).	pointer
+ESIGN-7: no change; D50 reads the stop's deadline step as L2	pointer
+deadlineAt; the ledger issues no kill (CONTRACT.md L2, L6, D	pointer
+next id's process_started while main leaves them' / 'open (2	pointer
+e and its process_lost': a Stop and two sends between U2's r	pointer
+d its runner's process_lost (CONTRACT.md L6). The other gate	pointer
+process_lost is' / '{runnerId, released: readonly {token: Se	pointer
+eads each released' / 'entry first, in that one decision, as	history
+run_released (L1)': process_lost is {runnerId, retiredAt}, o	pointer
+edAt); the run.released events of its transaction precede it	pointer
+d first, each as its run_released, with the same Consumption	pointer
+d 3.13, 4.5, 6.5). Supersedes 'policy {interruptMs, settleMs	history
+stop.deadlineAt (3.7, 3.13). Supersedes, in the REDESIGN-10 	history
+'DeadlineOwner is Run (Settling only) | Send | Interaction' 	history
+nd, and the stop's deadline is U2's deadlineAt, which the" /	history
+nd never fires': DeadlineOwner is Run (Settling only) | Send	pointer
+| NativeCommand | Stop, Stop being the ledger stop deadline,	pointer
+row, which the ledger ends at its alarm_fired (3.7, L6). The	pointer
+s stop and end carry deadlineAt: number | null, the commit's	pointer
+load.stop.deadlineAt, null for a commit L6 does not fold (3.	pointer
+turn_ended-at-clear rule; the description's single ingestion	pointer
+ Run ends forced at the step); a' / "killed unsealed Run end	history
+ts kill's process_lost": condition 2 reads no step; work is 	pointer
+when the ledger stop deadline's alarm ended it, and OpenCode	pointer
+unconfirmed are main's and not forced (CONTRACT.md 3.8, L6);	history
+process_lost (L1). The other oracle expectations hold.	history
+kinds: h (process_lost' / 'released[] NotSent for a not-yet-	pointer
+t and its steer)' and "stop-commit process_lost with NotSent	history
+irement's process_lost {runnerId, retiredAt} preceded in its	history
+by a run.released NotSent for a not-yet-delivered start and 	history
+ll's issue and its" / 'process_lost' and 'completed. Expect:	history
+ Run Ends forced at the step and the Queued Run' / 'launches	pointer
+ runner's process_lost; an OpenCode owner run ends stop_unco	history
+main, not forced, and the Queued Run launches; label work wi	history
+run ends forced only at the ledger stop deadline's alarm (L6	history
+w or end, forced when the stop's deadline step ended it (3.7	pointer
+ at its' / "kill's process_lost, interrupted, forced; end in	history
+end, forced only when the ledger stop deadline's alarm ended	pointer
+ runner's process_lost, interrupted and not forced, and a wo	history
+e the alarm leaves it not forced (L6). The plain Run path is	history
+one per stop commit's stop.deadlineAt," / 'over the label wo	pointer
+n now or end commit with no open main': one open ledger stop	pointer
+session row, its time the stop.deadlineAt of the Stop or Run	pointer
+ing it, and no other commit adds, a Run-less end_session and	pointer
+ion) and is replaced by: [ ] Fixed trace: process_lost{R,' /	pointer
+'released:[{t, NotSent}]}' and 'released:[]}. A ends process	history
+ce is run.released{t, NotSent} then process_lost{R, retiredA	pointer
+process_lost{R, retiredAt} (3.13, 4.5). Authority and sessio	pointer
+.md 3.10, row 205); a Run-less end_session adds nothing, and	pointer
+ds at the ledger stop deadline's alarm (L6). Supersedes, in 	pointer
+Run now commit joins the open ledger stop deadline and moves	pointer
+ fixes applied, not a new decision. The ledger stop deadline	pointer
+on row: the first Stop or Run now commit (acceptStopEffect's	pointer
+t, no retireRunIds) opens it at its stop.deadlineAt, a later	pointer
+nd moves nothing, and no other commit adds to it, a Run-less	pointer
+U2's retire end_session included; forced means only that its	pointer
+nded the work; 3.13's control stop and end carry deadlineAt,	pointer
+process_lost is {runnerId, retiredAt}, policy has no interru	pointer
+DeadlineOwner adds Stop (CONTRACT.md L6, 3.7, 3.8, 3.13). Su	pointer
+ note, 'of label work with no open main run, one ledger stop	history
+p' / "commit's deadlineAt, kept on the session row and ended	history
+by its alarm_fired as": one ledger stop deadline per session	pointer
+Run now commit's stop.deadlineAt, whose alarm ends only work	history
+Run-less end_session joins or opens' / 'the stop;', in the R	pointer
+ note, "stop item; a stop commit's projected stop only opens	pointer
+w commit (acceptStopEffect's, stop set, no retireRunIds) ope	pointer
+ession row's one ledger stop deadline, and a later one moves	pointer
+othing; a Run-less end_session commits stop: null and adds n	pointer
+commit's `stop.deadlineAt` (`STOP_ABORT_WAIT_MS`, orchestration-engine.ts 871-880	owner
+# build round 1 (2026-10-31): contract lines, bead lines and the notes-gaps1 notes, raw and wrapped at 76 and 78.
+folds, `run.requested` (above), `run.started` (3.9) and main	owner
+utcome's `retryAt`, when it has one, as a field (3.7, 3.13).	owner
+ as the unlaunching outcome's `retryAt`, a view field and no	owner
+sk and cancel_request (3.12), each Tokened; every other kind	owner
+nly tag: "Tokened"; readonly token: SendToken; readonly effe	owner
+a Queued Run after an unlaunch carries retryAt?: number, the	owner
+// PendingConfirm.step: "retire" | "end_session"; a restart 	owner
+nning A, `run_now(B)` queued, then the project is removed: A	owner
+ends a Run, what fences, what an idle probe proves, when wor	pointer
+s and the ledger stop deadline's alarm is the same for every	pointer
+ledger stop deadline's alarm (L6, D47), so the relaunch's st	pointer
+.4, D60); run.dispatched and run.released are Answers (4.11)	pointer
+- D5: tokened command lifecycle addresses a held query trans	unrelated
+4.7's `ctx.replaying`, 3.6's deadline kind and 3.13's `not_s	history
+commit opens the ledger stop deadline at its `deadlineAt`.	history
+nts the arm folds, `run.requested`, `run.started` and main's	history
+ispatched` and `run.released` stay hold-fact Answers (4.11).	history
+p_task` and `cancel_request`, each Tokened; a start or steer	history
+icy holds no stop rule; the stop's deadline step is U2's and	history
+`run_now` carries `deadlineAt: number | null`, as `stop` and	history
+the ledger stop deadline (L6). Reason: the target was unname	history
+`retryAt`, when it has one, as a view field, no Deadline and	history
+, 3.13): `PendingConfirm.step` is `retire` or `end_session`;	history
+plain queued send; every `run_now` of an unadmitted input is	history
+omments, `run_now` and `PendingConfirm.step`, 8.2's and 12.2	history
+un skipped when ctx.replaying; Stale with reason; exhaustive	history
+ctx.replaying. contract consolidation 2026-10-28: 	history
+or Tokened{token, effect} for every effect with no hold (tok	history
+ation (§3.4): Answer{token: SendToken<K>} & EvidenceFor<K> |	history
+Sent, consumption a separate union; SendToken<K> tied to the	history
+, observe<K>(s: Send<K>, e: EvidenceFor<K>). Stored only for	history
+idence of the wrong kind for a Send Token is a compile error	history
+token, and every other effect as Tokened (§3.4)	history
+Held|Tokened (OPEN-2), no stored chain for runner-held sends	history
+(stop/end deadlineAt, DeadlineOwner Stop, policy {settleMs, 	history
+mmandMs}, process_lost {runnerId, retiredAt}); InputRequest 	history
+rving (8.2); PendingConfirm.step restart|retire|end_session;	history
+tests deleted: decider, evidence-order, transmission-proof, 	history
+step values; Held/Tokened acceptance vs 3.12).	history
+; the Control union has run_now (SendNow with interrupt) and	history
+71); 2591 run_now admits a new input (SendNow needs a queued	history
+4862: run_now on an unadmitted B; main returns already_start	history
+plain send, 271); 2591's run_now admits a new input (SendNow	history
+ head, 2312's run_now of the unadmitted C is already_started	history
+er; every run_now of an unadmitted input is already_started.	history
+ule now empty, Held/Tokened acceptance vs 3.12), 0 came from	history
+edgerCommand input for main's run.requested, run.started and	history
+ versus a D50 unlaunch), 1 amends an earlier one (G2 run_now	history
+lacks deadlineAt, L6), 0 came from new generator input kinds	history
+.13 (all four REDESIGN-11 kinds included: deadlineAt on stop	history
+and end, turn_ended, process_lost runnerId and retiredAt, Op	history
+ user, I want "Stopping…" shown until the server is actually	unrelated
+s shell, so that stopping a server never breaks the session.	unrelated
+conduit user, I want stopping a server that shares the agent	unrelated
+ stop, and a "Stopping N servers" toast, so that the kill is	unrelated
+nown, not absent: auto-settle waits, so a server started whi	unrelated
+"Stopping 2 servers". The list, not the toast, reports compl	unrelated
+PEN-2) or Tokened{token, effect} for every effect with no ho	owner
+Tokened{token, effect} for every effect with no hold (token 	owner
+est, each Tokened{token, effect} with its token from ctx.new	owner
+ (commandId, n); OPEN-2) or Tokened{token, effect} for every	owner
+e, stop_task and cancel_request, each Tokened{token, effect}	owner
+er{token: SendToken<K>} & EvidenceFor<K> | Unsolicited{label	history
+rvation (§3.4): Answer{token: SendToken<K>} & EvidenceFor<K>	history
+persedes 'SendToken<K> tied to the effect kind, observe<K>(s	owner
+UDIT-2 T7, 3.4): supersedes 'SendToken<K> tied to the effect	owner
+(s: Send<K>, e: EvidenceFor<K>)'. SendToken carries no kind;	owner
+ T7, 3.4): supersedes 'SendToken<K> tied to the effect kind,	owner
+nd<K>, e: EvidenceFor<K>)'. SendToken carries no kind; decid	owner
+ce of the wrong kind for a Send Token is a compile error' be	owner
+anges. '[ ] Evidence of the wrong kind for a Send Token is a	owner
+effect as Tokened (§3.4)' becomes '[ ] `live` shows a runner	owner
+issues is Tokened (3.12, 3.13)'. New: '[ ] A Main observatio	owner
+: Control run_now is {inputId, deadlineAt: number | null}, a	owner
+ D59, L6): Control run_now is {inputId, deadlineAt: number |	owner
+6): Control run_now is {inputId, deadlineAt: number | null},	owner
+h carries retryAt?: number, the unlaunching outcome's, a vie	owner
+ 3.6, 3.7): a Queued Run after an unlaunch carries retryAt?:	owner
+persedes 'PendingConfirm.step restart|retire|end_session' wi	owner
+M6 (amends D43, 8.4): supersedes 'PendingConfirm.step	owner
+ own end (turn_ended), its coverage or the ledger stop deadl	owner
+ts label's work until its own end (turn_ended), its coverage	owner
+or the ledger stop deadline's alarm, so the relaunch's start	owner
+label's work until its own end (turn_ended), its coverage or	owner
+the ledger stop deadline's alarm, so the relaunch's start wa	owner
+): main's run.requested, run.started and terminals reach the	owner
+: Control run_now carries deadlineAt: number | null; a Run n	owner
+retryAt as a view field, no Deadline. M6: PendingConfirm.ste	owner
+eadline. M6: PendingConfirm.step is retire or end_session; a	owner
+: Control run_now carries deadlineAt: number | null. New gen	owner
+D59 (L6, 3.13): Control run_now carries deadlineAt: number |	owner
+null. New generator input kind: a Run now with deadlineAt.	owner
+6, 3.13): Control run_now carries deadlineAt: number | null.	owner
+New generator input kind: a Run now with deadlineAt.	owner
+every other effect as Tokened (§3.4)' becomes '[ ] live shows	history
+# build round 2 (fix-gaps2, 2026-10-31): CONTRACT readers of changed terms (owner), A.2/block/A.21 history, superseded bead lines and pending-note quotes
+| A Run's id | main: the `runId` of the `run.requested` that reserves it	owner
+- **A Run's id is main's.** A user Run's id is the `runId` of the `run.r	owner
+`markRunning`, orchestration-side-effect-reactor.ts 1338-1345 at 6c9ff950)	owner
+Run is reserved there, never at admit. A later `run.requested` for an in	owner
+| { readonly tag: "retryable"; readonly retryAt: number; readonly code?:	owner
+type DeadlineOwner = "Run" | "Send" | "NativeCommand" | "Stop"; // Run:	owner
+permission is answered `{ decision: "reject", reason: "timeout" }`; the	history
+since 3.4 rejects evidence of a kind its provider cannot produce and row	history
+idle probe (D26), so 3.4's list now names it and a non-Claude `turn_ende	history
+G7 came from the new `Main` generator kinds and G8 from the `turn_ended`	history
+`run.requested` that reserves it, and the Run is reserved there, never a	history
+`run.requested` for an input its Run holds names that Run; `ctx.newId` m	history
+run and appends `run.requested` after `input.sent` in one write (orchest	history
+timeout deadline; `timeoutAt` and the `Interaction` deadline owner are d	history
+- Amends HLK 10B (3.10, 3.13): an `effect_outcome` `retryable` carries m	history
+provider's `turn_ended` is Rejected (3.4), not a wake's end, since only	history
+- Added: a user Run's id is its reserving `run.requested`'s `runId`, mai	history
+amendments, and rewrites in place, counting nothing: 3.4's kind check (`	history
+refused or covered. A native command issues in the requesting decision (	history
+its native_command control (8.5, LI6, G6). A turn_ended from any provide	pointer
+Supersedes 'A native command issues in the requesting decision (LI6)' wi	pointer
+run.requested runId. Every other effect with no hold: from ctx.newId.'	pointer
+}' (the optional timeoutAt field is deleted).	pointer
+effect_outcome retryable: '| { readonly tag: "retryable"; readonly retry	pointer
+DeadlineOwner: 'type DeadlineOwner = "Run" | "Send" | "NativeCommand" |	pointer
+Stop: the ledger stop deadline, one per session row, its target the row,	pointer
+LI6: a native command issues in the requesting decision, always. Spec	history
+Tokened issue carries its own. reference.ts dispatched (about 1773): bin	pointer
+G8 (3.4, row 215): overturned. turn_ended from any provider but Claude i	pointer
+it). reference.ts turn_ended (about 1165) stops ending a Codex, Cursor o	pointer
+168 and 1019 (the interaction's timeoutAt) and 2105 to 2116 (the timeout	pointer
+GAP 8 (3.10, 3.13, 10B): the oracle's first option. An effect_outcome	pointer
+Supersedes 'LI6: a native command issues in the requesting decision,	pointer
+and run_now carries deadlineAt. The alphabet gate covers all 57 kinds wi	history
+none missing; waiting: non-Claude turn_ended (G8) and OpenCode main	history
+(kill_and_respawn by D59, close by REDESIGN-7). Follow-up: re-express L1	history
+escalation through process_lost. New gaps G5 (no commandId-to-Run bindin	history
+G8 (non-Claude turn_ended). Review traces compile but nothing in the ora	history
+run.requested in the write that sends its input, after input.sent	pointer
+G8 (3.4, row 215): a turn_ended for Codex, Cursor or OpenCode is generat	pointer
+Supersedes, in the harness pass 2 note, 'waiting: non-Claude turn_ended	pointer
+retransmit rules, permission timeouts; CONTRACT.md §3.10); steers (§3.9)	history
+Supersedes 'retransmit rules, permission timeouts; CONTRACT.md' in the s	pointer
+amend D60), 1 new or amends D46 (G8 non-Claude turn_ended), 4 came from	history
+produces 57 at Claude except turn_ended-dependent paths: Claude 56, Code	history
+and Cursor 55 (turn_ended waits on G8), OpenCode 54 (also main completed	history
+(G5, G6, G7 amend D60), 1 new or amends D46 (G8 non-Claude turn_ended),	pointer
+that delivers exactly { decision: "reject", reason: "timeout" }; a run	history
+[ ] A permission timeout delivers { decision: "reject", reason: "timeout	history
+# build round 2b (fix-gaps3, 2026-10-31)
+issues is named by main's `(commandId, n)`: for a runner-held start or steer `n` is minted by	owner
+row's `attempt_count`, carried by its `effect_outcome`; a direct start's is its `run.requested`	owner
+runId. `ctx.newId` mints only the tokens of the effects decide issues (3.4).	owner
+- **Transmission.** One attempt to give a send to one runner, identified by `(commandId, n)`.	owner
+| Send Token | opaque host string, never parsed; its issuer's (3.4): an effect main issues is b	owner
+| Transmission count | the event stream (count of `run.dispatched` per `commandId`) for a runne	owner
+an effect owns its Send Tokens (main's `(commandId, n)` for every effect main issues, `holdRun`	owner
+`markRunning` every other's; the ledger's `ctx.newId` for the three it issues), the send module	owner
+`cancel_request` (3.12), each a `Tokened` `IssuedEffect` whose token `ctx.newId` mints. Main	owner
+by its `commandId` (3.13), each transmission by main's `(commandId, n)` (below). A retry is a n	owner
+`run.requested` (a fresh claim) as a direct send's (OpenCode: the session's driver sets	owner
+`run.requested` names the ledger Run its input belongs to and is no transmission; its try befor	owner
+events and a diagnostic. A steer's own Run takes the steer's `runId` (3.9). `ctx.newId` mints	owner
+`send_native_command`; a direct start is named by its `run.requested` runId, above) is named by	owner
+(3.13). Its transmission `n` is the row's `attempt_count`, which each `markRunning` claim	owner
+orchestration-side-effect-reactor.ts 2276-2380; `markCompleted`, 2253-2274; `writeFailure`,	owner
+the fence, which `markRunning` reads in the view (below; 2.1 row 202). Stop or Run now withdraw	pointer
+(reserve the Run a reserving `run.requested` names, 3.4, 3.9; launch a Queued Run whose start	pointer
+- **No result, either order (GAP 5).** A Run with a main run (one its `run.requested` reserved,	pointer
+4.8, its coverage, or the stop's deadline step, L6), as main deletes the entry when the answer	pointer
+`write` body, as `recordControlOutcome`'s is (2299), to append its `effect_outcome` (2.1 row	pointer
+// minted by holdRun, 4.11), any other's from its effect_outcome's `transmission` (n the claime	owner
+// outbox row's attempt_count); a direct start's is its run.requested runId. probe, stop_task a	owner
+// cancel_request: from ctx.newId. export type	owner
+| { readonly kind: "effect_outcome"; readonly transmission?: MainTransmission; readonly outcome	owner
+| { readonly kind: "end"; readonly commandId: string; readonly deadlineAt: number | null } // d	owner
+| { readonly kind: "run_now"; readonly commandId: string; readonly inputId: string; readonly de	owner
+readonly newId: () => string; // mints a wake Run's id and the tokens of probe, stop_task and c	owner
+// a runner-held start or steer from its run.dispatched, under its runId; a direct start by its	owner
+// any other from its effect_outcome. Hold facts are valid only on a runner-held start or steer	owner
+// probe, stop_task and cancel_request, which decide issues; each token from ctx.newId().	owner
+export interface MainTransmission { readonly commandId: string; readonly transmission: number }	owner
+readonly lastRefusal?: { readonly attempt: MainTransmission; readonly code: string } } // the r	owner
+the `retryable` `effect_outcome` that refused it, and its refusal code (3.4, 3.10).	owner
+- **Transmission:** one attempt to give a send to one runner, identified by `(commandId, n)`. `	owner
+| `run.dispatched{commandId, transmission: n}` | the `run.dispatched` event | the send's issue	owner
+`markRunning`'s claim is the only minter of `n` (`attempt_count`, reactor 1352 at 6c9ff950) and	owner
+`maxControlAttempts` or main's send budget the only cap (3.4). `ctx.newId` mints only a wake Ru	owner
+for it (H3, 4.4). Main issues it (D60), named by main's `(commandId, n)` (3.4); it enters	pointer
+id and the tokens of effects with no hold other than a direct start (G7). Reason: main mints th	history
+input kind; the first needs one the generator lacks: a control's `effect_outcome` with main's	history
+transmission by main's `(commandId, n)`: `n` from `run.dispatched` for a runner-held start or	history
+steer, else the claimed outbox row's `attempt_count`, which `markRunning` increments under a	history
+outcome's writer carries in `effect_outcome`'s `transmission`; a direct start keeps its	history
+`run.requested` runId. `ctx.newId` mints only a wake Run's id and the tokens of the three effec	history
+Build round 2b replaces three: a control's outcome arrives as `effect_outcome` naming main's	history
+`(commandId, transmission)`, not a `ctx.newId` token, and `lastRefusal.attempt` is that pair; n	history
+- Deleted HEAD rule: the ledger mints the Send Token of each effect with no hold, `ctx.newId`	history
+`(commandId, n)`, `n` the outbox `attempt_count` with no hold (3.4, 3.13, 4.11, D60); build	history
+- Added: each writer of a control's outcome appends its `effect_outcome` with main's	history
+`(commandId, n)` and the status it writes, `markCompleted` and `writeFailure` included (2.1 row	history
+`SendToken`, `newId`, `IssuedEffect` and `run_requested` comments, 2's Run id row, 4.11's minte	history
+transmission count and identity rows; 3.13's `SendToken`, `newId`, `RunEffect` and `Control`	history
+newId()) (§3.4, §3.13). • A runner-held send	history
+DecideContext newId: 'readonly newId: () => string; // mints a wake Run's id and the tokens of effects with	history
+an input its Run holds names that Run. ctx.newId mints a wake Run's id and	pointer
+minted by holdRun, 4.11), any other's from its effect_outcome's	pointer
+start's is its run.requested runId. probe, stop_task and /	pointer
+cancel_request: from ctx.newId.' effect_outco	pointer
+effect_outcome: '// transmission: present for an effect main issues with	pointer
+readonly kind: "effect_outcome"; readonly transmission?: MainTransmission;	pointer
+stop, end, run_now and answer each gain 'readonly commandId: string;' after	pointer
+their kind (deadlineAt, inputId, interactionId and answer stand).	pointer
+DecideContext newId: 'readonly newId: () => string; // mints a wake Run's id and the tokens of probe, st	pointer
+direct start by its run.requested runId; / // any other from its	pointer
+effect_outcome. Hold facts are valid only on a runner-held start or steer. /	pointer
+commandId and its n (3.4) / export interface MainTransmission { readonly	pointer
+MainTransmission; readonly code: string } } // the refused answer	pointer
+effect with no hold: from ctx.newId.' and 'mints a wake Run's id and the	history
+steer's own Run takes the steer's runId (3.9). ctx.newId mints only a wake	pointer
+steer's transmission is its run_dispatched (commandId, n); any other's is	pointer
+the transmission its effect_outcome carries, main's outbox command_id and	pointer
+claimed attempt_count; a direct start keeps its run.requested runId. A	pointer
+by the Control's commandId. ctx.newId mints only a wake Run's id and the	pointer
+lastRefusal (3.10, 10B): a retryable effect_outcome with a code for a	pointer
+Decide issues no answer and probes none: no interaction probe target, no	pointer
+run_dispatched, a Tokened issue carries its own' with: each transmission	history
+of a Main issue is main's (commandId, n), from its run_dispatched for a	pointer
+runner-held start or steer and from its effect_outcome for any other; a	pointer
+Tokened issue carries its own. Supersedes, in	pointer
+Controls: each stop, end, run_now and answer Control the fake emits	pointer
+deliver_answer and send_native_command, the fake emits an effect_outcome	pointer
+with transmission (commandId, n), n counting from 1 per commandId, and the	pointer
+retryable (retryAt, code), failed or cancelled to permanent. A transmission	pointer
+lastRefusal is that outcome's (commandId, n). The fake issues no	pointer
+interaction probe; an answer's outcome is never delivery_unknown.	pointer
+by main's (commandId, n); a refused answer's lastRefusal is that pair and	pointer
+(commandId, n) counted from run.dispatched, §3.4/§4.11). Title still says	history
+(commandId, n), so each writer of a control's outcome appends an	pointer
+effect_outcome naming the row's command_id and claimed attempt_count, with	pointer
+retryable, retryAt its next_attempt_at and code its error_code; failed or	pointer
+recordControlOutcome where its guarded update changes the row	pointer
+markCompleted (2253-2274) and writeFailure (2753-2783) on a non-send row,	pointer
+recordControlOutcome's is (2299), so the event is projected with its	pointer
+Supersedes '(15 writers; markCompleted and writeFailure keep main's	history
+unguarded writes)' with: (15 writers; markCompleted and writeFailure keep	pointer
+write body to append its effect_outcome).	pointer
+Supersedes 'OPEN-2 (token (commandId, n) counted from run.dispatched,	history
+effect_outcome in the write that sets its status, naming (command_id,	pointer
+Token (commandId, n) (§4.11) is the only send identity on the runner wire;	pointer
+submitted answer, and an ambiguous earlier transmission is reconciled by	history
+probe before a retransmit with a fresh token (10B).	history
+issues every answer (D60) and names each transmission by its (commandId,	pointer
+transmission is reconciled by probe before a retransmit with a fresh token	pointer
+past its cap ends delivery' with: or the stop's deadline step ends	pointer
+# build round 2c (fix-gaps4, 2026-10-31): 3.4, 3.9, 3.12 owner lines, A.2 block and A.21 history, notes-gaps4 notes and superseded bead lines
+appends `effect_outcome` naming the row's `command_id` and `attempt_count`, with the status it	owner
+`retryAt` its `next_attempt_at` and `code` its `error_code`; `failed` or `cancelled`, `permanent	owner
+2753-2783 at 6c9ff950) and every sweep that ends an open control row: the refusal sweep	owner
+control row: `acceptStopEffect`'s DELETE and the Run's end touch only send rows	owner
+511-529; `settleLegacySend`, 412-475 at 6c9ff950), and `acceptStopEffect`'s	owner
+(`markCompleted`, 2253-2274; `recordControlOutcome`, 2276-2380; `writeFailure`, 2753-2783;	pointer
+3.4), and so is the outcome of each sweep that ends a control row (the refusal sweep, `drain`	pointer
+rows to `cancelled`, `retirePendingPrompts`, retire-pending-prompts.ts 21, 149-151), the	owner
+keep their status transitions. T5-writers (32.3) holds the table of these writers' from and to s	pointer
+- **A sweep that ends a control row appends its outcome.** The refusal sweep, `drain`'s	owner
+6c9ff950). For each control row its update changes, that body appends `effect_outcome` naming	owner
+refusal sweep's store does (orchestration-side-effect-reactor.ts 2659-2663 at 6c9ff950); and	owner
+`effect_outcome` with main's `(commandId, n)`, but a sweep that ends a control row appended none	history
+generator has none for it yet. `acceptStopEffect`'s DELETE, named with the sweeps when the gap w	history
+refusal sweep, `drain`'s removed-project cancel and pending-prompt retirement append	history
+`effect_outcome` in the write that sets the row's status, naming its `command_id` and	history
+- Added: every writer that ends a control row appends its `effect_outcome`, the refusal sweep,	history
+nothing: 3.9 item 1's and 3.12's `acceptStopEffect` DELETE as send rows only; 3.10's answer end;	history
+3.12's `Main's writers` sentence; 3.13's `effect_outcome` and `MainTransmission` comments; and	history
+no hold but a direct start, its outbox / row's command_id and claimed	history
+Supersedes the effect_outcome comment '// transmission: present for an	history
+command_id and claimed attempt_count (3.4); absent for the three effects	history
+Supersedes the MainTransmission comment '// main's name for one	history
+No type line changes: the MainTransmission interface and the	pointer
+effect_outcome variant stand as they are.	pointer
+A Main issue's effect_outcome with transmission n of 1 or more joins that	pointer
+sweep then an unguarded markCompleted or writeFailure): transport by the	pointer
+its effect_outcome carries, main's outbox command_id and claimed	history
+Claude turn_ended generated as adversarial (expected Rejected); no Cursor	history
+to add: build round 2b's control effect_outcome per (commandId, n) and both	history
+write with the row's status: effect_outcome permanent with the sweep's	pointer
+code, transmission (commandId, n) where n is the latest claim, or	pointer
+(refusal sweep or drain), project_unavailable or another refusal code	pointer
+(refusal sweep, failed), provider_process_gone (pending-prompt	pointer
+control effect_outcome per (commandId, n) and both OpenCode fold orders of	history
+ended by a sweep (refusal sweep, drain, retirePendingPrompts,	history
+acceptStopEffect's delete) gets no effect_outcome, so the ledger sees its	history
+input kinds (new inputs retryable.code and adversarial non-Claude turn_ended	history
+produced: control effect_outcome per (commandId, n) and the OpenCode	history
+The rule: every writer that ends a control row appends its effect_outcome,	pointer
+the refusal sweep, drain's removed-project cancel and pending-prompt	pointer
+no transmission and ends its issue never transmitted. The acceptStopEffect	pointer
+sweep (refusal sweep, drain, retirePendingPrompts, acceptStopEffect's	history
+delete) gets no effect_outcome' with: closed by build round 2c; the sweeps	history
+are the refusal sweep, drain and retirePendingPrompts.	pointer
+Input kinds still not produced: a sweep's control effect_outcome, claimed	pointer
+(commandId, n) and unclaimed (commandId, 0), per provider.	pointer
+executors', checked against each writer's SQL text; main's writers are not	history
+status. An outcome written with no claim (the control budget's exhaustion,	history
+Supersedes 'so each writer of a control's outcome appends an effect_outcome	pointer
+naming the row's command_id and claimed attempt_count' with: so every	pointer
+writer that ends a control row appends an effect_outcome naming the row's	pointer
+each row's project_key, as the refusal sweep's store does (2659-2663);	pointer
+Supersedes 'An outcome written with no claim (the control budget's	pointer
+Supersedes 'main's writers are not edited, and outbox status stays main's	pointer
+Not writers of a control outcome: acceptStopEffect's DELETE and	pointer
+settleRunCommands touch only send rows (orchestration-engine.ts 858;	pointer
+Acceptance adds: [ ] a control row the refusal sweep, drain or	pointer
+pending-prompt retirement ends appends one effect_outcome in that write,	pointer
+# build round 2d (fix-gaps5, 2026-10-31): 3.4, H4, 4.4, 4.7, 8.4 owner lines, A.2 block and A.21 history, notes-gaps5 notes and superseded bead lines
+forward (295, 324), so a `(commandId, n)` never repeats. So each row is its own issue unde	owner
+before `markRunning` at 815-822 at 6c9ff950), and a claim made before an outage waits insi	owner
+`send_native_command`) is answered only by its `effect_outcome` (D61): the resolution of a	owner
+8.3; any but `effect_outcome` on a control main issues, D61), a contradicting	owner
+effect decide issues as `effect_outcome`; a row main's executor runs gets none, as its gat	owner
+and no hold, is answered as main's outbox row (3.4): removed, the refusal sweep	owner
+| project not served (H4) | an effect decide issues: `effect_outcome` `not_sent`; runner-h	owner
+(3.4): the Stop commit as a `stop` Control, or an `end` Control with its `deadlineAt` wher	owner
+`end_session` as an `end` Control, `deadlineAt` null, under its own `command_id`	owner
+`effect_outcome` generator kind: a control's `not_sent` and provider evidence on a control	history
+`interaction` target, so the findings `answer_consumed` and `answer_pending` answer no pro	history
+`send_native_command`) is answered only by its `effect_outcome`. Every `interaction_resolv	history
+steer's receipts. Reason: main's claim appends no event (`markRunning` appends `run.reques	history
+under its own `command_id`, and a Control names only the row its own commit writes. `end`'	history
+commit is a `stop` Control, or an `end` Control with its `deadlineAt` where main commits t	history
+794-803, before `markRunning` at 815-822 at 6c9ff950), and a claim made before an outage w	history
+`effect_outcome`. A native command's confirmation clock runs through an outage, which noth	history
+shows. Reason: main writes no `not_sent` status for a control row (`recordControlOutcome`,	history
+- Amends HLK 10B (3.4, 3.13), as build round 2b amends it: the probe findings `answer_cons	history
+and `answer_pending` and 3.4's answer probe receipts are deleted, as decide probes no answ	history
+- Added: D61, a control main issues is answered only by its `effect_outcome`; the resoluti	history
+review r3-2 (8.5): a native command whose latest try got not_sent shows	history
+Supersedes 'a not-served project gets effect_outcome not_sent for every	pointer
+Supersedes 'a native command whose latest try got not_sent shows Queued and	pointer
+send_native_command confirmation deadline does not run while its latest try	history
+while its latest try got not_sent (3.7, 8.5), and the view shows Queued'	history
+and steer), Tokened is probe, stop_task and cancel_request only,	history
+MainTransmission, effect_outcome.transmission optional, commandId on stop,	history
+end, run_now and answer, lastRefusal.attempt is a MainTransmission,	history
+interaction probe target deleted; public test green.	history
+probe_result loses the answer_consumed and answer_pending findings; its	pointer
+precedes its claim (3.4); retryAt is the outcome time.	pointer
+Supersedes, in the round 2b note, 'interaction probe target deleted' with:	history
+interaction probe target deleted, and build round 2d deletes the two answer	pointer
+Oracle on round 2b (lane 2b): a control's (commandId, n) binds the host	history
+control effect_outcome per (commandId, n) with the 3.4 mapping and a reclaim	history
+Drop the fake's outcome-first delivery and its answer probe findings.	pointer
+New input kinds per provider: control evidence before and after its	pointer
+when its start's latest try got not_sent and its execution has no evidence	history
+shape. Open risk for 32.3: an unguarded writeFailure retryable after a sweep	history
+not_sent has no 3.4 mapping; answer_consumed and answer_pending are dead	history
+findings), 2 came from new generator input kinds (control effect_outcome).	history
+answer_consumed and answer_pending are dead findings)' with: closed by	history
+Gap 4: the two answer probe findings are deleted from probe_result.	pointer
+• the refusal sweep, refuseProjectCommand	pointer
+# build round 2e (fix-gaps6, 2026-10-31)
+`turn_ended` from any provider but Claude, 2.1 row 215,	owner
+- LI8: `anythingMayAct` is false only when the fake has no running turn	owner
+or send whose work the ledger stop deadline's alarm ended (forced, L6), which the alarm never	owner
+`not_sent` or `delivery_unknown` outcome naming a transmission is evidence its send cannot	history
+from the alarm: LI8 read a running turn the ledger cannot see after a forced end.	history
+ended (forced, L6) no longer holds it true, though the native turn may run on	history
+nothing. Live tasks still hold it, as a forced end touches only label work.	history
+main a Claude input's result clears the turn its wake opened, which the wake's `turn_ended` then	history
+dropped; process_lost scenarios PL-1 to PL-6 restore the deleted coverage;	history
+LI8 in the harness: a turn or send whose work the alarm ended (forced, L6)	pointer
+LI8: do not count a turn or send whose work the alarm ended (forced, L6)	pointer
+Run (expected a new wake Run, LI9); and alarm-forced work with the fake's	pointer
+control main issues is answered only by its effect_outcome; provider	history
+input kinds (control effect_outcome). round build-3a (oracle lane)	history
+earlier ones (LI8 3432 vs the alarm-forced end in L6 and 8.3; an Unsolicited	history
+effect_outcome). round build-3b (generator lane, first report	history
+missing, 0 waiting per provider; non-produced rows are adversarial or not	unrelated
+ended (forced, L6) no longer holds it, though the native turn may run on,	pointer
+# 32.2.18 check-in (2026-10-31): 25scs is swept (the 12.2 table names it); newest notes are live (A.21), so their
+# history entries were reclassified pointer or owner; build notes of 32.2.4 to 32.2.8, 32.2.11 and 32.2 classified.
+statement depends on: in the reactor, rows 202 and 212 (markRunning reads	owner
+body, recordSendReply); in dispatch, rows 206 and 207 (requeueFailedSteers's	owner
+commitAndSignal's call passes); in R2's engine and U2, rows 203 and 204 (the	history
+stop's items folded in the control row's projection) and row 213's view read	history
+the change in dispatch (rows 206 and 207) is in requeueFailedSteers's body,	owner
+ticket also lands row 214's runner branch: U2's runner deadline step that	history
+item's Run with its owners to settleSessionRuns, as the OpenCode branch does	history
+(CONTRACT.md L6, 2.1 row 214). The stop's owners are written in R2's engine,	history
+acceptStopEffect (U9, orchestration-engine.ts 658-669 at 6c9ff950), which	pointer
+description, 'in R2's engine and U2, rows 203 and 204 (the' / 'stop's items	history
+'ticket also lands row 214's runner branch' through '(CONTRACT.md L6, 2.1	history
+row 214).' and 'which' / 'reads the view's stop coverage (5.4); that read	history
+moves here from 32.2.6.': rows 203, 204 and 214 are deleted (D59) and R2's	history
+acceptStopEffect reads no view; this ticket keeps rows 202, 206, 207, 210,	history
+supersedes 'acceptStopEffect reads no view;': R2's acceptStopEffect reads no view, and 32.11 adds row 205's read there	pointer
+amend earlier ones (LI8 reads ledger belief, a forced end no longer holds	history
+run.requested; GAP 5 vs section 9 OpenCode work end) stay pended in the oracle	pointer
+tasks_snapshot); the L6 ledger stop deadline with qualifying work is first	owner
+3 steer-join and 5 OpenCode work-end on the oracle side, 5 alarm-forced LI8	history
+process_started; 1521-1523 uncoded failure -> provider_send_attempts_exhausted	history
+From 32.2.5: Settling expiry (alarm_fired with a due deadline) and	history
+match), hold_exhausted, run_released, delivery_indeterminate,	owner
+(outbox side 25scs); AC5 stopCovers moves to 32.2.7 + 25scs. Gaps (contract	pointer
+conduit-test-82tn.32.2.7 · Run Ledger redesign: core authority and stopping	owner
+inbox and claimed rows via stopCovers (5.4), is built here (decider side;	owner
+32.2.7 built at 34873934 on wt/82tn3225 (wt/82tn32 ff'd): stop/run_now/end	owner
+process_started (decider and oracle), runnerHost policy capability, ledger	owner
+32.2.6 AC5 decider side shown (coverage is main's stopCovers, 5.2/5.4).	owner
+retired before its process_started must be recorded retired, and a later	owner
+process_started for it rejected (CONTRACT.md 349-350, 6.1, 9: retirement is	owner
+run.requested, run.started join, a steer outliving its Run becomes its own	owner
+commandReceipts capability, final retirement before process_started (L1 349-	owner
+the refusal sweep, refuseProjectCommand (orchestration-side-effect-reactor.ts 2556-2660	owner
