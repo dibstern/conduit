@@ -466,8 +466,9 @@ Only evidence and conduit's decisions, each once:
   while the project is not served (`executeRow`, orchestration-side-effect-reactor.ts 782, 794-803,
   before `markRunning` at 815-822 at 6c9ff950), and a claim made before an outage waits inside it
   (`runProviderEffect`, 1440-1456), so no row main's executor runs, a direct start's included,
-  gets a `not_sent`: such a try shows nothing and counts nothing (H4), and a `not_sent` or
-  `delivery_unknown` outcome naming a transmission is evidence its send cannot produce (below).
+  gets a `not_sent`: such a try shows nothing and counts nothing (H4), and a `not_sent` outcome on
+  any effect main issues, a direct start's named by its runId included, or a `delivery_unknown`
+  one naming a transmission, is evidence its send cannot produce (below).
   The host composes the token from the pair, as from `run.dispatched`'s. A claim appends no event,
   so a transmission shows only at its outcome, and
   its issue may still act until then (3.5). An outcome written with no live claim (the control
@@ -513,11 +514,13 @@ Only evidence and conduit's decisions, each once:
   later.
 - Receipt evidence (input acceptance and decline, accounting, input probe findings) updates only
   the record `receiptAddress(token)` names, and never changes or revives Run lifecycle.
-- An unknown or never-issued token: Accepted, no events, a diagnostic. Evidence of a kind the send
-  or its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; `command_lifecycle`
-  from any provider but Claude, 9, D46; `turn_ended` from any provider but Claude, 2.1 row 215,
+- An unknown or never-issued token, or a native command's receipt whose `commandId` names no
+  native command (its key, D61): Accepted, no events, a diagnostic. Evidence of a kind the send
+  or its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; either command
+  receipt, `command_lifecycle` or `command_result`, from any provider but Claude, 9, D46;
+  `turn_ended` from any provider but Claude, 2.1 row 215,
   8.3; any but `effect_outcome` on a control main issues, D61), a contradicting
-  native id, or a command receipt naming another commandId (D21):
+  native id, or a held start's or steer's command receipt naming another commandId (D21):
   Rejected, a diagnostic, no state change. A Send Token carries no kind, so this check is
   decide's, never the type's (3.13). No throws
   and no new error types.
@@ -2831,8 +2834,10 @@ type NativeCommand = Sent | Queued | Started | Unconfirmed | Completed | Cancell
   `result` and `query_ended` apply to the wake execution of the observation's label; with none
   they are recorded with a diagnostic and no change. No fictitious token is minted.
 - **Stop and wake labels:** 3.7 L6.
-- **Wake Runs.** A wake execution with no active Run records a wake Run as Launched, with no start
-  effect; its waking task is the one notified just before. One under another label while that wake
+- **Wake Runs.** A `turn_started` folded with no active Run records a wake Run as Launched, with no
+  start effect, whether it opens its label's wake execution or repeats one still outstanding (one
+  a joined Run left, as only its own end above ends it), which it re-arms as that Run's (D28). Its
+  waking task is the one notified just before. One under another label while that wake
   Run is active adds an execution to it. A wake Run reads its executions' activity while it is
   active: it ends when its latest label's wake execution ends (above), by the fold, so `completed`
   at a clean result (3.8 condition 1), `interrupted` at a Claude `turn_ended` after a Stop with no
@@ -3430,8 +3435,9 @@ Behavioural statements the rebuilt decider must make impossible to violate:
   - LI7: older-label evidence never changes authority or liveness; a send's own label is never older
     for that send (3.4).
   - LI8: `anythingMayAct` is false only when the fake has no running turn, no unfinished send other
-    than a probe (D31) or a `stop_task` whose task is gone (3.5), and no live task; unknown counts
-    as true.
+    than a probe (D31) or a `stop_task` whose task is gone (3.5), and no live task, but for a turn
+    or send whose work the ledger stop deadline's alarm ended (forced, L6), which the alarm never
+    kills and so may run on; unknown counts as true.
   - LI9: each self-started turn on a label that is not older (3.4), with no active Run, yields
     exactly one wake Run.
   - LI10: a zero-turn result never ends or starts a Run.
@@ -3897,9 +3903,10 @@ a native command fails it (D34), and an older wake label's
   still matched and opened the destruction gate (LI5). One principle replaces a list of two events.
   Rejected: dropping the pending confirm at a replacement (the step is still wanted; only the
   user's view is stale).
-- D46: `command_lifecycle` from any provider but Claude is evidence its provider cannot produce,
-  Rejected (3.4). Reason: section 9 defines it only for Claude, and only Claude source emits it; a
-  Codex or Cursor one read as NotConsumed ended a Run whose start the host still held (LI8).
+- D46: either command receipt, `command_lifecycle` or `command_result`, from any provider but
+  Claude is evidence its provider cannot produce, Rejected (3.4; build round 2e). Reason: section 9
+  defines them only for Claude, and only Claude source emits one; a Codex or Cursor one read as
+  NotConsumed ended a Run whose start the host still held (LI8).
   Rejected: adding it to those providers' Work ended (invents a host behaviour).
 - D47: amends 8.3. Every unsolicited `turn_started` is outstanding work in its own right, whether
   it records a wake Run or joins an active Run. Reason: an OpenCode turn joined to a Starting Run,
@@ -4800,6 +4807,59 @@ rules and adds 84: 17 more (A.21).
   deletion and counts nothing. Reason: no probe a decider issues can produce them. Rejected:
   keeping them as findings an input probe may return (an input probe answers for an input, never
   an answer, 3.4).
+
+**Decided (build round 2e, 2026-10-31)**
+
+The five gaps lanes 3a and 3b found building round 2d. Four came from generator kinds: a Claude
+native command receipt naming no native command, a direct start's `not_sent`, a `command_result`
+from a provider but Claude, and a repeat `turn_started` after a joined input Run ended. One came
+from the alarm: LI8 read a running turn the ledger cannot see after a forced end.
+Build round 2e (contract, after redesign 11): 0 new decisions, 5 amend earlier ones, 4 came from
+new generator input kinds. Against HEAD, a replaced rule counting as one deletion and one addition,
+a move or a restatement as neither and a new reader or exception as an addition, it deletes 68
+rules and adds 85: 17 more (A.21).
+- Amends D59 (11.2 LI8): `anythingMayAct` is the ledger's belief, and a turn or send the alarm
+  ended (forced, L6) no longer holds it true, though the native turn may run on, as the alarm kills
+  nothing. Live tasks still hold it, as a forced end touches only label work. It narrows LI8 and
+  counts nothing. Reason: the bound exists so a hung turn cannot hold liveness for good (L6), and
+  main's own liveness reader counts only live background tasks, never turns (`hasLiveWork`,
+  background-liveness.ts 103-105 at 6c9ff950 and 862c9557, read by delete,
+  session-manager-service.ts 1297-1302, and triage, session-manager-triage.ts 133). Rejected:
+  `anythingMayAct` true after a forced end (a hung turn would hold cleanup, archive and delete for
+  good, which main never does); a fact for the turn's real end (no observer reports it).
+- Amends D61 (3.4, D21): a native command's receipt whose `commandId` names no native command is
+  an unknown token, Accepted with no events and a diagnostic, as the `commandId` is its key as a
+  token is an Answer's; 3.4's D21 clause narrows to a held start's or steer's receipt, as the D21
+  entry already reads. It counts nothing. Reason: D46 checks the kind before the key (oracle round
+  10), and a Claude receipt is a kind Claude produces (`handleCommandLifecycleEffect`,
+  claude-runner-payload.ts 2431-2480 at 6c9ff950). Rejected: keeping it Rejected, lane 3a's
+  reading (calls producible evidence unproducible because its key is unknown, which no other
+  Unsolicited kind does).
+- Amends D48 (3.4), as build round 2d amends it: a `not_sent` outcome on any effect main issues, a
+  direct start's named by its `runId` included, is evidence its send cannot produce, so 3.4's one
+  line decides what 3.13 already says (`not_sent`: an effect decide issues only). It restates and
+  counts nothing. Reason: a direct start's row is one main's executor runs, whose gate precedes
+  its claim (round 2d), and a direct start's uncertainty is its own marker, not an outcome
+  (`delivery_indeterminate`, orchestration-side-effect-reactor.ts 919-925 at 6c9ff950). Rejected:
+  widening `delivery_unknown` the same way (a runner-held send's `delivery_unknown` is real, 3.6).
+- Amends D46 (3.4, 9): either command receipt, `command_lifecycle` or `command_result`, from any
+  provider but Claude is evidence its provider cannot produce, Rejected. It replaces D46's
+  `command_lifecycle`-only rule, one deletion and one addition. Reason: only Claude source emits `command_lifecycle`
+  (claude-runner-payload.ts 2059-2060 at 6c9ff950; types.ts 114), and no source at 6c9ff950 or
+  862c9557 produces `command_result` for any provider (`git grep`). Rejected: leaving
+  `command_result` to the unknown-token rule (a Codex one would be Accepted as a fact no host
+  makes); a rule per receipt (two rules for one check).
+- Amends D47 and D28 (8.3): a `turn_started` folded with no active Run records a wake Run, opening
+  its label's wake execution or re-arming one still outstanding as that Run's. A joined Run's end,
+  its start's result included, is no end of the wake execution, so after a joined input Run ends
+  its label's execution stays outstanding, and a repeat `turn_started` re-arms it into a new wake
+  Run. It narrows 8.3 and counts nothing. Reason: the wake's own end ends it (8.3, D28), and on
+  main a Claude input's result clears the turn its wake opened, which the wake's `turn_ended` then
+  follows (claude-runner-payload.ts 2196, 2301 at 6c9ff950; 2.1 row 215); LI9 already asks for the
+  Run, so the oracle's noop on an outstanding wake (its reference model in conduit-82tn3223b)
+  was wrong and the fake right. Rejected: the joined Run's end ending the wake execution (round 10's
+  reading, from before REDESIGN-5: a running native turn with no execution, LI8); no Run on the
+  repeat (work no Run reads).
 
 ### A.11 REDESIGN-1 Process and address (2026-10-28): C + M1
 
@@ -6392,6 +6452,14 @@ Build round 2b replaces three: a control's outcome arrives as `effect_outcome` n
 expectation has decide probe an answer before a retry; and a Run whose fold has no result ends
 only once main's terminal for its run has folded, with that terminal's reason, in either fold
 order of `query_ended` and `turn.error`.
+Build round 2e replaces four: LI8 no longer counts a turn or send the alarm ended as running, since
+the alarm kills nothing and main's liveness reader counts only background tasks
+(background-liveness.ts 103-105 at 6c9ff950); a native command's receipt whose `commandId` names
+no native command is Accepted with no events, not Rejected, since its kind is producible and only
+its key is unknown (D46 before the key); a `command_result` from a provider but Claude is
+Rejected, not unread, since no source produces one; and a repeat `turn_started` with no active Run
+after a joined input Run ended records a wake Run, where the oracle made none, since a joined
+Run's end is no end of the wake execution (8.3, LI9).
 
 Risks: only a Stop or Run now commit opens or joins the ledger stop deadline (L6), and a user
 Stop or Run now always makes one: `acceptStopEffect` always sets `stop` with a `deadlineAt`
@@ -6449,7 +6517,9 @@ probe`; changed, `MainTransmission`; `(commandId, n)`;
 written with no claim`; `writers are not edited`; changed, `retirePendingPrompts`; `claimed
 attempt_count`; and from build round 2d, deleted, `answer_consumed`; `answer_pending`;
 `` `deliver_answer` it confirms ``; `answer confirmation`; `answer probe findings`; `latest try
-got`; `the effect's for`; `runner-held or not`.
+got`; `the effect's for`; `runner-held or not`; and from build round 2e, deleted, `wake
+execution with no active Run`; `or a command receipt naming another commandId`; `` `command_lifecycle`
+from any provider ``; `naming a transmission is evidence`; changed, `no running turn`.
 D59 is new and each of its readers is written here; A.20's terms are carried so a stale reader of
 them stays swept.
 
@@ -6525,16 +6595,22 @@ Rule count against HEAD, by A.17's convention, itemized (T3 counts these bullets
 - Deleted HEAD rule: a native command's receipt answers its send, and one naming another commandId
   is Rejected (9, D21); build round 2d, replaced below.
 - Added: a row main's executor runs gets no `not_sent`, its gate preceding its claim, so its try in
-  a project not served shows nothing; a `not_sent` or `delivery_unknown` naming a transmission is
-  Rejected (3.4, H4, 4.7, D48); build round 2d.
+  a project not served shows nothing; a `not_sent` on any effect main issues, a direct start's
+  included, or a `delivery_unknown` naming a transmission is Rejected (3.4, H4, 4.7, D48); build
+  round 2d, restated in place by build round 2e.
 - Added: D61, a control main issues is answered only by its `effect_outcome`; the resolution of an
   answer's interaction and a native command's receipts are unsolicited, naming that interaction or
   command, so they read the same before or after the outcome (3.4, 9, D21); build round 2d.
-- Result: 67 deleted and 84 added, 17 net added, against A.20's 5.
+- Deleted HEAD rule: `command_lifecycle` alone, from any provider but Claude, is Rejected (3.4,
+  D46); build round 2e, replaced below.
+- Added: either command receipt, `command_lifecycle` or `command_result`, from any provider but
+  Claude is Rejected (3.4, 9, D46); build round 2e.
+- Result: 68 deleted and 85 added, 17 net added, against A.20's 5.
 
-Net rule change, deleted minus added: -17 (67 minus 84); REDESIGN-11 withdraws 5 of A.20's
+Net rule change, deleted minus added: -17 (68 minus 85); REDESIGN-11 withdraws 5 of A.20's
 additions and adds 8, net -3, build round 1 adds 1, build round 2 adds 6, build round 2b adds 1,
-build round 2c adds 1 and build round 2d deletes 2 and adds 2.
+build round 2c adds 1, build round 2d deletes 2 and adds 2 and build round 2e deletes 1 and adds
+1.
 Rewritten in place, counting nothing: 2.1's intro and rows 202 and 205; L6's stop, deadline step,
 restart and end; 3.7's derived deadlines and Starting clause; 3.4's Send Token, minter and
 `IssuedEffect` comments; 5.4; 6.5; 9; 3.12's writer list; the 12.2 rows; A.20's Run end cell. The
@@ -6561,6 +6637,9 @@ nothing: 3.9 item 1's and 3.12's `acceptStopEffect` DELETE as send rows only; 3.
 nothing: 3.4's one row per Control and n 0 sentences, its answer findings and receipt list and its
 confirming `interaction_resolved` sentence; 8.4's `end` steps; 3.13's `Unsolicited`, `not_sent`
 and `probe_result` lines; 4.4's native command answer; 8.2's runner events; and the D21 entry.
+Build round 2e adds five amendments, and rewrites in place, counting nothing: LI8; 3.4's
+`not_sent` line, its unknown-token rule and its kind list; 8.3's Wake Runs opener; the D46 entry;
+and this appendix's round 2d `not_sent` bullet.
 
 <!-- src: REDESIGN-11 2026-10-31 (/private/tmp/r32-redesign-11); REDESIGN-10 review rounds 1 to 3 (ub, poteto, /private/tmp/r32-redesign-10/review-*-out.md); main at 1ba91324 (provider-turn-service.ts 202-405; 78 `provider_runs` query sites in 23 files); R2 at 6c9ff950 (orchestration-engine.ts 658-940; session-run-settlement.ts 27-59; orchestration-side-effect-reactor.ts 1606-1624; runner-receipts.ts 619-628); competitor survey: t3code, paseo, bb, monocode, capy, zeron (/private/tmp/r32-redesign-6/survey) -->
 
