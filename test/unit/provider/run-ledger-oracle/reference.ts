@@ -2383,6 +2383,55 @@ function control(
 	}
 }
 
+/** L1: a runner retires at its process_lost or, for totality, another runner's process_started. */
+function retire(world: World, runnerId: string): void {
+	const runner = world.runners.get(runnerId);
+	if (runner !== undefined) {
+		runner.retired = true;
+		decideLostWork(world, runner.latest);
+	}
+	if (world.current === runnerId) world.current = null;
+	const onRunner = (label: Label | null) =>
+		label !== null && splitLabel(label).runnerId === runnerId;
+	const addressed = (send: Send, tx: Tx) =>
+		send.runnerId === runnerId || tx.runnerId === runnerId;
+	// L1 item 1: retiring covers every send addressed to it, whatever its tries got, and
+	// seals its transmissions.
+	for (const send of world.sends) {
+		for (const tx of send.txs)
+			if (addressed(send, tx)) {
+				seal(tx);
+				tx.ended ??= "process_lost";
+			}
+		const run = findRun(world, send.runId);
+		if (
+			send.held &&
+			send.txs.length === 0 &&
+			send.runnerId === runnerId &&
+			run !== undefined &&
+			run.phase !== "Ended"
+		)
+			// 3.6: retirement before any hold of its start leaves it never handed over.
+			transmit(world, send, undefined).sealed = {
+				value: "never",
+				unconsumed: false,
+			};
+	}
+	for (const run of world.runs)
+		if (
+			run.phase !== "Ended" &&
+			run.exec.evidence &&
+			runSends(world, run).some((send) =>
+				send.txs.some((tx) => addressed(send, tx)),
+			)
+		)
+			run.exec.endedBy ??= "process_lost";
+	for (const wake of world.wakes)
+		if (onRunner(wake.label)) wake.ended ??= "process_lost";
+	for (const interaction of world.interactions)
+		if (onRunner(interaction.label)) interaction.resolved = true;
+}
+
 function settle(
 	world: World,
 	step: Step,
@@ -2446,6 +2495,21 @@ function settle(
 			// L5, D44: the runner's previous label becomes older, so its scope ends.
 			if (prior !== undefined && prior.latest !== settlement.label)
 				decideLostWork(world, prior.latest);
+			// Oracle edit (32.2.7), L1 totality (CONTRACT.md 346-349): another runner's
+			// process_started is the process_lost of every other runner, started or not.
+			for (const other of new Set([
+				...world.runners.keys(),
+				...world.sends.flatMap((send) => [
+					send.runnerId,
+					...send.txs.map((tx) => tx.runnerId),
+				]),
+			]))
+				if (
+					other !== null &&
+					other !== runnerId &&
+					world.runners.get(other)?.retired !== true
+				)
+					retire(world, other);
 			world.runners.set(runnerId, {
 				latest: settlement.label,
 				retired: false,
@@ -2478,52 +2542,7 @@ function settle(
 			if (world.retirements.has(key))
 				return noop("process_lost already folded (6.5)");
 			world.retirements.add(key);
-			const runner = world.runners.get(settlement.runnerId);
-			if (runner !== undefined) {
-				runner.retired = true;
-				decideLostWork(world, runner.latest);
-			}
-			if (world.current === settlement.runnerId) world.current = null;
-			const onRunner = (label: Label | null) =>
-				label !== null && splitLabel(label).runnerId === settlement.runnerId;
-			const addressed = (send: Send, tx: Tx) =>
-				send.runnerId === settlement.runnerId ||
-				tx.runnerId === settlement.runnerId;
-			// L1 item 1: retiring covers every send addressed to it, whatever its tries got, and
-			// seals its transmissions.
-			for (const send of world.sends) {
-				for (const tx of send.txs)
-					if (addressed(send, tx)) {
-						seal(tx);
-						tx.ended ??= "process_lost";
-					}
-				const run = findRun(world, send.runId);
-				if (
-					send.held &&
-					send.txs.length === 0 &&
-					send.runnerId === settlement.runnerId &&
-					run !== undefined &&
-					run.phase !== "Ended"
-				)
-					// 3.6: retirement before any hold of its start leaves it never handed over.
-					transmit(world, send, undefined).sealed = {
-						value: "never",
-						unconsumed: false,
-					};
-			}
-			for (const run of world.runs)
-				if (
-					run.phase !== "Ended" &&
-					run.exec.evidence &&
-					runSends(world, run).some((send) =>
-						send.txs.some((tx) => addressed(send, tx)),
-					)
-				)
-					run.exec.endedBy ??= "process_lost";
-			for (const wake of world.wakes)
-				if (onRunner(wake.label)) wake.ended ??= "process_lost";
-			for (const interaction of world.interactions)
-				if (onRunner(interaction.label)) interaction.resolved = true;
+			retire(world, settlement.runnerId);
 			return changed;
 		}
 		case "session_ended": {

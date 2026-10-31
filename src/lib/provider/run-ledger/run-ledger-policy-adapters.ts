@@ -117,20 +117,20 @@ const claudeRules: ProviderDecisionRules = {
 export const nativePolicies: ProviderPolicyTable = {
 	claude: {
 		tag: "Ready",
-		capabilities: { backgroundTasks: true },
+		capabilities: { backgroundTasks: true, runnerHost: true },
 		runEnd: "result",
 		intake: runnerIntake,
 		rules: claudeRules,
 	},
 	codex: {
 		tag: "Pending",
-		capabilities: { backgroundTasks: true },
+		capabilities: { backgroundTasks: true, runnerHost: true },
 		runEnd: "result",
 		ticket: "conduit-test-82tn.32.2.13",
 	},
 	cursor: {
 		tag: "Ready",
-		capabilities: { backgroundTasks: false },
+		capabilities: { backgroundTasks: false, runnerHost: true },
 		runEnd: "result",
 		intake: runnerIntake,
 		rules: {
@@ -141,7 +141,7 @@ export const nativePolicies: ProviderPolicyTable = {
 	},
 	opencode: {
 		tag: "Ready",
-		capabilities: { backgroundTasks: false },
+		capabilities: { backgroundTasks: false, runnerHost: false },
 		runEnd: "query_ended",
 		intake: openCodeIntake,
 		rules: {

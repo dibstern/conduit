@@ -25,16 +25,8 @@ type Mode = "reference" | "decider";
 /** Decider tests a later lane builds: each must fail with that lane's typed not-yet-built rejection. */
 const notBuilt: ReadonlyMap<string, string> = new Map([
 	[
-		"[step1] a start with a retryable outcome cannot start again while Stop interrupts it",
-		"32.2.7",
-	],
-	[
 		"[10B] an answer confirmation cannot settle a different interaction on the same Run",
 		"32.2.8",
-	],
-	[
-		"[8C] unknown evidence drops but known incompatible retired sends reject",
-		"32.2.7",
 	],
 	[
 		"[3.10] main's timeout reject folds as any answer; decide issues nothing and arms no timeout",
@@ -43,14 +35,6 @@ const notBuilt: ReadonlyMap<string, string> = new Map([
 	[
 		"[R1] an unanswered input probe owns a deadline from issue and re-probes at it",
 		"32.2.8",
-	],
-	[
-		"[4B] OpenCode idle cannot discharge a request issued after its probe",
-		"32.2.7",
-	],
-	[
-		"[5C] completion beats interrupt fallback and a Tombstone is immutable",
-		"32.2.7",
 	],
 	[
 		"[10B] a permanent refusal resolves the interaction and nothing re-delivers it",

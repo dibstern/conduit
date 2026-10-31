@@ -16,18 +16,25 @@ import {
 	writeTraceArtifact,
 } from "./harness.js";
 import {
+	admit,
 	begin,
+	complete,
 	Driver,
 	fire,
 	main,
+	noLifecycleChange,
 	observe,
+	request,
+	running,
 	scenarios,
+	step,
+	stop,
 	transmissions,
 	visibleInput,
 } from "./scenarios.js";
 
-/** Inputs the 32.2.6 slice leaves to a later lane; a trace that reaches one stops there. */
-const notBuilt = /^not yet built \(32\.2\.(7|8|11)\): /;
+/** Inputs the 32.2.7 slice leaves to a later lane; a trace that reaches one stops there. */
+const notBuilt = /^not yet built \(32\.2\.(8|11)\): /;
 
 /** What the oracle and the real decider must agree on at every step (3.1). */
 const publicStep = (decision: Decision<unknown>, view: LedgerView) =>
@@ -97,6 +104,11 @@ describe("[32.2.5] plain Run path differential", () => {
 		(token) => token as SendToken,
 	);
 	const commandIds = ["c1", "c2"];
+	/** 32.2.7: Stop, Run now and end controls, each answered by main's (commandId, transmission) claims. */
+	const controlIds = ["s1", "s2"];
+	const claims = controlIds.flatMap((commandId) =>
+		[0, 1, 2].map((transmission) => ({ commandId, transmission })),
+	);
 	/** A generated answer to its round's own send. */
 	const own = "own" as SendToken;
 	const retryAt = fc.constantFrom(600, 9_000);
@@ -265,6 +277,54 @@ describe("[32.2.5] plain Run path differential", () => {
 					fc.constantFrom(...probeTokens),
 					fc.oneof({ weight: 3, arbitrary: findings }, evidence),
 				),
+			},
+			{
+				weight: 2,
+				arbitrary: fc
+					.tuple(
+						fc.constantFrom("stop", "run_now", "end" as const),
+						fc.constantFrom(...controlIds),
+						fc.constantFrom(null, 9_000),
+						fc.constantFrom(...inputs),
+					)
+					.map(
+						([kind, commandId, deadlineAt, inputId]): LedgerCommand => ({
+							verb: "control",
+							control:
+								kind === "run_now"
+									? { kind, commandId, deadlineAt, inputId }
+									: { kind, commandId, deadlineAt },
+						}),
+					),
+			},
+			{
+				weight: 2,
+				arbitrary: fc
+					.tuple(
+						fc.constantFrom(...claims),
+						fc.oneof(
+							fc.constant({ tag: "succeeded" as const }),
+							retryAt.map((at) => ({ tag: "retryable" as const, retryAt: at })),
+							code.map((permanent) => ({
+								tag: "permanent" as const,
+								code: permanent,
+							})),
+							fc.constant({ tag: "delivery_unknown" as const }),
+						),
+					)
+					.map(
+						([transmission, outcome]): LedgerCommand => ({
+							verb: "observe",
+							observation: {
+								tag: "Answer",
+								token:
+									`${transmission.commandId}:${transmission.transmission}` as SendToken,
+								kind: "effect_outcome",
+								outcome,
+								transmission,
+							},
+						}),
+					),
 			},
 			{
 				weight: 2,
@@ -464,6 +524,14 @@ describe("[32.2.5] plain Run path differential", () => {
 								reached.views.add("relaunched");
 							queued = active?.tag === "Queued" ? active.runId : undefined;
 							reached.views.add(active?.tag ?? "idle");
+							// 3.13: main's Stop and end rows, and decide's own cancel_request, are live.
+							for (const { effect } of stepped.view.live)
+								if (
+									effect.kind === "interrupt" ||
+									effect.kind === "end_session" ||
+									effect.kind === "cancel_request"
+								)
+									reached.views.add(effect.kind);
 							if (
 								active?.inputs.some(
 									({ state }) =>
@@ -478,6 +546,7 @@ describe("[32.2.5] plain Run path differential", () => {
 									)
 								)
 									reached.views.add("probed");
+
 								for (const ended of stepped.decision.ended)
 									reached.ends.add(ended.reason.tag);
 							}
@@ -506,7 +575,10 @@ describe("[32.2.5] plain Run path differential", () => {
 					"relaunched",
 					"delivery unknown",
 					"probed",
-					...(provider === "opencode" ? ["Settling"] : []),
+					"Interrupting",
+					"interrupt",
+					"end_session",
+					...(provider === "opencode" ? ["Settling", "cancel_request"] : []),
 				]),
 			);
 			expect([...reached.ends]).toEqual(
@@ -515,32 +587,33 @@ describe("[32.2.5] plain Run path differential", () => {
 					"provider_error",
 					"refused",
 					"process_lost",
+					"interrupted",
 				]),
 			);
 		});
 });
 
-describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance criteria", () => {
-	/**
-	 * Runs a trace on the real decider for its assertions, runs it again on the oracle, and replays
-	 * the oracle's commands through the lockstep, so every step is also green against the oracle.
-	 */
-	function agreed(provider: ProviderKind, trace: (d: Driver) => void) {
-		const d = new Driver(provider, "decider");
-		trace(d);
-		const recorded = new Recording(provider);
-		trace(recorded);
-		const step = lockstep(provider);
-		for (const [command, now] of recorded.log ?? [])
-			assert(step(command, now), `${JSON.stringify(command)} is built`);
-		return d;
-	}
-	const scenario = (id: string) => {
-		const found = scenarios.find((candidate) => candidate.id === id);
-		assert(found, `scenario ${id}`);
-		return found;
-	};
+/**
+ * Runs a trace on the real decider for its assertions, runs it again on the oracle, and replays
+ * the oracle's commands through the lockstep, so every step is also green against the oracle.
+ */
+function agreed(provider: ProviderKind, trace: (d: Driver) => void) {
+	const d = new Driver(provider, "decider");
+	trace(d);
+	const recorded = new Recording(provider);
+	trace(recorded);
+	const step = lockstep(provider);
+	for (const [command, now] of recorded.log ?? [])
+		assert(step(command, now), `${JSON.stringify(command)} is built`);
+	return d;
+}
+const scenario = (id: string) => {
+	const found = scenarios.find((candidate) => candidate.id === id);
+	assert(found, `scenario ${id}`);
+	return found;
+};
 
+describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance criteria", () => {
 	it("R5's fixed trace is green and reaches the race a start refused with an accepted sibling", () => {
 		const r5 = scenario("R5");
 		const d = agreed(r5.provider, r5.run);
@@ -771,5 +844,395 @@ describe("[32.2.5] activity throttling (3.8) and the evidence registry (3.2)", (
 		// @ts-expect-error The registry is keyed by every Evidence kind (3.2).
 		const registry: EvidenceTable = missing;
 		expect(registry).toEqual({});
+	});
+});
+
+describe("[32.2.7] core authority and stopping: the bead's acceptance criteria", () => {
+	const lose = (d: Driver, runnerId: string) =>
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "process_lost", runnerId, retiredAt: d.now },
+		});
+	const started = (d: Driver, label: string) =>
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "process_started", label, reattached: false },
+		});
+	const end = (d: Driver, deadlineAt: number | null = null) =>
+		step(d, {
+			verb: "control",
+			control: { kind: "end", commandId: `end-${d.next()}`, deadlineAt },
+		});
+	const runNow = (
+		d: Driver,
+		inputId: string,
+		deadlineAt: number | null = null,
+	) =>
+		step(d, {
+			verb: "control",
+			control: {
+				kind: "run_now",
+				commandId: `run-now-${d.next()}`,
+				inputId,
+				deadlineAt,
+			},
+		});
+	/** Claude's held start for an admitted input, dispatched to `runnerId` (3.4, 4.11). */
+	const dispatchedTo = (d: Driver, runnerId: string) => {
+		admit(d, "A");
+		return request(d, "A", runnerId);
+	};
+
+	it("the races process loss mid-Run, runner release and evidence on both sides of a Tombstone are hit and green", () => {
+		const lost = agreed("claude", (d) => {
+			const a = running(d);
+			lose(d, "r1");
+			observe(d, a.token, { kind: "activity" });
+		});
+		const released = agreed("claude", (d) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+		});
+		expect(lost.coverage.races["process loss mid-Run"]).toBe(1);
+		expect(lost.coverage.races["evidence on both sides of a Tombstone"]).toBe(
+			1,
+		);
+		expect(released.coverage.races["runner release"]).toBe(1);
+	});
+
+	it("no fixed trace the decider builds issues a quarantine effect (5.1)", () => {
+		const kinds = new Set<string>();
+		for (const fixed of scenarios) {
+			const d = new Driver(fixed.provider, "decider");
+			try {
+				fixed.run(d);
+			} catch (error) {
+				if (!String(error).match(/not yet built/)) throw error;
+			}
+			for (const { effect } of d.issued) kinds.add(effect.kind);
+		}
+		expect(kinds).not.toContain("quarantine");
+		expect([...kinds].sort()).toEqual(
+			expect.arrayContaining(["end_session", "interrupt", "probe", "start"]),
+		);
+	});
+
+	it("process_lost ends a Run that reached the agent on its runner process_lost (L1)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			expect(lose(d, "r1").ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+	});
+
+	it("a second runner's process_started with no prior loss retires the first as its process_lost (L1 totality)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			expect(started(d, "r2:1").ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+			// Retired is final: the first runner's later start is an older label.
+			noLifecycleChange(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "r1:2",
+					reattached: false,
+				},
+			});
+			end(d);
+			expect(d.latest("end_session").effect).toEqual({
+				kind: "end_session",
+				runId: null,
+				label: "r2:1",
+			});
+		});
+	});
+
+	it("an end_session with no current process is pending with label null and resolves to the next runner (L2 case 3)", () => {
+		agreed("claude", (d) => {
+			lose(d, "r1");
+			end(d);
+			expect(d.latest("end_session").effect).toEqual({
+				kind: "end_session",
+				runId: null,
+				label: null,
+			});
+			started(d, "r2:1");
+			// Resolved, not covered: it may still act on the next runner.
+			expect(d.view().live).toMatchObject([
+				{ effect: { kind: "end_session" } },
+			]);
+		});
+	});
+
+	it("an end_session for a Run goes to its execution's runner, even after a replacement started (L2 case 2)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			end(d, 9_000);
+			expect(d.latest("end_session").effect).toEqual({
+				kind: "end_session",
+				runId: a.runId,
+				label: "r1:1",
+			});
+			expect(d.view().active).toMatchObject({ tag: "Interrupting", by: "end" });
+			// The replacement retires r1: the end_session addressed to r1 is covered, never re-addressed,
+			// and the asked Run ends interrupted (3.8).
+			expect(started(d, "r2:1").ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "interrupted" } },
+			]);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+	});
+
+	it("a Run dispatched to a runner not yet started addresses its end_session there with label null (L2 case 2, r3-1)", () => {
+		agreed("claude", (d) => {
+			lose(d, "r1");
+			const a = dispatchedTo(d, "r2");
+			observe(d, a.token, { kind: "started" });
+			end(d, 9_000);
+			expect(d.latest("end_session").effect).toEqual({
+				kind: "end_session",
+				runId: a.runId,
+				label: null,
+			});
+			// r2's start fixes the label and covers nothing.
+			started(d, "r2:1");
+			expect(d.view().live.map(({ effect }) => effect.kind)).toContain(
+				"end_session",
+			);
+		});
+	});
+
+	it("labels split at the last ':' before a decimal; two OpenCode runners are distinct and the second is live (L1)", () => {
+		agreed("opencode", (d) => {
+			started(d, "opencode:a:0");
+			lose(d, "opencode:a");
+			started(d, "opencode:b:0");
+			// opencode:a is retired, so its later start is an older label.
+			noLifecycleChange(d, {
+				verb: "settle",
+				settlement: {
+					kind: "process_started",
+					label: "opencode:a:1",
+					reattached: false,
+				},
+			});
+			end(d);
+			expect(d.latest("end_session").effect).toMatchObject({
+				label: "opencode:b:0",
+			});
+			const a = running(d);
+			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Running" });
+		});
+		agreed("claude", (d) => {
+			// An older host's label has no querySeq: the whole label is the runnerId.
+			started(d, "host");
+			lose(d, "host");
+			end(d);
+			expect(d.latest("end_session").effect).toMatchObject({ label: null });
+		});
+	});
+
+	it("run_dispatched to an unstarted runner then its process_lost ends the Run process_lost, recording no lost work (L1, r3-1)", () => {
+		agreed("claude", (d) => {
+			lose(d, "r1");
+			const a = dispatchedTo(d, "r2");
+			expect(lose(d, "r2").ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+			expect(d.view()).toMatchObject({ lostWork: [], anythingMayAct: false });
+		});
+	});
+
+	it("a released start then its runner's process_lost relaunches under the same commandId to the next runner (D50)", () => {
+		agreed("claude", (d) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+			lose(d, "r1");
+			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Queued" });
+			started(d, "r2:1");
+			const t2 = "hold-A-2" as SendToken;
+			observe(d, t2, {
+				kind: "run_dispatched",
+				runId: a.runId,
+				runnerId: "r2",
+				commandId: "cmd-A-1",
+				transmission: 2,
+			});
+			expect(d.view().active).toMatchObject({
+				runId: a.runId,
+				tag: "Starting",
+			});
+			// A later release of the first transmission is stale.
+			noLifecycleChange(d, {
+				verb: "observe",
+				observation: {
+					tag: "Answer",
+					token: a.token,
+					kind: "run_released",
+					reason: "NotSent",
+				},
+			});
+			observe(d, t2, { kind: "input_accepted", nativeMessageId: "native-A" });
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-A",
+			});
+		});
+	});
+
+	it("retirement unlaunches a not-yet-delivered Run with no released token (L1 item 2, 3.6)", () => {
+		agreed("claude", (d) => {
+			// Main's run.requested with no run.dispatched: a held start no transmission reached.
+			admit(d, "A");
+			const runId = `main-A-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+			expect(lose(d, "r1").ended).toEqual([]);
+			expect(d.view().active).toMatchObject({ runId, tag: "Queued" });
+		});
+	});
+
+	it("a Refused release after the Run ended process lost finds it Ended, and the input runs on a new Run (F40)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			lose(d, "r1");
+			noLifecycleChange(d, {
+				verb: "observe",
+				observation: {
+					tag: "Answer",
+					token: a.token,
+					kind: "run_released",
+					reason: { tag: "Refused", why: "retiring" },
+				},
+			});
+			started(d, "r2:1");
+			admit(d, "A");
+			const again = request(d, "A", "r2");
+			expect(again.runId).not.toBe(a.runId);
+			expect(d.view().active).toMatchObject({ runId: again.runId });
+		});
+	});
+
+	it("Stop and Run now interrupt the Run, naming main's runs in the interrupt (R5 r1, 5.1)", () => {
+		for (const commit of ["stop", "run_now"] as const)
+			agreed("claude", (d) => {
+				const a = running(d);
+				if (commit === "stop") stop(d);
+				else runNow(d, "B");
+				expect(d.view().active).toMatchObject({
+					runId: a.runId,
+					tag: "Interrupting",
+					by: commit,
+				});
+				expect(d.latest("interrupt").effect).toEqual({
+					kind: "interrupt",
+					runId: a.runId,
+					runIds: [a.runId],
+				});
+				expect(complete(d, a.token)).toMatchObject([
+					{ runId: a.runId, outcome: "completed" },
+				]);
+			});
+		// A Run nothing of which may act ends at once with no effect.
+		agreed("claude", (d) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+			expect(stop(d).ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "interrupted", forced: false } },
+			]);
+			expect(d.view().live).toEqual([]);
+		});
+	});
+
+	it("OpenCode Stop issues cancel_request and a native_session probe with its interrupt (5.1)", () => {
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const stopped = stop(d);
+			expect(stopped.issued.map(({ effect }) => effect.kind).sort()).toEqual([
+				"cancel_request",
+				"interrupt",
+				"probe",
+			]);
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						tag: "Main",
+						effect: expect.objectContaining({
+							kind: "interrupt",
+							runId: a.runId,
+						}),
+					}),
+					expect.objectContaining({
+						tag: "Tokened",
+						effect: { kind: "cancel_request", runId: a.runId },
+					}),
+				]),
+			);
+		});
+	});
+
+	it("one Stop rule over the inbox and claimed rows: a retry-pending start is never re-sent and a claimed, untransmitted start ends with its Run (32.2.6 AC5, 5.4)", () => {
+		// Coverage is main's stopCovers (5.2, 5.4); the ledger reads only the folded Stop and holds no
+		// re-send of its own: a retry is main's next transmission (3.4, 3.7).
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "started" });
+			const retryAt = d.now + 300;
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt },
+			});
+			stop(d);
+			expect(d.view().active).toMatchObject({ tag: "Interrupting" });
+			expect(d.alarmAt).not.toBe(retryAt);
+			expect(transmissions(d, "A")).toHaveLength(1);
+		});
+		// A held start main claimed but never transmitted ends with its Run at the Stop.
+		agreed("claude", (d) => {
+			admit(d, "A");
+			const runId = `main-A-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+			expect(stop(d).ended).toMatchObject([
+				{ runId, reason: { tag: "interrupted", forced: false } },
+			]);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+	});
+
+	it("a Stop or end with a deadlineAt and no label work outside main's runs opens no ledger stop deadline (L6)", () => {
+		// CONTRACT.md 793-794: with no such work the arm opens none. Work with no open main run is a wake
+		// execution (32.2.11) or a send of an ended main run, and main's terminal seals the latter.
+		agreed("opencode", (d) => {
+			const a = running(d);
+			stop(d, 5_000);
+			expect(d.alarmAt).not.toBe(5_000);
+			expect(d.view().active).not.toHaveProperty("deadlineAt");
+			main(d, { kind: "run_terminal", runId: a.runId, outcome: "interrupted" });
+			stop(d, 9_000);
+			expect(d.alarmAt).not.toBe(9_000);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+	});
+
+	it("on Claude, input_accepted on a re-dispatched transmission 2 accepts the input (3.4, 4.3)", () => {
+		agreed("claude", (d) => {
+			const a = begin(d);
+			const t2 = "hold-A-again" as SendToken;
+			observe(d, t2, {
+				kind: "run_dispatched",
+				runId: a.runId,
+				runnerId: "r1",
+				commandId: "cmd-A-1",
+				transmission: 2,
+			});
+			observe(d, t2, { kind: "input_accepted", nativeMessageId: "native-A" });
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-A",
+			});
+		});
 	});
 });

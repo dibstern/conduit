@@ -590,7 +590,11 @@ export interface ProviderDecisionRules {
 	readonly workEnded: (evidence: readonly Evidence[]) => boolean;
 }
 export type ProviderPolicy = {
-	readonly capabilities: { readonly backgroundTasks: boolean };
+	readonly capabilities: {
+		readonly backgroundTasks: boolean;
+		/** 4.10: a runner hosts its Runs; L2 case 2 addresses a Run's sends to its execution's runner. */
+		readonly runnerHost: boolean;
+	};
 	readonly runEnd: "result" | "query_ended";
 } & (
 	| {

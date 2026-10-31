@@ -61,14 +61,14 @@ describe("Run Ledger public model", () => {
 					verb: "control",
 					control: { kind: "stop", commandId: "stop-1", deadlineAt: 30_100 },
 				},
-				"Rejected",
+				"Accepted",
 			],
 			[
 				{
 					verb: "control",
 					control: { kind: "end", commandId: "end-1", deadlineAt: null },
 				},
-				"Rejected",
+				"Accepted",
 			],
 			[
 				{
@@ -163,7 +163,7 @@ describe("Run Ledger public model", () => {
 		};
 		const pending = {
 			tag: "Pending",
-			capabilities: { backgroundTasks: false },
+			capabilities: { backgroundTasks: false, runnerHost: true },
 			runEnd: "result",
 			ticket: "t",
 		} as const;

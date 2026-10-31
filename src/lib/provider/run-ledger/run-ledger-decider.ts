@@ -6,6 +6,7 @@ import type {
 	EndReason,
 	Evidence,
 	InputState,
+	InterruptBy,
 	IssuedEffect,
 	Label,
 	LedgerCommand,
@@ -33,8 +34,11 @@ export type LedgerEvent = { readonly [eventBrand]: true };
 type Value = "never" | "possibly" | "reached";
 
 interface Tx {
-	readonly token?: SendToken | undefined;
+	/** A control's claim is bound at its first outcome naming its transmission (3.4). */
+	token?: SendToken | undefined;
 	readonly seq: number;
+	/** A control's claim number, per row from 1 (3.4, CONTRACT.md 449-455). */
+	readonly n?: number | undefined;
 	/** Its send's address, or the runner its run.dispatched names; null while pending (L2). */
 	label: Label | null;
 	runnerId: string | null;
@@ -63,13 +67,17 @@ interface Tx {
 	readonly answers: Evidence[];
 	/** D52: sealed at its first closing fact, reading its value then. */
 	sealed?: { readonly value: Value; readonly unconsumed: boolean } | undefined;
-	/** Why its work ended (3.5): its evidence, main's terminal (D59), coverage or an unlaunch. */
+	/**
+	 * Why its work ended (3.5): its evidence, main's terminal (D59), coverage, an unlaunch or the
+	 * ledger stop deadline's alarm (L6).
+	 */
 	ended?:
 		| "evidence"
 		| "main"
 		| "process_lost"
 		| "session_ended"
 		| "dropped"
+		| "forced"
 		| undefined;
 	nativeMessageId?: string | undefined;
 	accounted: boolean;
@@ -77,6 +85,10 @@ interface Tx {
 
 type StartEffect = Extract<RunEffect, { kind: "start" }>;
 type ProbeEffect = Extract<RunEffect, { kind: "probe" }>;
+type ControlEffect = Extract<
+	RunEffect,
+	{ kind: "interrupt" | "end_session" | "cancel_request" }
+>;
 
 /** A probe's target and what it covers, stored at issue (3.7, 3.12). */
 interface Probe {
@@ -87,20 +99,29 @@ interface Probe {
 	done: boolean;
 }
 
-/** Send (issue decision, 3.3): a start main issues (D60) or a probe decide issues (3.12). */
+/**
+ * Send (issue decision, 3.3): a start main issues (D60), a Stop's interrupt or an end_session main
+ * issues under its Control, or a probe or cancel_request decide issues (3.12).
+ */
 interface Send<
-	Effect extends StartEffect | ProbeEffect = StartEffect | ProbeEffect,
+	Effect extends StartEffect | ProbeEffect | ControlEffect =
+		| StartEffect
+		| ProbeEffect
+		| ControlEffect,
 > {
 	readonly seq: number;
 	readonly effect: Effect;
 	readonly held: boolean;
 	commandId?: string | undefined;
-	readonly runId: string;
+	/** Its Run, null for a send no Run reads (an idle Stop's, a Run-less end_session). */
+	readonly runId: string | null;
 	/** Its execution (3.3). */
 	readonly exec: number;
 	/** L2 case 3: the current process at issue, null while pending, then resolved once. */
 	runnerId: string | null;
 	label: Label | null;
+	/** L2 case 2: the seq of the pending start it follows, resolving with it. */
+	readonly follows?: number | undefined;
 	/** L2, 3.6: a send of an execution an unlaunch dropped resolves no further. */
 	dropped: boolean;
 	readonly txs: Tx[];
@@ -131,11 +152,15 @@ interface Exec {
 	readonly fold: FoldItem[];
 }
 
-/** Run (decisions only, 3.3). Interrupting lands with stopping (32.2.7). */
+/** Run (decisions only, 3.3). */
 interface Run {
 	readonly runId: string;
 	readonly inputs: string[];
-	phase: "Queued" | "Launched" | "Ended";
+	phase: "Queued" | "Launched" | "Interrupting" | "Ended";
+	/** 3.6: a Stop, Run now or end commit asked it to stop; its retries are withdrawn. */
+	asked: boolean;
+	/** The commit that made it Interrupting. */
+	by?: InterruptBy | undefined;
 	exec: Exec;
 	/** 3.6: after an unlaunch, the unlaunching outcome's retryAt (a field, not a deadline). */
 	retryAt?: number | undefined;
@@ -162,6 +187,14 @@ interface Book {
 	readonly runners: Map<string, { latest: Label; retired: boolean }>;
 	current: string | null;
 	readonly retirements: Set<string>;
+	/** L6: the one ledger stop deadline, over transmissions by their send and tx index. */
+	stop?:
+		| {
+				readonly at: number;
+				readonly opened: number;
+				readonly items: { readonly send: number; readonly tx: number }[];
+		  }
+		| undefined;
 }
 
 /**
@@ -260,8 +293,16 @@ function seal(tx: Tx): void {
 const sealedValue = (tx: Tx): Value => tx.sealed?.value ?? value(tx);
 
 /** 3.5 mayStillAct; a probe only reads, so its work has always ended (8.3, D31). */
-function mayStillAct(send: Send, tx: Tx): boolean {
-	if (tx.ended !== undefined || send.effect.kind === "probe") return false;
+function mayStillAct(book: Book, send: Send, tx: Tx): boolean {
+	const effect = send.effect;
+	if (tx.ended !== undefined || effect.kind === "probe") return false;
+	// D59: a runner provider's interrupt is no fence member; its work ends with the Run it names.
+	if (
+		effect.kind === "interrupt" &&
+		!rules(book).fences(effect) &&
+		findRun(book, effect.runId)?.phase !== "Interrupting"
+	)
+		return false;
 	switch (tx.consumption.tag) {
 		case "Accepted":
 		case "Observed":
@@ -273,8 +314,8 @@ function mayStillAct(send: Send, tx: Tx): boolean {
 	}
 }
 
-const findRun = (book: Book, runId: string | undefined) =>
-	runId === undefined
+const findRun = (book: Book, runId: string | null | undefined) =>
+	runId === null || runId === undefined
 		? undefined
 		: book.runs.find((run) => run.runId === runId);
 /** The sends of the Run's current execution (3.6). */
@@ -292,6 +333,21 @@ const currentLabel = (book: Book): Label | null =>
 	book.current === null
 		? null
 		: (book.runners.get(book.current)?.latest ?? null);
+/** 3.8 condition 2's work: no probe or end_session, nor a runner provider's interrupt (D59). */
+const runWork = (book: Book, run: Run) =>
+	runSends(book, run).filter(
+		(send) =>
+			send.effect.kind !== "probe" &&
+			send.effect.kind !== "end_session" &&
+			(send.effect.kind !== "interrupt" || rules(book).fences(send.effect)),
+	);
+/** L6: label work, the fence members that may still act. */
+const labelWorkOutstanding = (book: Book) =>
+	book.sends.some(
+		(send) =>
+			rules(book).fences(send.effect) &&
+			send.txs.some((tx) => mayStillAct(book, send, tx)),
+	);
 
 // ---------------------------------------------------------------------------------------------
 // read (3.2): every summary reconcile and the view act on.
@@ -319,10 +375,14 @@ function notYetDelivered(book: Book, run: Run): boolean {
 	);
 }
 
-/** 3.6 retry pending: from a retrying outcome until its next transmission, an acceptance or the end. */
-function retryPending(book: Book, run: Run, send: StartSend): boolean {
+/**
+ * 3.6 retry pending: from a retrying outcome until its next transmission, an acceptance, Stop or
+ * the end. A Stop, Run now or end commit asks the Run, which withdraws every retry of its sends.
+ */
+function retryPending(book: Book, run: Run, send: Send): boolean {
 	const latest = send.txs.at(-1);
 	if (
+		run.asked ||
 		send.exhausted ||
 		latest?.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
@@ -336,15 +396,16 @@ function retryPending(book: Book, run: Run, send: StartSend): boolean {
 		latest.notSent ||
 		latest.unheld ||
 		latest.released ||
-		latest.declined ||
+		(latest.declined && isStart(send)) ||
 		latest.absent ||
 		(latest.retryable && latest.consumption.tag === "None")
 	);
 }
 
-/** 3.8 outcome fold (5C, 10A): failure beats success, specific beats generic. */
+/** 3.8 outcome fold (5C, 10A): failure beats success, specific beats generic, completion beats an interrupt. */
 function fold(
 	items: readonly FoldItem[],
+	asked: boolean,
 ): Pick<RunEnded, "outcome" | "reason"> {
 	const failure = items
 		.filter((item) => item.outcome === "error")
@@ -365,14 +426,39 @@ function fold(
 		};
 	if (items.some((item) => item.outcome === "completed"))
 		return { outcome: "completed", reason: { tag: "completed" } };
-	return items.some((item) => item.outcome === "interrupted")
+	// 3.8 condition 1: an asked Run keeps the interrupt fallback.
+	return asked || items.some((item) => item.outcome === "interrupted")
 		? { outcome: "interrupted", reason: { tag: "interrupted", forced: false } }
 		: { outcome: "completed", reason: { tag: "completed" } };
 }
 
-/** What 3.6 and 3.8 read of one Launched Run. */
+/** 3.8 condition 2: a send with no transmission is sealed once its Run was asked (3.6). */
+function nothingMayAct(book: Book, run: Run): boolean {
+	const exec = run.exec;
+	return (
+		deliverySends(book, run).every((send) => {
+			const latest = send.txs.at(-1);
+			return latest === undefined ? run.asked : latest.sealed !== undefined;
+		}) &&
+		runWork(book, run).every(
+			(send) =>
+				!send.txs.some((tx) => mayStillAct(book, send, tx)) &&
+				!retryPending(book, run, send),
+		) &&
+		!(exec.evidence && !exec.endEvidence && exec.endedBy === undefined)
+	);
+}
+
+/** What 3.6 and 3.8 read of one Run not Ended. */
 interface RunSummary {
 	readonly runId: string;
+	readonly queued: boolean;
+	/** A Stop, Run now or end commit asked it (3.6). */
+	readonly asked: boolean;
+	/** Reason 2.1: asked, or a start cancelled before it started (9). */
+	readonly interrupted: boolean;
+	/** L6: its work's end was forced by the ledger stop deadline's alarm. */
+	readonly forced: boolean;
 	/** Condition 1: Run-end evidence recorded with authority. */
 	readonly endEvidence: boolean;
 	/** GAP 5: no result and main's run still open. */
@@ -409,16 +495,21 @@ function summarize(book: Book, run: Run): RunSummary {
 				: undefined;
 	return {
 		runId: run.runId,
+		queued: run.phase === "Queued",
+		asked: run.asked,
+		interrupted:
+			run.asked ||
+			txs.some(
+				(tx) =>
+					tx.consumption.tag === "NotConsumed" &&
+					tx.consumption.why === "cancelled",
+			),
+		forced: runWork(book, run).some((send) =>
+			send.txs.some((tx) => tx.ended === "forced"),
+		),
 		endEvidence: exec.endEvidence,
 		awaiting,
-		nothingMayAct:
-			sends.every((send) => send.txs.at(-1)?.sealed !== undefined) &&
-			sends.every(
-				(send) =>
-					!send.txs.some((tx) => mayStillAct(send, tx)) &&
-					!retryPending(book, run, send),
-			) &&
-			!(exec.evidence && !exec.endEvidence && exec.endedBy === undefined),
+		nothingMayAct: nothingMayAct(book, run),
 		notYetDelivered: notYetDelivered(book, run),
 		// 4.3: the cap's refusal, else the first specific permanent code.
 		refusal: sends.some((send) => send.exhausted)
@@ -431,24 +522,27 @@ function summarize(book: Book, run: Run): RunSummary {
 		),
 		covered,
 		// 3.8 5C: delivery_unknown with no later proof is a failure coded delivery_indeterminate.
-		fold: fold([
-			...exec.fold,
-			...txs
-				.filter(
-					(tx) =>
-						tx.transport.tag === "Unknown" &&
-						consumptionRank[tx.consumption.tag] < 2 &&
-						!tx.resulted,
-				)
-				.map(
-					(tx): FoldItem => ({
-						seq: tx.seq,
-						outcome: "error",
-						code: "delivery_indeterminate",
-						retryable: false,
-					}),
-				),
-		]),
+		fold: fold(
+			[
+				...exec.fold,
+				...txs
+					.filter(
+						(tx) =>
+							tx.transport.tag === "Unknown" &&
+							consumptionRank[tx.consumption.tag] < 2 &&
+							!tx.resulted,
+					)
+					.map(
+						(tx): FoldItem => ({
+							seq: tx.seq,
+							outcome: "error",
+							code: "delivery_indeterminate",
+							retryable: false,
+						}),
+					),
+			],
+			run.asked,
+		),
 	};
 }
 
@@ -458,9 +552,36 @@ interface Due {
 	readonly fire: (fact: Fact, step: Step) => void;
 }
 
+/** L6: a stop item is open while its transmission may still act. */
+function stopItemOpen(
+	book: Book,
+	item: { readonly send: number; readonly tx: number },
+): boolean {
+	const send = book.sends[item.send];
+	const tx = send?.txs[item.tx];
+	return send !== undefined && tx !== undefined && mayStillAct(book, send, tx);
+}
+const stopOpen = (book: Book) =>
+	book.stop?.items.some((item) => stopItemOpen(book, item)) ?? false;
+
 /** 3.7: every open deadline with its firing, in deadline then opening order. */
 function deadlines(book: Book): Due[] {
 	const due: Due[] = [];
+	const stop = book.stop;
+	if (stop !== undefined && stopOpen(book))
+		due.push({
+			at: stop.at,
+			opened: stop.opened,
+			fire: () => {
+				// L6: the alarm forces only work no observer ended, and kills nothing.
+				for (const item of stop.items)
+					if (stopItemOpen(book, item)) {
+						const tx = book.sends[item.send]?.txs[item.tx];
+						if (tx !== undefined) tx.ended = "forced";
+					}
+				book.stop = undefined;
+			},
+		});
 	for (const run of book.runs) {
 		const settle = run.exec.settle;
 		if (run.phase !== "Ended" && settle !== undefined)
@@ -469,7 +590,7 @@ function deadlines(book: Book): Due[] {
 				fire: (fact, step) => {
 					// 3.7: Settling's expiry probes native_session; the view then reads Running (3.6).
 					run.exec.settle = undefined;
-					probe(book, fact, step, run, { tag: "native_session" });
+					probe(book, fact, step, run.runId, { tag: "native_session" });
 				},
 			});
 	}
@@ -502,7 +623,7 @@ function deadlines(book: Book): Due[] {
 							book,
 							fact,
 							step,
-							run,
+							run.runId,
 							{ tag: "input", inputId: send.effect.inputId },
 							{ send: book.sends.indexOf(send), tx: send.txs.indexOf(tx) },
 						);
@@ -516,7 +637,7 @@ function deadlines(book: Book): Due[] {
 function read(book: Book) {
 	return {
 		runs: book.runs.flatMap((run) =>
-			run.phase === "Launched" ? [summarize(book, run)] : [],
+			run.phase === "Ended" ? [] : [summarize(book, run)],
 		),
 		alarmAt: deadlines(book)[0]?.at,
 	};
@@ -530,17 +651,29 @@ function reconcile(situation: ReturnType<typeof read>): Entry | undefined {
 		runId: string,
 		ended: Pick<RunEnded, "outcome" | "reason">,
 	): Entry => ({ kind: "end", runId, ...ended });
+	const interrupted = (
+		forced: boolean,
+	): Pick<RunEnded, "outcome" | "reason"> => ({
+		outcome: "interrupted",
+		reason: { tag: "interrupted", forced },
+	});
 	for (const run of situation.runs) {
+		// 3.6: a Run not yet launched ends interrupted at its commit.
+		if (run.queued) {
+			if (run.asked) return end(run.runId, interrupted(false));
+			continue;
+		}
 		if (run.endEvidence && !run.awaiting) return end(run.runId, run.fold);
 		if (!run.nothingMayAct) continue;
 		// D48: a permanent outcome on an undelivered start ends it refused; else D50 unlaunches.
-		if (run.notYetDelivered)
+		if (run.notYetDelivered && !run.asked)
 			return run.refusal === undefined
 				? { kind: "unlaunch", runId: run.runId }
 				: end(run.runId, {
 						outcome: "error",
 						reason: { tag: "refused", code: run.refusal },
 					});
+		if (run.interrupted) return end(run.runId, interrupted(run.forced));
 		if (run.refusal !== undefined && run.refused)
 			return end(run.runId, {
 				outcome: "error",
@@ -586,6 +719,11 @@ function transmit(
 		transport: { tag: "Issued" },
 		consumption: { tag: "None" },
 		unheld: token === undefined && send.held,
+		// 3.4 (CONTRACT.md 449-455): a control's claims count per row, n from 1.
+		n:
+			token === undefined && !send.held
+				? 1 + Math.max(0, ...send.txs.map((claim) => claim.n ?? 0))
+				: undefined,
 		notSent: false,
 		released: false,
 		resumeRejected: false,
@@ -622,20 +760,47 @@ const nextMode = (book: Book): "fresh" | "resume" =>
 		? "resume"
 		: "fresh";
 
-function issue<Effect extends StartEffect | ProbeEffect>(
+/**
+ * L2: a send's address at issue. Case 2: a send for a Run with an execution, on a runner-host
+ * provider, goes to that execution's runner, pending while its start is. Case 3: every other send
+ * (every OpenCode send) goes to the current process, or pending with none.
+ */
+function addressAt(
 	book: Book,
-	run: Run,
+	run: Run | undefined,
+): Pick<Send, "runnerId" | "label" | "follows"> {
+	if (
+		run !== undefined &&
+		run.phase !== "Queued" &&
+		nativePolicies[book.provider].capabilities.runnerHost
+	) {
+		const start = runSends(book, run).find(
+			(send) => isStart(send) && !send.dropped,
+		);
+		if (start !== undefined)
+			return start.runnerId === null
+				? { runnerId: null, label: null, follows: start.seq }
+				: {
+						runnerId: start.runnerId,
+						label: book.runners.get(start.runnerId)?.latest ?? null,
+					};
+	}
+	return { runnerId: book.current, label: currentLabel(book) };
+}
+
+function issue<Effect extends StartEffect | ProbeEffect | ControlEffect>(
+	book: Book,
 	effect: Effect,
 	held: boolean,
 ): Send<Effect> {
+	const run = findRun(book, "runId" in effect ? effect.runId : null);
 	const send: Send<Effect> = {
 		seq: book.seq++,
 		effect,
 		held,
-		runId: run.runId,
-		exec: run.exec.n,
-		runnerId: book.current,
-		label: currentLabel(book),
+		runId: run?.runId ?? null,
+		exec: run?.exec.n ?? 0,
+		...addressAt(book, run),
 		dropped: false,
 		txs: [],
 		exhausted: false,
@@ -646,10 +811,23 @@ function issue<Effect extends StartEffect | ProbeEffect>(
 const start = (book: Book, run: Run, inputId: string, held: boolean) =>
 	issue(
 		book,
-		run,
 		{ kind: "start", runId: run.runId, inputId, mode: nextMode(book) },
 		held,
 	);
+
+/**
+ * 3.4: an effect main issues with no hold, under its Control's commandId; its first claim is open,
+ * named only at its outcome, and may act until then (3.5).
+ */
+function issueControl(
+	book: Book,
+	effect: ControlEffect,
+	commandId: string,
+): void {
+	const send = issue(book, effect, false);
+	send.commandId = commandId;
+	transmit(book, send, undefined);
+}
 
 /** 3.7: probe transmission n's retry deadline is its issue plus max(probeMs, backoff(n)). */
 const backoff = (n: number) => [1_000, 2_000, 4_000, 8_000][n - 1] ?? 30_000;
@@ -683,16 +861,11 @@ function probe(
 	book: Book,
 	fact: Fact,
 	step: Step,
-	run: Run,
+	runId: string | null,
 	target: Probe["target"],
 	subject?: Probe["subject"],
 ): void {
-	const send = issue(
-		book,
-		run,
-		{ kind: "probe", runId: run.runId, target },
-		false,
-	);
+	const send = issue(book, { kind: "probe", runId, target }, false);
 	send.probe = { target, subject, done: false };
 	reprobe(book, fact, step, send, send.probe);
 }
@@ -729,6 +902,12 @@ function effectOutcome(
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
+			if (send.effect.kind === "end_session") {
+				seal(tx);
+				tx.ended ??= "evidence";
+				sessionEnd(book, send.seq);
+				return changed;
+			}
 			break;
 		case "retryable":
 			tx.retryable = true;
@@ -752,7 +931,12 @@ function effectOutcome(
 				at: outcome.retryAt,
 			});
 			break;
-		case "permanent":
+		case "permanent": {
+			// 3.4: an outcome with no live claim (the budget's exhaustion) names the latest claimed
+			// transmission, so the claim opened for the retry never happened.
+			const open = send.txs.at(-1);
+			if (tx.n !== undefined && open !== tx && open?.token === undefined)
+				send.txs.pop();
 			tx.permanent = outcome.code;
 			tx.resumeRejected = outcome.code === "native_resume_rejected";
 			tx.transport = joinTransport(tx.transport, {
@@ -761,6 +945,7 @@ function effectOutcome(
 			});
 			failInput(book, send, tx);
 			break;
+		}
 		case "delivery_unknown":
 			// 3.7, D20: an unknown delivery is never re-sent; a probe recovers it.
 			tx.transport = joinTransport(tx.transport, { tag: "Unknown" });
@@ -768,8 +953,45 @@ function effectOutcome(
 			openRecovery(book, fact, send, tx);
 			return changed;
 	}
+	// 3.4: main claims a control's row again after a retryable outcome on its latest claim.
+	if (
+		tx.n !== undefined &&
+		tx === send.txs.at(-1) &&
+		outcome.tag === "retryable"
+	)
+		transmit(book, send, undefined);
 	seal(tx);
 	return changed;
+}
+
+/**
+ * 3.4 session end: covers every transmission issued before `before` and the next start is fresh.
+ * An end_session success covers only what issued before it (CONTRACT.md 535-537).
+ */
+function sessionEnd(book: Book, before: number): boolean {
+	let moved = book.freshSince !== book.seq;
+	book.freshSince = book.seq;
+	for (const send of book.sends)
+		for (const tx of send.txs)
+			if (
+				tx.seq < before &&
+				(tx.sealed === undefined || tx.ended === undefined)
+			) {
+				seal(tx);
+				tx.ended ??= "session_ended";
+				moved = true;
+			}
+	for (const run of book.runs)
+		if (
+			run.phase !== "Ended" &&
+			run.exec.evidence &&
+			run.exec.endedBy === undefined &&
+			runSends(book, run).some((send) => send.txs.some((tx) => tx.seq < before))
+		) {
+			run.exec.endedBy = "session_ended";
+			moved = true;
+		}
+	return moved;
 }
 
 /** An answer resolved to its send and transmission (3.4). */
@@ -957,9 +1179,11 @@ const evidenceTable: EvidenceTable = {
 		produces: (send) => !send.held,
 		merge: (book, fact, { send, tx }, evidence) =>
 			// 3.4 (CONTRACT.md 465-471, D48): not_sent is only a probe's, stop_task's or
-			// cancel_request's, never a start's.
-			evidence.outcome.tag === "not_sent" && isStart(send)
-				? rejected("start cannot produce not_sent evidence (3.4)")
+			// cancel_request's.
+			evidence.outcome.tag === "not_sent" &&
+			send.effect.kind !== "probe" &&
+			send.effect.kind !== "cancel_request"
+				? rejected(`${send.effect.kind} cannot produce not_sent evidence (3.4)`)
 				: effectOutcome(book, fact, send, tx, evidence.outcome),
 	},
 	runner_reply: {
@@ -1206,14 +1430,22 @@ function dispatched(
 		.filter((tx) => !tx.unheld).length;
 	if (evidence.transmission !== holds + 1)
 		return rejected("run.dispatched transmission out of order (4.3)");
-	// L2: a pending held send resolves at its own run_dispatched to the runner it names.
+	// L2: a pending held send resolves at its own run_dispatched to the runner it names, and a
+	// case 2 send following its start resolves with it.
 	if (send.runnerId === null) {
-		send.runnerId = evidence.runnerId;
-		send.label = runner?.latest ?? null;
-		for (const tx of send.txs)
-			if (tx.runnerId === null) {
-				tx.runnerId = evidence.runnerId;
-				tx.label = send.label;
+		const startSeq = send.seq;
+		for (const item of book.sends)
+			if (
+				item === send ||
+				(item.follows === startSeq && item.runnerId === null)
+			) {
+				item.runnerId = evidence.runnerId;
+				item.label = runner?.latest ?? null;
+				for (const tx of item.txs)
+					if (tx.runnerId === null) {
+						tx.runnerId = evidence.runnerId;
+						tx.label = item.label;
+					}
 			}
 	}
 	transmit(book, send, token, evidence.runnerId, runner?.latest ?? send.label);
@@ -1245,6 +1477,7 @@ function observe(
 							runId: observation.runId,
 							inputs: [observation.inputId],
 							phase: "Queued",
+							asked: false,
 							exec: newExec(0),
 						});
 						input.runId = observation.runId;
@@ -1298,16 +1531,64 @@ function observe(
 				!book.tokens.has(observation.token)
 			)
 				return dispatched(book, observation.token, observation);
+			// 3.4: a control's outcome names its transmission, which binds the token the host composed.
 			if (
 				observation.kind === "effect_outcome" &&
 				observation.transmission !== undefined
-			)
-				return notBuilt("32.2.7", "a control's effect_outcome");
+			) {
+				const named = observation.transmission;
+				if (
+					observation.outcome.tag === "delivery_unknown" ||
+					observation.outcome.tag === "not_sent"
+				)
+					// 3.4 (CONTRACT.md 465-471, D48): main's gate precedes its claim.
+					return rejected(
+						`main writes no ${observation.outcome.tag} for a transmission (3.4)`,
+					);
+				const rows = book.sends.filter(
+					(item) => !item.held && item.commandId === named.commandId,
+				);
+				if (named.transmission === 0) {
+					// 3.4 (CONTRACT.md 474-477): n 0 ends the issue never transmitted, adding no chain.
+					const issued = rows
+						.filter((item) => item.txs.every((tx) => tx.token === undefined))
+						.at(-1);
+					if (issued === undefined) return noop("n 0 names no issue (3.4)");
+					issued.txs.length = 0;
+					return changed;
+				}
+				const row = rows.find((item) =>
+					item.txs.some((tx) => tx.n === named.transmission),
+				);
+				const claim = row?.txs.find((tx) => tx.n === named.transmission);
+				if (row === undefined || claim === undefined)
+					return noop("unknown transmission (3.4)");
+				if (claim.token === undefined && !book.tokens.has(observation.token)) {
+					claim.token = observation.token;
+					book.tokens.set(observation.token, {
+						send: book.sends.indexOf(row),
+						tx: row.txs.indexOf(claim),
+					});
+				} else if (claim.token !== observation.token)
+					return rejected("a transmission names one token (3.4)");
+			}
 			const at = book.tokens.get(observation.token);
 			const send = at === undefined ? undefined : book.sends[at.send];
 			const tx = at === undefined ? undefined : send?.txs[at.tx];
 			if (send === undefined || tx === undefined)
 				return noop("unknown or never-issued token (3.4)");
+			if (tx.n !== undefined && observation.kind !== "effect_outcome")
+				// D61 (CONTRACT.md 489-494, 517-518): a control main issues is answered only by its outcome.
+				return rejected(
+					`${observation.kind} on a control main issues (3.4, D61)`,
+				);
+			if (
+				observation.kind === "effect_outcome" &&
+				(observation.transmission !== undefined) !== (tx.n !== undefined)
+			)
+				return rejected(
+					"an effect_outcome names a transmission exactly for a control (3.4)",
+				);
 			const run = findRun(book, send.runId);
 			const live =
 				run !== undefined &&
@@ -1329,6 +1610,43 @@ function observe(
 			return outcome;
 		}
 	}
+}
+
+/** L1: a runner retires (its process_lost, or another runner's process_started). */
+function retire(book: Book, runnerId: string): void {
+	const runner = book.runners.get(runnerId);
+	if (runner !== undefined) runner.retired = true;
+	if (book.current === runnerId) book.current = null;
+	const addressed = (send: Send, tx: Tx) =>
+		send.runnerId === runnerId || tx.runnerId === runnerId;
+	// L1 item 1: retiring covers every send addressed to it and seals its transmissions.
+	for (const send of book.sends) {
+		for (const tx of send.txs)
+			if (addressed(send, tx)) {
+				seal(tx);
+				tx.ended ??= "process_lost";
+			}
+		if (
+			send.held &&
+			send.txs.length === 0 &&
+			send.runnerId === runnerId &&
+			findRun(book, send.runId)?.phase !== "Ended"
+		)
+			// 3.6: retirement before any hold of its start leaves it never handed over.
+			transmit(book, send, undefined).sealed = {
+				value: "never",
+				unconsumed: false,
+			};
+	}
+	for (const run of book.runs)
+		if (
+			run.phase !== "Ended" &&
+			run.exec.evidence &&
+			runSends(book, run).some((send) =>
+				send.txs.some((tx) => addressed(send, tx)),
+			)
+		)
+			run.exec.endedBy ??= "process_lost";
 }
 
 function settle(
@@ -1391,8 +1709,21 @@ function settle(
 				nativePolicies[book.provider].capabilities.backgroundTasks
 			)
 				return notBuilt("32.2.11", "a reattached runner's tasks");
-			// Gap (CONTRACT.md 346-348): L1 retires every other runner here; this slice follows the
-			// oracle and leaves that retirement to the host's process_lost (H1, 6.9).
+			// L1 totality (CONTRACT.md 346-349): another runner's process_started is the process_lost
+			// of every other runner, started or only named by a run.dispatched.
+			for (const other of new Set([
+				...book.runners.keys(),
+				...book.sends.flatMap((send) => [
+					send.runnerId,
+					...send.txs.map((tx) => tx.runnerId),
+				]),
+			]))
+				if (
+					other !== null &&
+					other !== runnerId &&
+					book.runners.get(other)?.retired !== true
+				)
+					retire(book, other);
 			book.runners.set(runnerId, { latest: settlement.label, retired: false });
 			book.current = runnerId;
 			// L2: a pending send resolves, once, to the next process_started's runner; a
@@ -1417,68 +1748,146 @@ function settle(
 			if (book.retirements.has(key))
 				return noop("process_lost already folded (6.5)");
 			book.retirements.add(key);
-			const runner = book.runners.get(settlement.runnerId);
-			if (runner !== undefined) runner.retired = true;
-			if (book.current === settlement.runnerId) book.current = null;
-			const addressed = (send: Send, tx: Tx) =>
-				send.runnerId === settlement.runnerId ||
-				tx.runnerId === settlement.runnerId;
-			// L1 item 1: retiring covers every send addressed to it and seals its transmissions.
-			for (const send of book.sends) {
-				for (const tx of send.txs)
-					if (addressed(send, tx)) {
-						seal(tx);
-						tx.ended ??= "process_lost";
-					}
-				if (
-					send.held &&
-					send.txs.length === 0 &&
-					send.runnerId === settlement.runnerId &&
-					findRun(book, send.runId)?.phase !== "Ended"
-				)
-					// 3.6: retirement before any hold of its start leaves it never handed over.
-					transmit(book, send, undefined).sealed = {
-						value: "never",
-						unconsumed: false,
-					};
-			}
-			for (const run of book.runs)
-				if (
-					run.phase !== "Ended" &&
-					run.exec.evidence &&
-					runSends(book, run).some((send) =>
-						send.txs.some((tx) => addressed(send, tx)),
-					)
-				)
-					run.exec.endedBy ??= "process_lost";
+			retire(book, settlement.runnerId);
 			return changed;
 		}
-		case "session_ended": {
+		case "session_ended":
 			// 3.4: the native session ends at this fact and covers every send issued before it.
-			let moved = book.freshSince !== book.seq;
-			book.freshSince = book.seq;
-			for (const send of book.sends)
-				for (const tx of send.txs)
-					if (tx.sealed === undefined || tx.ended === undefined) {
-						seal(tx);
-						tx.ended ??= "session_ended";
-						moved = true;
-					}
-			for (const run of book.runs)
-				if (
-					run.phase !== "Ended" &&
-					run.exec.evidence &&
-					run.exec.endedBy === undefined
-				) {
-					run.exec.endedBy = "session_ended";
-					moved = true;
-				}
-			return moved ? changed : noop("the native session already ended");
-		}
+			return sessionEnd(book, book.seq)
+				? changed
+				: noop("the native session already ended");
 	}
 }
 
 /** Applies one entry to a draft; the caller discards the draft unless it changed. */
+/** 8.4: an end_session row under its own Control, addressed as L2 says (case 2 or 3). */
+const endSession = (book: Book, run: Run | undefined, commandId: string) =>
+	issueControl(
+		book,
+		{
+			kind: "end_session",
+			runId: run?.runId ?? null,
+			label: addressAt(book, run).label,
+		},
+		commandId,
+	);
+
+/** 3.6, 5.1, L6: a Stop, Run now or end commit asks the active Run and opens or joins the stop deadline. */
+function commit(
+	book: Book,
+	fact: Fact,
+	step: Step,
+	by: InterruptBy,
+	deadlineAt: number | null,
+	commandId: string,
+): void {
+	const run = activeRun(book);
+	if (run !== undefined) {
+		run.asked = true;
+		if (run.phase !== "Queued") {
+			run.phase = "Interrupting";
+			run.by = by;
+		}
+	}
+	// 5.1: a Run nothing of which may act ends at once with no effect; with neither it nor label
+	// work, Stop issues nothing.
+	const acting =
+		run !== undefined && run.phase !== "Queued" && !nothingMayAct(book, run);
+	// 8.4: an end's Stop row is its end_session, not an interrupt.
+	if (by === "end") endSession(book, run, commandId);
+	else if (acting || labelWorkOutstanding(book)) {
+		const runId = acting ? (run?.runId ?? null) : null;
+		issueControl(
+			book,
+			{
+				kind: "interrupt",
+				runId,
+				runIds: [...book.mainRuns.entries()]
+					.filter(([, main]) => main.open && main.runId === run?.runId)
+					.map(([id]) => id),
+			},
+			commandId,
+		);
+		if (!nativePolicies[book.provider].capabilities.runnerHost) {
+			// 5.1 OpenCode Stop: the Stop issues cancel_request and a native_session probe together,
+			// the probe's deadline running from that issue (3.7).
+			const send = issue(book, { kind: "cancel_request", runId }, false);
+			const token = step.newId() as SendToken;
+			transmit(book, send, token);
+			step.effects.push({ tag: "Tokened", token, effect: send.effect });
+			probe(book, fact, step, runId, { tag: "native_session" });
+		}
+	}
+	if (deadlineAt === null) return;
+	// L6: add the label work with no open main run to the one ledger stop deadline.
+	const hasOpenMain = (runId: string | null) =>
+		[...book.mainRuns.values()].some(
+			(main) => main.open && main.runId === runId,
+		);
+	const items = book.sends.flatMap((send, index) =>
+		rules(book).fences(send.effect) && !hasOpenMain(send.runId)
+			? send.txs.flatMap((tx, txIndex) =>
+					mayStillAct(book, send, tx) ? [{ send: index, tx: txIndex }] : [],
+				)
+			: [],
+	);
+	if (items.length === 0) return;
+	const stop = book.stop;
+	book.stop =
+		stop === undefined || !stopOpen(book)
+			? { at: deadlineAt, opened: book.entry, items }
+			: {
+					...stop,
+					items: [
+						...stop.items,
+						...items.filter(
+							(item) =>
+								!stop.items.some(
+									(old) => old.send === item.send && old.tx === item.tx,
+								),
+						),
+					],
+				};
+}
+
+function control(
+	book: Book,
+	fact: Fact,
+	step: Step,
+	command: Extract<LedgerCommand, { verb: "control" }>["control"],
+): Outcome {
+	switch (command.kind) {
+		case "stop":
+		case "run_now":
+			// D58: a Run now's input is main's inbox's until its handoff; the ledger reads the commit.
+			commit(
+				book,
+				fact,
+				step,
+				command.kind,
+				command.deadlineAt,
+				command.commandId,
+			);
+			return changed;
+		case "end": {
+			// 8.4 (CONTRACT.md 2889-2898): with deadlineAt, main commits the Stop as this end_session;
+			// a later one (deadlineAt null) or one with no Run joins no deadline.
+			const run = activeRun(book);
+			if (run === undefined || command.deadlineAt === null)
+				endSession(book, run, command.commandId);
+			else
+				commit(book, fact, step, "end", command.deadlineAt, command.commandId);
+			return changed;
+		}
+		case "answer":
+			return notBuilt("32.2.8", "an interaction's answer");
+		case "stop_tasks":
+		case "confirm_escalation":
+		case "native_command":
+			return notBuilt("32.2.11", `the ${command.kind} control`);
+	}
+}
+
 function apply(book: Book, entry: Entry, step: Step): Outcome {
 	switch (entry.kind) {
 		case "end": {
@@ -1524,7 +1933,7 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 				case "observe":
 					return observe(book, entry, command.observation);
 				case "control":
-					return notBuilt("32.2.7", `the ${command.control.kind} control`);
+					return control(book, entry, step, command.control);
 				case "settle":
 					return settle(book, entry, step, command.settlement);
 			}
@@ -1712,14 +2121,27 @@ function activeView(book: Book, run: Run): ActiveRunView {
 		})),
 		origin: "input" as const,
 	};
+	// L6: the stop deadline shows on a Queued Run with label work, else on the Run its items name.
+	const stop = book.stop;
+	const deadline =
+		stop !== undefined &&
+		stopOpen(book) &&
+		(run.phase === "Queued"
+			? labelWorkOutstanding(book)
+			: stop.items.some((item) => book.sends[item.send]?.runId === run.runId))
+			? { deadline: { owner: "Stop" as const, at: stop.at } }
+			: {};
 	if (run.phase === "Queued")
 		return {
 			...head,
 			tag: "Queued",
+			...deadline,
 			...(run.retryAt === undefined ? {} : { retryAt: run.retryAt }),
 		};
+	if (run.phase === "Interrupting")
+		return { ...head, tag: "Interrupting", by: run.by ?? "stop", ...deadline };
 	return run.exec.settle === undefined
-		? { ...head, tag: run.exec.evidence ? "Running" : "Starting" }
+		? { ...head, tag: run.exec.evidence ? "Running" : "Starting", ...deadline }
 		: {
 				...head,
 				tag: "Settling",
@@ -1730,11 +2152,21 @@ function activeView(book: Book, run: Run): ActiveRunView {
 export function viewLedger(state: SessionLedgerState): LedgerView {
 	const book = bookOf(state);
 	const run = activeRun(book);
-	const live = book.sends.flatMap((send): IssuedEffect[] =>
-		send.commandId !== undefined && send.txs.some((tx) => mayStillAct(send, tx))
-			? [{ tag: "Main", commandId: send.commandId, effect: send.effect }]
-			: [],
-	);
+	const live = book.sends.flatMap((send): IssuedEffect[] => {
+		const effect = send.effect;
+		if (effect.kind === "probe") return [];
+		const acting = send.txs.filter((tx) => mayStillAct(book, send, tx));
+		// 3.13: decide's own effects are Tokened per transmission; every effect main issues is Main.
+		if (effect.kind === "cancel_request")
+			return acting.flatMap((tx): IssuedEffect[] =>
+				tx.token === undefined
+					? []
+					: [{ tag: "Tokened", token: tx.token, effect }],
+			);
+		return acting.length > 0 && send.commandId !== undefined
+			? [{ tag: "Main", commandId: send.commandId, effect }]
+			: [];
+	});
 	return {
 		paused: false,
 		...(run === undefined ? {} : { active: activeView(book, run) }),
