@@ -23,7 +23,7 @@ describe("Run Ledger public model", () => {
 		"codex",
 		"cursor",
 		"opencode",
-	])("%s exposes an empty view and rejects commands without writing or minting", (provider) => {
+	])("%s exposes an empty view and decides without writing or minting", (provider) => {
 		const state = Object.freeze(initialSessionLedgerState("session", provider));
 		const newId = vi.fn(() => "unused");
 		const ctx: DecideContext = {
@@ -42,53 +42,75 @@ describe("Run Ledger public model", () => {
 			interactions: [],
 		};
 		expect(viewLedger(state)).toEqual(empty);
-		const commands: readonly LedgerCommand[] = [
-			{
-				verb: "admit",
-				inputId: "A",
-				delivery: "queue",
-				request: { text: "hello" },
-			},
-			{
-				verb: "control",
-				control: { kind: "stop", commandId: "stop-1", deadlineAt: 30_100 },
-			},
-			{
-				verb: "control",
-				control: { kind: "end", commandId: "end-1", deadlineAt: null },
-			},
-			{
-				verb: "settle",
-				settlement: { kind: "process_lost", runnerId: "host", retiredAt: 99 },
-			},
-			{
-				verb: "settle",
-				settlement: {
-					kind: "process_started",
-					label: "host:7",
-					reattached: false,
+		// 32.2.5 builds the plain path; later lanes' inputs reject as not yet built.
+		const commands: readonly (readonly [
+			LedgerCommand,
+			"Accepted" | "Rejected",
+		])[] = [
+			[
+				{
+					verb: "admit",
+					inputId: "A",
+					delivery: "queue",
+					request: { text: "hello" },
 				},
-			},
-			{
-				verb: "observe",
-				observation: {
-					tag: "Unsolicited",
-					label: "host:7",
-					eventId: "snapshot",
-					kind: "tasks_snapshot",
-					tasks: [],
+				"Accepted",
+			],
+			[
+				{
+					verb: "control",
+					control: { kind: "stop", commandId: "stop-1", deadlineAt: 30_100 },
 				},
-			},
-			{
-				verb: "observe",
-				observation: { tag: "Answer", token, kind: "input_accepted" },
-			},
+				"Rejected",
+			],
+			[
+				{
+					verb: "control",
+					control: { kind: "end", commandId: "end-1", deadlineAt: null },
+				},
+				"Rejected",
+			],
+			[
+				{
+					verb: "settle",
+					settlement: { kind: "process_lost", runnerId: "host", retiredAt: 99 },
+				},
+				"Accepted",
+			],
+			[
+				{
+					verb: "settle",
+					settlement: {
+						kind: "process_started",
+						label: "host:7",
+						reattached: false,
+					},
+				},
+				"Accepted",
+			],
+			[
+				{
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: "host:7",
+						eventId: "snapshot",
+						kind: "tasks_snapshot",
+						tasks: [],
+					},
+				},
+				"Rejected",
+			],
+			[
+				{
+					verb: "observe",
+					observation: { tag: "Answer", token, kind: "input_accepted" },
+				},
+				"Accepted",
+			],
 		];
-		for (const command of commands) {
-			expect(decide(state, command, ctx)).toEqual({
-				tag: "Rejected",
-				diagnostic: "Run Ledger decider pending redesign implementation",
-			});
+		for (const [command, tag] of commands) {
+			expect(decide(state, command, ctx).tag).toBe(tag);
 			expect(viewLedger(state)).toEqual(empty);
 		}
 		expect(newId).not.toHaveBeenCalled();

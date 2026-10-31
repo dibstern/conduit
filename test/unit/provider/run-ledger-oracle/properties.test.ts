@@ -2070,20 +2070,6 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				},
 			);
 	}
-	pendingSuite("[checkpoint] run-ledger-differential")(
-		"stub remains pending on first authorized admission",
-		() => {
-			const d = new TraceDriver(provider, "decider");
-			expect(
-				d.step({
-					verb: "admit",
-					inputId: "A",
-					delivery: "queue",
-					request: { text: "A" },
-				}).tag,
-			).toBe("Accepted");
-		},
-	);
 	it.skipIf(!oracleAvailable)(
 		"LI2 joins commute across send outcomes and receipt orders",
 		({ task }) => {
