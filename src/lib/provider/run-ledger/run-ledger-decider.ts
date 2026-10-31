@@ -10,6 +10,7 @@ import type {
 	Label,
 	LedgerCommand,
 	LedgerView,
+	ProviderDecisionRules,
 	ProviderKind,
 	RunEffect,
 	RunEnded,
@@ -42,12 +43,24 @@ interface Tx {
 	/** A runner-held try that ended before any hold (3.4): never handed over. */
 	readonly unheld: boolean;
 	notSent: boolean;
+	/** run.released: the runner returned the hold unconsumed (4.11). */
+	released: boolean;
 	/** D48: a rejected resume's start never reached the agent and starts the next one fresh. */
 	resumeRejected: boolean;
+	/** Stop's own outcome (4.8, 9): never retried, never fails an input. */
+	stopOwn: boolean;
 	retryable: boolean;
 	permanent?: string | undefined;
 	retryAt?: number | undefined;
 	declined: boolean;
+	/** 9: an input_absent finding; a later acceptance beats it. */
+	absent: boolean;
+	/** A result answered it (3.8 5C: proof after an unknown delivery). */
+	resulted: boolean;
+	/** The first delivery-recovery probe's deadline (3.7, D20). */
+	recovery?: { readonly at: number; readonly opened: number } | undefined;
+	/** Its answers, the evidence section 9's work-ended column reads. */
+	readonly answers: Evidence[];
 	/** D52: sealed at its first closing fact, reading its value then. */
 	sealed?: { readonly value: Value; readonly unconsumed: boolean } | undefined;
 	/** Why its work ended (3.5): its evidence, main's terminal (D59), coverage or an unlaunch. */
@@ -62,10 +75,24 @@ interface Tx {
 	accounted: boolean;
 }
 
-/** Send (issue decision, 3.3). In this slice every send is a start; main issues it (D60). */
-interface Send {
+type StartEffect = Extract<RunEffect, { kind: "start" }>;
+type ProbeEffect = Extract<RunEffect, { kind: "probe" }>;
+
+/** A probe's target and what it covers, stored at issue (3.7, 3.12). */
+interface Probe {
+	readonly target: ProbeEffect["target"];
+	/** The transmission an input probe recovers. */
+	readonly subject?: { readonly send: number; readonly tx: number } | undefined;
+	deadline?: { readonly at: number; readonly opened: number } | undefined;
+	done: boolean;
+}
+
+/** Send (issue decision, 3.3): a start main issues (D60) or a probe decide issues (3.12). */
+interface Send<
+	Effect extends StartEffect | ProbeEffect = StartEffect | ProbeEffect,
+> {
 	readonly seq: number;
-	readonly effect: Extract<RunEffect, { kind: "start" }>;
+	readonly effect: Effect;
 	readonly held: boolean;
 	commandId?: string | undefined;
 	readonly runId: string;
@@ -77,7 +104,11 @@ interface Send {
 	/** L2, 3.6: a send of an execution an unlaunch dropped resolves no further. */
 	dropped: boolean;
 	readonly txs: Tx[];
+	/** 4.3: hold_exhausted settled it failed at the cap. */
+	exhausted: boolean;
+	probe?: Probe | undefined;
 }
+type StartSend = Send<StartEffect>;
 
 interface FoldItem {
 	readonly seq: number;
@@ -135,7 +166,7 @@ interface Book {
 
 /**
  * LedgerEvent is one entry (3.2): a fact (the command with the time and policy it was decided
- * under) or a decision `reconcile` made from the views. Later lanes add the ids a fact mints.
+ * under, and the ids it minted) or a decision `reconcile` made from the views.
  */
 type Entry =
 	| {
@@ -143,6 +174,7 @@ type Entry =
 			readonly command: LedgerCommand;
 			readonly now: number;
 			readonly policy: DecideContext["policy"];
+			readonly ids: readonly string[];
 	  }
 	| ({ readonly kind: "end"; readonly runId: string } & Pick<
 			RunEnded,
@@ -150,6 +182,11 @@ type Entry =
 	  >)
 	| { readonly kind: "unlaunch"; readonly runId: string };
 type Fact = Extract<Entry, { kind: "fact" }>;
+/** A fact's minting: decide draws ids from ctx.newId, evolve replays the entry's (3.2, 3.12). */
+interface Step {
+	readonly newId: () => string;
+	readonly effects: IssuedEffect[];
+}
 
 type Outcome =
 	| { readonly tag: "Changed" }
@@ -207,12 +244,14 @@ function splitLabel(label: Label): { runnerId: string; querySeq: number } {
 function value(tx: Tx): Value {
 	if (tx.consumption.tag === "Observed" || tx.consumption.tag === "Accepted")
 		return "reached";
-	return tx.unheld || tx.notSent || tx.resumeRejected ? "never" : "possibly";
+	return tx.unheld || tx.notSent || tx.released || tx.resumeRejected
+		? "never"
+		: "possibly";
 }
 function unconsumed(tx: Tx): boolean {
 	if (value(tx) !== "possibly") return false;
 	return tx.consumption.tag === "NotConsumed"
-		? true
+		? tx.consumption.why !== "released"
 		: tx.retryable || tx.permanent !== undefined;
 }
 function seal(tx: Tx): void {
@@ -220,9 +259,9 @@ function seal(tx: Tx): void {
 }
 const sealedValue = (tx: Tx): Value => tx.sealed?.value ?? value(tx);
 
-/** 3.5 mayStillAct. */
-function mayStillAct(tx: Tx): boolean {
-	if (tx.ended !== undefined) return false;
+/** 3.5 mayStillAct; a probe only reads, so its work has always ended (8.3, D31). */
+function mayStillAct(send: Send, tx: Tx): boolean {
+	if (tx.ended !== undefined || send.effect.kind === "probe") return false;
 	switch (tx.consumption.tag) {
 		case "Accepted":
 		case "Observed":
@@ -238,11 +277,15 @@ const findRun = (book: Book, runId: string | undefined) =>
 	runId === undefined
 		? undefined
 		: book.runs.find((run) => run.runId === runId);
-/** The sends of the Run's current execution; every send of this slice is a start (3.6). */
+/** The sends of the Run's current execution (3.6). */
 const runSends = (book: Book, run: Run) =>
 	book.sends.filter(
 		(send) => send.runId === run.runId && send.exec === run.exec.n,
 	);
+const isStart = (send: Send): send is StartSend => send.effect.kind === "start";
+/** Its starts: the sends that deliver (3.6); a Run's end waits for no probe (3.8 condition 2). */
+const deliverySends = (book: Book, run: Run) =>
+	runSends(book, run).filter(isStart);
 const activeRun = (book: Book) =>
 	book.runs.find((run) => run.phase !== "Ended");
 const currentLabel = (book: Book): Label | null =>
@@ -272,17 +315,19 @@ function notYetDelivered(book: Book, run: Run): boolean {
 	return (
 		run.phase === "Queued" ||
 		(!run.exec.evidence &&
-			runSends(book, run).every((send) => sendValue(send) === "never"))
+			deliverySends(book, run).every((send) => sendValue(send) === "never"))
 	);
 }
 
 /** 3.6 retry pending: from a retrying outcome until its next transmission, an acceptance or the end. */
-function retryPending(book: Book, run: Run, send: Send): boolean {
+function retryPending(book: Book, run: Run, send: StartSend): boolean {
 	const latest = send.txs.at(-1);
 	if (
+		send.exhausted ||
 		latest?.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
 		latest.resumeRejected ||
+		latest.stopOwn ||
 		send.txs.some((tx) => tx.consumption.tag === "Accepted") ||
 		notYetDelivered(book, run)
 	)
@@ -290,7 +335,9 @@ function retryPending(book: Book, run: Run, send: Send): boolean {
 	return (
 		latest.notSent ||
 		latest.unheld ||
+		latest.released ||
 		latest.declined ||
+		latest.absent ||
 		(latest.retryable && latest.consumption.tag === "None")
 	);
 }
@@ -343,7 +390,7 @@ interface RunSummary {
 }
 
 function summarize(book: Book, run: Run): RunSummary {
-	const sends = runSends(book, run);
+	const sends = deliverySends(book, run);
 	const exec = run.exec;
 	const mains = [...book.mainRuns.values()].filter(
 		(main) => main.runId === run.runId,
@@ -367,37 +414,111 @@ function summarize(book: Book, run: Run): RunSummary {
 		nothingMayAct:
 			sends.every((send) => send.txs.at(-1)?.sealed !== undefined) &&
 			sends.every(
-				(send) => !send.txs.some(mayStillAct) && !retryPending(book, run, send),
+				(send) =>
+					!send.txs.some((tx) => mayStillAct(send, tx)) &&
+					!retryPending(book, run, send),
 			) &&
 			!(exec.evidence && !exec.endEvidence && exec.endedBy === undefined),
 		notYetDelivered: notYetDelivered(book, run),
-		refusal: txs
-			.filter((tx) => tx.permanent !== undefined && !tx.resumeRejected)
-			.sort((a, b) => a.seq - b.seq)[0]?.permanent,
+		// 4.3: the cap's refusal, else the first specific permanent code.
+		refusal: sends.some((send) => send.exhausted)
+			? "provider_send_attempts_exhausted"
+			: txs
+					.filter((tx) => tx.permanent !== undefined && !tx.resumeRejected)
+					.sort((a, b) => a.seq - b.seq)[0]?.permanent,
 		refused: sends.every(
 			(send) => sendValue(send) === "never" || sendUnconsumed(send),
 		),
 		covered,
-		fold: fold(exec.fold),
+		// 3.8 5C: delivery_unknown with no later proof is a failure coded delivery_indeterminate.
+		fold: fold([
+			...exec.fold,
+			...txs
+				.filter(
+					(tx) =>
+						tx.transport.tag === "Unknown" &&
+						consumptionRank[tx.consumption.tag] < 2 &&
+						!tx.resulted,
+				)
+				.map(
+					(tx): FoldItem => ({
+						seq: tx.seq,
+						outcome: "error",
+						code: "delivery_indeterminate",
+						retryable: false,
+					}),
+				),
+		]),
 	};
 }
 
-/** 3.7: open deadlines in this slice are Settling's, in deadline then opening order. */
-const settles = (book: Book) =>
-	book.runs
-		.flatMap((run) =>
-			run.phase === "Ended" || run.exec.settle === undefined
-				? []
-				: [run.exec.settle],
-		)
-		.sort((a, b) => a.at - b.at || a.opened - b.opened);
+interface Due {
+	readonly at: number;
+	readonly opened: number;
+	readonly fire: (fact: Fact, step: Step) => void;
+}
+
+/** 3.7: every open deadline with its firing, in deadline then opening order. */
+function deadlines(book: Book): Due[] {
+	const due: Due[] = [];
+	for (const run of book.runs) {
+		const settle = run.exec.settle;
+		if (run.phase !== "Ended" && settle !== undefined)
+			due.push({
+				...settle,
+				fire: (fact, step) => {
+					// 3.7: Settling's expiry probes native_session; the view then reads Running (3.6).
+					run.exec.settle = undefined;
+					probe(book, fact, step, run, { tag: "native_session" });
+				},
+			});
+	}
+	for (const send of book.sends) {
+		const pending = send.probe;
+		// Gap (CONTRACT.md 1876, "probes follow 3.7"): a probe's retries do not stop when its Run
+		// ends; it goes on to its cap or its answer, as the oracle does.
+		if (pending?.deadline !== undefined && !pending.done)
+			due.push({
+				...pending.deadline,
+				fire: (fact, step) => reprobe(book, fact, step, send, pending),
+			});
+		if (!isStart(send)) continue;
+		for (const tx of send.txs) {
+			const recovery = tx.recovery;
+			if (recovery !== undefined)
+				due.push({
+					...recovery,
+					fire: (fact, step) => {
+						tx.recovery = undefined;
+						const run = findRun(book, send.runId);
+						// 3.7, D20: it probes only an input nothing answered since and whose work goes on.
+						if (
+							consumptionRank[tx.consumption.tag] >= 1 ||
+							tx.ended !== undefined ||
+							run === undefined
+						)
+							return;
+						probe(
+							book,
+							fact,
+							step,
+							run,
+							{ tag: "input", inputId: send.effect.inputId },
+							{ send: book.sends.indexOf(send), tx: send.txs.indexOf(tx) },
+						);
+					},
+				});
+		}
+	}
+	return due.sort((a, b) => a.at - b.at || a.opened - b.opened);
+}
 
 function read(book: Book) {
 	return {
 		runs: book.runs.flatMap((run) =>
 			run.phase === "Launched" ? [summarize(book, run)] : [],
 		),
-		alarmAt: settles(book)[0]?.at,
+		alarmAt: deadlines(book)[0]?.at,
 	};
 }
 
@@ -466,9 +587,14 @@ function transmit(
 		consumption: { tag: "None" },
 		unheld: token === undefined && send.held,
 		notSent: false,
+		released: false,
 		resumeRejected: false,
+		stopOwn: false,
 		retryable: false,
 		declined: false,
+		absent: false,
+		resulted: false,
+		answers: [],
 		accounted: false,
 	};
 	send.txs.push(tx);
@@ -489,16 +615,22 @@ function transmit(
 const nextMode = (book: Book): "fresh" | "resume" =>
 	book.sends.some(
 		(send) =>
+			isStart(send) &&
 			send.seq > book.freshSince &&
 			send.txs.some((tx) => value(tx) !== "never"),
 	)
 		? "resume"
 		: "fresh";
 
-function issue(book: Book, run: Run, inputId: string, held: boolean): Send {
-	const send: Send = {
+function issue<Effect extends StartEffect | ProbeEffect>(
+	book: Book,
+	run: Run,
+	effect: Effect,
+	held: boolean,
+): Send<Effect> {
+	const send: Send<Effect> = {
 		seq: book.seq++,
-		effect: { kind: "start", runId: run.runId, inputId, mode: nextMode(book) },
+		effect,
 		held,
 		runId: run.runId,
 		exec: run.exec.n,
@@ -506,9 +638,63 @@ function issue(book: Book, run: Run, inputId: string, held: boolean): Send {
 		label: currentLabel(book),
 		dropped: false,
 		txs: [],
+		exhausted: false,
 	};
 	book.sends.push(send);
 	return send;
+}
+const start = (book: Book, run: Run, inputId: string, held: boolean) =>
+	issue(
+		book,
+		run,
+		{ kind: "start", runId: run.runId, inputId, mode: nextMode(book) },
+		held,
+	);
+
+/** 3.7: probe transmission n's retry deadline is its issue plus max(probeMs, backoff(n)). */
+const backoff = (n: number) => [1_000, 2_000, 4_000, 8_000][n - 1] ?? 30_000;
+
+/** A probe transmission, Tokened from ctx.newId (3.12); past the cap of 5 it ends with no finding. */
+function reprobe(
+	book: Book,
+	fact: Fact,
+	step: Step,
+	send: Send,
+	pending: Probe,
+): void {
+	// 4.8 (CONTRACT.md 1873-1875): the cap counts every issued token but a not_sent one.
+	const n = send.txs.filter((tx) => !tx.notSent).length + 1;
+	if (n > 5) {
+		pending.done = true;
+		pending.deadline = undefined;
+		return;
+	}
+	const token = step.newId() as SendToken;
+	transmit(book, send, token);
+	step.effects.push({ tag: "Tokened", token, effect: send.effect });
+	pending.deadline = {
+		at: fact.now + Math.max(fact.policy.probeMs, backoff(n)),
+		opened: book.entry,
+	};
+}
+
+/** 3.7, 3.12: a probe stores at issue what it covers and owns a deadline from its issue. */
+function probe(
+	book: Book,
+	fact: Fact,
+	step: Step,
+	run: Run,
+	target: Probe["target"],
+	subject?: Probe["subject"],
+): void {
+	const send = issue(
+		book,
+		run,
+		{ kind: "probe", runId: run.runId, target },
+		false,
+	);
+	send.probe = { target, subject, done: false };
+	reprobe(book, fact, step, send, send.probe);
 }
 
 function launch(run: Run): void {
@@ -517,17 +703,25 @@ function launch(run: Run): void {
 	run.exec = newExec(run.exec.n + 1);
 }
 
-/** D53: a send fails its input once, at a permanent outcome other than a rejected resume. */
+/** D53: a start fails its input once, at a permanent outcome other than a rejected resume or Stop's own. */
 function failInput(book: Book, send: Send, tx: Tx): void {
+	if (!isStart(send) || tx.resumeRejected || tx.stopOwn) return;
 	const input = book.inputs.get(send.effect.inputId);
-	if (!tx.resumeRejected && input?.runId === send.runId)
+	if (input?.runId === send.runId)
 		// Gap (CONTRACT.md 1521-1523): only hold_exhausted names a code; any other uncoded failure
 		// reuses provider_send_attempts_exhausted.
 		input.failed ??= tx.permanent ?? "provider_send_attempts_exhausted";
 }
 
+/** The first delivery-recovery probe: a start's deadline at the outcome plus probeMs (3.7, D20). */
+function openRecovery(book: Book, fact: Fact, send: Send, tx: Tx): void {
+	if (isStart(send))
+		tx.recovery ??= { at: fact.now + fact.policy.probeMs, opened: book.entry };
+}
+
 function effectOutcome(
 	book: Book,
+	fact: Fact,
 	send: Send,
 	tx: Tx,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
@@ -543,6 +737,12 @@ function effectOutcome(
 				tag: "Retrying",
 				at: outcome.retryAt,
 			});
+			if (send.probe?.deadline !== undefined && tx === send.txs.at(-1))
+				// 3.7, D20: a probe's deadline is raised to a later retryAt.
+				send.probe.deadline = {
+					at: Math.max(send.probe.deadline.at, outcome.retryAt),
+					opened: send.probe.deadline.opened,
+				};
 			break;
 		case "not_sent":
 			tx.notSent = true;
@@ -562,7 +762,11 @@ function effectOutcome(
 			failInput(book, send, tx);
 			break;
 		case "delivery_unknown":
-			return notBuilt("32.2.6", "delivery recovery");
+			// 3.7, D20: an unknown delivery is never re-sent; a probe recovers it.
+			tx.transport = joinTransport(tx.transport, { tag: "Unknown" });
+			seal(tx);
+			openRecovery(book, fact, send, tx);
+			return changed;
 	}
 	seal(tx);
 	return changed;
@@ -602,10 +806,21 @@ export type EvidenceTable = {
 	readonly [K in Evidence["kind"]]: EvidenceRule<K>;
 };
 
-// Gap (CONTRACT.md 3076-3077 decides membership; the policy table is still Pending): runEnd and
-// capabilities are read from the Pending row as the nearest reading.
 const runEnd = (book: Book) => nativePolicies[book.provider].runEnd;
-const lifecycle = () => true;
+/** Section 9's fence membership, idle proof and work-ended column (CONTRACT.md 3076-3093). */
+function rules(book: Book): ProviderDecisionRules {
+	const policy = nativePolicies[book.provider];
+	// Gap (CONTRACT.md 3087, 32.2.13): a Pending row's start fences, has no idle proof, and its
+	// work ends at its runEnd evidence, the nearest reading until its row is decided.
+	return policy.tag === "Ready"
+		? policy.rules
+		: {
+				fences: (effect) => effect.kind === "start",
+				idleCovers: () => false,
+				workEnded: (evidence) =>
+					evidence.some((item) => item.kind === policy.runEnd),
+			};
+}
 const never = () => false;
 const held = (send: Send) => send.held;
 
@@ -640,12 +855,13 @@ function liveness(
 }
 
 const evidenceTable: EvidenceTable = {
-	started: { class: "lifecycle", produces: lifecycle, merge: liveness },
-	activity: { class: "lifecycle", produces: lifecycle, merge: liveness },
+	started: { class: "lifecycle", produces: isStart, merge: liveness },
+	activity: { class: "lifecycle", produces: isStart, merge: liveness },
 	result: {
 		class: "lifecycle",
-		produces: lifecycle,
+		produces: isStart,
 		merge(book, fact, { send, tx, run }, evidence) {
+			tx.resulted = true;
 			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
 			seal(tx);
 			const authority =
@@ -654,7 +870,6 @@ const evidenceTable: EvidenceTable = {
 				send.exec === run.exec.n &&
 				(tx.ended === undefined || tx.ended === "evidence");
 			const byResult = runEnd(book) === "result";
-			if (byResult) tx.ended ??= "evidence";
 			if (!authority) return changed;
 			run.exec.evidence = true;
 			run.exec.result = true;
@@ -677,23 +892,23 @@ const evidenceTable: EvidenceTable = {
 	},
 	query_ended: {
 		class: "lifecycle",
-		produces: lifecycle,
+		produces: isStart,
 		merge(book, _fact, { tx, run, live }) {
-			// 9: query_ended ends only an owned execution's work.
+			// 9: query_ended ends only an owned execution's work, and its own by the work-ended column.
 			if (runEnd(book) !== "query_ended") return noop();
-			tx.ended ??= "evidence";
-			// The label's fence members (section 9): in this slice, its starts.
+			// 9: it ends its label's fence members.
 			for (const send of book.sends)
-				for (const other of send.txs)
-					if (tx.label !== null && other.label === tx.label)
-						other.ended ??= "evidence";
+				if (rules(book).fences(send.effect))
+					for (const other of send.txs)
+						if (tx.label !== null && other.label === tx.label)
+							other.ended ??= "evidence";
 			if (live && run !== undefined) run.exec.endEvidence = true;
 			return changed;
 		},
 	},
 	input_accepted: {
 		class: "receipt",
-		produces: lifecycle,
+		produces: isStart,
 		merge(_book, _fact, { tx }, evidence) {
 			const nativeId = evidence.nativeMessageId;
 			if (
@@ -713,7 +928,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	input_declined: {
 		class: "receipt",
-		produces: lifecycle,
+		produces: isStart,
 		merge(_book, _fact, { tx }) {
 			const before = JSON.stringify(tx.consumption);
 			const moved = !tx.declined;
@@ -730,7 +945,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	accounting: {
 		class: "receipt",
-		produces: lifecycle,
+		produces: isStart,
 		merge(_book, _fact, { tx }) {
 			if (tx.accounted) return noop("a duplicate accounting receipt (12A)");
 			tx.accounted = true;
@@ -740,19 +955,20 @@ const evidenceTable: EvidenceTable = {
 	effect_outcome: {
 		class: "outcome",
 		produces: (send) => !send.held,
-		merge: (book, _fact, { send, tx }, evidence) =>
+		merge: (book, fact, { send, tx }, evidence) =>
 			// 3.4 (CONTRACT.md 465-471, D48): not_sent is only a probe's, stop_task's or
 			// cancel_request's, never a start's.
-			evidence.outcome.tag === "not_sent"
+			evidence.outcome.tag === "not_sent" && isStart(send)
 				? rejected("start cannot produce not_sent evidence (3.4)")
-				: effectOutcome(book, send, tx, evidence.outcome),
+				: effectOutcome(book, fact, send, tx, evidence.outcome),
 	},
 	runner_reply: {
 		class: "hold",
 		produces: held,
-		merge: (book, _fact, { send, tx }, evidence) =>
+		merge: (book, fact, { send, tx }, evidence) =>
 			effectOutcome(
 				book,
+				fact,
 				send,
 				tx,
 				evidence.outcome.tag === "succeeded"
@@ -769,26 +985,134 @@ const evidenceTable: EvidenceTable = {
 	run_released: {
 		class: "hold",
 		produces: held,
-		merge: () => notBuilt("32.2.6", "run_released"),
+		merge(_book, _fact, { tx }, { reason }) {
+			// 4.11: the runner returned the hold; a rejected resume never reached the agent (D48).
+			tx.released = true;
+			if (reason === "ResumeRejected") {
+				tx.resumeRejected = true;
+				tx.transport = joinTransport(tx.transport, {
+					tag: "Failed",
+					code: "native_resume_rejected",
+				});
+			} else {
+				// 4.8, 9: a hold released by Stop is Stop's own, never retried.
+				tx.stopOwn = typeof reason === "object" && reason.why === "interrupted";
+				tx.consumption = joinConsumption(tx.consumption, {
+					tag: "NotConsumed",
+					why: "released",
+				});
+			}
+			seal(tx);
+			return changed;
+		},
 	},
 	delivery_indeterminate: {
 		class: "hold",
 		produces: held,
-		merge: () => notBuilt("32.2.6", "delivery_indeterminate"),
+		merge(book, fact, { send, tx }) {
+			tx.transport = joinTransport(tx.transport, { tag: "Unknown" });
+			seal(tx);
+			openRecovery(book, fact, send, tx);
+			return changed;
+		},
 	},
 	journal_answer: {
 		class: "hold",
 		produces: held,
-		merge: () => notBuilt("32.2.6", "journal_answer"),
+		merge(_book, _fact, { tx }, { answer }) {
+			if (answer === "uncertain") return noop();
+			// 9: absent closes the hold; the work-ended column reads it after the merge.
+			if (answer !== "absent")
+				tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+			seal(tx);
+			return changed;
+		},
 	},
 	probe_result: {
 		class: "probe",
-		produces: never,
-		merge: () => notBuilt("32.2.6", "probe_result"),
+		produces: (send) => send.effect.kind === "probe",
+		merge(book, _fact, { send, tx }, { finding }) {
+			const pending = send.probe;
+			if (pending === undefined)
+				return rejected("probe_result for a non-probe (3.4)");
+			const target = pending.target.tag;
+			if (
+				finding.tag !== "native_busy" &&
+				(target === "input"
+					? finding.tag === "native_idle"
+					: finding.tag !== "native_idle")
+			)
+				return rejected(`${finding.tag} cannot answer a ${target} probe (3.4)`);
+			const subjectSend =
+				pending.subject === undefined
+					? undefined
+					: book.sends[pending.subject.send];
+			const subject =
+				pending.subject === undefined
+					? undefined
+					: subjectSend?.txs[pending.subject.tx];
+			if (
+				finding.tag === "input_present" &&
+				finding.nativeMessageId !== undefined &&
+				subjectSend?.txs.some(
+					(item) =>
+						item.nativeMessageId !== undefined &&
+						item.nativeMessageId !== finding.nativeMessageId,
+				)
+			)
+				return rejected("a contradicting native id (3.4, 6C)");
+			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+			seal(tx);
+			if (pending.done) return noop("late probe answer");
+			// 3.7: busy is no finding; the probe re-probes at its deadline.
+			if (finding.tag === "native_busy") return changed;
+			pending.done = true;
+			pending.deadline = undefined;
+			switch (finding.tag) {
+				case "input_present":
+					if (subject !== undefined) {
+						subject.nativeMessageId ??= finding.nativeMessageId;
+						subject.consumption = joinConsumption(subject.consumption, {
+							tag: "Observed",
+						});
+						seal(subject);
+					}
+					break;
+				case "input_absent":
+					if (subject !== undefined) {
+						// 9: input_absent ends probing; a later acceptance beats it.
+						subject.absent = true;
+						subject.consumption = joinConsumption(subject.consumption, {
+							tag: "NotConsumed",
+							why: "absent",
+						});
+						seal(subject);
+					}
+					break;
+				case "native_idle": {
+					// 9: an idle probe covers the fence members issued before it its idle proof names.
+					const policy = rules(book);
+					for (const other of book.sends)
+						if (policy.fences(other.effect))
+							for (const item of other.txs)
+								if (
+									item.seq < tx.seq &&
+									item.ended === undefined &&
+									policy.idleCovers(
+										other.effect,
+										item.resulted || consumptionRank[item.consumption.tag] >= 2,
+									)
+								)
+									item.ended = "evidence";
+					break;
+				}
+			}
+			return changed;
+		},
 	},
 	interaction_requested: {
 		class: "interaction",
-		produces: lifecycle,
+		produces: isStart,
 		merge: () => notBuilt("32.2.8", "interaction_requested"),
 	},
 	interaction_resolved: {
@@ -798,7 +1122,7 @@ const evidenceTable: EvidenceTable = {
 	},
 	command_lifecycle: {
 		class: "command",
-		produces: lifecycle,
+		produces: isStart,
 		merge: () => notBuilt("32.2.8", "command_lifecycle"),
 	},
 	command_result: {
@@ -853,9 +1177,9 @@ function dispatched(
 		return noop("no hold is written on a retired runner (4.3)");
 	const run = findRun(book, book.mainRuns.get(evidence.runId)?.runId);
 	if (run === undefined) return noop("unknown or never-issued token (3.4)");
-	const heldSends = book.sends.filter(
-		(send) => send.held && send.runId === run.runId,
-	);
+	const heldSends = book.sends
+		.filter(isStart)
+		.filter((send) => send.held && send.runId === run.runId);
 	let send = heldSends
 		.filter((item) => item.commandId === evidence.commandId)
 		.at(-1);
@@ -863,7 +1187,7 @@ function dispatched(
 		// 3.6 D50: a relaunch is a new transmission of the same issue, in a new execution.
 		if (run.phase === "Queued") {
 			launch(run);
-			send = issue(book, run, send.effect.inputId, true);
+			send = start(book, run, send.effect.inputId, true);
 			send.commandId = evidence.commandId;
 		} else if (
 			run.phase === "Ended" &&
@@ -934,9 +1258,9 @@ function observe(
 					});
 					if (run.phase === "Queued") launch(run);
 					const send =
-						runSends(book, run).find(
+						deliverySends(book, run).find(
 							(item) => item.effect.inputId === observation.inputId,
-						) ?? issue(book, run, observation.inputId, !observation.direct);
+						) ?? start(book, run, observation.inputId, !observation.direct);
 					if (observation.direct) {
 						// 3.13: a direct start is Main under its input's id, its token the runId (3.4).
 						send.commandId ??= observation.inputId;
@@ -990,13 +1314,19 @@ function observe(
 				run.phase !== "Ended" &&
 				send.exec === run.exec.n &&
 				tx.ended === undefined;
-			return merge(
+			// The draft is discarded unless the merge changed it, so only folded answers stay.
+			tx.answers.push(observation);
+			const outcome = merge(
 				book,
 				fact,
 				{ send, tx, run, live },
 				observation.kind,
 				observation,
 			);
+			// 3.5, 9: a start's own work ends by its provider's work-ended column.
+			if (isStart(send) && rules(book).workEnded(tx.answers))
+				tx.ended ??= "evidence";
+			return outcome;
 		}
 	}
 }
@@ -1004,24 +1334,36 @@ function observe(
 function settle(
 	book: Book,
 	fact: Fact,
+	step: Step,
 	settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
 ): Outcome {
 	switch (settlement.kind) {
-		case "alarm_fired":
-			// 3.7: due only when an alarm recorded after it opened reaches its time.
-			return settles(book).some(
+		case "alarm_fired": {
+			// 3.7: every deadline an alarm recorded after it opened reaches fires once, in order.
+			const due = deadlines(book).filter(
 				(item) => item.at <= fact.now && item.opened < book.entry,
-			)
-				? notBuilt("32.2.6", "Settling expiry's native_session probe")
-				: noop("nothing due");
-		case "hold_exhausted":
-			return notBuilt("32.2.6", "hold_exhausted");
+			);
+			for (const item of due) item.fire(fact, step);
+			return due.length > 0 ? changed : noop("nothing due");
+		}
+		case "hold_exhausted": {
+			const send = book.sends
+				.filter((item) => item.held && item.commandId === settlement.commandId)
+				.at(-1);
+			if (send === undefined) return noop("unknown commandId (3.4)");
+			// 4.3: the hold's budget is spent; it fails its input with provider_send_attempts_exhausted.
+			send.exhausted = true;
+			for (const tx of send.txs) seal(tx);
+			const latest = send.txs.at(-1);
+			if (latest !== undefined) failInput(book, send, latest);
+			return changed;
+		}
 		case "unheld_outcome": {
 			const run = findRun(book, book.mainRuns.get(settlement.runId)?.runId);
 			if (run === undefined) return noop("unknown token (3.4)");
 			if (run.phase === "Ended")
 				return noop("late evidence for an Ended Run (3.8)");
-			const sends = runSends(book, run).filter((item) => item.held);
+			const sends = deliverySends(book, run).filter((item) => item.held);
 			const send =
 				sends
 					.filter((item) => item.commandId === settlement.commandId)
@@ -1029,7 +1371,7 @@ function settle(
 			if (send === undefined) return noop("unknown token (3.4)");
 			send.commandId ??= settlement.commandId;
 			const tx = transmit(book, send, undefined);
-			effectOutcome(book, send, tx, settlement.outcome);
+			effectOutcome(book, fact, send, tx, settlement.outcome);
 			tx.notSent ||= settlement.outcome.tag === "not_sent";
 			return changed;
 		}
@@ -1137,7 +1479,7 @@ function settle(
 }
 
 /** Applies one entry to a draft; the caller discards the draft unless it changed. */
-function apply(book: Book, entry: Entry): Outcome {
+function apply(book: Book, entry: Entry, step: Step): Outcome {
 	switch (entry.kind) {
 		case "end": {
 			const run = findRun(book, entry.runId);
@@ -1154,7 +1496,7 @@ function apply(book: Book, entry: Entry): Outcome {
 			if (run?.phase !== "Launched" || !notYetDelivered(book, run))
 				return rejected(`an unlaunch of a delivered Run ${entry.runId} (3.6)`);
 			// 3.6 D50: back to Queued; the execution's sends are dropped and resolve no further (L2).
-			const txs = runSends(book, run).flatMap((send) => send.txs);
+			const txs = deliverySends(book, run).flatMap((send) => send.txs);
 			for (const tx of txs) tx.ended ??= "dropped";
 			for (const send of runSends(book, run)) send.dropped = true;
 			run.retryAt = txs.at(-1)?.retryAt;
@@ -1184,7 +1526,7 @@ function apply(book: Book, entry: Entry): Outcome {
 				case "control":
 					return notBuilt("32.2.7", `the ${command.control.kind} control`);
 				case "settle":
-					return settle(book, entry, command.settlement);
+					return settle(book, entry, step, command.settlement);
 			}
 		}
 	}
@@ -1195,9 +1537,9 @@ type Recorded =
 	| { readonly tag: "Unchanged"; readonly diagnostic?: string | undefined }
 	| { readonly tag: "Rejected"; readonly diagnostic: string };
 
-function record(book: Book, entry: Entry): Recorded {
+function record(book: Book, entry: Entry, step: Step): Recorded {
 	const draft = structuredClone(book);
-	const outcome = apply(draft, entry);
+	const outcome = apply(draft, entry, step);
 	switch (outcome.tag) {
 		case "Changed":
 			return { tag: "Recorded", book: draft };
@@ -1245,13 +1587,24 @@ export function decide(
 	ctx: DecideContext,
 ): Decision<LedgerEvent> {
 	const book = bookOf(state);
+	// 3.12: the fact keeps the ids it mints, so evolve replays them.
+	const ids: string[] = [];
+	const step: Step = {
+		newId: () => {
+			const id = ctx.newId();
+			ids.push(id);
+			return id;
+		},
+		effects: [],
+	};
 	const fact: Entry = {
 		kind: "fact",
 		command,
 		now: ctx.now,
 		policy: ctx.policy,
+		ids,
 	};
-	const recorded = record(book, fact);
+	const recorded = record(book, fact, step);
 	if (recorded.tag === "Rejected") return recorded;
 	const alarm = (at: number | undefined) =>
 		at === undefined ? {} : { alarmAt: at };
@@ -1278,19 +1631,19 @@ export function decide(
 				tag: "Rejected",
 				diagnostic: `reconcile found no fixpoint within ${reconcileBound} steps (3.2)`,
 			};
-		const step = record(current, next);
-		if (step.tag !== "Recorded")
+		const decided = record(current, next, step);
+		if (decided.tag !== "Recorded")
 			return {
 				tag: "Rejected",
-				diagnostic: `reconcile made an illegal decision: ${step.diagnostic ?? next.kind}`,
+				diagnostic: `reconcile made an illegal decision: ${decided.diagnostic ?? next.kind}`,
 			};
 		entries.push(next);
-		current = step.book;
+		current = decided.book;
 	}
 	return {
 		tag: "Accepted",
 		events: entries as readonly Entry[] as unknown as readonly LedgerEvent[],
-		effects: [],
+		effects: step.effects,
 		ended: entries.flatMap((entry): RunEnded[] =>
 			entry.kind === "end"
 				? [{ runId: entry.runId, outcome: entry.outcome, reason: entry.reason }]
@@ -1305,14 +1658,19 @@ export function evolve(
 	state: SessionLedgerState,
 	event: LedgerEvent,
 ): SessionLedgerState {
-	const recorded = record(bookOf(state), event as unknown as Entry);
+	const entry = event as unknown as Entry;
+	const ids = entry.kind === "fact" ? [...entry.ids] : [];
+	const recorded = record(bookOf(state), entry, {
+		newId: () => ids.shift() ?? "",
+		effects: [],
+	});
 	return recorded.tag === "Recorded" ? stateOf(recorded.book) : state;
 }
 
 function inputState(book: Book, run: Run, inputId: string): InputState {
 	const failed = book.inputs.get(inputId)?.failed;
 	if (failed !== undefined) return { tag: "Failed", reason: failed };
-	const txs = runSends(book, run)
+	const txs = deliverySends(book, run)
 		.filter((send) => send.effect.inputId === inputId)
 		.flatMap((send) => send.txs);
 	const accepted = txs.find((tx) => tx.consumption.tag === "Accepted");
@@ -1320,6 +1678,13 @@ function inputState(book: Book, run: Run, inputId: string): InputState {
 		return accepted.nativeMessageId === undefined
 			? { tag: "Accepted" }
 			: { tag: "Accepted", nativeMessageId: accepted.nativeMessageId };
+	// 3.7: an unknown delivery nothing answered stays unknown until a probe or receipt settles it.
+	if (
+		txs.some(
+			(tx) => tx.transport.tag === "Unknown" && tx.consumption.tag === "None",
+		)
+	)
+		return { tag: "Delivered", certainty: "unknown" };
 	const latest = txs.at(-1);
 	// A latest try not consumed waits as Queued (3.9).
 	if (
@@ -1331,6 +1696,8 @@ function inputState(book: Book, run: Run, inputId: string): InputState {
 		return { tag: "Queued" };
 	if (latest.consumption.tag === "Observed" || latest.transport.tag === "Sent")
 		return { tag: "Delivered", certainty: "sent" };
+	if (latest.transport.tag === "Unknown")
+		return { tag: "Delivered", certainty: "unknown" };
 	return latest.transport.tag === "Issued"
 		? { tag: "Dispatching" }
 		: { tag: "Queued" };
@@ -1364,7 +1731,7 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 	const book = bookOf(state);
 	const run = activeRun(book);
 	const live = book.sends.flatMap((send): IssuedEffect[] =>
-		send.commandId !== undefined && send.txs.some(mayStillAct)
+		send.commandId !== undefined && send.txs.some((tx) => mayStillAct(send, tx))
 			? [{ tag: "Main", commandId: send.commandId, effect: send.effect }]
 			: [],
 	);

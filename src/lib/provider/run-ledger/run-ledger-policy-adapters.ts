@@ -1,9 +1,11 @@
 import type {
 	Evidence,
 	Observation,
+	ProviderDecisionRules,
 	ProviderIntake,
 	ProviderKind,
 	ProviderPolicyTable,
+	RunEffect,
 } from "./run-ledger-model.js";
 
 function terminalAnswer(
@@ -68,22 +70,57 @@ const openCodeTerminal: ProviderIntake["terminal"] = (
 	return undefined;
 };
 
+const runnerIntake: ProviderIntake = { terminal: runnerTerminal };
+const openCodeIntake: ProviderIntake = { terminal: openCodeTerminal };
+
 /** Canonical-event intake is known independently of the unresolved decision rules. */
 export const nativeIntakes: {
 	readonly [P in ProviderKind]: ProviderIntake | undefined;
 } = {
-	claude: { terminal: runnerTerminal },
+	claude: runnerIntake,
 	codex: undefined,
-	cursor: { terminal: runnerTerminal },
-	opencode: { terminal: openCodeTerminal },
+	cursor: runnerIntake,
+	opencode: openCodeIntake,
+};
+
+const startOrSteer = (effect: RunEffect) =>
+	effect.kind === "start" || effect.kind === "steer";
+const has = (
+	evidence: readonly Evidence[],
+	kind: "result" | "query_ended",
+): boolean => evidence.some((item) => item.kind === kind);
+
+// Section 9's decided fence membership, work-ended column and idle proof (CONTRACT.md 3076-3093).
+const claudeRules: ProviderDecisionRules = {
+	fences: startOrSteer,
+	idleCovers: () => false,
+	workEnded(evidence) {
+		const lifecycle = (state: "started" | "cancelled") =>
+			evidence.findIndex(
+				(item) => item.kind === "command_lifecycle" && item.state === state,
+			);
+		// Gap (CONTRACT.md 3092-3094): "cancelled before any started" is read from this send's
+		// evidence order; the oracle reads it as the transmission still unconsumed.
+		const cancelled = lifecycle("cancelled");
+		const started = lifecycle("started");
+		return (
+			has(evidence, "result") ||
+			(cancelled >= 0 && (started < 0 || cancelled < started)) ||
+			(evidence.some(
+				(item) => item.kind === "journal_answer" && item.answer === "absent",
+			) &&
+				!evidence.some((item) => item.kind === "input_accepted"))
+		);
+	},
 };
 
 export const nativePolicies: ProviderPolicyTable = {
 	claude: {
-		tag: "Pending",
+		tag: "Ready",
 		capabilities: { backgroundTasks: true },
 		runEnd: "result",
-		ticket: "unresolved contract: Claude fence membership and idle proof",
+		intake: runnerIntake,
+		rules: claudeRules,
 	},
 	codex: {
 		tag: "Pending",
@@ -92,15 +129,33 @@ export const nativePolicies: ProviderPolicyTable = {
 		ticket: "conduit-test-82tn.32.2.13",
 	},
 	cursor: {
-		tag: "Pending",
+		tag: "Ready",
 		capabilities: { backgroundTasks: false },
 		runEnd: "result",
-		ticket: "unresolved contract: Cursor result releases native-session fence",
+		intake: runnerIntake,
+		rules: {
+			fences: startOrSteer,
+			idleCovers: () => false,
+			workEnded: (evidence) => has(evidence, "result"),
+		},
 	},
 	opencode: {
-		tag: "Pending",
+		tag: "Ready",
 		capabilities: { backgroundTasks: false },
 		runEnd: "query_ended",
-		ticket: "unresolved contract: OpenCode fence membership and idle proof",
+		intake: openCodeIntake,
+		rules: {
+			fences: (effect) =>
+				startOrSteer(effect) ||
+				effect.kind === "interrupt" ||
+				effect.kind === "cancel_request",
+			// A native_idle probe covers aborts and cancel_request session-wide, and a start or steer
+			// whose delivery is confirmed (D26).
+			idleCovers: (effect, deliveryConfirmed) =>
+				effect.kind === "interrupt" ||
+				effect.kind === "cancel_request" ||
+				(startOrSteer(effect) && deliveryConfirmed),
+			workEnded: (evidence) => has(evidence, "query_ended"),
+		},
 	},
 };

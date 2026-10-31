@@ -15,10 +15,19 @@ import {
 	referenceImplementation,
 	writeTraceArtifact,
 } from "./harness.js";
-import { Driver, scenarios } from "./scenarios.js";
+import {
+	begin,
+	Driver,
+	fire,
+	main,
+	observe,
+	scenarios,
+	transmissions,
+	visibleInput,
+} from "./scenarios.js";
 
-/** Inputs the 32.2.5 slice leaves to a later lane; a trace that reaches one stops there. */
-const notBuilt = /^not yet built \(32\.2\.(6|7|8|11)\): /;
+/** Inputs the 32.2.6 slice leaves to a later lane; a trace that reaches one stops there. */
+const notBuilt = /^not yet built \(32\.2\.(7|8|11)\): /;
 
 /** What the oracle and the real decider must agree on at every step (3.1). */
 const publicStep = (decision: Decision<unknown>, view: LedgerView) =>
@@ -83,65 +92,86 @@ describe("[32.2.5] plain Run path differential", () => {
 	const tokens = [...runIds, "h1", "h2", "h3"].map(
 		(token) => token as SendToken,
 	);
+	/** The harness mints decide's probe tokens as `reference:n` on both sides of the lockstep. */
+	const probeTokens = ["reference:1", "reference:2", "reference:3"].map(
+		(token) => token as SendToken,
+	);
 	const commandIds = ["c1", "c2"];
 	/** A generated answer to its round's own send. */
 	const own = "own" as SendToken;
 	const retryAt = fc.constantFrom(600, 9_000);
 	const code = fc.constantFrom("Refused", "native_resume_rejected");
+	const evidence: fc.Arbitrary<Evidence> = fc.oneof(
+		fc.constantFrom<Evidence>(
+			{ kind: "started" },
+			{ kind: "activity" },
+			{ kind: "accounting" },
+			{ kind: "query_ended" },
+			{ kind: "input_accepted" },
+			{ kind: "input_accepted", nativeMessageId: "n1" },
+			{ kind: "input_accepted", nativeMessageId: "n2" },
+			{ kind: "input_declined", reason: "busy" },
+			{ kind: "result", outcome: "completed" },
+			{ kind: "result", outcome: "interrupted" },
+			{
+				kind: "result",
+				outcome: "error",
+				error: { code: "rate_limited", retryable: true },
+			},
+			{ kind: "runner_reply", outcome: { tag: "succeeded" } },
+			{
+				kind: "runner_reply",
+				outcome: { tag: "failed", code: "IteratorFailed" },
+			},
+			{ kind: "effect_outcome", outcome: { tag: "succeeded" } },
+			{ kind: "effect_outcome", outcome: { tag: "delivery_unknown" } },
+			{ kind: "delivery_indeterminate" },
+			{ kind: "run_released", reason: "ResumeRejected" },
+			{ kind: "run_released", reason: "NotSent" },
+			{ kind: "run_released", reason: { tag: "Refused", why: "retiring" } },
+			{ kind: "run_released", reason: { tag: "Refused", why: "interrupted" } },
+			{ kind: "journal_answer", answer: "absent" },
+			{ kind: "journal_answer", answer: "running" },
+			{ kind: "journal_answer", answer: "finished" },
+			{ kind: "journal_answer", answer: "uncertain" },
+		),
+		retryAt.map(
+			(at): Evidence => ({
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: at },
+			}),
+		),
+		retryAt.map(
+			(at): Evidence => ({
+				kind: "effect_outcome",
+				outcome: { tag: "not_sent", retryAt: at },
+			}),
+		),
+		code.map(
+			(permanent): Evidence => ({
+				kind: "effect_outcome",
+				outcome: { tag: "permanent", code: permanent },
+			}),
+		),
+	);
+	const findings = fc.constantFrom<Evidence>(
+		{ kind: "probe_result", finding: { tag: "input_present" } },
+		{
+			kind: "probe_result",
+			finding: { tag: "input_present", nativeMessageId: "n1" },
+		},
+		{ kind: "probe_result", finding: { tag: "input_absent" } },
+		{ kind: "probe_result", finding: { tag: "native_idle" } },
+		{ kind: "probe_result", finding: { tag: "native_busy" } },
+	);
 	const answer = (
 		token: fc.Arbitrary<SendToken>,
+		kinds = evidence,
 	): fc.Arbitrary<LedgerCommand> =>
-		fc
-			.tuple(
-				token,
-				fc.oneof(
-					fc.constantFrom<Evidence>(
-						{ kind: "started" },
-						{ kind: "activity" },
-						{ kind: "accounting" },
-						{ kind: "query_ended" },
-						{ kind: "input_accepted" },
-						{ kind: "input_accepted", nativeMessageId: "n1" },
-						{ kind: "input_accepted", nativeMessageId: "n2" },
-						{ kind: "input_declined", reason: "busy" },
-						{ kind: "result", outcome: "completed" },
-						{ kind: "result", outcome: "interrupted" },
-						{
-							kind: "result",
-							outcome: "error",
-							error: { code: "rate_limited", retryable: true },
-						},
-						{ kind: "runner_reply", outcome: { tag: "succeeded" } },
-						{
-							kind: "runner_reply",
-							outcome: { tag: "failed", code: "IteratorFailed" },
-						},
-						{ kind: "effect_outcome", outcome: { tag: "succeeded" } },
-					),
-					retryAt.map(
-						(at): Evidence => ({
-							kind: "effect_outcome",
-							outcome: { tag: "retryable", retryAt: at },
-						}),
-					),
-					retryAt.map(
-						(at): Evidence => ({
-							kind: "effect_outcome",
-							outcome: { tag: "not_sent", retryAt: at },
-						}),
-					),
-					code.map(
-						(permanent): Evidence => ({
-							kind: "effect_outcome",
-							outcome: { tag: "permanent", code: permanent },
-						}),
-					),
-				),
-			)
-			.map(([to, fields]) => ({
-				verb: "observe",
-				observation: { tag: "Answer", token: to, ...fields },
-			}));
+		fc.tuple(token, kinds).map(([to, fields]) => ({
+			verb: "observe",
+			observation: { tag: "Answer", token: to, ...fields },
+		}));
 	const commandFor = (provider: ProviderKind): fc.Arbitrary<LedgerCommand> =>
 		fc.oneof(
 			{
@@ -228,6 +258,28 @@ describe("[32.2.5] plain Run path differential", () => {
 			{
 				weight: 6,
 				arbitrary: answer(fc.constantFrom(...tokens)),
+			},
+			{
+				weight: 3,
+				arbitrary: answer(
+					fc.constantFrom(...probeTokens),
+					fc.oneof({ weight: 3, arbitrary: findings }, evidence),
+				),
+			},
+			{
+				weight: 2,
+				arbitrary: fc.oneof(
+					fc.constant<LedgerCommand>({
+						verb: "settle",
+						settlement: { kind: "alarm_fired" },
+					}),
+					fc.constantFrom(...commandIds).map(
+						(commandId): LedgerCommand => ({
+							verb: "settle",
+							settlement: { kind: "hold_exhausted", commandId },
+						}),
+					),
+				),
 			},
 			{
 				weight: 2,
@@ -412,9 +464,23 @@ describe("[32.2.5] plain Run path differential", () => {
 								reached.views.add("relaunched");
 							queued = active?.tag === "Queued" ? active.runId : undefined;
 							reached.views.add(active?.tag ?? "idle");
-							if (stepped.decision.tag === "Accepted")
+							if (
+								active?.inputs.some(
+									({ state }) =>
+										state.tag === "Delivered" && state.certainty === "unknown",
+								)
+							)
+								reached.views.add("delivery unknown");
+							if (stepped.decision.tag === "Accepted") {
+								if (
+									stepped.decision.effects.some(
+										({ effect }) => effect.kind === "probe",
+									)
+								)
+									reached.views.add("probed");
 								for (const ended of stepped.decision.ended)
 									reached.ends.add(ended.reason.tag);
+							}
 						}
 					},
 				),
@@ -438,6 +504,8 @@ describe("[32.2.5] plain Run path differential", () => {
 					"Running",
 					"Queued",
 					"relaunched",
+					"delivery unknown",
+					"probed",
 					...(provider === "opencode" ? ["Settling"] : []),
 				]),
 			);
@@ -450,6 +518,169 @@ describe("[32.2.5] plain Run path differential", () => {
 				]),
 			);
 		});
+});
+
+describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance criteria", () => {
+	/**
+	 * Runs a trace on the real decider for its assertions, runs it again on the oracle, and replays
+	 * the oracle's commands through the lockstep, so every step is also green against the oracle.
+	 */
+	function agreed(provider: ProviderKind, trace: (d: Driver) => void) {
+		const d = new Driver(provider, "decider");
+		trace(d);
+		const recorded = new Recording(provider);
+		trace(recorded);
+		const step = lockstep(provider);
+		for (const [command, now] of recorded.log ?? [])
+			assert(step(command, now), `${JSON.stringify(command)} is built`);
+		return d;
+	}
+	const scenario = (id: string) => {
+		const found = scenarios.find((candidate) => candidate.id === id);
+		assert(found, `scenario ${id}`);
+		return found;
+	};
+
+	it("R5's fixed trace is green and reaches the race a start refused with an accepted sibling", () => {
+		const r5 = scenario("R5");
+		const d = agreed(r5.provider, r5.run);
+		expect(d.coverage.races["start refused with an accepted sibling"]).toBe(1);
+	});
+
+	it("an unknown delivery settled by a probe (RL-021) is reached and green", () => {
+		const rl021 = scenario("RL-021");
+		const d = agreed(rl021.provider, rl021.run);
+		expect(d.coverage.races["unknown delivery settled by a probe"]).toBe(1);
+	});
+
+	it("a late acceptance after a Tombstone restores its send's work to its label (3.8, D54)", () => {
+		const d = agreed("claude", (d) => {
+			const a = begin(d);
+			const refused = observe(d, a.token, {
+				kind: "runner_reply",
+				outcome: { tag: "failed", code: "IteratorFailed" },
+			});
+			expect(refused.ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "refused" } },
+			]);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+			const late = observe(d, a.token, {
+				kind: "input_accepted",
+				nativeMessageId: "native-A",
+			});
+			// The Run stays ended; the label's work is the accepted send again.
+			expect(late.ended).toEqual([]);
+			expect(d.view()).toMatchObject({
+				anythingMayAct: true,
+				live: [{ effect: { kind: "start", runId: a.runId, inputId: "A" } }],
+			});
+		});
+		expect(d.coverage.races["late acceptance after a Tombstone"]).toBe(1);
+	});
+
+	it("a direct delivery_unknown send with no later proof is never re-sent, only probed up to the cap (3.5, 4.8)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			// A later retryable answer cannot resend a send that may have reached the provider.
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 300 },
+			});
+			const issued = [];
+			for (let alarm = 0; alarm < 10 && d.alarmAt !== undefined; alarm += 1) {
+				const fired = fire(d);
+				expect(fired.ended).toEqual([]);
+				issued.push(...fired.issued);
+			}
+			expect(d.alarmAt).toBeUndefined();
+			expect(issued.map(({ effect }) => effect.kind)).toEqual(
+				Array.from({ length: 5 }, () => "probe"),
+			);
+			expect(transmissions(d, "A")).toHaveLength(1);
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Delivered",
+				certainty: "unknown",
+			});
+		});
+	});
+
+	it("a probe's not_sent transmission does not count toward its cap of 5 (4.8)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			const [first] = fire(d).issued;
+			assert(first?.tag === "Tokened", "the recovery probe is decide's");
+			observe(d, first.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "not_sent", retryAt: d.now + 1 },
+			});
+			let probes = 1;
+			for (let alarm = 0; alarm < 10 && d.alarmAt !== undefined; alarm += 1)
+				probes += fire(d).issued.length;
+			expect(probes).toBe(6);
+		});
+	});
+
+	it("an unknown delivery blocks the automatic resend until a probe's input_absent settles it (3.5, 4.8)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 300 },
+			});
+			const [probe] = fire(d).issued;
+			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
+			expect(visibleInput(d, "A")?.state).toMatchObject({
+				certainty: "unknown",
+			});
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			});
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
+			expect(d.view().live).toEqual([]);
+		});
+	});
+
+	it("a retryable send row returns to the queue and is re-sent from there (4.8)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "retryable", retryAt: d.now + 300 },
+			});
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
+			expect(d.view().live).toEqual([]);
+			main(
+				d,
+				{ kind: "run_requested", runId: a.runId, inputId: "A", direct: true },
+				"requested-again",
+			);
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Dispatching" });
+			expect(d.view().live).toMatchObject([
+				{ effect: { kind: "start", runId: a.runId, inputId: "A" } },
+			]);
+		});
+		agreed("claude", (d) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+			expect(d.view()).toMatchObject({
+				live: [],
+				active: { runId: a.runId, tag: "Queued" },
+			});
+		});
+	});
 });
 
 describe("[32.2.5] activity throttling (3.8) and the evidence registry (3.2)", () => {

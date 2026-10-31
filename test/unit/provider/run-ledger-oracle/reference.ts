@@ -951,7 +951,8 @@ function probe(
 }
 
 function reprobe(world: World, step: Step, send: Send, probe: Probe): void {
-	const n = send.txs.length + 1;
+	// 4.8 (CONTRACT.md 1873-1875): the cap counts every issued token but a not_sent one.
+	const n = send.txs.filter((tx) => !tx.notSent).length + 1;
 	if (n > 5) {
 		// 3.7: past the cap the probe ends with no finding.
 		probe.done = true;

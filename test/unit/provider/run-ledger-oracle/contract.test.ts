@@ -25,24 +25,12 @@ type Mode = "reference" | "decider";
 /** Decider tests a later lane builds: each must fail with that lane's typed not-yet-built rejection. */
 const notBuilt: ReadonlyMap<string, string> = new Map([
 	[
-		"[step1] native input acceptance cannot be downgraded by a late uncertain transport outcome",
-		"32.2.6",
-	],
-	[
-		"[step1] an earlier retryable outcome cannot resend an uncertain input",
-		"32.2.6",
-	],
-	[
 		"[step1] a start with a retryable outcome cannot start again while Stop interrupts it",
 		"32.2.7",
 	],
 	[
 		"[10B] an answer confirmation cannot settle a different interaction on the same Run",
 		"32.2.8",
-	],
-	[
-		"[8C] a lost process ends an uncertain Run and the ledger never resends its input",
-		"32.2.6",
 	],
 	[
 		"[8C] unknown evidence drops but known incompatible retired sends reject",
@@ -57,24 +45,12 @@ const notBuilt: ReadonlyMap<string, string> = new Map([
 		"32.2.8",
 	],
 	[
-		"[R1] an unanswered native_session probe owns a deadline from issue and re-probes at it",
-		"32.2.6",
-	],
-	[
-		"[step1] probe retry is data and fulfillment removes its deadline",
-		"32.2.6",
-	],
-	[
 		"[4B] OpenCode idle cannot discharge a request issued after its probe",
 		"32.2.7",
 	],
 	[
 		"[5C] completion beats interrupt fallback and a Tombstone is immutable",
 		"32.2.7",
-	],
-	[
-		"[6C] a contradictory input probe rejects even after native acceptance",
-		"32.2.6",
 	],
 	[
 		"[10B] a permanent refusal resolves the interaction and nothing re-delivers it",
