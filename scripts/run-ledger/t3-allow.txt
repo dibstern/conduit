@@ -2044,3 +2044,6 @@ process_started for it rejected (CONTRACT.md 349-350, 6.1, 9: retirement is	owne
 run.requested, run.started join, a steer outliving its Run becomes its own	owner
 commandReceipts capability, final retirement before process_started (L1 349-	owner
 the refusal sweep, refuseProjectCommand (orchestration-side-effect-reactor.ts 2556-2660	owner
+# 32.2.11 build note (2026-10-31): a build record pointing at commit 57a582df.
+stop_tasks, wake Runs from turn_started including D59 Claude turn_ended,	pointer
+differential pending keyed per provider. Gaps: 8.2 serving (2778-2781),	pointer
