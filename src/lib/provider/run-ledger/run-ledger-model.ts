@@ -43,17 +43,38 @@ export type LedgerCommand =
 	| { readonly verb: "control"; readonly control: Control }
 	| { readonly verb: "settle"; readonly settlement: Settlement };
 
-/**
- * CONTRACT.md 3.13 line 1085: an Answer's evidence should be EvidenceFor<K> of its send's kind,
- * but SendToken carries no kind, so any Evidence type-checks here.
- */
 export type Observation =
+	/** A kind the send cannot produce is Rejected at decide (3.4); SendToken carries no kind. */
 	| ({ readonly tag: "Answer"; readonly token: SendToken } & Evidence)
+	/** Main's run events the arm folds (3.4, D60); run.dispatched and run.released are Answers. */
+	| ({ readonly tag: "Main"; readonly eventId: string } & MainRunEvent)
 	| ({
 			readonly tag: "Unsolicited";
 			readonly label: Label;
 			readonly eventId: string;
 	  } & Unsolicited);
+
+export type MainRunEvent =
+	/** 3.4: a direct send (runsOpenCodeServer) is a transmission, its token the runId. */
+	| {
+			readonly kind: "run_requested";
+			readonly runId: string;
+			readonly inputId: string;
+			readonly direct: boolean;
+	  }
+	/** 3.9: joins its input to requestedRunId's Run, or starts a steer's own Run. */
+	| {
+			readonly kind: "run_started";
+			readonly inputId: string;
+			readonly requestedRunId: string;
+	  }
+	/** 3.9, L6: turn.completed, turn.error or turn.interrupted; ends its Run's work as main's (D59). */
+	| {
+			readonly kind: "run_terminal";
+			readonly runId: string;
+			readonly outcome: RunOutcome;
+			readonly code?: string;
+	  };
 
 export type Unsolicited = Extract<
 	Evidence,
@@ -184,7 +205,11 @@ export type Control =
 	| { readonly kind: "stop"; readonly deadlineAt: number | null }
 	| { readonly kind: "end"; readonly deadlineAt: number | null }
 	/** The interrupt main's `interruptForInput` asks for (5.1, D58). */
-	| { readonly kind: "run_now"; readonly inputId: string }
+	| {
+			readonly kind: "run_now";
+			readonly inputId: string;
+			readonly deadlineAt: number | null;
+	  }
 	| {
 			readonly kind: "answer";
 			readonly interactionId: string;
@@ -366,7 +391,7 @@ export type Deadline = { readonly at: number } & (
 	| { readonly owner: "Send"; readonly token: SendToken }
 	| { readonly owner: "Interaction"; readonly interactionId: string }
 	| { readonly owner: "NativeCommand"; readonly commandId: string }
-	/** CONTRACT.md 3.7 line 644: the target is the session row, which owns this state. */
+	/** The ledger stop deadline: one per session row, its target the row, no field (3.7, L6). */
 	| { readonly owner: "Stop" }
 );
 
@@ -407,11 +432,9 @@ export type ActiveRunView = {
 	(
 		| {
 				readonly tag: "Queued";
-				/** CONTRACT.md 3.7 line 733: after an unlaunch, its start's retry. */
-				readonly deadline?: Extract<
-					Deadline,
-					{ readonly owner: "Stop" | "Send" }
-				>;
+				readonly deadline?: Extract<Deadline, { readonly owner: "Stop" }>;
+				/** After an unlaunch, the unlaunching outcome's retryAt: a field, not a Deadline (3.6, 3.7). */
+				readonly retryAt?: number;
 		  }
 		| {
 				readonly tag: "Starting" | "Running";
@@ -458,8 +481,8 @@ export type TasksView =
 	  };
 /** The gate stores its step, never its addresses (L3, 8.4). */
 export interface PendingConfirm {
-	/** CONTRACT.md 8.4 line 2712: a restart, a retirement or an end-session. */
-	readonly step: "restart" | "retire" | "end_session";
+	/** A restart is a retire, then main's relaunch (8.4). */
+	readonly step: "retire" | "end_session";
 	/** A view: the labels the step's addresses have now; one confirm covers them all. */
 	readonly labels: readonly Label[];
 	readonly snapshotEntry: number;
@@ -509,9 +532,8 @@ export interface ProviderIntake {
 	) => Extract<Observation, { readonly tag: "Answer" }> | undefined;
 }
 /**
- * Plain data and pure predicates over recorded evidence (3.2, section 9). CONTRACT.md 3.2 line 294
- * also lists "what the stop's deadline step does"; that step is U2's and the ledger's alarm is
- * provider-independent (3.7 L6), so no rule carries it.
+ * Plain data and pure predicates over recorded evidence (3.2, section 9). The stop's deadline step
+ * is U2's and the ledger's alarm is the same for every provider (L6), so no rule carries it.
  */
 export interface ProviderDecisionRules {
 	readonly fences: (effect: RunEffect) => boolean;
