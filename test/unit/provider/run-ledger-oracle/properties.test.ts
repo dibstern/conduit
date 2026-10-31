@@ -26,7 +26,6 @@ import {
 	type LedgerImplementation,
 	namedRaces,
 	observationKinds,
-	oracleAvailable,
 	PublicNames,
 	policy,
 	referenceImplementation,
@@ -186,6 +185,9 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 					? `control:${control.kind}:${control.deadlineAt === null ? "null" : "at"}`
 					: `control:${control.kind}`,
 			);
+			// 3.4, 8.4 (round 2d): an end with a Run active, each row its own Control.
+			const end = real.fake.ends.get(command);
+			if (end) hit(`control:end:${end}`);
 		}
 		if (command.verb === "observe") {
 			const e = command.observation;
@@ -239,16 +241,24 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 					(item) => real.fake.isHeld(item) && item.commandId === e.commandId,
 				);
 				if (held) hit(`answer:command_lifecycle:${held.effect.kind}`);
-				if (held && real.fake.bound(held).token !== e.token)
+				if (
+					held?.tag === "Main" &&
+					!real.fake
+						.bindingsFor(held)
+						.some(({ send }) => send.token === e.token)
+				)
 					hit("answer:command_lifecycle:foreign-commandId");
 			}
 			if (e.tag === "Answer") {
-				const issue = real.issued.find(
-					(item) => real.fake.bound(item).token === e.token,
-				);
-				const address =
-					issue &&
-					splitLabel(real.fake.labelFor(real.fake.bound(issue))).runnerId;
+				// Read the fake's transmissions without binding: bound() would claim an unclaimed control (3.4).
+				const send = real.issued
+					.flatMap((item) =>
+						item.tag === "Tokened"
+							? [item]
+							: real.fake.bindingsFor(item).map(({ send }) => send),
+					)
+					.find(({ token }) => token === e.token);
+				const address = send && splitLabel(real.fake.labelFor(send)).runnerId;
 				if (address !== undefined && hosts.retired.has(address))
 					hit("answer:retired-address");
 			}
@@ -256,6 +266,49 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 				hit(
 					`unsolicited:${e.kind}:${e.label === real.fake.label ? "own" : "other"}`,
 				);
+			// D61: an answer's confirming interaction_resolved and a native command's receipts are
+			// unsolicited, before or after the control's outcome; on the control's token, adversarial.
+			const control =
+				e.tag === "Unsolicited" &&
+				(e.kind === "interaction_resolved" ||
+					e.kind === "command_lifecycle" ||
+					e.kind === "command_result")
+					? real.issued.find(
+							({ effect }) =>
+								(e.kind === "interaction_resolved" &&
+									effect.kind === "deliver_answer" &&
+									effect.interactionId === e.interactionId) ||
+								(e.kind !== "interaction_resolved" &&
+									effect.kind === "send_native_command" &&
+									effect.commandId === e.commandId),
+						)
+					: undefined;
+			if (control?.tag === "Main")
+				hit(
+					`unsolicited:${e.kind}:${control.effect.kind === "deliver_answer" ? "answer" : "native"}:${
+						real.packets.some(
+							(p) =>
+								p.verb === "observe" &&
+								p.observation.kind === "effect_outcome" &&
+								p.observation.transmission?.commandId === control.commandId,
+						)
+							? "after"
+							: "before"
+					}`,
+				);
+			if (
+				e.tag === "Answer" &&
+				e.kind !== "effect_outcome" &&
+				real.issued.some(
+					(item) =>
+						item.tag === "Main" &&
+						!real.fake.isHeld(item) &&
+						real.fake
+							.bindingsFor(item)
+							.some(({ send }) => send.token === e.token),
+				)
+			)
+				hit("answer:control:evidence");
 			if (e.tag === "Unsolicited" && e.kind === "result")
 				hit(`unsolicited:result:${e.outcome}`);
 			if (e.kind === "run_dispatched" && e.transmission > 1)
@@ -329,6 +382,32 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				commandId: "end-session",
 				effect: { kind: "end_session", runId: null, label: "host-0:1" },
 			},
+			// Every control type main issues, so outcome:control:* counts each (3.4).
+			{
+				tag: "Main",
+				commandId: "interrupt",
+				effect: { kind: "interrupt", runId: "R", runIds: ["R"] },
+			},
+			{
+				tag: "Main",
+				commandId: "answer",
+				effect: {
+					kind: "deliver_answer",
+					runId: "R",
+					label: "host-0:1",
+					interactionId: "question:0",
+					answer: "yes",
+				},
+			},
+			{
+				tag: "Main",
+				commandId: "native",
+				effect: {
+					kind: "send_native_command",
+					commandId: "native",
+					text: "/goal",
+				},
+			},
 		];
 		const seeds: unknown[] = [];
 		for (const seed of fixedSeeds) {
@@ -366,22 +445,33 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 								const key = command.observation.outcome.tag;
 								outcomes[key] = (outcomes[key] ?? 0) + 1;
 								const { token, transmission } = command.observation;
-								// 3.4: a control's claims are its transmissions; a hold or a Tokened send has one token.
+								// 3.4: a control's claims are its transmissions, n 0 names its row alone; a hold's are its
+								// run.dispatched. Read without binding, so nothing is claimed here.
 								const effect = real.issued.find((item) =>
-									item.tag === "Main" && !real.fake.isHeld(item)
-										? real.fake
+									item.tag === "Tokened"
+										? item.token === token
+										: real.fake
 												.bindingsFor(item)
-												.some(({ send }) => send.token === token)
-										: real.fake.bound(item).token === token,
+												.some(({ send }) => send.token === token) ||
+											(transmission?.transmission === 0 &&
+												transmission.commandId === item.commandId),
 								)?.effect.kind;
-								if (effect)
-									outcomes[`${effect}:${key}`] =
-										(outcomes[`${effect}:${key}`] ?? 0) + 1;
-								if (transmission !== undefined)
-									for (const name of transmission.transmission > 1
-										? [`control:${key}`, "control:transmission>1"]
-										: [`control:${key}`])
-										outcomes[name] = (outcomes[name] ?? 0) + 1;
+								const sweep = real.fake.sweeps.get(command);
+								for (const name of [
+									...(effect ? [`${effect}:${key}`] : []),
+									...(transmission === undefined
+										? []
+										: [
+												`control:${key}`,
+												...(transmission.transmission > 1
+													? ["control:transmission>1"]
+													: transmission.transmission === 0
+														? ["control:sweep_n0"]
+														: []),
+											]),
+									...(sweep ? [`sweep:${sweep.shape}`] : []),
+								])
+									outcomes[name] = (outcomes[name] ?? 0) + 1;
 							}
 						}
 					},
@@ -460,6 +550,19 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 			"control:stop_tasks",
 			"control:confirm_escalation",
 			"control:native_command",
+			// 3.4, 8.4 (round 2d): an end with a Run active commits each row as its own Control.
+			"control:end:after_stop",
+			"control:end:as_stop",
+			"control:end:retire",
+			// D61: an answer's confirmation and a native command's receipts, before and after its outcome.
+			...[
+				"interaction_resolved:answer",
+				"command_lifecycle:native",
+				"command_result:native",
+			].flatMap((kind) =>
+				["before", "after"].map((order) => `unsolicited:${kind}:${order}`),
+			),
+			"answer:control:evidence",
 			"settlement:alarm_fired",
 			"settlement:hold_exhausted",
 			"settlement:unheld_outcome",
@@ -482,6 +585,12 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				"delivery_unknown",
 				"not_sent",
 			].map((outcome) => `outcome:end_session:${outcome}`),
+			...["interrupt", "deliver_answer", "send_native_command"].flatMap(
+				(effect) =>
+					["succeeded", "permanent", "retryable"].map(
+						(outcome) => `outcome:${effect}:${outcome}`,
+					),
+			),
 			// 3.4: a control's effect_outcome per (commandId, n), n from 1.
 			...[
 				"succeeded",
@@ -491,11 +600,27 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				"transmission>1",
 				"sweep_n0",
 			].map((outcome) => `outcome:control:${outcome}`),
+			// 3.4, 3.12: a sweep's outcome names the row's latest claim, a row not running included, or n 0
+			// for a row no claim reached; the refusal sweep and drain write the same input. An executor's
+			// outcome after the sweep, on the same transmission, joins its chains.
+			...["project_inactive", "provider_process_gone"].flatMap((code) =>
+				["claimed", "n0"].map((shape) => `outcome:sweep:${code}:${shape}`),
+			),
+			"outcome:sweep:not_running",
+			"outcome:sweep:adversarial:succeeded",
+			"outcome:sweep:adversarial:retryable",
 			// 3.4, 3.8 GAP 5: OpenCode's turn.error writes main's terminal and query_ended together.
 			"main:opencode_pair:query_ended_first",
 			"main:opencode_pair:terminal_first",
 		];
 		const adversarial: Record<string, string> = {
+			// Round 2d: main's gate precedes its claim, so a control's not_sent names a transmission (3.4).
+			"outcome:control:not_sent":
+				"a control's not_sent naming its transmission (3.4, D48 amended, round 2d)",
+			"outcome:end_session:not_sent":
+				"a control's not_sent naming its transmission (3.4, D48 amended, round 2d)",
+			"answer:control:evidence":
+				"any but effect_outcome on a control main issues (3.4, D61)",
 			...(provider === "cursor" || provider === "opencode"
 				? {
 						"observe:tasks_snapshot":
@@ -509,20 +634,21 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				: {
 						"observe:command_lifecycle":
 							"command_lifecycle from any provider but Claude (3.4, D46)",
+						"unsolicited:command_lifecycle:native:before":
+							"command_lifecycle from any provider but Claude (3.4, D46)",
+						"unsolicited:command_lifecycle:native:after":
+							"command_lifecycle from any provider but Claude (3.4, D46)",
+						"observe:command_result":
+							"command_result from any provider but Claude (3.4, D46, round 2e)",
+						"unsolicited:command_result:native:before":
+							"command_result from any provider but Claude (3.4, D46, round 2e)",
+						"unsolicited:command_result:native:after":
+							"command_result from any provider but Claude (3.4, D46, round 2e)",
 						"observe:turn_ended":
 							"turn_ended from any provider but Claude (3.4, 2.1 row 215, 8.3)",
 					}),
 		};
-		const waiting: Record<string, string> = {
-			"outcome:control:sweep_n0":
-				"a sweep ending a control row never claimed (n 0, 3.4 line 465, build round 2c) is not generated yet",
-			...(provider === "opencode"
-				? {
-						"main:run_terminal:completed":
-							"the fake models no OpenCode native turn end (its result leaves the send open), so main's clean terminal has no native truth to follow",
-					}
-				: {}),
-		};
+		const waiting: Record<string, string> = {};
 		// D60: OpenCode's run_requested is its transmission; the others' is a held dispatch.
 		const notExpressible: Record<string, string> = {
 			"outcome:end_session:delivery_unknown":
@@ -1255,55 +1381,53 @@ describe("trace driver mechanics", () => {
 		).toThrow(/issued effects/);
 	});
 	// Default run claude-82103301 (phase 2): the gate is a host fact, not an input (H4, D48), so a
-	// differential trace's second host must answer from the same registry as the first.
-	it.skipIf(!oracleAvailable)(
-		"gives a differential trace's second host the first host's gate (H4)",
-		() => {
-			assert(referenceImplementation);
-			const d = new DifferentialTrace(
-				"claude",
-				referenceImplementation,
-				referenceImplementation,
-			);
+	// differential trace's second host must answer from the same registry as the first. Round 2d: a
+	// control never gets not_sent, so the gate's answer is the removed refusal naming main's claim (3.4).
+	it("gives a differential trace's second host the first host's gate (H4)", () => {
+		assert(referenceImplementation);
+		const d = new DifferentialTrace(
+			"claude",
+			referenceImplementation,
+			referenceImplementation,
+		);
+		d.step({
+			verb: "settle",
+			settlement: {
+				kind: "process_started",
+				label: d.expected.label,
+				reattached: false,
+			},
+		});
+		d.expected.host.setGate("removed");
+		d.step({
+			verb: "control",
+			control: {
+				kind: "native_command",
+				commandId: "command:0",
+				text: "/goal clear",
+			},
+		});
+		const issue = d.expected.issued.at(-1);
+		assert(issue?.tag === "Main");
+		// 3.4: main's claim of the native command is its transmission 1.
+		const claim = d.expected.host.bindingsFor(issue).at(-1);
+		assert(claim);
+		expect(() =>
 			d.step({
-				verb: "settle",
-				settlement: {
-					kind: "process_started",
-					label: d.expected.label,
-					reattached: false,
-				},
-			});
-			d.expected.host.setGate("not_served");
-			d.step({
-				verb: "control",
-				control: {
-					kind: "native_command",
-					commandId: "command:0",
-					text: "/goal clear",
-				},
-			});
-			const issue = d.expected.issued.at(-1);
-			assert(issue?.tag === "Main");
-			// 3.4: main's claim of the native command is its transmission 1.
-			const claim = d.expected.host.bindingsFor(issue).at(-1);
-			assert(claim);
-			expect(() =>
-				d.step({
-					verb: "observe",
-					observation: {
-						tag: "Answer",
-						token: claim.send.token,
-						kind: "effect_outcome",
-						outcome: { tag: "not_sent", retryAt: d.expected.now },
-						transmission: {
-							commandId: issue.commandId,
-							transmission: claim.transmission,
-						},
+				verb: "observe",
+				observation: {
+					tag: "Answer",
+					token: claim.send.token,
+					kind: "effect_outcome",
+					outcome: { tag: "permanent", code: "project_inactive" },
+					transmission: {
+						commandId: issue.commandId,
+						transmission: claim.transmission,
 					},
-				}),
-			).not.toThrow();
-		},
-	);
+				},
+			}),
+		).not.toThrow();
+	});
 	it("rejects an evidence kind that the send cannot produce at the test intake boundary", () => {
 		expect(() =>
 			answer(
@@ -1871,7 +1995,6 @@ describe("trace coverage gate", () => {
 			runs,
 			maxCommands,
 			size: "max",
-			oracleAvailable,
 		};
 		const path = writeTraceArtifact("manifest", artifact);
 		expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(artifact);
@@ -1925,9 +2048,7 @@ describe("trace coverage gate", () => {
 
 describe.each(providers)("%s model-based public traces", (provider) => {
 	for (const seed of fixedSeeds) {
-		(oracleAvailable
-			? pendingSuite(`[convergence] ${provider} oracle traces, seed ${seed}`)
-			: it.skip)(
+		pendingSuite(`[convergence] ${provider} oracle traces, seed ${seed}`)(
 			`oracle LI1-LI10 and full coverage, seed ${seed}`,
 			({ task }) => {
 				const coverage = new Coverage();
@@ -1998,169 +2119,165 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				assert.equal(result.failed, false, String(result.errorInstance));
 			},
 		);
-		if (oracleAvailable)
-			pendingSuite("[checkpoint] run-ledger-differential")(
-				`real decider agrees at every step, seed ${seed}`,
-				({ task }) => {
-					const coverage = new Coverage();
-					let lastTrace: TraceDriver | undefined;
-					const result = fc.check(
-						fc.property(
-							fc.commands([traceAction.map((a) => new ProviderCommand(a))], {
-								maxCommands,
-								size: "max",
-							}),
-							(commands) => {
-								const real = new DifferentialTrace(provider);
-								try {
-									real.step({
-										verb: "settle",
-										settlement: {
-											kind: "process_started",
-											label: real.expected.label,
-											reattached: false,
-										},
-									});
-									fc.modelRun(
-										() => ({
-											model: {
-												scheduler: real.expected.host,
-												executedCommands: 0,
-											},
-											real,
-										}),
-										commands,
-									);
-								} catch (error) {
-									lastTrace = real.expected;
-									throw error;
-								} finally {
-									coverage.merge(real.coverage);
-								}
-							},
-						),
-						{ seed, numRuns: runs },
-					);
-					writeTraceArtifact(
-						`differential-${provider}-${seed}`,
-						{
-							test: { id: task.id, name: task.name, file: task.file.filepath },
-							seed,
-							runs,
+		pendingSuite("[checkpoint] run-ledger-differential")(
+			`real decider agrees at every step, seed ${seed}`,
+			({ task }) => {
+				const coverage = new Coverage();
+				let lastTrace: TraceDriver | undefined;
+				const result = fc.check(
+					fc.property(
+						fc.commands([traceAction.map((a) => new ProviderCommand(a))], {
 							maxCommands,
 							size: "max",
-							evidence: coverage.kinds,
-							races: coverage.races,
-							shrunkFailures: result.failed
-								? [
-										{
-											seed: result.seed,
-											path: result.counterexamplePath,
-											commands: result.counterexample?.map(String),
-											publicCommands: lastTrace?.commands,
-											firstDivergence: lastTrace?.commands.at(-1),
-											error: String(result.errorInstance),
+						}),
+						(commands) => {
+							const real = new DifferentialTrace(provider);
+							try {
+								real.step({
+									verb: "settle",
+									settlement: {
+										kind: "process_started",
+										label: real.expected.label,
+										reattached: false,
+									},
+								});
+								fc.modelRun(
+									() => ({
+										model: {
+											scheduler: real.expected.host,
+											executedCommands: 0,
 										},
-									]
-								: [],
+										real,
+									}),
+									commands,
+								);
+							} catch (error) {
+								lastTrace = real.expected;
+								throw error;
+							} finally {
+								coverage.merge(real.coverage);
+							}
 						},
-						task.id,
-					);
-					assert.equal(result.failed, false, String(result.errorInstance));
-				},
-			);
+					),
+					{ seed, numRuns: runs },
+				);
+				writeTraceArtifact(
+					`differential-${provider}-${seed}`,
+					{
+						test: { id: task.id, name: task.name, file: task.file.filepath },
+						seed,
+						runs,
+						maxCommands,
+						size: "max",
+						evidence: coverage.kinds,
+						races: coverage.races,
+						shrunkFailures: result.failed
+							? [
+									{
+										seed: result.seed,
+										path: result.counterexamplePath,
+										commands: result.counterexample?.map(String),
+										publicCommands: lastTrace?.commands,
+										firstDivergence: lastTrace?.commands.at(-1),
+										error: String(result.errorInstance),
+									},
+								]
+							: [],
+					},
+					task.id,
+				);
+				assert.equal(result.failed, false, String(result.errorInstance));
+			},
+		);
 	}
-	it.skipIf(!oracleAvailable)(
-		"LI2 joins commute across send outcomes and receipt orders",
-		({ task }) => {
-			const comparisons: unknown[] = [];
-			for (const outcome of [
-				{ tag: "succeeded" },
-				{ tag: "delivery_unknown" },
-				{ tag: "retryable", retryAt: 500 },
-				{ tag: "permanent", code: "Refused" },
-			] as const) {
-				const drivers = [new TraceDriver(provider), new TraceDriver(provider)];
-				const tombstonedBetween: string[][] = [[], []];
-				for (const [index, d] of drivers.entries()) {
-					d.step(
-						{
-							verb: "settle",
-							settlement: {
-								kind: "process_started",
-								label: d.label,
-								reattached: false,
-							},
+	it("LI2 joins commute across send outcomes and receipt orders", ({
+		task,
+	}) => {
+		const comparisons: unknown[] = [];
+		for (const outcome of [
+			{ tag: "succeeded" },
+			{ tag: "delivery_unknown" },
+			{ tag: "retryable", retryAt: 500 },
+			{ tag: "permanent", code: "Refused" },
+		] as const) {
+			const drivers = [new TraceDriver(provider), new TraceDriver(provider)];
+			const tombstonedBetween: string[][] = [[], []];
+			for (const [index, d] of drivers.entries()) {
+				d.step(
+					{
+						verb: "settle",
+						settlement: {
+							kind: "process_started",
+							label: d.label,
+							reattached: false,
 						},
-						100,
-					);
-					d.step({
-						verb: "admit",
-						inputId: "A",
-						delivery: "queue",
-						request: { text: "A" },
-					});
-					// D60: main, not decide, starts the Run; the start reaches the log through `live`.
-					main(d, 0);
-					const send = d.latest("start");
-					const evidence: Evidence[] = [
-						{ kind: "input_accepted", nativeMessageId: "native-A" },
-						{ kind: "effect_outcome", outcome },
-					];
-					for (const [factIndex, e] of (index === 0
-						? evidence
-						: evidence.reverse()
-					).entries()) {
-						const decision = d.observe(send, e, 100);
-						if (factIndex === 0)
-							tombstonedBetween[index] = decision.ended.map(
-								({ runId }) => runId,
-							);
-					}
-					d.observe(send, { kind: "accounting" }, 100);
-					d.observe(send, { kind: "accounting" }, 100);
-					expect(
-						d.lastEventCount,
-						"11.2: duplicate accounting receipt produces no events",
-					).toBe(0);
+					},
+					100,
+				);
+				d.step({
+					verb: "admit",
+					inputId: "A",
+					delivery: "queue",
+					request: { text: "A" },
+				});
+				// D60: main, not decide, starts the Run; the start reaches the log through `live`.
+				main(d, 0);
+				const send = d.latest("start");
+				const evidence: Evidence[] = [
+					{ kind: "input_accepted", nativeMessageId: "native-A" },
+					{ kind: "effect_outcome", outcome },
+				];
+				for (const [factIndex, e] of (index === 0
+					? evidence
+					: evidence.reverse()
+				).entries()) {
+					const decision = d.observe(send, e, 100);
+					if (factIndex === 0)
+						tombstonedBetween[index] = decision.ended.map(({ runId }) => runId);
 				}
-				const views = drivers.map((d) => {
-					const n = new PublicNames();
-					n.register(d);
-					const view = d.view();
-					return { view, n };
-				});
-				const [leftEnded, rightEnded] = tombstonedBetween;
-				assert(leftEnded && rightEnded);
-				const asymmetric = new Set([
-					...leftEnded.filter((runId) => !rightEnded.includes(runId)),
-					...rightEnded.filter((runId) => !leftEnded.includes(runId)),
-				]);
-				const normalized = views.map(({ view, n }) => {
-					// D14 permits only this Run's absence from active. LedgerView has
-					// no outcome fields; every other field is compared exactly.
-					if (view.active && asymmetric.has(view.active.runId)) {
-						const { active: _active, ...rest } = view;
-						return n.normalize(rest);
-					}
-					return n.normalize(view);
-				});
-				comparisons.push({
-					outcome,
-					tombstonedBetween,
-					views: views.map(({ view }) => view),
-					normalized,
-				});
-				writeTraceArtifact(`li2-${provider}`, { comparisons }, task.id);
-				expect(normalized[0]).toEqual(normalized[1]);
+				d.observe(send, { kind: "accounting" }, 100);
+				d.observe(send, { kind: "accounting" }, 100);
+				expect(
+					d.lastEventCount,
+					"11.2: duplicate accounting receipt produces no events",
+				).toBe(0);
 			}
-		},
-	);
+			const views = drivers.map((d) => {
+				const n = new PublicNames();
+				n.register(d);
+				const view = d.view();
+				return { view, n };
+			});
+			const [leftEnded, rightEnded] = tombstonedBetween;
+			assert(leftEnded && rightEnded);
+			const asymmetric = new Set([
+				...leftEnded.filter((runId) => !rightEnded.includes(runId)),
+				...rightEnded.filter((runId) => !leftEnded.includes(runId)),
+			]);
+			const normalized = views.map(({ view, n }) => {
+				// D14 permits only this Run's absence from active. LedgerView has
+				// no outcome fields; every other field is compared exactly.
+				if (view.active && asymmetric.has(view.active.runId)) {
+					const { active: _active, ...rest } = view;
+					return n.normalize(rest);
+				}
+				return n.normalize(view);
+			});
+			comparisons.push({
+				outcome,
+				tombstonedBetween,
+				views: views.map(({ view }) => view),
+				normalized,
+			});
+			writeTraceArtifact(`li2-${provider}`, { comparisons }, task.id);
+			expect(normalized[0]).toEqual(normalized[1]);
+		}
+	});
 });
 
 describe.each(providers)("%s long public traces", (provider) => {
 	for (const lane of ["oracle", "differential"] as const)
-		it.runIf(oracleAvailable && process.env["RUN_LEDGER_LONG_PROOF"] === "1")(
+		it.runIf(process.env["RUN_LEDGER_LONG_PROOF"] === "1")(
 			`${lane} executes every requested independent run with exact command lengths`,
 			({ task }) => {
 				const seed = fixedSeeds[0];
@@ -2313,22 +2430,21 @@ describe.each(providers)("%s long public traces", (provider) => {
 
 describe("generated D34 coverage", () => {
 	// The property generator, not only the D34 scenario, must reach a refused native command (8.5, D34).
-	it.skipIf(!oracleAvailable)(
-		"generated traces refuse a native command at delivery",
-		() => {
-			assert(
-				oracleCoverage.races["a native command refused at delivery"] > 0,
-				"D34: no generated trace refused a native command",
-			);
-		},
-	);
+	it("generated traces refuse a native command at delivery", () => {
+		assert(
+			oracleCoverage.races["a native command refused at delivery"] > 0,
+			"D34: no generated trace refused a native command",
+		);
+	});
 	// Round 9 phase 2: the generator, not a scenario, reaches each shape (input-kinds.md).
 	for (const shape of [
 		"D43 gated Run ended, gate dropped", // D43, 5.1, 8.4
 		"process_lost while gated", // 8.4 release by retirement, REDESIGN r2-1
 		"older wake label Run-end evidence", // 8.3: clears that execution only
-		"native-token command_lifecycle", // 8.5, D21
-		"native-token command_result", // 8.5, D21
+		// D61: an Unsolicited receipt by its native command's key counts, as main's control row is answered
+		// only by its effect_outcome (3.4).
+		"native-token command_lifecycle", // 8.5, D21, D61
+		"native-token command_result", // 8.5, D21, D61
 		"native_resume_rejected", // 3.4, 3.7
 		"probe input_present without id", // 3.5
 		"query replacement", // 6.1, L1, D44
@@ -2338,11 +2454,11 @@ describe("generated D34 coverage", () => {
 		// Round 13: every gate answer variant (H4, 4.4, D48) and the 3.6 unlaunch transition.
 		"not_sent Held start", // H4, 4.4 gate before holdRun
 		"not_sent Held steer", // H4, 4.4
-		"not_sent no-hold start", // H4, 3.7
-		"not_sent no-hold steer", // H4, 3.7
 		"not_sent probe", // H4, 3.5, 4.8
-		"not_sent interrupt", // H4, 4.8
-		"not_sent native command", // 4.4, 8.5
+		// Round 2d: a row main's executor runs, a direct start's, a steer's or a control's, gets no
+		// not_sent (3.4 465-471), and the native clock no longer pauses for one (8.5), so "not_sent
+		// no-hold start", "not_sent no-hold steer", "not_sent interrupt", "not_sent native command" and
+		// "native clock paused at not_sent" name no accepted input.
 		"not_sent other send", // H4
 		"removed Held start", // H4 removed, 4.4 Send Settlement
 		// "removed Held steer" is counted, not barred here: the default run (100 x 80) reaches it 0 times,
@@ -2386,52 +2502,54 @@ describe("generated D34 coverage", () => {
 		"Q28 adoption with not_received", // Q28, 7.2
 		"Q28 journal settle", // Q28, 7.3
 		"Q28 removed with a surviving runner", // 4.4, Q28
-		"native clock paused at not_sent", // 8.5 D48 amended
-		"native clock resumed at re-issue", // 8.5 D48 amended
+		// Round 2d: the native clock no longer pauses at not_sent, so neither its pause nor its resume at
+		// re-issue is a shape (8.5).
 	] as const)
-		(oracleAvailable
-			? pendingSuite(`[convergence] generated traces reach ${shape}`)
-			: it.skip)(`generated traces reach ${shape}`, () => {
-			expect(oracleCoverage.shapes[shape], shape).toBeGreaterThan(0);
-		});
+		pendingSuite(`[convergence] generated traces reach ${shape}`)(
+			`generated traces reach ${shape}`,
+			() => {
+				expect(oracleCoverage.shapes[shape], shape).toBeGreaterThan(0);
+			},
+		);
 	// 8.3 (oracle round 8 clarifications): older wake execution labels never end the Run.
-	it.skipIf(!oracleAvailable)(
-		"generated older wake label Run-end evidence never ends the Run",
-		() => {
-			expect(oracleCoverage.shapes["older wake label Run end"]).toBe(0);
-		},
-	);
+	it("generated older wake label Run-end evidence never ends the Run", () => {
+		expect(oracleCoverage.shapes["older wake label Run end"]).toBe(0);
+	});
 });
 
 describe("fixed catalogue coverage", () => {
-	(oracleAvailable
-		? pendingSuite("[convergence] fixed catalogue race gate")
-		: it.skip)("executes every fixed trace and gates actual race hits", () => {
-		const coverage = new Coverage();
-		coverage.merge(oracleCoverage);
-		// Scenarios drive the public ledger without the fake, so the race gate reads generated
-		// coverage; scenarios.test.ts reports each scenario's divergence.
-		const failed: string[] = [];
-		for (const scenario of scenarios) {
-			try {
-				scenario.run(new Driver(scenario.provider));
-			} catch {
-				failed.push(scenario.id);
+	pendingSuite("[convergence] fixed catalogue race gate")(
+		"executes every fixed trace and gates actual race hits",
+		() => {
+			const coverage = new Coverage();
+			coverage.merge(oracleCoverage);
+			// The race gate reads generated coverage and each scenario Driver's races; scenarios.test.ts
+			// reports each scenario's divergence.
+			const failed: string[] = [];
+			for (const scenario of scenarios) {
+				const d = new Driver(scenario.provider);
+				try {
+					scenario.run(d);
+				} catch {
+					failed.push(scenario.id);
+				} finally {
+					coverage.merge(d.coverage);
+				}
 			}
-		}
-		writeTraceArtifact("fixed-coverage", {
-			seeds: fixedSeeds,
-			evidence: coverage.kinds,
-			races: coverage.races,
-			generatedShapes: oracleCoverage.shapes,
-			failedScenarios: failed,
-			shrunkFailures: [],
-		});
-		coverage.assertComplete();
-		assert.deepEqual(
-			failed,
-			[],
-			"fixed scenarios that fail against the oracle",
-		);
-	});
+			writeTraceArtifact("fixed-coverage", {
+				seeds: fixedSeeds,
+				evidence: coverage.kinds,
+				races: coverage.races,
+				generatedShapes: oracleCoverage.shapes,
+				failedScenarios: failed,
+				shrunkFailures: [],
+			});
+			coverage.assertComplete();
+			assert.deepEqual(
+				failed,
+				[],
+				"fixed scenarios that fail against the oracle",
+			);
+		},
+	);
 });

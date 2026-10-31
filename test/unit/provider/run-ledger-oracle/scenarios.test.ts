@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { TraceDriver } from "./harness.js";
+import { pendingSuite } from "./pending.js";
 import type { Mutation } from "./reference.js";
+import { reviewTraces } from "./review-traces.js";
 import { Driver, scenarios, sourceOnlyCases } from "./scenarios.js";
 
 /** Scenarios a later lane builds: each must fail with that lane's typed not-yet-built rejection. */
@@ -28,6 +31,12 @@ const notBuilt: ReadonlyMap<string, string> = new Map([
 	["L6-1", "32.2.11"],
 	["L6-2", "32.2.11"],
 	["L6-3", "32.2.11"],
+	["PL-1", "32.2.7"],
+	["PL-2", "32.2.11"],
+	["PL-4", "32.2.6"],
+	["PL-6", "32.2.11"],
+	["R3", "32.2.8"],
+	["R5", "32.2.6"],
 ]);
 
 describe("[step1] Run Ledger catalogue scenarios", () => {
@@ -49,6 +58,15 @@ describe("[step1] Run Ledger catalogue scenarios", () => {
 	for (const scenario of sourceOnlyCases) {
 		it.todo(`${scenario.title} (${scenario.id}). ${scenario.reason}`);
 	}
+});
+
+// Review traces run on the fake's TraceDriver, so every step also meets the fake's ground truth.
+describe("Run Ledger review traces", () => {
+	for (const trace of reviewTraces)
+		pendingSuite(`[convergence] review trace ${trace.id}`)(
+			`${trace.title} (${trace.id})`,
+			() => trace.run(new TraceDriver(trace.provider)),
+		);
 });
 
 describe("[step1] reference mutation sensitivity", () => {

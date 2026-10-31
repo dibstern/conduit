@@ -985,7 +985,7 @@ describe("fake provider round 3 contract decisions", () => {
 	it.each([
 		"answer",
 		"native",
-	] as const)("settles every transmission of a resolved interaction through %s evidence (D12)", (source) => {
+	] as const)("settles every transmission of a resolved interaction through %s evidence (D12, D61)", (source) => {
 		const fake = new FakeProvider("claude");
 		started(fake);
 		const [start, first, retry, other] = fake.issued([
@@ -1005,10 +1005,23 @@ describe("fake provider round 3 contract decisions", () => {
 			),
 		]);
 		assert(start && first && retry && other);
-		answer(fake, source === "answer" ? retry : start, {
-			kind: "interaction_resolved",
-			interactionId: "Q",
-		});
+		// D61: an answer's confirmation is unsolicited, by its interaction; a native one may answer a start.
+		if (source === "answer")
+			fake.observe(
+				{
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: fake.label,
+						eventId: "confirm",
+						kind: "interaction_resolved",
+						interactionId: "Q",
+					},
+				},
+				emptyView(),
+			);
+		else
+			answer(fake, start, { kind: "interaction_resolved", interactionId: "Q" });
 		expect(fake.groundTruth().unfinished).toEqual([start.token, other.token]);
 	});
 
@@ -1138,7 +1151,8 @@ describe("fake provider round 3 contract decisions", () => {
 describe("fake provider round 4 contract", () => {
 	it.each([
 		["claude", "running", true],
-		["claude", "result", true],
+		// D25 amended: a Claude wake leaves the fence at a result naming no send's input uuid (8.3).
+		["claude", "result", false],
 		["claude", "result-then-query-end", false],
 		["claude", "session-end", false],
 		["claude", "coverage", false],
@@ -2351,11 +2365,9 @@ describe("fake provider round 12: executions per (Run, label), as the oracle (D4
 		"claude",
 		"codex",
 		"cursor",
-	] as const)("a %s query_ended without a result leaves the joined execution live until its result (endExecution)", (provider) => {
+	] as const)("a %s query_ended without a result ends the joined execution (8.3, D25 amended)", (provider) => {
 		const fake = declinedUnderJoinedTurn(provider);
 		background(fake, { kind: "query_ended" });
-		expect(fake.groundTruth().runningTurn).toBe(true);
-		background(fake, { kind: "result", outcome: "completed" });
 		expect(fake.groundTruth().runningTurn).toBe(false);
 	});
 
@@ -2584,11 +2596,6 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 
 	it.each([
 		["not_served", "Queued", undefined],
-		[
-			"not_served",
-			"Sent",
-			/LI6: a native command whose latest try got not_sent is not Queued/,
-		],
 		["removed", "Failed", undefined],
 		[
 			"removed",
@@ -2630,7 +2637,8 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 	it.each([
 		["not_served", true],
 		["removed", true],
-		["not_served", false],
+		// Round 2d drops the not_sent Queued check, so the uncovered control is a removed refusal (D34).
+		["removed", false],
 	] as const)("keeps a gated native command %s covered by process_lost before its answer: lost=%s (3.4, 8.5, LI6)", (gate, lost) => {
 		const fake = new FakeProvider("claude");
 		started(fake);
@@ -2664,13 +2672,14 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 	// process that starts next (4.4, 6.1); that runner's process_lost covers it, so a late answer changes
 	// nothing (3.4, 8.5).
 	it.each([
-		true,
-		false,
-	])("keeps a gated native command addressed to the next process covered by its loss: lost=%s (3.4, 8.5, LI6)", (wasLost) => {
+		["not_served", true],
+		// Round 2d drops the not_sent Queued check, so the uncovered control is a removed refusal (D34).
+		["removed", false],
+	] as const)("keeps a gated native command %s addressed to the next process covered by its loss: lost=%s (3.4, 8.5, LI6)", (gate, wasLost) => {
 		const fake = new FakeProvider("opencode");
 		started(fake, "opencode:a1:0");
 		lost(fake, "opencode:a1");
-		fake.setGate("not_served");
+		fake.setGate(gate);
 		fake.issued([nativeCommand]);
 		reattached(fake, "opencode:b2:0");
 		if (wasLost) lost(fake, "opencode:b2");

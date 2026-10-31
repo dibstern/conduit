@@ -89,9 +89,10 @@ export type Unsolicited = Extract<
 			| "task_event"
 			| "turn_started"
 			| "turn_ended"
+			/** command_*: a native command's, by commandId (D61). */
 			| "command_lifecycle"
 			| "command_result"
-			/** Its label's (3.10); resolved: natively. */
+			/** Its label's (3.10); resolved: natively or confirming an answer, never an Answer (D61). */
 			| "interaction_requested"
 			| "interaction_resolved"
 			| "activity"
@@ -137,7 +138,10 @@ export type Evidence =
 				  }
 				/** Includes "native_resume_rejected". */
 				| { readonly tag: "permanent"; readonly code: string }
-				/** The host never called the provider (H4); 3.7 spaces the re-send. */
+				/**
+				 * Host never called the provider (H4): an effect decide issues only, never with a
+				 * transmission, as main's gate precedes its claim (3.4); retryAt is the outcome time.
+				 */
 				| { readonly tag: "not_sent"; readonly retryAt: number }
 				| { readonly tag: "delivery_unknown" };
 	  }
@@ -147,9 +151,7 @@ export type Evidence =
 				| { readonly tag: "input_present"; readonly nativeMessageId?: string }
 				| { readonly tag: "input_absent" }
 				| { readonly tag: "native_idle" }
-				| { readonly tag: "native_busy" }
-				| { readonly tag: "answer_consumed" }
-				| { readonly tag: "answer_pending" };
+				| { readonly tag: "native_busy" };
 	  }
 	// background work (section 8)
 	| {

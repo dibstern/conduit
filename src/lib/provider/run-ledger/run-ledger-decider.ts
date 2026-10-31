@@ -34,8 +34,9 @@ type Value = "never" | "possibly" | "reached";
 interface Tx {
 	readonly token?: SendToken | undefined;
 	readonly seq: number;
-	readonly label: Label | null;
-	readonly runnerId: string | null;
+	/** Its send's address, or the runner its run.dispatched names; null while pending (L2). */
+	label: Label | null;
+	runnerId: string | null;
 	transport: Transport;
 	consumption: Consumption;
 	/** A runner-held try that ended before any hold (3.4): never handed over. */
@@ -70,7 +71,11 @@ interface Send {
 	readonly runId: string;
 	/** Its execution (3.3). */
 	readonly exec: number;
-	readonly label: Label | null;
+	/** L2 case 3: the current process at issue, null while pending, then resolved once. */
+	runnerId: string | null;
+	label: Label | null;
+	/** L2, 3.6: a send of an execution an unlaunch dropped resolves no further. */
+	dropped: boolean;
 	readonly txs: Tx[];
 }
 
@@ -449,7 +454,7 @@ function transmit(
 	book: Book,
 	send: Send,
 	token: SendToken | undefined,
-	runnerId: string | null = book.current,
+	runnerId: string | null = send.runnerId,
 	label: Label | null = send.label,
 ): Tx {
 	const tx: Tx = {
@@ -467,6 +472,11 @@ function transmit(
 		accounted: false,
 	};
 	send.txs.push(tx);
+	// L1 item 1, L2: a transmission to a retired address is covered at once.
+	if (runnerId !== null && book.runners.get(runnerId)?.retired) {
+		seal(tx);
+		tx.ended ??= "process_lost";
+	}
 	if (token !== undefined)
 		book.tokens.set(token, {
 			send: book.sends.indexOf(send),
@@ -492,7 +502,9 @@ function issue(book: Book, run: Run, inputId: string, held: boolean): Send {
 		held,
 		runId: run.runId,
 		exec: run.exec.n,
+		runnerId: book.current,
 		label: currentLabel(book),
+		dropped: false,
 		txs: [],
 	};
 	book.sends.push(send);
@@ -729,7 +741,11 @@ const evidenceTable: EvidenceTable = {
 		class: "outcome",
 		produces: (send) => !send.held,
 		merge: (book, _fact, { send, tx }, evidence) =>
-			effectOutcome(book, send, tx, evidence.outcome),
+			// 3.4 (CONTRACT.md 465-471, D48): not_sent is only a probe's, stop_task's or
+			// cancel_request's, never a start's.
+			evidence.outcome.tag === "not_sent"
+				? rejected("start cannot produce not_sent evidence (3.4)")
+				: effectOutcome(book, send, tx, evidence.outcome),
 	},
 	runner_reply: {
 		class: "hold",
@@ -866,6 +882,16 @@ function dispatched(
 		.filter((tx) => !tx.unheld).length;
 	if (evidence.transmission !== holds + 1)
 		return rejected("run.dispatched transmission out of order (4.3)");
+	// L2: a pending held send resolves at its own run_dispatched to the runner it names.
+	if (send.runnerId === null) {
+		send.runnerId = evidence.runnerId;
+		send.label = runner?.latest ?? null;
+		for (const tx of send.txs)
+			if (tx.runnerId === null) {
+				tx.runnerId = evidence.runnerId;
+				tx.label = send.label;
+			}
+	}
 	transmit(book, send, token, evidence.runnerId, runner?.latest ?? send.label);
 	return changed;
 }
@@ -1027,6 +1053,21 @@ function settle(
 			// oracle and leaves that retirement to the host's process_lost (H1, 6.9).
 			book.runners.set(runnerId, { latest: settlement.label, retired: false });
 			book.current = runnerId;
+			// L2: a pending send resolves, once, to the next process_started's runner; a
+			// run_dispatched naming a runner not yet started fixes its label here.
+			for (const send of book.sends)
+				if (
+					(send.runnerId === null && !send.dropped) ||
+					(send.runnerId === runnerId && send.label === null)
+				) {
+					for (const tx of send.txs)
+						if (tx.runnerId === send.runnerId && tx.label === null) {
+							tx.runnerId = runnerId;
+							tx.label = settlement.label;
+						}
+					send.runnerId = runnerId;
+					send.label = settlement.label;
+				}
 			return changed;
 		}
 		case "process_lost": {
@@ -1037,22 +1078,20 @@ function settle(
 			const runner = book.runners.get(settlement.runnerId);
 			if (runner !== undefined) runner.retired = true;
 			if (book.current === settlement.runnerId) book.current = null;
-			const onRunner = (label: Label | null) =>
-				label !== null && splitLabel(label).runnerId === settlement.runnerId;
-			const covers = (tx: Tx) =>
-				tx.runnerId === settlement.runnerId ||
-				(tx.runnerId === null && onRunner(tx.label));
-			// L1 item 1: coverage ends the runner's work and seals its transmissions.
+			const addressed = (send: Send, tx: Tx) =>
+				send.runnerId === settlement.runnerId ||
+				tx.runnerId === settlement.runnerId;
+			// L1 item 1: retiring covers every send addressed to it and seals its transmissions.
 			for (const send of book.sends) {
 				for (const tx of send.txs)
-					if (covers(tx)) {
+					if (addressed(send, tx)) {
 						seal(tx);
 						tx.ended ??= "process_lost";
 					}
 				if (
 					send.held &&
 					send.txs.length === 0 &&
-					onRunner(send.label) &&
+					send.runnerId === settlement.runnerId &&
 					findRun(book, send.runId)?.phase !== "Ended"
 				)
 					// 3.6: retirement before any hold of its start leaves it never handed over.
@@ -1066,9 +1105,7 @@ function settle(
 					run.phase !== "Ended" &&
 					run.exec.evidence &&
 					runSends(book, run).some((send) =>
-						send.txs.some(
-							(tx) => tx.runnerId === settlement.runnerId || onRunner(tx.label),
-						),
+						send.txs.some((tx) => addressed(send, tx)),
 					)
 				)
 					run.exec.endedBy ??= "process_lost";
@@ -1119,6 +1156,7 @@ function apply(book: Book, entry: Entry): Outcome {
 			// 3.6 D50: back to Queued; the execution's sends are dropped and resolve no further (L2).
 			const txs = runSends(book, run).flatMap((send) => send.txs);
 			for (const tx of txs) tx.ended ??= "dropped";
+			for (const send of runSends(book, run)) send.dropped = true;
 			run.retryAt = txs.at(-1)?.retryAt;
 			run.phase = "Queued";
 			if (txs.some((tx) => tx.resumeRejected)) book.freshSince = book.seq;
