@@ -8,11 +8,16 @@ import {
 	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
+	clearInstanceState,
+	instanceState,
+} from "../../../src/lib/frontend/stores/instance.svelte.js";
+import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { applySessionChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
@@ -66,10 +71,41 @@ describe("RewindBanner", () => {
 
 	afterEach(() => {
 		cleanup();
+		clearInstanceState();
 		clearMessages();
 		openSessionForSetup(null);
 		uiState.rewindActive = false;
 		uiState.rewindSelectedUuid = null;
+	});
+
+	it("says files are not restored for an OpenCode session", () => {
+		instanceState.instances = [
+			{
+				id: "opencode",
+				name: "OpenCode",
+				driver: "opencode",
+				status: "healthy",
+				port: 0,
+				managed: false,
+				restartCount: 0,
+				createdAt: 0,
+			},
+		];
+		applySessionChange({
+			_tag: "snapshot",
+			sequence: 1,
+			rows: [
+				{
+					id: "session-1",
+					title: "Rewind",
+					projectSlug: "project-a",
+					accountId: "opencode",
+					status: "idle",
+				},
+			],
+		});
+		const { getByText } = render(RewindBanner);
+		expect(getByText("Files are not restored.")).toBeTruthy();
 	});
 
 	it("explains permanent removal and the undo deadline for an event-seeded rewind target", () => {

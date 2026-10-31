@@ -48,10 +48,12 @@ function makeStubClient(overrides?: Record<string, unknown>): OpenCodeAPI {
 		session: {
 			get: vi.fn(async () => ({ permission: [] })),
 			messages: vi.fn(async () => []),
+			deleteMessage: vi.fn(async () => {}),
 			statuses: vi.fn(async () => ({})),
 			update: vi.fn(async () => {}),
 			prompt: vi.fn(async () => {}),
 			abort: vi.fn(async () => {}),
+			summarize: vi.fn(async () => {}),
 			...(overrides?.["session"] as Record<string, unknown>),
 		},
 	} as unknown as OpenCodeAPI;
@@ -199,6 +201,187 @@ describe("OpenCodeProviderInstance.sendTurn()", () => {
 		instance = new OpenCodeProviderInstance({
 			clientForSession: () => Effect.succeed(client),
 		});
+	});
+
+	it.each([
+		{ resumeSessionAt: null, ids: ["cut", "tail"], deleted: ["tail", "cut"] },
+		{ resumeSessionAt: "kept", ids: ["kept", "tail"], deleted: ["tail"] },
+	])("truncates with anchor $resumeSessionAt and confirms an already missing cut", async ({
+		resumeSessionAt,
+		ids,
+		deleted,
+	}) => {
+		vi.mocked(client.session.messages).mockResolvedValue(
+			ids.map((id, index) => ({
+				id,
+				sessionID: "s1",
+				role: "user",
+				time: { created: index },
+			})),
+		);
+		const sink = makeStubEventSink();
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({
+					rewind: { resumeSessionAt, targetMessageId: "cut" },
+					eventSink: sink,
+				}),
+			),
+		);
+		expect(
+			vi.mocked(client.session.deleteMessage).mock.calls.map(([, id]) => id),
+		).toEqual(deleted);
+		expect(sink.pushedEvents).toContainEqual(
+			expect.objectContaining({
+				type: "message.removed",
+				data: { messageId: "cut" },
+			}),
+		);
+		expect(client.session.prompt).toHaveBeenCalledOnce();
+	});
+
+	it("skips replayed truncation when this input already exists natively even without the anchor", async () => {
+		vi.mocked(client.session.messages).mockResolvedValue([
+			{
+				id: "msg_conduit_t1",
+				sessionID: "s1",
+				role: "user",
+				time: { created: 3 },
+			},
+		]);
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({
+					rewind: { resumeSessionAt: "missing", targetMessageId: "cut" },
+				}),
+			),
+		);
+		expect(client.session.messages).toHaveBeenCalledOnce();
+		expect(client.session.deleteMessage).not.toHaveBeenCalled();
+		expect(client.session.prompt).toHaveBeenCalledOnce();
+	});
+
+	it("recalls an abort between native deletes before the cut or prompt", async () => {
+		const controller = new AbortController();
+		vi.mocked(client.session.messages).mockResolvedValue(
+			["kept", "cut", "tail"].map((id, index) => ({
+				id,
+				sessionID: "s1",
+				role: "user",
+				time: { created: index },
+			})),
+		);
+		vi.mocked(client.session.deleteMessage).mockImplementation(async () =>
+			controller.abort(),
+		);
+		const sink = makeStubEventSink();
+		const result = await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({
+					abortSignal: controller.signal,
+					rewind: { resumeSessionAt: "kept", targetMessageId: "cut" },
+					eventSink: sink,
+				}),
+			),
+		);
+		expect(result.status).toBe("cancelled");
+		expect(client.session.deleteMessage).toHaveBeenCalledExactlyOnceWith(
+			"s1",
+			"tail",
+		);
+		expect(client.session.prompt).not.toHaveBeenCalled();
+		expect(sink.pushedEvents).not.toContainEqual(
+			expect.objectContaining({ type: "message.removed" }),
+		);
+	});
+
+	it("returns a typed send failure for an absent native anchor before prompting", async () => {
+		const result = await Effect.runPromise(
+			instance
+				.sendTurnEffect(
+					makeSendTurnInput({
+						rewind: { resumeSessionAt: "missing", targetMessageId: "cut" },
+					}),
+				)
+				.pipe(Effect.result),
+		);
+		expectDeliveryFailure(result, expect.stringContaining("anchor missing"));
+		expect(client.session.prompt).not.toHaveBeenCalled();
+	});
+
+	it("truncates before submitting an OpenCode slash command", async () => {
+		vi.mocked(client.app.commands).mockResolvedValue([
+			{ name: "init", source: "command" },
+		]);
+		vi.mocked(client.session.messages).mockResolvedValue([
+			{ id: "cut", sessionID: "s1", role: "user", time: { created: 1 } },
+		]);
+		const command = vi.fn(async () => {});
+		const localClient = makeStubClient({
+			session: {
+				messages: client.session.messages,
+				deleteMessage: client.session.deleteMessage,
+				command,
+			},
+		});
+		vi.mocked(localClient.app.commands).mockResolvedValue([
+			{ name: "init", source: "command" },
+		]);
+		const adapter = new OpenCodeProviderInstance({
+			clientForSession: () => Effect.succeed(localClient),
+		});
+		await Effect.runPromise(
+			adapter.sendTurnEffect(
+				makeSendTurnInput({
+					prompt: "/init",
+					rewind: { resumeSessionAt: null, targetMessageId: "cut" },
+				}),
+			),
+		);
+		expect(client.session.deleteMessage).toHaveBeenCalledExactlyOnceWith(
+			"s1",
+			"cut",
+		);
+		expect(command).toHaveBeenCalledOnce();
+		expect(
+			vi.mocked(client.session.deleteMessage).mock.invocationCallOrder[0],
+		).toBeLessThan(command.mock.invocationCallOrder[0] ?? 0);
+	});
+
+	it("truncates and confirms the cut before compacting", async () => {
+		vi.mocked(client.session.messages).mockResolvedValue(
+			["kept", "cut", "tail"].map((id, index) => ({
+				id,
+				sessionID: "s1",
+				role: "user",
+				time: { created: index },
+			})),
+		);
+		const sink = makeStubEventSink();
+		await Effect.runPromise(
+			instance.sendTurnEffect(
+				makeSendTurnInput({
+					prompt: "/compact",
+					model: { providerId: "opencode", modelId: "model" },
+					rewind: { resumeSessionAt: "kept", targetMessageId: "cut" },
+					eventSink: sink,
+				}),
+			),
+		);
+		expect(
+			vi.mocked(client.session.deleteMessage).mock.calls.map(([, id]) => id),
+		).toEqual(["tail", "cut"]);
+		expect(sink.pushedEvents).toContainEqual(
+			expect.objectContaining({
+				type: "message.removed",
+				data: { messageId: "cut" },
+			}),
+		);
+		expect(
+			vi.mocked(client.session.deleteMessage).mock.invocationCallOrder[1],
+		).toBeLessThan(
+			vi.mocked(client.session.summarize).mock.invocationCallOrder[0] ?? 0,
+		);
 	});
 
 	it.each([

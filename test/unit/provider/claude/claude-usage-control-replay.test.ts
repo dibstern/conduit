@@ -31,6 +31,7 @@ it.each([
 	const decoded = Schema.decodeUnknownSync(ClaudeUsageResponseSchema)(response);
 	expect(decoded.rate_limits_available).toBe(true);
 	let closed = false;
+	let fileCheckpointing: boolean | undefined;
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
@@ -47,6 +48,7 @@ it.each([
 						cursor: { read: () => Effect.die("Unexpected Cursor usage read") },
 						claude: makeClaudeUsageReader({
 							queryFactory: ({ options }) => {
+								fileCheckpointing = options?.enableFileCheckpointing;
 								expect(options?.env?.["CLAUDE_CONFIG_DIR"]).toBe(
 									"/captured-account",
 								);
@@ -114,6 +116,7 @@ it.each([
 		),
 	);
 	expect(closed).toBe(true);
+	expect(fileCheckpointing).toBe(false);
 });
 
 it.each([

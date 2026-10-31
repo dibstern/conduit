@@ -130,6 +130,9 @@ describe("probeClaudeCapabilities", () => {
 			workspaceRoot,
 			configDir,
 		});
+		expect(
+			queryFactory.mock.calls[0]?.[0]?.options?.enableFileCheckpointing,
+		).toBe(false);
 		expect(result.models).toHaveLength(2);
 		expect(result.models[0]).toMatchObject({
 			id: "claude-opus-4-7",

@@ -169,9 +169,11 @@ export const makeClaudeRunnerLaunch = (
 				});
 			const queryOptions = {
 				...queryLaunchOptions,
+				enableFileCheckpointing: false,
 				// Lets the agent's tools name the Conduit session they run in.
 				env: {
 					...queryLaunchOptions.env,
+					CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING: "false",
 					CONDUIT_SESSION_ID: sessionId,
 				},
 				allowedTools: [

@@ -279,6 +279,7 @@ async function collectClaudeCapabilities(
 	const queryFactory = deps.queryFactory ?? sdkQuery;
 	const options = {
 		persistSession: false,
+		enableFileCheckpointing: false,
 		maxTurns: 0,
 		cwd: deps.workspaceRoot,
 		...(deps.extraFolders && deps.extraFolders.length > 0

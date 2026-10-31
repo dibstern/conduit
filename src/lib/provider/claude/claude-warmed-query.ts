@@ -87,6 +87,7 @@ export const makeClaudeEmptyQuery = <Q extends { close(): void }>(
 				stderr = launch.stderr;
 				const options: SDKOptions = {
 					...launch,
+					enableFileCheckpointing: false,
 					spawnClaudeCodeProcess: processes.spawnClaudeCodeProcess,
 					env: makeClaudeSdkEnv({
 						...launchConfig,

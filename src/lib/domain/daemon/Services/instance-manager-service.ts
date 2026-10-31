@@ -1166,6 +1166,7 @@ const startManagedOpenCodeServer = (
 					...env,
 					OPENCODE_CONFIG_CONTENT: JSON.stringify({
 						...config,
+						snapshot: false,
 						plugin: [...(config["plugin"] ?? []), plugin.href],
 					}),
 					CONDUIT_DAEMON_SOCKET: socketPath,

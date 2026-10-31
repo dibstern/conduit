@@ -15,51 +15,55 @@ const rpcClient = Effect.gen(function* () {
 });
 
 describe("WsRpcServerLayer RewindSession", () => {
-	it.effect("rejects an unknown transcript target without reverting", () => {
-		const api = makeMockOpenCodeAPI();
-		return Effect.gen(function* () {
-			const client = yield* rpcClient;
-			const result = yield* Effect.result(
-				client.RewindSession({
-					sessionId: "session-1",
-					messageId: "client-only-uuid",
-				}),
-			);
-			expect(result).toMatchObject({
-				_tag: "Failure",
-				failure: {
-					_tag: "WsRpcError",
-					message: expect.stringContaining("not found"),
-				},
-			});
-			expect(api.session.revert).not.toHaveBeenCalled();
-		}).pipe(
-			Effect.scoped,
-			Effect.provide(
-				WsRpcServerLayer.pipe(
-					Layer.provideMerge(
-						makeTestHandlerLayer({
-							api,
-							seedEvents: [
-								canonicalEvent(
-									"session.created",
-									"session-1",
-									{
-										sessionId: "session-1",
-										title: "Rewind",
-										provider: "opencode",
-									},
-									{ provider: "opencode" },
-								),
-							],
-						}),
+	it.effect(
+		"rejects an unknown transcript target without any OpenCode request",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			return Effect.gen(function* () {
+				const client = yield* rpcClient;
+				const result = yield* Effect.result(
+					client.RewindSession({
+						sessionId: "session-1",
+						messageId: "client-only-uuid",
+					}),
+				);
+				expect(result).toMatchObject({
+					_tag: "Failure",
+					failure: {
+						_tag: "WsRpcError",
+						message: expect.stringContaining("not found"),
+					},
+				});
+				for (const request of Object.values(api.session))
+					expect(request).not.toHaveBeenCalled();
+			}).pipe(
+				Effect.scoped,
+				Effect.provide(
+					WsRpcServerLayer.pipe(
+						Layer.provideMerge(
+							makeTestHandlerLayer({
+								api,
+								seedEvents: [
+									canonicalEvent(
+										"session.created",
+										"session-1",
+										{
+											sessionId: "session-1",
+											title: "Rewind",
+											provider: "opencode",
+										},
+										{ provider: "opencode" },
+									),
+								],
+							}),
+						),
 					),
+					{ local: true },
 				),
-				{ local: true },
-			),
-		);
-	});
-	it.effect("reverts the requested session", () => {
+			);
+		},
+	);
+	it.effect("records a local rewind without any OpenCode request", () => {
 		const api = makeMockOpenCodeAPI();
 		return Effect.gen(function* () {
 			const client = yield* rpcClient;
@@ -74,9 +78,8 @@ describe("WsRpcServerLayer RewindSession", () => {
 				sessionId: "session-1",
 				messageId: "message-1",
 			});
-			expect(api.session.revert).toHaveBeenCalledWith("session-1", {
-				messageID: "message-1",
-			});
+			for (const request of Object.values(api.session))
+				expect(request).not.toHaveBeenCalled();
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

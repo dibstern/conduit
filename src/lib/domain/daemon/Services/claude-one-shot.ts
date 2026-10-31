@@ -176,6 +176,7 @@ export const makeClaudeOneShot = (options: {
 									},
 									...options.isolation,
 									persistSession: false,
+									enableFileCheckpointing: false,
 									maxTurns: 1,
 									allowedTools: [],
 									tools: [],

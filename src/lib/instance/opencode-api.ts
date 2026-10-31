@@ -375,7 +375,7 @@ class SessionNamespace {
 		);
 	}
 
-	/** Flatten the SDK's validated `{ info, parts }` message envelopes. */
+	/** Without a limit, OpenCode reads every native page before returning. */
 	async messages(
 		sessionId: string,
 		options?: { limit?: number; signal?: AbortSignal },
@@ -430,6 +430,18 @@ class SessionNamespace {
 				}),
 		);
 		return flattenMessage(data);
+	}
+
+	async deleteMessage(sessionId: string, messageId: string): Promise<void> {
+		await this.api.sdk(
+			"session.deleteMessage",
+			decodeOpenCodeBooleanResponse,
+			() =>
+				this.api._sdk.session.deleteMessage({
+					sessionID: sessionId,
+					messageID: messageId,
+				}),
+		);
 	}
 
 	async prompt(sessionId: string, options: PromptOptions): Promise<void> {
@@ -533,21 +545,6 @@ class SessionNamespace {
 	): Promise<SessionDetail> {
 		return this.api.sdk("session.fork", decodeSessionDetailResponse, () =>
 			this.api._sdk.session.fork({ sessionID: sessionId, ...options }),
-		);
-	}
-
-	async revert(
-		sessionId: string,
-		options: { messageID: string; partID?: string },
-	): Promise<void> {
-		await this.api.sdk("session.revert", decodeOpenCodeSessionResponse, () =>
-			this.api._sdk.session.revert({ sessionID: sessionId, ...options }),
-		);
-	}
-
-	async unrevert(sessionId: string): Promise<void> {
-		await this.api.sdk("session.unrevert", decodeOpenCodeSessionResponse, () =>
-			this.api._sdk.session.unrevert({ sessionID: sessionId }),
 		);
 	}
 

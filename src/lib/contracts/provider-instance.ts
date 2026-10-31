@@ -49,7 +49,7 @@ export interface ProviderDriverTraits {
 	readonly interactionSink: "permission-asking" | "auto-approving";
 	/** orchestration-side-effect-reactor.test.ts pins native-thread preparation and replay. */
 	readonly supportsNativeResume: boolean;
-	/** codex-fork.test.ts pins a send that reverts native history before confirming the rewind. */
+	/** codex-fork.test.ts and session-rewind.integration.ts pin a driver that truncates native history before the send, confirming the cut itself. */
 	readonly revertsConversationNatively: boolean;
 	/** session-workspace-fork.test.ts and cursor-fork.test.ts pin native versus digest seeding. */
 	readonly forkStrategy: "native" | "transcript-digest";
@@ -138,7 +138,7 @@ export const PROVIDER_DRIVERS = {
 		composerModeControl: "agent",
 		permissionModes: ["ask", "acceptEdits", "full"],
 		supportsQuestionSkip: true,
-		supportsFileRewind: true,
+		supportsFileRewind: false,
 		sessionCapabilities: {
 			supportsMultiFolder: true,
 			supportsWorktree: false,
@@ -149,7 +149,7 @@ export const PROVIDER_DRIVERS = {
 		usageHarness: undefined,
 		interactionSink: "auto-approving",
 		supportsNativeResume: false,
-		revertsConversationNatively: false,
+		revertsConversationNatively: true,
 		forkStrategy: "native",
 		needsPriorHistoryMetadata: false,
 		accountKind: "server",

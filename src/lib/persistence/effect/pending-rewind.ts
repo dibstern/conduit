@@ -14,6 +14,11 @@ export const readPendingRewindCommit = (
 			provider: string;
 		}>`SELECT pending_rewind_message_id, provider FROM sessions WHERE id = ${sessionId}`;
 		if (!session?.pending_rewind_message_id) return undefined;
+		if (
+			upstreamRemovedId !== undefined &&
+			upstreamRemovedId !== session.pending_rewind_message_id
+		)
+			return undefined;
 		const messages = yield* sql<{ id: string }>`SELECT id FROM messages
 			WHERE session_id = ${sessionId} ORDER BY created_at, id`;
 		const cut = messages.findIndex(
@@ -21,11 +26,6 @@ export const readPendingRewindCommit = (
 		);
 		if (cut < 0) return undefined;
 		const removed = messages.slice(cut);
-		if (
-			upstreamRemovedId !== undefined &&
-			!removed.some((message) => message.id === upstreamRemovedId)
-		)
-			return undefined;
 		const metadata = { provider: session.provider };
 		return {
 			removedMessageIds: removed.map((message) => message.id),
