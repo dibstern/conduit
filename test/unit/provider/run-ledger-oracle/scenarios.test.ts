@@ -6,7 +6,7 @@ import { reviewTraces } from "./review-traces.js";
 import { Driver, scenarios, sourceOnlyCases } from "./scenarios.js";
 
 /** Scenarios a later lane builds: each must fail with that lane's typed not-yet-built rejection. */
-const notBuilt: ReadonlyMap<string, string> = new Map([["PL-6", "32.2.12"]]);
+const notBuilt: ReadonlyMap<string, string> = new Map();
 
 describe("[step1] Run Ledger catalogue scenarios", () => {
 	for (const scenario of scenarios) {

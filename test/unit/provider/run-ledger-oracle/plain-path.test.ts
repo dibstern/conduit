@@ -44,8 +44,8 @@ import {
 	wake,
 } from "./scenarios.js";
 
-/** Inputs the 32.2.11 slice leaves to a later lane; a trace that reaches one stops there. */
-const notBuilt = /^not yet built \(32\.2\.1[23]\): /;
+/** Inputs the 32.2.12 slice leaves to a later lane; a trace that reaches one stops there. */
+const notBuilt = /^not yet built \(32\.2\.13\): /;
 
 /** 8.2: a shell, a subagent under a native run_id, and an ambient monitor (kind and class from task_type). */
 const shell = {
@@ -982,7 +982,9 @@ describe("[32.2.5] plain Run path differential", () => {
 					"interrupted",
 				]),
 			);
-		});
+			// A generated trace takes 4 to 7 s alone, so the 10 s default fails it under the
+			// pre-commit hook's parallel build and typecheck.
+		}, 30_000);
 });
 
 /**
@@ -1631,8 +1633,6 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 });
 
 describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's acceptance criteria", () => {
-	/** The fixed trace that reaches 32.2.12's confirm gate (scenarios.test.ts). */
-	const confirmGated = new Set(["PL-6"]);
 	const settle = (
 		d: Driver,
 		settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
@@ -1670,13 +1670,12 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 		"claude",
 		"cursor",
 		"opencode",
-	] as const)("every fixed %s trace runs to its end in lockstep with the oracle, but for 32.2.12's confirm gate", (provider) => {
+	] as const)("every fixed %s trace runs to its end in lockstep with the oracle", (provider) => {
 		const fixed = scenarios.filter(
 			(candidate) => candidate.provider === provider,
 		);
 		expect(fixed.length).toBeGreaterThan(0);
-		for (const trace of fixed)
-			if (!confirmGated.has(trace.id)) agreed(provider, trace.run);
+		for (const trace of fixed) agreed(provider, trace.run);
 	});
 
 	it("a sibling steer's unsettled delivery_unknown blocks its input's automatic resend until a probe settles it (32.2.6 AC3, 3.5)", () => {
@@ -2340,25 +2339,17 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		["claude", 821101],
 		["cursor", 821102],
 		["opencode", 821103],
-	] as const)("LI6 to LI10 hold against the fake on %s's generated traces, seed %i", (provider, seed) => {
-		// The fake checks LI1 to LI10 at every step (assertStep). A trace stops at a 32.2.12 or 32.2.13
-		// input, or is discarded where the oracle itself fails the fake (the pended convergence suite).
-		const seen: { last?: ReturnType<typeof decider.decide> } = {};
-		const recorded = {
-			...decider,
-			decide: (...args: Parameters<typeof decider.decide>) => {
-				seen.last = decider.decide(...args);
-				return seen.last;
-			},
-		};
-		const tally = { checked: 0, later: 0, oracle: 0 };
+	] as const)("LI5 to LI10 hold against the fake on %s's generated traces, seed %i", (provider, seed) => {
+		// The fake checks LI1 to LI10 at every step (assertStep). Every trace runs through; one is
+		// discarded only where the oracle itself fails the fake (the pended convergence suite).
+		const tally = { checked: 0, oracle: 0, gated: 0, lost: 0 };
 		const kinds = new Set<string>();
 		fc.assert(
 			fc.property(fc.array(traceAction, { maxLength: 60 }), (actions) => {
 				const real = new DifferentialTrace(
 					provider,
 					referenceImplementation,
-					recorded,
+					decider,
 				);
 				try {
 					real.step({
@@ -2378,16 +2369,13 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 							alarmAt: expected.alarmAt,
 						});
 						real.step(packet.command, packet.now);
+						if (real.actual.view().pendingConfirm) tally.gated += 1;
 					}
+					if (real.actual.view().lostWork.length > 0) tally.lost += 1;
 					tally.checked += 1;
 				} catch (error) {
 					if (real.actual.commands.length < real.expected.commands.length)
 						tally.oracle += 1;
-					else if (
-						seen.last?.tag === "Rejected" &&
-						notBuilt.test(seen.last.diagnostic)
-					)
-						tally.later += 1;
 					else throw error;
 				} finally {
 					for (const [kind, count] of Object.entries(
@@ -2403,7 +2391,12 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 			tally,
 			kinds: [...kinds].sort(),
 		});
-		expect(tally.checked).toBeGreaterThan(tally.later + tally.oracle);
+		expect(tally.checked).toBeGreaterThan(tally.oracle);
+		// 32.2.12: Claude's traces reach the confirm gate and lost work on the real decider (8.4, L5).
+		if (provider === "claude") {
+			expect(tally.gated).toBeGreaterThan(0);
+			expect(tally.lost).toBeGreaterThan(0);
+		}
 		expect([...kinds]).toEqual(
 			expect.arrayContaining([
 				"activity",
@@ -2418,5 +2411,322 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 					: []),
 			]),
 		);
+	});
+});
+
+describe("[32.2.12] core destructive confirm and lost work: the bead's acceptance criteria", () => {
+	const settle = (
+		d: Driver,
+		settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
+	) => step(d, { verb: "settle", settlement });
+	const lose = (d: Driver, runnerId: string) =>
+		settle(d, { kind: "process_lost", runnerId, retiredAt: d.now });
+	const started = (d: Driver, label: string, reattached = false) =>
+		settle(d, { kind: "process_started", label, reattached });
+	const snapshot = (d: Driver, tasks: (typeof shell)[], label = d.label) =>
+		unsolicited(d, { kind: "tasks_snapshot", tasks }, label);
+	const end = (d: Driver, deadlineAt: number | null = null) =>
+		step(d, {
+			verb: "control",
+			control: { kind: "end", commandId: `end-${d.next()}`, deadlineAt },
+		});
+	/** Confirms the gate the view shows, or a stale snapshotEntry when given (D45). */
+	const confirm = (
+		d: Driver,
+		snapshotEntry = d.view().pendingConfirm?.snapshotEntry,
+	) => {
+		assert(snapshotEntry !== undefined, "a pending confirm is shown");
+		return d.step({
+			verb: "control",
+			control: { kind: "confirm_escalation", snapshotEntry },
+		});
+	};
+	const endSessions = (d: Driver) =>
+		d.issued.filter(({ effect }) => effect.kind === "end_session");
+	const liveShell = {
+		tag: "live",
+		label: "r1:1",
+		tasks: [{ ...shell, kind: "shell", class: "work" }],
+	} as const;
+	const lostShell = {
+		label: "r1:1",
+		tag: "known",
+		tasks: liveShell.tasks,
+	} as const;
+
+	describe("each destructive path gives the right confirm, or one lost-work fact per label (8.4, L3, L5)", () => {
+		it("restart: an interrupted Run with live tasks waits on a retire confirm, and the relaunch's process_started records the old label's lost work once", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				running(d);
+				stop(d, 9_000);
+				expect(d.view().pendingConfirm).toEqual({
+					step: "retire",
+					labels: ["r1:1"],
+					snapshotEntry: 2,
+					tasks: liveShell,
+				});
+				expect(confirm(d)).toMatchObject({ tag: "Accepted", effects: [] });
+				expect(d.view().pendingConfirm).toBeUndefined();
+				started(d, "r2:1");
+				expect(d.view().lostWork).toEqual([lostShell]);
+				lose(d, "r2");
+				expect(d.view().lostWork).toEqual([lostShell]);
+			});
+		});
+
+		it("kill: the confirmed retire step's process_lost records the label's live tasks once", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				const a = running(d);
+				stop(d, 9_000);
+				expect(d.view().pendingConfirm?.step).toBe("retire");
+				confirm(d);
+				expect(lose(d, "r1").ended).toMatchObject([{ runId: a.runId }]);
+				expect(d.view()).toMatchObject({ lostWork: [lostShell] });
+				expect(d.view().pendingConfirm).toBeUndefined();
+			});
+		});
+
+		it("end-session: end_session issues only at the confirm, addressed then, and session_ended records lost work once", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				end(d);
+				expect(d.view().pendingConfirm).toMatchObject({ step: "end_session" });
+				expect(endSessions(d)).toEqual([]);
+				confirm(d);
+				expect(endSessions(d)).toMatchObject([
+					{ effect: { kind: "end_session", runId: null, label: "r1:1" } },
+				]);
+				settle(d, { kind: "session_ended", cause: "native_session_vanished" });
+				settle(d, { kind: "session_ended", cause: "native_session_vanished" });
+				expect(d.view().lostWork).toEqual([lostShell]);
+			});
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				const a = running(d);
+				end(d, 9_000);
+				expect(d.view()).toMatchObject({
+					active: { tag: "Interrupting", by: "end" },
+					pendingConfirm: { step: "end_session" },
+				});
+				expect(endSessions(d)).toEqual([]);
+				confirm(d);
+				expect(endSessions(d)).toMatchObject([
+					{ effect: { kind: "end_session", runId: a.runId, label: "r1:1" } },
+				]);
+			});
+		});
+
+		it("ignored interrupt: the Run stays Interrupting with its retire step gated, and nothing destroys on its own", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				const a = running(d);
+				stop(d, 9_000);
+				// The provider ignores the interrupt: its Run keeps working.
+				expect(observe(d, a.token, { kind: "activity" }).issued).toEqual([]);
+				expect(d.view()).toMatchObject({
+					active: { tag: "Interrupting", runId: a.runId },
+					pendingConfirm: { step: "retire", tasks: liveShell },
+					tasks: liveShell,
+					lostWork: [],
+				});
+			});
+		});
+
+		it("ignored interrupt while paused: a paused goal's ignored interrupt waits on the same retire confirm", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				step(d, {
+					verb: "control",
+					control: {
+						kind: "native_command",
+						commandId: "n1",
+						text: "/goal pause",
+					},
+				});
+				running(d);
+				stop(d, 9_000);
+				expect(d.view().pendingConfirm).toMatchObject({
+					step: "retire",
+					tasks: liveShell,
+				});
+			});
+		});
+
+		it("process loss: unplanned loss records lost work without asking, unknown for a reattached label", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				lose(d, "r1");
+				expect(d.view().pendingConfirm).toBeUndefined();
+				expect(d.view().lostWork).toEqual([lostShell]);
+				started(d, "r2:1", true);
+				lose(d, "r2");
+				expect(d.view().lostWork).toEqual([
+					lostShell,
+					{ label: "r2:1", tag: "unknown" },
+				]);
+			});
+		});
+
+		it("pending kill: a destruction addressed to pending records nothing", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				lose(d, "r1");
+				end(d);
+				expect(d.view().pendingConfirm).toBeUndefined();
+				expect(d.latest("end_session").effect).toMatchObject({ label: null });
+				started(d, "r2:1");
+				expect(d.view().lostWork).toEqual([lostShell]);
+			});
+		});
+	});
+
+	it("a confirm after a process replacement issues the step to the current process (L3, L2)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			end(d);
+			started(d, "r2:1", true);
+			expect(d.view().pendingConfirm).toEqual({
+				step: "end_session",
+				labels: ["r2:1"],
+				snapshotEntry: 3,
+				tasks: { tag: "unknown", label: "r2:1" },
+			});
+			confirm(d);
+			expect(endSessions(d)).toMatchObject([
+				{ effect: { runId: null, label: "r2:1" } },
+			]);
+			expect(d.view().lostWork).toEqual([lostShell]);
+		});
+	});
+
+	it("a step whose every address is retired issues nothing: its Run's end drops it (8.4, D43)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			const a = running(d);
+			end(d);
+			expect(d.view().pendingConfirm).toMatchObject({ step: "end_session" });
+			expect(lose(d, "r1").ended).toMatchObject([{ runId: a.runId }]);
+			expect(d.view().pendingConfirm).toBeUndefined();
+			expect(endSessions(d)).toEqual([]);
+		});
+	});
+
+	it("a confirm and clearing evidence issue the same effects (L3)", () => {
+		const gated = (clear: (d: Driver) => void) =>
+			endSessions(
+				agreed("claude", (d) => {
+					snapshot(d, [shell]);
+					end(d);
+					clear(d);
+					expect(d.view().pendingConfirm).toBeUndefined();
+				}),
+			);
+		const confirmed = gated((d) => confirm(d));
+		expect(confirmed).toHaveLength(1);
+		expect(gated((d) => snapshot(d, []))).toEqual(confirmed);
+	});
+
+	it("lost work is decided once per label, and a later scope end of a decided label records nothing (L5)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			// A newer querySeq ends r1:1's scope; its tasks are unknown until its first snapshot (D44).
+			unsolicited(d, { kind: "activity" }, "r1:2");
+			expect(d.view().lostWork).toEqual([lostShell]);
+			lose(d, "r1");
+			settle(d, { kind: "session_ended", cause: "native_session_vanished" });
+			expect(d.view().lostWork).toEqual([
+				lostShell,
+				{ label: "r1:2", tag: "unknown" },
+			]);
+			started(d, "r2:1");
+			settle(d, { kind: "session_ended", cause: "native_session_vanished" });
+			lose(d, "r2");
+			expect(d.view().lostWork).toHaveLength(2);
+		});
+	});
+
+	it("a gate open on the current process releases when it is lost; a Run-less end_session goes to pending (PL-6)", () => {
+		const pl6 = scenario("PL-6");
+		agreed(pl6.provider, pl6.run);
+	});
+
+	it.each([
+		"cursor",
+		"opencode",
+	] as const)("a reattached %s process never opens a gate, and its kill or process_lost records no lost work (8.3)", (provider) => {
+		agreed(provider, (d) => {
+			started(d, "r1:2", true);
+			running(d);
+			stop(d, 9_000);
+			expect(d.view().active).toMatchObject({ tag: "Interrupting" });
+			expect(d.view().pendingConfirm).toBeUndefined();
+			end(d);
+			expect(d.view().pendingConfirm).toBeUndefined();
+			expect(endSessions(d)).toHaveLength(1);
+			lose(d, "r1");
+			expect(d.view().lostWork).toEqual([]);
+		});
+	});
+
+	it("a Known-empty Claude kill opens no gate and records no lost work (L5, 8.3)", () => {
+		agreed("claude", (d) => {
+			running(d);
+			stop(d, 9_000);
+			expect(d.view().pendingConfirm).toBeUndefined();
+			lose(d, "r1");
+			expect(d.view().lostWork).toEqual([]);
+		});
+	});
+
+	it("an end_session success and a rejected resume record no lost work (L5)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			end(d);
+			confirm(d);
+			const sent = d.latest("end_session");
+			observe(d, tokenOf(sent), {
+				kind: "effect_outcome",
+				outcome: { tag: "succeeded" },
+				transmission: claimOf(sent),
+			});
+			expect(d.view().lostWork).toEqual([]);
+		});
+		agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "run_released",
+				reason: "ResumeRejected",
+			});
+			expect(d.view().lostWork).toEqual([]);
+		});
+	});
+
+	it("the coverage gate's races: a stale confirm is rejected, and a label change mid-interrupt releases the gate (11.2, D45)", () => {
+		const stale = agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			running(d);
+			stop(d, 9_000);
+			const shown = d.view().pendingConfirm?.snapshotEntry;
+			snapshot(d, [shell, monitor]);
+			expect(confirm(d, shown)).toMatchObject({
+				tag: "Rejected",
+				diagnostic: "stale confirm (8.4)",
+			});
+			expect(d.view().pendingConfirm?.snapshotEntry).toBe((shown ?? 0) + 1);
+			expect(confirm(d).tag).toBe("Accepted");
+		});
+		expect(stale.coverage.races["a stale confirm"]).toBe(1);
+		const relabelled = agreed("claude", (d) => {
+			snapshot(d, [shell]);
+			running(d);
+			stop(d, 9_000);
+			started(d, "r2:1");
+			expect(d.view().pendingConfirm).toBeUndefined();
+			expect(d.view().lostWork).toEqual([lostShell]);
+		});
+		expect(relabelled.coverage.races["a label change mid-interrupt"]).toBe(1);
 	});
 });

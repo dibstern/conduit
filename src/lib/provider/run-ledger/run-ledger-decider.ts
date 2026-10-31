@@ -12,6 +12,7 @@ import type {
 	Label,
 	LedgerCommand,
 	LedgerView,
+	LostWork,
 	NativeCommandView,
 	ProviderDecisionRules,
 	ProviderKind,
@@ -285,6 +286,19 @@ interface Book {
 				readonly items: StopItem[];
 		  }
 		| undefined;
+	/** L5: lost work in record order, and each label decided once. */
+	readonly lostWork: LostWork[];
+	readonly lostDecided: Set<Label>;
+	/** 8.4 (L3): the confirm gate holds only its step; D43 drops it with its Run. */
+	confirm?:
+		| {
+				readonly step: "retire" | "end_session";
+				readonly runId?: string | undefined;
+				readonly commandId?: string | undefined;
+		  }
+		| undefined;
+	/** 8.4, D45: raised by every non-older snapshot, process_started and raised label. */
+	snapshotEntry: number;
 }
 
 /**
@@ -303,7 +317,8 @@ type Entry =
 			RunEnded,
 			"outcome" | "reason"
 	  >)
-	| { readonly kind: "unlaunch"; readonly runId: string };
+	| { readonly kind: "unlaunch"; readonly runId: string }
+	| { readonly kind: "release" };
 type Fact = Extract<Entry, { kind: "fact" }>;
 /** A fact's minting: decide draws ids from ctx.newId, evolve replays the entry's (3.2, 3.12). */
 interface Step {
@@ -321,9 +336,6 @@ const rejected = (diagnostic: string): Outcome => ({
 	tag: "Rejected",
 	diagnostic,
 });
-/** An input a later lane builds: a typed rejection the differential test excludes by name. */
-const notBuilt = (ticket: string, what: string): Outcome =>
-	rejected(`not yet built (${ticket}): ${what}`);
 
 const transportRank = {
 	Issued: 0,
@@ -483,15 +495,19 @@ function taskView(book: Book): TasksView {
 		: { tag: "live", label: runner.latest, tasks: runner.tasks.tasks };
 }
 /**
- * L5: whether ending a label's scope records lost work, the confirm gate's and lost work's
- * ticket (32.2.12); a label whose tasks are known and empty records none.
+ * L5: a label's lost work is decided once, when its scope first ends: its live tasks, unknown
+ * tasks for a provider that reports them, and none for a label known to be empty.
  */
-function losesWork(book: Book, label: Label): boolean {
+function decideLostWork(book: Book, label: Label): void {
+	if (book.lostDecided.has(label)) return;
+	book.lostDecided.add(label);
 	const runner = book.runners.get(splitLabel(label).runnerId);
 	const tasks = runner?.retired === false ? runner.tasks : undefined;
-	return tasks === undefined || tasks.tag === "Unknown" || tasks.label !== label
-		? nativePolicies[book.provider].capabilities.backgroundTasks
-		: tasks.tasks.length > 0;
+	if (tasks === undefined || tasks.tag === "Unknown" || tasks.label !== label) {
+		if (nativePolicies[book.provider].capabilities.backgroundTasks)
+			book.lostWork.push({ label, tag: "unknown" });
+	} else if (tasks.tasks.length > 0)
+		book.lostWork.push({ label, tag: "known", tasks: tasks.tasks });
 }
 const currentLabel = (book: Book): Label | null =>
 	book.current === null
@@ -848,6 +864,8 @@ function read(book: Book) {
 			run.phase === "Ended" ? [] : [summarize(book, run)],
 		),
 		alarmAt: deadlines(book)[0]?.at,
+		// 8.4: a gate whose tasks are neither live nor unknown releases.
+		release: book.confirm !== undefined && taskView(book).tag === "none",
 	};
 }
 
@@ -900,7 +918,8 @@ function reconcile(situation: ReturnType<typeof read>): Entry | undefined {
 		}
 		if (!run.awaiting) return end(run.runId, run.fold);
 	}
-	return undefined;
+	// 8.4: after the Run decisions, as an ended Run drops its gate first (D43).
+	return situation.release ? { kind: "release" } : undefined;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1794,12 +1813,12 @@ function unsolicited(
 	// scope; its tasks are unknown until its first snapshot.
 	let raised = false;
 	if (!runner.retired && querySeq > splitLabel(runner.latest).querySeq) {
-		if (losesWork(book, runner.latest))
-			return notBuilt("32.2.12", "lost work at a raised label");
+		decideLostWork(book, runner.latest);
 		runner.latest = label;
 		runner.tasks = capabilities.backgroundTasks
 			? { tag: "Unknown", label }
 			: { tag: "Known", label, tasks: [] };
+		book.snapshotEntry++;
 		raised = true;
 	}
 	const unchanged = (diagnostic?: string) =>
@@ -1829,6 +1848,7 @@ function unsolicited(
 						task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
 				})),
 			};
+			book.snapshotEntry++;
 			return changed;
 		case "task_event":
 			// 8.3: a notification names the waking task.
@@ -2234,11 +2254,10 @@ function observe(
 }
 
 /** L1: a runner retires (its process_lost, or another runner's process_started). */
-function retire(book: Book, runnerId: string): Outcome {
+function retire(book: Book, runnerId: string): void {
 	const runner = book.runners.get(runnerId);
 	// L1 item 3, L5: retiring records its latest label's lost work.
-	if (runner?.retired === false && losesWork(book, runner.latest))
-		return notBuilt("32.2.12", "lost work at a retirement");
+	if (runner?.retired === false) decideLostWork(book, runner.latest);
 	// L1 (CONTRACT.md 349-350): retirement is final, a runner not yet started included.
 	book.runners.set(runnerId, {
 		latest: book.runners.get(runnerId)?.latest ?? null,
@@ -2283,7 +2302,6 @@ function retire(book: Book, runnerId: string): Outcome {
 	for (const interaction of book.interactions)
 		if (splitLabel(interaction.label).runnerId === runnerId)
 			interaction.resolved = true;
-	return changed;
 }
 
 function settle(
@@ -2344,12 +2362,8 @@ function settle(
 			)
 				return noop("an older label's process_started changes nothing (L1)");
 			// L5, D44: the runner's previous label becomes older, so its scope ends.
-			if (
-				prior !== undefined &&
-				prior.latest !== settlement.label &&
-				losesWork(book, prior.latest)
-			)
-				return notBuilt("32.2.12", "lost work at a raised label");
+			if (prior !== undefined && prior.latest !== settlement.label)
+				decideLostWork(book, prior.latest);
 			// L1 totality (CONTRACT.md 346-349): another runner's process_started is the process_lost
 			// of every other runner, started or only named by a run.dispatched.
 			for (const other of new Set([
@@ -2363,10 +2377,8 @@ function settle(
 					other !== null &&
 					other !== runnerId &&
 					book.runners.get(other)?.retired !== true
-				) {
-					const retired = retire(book, other);
-					if (retired.tag === "Rejected") return retired;
-				}
+				)
+					retire(book, other);
 			// 8.3: a fresh launch has no tasks; a reattach's are unknown until its snapshot.
 			book.runners.set(runnerId, {
 				latest: settlement.label,
@@ -2378,6 +2390,7 @@ function settle(
 						: { tag: "Known", label: settlement.label, tasks: [] },
 			});
 			book.current = runnerId;
+			book.snapshotEntry++;
 			// L2: a pending send resolves, once, to the next process_started's runner; a
 			// run_dispatched naming a runner not yet started fixes its label here.
 			for (const send of book.sends)
@@ -2400,22 +2413,23 @@ function settle(
 			if (book.retirements.has(key))
 				return noop("process_lost already folded (6.5)");
 			book.retirements.add(key);
-			return retire(book, settlement.runnerId);
+			retire(book, settlement.runnerId);
+			return changed;
 		}
 		case "session_ended": {
 			// L5, 8.4 (CONTRACT.md 2884-2885): session_ended ends the latest label's scope.
-			const label = currentLabel(book);
-			if (label !== null && losesWork(book, label))
-				return notBuilt("32.2.12", "lost work at session_ended");
 			// 3.4: the native session ends at this fact and covers every send issued before it.
-			return sessionEnd(book, book.seq)
+			const moved = sessionEnd(book, book.seq);
+			const label = currentLabel(book);
+			const decided = book.lostDecided.size;
+			if (label !== null) decideLostWork(book, label);
+			return moved || book.lostDecided.size !== decided
 				? changed
 				: noop("the native session already ended");
 		}
 	}
 }
 
-/** Applies one entry to a draft; the caller discards the draft unless it changed. */
 /** 8.4: an end_session row under its own Control, addressed as L2 says (case 2 or 3). */
 const endSession = (book: Book, run: Run | undefined, commandId: string) =>
 	issueControl(
@@ -2427,6 +2441,11 @@ const endSession = (book: Book, run: Run | undefined, commandId: string) =>
 		},
 		commandId,
 	);
+/** 8.4 (L3): the end_session step waits on the confirm gate with tasks live or unknown. */
+function gateEndSession(book: Book, run: Run | undefined, commandId: string) {
+	if (taskView(book).tag === "none") endSession(book, run, commandId);
+	else book.confirm = { step: "end_session", runId: run?.runId, commandId };
+}
 
 /** 3.6, 5.1, L6: a Stop, Run now or end commit asks the active Run and opens or joins the stop deadline. */
 function commit(
@@ -2438,12 +2457,6 @@ function commit(
 	commandId: string,
 ): Outcome {
 	const run = activeRun(book);
-	// 8.4 (L3): a destructive step with tasks live or unknown waits on the confirm gate.
-	if (
-		taskView(book).tag !== "none" &&
-		(by === "end" || (run !== undefined && run.phase !== "Queued"))
-	)
-		return notBuilt("32.2.12", "the confirm gate");
 	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
 	const labels = new Set([
 		...book.wakes.flatMap((wake) =>
@@ -2476,7 +2489,7 @@ function commit(
 	const acting =
 		run !== undefined && run.phase !== "Queued" && !nothingMayAct(book, run);
 	// 8.4: an end's Stop row is its end_session, not an interrupt.
-	if (by === "end") endSession(book, run, commandId);
+	if (by === "end") gateEndSession(book, run, commandId);
 	else if (acting || labelWorkOutstanding(book)) {
 		const runId = acting ? (run?.runId ?? null) : null;
 		issueControl(
@@ -2497,6 +2510,16 @@ function commit(
 			probe(book, fact, step, runId, { tag: "native_session" });
 		}
 	}
+	// 8.4 (L3): an interrupted Run's retire step waits on the gate with tasks live or unknown.
+	// Gap (CONTRACT.md 2870): the contract gates the step past the stop's deadline, which for a
+	// runner host is main's (U2), not the ledger's; the gate opens at the commit as the oracle's
+	// does, and a Run-less Stop of label work alone opens none, as the oracle.
+	if (
+		by !== "end" &&
+		run?.phase === "Interrupting" &&
+		taskView(book).tag !== "none"
+	)
+		book.confirm ??= { step: "retire", runId: run.runId };
 	if (deadlineAt === null) return changed;
 	// L6: add the label work with no open main run to the one ledger stop deadline.
 	const hasOpenMain = (runId: string | null) =>
@@ -2566,10 +2589,7 @@ function control(
 					command.deadlineAt,
 					command.commandId,
 				);
-			// 8.4 (L3): both steps are confirm-gated with tasks live or unknown.
-			if (taskView(book).tag !== "none")
-				return notBuilt("32.2.12", "the confirm gate");
-			endSession(book, run, command.commandId);
+			gateEndSession(book, run, command.commandId);
 			return changed;
 		}
 		case "answer": {
@@ -2622,8 +2642,18 @@ function control(
 				issueTokened(book, step, { kind: "stop_task", key });
 			return changed;
 		}
-		case "confirm_escalation":
-			return notBuilt("32.2.12", "the confirm_escalation control");
+		case "confirm_escalation": {
+			// 8.4, D45: a confirm answers only the gate's current snapshot; its end_session step
+			// issues at the confirm, addressed then (L2).
+			const gate = book.confirm;
+			if (gate === undefined) return rejected("no pending confirm (8.4)");
+			if (command.snapshotEntry !== book.snapshotEntry)
+				return rejected("stale confirm (8.4)");
+			book.confirm = undefined;
+			if (gate.step === "end_session" && gate.commandId !== undefined)
+				endSession(book, findRun(book, gate.runId), gate.commandId);
+			return changed;
+		}
 		case "native_command": {
 			if (
 				book.nativeCommands.some((item) => item.commandId === command.commandId)
@@ -2655,6 +2685,7 @@ function control(
 	}
 }
 
+/** Applies one entry to a draft; the caller discards the draft unless it changed. */
 function apply(book: Book, entry: Entry, step: Step): Outcome {
 	switch (entry.kind) {
 		case "end": {
@@ -2665,6 +2696,18 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 			run.retryAt = undefined;
 			run.exec.settle = undefined;
 			run.ended = { outcome: entry.outcome, reason: entry.reason };
+			// D43: the gate drops with its Run.
+			if (book.confirm?.runId === entry.runId) book.confirm = undefined;
+			return changed;
+		}
+		case "release": {
+			const gate = book.confirm;
+			if (gate === undefined || taskView(book).tag !== "none")
+				return rejected("a release with no gate to release (8.4)");
+			book.confirm = undefined;
+			// 8.4: the end_session step issues at its release, addressed then (L2).
+			if (gate.step === "end_session" && gate.commandId !== undefined)
+				endSession(book, findRun(book, gate.runId), gate.commandId);
 			return changed;
 		}
 		case "unlaunch": {
@@ -2760,6 +2803,9 @@ export function initialSessionLedgerState(
 		interactions: [],
 		wakes: [],
 		nativeCommands: [],
+		lostWork: [],
+		lostDecided: new Set(),
+		snapshotEntry: 0,
 	});
 }
 
@@ -2970,7 +3016,18 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 			live.length > 0 ||
 			tasks.tag !== "none" ||
 			book.wakes.some((wake) => wake.ended === undefined),
-		lostWork: [],
+		// 8.4: a gate shows while its tasks are live or unknown; its labels are the current one.
+		...(book.confirm === undefined || tasks.tag === "none"
+			? {}
+			: {
+					pendingConfirm: {
+						step: book.confirm.step,
+						labels: [currentLabel(book)].filter((label) => label !== null),
+						snapshotEntry: book.snapshotEntry,
+						tasks,
+					},
+				}),
+		lostWork: book.lostWork,
 		// 8.5: a projection of its send; Failed with the covering cause when covered.
 		nativeCommands: book.nativeCommands.map((command): NativeCommandView => {
 			const { commandId, state } = command;

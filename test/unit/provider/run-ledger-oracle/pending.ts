@@ -3,11 +3,6 @@ import { it } from "vitest";
 // Remove an entry when its implementation lands; an unexpected pass fails the suite.
 export const pendingCases: ReadonlyMap<string, string> = new Map([
 	[
-		"[checkpoint] claude run-ledger-differential",
-		"32.2.12: lost work at a raised label or a retirement",
-	],
-	["[checkpoint] codex run-ledger-differential", "32.2.13: Codex policy"],
-	[
 		"[checkpoint] opencode run-ledger-differential",
 		"32.2.3/32.2.4: oracle and fake disagree on GAP 5 against section 9",
 	],

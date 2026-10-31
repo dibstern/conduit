@@ -127,11 +127,6 @@ export class Driver implements CoverageReader {
 			observation.direct
 		)
 			this.commandIds.set(observation.runId as SendToken, observation.inputId);
-		if (
-			command.verb === "settle" &&
-			command.settlement.kind === "process_started"
-		)
-			this.label = command.settlement.label;
 		this.ended.push(...decision.ended);
 		// LI1, LI6 (D60): decide issues only probe, stop_task and cancel_request; a start or steer reaches `live`
 		// from its Main observation or run.dispatched Answer (D60), so issued work reads both.
@@ -152,6 +147,13 @@ export class Driver implements CoverageReader {
 			{ ...decision, effects: issued },
 			this,
 		);
+		// Oracle edit (32.2.12): coverage reads the label before this step, as TraceDriver's host
+		// does, so a fixed process_started can hit "a label change mid-interrupt".
+		if (
+			command.verb === "settle" &&
+			command.settlement.kind === "process_started"
+		)
+			this.label = command.settlement.label;
 		return { ...decision, issued };
 	}
 
