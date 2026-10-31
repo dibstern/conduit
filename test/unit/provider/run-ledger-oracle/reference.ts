@@ -1,1288 +1,2734 @@
-// @ts-nocheck Stale against the 3.13 model (32.2.2); the oracle lane (32.2.3) replaces this file.
 /**
- * A slow, disposable reconstruction from the entire command history.
- * No ledger events, private state, implementation helpers, or decider outputs
- * enter this model. Every query scans retained admissions, sends and receipts.
+ * Reference oracle for the Run Ledger (82tn.32.2.3), built to CONTRACT.md 3.13 and the 32d model.
+ * It is a plain interpreter: its entries are the decisions it accepted, and its state is the world
+ * those entries fold to. Comments cite CONTRACT.md sections; `GAP:` marks a nearest reading.
  */
-import assert from "node:assert/strict";
 import type {
-	Deadline,
-	DeadlineKind,
+	ActiveRunView,
+	Consumption,
 	DecideContext,
-	EndReason,
+	Decision,
 	Evidence,
 	InputState,
-	InputView,
 	InteractionView,
+	InterruptBy,
 	IssuedEffect,
+	Label,
 	LedgerCommand,
 	LedgerView,
-	Observation,
+	LostWork,
+	NativeCommandView,
 	ProviderKind,
 	RunEffect,
 	RunEnded,
 	RunOutcome,
-	RunTag,
 	SendToken,
+	Task,
+	TaskKey,
+	TasksView,
+	Transport,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
 
-export const policy: DecideContext["policy"] = {
-	startMs: 1_000,
-	livenessMs: 10_000,
-	interruptMs: 30_000,
-	closeMs: 2_000,
-	settleMs: 3_000,
-	fenceMs: 4_000,
-};
+/** A deliberate contract break, so a scenario can prove it notices one. */
+export type Mutation = "probe_at_outcome" | "extend_settle" | "unforced_alarm";
 
-export type Mutation = "ignore_pause" | "resend_unknown" | "extend_settle";
-export interface ReferenceResult {
-	readonly tag: "Accepted" | "Rejected";
-	readonly effects: readonly IssuedEffect[];
-	readonly ended: readonly RunEnded[];
-	readonly diagnostic?: string;
-	readonly alarmAt?: number | undefined;
+/** One accepted decision, replayed with the ids it minted (LI4). */
+export interface ReferenceEntry {
+	readonly command: LedgerCommand;
+	readonly now: number;
+	readonly policy: DecideContext["policy"];
+	readonly ids: readonly string[];
+}
+export interface ReferenceState {
+	readonly sessionId: string;
+	readonly provider: ProviderKind;
+	readonly mutation?: Mutation | undefined;
+	readonly entries: readonly ReferenceEntry[];
+}
+
+type Value = "never" | "possibly" | "reached";
+/** Why a transmission's work ended (3.5): its evidence, main's terminal (D59), coverage, a drop or the alarm. */
+type WorkEnd =
+	| "evidence"
+	| "main"
+	| "process_lost"
+	| "session_ended"
+	| "dropped"
+	| "forced";
+
+interface Tx {
+	readonly token?: SendToken | undefined;
+	readonly seq: number;
+	readonly label: Label | null;
+	readonly runnerId: string | null;
+	transport: Transport;
+	consumption: Consumption;
+	/** A runner-held try that ended before any hold (3.4): never handed over. */
+	readonly unheld: boolean;
+	notSent: boolean;
+	released: boolean;
+	resumeRejected: boolean;
+	/** Stop's own outcome (4.8, 9): never retried, never fails an input. */
+	stopOwn: boolean;
+	retryable: boolean;
+	/** A retryable outcome's code: an answer's lastRefusal (10B, 3.10). */
+	refusal?: string | undefined;
+	permanent?: string | undefined;
+	retryAt?: number | undefined;
+	declined: boolean;
+	absent: boolean;
+	sealed?: { readonly value: Value; readonly unconsumed: boolean } | undefined;
+	ended?: WorkEnd | undefined;
+	nativeMessageId?: string | undefined;
+	resulted: boolean;
+	/** The first delivery-recovery probe's deadline (3.7, D20). */
+	recovery?: { readonly at: number; readonly opened: number } | undefined;
+	/** An accounting receipt is recorded once; a duplicate produces no events (12A, LI2). */
+	accounted?: true | undefined;
+}
+
+interface Probe {
+	readonly target: Extract<RunEffect, { kind: "probe" }>["target"];
+	readonly subject?: { readonly send: number; readonly tx: number } | undefined;
+	deadline?: { at: number; readonly opened: number } | undefined;
+	answered: boolean;
+	busy: boolean;
+	done: boolean;
+}
+
+interface Send {
+	readonly seq: number;
+	readonly effect: RunEffect;
+	readonly held: boolean;
+	commandId?: string | undefined;
+	readonly runId: string | null;
+	readonly exec: number;
+	readonly label: Label | null;
+	readonly txs: Tx[];
+	withdrawn: boolean;
+	exhausted: boolean;
+	probe?: Probe | undefined;
+}
+
+interface FoldItem {
+	readonly seq: number;
+	readonly outcome: RunOutcome;
+	readonly code?: string | undefined;
+	readonly retryable: boolean;
+}
+
+interface Exec {
+	readonly n: number;
+	evidence: boolean;
+	activity: boolean;
+	result: boolean;
+	afterResult: boolean;
+	endEvidence: boolean;
+	endedBy?: "process_lost" | "session_ended" | "forced" | undefined;
+	settle?: { at: number; readonly opened: number } | undefined;
+	settleExpired: boolean;
+	readonly fold: FoldItem[];
 }
 
 interface Run {
-	id: string;
-	frames: {
-		tag: RunTag;
-		deadline: Deadline;
-		by?: "stop" | "run_now" | "end";
-	}[];
-	result?:
-		| { outcome: RunOutcome; reason: EndReason; specific?: boolean }
-		| undefined;
-	terminal?: RunEnded;
-	nativeOpen: boolean;
-	nativeDeadline?: number | undefined;
-	cleanup?: { at: number; stage: "close" | "kill" } | undefined;
-}
-interface Admission {
-	id: string;
-	run?: string | undefined;
-	role: "initial" | "steer";
-	priority: boolean;
-	states: InputState[];
-	cancelled: boolean;
-}
-interface Interaction {
-	id: string;
-	run: string;
-	kind: "permission" | "question";
-	views: InteractionView[];
-	answer?: unknown;
-	timeoutAt?: number | undefined;
-}
-type Due = { at: number } & (
-	| { role: "run"; run: Run; deadline: DeadlineKind }
-	| { role: "native"; run: Run }
-	| { role: "retry"; source: Send }
-	| { role: "permission"; interaction: Interaction }
-	| { role: "cleanup"; run: Run; stage: "close" | "kill" }
-);
-interface Send {
-	issued: IssuedEffect;
-	run?: string | undefined;
-	purpose: string;
+	readonly runId: string;
+	readonly origin: "input" | "wake";
+	readonly wakeTask?: TaskKey | undefined;
+	readonly inputs: string[];
+	phase: "Queued" | "Launched" | "Interrupting" | "Ended";
+	by?: InterruptBy | undefined;
+	asked: boolean;
+	exec: Exec;
 	retryAt?: number | undefined;
+	readonly wakeLabels: Label[];
+}
+
+interface Input {
+	readonly inputId: string;
+	readonly delivery: "queue" | "steer";
+	runId?: string | undefined;
+	failed?: string | undefined;
+}
+
+interface Wake {
+	readonly label: Label;
+	readonly runId?: string | undefined;
+	ended?:
+		| "result"
+		| "own"
+		| "process_lost"
+		| "session_ended"
+		| "forced"
+		| undefined;
+	outcome?: FoldItem | undefined;
+}
+
+interface Interaction {
+	readonly interactionId: string;
+	readonly kind: "permission" | "question";
+	readonly label: Label;
+	readonly opened: number;
+	answer?: unknown | undefined;
+	deliveries: number[];
+	resolved: boolean;
+}
+
+interface NativeCommandRec {
+	readonly commandId: string;
+	readonly send: number;
+	state:
+		| "Sent"
+		| "Started"
+		| "Queued"
+		| "Unconfirmed"
+		| "Completed"
+		| "Cancelled"
+		| "Failed";
+	code?: string | undefined;
+	/** Time left while paused (8.5): the deadline resumes with it. */
+	remaining: number;
+	deadline?: { at: number; readonly opened: number } | undefined;
+}
+
+type TaskState =
+	| { readonly tag: "Unknown"; readonly label: Label }
+	| { readonly tag: "Known"; readonly label: Label; readonly tasks: Task[] };
+
+interface Runner {
+	latest: Label;
 	retired: boolean;
-	outcomes: Evidence[];
-	input?: Admission | undefined;
+	tasks: TaskState;
 }
 
-const last = <T>(values: readonly T[]): T => {
-	const value = values.at(-1);
-	assert(value !== undefined, "reference history must contain a fact");
-	return value;
-};
+type StopItem =
+	| { readonly tag: "tx"; readonly send: number; readonly tx: number }
+	| { readonly tag: "wake"; readonly wake: number };
 
-/** The replay workspace is discarded after every external command. */
-class Reconstruction {
-	readonly sends: Send[] = [];
-	readonly runs: Run[] = [];
-	readonly admissions: Admission[] = [];
-	readonly interactions: Interaction[] = [];
-	readonly terminals: RunEnded[] = [];
-	paused = false;
-	inactive = false;
-	now = 100;
-	private ids = 0;
+interface World {
+	readonly sessionId: string;
+	readonly provider: ProviderKind;
+	readonly mutation?: Mutation | undefined;
+	step: number;
+	seq: number;
+	readonly runs: Run[];
+	readonly inputs: Map<string, Input>;
+	readonly sends: Send[];
+	readonly tokens: Map<string, { send: number; tx: number }>;
+	readonly mainRuns: Map<string, { runId: string; open: boolean }>;
+	readonly seen: Set<string>;
+	/** The seq of the last session end or rejected resume (3.4). */
+	freshSince: number;
+	readonly runners: Map<string, Runner>;
+	current: string | null;
+	readonly retirements: Set<string>;
+	readonly wakes: Wake[];
+	readonly interactions: Interaction[];
+	readonly nativeCommands: NativeCommandRec[];
+	readonly lostWork: LostWork[];
+	readonly lostDecided: Set<Label>;
+	stop?:
+		| { readonly at: number; readonly opened: number; items: StopItem[] }
+		| undefined;
+	confirm?:
+		| {
+				readonly step: "retire" | "end_session";
+				readonly runId?: string | undefined;
+		  }
+		| undefined;
+	pendingEnd?: { readonly runId: string } | undefined;
+	snapshotEntry: number;
+	lastNotified?: TaskKey | undefined;
+}
 
-	constructor(
-		readonly provider: ProviderKind,
-		readonly mutation?: Mutation,
-	) {}
+interface Step {
+	readonly now: number;
+	readonly policy: DecideContext["policy"];
+	readonly newId: () => string;
+	readonly effects: IssuedEffect[];
+	readonly ended: RunEnded[];
+}
 
-	private active(): Run | undefined {
-		return this.runs.find((run) => !run.terminal);
-	}
-	private currentInput(id: string): Admission | undefined {
-		return this.admissions
-			.slice()
-			.reverse()
-			.find((input) => input.id === id);
-	}
-	private inputView(input: Admission): InputView {
-		const state = last(input.states);
-		return {
-			inputId: input.id,
-			state,
-			uncertain: state.tag === "Delivered" && state.certainty === "unknown",
-		};
-	}
-	private issue(effect: RunEffect, purpose: string): Send {
-		for (const prior of this.sends) {
-			if (prior.purpose === purpose) {
-				prior.retired = true;
-				prior.retryAt = undefined;
-			}
-		}
-		const send: Send = {
-			issued: { token: `reference-send-${++this.ids}` as SendToken, effect },
-			purpose,
-			// A missing probe response must retry even without a transport outcome.
-			retryAt: effect.kind === "probe" ? this.now + policy.closeMs : undefined,
-			retired: false,
-			outcomes: [],
-			...("runId" in effect ? { run: effect.runId } : {}),
-		};
-		this.sends.push(send);
-		return send;
-	}
-	private frame(run: Run, tag: RunTag, kind: DeadlineKind, duration: number) {
-		const previous = run.frames.at(-1);
-		const deadline = { at: this.now + duration, kind };
-		run.frames.push({
-			tag,
-			deadline,
-			...(tag === "Interrupting" && previous?.by ? { by: previous.by } : {}),
-		});
-	}
-	private carry(input: Admission, run: Run, kind: "start" | "steer") {
-		input.run = run.id;
-		input.role = kind === "start" ? "initial" : "steer";
-		if (kind === "start") run.nativeOpen = true;
-		input.states.push({ tag: "Delivered", certainty: "sent" });
-		const send = this.issue(
-			{ kind, runId: run.id, inputId: input.id },
-			`input:${run.id}:${this.admissions.indexOf(input)}`,
-		);
-		send.input = input;
-	}
-	private unresolvedNative(): Send[] {
-		return this.sends.filter((send) => {
-			const effect = send.issued.effect;
-			const run = this.runs.find((item) => item.id === send.run);
-			if (!run?.terminal || send.retired) return false;
-			if (
-				(effect.kind === "start" || effect.kind === "steer") &&
-				run.nativeOpen
-			)
-				return true;
-			if (
-				!["close", "kill_and_respawn", "cancel_request", "interrupt"].includes(
-					effect.kind,
-				)
-			)
-				return false;
-			if (this.provider !== "opencode" && effect.kind === "interrupt")
-				return false;
+type Outcome =
+	| { readonly tag: "Rejected"; readonly diagnostic: string }
+	| { readonly tag: "Noop"; readonly diagnostic?: string | undefined }
+	| { readonly tag: "Changed"; readonly diagnostic?: string | undefined };
+
+const changed: Outcome = { tag: "Changed" };
+const noop = (diagnostic?: string): Outcome => ({ tag: "Noop", diagnostic });
+const rejected = (diagnostic: string): Outcome => ({
+	tag: "Rejected",
+	diagnostic,
+});
+
+const transportRank = {
+	Issued: 0,
+	Retrying: 1,
+	Failed: 2,
+	Unknown: 3,
+	Sent: 4,
+} as const;
+const consumptionRank = {
+	None: 0,
+	NotConsumed: 1,
+	Observed: 2,
+	Accepted: 3,
+} as const;
+
+/** 3.5: each chain merges by join (maximum). */
+function joinTransport(a: Transport, b: Transport): Transport {
+	if (a.tag === "Retrying" && b.tag === "Retrying")
+		return { tag: "Retrying", at: Math.min(a.at, b.at) };
+	if (a.tag === "Failed" && b.tag === "Failed")
+		return { tag: "Failed", code: a.code < b.code ? a.code : b.code };
+	return transportRank[b.tag] > transportRank[a.tag] ? b : a;
+}
+function joinConsumption(a: Consumption, b: Consumption): Consumption {
+	if (a.tag === "NotConsumed" && b.tag === "NotConsumed")
+		return a.why < b.why ? a : b;
+	return consumptionRank[b.tag] > consumptionRank[a.tag] ? b : a;
+}
+
+function splitLabel(label: Label): { runnerId: string; querySeq: number } {
+	const at = label.lastIndexOf(":");
+	return at < 0
+		? { runnerId: label, querySeq: 0 }
+		: {
+				runnerId: label.slice(0, at),
+				querySeq: Number(label.slice(at + 1)) || 0,
+			};
+}
+
+const reportsTasks = (provider: ProviderKind) =>
+	provider === "claude" || provider === "codex";
+
+/** Section 9 fence members: start and steer; OpenCode adds cancel_request and its abort. */
+const fenceMember = (provider: ProviderKind, kind: RunEffect["kind"]) =>
+	kind === "start" ||
+	kind === "steer" ||
+	(provider === "opencode" &&
+		(kind === "interrupt" || kind === "cancel_request"));
+
+/** 3.6: the reached test. */
+function value(tx: Tx): Value {
+	if (tx.consumption.tag === "Observed" || tx.consumption.tag === "Accepted")
+		return "reached";
+	if (tx.unheld || tx.notSent || tx.released || tx.resumeRejected)
+		return "never";
+	return "possibly";
+}
+function unconsumed(tx: Tx): boolean {
+	if (value(tx) !== "possibly") return false;
+	if (tx.consumption.tag === "NotConsumed")
+		return tx.consumption.why !== "released";
+	return tx.retryable || tx.permanent !== undefined;
+}
+/** D52: a transmission is sealed at its first closing fact, reading its value then. */
+function seal(tx: Tx): void {
+	tx.sealed ??= { value: value(tx), unconsumed: unconsumed(tx) };
+}
+const sealedValue = (tx: Tx): Value => tx.sealed?.value ?? value(tx);
+
+function findRun(world: World, runId: string | null | undefined) {
+	return runId === null || runId === undefined
+		? undefined
+		: world.runs.find((run) => run.runId === runId);
+}
+
+function workEnded(world: World, send: Send, tx: Tx): boolean {
+	if (tx.ended !== undefined) return true;
+	const effect = send.effect;
+	switch (effect.kind) {
+		case "interrupt":
+			// D59: a runner provider's interrupt is no member; it ends with the Runs it names, at once with none.
+			if (world.provider !== "opencode")
+				return findRun(world, effect.runId)?.phase !== "Interrupting";
+			return false;
+		case "deliver_answer":
 			return (
-				!send.outcomes.some(
-					(item) =>
-						item.kind === "effect_outcome" && item.outcome.tag === "succeeded",
-				) && !send.retired
+				world.interactions.find(
+					(item) => item.interactionId === effect.interactionId,
+				)?.resolved ?? true
 			);
-		});
-	}
-	private startWaiting() {
-		if (this.inactive || this.active()) return;
-		const waiting = this.admissions.filter(
-			(input) =>
-				!input.run && !input.cancelled && last(input.states).tag === "Queued",
-		);
-		const input = waiting.find((item) => item.priority) ?? waiting[0];
-		if (
-			!input ||
-			(this.paused && !input.priority && this.mutation !== "ignore_pause")
-		)
-			return;
-		const run: Run = {
-			id: `reference-run-${++this.ids}`,
-			frames: [],
-			nativeOpen: false,
-		};
-		this.runs.push(run);
-		input.run = run.id;
-		if (this.unresolvedNative().length) {
-			this.frame(run, "Queued", "fence", policy.fenceMs);
-			this.issue(
-				{ kind: "probe", runId: run.id, target: { tag: "native_session" } },
-				`native-probe:${run.id}`,
+		case "stop_task": {
+			// 3.5, 8.4: a stop_task's work is its task.
+			const tasks = taskView(world);
+			return !(
+				tasks.tag === "unknown" ||
+				(tasks.tag === "live" &&
+					tasks.tasks.some((task) => sameKey(task.key, effect.key)))
 			);
-		} else {
-			this.carry(input, run, "start");
-			this.frame(run, "Starting", "start", policy.startMs);
 		}
-	}
-	private releaseWaiting() {
-		const run = this.active();
-		if (
-			!this.inactive &&
-			run &&
-			last(run.frames).tag === "Queued" &&
-			!this.unresolvedNative().length
-		) {
-			const input = this.admissions.find((item) => item.run === run.id);
-			if (input) this.carry(input, run, "start");
-			this.frame(run, "Starting", "start", policy.startMs);
-		} else this.startWaiting();
-	}
-	private acceptInput(input: Admission, nativeMessageId?: string) {
-		const previous = input.states.find(
-			(state) =>
-				state.tag === "Accepted" && state.nativeMessageId !== undefined,
-		);
-		const id =
-			previous?.tag === "Accepted" ? previous.nativeMessageId : nativeMessageId;
-		input.states.push({
-			tag: "Accepted",
-			...(id !== undefined ? { nativeMessageId: id } : {}),
-			...(input.cancelled ? { cancelled: true as const } : {}),
-		});
-		for (const send of this.sends)
-			if (send.input === input) {
-				send.retryAt = undefined;
-				if (send.issued.effect.kind === "probe") send.retired = true;
-			}
-	}
-	private consumeAnswer(item: Interaction) {
-		item.views.push({
-			tag: "Answered",
-			interactionId: item.id,
-			kind: item.kind,
-			delivery: "settled",
-		});
-		item.timeoutAt = undefined;
-		for (const send of this.sends) {
-			const effect = send.issued.effect;
-			if (
-				send.run === item.run &&
-				((effect.kind === "deliver_answer" &&
-					effect.interactionId === item.id) ||
-					(effect.kind === "probe" &&
-						effect.target.tag === "interaction" &&
-						effect.target.interactionId === item.id))
-			) {
-				send.retired = true;
-				send.retryAt = undefined;
-			}
-		}
-	}
-	private probeInput(input: Admission, runId: string) {
-		const send = this.issue(
-			{ kind: "probe", runId, target: { tag: "input", inputId: input.id } },
-			`input-probe:${runId}:${this.admissions.indexOf(input)}`,
-		);
-		send.input = input;
-	}
-	private finish(
-		run: Run,
-		outcome: RunOutcome,
-		reason: EndReason,
-		cleanup = false,
-	) {
-		if (run.terminal) return;
-		run.terminal = { runId: run.id, outcome, reason };
-		this.terminals.push(run.terminal);
-		for (const send of this.sends) {
-			if (send.run !== run.id) continue;
-			const effect = send.issued.effect;
-			if (effect.kind === "start" || effect.kind === "steer")
-				send.retryAt = undefined;
-			// Run lifecycle ends now; native work and answer delivery can outlive it.
-			if (
-				(run.nativeOpen &&
-					(effect.kind === "start" || effect.kind === "steer")) ||
-				effect.kind === "deliver_answer" ||
-				(effect.kind === "probe" && effect.target.tag !== "native_session") ||
-				(run.cleanup && ["close", "kill_and_respawn"].includes(effect.kind)) ||
-				(this.provider === "opencode" && effect.kind === "interrupt")
-			)
-				continue;
-			send.retired = true;
-			send.retryAt = undefined;
-		}
-		for (const interaction of this.interactions)
-			if (interaction.run === run.id) interaction.timeoutAt = undefined;
-		if (outcome !== "completed") this.paused = true;
-		for (const input of this.admissions.filter((item) => item.run === run.id)) {
-			if (input.role !== "steer" || last(input.states).tag === "Accepted")
-				continue;
-			if (last(input.states).tag === "Declined") continue;
-			input.run = undefined;
-			input.states.push({ tag: "Delivered", certainty: "unknown" });
-			if (!this.inactive) this.probeInput(input, run.id);
-		}
-		if (cleanup && !this.inactive) this.cleanup(run);
-		this.startWaiting();
-	}
-	private cleanup(run: Run) {
-		if (this.provider === "opencode") {
-			this.issue({ kind: "cancel_request", runId: run.id }, `cancel:${run.id}`);
-			this.issue({ kind: "interrupt", runId: run.id }, `abort:${run.id}`);
-			this.issue(
-				{ kind: "probe", runId: run.id, target: { tag: "native_session" } },
-				`native-probe:${run.id}`,
+		case "send_native_command": {
+			const command = world.nativeCommands.find(
+				(item) => item.commandId === effect.commandId,
 			);
-		} else {
-			this.issue({ kind: "close", runId: run.id }, `close:${run.id}`);
+			return (
+				command === undefined ||
+				["Completed", "Cancelled", "Failed"].includes(command.state)
+			);
 		}
-		run.nativeDeadline = undefined;
-		run.cleanup = { at: this.now + policy.closeMs, stage: "close" };
-	}
-
-	private settleResult(run: Run) {
-		if (run.result) this.finish(run, run.result.outcome, run.result.reason);
-	}
-	private reject(diagnostic: string): ReferenceResult {
-		return { tag: "Rejected", diagnostic, effects: [], ended: [] };
-	}
-	private admit(id: string, priority: boolean): string | undefined {
-		const existing = this.currentInput(id);
-		if (existing && this.inputView(existing).uncertain)
-			return "uncertain input requires provider proof before readmission";
-		if (
-			existing &&
-			(!existing.run ||
-				!this.runs.find((run) => run.id === existing.run)?.terminal)
-		)
-			return "input already admitted";
-		const input: Admission = {
-			id,
-			role: "initial",
-			priority,
-			states: [{ tag: "Queued" }],
-			cancelled: false,
-		};
-		this.admissions.push(input);
-		const active = this.active();
-		if (priority && active) this.interrupt(active, "run_now");
-		else if (
-			active &&
-			!this.inactive &&
-			!this.paused &&
-			["Starting", "Running"].includes(last(active.frames).tag)
-		)
-			this.carry(input, active, "steer");
-		else this.startWaiting();
-		return undefined;
-	}
-	private interrupt(run: Run, by: "stop" | "run_now" | "end") {
-		if (last(run.frames).tag === "Interrupting") return;
-		for (const send of this.sends)
-			if (
-				send.run === run.id &&
-				["start", "steer"].includes(send.issued.effect.kind)
-			)
-				send.retryAt = undefined;
-		this.issue(
-			{ kind: by === "end" ? "end_session" : "interrupt", runId: run.id },
-			`interrupt:${run.id}`,
-		);
-		this.frame(run, "Interrupting", "interrupt", policy.interruptMs);
-		last(run.frames).by = by;
-	}
-	private answer(item: Interaction, answer: unknown) {
-		item.answer = answer;
-		item.views.push({
-			tag: "Answered",
-			interactionId: item.id,
-			kind: item.kind,
-			delivery: "sent",
-		});
-		this.issue(
-			{
-				kind: "deliver_answer",
-				runId: item.run,
-				interactionId: item.id,
-				answer,
-			},
-			`answer:${item.run}:${item.id}`,
-		);
-		item.timeoutAt = undefined;
-	}
-
-	apply(command: LedgerCommand, now: number): ReferenceResult {
-		this.now = now;
-		const beforeSends = this.sends.length;
-		const beforeTerminals = this.terminals.length;
-		let diagnostic: string | undefined;
-		switch (command.verb) {
-			case "admit":
-				diagnostic = this.admit(command.inputId, command.runNow);
-				break;
-			case "control": {
-				const control = command.control;
-				const run = this.active();
-				switch (control.kind) {
-					case "stop":
-					case "end":
-						this.paused = true;
-						if (run) this.interrupt(run, control.kind);
-						break;
-					case "resume":
-						this.paused = false;
-						this.startWaiting();
-						break;
-					case "run_now": {
-						const input = this.currentInput(control.inputId);
-						if (input && !input.run) {
-							input.priority = true;
-							if (run) this.interrupt(run, "run_now");
-							else this.startWaiting();
-						} else diagnostic = this.admit(control.inputId, true);
-						break;
-					}
-					case "cancel_input": {
-						const input = this.currentInput(control.inputId);
-						if (!input) {
-							diagnostic = "unknown input";
-							break;
-						}
-						if (last(input.states).tag === "Accepted") {
-							diagnostic = "accepted input cannot be recalled";
-							break;
-						}
-						input.cancelled = true;
-						if (last(input.states).tag === "Queued")
-							input.states.push({ tag: "Declined", reason: "cancelled" });
-						else {
-							input.states.push({ tag: "Delivered", certainty: "unknown" });
-							if (input.run && !this.inactive)
-								this.probeInput(input, input.run);
-						}
-						break;
-					}
-					case "answer": {
-						const item = this.interactions
-							.slice()
-							.reverse()
-							.find(
-								(interaction) =>
-									interaction.id === control.interactionId &&
-									interaction.run === run?.id,
-							);
-						if (!item || last(item.views).tag !== "Pending")
-							diagnostic = "interaction is not pending";
-						else {
-							item.answer = control.answer;
-							const ambiguous = this.sends.some(
-								(send) =>
-									send.run === item.run &&
-									send.issued.effect.kind === "deliver_answer" &&
-									send.issued.effect.interactionId === item.id &&
-									send.outcomes.some(
-										(evidence) =>
-											evidence.kind === "effect_outcome" &&
-											evidence.outcome.tag === "delivery_unknown",
-									),
-							);
-							const reconciling = this.sends.some(
-								(send) =>
-									!send.retired &&
-									send.run === item.run &&
-									send.issued.effect.kind === "probe" &&
-									send.issued.effect.target.tag === "interaction" &&
-									send.issued.effect.target.interactionId === item.id,
-							);
-							if (!ambiguous || !reconciling) this.answer(item, control.answer);
-						}
-						break;
-					}
-				}
-				break;
-			}
-			case "observe":
-				diagnostic = this.observe(command.observation);
-				break;
-			case "settle": {
-				const settlement = command.settlement;
-				if (
-					settlement.kind === "project_inactive" ||
-					settlement.kind === "session_ended"
-				) {
-					const previouslyInactive = this.inactive;
-					this.inactive = true;
-					this.paused = true;
-					const run = this.active();
-					if (run)
-						this.finish(
-							run,
-							"error",
-							settlement.kind === "project_inactive"
-								? { kind: "project_inactive" }
-								: { kind: "session_ended", cause: settlement.cause },
-						);
-					for (const send of this.sends) send.retired = true;
-					for (const owner of this.runs) {
-						owner.nativeOpen = false;
-						owner.nativeDeadline = undefined;
-						owner.cleanup = undefined;
-					}
-					this.inactive =
-						settlement.kind === "project_inactive" || previouslyInactive;
-				} else if (settlement.kind === "alarm_fired") {
-					let due = this.deadlines()[0];
-					while (due && due.at <= now) {
-						this.fire(due);
-						due = this.deadlines()[0];
-					}
-				} else {
-					const send = this.sends.find(
-						(item) => item.issued.token === settlement.token,
-					);
-					if (!send || send.retired) break;
-					if (!["start", "steer"].includes(send.issued.effect.kind))
-						diagnostic = "process loss needs a query send";
-					else {
-						const run = this.runs.find((item) => item.id === send.run);
-						if (run && !run.terminal) {
-							run.nativeOpen = false;
-							this.finish(run, "error", { kind: "process_lost" });
-						}
-					}
-				}
-				break;
-			}
-		}
-		if (diagnostic) return this.reject(diagnostic);
-		return {
-			tag: "Accepted",
-			effects: this.sends.slice(beforeSends).map((send) => send.issued),
-			ended: this.terminals.slice(beforeTerminals),
-			...(this.deadlines()[0] ? { alarmAt: this.deadlines()[0]?.at } : {}),
-		};
-	}
-
-	/** Scan the owners each time. There is no scheduler history to reconcile. */
-	private deadlines(): Due[] {
-		if (this.inactive) return [];
-		const due: Due[] = [];
-		for (const run of this.runs) {
-			if (!run.terminal) {
-				const deadline = last(run.frames).deadline;
-				due.push({
-					role: "run",
-					run,
-					deadline: deadline.kind,
-					at: deadline.at,
-				});
-			}
-			if (run.nativeOpen && run.nativeDeadline !== undefined)
-				due.push({ role: "native", run, at: run.nativeDeadline });
-			if (run.cleanup) due.push({ role: "cleanup", run, ...run.cleanup });
-		}
-		for (const send of this.sends)
-			if (!send.retired && send.retryAt !== undefined)
-				due.push({ role: "retry", source: send, at: send.retryAt });
-		for (const interaction of this.interactions)
-			if (interaction.timeoutAt !== undefined)
-				due.push({
-					role: "permission",
-					interaction,
-					at: interaction.timeoutAt,
-				});
-		return due.sort((a, b) => a.at - b.at);
-	}
-
-	private observe(observation: Observation): string | undefined {
-		const send = this.sends.find(
-			(item) => item.issued.token === observation.token,
-		);
-		if (!send) return undefined;
-		const effect = send.issued.effect;
-		const kind = observation.kind;
-		const query = effect.kind === "start" || effect.kind === "steer";
-		const receipt =
-			["input_accepted", "input_declined", "accounting"].includes(kind) ||
-			(kind === "interaction_resolved" && effect.kind === "deliver_answer") ||
-			(kind === "probe_result" &&
-				effect.kind === "probe" &&
-				effect.target.tag !== "native_session");
-		// Even stale known tokens must reject an impossible producer/evidence pairing.
-		if (
-			([
-				"started",
-				"activity",
-				"result",
-				"query_ended",
-				"interaction_requested",
-				"input_accepted",
-				"input_declined",
-				"accounting",
-			].includes(kind) &&
-				!query) ||
-			(kind === "interaction_resolved" &&
-				!query &&
-				effect.kind !== "deliver_answer") ||
-			(kind === "probe_result" && effect.kind !== "probe")
-		)
-			return "evidence kind cannot be produced by this send";
-		if (kind === "probe_result" && effect.kind === "probe") {
-			const expected =
-				effect.target.tag === "input"
-					? ["input_present", "input_absent"]
-					: effect.target.tag === "interaction"
-						? ["answer_consumed", "answer_pending"]
-						: ["native_idle", "native_busy"];
-			if (!expected.includes(observation.finding.tag))
-				return "probe finding does not match target";
-		}
-		if (
-			observation.kind === "interaction_resolved" &&
-			effect.kind === "deliver_answer" &&
-			observation.interactionId !== effect.interactionId
-		)
-			return "answer token belongs to another interaction";
-		if (send.retired && !receipt) return undefined;
-		const run = this.runs.find((item) => item.id === send.run);
-		if (query && run?.terminal && !receipt && kind !== "query_ended")
-			return undefined;
-		const liveReceipt = !send.retired && !this.inactive;
-		const nativeMessageId =
-			observation.kind === "input_accepted"
-				? observation.nativeMessageId
-				: observation.kind === "probe_result" &&
-						observation.finding.tag === "input_present"
-					? observation.finding.nativeMessageId
-					: undefined;
-		const accepted = send.input?.states.find(
-			(state) =>
-				state.tag === "Accepted" && state.nativeMessageId !== undefined,
-		);
-		if (
-			accepted?.tag === "Accepted" &&
-			nativeMessageId !== undefined &&
-			accepted.nativeMessageId !== nativeMessageId
-		)
-			return "native input identity cannot change";
-		send.outcomes.push(observation);
-		const input = send.input;
-		switch (kind) {
-			case "accounting":
-				break;
-			case "input_accepted":
-				if (input) this.acceptInput(input, observation.nativeMessageId);
-				if (
-					run &&
-					!run.terminal &&
-					last(run.frames).tag === "Settling" &&
-					this.mutation === "extend_settle"
-				)
-					this.frame(run, "Settling", "settle", policy.settleMs);
-				if (
-					run?.nativeDeadline !== undefined &&
-					this.mutation === "extend_settle"
-				)
-					run.nativeDeadline = this.now + policy.settleMs;
-				break;
-			case "input_declined":
-				if (input && last(input.states).tag !== "Accepted") {
-					for (const prior of this.sends)
-						if (prior.input === input) prior.retryAt = undefined;
-					input.states.push({ tag: "Declined", reason: observation.reason });
-					input.run = undefined;
-					input.states.push({ tag: "Queued" });
-				}
-				break;
-			case "started":
-				if (run && !run.terminal && last(run.frames).tag === "Starting")
-					this.frame(run, "Running", "liveness", policy.livenessMs);
-				break;
-			case "activity":
-				if (run && !run.terminal) {
-					if (["Starting", "Running"].includes(last(run.frames).tag))
-						this.frame(run, "Running", "liveness", policy.livenessMs);
-					else if (
-						last(run.frames).tag === "Settling" &&
-						this.mutation === "extend_settle"
-					)
-						this.frame(run, "Settling", "settle", policy.settleMs);
-				}
-				break;
-			case "result":
-				if (run && !run.terminal) {
-					const previous = run.result;
-					const result: NonNullable<Run["result"]> = {
-						outcome: observation.outcome,
-						reason:
-							observation.outcome === "error"
-								? {
-										kind: "provider_error",
-										code: observation.error?.code ?? "provider_error",
-										retryable: observation.error?.retryable ?? false,
-									}
-								: observation.outcome === "interrupted"
-									? {
-											kind: "interrupted",
-											by: last(run.frames).by ?? "stop",
-											forced: false,
-										}
-									: { kind: "completed" },
-						specific: observation.error !== undefined,
-					};
-					if (
-						!previous ||
-						(result.outcome === "error" &&
-							(previous.outcome !== "error" ||
-								(!previous.specific && result.specific))) ||
-						(result.outcome === "completed" &&
-							previous.outcome === "interrupted")
-					)
-						run.result = result;
-					if (this.provider === "opencode") {
-						if (last(run.frames).tag !== "Settling")
-							this.frame(run, "Settling", "settle", policy.settleMs);
-					} else {
-						if (this.provider === "claude")
-							run.nativeDeadline ??= this.now + policy.settleMs;
-						else run.nativeOpen = false;
-						this.settleResult(run);
-					}
-				}
-				break;
-			case "query_ended":
-				if (run) {
-					run.nativeOpen = false;
-					run.nativeDeadline = undefined;
-					for (const prior of this.sends)
-						if (
-							prior.run === run.id &&
-							(["start", "steer"].includes(prior.issued.effect.kind) ||
-								(this.provider !== "opencode" &&
-									["interrupt", "close", "kill_and_respawn"].includes(
-										prior.issued.effect.kind,
-									)))
-						) {
-							prior.retired = true;
-							prior.retryAt = undefined;
-						}
-					if (this.provider !== "opencode") run.cleanup = undefined;
-					if (run.terminal) {
-						this.releaseWaiting();
-						break;
-					}
-					if (!run.result)
-						run.result = {
-							outcome: "completed",
-							reason: { kind: "completed" },
-						};
-					this.settleResult(run);
-					this.releaseWaiting();
-				}
-				break;
-			case "interaction_requested":
-				if (
-					run &&
-					!run.terminal &&
-					!this.interactions.some(
-						(item) =>
-							item.run === run.id && item.id === observation.interactionId,
-					)
-				) {
-					const item: Interaction = {
-						id: observation.interactionId,
-						run: run.id,
-						kind: observation.interactionKind,
-						views: [
-							{
-								tag: "Pending",
-								interactionId: observation.interactionId,
-								kind: observation.interactionKind,
-							},
-						],
-					};
-					this.interactions.push(item);
-					if (item.kind === "permission" && observation.timeoutAt !== undefined)
-						item.timeoutAt = observation.timeoutAt;
-				}
-				break;
-			case "interaction_resolved": {
-				const item = this.interactions
-					.slice()
-					.reverse()
-					.find(
-						(interaction) =>
-							interaction.id === observation.interactionId &&
-							interaction.run === send.run,
-					);
-				if (item) this.consumeAnswer(item);
-				break;
-			}
-			case "effect_outcome":
-				this.effectOutcome(send, observation.outcome);
-				break;
-			case "probe_result": {
-				if (effect.kind !== "probe") break;
-				send.retired = true;
-				send.retryAt = undefined;
-				const finding = observation.finding;
-				if (effect.target.tag === "input") {
-					const admission = send.input;
-					if (admission && finding.tag === "input_present")
-						this.acceptInput(admission, finding.nativeMessageId);
-					if (
-						admission &&
-						finding.tag === "input_absent" &&
-						last(admission.states).tag !== "Accepted"
-					)
-						admission.states.push(
-							admission.cancelled
-								? { tag: "Declined", reason: "cancelled" }
-								: { tag: "Queued" },
-						);
-				} else if (effect.target.tag === "interaction") {
-					const id = effect.target.interactionId;
-					const item = this.interactions
-						.slice()
-						.reverse()
-						.find(
-							(interaction) =>
-								interaction.id === id && interaction.run === send.run,
-						);
-					if (item && finding.tag === "answer_consumed")
-						this.consumeAnswer(item);
-					if (
-						item &&
-						finding.tag === "answer_pending" &&
-						liveReceipt &&
-						!this.inactive
-					)
-						this.answer(item, item.answer);
-				} else if (finding.tag === "native_idle") {
-					const order = this.sends.indexOf(send);
-					for (const prior of this.sends.slice(0, order)) {
-						const instruction = prior.issued.effect;
-						// Idle proves native readiness, not an input or answer receipt.
-						if (
-							instruction.kind === "deliver_answer" ||
-							(instruction.kind === "probe" &&
-								instruction.target.tag !== "native_session")
-						)
-							continue;
-						// OpenCode status cannot cancel a still-in-flight HTTP command.
-						if (
-							this.provider === "opencode" &&
-							["start", "steer", "interrupt", "cancel_request"].includes(
-								prior.issued.effect.kind,
-							) &&
-							!prior.outcomes.some(
-								(item) =>
-									item.kind === "effect_outcome" &&
-									["succeeded", "permanent"].includes(item.outcome.tag),
-							)
-						)
-							continue;
-						prior.retired = true;
-						prior.retryAt = undefined;
-					}
-					send.retired = true;
-					send.retryAt = undefined;
-					for (const owner of this.runs) {
-						const remaining = this.sends.filter(
-							(item) => !item.retired && item.run === owner.id,
-						);
-						if (
-							!remaining.some((item) =>
-								["start", "steer"].includes(item.issued.effect.kind),
-							)
-						) {
-							owner.nativeOpen = false;
-							owner.nativeDeadline = undefined;
-						}
-						if (
-							!remaining.some((item) =>
-								[
-									"close",
-									"kill_and_respawn",
-									"cancel_request",
-									"interrupt",
-								].includes(item.issued.effect.kind),
-							)
-						)
-							owner.cleanup = undefined;
-					}
-					if (
-						run &&
-						!run.terminal &&
-						["Running", "Settling"].includes(last(run.frames).tag) &&
-						!run.nativeOpen
-					)
-						this.finish(
-							run,
-							run.result?.outcome ?? "completed",
-							run.result?.reason ?? { kind: "completed" },
-						);
-					this.releaseWaiting();
-				} else if (
-					finding.tag === "native_busy" &&
-					run &&
-					!run.terminal &&
-					last(run.frames).tag === "Running"
-				)
-					this.frame(run, "Running", "liveness", policy.livenessMs);
-				break;
-			}
-		}
-		return undefined;
-	}
-
-	private effectOutcome(
-		send: Send,
-		outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
-	) {
-		const effect = send.issued.effect;
-		const run = this.runs.find((item) => item.id === send.run);
-		const input = send.input;
-		if (effect.kind === "probe") {
-			if (outcome.tag === "retryable") send.retryAt = outcome.retryAt;
-			return;
-		}
-		const interaction =
-			"interactionId" in effect
-				? this.interactions
-						.slice()
-						.reverse()
-						.find(
-							(item) =>
-								item.id === effect.interactionId && item.run === send.run,
-						)
-				: undefined;
-		// Native receipts outrank an interpreter outcome delivered afterwards.
-		if (
-			input?.states.some(
-				(state) => state.tag === "Accepted" || state.tag === "Declined",
-			)
-		)
-			return;
-		const answerView = interaction ? last(interaction.views) : undefined;
-		if (answerView?.tag === "Answered" && answerView.delivery === "settled")
-			return;
-		if (outcome.tag === "retryable") {
-			if (
-				input &&
-				this.inputView(input).uncertain &&
-				run &&
-				(effect.kind === "start" || effect.kind === "steer")
-			) {
-				this.probeInput(input, run.id);
-				return;
-			}
-			if (interaction)
-				interaction.views.push({
-					tag: "Answered",
-					interactionId: interaction.id,
-					kind: interaction.kind,
-					delivery: "queued",
-				});
-			send.retryAt = outcome.retryAt;
-		} else if (outcome.tag === "delivery_unknown") {
-			send.retryAt = undefined;
-			if (input && run) {
-				input.states.push({ tag: "Delivered", certainty: "unknown" });
-				if (this.mutation === "resend_unknown")
-					this.carry(input, run, effect.kind === "steer" ? "steer" : "start");
-				else this.probeInput(input, run.id);
-			} else if (interaction && run) {
-				interaction.views.push({
-					tag: "Answered",
-					interactionId: interaction.id,
-					kind: interaction.kind,
-					delivery: "unknown",
-				});
-				this.issue(
-					{
-						kind: "probe",
-						runId: run.id,
-						target: { tag: "interaction", interactionId: interaction.id },
-					},
-					`answer-probe:${run.id}:${interaction.id}`,
-				);
-			}
-		} else if (outcome.tag === "permanent") {
-			send.retryAt = undefined;
-			if (interaction) {
-				// A terminal failure is visible as a still-pending request, never a false consumption.
-				interaction.views.push({
-					tag: "Pending",
-					interactionId: interaction.id,
-					kind: interaction.kind,
-				});
-				this.issue(
-					{
-						kind: "probe",
-						runId: interaction.run,
-						target: { tag: "interaction", interactionId: interaction.id },
-					},
-					`answer-probe:${interaction.run}:${interaction.id}`,
-				);
-			} else if (effect.kind === "kill_and_respawn") {
-				send.retired = true;
-				if (run) run.cleanup = undefined;
-				this.issue(
-					{ kind: "quarantine", runId: effect.runId },
-					`quarantine:${effect.runId}`,
-				);
-			} else if (effect.kind === "interrupt" && run && !run.terminal) {
-				if (this.provider !== "opencode") this.cleanup(run);
-			} else if (effect.kind === "steer" && input) {
-				input.run = undefined;
-				input.states.push({ tag: "Queued" });
-			} else if (run && !run.terminal && effect.kind === "start") {
-				run.nativeOpen = false;
-				this.finish(run, "error", { kind: "refused", code: outcome.code });
-			}
-		} else if (outcome.tag === "succeeded") {
-			send.retryAt = undefined;
-			if (
-				[
-					"close",
-					"kill_and_respawn",
-					"cancel_request",
-					"end_session",
-					"quarantine",
-				].includes(effect.kind)
-			) {
-				send.retired = true;
-				if (
-					run &&
-					["close", "kill_and_respawn", "end_session"].includes(effect.kind)
-				) {
-					run.nativeOpen = false;
-					run.nativeDeadline = undefined;
-					run.cleanup = undefined;
-					for (const prior of this.sends)
-						if (
-							prior.run === run.id &&
-							["start", "steer", "close", "kill_and_respawn"].includes(
-								prior.issued.effect.kind,
-							)
-						) {
-							prior.retired = true;
-							prior.retryAt = undefined;
-						}
-				}
-				this.releaseWaiting();
-			}
-		}
-	}
-
-	private fire(due: Due) {
-		if (due.role === "permission") {
-			due.interaction.timeoutAt = undefined;
-			if (last(due.interaction.views).tag === "Pending")
-				this.answer(due.interaction, { decision: "reject", reason: "timeout" });
-			return;
-		}
-		if (due.role === "retry") {
-			const original = due.source;
-			original.retryAt = undefined;
-			if (!original || original.retired || this.inactive) return;
-			const effect = original.issued.effect;
-			const query = effect.kind === "start" || effect.kind === "steer";
-			if (
-				query &&
-				original.input?.states.some(
-					(state) => state.tag === "Accepted" || state.tag === "Declined",
-				)
-			)
-				return;
-			if (
-				query &&
-				original.input &&
-				last(original.input.states).tag === "Delivered" &&
-				this.inputView(original.input).uncertain
-			)
-				return;
-			const run = this.runs.find((item) => item.id === original.run);
-			if (effect.kind === "deliver_answer") {
-				const interaction = this.interactions
-					.slice()
-					.reverse()
-					.find(
-						(item) =>
-							item.id === effect.interactionId && item.run === effect.runId,
-					);
-				const view = interaction ? last(interaction.views) : undefined;
-				if (!view || (view.tag === "Answered" && view.delivery === "settled"))
-					return;
-			}
-			if (effect.kind === "start" || effect.kind === "steer") {
-				if (
-					!run ||
-					run.terminal ||
-					(this.paused && !original.input?.priority) ||
-					!["Starting", "Running"].includes(last(run.frames).tag)
-				)
-					return;
-			}
-			if (effect.kind === "start" && run && !run.terminal) {
-				for (const previous of this.sends)
-					if (previous.run === run.id) previous.retired = true;
-				this.issue(effect, original.purpose).input = original.input;
-				run.result = undefined;
-				run.nativeOpen = true;
-				this.frame(run, "Starting", "start", policy.startMs);
-			} else this.issue(effect, original.purpose).input = original.input;
-			if (effect.kind === "deliver_answer") {
-				const item = this.interactions
-					.slice()
-					.reverse()
-					.find(
-						(interaction) =>
-							interaction.id === effect.interactionId &&
-							interaction.run === effect.runId,
-					);
-				if (item)
-					item.views.push({
-						tag: "Answered",
-						interactionId: item.id,
-						kind: item.kind,
-						delivery: "sent",
-					});
-			}
-			return;
-		}
-		const run = due.run;
-		if (due.role === "native") {
-			run.nativeDeadline = undefined;
-			this.cleanup(run);
-			return;
-		}
-		if (due.role === "cleanup") {
-			run.cleanup = undefined;
-			if (this.inactive) return;
-			if (due.stage === "close" && this.provider !== "opencode") {
-				for (const previous of this.sends)
-					if (
-						previous.run === run.id &&
-						previous.issued.effect.kind === "close"
-					)
-						previous.retired = true;
-				this.issue(
-					{ kind: "kill_and_respawn", runId: run.id },
-					`kill:${run.id}`,
-				);
-				run.cleanup = { at: this.now + policy.closeMs, stage: "kill" };
-			} else
-				this.issue(
-					{ kind: "quarantine", runId: run.id },
-					`quarantine:${run.id}`,
-				);
-			return;
-		}
-		if (run.terminal) return;
-		switch (due.deadline) {
-			case "start":
-				this.finish(
-					run,
-					"error",
-					{ kind: "deadline_expired", deadline: "start" },
-					true,
-				);
-				break;
-			case "interrupt":
-				this.finish(
-					run,
-					"interrupted",
-					{
-						kind: "interrupted",
-						by: last(run.frames).by ?? "stop",
-						forced: true,
-					},
-					true,
-				);
-				break;
-			case "liveness":
-				this.issue(
-					{ kind: "probe", runId: run.id, target: { tag: "native_session" } },
-					`native-probe:${run.id}`,
-				);
-				this.frame(run, "Running", "liveness", policy.livenessMs);
-				break;
-			case "settle":
-				this.finish(
-					run,
-					run.result?.outcome ?? "error",
-					run.result?.reason ?? {
-						kind: "deadline_expired",
-						deadline: "settle",
-					},
-					true,
-				);
-				break;
-			case "fence":
-				this.finish(run, "error", { kind: "fence_unconfirmed" });
-				break;
-			default:
-				break;
-		}
-	}
-
-	view(): LedgerView {
-		const run = this.active();
-		const frame = run?.frames.at(-1);
-		return {
-			paused: this.paused,
-			...(run && frame
-				? {
-						active: {
-							runId: run.id,
-							...frame,
-							inputs: this.admissions
-								.filter((input) => input.run === run.id)
-								.map((input) => this.inputView(input)),
-							interactions: this.interactions
-								.filter((item) => item.run === run.id)
-								.map((item) => last(item.views)),
-						},
-					}
-				: {}),
-			inbox: this.admissions
-				.filter((input) => !input.run && !input.cancelled)
-				.map((input) => this.inputView(input)),
-			live: this.sends
-				.filter((send) => !send.retired)
-				.map((send) => send.issued),
-		};
+		case "probe":
+			return true;
+		default:
+			return false;
 	}
 }
 
-export class HistoryReference {
-	readonly history: { command: LedgerCommand; now: number }[] = [];
-	private reconstruction: Reconstruction;
-	constructor(
-		readonly provider: ProviderKind,
-		readonly mutation?: Mutation,
+/** 3.5 mayStillAct; a probe only reads, so it never may act (8.3, D31). */
+function mayStillAct(world: World, send: Send, tx: Tx): boolean {
+	if (workEnded(world, send, tx)) return false;
+	switch (tx.consumption.tag) {
+		case "Accepted":
+		case "Observed":
+			return true;
+		case "NotConsumed":
+			return false;
+		case "None":
+			return tx.transport.tag !== "Retrying" && tx.transport.tag !== "Failed";
+	}
+}
+
+const sameKey = (a: TaskKey, b: TaskKey) =>
+	a.taskId === b.taskId && a.runId === b.runId;
+
+function taskView(world: World): TasksView {
+	const runner =
+		world.current === null ? undefined : world.runners.get(world.current);
+	if (runner === undefined || !reportsTasks(world.provider))
+		return { tag: "none" };
+	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest)
+		return { tag: "unknown", label: runner.latest };
+	return runner.tasks.tasks.length === 0
+		? { tag: "none" }
+		: { tag: "live", label: runner.latest, tasks: runner.tasks.tasks };
+}
+
+function labelWorkOutstanding(world: World): boolean {
+	return (
+		world.wakes.some((wake) => wake.ended === undefined) ||
+		world.sends.some(
+			(send) =>
+				fenceMember(world.provider, send.effect.kind) &&
+				send.txs.some((tx) => mayStillAct(world, send, tx)),
+		)
+	);
+}
+
+/** 3.6: a send with no transmission is sealed once a try ended before transmitting or its Run was asked. */
+function sendSealed(run: Run, send: Send): boolean {
+	const latest = send.txs.at(-1);
+	return latest === undefined ? run.asked : latest.sealed !== undefined;
+}
+function sendValue(send: Send): Value {
+	const values = send.txs.map(sealedValue);
+	return values.includes("reached")
+		? "reached"
+		: values.includes("possibly")
+			? "possibly"
+			: "never";
+}
+function sendUnconsumed(send: Send): boolean {
+	return (
+		sendValue(send) === "possibly" &&
+		send.txs
+			.filter((tx) => sealedValue(tx) === "possibly")
+			.every((tx) => tx.sealed?.unconsumed ?? unconsumed(tx))
+	);
+}
+
+const runSends = (world: World, run: Run) =>
+	world.sends.filter(
+		(send) => send.runId === run.runId && send.exec === run.exec.n,
+	);
+const deliverySends = (world: World, run: Run) =>
+	runSends(world, run).filter(
+		(send) => send.effect.kind === "start" || send.effect.kind === "steer",
+	);
+
+/** 3.6 D50: Launched with every start and steer never handed over, and no execution evidence. */
+function notYetDelivered(world: World, run: Run): boolean {
+	return (
+		run.phase === "Queued" ||
+		(!run.exec.evidence &&
+			deliverySends(world, run).every((send) => sendValue(send) === "never"))
+	);
+}
+
+/** 3.6 retry pending: from a retrying outcome until its next transmission, an acceptance, Stop or the Run's end. */
+function retryPending(world: World, run: Run, send: Send): boolean {
+	const latest = send.txs.at(-1);
+	if (
+		latest === undefined ||
+		run.asked ||
+		send.withdrawn ||
+		send.exhausted ||
+		latest.sealed === undefined ||
+		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		latest.resumeRejected ||
+		latest.stopOwn ||
+		send.txs.some((tx) => tx.consumption.tag === "Accepted") ||
+		notYetDelivered(world, run)
+	)
+		return false;
+	return (
+		latest.notSent ||
+		latest.unheld ||
+		latest.released ||
+		(latest.declined && send.effect.kind === "start") ||
+		latest.absent ||
+		(latest.retryable && latest.consumption.tag === "None")
+	);
+}
+
+/** Sends a Run's end waits for (3.8 condition 2); a runner provider's interrupt ends with its Run (D59). */
+const runWork = (world: World, run: Run) =>
+	runSends(world, run).filter(
+		(send) =>
+			send.effect.kind !== "probe" &&
+			send.effect.kind !== "deliver_answer" &&
+			send.effect.kind !== "end_session" &&
+			(world.provider === "opencode" || send.effect.kind !== "interrupt"),
+	);
+
+/** 3.8 condition 2. */
+function nothingMayAct(world: World, run: Run): boolean {
+	const work = runWork(world, run);
+	return (
+		deliverySends(world, run).every((send) => sendSealed(run, send)) &&
+		work.every(
+			(send) =>
+				!send.txs.some((tx) => mayStillAct(world, send, tx)) &&
+				!retryPending(world, run, send),
+		) &&
+		!(
+			run.exec.evidence &&
+			!run.exec.endEvidence &&
+			run.exec.endedBy === undefined
+		)
+	);
+}
+
+/** 3.8 outcome fold (5C, 10A): failure beats success, specific beats generic, completion beats an interrupt. */
+function fold(
+	items: readonly FoldItem[],
+	asked: boolean,
+): Pick<RunEnded, "outcome" | "reason"> {
+	const failures = items
+		.filter((item) => item.outcome === "error")
+		.sort(
+			(a, b) =>
+				Number(a.code === undefined) - Number(b.code === undefined) ||
+				a.seq - b.seq ||
+				(a.code ?? "").localeCompare(b.code ?? ""),
+		);
+	const failure = failures[0];
+	if (failure !== undefined)
+		return {
+			outcome: "error",
+			reason: {
+				tag: "provider_error",
+				code: failure.code ?? "provider_error",
+				retryable: failure.retryable,
+			},
+		};
+	if (items.some((item) => item.outcome === "completed"))
+		return { outcome: "completed", reason: { tag: "completed" } };
+	// 3.8 condition 2.4: main's terminal is in the fold (run_terminal, `error` as provider_error, not
+	// retryable); with neither it nor a result (a wake Run, 8.3) the end reads completed. Asked keeps
+	// condition 1's interrupt fallback.
+	return asked || items.some((item) => item.outcome === "interrupted")
+		? { outcome: "interrupted", reason: { tag: "interrupted", forced: false } }
+		: { outcome: "completed", reason: { tag: "completed" } };
+}
+
+/** 3.8 5C: delivery_unknown with no later proof is a failure coded delivery_indeterminate. */
+function foldItems(world: World, run: Run): FoldItem[] {
+	return [
+		...run.exec.fold,
+		...deliverySends(world, run).flatMap((send) =>
+			send.txs
+				.filter(
+					(tx) =>
+						tx.transport.tag === "Unknown" &&
+						consumptionRank[tx.consumption.tag] < 2 &&
+						!tx.resulted,
+				)
+				.map(
+					(tx): FoldItem => ({
+						seq: tx.seq,
+						outcome: "error",
+						code: "delivery_indeterminate",
+						retryable: false,
+					}),
+				),
+		),
+	];
+}
+
+function endRun(
+	world: World,
+	step: Step,
+	run: Run,
+	ended: Pick<RunEnded, "outcome" | "reason">,
+): void {
+	run.phase = "Ended";
+	run.retryAt = undefined;
+	run.exec.settle = undefined;
+	step.ended.push({ runId: run.runId, ...ended });
+	if (world.confirm?.runId === run.runId) world.confirm = undefined;
+	// 8.4: end stops the Run, then issues end_session once it is Ended.
+	if (world.pendingEnd?.runId === run.runId) {
+		world.pendingEnd = undefined;
+		gateEndSession(world, step, run.runId);
+	}
+}
+
+/** The first specific permanent code, or the cap (3.8 reason 2.2, 4.3). */
+function refusal(world: World, run: Run): string | undefined {
+	const sends = deliverySends(world, run);
+	if (sends.some((send) => send.exhausted))
+		return "provider_send_attempts_exhausted";
+	return sends
+		.flatMap((send) => send.txs)
+		.filter((tx) => tx.permanent !== undefined && !tx.resumeRejected)
+		.sort((a, b) => a.seq - b.seq)[0]?.permanent;
+}
+
+function wakeEnd(
+	world: World,
+	run: Run,
+): Pick<RunEnded, "outcome" | "reason"> | undefined {
+	const latest = run.wakeLabels.at(-1);
+	const wake = [...world.wakes]
+		.reverse()
+		.find((item) => item.label === latest && item.runId === run.runId);
+	if (wake?.ended === undefined) return undefined;
+	switch (wake.ended) {
+		case "process_lost":
+		case "session_ended":
+			return { outcome: "error", reason: { tag: wake.ended } };
+		case "forced":
+			return {
+				outcome: "interrupted",
+				reason: {
+					tag: "interrupted",
+					forced: world.mutation !== "unforced_alarm",
+				},
+			};
+		default:
+			return fold(wake.outcome === undefined ? [] : [wake.outcome], run.asked);
+	}
+}
+
+/** 3.8: the one Run-end rule, with 3.6's unlaunch, to a fixpoint, then advance. */
+function reconcile(world: World, step: Step): void {
+	for (let moved = true; moved; ) {
+		moved = false;
+		for (const run of world.runs) {
+			if (run.phase === "Ended") continue;
+			if (run.phase === "Queued") {
+				if (run.asked) {
+					endRun(world, step, run, {
+						outcome: "interrupted",
+						reason: { tag: "interrupted", forced: false },
+					});
+					moved = true;
+				}
+				continue;
+			}
+			if (run.origin === "wake") {
+				const ended = wakeEnd(world, run);
+				if (ended !== undefined) {
+					endRun(world, step, run, ended);
+					moved = true;
+				}
+				continue;
+			}
+			if (run.exec.endEvidence) {
+				endRun(world, step, run, fold(foldItems(world, run), run.asked));
+				moved = true;
+				continue;
+			}
+			if (!nothingMayAct(world, run)) continue;
+			moved = true;
+			const sends = deliverySends(world, run);
+			const code = refusal(world, run);
+			if (notYetDelivered(world, run) && !run.asked) {
+				if (code !== undefined) {
+					endRun(world, step, run, {
+						outcome: "error",
+						reason: { tag: "refused", code },
+					});
+					continue;
+				}
+				// 3.6 D50: unlaunch back to Queued; the execution's sends are dropped.
+				for (const send of sends)
+					for (const tx of send.txs) tx.ended ??= "dropped";
+				run.retryAt = sends.flatMap((send) => send.txs).at(-1)?.retryAt;
+				run.phase = "Queued";
+				if (sends.some((send) => send.txs.some((tx) => tx.resumeRejected)))
+					world.freshSince = world.seq;
+				continue;
+			}
+			const covered = sends
+				.flatMap((send) => send.txs)
+				.filter(
+					(tx) =>
+						sealedValue(tx) !== "never" &&
+						(tx.ended === "process_lost" || tx.ended === "session_ended"),
+				);
+			const firstCode = fold(foldItems(world, run), false);
+			if (
+				run.asked ||
+				sends.some((send) =>
+					send.txs.some(
+						(tx) =>
+							tx.consumption.tag === "NotConsumed" &&
+							tx.consumption.why === "cancelled",
+					),
+				)
+			) {
+				const forced = runWork(world, run).some((send) =>
+					send.txs.some((tx) => tx.ended === "forced"),
+				);
+				endRun(world, step, run, {
+					outcome: "interrupted",
+					reason: {
+						tag: "interrupted",
+						forced: forced && world.mutation !== "unforced_alarm",
+					},
+				});
+			} else if (
+				code !== undefined &&
+				sends.every(
+					(send) => sendValue(send) === "never" || sendUnconsumed(send),
+				)
+			)
+				endRun(world, step, run, {
+					outcome: "error",
+					reason: { tag: "refused", code },
+				});
+			else if (covered.length > 0 || run.exec.endedBy !== undefined) {
+				const cause =
+					covered.some((tx) => tx.ended === "session_ended") ||
+					run.exec.endedBy === "session_ended"
+						? "session_ended"
+						: "process_lost";
+				endRun(world, step, run, {
+					outcome: "error",
+					reason:
+						firstCode.reason.tag === "provider_error"
+							? { tag: cause, code: firstCode.reason.code }
+							: { tag: cause },
+				});
+			} else endRun(world, step, run, fold(foldItems(world, run), run.asked));
+		}
+	}
+	// 8.4: a gate releases once the tasks it reads are neither live nor unknown.
+	if (world.confirm !== undefined && taskView(world).tag === "none") {
+		const gate = world.confirm;
+		world.confirm = undefined;
+		if (gate.step === "end_session")
+			foldEndSession(world, step, gate.runId ?? null);
+	}
+}
+
+/** 3.4: a user Run's id is main's, the runId of the run.requested that reserves it. */
+function reserve(world: World, runId: string, inputId: string): Run {
+	const run: Run = {
+		runId,
+		origin: "input",
+		inputs: [inputId],
+		phase: "Queued",
+		asked: false,
+		exec: newExec(0),
+		wakeLabels: [],
+	};
+	world.runs.push(run);
+	const input = world.inputs.get(inputId);
+	if (input !== undefined) input.runId = run.runId;
+	return run;
+}
+
+const newExec = (n: number): Exec => ({
+	n,
+	evidence: false,
+	activity: false,
+	result: false,
+	afterResult: false,
+	endEvidence: false,
+	settleExpired: false,
+	fold: [],
+});
+
+function launch(run: Run): void {
+	run.phase = "Launched";
+	run.retryAt = undefined;
+	run.exec = newExec(run.exec.n + 1);
+}
+
+function currentLabel(world: World): Label | null {
+	return world.current === null
+		? null
+		: (world.runners.get(world.current)?.latest ?? null);
+}
+
+function issue(
+	world: World,
+	effect: RunEffect,
+	held: boolean,
+	label: Label | null = currentLabel(world),
+): Send {
+	const run = findRun(world, "runId" in effect ? effect.runId : null);
+	const send: Send = {
+		seq: world.seq++,
+		effect,
+		held,
+		runId: run?.runId ?? null,
+		exec: run?.exec.n ?? 0,
+		label,
+		txs: [],
+		withdrawn: false,
+		exhausted: false,
+	};
+	world.sends.push(send);
+	return send;
+}
+
+function transmit(
+	world: World,
+	send: Send,
+	token: SendToken | undefined,
+	runnerId: string | null = world.current,
+	label: Label | null = send.label,
+): Tx {
+	const tx: Tx = {
+		token,
+		seq: world.seq++,
+		label,
+		runnerId,
+		transport: { tag: "Issued" },
+		consumption: { tag: "None" },
+		unheld: token === undefined,
+		notSent: false,
+		released: false,
+		resumeRejected: false,
+		stopOwn: false,
+		retryable: false,
+		declined: false,
+		absent: false,
+		resulted: false,
+	};
+	send.txs.push(tx);
+	if (token !== undefined)
+		world.tokens.set(token, {
+			send: world.sends.indexOf(send),
+			tx: send.txs.length - 1,
+		});
+	return tx;
+}
+
+/** A Tokened effect with no hold, its token from ctx.newId (3.13). */
+function fold1(world: World, step: Step, effect: RunEffect): Send {
+	const send = issue(world, effect, false);
+	const token = step.newId() as SendToken;
+	transmit(world, send, token);
+	if (
+		effect.kind === "probe" ||
+		effect.kind === "stop_task" ||
+		effect.kind === "cancel_request"
+	)
+		step.effects.push({ tag: "Tokened", token, effect });
+	return send;
+}
+
+/** 3.7: probe transmission n's retry deadline is its issue plus max(probeMs, backoff(n)). */
+const backoff = (n: number) => [1_000, 2_000, 4_000, 8_000][n - 1] ?? 30_000;
+
+function probe(
+	world: World,
+	step: Step,
+	runId: string | null,
+	target: Probe["target"],
+	subject?: Probe["subject"],
+): void {
+	const send = fold1(world, step, { kind: "probe", runId, target });
+	send.probe = {
+		target,
+		subject,
+		deadline: {
+			at: step.now + Math.max(step.policy.probeMs, backoff(1)),
+			opened: world.step,
+		},
+		answered: false,
+		busy: false,
+		done: false,
+	};
+}
+
+function reprobe(world: World, step: Step, send: Send, probe: Probe): void {
+	const n = send.txs.length + 1;
+	if (n > 5) {
+		// 3.7: past the cap the probe ends with no finding.
+		probe.done = true;
+		probe.deadline = undefined;
+		return;
+	}
+	const token = step.newId() as SendToken;
+	transmit(world, send, token);
+	step.effects.push({ tag: "Tokened", token, effect: send.effect });
+	probe.answered = false;
+	probe.busy = false;
+	probe.deadline = {
+		at: step.now + Math.max(step.policy.probeMs, backoff(n)),
+		opened: world.step,
+	};
+}
+
+function foldEndSession(world: World, step: Step, runId: string | null): void {
+	fold1(world, step, {
+		kind: "end_session",
+		runId,
+		label: currentLabel(world),
+	});
+}
+
+/** 8.4: the end_session step is confirm-gated with tasks live or unknown. */
+function gateEndSession(world: World, step: Step, runId: string | null): void {
+	if (taskView(world).tag === "none") foldEndSession(world, step, runId);
+	else world.confirm = { step: "end_session", runId: runId ?? undefined };
+}
+
+/** 3.4 session end: covers earlier sends; the next start is fresh. */
+function sessionEnd(
+	world: World,
+	before: number,
+	cause: "session_ended",
+): void {
+	world.freshSince = world.seq;
+	for (const send of world.sends)
+		for (const tx of send.txs)
+			if (tx.seq < before) {
+				seal(tx);
+				tx.ended ??= cause;
+			}
+	for (const run of world.runs)
+		if (run.phase !== "Ended" && run.exec.evidence) run.exec.endedBy ??= cause;
+	for (const wake of world.wakes) wake.ended ??= cause;
+	for (const interaction of world.interactions) interaction.resolved = true;
+	const label = currentLabel(world);
+	if (label !== null) decideLostWork(world, label);
+}
+
+/** L5: each label's lost work is decided once, when its scope first ends. */
+function decideLostWork(world: World, label: Label): void {
+	if (world.lostDecided.has(label)) return;
+	world.lostDecided.add(label);
+	const runner = world.runners.get(splitLabel(label).runnerId);
+	const tasks = runner?.tasks;
+	if (tasks === undefined || tasks.tag === "Unknown" || tasks.label !== label) {
+		if (reportsTasks(world.provider))
+			world.lostWork.push({ label, tag: "unknown" });
+		return;
+	}
+	if (tasks.tasks.length > 0)
+		world.lostWork.push({ label, tag: "known", tasks: tasks.tasks });
+}
+
+/** A label newer than its runner's latest raises it (8.4 snapshotEntry, L5). */
+function noteLabel(world: World, label: Label): "older" | "current" {
+	const { runnerId, querySeq } = splitLabel(label);
+	const runner = world.runners.get(runnerId);
+	if (runner === undefined) {
+		world.runners.set(runnerId, {
+			latest: label,
+			retired: false,
+			tasks: reportsTasks(world.provider)
+				? { tag: "Unknown", label }
+				: { tag: "Known", label, tasks: [] },
+		});
+		world.current ??= runnerId;
+		return "current";
+	}
+	if (runner.retired) return "older";
+	const latest = splitLabel(runner.latest).querySeq;
+	if (querySeq < latest) return "older";
+	if (querySeq > latest) {
+		decideLostWork(world, runner.latest);
+		runner.latest = label;
+		// D44: the newer label's tasks are unknown until its first snapshot (8.4).
+		runner.tasks = reportsTasks(world.provider)
+			? { tag: "Unknown", label }
+			: { tag: "Known", label, tasks: [] };
+		world.snapshotEntry++;
+	}
+	return "current";
+}
+
+/** Evidence kinds each effect can produce as an Answer (3.4). */
+function producible(world: World, send: Send, evidence: Evidence): boolean {
+	const kind = send.effect.kind;
+	switch (evidence.kind) {
+		case "run_dispatched":
+		case "run_released":
+		case "delivery_indeterminate":
+		case "runner_reply":
+		case "journal_answer":
+			return send.held;
+		case "effect_outcome":
+			return !send.held;
+		case "started":
+		case "input_accepted":
+		case "input_declined":
+		case "activity":
+		case "result":
+		case "query_ended":
+		case "accounting":
+		case "interaction_requested":
+			return kind === "start" || kind === "steer";
+		case "command_lifecycle":
+			return (
+				world.provider === "claude" &&
+				(kind === "start" || kind === "steer" || kind === "send_native_command")
+			);
+		case "command_result":
+			return kind === "send_native_command";
+		case "interaction_resolved":
+			return kind === "deliver_answer";
+		case "probe_result":
+			return kind === "probe";
+		default:
+			return false;
+	}
+}
+
+function interactionOf(world: World, interactionId: string) {
+	return world.interactions.find(
+		(item) => item.interactionId === interactionId,
+	);
+}
+
+function requestInteraction(
+	world: World,
+	label: Label,
+	evidence: Extract<Evidence, { kind: "interaction_requested" }>,
+): Outcome {
+	if (interactionOf(world, evidence.interactionId) !== undefined)
+		return noop("interaction already requested");
+	world.interactions.push({
+		interactionId: evidence.interactionId,
+		kind: evidence.interactionKind,
+		label,
+		opened: world.step,
+		deliveries: [],
+		resolved: false,
+	});
+	return changed;
+}
+
+/** 3.10: the first answer decision wins (user or timeout). */
+function answerInteraction(
+	world: World,
+	step: Step,
+	interaction: Interaction,
+	answer: unknown,
+): void {
+	interaction.answer ??= answer;
+	const run = world.runs.find(
+		(item) =>
+			item.phase !== "Ended" &&
+			(item.wakeLabels.includes(interaction.label) ||
+				world.sends.some(
+					(send) =>
+						send.runId === item.runId &&
+						send.txs.some((tx) => tx.label === interaction.label),
+				)),
+	);
+	const send = fold1(world, step, {
+		kind: "deliver_answer",
+		runId: run?.runId ?? null,
+		label: interaction.label,
+		interactionId: interaction.interactionId,
+		answer: interaction.answer,
+	});
+	interaction.deliveries.push(world.sends.indexOf(send));
+}
+
+function wakeOn(world: World, label: Label) {
+	return world.wakes.find(
+		(wake) => wake.label === label && wake.ended === undefined,
+	);
+}
+
+function activeInputRun(world: World) {
+	return world.runs.find(
+		(run) => run.phase !== "Ended" && run.origin === "input",
+	);
+}
+function activeRun(world: World) {
+	return (
+		activeInputRun(world) ??
+		world.runs.find((run) => run.phase !== "Ended" && run.origin === "wake")
+	);
+}
+
+/** Unsolicited observations (3.4, 8.3): named by (label, event id). */
+function unsolicited(
+	world: World,
+	step: Step,
+	observation: Extract<
+		Extract<LedgerCommand, { verb: "observe" }>["observation"],
+		{ tag: "Unsolicited" }
+	>,
+): Outcome {
+	const key = `${observation.label}\u0000${observation.eventId}`;
+	if (world.seen.has(key)) return noop("repeated unsolicited observation");
+	if (
+		(observation.kind === "tasks_snapshot" ||
+			observation.kind === "task_event") &&
+		!reportsTasks(world.provider)
+	)
+		return rejected(`${world.provider} reports no background tasks (8.1)`);
+	if (
+		(observation.kind === "command_lifecycle" ||
+			observation.kind === "command_result") &&
+		world.provider !== "claude"
+	)
+		return rejected("command receipts are Claude's (9, D46)");
+	if (observation.kind === "turn_ended" && world.provider !== "claude")
+		return rejected(
+			"only a Claude wake has a turn_ended (3.4, 2.1 row 215, 8.3)",
+		);
+	if (
+		observation.kind === "command_lifecycle" ||
+		observation.kind === "command_result"
 	) {
-		this.reconstruction = new Reconstruction(provider, mutation);
+		const command = world.nativeCommands.find(
+			(item) => item.commandId === observation.commandId,
+		);
+		if (command === undefined)
+			return rejected("a command receipt naming another commandId (D21)");
+		world.seen.add(key);
+		commandReceipt(world, step, command, observation);
+		return changed;
 	}
-	step(command: LedgerCommand, now: number): ReferenceResult {
-		this.history.push({ command, now });
-		const rebuilt = new Reconstruction(this.provider, this.mutation);
-		let result: ReferenceResult = { tag: "Accepted", effects: [], ended: [] };
-		for (const entry of this.history)
-			result = rebuilt.apply(entry.command, entry.now);
-		this.reconstruction = rebuilt;
-		return result;
+	world.seen.add(key);
+	const label = observation.label;
+	const place = noteLabel(world, label);
+	const wake = wakeOn(world, label);
+	switch (observation.kind) {
+		case "tasks_snapshot": {
+			if (place === "older") return noop("older-label snapshot (L1.4)");
+			const runner = world.runners.get(splitLabel(label).runnerId);
+			if (runner === undefined) return noop();
+			runner.tasks = {
+				tag: "Known",
+				label,
+				tasks: observation.tasks.map((task) => ({
+					...task,
+					kind: task.taskType,
+					// 8.2 class: GAP (held loosely, server evidence is 32.33's)
+					class: task.ambient ? "monitoring" : "work",
+				})),
+			};
+			world.snapshotEntry++;
+			return changed;
+		}
+		case "task_event":
+			if (observation.event === "notification")
+				world.lastNotified = observation.key;
+			return changed;
+		case "turn_started": {
+			if (place === "older")
+				return noop("older label gives no wake Run (L1.4)");
+			if (wake !== undefined) return noop("wake execution already outstanding");
+			const userRun = activeInputRun(world);
+			const wakeRun = world.runs.find(
+				(run) => run.phase !== "Ended" && run.origin === "wake",
+			);
+			let runId: string | undefined;
+			if (userRun === undefined) {
+				if (wakeRun !== undefined) {
+					wakeRun.wakeLabels.push(label);
+					runId = wakeRun.runId;
+				} else {
+					const run: Run = {
+						runId: step.newId(),
+						origin: "wake",
+						wakeTask: observation.wakeTask ?? world.lastNotified,
+						inputs: [],
+						phase: "Launched",
+						asked: false,
+						exec: { ...newExec(1), evidence: true },
+						wakeLabels: [label],
+					};
+					world.runs.push(run);
+					runId = run.runId;
+				}
+			}
+			world.wakes.push({ label, runId });
+			return changed;
+		}
+		case "turn_ended":
+			if (wake === undefined)
+				return noop("no wake execution on its label (8.3)");
+			wake.ended = "own";
+			return changed;
+		case "activity":
+			if (wake === undefined)
+				return noop("no wake execution on its label (8.3)");
+			return noop();
+		case "result":
+			if (wake === undefined) {
+				// 3.4: a Claude result naming none, with no wake, names each started send with no result.
+				const started = world.sends.filter(
+					(send) =>
+						(send.effect.kind === "start" || send.effect.kind === "steer") &&
+						send.txs.some(
+							(tx) =>
+								tx.label === label &&
+								tx.consumption.tag !== "None" &&
+								!tx.resulted,
+						),
+				);
+				if (world.provider !== "claude" || started.length === 0)
+					return noop("no wake execution on its label (8.3)");
+				for (const send of started)
+					for (const tx of send.txs)
+						if (tx.label === label && !tx.resulted)
+							answerResult(world, step, send, tx, observation);
+				return changed;
+			}
+			if (world.provider === "opencode") return noop();
+			wake.ended = "result";
+			wake.outcome = {
+				seq: world.seq,
+				outcome: observation.outcome,
+				code: observation.error?.code,
+				retryable: observation.error?.retryable ?? false,
+			};
+			return changed;
+		case "query_ended":
+			if (wake === undefined) {
+				if (world.provider !== "opencode")
+					return noop("no wake execution on its label (8.3)");
+				return queryEnded(world, label) ? changed : noop();
+			}
+			wake.ended = "own";
+			if (world.provider === "opencode") queryEnded(world, label);
+			return changed;
+		case "interaction_requested":
+			return requestInteraction(world, label, observation);
+		case "interaction_resolved": {
+			const interaction = interactionOf(world, observation.interactionId);
+			if (interaction === undefined || interaction.resolved) return noop();
+			interaction.resolved = true;
+			return changed;
+		}
 	}
-	view(): LedgerView {
-		return this.reconstruction.view();
+}
+
+/** OpenCode's query end ends its label's members, aborts and cancel_request included (9). */
+function queryEnded(world: World, label: Label): boolean {
+	let moved = false;
+	for (const send of world.sends)
+		if (fenceMember(world.provider, send.effect.kind))
+			for (const tx of send.txs)
+				if (tx.label === label && tx.ended === undefined) {
+					tx.ended = "evidence";
+					moved = true;
+				}
+	return moved;
+}
+
+function commandReceipt(
+	world: World,
+	step: Step,
+	command: NativeCommandRec,
+	evidence: Extract<
+		Evidence,
+		{ kind: "command_lifecycle" } | { kind: "command_result" }
+	>,
+): void {
+	const state =
+		evidence.kind === "command_result" ? "completed" : evidence.state;
+	const pause = () => {
+		if (command.deadline !== undefined)
+			command.remaining = Math.max(0, command.deadline.at - step.now);
+		command.deadline = undefined;
+	};
+	switch (state) {
+		case "queued":
+			pause();
+			command.state = "Queued";
+			return;
+		case "started":
+			command.deadline ??= {
+				at: step.now + command.remaining,
+				opened: world.step,
+			};
+			command.state = "Started";
+			return;
+		case "completed":
+			command.deadline = undefined;
+			command.state = "Completed";
+			return;
+		case "cancelled":
+			command.deadline = undefined;
+			command.state = "Cancelled";
 	}
-	get issued(): readonly IssuedEffect[] {
-		return this.reconstruction.sends.map((send) => send.issued);
+}
+
+function answerResult(
+	world: World,
+	step: Step,
+	send: Send,
+	tx: Tx,
+	evidence: Extract<Evidence, { kind: "result" }>,
+): void {
+	tx.resulted = true;
+	tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+	seal(tx);
+	const run = findRun(world, send.runId);
+	const authority =
+		run !== undefined &&
+		run.phase !== "Ended" &&
+		send.exec === run.exec.n &&
+		(tx.ended === undefined || tx.ended === "evidence");
+	if (world.provider !== "opencode") tx.ended ??= "evidence";
+	if (!authority || run === undefined) return;
+	run.exec.evidence = true;
+	run.exec.result = true;
+	run.exec.afterResult = false;
+	run.exec.fold.push({
+		seq: send.seq,
+		outcome: evidence.outcome,
+		code: evidence.error?.code,
+		retryable: evidence.error?.retryable ?? false,
+	});
+	if (world.provider === "opencode")
+		// 11A: Settling holds the result until the owned execution ends.
+		// 3.7: Settling is fixed at the result; a later result neither moves nor extends it.
+		run.exec.settle ??= {
+			at: step.now + step.policy.settleMs,
+			opened: world.step,
+		};
+	else run.exec.endEvidence = true;
+}
+
+function answer(
+	world: World,
+	step: Step,
+	observation: Extract<
+		Extract<LedgerCommand, { verb: "observe" }>["observation"],
+		{ tag: "Answer" }
+	>,
+): Outcome {
+	const evidence: Evidence = observation;
+	if (observation.kind === "run_dispatched")
+		return dispatched(world, observation);
+	// D46 (oracle round 10): producibility is the kind's, so it comes before the unknown-token rule.
+	if (
+		(observation.kind === "command_lifecycle" ||
+			observation.kind === "turn_ended") &&
+		world.provider !== "claude"
+	)
+		return rejected(`${observation.kind} is Claude's (3.4, 9, D46)`);
+	const at = world.tokens.get(observation.token);
+	if (at === undefined) return noop("unknown or never-issued token (3.4)");
+	const send = world.sends[at.send];
+	const tx = send?.txs[at.tx];
+	if (send === undefined || tx === undefined)
+		return noop("unknown or never-issued token (3.4)");
+	if (!producible(world, send, evidence))
+		return rejected(
+			`${send.effect.kind} cannot produce ${evidence.kind} evidence (3.4)`,
+		);
+	const run = findRun(world, send.runId);
+	const live =
+		run !== undefined &&
+		run.phase !== "Ended" &&
+		send.exec === run.exec.n &&
+		tx.ended === undefined;
+	switch (evidence.kind) {
+		case "started":
+		case "activity": {
+			const before = tx.consumption.tag;
+			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+			seal(tx);
+			if (!live || run === undefined)
+				return before === tx.consumption.tag ? noop() : changed;
+			const exec = run.exec;
+			const first =
+				!exec.evidence || (evidence.kind === "activity" && !exec.activity);
+			const phase =
+				exec.result && !exec.afterResult && world.provider === "opencode";
+			exec.evidence = true;
+			if (evidence.kind === "activity") exec.activity = true;
+			if (phase && evidence.kind === "activity") {
+				if (world.mutation === "extend_settle")
+					exec.settle = {
+						at: step.now + step.policy.settleMs,
+						opened: world.step,
+					};
+				else {
+					exec.afterResult = true;
+					exec.settle = undefined;
+				}
+			}
+			// 3.8 activity throttling: only repeats within one phase are dropped.
+			return first || phase || before !== tx.consumption.tag ? changed : noop();
+		}
+		case "input_accepted":
+		case "input_declined": {
+			const nativeId =
+				evidence.kind === "input_accepted"
+					? evidence.nativeMessageId
+					: undefined;
+			if (
+				nativeId !== undefined &&
+				tx.nativeMessageId !== undefined &&
+				tx.nativeMessageId !== nativeId
+			)
+				return rejected("a contradicting native id (3.4, 6C)");
+			if (evidence.kind === "input_accepted") {
+				tx.nativeMessageId ??= nativeId;
+				tx.consumption = joinConsumption(tx.consumption, { tag: "Accepted" });
+			} else {
+				tx.declined = true;
+				tx.consumption = joinConsumption(tx.consumption, {
+					tag: "NotConsumed",
+					why: "declined",
+				});
+			}
+			seal(tx);
+			return changed;
+		}
+		case "accounting":
+			if (tx.accounted)
+				return noop("a duplicate accounting receipt (12A, LI2)");
+			tx.accounted = true;
+			return changed;
+		case "interaction_requested":
+			return tx.label === null
+				? noop("an interaction needs a label (3.10)")
+				: requestInteraction(world, tx.label, evidence);
+		case "result":
+			answerResult(world, step, send, tx, evidence);
+			return changed;
+		case "query_ended":
+			if (world.provider !== "opencode")
+				// 9: query_ended ends no Claude send's work, only a wake's.
+				return noop();
+			tx.ended ??= "evidence";
+			if (tx.label !== null) queryEnded(world, tx.label);
+			if (live && run !== undefined) run.exec.endEvidence = true;
+			return changed;
+		case "effect_outcome":
+			return effectOutcome(world, step, send, tx, evidence.outcome);
+		case "run_released": {
+			const reason = evidence.reason;
+			if (reason === "ResumeRejected") {
+				tx.resumeRejected = true;
+				tx.released = true;
+				tx.transport = joinTransport(tx.transport, {
+					tag: "Failed",
+					code: "native_resume_rejected",
+				});
+			} else {
+				tx.released = true;
+				tx.stopOwn = typeof reason === "object" && reason.why === "interrupted";
+				tx.consumption = joinConsumption(tx.consumption, {
+					tag: "NotConsumed",
+					why: "released",
+				});
+			}
+			seal(tx);
+			return changed;
+		}
+		case "delivery_indeterminate":
+			tx.transport = joinTransport(tx.transport, { tag: "Unknown" });
+			seal(tx);
+			openRecovery(world, step, send, tx);
+			return changed;
+		case "runner_reply":
+			return effectOutcome(
+				world,
+				step,
+				send,
+				tx,
+				evidence.outcome.tag === "succeeded"
+					? { tag: "succeeded" }
+					: { tag: "permanent", code: evidence.outcome.code },
+			);
+		case "journal_answer":
+			if (evidence.answer === "uncertain") return noop();
+			if (evidence.answer === "absent") {
+				seal(tx);
+				// 9: a Claude send's work ends at journal absent with no acceptance.
+				if (world.provider === "claude" && tx.consumption.tag !== "Accepted")
+					tx.ended ??= "evidence";
+				return changed;
+			}
+			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+			seal(tx);
+			return changed;
+		case "command_lifecycle":
+		case "command_result": {
+			const commandId =
+				send.effect.kind === "send_native_command"
+					? send.effect.commandId
+					: send.commandId;
+			if (evidence.commandId !== commandId)
+				return rejected("a command receipt naming another commandId (D21)");
+			if (send.effect.kind === "send_native_command") {
+				const command = world.nativeCommands.find(
+					(item) => item.commandId === commandId,
+				);
+				if (command !== undefined)
+					commandReceipt(world, step, command, evidence);
+				return changed;
+			}
+			if (evidence.kind === "command_lifecycle") {
+				if (evidence.state === "cancelled" && tx.consumption.tag === "None") {
+					// 9: cancelled before started is NotConsumed{cancelled}, Stop's own.
+					tx.stopOwn = true;
+					tx.consumption = { tag: "NotConsumed", why: "cancelled" };
+				} else if (evidence.state === "started")
+					tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+				seal(tx);
+			}
+			return changed;
+		}
+		case "interaction_resolved": {
+			if (
+				send.effect.kind !== "deliver_answer" ||
+				send.effect.interactionId !== evidence.interactionId
+			)
+				return rejected(
+					"an answer confirmation names another interaction (10B)",
+				);
+			tx.consumption = joinConsumption(tx.consumption, { tag: "Accepted" });
+			seal(tx);
+			const interaction = interactionOf(world, evidence.interactionId);
+			if (interaction !== undefined) interaction.resolved = true;
+			return changed;
+		}
+		case "probe_result":
+			return probeResult(world, send, tx, evidence.finding);
+		default:
+			return rejected(`${evidence.kind} is never an answer (3.4)`);
 	}
+}
+
+/** The first delivery-recovery probe: a Send deadline at the outcome plus probeMs (3.7, D20). */
+function openRecovery(world: World, step: Step, send: Send, tx: Tx): void {
+	const target = recoveryTarget(send);
+	if (target === undefined) return;
+	if (world.mutation === "probe_at_outcome") {
+		probe(world, step, send.runId, target, {
+			send: world.sends.indexOf(send),
+			tx: send.txs.indexOf(tx),
+		});
+		return;
+	}
+	tx.recovery ??= { at: step.now + step.policy.probeMs, opened: world.step };
+}
+function recoveryTarget(send: Send): Probe["target"] | undefined {
+	const effect = send.effect;
+	if (effect.kind === "start" || effect.kind === "steer")
+		return { tag: "input", inputId: effect.inputId };
+	if (effect.kind === "deliver_answer")
+		return { tag: "interaction", interactionId: effect.interactionId };
+	return undefined;
+}
+
+function effectOutcome(
+	world: World,
+	step: Step,
+	send: Send,
+	tx: Tx,
+	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
+): Outcome {
+	switch (outcome.tag) {
+		case "succeeded":
+			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
+			if (send.effect.kind === "end_session") {
+				seal(tx);
+				tx.ended ??= "evidence";
+				sessionEnd(world, send.seq, "session_ended");
+				return changed;
+			}
+			break;
+		case "retryable":
+			tx.retryable = true;
+			tx.retryAt = outcome.retryAt;
+			tx.refusal = outcome.code;
+			tx.transport = joinTransport(tx.transport, {
+				tag: "Retrying",
+				at: outcome.retryAt,
+			});
+			if (send.probe?.deadline !== undefined && tx === send.txs.at(-1))
+				// 3.7, D20: a probe's deadline is raised to a later retryAt.
+				send.probe.deadline = {
+					at: Math.max(send.probe.deadline.at, outcome.retryAt),
+					opened: send.probe.deadline.opened,
+				};
+			break;
+		case "not_sent":
+			tx.notSent = true;
+			tx.retryAt = outcome.retryAt;
+			tx.transport = joinTransport(tx.transport, {
+				tag: "Retrying",
+				at: outcome.retryAt,
+			});
+			if (send.effect.kind === "send_native_command") {
+				const command = world.nativeCommands.find(
+					(item) => item.send === world.sends.indexOf(send),
+				);
+				// 8.5 (H4): a latest try that got not_sent shows Queued, its deadline paused with the time left.
+				if (
+					command !== undefined &&
+					(command.deadline !== undefined || command.state === "Unconfirmed")
+				) {
+					command.remaining =
+						command.deadline === undefined
+							? 0
+							: Math.max(0, command.deadline.at - step.now);
+					command.deadline = undefined;
+					command.state = "Queued";
+				}
+			}
+			break;
+		case "permanent":
+			tx.permanent = outcome.code;
+			tx.resumeRejected = outcome.code === "native_resume_rejected";
+			tx.transport = joinTransport(tx.transport, {
+				tag: "Failed",
+				code: outcome.code,
+			});
+			failInput(world, send, tx);
+			if (send.effect.kind === "send_native_command") {
+				const command = world.nativeCommands.find(
+					(item) => item.send === world.sends.indexOf(send),
+				);
+				if (command !== undefined) {
+					command.state = "Failed";
+					command.code = outcome.code;
+					command.deadline = undefined;
+				}
+			}
+			if (send.effect.kind === "deliver_answer") {
+				// 3.10 (amends 10B): a permanent refusal ends the delivery, which resolves the interaction.
+				const interaction = interactionOf(world, send.effect.interactionId);
+				if (interaction !== undefined) interaction.resolved = true;
+			}
+			break;
+		case "delivery_unknown":
+			tx.transport = joinTransport(tx.transport, { tag: "Unknown" });
+			seal(tx);
+			openRecovery(world, step, send, tx);
+			return changed;
+	}
+	seal(tx);
+	return changed;
+}
+
+/** D53: a send fails once, at a permanent outcome other than a rejected resume or Stop's own. */
+function failInput(world: World, send: Send, tx: Tx): void {
+	const effect = send.effect;
+	if (
+		(effect.kind !== "start" && effect.kind !== "steer") ||
+		tx.resumeRejected ||
+		tx.stopOwn
+	)
+		return;
+	const input = world.inputs.get(effect.inputId);
+	if (input !== undefined && input.runId === send.runId)
+		input.failed ??= tx.permanent ?? "provider_send_attempts_exhausted";
+}
+
+function probeResult(
+	world: World,
+	send: Send,
+	tx: Tx,
+	finding: Extract<Evidence, { kind: "probe_result" }>["finding"],
+): Outcome {
+	const probe = send.probe;
+	if (probe === undefined)
+		return rejected("probe_result for a non-probe (3.4)");
+	const target = probe.target.tag;
+	const fits =
+		finding.tag === "native_busy" ||
+		(target === "input" &&
+			(finding.tag === "input_present" || finding.tag === "input_absent")) ||
+		(target === "interaction" &&
+			(finding.tag === "answer_consumed" ||
+				finding.tag === "answer_pending")) ||
+		(target === "native_session" && finding.tag === "native_idle");
+	if (!fits)
+		return rejected(`${finding.tag} cannot answer a ${target} probe (3.4)`);
+	const subjectSend =
+		probe.subject === undefined ? undefined : world.sends[probe.subject.send];
+	const subject =
+		probe.subject === undefined
+			? undefined
+			: subjectSend?.txs[probe.subject.tx];
+	if (
+		finding.tag === "input_present" &&
+		finding.nativeMessageId !== undefined &&
+		subjectSend !== undefined &&
+		subjectSend.txs.some(
+			(item) =>
+				item.nativeMessageId !== undefined &&
+				item.nativeMessageId !== finding.nativeMessageId,
+		)
+	)
+		return rejected("a contradicting native id (3.4, 6C)");
+	tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
+	seal(tx);
+	if (probe.done) return noop("late probe answer");
+	if (finding.tag === "native_busy") {
+		probe.busy = true;
+		return changed;
+	}
+	probe.answered = true;
+	probe.done = true;
+	probe.deadline = undefined;
+	switch (finding.tag) {
+		case "input_present":
+			if (subject !== undefined) {
+				subject.nativeMessageId ??= finding.nativeMessageId;
+				subject.consumption = joinConsumption(subject.consumption, {
+					tag: "Observed",
+				});
+				seal(subject);
+			}
+			break;
+		case "input_absent":
+			if (subject !== undefined) {
+				// 9 (decided 2026-10-28): input_absent ends probing; a later acceptance beats it.
+				subject.absent = true;
+				subject.consumption = joinConsumption(subject.consumption, {
+					tag: "NotConsumed",
+					why: "absent",
+				});
+				seal(subject);
+			}
+			break;
+		case "answer_consumed":
+			if (subject !== undefined) {
+				subject.consumption = joinConsumption(subject.consumption, {
+					tag: "Accepted",
+				});
+				seal(subject);
+			}
+			if (probe.target.tag === "interaction") {
+				const interaction = interactionOf(world, probe.target.interactionId);
+				if (interaction !== undefined) interaction.resolved = true;
+			}
+			break;
+		case "answer_pending":
+			if (subject !== undefined) {
+				subject.consumption = joinConsumption(subject.consumption, {
+					tag: "NotConsumed",
+					why: "absent",
+				});
+				seal(subject);
+			}
+			break;
+		case "native_idle":
+			// 9: an idle probe covers sends issued before it whose delivery is confirmed, aborts and
+			// cancel_request session-wide, and OpenCode wake executions (D26).
+			for (const other of world.sends) {
+				if (!fenceMember(world.provider, other.effect.kind)) continue;
+				const sessionWide =
+					other.effect.kind === "interrupt" ||
+					other.effect.kind === "cancel_request";
+				for (const item of other.txs)
+					if (
+						item.seq < tx.seq &&
+						item.ended === undefined &&
+						(sessionWide ||
+							item.resulted ||
+							consumptionRank[item.consumption.tag] >= 2)
+					)
+						item.ended = "evidence";
+			}
+			for (const wake of world.wakes) wake.ended ??= "own";
+			break;
+	}
+	return changed;
+}
+
+/** run.dispatched binds a held issue's transmission by commandId (3.4, 4.11). */
+function dispatched(
+	world: World,
+	observation: Extract<Evidence, { kind: "run_dispatched" }> & {
+		readonly token: SendToken;
+	},
+): Outcome {
+	if (world.tokens.has(observation.token))
+		return noop("repeated run.dispatched");
+	const runner = world.runners.get(observation.runnerId);
+	if (runner?.retired === true)
+		return noop("no hold is written on a retired runner (4.3)");
+	// 3.4: run.dispatched names its Run by main's runId and the issue in that Run by commandId.
+	const run = findRun(world, world.mainRuns.get(observation.runId)?.runId);
+	if (run === undefined) return noop("unknown or never-issued token (3.4)");
+	const held = world.sends.filter(
+		(item) => item.held && item.runId === run.runId,
+	);
+	let send = [...held]
+		.reverse()
+		.find((item) => item.commandId === observation.commandId);
+	if (send !== undefined) {
+		// 3.6: a relaunch is a new transmission of the same Run, in a new execution.
+		if (run.phase === "Queued") {
+			launch(run);
+			send = issue(
+				world,
+				send.effect.kind === "start"
+					? { ...send.effect, mode: nextMode(world) }
+					: send.effect,
+				true,
+			);
+			send.commandId = observation.commandId;
+		} else if (
+			run.phase === "Ended" &&
+			send.txs.some((tx) => tx.ended === "dropped")
+		)
+			return noop("the dropped issue's hold finds no running send (H3)");
+	} else {
+		send = held.find((item) => item.commandId === undefined);
+		if (send === undefined) return noop("unknown or never-issued token (3.4)");
+		send.commandId = observation.commandId;
+	}
+	// holdRun counts n per commandId across a relaunch (4.3); an unheld try took no hold.
+	const holds = world.sends
+		.filter((item) => item.held && item.commandId === observation.commandId)
+		.flatMap((item) => item.txs)
+		.filter((tx) => !tx.unheld).length;
+	if (observation.transmission !== holds + 1)
+		return rejected("run.dispatched transmission out of order (4.3)");
+	transmit(
+		world,
+		send,
+		observation.token,
+		observation.runnerId,
+		runner?.latest ?? send.label,
+	);
+	return changed;
+}
+
+/** 3.4: fresh until a start since the last session end or rejected resume may have reached. */
+function nextMode(world: World): "fresh" | "resume" {
+	return world.sends.some(
+		(send) =>
+			send.effect.kind === "start" &&
+			send.seq > world.freshSince &&
+			send.txs.some((tx) => value(tx) !== "never"),
+	)
+		? "resume"
+		: "fresh";
+}
+
+/** Main's run events (3.4, D60): decide issues no start or steer from one. */
+function mainEvent(
+	world: World,
+	observation: Extract<
+		Extract<LedgerCommand, { verb: "observe" }>["observation"],
+		{ tag: "Main" }
+	>,
+): Outcome {
+	if (world.seen.has(`main\u0000${observation.eventId}`))
+		return noop("repeated main observation (D60)");
+	world.seen.add(`main\u0000${observation.eventId}`);
+	switch (observation.kind) {
+		case "run_requested": {
+			const input = world.inputs.get(observation.inputId);
+			if (input === undefined)
+				return noop("run.requested for an input never admitted");
+			if (input.runId === undefined) {
+				if (activeInputRun(world) !== undefined)
+					return noop("run.requested while another Run is active");
+				// 3.4: the Run is reserved at main's run.requested, under main's runId.
+				reserve(world, observation.runId, input.inputId);
+			}
+			const run = findRun(world, input.runId);
+			if (run === undefined || run.phase === "Ended")
+				return noop("run.requested for an ended Run (3.8)");
+			world.mainRuns.set(observation.runId, { runId: run.runId, open: true });
+			if (run.phase === "Queued") launch(run);
+			const prior = deliverySends(world, run).find(
+				(send) =>
+					"inputId" in send.effect && send.effect.inputId === input.inputId,
+			);
+			const effect: RunEffect =
+				input.delivery === "steer" && run.inputs[0] !== input.inputId
+					? { kind: "steer", runId: run.runId, inputId: input.inputId }
+					: {
+							kind: "start",
+							runId: run.runId,
+							inputId: input.inputId,
+							mode: nextMode(world),
+						};
+			// 3.4: a direct send's run.requested is its transmission, its token the runId; a runner-held
+			// send's names its Run, and run.dispatched is its transmission.
+			const send = prior ?? issue(world, effect, !observation.direct);
+			if (observation.direct)
+				transmit(world, send, observation.runId as SendToken);
+			return changed;
+		}
+		case "run_started": {
+			const input = world.inputs.get(observation.inputId);
+			const target = world.mainRuns.get(observation.requestedRunId);
+			const run = findRun(world, target?.runId);
+			if (input === undefined || run === undefined)
+				return noop("run.started for an unknown run");
+			if (input.runId === run.runId) {
+				// 3.9: a steer that outlived its Run starts its own Run here.
+				if (run.phase === "Ended") return noop();
+				return noop();
+			}
+			const from = findRun(world, input.runId);
+			if (run.phase === "Ended") {
+				// 3.9: a steer its Run's end left unconsumed is a Run of its own, Launched with its send.
+				const own: Run = {
+					// 3.4: a steer's own Run takes main's requested runId.
+					runId: observation.requestedRunId,
+					origin: "input",
+					inputs: [input.inputId],
+					phase: "Launched",
+					asked: false,
+					exec: { ...newExec(1), evidence: true },
+					wakeLabels: [],
+				};
+				world.runs.push(own);
+				input.runId = own.runId;
+				world.mainRuns.set(observation.requestedRunId, {
+					runId: own.runId,
+					open: true,
+				});
+				return changed;
+			}
+			if (from !== undefined) {
+				const at = from.inputs.indexOf(input.inputId);
+				if (at >= 0) from.inputs.splice(at, 1);
+			}
+			if (!run.inputs.includes(input.inputId)) run.inputs.push(input.inputId);
+			input.runId = run.runId;
+			return changed;
+		}
+		case "run_terminal": {
+			const target = world.mainRuns.get(observation.runId);
+			if (target === undefined) return noop("run_terminal for an unknown run");
+			target.open = false;
+			const run = findRun(world, target.runId);
+			if (run === undefined || run.phase === "Ended") return changed;
+			// D59: main's terminal ends its Run's work as main.
+			for (const send of runSends(world, run))
+				for (const tx of send.txs) tx.ended ??= "main";
+			run.exec.fold.push({
+				seq: world.seq,
+				outcome: observation.outcome,
+				code: observation.code,
+				retryable: false,
+			});
+			run.exec.endEvidence = true;
+			return changed;
+		}
+	}
+}
+
+/** Stop, Run now and end commits (5.1, L6, 3.10, 8.4). */
+function commit(
+	world: World,
+	step: Step,
+	by: InterruptBy,
+	deadlineAt: number | null,
+): void {
+	const run = activeRun(world);
+	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
+	const labels = new Set<Label>([
+		...world.wakes
+			.filter((wake) => wake.ended === undefined)
+			.map((wake) => wake.label),
+		...world.sends.flatMap((send) =>
+			fenceMember(world.provider, send.effect.kind)
+				? send.txs
+						.filter((tx) => tx.label !== null && mayStillAct(world, send, tx))
+						.map((tx) => tx.label ?? "")
+				: [],
+		),
+	]);
+	for (const interaction of world.interactions)
+		if (
+			!interaction.resolved &&
+			labels.has(interaction.label) &&
+			!interaction.deliveries.some((index) => {
+				const send = world.sends[index];
+				return send?.txs.some((tx) => mayStillAct(world, send, tx)) ?? false;
+			})
+		)
+			interaction.resolved = true;
+	if (run !== undefined) {
+		run.asked = true;
+		if (run.phase !== "Queued") {
+			run.phase = "Interrupting";
+			run.by = by;
+		}
+		for (const send of runSends(world, run)) send.withdrawn = true;
+	}
+	// 5.1: a Run nothing of which may act ends at once with no effect; with neither it nor label
+	// work, Stop issues nothing (REDESIGN-6 r2).
+	const acting =
+		run !== undefined && run.phase !== "Queued" && !nothingMayAct(world, run);
+	if (acting || labelWorkOutstanding(world)) {
+		const runIds = [...world.mainRuns.entries()]
+			.filter(([, main]) => main.open && main.runId === run?.runId)
+			.map(([id]) => id);
+		const runId = acting ? (run?.runId ?? null) : null;
+		fold1(world, step, { kind: "interrupt", runId, runIds });
+		if (world.provider === "opencode") {
+			// 5.1 OpenCode Stop: main issues the native abort; the Stop issues cancel_request and a
+			// native_session probe together, the probe's deadline running from that issue (3.7).
+			fold1(world, step, { kind: "cancel_request", runId });
+			probe(world, step, runId, { tag: "native_session" });
+		}
+	}
+	if (
+		run !== undefined &&
+		run.phase === "Interrupting" &&
+		taskView(world).tag !== "none"
+	)
+		world.confirm ??= { step: "retire", runId: run.runId };
+	if (deadlineAt === null) return;
+	// L6: add the label work with no open main run to the one ledger stop deadline.
+	const hasOpenMain = (runId: string | null) =>
+		runId !== null &&
+		[...world.mainRuns.values()].some(
+			(main) => main.open && main.runId === runId,
+		);
+	const items: StopItem[] = [
+		...world.wakes.flatMap((wake, index): StopItem[] =>
+			wake.ended === undefined ? [{ tag: "wake", wake: index }] : [],
+		),
+		...world.sends.flatMap((send, index) =>
+			fenceMember(world.provider, send.effect.kind) && !hasOpenMain(send.runId)
+				? send.txs.flatMap((tx, txIndex): StopItem[] =>
+						mayStillAct(world, send, tx)
+							? [{ tag: "tx", send: index, tx: txIndex }]
+							: [],
+					)
+				: [],
+		),
+	];
+	if (items.length === 0) return;
+	if (world.stop === undefined || !stopOpen(world))
+		world.stop = { at: deadlineAt, opened: world.step, items };
+	else
+		world.stop.items = [
+			...world.stop.items,
+			...items.filter(
+				(item) =>
+					!world.stop?.items.some(
+						(old) => JSON.stringify(old) === JSON.stringify(item),
+					),
+			),
+		];
+}
+
+function stopItemOpen(world: World, item: StopItem): boolean {
+	if (item.tag === "wake") return world.wakes[item.wake]?.ended === undefined;
+	const send = world.sends[item.send];
+	const tx = send?.txs[item.tx];
+	return send !== undefined && tx !== undefined && mayStillAct(world, send, tx);
+}
+const stopOpen = (world: World) =>
+	world.stop?.items.some((item) => stopItemOpen(world, item)) ?? false;
+
+interface Due {
+	readonly at: number;
+	readonly opened: number;
+	readonly fire: () => void;
+}
+
+/** 3.7: every open deadline, each with its firing. */
+function deadlines(world: World, step: Step): Due[] {
+	const due: Due[] = [];
+	const stop = world.stop;
+	if (stop !== undefined && stopOpen(world))
+		due.push({
+			at: stop.at,
+			opened: stop.opened,
+			fire: () => {
+				// L6: the alarm forces only work no observer ended, and kills nothing.
+				for (const item of stop.items) {
+					if (!stopItemOpen(world, item)) continue;
+					if (item.tag === "wake") {
+						const wake = world.wakes[item.wake];
+						if (wake !== undefined) wake.ended = "forced";
+					} else {
+						const tx = world.sends[item.send]?.txs[item.tx];
+						if (tx !== undefined) tx.ended = "forced";
+					}
+				}
+				world.stop = undefined;
+			},
+		});
+	for (const run of world.runs) {
+		const settle = run.exec.settle;
+		if (run.phase !== "Ended" && settle !== undefined)
+			due.push({
+				...settle,
+				fire: () => {
+					// 3.7: Settling's expiry probes native_session; the view then reads Running (3.6).
+					run.exec.settle = undefined;
+					run.exec.settleExpired = true;
+					probe(world, step, run.runId, { tag: "native_session" });
+				},
+			});
+	}
+	for (const send of world.sends) {
+		const probeRec = send.probe;
+		if (probeRec?.deadline !== undefined && !probeRec.done)
+			due.push({
+				...probeRec.deadline,
+				fire: () => reprobe(world, step, send, probeRec),
+			});
+		for (const tx of send.txs) {
+			const recovery = tx.recovery;
+			const target = recoveryTarget(send);
+			if (recovery === undefined || target === undefined) continue;
+			due.push({
+				...recovery,
+				fire: () => {
+					tx.recovery = undefined;
+					if (
+						consumptionRank[tx.consumption.tag] >= 1 ||
+						tx.ended !== undefined
+					)
+						return;
+					probe(world, step, send.runId, target, {
+						send: world.sends.indexOf(send),
+						tx: send.txs.indexOf(tx),
+					});
+				},
+			});
+		}
+	}
+	for (const command of world.nativeCommands)
+		if (command.deadline !== undefined)
+			due.push({
+				...command.deadline,
+				fire: () => {
+					command.deadline = undefined;
+					command.state = "Unconfirmed";
+				},
+			});
+	return due.sort((a, b) => a.at - b.at || a.opened - b.opened);
+}
+
+function control(
+	world: World,
+	step: Step,
+	command: Extract<LedgerCommand, { verb: "control" }>["control"],
+): Outcome {
+	switch (command.kind) {
+		case "stop":
+			commit(world, step, "stop", command.deadlineAt);
+			return changed;
+		case "run_now": {
+			// D58: the input is main's inbox's until its handoff; the ledger reads only the commit.
+			commit(world, step, "run_now", command.deadlineAt);
+			return changed;
+		}
+		case "end": {
+			const run = activeRun(world);
+			if (run === undefined || run.phase === "Queued") {
+				if (run !== undefined) {
+					run.asked = true;
+					world.pendingEnd = { runId: run.runId };
+					return changed;
+				}
+				// 8.4: with no Run, end_session{runId: null} at once, adding nothing to the stop deadline.
+				gateEndSession(world, step, null);
+				return changed;
+			}
+			world.pendingEnd = { runId: run.runId };
+			commit(world, step, "end", command.deadlineAt);
+			return changed;
+		}
+		case "answer": {
+			const interaction = interactionOf(world, command.interactionId);
+			if (interaction === undefined)
+				return rejected("no such interaction (3.10)");
+			if (interaction.resolved)
+				return noop("interaction already resolved (3.10)");
+			const delivering = interaction.deliveries.some((index) => {
+				const send = world.sends[index];
+				return send?.txs.some((tx) => mayStillAct(world, send, tx)) ?? false;
+			});
+			if (delivering)
+				return noop("answered once: the first answer wins (3.10)");
+			answerInteraction(world, step, interaction, command.answer);
+			return changed;
+		}
+		case "stop_tasks": {
+			const tasks = taskView(world);
+			if (tasks.tag !== "live")
+				return rejected(`stop_tasks with tasks ${tasks.tag} (8.4)`);
+			const keys =
+				command.tasks === "all"
+					? tasks.tasks.map((task) => task.key)
+					: command.tasks.filter((key) =>
+							tasks.tasks.some((task) => sameKey(task.key, key)),
+						);
+			if (keys.length === 0) return rejected("no live task named (8.4)");
+			for (const key of keys) fold1(world, step, { kind: "stop_task", key });
+			return changed;
+		}
+		case "confirm_escalation": {
+			const gate = world.confirm;
+			if (gate === undefined) return rejected("no pending confirm (8.4)");
+			if (command.snapshotEntry !== world.snapshotEntry)
+				return rejected("stale confirm (8.4)");
+			world.confirm = undefined;
+			if (gate.step === "end_session")
+				foldEndSession(world, step, gate.runId ?? null);
+			return changed;
+		}
+		case "native_command": {
+			if (
+				world.nativeCommands.some(
+					(item) => item.commandId === command.commandId,
+				)
+			)
+				return rejected("native command already issued (8.5)");
+			const send = fold1(world, step, {
+				kind: "send_native_command",
+				commandId: command.commandId,
+				text: command.text,
+			});
+			world.nativeCommands.push({
+				commandId: command.commandId,
+				send: world.sends.indexOf(send),
+				state: "Sent",
+				remaining: step.policy.nativeCommandMs,
+				deadline: {
+					at: step.now + step.policy.nativeCommandMs,
+					opened: world.step,
+				},
+			});
+			return changed;
+		}
+	}
+}
+
+function settle(
+	world: World,
+	step: Step,
+	settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
+): Outcome {
+	switch (settlement.kind) {
+		case "alarm_fired": {
+			// 3.7: fire every deadline with at <= now, in deadline order, once.
+			const due = deadlines(world, step).filter(
+				(item) => item.at <= step.now && item.opened < world.step,
+			);
+			if (due.length === 0) return noop("nothing due");
+			for (const item of due) item.fire();
+			return changed;
+		}
+		case "hold_exhausted": {
+			const send = [...world.sends]
+				.reverse()
+				.find((item) => item.held && item.commandId === settlement.commandId);
+			if (send === undefined) return noop("unknown commandId (3.4)");
+			// 4.3: settles the run failed with provider_send_attempts_exhausted.
+			send.exhausted = true;
+			for (const tx of send.txs) seal(tx);
+			const latest = send.txs.at(-1);
+			if (latest !== undefined) failInput(world, send, latest);
+			return changed;
+		}
+		case "unheld_outcome": {
+			const target = world.mainRuns.get(settlement.runId);
+			const run = findRun(world, target?.runId);
+			if (run === undefined) return noop("unknown token (3.4)");
+			if (run.phase === "Ended")
+				return noop("late evidence for an Ended Run (3.8)");
+			const send =
+				[...runSends(world, run)]
+					.reverse()
+					.find(
+						(item) => item.held && item.commandId === settlement.commandId,
+					) ??
+				runSends(world, run).find(
+					(item) => item.held && item.commandId === undefined,
+				);
+			if (send === undefined) return noop("unknown token (3.4)");
+			send.commandId ??= settlement.commandId;
+			const tx = transmit(world, send, undefined);
+			effectOutcome(world, step, send, tx, settlement.outcome);
+			tx.notSent ||= settlement.outcome.tag === "not_sent";
+			return changed;
+		}
+		case "process_started": {
+			const { runnerId, querySeq } = splitLabel(settlement.label);
+			const prior = world.runners.get(runnerId);
+			// L1: retired is final, and a live runner's start at or below its latest querySeq is an older label.
+			if (
+				prior?.retired === true ||
+				(prior !== undefined &&
+					world.current === runnerId &&
+					querySeq <= splitLabel(prior.latest).querySeq)
+			)
+				return noop("an older label's process_started changes nothing (L1)");
+			// L5, D44: the runner's previous label becomes older, so its scope ends.
+			if (prior !== undefined && prior.latest !== settlement.label)
+				decideLostWork(world, prior.latest);
+			world.runners.set(runnerId, {
+				latest: settlement.label,
+				retired: false,
+				tasks:
+					settlement.reattached && reportsTasks(world.provider)
+						? { tag: "Unknown", label: settlement.label }
+						: { tag: "Known", label: settlement.label, tasks: [] },
+			});
+			world.current = runnerId;
+			world.snapshotEntry++;
+			return changed;
+		}
+		case "process_lost": {
+			const key = `${settlement.runnerId}\u0000${settlement.retiredAt}`;
+			if (world.retirements.has(key))
+				return noop("process_lost already folded (6.5)");
+			world.retirements.add(key);
+			const runner = world.runners.get(settlement.runnerId);
+			if (runner !== undefined) {
+				runner.retired = true;
+				decideLostWork(world, runner.latest);
+			}
+			if (world.current === settlement.runnerId) world.current = null;
+			const onRunner = (label: Label | null) =>
+				label !== null && splitLabel(label).runnerId === settlement.runnerId;
+			// L1: coverage ends the runner's work and seals its transmissions.
+			for (const send of world.sends) {
+				for (const tx of send.txs)
+					if (
+						tx.runnerId === settlement.runnerId ||
+						(tx.runnerId === null && onRunner(tx.label))
+					) {
+						seal(tx);
+						tx.ended ??= "process_lost";
+					}
+				const run = findRun(world, send.runId);
+				if (
+					send.held &&
+					send.txs.length === 0 &&
+					onRunner(send.label) &&
+					run !== undefined &&
+					run.phase !== "Ended"
+				)
+					// 3.6: retirement before any hold of its start leaves it never handed over.
+					transmit(world, send, undefined).sealed = {
+						value: "never",
+						unconsumed: false,
+					};
+			}
+			for (const run of world.runs)
+				if (
+					run.phase !== "Ended" &&
+					run.exec.evidence &&
+					runSends(world, run).some((send) =>
+						send.txs.some(
+							(tx) => tx.runnerId === settlement.runnerId || onRunner(tx.label),
+						),
+					)
+				)
+					run.exec.endedBy ??= "process_lost";
+			for (const wake of world.wakes)
+				if (onRunner(wake.label)) wake.ended ??= "process_lost";
+			for (const interaction of world.interactions)
+				if (onRunner(interaction.label)) interaction.resolved = true;
+			return changed;
+		}
+		case "session_ended":
+			sessionEnd(world, world.seq, "session_ended");
+			return changed;
+	}
+}
+
+function apply(world: World, command: LedgerCommand, step: Step): Outcome {
+	switch (command.verb) {
+		case "admit": {
+			const prior = world.inputs.get(command.inputId);
+			if (
+				prior !== undefined &&
+				findRun(world, prior.runId)?.phase !== "Ended" &&
+				prior.runId !== undefined
+			)
+				return rejected("input already admitted to an active Run");
+			const input: Input = {
+				inputId: command.inputId,
+				delivery: command.delivery,
+			};
+			world.inputs.set(command.inputId, input);
+			const active = activeInputRun(world);
+			if (command.delivery === "steer") {
+				if (active !== undefined && active.phase === "Launched") {
+					active.inputs.push(command.inputId);
+					input.runId = active.runId;
+				}
+				return changed;
+			}
+			// D58, 3.4: main's handoff; main mints the Run id, so its run.requested reserves the Run.
+			return changed;
+		}
+		case "observe": {
+			const observation = command.observation;
+			switch (observation.tag) {
+				case "Answer":
+					return answer(world, step, observation);
+				case "Main":
+					return mainEvent(world, observation);
+				case "Unsolicited": {
+					const raisedAt = world.snapshotEntry;
+					const outcome = unsolicited(world, step, observation);
+					// L1, D44: accepted evidence on a newer querySeq raises its runner's label, so it records.
+					return outcome.tag === "Noop" && world.snapshotEntry !== raisedAt
+						? { tag: "Changed", diagnostic: outcome.diagnostic }
+						: outcome;
+				}
+			}
+			break;
+		}
+		case "control":
+			return control(world, step, command.control);
+		case "settle":
+			return settle(world, step, command.settlement);
+	}
+}
+
+function emptyWorld(
+	sessionId: string,
+	provider: ProviderKind,
+	mutation?: Mutation,
+): World {
+	return {
+		sessionId,
+		provider,
+		mutation,
+		step: 0,
+		seq: 0,
+		runs: [],
+		inputs: new Map(),
+		sends: [],
+		tokens: new Map(),
+		mainRuns: new Map(),
+		seen: new Set(),
+		freshSince: -1,
+		runners: new Map(),
+		current: null,
+		retirements: new Set(),
+		wakes: [],
+		interactions: [],
+		nativeCommands: [],
+		lostWork: [],
+		lostDecided: new Set(),
+		snapshotEntry: 0,
+	};
+}
+
+function run(
+	world: World,
+	entry: ReferenceEntry,
+	newId: () => string,
+): { outcome: Outcome; step: Step } {
+	world.step++;
+	const step: Step = {
+		now: entry.now,
+		policy: entry.policy,
+		newId,
+		effects: [],
+		ended: [],
+	};
+	const outcome = apply(world, entry.command, step);
+	if (outcome.tag === "Changed") reconcile(world, step);
+	return { outcome, step };
+}
+
+/** Worlds are derived from entries; the cache only saves replay time. */
+const worlds = new WeakMap<ReferenceState, World>();
+function worldOf(state: ReferenceState): World {
+	const cached = worlds.get(state);
+	if (cached !== undefined) return cached;
+	const world = emptyWorld(state.sessionId, state.provider, state.mutation);
+	for (const entry of state.entries) {
+		const ids = [...entry.ids];
+		run(world, entry, () => ids.shift() ?? "");
+	}
+	worlds.set(state, world);
+	return world;
+}
+
+export function initialSessionLedgerState(
+	sessionId: string,
+	provider: ProviderKind,
+	mutation?: Mutation,
+): ReferenceState {
+	return { sessionId, provider, mutation, entries: [] };
+}
+
+export function decide(
+	state: ReferenceState,
+	command: LedgerCommand,
+	ctx: DecideContext,
+): Decision<ReferenceEntry> {
+	const world = structuredClone(worldOf(state));
+	const ids: string[] = [];
+	const entry = { command, now: ctx.now, policy: ctx.policy, ids };
+	const { outcome, step } = run(world, entry, () => {
+		const id = ctx.newId();
+		ids.push(id);
+		return id;
+	});
+	if (outcome.tag === "Rejected") return outcome;
+	const alarmAt = deadlines(world, step)[0]?.at;
+	return {
+		tag: "Accepted",
+		events: outcome.tag === "Changed" ? [entry] : [],
+		effects: step.effects,
+		ended: step.ended,
+		...(alarmAt === undefined ? {} : { alarmAt }),
+		...(outcome.diagnostic === undefined
+			? {}
+			: { diagnostic: outcome.diagnostic }),
+	};
+}
+
+export function evolve(
+	state: ReferenceState,
+	entry: ReferenceEntry,
+): ReferenceState {
+	const world = structuredClone(worldOf(state));
+	const ids = [...entry.ids];
+	run(world, entry, () => ids.shift() ?? "");
+	const next = { ...state, entries: [...state.entries, entry] };
+	worlds.set(next, world);
+	return next;
+}
+
+function inputState(world: World, run: Run, inputId: string): InputState {
+	const input = world.inputs.get(inputId);
+	if (input?.failed !== undefined)
+		return { tag: "Failed", reason: input.failed };
+	const txs = deliverySends(world, run)
+		.filter(
+			(send) => "inputId" in send.effect && send.effect.inputId === inputId,
+		)
+		.flatMap((send) => send.txs);
+	const accepted = txs.find((tx) => tx.consumption.tag === "Accepted");
+	if (accepted !== undefined)
+		return accepted.nativeMessageId === undefined
+			? { tag: "Accepted" }
+			: { tag: "Accepted", nativeMessageId: accepted.nativeMessageId };
+	if (
+		txs.some(
+			(tx) => tx.transport.tag === "Unknown" && tx.consumption.tag === "None",
+		)
+	)
+		return { tag: "Delivered", certainty: "unknown" };
+	const latest = txs.at(-1);
+	// A latest try not consumed (declined, absent, released, cancelled) waits as Queued (3.9).
+	if (
+		latest === undefined ||
+		latest.notSent ||
+		latest.unheld ||
+		latest.consumption.tag === "NotConsumed"
+	)
+		return { tag: "Queued" };
+	if (latest.consumption.tag === "Observed" || latest.transport.tag === "Sent")
+		return { tag: "Delivered", certainty: "sent" };
+	if (latest.transport.tag === "Unknown")
+		return { tag: "Delivered", certainty: "unknown" };
+	return latest.transport.tag === "Issued"
+		? { tag: "Dispatching" }
+		: { tag: "Queued" };
+}
+
+function activeView(world: World, run: Run): ActiveRunView {
+	const head = {
+		runId: run.runId,
+		inputs: run.inputs.map((inputId) => ({
+			inputId,
+			state: inputState(world, run, inputId),
+		})),
+	};
+	const origin =
+		run.origin === "wake"
+			? run.wakeTask === undefined
+				? { origin: "wake" as const }
+				: { origin: "wake" as const, wakeTask: run.wakeTask }
+			: { origin: "input" as const };
+	const stop = world.stop;
+	const inStop =
+		stop !== undefined &&
+		stopOpen(world) &&
+		!(run.origin === "wake" && world.provider === "claude") &&
+		(run.phase === "Queued"
+			? labelWorkOutstanding(world)
+			: stop.items.some((item) =>
+					item.tag === "wake"
+						? world.wakes[item.wake]?.runId === run.runId
+						: world.sends[item.send]?.runId === run.runId,
+				));
+	const deadline = inStop
+		? { deadline: { owner: "Stop" as const, at: stop.at } }
+		: {};
+	if (run.phase === "Queued")
+		return {
+			...head,
+			...origin,
+			tag: "Queued",
+			...deadline,
+			...(run.retryAt === undefined ? {} : { retryAt: run.retryAt }),
+		};
+	if (run.phase === "Interrupting")
+		return {
+			...head,
+			...origin,
+			tag: "Interrupting",
+			by: run.by ?? "stop",
+			...deadline,
+		};
+	if (run.exec.settle !== undefined)
+		return {
+			...head,
+			...origin,
+			tag: "Settling",
+			deadline: { owner: "Run", runId: run.runId, at: run.exec.settle.at },
+		};
+	return {
+		...head,
+		...origin,
+		tag: run.exec.evidence ? "Running" : "Starting",
+		...deadline,
+	};
+}
+
+export function viewLedger(state: ReferenceState): LedgerView {
+	const world = worldOf(state);
+	const run = activeRun(world);
+	const live: IssuedEffect[] = world.sends.flatMap((send): IssuedEffect[] => {
+		if (send.effect.kind === "probe") return [];
+		const acting = send.txs.filter((tx) => mayStillAct(world, send, tx));
+		if (send.held)
+			return acting.length > 0 && send.commandId !== undefined
+				? [{ tag: "Held", commandId: send.commandId, effect: send.effect }]
+				: [];
+		return acting.flatMap((tx): IssuedEffect[] =>
+			tx.token === undefined
+				? []
+				: [{ tag: "Tokened", token: tx.token, effect: send.effect }],
+		);
+	});
+	const tasks = taskView(world);
+	const interactions = world.interactions.flatMap((item): InteractionView[] => {
+		const delivery = item.deliveries
+			.map((index) => world.sends[index])
+			.at(-1)
+			?.txs.at(-1);
+		if (item.resolved && delivery === undefined) return [];
+		// 10B: a refused answer stays Pending, naming its attempt and code, while its delivery retries.
+		const refused =
+			!item.resolved &&
+			delivery?.consumption.tag !== "Accepted" &&
+			delivery?.transport.tag === "Retrying" &&
+			delivery.refusal !== undefined &&
+			delivery.token !== undefined
+				? { attempt: delivery.token, code: delivery.refusal }
+				: undefined;
+		if (delivery === undefined || refused !== undefined)
+			return [
+				{
+					tag: "Pending",
+					interactionId: item.interactionId,
+					kind: item.kind,
+					...(refused === undefined ? {} : { lastRefusal: refused }),
+				},
+			];
+		return [
+			{
+				tag: "Answered",
+				interactionId: item.interactionId,
+				kind: item.kind,
+				delivery:
+					item.resolved || delivery.consumption.tag === "Accepted"
+						? "settled"
+						: delivery.transport.tag === "Sent"
+							? "sent"
+							: delivery.transport.tag === "Unknown"
+								? "unknown"
+								: "queued",
+			},
+		];
+	});
+	const nativeCommands = world.nativeCommands.map(
+		(command): NativeCommandView => {
+			switch (command.state) {
+				case "Sent":
+				case "Started":
+					return command.deadline === undefined
+						? { commandId: command.commandId, tag: "Queued" }
+						: {
+								commandId: command.commandId,
+								tag: command.state,
+								deadline: {
+									owner: "NativeCommand",
+									commandId: command.commandId,
+									at: command.deadline.at,
+								},
+							};
+				case "Failed":
+					return {
+						commandId: command.commandId,
+						tag: "Failed",
+						code: command.code ?? "failed",
+					};
+				default:
+					return { commandId: command.commandId, tag: command.state };
+			}
+		},
+	);
+	const confirm = world.confirm;
+	return {
+		paused: false,
+		...(run === undefined ? {} : { active: activeView(world, run) }),
+		// D58: the oracle models no inbox; main's module computes it in T2.
+		inbox: [],
+		live,
+		tasks,
+		anythingMayAct:
+			world.runs.some((item) => item.phase !== "Ended") ||
+			live.length > 0 ||
+			tasks.tag !== "none" ||
+			world.wakes.some((wake) => wake.ended === undefined),
+		...(confirm === undefined || tasks.tag === "none"
+			? {}
+			: {
+					pendingConfirm: {
+						step: confirm.step,
+						labels:
+							currentLabel(world) === null ? [] : [currentLabel(world) ?? ""],
+						snapshotEntry: world.snapshotEntry,
+						tasks,
+					},
+				}),
+		lostWork: world.lostWork,
+		nativeCommands,
+		interactions,
+	};
 }

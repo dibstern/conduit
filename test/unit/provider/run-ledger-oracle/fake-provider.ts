@@ -49,10 +49,8 @@ export type UnheldOutcome =
 	| { readonly tag: "retryable"; readonly retryAt: number }
 	| { readonly tag: "permanent"; readonly code: string }
 	| { readonly tag: "not_sent"; readonly retryAt: number };
-/** The model has spelled every host answer since D59; the harness feeds the public alphabet. */
-export type HarnessCommand = LedgerCommand;
 /** A gate answer (H4): a Tokened send's `not_sent`, or `unheld_outcome` (D49), a try with no token. */
-export const isGateAnswer = (command: HarnessCommand): boolean =>
+export const isGateAnswer = (command: LedgerCommand): boolean =>
 	(command.verb === "settle" && command.settlement.kind === "unheld_outcome") ||
 	(command.verb === "observe" &&
 		command.observation.tag === "Answer" &&
@@ -73,7 +71,7 @@ export type ReleaseReason = Extract<
 >["reason"];
 
 export interface TracePacket {
-	readonly command: HarnessCommand;
+	readonly command: LedgerCommand;
 	readonly now: number;
 }
 
@@ -178,6 +176,8 @@ const outcome = (variant: number, now: number): Outcome => {
 				outcome: {
 					tag: "retryable",
 					retryAt: now + (variant % 8 === 5 ? 100_000 : 100),
+					// 10B: main's receipt error_code, an answer's lastRefusal (3.10).
+					...(variant % 16 === 9 ? { code: "answer_refused" } : {}),
 				},
 			};
 		case 2:
@@ -255,7 +255,11 @@ export class FakeProvider {
 	private readonly transmissions = new Map<string, number>();
 	private readonly holdBindings = new Map<
 		SendToken,
-		{ readonly commandId: string; readonly transmission: number }
+		{
+			readonly runId: string;
+			readonly commandId: string;
+			readonly transmission: number;
+		}
 	>();
 	private readonly sends = new Map<SendToken, NativeSend>();
 	private readonly pendingHeld = new Map<
@@ -341,7 +345,7 @@ export class FakeProvider {
 	/** Q28: the daemon restarted under a live runner, which this step adopts or settles from its journal (7.2, 7.3), or a mid-removal death left it alive (4.4). */
 	q28: "adopt" | "journal" | "survivor" | undefined;
 	/** The rest of a runner's stop commit, emitted before any other fact (4.5). */
-	private readonly commit: HarnessCommand[] = [];
+	private readonly commit: LedgerCommand[] = [];
 	/** The time of the packet being drawn: a stop commit's retiredAt (6.5). */
 	private clock = 0;
 	/** Gated holds: a phantom send with no transmission (4.4, 4.8). */
@@ -460,7 +464,14 @@ export class FakeProvider {
 				? { token: tokened(wire), effect: issued.effect }
 				: { token: tokened(wire), effect: issued.effect };
 		this.bindings.set(issued, { send, transmission: n });
+		const { effect } = issued;
+		assert(
+			effect.kind === "start" || effect.kind === "steer",
+			"Only a start or steer is held (3.4)",
+		);
+		// 3.4: run.dispatched names the Run by runId and the issue by commandId.
 		this.holdBindings.set(send.token, {
+			runId: effect.runId,
 			commandId: issued.commandId,
 			transmission: n,
 		});
@@ -572,7 +583,7 @@ export class FakeProvider {
 			removed: this.gate === "removed",
 		});
 	}
-	private gateAnswer(now: number): HarnessCommand | undefined {
+	private gateAnswer(now: number): LedgerCommand | undefined {
 		const next = this.gateAnswers.shift();
 		if (!next) return undefined;
 		const outcome: GateOutcome = next.removed
@@ -794,12 +805,12 @@ export class FakeProvider {
 	 * A runner's stop commit: any pending run.dispatched of it first, then its run.released
 	 * Answers, then process_lost{runnerId, retiredAt}, folded in that order (4.5, 3.13).
 	 */
-	private loss(runner: string, variant: number): HarnessCommand {
+	private loss(runner: string, variant: number): LedgerCommand {
 		const dispatched = this.dispatchFirst((n) => n.runnerId === runner);
 		if (dispatched) return { verb: "observe", observation: dispatched };
 		const [first, ...rest] = [
 			...this.releases(runner, variant).map(
-				({ token, reason }): HarnessCommand => ({
+				({ token, reason }): LedgerCommand => ({
 					verb: "observe",
 					observation: { tag: "Answer", token, kind: "run_released", reason },
 				}),
@@ -811,7 +822,7 @@ export class FakeProvider {
 					runnerId: runner,
 					retiredAt: this.clock,
 				},
-			} satisfies HarnessCommand,
+			} satisfies LedgerCommand,
 		];
 		assert(first);
 		this.commit.push(...rest);
@@ -1154,6 +1165,8 @@ export class FakeProvider {
 		return this.provider === "claude" || this.provider === "codex";
 	}
 	private queueWake(wakeTask?: TaskKey): void {
+		// 8.3: Cursor starts no unsolicited turn.
+		if (this.provider === "cursor") return;
 		if (
 			this.notifications.some(
 				(observation) =>
@@ -1276,14 +1289,28 @@ export class FakeProvider {
 
 	/** Impossible token frames and older labels never become native ground truth. */
 	observe(
-		command: HarnessCommand,
+		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView = before,
 	): void {
 		// Only this step's retirement is checked against this step's terminals.
 		this.retirement = undefined;
-		// A gate answer names a send never transmitted: no host fact changes (H4).
-		if (isGateAnswer(command)) return;
+		// A gate answer names a send never transmitted: no host fact changes (H4), and a not_sent
+		// send nothing received is no native work.
+		if (isGateAnswer(command)) {
+			const native =
+				command.verb === "observe" && command.observation.tag === "Answer"
+					? this.sends.get(command.observation.token)
+					: undefined;
+			if (
+				native &&
+				!native.accepted &&
+				!native.deliveryConfirmed &&
+				!native.lifecycleStarted
+			)
+				native.unfinished = false;
+			return;
+		}
 		// D58: main's inbox holds the inputs the ledger accepted.
 		if (command.verb === "admit")
 			this.mainInbox.push({
@@ -1373,7 +1400,11 @@ export class FakeProvider {
 				this.pendingNativeCommands.clear();
 				// Session end covers every send (3.4), a gated native command's included.
 				this.gatedCommands.clear();
-				for (const x of this.executions) x.fenced = false;
+				// Nothing acts in an ended native session (3.4), a wake's turn included.
+				for (const x of this.executions) {
+					x.fenced = false;
+					x.live = false;
+				}
 				for (const { commandId } of this.holdBindings.values())
 					this.retireHold(commandId);
 				// The native session ends, not the process: only the watcher reports a death (3.11, D16).
@@ -1395,12 +1426,15 @@ export class FakeProvider {
 		if (this.older(observation) && !this.wakeEnd(observation)) return;
 		if (observation.tag === "Unsolicited") {
 			// Evidence its provider cannot produce is Rejected and never raises the querySeq (L1, 3.4):
-			// task evidence from Cursor or OpenCode, command_lifecycle from any provider but Claude (D46).
+			// task evidence from Cursor or OpenCode, command_lifecycle (D46) or turn_ended (2.1 row 215,
+			// 8.3) from any provider but Claude.
 			if (
 				(!this.supportsTasks() &&
 					(observation.kind === "tasks_snapshot" ||
 						observation.kind === "task_event")) ||
-				(this.provider !== "claude" && observation.kind === "command_lifecycle")
+				(this.provider !== "claude" &&
+					(observation.kind === "command_lifecycle" ||
+						observation.kind === "turn_ended"))
 			)
 				return;
 			const identity = `${observation.label}/${observation.eventId}`;
@@ -1863,7 +1897,7 @@ export class FakeProvider {
 	}
 
 	/** 3.4: evidence its provider cannot produce (task evidence from Cursor or OpenCode, 8.1; command_lifecycle from any provider but Claude, D46) is Rejected. */
-	assertVerdict(command: HarnessCommand, tag: "Accepted" | "Rejected"): void {
+	assertVerdict(command: LedgerCommand, tag: "Accepted" | "Rejected"): void {
 		if (
 			command.verb === "observe" &&
 			command.observation.tag === "Unsolicited" &&
@@ -1887,10 +1921,21 @@ export class FakeProvider {
 				"Rejected",
 				"D46: command_lifecycle from a provider but Claude is not Rejected (3.4)",
 			);
+		// 3.4: only Claude's payload has a wake turn_ended (2.1 row 215, 8.3).
+		if (
+			command.verb === "observe" &&
+			command.observation.kind === "turn_ended" &&
+			this.provider !== "claude"
+		)
+			assert.equal(
+				tag,
+				"Rejected",
+				"3.4: turn_ended from a provider but Claude is not Rejected (8.3)",
+			);
 	}
 	/** Assertions depend only on views, outputs and native facts observed above. */
 	assertStep(
-		command: HarnessCommand,
+		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView,
 		effects: readonly IssuedEffect[],
@@ -2596,12 +2641,10 @@ export class FakeProvider {
 				return {
 					kind: "interaction_requested",
 					interactionId: `question:${action.input % 5}`,
-					// Both kinds with and without a timeout.
 					interactionKind:
 						(action.variant + action.input) % 2 === 0
 							? "question"
 							: "permission",
-					...(action.variant === 5 ? { timeoutAt: now + 200 } : {}),
 				};
 			case 6:
 				return {
@@ -2627,6 +2670,7 @@ export class FakeProvider {
 					kind: "run_dispatched",
 					runnerId: runnerOf(send ? this.labelFor(send) : this.label),
 					...(this.holdBindings.get(send?.token ?? tokened("never")) ?? {
+						runId: `never-issued-run:${action.input}`,
 						commandId: `never-issued:${action.input}`,
 						transmission: 1 + (action.index % 5),
 					}),
@@ -2711,8 +2755,8 @@ export class FakeProvider {
 							}
 						: { ...base, kind: "result", outcome: "interrupted" };
 			case 50:
-				// 8.3: a Claude wake's own end is its turn_ended.
-				return this.provider === "claude" && action.input % 2 === 1
+				// 8.3: a Claude wake's own end is its turn_ended; any other provider's is Rejected (3.4).
+				return action.input % 2 === 1
 					? { ...base, kind: "turn_ended" }
 					: { ...base, kind: "query_ended" };
 			case 23:
@@ -2739,6 +2783,8 @@ export class FakeProvider {
 					: { ...base, kind: "activity" };
 			}
 			case 28:
+				// 8.3: Cursor starts no unsolicited turn.
+				if (this.provider === "cursor") return { ...base, kind: "activity" };
 				return {
 					...base,
 					kind: "turn_started",
@@ -2972,7 +3018,7 @@ export class FakeProvider {
 	 * transmission is the hold's run.dispatched (3.4, 4.11); direct (OpenCode, `runsOpenCodeServer`):
 	 * run_requested is the transmission, its token the runId. Each event has main's event id.
 	 */
-	private main(action: TraceAction): HarnessCommand {
+	private main(action: TraceAction): LedgerCommand {
 		const alarm = {
 			verb: "settle",
 			settlement: { kind: "alarm_fired" },
@@ -2980,7 +3026,7 @@ export class FakeProvider {
 		const direct = this.provider === "opencode";
 		const emit = (
 			event: Extract<Observation, { tag: "Main" }>,
-		): HarnessCommand => {
+		): LedgerCommand => {
 			this.mainEvents.push(event);
 			return { verb: "observe", observation: event };
 		};
@@ -3003,7 +3049,8 @@ export class FakeProvider {
 			switch ((action.variant + offset) % 5) {
 				case 0: {
 					// Main claims its inbox head: a start with no open run, else a steer into it; a queued
-					// input waits for the open run's terminal (3.9).
+					// input waits for the open run's terminal (3.9). Its run.requested is appended in the
+					// write that sends the input, after input.sent, never at admit (3.4).
 					const head = this.mainInbox[0];
 					if (!head || (open && head.delivery === "queue")) continue;
 					this.mainInbox.shift();
@@ -3162,7 +3209,7 @@ export class FakeProvider {
 	private processEvent(
 		action: TraceAction,
 		snapshot: ProviderSnapshot,
-	): HarnessCommand {
+	): LedgerCommand {
 		const serving = this.serving();
 		const reattached = action.variant % 2 === 0;
 		if (serving !== undefined && !(this.totality && action.variant % 3 === 0)) {
@@ -3346,7 +3393,7 @@ export class FakeProvider {
 			this.copiedConfirms.push(snapshot.view.pendingConfirm.snapshotEntry);
 		let now = snapshot.now + action.advance;
 		const inputId = `input:${action.input}`;
-		let command: HarnessCommand;
+		let command: LedgerCommand;
 		// The removal's process_lost was not observed (a rejected step): the removal still finishes.
 		if (this.removing) {
 			this.setGate(this.removing.gate);
@@ -3868,7 +3915,7 @@ export class FakeProvider {
 	 * advance (removal finishing, a re-add's import window, served again), a not-served window, a
 	 * Registering restart whose adopted runner starts a turn of its own, and session ends.
 	 */
-	private projectMacro(action: TraceAction): HarnessCommand {
+	private projectMacro(action: TraceAction): LedgerCommand {
 		const alarm = {
 			verb: "settle",
 			settlement: { kind: "alarm_fired" },

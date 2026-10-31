@@ -94,7 +94,7 @@ function starts(d: TraceDriver, inputId: string) {
 	);
 }
 
-export const reviewTraces: readonly OracleScenario[] = [
+export const reviewTraces: readonly OracleScenario<TraceDriver>[] = [
 	{
 		id: "R1-1",
 		title:

@@ -12,7 +12,6 @@ import type {
 import {
 	FakeProvider,
 	type GateOutcome,
-	type HarnessCommand,
 	type Send,
 	type TraceAction,
 } from "./fake-provider.js";
@@ -254,6 +253,7 @@ describe("fake provider round 3 alphabet", () => {
 				tag: "Answer",
 				token: send.token,
 				kind: "run_dispatched",
+				runId: "R",
 				runnerId: "replacement",
 				commandId: "start",
 				transmission: 1,
@@ -366,6 +366,7 @@ describe("fake provider round 3 alphabet", () => {
 			observation: {
 				token: send.token,
 				kind: "run_dispatched",
+				runId: "R",
 				runnerId: "host-0",
 			},
 		});
@@ -1101,12 +1102,12 @@ describe("fake provider round 3 contract decisions", () => {
 		expect(fake.groundTruth().unfinished).toEqual([]);
 	});
 
+	// Cursor starts no unsolicited turn (8.3).
 	it.each([
 		"claude",
 		"codex",
-		"cursor",
 		"opencode",
-	] satisfies readonly ProviderKind[])("retains %s wake execution after session end until provider Run-end evidence (D7)", (provider) => {
+	] satisfies readonly ProviderKind[])("ends %s wake execution at its session's end (8.3, 3.4)", (provider) => {
 		const fake = new FakeProvider(provider);
 		started(fake);
 		fake.observe(
@@ -1125,21 +1126,6 @@ describe("fake provider round 3 contract decisions", () => {
 			{
 				verb: "settle",
 				settlement: { kind: "session_ended", cause: "native_session_vanished" },
-			},
-			emptyView(),
-		);
-		expect(fake.groundTruth().runningTurn).toBe(true);
-		fake.observe(
-			{
-				verb: "observe",
-				observation: {
-					tag: "Unsolicited",
-					label: fake.label,
-					eventId: "done",
-					...(provider === "opencode"
-						? ({ kind: "query_ended" } as const)
-						: ({ kind: "result", outcome: "completed" } as const)),
-				},
 			},
 			emptyView(),
 		);
@@ -1839,6 +1825,7 @@ describe("fake provider round 9 contract decisions", () => {
 		assert(start);
 		answer(fake, start, {
 			kind: "run_dispatched",
+			runId: "R",
 			runnerId: "host-1",
 			commandId: "c1",
 			transmission: 1,
@@ -1906,6 +1893,7 @@ describe("fake provider round 9 contract decisions", () => {
 		assert(start);
 		answer(fake, start, {
 			kind: "run_dispatched",
+			runId: "R",
 			runnerId: "host-0",
 			commandId: "c1",
 			transmission: 1,
@@ -2397,7 +2385,7 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 		now: 100,
 	});
 	/** Operation 9 with variant 0 delivers a queued gate answer before any notification. */
-	const gateAnswer = (fake: FakeProvider): HarnessCommand =>
+	const gateAnswer = (fake: FakeProvider): LedgerCommand =>
 		fake.next({ ...action, operation: 9, variant: 0 }, snapshot()).command;
 	const tokenedEffect = (
 		effect: Send["effect"],
@@ -2710,7 +2698,7 @@ describe("fake provider round 13: the H4 project gate (3.11, 4.4, D48)", () => {
 				emptyView(),
 			);
 		const stop = tokenedEffect({ kind: "stop_task", key: task.key });
-		const alarm: HarnessCommand = {
+		const alarm: LedgerCommand = {
 			verb: "settle",
 			settlement: { kind: "alarm_fired" },
 		};
@@ -3246,6 +3234,7 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 				tag: "Answer",
 				token: send.token,
 				kind: "run_dispatched",
+				runId: "R2",
 				runnerId: "host-0",
 				commandId: "C",
 				transmission: 1,
@@ -3385,6 +3374,7 @@ describe("fake provider round 14: D49, D50 and a stop commit's releases (3.6, 3.
 				tag: "Answer",
 				token: send.token,
 				kind: "run_dispatched",
+				runId: "R2",
 				runnerId: "host-0",
 				commandId: "C",
 				transmission: 1,

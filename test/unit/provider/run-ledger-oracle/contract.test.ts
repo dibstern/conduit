@@ -1,634 +1,415 @@
-// @ts-nocheck Stale against the 3.13 model (32.2.2); the oracle lane (32.2.3) replaces this file.
-import { describe, expect, it } from "vitest";
-import type {
-	Evidence,
-	IssuedEffect,
-	SendToken,
-} from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import { TraceDriver } from "./harness.js";
-import { oracleTest } from "./pending.js";
+import { assert, describe, expect, it } from "vitest";
+import type { SendToken } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
+import { policy } from "./harness.js";
+import { pendingSuite } from "./pending.js";
+import {
+	admit,
+	ask,
+	begin,
+	complete,
+	Driver,
+	fire,
+	observe,
+	request,
+	running,
+	step,
+	stop,
+	tokenOf,
+	transmissions,
+	visibleInput,
+} from "./scenarios.js";
 
-const observe = (driver: TraceDriver, send: IssuedEffect, evidence: Evidence) =>
-	driver.step({
-		verb: "observe",
-		observation: { token: send.token, ...evidence },
-	});
+type Mode = "reference" | "decider";
 
-// Stale against the 3.13 model; the oracle lane (32.2.3) replaces it.
-describe.skip.each([
+const check = (mode: Mode) => (name: string, run: () => void) =>
+	mode === "reference"
+		? it(name, run)
+		: pendingSuite("[checkpoint] run-ledger-decider")(name, run);
+
+const startOrSteer = (decision: {
+	readonly issued: readonly { readonly effect: { readonly kind: string } }[];
+}) =>
+	decision.issued.filter(
+		({ effect }) => effect.kind === "start" || effect.kind === "steer",
+	);
+
+describe.each([
 	"reference",
 	"decider",
 ] as const)("[step1] %s correlation contract", (mode) => {
-	const check = oracleTest(`[step1] ${mode} correlation contract`);
+	const test = check(mode);
 
-	check(
-		"[step1] native input acceptance cannot be downgraded by a late uncertain transport outcome",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "input_accepted",
-				nativeMessageId: "native-A",
-			});
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-			expect(d.view().active?.inputs).toEqual([
-				{
-					inputId: "A",
-					state: { tag: "Accepted", nativeMessageId: "native-A" },
-					uncertain: false,
-				},
-			]);
-		},
-	);
+	test("[step1] native input acceptance cannot be downgraded by a late uncertain transport outcome", () => {
+		const d = new Driver("claude", mode);
+		const a = begin(d);
+		observe(d, a.token, {
+			kind: "input_accepted",
+			nativeMessageId: "native-A",
+		});
+		observe(d, a.token, { kind: "delivery_indeterminate" });
+		// 3.13 (1241): InputView's `uncertain` is deleted; the state alone shows acceptance.
+		expect(d.view().active?.inputs).toEqual([
+			{ inputId: "A", state: { tag: "Accepted", nativeMessageId: "native-A" } },
+		]);
+	});
 
-	check(
-		"[step1] an obsolete retry deadline cannot resend an uncertain input",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: 200 },
-			});
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-			const fired = d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				200,
-			);
-			expect(
-				fired.effects.filter(
-					({ effect }) => effect.kind === "start" || effect.kind === "steer",
-				),
-			).toEqual([]);
-		},
-	);
+	test("[step1] an earlier retryable outcome cannot resend an uncertain input", () => {
+		// 3.4: a runner-held send answers by runner_reply, never effect_outcome, so this is a direct send.
+		const d = new Driver("opencode", mode);
+		const a = begin(d);
+		observe(d, a.token, {
+			kind: "effect_outcome",
+			outcome: { tag: "retryable", retryAt: d.now + 50 },
+		});
+		observe(d, a.token, {
+			kind: "effect_outcome",
+			outcome: { tag: "delivery_unknown" },
+		});
+		// 3.7 (676-678): a send's retry is main's, never a ledger deadline; the alarm is the recovery probe.
+		expect(d.alarmAt).toBe(d.now + policy.probeMs);
+		const fired = fire(d);
+		expect(startOrSteer(fired)).toEqual([]);
+		expect(fired.issued.map(({ effect }) => effect.kind)).toEqual(["probe"]);
+		expect(transmissions(d, "A")).toHaveLength(1);
+	});
 
-	check(
-		"[step1] a start retry scheduled before Stop cannot start while interrupting",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: 200 },
-			});
-			d.step({ verb: "control", control: { kind: "stop" } });
-			const fired = d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				200,
-			);
-			expect(
-				fired.effects.filter(
-					({ effect }) => effect.kind === "start" || effect.kind === "steer",
-				),
-			).toEqual([]);
-			expect(d.view().active?.tag).toBe("Interrupting");
-		},
-	);
+	test("[step1] a start with a retryable outcome cannot start again while Stop interrupts it", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		observe(d, a.token, {
+			kind: "effect_outcome",
+			outcome: { tag: "retryable", retryAt: d.now + 50 },
+		});
+		stop(d);
+		expect(d.view().active?.tag).toBe("Interrupting");
+		// 3.7 (676-678): the retry at retryAt is main's; the ledger holds no deadline for it.
+		const fired = step(
+			d,
+			{ verb: "settle", settlement: { kind: "alarm_fired" } },
+			d.now + 50,
+		);
+		expect(startOrSteer(fired)).toEqual([]);
+		expect(transmissions(d, "A")).toHaveLength(1);
+		expect(d.view().active?.tag).toBe("Interrupting");
+	});
 
-	check(
-		"[8C] a receipt for an earlier admission cannot accept the reused input's new admission",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const old = d.latest("start");
-			observe(d, old, {
-				kind: "result",
-				outcome: "error",
-				error: { code: "Old", retryable: false },
-			});
-			d.step({ verb: "admit", inputId: "A", runNow: true });
-			const before = d.view();
-			const receipt = observe(d, old, {
-				kind: "input_accepted",
-				nativeMessageId: "old-native",
-			});
-			expect(receipt.ended).toEqual([]);
-			expect(receipt.effects).toEqual([]);
-			expect(d.view()).toEqual(before);
-		},
-	);
+	test("[8C] a receipt for an earlier admission cannot accept the reused input's new admission", () => {
+		const d = new Driver("cursor", mode);
+		const old = begin(d);
+		observe(d, old.token, {
+			kind: "result",
+			outcome: "error",
+			error: { code: "Old", retryable: false },
+		});
+		begin(d, "A");
+		const before = d.view();
+		const receipt = observe(d, old.token, {
+			kind: "input_accepted",
+			nativeMessageId: "old-native",
+		});
+		expect(receipt.ended).toEqual([]);
+		expect(receipt.issued).toEqual([]);
+		expect(d.view()).toEqual(before);
+	});
 
-	check(
-		"[step1] native acceptance during backoff removes its retry deadline",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: 200 },
-			});
-			observe(d, start, { kind: "input_accepted" });
-			const fired = d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				200,
-			);
-			expect(fired.effects).toEqual([]);
-		},
-	);
+	test("[10B] an answer confirmation cannot settle a different interaction on the same Run", () => {
+		const d = new Driver("claude", mode);
+		const a = running(d);
+		ask(d, a.token, "q1");
+		ask(d, a.token, "q2");
+		const first = d.issued.find(
+			({ effect }) =>
+				effect.kind === "deliver_answer" && effect.interactionId === "q1",
+		);
+		expect(first).toBeDefined();
+		if (first === undefined) return;
+		const before = d.view();
+		const crossed = d.step({
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: tokenOf(first),
+				kind: "interaction_resolved",
+				interactionId: "q2",
+			},
+		});
+		expect(crossed.tag).toBe("Rejected");
+		expect(d.view()).toEqual(before);
+	});
 
-	check(
-		"[10B] an answer confirmation cannot settle a different interaction on the same Run",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			for (const interactionId of ["q1", "q2"]) {
-				observe(d, start, {
-					kind: "interaction_requested",
-					interactionId,
-					interactionKind: "question",
-				});
-				d.step({
-					verb: "control",
-					control: { kind: "answer", interactionId, answer: "yes" },
-				});
-			}
-			const first = d.latest(
-				"deliver_answer",
-				(effect) =>
-					effect.kind === "deliver_answer" && effect.interactionId === "q1",
-			);
-			const before = d.view();
-			observe(d, first, { kind: "interaction_resolved", interactionId: "q2" });
-			expect(d.view()).toEqual(before);
-		},
-	);
+	test("[8C] a lost process ends an uncertain Run and the ledger never resends its input", () => {
+		const d = new Driver("cursor", mode);
+		const a = begin(d);
+		observe(d, a.token, { kind: "delivery_indeterminate" });
+		const lost = step(d, {
+			verb: "settle",
+			settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+		});
+		expect(lost.ended).toMatchObject([{ reason: { tag: "process_lost" } }]);
+		// D58, D60: a re-admission is main's handoff and issues nothing; a resend is only main's run.requested.
+		expect(admit(d, "A").issued).toEqual([]);
+		expect(transmissions(d, "A")).toHaveLength(1);
+	});
 
-	check(
-		"[step1] native answer consumption during backoff removes its retry deadline",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			observe(d, d.latest("start"), {
-				kind: "interaction_requested",
-				interactionId: "q",
-				interactionKind: "question",
-			});
-			d.step({
-				verb: "control",
-				control: { kind: "answer", interactionId: "q", answer: "yes" },
-			});
-			const answer = d.latest("deliver_answer");
-			observe(d, answer, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: 200 },
-			});
-			observe(d, answer, { kind: "interaction_resolved", interactionId: "q" });
-			const fired = d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				200,
-			);
-			expect(fired.effects).toEqual([]);
-		},
-	);
+	test("[5C] conflicting result evidence cannot replace a recorded failure or extend settlement", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		observe(d, a.token, {
+			kind: "result",
+			outcome: "error",
+			error: { code: "ActualFailure", retryable: false },
+		});
+		const deadline = d.alarmAt;
+		expect(d.view().active).toMatchObject({
+			tag: "Settling",
+			deadline: { owner: "Run", at: deadline },
+		});
+		const duplicate = observe(
+			d,
+			a.token,
+			{ kind: "result", outcome: "completed" },
+			d.now + 10,
+		);
+		expect(duplicate.issued).toEqual([]);
+		expect(d.alarmAt).toBe(deadline);
+		expect(observe(d, a.token, { kind: "query_ended" }).ended).toMatchObject([
+			{ outcome: "error", reason: { code: "ActualFailure" } },
+		]);
+	});
 
-	check(
-		"[4B] native idle removes old cleanup and leaves only the successor deadline",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			d.step({ verb: "control", control: { kind: "stop" } });
-			d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				30_200,
-			);
-			const closeAt = d.alarmAt;
-			d.step({ verb: "admit", inputId: "B", runNow: true });
-			observe(d, d.latest("probe"), {
-				kind: "probe_result",
-				finding: { tag: "native_idle" },
-			});
-			expect(d.view().active?.tag).toBe("Starting");
-			const successor = d.latest("start");
-			observe(d, successor, { kind: "started" });
-			const before = d.view();
-			expect(d.alarmAt).toBe(before.active?.deadline.at);
-			const fired = d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				closeAt,
-			);
-			expect(fired.effects).toEqual([]);
-			expect(d.view()).toEqual(before);
-		},
-	);
+	test("[7B] session end removes deadlines and permits a fresh start", () => {
+		const d = new Driver("claude", mode);
+		begin(d);
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "session_ended", cause: "native_session_vanished" },
+		});
+		expect(d.view().live).toEqual([]);
+		expect(d.alarmAt).toBeUndefined();
+		const b = begin(d, "B");
+		expect(d.latest("start").effect).toMatchObject({
+			kind: "start",
+			inputId: "B",
+			mode: "fresh",
+		});
+		observe(d, b.token, { kind: "started" });
+		const before = d.view();
+		const stale = fire(d, 1_000);
+		expect(stale.issued).toEqual([]);
+		expect(stale.ended).toEqual([]);
+		expect(d.view()).toEqual(before);
+	});
 
-	check(
-		"[8C] uncertainty remains a resend barrier after its Run disappears from the view",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-			d.step({
-				verb: "settle",
-				settlement: { kind: "process_lost", token: start.token },
-			});
-			const readmit = d.step({ verb: "admit", inputId: "A", runNow: true });
-			expect(
-				readmit.effects.filter(
-					({ effect }) => effect.kind === "start" || effect.kind === "steer",
-				),
-			).toEqual([]);
-		},
-	);
-
-	check(
-		"[5C] conflicting result evidence cannot replace a recorded failure or extend settlement",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "result",
-				outcome: "error",
-				error: { code: "ActualFailure", retryable: false },
-			});
-			const deadline = d.view().active?.deadline;
-			const duplicate = observe(d, start, {
+	test("[8C] unknown evidence drops but known incompatible retired sends reject", () => {
+		const d = new Driver("opencode", mode);
+		running(d);
+		stop(d);
+		const interrupt = d.latest("interrupt");
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "session_ended", cause: "native_session_vanished" },
+		});
+		const before = d.view();
+		const incompatible = d.step({
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: tokenOf(interrupt),
 				kind: "result",
 				outcome: "completed",
-			});
-			expect(duplicate.effects).toEqual([]);
-			expect(d.view().active?.deadline).toEqual(deadline);
-			const ended = observe(d, start, { kind: "query_ended" });
-			expect(ended.ended).toMatchObject([
-				{ outcome: "error", reason: { code: "ActualFailure" } },
-			]);
-		},
-	);
-
-	check(
-		"[7B] session end removes deadlines and permits fresh authorized admission",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			d.step({
-				verb: "settle",
-				settlement: { kind: "session_ended", cause: "native_session_vanished" },
-			});
-			expect(d.view().live).toEqual([]);
-			expect(d.alarmAt).toBeUndefined();
-			d.step({ verb: "admit", inputId: "B", runNow: true });
-			expect(d.latest("start").effect).toMatchObject({ inputId: "B" });
-			observe(d, d.latest("start"), { kind: "started" });
-			const before = d.view();
-			const stale = d.step(
-				{
-					verb: "settle",
-					settlement: { kind: "alarm_fired" },
-				},
-				1_000,
-			);
-			expect(stale.effects).toEqual([]);
-			expect(stale.ended).toEqual([]);
-			expect(d.view()).toEqual(before);
-		},
-	);
-
-	check(
-		"[8C] unknown evidence drops but known incompatible retired sends reject",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			d.step({ verb: "control", control: { kind: "stop" } });
-			const interrupt = d.latest("interrupt");
-			d.step({
-				verb: "settle",
-				settlement: { kind: "session_ended", cause: "native_session_vanished" },
-			});
-			const before = d.view();
-			const incompatible = observe(d, interrupt, {
-				kind: "result",
-				outcome: "completed",
-			});
-			expect(incompatible.tag).toBe("Rejected");
-			const unknown = d.step({
-				verb: "observe",
-				observation: {
-					token: "never-issued" as SendToken,
-					kind: "result",
-					outcome: "completed",
-				},
-			});
-			expect(unknown.tag).toBe("Accepted");
-			expect(unknown.effects).toEqual([]);
-			expect(unknown.ended).toEqual([]);
-			expect(d.view()).toEqual(before);
-		},
-	);
+			},
+		});
+		expect(incompatible.tag).toBe("Rejected");
+		const unknown = observe(d, "never-issued" as SendToken, {
+			kind: "result",
+			outcome: "completed",
+		});
+		expect(unknown.issued).toEqual([]);
+		expect(unknown.ended).toEqual([]);
+		expect(d.view()).toEqual(before);
+	});
 });
 
-// Stale against the 3.13 model; the oracle lane (32.2.3) replaces it.
-describe.skip.each([
+describe.each([
 	"reference",
 	"decider",
 ] as const)("[step1] %s amendment", (mode) => {
-	const check = oracleTest(`[step1] ${mode} amendment`);
-	check(
-		"[step1] first admission projects exactly one alarm and issues only start",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			const first = d.step({ verb: "admit", inputId: "A", runNow: false }, 100);
-			expect(first.effects.map(({ effect }) => effect.kind)).toEqual(["start"]);
-			expect(first.alarmAt).toBe(1_100);
-			expect(d.view().live).toEqual(first.effects);
-			const before = d.view();
-			for (const now of [100, 1_099, 1_099]) {
-				const early = d.step(
-					{ verb: "settle", settlement: { kind: "alarm_fired" } },
-					now,
-				);
-				expect(early).toMatchObject({
-					tag: "Accepted",
-					effects: [],
-					ended: [],
-					alarmAt: 1_100,
-				});
-				expect(d.lastEventCount).toBe(0);
-				expect(d.view()).toEqual(before);
-			}
-			const expired = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				1_100,
-			);
-			expect(expired.ended).toMatchObject([
-				{ reason: { kind: "deadline_expired", deadline: "start" } },
-			]);
-			expect(expired.alarmAt).toBe(3_100);
-			const lateClose = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				10_000,
-			);
-			expect(lateClose.effects.map(({ effect }) => effect.kind)).toEqual([
-				"kill_and_respawn",
-			]);
-			expect(lateClose.alarmAt).toBe(12_000);
-			const refusedKill = observe(d, d.latest("kill_and_respawn"), {
-				kind: "effect_outcome",
-				outcome: { tag: "permanent", code: "CannotKill" },
-			});
-			expect(refusedKill.effects.map(({ effect }) => effect.kind)).toEqual([
-				"quarantine",
-			]);
-			expect(refusedKill.alarmAt).toBeUndefined();
-			const repeated = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				100_000,
-			);
-			expect(repeated.effects).toEqual([]);
-			expect(repeated.ended).toEqual([]);
-		},
-	);
+	const test = check(mode);
 
-	check(
-		"[step1] a late alarm fires every due obligation in deadline order once",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false }, 100);
-			const start = d.latest("start");
-			observe(d, start, { kind: "started" });
-			observe(d, start, {
-				kind: "interaction_requested",
-				interactionId: "later",
-				interactionKind: "permission",
-				timeoutAt: 400,
+	test("[step1] admission issues nothing and main's request issues only the start, with no deadline", () => {
+		const d = new Driver("claude", mode);
+		// D58, D60: admit is main's handoff; the ledger issues nothing and opens no deadline.
+		const admitted = admit(d, "A");
+		expect(admitted.issued).toEqual([]);
+		expect(admitted.alarmAt).toBeUndefined();
+		request(d, "A");
+		// LI1 (D60): the start reaches `live` from main's run.requested and its run.dispatched Answer.
+		expect(d.view().live.map(({ effect }) => effect.kind)).toEqual(["start"]);
+		// 3.7 (659): Starting has no deadline.
+		expect(d.alarmAt).toBeUndefined();
+		const before = d.view();
+		for (const now of [d.now, d.now + 1_000, d.now + 100_000]) {
+			const early = fire(d, now);
+			expect(early).toMatchObject({
+				tag: "Accepted",
+				events: [],
+				effects: [],
+				ended: [],
 			});
-			observe(d, start, {
-				kind: "interaction_requested",
-				interactionId: "earlier",
-				interactionKind: "permission",
-				timeoutAt: 200,
-			});
-			const alarm = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				500,
-			);
-			expect(alarm.effects.map(({ effect }) => effect)).toEqual([
-				{
-					kind: "deliver_answer",
-					runId: d.view().active?.runId,
-					interactionId: "earlier",
-					answer: { decision: "reject", reason: "timeout" },
-				},
-				{
-					kind: "deliver_answer",
-					runId: d.view().active?.runId,
-					interactionId: "later",
-					answer: { decision: "reject", reason: "timeout" },
-				},
-			]);
-			expect(alarm.alarmAt).toBe(10_101);
-			const repeated = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				500,
-			);
-			expect(repeated.effects).toEqual([]);
-			expect(d.lastEventCount).toBe(0);
-		},
-	);
-
-	it.each([
-		"input",
-		"interaction",
-		"native_session",
-	] as const)("[R1] an unanswered %s probe owns a deadline from issue and re-probes at it", (target) => {
-		const d = new TraceDriver("opencode", mode);
-		d.step({ verb: "admit", inputId: "A", runNow: false });
-		const start = d.latest("start");
-		observe(d, start, { kind: "started" });
-		if (target === "input") {
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-		} else if (target === "interaction") {
-			observe(d, start, {
-				kind: "interaction_requested",
-				interactionId: "q",
-				interactionKind: "question",
-			});
-			d.step({
-				verb: "control",
-				control: { kind: "answer", interactionId: "q", answer: "E" },
-			});
-			observe(d, d.latest("deliver_answer"), {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-		} else {
-			d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				d.alarmAt,
-			);
+			expect(early.alarmAt).toBeUndefined();
+			expect(d.view()).toEqual(before);
 		}
-		const probe = d.latest("probe");
-		const retryAt = d.alarmAt;
-		expect(retryAt).toBeGreaterThan(d.now);
-		expect(retryAt).toBeLessThan(d.view().active?.deadline.at ?? Infinity);
-		const early = d.step(
-			{ verb: "settle", settlement: { kind: "alarm_fired" } },
-			(retryAt ?? 0) - 1,
-		);
-		expect(early.effects).toEqual([]);
-		expect(early.alarmAt).toBe(retryAt);
-		const retried = d.step(
-			{ verb: "settle", settlement: { kind: "alarm_fired" } },
-			retryAt,
-		);
-		expect(retried.effects.map(({ effect }) => effect)).toEqual([probe.effect]);
-		expect(d.latest("probe").token).not.toBe(probe.token);
-		expect(retried.alarmAt).toBeGreaterThan(d.now);
-		const repeated = d.step(
-			{ verb: "settle", settlement: { kind: "alarm_fired" } },
-			d.now,
-		);
-		expect(repeated.effects).toEqual([]);
-		const transported = observe(d, d.latest("probe"), {
-			kind: "effect_outcome",
-			outcome: { tag: "succeeded" },
-		});
-		expect(transported.effects).toEqual([]);
-		expect(transported.alarmAt).toBe(retried.alarmAt);
 	});
 
-	check(
-		"[step1] probe retry is data and fulfillment removes its deadline",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			observe(d, d.latest("start"), {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
+	test("[3.10] main's timeout reject folds as any answer; decide issues nothing and arms no timeout", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		observe(d, a.token, {
+			kind: "interaction_requested",
+			interactionId: "q",
+			interactionKind: "permission",
+		});
+		// 3.10, 3.13: main owns the permission timeout; its reject reaches the ledger as an answer.
+		const timedOut = d.step({
+			verb: "control",
+			control: {
+				kind: "answer",
+				interactionId: "q",
+				answer: { decision: "reject", reason: "timeout" },
+			},
+		});
+		assert(timedOut.tag === "Accepted");
+		expect(timedOut.effects).toEqual([]);
+		const late = fire(d, d.now + 60_000);
+		expect(
+			late.issued.filter(({ effect }) => effect.kind === "deliver_answer"),
+		).toEqual([]);
+	});
+
+	for (const target of ["input", "interaction", "native_session"] as const)
+		test(`[R1] an unanswered ${target} probe owns a deadline from issue and re-probes at it`, () => {
+			const d = new Driver("opencode", mode);
+			const a = running(d);
+			if (target === "input") {
+				const b = begin(d, "B", "steer");
+				observe(d, b.token, {
+					kind: "effect_outcome",
+					outcome: { tag: "delivery_unknown" },
+				});
+				fire(d);
+			} else if (target === "interaction") {
+				const answer = ask(d, a.token);
+				observe(d, tokenOf(answer), {
+					kind: "effect_outcome",
+					outcome: { tag: "delivery_unknown" },
+				});
+				fire(d);
+			} else {
+				observe(d, a.token, { kind: "result", outcome: "completed" });
+				// 3.7: Settling's expiry probes native_session.
+				fire(d);
+			}
 			const probe = d.latest("probe");
-			const retry = observe(d, probe, {
+			expect(probe.effect).toMatchObject({ target: { tag: target } });
+			const retryAt = d.alarmAt;
+			assert(retryAt !== undefined, "the probe owns a deadline");
+			// 3.7 (678): a probe's deadline is its issue plus max(probeMs, backoff(n)).
+			expect(retryAt).toBeGreaterThanOrEqual(d.now + policy.probeMs);
+			const early = fire(d, retryAt - 1);
+			expect(early.issued).toEqual([]);
+			expect(early.alarmAt).toBe(retryAt);
+			const retried = fire(d, retryAt);
+			expect(retried.issued.map(({ effect }) => effect)).toEqual([
+				probe.effect,
+			]);
+			expect(tokenOf(d.latest("probe"))).not.toBe(tokenOf(probe));
+			expect(retried.alarmAt).toBeGreaterThan(d.now);
+			expect(fire(d, d.now).issued).toEqual([]);
+			const transported = observe(d, tokenOf(d.latest("probe")), {
 				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: 200 },
+				outcome: { tag: "succeeded" },
 			});
-			expect(retry.effects).toEqual([]);
-			expect(retry.alarmAt).toBe(200);
-			const resent = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				200,
-			);
-			expect(resent.effects.map(({ effect }) => effect.kind)).toEqual([
-				"probe",
-			]);
-			expect(d.latest("probe").token).not.toBe(probe.token);
-			observe(d, d.latest("probe"), {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: 300 },
-			});
-			observe(d, probe, {
-				kind: "probe_result",
-				finding: { tag: "input_present", nativeMessageId: "native-A" },
-			});
-			expect(d.alarmAt).toBe(d.view().active?.deadline.at);
-			const alarm = d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				300,
-			);
-			expect(alarm.effects).toEqual([]);
-		},
-	);
+			expect(transported.issued).toEqual([]);
+			expect(transported.alarmAt).toBe(retried.alarmAt);
+		});
 
-	check(
-		"[2C] Claude result ends the Run while its query fence holds the next start",
-		() => {
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false }, 100);
-			const start = d.latest("start");
-			const result = observe(d, start, {
-				kind: "result",
-				outcome: "completed",
-			});
-			expect(result.ended).toMatchObject([{ outcome: "completed" }]);
-			expect(d.view().active).toBeUndefined();
-			expect(result.alarmAt).toBe(d.now + 3_000);
-			const waiting = d.step({ verb: "admit", inputId: "B", runNow: false });
-			expect(waiting.effects.map(({ effect }) => effect.kind)).toEqual([
-				"probe",
-			]);
-			expect(d.view().active?.tag).toBe("Queued");
-			const closed = observe(d, start, { kind: "query_ended" });
-			expect(closed.ended).toEqual([]);
-			expect(closed.effects.map(({ effect }) => effect)).toMatchObject([
-				{ kind: "start", inputId: "B" },
-			]);
-			expect(closed.alarmAt).toBe(d.now + 1_000);
-		},
-	);
+	test("[step1] probe retry is data and fulfillment removes its deadline", () => {
+		const d = new Driver("opencode", mode);
+		const a = begin(d);
+		observe(d, a.token, {
+			kind: "effect_outcome",
+			outcome: { tag: "delivery_unknown" },
+		});
+		fire(d);
+		const probe = d.latest("probe");
+		const raisedAt = (d.alarmAt ?? 0) + 5_000;
+		// 3.7 (678-679, D20): a later retryAt raises the probe's deadline.
+		const retry = observe(d, tokenOf(probe), {
+			kind: "effect_outcome",
+			outcome: { tag: "retryable", retryAt: raisedAt },
+		});
+		expect(retry.issued).toEqual([]);
+		expect(retry.alarmAt).toBe(raisedAt);
+		const resent = fire(d, raisedAt);
+		expect(resent.issued.map(({ effect }) => effect.kind)).toEqual(["probe"]);
+		expect(tokenOf(d.latest("probe"))).not.toBe(tokenOf(probe));
+		observe(d, tokenOf(d.latest("probe")), {
+			kind: "effect_outcome",
+			outcome: { tag: "retryable", retryAt: raisedAt + 5_000 },
+		});
+		observe(d, tokenOf(probe), {
+			kind: "probe_result",
+			finding: { tag: "input_present", nativeMessageId: "native-A" },
+		});
+		// 3.7 (659): Starting has no deadline, so the answered probe leaves none.
+		expect(d.alarmAt).toBeUndefined();
+		expect(fire(d, raisedAt + 5_000).issued).toEqual([]);
+	});
 
-	check(
-		"[2C] OpenCode result supplies outcome until the owned execution ends",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			expect(
-				observe(d, start, { kind: "result", outcome: "completed" }).ended,
-			).toEqual([]);
-			expect(d.view().active?.tag).toBe("Settling");
-			expect(observe(d, start, { kind: "query_ended" }).ended).toMatchObject([
-				{ outcome: "completed" },
-			]);
-			expect(d.alarmAt).toBeUndefined();
-		},
-	);
+	test("[2C] a Claude result ends the Run with no query-fence deadline", () => {
+		const d = new Driver("claude", mode);
+		const a = begin(d);
+		expect(
+			observe(d, a.token, { kind: "result", outcome: "completed" }).ended,
+		).toMatchObject([{ outcome: "completed" }]);
+		expect(d.view().active).toBeUndefined();
+		// 3.7 (659), 3.13 (32.19): no ledger query-fence deadline; the fence is the runner's.
+		expect(d.alarmAt).toBeUndefined();
+		expect(observe(d, a.token, { kind: "query_ended" }).ended).toEqual([]);
+		begin(d, "B");
+		expect(transmissions(d, "B")).toHaveLength(1);
+		expect(d.view().active?.tag).toBe("Starting");
+	});
 
-	check(
-		"[4B] OpenCode idle cannot discharge a request or abort that may still execute",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			d.step({ verb: "control", control: { kind: "stop" } });
-			d.step(
-				{ verb: "settle", settlement: { kind: "alarm_fired" } },
-				d.alarmAt,
-			);
-			d.step({ verb: "admit", inputId: "B", runNow: true });
-			const before = d.alarmAt;
-			const idle = observe(d, d.latest("probe"), {
-				kind: "probe_result",
-				finding: { tag: "native_idle" },
-			});
-			expect(idle.effects).toEqual([]);
-			expect(d.view().active?.tag).toBe("Queued");
-			expect(d.alarmAt).toBe(before);
-		},
-	);
+	test("[2C] OpenCode result supplies outcome until the owned execution ends", () => {
+		const d = new Driver("opencode", mode);
+		const a = begin(d);
+		expect(
+			observe(d, a.token, { kind: "result", outcome: "completed" }).ended,
+		).toEqual([]);
+		expect(d.view().active?.tag).toBe("Settling");
+		expect(observe(d, a.token, { kind: "query_ended" }).ended).toMatchObject([
+			{ outcome: "completed" },
+		]);
+		expect(d.alarmAt).toBeUndefined();
+	});
+
+	test("[4B] OpenCode idle cannot discharge a request issued after its probe", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		stop(d);
+		const probe = d.latest("probe");
+		expect(probe.effect).toMatchObject({ target: { tag: "native_session" } });
+		complete(d, a.token);
+		const b = begin(d, "B");
+		const idle = observe(d, tokenOf(probe), {
+			kind: "probe_result",
+			finding: { tag: "native_idle" },
+		});
+		expect(idle.issued).toEqual([]);
+		expect(idle.ended).toEqual([]);
+		expect(d.view().active).toMatchObject({ tag: "Starting", runId: b.runId });
+	});
 
 	for (const outcomes of [
 		["completed", "interrupted", "error"],
@@ -637,276 +418,206 @@ describe.skip.each([
 		["completed", "error", "interrupted"],
 		["error", "interrupted", "completed"],
 		["interrupted", "completed", "error"],
-	] as const) {
-		check(
-			`[5C] failure wins the outcome fold in order ${outcomes.join(",")}`,
-			() => {
-				const d = new TraceDriver("opencode", mode);
-				d.step({ verb: "admit", inputId: "A", runNow: false });
-				const start = d.latest("start");
-				for (const outcome of outcomes)
-					observe(d, start, {
-						kind: "result",
-						outcome,
-						...(outcome === "error"
-							? { error: { code: "ActualFailure", retryable: false } }
-							: {}),
-					});
-				const closed = observe(d, start, { kind: "query_ended" });
-				expect(closed.ended).toMatchObject([
-					{ outcome: "error", reason: { code: "ActualFailure" } },
-				]);
-			},
-		);
-	}
-
-	check(
-		"[5C] specific beats generic and the first specific code survives later failures",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			for (const code of [undefined, "FirstFailure", "LaterFailure", undefined])
-				observe(d, start, {
-					kind: "result",
-					outcome: "error",
-					...(code ? { error: { code, retryable: false } } : {}),
-				});
-			expect(observe(d, start, { kind: "query_ended" }).ended).toMatchObject([
-				{ reason: { code: "FirstFailure" } },
+	] as const)
+		test(`[5C] failure wins the outcome fold in order ${outcomes.join(",")}`, () => {
+			const d = new Driver("opencode", mode);
+			const a = begin(d);
+			for (const outcome of outcomes)
+				observe(
+					d,
+					a.token,
+					outcome === "error"
+						? {
+								kind: "result",
+								outcome,
+								error: { code: "ActualFailure", retryable: false },
+							}
+						: { kind: "result", outcome },
+				);
+			expect(observe(d, a.token, { kind: "query_ended" }).ended).toMatchObject([
+				{ outcome: "error", reason: { code: "ActualFailure" } },
 			]);
-			d.step({ verb: "admit", inputId: "B", runNow: true });
-			const next = d.latest("start");
-			observe(d, next, { kind: "result", outcome: "completed" });
-			expect(observe(d, next, { kind: "query_ended" }).ended).toMatchObject([
-				{ outcome: "completed" },
-			]);
-		},
-	);
+		});
 
-	check(
-		"[5C] completion beats interrupt fallback and a Tombstone is immutable",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			d.step({ verb: "control", control: { kind: "stop" } });
-			observe(d, start, { kind: "result", outcome: "interrupted" });
-			observe(d, start, { kind: "result", outcome: "completed" });
-			expect(observe(d, start, { kind: "query_ended" }).ended).toMatchObject([
-				{ outcome: "completed" },
-			]);
-			const before = d.view();
-			const late = observe(d, start, {
-				kind: "result",
-				outcome: "error",
-				error: { code: "TooLate", retryable: false },
-			});
-			expect(late.ended).toEqual([]);
-			expect(d.view()).toEqual(before);
-		},
-	);
-
-	check(
-		"[6C] native identity fills once and contradictions reject without changing state or alarm",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, { kind: "input_accepted" });
-			observe(d, start, {
-				kind: "input_accepted",
-				nativeMessageId: "native-A",
-			});
-			observe(d, start, { kind: "input_accepted" });
-			expect(d.view().active?.inputs[0]?.state).toEqual({
-				tag: "Accepted",
-				nativeMessageId: "native-A",
-			});
-			const before = d.view();
-			const alarm = d.alarmAt;
-			const contradiction = observe(d, start, {
-				kind: "input_accepted",
-				nativeMessageId: "foreign",
-			});
-			expect(contradiction.tag).toBe("Rejected");
-			expect(contradiction.diagnostic).toBeTruthy();
-			expect(d.view()).toEqual(before);
-			expect(d.alarmAt).toBe(alarm);
-		},
-	);
-
-	check(
-		"[6C] a contradictory input probe rejects even after native acceptance",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const start = d.latest("start");
-			observe(d, start, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-			const probe = d.latest("probe");
-			observe(d, start, {
-				kind: "input_accepted",
-				nativeMessageId: "native-A",
-			});
-			const before = d.view();
-			expect(
-				observe(d, probe, {
-					kind: "probe_result",
-					finding: { tag: "input_present", nativeMessageId: "foreign" },
-				}).tag,
-			).toBe("Rejected");
-			expect(d.view()).toEqual(before);
-		},
-	);
-
-	it.each([
-		"usage_limit_failover",
-		"native_session_vanished",
-	] as const)("[7B] ending an empty provider session with %s permits fresh authorization", (cause) => {
-		const d = new TraceDriver("claude", mode);
-		d.step({ verb: "settle", settlement: { kind: "session_ended", cause } });
-		const next = d.step({ verb: "admit", inputId: "B", runNow: true });
-		expect(next.effects.map(({ effect }) => effect.kind)).toEqual(["start"]);
-		expect(next.alarmAt).toBe(d.now + 1_000);
+	test("[5C] specific beats generic and the first specific code survives later failures", () => {
+		const d = new Driver("opencode", mode);
+		const a = begin(d);
+		for (const code of [undefined, "FirstFailure", "LaterFailure", undefined])
+			observe(
+				d,
+				a.token,
+				code === undefined
+					? { kind: "result", outcome: "error" }
+					: {
+							kind: "result",
+							outcome: "error",
+							error: { code, retryable: false },
+						},
+			);
+		expect(observe(d, a.token, { kind: "query_ended" }).ended).toMatchObject([
+			{ reason: { code: "FirstFailure" } },
+		]);
+		const b = begin(d, "B");
+		observe(d, b.token, { kind: "result", outcome: "completed" });
+		expect(observe(d, b.token, { kind: "query_ended" }).ended).toMatchObject([
+			{ outcome: "completed" },
+		]);
 	});
 
-	check(
-		"[8C] very old receipts retain their address and native identity after many finished Runs",
-		() => {
-			const d = new TraceDriver("cursor", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			const old = d.latest("start");
-			observe(d, old, { kind: "result", outcome: "completed" });
-			for (let index = 0; index < 24; index++) {
-				d.step({ verb: "admit", inputId: `later-${index}`, runNow: true });
-				observe(d, d.latest("start"), { kind: "result", outcome: "completed" });
-			}
-			expect(
-				observe(d, old, {
-					kind: "input_accepted",
-					nativeMessageId: "old-native",
-				}).tag,
-			).toBe("Accepted");
-			const before = d.view();
-			expect(
-				observe(d, old, {
-					kind: "input_accepted",
-					nativeMessageId: "contradiction",
-				}).tag,
-			).toBe("Rejected");
-			expect(d.view()).toEqual(before);
-		},
-	);
+	test("[5C] completion beats interrupt fallback and a Tombstone is immutable", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		stop(d);
+		observe(d, a.token, { kind: "result", outcome: "interrupted" });
+		observe(d, a.token, { kind: "result", outcome: "completed" });
+		expect(observe(d, a.token, { kind: "query_ended" }).ended).toMatchObject([
+			{ outcome: "completed" },
+		]);
+		const before = d.view();
+		const late = observe(d, a.token, {
+			kind: "result",
+			outcome: "error",
+			error: { code: "TooLate", retryable: false },
+		});
+		expect(late.ended).toEqual([]);
+		expect(d.view()).toEqual(before);
+	});
 
-	check(
-		"[9B] Resume and provider-session end cannot clear project inactivity",
-		() => {
-			const ordinary = new TraceDriver("claude", mode);
-			ordinary.step({ verb: "control", control: { kind: "stop" } });
-			ordinary.step({ verb: "admit", inputId: "ordinary", runNow: false });
-			expect(ordinary.view().active).toBeUndefined();
-			expect(
-				ordinary
-					.step({ verb: "control", control: { kind: "resume" } })
-					.effects.map(({ effect }) => effect.kind),
-			).toEqual(["start"]);
-			const d = new TraceDriver("claude", mode);
-			d.step({ verb: "settle", settlement: { kind: "project_inactive" } });
-			d.step({ verb: "admit", inputId: "B", runNow: true });
-			d.step({ verb: "control", control: { kind: "resume" } });
-			d.step({
-				verb: "settle",
-				settlement: { kind: "session_ended", cause: "native_session_vanished" },
-			});
-			const resumed = d.step({ verb: "control", control: { kind: "resume" } });
-			expect(resumed.effects).toEqual([]);
-			expect(d.view().active).toBeUndefined();
-			expect(d.view().inbox.map(({ inputId }) => inputId)).toEqual(["B"]);
-			expect(d.alarmAt).toBeUndefined();
-		},
-	);
+	test("[6C] native identity fills once and contradictions reject without changing state or alarm", () => {
+		const d = new Driver("cursor", mode);
+		const a = begin(d);
+		observe(d, a.token, { kind: "input_accepted" });
+		observe(d, a.token, {
+			kind: "input_accepted",
+			nativeMessageId: "native-A",
+		});
+		observe(d, a.token, { kind: "input_accepted" });
+		expect(visibleInput(d, "A")?.state).toEqual({
+			tag: "Accepted",
+			nativeMessageId: "native-A",
+		});
+		const before = d.view();
+		const alarm = d.alarmAt;
+		const contradiction = d.step({
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: a.token,
+				kind: "input_accepted",
+				nativeMessageId: "foreign",
+			},
+		});
+		expect(contradiction.tag).toBe("Rejected");
+		expect(contradiction.diagnostic).toBeTruthy();
+		expect(d.view()).toEqual(before);
+		expect(d.alarmAt).toBe(alarm);
+	});
 
-	check(
-		"[10B] permanent refusal stays Pending and reconciliation retries the preserved answer",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			observe(d, d.latest("start"), {
-				kind: "interaction_requested",
-				interactionId: "q",
-				interactionKind: "question",
-			});
-			d.step({
-				verb: "control",
-				control: {
-					kind: "answer",
-					interactionId: "q",
-					answer: { choice: "preserved" },
-				},
-			});
-			const first = d.latest("deliver_answer");
-			observe(d, first, {
-				kind: "effect_outcome",
-				outcome: { tag: "permanent", code: "HTTP400" },
-			});
-			expect(d.view().active?.interactions).toEqual([
-				{ tag: "Pending", interactionId: "q", kind: "question" },
-			]);
-			observe(d, d.latest("probe"), {
+	test("[6C] a contradictory input probe rejects even after native acceptance", () => {
+		const d = new Driver("cursor", mode);
+		const a = begin(d);
+		observe(d, a.token, { kind: "delivery_indeterminate" });
+		fire(d);
+		const probe = d.latest("probe");
+		observe(d, a.token, {
+			kind: "input_accepted",
+			nativeMessageId: "native-A",
+		});
+		const before = d.view();
+		const contradiction = d.step({
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: tokenOf(probe),
 				kind: "probe_result",
-				finding: { tag: "answer_pending" },
-			});
-			const retry = d.latest("deliver_answer");
-			expect(retry.token).not.toBe(first.token);
-			expect(retry.effect).toEqual(first.effect);
-		},
-	);
+				finding: { tag: "input_present", nativeMessageId: "foreign" },
+			},
+		});
+		expect(contradiction.tag).toBe("Rejected");
+		expect(d.view()).toEqual(before);
+	});
 
-	check(
-		"[10B] an ambiguous earlier answer is reconciled before retransmission after refusal",
-		() => {
-			const d = new TraceDriver("opencode", mode);
-			d.step({ verb: "admit", inputId: "A", runNow: false });
-			observe(d, d.latest("start"), {
-				kind: "interaction_requested",
-				interactionId: "q",
-				interactionKind: "question",
-			});
-			d.step({
-				verb: "control",
-				control: { kind: "answer", interactionId: "q", answer: "saved" },
-			});
-			const first = d.latest("deliver_answer");
-			observe(d, first, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-			observe(d, first, {
-				kind: "effect_outcome",
-				outcome: { tag: "permanent", code: "Refused" },
-			});
-			const attempted = d.step({
-				verb: "control",
-				control: { kind: "answer", interactionId: "q", answer: "saved" },
-			});
-			expect(
-				attempted.effects.filter(
-					({ effect }) => effect.kind === "deliver_answer",
-				),
-			).toEqual([]);
-			observe(d, d.latest("probe"), {
-				kind: "probe_result",
-				finding: { tag: "answer_consumed" },
-			});
-			expect(
-				d.issued.filter(({ effect }) => effect.kind === "deliver_answer"),
-			).toHaveLength(1);
-			expect(d.view().active?.interactions).toMatchObject([
-				{ tag: "Answered", delivery: "settled" },
-			]);
-		},
-	);
+	// 3.13 (1175): native_session_vanished is session_ended's only cause; usage_limit_failover deleted (4627).
+	test("[7B] ending an empty provider session with native_session_vanished permits a fresh start", () => {
+		const d = new Driver("claude", mode);
+		step(d, {
+			verb: "settle",
+			settlement: { kind: "session_ended", cause: "native_session_vanished" },
+		});
+		begin(d, "B");
+		expect(transmissions(d, "B").map(({ effect }) => effect)).toMatchObject([
+			{ kind: "start", mode: "fresh" },
+		]);
+		// 3.7 (659): Starting has no deadline.
+		expect(d.alarmAt).toBeUndefined();
+	});
+
+	test("[8C] very old receipts retain their address and native identity after many finished Runs", () => {
+		const d = new Driver("cursor", mode);
+		const old = begin(d);
+		observe(d, old.token, { kind: "result", outcome: "completed" });
+		for (let index = 0; index < 24; index++) {
+			const later = begin(d, `later-${index}`);
+			observe(d, later.token, { kind: "result", outcome: "completed" });
+		}
+		observe(d, old.token, {
+			kind: "input_accepted",
+			nativeMessageId: "old-native",
+		});
+		const before = d.view();
+		const contradiction = d.step({
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: old.token,
+				kind: "input_accepted",
+				nativeMessageId: "contradiction",
+			},
+		});
+		expect(contradiction.tag).toBe("Rejected");
+		expect(d.view()).toEqual(before);
+	});
+
+	test("[10B] a permanent refusal resolves the interaction and nothing re-delivers it", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		const first = ask(d, a.token);
+		const refused = observe(d, tokenOf(first), {
+			kind: "effect_outcome",
+			outcome: { tag: "permanent", code: "HTTP400" },
+		});
+		// 3.10, A (4386-4389, amends 10B): a permanent refusal ends the delivery and resolves the interaction.
+		expect(refused.issued).toEqual([]);
+		expect(d.view().interactions).not.toContainEqual(
+			expect.objectContaining({ tag: "Pending", interactionId: "q" }),
+		);
+		expect(d.alarmAt).toBeUndefined();
+		expect(
+			d.issued.filter(({ effect }) => effect.kind === "deliver_answer"),
+		).toEqual([first]);
+	});
+
+	test("[10B] an ambiguous answer is reconciled by its probe and never retransmitted", () => {
+		const d = new Driver("opencode", mode);
+		const a = running(d);
+		const first = ask(d, a.token);
+		observe(d, tokenOf(first), {
+			kind: "effect_outcome",
+			outcome: { tag: "delivery_unknown" },
+		});
+		const recovered = fire(d);
+		expect(recovered.issued.map(({ effect }) => effect)).toMatchObject([
+			{ kind: "probe", target: { tag: "interaction", interactionId: "q" } },
+		]);
+		observe(d, tokenOf(d.latest("probe")), {
+			kind: "probe_result",
+			finding: { tag: "answer_consumed" },
+		});
+		expect(
+			d.issued.filter(({ effect }) => effect.kind === "deliver_answer"),
+		).toHaveLength(1);
+		expect(d.view().interactions).toMatchObject([
+			{ tag: "Answered", interactionId: "q", delivery: "settled" },
+		]);
+	});
 });

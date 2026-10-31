@@ -1,22 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { TraceDriver } from "./harness.js";
-import { oracleTest } from "./pending.js";
-import { scenarios, sourceOnlyCases } from "./scenarios.js";
+import { pendingSuite } from "./pending.js";
+import type { Mutation } from "./reference.js";
+import { Driver, scenarios, sourceOnlyCases } from "./scenarios.js";
 
-// Stale against the 3.13 model; the oracle lane (32.2.3) replaces it.
-describe.skip("[step1] Run Ledger catalogue scenarios", () => {
+describe("[step1] Run Ledger catalogue scenarios", () => {
 	for (const scenario of scenarios) {
 		describe(`${scenario.title} (${scenario.id})`, () => {
-			const check = oracleTest(
-				`[step1] Run Ledger catalogue scenarios ${scenario.title} (${scenario.id})`,
+			it("reference", () => scenario.run(new Driver(scenario.provider)));
+			pendingSuite("[checkpoint] run-ledger-oracle-scenarios")("decider", () =>
+				scenario.run(new Driver(scenario.provider, "decider")),
 			);
-			check(`${scenario.title} reference`, () => {
-				scenario.run(new TraceDriver(scenario.provider, "reference"));
-			});
-
-			check(`${scenario.title} decider`, () => {
-				scenario.run(new TraceDriver(scenario.provider, "decider"));
-			});
 		});
 	}
 
@@ -25,19 +18,19 @@ describe.skip("[step1] Run Ledger catalogue scenarios", () => {
 	}
 });
 
-// Stale against the 3.13 model; the oracle lane (32.2.3) replaces it.
-describe.skip("[step1] reference mutation sensitivity", () => {
+describe("[step1] reference mutation sensitivity", () => {
 	for (const [id, mutation] of [
-		["RL-041", "ignore_pause"],
-		["RL-055", "resend_unknown"],
-		["R10-5", "extend_settle"],
-	] as const) {
+		["RL-021", "probe_at_outcome"],
+		["RL-055", "probe_at_outcome"],
+		["11A-1", "extend_settle"],
+		["L6-1", "unforced_alarm"],
+	] satisfies [string, Mutation][]) {
 		it(`[step1] ${id} detects ${mutation}`, () => {
 			const scenario = scenarios.find((entry) => entry.id === id);
 			expect(scenario).toBeDefined();
-			if (!scenario) return;
+			if (scenario === undefined) return;
 			expect(() =>
-				scenario.run(new TraceDriver(scenario.provider, "reference", mutation)),
+				scenario.run(new Driver(scenario.provider, "reference", mutation)),
 			).toThrow();
 		});
 	}

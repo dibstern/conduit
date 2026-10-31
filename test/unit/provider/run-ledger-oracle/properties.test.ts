@@ -15,7 +15,6 @@ import type {
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import {
 	FakeProvider,
-	type HarnessCommand,
 	splitLabel,
 	type TraceAction,
 	traceAction,
@@ -37,7 +36,7 @@ import {
 } from "./harness.js";
 import { pendingSuite } from "./pending.js";
 import { main } from "./review-traces.js";
-import { scenarios } from "./scenarios.js";
+import { Driver, scenarios } from "./scenarios.js";
 
 const providers = ["claude", "codex", "cursor", "opencode"] as const;
 const count = (name: string, fallback: number) => {
@@ -105,7 +104,7 @@ interface GenerationRun {
 	readonly fake: FakeProvider;
 	/** The fixture, then main's starts and steers as the fake plays main (D60). */
 	readonly issued: IssuedEffect[];
-	readonly packets: HarnessCommand[];
+	readonly packets: LedgerCommand[];
 	readonly shapes: Record<string, number>;
 	/** Host facts read from the packet stream only, for shape counting. */
 	readonly hosts: {
@@ -252,9 +251,7 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 			if (e.kind === "tasks_snapshot" && e.tasks.length > 1)
 				hit("tasks_snapshot:several");
 			if (e.kind === "interaction_requested")
-				hit(
-					`interaction:${e.interactionKind}:${e.timeoutAt === undefined ? "no-timeout" : "timeout"}`,
-				);
+				hit(`interaction:${e.interactionKind}`);
 		}
 		real.fake.observe(packet.command, view);
 		real.issued.push(...real.fake.takeMainIssues().map(({ issue }) => issue));
@@ -408,7 +405,8 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 			);
 		}
 		// Coverage gate over the 3.13 input alphabet (D60): every expressible input kind is produced,
-		// or waits with its reason; a kind a provider cannot express is listed with its clause.
+		// or waits with its reason; a kind a provider cannot express is listed with its clause, and a
+		// kind its provider cannot produce is produced as an adversarial input decide Rejects (3.4).
 		const produced: Record<string, number> = {
 			...shapes,
 			...Object.fromEntries(
@@ -455,14 +453,25 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				"not_sent",
 			].map((outcome) => `outcome:end_session:${outcome}`),
 		];
-		const waiting: Record<string, string> = {
+		const adversarial: Record<string, string> = {
+			...(provider === "cursor" || provider === "opencode"
+				? {
+						"observe:tasks_snapshot":
+							"task evidence from Cursor or OpenCode (3.4, 8.1)",
+						"observe:task_event":
+							"task evidence from Cursor or OpenCode (3.4, 8.1)",
+					}
+				: {}),
 			...(provider === "claude"
 				? {}
 				: {
-						// 8.3, 3.13 (contract line 1141): a Claude wake's; 3.4 and D46 list no Rejected path for it.
+						"observe:command_lifecycle":
+							"command_lifecycle from any provider but Claude (3.4, D46)",
 						"observe:turn_ended":
-							"G8: the contract does not say whether another provider's turn_ended is a Rejected-path input",
+							"turn_ended from any provider but Claude (3.4, 2.1 row 215, 8.3)",
 					}),
+		};
+		const waiting: Record<string, string> = {
 			...(provider === "opencode"
 				? {
 						"main:run_terminal:completed":
@@ -471,8 +480,8 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				: {}),
 		};
 		// D60: OpenCode's run_requested is its transmission; the others' is a held dispatch.
-		const notExpressible: Record<string, string> =
-			provider === "opencode"
+		const notExpressible: Record<string, string> = {
+			...(provider === "opencode"
 				? {
 						"main:run_requested:held":
 							"OpenCode main dispatches directly (D60, 4.11)",
@@ -480,7 +489,14 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				: {
 						"main:run_requested:direct":
 							"only OpenCode main dispatches directly (D60, 4.11)",
-					};
+					}),
+			...(provider === "cursor"
+				? {
+						"observe:turn_started":
+							"Cursor starts no unsolicited turn (8.3, cursor-runner-payload.ts)",
+					}
+				: {}),
+		};
 		const listed = (reasons: Record<string, string>) =>
 			alphabet.flatMap((kind) => {
 				const reason = reasons[kind];
@@ -488,6 +504,7 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 			});
 		const gate = {
 			produced: alphabet.filter((kind) => (produced[kind] ?? 0) > 0),
+			adversarial: listed(adversarial),
 			waiting: listed(waiting),
 			notExpressible: listed(notExpressible),
 			missing: alphabet.filter(
@@ -518,6 +535,12 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				? ["tasks_snapshot", "task_event"]
 				: [];
 		expect(gate.missing).toEqual([]);
+		expect(
+			alphabet.filter(
+				(kind) =>
+					notExpressible[kind] !== undefined && (produced[kind] ?? 0) > 0,
+			),
+		).toEqual([]);
 		for (const kind of ["activity", "result", "query_ended"])
 			for (const label of ["own", "other"])
 				expect(
@@ -550,10 +573,8 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 			"unsolicited:result:interrupted",
 			"retryable:before-probe-deadline", // 3.7
 			"retryable:after-probe-deadline",
-			"interaction:question:timeout", // 3.13 interaction_requested
-			"interaction:permission:timeout",
-			"interaction:question:no-timeout",
-			"interaction:permission:no-timeout",
+			"interaction:question", // 3.13 interaction_requested; main owns the timeout (3.10)
+			"interaction:permission",
 			...(runnerHeld
 				? [
 						"process_started:no-querySeq", // 3.4 older host label, REDESIGN r2-2
@@ -596,7 +617,7 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 });
 
 type HostEvent =
-	| HarnessCommand
+	| LedgerCommand
 	| {
 			readonly verb: "issued";
 			readonly effect: IssuedEffect;
@@ -1019,6 +1040,7 @@ describe("trace driver mechanics", () => {
 				verb: "observe",
 				observation: answer(send, {
 					kind: "run_dispatched",
+					runId: "R",
 					runnerId: "host-1",
 					commandId: "A",
 					transmission: 1,
@@ -1827,7 +1849,9 @@ describe("trace coverage gate", () => {
 
 describe.each(providers)("%s model-based public traces", (provider) => {
 	for (const seed of fixedSeeds) {
-		it.skipIf(!oracleAvailable)(
+		(oracleAvailable
+			? pendingSuite(`[convergence] ${provider} oracle traces, seed ${seed}`)
+			: it.skip)(
 			`oracle LI1-LI10 and full coverage, seed ${seed}`,
 			({ task }) => {
 				const coverage = new Coverage();
@@ -2237,7 +2261,7 @@ describe("generated D34 coverage", () => {
 		},
 	);
 	// Round 9 phase 2: the generator, not a scenario, reaches each shape (input-kinds.md).
-	it.skipIf(!oracleAvailable).each([
+	for (const shape of [
 		"D43 gated Run ended, gate dropped", // D43, 5.1, 8.4
 		"process_lost while gated", // 8.4 release by retirement, REDESIGN r2-1
 		"older wake label Run-end evidence", // 8.3: clears that execution only
@@ -2302,9 +2326,12 @@ describe("generated D34 coverage", () => {
 		"Q28 removed with a surviving runner", // 4.4, Q28
 		"native clock paused at not_sent", // 8.5 D48 amended
 		"native clock resumed at re-issue", // 8.5 D48 amended
-	] as const)("generated traces reach %s", (shape) => {
-		expect(oracleCoverage.shapes[shape], shape).toBeGreaterThan(0);
-	});
+	] as const)
+		(oracleAvailable
+			? pendingSuite(`[convergence] generated traces reach ${shape}`)
+			: it.skip)(`generated traces reach ${shape}`, () => {
+			expect(oracleCoverage.shapes[shape], shape).toBeGreaterThan(0);
+		});
 	// 8.3 (oracle round 8 clarifications): older wake execution labels never end the Run.
 	it.skipIf(!oracleAvailable)(
 		"generated older wake label Run-end evidence never ends the Run",
@@ -2315,37 +2342,34 @@ describe("generated D34 coverage", () => {
 });
 
 describe("fixed catalogue coverage", () => {
-	it.skipIf(!oracleAvailable)(
-		"executes every fixed trace and gates actual race hits",
-		() => {
-			const coverage = new Coverage();
-			coverage.merge(oracleCoverage);
-			// A failing scenario still gates coverage; scenarios.test.ts reports its divergence.
-			const failed: string[] = [];
-			for (const scenario of scenarios) {
-				const d = new TraceDriver(scenario.provider);
-				try {
-					scenario.run(d);
-				} catch {
-					failed.push(scenario.id);
-				} finally {
-					coverage.merge(d.coverage);
-				}
+	(oracleAvailable
+		? pendingSuite("[convergence] fixed catalogue race gate")
+		: it.skip)("executes every fixed trace and gates actual race hits", () => {
+		const coverage = new Coverage();
+		coverage.merge(oracleCoverage);
+		// Scenarios drive the public ledger without the fake, so the race gate reads generated
+		// coverage; scenarios.test.ts reports each scenario's divergence.
+		const failed: string[] = [];
+		for (const scenario of scenarios) {
+			try {
+				scenario.run(new Driver(scenario.provider));
+			} catch {
+				failed.push(scenario.id);
 			}
-			writeTraceArtifact("fixed-coverage", {
-				seeds: fixedSeeds,
-				evidence: coverage.kinds,
-				races: coverage.races,
-				generatedShapes: oracleCoverage.shapes,
-				failedScenarios: failed,
-				shrunkFailures: [],
-			});
-			coverage.assertComplete();
-			assert.deepEqual(
-				failed,
-				[],
-				"fixed scenarios that fail against the oracle",
-			);
-		},
-	);
+		}
+		writeTraceArtifact("fixed-coverage", {
+			seeds: fixedSeeds,
+			evidence: coverage.kinds,
+			races: coverage.races,
+			generatedShapes: oracleCoverage.shapes,
+			failedScenarios: failed,
+			shrunkFailures: [],
+		});
+		coverage.assertComplete();
+		assert.deepEqual(
+			failed,
+			[],
+			"fixed scenarios that fail against the oracle",
+		);
+	});
 });

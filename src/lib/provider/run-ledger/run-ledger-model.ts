@@ -9,9 +9,9 @@ import type {
 
 export type ProviderKind = "claude" | "codex" | "cursor" | "opencode";
 /**
- * Opaque host string, never parsed. Runner-held start or steer: bound by run_dispatched's
- * commandId and transmission, n minted by holdRun (4.11). A direct start: its run.requested runId.
- * Every other effect with no hold: from ctx.newId.
+ * Opaque host string, never parsed. Runner-held start or steer: each transmission's from its
+ * run_dispatched (runId, commandId, transmission), n minted by holdRun (3.4, 4.11). A direct start:
+ * its run.requested runId. Every other effect with no hold: from ctx.newId.
  */
 export type SendToken = string & { readonly __brand: "SendToken" };
 /**
@@ -55,7 +55,10 @@ export type Observation =
 	  } & Unsolicited);
 
 export type MainRunEvent =
-	/** 3.4: a direct send (runsOpenCodeServer) is a transmission, its token the runId. */
+	/**
+	 * 3.4: reserves its input's Run under runId, or names the Run that holds it; direct
+	 * (runsOpenCodeServer) is also a transmission, its token the runId.
+	 */
 	| {
 			readonly kind: "run_requested";
 			readonly runId: string;
@@ -104,7 +107,6 @@ export type Evidence =
 			readonly kind: "interaction_requested";
 			readonly interactionId: string;
 			readonly interactionKind: "permission" | "question";
-			readonly timeoutAt?: number;
 	  }
 	| { readonly kind: "interaction_resolved"; readonly interactionId: string }
 	| {
@@ -118,7 +120,12 @@ export type Evidence =
 			readonly kind: "effect_outcome";
 			readonly outcome:
 				| { readonly tag: "succeeded" }
-				| { readonly tag: "retryable"; readonly retryAt: number }
+				/** code: main's receipt error_code, an answer's lastRefusal (3.10). */
+				| {
+						readonly tag: "retryable";
+						readonly retryAt: number;
+						readonly code?: string;
+				  }
 				/** Includes "native_resume_rejected". */
 				| { readonly tag: "permanent"; readonly code: string }
 				/** The host never called the provider (H4); 3.7 spaces the re-send. */
@@ -166,9 +173,10 @@ export type Evidence =
 	  }
 	| { readonly kind: "command_result"; readonly commandId: string }
 	// Hold facts of a runner-held send (4.11): read from the existing event stream, never copied
-	// into a second store. The opaque token identifies this commandId and transmission.
+	// into a second store. runId names the Run, commandId its issue (3.4).
 	| {
 			readonly kind: "run_dispatched";
+			readonly runId: string;
 			readonly runnerId: string;
 			readonly commandId: string;
 			readonly transmission: number;
@@ -309,8 +317,8 @@ export type RunEffect =
 export interface DecideContext {
 	readonly now: number;
 	/**
-	 * Mints Run ids and the tokens of effects with no hold from the folded event's sequence and a
-	 * counter within the decision, so a replay mints the same ids; never repeats.
+	 * Mints a wake Run's id and the tokens of effects with no hold (3.4) from the folded event's
+	 * sequence and a counter within the decision, so a replay mints the same ids; never repeats.
 	 */
 	readonly newId: () => string;
 	readonly policy: {
@@ -321,13 +329,13 @@ export interface DecideContext {
 }
 
 export type IssuedEffect =
-	/** A runner-held start or steer main issued, folded from `run.dispatched` under its commandId; holdRun binds n. */
+	/** A runner-held start or steer main issued, folded from `run.dispatched` under its runId and commandId; holdRun binds n. */
 	| {
 			readonly tag: "Held";
 			readonly commandId: string;
 			readonly effect: RunEffect;
 	  }
-	/** A direct start's token is its `run.requested` runId; every other effect with no hold gets ctx.newId(). */
+	/** A direct start's token is its `run.requested` runId; every other effect with no hold gets its token from ctx.newId(). */
 	| {
 			readonly tag: "Tokened";
 			readonly token: SendToken;
@@ -377,19 +385,16 @@ export type Consumption =
 	| { readonly tag: "Observed" }
 	| { readonly tag: "Accepted" };
 
-/** Run: Settling only. Stop: the ledger stop deadline, one per session row (3.7, L6). */
-export type DeadlineOwner =
-	| "Run"
-	| "Send"
-	| "Interaction"
-	| "NativeCommand"
-	| "Stop";
+/**
+ * Run: Settling only; Send: a probe or a delivery recovery (3.7); Stop: the ledger stop deadline,
+ * one per session row, its target the row, no field (3.7, L6).
+ */
+export type DeadlineOwner = "Run" | "Send" | "NativeCommand" | "Stop";
 /** Tagged by owner, with a required target; alarmAt is the earliest (3.7). */
 export type Deadline = { readonly at: number } & (
 	| { readonly owner: "Run"; readonly runId: string }
-	/** A probe's retry deadline (3.7). */
+	/** A probe or a delivery recovery (3.7). */
 	| { readonly owner: "Send"; readonly token: SendToken }
-	| { readonly owner: "Interaction"; readonly interactionId: string }
 	| { readonly owner: "NativeCommand"; readonly commandId: string }
 	/** The ledger stop deadline: one per session row, its target the row, no field (3.7, L6). */
 	| { readonly owner: "Stop" }

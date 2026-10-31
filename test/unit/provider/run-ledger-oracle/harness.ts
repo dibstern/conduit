@@ -9,6 +9,7 @@ import type {
 	Decision,
 	Evidence,
 	IssuedEffect,
+	LedgerCommand,
 	LedgerView,
 	Observation,
 	ProviderKind,
@@ -16,23 +17,16 @@ import type {
 	RunEnded,
 	SendToken,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import {
-	FakeProvider,
-	type HarnessCommand,
-	type Send,
-	splitLabel,
-} from "./fake-provider.js";
-import type { Mutation } from "./reference.js";
+import { FakeProvider, type Send, splitLabel } from "./fake-provider.js";
 import * as oracleModule from "./reference.js";
 
 /** Each implementation owns its state and entries; the harness only folds entries. */
 export interface LedgerImplementation<State, Entry> {
 	initialSessionLedgerState(sessionId: string, provider: ProviderKind): State;
-	// Method syntax: an implementation spelled for LedgerCommand still receives the gate answers
-	// (H4) the production model cannot spell yet.
+	// Gate answers (H4) are LedgerCommand members: `not_sent` and `unheld_outcome` (3.13).
 	decide(
 		state: State,
-		command: HarnessCommand,
+		command: LedgerCommand,
 		ctx: DecideContext,
 	): Decision<Entry>;
 	evolve(state: State, entry: Entry): State;
@@ -56,9 +50,10 @@ export const referenceImplementation:
 	| LedgerImplementation<unknown, unknown>
 	| undefined = publicImplementation(oracle) ? oracle : undefined;
 export const oracleAvailable = referenceImplementation !== undefined;
+/** settleMs is the contract's 7 s (3.7); probeMs and nativeCommandMs are test policy, this folder's one constant. */
 export const policy: DecideContext["policy"] = {
-	settleMs: 500,
-	probeMs: 700,
+	settleMs: 7_000,
+	probeMs: 500,
 	nativeCommandMs: 800,
 };
 export interface StepResult {
@@ -68,14 +63,18 @@ export interface StepResult {
 	readonly alarmAt?: number;
 	readonly diagnostic?: string;
 }
-interface PublicDriver {
-	step(command: HarnessCommand, now: number): StepResult;
+export interface PublicDriver {
+	step(command: LedgerCommand, now: number): Decision<unknown>;
 	view(): LedgerView;
 	replay(): LedgerView;
 	readonly lastEventCount: number;
 	readonly alarmAt: number | undefined;
 }
-function driver<State, Entry>(
+/**
+ * The one owner of a ledger step for scenarios and generated traces: decide changes no state, and
+ * the view is its entries' replay (3.1, 3.13, LI4).
+ */
+export function driver<State, Entry>(
 	implementation: LedgerImplementation<State, Entry>,
 	provider: ProviderKind,
 	prefix: string,
@@ -106,8 +105,7 @@ function driver<State, Entry>(
 			});
 			assert.deepEqual(view(), before, "decide must not mutate its input");
 			lastEventCount = result.tag === "Accepted" ? result.events.length : 0;
-			if (result.tag === "Rejected")
-				return { ...result, effects: [], ended: [] };
+			if (result.tag === "Rejected") return result;
 			state = result.events.reduce(implementation.evolve, state);
 			entries.push(...result.events);
 			alarmAt = result.alarmAt;
@@ -170,7 +168,7 @@ export function answer(send: Send, evidence: Evidence): Observation {
 export class TraceDriver {
 	now = 100;
 	readonly commands: {
-		readonly command: HarnessCommand;
+		readonly command: LedgerCommand;
 		readonly now: number;
 	}[] = [];
 	readonly host: FakeProvider;
@@ -187,12 +185,10 @@ export class TraceDriver {
 	constructor(
 		readonly provider: ProviderKind,
 		readonly mode: "reference" | "decider" = "reference",
-		// Oracle seam (32.2.3): the stale scenarios.test.ts passes a Mutation; the oracle lane's version
-		// mutates the driver instead, so a Mutation selects the plain reference. Drop it at that merge.
-		implementation?: LedgerImplementation<unknown, unknown> | Mutation,
+		implementation?: LedgerImplementation<unknown, unknown>,
 	) {
 		this.host = new FakeProvider(provider);
-		if (typeof implementation === "object")
+		if (implementation)
 			this.publicDriver = driver(implementation, provider, mode);
 		else if (mode === "decider")
 			this.publicDriver = driver(production, provider, mode);
@@ -204,11 +200,15 @@ export class TraceDriver {
 			this.publicDriver = driver(referenceImplementation, provider, mode);
 		}
 	}
-	step(command: HarnessCommand, now = this.now + 1): StepResult {
+	step(
+		command: LedgerCommand,
+		now = this.now + 1,
+		mainIssues = this.host.takeMainIssues(),
+	): StepResult {
 		this.commands.push({ command, now });
 		this.now = now;
 		// D60: main issued these while it drew the command; the fake already holds and binds them.
-		this.log.push(...this.host.takeMainIssues().map(({ issue }) => issue));
+		this.log.push(...mainIssues.map(({ issue }) => issue));
 		const before = this.view();
 		const stepped = this.publicDriver.step(command, now);
 		const after = this.view();
@@ -227,7 +227,10 @@ export class TraceDriver {
 							),
 					)
 				: [];
-		const result = { ...stepped, effects: [...stepped.effects, ...folded] };
+		const result: StepResult =
+			stepped.tag === "Accepted"
+				? { ...stepped, effects: [...stepped.effects, ...folded] }
+				: { ...stepped, effects: [], ended: [] };
 		this.log.push(...result.effects);
 		this.coverage.record(command, before, after, result, this);
 		this.host.assertVerdict(command, result.tag);
@@ -422,10 +425,10 @@ export class PublicNames {
 	}
 }
 export function translateCommand(
-	command: HarnessCommand,
+	command: LedgerCommand,
 	from: TraceDriver,
 	to: TraceDriver,
-): HarnessCommand {
+): LedgerCommand {
 	if (
 		command.verb === "settle" &&
 		(command.settlement.kind === "hold_exhausted" ||
@@ -522,11 +525,14 @@ export class DifferentialTrace {
 		this.expected = new TraceDriver(provider, "reference", expected);
 		this.actual = new TraceDriver(provider, "decider", actual);
 	}
-	step(command: HarnessCommand, now = this.expected.now + 1): void {
+	step(command: LedgerCommand, now = this.expected.now + 1): void {
 		const translated = translateCommand(command, this.expected, this.actual);
 		this.actual.host.mirrorRegistry(this.expected.host);
-		const expected = this.expected.step(command, now);
-		const actual = this.actual.step(translated, now);
+		// D60: main is one host process, so both ledgers see the issues the expected fake drew.
+		const mainIssues = this.expected.host.takeMainIssues();
+		this.actual.host.issued(mainIssues.map(({ issue }) => issue));
+		const expected = this.expected.step(command, now, mainIssues);
+		const actual = this.actual.step(translated, now, mainIssues);
 		this.expectedNames.register(this.expected);
 		this.actualNames.register(this.actual);
 		assert.equal(actual.tag, expected.tag, "decision acceptance");
@@ -703,7 +709,7 @@ export class Coverage {
 	/** Native commands a not_sent try paused (D48). */
 	private readonly pausedNative = new Set<string>();
 	record(
-		command: HarnessCommand,
+		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView,
 		result: StepResult,
@@ -879,7 +885,7 @@ export class Coverage {
 		for (const terminal of result.ended) this.ended.add(terminal.runId);
 	}
 	private recordShapes(
-		command: HarnessCommand,
+		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView,
 		result: StepResult,
@@ -1150,7 +1156,7 @@ export class Coverage {
 	}
 	/** H4 and 4.4: a gate answer, by send kind; 3.6 unlaunch and its Otherwise branch. */
 	private recordGate(
-		command: HarnessCommand,
+		command: LedgerCommand,
 		before: LedgerView,
 		after: LedgerView,
 		result: StepResult,
