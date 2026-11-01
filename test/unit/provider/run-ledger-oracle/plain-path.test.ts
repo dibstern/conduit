@@ -1621,6 +1621,82 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("an OpenCode query_ended ends the Run's start, not its Stop's cancel_request, which a probe issued after it ends (CONTRACT.md 334-338, 3101-3106)", () => {
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const probe = stop(d).issued.find(
+				(entry) => entry.effect.kind === "probe",
+			);
+			assert(probe?.tag === "Tokened", "the Stop's probe");
+			const cancel = expect.objectContaining({
+				tag: "Tokened",
+				effect: { kind: "cancel_request", runId: a.runId },
+			});
+			observe(d, a.token, { kind: "query_ended" });
+			expect(d.view().live).toEqual(expect.arrayContaining([cancel]));
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().live).not.toEqual(expect.arrayContaining([cancel]));
+		});
+	});
+
+	it("main's OpenCode terminal ends the Run, but its Stop's cancel_request whose call has not returned stays a fence member until the call returns, a probe issued after it, or a stop_unconfirmed terminal (CONTRACT.md 788-789, 797-799, 3101-3106)", () => {
+		const cancelOf = (runId: string) =>
+			expect.objectContaining({
+				tag: "Tokened",
+				effect: { kind: "cancel_request", runId },
+			});
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const probe = stop(d).issued.find(
+				(entry) => entry.effect.kind === "probe",
+			);
+			assert(probe?.tag === "Tokened", "the Stop's probe");
+			expect(terminal(d, a.runId, "interrupted").ended).toMatchObject([
+				{ runId: a.runId },
+			]);
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([cancelOf(a.runId)]),
+			);
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+		agreed("opencode", (d) => {
+			const a = running(d);
+			stop(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "interrupted",
+				code: "stop_unconfirmed",
+			});
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const cancel = stop(d).issued.find(
+				(entry) => entry.effect.kind === "cancel_request",
+			);
+			assert(cancel?.tag === "Tokened", "the Stop's cancel_request");
+			terminal(d, a.runId, "interrupted");
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([cancelOf(a.runId)]),
+			);
+			observe(d, cancel.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "succeeded" },
+			});
+			expect(d.view().live).not.toEqual(
+				expect.arrayContaining([cancelOf(a.runId)]),
+			);
+		});
+	});
+
 	it("one Stop rule over the inbox and claimed rows: a retry-pending start is never re-sent and a claimed, untransmitted start ends with its Run (32.2.6 AC5, 5.4)", () => {
 		// Coverage is main's stopCovers (5.2, 5.4); the ledger reads only the folded Stop and holds no
 		// re-send of its own: a retry is main's next transmission (3.4, 3.7).
@@ -1658,9 +1734,33 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			stop(d, 5_000);
 			expect(d.alarmAt).not.toBe(5_000);
 			expect(d.view().active).not.toHaveProperty("deadlineAt");
-			main(d, { kind: "run_terminal", runId: a.runId, outcome: "interrupted" });
+			// The stop's deadline step: main's stop_unconfirmed terminal ends the aborts too (797-799).
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "interrupted",
+				code: "stop_unconfirmed",
+			});
 			stop(d, 9_000);
 			expect(d.alarmAt).not.toBe(9_000);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+		// Any other terminal leaves the abort and cancel_request open, a send whose run main has ended,
+		// so the next Stop's deadline bounds them (788-789, 3101-3106).
+		agreed("opencode", (d) => {
+			const a = running(d);
+			stop(d, 5_000);
+			main(d, { kind: "run_terminal", runId: a.runId, outcome: "interrupted" });
+			stop(d, 9_000);
+			fire(d, 8_999);
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						effect: { kind: "cancel_request", runId: a.runId },
+					}),
+				]),
+			);
+			fire(d, 9_000);
 			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
 		});
 	});

@@ -918,7 +918,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								expect(stopRequests).toEqual(
 									provider === "opencode" ? [sessionId] : [],
 								);
-								yield* awaitCondition(() => sent.length === 2);
+								// OpenCode's ledger abort is session-wide: the selected input waits for its call
+								// to return, so the abort cannot land on it (CONTRACT.md 3101-3106).
+								if (provider === "opencode") yield* Effect.sleep("50 millis");
+								else yield* awaitCondition(() => sent.length === 2);
 								expect(providerTurns.turnFences(sessionId).stopping).toBe(
 									false,
 								);
@@ -938,7 +941,8 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								yield* Effect.sleep("30 millis");
 							}
 							expect(sent).toEqual(
-								scenario === "recover-registration-race"
+								scenario === "recover-registration-race" &&
+									provider !== "opencode"
 									? ["running", "selected"]
 									: ["running"],
 							);

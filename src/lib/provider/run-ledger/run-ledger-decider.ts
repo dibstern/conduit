@@ -88,6 +88,8 @@ interface Tx {
 		| "dropped"
 		| "forced"
 		| undefined;
+	/** D59: main's terminal ended its Run, but this OpenCode abort or cancel_request stays a fence member (3101-3106). */
+	mainEnded?: boolean | undefined;
 	nativeMessageId?: string | undefined;
 	accounted: boolean;
 }
@@ -574,6 +576,7 @@ function retryPending(book: Book, run: Run, send: Send): boolean {
 		send.exhausted ||
 		latest?.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		latest.mainEnded ||
 		latest.resumeRejected ||
 		latest.stopOwn ||
 		send.txs.some((tx) => tx.consumption.tag === "Accepted") ||
@@ -630,7 +633,7 @@ function nothingMayAct(book: Book, run: Run): boolean {
 		}) &&
 		runWork(book, run).every(
 			(send) =>
-				!send.txs.some((tx) => mayStillAct(book, send, tx)) &&
+				!send.txs.some((tx) => !tx.mainEnded && mayStillAct(book, send, tx)) &&
 				!retryPending(book, run, send),
 		) &&
 		!(exec.evidence && !exec.endEvidence && exec.endedBy === undefined)
@@ -1174,6 +1177,8 @@ function effectOutcome(
 	tx: Tx,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): Outcome {
+	// 3101-3106: the returned call of an abort its Run's terminal left open ends it.
+	if (tx.mainEnded) tx.ended ??= "main";
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
@@ -1418,9 +1423,10 @@ const evidenceTable: EvidenceTable = {
 		merge(book, _fact, { tx, run, live }) {
 			// 9: query_ended ends only an owned execution's work, and its own by the work-ended column.
 			if (runEnd(book) !== "query_ended") return noop();
-			// 9: it ends its label's fence members.
+			// 9: it ends its label's starts and steers; an abort or cancel_request acts on the native
+			// session, not the query, so a query end never covers them (CONTRACT.md 334-338, 3101-3106).
 			for (const send of book.sends)
-				if (rules(book).fences(send.effect))
+				if (delivers(send))
 					for (const other of send.txs)
 						if (tx.label !== null && other.label === tx.label)
 							other.ended ??= "evidence";
@@ -1975,11 +1981,12 @@ function unsolicited(
 			if (wake === undefined && runEnd(book) !== "query_ended")
 				return unchanged("no wake execution on its label (8.3)");
 			if (wake !== undefined) wake.ended = "own";
-			// 9: OpenCode's query end ends its label's fence members.
+			// 9: OpenCode's query end ends its label's starts and steers, never an abort or
+			// cancel_request (CONTRACT.md 334-338, 3101-3106).
 			let moved = wake !== undefined;
 			if (runEnd(book) === "query_ended")
 				for (const send of book.sends)
-					if (rules(book).fences(send.effect))
+					if (delivers(send))
 						for (const tx of send.txs)
 							if (tx.label === label && tx.ended === undefined) {
 								tx.ended = "evidence";
@@ -2163,9 +2170,22 @@ function observe(
 					target.open = false;
 					const run = findRun(book, target.runId);
 					if (run === undefined || run.phase === "Ended") return changed;
-					// D59: main's terminal ends its Run's work as main.
+					// D59: main's terminal ends its Run's work as main, except an OpenCode abort or cancel_request
+					// whose call has not returned: session-wide, its delivery unknown, it stays a fence member until
+					// the call returns, a probe issued after it returns native_idle, or the stop's deadline step,
+					// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
+					// 3101-3106; a reading, reported as a gap).
 					for (const send of runSends(book, run))
-						for (const tx of send.txs) tx.ended ??= "main";
+						for (const tx of send.txs)
+							if (
+								(send.effect.kind === "interrupt" ||
+									send.effect.kind === "cancel_request") &&
+								rules(book).fences(send.effect) &&
+								observation.code !== "stop_unconfirmed" &&
+								tx.transport.tag === "Issued"
+							)
+								tx.mainEnded = true;
+							else tx.ended ??= "main";
 					run.exec.fold.push({
 						seq: book.seq,
 						outcome: observation.outcome,

@@ -83,6 +83,8 @@ interface Tx {
 	absent: boolean;
 	sealed?: { readonly value: Value; readonly unconsumed: boolean } | undefined;
 	ended?: WorkEnd | undefined;
+	/** D59: main's terminal ended its Run, but this OpenCode abort or cancel_request stays a fence member (3101-3106). */
+	mainEnded?: boolean | undefined;
 	nativeMessageId?: string | undefined;
 	resulted: boolean;
 	/** The first delivery-recovery probe's deadline (3.7, D20). */
@@ -480,6 +482,7 @@ function retryPending(world: World, run: Run, send: Send): boolean {
 		send.exhausted ||
 		latest.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		latest.mainEnded ||
 		latest.resumeRejected ||
 		latest.stopOwn ||
 		send.txs.some((tx) => tx.consumption.tag === "Accepted") ||
@@ -513,7 +516,7 @@ function nothingMayAct(world: World, run: Run): boolean {
 		deliverySends(world, run).every((send) => sendSealed(run, send)) &&
 		work.every(
 			(send) =>
-				!send.txs.some((tx) => mayStillAct(world, send, tx)) &&
+				!send.txs.some((tx) => !tx.mainEnded && mayStillAct(world, send, tx)) &&
 				!retryPending(world, run, send),
 		) &&
 		!(
@@ -1362,11 +1365,14 @@ function unsolicited(
 	}
 }
 
-/** OpenCode's query end ends its label's members, aborts and cancel_request included (9). */
+/**
+ * OpenCode's query end ends its label's starts and steers (9). An abort or cancel_request acts on
+ * the native session, not the query, so a query end never covers them (CONTRACT.md 334-338, 3101-3106).
+ */
 function queryEnded(world: World, label: Label): boolean {
 	let moved = false;
 	for (const send of world.sends)
-		if (fenceMember(world.provider, send.effect.kind))
+		if (send.effect.kind === "start" || send.effect.kind === "steer")
 			for (const tx of send.txs)
 				if (tx.label === label && tx.ended === undefined) {
 					tx.ended = "evidence";
@@ -1715,6 +1721,8 @@ function effectOutcome(
 	tx: Tx,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): Outcome {
+	// 3101-3106: the returned call of an abort its Run's terminal left open ends it.
+	if (tx.mainEnded) tx.ended ??= "main";
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
@@ -2101,9 +2109,22 @@ function mainEvent(
 			target.open = false;
 			const run = findRun(world, target.runId);
 			if (run === undefined || run.phase === "Ended") return changed;
-			// D59: main's terminal ends its Run's work as main.
+			// D59: main's terminal ends its Run's work as main, except an OpenCode abort or cancel_request
+			// whose call has not returned: session-wide, its delivery unknown, it stays a fence member until
+			// the call returns, a probe issued after it returns native_idle, or the stop's deadline step,
+			// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
+			// 3101-3106; a reading, reported as a gap).
 			for (const send of runSends(world, run))
-				for (const tx of send.txs) tx.ended ??= "main";
+				for (const tx of send.txs)
+					if (
+						world.provider === "opencode" &&
+						(send.effect.kind === "interrupt" ||
+							send.effect.kind === "cancel_request") &&
+						observation.code !== "stop_unconfirmed" &&
+						tx.transport.tag === "Issued"
+					)
+						tx.mainEnded = true;
+					else tx.ended ??= "main";
 			run.exec.fold.push({
 				seq: world.seq,
 				outcome: observation.outcome,
