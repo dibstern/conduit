@@ -37,7 +37,6 @@ import {
 	InputDraftsTag,
 } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../effect/failure-classification.js";
 import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -61,6 +60,7 @@ import {
 	endedRowOutcome,
 	LEDGER_EFFECT_TYPES,
 	ledgerEffectWakes,
+	loadLedger,
 } from "../persistence/effect/run-ledger-arm.js";
 import { SessionRollupProjects } from "../persistence/effect/session-rollup-projects.js";
 import { type CanonicalEvent, canonicalEvent } from "../persistence/events.js";
@@ -85,6 +85,7 @@ import type {
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
+import { fenceHolds, inputPlacement } from "./run-ledger/run-ledger-decider.js";
 import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
 import {
 	classify,
@@ -282,6 +283,7 @@ export interface ProviderSideEffectReactorOptions {
 
 const defaultRetryBackoff = (failureCount: number): Duration.Input =>
 	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
+/** 4.8: the cap, 5 transmissions per send or control effect. */
 const maxControlAttempts = 5;
 const runnerControlReplyGraceMs = 5000;
 const maxControlRetryAfterMs = 30_000;
@@ -878,15 +880,27 @@ export class ProviderSideEffectReactor {
 			if (row.effect_type === "send_turn")
 				ownedSend = `${row.request_sequence}:${row.attempt_count}`;
 			const cancellation = new AbortController();
-			const delivery = this.runProviderEffect(
-				row,
-				options?.interactions,
-				options?.makeInteractions,
-				options?.abortSignal
-					? AbortSignal.any([options.abortSignal, cancellation.signal])
-					: cancellation.signal,
-				options?.liveContext,
-			);
+			// 2.1 row 212: a claim past the cap sends nothing and fails its input through main's path.
+			const delivery = claimed.exhausted
+				? Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: row.provider_id,
+							operation: "sendTurn",
+							cause: Object.assign(
+								new Error("Provider send attempts exhausted"),
+								{ code: "provider_send_attempts_exhausted", retryable: false },
+							),
+						}),
+					)
+				: this.runProviderEffect(
+						row,
+						options?.interactions,
+						options?.makeInteractions,
+						options?.abortSignal
+							? AbortSignal.any([options.abortSignal, cancellation.signal])
+							: cancellation.signal,
+						options?.liveContext,
+					);
 			const result = yield* Effect.result(
 				row.effect_type !== "send_turn"
 					? delivery
@@ -920,6 +934,8 @@ export class ProviderSideEffectReactor {
 									}),
 								);
 							});
+							// 2.1 row 202 (CONTRACT.md 215): the fence replaces the intake recall's deadline, so
+							// only another writer's durable error recalls the queue.
 							return yield* Effect.raceFirst(
 								wait,
 								this.durableOutcome(row.command_id).pipe(
@@ -927,33 +943,6 @@ export class ProviderSideEffectReactor {
 										outcome.error ? recall.pipe(Effect.as(outcome)) : wait,
 									),
 								),
-							).pipe(
-								Effect.timeoutOrElse({
-									duration: PROCESSING_TIMEOUT_DURATION,
-									orElse: () =>
-										recall.pipe(
-											Effect.flatMap((ack) =>
-												ack.status !== "cancelled"
-													? Effect.succeed({
-															...REACTOR_COMPLETED_RESULT,
-															status: "indeterminate" as const,
-														})
-													: Effect.fail(
-															new ProviderInstanceFailure({
-																providerId: row.provider_id,
-																operation: "awaitIntake",
-																cause: Object.assign(
-																	new Error("Input recalled before intake"),
-																	{
-																		code: "processing_timeout",
-																		retryable: false,
-																	},
-																),
-															}),
-														),
-											),
-										),
-								}),
 							);
 						}),
 			);
@@ -1548,7 +1537,7 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
 	): Effect.Effect<
-		ProviderCommandOutboxRow | undefined,
+		(ProviderCommandOutboxRow & { readonly exhausted?: true }) | undefined,
 		ProviderCommandStoreFailure
 	> {
 		const runId = randomUUID();
@@ -1556,6 +1545,27 @@ export class ProviderSideEffectReactor {
 		return this.options
 			.write((project, stamp) =>
 				Effect.gen({ self: this }, function* () {
+					let exhausted = false;
+					if (row.effect_type === "send_turn") {
+						const ledger = yield* loadLedger(row.session_id).pipe(
+							Effect.provideService(SqlClient.SqlClient, this.options.sql),
+						);
+						const claim = row.run_id ?? undefined;
+						const input =
+							ledger && inputPlacement(ledger.state, row.command_id, claim);
+						// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits with no clock while some
+						// label has work; the commit that releases the fence wakes the drain.
+						if (ledger && input?.start && fenceHolds(ledger.state, claim))
+							return undefined;
+						// 2.1 row 212 (CONTRACT.md 1873-1876): 5 transmissions per direct send; a runner-held
+						// one is holdRun's to cap. The view folds a retry's run.requested on an ended Run only
+						// from 32.2.6 (CONTRACT.md 3583), so main's own claims are the floor (gap, reported).
+						exhausted =
+							ledger !== undefined &&
+							getProviderDriver(ledger.provider)?.runsOpenCodeServer === true &&
+							Math.max(input?.transmissions ?? 0, row.attempt_count) >=
+								maxControlAttempts;
+					}
 					const [claimed] = yield* this.options.sql<ProviderCommandOutboxRow>`
 				UPDATE provider_command_outbox SET status = 'running',
 					attempt_count = attempt_count + 1, error_code = NULL, next_attempt_at = NULL, updated_at = ${updatedAt},
@@ -1616,7 +1626,9 @@ export class ProviderSideEffectReactor {
 							),
 						);
 					}
-					return claimed;
+					return claimed && exhausted
+						? { ...claimed, exhausted: true as const }
+						: claimed;
 				}),
 			)
 			.pipe(

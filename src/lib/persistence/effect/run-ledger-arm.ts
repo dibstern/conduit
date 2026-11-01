@@ -17,6 +17,7 @@ import type { InputRequest } from "../../contracts/stored-event.js";
 import {
 	decide,
 	evolve,
+	fenceHolds,
 	initialSessionLedgerState,
 	type LedgerEvent,
 	type SessionLedgerState,
@@ -610,7 +611,10 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							RETURNING command_id`;
 						inserted ||= written.length > 0;
 					}
-					if (inserted) wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
+					// 2.1 row 202 (CONTRACT.md 215): a start waits on the fence with no clock, so the commit
+					// that releases it wakes the drain that claims the start (gap, reported).
+					if (inserted || (fenceHolds(ledger.state) && !fenceHolds(state)))
+						wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
 				}
 				// A folded fact advances the read model (A.21): its session row takes the version.
 				const stamped = yield* sql<{ id: string }>`

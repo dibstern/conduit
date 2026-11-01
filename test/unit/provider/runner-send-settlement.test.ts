@@ -3102,44 +3102,6 @@ for (const source of ["adoption", "retained reply", "reactor reply"] as const)
 	);
 
 it.effect(
-	"reactor recall of an unheld send retains processing-timeout evidence across rollback",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* s7Fixture("claude");
-				yield* f.seed("recall", 1, 0);
-				yield* f.recover;
-				const enteredHold = yield* Deferred.make<void>();
-				const fault = yield* failSettlementWrite(f.sql, enteredHold);
-				const sending = yield* f.reactor.runOnce().pipe(Effect.forkChild);
-				yield* Deferred.await(enteredHold);
-				yield* TestClock.adjust("2 minutes");
-				yield* Deferred.await(fault.entered);
-				yield* TestClock.adjust(0);
-				expect(
-					yield* f.sql`SELECT status, runner_id FROM provider_runs`,
-				).toEqual([{ status: "pending", runner_id: null }]);
-				expect(
-					yield* f.sql`SELECT status FROM provider_command_outbox`,
-				).toEqual([{ status: "running" }]);
-				fault.recover();
-				yield* TestClock.adjust("2 seconds");
-				expect(sending.pollUnsafe()).toMatchObject({ _tag: "Success" });
-				expect(yield* f.sql`SELECT status FROM provider_runs`).toEqual([
-					{ status: "error" },
-				]);
-				expect(
-					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", error_code: "processing_timeout" }]);
-				expect(
-					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.error" }]);
-				expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([]);
-			}),
-		),
-);
-
-it.effect(
 	"F79 corrupt stored payload is rejected once rather than retried as unavailable",
 	() =>
 		runRetirement(
