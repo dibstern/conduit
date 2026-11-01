@@ -9286,7 +9286,7 @@ it.effect(
 					signals.push({ pid, signal });
 					f.processes.delete(pid);
 				});
-				const before = yield* f.sql`SELECT type FROM events`;
+				const before = yield* f.sql`SELECT type FROM events ORDER BY sequence`;
 				// This public entry bypasses only the fixture's cursor auto-registration.
 				if (
 					!f.manager.attachSessionsEffect ||
@@ -9306,7 +9306,10 @@ it.effect(
 				expect(
 					f.commands.filter((command) => command.type === "send-turn"),
 				).toEqual([]);
-				expect(yield* f.sql`SELECT type FROM events`).toEqual(before);
+				// The retirement records the runner's loss once (CONTRACT 6.5).
+				expect(yield* f.sql`SELECT type FROM events ORDER BY sequence`).toEqual(
+					[...before, { type: "evidence.process_lost" }],
+				);
 			}),
 		),
 );

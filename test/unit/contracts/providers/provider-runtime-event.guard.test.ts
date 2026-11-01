@@ -67,6 +67,8 @@ describe("ProviderRuntimeEvent contracts", () => {
 			"src/lib/provider/orchestration-engine.ts",
 			// The lifecycle gate owns durable dispatch/release events, checked by its ownership guard.
 			"src/lib/provider/runner/runner-retirement.ts",
+			// The write that first retires a runner records its process loss (CONTRACT 6.5).
+			"src/lib/provider/runner/runner-receipts.ts",
 		]);
 		const unexpected = files.flatMap((file) => {
 			if (allowed.has(file)) return [];

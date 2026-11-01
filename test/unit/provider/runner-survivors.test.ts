@@ -1757,9 +1757,15 @@ it.effect(
 							command.runnerId === stopped?.runnerId,
 					),
 				).toHaveLength(1);
+				// Only the stopped runner is gated. Whether admission's NotSent retry
+				// reaches a fresh runner depends on scheduling, so it is not asserted.
 				expect(
 					f.commands
-						.filter((command) => command.type === "send-turn")
+						.filter(
+							(command) =>
+								command.type === "send-turn" &&
+								command.runnerId === stopped?.runnerId,
+						)
 						.map((command) => command.runId),
 				).toEqual(["first-run"]);
 				expect(
