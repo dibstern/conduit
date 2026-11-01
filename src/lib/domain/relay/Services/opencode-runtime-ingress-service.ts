@@ -17,7 +17,7 @@ import {
 } from "../../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../../persistence/effect/projectors-effect.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
-import { createEventId } from "../../../persistence/events.js";
+import { canonicalEvent, createEventId } from "../../../persistence/events.js";
 import {
 	completedCompactionEvent,
 	isSettled,
@@ -87,9 +87,11 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		context?: OpenCodeEventContext,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
 	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
+	/** stoppedProcessId: the stopped process's promptProcessId, when conduit stopped it. */
 	onInstanceStopped(
 		providerInstanceId: string,
 		isCurrent: () => boolean,
+		stoppedProcessId?: string,
 	): Effect.Effect<void>;
 	reconcileSession(sessionId: string): Effect.Effect<void>;
 	shutdown(): void;
@@ -208,6 +210,8 @@ export class EffectOpenCodeRuntimeIngress
 	 *  on reconnect, so the next event of each session backfills the gap. */
 	private readonly syncedSessions = new Set<string>();
 	private readonly sessionInstanceIds = new Map<string, string>();
+	/** The process id this ingress last reported started for each session (CONTRACT.md 9). */
+	private readonly reportedProcesses = new Map<string, string>();
 	/** First-sighting REST reads precede the stored workspace; retries keep the
 	 *  observed directory only while the same instance owns the session. */
 	private readonly sessionDirectories = new Map<
@@ -1657,12 +1661,44 @@ export class EffectOpenCodeRuntimeIngress
 			// everything after COMMIT (bus publish, relay publish) can die or be
 			// interrupted while the batch stays durable, and a retry then would
 			// translate the same event onto a store that already holds it.
+			// CONTRACT.md 9 "OpenCode adapter", 2.1 row 215: the reporter's process_started, labelled
+			// with the instance's promptProcessId, when a session binds the process or, with the same
+			// id as the session's last report, when a daemon restart reattaches it. Binding is read as
+			// the first event this ingress takes from that session on that process (gap, audit).
+			const startedProcess =
+				providerProcessId !== undefined &&
+				this.reportedProcesses.get(sessionId) !== providerProcessId
+					? providerProcessId
+					: undefined;
 			const ingestOptions = {
 				publishToRelay: false,
 				...(translation.droppedRewrite
 					? { beforeCommit: this.invalidateHistory(sessionId) }
 					: {}),
+				...(startedProcess
+					? {
+							evidence: this.sql<{ runner_id: string }>`
+								SELECT json_extract(data, '$.runnerId') AS runner_id FROM events
+								WHERE session_id = ${sessionId} AND type = 'evidence.process_started'
+								ORDER BY sequence DESC LIMIT 1`.pipe(
+								Effect.map(([latest]) => [
+									canonicalEvent(
+										"evidence.process_started",
+										sessionId,
+										{
+											runnerId: startedProcess,
+											label: `${startedProcess}:0`,
+											reattached: latest?.runner_id === startedProcess,
+										},
+										{ provider: "opencode" },
+									),
+								]),
+							),
+						}
+					: {}),
 				afterCommit: Effect.gen({ self: this }, function* () {
+					if (startedProcess)
+						this.reportedProcesses.set(sessionId, startedProcess);
 					this.translator.commitSession(sessionId, translation);
 					if (translation.droppedRewrite) this.syncedSessions.delete(sessionId);
 					if (
@@ -1759,6 +1795,7 @@ export class EffectOpenCodeRuntimeIngress
 	onInstanceStopped(
 		providerInstanceId: string,
 		isCurrent: () => boolean,
+		stoppedProcessId?: string,
 	): Effect.Effect<void> {
 		return this.withSql(
 			Effect.gen({ self: this }, function* () {
@@ -1786,6 +1823,37 @@ export class EffectOpenCodeRuntimeIngress
 									this.ingestion.ingestBatch(events, {
 										beforeProject: current,
 										beforeCommit: current,
+										// CONTRACT.md 2.1 row 215, 9: conduit stopped the process, so its
+										// process_lost rides this settlement's write, once, for a session
+										// the reporter bound to it.
+										...(stoppedProcessId
+											? {
+													evidence: this.sql`
+														SELECT 1 FROM events WHERE session_id = ${sessionId}
+														AND type = 'evidence.process_started'
+														AND json_extract(data, '$.runnerId') = ${stoppedProcessId}
+														AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = ${sessionId}
+															AND type = 'evidence.process_lost'
+															AND json_extract(data, '$.runnerId') = ${stoppedProcessId})
+														LIMIT 1`.pipe(
+														Effect.map((bound) =>
+															bound.length
+																? [
+																		canonicalEvent(
+																			"evidence.process_lost",
+																			sessionId,
+																			{
+																				runnerId: stoppedProcessId,
+																				retiredAt: Date.now(),
+																			},
+																			{ provider: "opencode" },
+																		),
+																	]
+																: [],
+														),
+													),
+												}
+											: {}),
 									}),
 								{ confirmedStop: true },
 							);
@@ -1888,6 +1956,7 @@ export class EffectOpenCodeRuntimeIngress
 		this.backfillControllers.delete(sessionId);
 		this.backfillsInFlight.delete(sessionId);
 		this.historyRevisions.delete(sessionId);
+		this.reportedProcesses.delete(sessionId);
 		this.backfillRetries.delete(sessionId);
 		this.pendingAttempts.delete(sessionId);
 		this.terminalRechecks.delete(sessionId);

@@ -36,6 +36,8 @@ export type OpenCodeInstanceEvent = {
 			readonly state: OpenCodeConnectionStatus;
 			/** The managed process has stopped, rather than only its transport. */
 			readonly managedStopped?: boolean;
+			/** With managedStopped: the stopped process's promptProcessId (CONTRACT.md 9). */
+			readonly stoppedProcessId?: string;
 	  }
 );
 

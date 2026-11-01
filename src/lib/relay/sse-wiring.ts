@@ -129,6 +129,7 @@ export interface SSEWiringDeps {
 		onInstanceStopped?(
 			providerInstanceId: string,
 			isCurrent: () => boolean,
+			stoppedProcessId?: string,
 		): Effect.Effect<void>;
 	};
 }
@@ -807,6 +808,7 @@ interface SSEConsumerCallbacks {
 	onConnectionStatus(
 		status: OpenCodeConnectionStatus,
 		managedStopped?: boolean,
+		stoppedProcessId?: string,
 	): void;
 }
 
@@ -827,9 +829,9 @@ function wireSSEConsumerWithCallbacks(
 		if (hasConnected) callbacks.onReconnect?.();
 		hasConnected = true;
 	});
-	consumer.on("status", (status, managedStopped) => {
+	consumer.on("status", (status, managedStopped, stoppedProcessId) => {
 		log.info(`OpenCode ${status}`);
-		callbacks.onConnectionStatus(status, managedStopped);
+		callbacks.onConnectionStatus(status, managedStopped, stoppedProcessId);
 	});
 	consumer.on("error", (err) => log.warn(`Error: ${err.message}`));
 
@@ -871,7 +873,7 @@ export const wireSSEConsumerEffect = (
 			const runFork = Effect.runForkWith(runtime);
 			let connectionRevision = 0;
 			wireSSEConsumerWithCallbacks(deps, consumer, {
-				onConnectionStatus: (status, managedStopped) => {
+				onConnectionStatus: (status, managedStopped, stoppedProcessId) => {
 					const revision = ++connectionRevision;
 					runFork(
 						Effect.gen(function* () {
@@ -892,6 +894,7 @@ export const wireSSEConsumerEffect = (
 								yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
 									deps.providerInstanceId,
 									() => revision === connectionRevision,
+									stoppedProcessId,
 								) ?? Effect.void;
 								// Marks the end of stop work, which can outlive an immediate restart.
 								yield* Effect.logInfo("Managed stop settlement finished", {

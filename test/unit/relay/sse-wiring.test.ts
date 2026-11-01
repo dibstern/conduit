@@ -487,13 +487,19 @@ describe("wireSSEConsumerEffect", () => {
 			}),
 		} as unknown as Parameters<typeof wireSSEConsumerEffect>[1];
 		let stopIsCurrent: (() => boolean) | undefined;
+		let stoppedProcess: string | undefined;
 		const deps = createMockSSEWiringDeps({
 			opencodeRuntimeIngress: {
 				onReconnect: () => Effect.void,
 				onSSEEventEffect: () =>
 					Effect.succeed({ ok: false, reason: "not-translatable" }),
-				onInstanceStopped: (_instanceId: string, isCurrent?: () => boolean) => {
+				onInstanceStopped: (
+					_instanceId: string,
+					isCurrent?: () => boolean,
+					stoppedProcessId?: string,
+				) => {
 					stopIsCurrent = isCurrent;
+					stoppedProcess = stoppedProcessId;
 					return Effect.void;
 				},
 			},
@@ -501,8 +507,10 @@ describe("wireSSEConsumerEffect", () => {
 		await wireSSEConsumerForTest(deps, consumer);
 		const status = listeners.get("status");
 		assert.exists(status);
-		status("stopped", true);
+		status("stopped", true, "opencode:stopped");
 		expect(stopIsCurrent?.()).toBe(true);
+		// CONTRACT.md 9: the stop's process id reaches the settlement for its process_lost.
+		expect(stoppedProcess).toBe("opencode:stopped");
 		status("starting");
 		expect(stopIsCurrent?.()).toBe(false);
 	});
