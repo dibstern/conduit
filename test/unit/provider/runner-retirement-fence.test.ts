@@ -3243,13 +3243,13 @@ it.effect(
 				);
 				expect(
 					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([{ status: "failed", error_code: "interrupted" }]);
+				).toEqual([{ status: "failed", error_code: "runner_stopped" }]);
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'run:unreceived'`,
-				).toEqual([{ status: "interrupted" }]);
+				).toEqual([{ status: "error" }]);
 				expect(
 					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
-				).toEqual([{ type: "turn.interrupted" }]);
+				).toEqual([{ type: "turn.error" }]);
 				expect(f.wakes).toEqual([]);
 				expect(
 					f.commands.filter((command) => command.type === "send-turn"),
