@@ -1591,6 +1591,22 @@ export const scenarios: readonly OracleScenario[] = [
 		},
 	},
 	{
+		id: "D56-206",
+		title:
+			"[2.1 row 206] a Claude steer still unanswered when main's 30s deadline step retires its Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			// The retire fails B's send with provider_failure, so both stacks requeue B. Row 206's branch
+			// needs runner_stopped, which only a runner's exit, a project's removal or a restart's recovery
+			// write (runner-retirement.ts 225-242, 931; runner-recovery.ts 232 at 6c9ff950): no wire (gap P5).
+			begin(d, "B", "steer");
+			stop(d);
+			// A Claude Stop opens no ledger alarm (L6); the turn ends 40s on, past main's 30s wait.
+			observe(d, a.token, { kind: "result", outcome: "interrupted" }, 40_000);
+		},
+	},
+	{
 		id: "D56-211",
 		title: "[2.1 row 211] Claude cancels a start's intake before it starts",
 		provider: "claude",

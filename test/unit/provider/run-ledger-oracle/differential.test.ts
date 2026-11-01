@@ -4,22 +4,23 @@
  * 210, 211, 212 and the ledger effects and evidence of 215 and 216; requeueFailedSteers, rows 206
  * and 207; ProviderTurnService.abort, row 213) are loaded from 6c9ff950's tree into a temp
  * directory over a copy of the current tree; every other module is the current build's source
- * (gap P4, P9). Each catalogue trace replays through both, and after every step main's events,
+ * (gap P4, P9). Each catalogue and generator trace (review traces included; Claude and OpenCode,
+ * the providers with wire frames) replays through both, and after every step main's events,
  * rows, readInboxState and calls are compared.
  *
  * How it could fail, written before the code:
  * 1. Main's side silently runs the current units: each unit's copy must be its 6c9ff950 source
- *    and differ from the current file, and the catalogue must list some difference.
+ *    and differ from the current file, and some trace must list a difference.
  * 2. Minted ids and clocks make every step differ, so the list is noise: the build against itself
  *    lists no difference for any trace. JSON columns are compared parsed.
  * 3. The comparison skips a part: a difference planted in one step's events, rows, inbox or
  *    calls is listed at that step and part.
- * 4. A side cannot run a trace: both sides must settle every step of every catalogue trace.
+ * 4. A side cannot run a trace: both sides must settle every step of every trace.
  *
  * Each difference is then masked by the 2.1 row that explains it, a typed mask (CONTRACT.md 210-211,
  * 3592; rows 215 and 216 are mask classes). How the masks could fail, written before the code:
- * 5. A difference no row explains passes: once masked, every catalogue trace must differ nowhere.
- * 6. A mask that never applies passes: each mask must, left out alone, leave some catalogue trace
+ * 5. A difference no row explains passes: once masked, every trace must differ nowhere.
+ * 6. A mask that never applies passes: each mask must, left out alone, leave some trace
  *    differing.
  * 7. A mask hides more than its class: a difference planted in any part still differs once masked.
  * 8. Masks depend on their order: each reads the step as recorded and edits only the masked copy.
@@ -45,7 +46,7 @@ import {
 	replayTrace,
 	type StepSnapshot,
 } from "./replay.js";
-import { catalogueTraces } from "./traces.js";
+import { allTraces } from "./traces.js";
 
 const r2 = "6c9ff950";
 const repo = resolve(import.meta.dirname, "../../../..");
@@ -137,11 +138,12 @@ interface Mask {
 }
 
 /**
- * Only rows 215 and 216 explain a difference the catalogue shows, so only they have masks. D56-202
- * and D56-211 reach the branches rows 202 and 211 change and differ nowhere: main's own gate holds
- * a start through a Claude wake, and a Claude start's message is placed at dispatch, so the view
- * never reads it unplaced. The other rows' branches need a wire fact this replay has none for, or a
- * wall clock past 30s (gap P10).
+ * Only rows 215 and 216 explain a difference any trace shows, so only they have masks. D56-202,
+ * D56-211, D56-213 and D56-206 reach the units rows 202, 211, 213 and 206 change and differ nowhere:
+ * main's own gate holds a start through a Claude wake; a Claude start's message is placed at
+ * dispatch, so the view never reads it unplaced; the arm folds no tasks, so the view never reads a
+ * task live; and a Stop's retire fails a steer provider_failure, never runner_stopped. The other
+ * rows' branches need a wire fact this replay has none for (gap P10).
  */
 const masks: readonly Mask[] = [
 	{
@@ -234,7 +236,7 @@ beforeAll(async () => {
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
-const catalogue = catalogueTraces().flatMap((trace) =>
+const traces = allTraces().flatMap((trace) =>
 	trace.provider === "claude" || trace.provider === "opencode"
 		? [{ trace, provider: trace.provider }]
 		: [],
@@ -262,7 +264,7 @@ describe("Run ledger: main's units beside the ledger build", () => {
 	});
 
 	it("lists a difference planted in any part at its step", async () => {
-		const trace = catalogue[0];
+		const trace = traces[0];
 		expect(trace).toBeDefined();
 		if (trace === undefined) return;
 		const { snapshots } = await replayTrace(trace.trace, trace.provider);
@@ -301,7 +303,7 @@ describe("Run ledger: main's units beside the ledger build", () => {
 	});
 
 	it.each(
-		catalogue.map((entry) => [entry.trace.id, entry] as const),
+		traces.map((entry) => [entry.trace.id, entry] as const),
 	)("%s: the build against itself differs nowhere", async (_id, {
 		trace,
 		provider,
@@ -312,7 +314,7 @@ describe("Run ledger: main's units beside the ledger build", () => {
 	});
 
 	it.each(
-		catalogue.map((entry) => [entry.trace.id, entry] as const),
+		traces.map((entry) => [entry.trace.id, entry] as const),
 	)("%s runs on both sides and lists every difference by step", async (_id, {
 		trace,
 		provider,
@@ -360,12 +362,12 @@ describe("Run ledger: main's units beside the ledger build", () => {
 	});
 
 	// Failure 1: were main's side the current build, nothing would differ.
-	it("finds main's units differing from the build somewhere in the catalogue", () => {
+	it("finds main's units differing from the build in some trace", () => {
 		expect(listed.length).toBeGreaterThan(0);
 	});
 
-	// Failure 6: a mask that applies to no catalogue trace fails.
-	it("applies every mask to some catalogue trace", () => {
+	// Failure 6: a mask that applies to no trace fails.
+	it("applies every mask to some trace", () => {
 		expect(
 			masks.map(({ row }) => row).filter((row) => !applied.has(row)),
 		).toEqual([]);
