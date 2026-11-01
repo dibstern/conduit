@@ -277,6 +277,8 @@ const commandFor = (
 						tag: "Main",
 						eventId: event.eventId,
 						kind: "run_started",
+						// 3.9: the run main started the input in; a native message's names the requested Run.
+						runId: event.metadata.runId ?? event.data.requestedRunId,
 						inputId: event.data.inputId,
 						requestedRunId: event.data.requestedRunId,
 					},
@@ -619,9 +621,21 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					}
 					if (inserted) wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
 					// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits on the fence with no clock, so the
-					// commit that releases it wakes the held starts (gap, reported).
-					if (fenceHolds(ledger.state) && !fenceHolds(state))
-						wakeAfterCommit(sql, fenceWakeKey, ledgerFenceWakes);
+					// commit that releases it, for a held start's own claim too, wakes the held starts (gap,
+					// reported).
+					if (fenceHolds(ledger.state)) {
+						const held = yield* sql<{ run_id: string | null }>`
+							SELECT run_id FROM provider_command_outbox
+							WHERE project_key = ${event.projectId} AND session_id = ${event.sessionId}
+								AND effect_type = 'send_turn' AND status = 'pending'`;
+						if (
+							[undefined, ...held.map((row) => row.run_id ?? undefined)].some(
+								(claim) =>
+									fenceHolds(ledger.state, claim) && !fenceHolds(state, claim),
+							)
+						)
+							wakeAfterCommit(sql, fenceWakeKey, ledgerFenceWakes);
+					}
 				}
 				// A folded fact advances the read model (A.21): its session row takes the version.
 				const stamped = yield* sql<{ id: string }>`

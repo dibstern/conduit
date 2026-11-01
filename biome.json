@@ -10,6 +10,7 @@
 			"!test-results",
 			"!test/e2e/linux-service/artifacts",
 			"!test/e2e/macos-service/artifacts",
+			"!test/unit/persistence/artifacts",
 			"!.claude",
 			"!.scratch",
 			"!.worktrees",

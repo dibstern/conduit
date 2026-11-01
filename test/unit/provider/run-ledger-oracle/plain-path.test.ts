@@ -278,6 +278,8 @@ describe("[32.2.5] plain Run path differential", () => {
 								tag: "Main",
 								eventId: `s${event}`,
 								kind: "run_started",
+								// The fake's steer joins and the named join test cover a distinct started run.
+								runId: requestedRunId,
 								inputId,
 								requestedRunId,
 							},
@@ -1474,6 +1476,13 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			end(d);
 			expect(d.latest("end_session").effect).toMatchObject({ label: null });
 		});
+		agreed("claude", (d) => {
+			// What follows the last ':' is not decimal, so the whole label is the runnerId (L1).
+			started(d, "host:abc");
+			lose(d, "host:abc");
+			end(d);
+			expect(d.latest("end_session").effect).toMatchObject({ label: null });
+		});
 	});
 
 	it("run_dispatched to an unstarted runner then its process_lost ends the Run process_lost, recording no lost work (L1, r3-1)", () => {
@@ -1614,6 +1623,82 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("an OpenCode query_ended ends the Run's start, not its Stop's cancel_request, which a probe issued after it ends (CONTRACT.md 334-338, 3101-3106)", () => {
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const probe = stop(d).issued.find(
+				(entry) => entry.effect.kind === "probe",
+			);
+			assert(probe?.tag === "Tokened", "the Stop's probe");
+			const cancel = expect.objectContaining({
+				tag: "Tokened",
+				effect: { kind: "cancel_request", runId: a.runId },
+			});
+			observe(d, a.token, { kind: "query_ended" });
+			expect(d.view().live).toEqual(expect.arrayContaining([cancel]));
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().live).not.toEqual(expect.arrayContaining([cancel]));
+		});
+	});
+
+	it("main's OpenCode terminal ends the Run, but its Stop's cancel_request whose call has not returned stays a fence member until the call returns, a probe issued after it, or a stop_unconfirmed terminal (CONTRACT.md 788-789, 797-799, 3101-3106)", () => {
+		const cancelOf = (runId: string) =>
+			expect.objectContaining({
+				tag: "Tokened",
+				effect: { kind: "cancel_request", runId },
+			});
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const probe = stop(d).issued.find(
+				(entry) => entry.effect.kind === "probe",
+			);
+			assert(probe?.tag === "Tokened", "the Stop's probe");
+			expect(terminal(d, a.runId, "interrupted").ended).toMatchObject([
+				{ runId: a.runId },
+			]);
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([cancelOf(a.runId)]),
+			);
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+		agreed("opencode", (d) => {
+			const a = running(d);
+			stop(d);
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "interrupted",
+				code: "stop_unconfirmed",
+			});
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const cancel = stop(d).issued.find(
+				(entry) => entry.effect.kind === "cancel_request",
+			);
+			assert(cancel?.tag === "Tokened", "the Stop's cancel_request");
+			terminal(d, a.runId, "interrupted");
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([cancelOf(a.runId)]),
+			);
+			observe(d, cancel.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "succeeded" },
+			});
+			expect(d.view().live).not.toEqual(
+				expect.arrayContaining([cancelOf(a.runId)]),
+			);
+		});
+	});
+
 	it("one Stop rule over the inbox and claimed rows: a retry-pending start is never re-sent and a claimed, untransmitted start ends with its Run (32.2.6 AC5, 5.4)", () => {
 		// Coverage is main's stopCovers (5.2, 5.4); the ledger reads only the folded Stop and holds no
 		// re-send of its own: a retry is main's next transmission (3.4, 3.7).
@@ -1651,9 +1736,33 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			stop(d, 5_000);
 			expect(d.alarmAt).not.toBe(5_000);
 			expect(d.view().active).not.toHaveProperty("deadlineAt");
-			main(d, { kind: "run_terminal", runId: a.runId, outcome: "interrupted" });
+			// The stop's deadline step: main's stop_unconfirmed terminal ends the aborts too (797-799).
+			main(d, {
+				kind: "run_terminal",
+				runId: a.runId,
+				outcome: "interrupted",
+				code: "stop_unconfirmed",
+			});
 			stop(d, 9_000);
 			expect(d.alarmAt).not.toBe(9_000);
+			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
+		});
+		// Any other terminal leaves the abort and cancel_request open, a send whose run main has ended,
+		// so the next Stop's deadline bounds them (788-789, 3101-3106).
+		agreed("opencode", (d) => {
+			const a = running(d);
+			stop(d, 5_000);
+			main(d, { kind: "run_terminal", runId: a.runId, outcome: "interrupted" });
+			stop(d, 9_000);
+			fire(d, 8_999);
+			expect(d.view().live).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						effect: { kind: "cancel_request", runId: a.runId },
+					}),
+				]),
+			);
+			fire(d, 9_000);
 			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
 		});
 	});
@@ -1788,7 +1897,12 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 			const b = begin(d, "B", "steer");
 			complete(d, a.token);
 			expect(d.view().active).toBeUndefined();
-			main(d, { kind: "run_started", inputId: "B", requestedRunId: b.runId });
+			main(d, {
+				kind: "run_started",
+				runId: b.runId,
+				inputId: "B",
+				requestedRunId: b.runId,
+			});
 			expect(d.view().active).toMatchObject({
 				runId: b.runId,
 				tag: "Running",
@@ -1797,6 +1911,28 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 				main(d, { kind: "run_terminal", runId: b.runId, outcome: "completed" })
 					.ended,
 			).toMatchObject([{ runId: b.runId, reason: { tag: "completed" } }]);
+		});
+	});
+
+	it("a run main started for a native message and joined a requested Run into names that Run, so its terminal ends it (CONTRACT.md 148, 956)", () => {
+		// 3.9: main joins the requested Run into the run it observed open; its run.started names that
+		// run as metadata.runId and the Run as requestedRunId, and main's terminal comes under the former.
+		agreed("opencode", (d) => {
+			const a = running(d);
+			main(d, {
+				kind: "run_started",
+				runId: "observed-run",
+				inputId: "A",
+				requestedRunId: a.runId,
+			});
+			expect(
+				main(d, {
+					kind: "run_terminal",
+					runId: "observed-run",
+					outcome: "completed",
+				}).ended,
+			).toMatchObject([{ runId: a.runId, reason: { tag: "completed" } }]);
+			expect(d.view().active).toBeUndefined();
 		});
 	});
 
@@ -2406,6 +2542,23 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 					},
 				}).tag,
 			).toBe("Rejected");
+		});
+		// 8.3 (CONTRACT.md 2808): Cursor starts no unsolicited turn and has no turn_ended.
+		agreed("cursor", (d) => {
+			started(d, "r1:1");
+			for (const kind of ["turn_started", "turn_ended"] as const)
+				expect(
+					d.step({
+						verb: "observe",
+						observation: {
+							tag: "Unsolicited",
+							label: "r1:1",
+							eventId: kind,
+							kind,
+						},
+					}).tag,
+				).toBe("Rejected");
+			expect(d.view().active).toBeUndefined();
 		});
 	});
 
@@ -3051,7 +3204,8 @@ describe("[32.2.13] core Codex policy: the bead's acceptance criteria", () => {
 		}).toEqual({
 			claude: "Accepted Accepted Accepted Accepted",
 			codex: "Accepted Accepted Rejected Rejected",
-			cursor: "Rejected Accepted Rejected Rejected",
+			// 8.3 (CONTRACT.md 2808): Cursor starts no unsolicited turn.
+			cursor: "Rejected Rejected Rejected Rejected",
 			opencode: "Rejected Accepted Rejected Rejected",
 		});
 	});

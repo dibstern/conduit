@@ -1202,7 +1202,8 @@ export const scenarios: readonly OracleScenario[] = [
 		id: "L6-3",
 		title:
 			"[L6] process_lost before the alarm ends a wake unforced; the alarm first forces it",
-		provider: "cursor",
+		// Cursor starts no unsolicited turn (8.3, CONTRACT.md 2808), so the wake is Codex's.
+		provider: "codex",
 		run(d) {
 			wake(d);
 			stop(d, 5_000);

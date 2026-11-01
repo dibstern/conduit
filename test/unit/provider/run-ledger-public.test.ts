@@ -168,6 +168,7 @@ describe("Run Ledger public model", () => {
 				backgroundTasks: false,
 				runnerHost: true,
 				commandReceipts: false,
+				wakeTurns: false,
 			},
 			runEnd: "result",
 			intake: { terminal: () => undefined },

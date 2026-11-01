@@ -67,9 +67,14 @@ export type MainRunEvent =
 			readonly inputId: string;
 			readonly direct: boolean;
 	  }
-	/** 3.9: joins its input to requestedRunId's Run, or starts a steer's own Run. */
+	/**
+	 * 3.9: joins its input, requested under requestedRunId, into the run main started it in (runId,
+	 * main's metadata.runId), or starts a steer's own Run. A runId the ledger does not know, a run
+	 * main observed for a native message, names the requested Run (CONTRACT.md 148, 956).
+	 */
 	| {
 			readonly kind: "run_started";
+			readonly runId: string;
 			readonly inputId: string;
 			readonly requestedRunId: string;
 	  }
@@ -609,6 +614,8 @@ export interface ProviderPolicy {
 		readonly runnerHost: boolean;
 		/** D46, 9: command receipts and a wake's turn_ended are this provider's evidence (CONTRACT.md 519-520). */
 		readonly commandReceipts: boolean;
+		/** 8.3: an unsolicited turn_started is this provider's evidence; Cursor starts none (CONTRACT.md 2808). */
+		readonly wakeTurns: boolean;
 	};
 	readonly runEnd: "result" | "query_ended";
 	readonly intake: ProviderIntake;
