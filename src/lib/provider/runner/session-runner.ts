@@ -1,4 +1,10 @@
-import type { Effect, Option, Scope, Stream } from "effect";
+import {
+	Context,
+	type Effect,
+	type Option,
+	type Scope,
+	type Stream,
+} from "effect";
 import type { Account } from "../../contracts/account.js";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
@@ -241,6 +247,12 @@ export type SessionOutput =
 					};
 			  }
 	  ));
+
+/** The SDK query whose callbacks produce this fiber's outputs. The host drops a replaced query's output by its identity (CONTRACT 6.1). */
+export const currentRunnerQuery = Context.Reference<object | undefined>(
+	"conduit/provider/currentRunnerQuery",
+	{ defaultValue: () => undefined },
+);
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
 export interface SessionOutputReply {

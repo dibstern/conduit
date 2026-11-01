@@ -29,12 +29,13 @@ import type {
 	RunnerSourceDelivery,
 	RunnerUpgradeState,
 } from "./runner-upgrade.js";
-import type {
-	NativeSessionRunner,
-	SessionCommand,
-	SessionFailure,
-	SessionOutput,
-	SessionOutputReply,
+import {
+	currentRunnerQuery,
+	type NativeSessionRunner,
+	type SessionCommand,
+	type SessionFailure,
+	type SessionOutput,
+	type SessionOutputReply,
 } from "./session-runner.js";
 
 export type RunnerRole =
@@ -77,7 +78,7 @@ export interface RunnerLaunchCallbacks {
 	readonly isBackgroundBusy: (ignoredCommands?: number) => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
 	/** Every native query start after the host's first is a replacement (CONTRACT 6.1). */
-	readonly queryStarted: () => void;
+	readonly queryStarted: (query: object) => void;
 	/** Only the producer can finish this exact terminal delivery. */
 	readonly sourceDelivery?: (
 		source: Pick<RunnerSourceDelivery, "sessionId" | "inputId" | "runId">,
@@ -293,7 +294,8 @@ export const runSessionRunner = (
 		let helloCount = 0;
 		// The host owns querySeq; a surviving host keeps it across daemon reconnects (6.1).
 		let querySeq = 0;
-		let queryStarted = false;
+		let currentQuery: object | undefined;
+		const querySeqs = new WeakMap<object, number>();
 		const spool = new RunnerSpool(`${socketPath}.spool`, () => querySeq);
 		let backgroundSnapshot:
 			| Extract<SessionOutput, { type: "background-task" }>
@@ -397,9 +399,11 @@ export const runSessionRunner = (
 				reportUpgradeState();
 				if (!inFlight) retireWhenQuiescent();
 			},
-			queryStarted: () => {
-				if (queryStarted) querySeq++;
-				queryStarted = true;
+			queryStarted: (query) => {
+				if (query === currentQuery) return;
+				if (currentQuery) querySeq++;
+				currentQuery = query;
+				querySeqs.set(query, querySeq);
 			},
 			sourceDelivery: (source) => {
 				const owner = sourceSinkId ? bindings.get(sourceSinkId) : undefined;
@@ -520,67 +524,109 @@ export const runSessionRunner = (
 										catch: (cause) => runnerFailure("open runner sends", cause),
 									});
 									runner = yield* launch
-										.makeRunner(config, (output) => {
-											if (output.type === "background-task") {
-												backgroundSnapshot =
-													output.transition.kind === "snapshot" &&
-													output.transition.tasks.length > 0
-														? output
-														: undefined;
-											}
-											idle?.activity(output);
-											activeOutputs++;
-											reportUpgradeState();
-											const binding =
-												"sinkId" in output
-													? bindings.get(output.sinkId)
-													: undefined;
-											if (
-												binding &&
-												binding.sessionId === sessionId &&
-												output.type === "event" &&
-												output.event.sessionId === sessionId &&
-												output.event.type === "run.started" &&
-												typeof output.event.data === "object" &&
-												output.event.data !== null &&
-												"inputId" in output.event.data &&
-												output.event.data.inputId === binding.inputId &&
-												output.event.runId
-											) {
-												binding.runId = output.event.runId;
-												sourceSinkId = output.sinkId;
-											}
-											const runId =
-												output.type === "event"
-													? output.event.providerRefs.providerTurnId
-													: undefined;
-											if (output.type === "release-sink" && binding)
-												binding.released = true;
-											const recordRun =
-												runId &&
-												binding?.token &&
-												sendJournal &&
-												binding.providerRunId !== runId
-													? sendJournal
-															.reportProviderRun(binding.token, runId)
-															.pipe(
-																Effect.tap(() =>
-																	Effect.sync(() => {
-																		binding.providerRunId = runId;
-																	}),
+										.makeRunner(config, (output) =>
+											Effect.gen(function* () {
+												// 6.1: a replaced query's output is dropped at capture, by
+												// identity. Its acceptance and terminal facts, and cleanup of
+												// what it opened (gap: 6.1 names no cleanup), still go out
+												// under its own querySeq.
+												const origin = yield* currentRunnerQuery;
+												if (
+													origin &&
+													origin !== currentQuery &&
+													!(output.type === "event"
+														? [
+																"run.started",
+																"turn.completed",
+																"turn.error",
+																"turn.interrupted",
+															].includes(output.event.type)
+														: [
+																"release-sink",
+																"cancel-interaction",
+																"cancel-interactions",
+																"resolve-permission",
+																"resolve-question",
+															].includes(output.type))
+												)
+													return output.type === "event" ||
+														output.type === "background-task" ||
+														output.type === "account-usage"
+														? {}
+														: yield* Effect.fail(
+																runnerFailure(
+																	"query fence",
+																	"The query that produced this output was replaced",
 																),
-															)
-													: Effect.void;
-											return recordRun.pipe(
-												Effect.andThen(spool.emit(output)),
-												Effect.ensuring(
-													Effect.sync(() => {
-														activeOutputs--;
-														reportUpgradeState();
-													}),
-												),
-											);
-										})
+															);
+												if (output.type === "background-task") {
+													backgroundSnapshot =
+														output.transition.kind === "snapshot" &&
+														output.transition.tasks.length > 0
+															? output
+															: undefined;
+												}
+												idle?.activity(output);
+												activeOutputs++;
+												reportUpgradeState();
+												const binding =
+													"sinkId" in output
+														? bindings.get(output.sinkId)
+														: undefined;
+												if (
+													binding &&
+													binding.sessionId === sessionId &&
+													output.type === "event" &&
+													output.event.sessionId === sessionId &&
+													output.event.type === "run.started" &&
+													typeof output.event.data === "object" &&
+													output.event.data !== null &&
+													"inputId" in output.event.data &&
+													output.event.data.inputId === binding.inputId &&
+													output.event.runId
+												) {
+													binding.runId = output.event.runId;
+													sourceSinkId = output.sinkId;
+												}
+												const runId =
+													output.type === "event"
+														? output.event.providerRefs.providerTurnId
+														: undefined;
+												if (output.type === "release-sink" && binding)
+													binding.released = true;
+												const recordRun =
+													runId &&
+													binding?.token &&
+													sendJournal &&
+													binding.providerRunId !== runId
+														? sendJournal
+																.reportProviderRun(binding.token, runId)
+																.pipe(
+																	Effect.tap(() =>
+																		Effect.sync(() => {
+																			binding.providerRunId = runId;
+																		}),
+																	),
+																)
+														: Effect.void;
+												return yield* recordRun.pipe(
+													Effect.andThen(
+														spool.emit(
+															output,
+															origin
+																? (querySeqs.get(origin) ?? querySeq)
+																: querySeq,
+														),
+													),
+													Effect.ensuring(
+														Effect.sync(() => {
+															activeOutputs--;
+															reportUpgradeState();
+														}),
+													),
+												);
+											}),
+										)
 										.pipe(Effect.provideService(Scope.Scope, scope));
 									const testIdle =
 										process.env["NODE_ENV"] === "test"

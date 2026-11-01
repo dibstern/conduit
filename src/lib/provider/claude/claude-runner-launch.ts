@@ -247,7 +247,7 @@ export const makeClaudeRunnerLaunch = (
 						options: queryOptions,
 					})
 				: sdkQuery({ prompt: params.prompt, options: queryOptions });
-			callbacks.queryStarted();
+			callbacks.queryStarted(query);
 			const {
 				abortController: _abort,
 				canUseTool: _tool,

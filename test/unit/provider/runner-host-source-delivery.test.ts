@@ -646,12 +646,12 @@ for (const { name, mode } of [
 							).toBe(0);
 							yield* send("first-query");
 							// The first query is no replacement: the hello and its frames read 0.
-							callbacks.queryStarted();
+							callbacks.queryStarted({});
 							yield* send("first-query-again");
 							const first = stamps();
 							expect(first.length).toBeGreaterThan(4);
 							expect(new Set(first)).toEqual(new Set([0]));
-							callbacks.queryStarted();
+							callbacks.queryStarted({});
 							yield* send("replacement-query");
 							// A late notice of the earlier send keeps the count it was emitted under.
 							const replaced = receivedFrames

@@ -116,6 +116,7 @@ export class RunnerSpool {
 
 	emit(
 		output: SessionOutput,
+		querySeq = this.querySeq(),
 	): Effect.Effect<SessionOutputReply, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			// Cleanup and the idle tail must not hold the next SDK enqueue.
@@ -139,7 +140,7 @@ export class RunnerSpool {
 				outputId: String(sequence),
 				sequence,
 				output,
-				querySeq: this.querySeq(),
+				querySeq,
 			};
 			if (
 				output.type === "permission-request" ||
