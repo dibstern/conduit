@@ -224,10 +224,8 @@ const meta = {
 		// the story that wants the collapse gets it.
 		sessionViewState.compact = true;
 		sessionViewState.composerWidth = 760;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = true;
-		sessionViewState.filesOpen = false;
-		sessionViewState.filesEverOpened = false;
+		sessionViewState.rightPaneView = "closed";
 		sessionSkillsState.sessionId = null;
 		sessionSkillsState.loads = [];
 		uiState.clientCount = 1;
@@ -653,7 +651,7 @@ export const GoalDetailsEmpty: Story = {
 	play: async ({ canvasElement }) => {
 		const { panel } = await assertGoalDetails(canvasElement, "Pursuing", 0);
 		await expect(panel.getByTestId("goal-details-history")).toHaveTextContent(
-			"No checks yet. The first runs when Claude finishes a turn.",
+			"No checks yet. The first runs when the agent finishes a turn.",
 		);
 		await expect(panel.getByTestId("goal-details-foot")).toHaveTextContent(
 			"0 checks",
@@ -724,7 +722,6 @@ export const ViewsSheetOpen: Story = {
 		);
 		expect(within(sheet).getAllByRole("menuitemradio")).toEqual(items);
 		await expect(items[0]).toHaveAttribute("aria-checked", "true");
-		await expect(items[2]).toHaveAttribute("aria-disabled", "true");
 		expect(
 			new Set(items.map((item) => item.getBoundingClientRect().top)).size,
 		).toBe(1);
@@ -848,7 +845,6 @@ export const AutoSettledCollapsed: Story = {
 			settledAutomatically: true,
 		});
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
@@ -964,7 +960,6 @@ export const OverflowMenuOpen: Story = {
 		answerAutoSettle,
 		() => {
 			sessionViewState.compact = true;
-			sessionViewState.atBottom = true;
 			sessionViewState.barOpen = false;
 		},
 	],
@@ -999,7 +994,6 @@ export const OverflowMenuDebug: Story = {
 		answerAutoSettle,
 		() => {
 			sessionViewState.compact = true;
-			sessionViewState.atBottom = true;
 			sessionViewState.barOpen = false;
 			featureFlags.debug = true;
 		},
@@ -1076,7 +1070,6 @@ export const Collapsed: Story = {
 	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
@@ -1277,7 +1270,9 @@ export const PhoneTop: Story = {
 		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
 			goal.getBoundingClientRect().bottom,
 		);
-		await expect(tasks).toHaveTextContent("2 background tasks");
+		await expect(
+			canvas.getByTestId("background-tasks-toggle"),
+		).toHaveAccessibleName(/^2 background tasks: /);
 		expect(goal.getBoundingClientRect().width).toBe(
 			bar.getBoundingClientRect().width - 20,
 		);
@@ -1290,7 +1285,6 @@ export const PhoneTop: Story = {
 			"session-bar-island-overflow",
 			"session-goal-subtitle",
 			"background-tasks-toggle",
-			"background-tasks-row-stop-all",
 		]) {
 			expectTouchTarget(
 				canvas.getByTestId(id),
@@ -1488,7 +1482,6 @@ export const ExpandedByChevron: Story = {
 	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 	},
 	play: async ({ canvasElement }) => {
@@ -1499,9 +1492,7 @@ export const ExpandedByChevron: Story = {
 		expect(canvasElement.querySelector("#session-bar-meta")).toBeVisible();
 		expect(canvas.queryByRole("button", { name: /^Checkout:/ })).toBeNull();
 		expect(canvas.getByTestId("session-bar")).toHaveFocus();
-		// Still at the bottom: the chevron overrides the rule, it does not move
-		// the transcript.
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(sessionViewState.barOpen).toBe(true);
 	},
 };
 
@@ -1905,7 +1896,6 @@ export const CollapsedWithBanners: Story = {
 	args: { island: true },
 	beforeEach: () => {
 		sessionViewState.compact = true;
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 		return showIslandBanners();
 	},
@@ -1984,66 +1974,40 @@ export const DesktopBackgroundTasks: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const tasks = canvas.getByTestId("background-tasks-row");
-		await expect(
-			tasks.querySelector('[data-flow-glyph="running"]'),
-		).toBeVisible();
 		const box = (el: Element) => el.getBoundingClientRect();
-		const bar = box(canvas.getByTestId("session-bar"));
-		expect(box(tasks).top - bar.top).toBe(52);
-		expect(box(tasks).bottom).toBe(bar.bottom);
-		const chip = canvas.getAllByTestId("background-task-chip")[0] ?? tasks;
-		const label = chip.querySelector("button span");
-		expect(label).not.toBeNull();
-		if (!label) throw new Error("Background task label is missing");
-		const fonts = await canvasElement.ownerDocument.fonts.load(
-			'400 11.5px "Geist Mono"',
-			label.textContent ?? "",
+		// The pills share the title's subline, under the title.
+		expect(box(tasks).top).toBeGreaterThanOrEqual(
+			box(canvas.getByTestId("session-bar-title")).bottom,
 		);
-		expect(fonts.length).toBeGreaterThan(0);
-		for (const font of fonts) expect(font.status).toBe("loaded");
-		const labelStyle = getComputedStyle(label);
-		expect(labelStyle.fontFamily).toContain("Geist Mono");
-		expect(labelStyle.fontSize).toBe("11.5px");
-		expect(labelStyle.fontWeight).toBe("400");
-		expect(labelStyle.lineHeight).toBe("normal");
-		const chipStyle = getComputedStyle(chip);
-		expect(box(chip).height).toBe(22);
-		expect(chipStyle.paddingLeft).toBe("9px");
-		expect(chipStyle.paddingRight).toBe("4px");
-		expect(chipStyle.columnGap).toBe("6px");
-		const range = canvasElement.ownerDocument.createRange();
-		range.selectNodeContents(label);
-		const textBox = range.getBoundingClientRect();
-		expect((textBox.top + textBox.bottom) / 2).toBeCloseTo(
-			(box(chip).top + box(chip).bottom) / 2,
-			1,
+		expect(box(tasks).bottom).toBeLessThanOrEqual(
+			box(canvas.getByTestId("session-bar")).bottom,
 		);
-		expect(textBox.top).toBeGreaterThanOrEqual(box(chip).top);
-		expect(textBox.bottom).toBeLessThanOrEqual(box(chip).bottom);
 		const overlaps = (a: DOMRect, b: DOMRect) =>
 			a.left < b.right &&
 			b.left < a.right &&
 			a.top < b.bottom &&
 			b.top < a.bottom;
-		const chips = box(tasks.firstElementChild ?? tasks);
-		for (const el of [
-			"session-bar-title",
-			"session-skills-chip",
-			"session-bar-overflow",
-		].map((id) => canvas.getByTestId(id)))
-			expect(overlaps(chips, box(el)), el.outerHTML.slice(0, 60)).toBe(false);
-		expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
+		for (const el of ["session-skills-chip", "session-bar-overflow"].map((id) =>
+			canvas.getByTestId(id),
+		))
+			expect(overlaps(box(tasks), box(el)), el.outerHTML.slice(0, 60)).toBe(
+				false,
+			);
+		// Newest first, named for their purpose, as many as fit, then "+N".
+		const chips = canvas.getAllByTestId("background-task-chip");
+		expect(chips[0]).toHaveTextContent(/^Wait for review or gate/);
+		expect(chips[0]).toHaveAttribute("title", "Wait for review or gate");
+		for (const chip of chips) expect(box(chip).height).toBe(20);
 		await expect(canvas.getByTestId("background-tasks-more")).toHaveTextContent(
-			"+1",
+			`+${3 - chips.length}`,
 		);
-		expect(canvas.queryByTestId("background-tasks-elbow")).toBeNull();
-		expect(tasks.querySelector("svg.lucide-chevron-down")).toBeNull();
-		expect(
-			chips.top - box(canvas.getByTestId("session-bar-title")).bottom,
-		).toBeGreaterThanOrEqual(6);
+		await expect(
+			canvas.getByTestId("background-tasks-toggle"),
+		).toHaveAccessibleName(/^3 background tasks: Wait for review or gate, /);
+		expect(canvas.queryByRole("button", { name: /^Stop / })).toBeNull();
 		await waitFor(() =>
 			expect(
-				getComputedStyle(canvas.getByTestId("background-tasks-more"))
+				getComputedStyle(canvas.getByTestId("background-tasks-toggle"))
 					.pointerEvents,
 			).toBe("auto"),
 		);
@@ -2074,10 +2038,14 @@ export const BackgroundTasks: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const tasks = canvas.getByTestId("background-tasks-row");
-		await expect(tasks).toHaveTextContent("1 background task");
+		await expect(tasks).toHaveTextContent(
+			/^\s*Run full gate with baseline orphan check/,
+		);
 		await expect(
-			tasks.querySelector('[data-flow-glyph="running"]'),
-		).toBeVisible();
+			canvas.getByTestId("background-tasks-toggle"),
+		).toHaveAccessibleName(
+			"1 background task: Run full gate with baseline orphan check",
+		);
 		expect(tasks.getBoundingClientRect().top).toBeGreaterThanOrEqual(
 			canvas.getByTestId("session-bar-title").getBoundingClientRect().bottom,
 		);
@@ -2118,7 +2086,6 @@ export const BackgroundTasks: Story = {
 			).toBe(mode === "dark" ? "#0b0c0e" : "#b0b1b3");
 		}
 		setThemeMode(theme);
-		sessionViewState.atBottom = true;
 		sessionViewState.barOpen = false;
 		await tick();
 		await expect(canvas.getByTestId("session-bar")).toHaveAttribute(
@@ -2950,14 +2917,13 @@ export const DesktopTaskControls: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		expect(
-			canvas.getByTestId("background-tasks-row").getBoundingClientRect().height,
-		).toBe(36);
-		for (const chip of canvas.getAllByTestId("background-task-chip")) {
-			expect(chip.getBoundingClientRect().height).toBe(22);
-		}
+		const row = canvas.getByTestId("background-tasks-row");
+		// The header pills only open the pull-down, which owns every stop.
+		expect(within(row).queryByRole("button", { name: /^Stop / })).toBeNull();
+		await userEvent.click(canvas.getByTestId("background-tasks-toggle"));
+		const panel = within(canvas.getByTestId("background-tasks-panel"));
 		await userEvent.click(
-			canvas.getByRole("button", { name: "Stop Run tests" }),
+			panel.getByRole("button", { name: "Stop background task Run tests" }),
 		);
 		await waitFor(() =>
 			expect(stopDesktopTask).toHaveBeenCalledWith({
@@ -2969,7 +2935,7 @@ export const DesktopTaskControls: Story = {
 		// Requests leave both chips in place until the SDK confirms a stop.
 		await expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
 		stopDesktopTask.mockClear();
-		await userEvent.click(canvas.getByTestId("background-tasks-row-stop-all"));
+		await userEvent.click(panel.getByTestId("background-tasks-stop-all"));
 		await waitFor(() => expect(stopDesktopTask).toHaveBeenCalledTimes(2));
 		await expect(stopDesktopTask).toHaveBeenNthCalledWith(1, {
 			_tag: "StopBackgroundTask",
@@ -2981,6 +2947,10 @@ export const DesktopTaskControls: Story = {
 			sessionId: mockSession.id,
 			taskId: "t1",
 		});
+		await userEvent.keyboard("{Escape}");
+		await waitFor(() =>
+			expect(canvas.queryByTestId("background-tasks-panel")).toBeNull(),
+		);
 	},
 };
 export const DesktopTaskControlsLight: Story = {

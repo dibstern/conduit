@@ -2,6 +2,7 @@ import { PlaywrightDriver } from "./playwrightDriver.js";
 import type { AcceptanceLifecycle, StepHandler } from "./runtime.js";
 import { addProjectDialogHandlers } from "./steps/addProjectDialog.js";
 import { askContextHandlers } from "./steps/askContext.js";
+import { assistantDiagramsHandlers } from "./steps/assistantDiagrams.js";
 import { backgroundTasksHandlers } from "./steps/backgroundTasks.js";
 import { claudeSettingsHandlers } from "./steps/claudeSettings.js";
 import { codexAsyncQuestionHandlers } from "./steps/codexAsyncQuestion.js";
@@ -12,6 +13,7 @@ import { composerEffortHandlers } from "./steps/composerEffort.js";
 import { composerFieldWidthHandlers } from "./steps/composerFieldWidth.js";
 import { composerFilesHandlers } from "./steps/composerFiles.js";
 import { composerFinalDesignHandlers } from "./steps/composerFinalDesign.js";
+import { composerImageDropAndViewHandlers } from "./steps/composerImageDropAndView.js";
 import { composerLiveStatusHandlers } from "./steps/composerLiveStatus.js";
 import { composerPickerHandlers } from "./steps/composerPicker.js";
 import { composerSendAtResetHandlers } from "./steps/composerSendAtReset.js";
@@ -29,8 +31,15 @@ import { cursorTurnHandlers } from "./steps/cursorTurn.js";
 import { cursorUsageHandlers } from "./steps/cursorUsage.js";
 import { cursorUsageErrorsHandlers } from "./steps/cursorUsageErrors.js";
 import { draftAttachmentFailureHandlers } from "./steps/draftAttachmentFailures.js";
+import { duoAlertsHandlers } from "./steps/duoAlerts.js";
+import { duoFoldedChipsHandlers } from "./steps/duoFoldedChips.js";
+import { duoFoldedKeyboardHandlers } from "./steps/duoFoldedKeyboard.js";
+import { duoFoldedPortraitHandlers } from "./steps/duoFoldedPortrait.js";
+import { duoPoseHandlers } from "./steps/duoPose.js";
+import { duoUnfoldedPortraitHandlers } from "./steps/duoUnfoldedPortrait.js";
 import { firstRunProjectsHandlers } from "./steps/firstRunProjects.js";
 import { harnessHandlers } from "./steps/harness.js";
+import { headerTapOnLiftHandlers } from "./steps/headerTapOnLift.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
@@ -39,7 +48,10 @@ import { pendingInputTrayHandlers } from "./steps/pendingInputTray.js";
 import { phoneToastsHandlers } from "./steps/phoneToasts.js";
 import { projectTreeHandlers } from "./steps/projectTree.js";
 import { providerInstancesHandlers } from "./steps/providerInstances.js";
+import { providerSettingsHandlers } from "./steps/providerSettings.js";
+import { rightPaneHandlers } from "./steps/rightPane.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
+import { sessionDiffHandlers } from "./steps/sessionDiff.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
 import { sessionGoalDetailsHandlers } from "./steps/sessionGoalDetails.js";
 import { sessionModeDefaultHandlers } from "./steps/sessionModeDefault.js";
@@ -64,6 +76,16 @@ import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { themeMenuHandlers } from "./steps/themeMenu.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
+import { turnActivityHandlers } from "./steps/turnActivity.js";
+import { turnActivityShowHandlers } from "./steps/turnActivityShow.js";
+import { turnActivitySkillsHandlers } from "./steps/turnActivitySkills.js";
+import { turnHoverHandlers } from "./steps/turnHover.js";
+import { turnOpeningHandlers } from "./steps/turnOpening.js";
+import { turnPanelHandlers } from "./steps/turnPanel.js";
+import { turnQaHandlers } from "./steps/turnQa.js";
+import { turnStickyHandlers } from "./steps/turnSticky.js";
+import { turnStripHandlers } from "./steps/turnStrip.js";
+import { turnUsageHandlers } from "./steps/turnUsage.js";
 import { usageFooterMeterHandlers } from "./steps/usageFooterMeter.js";
 import { usageLimitStripHandlers } from "./steps/usageLimitStrip.js";
 import { usageSettingsHandlers } from "./steps/usageSettings.js";
@@ -75,6 +97,7 @@ import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings
 const driver = new PlaywrightDriver();
 
 export const conduitVisualHandlers: StepHandler[] = [
+	...headerTapOnLiftHandlers,
 	...addProjectDialogHandlers,
 	...firstRunProjectsHandlers,
 	...draftAttachmentFailureHandlers,
@@ -83,8 +106,16 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionSheetSnoozeHandlers,
 	...sessionAutoSettleHandlers,
 	...phoneToastsHandlers,
+	...duoPoseHandlers,
+	...duoUnfoldedPortraitHandlers,
+	...duoFoldedKeyboardHandlers,
+	...duoFoldedPortraitHandlers,
+	...duoAlertsHandlers,
+	...duoFoldedChipsHandlers,
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
+	...rightPaneHandlers,
+	...sessionDiffHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
 	...launchingRowsHandlers,
@@ -95,6 +126,16 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...titleGenerationSettingsHandlers,
 	...sideThreadsHandlers,
 	...surfacingCardHandlers,
+	...turnActivitySkillsHandlers,
+	...turnActivityHandlers,
+	...turnStripHandlers,
+	...turnQaHandlers,
+	...turnActivityShowHandlers,
+	...turnPanelHandlers,
+	...turnStickyHandlers,
+	...turnUsageHandlers,
+	...turnHoverHandlers,
+	...turnOpeningHandlers,
 	...surfacingMarksHandlers,
 	...surfacingMinimiseHandlers,
 	...surfacingRecapHandlers,
@@ -130,6 +171,8 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...transcriptFeedHandlers,
 	...composerFieldWidthHandlers,
 	...composerFilesHandlers,
+	...composerImageDropAndViewHandlers,
+	...assistantDiagramsHandlers,
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
@@ -148,6 +191,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...visualHandlers,
 	...claudeSettingsHandlers,
 	...providerInstancesHandlers,
+	...providerSettingsHandlers,
 ];
 
 export const conduitVisualLifecycle: AcceptanceLifecycle = {

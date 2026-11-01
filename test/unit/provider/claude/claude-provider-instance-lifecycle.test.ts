@@ -216,12 +216,15 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("interruptTurnEffect()", () => {
-		it("cancels a bound Stop while query setup has no context", async () => {
+		it("interrupts a bound Stop before query setup and lets the next turn run", async () => {
 			let releaseSetup = () => {};
 			const setup = new Promise<void>((resolve) => {
 				releaseSetup = resolve;
 			});
-			const prepareQuery = vi.fn(() => setup);
+			const prepareQuery = vi
+				.fn()
+				.mockImplementationOnce(() => setup)
+				.mockResolvedValue(undefined);
 			const queryFactory = vi.fn(() => createMockQuery([makeSuccessResult()]));
 			const instance = makeTestClaudeProviderInstance({
 				runnerFactory: (deps, emit) =>
@@ -229,17 +232,16 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				queryFactory,
 			});
 			const inputId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+			const eventSink = createMockEventSink();
+			const input = makeBaseSendTurnInput({
+				sessionId: "sess-stop-setup",
+				inputId,
+				runId: "setup-reservation",
+				eventSink,
+				model: { providerId: "claude", modelId: "sonnet" },
+			});
 			const send = Effect.runPromise(
-				instance
-					.sendTurnEffect(
-						makeBaseSendTurnInput({
-							sessionId: "sess-stop-setup",
-							inputId,
-							runId: "setup-reservation",
-							model: { providerId: "claude", modelId: "sonnet" },
-						}),
-					)
-					.pipe(Effect.result),
+				instance.sendTurnEffect(input).pipe(Effect.result),
 			);
 			try {
 				await vi.waitFor(() => expect(prepareQuery).toHaveBeenCalledOnce());
@@ -247,11 +249,102 @@ describe("ClaudeProviderInstance lifecycle", () => {
 					instance.interruptTurnEffect("sess-stop-setup", [inputId]),
 				);
 				releaseSetup();
-				expect((await send)._tag).toBe("Failure");
+				expect(await send).toMatchObject({
+					_tag: "Success",
+					success: { status: "cancelled" },
+				});
 				expect(queryFactory).not.toHaveBeenCalled();
+				const events = vi
+					.mocked(eventSink.push)
+					.mock.calls.map(([event]) => event);
+				expect(
+					events.filter((event) => event.type === "turn.interrupted"),
+				).toEqual([
+					expect.objectContaining({
+						runId: "setup-reservation",
+						data: { messageId: "" },
+					}),
+				]);
+				expect(events.some((event) => event.type === "turn.error")).toBe(false);
+				expect(events.some((event) => event.type === "run.started")).toBe(
+					false,
+				);
+				expect(
+					await Effect.runPromise(
+						instance.sendTurnEffect({
+							...input,
+							inputId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+							runId: "next-reservation",
+							prompt: "Bravo",
+						}),
+					),
+				).toMatchObject({ status: "completed" });
+				expect(queryFactory).toHaveBeenCalledOnce();
 			} finally {
 				releaseSetup();
 				await send;
+			}
+		});
+
+		it("stops setup before awaiting the interrupted terminal's persistence", async () => {
+			let releaseSetup = () => {};
+			const setup = new Promise<void>((resolve) => {
+				releaseSetup = resolve;
+			});
+			const prepareQuery = vi.fn(() => setup);
+			const interrupted = Effect.runSync(Deferred.make<void>());
+			const persisted = Effect.runSync(Deferred.make<void>());
+			const eventSink = createMockEventSink();
+			eventSink.push = (event) =>
+				event.type === "turn.interrupted"
+					? Deferred.succeed(interrupted, undefined).pipe(
+							Effect.andThen(Deferred.await(persisted)),
+						)
+					: Effect.void;
+			const queryFactory = vi.fn(() => createMockQuery([makeSuccessResult()]));
+			const instance = makeTestClaudeProviderInstance({
+				runnerFactory: (deps, emit) =>
+					makeClaudeSessionRunner({ ...deps, prepareQuery }, emit),
+				queryFactory,
+			});
+			const input = makeBaseSendTurnInput({
+				inputId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				eventSink,
+				model: { providerId: "claude", modelId: "sonnet" },
+			});
+			let replied = false;
+			const send = Effect.runPromise(
+				instance.sendTurnEffect(input).pipe(Effect.result),
+			).then((result) => {
+				replied = true;
+				return result;
+			});
+			let stop: Promise<void> | undefined;
+			try {
+				await vi.waitFor(() => expect(prepareQuery).toHaveBeenCalledOnce());
+				stop = Effect.runPromise(
+					instance.interruptTurnEffect(input.sessionId, [input.inputId]),
+				);
+				await Effect.runPromise(Deferred.await(interrupted));
+				releaseSetup();
+				await new Promise<void>((resolve) => setImmediate(resolve));
+				expect(queryFactory).not.toHaveBeenCalled();
+				expect(replied).toBe(false);
+				await Effect.runPromise(
+					instance
+						.interruptTurnEffect(input.sessionId, [input.inputId])
+						.pipe(Effect.timeout("100 millis")),
+				);
+				Effect.runSync(Deferred.succeed(persisted, undefined));
+				await stop;
+				expect(await send).toMatchObject({
+					_tag: "Success",
+					success: { status: "cancelled" },
+				});
+			} finally {
+				releaseSetup();
+				Effect.runSync(Deferred.succeed(persisted, undefined));
+				await Promise.allSettled([send, ...(stop ? [stop] : [])]);
 			}
 		});
 

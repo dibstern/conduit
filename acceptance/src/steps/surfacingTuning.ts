@@ -408,7 +408,7 @@ export const surfacingTuningHandlers: StepHandler[] = [
 			await expect(preview(page)).toContainText("agrees with");
 			const now = await page.evaluate(() => Date.now());
 			await page.clock.install({ time: now });
-			await page.clock.pauseAt(now + 1);
+			await page.clock.pauseAt(now + 1_000);
 			const initial = fixture(page).scoreRequests.length;
 			await page.getByRole("button", { name: "Raise Finding weight" }).click();
 			await page.getByRole("button", { name: "Raise Finding weight" }).click();
@@ -419,7 +419,7 @@ export const surfacingTuningHandlers: StepHandler[] = [
 				.poll(() => fixture(page).scoreRequests.length)
 				.toBe(initial + 2);
 			await expect(preview(page)).toContainText("agrees with");
-			await expect(preview(page)).toContainText("Balanced shows");
+			await expect(preview(page)).toContainText("Most shows");
 			expect(
 				fixture(page).scoreRequests.every(({ jevCalls }) => jevCalls === 0),
 			).toBe(true);

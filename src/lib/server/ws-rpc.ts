@@ -35,12 +35,13 @@ import {
 } from "../domain/relay/Services/services.js";
 import { subscribeSessionDetail } from "../domain/relay/Services/session-detail-subscription.js";
 import { subscribeSessionFamily } from "../domain/relay/Services/session-family-subscription.js";
+import { subscribeSessionPromptIndex } from "../domain/relay/Services/session-prompt-index.js";
 import { subscribeShell } from "../domain/relay/Services/shell-subscription.js";
 import { subscribeSessionTodos } from "../domain/relay/Services/todo-subscription.js";
 import * as Failure from "../effect/failure-classification.js";
-import { EventDelivery } from "./event-audiences.js";
 import {
 	CurrentEventDelivery,
+	currentEventDelivery,
 	deliverEventStream,
 	deliverPtyRows,
 	deliverSessionRows,
@@ -52,6 +53,7 @@ import { filesHandlers } from "./ws-rpc/files.js";
 import { instancesHandlers } from "./ws-rpc/instances.js";
 import { modelsHandlers, subscribeDraftModels } from "./ws-rpc/models.js";
 import { projectsHandlers } from "./ws-rpc/projects.js";
+import { sessionDiffHandlers } from "./ws-rpc/session-diff.js";
 import { sessionSkillsHandlers } from "./ws-rpc/session-skills.js";
 import { sessionsHandlers } from "./ws-rpc/sessions.js";
 import { settingsHandlers } from "./ws-rpc/settings.js";
@@ -66,6 +68,7 @@ const unaryHandlers = {
 	...settingsHandlers,
 	...terminalsHandlers,
 	...filesHandlers,
+	...sessionDiffHandlers,
 	...sessionSkillsHandlers,
 	...modelsHandlers,
 	...sessionsHandlers,
@@ -163,9 +166,12 @@ const streamHandlers = {
 				? {}
 				: { resumeFromSequence: request.resumeFromSequence },
 		),
+	SubscribeSessionPromptIndex: (request) =>
+		subscribeSessionPromptIndex(request),
 	SubscribeSessionDetail: (request) =>
 		subscribeSessionDetailWithPresence({
 			sessionId: request.sessionId,
+			...(request.window === undefined ? {} : { window: request.window }),
 			...(request.resumeFromSequence === undefined
 				? {}
 				: { resumeFromSequence: request.resumeFromSequence }),
@@ -546,8 +552,7 @@ export const makeRoutedWsRpcServerLayer = <
 							);
 							const context = yield* resolveContext(projectSlug);
 							const producerProject = Context.get(context, ConfigTag).slug;
-							const delivery =
-								(yield* CurrentEventDelivery) ?? new EventDelivery();
+							const delivery = yield* currentEventDelivery;
 							const source = Stream.unwrap(
 								Effect.gen(function* () {
 									const queue = yield* Effect.acquireRelease(

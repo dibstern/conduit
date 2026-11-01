@@ -216,6 +216,8 @@ async function openWindows(page: Page, browser: Browser, relayUrl: string) {
 }
 
 async function screenshotRow(page: Page, sessionId: string, name: string) {
+	// Pixel baselines are Darwin-only, like the Storybook visual suite.
+	if (process.platform !== "darwin") return;
 	await page.mouse.move(0, 0);
 	await expect(row(page, sessionId)).toHaveScreenshot(name, {
 		mask: [row(page, sessionId).locator(".session-item-meta")],
@@ -569,9 +571,16 @@ async function dwellAndViewport(
 	});
 
 	await test.step("nothing counts while the view is off screen", async () => {
+		// Fixed, so the moved view adds no scrollable overflow: Chromium 156
+		// scrolls a focused input's caret into view on ArrowUp, which would
+		// otherwise scroll the page down to the translated view.
 		await A.evaluate(() => {
 			const app = document.querySelector<HTMLElement>("#app");
-			if (app) app.style.transform = "translateY(200vh)";
+			if (app) {
+				app.style.position = "fixed";
+				app.style.inset = "0";
+				app.style.transform = "translateY(200vh)";
+			}
 		});
 		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
 		// Focus without scrolling, or the page scrolls the view back on screen.
@@ -582,7 +591,11 @@ async function dwellAndViewport(
 		await expect(A.locator("[data-turn-end]")).not.toBeInViewport();
 		await A.evaluate(() => {
 			const app = document.querySelector<HTMLElement>("#app");
-			if (app) app.style.transform = "";
+			if (app) {
+				app.style.position = "";
+				app.style.inset = "";
+				app.style.transform = "";
+			}
 		});
 		await expectKept(ctx, 1, "off-screen view");
 	});

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, userEvent, within } from "storybook/test";
 import TabsSnippetHost from "./__fixtures__/TabsSnippetHost.svelte";
-import { SEGMENTED_VARIANT_NAMES } from "./segmented-styles.js";
+import { TAB_VARIANT_NAMES } from "./segmented-styles.js";
 import Tabs from "./Tabs.svelte";
 
 const SECTIONS = [
@@ -21,7 +21,7 @@ const meta = {
 		label: "Settings sections",
 	},
 	argTypes: {
-		variant: { control: "select", options: SEGMENTED_VARIANT_NAMES },
+		variant: { control: "select", options: TAB_VARIANT_NAMES },
 	},
 } satisfies Meta<typeof Tabs>;
 
@@ -30,6 +30,42 @@ type Story = StoryObj<typeof meta>;
 
 /** The default look: an underline pulled over the strip's rule. */
 export const Underline: Story = {};
+
+export const Footer: Story = {
+	args: {
+		variant: "footer",
+		label: "Show",
+		value: "most",
+		options: [
+			{ value: "answer", label: "Answer" },
+			{ value: "key", label: "Key" },
+			{ value: "most", label: "Most" },
+			{ value: "all", label: "All messages" },
+			{ value: "log", label: "Full log", groupLabel: "Every step" },
+		],
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByRole("tablist")).toHaveAccessibleName("Show");
+		const most = canvas.getByRole("tab", { name: "Most" });
+		await expect(most).toHaveAttribute("aria-selected", "true");
+		await expect(most).toHaveStyle({
+			borderTopWidth: "2px",
+			boxShadow: "none",
+			borderRadius: "0px",
+		});
+		most.focus();
+		await userEvent.keyboard("{ArrowRight}");
+		await expect(
+			canvas.getByRole("tab", { name: "All messages" }),
+		).toHaveFocus();
+		await userEvent.keyboard("{End}");
+		await expect(canvas.getByRole("tab", { name: "Full log" })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
+	},
+};
 
 /** DiffView's Unified/Split switch, the only variant that hovers a border colour. */
 export const Pill: Story = {

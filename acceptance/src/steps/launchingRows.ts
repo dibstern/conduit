@@ -111,7 +111,12 @@ const breathing = (page: Page) =>
 	page
 		.locator("#messages .turn-activity")
 		.first()
-		.locator('[aria-label^="Activity timeline"] .animate-pulse');
+		.locator('[aria-label^="Activity timeline"] [data-step-id]')
+		.evaluateAll(
+			(steps) =>
+				steps.filter((step) => getComputedStyle(step).animationName !== "none")
+					.length,
+		);
 
 export const launchingRowsHandlers: StepHandler[] = [
 	{
@@ -131,6 +136,8 @@ export const launchingRowsHandlers: StepHandler[] = [
 					status: "idle",
 					updatedAt: PINNED_CLOCK_MS,
 					backgroundWork: "working",
+					// The server rolls working background work into attention.
+					attention: "working",
 					backgroundTasks: [
 						{
 							id: "task-shell",
@@ -173,6 +180,7 @@ export const launchingRowsHandlers: StepHandler[] = [
 					...(row as object | undefined),
 					id,
 					backgroundWork: undefined,
+					attention: undefined,
 					backgroundTasks: undefined,
 				},
 			]);
@@ -188,11 +196,12 @@ export const launchingRowsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert the step log's running pill",
-		match: /^the step log shows (?:"([0-9]+) running"|no running pill)$/,
+		name: "assert the Show bar's running pill",
+		match: /^the Show bar shows (?:"([0-9]+) running"|no running pill)$/,
 		run: async ({ world, match }) => {
-			// The Final head has no pill; the count sits in the step-log footer.
-			const pill = world.page.locator("#messages .step-log .turn-running");
+			const pill = world.page.locator(
+				'#messages [data-testid="turn-show-bar"] .turn-running',
+			);
 			if (match[1] === undefined) await expect(pill).toHaveCount(0);
 			else
 				await expect(pill).toHaveText(
@@ -204,9 +213,9 @@ export const launchingRowsHandlers: StepHandler[] = [
 		name: "assert breathing launching steps",
 		match: /^(no|[0-9]+) launching steps breathe on the activity strip$/,
 		run: async ({ world, match }) => {
-			await expect(breathing(world.page)).toHaveCount(
-				match[1] === "no" ? 0 : Number(match[1]),
-			);
+			await expect
+				.poll(() => breathing(world.page))
+				.toBe(match[1] === "no" ? 0 : Number(match[1]));
 		},
 	},
 	{

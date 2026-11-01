@@ -31,6 +31,7 @@
 	import {
 		forceBarOpen,
 		isBarCollapsed,
+		isDuoChipRowFolded,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
 	import { findSession, getAttentionSessions, sessionAttention, sessionState } from "../../stores/session.svelte.js";
@@ -71,6 +72,7 @@
 	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import AutoSettleRow from "../session/AutoSettleRow.svelte";
 	import { getProjectAccent } from "../session/session-list-project.js";
+	import ProjectMark from "../ui/ProjectMark.svelte";
 	import ViewCard from "../ui/ViewCard.svelte";
 	import { activeSessionView, sessionViews } from "./session-views.js";
 
@@ -234,7 +236,8 @@
 	}
 
 	function handleGoalDetailsKeydown(event: KeyboardEvent) {
-		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || uiState.confirmDialog) return;
+		// Window capture runs before any modal dialog can claim the key; an open one owns it.
+		if (event.key !== "Escape" || (!goalDetails.open && !tasksPanel.open && !sideThreadsPanel.open) || document.querySelector("dialog:modal")) return;
 		if (goalDetails.open && sessionViewState.compact && !tasksPanel.open && !sideThreadsPanel.open) return;
 		if (sideThreadsPanel.open && sessionViewState.compact) return;
 		event.preventDefault();
@@ -308,6 +311,8 @@
 
 	const activeView = $derived(activeSessionView());
 	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open && !sideThreadsPanel.open && !tasksPanel.open);
+	const duoFolded = $derived(sessionViewState.pose === "duo-folded-portrait");
+	const chipsFolded = $derived(isDuoChipRowFolded() && !goalDetails.open && !tasksPanel.open);
 	const viewBadgeCount = $derived(
 		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
 	);
@@ -509,7 +514,7 @@
 		{:else if detailsFailed}
 			<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
 		{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
-			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when Claude finishes a turn.</span></li>
+			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when the agent finishes a turn.</span></li>
 		{/if}
 		</ol>
 		{/if}
@@ -527,10 +532,26 @@
 {/snippet}
 
 {#snippet goalLine(props: Record<string, unknown> = {})}
-	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
+	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" data-goal-phase={goal.phase} aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
 		{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" />{:else}<Icon name={goalIcon} size={12} class="shrink-0" />{/if}
-		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
+		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}
+		{#if !duoFolded}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
+		{:else if (goal.phase === "pursuing" || goal.phase === "not_yet") && detailsGoal}<small class="shrink-0">{detailsGoal.iterations} {detailsGoal.iterations === 1 ? "check" : "checks"}</small>{/if}
 	</Button>
+{/snippet}
+
+{#snippet goalSheet()}
+	<Popover bind:open={goalDetails.open} presentation="sheet" sheetEdge="top" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={16} class="px-[20px] pt-[16px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
+		onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
+		onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
+	>
+		{#snippet trigger({ props })}{@render goalLine(props)}{/snippet}
+		{@render goalContent()}
+	</Popover>
+{/snippet}
+
+{#snippet tasksRow(layout: "subtitle" | "swipe" | "strip")}
+	<BackgroundTasksRow tasks={backgroundTasks} {layout} onstopall={supportsTaskStop && layout === "strip" ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
 {/snippet}
 
 <!-- One border for the session controls. -->
@@ -666,7 +687,7 @@
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		</div>
-		{#if goalShown && !sessionViewState.compact}{@render goalLine()}{/if}
+		{#if duoFolded && session}<span data-testid="session-bar-subline" class="flex min-w-0 items-center gap-[6px] text-[12px] leading-[16px] text-text-secondary"><ProjectMark accent={getProjectAccent(session)} /><span class="truncate">{project?.title ?? getCurrentSlug()}</span>{#if chipsFolded && goalShown}<span data-testid="session-bar-subline-goal" class="duo-subline-mark" data-tone={goalButtonTone}><Icon name={goalIcon} size={12} /><span class="sr-only">Goal {desktopGoalLabel}</span></span>{/if}{#if chipsFolded && backgroundTasks.length > 0}<span class="duo-subline-mark"><ConduitMark size={11} variant="running" tone="inherit" /><span data-testid="session-bar-subline-tasks">{backgroundTasks.length}</span><span class="sr-only"> background {backgroundTasks.length === 1 ? "task" : "tasks"}</span></span>{/if}</span>{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>
@@ -737,17 +758,25 @@
 			{/if}
 		{/if}
 	</div>
+	{#if !sessionViewState.compact && (goalShown || backgroundTasks.length > 0)}
+		<!-- Under the title line, so the pills get the full title column rather than the title's width. Beside pills the goal keeps at most 55% and they fill the rest; alone it takes the line. -->
+		<div class="flex min-w-0 items-center gap-[8px] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:max-w-[55%] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:shrink-0">
+			{#if goalShown}{@render goalLine()}{/if}
+			{#if backgroundTasks.length > 0}{@render tasksRow("subtitle")}{/if}
+		</div>
+	{/if}
 	</div>
 	{/if}
 
-	{#if sessionViewState.compact && !collapsed && goalShown}
-		<Popover bind:open={goalDetails.open} presentation="sheet" sheetEdge="top" modal initialFocus="content" labelledBy="goal-details-title" id="goal-details" data-testid="goal-details" portalTo="#session-bar" sheetBottomPadding={16} class="px-[20px] pt-[16px] whitespace-normal text-[12px]" sheetScrim={{ portalTo: goalSubtitleEl?.closest("#session-bar")?.parentElement ?? undefined, zIndex: "var(--z-dropdown)", testId: "goal-details-scrim" }}
-			onopenchange={(open) => { if (open) { goalFocusHandedOff = false; tasksPanel.open = false; sideThreadsPanel.open = false; } }}
-			onCloseAutoFocus={(event) => { if (goalFocusHandedOff) event.preventDefault(); goalFocusHandedOff = false; }}
-		>
-			{#snippet trigger({ props })}{@render goalLine(props)}{/snippet}
-			{@render goalContent()}
-		</Popover>
+	{#if duoFolded}
+		{#if !chipsFolded && (goalShown || backgroundTasks.length > 0)}
+			<div id="duo-chips" data-testid="duo-chips">
+				{#if goalShown}{@render goalSheet()}{/if}
+				{#if backgroundTasks.length > 0}{@render tasksRow("strip")}{/if}
+			</div>
+		{/if}
+	{:else if sessionViewState.compact && !collapsed && goalShown}
+		{@render goalSheet()}
 	{/if}
 
 	{#if !sessionViewState.compact}{@render identityBlock()}{/if}
@@ -782,9 +811,7 @@
 	{/if}
 
 	{@render overflowMenu()}
-	{#if backgroundTasks.length > 0 && !collapsed}
-		<BackgroundTasksRow tasks={backgroundTasks} compact={sessionViewState.compact} onstop={supportsTaskStop ? (taskId) => { void stopBackgroundTasks(sessionState.currentId, taskId); } : undefined} onstopall={supportsTaskStop ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
-	{/if}
+	{#if sessionViewState.compact && backgroundTasks.length > 0 && !collapsed && !duoFolded}{@render tasksRow("swipe")}{/if}
 
 	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
 		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] px-[16px] pt-[14px] pb-[12px]">

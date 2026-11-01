@@ -4,6 +4,8 @@
  * - A just-added account must work before daemon.json is flushed.
  * - Commands and skills must use that account's folder and session workspace.
  * - Driver catalogue keys must remain independent of account ids.
+ * - A standalone relay must not start its saved OpenCode default without health,
+ *   or let that missing health block Claude account/session model catalogues.
  * Every folder, login and config file belongs to this temporary fixture.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -11,7 +13,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
+import {
+	defaultDaemonConfig,
+	saveDaemonConfig,
+} from "../../../src/lib/daemon/config-persistence.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
 	DaemonConfigRefLive,
@@ -27,7 +34,9 @@ import { applySessionCommand } from "../../../src/lib/domain/relay/Services/sess
 import { getSkillNamesForSession } from "../../../src/lib/handlers/settings.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
+import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -37,6 +46,7 @@ describe("Integration: account catalogues", () => {
 	const evidence: Array<{ name: string; result: string | undefined }> = [];
 	let root: string;
 	let harness: RelayHarness | undefined;
+	let savedServer: MockOpenCodeServer | undefined;
 	let disposeRegistry: (() => Promise<void>) | undefined;
 
 	beforeEach(() => {
@@ -56,6 +66,8 @@ describe("Integration: account catalogues", () => {
 	afterEach(async ({ task }) => {
 		await harness?.stop();
 		harness = undefined;
+		await savedServer?.stop();
+		savedServer = undefined;
 		await disposeRegistry?.();
 		disposeRegistry = undefined;
 		vi.unstubAllEnvs();
@@ -69,7 +81,34 @@ describe("Integration: account catalogues", () => {
 		rmSync(root, { recursive: true, force: true });
 	});
 
-	it("rejects unroutable explicit and session refs without querying OpenCode", async () => {
+	it("keeps no-health OpenCode defaults off the saved server and rejects unroutable refs", async () => {
+		savedServer = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await savedServer.start();
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				accountDefaults: { opencode: AccountIdSchema.make("remote") },
+				instances: [
+					{
+						id: "claude",
+						name: "Claude",
+						driver: "claude",
+						configDir: join(root, "login"),
+						port: 0,
+						managed: false,
+					},
+					{
+						id: "remote",
+						name: "Saved OpenCode default",
+						driver: "opencode",
+						url: savedServer.url,
+						port: Number(new URL(savedServer.url).port),
+						managed: false,
+					},
+				],
+			},
+			root,
+		);
 		harness = await createRelayHarness("chat-simple", {
 			configDir: root,
 			defaultModel: null,
@@ -77,6 +116,52 @@ describe("Integration: account catalogues", () => {
 		});
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
+		const runtime = harness.stack.effectRuntime.runtime;
+		const directory = await runtime.runPromise(AccountDirectory);
+		expect(
+			(await runtime.runPromise(directory.list)).find(
+				({ id }) => id === "remote",
+			),
+		).toMatchObject({ isDefault: true });
+		expect(
+			await runtime.runPromise(
+				directory.resolve({ _tag: "DriverDefault", driver: "opencode" }),
+			),
+		).toMatchObject({ id: "opencode", driver: "opencode" });
+		const explicit = await client.rpcCall((rpc) =>
+			rpc.GetModels({ projectSlug: "integration-test", instanceId: "claude" }),
+		);
+		expect(explicit.providers).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					id: "claude",
+					models: expect.arrayContaining([
+						expect.objectContaining({ id: "sonnet" }),
+					]),
+				}),
+			]),
+		);
+		const created = await client.createSession(
+			"Claude without OpenCode health",
+			{
+				instanceId: "claude",
+				model: {
+					providerId: "claude",
+					modelId: "sonnet",
+					variant: "",
+					contextWindow: "",
+				},
+			},
+		);
+		const sessionId = created["id"];
+		if (typeof sessionId !== "string")
+			throw new Error("CreateSession returned no id");
+		const active = await client.rpcCall((rpc) => rpc.GetModels({ sessionId }));
+		expect(active.instanceId).toBe("claude");
+		expect(active.active).toEqual({ provider: "claude", model: "sonnet" });
+		expect(
+			savedServer.diagnostics.filter(({ event }) => event === "request"),
+		).toEqual([]);
 		await harness.stack.effectRuntime.runtime.runPromise(
 			applySessionCommand({
 				type: "session.created",

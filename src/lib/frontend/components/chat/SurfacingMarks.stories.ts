@@ -5,8 +5,12 @@ import {
 	type SurfacingMark,
 } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
-import { setSessionSurfaceLevel } from "../../stores/message-surfacing.svelte.js";
 import { feedbackLedger } from "../../stores/surfacing-feedback.svelte.js";
+import {
+	expectSelectedPin,
+	showTurnStop,
+} from "../../stories/turn-controls.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { ActivityPart, Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -66,6 +70,7 @@ const turn: Turn = {
 		createdAt: start,
 	},
 	segments: [segment],
+	preface: [],
 	notices: [],
 	live: false,
 };
@@ -90,8 +95,12 @@ const meta = {
 			categorySet: DEFAULT_CATEGORY_SET,
 		},
 	},
-	beforeEach: () => {
-		setSessionSurfaceLevel("marks-story", null);
+	beforeEach: ({ args }) => {
+		const restore = setupTurnStory({
+			turn: args["turn"],
+			sessionId: args["sessionId"],
+			surfacing: args["surfacing"],
+		});
 		feedbackLedger.entries = [
 			"users saw this",
 			"root cause",
@@ -101,6 +110,7 @@ const meta = {
 			partId: String(index),
 			mark: { level: "balanced", direction: "raise", reason },
 		}));
+		return restore;
 	},
 } satisfies Meta<typeof TurnActivity>;
 export default meta;
@@ -112,7 +122,7 @@ export const RaiseWhy: Story = {
 		await userEvent.click(canvas.getByTestId("surfacing-pin-26"));
 		await userEvent.click(canvas.getByTestId("surfacing-mark-raise"));
 		await expect(canvas.getByTestId("surfacing-mark-why")).toHaveTextContent(
-			"▲ Raise #26: All → Balanced. Why?",
+			"▲ Raise #26: All messages → Most. Why?",
 		);
 		await expect(canvas.getByTestId("surfacing-mark-why")).toHaveTextContent(
 			"p .64 × 40 = 26",
@@ -133,7 +143,9 @@ export const RaiseWhy: Story = {
 		expected.color = getComputedStyle(pin).getPropertyValue(
 			"--color-cat-finding",
 		);
-		await expect(getComputedStyle(pin).backgroundColor).toBe(expected.color);
+		// The selected pin carries Finding as a tint and ring, not a solid fill (xdyjq.17).
+		await expectSelectedPin(pin);
+		await expect(getComputedStyle(pin).boxShadow).toContain(expected.color);
 		await expect(getComputedStyle(label).color).toBe(expected.color);
 		await expect(getComputedStyle(glyph).color).toBe(expected.color);
 	},
@@ -235,12 +247,19 @@ export const RoutineInLog: Story = {
 			".turn-activity-toggle",
 		);
 		await expect(toggle).not.toBeNull();
-		if (toggle) await userEvent.click(toggle);
-		const row = within(canvas.getByTestId("surfacing-step-mark-28"));
+		if (toggle && toggle.getAttribute("aria-expanded") !== "true")
+			await userEvent.click(toggle);
+		await showTurnStop(canvasElement, "log");
+		const message = canvasElement.querySelector<HTMLButtonElement>(
+			'.step-log [data-message-number="28"] button',
+		);
+		if (!message) throw new Error("Missing routine message row");
+		await userEvent.click(message);
+		const row = within(canvas.getByTestId("surfacing-msg-card"));
 		await expect(row.getByTestId("surfacing-mark-lower")).toBeDisabled();
 		await userEvent.click(row.getByTestId("surfacing-mark-raise"));
 		await expect(row.getByTestId("surfacing-mark-why")).toHaveTextContent(
-			"the log → All",
+			"Full log → All messages",
 		);
 		await canvasElement.ownerDocument.fonts.ready;
 		row
@@ -279,10 +298,16 @@ export const LoweredInLog: Story = {
 			".turn-activity-toggle",
 		);
 		await expect(toggle).not.toBeNull();
-		if (toggle) await userEvent.click(toggle);
-		await userEvent.click(canvas.getByTestId("surfacing-step-open-26"));
+		if (toggle && toggle.getAttribute("aria-expanded") !== "true")
+			await userEvent.click(toggle);
+		await showTurnStop(canvasElement, "log");
+		const message = canvasElement.querySelector<HTMLButtonElement>(
+			'.step-log [data-message-number="26"] button',
+		);
+		if (!message) throw new Error("Missing lowered message row");
+		await userEvent.click(message);
 		await expect(canvas.getByTestId("surfacing-msg-card")).toHaveTextContent(
-			"Hidden at this level",
+			"opened directly",
 		);
 		await expect(
 			within(canvas.getByTestId("surfacing-msg-card")).getByTestId(

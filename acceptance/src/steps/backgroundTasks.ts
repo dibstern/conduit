@@ -122,6 +122,8 @@ export async function setLiveTasks(
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier tasks.
 			backgroundWork: tasks.length > 0 ? "working" : undefined,
+			// The server rolls working background work into attention.
+			attention: tasks.length > 0 ? "working" : undefined,
 			backgroundTasks:
 				tasks.length > 0
 					? tasks.map(
@@ -146,6 +148,14 @@ export async function setLiveTasks(
 					: undefined,
 		},
 	]);
+	// Working attention moves the sidebar row from Idle to Running a beat after
+	// the rows land; wait so a screenshot cannot catch it still under Idle.
+	const sidebarShown = await page
+		.locator('[data-testid$="-shelf-toggle"]')
+		.first()
+		.isVisible();
+	if (tasks.length > 0 && sidebarShown)
+		await expect(page.getByTestId("running-shelf-toggle")).toBeVisible();
 }
 
 export const backgroundTasksHandlers: StepHandler[] = [
@@ -444,20 +454,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const row = world.page.getByTestId("background-tasks-row");
 			const chips = row.getByTestId("background-task-chip");
-			if (/^\d+ background tasks?$/.test(match[1] ?? "")) {
-				expect(match[2], "Phone task summaries have no overflow pill").toBe(
-					"no more pill",
-				);
-				await expect(row.getByTestId("background-tasks-toggle")).toHaveText(
-					match[1] ?? "",
-				);
-				await expect(
-					row.getByTestId("background-tasks-row-stop-all"),
-				).toBeVisible();
-				await expect(chips).toHaveCount(0);
-				await expect(row.getByTestId("background-tasks-more")).toHaveCount(0);
-				return;
-			}
+			// The header only opens the pull-down; stopping lives there.
+			await expect(row.getByRole("button", { name: /^Stop / })).toHaveCount(0);
 			const expected = (match[1] ?? "")
 				.split(", ")
 				.map((label) => new RegExp(`^\\s*${label}`));

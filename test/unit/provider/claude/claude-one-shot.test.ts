@@ -26,9 +26,10 @@ const answerSchema = Schema.Struct({ answer: Schema.Number });
 describe("Claude one-shot", () => {
 	it.effect("decodes structured output through the caller's schema", () =>
 		Effect.gen(function* () {
-			const client = makeClient(() =>
-				reply([{ type: "result", result: '{"answer":42}' }]),
-			);
+			const client = makeClient(({ options }) => {
+				expect(options?.enableFileCheckpointing).toBe(false);
+				return reply([{ type: "result", result: '{"answer":42}' }]);
+			});
 			expect(yield* client.ask("Answer in JSON", answerSchema, "opus")).toEqual(
 				{
 					answer: 42,

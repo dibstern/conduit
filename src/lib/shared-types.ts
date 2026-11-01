@@ -21,8 +21,16 @@ export type {
 	WorktreeInfo,
 } from "./contracts/session-workspace.js";
 
-import { SessionGoalChangedPayloadSchema } from "./contracts/stored-event.js";
-import type { ToolInput, ToolText } from "./contracts/tool-wire.js";
+import {
+	SessionGoalChangedPayloadSchema,
+	type ToolFileChange,
+} from "./contracts/stored-event.js";
+import type {
+	ToolInput,
+	ToolPresentation,
+	ToolText,
+	Utf8Bytes,
+} from "./contracts/tool-wire.js";
 import type { ModelInfo as WireModelInfo } from "./contracts/ws-rpc.js";
 // SDK-derived type aliases — single source of truth for Part/Tool enums.
 // Imported for local use; re-exported below for downstream consumers.
@@ -265,6 +273,8 @@ export interface SessionGit {
 	upstream?: string;
 	worktree?: string;
 	dirty?: boolean;
+	/** Porcelain and dirty content digest; no per-file state leaves SessionGit. */
+	fingerprint?: string;
 	changes?: { files: number; insertions: number; deletions: number };
 	ahead?: number;
 	behind?: number;
@@ -285,6 +295,7 @@ const GitStatusSchema = Schema.Struct({
 	upstream: Schema.optionalKey(Schema.String),
 	worktree: Schema.optionalKey(Schema.String),
 	dirty: Schema.optionalKey(Schema.Boolean),
+	fingerprint: Schema.optionalKey(Schema.String),
 	changes: Schema.optionalKey(
 		Schema.Struct({
 			files: Schema.Number,
@@ -538,6 +549,9 @@ export interface HistoryMessagePart {
 	state?: {
 		status?: ToolStatus;
 		outcome?: "succeeded" | "failed";
+		fileChanges?: readonly ToolFileChange[];
+		fileChangesBytes?: Utf8Bytes;
+		presentation?: ToolPresentation;
 		/** Whole, or a preview GetToolDetails serves in full. */
 		input?: ToolInput;
 		output?: ToolText;

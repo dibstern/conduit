@@ -144,7 +144,7 @@ Scenario: A failed write preserves the row and shows the existing error toast
   Then the auto-settle status line is On · settles Sat 9:41 am if left idle
   And the session sheet stays open with Auto-settle on
   And auto-settle is interactive
-  And the session sheet stays open with the reason pill Couldn't change auto-settle Relay unavailable
+  And the session sheet stays open under the reason toast Couldn't change auto-settle Relay unavailable
 
 Scenario: A read for the previous list sheet cannot replace the new session's outlook
   Given the conduit app is served with the long-transcript mockup
@@ -171,7 +171,7 @@ Scenario: A failed write during loading still invalidates the old read
   Then the auto-settle status line is blank
   And the session sheet stays open with Auto-settle on
   And auto-settle is interactive
-  And the session sheet stays open with the reason pill Couldn't change auto-settle Relay unavailable
+  And the session sheet stays open under the reason toast Couldn't change auto-settle Relay unavailable
 
 Scenario Outline: Every phone sheet reads and saves the outlook
   Given the conduit app is served with the long-transcript mockup

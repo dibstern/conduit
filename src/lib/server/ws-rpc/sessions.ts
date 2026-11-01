@@ -60,6 +60,7 @@ import { dismissWorkspaceHint } from "../../domain/relay/Services/session-worksp
 import { prepareSessionWorktreeDeletion } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { makeSurfacingFeedback } from "../../domain/relay/Services/surfacing-feedback.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { ENV } from "../../env.js";
 import { formatErrorDetail } from "../../errors.js";
 import {
 	listLocalBranches,
@@ -305,7 +306,7 @@ export const sessionsHandlers = {
 			});
 			if (!PROVIDER_DRIVERS[account.driver].supportsGoalState) {
 				return yield* new WsRpcError({
-					message: "Goal summaries are available only for Claude sessions",
+					message: "This provider does not support goal summaries",
 				});
 			}
 			return yield* (yield* GoalSummaryServiceTag).generate(request.sessionId);
@@ -515,9 +516,13 @@ export const sessionsHandlers = {
 						: mapRpcFailure("PreviewContinuation")(error),
 			),
 		),
-	QuotaForAccounts: (_request) =>
+	QuotaForAccounts: (request) =>
 		Effect.flatMap(Usage, (usage) =>
-			usage.refresh({ maxAge: "30 seconds" }),
+			usage.refresh(
+				request.force
+					? { maxAge: 0, wait: "until-settled" }
+					: { maxAge: ENV.quotaReadMaxAgeMs, wait: "5 seconds" },
+			),
 		).pipe(Effect.catch(mapRpcFailure("QuotaForAccounts"))),
 	GetContinuationHandoff: (request) =>
 		Effect.gen(function* () {
@@ -758,6 +763,16 @@ export const sessionsHandlers = {
 						),
 					);
 					return { projectSlug: request.projectSlug, sessionId: session.id };
+				}
+				if (
+					path !== undefined &&
+					!PROVIDER_SESSION_CAPABILITIES[account.driver].supportsWorktree
+				) {
+					yield* takeReservation;
+					return yield* new WorkspaceMoveError({
+						path,
+						reason: "unsupported-provider",
+					});
 				}
 				// Taking a reservation and arming its rollback must not be split by interruption.
 				const session = yield* Effect.uninterruptibleMask((restore) =>

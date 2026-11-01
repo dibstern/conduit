@@ -1,4 +1,4 @@
-import { Clock, Duration, Effect, Schedule } from "effect";
+import { Clock, Duration, Effect, Schedule, Semaphore } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import type {
 	RunnerLiveQueryConfiguration,
@@ -72,6 +72,10 @@ export function makeRunnerUpgrade<
 	readonly failed: (sessionId: string, runner: T, cause: unknown) => void;
 	readonly cancelled: (sessionId: string, runner: T, replacement: T) => void;
 }) {
+	// A restart asks every live runner to upgrade at once. Unbounded, the
+	// concurrent provider starts starve each other (and other one-shot calls such
+	// as session titling) past their timeouts. Backoff sleeps outside the gate.
+	const warming = Semaphore.makeUnsafe(4);
 	const newBackoff = Schedule.toStep(runnerRetrySchedule);
 	const backoffs = new WeakMap<T, Effect.Success<typeof newBackoff>>();
 	const consider = (sessionId: string, runner: T): void => {
@@ -110,23 +114,28 @@ export function makeRunnerUpgrade<
 						runner.upgrade.retryAt - (yield* Clock.currentTimeMillis),
 					),
 				);
-				if (
-					activity !== runner.upgrade.activity ||
-					!options.eligible(sessionId, runner)
-				)
-					return;
-				replacement = yield* options.create(sessionId, runner);
-				yield* options.warm(sessionId, runner, replacement);
-				committed = yield* options.commit(
-					sessionId,
-					runner,
-					replacement,
-					activity,
+				yield* warming.withPermits(1)(
+					Effect.gen(function* () {
+						// Re-checked under the gate: a send while queued voids the attempt.
+						if (
+							activity !== runner.upgrade.activity ||
+							!options.eligible(sessionId, runner)
+						)
+							return;
+						replacement = yield* options.create(sessionId, runner);
+						yield* options.warm(sessionId, runner, replacement);
+						committed = yield* options.commit(
+							sessionId,
+							runner,
+							replacement,
+							activity,
+						);
+						if (!committed) {
+							options.cancelled(sessionId, runner, replacement);
+							yield* failed("Swap commit was refused");
+						}
+					}),
 				);
-				if (!committed) {
-					options.cancelled(sessionId, runner, replacement);
-					yield* failed("Swap commit was refused");
-				}
 			}).pipe(
 				Effect.catchCause((cause) =>
 					Effect.gen(function* () {

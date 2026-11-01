@@ -182,25 +182,28 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 			await expect(chip).toHaveText(match[1] ?? "");
 			await expect(chip).toHaveAttribute(
 				"aria-label",
-				`Effort: ${match[1]}. Open effort options`,
+				`Effort: ${match[1]}. Click to raise; Option-click for options`,
 			);
 			await expect(chip).toHaveAttribute(
 				"title",
-				`Effort ${match[1]}. Ctrl+T to cycle`,
+				`Effort ${match[1]}. Click or Ctrl+T to raise; Option-click for options`,
 			);
 			await expect(chip).not.toContainText(match[2] ?? "");
 		},
 	},
 	{
-		name: "assert Cursor phone effort row labels",
-		match: /^the Cursor phone effort row omits combination (.+)$/,
+		name: "assert Cursor phone Session panel effort row labels",
+		match: /^the Cursor phone Session panel effort row omits combination (.+)$/,
 		run: async ({ world, match }) => {
-			const row = world.page.getByTestId("composer-more-effort");
+			const row = world.page.getByTestId("picker-row-effort");
 			await expect(row).not.toContainText(match[1] ?? "");
-			await expect(row).toHaveAttribute(
-				"aria-label",
-				"Effort: xhigh · Fast. Open effort options",
-			);
+			await expect(
+				row.getByRole("radiogroup", { name: "Effort", exact: true }),
+			).toBeVisible();
+			await expect(
+				row.getByRole("radio", { name: "xhigh", exact: true }),
+			).toBeChecked();
+			await expect(row).not.toContainText("Fast");
 		},
 	},
 	{
@@ -572,7 +575,7 @@ export const cursorModelParametersHandlers: StepHandler[] = [
 		name: "assert Cursor composer words",
 		match: /^the Cursor composer words show context (.+) and effort (.+)$/,
 		run: async ({ world, match }) => {
-			// A phone shows the words as one summary that opens the Composer sheet.
+			// A phone shows the words as one summary that opens the Session panel.
 			const summary = world.page.getByTestId("composer-words-sheet-trigger");
 			if (await summary.count()) {
 				for (const word of [match[1], match[2]])

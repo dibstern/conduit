@@ -4,9 +4,16 @@ import { configDefaults, defineConfig } from "vitest/config";
 
 const guardTests = ["test/unit/**/*.guard.test.ts"];
 
+// Parallel vitest processes sharing one cache race to clear it when it is cold
+// or stale (ENOTEMPTY); the pre-commit hook gives its guards run its own.
+const cacheDir = process.env.CONDUIT_VITEST_CACHE_DIR;
+
 export default defineConfig({
 	plugins: [svelte()],
+	cacheDir,
 	test: {
+		// Vitest's module cache defaults to one shared node_modules/.vitest-cache.
+		fsModuleCachePath: cacheDir ? `${cacheDir}/modules` : undefined,
 		// `related` cannot trace filesystem reads or spawned build artifacts.
 		// It resolves inputs to absolute paths, so keep the **/ prefixes.
 		forceRerunTriggers: [

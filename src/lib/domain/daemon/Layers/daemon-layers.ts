@@ -121,6 +121,7 @@ import {
 	RelayCacheTag,
 } from "../Services/relay-cache.js";
 import { SessionActivityDaemonLive } from "../Services/session-activity.js";
+import { SessionDiffLive } from "../Services/session-diff.js";
 import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
@@ -907,6 +908,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withWorktrees));
+	const withSessionDiff = SessionDiffLive(configDir).pipe(
+		Layer.provideMerge(withSessionGit),
+	);
 	const withGitChanges = Layer.effectDiscard(
 		Effect.gen(function* () {
 			const git = yield* SessionGit;
@@ -918,7 +922,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				Effect.forkScoped,
 			);
 		}),
-	).pipe(Layer.provideMerge(withSessionGit));
+	).pipe(Layer.provideMerge(withSessionDiff));
 	const withSessionWorkspace = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;

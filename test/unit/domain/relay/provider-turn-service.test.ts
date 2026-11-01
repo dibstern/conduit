@@ -6,7 +6,10 @@ import { Clock, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../../src/lib/account-directory.js";
 import {
 	AccountIdSchema,
 	type ClaudeAccount,
@@ -295,6 +298,8 @@ const makeReadQuery = (
 	readInboxState: () => Effect.succeed(undefined),
 	readStoreIdentity: () => Effect.succeed("store"),
 	getSessionHistoryMetadata,
+	readSessionPromptIndex: () =>
+		Effect.succeed({ rows: [], removed: [], version: 0 }),
 	readSessionTranscriptPage: vi.fn(() =>
 		Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 	),
@@ -409,6 +414,7 @@ const serviceLayer = (input: {
 				: AccountDirectoryFromConfigLive(
 						input.configDir,
 						configuredClaudeConfigDir("/isolated-provider-home/.claude"),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 		Layer.succeed(OpenCodeAPITag)(api),
 		Layer.succeed(OpenCodeInstancesTag)(
@@ -568,6 +574,7 @@ describe("ProviderTurnService", () => {
 									5,
 									{ defaultAccountIds: { claude: admitted.id } },
 								),
+								Effect.succeed(NO_OPENCODE_HEALTH),
 							),
 						),
 					);

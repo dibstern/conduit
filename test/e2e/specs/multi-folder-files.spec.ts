@@ -77,7 +77,6 @@ for (const multiple of [true, false]) {
 						nextCursor: null,
 					}),
 					GetModels: (input) => ({
-						defaultOpenCodeInstanceId: "opencode",
 						projectSlug:
 							"projectSlug" in input ? input.projectSlug : projectSlug,
 						providers: [],

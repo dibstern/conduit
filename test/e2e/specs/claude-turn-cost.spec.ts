@@ -109,6 +109,9 @@ test.describe("Claude turn cost", () => {
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => stored().results.length).toBe(1);
+			// The store can lead the browser: wait for the delivered turn, since
+			// the empty Working placeholder it replaces drops its expansion.
+			await expect(chat.turnActivityToggles.last()).toContainText("Worked");
 			await chat.expandTurnActivity();
 			await expect(shownCosts).toHaveText(["$0.2982"]);
 			await record("first-result");

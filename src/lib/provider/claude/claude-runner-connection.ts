@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { defaultFor } from "../../account-directory.js";
+import { defaultFor, NO_OPENCODE_HEALTH } from "../../account-directory.js";
 import { AccountUnroutable } from "../../contracts/limit-recovery.js";
 import { AttachmentStoreTag } from "../../domain/persistence/Services/attachment-store.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
@@ -17,7 +17,8 @@ export const connectClaudeRunner = (
 	Effect.gen(function* () {
 		const accounts = yield* options.deps.accounts ?? Effect.succeed(undefined);
 		const claudeLaunchConfig =
-			accounts && Option.isNone(defaultFor(accounts, "claude"))
+			accounts &&
+			Option.isNone(defaultFor(accounts, "claude", NO_OPENCODE_HEALTH))
 				? null
 				: claudeLaunchConfigFromAccounts(accounts);
 		const read = yield* Effect.serviceOption(ReadQueryEffectTag);

@@ -714,11 +714,11 @@ export class MockOpenCodeServer {
 
 		// Read request body (used by stateful session handlers)
 		const rawBody = await this.readBody(req);
-		if (rawBody)
+		if (rawBody || method === "DELETE")
 			this.receivedBodies.push({
 				method,
 				path: path.split("?")[0] ?? path,
-				body: rawBody,
+				body: rawBody ?? "",
 			});
 
 		const recordedPath = path
@@ -734,6 +734,23 @@ export class MockOpenCodeServer {
 		const normalized = normalizedKey(method, recordedPath);
 
 		const basePath = path.split("?")[0] ?? path;
+		const deletion = /^\/session\/([^/]+)\/message\/([^/]+)$/.exec(basePath);
+		if (method === "DELETE" && deletion) {
+			const override = this.getActiveQueue(this.exactQueues, exact)?.[0];
+			if (override && override.status >= 400) {
+				res.writeHead(override.status, { "Content-Type": "application/json" });
+				res.end(JSON.stringify(override.responseBody));
+				return;
+			}
+			this.sseMessages.get(deletion[1] ?? "")?.delete(deletion[2] ?? "");
+			this.emitTestEvent("message.removed", {
+				sessionID: deletion[1],
+				messageID: deletion[2],
+			});
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end("true");
+			return;
+		}
 		const rewindRoute = /^\/session\/([^/]+)\/(revert|unrevert)$/.exec(
 			basePath,
 		);
@@ -1199,7 +1216,11 @@ export class MockOpenCodeServer {
 
 		// After a prompt_async has been processed, SSE events accumulate message
 		// data in sseMessages. Serve these when the queue would return empty.
-		if (method === "GET" && /^\/session\/[^/]+\/message$/.test(basePath)) {
+		if (
+			method === "GET" &&
+			/^\/session\/[^/]+\/message$/.test(basePath) &&
+			!this.exactQueues.get(exact)?.[0]?.sticky
+		) {
 			const segments = basePath.split("/");
 			const sessionId = segments[2];
 			const sessionMsgs = sessionId

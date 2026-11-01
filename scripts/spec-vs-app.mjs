@@ -250,7 +250,7 @@ const SECTIONS = {
 			"chat-surfacing-card--short-turn",
 			"chat-surfacing-card--nothing-at-key",
 			"chat-surfacing-card--not-judged",
-			"chat-surfacing-card--hand-back-first-block",
+			"chat-surfacing-card--hand-back",
 		],
 	},
 	"jev/Minimise": {

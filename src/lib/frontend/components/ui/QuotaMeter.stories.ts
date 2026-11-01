@@ -10,7 +10,7 @@ const meta = {
 	parameters: { layout: "padded" },
 	args: { used: 23, size: "md" },
 	argTypes: {
-		size: { control: "inline-radio", options: ["sm", "md", "lg"] },
+		size: { control: "inline-radio", options: ["sm", "md", "lg", "panel"] },
 	},
 } satisfies Meta<typeof QuotaMeter>;
 
@@ -31,5 +31,30 @@ export const Thresholds: Story = {
 		await expect(
 			within(meter).getByTestId("quota-meter-caption"),
 		).toHaveTextContent("4% left");
+	},
+};
+
+/** Turn context uses the same thresholds, with a taller track and a leading label. */
+export const PanelContext: Story = {
+	args: {
+		used: 41,
+		size: "panel",
+		labelPrefix: "ctx",
+		caption: "41% · 82k / 200k",
+		trackTestId: "context-track",
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await expect(canvas.getByText("ctx", { exact: true })).toBeVisible();
+		await expect(canvas.getByTestId("context-track")).toHaveStyle({
+			height: "6px",
+		});
+		await expect(canvas.getByTestId("quota-meter-caption")).toHaveTextContent(
+			"41% · 82k / 200k",
+		);
+		await expect(canvas.getByTestId("quota-meter")).toHaveAttribute(
+			"data-state",
+			"normal",
+		);
 	},
 };

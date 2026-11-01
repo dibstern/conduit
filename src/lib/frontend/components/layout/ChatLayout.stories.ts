@@ -18,12 +18,13 @@ import {
 	routerState,
 } from "../../stores/router.svelte.js";
 import {
+	openFileViewer,
 	sessionViewState,
-	setFilesOpen,
-	setFilesPaneWidth,
+	setRightPaneView,
+	setRightPaneWidth,
 } from "../../stores/session-view.svelte.js";
 import { setThemeMode } from "../../stores/theme.svelte.js";
-import { openFileViewer, uiState } from "../../stores/ui.svelte.js";
+import { uiState } from "../../stores/ui.svelte.js";
 import {
 	applyGetFileContentResponse,
 	applyGetFileListResponse,
@@ -96,11 +97,10 @@ const meta = {
 		// Reset state for each story
 		uiState.sidebarCollapsed = false;
 		uiState.rewindActive = false;
-		uiState.fileViewerOpen = false;
-		uiState.fileViewerPath = null;
-		sessionViewState.filesOpen = false;
-		sessionViewState.filesPaneExpanded = false;
-		sessionViewState.filesPaneWidth = null;
+		sessionViewState.filePreview = null;
+		sessionViewState.rightPaneView = "closed";
+		sessionViewState.rightPaneExpanded = false;
+		sessionViewState.rightPaneWidth = null;
 		clearFileTreeState();
 		routerState.path = "/";
 		routerState.search = "?p=test-project";
@@ -333,7 +333,7 @@ async function showFilesTree(
 	await expectSessionVisible(context);
 	// The isolated layout has no selection runtime to establish a file scope.
 	fileTreeState.scope = "storybook:test-project";
-	setFilesOpen(true);
+	setRightPaneView("files");
 	// The pane mounts before its lazily imported panel, which is what listens
 	// for the listing.
 	await waitFor(() => {
@@ -426,7 +426,7 @@ export const FilesExpanded: Story = {
 	},
 	play: async (context) => {
 		await showFilesTree(context);
-		sessionViewState.filesPaneExpanded = true;
+		sessionViewState.rightPaneExpanded = true;
 		await waitFor(() => {
 			expect(
 				context.canvasElement
@@ -443,7 +443,7 @@ export const FilesForcedExpanded: Story = {
 	},
 	play: async (context) => {
 		context.canvasElement.style.width = "800px";
-		setFilesPaneWidth(400);
+		setRightPaneWidth(400);
 		await showFilesTree(context);
 		await waitFor(() => {
 			expect(

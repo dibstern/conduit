@@ -2,13 +2,12 @@
 <!-- Command menu triggered by "/" prefix. -->
 
 <script lang="ts">
-	import Popover from "../ui/Popover.svelte";
 	import ComposerFrame from "../ui/ComposerFrame.svelte";
 	import ComposerStrip from "../ui/ComposerStrip.svelte";
 	import ComposerSendGroup from "../ui/ComposerSendGroup.svelte";
 	import { AccountIdSchema, getProviderDriver } from "../../../contracts/provider-instance.js";
 	import { accountLimit } from "../../../contracts/account-limit.js";
-	import { tick, untrack, type Snippet } from "svelte";
+	import { tick, untrack } from "svelte";
 	import { failureLine, toastFailure } from "../../transport/rpc-errors.js";
 	import { refreshInputDraftAttachments } from "../../stores/input-draft.js";
 	import Button from "../ui/Button.svelte";
@@ -68,7 +67,7 @@
 		filterFiles,
 	} from "../../stores/file-tree.svelte.js";
 	import { fetchFileContent, fetchDirectoryListing, prepareFileAttachment } from "./input-utils.js";
-	import { findSession, isBusy, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
+	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
 	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -78,12 +77,12 @@
 	import { fade } from "svelte/transition";
 	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { getDriverTraits, getInstanceById, instanceState } from "../../stores/instance.svelte.js";
-	import { requestTranscriptFollow, sessionViewState } from "../../stores/session-view.svelte.js";
+	import { requestTranscriptFollow, sessionViewState, setKeyboardHandoff } from "../../stores/session-view.svelte.js";
+	import { prepareHandoff } from "../../utils/composer-handoff.js";
 	import { showToast, uiState } from "../../stores/ui.svelte.js";
 	import { composerAccountId, usageState } from "../../stores/usage.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { composerPreferences, isContextWarning } from "../../stores/composer-preferences.svelte.js";
-	import { composerPickerState } from "../../stores/composer-picker.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 	import { buildAttachedMessage, parseAtReferences } from "../../utils/file-attach.js";
@@ -91,6 +90,7 @@
 	import { planUsageWindows, usageForecastTime, usageWarning } from "../../utils/continuation.js";
 	import { switchSessionAccount } from "../../utils/account-switch.js";
 	import { getProviderPresentation } from "../../utils/provider-presentation.js";
+	import { plural } from "../../utils/turns.js";
 	import type { FileAttachment } from "../../utils/file-attach.js";
 	import type { SessionPermissionMode } from "../../types.js";
 	import type { InputDelivery, SteerBlocker } from "../../../contracts/stored-event.js";
@@ -100,20 +100,6 @@
 	const fileListboxId = `${inputAreaId}-file-listbox`;
 	const commandListboxId = `${inputAreaId}-command-listbox`;
 	let composerWrapperEl: HTMLDivElement | undefined = $state();
-	let composerMoreOpen = $state(false);
-	$effect(() => {
-		const request = composerPickerState.request;
-		if (request && composerMoreOpen) {
-			request.opener = composerWrapperEl?.querySelector<HTMLElement>('[data-testid="model-picker-trigger"], [data-testid="composer-words-sheet-trigger"]') ?? request.opener;
-			composerMoreOpen = false;
-		}
-	});
-	$effect(() => {
-		sessionState.currentId;
-		sessionViewState.composerTier;
-		composerPreferences.controls;
-		composerMoreOpen = false;
-	});
 
 	const composerDraft = createComposerDraft({
 		key: () => {
@@ -260,7 +246,6 @@
 	const composerProjectSlug = $derived(currentSession ? currentSession.projectSlug : getDraftProject() ?? "");
 	const composerProject = $derived(projectState.projects.find((project) => project.slug === composerProjectSlug));
 	const composerDirectory = $derived(composerProject ? effectiveWorkingDirectory(composerProject.folders[0], currentSession?.workspace) : undefined);
-	const composerGit = $derived(currentSession?.workspace ? currentSession.git : currentSession?.git ?? composerProject?.git);
 	const accountId = $derived(composerAccountId(currentSession));
 	const composerInstance = $derived(getAvailableInstances().find((instance) => instance.id === accountId));
 	// Wait for accounts and session placement before showing settings. Catalog
@@ -327,13 +312,7 @@
 	const sendAtTime = $derived(usageForecastTime(sendsAt, clock.now));
 	const hasSendMenu = $derived((sendMode === "at-reset" || sendMode === "switch") && hasOtherClaudeAccount);
 	$effect(() => {
-		// A quota reply belongs to the session and menu opening that requested it.
-		currentSession?.id;
-		accountId;
-		composerProjectSlug;
-		usageState.readings;
 		if (sendsAt === undefined || !hasOtherClaudeAccount) sendMenuOpen = false;
-		claudeAccounts.invalidateSendQuotas();
 	});
 	const placeholder = $derived(
 		sendsAt !== undefined
@@ -491,39 +470,6 @@
 		if (!isProcessing() || reason === undefined || reason === "no_steering") return undefined;
 		return reason ?? "ready";
 	});
-	// [DEBUG-st33r] Temporary Steer diagnosis, remove after: when a queued row has had
-	// no Steer for 1.5s while the session is busy, report steer's inputs to the daemon
-	// log. A string, so streaming updates that leave it unchanged do not reset the timer.
-	const debugSteerReport = $derived.by(() => {
-		const chat = currentChat();
-		const id = sessionState.currentId;
-		const transcript = chat.transcript;
-		const listBusy = isBusy(findSession(id ?? ""));
-		if (!transcript?.pending.some((input) => input.state === "queued") || steer !== undefined || !(working || listBusy)) return null;
-		return JSON.stringify({
-			id,
-			shown: selection.shown.kind === "placed" ? selection.shown.sessionId : selection.shown.kind,
-			working,
-			listBusy,
-			processing: isProcessing(),
-			phase: chat.phase,
-			loadLifecycle: chat.loadLifecycle,
-			steerRow: transcript.steer === undefined ? "undefined" : transcript.steer,
-			feed: transcript.status,
-			paused: transcript.paused,
-			pending: transcript.pending.map((input) => input.state),
-			ua: navigator.userAgent.slice(0, 90),
-		});
-	});
-	$effect(() => {
-		const report = debugSteerReport;
-		if (report === null) return;
-		const timer = setTimeout(() => {
-			const socket = new WebSocket(`${location.origin.replace(/^http/, "ws")}/__debug-st33r?d=${encodeURIComponent(report)}`);
-			socket.onerror = () => {};
-		}, 1500);
-		return () => clearTimeout(timer);
-	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
 		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${composerDraft.text.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
@@ -547,6 +493,26 @@
 		slash_command: "Commands can't steer; they queue.",
 	};
 	const contextWarning = $derived(isContextWarning(currentChat().contextPercent, composerPreferences.contextWarning));
+	const foldedDuo = $derived(sessionViewState.pose === "duo-folded-portrait");
+	// The folded Duo's rail holds the icon controls, whatever the saved preference.
+	const composerControls = $derived(foldedDuo ? "icons" : composerPreferences.controls);
+	let inputAreaEl: HTMLDivElement | undefined = $state();
+	// The keyboard hands the rail's controls to the full composer and back. A tap
+	// on a control must not blur the field: that would close the keyboard and send
+	// the controls back to the rail mid-tap. Menus that take focus still close it.
+	$effect(() => {
+		const root = inputAreaEl;
+		if (!foldedDuo || !root) return;
+		const keepKeyboardOpen = (event: MouseEvent) => {
+			if (sessionViewState.keyboardOpen && event.target instanceof Element && event.target.closest("button")) event.preventDefault();
+		};
+		root.addEventListener("mousedown", keepKeyboardOpen);
+		const endHandoff = setKeyboardHandoff((open) => prepareHandoff(root, open));
+		return () => {
+			root.removeEventListener("mousedown", keepKeyboardOpen);
+			endHandoff();
+		};
+	});
 	let contextDismissed = $state(false);
 	let clearedGoalDismissed = $state(false);
 	const contextDismissalKey = $derived(`conduit:context-warning-dismissed:${sessionState.currentId ?? "draft"}`);
@@ -991,6 +957,16 @@
 		photosPicker?.open();
 	}
 
+	/** A pasted image takes the Add Photos path. A clipboard carrying text (an
+	 *  Office copy also carries a rendered image) pastes as text, as before. */
+	function handlePaste(event: ClipboardEvent) {
+		if (!event.clipboardData || event.clipboardData.types.includes("text/plain")) return;
+		const images = Array.from(event.clipboardData.files).filter((file) => file.type.startsWith("image/"));
+		if (images.length === 0) return;
+		event.preventDefault();
+		void processSelectedFiles(images);
+	}
+
 	function handleAttachFiles() {
 		if (!getProviderDriver(composerDriver)?.supportsFileAttachments) {
 			attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
@@ -1024,6 +1000,34 @@
 		}
 		window.addEventListener("composer:goal", handleGoalAction);
 		return () => window.removeEventListener("composer:goal", handleGoalAction);
+	});
+
+	// Files dropped anywhere in the window join the draft. Without this the
+	// browser's default drop navigates away to the file itself.
+	$effect(() => {
+		const fileTransfer = (event: DragEvent) => event.defaultPrevented || !event.dataTransfer?.types.includes("Files") ? undefined : event.dataTransfer;
+		function handleDragOver(event: DragEvent) {
+			const transfer = fileTransfer(event);
+			if (!transfer) return;
+			event.preventDefault();
+			transfer.dropEffect = readOnlySubagent ? "none" : "copy";
+		}
+		function handleDrop(event: DragEvent) {
+			const transfer = fileTransfer(event);
+			if (!transfer) return;
+			event.preventDefault();
+			if (readOnlySubagent) return;
+			const files = [...transfer.files];
+			const accepted = getProviderDriver(composerDriver)?.supportsFileAttachments ? files : files.filter((file) => file.type.startsWith("image/"));
+			if (accepted.length > 0) void processSelectedFiles(accepted);
+			if (accepted.length < files.length) attachmentError = "File attachments are available with Claude and OpenCode. Choose one of those harnesses before attaching files.";
+		}
+		window.addEventListener("dragover", handleDragOver);
+		window.addEventListener("drop", handleDrop);
+		return () => {
+			window.removeEventListener("dragover", handleDragOver);
+			window.removeEventListener("drop", handleDrop);
+		};
 	});
 
 	/** All picker entries share one attachment row and one send path. */
@@ -1153,25 +1157,6 @@
 		document.addEventListener("keydown", handleGlobalEsc);
 		return () => document.removeEventListener("keydown", handleGlobalEsc);
 	});
-
-	/** Publishes how far the composer's top edge sits above the viewport bottom
-	 *  as --composer-clearance, so the toast stack (Toast.svelte) never covers
-	 *  it. Measured from the viewport rather than the composer's height because a
-	 *  terminal panel below the chat lifts the composer. Watching the parent too
-	 *  catches that move, since the chat column shrinks when it happens. */
-	function publishComposerClearance(area: HTMLElement) {
-		const root = document.documentElement;
-		const observer = new ResizeObserver(() => {
-			const clearance = area.offsetHeight > 0 ? window.innerHeight - area.getBoundingClientRect().top : 0;
-			root.style.setProperty("--composer-clearance", `${Math.max(0, clearance)}px`);
-		});
-		observer.observe(area);
-		if (area.parentElement) observer.observe(area.parentElement);
-		return () => {
-			observer.disconnect();
-			root.style.removeProperty("--composer-clearance");
-		};
-	}
 </script>
 
 {#snippet settingsStatus()}
@@ -1199,48 +1184,6 @@
 	</div>
 {/if}
 
-{#snippet phoneMore(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>, checkout?: Snippet, warning?: Snippet, attention = false)}
-	{#snippet phoneTrigger({ props }: { props: Record<string, unknown> })}{@render trigger({ props, attention })}{/snippet}
-	<!-- Focus the sheet on open; Tab gives a row its keyboard-only focus ring. -->
-	<Popover bind:open={composerMoreOpen} presentation="auto" initialFocus="content" title="Composer" side="top" trigger={phoneTrigger} data-testid="composer-more-sheet" class="px-[16px]">
-		<div class="divide-y divide-border-subtle">
-			{@render rows()}
-			<PermissionModeSelector variant="row" />
-			{@render checkout?.()}
-		</div>
-		{@render warning?.()}
-	</Popover>
-{/snippet}
-
-{#snippet composerPhoneControls(rows: Snippet, trigger: Snippet<[{ props: Record<string, unknown>; attention?: boolean }]>) }
-	{#if currentSession && composerDirectory}
-		{@const session = currentSession}
-		{#key session.id}
-			<GitIdentity
-				presentation="row"
-				directory={composerDirectory}
-				git={composerGit}
-				workspaceCause={session.workspace?.cause}
-				workspaceMissing={session.workspaceMissing}
-				workspaceMismatch={session.workspaceMismatch}
-				workspaceHint={session.workspaceHint}
-				loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-				onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-				onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-				oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-				ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-				onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
-			>
-				{#snippet children(attention, checkout, warning)}
-					{@render phoneMore(rows, trigger, checkout, warning, attention)}
-				{/snippet}
-			</GitIdentity>
-		{/key}
-	{:else}
-		{@render phoneMore(rows, trigger)}
-	{/if}
-{/snippet}
-
 <!-- While the textarea is focused the keyboard covers the home indicator, but iOS
      keeps env(safe-area-inset-bottom) at full size, leaving a dead gap above the
      keyboard. Drop the inset then. Restore it only once the keyboard has slid away:
@@ -1248,7 +1191,7 @@
      inset at once lifts the button out from under the finger before the click. -->
 <div
 	id="input-area"
-	{@attach publishComposerClearance}
+	bind:this={inputAreaEl}
 	data-compact={sessionViewState.compact}
 	class="shrink-0 px-[32px] pt-[8px] transition-[padding-bottom] duration-0 delay-250 has-[textarea:focus]:delay-0 pb-[calc(env(safe-area-inset-bottom,0px)+22px)] has-[textarea:focus]:pb-[22px] max-md:px-[12px] max-md:pt-[6px] max-md:pb-[calc(env(safe-area-inset-bottom,0px)+8px)] max-md:has-[textarea:focus]:pb-[8px]"
 >
@@ -1288,7 +1231,7 @@
 		{#if isGoalCommand}
 			<ComposerStrip tone="goal" data-testid="composer-goal-hint" class="flex items-center gap-[8px]">
 				<Icon name="target" size={16} class="shrink-0 text-status-goal" />
-				<div class="min-w-0 flex-1">Claude keeps working until this is true, and checks after each turn.
+				<div class="min-w-0 flex-1">{composerPresentation?.label ?? "The agent"} keeps working until this is true, and checks after each turn.
 					<small class="block text-[12px] text-text-muted">{#if goalFacts?.goal?.judgeModel}{getModelDisplayName(goalFacts.goal.judgeModel)} judges · {/if}Esc to cancel</small>
 				</div>
 			</ComposerStrip>
@@ -1298,7 +1241,7 @@
 			<ComposerStrip tone="success" data-testid="composer-goal-met" class="flex items-center gap-[8px]">
 				<Icon name="circle-check" size={16} class="shrink-0 text-status-green" />
 				<div class="min-w-0 flex-1"><b class="font-semibold text-text">Goal met</b> · {goalFacts.endedGoal?.condition ?? goalFacts.endedGoal?.lastReason ?? ""}
-					<small class="block text-[12px] text-text-muted">Checked {goalFacts.endedAt === undefined ? "just now" : new Date(goalFacts.endedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}{goalFacts.endedGoal?.turnCount === undefined ? "" : ` · ${goalFacts.endedGoal.turnCount} turns`}{goal.subtitle.slice("Goal met".length)}</small>
+					<small class="block text-[12px] text-text-muted">Checked {goalFacts.endedAt === undefined ? "just now" : new Date(goalFacts.endedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}{goalFacts.endedGoal?.turnCount ? ` · ${plural(goalFacts.endedGoal.turnCount, "turn")}` : ""}{goal.subtitle.slice("Goal met".length)}</small>
 				</div>
 				<Button variant="secondary" size="composer-chip" data-testid="composer-goal-met-details" onclick={() => { goalDetails.open = true; }}>Details</Button>
 				<Button variant="ghost" size="composer-icon" iconOnly icon="x" iconSize={14} ariaLabel="Dismiss" onclick={() => { if (goalFacts) dismissGoalMet(goalFacts); }} />
@@ -1356,11 +1299,11 @@
 				</div>
 			</ComposerStrip>
 		{/if}
-		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerPreferences.controls === "words"} goal={goal.border}>
+		<ComposerFrame id="input-row" compact={sessionViewState.compact} words={composerControls === "words"} goal={goal.border}>
 			{#if draftAttachments.length > 0}
 				<PastePreview images={draftAttachments} projectSlug={composerProjectSlug} onRemove={removeDraftAttachment} onRetry={(id) => composerDraft.retryAttachment(id)} />
 			{/if}
-			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerPreferences.controls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerPreferences.controls === "icons"} singleRow={composerPreferences.controls === "words"}>
+			<TwoRowComposerLayout id="input-bottom" data-testid="composer-layout" data-phone-icons={composerControls === "icons" && sessionViewState.composerTier === "phone" ? "" : undefined} splitFooter={composerControls === "icons"} singleRow={composerControls === "words"}>
 				{#snippet field()}
 					<!-- Textarea row.
 					     The composer grows with its text and then scrolls, and both of those
@@ -1372,7 +1315,7 @@
 					     revealCaret(), for edits the browser reveals before the row grows.
 					     `scrollbar-gutter: stable` keeps a scrollbar appearing from narrowing
 					     the textarea but not the mirror, which would wrap them differently. -->
-					<div class="max-h-[120px] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
+					<div class="max-h-[var(--composer-field-max,120px)] overflow-y-auto [scrollbar-gutter:stable] max-md:[scrollbar-width:none]" bind:this={fieldScroller}>
 						<!-- Past HIGHLIGHT_MAX_CHARS the mirror renders nothing, so it can no
 						     longer size the row: pin the row to the cap and let the textarea
 						     scroll itself. Safe only because the mirror is blank in that mode,
@@ -1428,6 +1371,7 @@
 								onblur={() => { composerFocused = false; }}
 								onkeydown={handleKeydown}
 								onkeyup={handleKeyup}
+								onpaste={handlePaste}
 								onclick={handleClick}
 								oncompositionstart={handleCompositionStart}
 								oncompositionend={handleCompositionEnd}
@@ -1470,9 +1414,9 @@
 					</div>
 				{/snippet}
 				{#snippet controls()}
-					{#if composerPreferences.controls === "icons" && settingsPending}
+					{#if composerControls === "icons" && settingsPending}
 						{@render settingsStatus()}
-					{:else if composerPreferences.controls === "icons"}
+					{:else if composerControls === "icons"}
 						<div
 							in:fade={{ duration: 180 }}
 							id="input-bottom-right"
@@ -1480,7 +1424,7 @@
 							class="flex w-full items-center min-w-0 gap-[2px]"
 						>
 							<!-- Harness instance + model picker -->
-							<InstanceModelPicker phoneControls={composerPhoneControls} />
+							<InstanceModelPicker />
 
 							<!-- Approvals (permission mode) selector -->
 							<PermissionModeSelector />
@@ -1491,18 +1435,6 @@
 									<GitIdentity
 										presentation="control"
 										compact={sessionViewState.composerTier === "phone"}
-										directory={composerDirectory}
-										git={composerGit}
-										workspaceCause={session.workspace?.cause}
-										workspaceMissing={session.workspaceMissing}
-										workspaceMismatch={session.workspaceMismatch}
-										workspaceHint={session.workspaceHint}
-										loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-										onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-										onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-										oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-										ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-										onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
 									/>
 								{/key}
 							{/if}
@@ -1547,8 +1479,7 @@
 						<Menu
 							bind:open={sendMenuOpen}
 							onopenchange={(open) => {
-								if (open) void claudeAccounts.refreshQuotas("send");
-								else claudeAccounts.invalidateSendQuotas(false);
+								if (open) void claudeAccounts.readUsage();
 							}}
 							presentation={sessionViewState.compact ? "sheet" : "popover"}
 							side="top"
@@ -1582,6 +1513,8 @@
 						<Button variant="inverse" size="composer-action" icon="clock" iconSize={16} id="send" data-goal={isGoalCommand ? "true" : "false"} data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel={sendButtonLabel} onclick={handleSendClick} touchTarget class="send-btn">
 							{@render sendAtLabel()}
 						</Button>
+					{:else if isGoalCommand && sessionViewState.pose === "duo-folded-portrait"}
+						<Button variant="goal" size="composer-action" iconOnly icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn" />
 					{:else if isGoalCommand}
 						<Button variant="goal" size="composer-action" icon="target" iconSize={16} id="send" data-goal="true" data-send-mode={sendMode} disabled={!canSend} title={sendButtonTitle} ariaLabel="Set goal" onclick={handleSendClick} touchTarget class="send-btn">Set goal</Button>
 					{:else}
@@ -1597,7 +1530,14 @@
 				{/snippet}
 			</TwoRowComposerLayout>
 		</ComposerFrame>
-		{#if composerPreferences.controls === "words"}
+		{#if foldedDuo && currentChat().contextPercent > 0}
+			<!-- Amber from 80% always: the hairline is a meter, not the configurable warning. -->
+			<div data-testid="context-hairline" data-warning={currentChat().contextPercent >= 80 ? "true" : undefined} class="context-hairline">
+				<span><i style:width="{Math.min(100, currentChat().contextPercent)}%"></i></span>
+				<b>{Math.round(currentChat().contextPercent)}% context</b>
+			</div>
+		{/if}
+		{#if composerControls === "words"}
 			<div
 				data-testid="composer-words-row"
 				class="flex items-center justify-between gap-[12px] px-[14px] pt-[9px] text-[12px] text-text-dimmer whitespace-nowrap"
@@ -1606,7 +1546,7 @@
 					{@render settingsStatus()}
 				{:else}
 				<div in:fade={{ duration: 180 }} data-testid="composer-words-left" class="inline-flex min-w-0 items-center gap-[5px]" class:flex-1={sessionViewState.composerTier === "phone"}>
-					<InstanceModelPicker variant="words" phoneControls={composerPhoneControls}>
+					<InstanceModelPicker variant="words">
 						{#snippet phoneMode()}<PermissionModeSelector variant="summary" />{/snippet}
 					</InstanceModelPicker>
 					{#if sessionViewState.composerTier !== "phone" && (composerTraits?.composerModeControl ?? "permission-mode") === "permission-mode"}
@@ -1614,30 +1554,19 @@
 						<PermissionModeSelector variant="words" />
 					{/if}
 				</div>
-				{#if !sessionViewState.compact}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex min-w-[56px] flex-[0_1000000_auto] items-center justify-end gap-[5px]">
+				{#if !sessionViewState.compact || (currentSession && composerDirectory)}<div in:fade={{ duration: 180 }} data-testid="composer-words-right" class="inline-flex {sessionViewState.composerTier === 'phone' ? 'min-w-[66px]' : 'min-w-[56px]'} flex-[0_1000000_auto] items-center justify-end gap-[5px]">
 					{#if currentSession}
 						{@const session = currentSession}
-						{#if composerDirectory && sessionViewState.composerTier !== "phone"}
+						{#if composerDirectory}
 							{#key session.id}
 								<GitIdentity
 									presentation="word"
-									directory={composerDirectory}
-									git={composerGit}
-									workspaceCause={session.workspace?.cause}
-									workspaceMissing={session.workspaceMissing}
-									workspaceMismatch={session.workspaceMismatch}
-									workspaceHint={session.workspaceHint}
-									loadWorktrees={supportsWorktree !== false ? () => rpc("ListWorktrees", { sessionId: session.id }) : undefined}
-									onmove={(path) => rpc("MoveSessionWorkspace", { sessionId: session.id, path })}
-									onrecreate={() => rpc("RecreateSessionWorktree", { sessionId: session.id })}
-									oncontinue={() => rpc("ContinueSessionInMainFolder", { sessionId: session.id })}
-									ondismiss={(path) => rpc("DismissWorkspaceHint", { sessionId: session.id, path })}
-									onrenamebranch={session.canRenameBranch ? (branchName) => rpc("RenameSessionBranch", { sessionId: session.id, branchName }) : undefined}
+									compact={sessionViewState.composerTier === "phone"}
 								/>
 							{/key}
 						{/if}
-						{#if currentChat().contextPercent > 0}
-							{#if composerDirectory && sessionViewState.composerTier !== "phone"}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
+						{#if sessionViewState.composerTier !== "phone" && currentChat().contextPercent > 0}
+							{#if composerDirectory}<span aria-hidden="true" class="text-text-dimmer">·</span>{/if}
 							<span data-testid="composer-word-context-usage" data-warning={contextWarning ? "true" : undefined} class:text-status-amber={contextWarning} class="shrink-0">{Math.round(currentChat().contextPercent)}%</span>
 						{/if}
 					{/if}
@@ -1664,4 +1593,10 @@
 <style>
 	#input-area[data-compact="true"] { padding: 6px 12px calc(env(safe-area-inset-bottom, 0px) + 8px); }
 	#input-area[data-compact="true"]:has(:global(textarea:focus)) { padding-bottom: 8px; }
+	/* The folded Duo's context reading: a hairline under the field, 8pt above the home indicator. */
+	.context-hairline { position: absolute; top: calc(100% + 6px); inset-inline: 12px; height: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; color: var(--color-text-secondary); }
+	.context-hairline[data-warning] { color: var(--color-status-amber); }
+	.context-hairline > span { position: relative; flex: 1; height: 2px; border-radius: 2px; overflow: hidden; background: var(--color-border); }
+	.context-hairline i { position: absolute; inset-block: 0; left: 0; border-radius: 2px; background: currentColor; }
+	.context-hairline b { font-size: 11px; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 </style>

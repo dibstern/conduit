@@ -29,10 +29,26 @@ export async function freezeAnimations(page: Page): Promise<void> {
 			animation.pause();
 			animation.currentTime = 0;
 		}
-		return new Promise<void>((resolve) =>
-			requestAnimationFrame(() => resolve()),
-		);
 	});
+	await waitForFrame(page);
+}
+
+/**
+ * Wait for the next real rendering update. A paused page.clock also stops
+ * requestAnimationFrame, but not a ResizeObserver, whose first notification
+ * arrives in the next rendering step.
+ */
+export async function waitForFrame(page: Page): Promise<void> {
+	await page.evaluate(
+		() =>
+			new Promise<void>((resolve) => {
+				const observer = new ResizeObserver(() => {
+					observer.disconnect();
+					resolve();
+				});
+				observer.observe(document.documentElement);
+			}),
+	);
 }
 
 /**

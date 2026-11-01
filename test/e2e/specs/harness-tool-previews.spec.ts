@@ -467,18 +467,30 @@ test("tools open as previews and expand to full detail", async ({
 	await expect(page.locator(".msg-assistant").last()).toContainText(
 		endOf("assistant"),
 	);
-	const opened = rpc.frames.flatMap(({ value }) => strings(value));
-	for (const whole of [LONG_USER_TEXT, LONG_THINKING, LONG_ASSISTANT_TEXT])
-		expect(opened).toContain(whole);
-	const task = lastTool(rpc.frames, ({ callID }) => callID === TASK_ID);
-	expect(task?.state?.input).toEqual({
-		_tag: "whole",
-		value: expect.objectContaining({ prompt: LONG_SUBAGENT_PROMPT }),
-	});
-	expect(task?.state?.output).toEqual({
-		_tag: "whole",
-		text: LONG_SUBAGENT_OUTPUT,
-	});
+	// What the page shows need not have come in the frames asserted here, so
+	// wait for those frames rather than reading the list once.
+	await expect
+		.poll(() => rpc.frames.flatMap(({ value }) => strings(value)))
+		.toEqual(
+			expect.arrayContaining([
+				LONG_USER_TEXT,
+				LONG_THINKING,
+				LONG_ASSISTANT_TEXT,
+			]),
+		);
+	const toolState = (callID: string) =>
+		lastTool(rpc.frames, (tool) => tool.callID === callID)?.state;
+	await expect
+		.poll(() => toolState(TASK_ID))
+		.toEqual(
+			expect.objectContaining({
+				input: {
+					_tag: "whole",
+					value: expect.objectContaining({ prompt: LONG_SUBAGENT_PROMPT }),
+				},
+				output: { _tag: "whole", text: LONG_SUBAGENT_OUTPUT },
+			}),
+		);
 	await page.locator(".turn-activity-toggle").last().click();
 	await page.locator(".thinking-item button").first().click();
 	await expect(page.locator(".thinking-item").first()).toContainText(
@@ -492,22 +504,26 @@ test("tools open as previews and expand to full detail", async ({
 
 	// AC3: cut fields carry their full size; expanding loads the rest, and a
 	// failed load offers a retry.
-	const bash = lastTool(rpc.frames, ({ callID }) => callID === BASH_ID);
-	expect(bash?.state?.input).toEqual({
-		_tag: "preview",
-		value: expect.objectContaining({
-			command: [...LONG_COMMAND].slice(0, PREVIEW_CODE_POINTS).join(""),
-		}),
-		cuts: [{ path: ["command"], fullBytes: bytes(LONG_COMMAND) }],
-	});
-	expect(bash?.state?.output).toEqual({
-		_tag: "preview",
-		text: [...LONG_RESULT].slice(0, PREVIEW_CODE_POINTS).join(""),
-		fullBytes: bytes(LONG_RESULT),
-	});
+	await expect
+		.poll(() => toolState(BASH_ID))
+		.toEqual(
+			expect.objectContaining({
+				input: {
+					_tag: "preview",
+					value: expect.objectContaining({
+						command: [...LONG_COMMAND].slice(0, PREVIEW_CODE_POINTS).join(""),
+					}),
+					cuts: [{ path: ["command"], fullBytes: bytes(LONG_COMMAND) }],
+				},
+				output: {
+					_tag: "preview",
+					text: [...LONG_RESULT].slice(0, PREVIEW_CODE_POINTS).join(""),
+					fullBytes: bytes(LONG_RESULT),
+				},
+			}),
+		);
 	// A cut the card never shows (a written file's content) loads nothing.
-	const write = lastTool(rpc.frames, ({ callID }) => callID === WRITE_ID);
-	expect(write?.state?.input?._tag).toBe("preview");
+	await expect.poll(() => toolState(WRITE_ID)?.input?._tag).toBe("preview");
 	const writeRow = await expandTool(page, toolRow(page, WRITE_ID));
 	await expect(writeRow.locator(".tool-result")).toContainText("File written");
 	await expect(writeRow.locator(".tool-full-detail")).toHaveCount(0);
@@ -572,13 +588,19 @@ test("tools open as previews and expand to full detail", async ({
 	expect(
 		JSON.stringify(LONG_QUESTION.questions[0]?.options).length,
 	).toBeGreaterThan(PREVIEW_CODE_POINTS);
-	const question = lastTool(rpc.frames, ({ tool }) =>
-		["AskUserQuestion", "question"].includes(tool),
-	);
-	expect(question?.state?.input).toEqual({
-		_tag: "whole",
-		value: expect.objectContaining({ questions: LONG_QUESTION.questions }),
-	});
+	// The card can render from the pending question before the transcript
+	// frame carrying its tool arrives, so wait for that frame.
+	await expect
+		.poll(
+			() =>
+				lastTool(rpc.frames, ({ tool }) =>
+					["AskUserQuestion", "question"].includes(tool),
+				)?.state?.input,
+		)
+		.toEqual({
+			_tag: "whole",
+			value: expect.objectContaining({ questions: LONG_QUESTION.questions }),
+		});
 
 	// AC4: a long live result arrives as a preview, and the final result
 	// replaces the running tool.
@@ -611,10 +633,8 @@ test("tools open as previews and expand to full detail", async ({
 		.slice(liveFrom)
 		.filter(({ value }) => toolsIn(value).some(({ tool }) => tool === "Bash"));
 	// The finished turn folds its step log; open it after that, not before.
-	await expect(page.locator(".turn-activity-toggle").last()).toHaveAttribute(
-		"aria-expanded",
-		"false",
-	);
+	// The toggle reads collapsed while live too, so wait for the row to go.
+	await expect(toolRow(page, liveId)).toBeHidden();
 	const liveRow = await expandTool(page, toolRow(page, liveId));
 	await expect(liveRow.locator(".shell-output")).toContainText(endOf("result"));
 	// The settled tool's detail was asked for once more, then kept.

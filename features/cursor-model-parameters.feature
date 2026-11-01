@@ -25,7 +25,7 @@ Scenario: the composer meter counts effort values rather than combinations
   Then the effort meter has 4 bars with 4 filled
   And the Cursor effort chip describes Extra high instead of combination 500K · xhigh · Fast
 
-Scenario: the phone composer Effort row omits the context from its value
+Scenario: the phone Session panel Effort row omits the context from its value
   Given the conduit app is served with the connected mockup
   And a Cursor account is available with its live models
   And the harness logo is viewed in the phone tier
@@ -39,10 +39,10 @@ Scenario: the phone composer Effort row omits the context from its value
   And I select model Grok 4.7 in the picker
   And I choose Cursor values context=500k, effort=xhigh, fast=true in the picker
   And I close the model picker
-  And I open the phone composer sheet
-  Then the phone composer Effort row reads xhigh · Fast
-  And the Cursor phone effort row omits combination 500K · xhigh · Fast
-  When I tap the phone composer Effort row
+  And I open the phone Session panel
+  Then the phone Session panel Effort row reads xhigh
+  And the Cursor phone Session panel effort row omits combination 500K · xhigh · Fast
+  When I tap the phone Session panel Effort row
   Then the Cursor parameter rows offer context=256k/500k; effort=low/medium/high/xhigh; fast=false/true
   And the Cursor rows show context=500k, effort=xhigh, fast=true
 

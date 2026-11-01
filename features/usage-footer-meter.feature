@@ -172,7 +172,7 @@ Scenario: account buttons change only the new-session default
   And I open settings to the Server section
   Then only the Work Claude account has the default marker
 
-Scenario: managed defaults offer no account button
+Scenario: an OpenCode server's Codex reading offers no account button
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
   And a session already exists on the Claude harness

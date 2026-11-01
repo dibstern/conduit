@@ -160,6 +160,23 @@ it.effect(
 				sendTurnEffect: (input) =>
 					Effect.gen(function* () {
 						sentPrompts.push(input.prompt);
+						// Mirrors the OpenCode adapter: the cut commits once it is gone natively.
+						expect(input.rewind?.targetMessageId).toBe("cut-user");
+						yield* input.eventSink
+							.push({
+								eventId: "evt_native_cut_removed",
+								type: "message.removed",
+								providerId: "opencode",
+								sessionId: "s1",
+								providerRefs: { providerSessionId: "s1" },
+								rawSource: {
+									kind: "opencode.command",
+									endpoint: "session.deleteMessage",
+								},
+								createdAt: 1000,
+								data: { messageId: "cut-user" },
+							})
+							.pipe(Effect.orDie);
 						yield* Deferred.succeed(called, undefined);
 						return {
 							status: "completed" as const,

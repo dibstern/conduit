@@ -51,6 +51,7 @@ export function buildClaudeQueryOptions(
 					: undefined,
 		}),
 		includePartialMessages: true,
+		enableFileCheckpointing: false,
 		forwardSubagentText: true,
 		// Individual task stops are exposed by the session's task pull-down.
 		perTaskStopAffordance: true,

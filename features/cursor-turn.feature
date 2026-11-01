@@ -21,6 +21,7 @@ Scenario Outline: send with the selected Cursor model and receive a streamed rep
   And the relay receives the sent text Say hello
   When the Cursor relay starts the sent turn
   And the Cursor relay streams thinking Considering
+  And I expand the live turn step log
   Then the Cursor thinking contains Considering
   When the Cursor relay streams thinking  the answer.
   Then the Cursor thinking contains Considering the answer.

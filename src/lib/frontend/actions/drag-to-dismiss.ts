@@ -22,7 +22,7 @@ export const settleMs = () =>
 
 /**
  * Separate values for `style:` directives: a whole `style` attribute would be
- * rewritten on every frame, wiping the --sheet-top that sheetPosition sets.
+ * rewritten on every frame, wiping the variables that belowHeader sets.
  */
 export const sheetScrimStyle = ({
 	progress,
@@ -40,15 +40,15 @@ export const sheetScrimStyle = ({
  * away, gliding there when `settling`. Its dialog gets --sheet-raised, 1 at rest
  * and 0 put away, and --sheet-transition, so the scrim and anything else styled
  * from them move with the sheet. Returns how long the glide takes: nothing when
- * the sheet is already there.
+ * the sheet is already there. `transform` replaces the offset's translation.
  */
 export function placeSheet(
 	node: HTMLElement,
 	offset: number,
 	away: number,
 	settling: boolean,
+	transform = offset !== 0 ? `translateY(${offset}px)` : "",
 ): number {
-	const transform = offset !== 0 ? `translateY(${offset}px)` : "";
 	const glideMs =
 		settling && node.style.transform !== transform ? settleMs() : 0;
 	const timing = `${glideMs}ms cubic-bezier(0.32, 0.72, 0, 1)`;
@@ -61,50 +61,135 @@ export function placeSheet(
 	return glideMs;
 }
 
-/** Clip a drop-down below the live header, including after its size changes. */
-export const sheetPosition: Action<HTMLElement, "bottom" | "top"> = (
-	node,
-	initial,
-) => {
-	let cleanup: (() => void) | undefined;
-	function update(edge: "bottom" | "top") {
-		cleanup?.();
-		if (edge !== "top") return;
-		const header = document.getElementById("session-bar");
-		const measure = () =>
-			node.style.setProperty(
-				"--sheet-top",
-				`${Math.max(0, header?.getBoundingClientRect().bottom ?? 0)}px`,
-			);
-		measure();
-		const observer = new ResizeObserver(measure);
-		if (header) observer.observe(header);
-		window.addEventListener("resize", measure);
-		window.addEventListener("scroll", measure, true);
-		cleanup = () => {
+/** --sheet-top is the header's bottom edge, --sheet-left and --sheet-right its column's insets. */
+function placeBelow(node: HTMLElement, header: HTMLElement): void {
+	const column = (
+		header.closest("#app, #sidebar") ?? header
+	).getBoundingClientRect();
+	node.style.setProperty(
+		"--sheet-top",
+		`${Math.max(0, header.getBoundingClientRect().bottom)}px`,
+	);
+	node.style.setProperty("--sheet-left", `${column.left}px`);
+	node.style.setProperty(
+		"--sheet-right",
+		`${document.documentElement.clientWidth - column.right}px`,
+	);
+}
+
+/** Re-place `node` whenever the live header (the session's, else the list's) moves or changes. */
+function followHeader(node: HTMLElement): () => void {
+	let header: Element | undefined;
+	const observer = new ResizeObserver(() => measure());
+	const measure = () => {
+		const live = ["session-bar", "sidebar-header"]
+			.map((id) => document.getElementById(id))
+			.find((element) => element?.getClientRects().length);
+		if (!live) return;
+		if (live !== header) {
 			observer.disconnect();
-			window.removeEventListener("resize", measure);
-			window.removeEventListener("scroll", measure, true);
-			node.style.removeProperty("--sheet-top");
-		};
-	}
-	update(initial);
-	return { update, destroy: () => cleanup?.() };
+			observer.observe(live);
+			header = live;
+		}
+		placeBelow(node, live);
+	};
+	measure();
+	const listening = new AbortController();
+	window.addEventListener("resize", measure, { signal: listening.signal });
+	window.addEventListener("scroll", measure, {
+		capture: true,
+		signal: listening.signal,
+	});
+	// The last place stays set, so a layer closing after this keeps it.
+	return () => {
+		observer.disconnect();
+		listening.abort();
+	};
+}
+
+/**
+ * While active, keeps a floating layer under the live header and inside that
+ * header's column. The .below-header utility applies the variables it sets.
+ */
+export const belowHeader: Action<HTMLElement, boolean> = (node, initial) => {
+	let stop = initial ? followHeader(node) : undefined;
+	return {
+		update(active) {
+			stop?.();
+			stop = active ? followHeader(node) : undefined;
+		},
+		destroy: () => stop?.(),
+	};
 };
 
-/** Hold the DOM through the same CSS glide used when a finger releases it. */
+/** The control that opened `node`: its own trigger, else one outside it whose aria-controls names the sheet or its content. */
+function openerOf(
+	node: HTMLElement,
+	trigger: HTMLElement | null,
+): HTMLElement | null {
+	return (
+		trigger ??
+		Array.from(document.querySelectorAll<HTMLElement>("[aria-controls]")).find(
+			(control) =>
+				node.contains(
+					document.getElementById(control.getAttribute("aria-controls") ?? ""),
+				),
+		) ??
+		null
+	);
+}
+
+/**
+ * In a Duo pose a resting sheet is put away into the control that opened it,
+ * wherever that sits: scaled about the control's centre down to its size.
+ * Off the Duo, with no control on screen, or once a finger has moved it, there
+ * is no such transform and the sheet glides behind the header.
+ */
+function intoTrigger(
+	node: HTMLElement,
+	trigger: HTMLElement | null,
+): string | undefined {
+	const box =
+		trigger?.closest("#layout[data-pose^='duo-']") &&
+		trigger.getClientRects()[0];
+	if (!trigger || !box || node.style.transform !== "") return undefined;
+	// Only the visible part: the phone task row scrolls a button wider than itself.
+	let clip = { left: 0, right: innerWidth };
+	for (let el = trigger.parentElement; el; el = el.parentElement)
+		if (/auto|scroll/.test(getComputedStyle(el).overflowX)) {
+			clip = el.getBoundingClientRect();
+			break;
+		}
+	const left = Math.max(box.left, clip.left, 0);
+	const width = Math.min(box.right, clip.right, innerWidth) - left;
+	const sheet = node.getBoundingClientRect();
+	node.style.transformOrigin = `${left + width / 2 - sheet.left}px ${box.top + box.height / 2 - sheet.top}px`;
+	return `scale(${Math.min(1, Math.max(width / sheet.width, box.height / sheet.height))})`;
+}
+
+/**
+ * Hold the DOM through the same CSS glide used when a finger releases it, or
+ * in a Duo pose grow out of and shrink back into `trigger`, measured each time.
+ */
 export function sheetGlide(
 	node: HTMLElement,
-	{ edge, onprogress }: Pick<DragToDismissOptions, "edge" | "onprogress">,
+	{
+		edge,
+		onprogress,
+		trigger,
+	}: Pick<DragToDismissOptions, "edge" | "onprogress"> & {
+		trigger: () => HTMLElement | null;
+	},
 ): (options?: { direction: "in" | "out" }) => TransitionConfig {
 	return ({ direction } = { direction: "in" }) => {
 		if (edge !== "top") return { duration: 0 };
 		const away = -node.offsetHeight;
+		const putAway = intoTrigger(node, openerOf(node, trigger()));
 		if (direction === "out") {
 			onprogress?.(1, true);
-			return { duration: placeSheet(node, away, away, true) };
+			return { duration: placeSheet(node, away, away, true, putAway) };
 		}
-		placeSheet(node, away, away, false);
+		placeSheet(node, away, away, false, putAway);
 		node.getBoundingClientRect();
 		onprogress?.(1, false);
 		requestAnimationFrame(() => {

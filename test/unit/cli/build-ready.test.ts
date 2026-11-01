@@ -31,6 +31,7 @@ function build({
 	roots.push(root);
 	const bin = join(root, "bin");
 	mkdirSync(bin);
+	mkdirSync(join(root, "src"));
 	mkdirSync(join(root, "dist"));
 	writeFileSync(join(root, "dist/build-ready.json"), '{"buildId":"old"}');
 	writeFileSync(
@@ -89,7 +90,10 @@ describe("complete build publication", () => {
 			join(root, "dist/public/index.html"),
 			"utf8",
 		);
-		expect(marker).toEqual({ buildId: frontendId });
+		expect(marker).toMatchObject({
+			buildId: frontendId,
+			sourceHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+		});
 		expect(
 			readFileSync(join(root, "dist/src/lib/build-id.js"), "utf8"),
 		).toContain(JSON.stringify(frontendId));

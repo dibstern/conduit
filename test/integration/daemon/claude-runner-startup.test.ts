@@ -87,10 +87,14 @@ describe("built runner startup deadlines", () => {
 			if (
 				!deadline ||
 				typeof deadline["deadline"] !== "number" ||
+				typeof deadline["startedAt"] !== "number" ||
 				typeof deadline["childPid"] !== "number"
 			)
 				throw new Error("Missing deadline proof");
 			evidence["deadline"] = deadline;
+			expect(
+				proof().find((mark) => mark["kind"] === "child-ready")?.["at"],
+			).toBeLessThanOrEqual(deadline["startedAt"]);
 			const childPid = deadline["childPid"];
 			const selectedProof = () =>
 				proof().filter(

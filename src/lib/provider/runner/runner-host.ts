@@ -153,6 +153,9 @@ done
 kill -s KILL -- "-$group" 2>/dev/null
 `;
 
+// Allow delayed source ACKs under load without approaching the daemon's send deadline.
+const SOURCE_DELIVERY_ADMISSION_WAIT_MS = 2_000;
+
 export const runSessionRunner = (
 	driverKind: string,
 	makeLaunch: (
@@ -297,6 +300,7 @@ export const runSessionRunner = (
 		let reportedQuiescent: boolean | undefined;
 		let sourceDelivery: RunnerSourceDelivery | undefined;
 		let sourceDeliveryInvalidated: Deferred.Deferred<void> | undefined;
+		const sourceDeliveryAborts = new Map<string, Deferred.Deferred<void>>();
 		let reportedDelivery: RunnerSourceDelivery | undefined;
 		let deliveryGeneration = 0;
 		let sourceSinkId: string | undefined;
@@ -816,6 +820,11 @@ export const runSessionRunner = (
 							command.type === "send-turn"
 								? (command.runId ?? command.input.runId)
 								: undefined;
+						// An abort releases a send waiting on source delivery even when refused.
+						if (command.type === "abort") {
+							const cancelled = sourceDeliveryAborts.get(command.sinkId);
+							if (cancelled) Deferred.doneUnsafe(cancelled, Effect.void);
+						}
 						const refused = exiting
 							? "exiting"
 							: retirementInputId !== undefined
@@ -915,19 +924,41 @@ export const runSessionRunner = (
 									return yield* Effect.die("Runner is not initialized");
 								const payloadRunner = runner;
 								const execution = Effect.gen(function* () {
-									// A waiting replacement could outlive a later abort.
+									const invalidated = sourceDeliveryInvalidated;
 									if (
 										command.type === "send-turn" &&
-										sourceDeliveryInvalidated &&
+										invalidated &&
 										launch.changesAccount?.(command)
-									)
-										return yield* Effect.fail({
-											operation: "send-turn",
-											code: "account_switch_busy",
-											retryable: true,
-											message:
-												"Source delivery did not finish before send admission. Resend the turn.",
-										});
+									) {
+										const cancelled = Deferred.makeUnsafe<void>();
+										if (command.aborted)
+											Deferred.doneUnsafe(cancelled, Effect.void);
+										sourceDeliveryAborts.set(command.sinkId, cancelled);
+										yield* Effect.raceFirst(
+											Deferred.await(invalidated),
+											Deferred.await(cancelled),
+										).pipe(
+											Effect.timeoutOption(SOURCE_DELIVERY_ADMISSION_WAIT_MS),
+											Effect.ensuring(
+												Effect.sync(() => {
+													sourceDeliveryAborts.delete(command.sinkId);
+												}),
+											),
+										);
+										// An old producer's signal cannot authorize rebinding past a newer fence.
+										if (
+											exiting ||
+											sourceDeliveryInvalidated ||
+											Deferred.isDoneUnsafe(cancelled)
+										)
+											return yield* Effect.fail({
+												operation: "send-turn",
+												code: "account_switch_busy",
+												retryable: true,
+												message:
+													"Source delivery did not finish before send admission. Resend the turn.",
+											});
+									}
 									launch.acceptCommand(command);
 									return yield* launch.executeEffect(payloadRunner, command);
 								});

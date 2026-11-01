@@ -44,7 +44,9 @@ export default defineConfig({
 	],
 	fullyParallel: true,
 	forbidOnly: !!process.env["CI"],
+	// The retry only labels a failure flaky with a trace; CI still fails on it.
 	retries: 1,
+	failOnFlakyTests: !!process.env["CI"],
 	// Each worker runs Chromium, an in-process relay and real child processes
 	// (PTY hosts, shells). One worker per core saturates the machine and pushes
 	// every test toward its timeouts. Terminals no longer fail on a slow PTY
@@ -61,7 +63,16 @@ export default defineConfig({
 		: [["list"], ["./helpers/require-tests-reporter.ts"]],
 
 	timeout: 30_000,
-	expect: { timeout: 10_000 },
+	// Text snapshots are platform-neutral; pixel baselines stay per platform.
+	snapshotPathTemplate:
+		"{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{ext}",
+	expect: {
+		timeout: 10_000,
+		toHaveScreenshot: {
+			pathTemplate:
+				"{snapshotDir}/{testFileDir}/{testFileName}-snapshots/{arg}{-projectName}{-snapshotSuffix}{ext}",
+		},
+	},
 
 	use: {
 		// No baseURL — each test gets a dynamic relay URL via the replay fixture.

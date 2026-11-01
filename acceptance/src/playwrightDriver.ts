@@ -12,14 +12,17 @@ import {
 	freezeAnimations,
 	screenshotLocator,
 	waitForFonts,
+	waitForFrame,
 	waitForIcons,
 } from "../../test/e2e/helpers/visual-helpers.js";
 import type { VisualMode } from "./visualMode.js";
 
-type Viewport = {
+export type Viewport = {
 	name: string;
 	width: number;
 	height: number;
+	/** Safe-area insets in CSS pixels, as env(safe-area-inset-*) reports them. */
+	insets?: { top: number; right: number; bottom: number; left: number };
 };
 
 export type VisualMatchResult = {
@@ -29,6 +32,13 @@ export type VisualMatchResult = {
 	actualPath?: string;
 	diffPath?: string;
 };
+
+/**
+ * A percentage threshold scales with the shot: 2% of a desktop screen is ~24k
+ * pixels, enough to hide a redesigned menu. Past this many differing pixels a
+ * render fails whatever its threshold.
+ */
+export const MAX_DIFF_PIXELS = 500;
 
 /** Browser and mock fixtures share a clock; timers and animation frames still run. */
 export const PINNED_CLOCK_MS = MOCK_NOW_MS;
@@ -140,12 +150,19 @@ export class PlaywrightDriver {
 			width: viewport.width,
 			height: viewport.height,
 		});
-		// The app's compact layout follows a matchMedia change event, which fires in the
-		// next rendering step; one frame lets it land before the next step acts on it.
-		await page.evaluate(
-			() =>
-				new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
-		);
+		if (viewport.insets) {
+			// After the resize, so the insets belong to the new size. The override
+			// outlives this session, so it can detach at once.
+			const cdp = await page.context().newCDPSession(page);
+			const { top, right, bottom, left } = viewport.insets;
+			await cdp.send("Emulation.setSafeAreaInsetsOverride", {
+				insets: { top, right, bottom, left },
+			});
+			await cdp.detach();
+		}
+		// The app's pose follows resize events and its inset probe, which update in
+		// the next rendering step; one frame lets them land before the next step acts.
+		await waitForFrame(page);
 		this.activeViewport = viewport;
 	}
 
@@ -168,7 +185,7 @@ export class PlaywrightDriver {
 		selector: string,
 		baseline: string,
 		threshold: number,
-		mode: VisualMode,
+		mode: Exclude<VisualMode, "skip">,
 	): Promise<VisualMatchResult> {
 		if (!/^[a-z0-9-]+$/.test(regionId)) {
 			throw new Error(`Unsupported visual region: ${regionId}`);
@@ -194,10 +211,8 @@ export class PlaywrightDriver {
 					animation.finish();
 				}
 			}
-			return new Promise<void>((resolve) =>
-				requestAnimationFrame(() => resolve()),
-			);
 		});
+		await waitForFrame(page);
 
 		const locator = page.locator(selector);
 		await locator.waitFor({ state: "visible", timeout: 10_000 });
@@ -236,7 +251,10 @@ export class PlaywrightDriver {
 
 		const comparison = compareImages(expected, actual);
 		const similarity = (1 - comparison.diffRatio) * 100;
-		const matches = !comparison.sizeMismatch && similarity >= threshold;
+		const matches =
+			!comparison.sizeMismatch &&
+			similarity >= threshold &&
+			comparison.diffCount <= MAX_DIFF_PIXELS;
 		if (matches) {
 			console.log(
 				`MATCH ${baseline}: ${similarity.toFixed(2)}% (${comparison.diffCount} pixels differ)`,

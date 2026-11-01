@@ -17,6 +17,7 @@ import {
 	type AccountsState,
 	accountsStateFromConfig,
 	migrateLegacyClaudeAccount,
+	NO_OPENCODE_HEALTH,
 	normalizeAccountConfig,
 	resolve as resolveAccount,
 } from "../account-directory.js";
@@ -411,6 +412,7 @@ export function resolveClaudeLaunchConfig(
 		instanceId === undefined
 			? { _tag: "DriverDefault", driver: "claude" }
 			: { _tag: "Id", id: instanceId },
+		NO_OPENCODE_HEALTH,
 	);
 	if (Result.isFailure(account)) throw account.failure;
 	if (account.success.driver === "claude")

@@ -1,7 +1,7 @@
 Feature: An Ask brings back the agent's setup and explains options on request
 
 Scenario Outline: Reply actions append an Ask reference to the draft without sending
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And Ask context uses the dark theme with summaries on
@@ -20,7 +20,7 @@ Examples:
   | phone    | Something else  | Re #2 (Ask, 00:17) | My existing draft                      |
 
 Scenario Outline: The agent's own setup is instant and jumps below the chosen level
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And Ask context uses the <theme> theme with summaries on
@@ -38,7 +38,7 @@ Examples:
   | phone    | light | 98        |
 
 Scenario Outline: Explain uses one paid request and citations jump to their messages
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And Ask context uses the <theme> theme with summaries on
@@ -59,7 +59,7 @@ Examples:
   | phone    | light | 98        |
 
 Scenario Outline: With no setup Explain is the primary action
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And Ask context uses the <theme> theme with summaries on
@@ -77,7 +77,7 @@ Examples:
   | phone    | light | 98        |
 
 Scenario Outline: A failed explanation preserves the question and can be retried
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And Ask context uses the <theme> theme with summaries on
@@ -93,7 +93,7 @@ Examples:
   | phone    | light |
 
 Scenario Outline: Summary Off keeps the free quote and prevents a paid call
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And Ask context uses the <theme> theme with summaries off

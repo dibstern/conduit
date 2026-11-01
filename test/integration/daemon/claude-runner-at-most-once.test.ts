@@ -209,7 +209,8 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 				throw new Error("Missing replacement runner");
 			expect(replacement.pid).not.toBe(original.pid);
 			await harness.kill();
-			// Daemon exit can precede the runner clearing its old connection.
+			// Server exit does not fence the runner's socket-close callback; until it runs,
+			// the runner still holds the dead daemon's socket and resets any new connection.
 			await vi.waitFor(
 				() =>
 					expect(

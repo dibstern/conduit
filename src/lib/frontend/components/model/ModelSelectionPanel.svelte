@@ -18,7 +18,7 @@
 		storedEffortLabel, view = $bindable("root"), searchQuery = $bindable(""),
 		searchEl = $bindable(), backEl = $bindable(), filterModel,
 		subtitle, accountControls, contextUsage, rootExtras, extraView,
-		modelToolbar, modelNotice, modelLabelSuffix, modelAction, modelFooter,
+		modelToolbar, modelNotice, modelLabelSuffix, modelAction,
 	}: {
 		target: ModelSelectionTarget;
 		titleId: string;
@@ -41,7 +41,6 @@
 		modelNotice?: Snippet;
 		modelLabelSuffix?: Snippet<[model: Immutable<ModelInfo>]>;
 		modelAction?: Snippet<[model: Immutable<ModelInfo>]>;
-		modelFooter?: Snippet;
 	} = $props();
 	const selection = createModelSelectionState(() => target);
 	const activeModelId = $derived(selection.activeModelId);
@@ -62,9 +61,7 @@
 	})));
 	const accountOptions = $derived(target.accounts.filter((account) => account.driver === target.pick.driver).map((account) => ({ value: account.id, label: account.label, locked: target.pending.model || account.available === false })));
 	function selectHarness(driver: ProviderDriverKind) {
-		const available = target.accounts.filter((account) => account.driver === driver && account.available !== false);
-		const account = available.find((account) => account.isDefault) ?? available[0];
-		if (account) target.selectAccount(account.id);
+		target.selectAccount({ driver });
 	}
 	const selectParameter = selection.selectParameter;
 	const scopedGroups = $derived(target.catalog);
@@ -298,7 +295,6 @@
 							</div>
 						{/each}
 					{/if}
-					{@render modelFooter?.()}
 				</div>
 			{/if}
 		</div>

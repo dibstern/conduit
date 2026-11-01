@@ -1,10 +1,9 @@
-import { tick } from "svelte";
+import { type Component, tick } from "svelte";
 import {
 	sessionViewState,
-	setFilesOpen,
+	setRightPaneView,
 } from "../../stores/session-view.svelte.js";
 import { closePanel, terminalState } from "../../stores/terminal.svelte.js";
-import { closeFileViewer } from "../../stores/ui.svelte.js";
 import { toggleTerminal } from "./chrome-actions.js";
 
 export type SessionView = {
@@ -14,6 +13,13 @@ export type SessionView = {
 	badge?: () => number | undefined;
 	shortcut: number;
 	disabled?: boolean;
+	loadPane?: () => Promise<{
+		default: Component<{
+			pane?: boolean;
+			onClose?: () => void;
+			visible?: boolean;
+		}>;
+	}>;
 	isOn: () => boolean;
 	select: () => void;
 };
@@ -28,15 +34,15 @@ export const sessionViews: readonly SessionView[] = [
 		shortcut: 1,
 		isOn: () =>
 			!sessionViewState.compact ||
-			(!terminalState.panelOpen && !sessionViewState.filesOpen),
+			(!terminalState.panelOpen && sessionViewState.rightPaneView === "closed"),
 		select: () => {
 			if (sessionViewState.compact) {
 				closePanel();
-				setFilesOpen(false);
+				setRightPaneView("closed");
 				return;
 			}
 			// A Files pane forced wide by a narrow window stays expanded anyway.
-			sessionViewState.filesPaneExpanded = false;
+			sessionViewState.rightPaneExpanded = false;
 			// Chat is inert while the pane is expanded, so focus after it renders.
 			void tick().then(() => document.getElementById("input")?.focus());
 		},
@@ -50,7 +56,7 @@ export const sessionViews: readonly SessionView[] = [
 		isOn: () => terminalState.panelOpen,
 		select: () => {
 			if (sessionViewState.compact) {
-				setFilesOpen(false);
+				setRightPaneView("closed");
 				if (terminalState.panelOpen) return;
 			}
 			toggleTerminal();
@@ -61,31 +67,33 @@ export const sessionViews: readonly SessionView[] = [
 		label: "Diff",
 		icon: "code",
 		shortcut: 3,
-		disabled: true,
-		isOn: () => false,
-		select: () => {},
+		loadPane: () => import("../diff/SessionDiff.svelte"),
+		isOn: () =>
+			sessionViewState.rightPaneView === "diff" &&
+			(!sessionViewState.compact || !terminalState.panelOpen),
+		select: () => selectPane("diff"),
 	},
 	{
 		id: "files",
 		label: "Files",
 		icon: "folder-tree",
 		shortcut: 4,
+		loadPane: () => import("../file/SidebarFilePanel.svelte"),
 		isOn: () =>
-			sessionViewState.compact
-				? !terminalState.panelOpen && sessionViewState.filesOpen
-				: sessionViewState.filesOpen,
-		select: () => {
-			sessionViewState.filesEverOpened = true;
-			if (sessionViewState.compact) {
-				closePanel();
-				setFilesOpen(true);
-				return;
-			}
-			if (sessionViewState.filesOpen) closeFileViewer();
-			setFilesOpen(!sessionViewState.filesOpen);
-		},
+			sessionViewState.rightPaneView === "files" &&
+			(!sessionViewState.compact || !terminalState.panelOpen),
+		select: () => selectPane("files"),
 	},
 ];
+
+function selectPane(view: "files" | "diff"): void {
+	if (sessionViewState.compact) closePanel();
+	setRightPaneView(
+		!sessionViewState.compact && sessionViewState.rightPaneView === view
+			? "closed"
+			: view,
+	);
+}
 
 export function viewShortcutHint(view: SessionView): string {
 	return `⌥${view.shortcut}`;
@@ -110,6 +118,7 @@ export function matchSessionViewShortcut(
 
 export function activeSessionView(): string {
 	if (terminalState.panelOpen) return "terminal";
-	if (sessionViewState.filesOpen) return "files";
+	if (sessionViewState.rightPaneView !== "closed")
+		return sessionViewState.rightPaneView;
 	return "chat";
 }

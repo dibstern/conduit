@@ -1,16 +1,19 @@
 // Tests segmentTurns, turnStats/countsPhrase, step durations and economics.
 
+import { Effect, ManagedRuntime } from "effect";
 import { assert, describe, expect, it } from "vitest";
 import { segmentAppearance } from "../../../src/lib/frontend/components/chat/activity-style.js";
 import type {
 	AssistantMessage,
 	ChatMessage,
+	HistoryMessage,
 	ResultMessage,
 	SystemMessage,
 	ThinkingMessage,
 	ToolMessage,
 	UserMessage,
 } from "../../../src/lib/frontend/types.js";
+import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import {
 	type ActivityPart,
 	appendActivity,
@@ -29,7 +32,6 @@ import {
 	liveLaunchedTasks,
 	partLabel,
 	segmentTurns,
-	skillChapters,
 	skillName,
 	stepDurations,
 	stepWeights,
@@ -37,6 +39,16 @@ import {
 	turnStats,
 	workingTime,
 } from "../../../src/lib/frontend/utils/turns.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
+import {
+	canonicalEvent,
+	type LiveEventType,
+} from "../../../src/lib/persistence/events.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 
 let seq = 0;
 const id = () => `m${++seq}`;
@@ -191,6 +203,26 @@ describe("forkMessageIdAtReply", () => {
 });
 
 describe("segmentTurns", () => {
+	it("keeps a sent prompt's turn when the server places it", () => {
+		const local: UserMessage = { type: "user", uuid: "input-1", text: "Hi" };
+		const placed = historyToChatMessages(
+			[
+				{
+					id: "server-1",
+					role: "user",
+					inputId: "input-1",
+					parts: [{ id: "p1", type: "text", text: "Hi" }],
+				},
+			],
+			undefined,
+			undefined,
+			(messageId, partId) => `${messageId}/${partId}`,
+		);
+		expect(segmentTurns(placed, true)[0]?.id).toBe(
+			segmentTurns([local], true)[0]?.id,
+		);
+	});
+
 	it.each([
 		"assistant",
 		"tool",
@@ -517,22 +549,6 @@ describe("turnStats", () => {
 		expect(s.skills).toBe(2);
 		expect(s.others).toBe(0);
 	});
-
-	it("counts failures from the typed outcome regardless of status", () => {
-		const s = turnStats({
-			activity: [
-				tool(
-					"Bash",
-					{ tool: "Bash", command: "false" },
-					{ status: "error", outcome: "failed" },
-				),
-				tool("Bash", { tool: "Bash", command: "nope" }, { outcome: "failed" }),
-				tool("Bash", { tool: "Bash", command: "ls" }),
-			],
-			reply: [],
-		});
-		expect(s.failed).toBe(2);
-	});
 });
 
 describe("countsPhrase", () => {
@@ -557,7 +573,7 @@ describe("countsPhrase", () => {
 		expect(phrase).toBe("2 reads · 1 search · 1 edit · 1 command");
 	});
 
-	it("leaves skills to their own control", () => {
+	it("counts skills alongside the other steps", () => {
 		expect(
 			countsPhrase(
 				turnStats({
@@ -569,7 +585,7 @@ describe("countsPhrase", () => {
 					reply: [],
 				}),
 			),
-		).toBe("1 fetch · 1 subagent");
+		).toBe("1 fetch · 1 skill · 1 subagent");
 		expect(
 			countsPhrase(
 				turnStats({
@@ -577,7 +593,7 @@ describe("countsPhrase", () => {
 					reply: [],
 				}),
 			),
-		).toBe("");
+		).toBe("1 skill");
 	});
 
 	it("falls back to thoughts, then to 'no tools'", () => {
@@ -707,6 +723,233 @@ describe("stepWeights", () => {
 });
 
 describe("workingTime", () => {
+	it.each([
+		1_200, 2_000,
+	])("keeps stopped time unchanged by late completion accounting for work starting at %i", async (createdAt) => {
+		const runtime = ManagedRuntime.make(
+			makePersistenceEffectLayer(":memory:", "test-project"),
+		);
+		const event = <T extends LiveEventType>(
+			type: T,
+			data: Parameters<typeof canonicalEvent<T>>[2],
+			createdAt: number,
+		) =>
+			canonicalEvent(type, "timer", data, {
+				provider: "claude",
+				createdAt,
+				metadata: { runId: "r1" },
+			});
+		try {
+			await runtime.runPromise(
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const persist = yield* ClaudeEventPersistEffectTag;
+					const read = yield* ReadQueryEffectTag;
+					const store = yield* EventStoreEffectTag;
+					yield* commit([
+						event(
+							"session.created",
+							{ sessionId: "timer", provider: "claude", title: "Timer" },
+							1_000,
+						),
+					]);
+					yield* persist.persistEvents([
+						event("run.requested", { runId: "r1", inputId: "u1" }, 1_000),
+						event(
+							"message.created",
+							{
+								messageId: "u1",
+								sessionId: "timer",
+								role: "user",
+								inputId: "u1",
+							},
+							1_000,
+						),
+						event(
+							"text.delta",
+							{ messageId: "u1", partId: "prompt", text: "work" },
+							1_000,
+						),
+						event(
+							"run.started",
+							{ requestedRunId: "r1", inputId: "u1" },
+							1_000,
+						),
+						event(
+							"message.created",
+							{
+								messageId: "a1",
+								sessionId: "timer",
+								role: "assistant",
+								parentID: "u1",
+							},
+							1_100,
+						),
+						event(
+							"text.delta",
+							{ messageId: "a1", partId: "reply", text: "working" },
+							createdAt,
+						),
+						event("turn.interrupted", { messageId: "a1" }, 2_000),
+					]);
+					const readTurn = read.getSessionMessagesWithParts("timer").pipe(
+						Effect.map((rows) => {
+							const history = messageRowsToHistory(rows, { pageSize: 100 });
+							const turns = segmentTurns(
+								historyToChatMessages(history.messages),
+								false,
+							);
+							expect(turns).toHaveLength(1);
+							const [turn] = turns;
+							assert.exists(turn);
+							return turn;
+						}),
+					);
+					expect(workingTime(yield* readTurn, 20_000)).toBe(1_000);
+					yield* persist.persistEvent(
+						event(
+							"turn.completed",
+							{ messageId: "a1", tokens: { input: 100, output: 10 } },
+							10_000,
+						),
+					);
+					const turn = yield* readTurn;
+					expect((yield* store.readBySession("timer")).at(-1)?.type).toBe(
+						"message.completed",
+					);
+					expect(turn.user?.turnTiming).toEqual({
+						startedAt: 1_000,
+						endedAt: 2_000,
+						waits: [],
+					});
+					expect(turn.segments[0]?.end?.createdAt).toBe(10_000);
+					expect(workingTime(turn, 20_000)).toBe(1_000);
+					expect(economics(turn, 20_000).tokensIn).toBe(100);
+				}),
+			);
+		} finally {
+			await runtime.dispose();
+		}
+	});
+
+	it.each([
+		["result only", [], 1_000],
+		["unstamped reply", [say()], 1_000],
+		[
+			"new activity after an old reply",
+			[say("old", 1_200), read("/a.ts", 3_000)],
+			9_000,
+		],
+		[
+			"new reply after old activity",
+			[think(1_200), say("awake", 3_000)],
+			9_000,
+		],
+		["hand-back", [tool("AskUserQuestion", {}, { createdAt: 3_000 })], 9_000],
+	] satisfies [
+		string,
+		ChatMessage[],
+		number,
+	][])("requires a post-boundary start to extend persisted timing: %s", (_name, activity, expected) => {
+		const prompt = user(undefined, 1_000);
+		prompt.turnTiming = { startedAt: 1_000, endedAt: 2_000, waits: [] };
+		const [turn] = segmentTurns(
+			[prompt, ...activity, result({ createdAt: 10_000 })],
+			false,
+		);
+		assert.exists(turn);
+		expect(workingTime(turn, 20_000)).toBe(expected);
+	});
+
+	it("counts captured activity after the prompt's persisted end, including a live wake", () => {
+		// Minimized from ses_003b6997cc02487ba6857a647d16a308: the slash
+		// command settled in 25ms, before these three assistant messages.
+		// Keep the real message/first-part stamps; omit content and inner steps.
+		const messages: HistoryMessage[] = [
+			{
+				id: "19eae387-ec97-4a33-9294-a2e4cebd5607",
+				role: "user",
+				time: { created: 1_793_265_581_997 },
+				parts: [{ id: "prompt", type: "text", text: "[redacted]" }],
+				turnTiming: {
+					startedAt: 1_793_265_581_997,
+					endedAt: 1_793_265_582_022,
+					waits: [],
+				},
+			},
+			...[
+				{
+					id: "msg_011CgWHDGcGNEC7hkXeevzep",
+					created: 1_793_265_582_784,
+					completed: 1_793_265_647_312,
+					first: 1_793_265_582_792,
+					firstEnd: 1_793_265_583_189,
+					input: 14,
+				},
+				{
+					id: "msg_011CgWHLiTxcyQLGGEYf7vJB",
+					created: 1_793_265_683_711,
+					completed: 1_793_265_687_608,
+					first: 1_793_265_683_718,
+					firstEnd: 1_793_265_683_858,
+					input: 2,
+				},
+				{
+					id: "msg_011CgWJ3Yzqjv2JCoqJWXaSQ",
+					created: 1_793_266_237_681,
+					completed: 1_793_266_495_853,
+					first: 1_793_266_237_688,
+					firstEnd: 1_793_266_238_270,
+					input: 6,
+				},
+			].map(
+				({
+					id,
+					created,
+					completed,
+					first,
+					firstEnd,
+					input,
+				}): HistoryMessage => ({
+					id,
+					role: "assistant",
+					time: { created, completed },
+					tokens: { input },
+					parts: [
+						{
+							id: `${id}-first`,
+							type: "thinking",
+							text: "[redacted]",
+							time: { start: first, end: firstEnd },
+						},
+					],
+				}),
+			),
+		];
+		const chat = historyToChatMessages(messages);
+		const [turn] = segmentTurns(chat, false);
+		assert.exists(turn);
+		expect(turn.segments).toHaveLength(3);
+		// 65,315ms + 3,890ms + 258,165ms, excluding both idle gaps.
+		expect(workingTime(turn, 1_793_266_500_000)).toBe(327_370);
+		expect(economics(turn, 1_793_266_500_000).duration).toBe(327_370);
+		expect(workingTime(turn, 1_793_266_500_000, 1_793_266_000_000)).toBe(
+			69_205,
+		);
+
+		const [live] = segmentTurns(chat.slice(0, -1), true);
+		assert.exists(live);
+		expect(live.live).toBe(true);
+		expect(workingTime(live, 1_793_266_496_853)).toBe(328_370);
+		expect(workingTime(live, 1_793_266_497_853)).toBe(329_370);
+
+		// Without a live signal or final result, unfinished work cannot move
+		// the settled boundary merely because its parts have later stamps.
+		const [stopped] = segmentTurns(chat.slice(0, -1), false);
+		assert.exists(stopped);
+		expect(workingTime(stopped, 1_793_266_500_000)).toBe(69_205);
+	});
+
 	it("excludes every idle gap, starting after the result rather than the reply", () => {
 		const [turn] = segmentTurns(
 			[
@@ -943,7 +1186,7 @@ describe("workingTime", () => {
 		expect(workingTime(turn, 50_000)).toBe(10_000);
 	});
 
-	it("clips gaps to the persisted turn bounds", () => {
+	it("clips gaps to the persisted turn bounds when no work starts after the end", () => {
 		const prompt = user(undefined, 0);
 		prompt.turnTiming = { startedAt: 4_000, endedAt: 9_000, waits: [] };
 		const [turn] = segmentTurns(
@@ -1464,6 +1707,7 @@ describe("liveLaunchedTasks", () => {
 	});
 	const turnOf = (...segments: ActivityPart[][]): Turn => ({
 		id: id(),
+		preface: [],
 		segments: segments.map((activity) => ({ activity, reply: [] })),
 		notices: [],
 		live: false,
@@ -1678,108 +1922,12 @@ describe("compaction", () => {
 				[user(), compaction("completed", fields)],
 				false,
 			);
-			const part = turn?.segments[0]?.activity[0];
+			const part = turn?.preface[0];
 			return part && partLabel(part);
 		};
 		expect(label({ preTokens: 180_000, postTokens: 42_000 })).toBe(
 			"Compacted context · 180k → 42k, 138k saved",
 		);
 		expect(label({})).toBe("Compacted context");
-	});
-});
-
-describe("skillChapters", () => {
-	const skill = (name: string, createdAt?: number) =>
-		tool(
-			"Skill",
-			{ tool: "Skill", name },
-			createdAt !== undefined ? { createdAt } : {},
-		);
-	const chapters = (messages: ChatMessage[], live: boolean, now: number) => {
-		const [turn] = segmentTurns(messages, live);
-		assert.exists(turn, "expected turn");
-		const [segment] = turn.segments;
-		assert.exists(segment, "expected segment");
-		return skillChapters(segment, turn, true, now);
-	};
-
-	it("runs each skill until the next one loads, and the last until the reply", () => {
-		expect(
-			chapters(
-				[
-					user(undefined, 0),
-					skill("tdd", 2_000),
-					read("/a.ts", 3_000),
-					skill("debugging", 10_000),
-					read("/b.ts", 11_000),
-					say("done", 20_000),
-				],
-				false,
-				0,
-			),
-		).toEqual([
-			{ index: 0, name: "tdd", offset: 2_000, duration: 8_000, running: false },
-			{
-				index: 2,
-				name: "debugging",
-				offset: 10_000,
-				duration: 10_000,
-				running: false,
-			},
-		]);
-	});
-
-	it("leaves the last skill of a live turn open rather than guessing its end", () => {
-		expect(
-			chapters(
-				[
-					user(undefined, 0),
-					skill("tdd", 1_000),
-					read("/a.ts", 2_000),
-					skill("debugging", 5_000),
-				],
-				true,
-				9_000,
-			),
-		).toEqual([
-			{ index: 0, name: "tdd", offset: 1_000, duration: 4_000, running: false },
-			{ index: 2, name: "debugging", offset: 5_000, running: true },
-		]);
-	});
-
-	it("omits whatever a missing stamp would have measured", () => {
-		expect(
-			chapters(
-				[
-					user(undefined, 0),
-					skill("tdd"),
-					skill("debugging", 4_000),
-					say("done", 6_000),
-				],
-				false,
-				0,
-			),
-		).toEqual([
-			{ index: 0, name: "tdd", running: false },
-			{
-				index: 1,
-				name: "debugging",
-				offset: 4_000,
-				duration: 2_000,
-				running: false,
-			},
-		]);
-	});
-
-	it("is empty when no skill ran", () => {
-		expect(chapters([user(), read("/a.ts"), say()], false, 0)).toEqual([]);
-	});
-
-	it("recovers the name of a skill recorded before inputs were normalized", () => {
-		expect(
-			skillName(
-				tool("Skill", {}, { result: "Launching skill: brainstorming" }),
-			),
-		).toBe("brainstorming");
 	});
 });

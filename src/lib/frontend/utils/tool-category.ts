@@ -22,7 +22,7 @@ const TOOL_CATEGORIES: Partial<Record<ToolName, ToolCategory>> = {
 	WebFetch: "fetch",
 	WebSearch: "fetch",
 	Task: "task",
-	Skill: "explore",
+	Skill: "other",
 };
 
 export function getToolCategory(toolName: string): ToolCategory {

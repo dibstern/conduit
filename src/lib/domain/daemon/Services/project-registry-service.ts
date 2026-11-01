@@ -36,7 +36,6 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { getProviderDriver } from "../../../contracts/provider-instance.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
 	resolveWorktreeCleanup,
@@ -101,9 +100,7 @@ import {
 	transitionProjectUnavailable,
 } from "./daemon-store-availability.js";
 import { OwnerScopes } from "./owner-scopes.js";
-import { ReadRequest } from "./read-request.js";
 import { RelayCacheTag } from "./relay-cache.js";
-import { SessionGit } from "./session-git.js";
 import { Subprocess } from "./subprocess.js";
 
 const PROJECT_REMOVE_ALL_CONCURRENCY = 4;
@@ -389,14 +386,6 @@ export const allProjects = Effect.gen(function* () {
 export const projectInfos = Effect.gen(function* () {
 	const unavailable = yield* DaemonStoreAvailability;
 	const projects = yield* allProjects;
-	const git = yield* Effect.serviceOption(SessionGit);
-	if (Option.isSome(git)) {
-		yield* Effect.forEach(
-			[...new Set(projects.flatMap(({ folders }) => folders))],
-			(directory) => git.value.invalidate({ directory }),
-			{ discard: true },
-		).pipe(Effect.provideService(ReadRequest, "GetProjects"));
-	}
 	return yield* withPublishedProjectGit(
 		projects.map((project) => {
 			const unavailableReason = unavailable.get(project.slug);
@@ -924,27 +913,6 @@ export const replaceRelay = (slug: string) =>
 		Effect.annotateLogs("slug", slug),
 		Effect.withSpan("projectRegistry.replaceRelay"),
 	);
-
-/** The first configured OpenCode endpoint drives the relay's default sessions. */
-export const openCodeInstanceFor = <
-	I extends {
-		id: string;
-		driver?: string;
-		managed?: boolean;
-		port?: number;
-		url?: string;
-	},
->(
-	instances: readonly I[],
-): I | undefined =>
-	instances.find((instance) => {
-		if (!getProviderDriver(instance.driver ?? "opencode")?.runsOpenCodeServer)
-			return false;
-		if (instance.managed === true || (instance.port ?? 0) > 0) return true;
-		if (instance.url !== undefined)
-			return URL.canParse(instance.url) && new URL(instance.url).port !== "0";
-		return instance.port === undefined;
-	});
 
 /**
  * Check if a project is currently in Registering state

@@ -4,7 +4,7 @@
 <script lang="ts">
 	import type { Snippet } from "svelte";
 	import type { HTMLButtonAttributes } from "svelte/elements";
-	import { hold } from "./actions/hold.js";
+	import { hold } from "../../actions/hold.js";
 
 	let {
 		label,

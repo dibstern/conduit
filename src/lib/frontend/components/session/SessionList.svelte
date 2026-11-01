@@ -357,7 +357,7 @@
 			return;
 		}
 		if (event.defaultPrevented || event.repeat || event.altKey) return;
-		if (isEditable(event.target) || document.querySelector('[role="dialog"], [role="menu"]') || renamingSessionId) return;
+		if (isEditable(event.target) || document.querySelector('dialog:modal, [role="dialog"], [role="menu"]') || renamingSessionId) return;
 		if ((event.metaKey || event.ctrlKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
 			// Only an Undo answers ⌘Z: a toast's primary action can also be a
 			// forward step ("Switch and resend") that must never fire by accident.

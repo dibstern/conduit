@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Toast placement</title>
+<script>document.documentElement.dataset.designTheme=localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<style>/* tsp chrome. Styles the page around designs only; designs render in their own iframes.
+   The chrome is always light: the theme toggle switches the designs (data-design-theme), never the page. */
+:root{--bg:#f7f7f5;--surface:#fff;--text:#1c1c1a;--muted:#6b6b65;--line:#e3e3de;--soft:#efefea;--ring:#1c1c1a;color-scheme:light;
+--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font);overflow-x:clip}
+[hidden]{display:none!important}
+html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme=dark] [data-theme-only=light]{display:none!important}
+
+.tsp-bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+  padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));
+  background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.tsp-titles{flex:1;min-width:0}
+.tsp-home{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:4px 0}
+.tsp-bar h1{margin:0;font-size:clamp(17px,2.2vw,21px);line-height:1.25;font-weight:650;text-wrap:balance}
+.tsp-bar p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tsp-actions{display:flex;gap:8px;flex-shrink:0}
+.tsp-btn{min-height:44px;min-width:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--text);font:500 13px/1 var(--font);cursor:pointer;display:inline-grid;place-items:center}
+.tsp-btn:hover{background:var(--soft)}
+.tsp-btn:focus-visible,.tsp-section>summary:focus-visible,.tsp-open:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.tsp-theme{padding:0}
+.tsp-theme svg{width:18px;height:18px}
+[data-design-theme=light] .tsp-sun,[data-design-theme=dark] .tsp-moon{display:none}
+
+.tsp-main{max-width:1440px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+.tsp-main>*+*,.tsp-section-body>*+*{margin-top:16px}
+
+.tsp-section{border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.tsp-section>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 16px;cursor:pointer;border-radius:14px}
+.tsp-section>summary::-webkit-details-marker{display:none}
+.tsp-section>summary h2{margin:0;flex:1;font-size:17px;line-height:1.3;font-weight:650}
+.tsp-chev{width:16px;height:16px;flex-shrink:0;color:var(--muted);transition:transform .15s}
+.tsp-section[open]>summary .tsp-chev{transform:rotate(90deg)}
+.tsp-count{font:12px var(--mono);color:var(--muted)}
+.tsp-section-body{padding:0 16px 16px}
+@media (max-width:520px){.tsp-section-body{padding:0 10px 10px}.tsp-section>summary{padding:8px 12px}}
+
+.tsp-grid{display:grid;align-items:start;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--tsp-min,340px)),1fr))}
+.tsp-card{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.tsp-wide{grid-column:1/-1}
+.tsp-card-head{display:flex;align-items:baseline;gap:8px}
+.tsp-n{font:600 12px/1 var(--mono);color:var(--muted)}
+.tsp-card h3{margin:0;flex:1;font-size:15px;line-height:1.35;font-weight:600}
+.tsp-open{display:inline-grid;place-items:center;min-width:44px;min-height:44px;margin:-14px -10px -14px 0;border-radius:8px;color:var(--muted);text-decoration:none}
+.tsp-open:hover{color:var(--text)}
+.tsp-why{margin:0;color:var(--muted);font-size:13px}
+.tsp-stage{overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.tsp-frame{display:block;width:100%;height:240px;border:0;transform-origin:0 0}
+
+:where(.tsp-main) :is(h2,h3,h4){line-height:1.3;text-wrap:balance}
+:where(.tsp-main) :is(p,li){max-width:78ch}
+:where(.tsp-main) a{color:inherit;text-underline-offset:2px}
+:where(.tsp-main) code{font:.9em var(--mono);background:var(--soft);padding:.1em .35em;border-radius:5px}
+:where(.tsp-main) pre{overflow-x:auto;padding:12px 14px;background:var(--soft);border-radius:10px;font:13px/1.5 var(--mono)}
+:where(.tsp-main) pre code{background:none;padding:0}
+:where(.tsp-main) table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:14px}
+:where(.tsp-main) :is(th,td){padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+:where(.tsp-main) :is(img,video){max-width:100%;height:auto}
+:where(.tsp-main) blockquote{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--muted)}
+
+.tsp-index{list-style:none;padding:0;display:grid;gap:10px}
+.tsp-index li{max-width:none;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--muted);font-size:13px}
+.tsp-index strong{color:var(--text);font-size:15px}
+.tsp-foot{padding:0 16px 32px;text-align:center;font:12px var(--mono);color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
+</style></head>
+<body>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Toast placement</h1><p>Toasts vs Q&amp;A and permission alerts, phone and desktop</p></div>
+<div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
+<button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
+<svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<svg class="tsp-sun" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+</button></div></header>
+<main class="tsp-main">
+
+
+<p><b>Goal.</b> Toasts get one home of their own that never collides with the in-session ask cards (bottom of the transcript), the keyboard, the session sheet, or the cross-session "needs attention" alert. Every frame below shows the worst case at once: keyboard open, a permission card waiting, an error toast, and two other sessions needing you.</p>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Today: why it breaks</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:300px">
+<article class="tsp-card" id="d-0"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Phone today</h3><a class="tsp-open" href="_frame-0.html" target="_blank" aria-label="Open Phone today alone">↗</a></header><p class="tsp-why">The toast is a sheet glued to the composer, so it rides the keyboard and covers the permission card. The attention banner covers Settle.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-0.html" title="Phone today" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-0x"><header class="tsp-card-head"><span class="tsp-n">0</span><h3>Desktop today</h3><a class="tsp-open" href="_frame-0x.html" target="_blank" aria-label="Open Desktop today alone">↗</a></header><p class="tsp-why">Two floating systems in two corners. The bottom-right toast lands on the ask card&#x27;s actions; the heavy modal shadow smears the transcript.</p><div class="tsp-stage" data-width="1280" data-height="800"><iframe class="tsp-frame" src="_frame-0x.html" title="Desktop today" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>A. One shared top lane</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p>Toasts and the cross-session alert stack in one column hanging from the top bar. The alert is a compact row pinned first; toasts queue beneath it. Simple model, but a persistent alert permanently eats the top of the transcript.</p>
+<div class="tsp-grid" style="--tsp-min:300px">
+<article class="tsp-card" id="d-a"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Phone</h3><a class="tsp-open" href="_frame-a.html" target="_blank" aria-label="Open Phone alone">↗</a></header><p class="tsp-why">Everything floating lives in one stack, so nothing can overlap. The stack is always under the header, never near the keyboard.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-a.html" title="Phone" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-ax"><header class="tsp-card-head"><span class="tsp-n">A</span><h3>Desktop</h3><a class="tsp-open" href="_frame-ax.html" target="_blank" aria-label="Open Desktop alone">↗</a></header><p class="tsp-why">Same lane, top-centre of the chat column. Both asks stay clear at the bottom.</p><div class="tsp-stage" data-width="1280" data-height="800"><iframe class="tsp-frame" src="_frame-ax.html" title="Desktop" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B. Attention in the chrome, toasts on top (recommended)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<p>Split by kind. "Two sessions need you" is <b>state</b>, so it becomes a chip in the top bar that stays until handled. A new arrival is an <b>event</b>, so it also fires one toast with an Open action. Toasts are the only floating thing, hanging under the top bar. Asks keep the bottom.</p>
+<div class="tsp-grid" style="--tsp-min:300px">
+<article class="tsp-card" id="d-b"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Phone</h3><a class="tsp-open" href="_frame-b.html" target="_blank" aria-label="Open Phone alone">↗</a></header><p class="tsp-why">One floating layer, one chip. Header controls stay tappable; the keyboard and the ask card are untouched.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-b.html" title="Phone" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-bx"><header class="tsp-card-head"><span class="tsp-n">B</span><h3>Desktop</h3><a class="tsp-open" href="_frame-bx.html" target="_blank" aria-label="Open Desktop alone">↗</a></header><p class="tsp-why">The chip names the count in the top bar; the sidebar dots name the sessions. Toast sits top-centre.</p><div class="tsp-stage" data-width="1280" data-height="800"><iframe class="tsp-frame" src="_frame-bx.html" title="Desktop" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>C. Island capsule</h2><span class="tsp-count">3</span></summary><div class="tsp-section-body">
+<p>One capsule centred in the top bar. At rest it shows the attention count; a toast expands it downward and it shrinks back when the toast leaves. Most delightful, most motion work, and it competes with the title for header space.</p>
+<div class="tsp-grid" style="--tsp-min:300px">
+<article class="tsp-card" id="d-c"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Phone, expanded</h3><a class="tsp-open" href="_frame-c.html" target="_blank" aria-label="Open Phone, expanded alone">↗</a></header><p class="tsp-why">Error expands the capsule; the attention row stays as its footer so neither hides the other.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-c.html" title="Phone, expanded" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-cx"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Phone, at rest</h3><a class="tsp-open" href="_frame-cx.html" target="_blank" aria-label="Open Phone, at rest alone">↗</a></header><p class="tsp-why">Collapsed capsule in the header&#x27;s dead centre.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-cx.html" title="Phone, at rest" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-cxx"><header class="tsp-card-head"><span class="tsp-n">C</span><h3>Desktop</h3><a class="tsp-open" href="_frame-cxx.html" target="_blank" aria-label="Open Desktop alone">↗</a></header><p class="tsp-why">Capsule centred on the top bar, expanded.</p><div class="tsp-stage" data-width="1280" data-height="800"><iframe class="tsp-frame" src="_frame-cxx.html" title="Desktop" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>B in the states that break today</h2><span class="tsp-count">4</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:300px">
+<article class="tsp-card" id="d-b1"><header class="tsp-card-head"><span class="tsp-n">B1</span><h3>Settle from chat</h3><a class="tsp-open" href="_frame-b1.html" target="_blank" aria-label="Open Settle from chat alone">↗</a></header><p class="tsp-why">You land on the list and the Undo toast is already in its final spot. No sheet, no New session button jumping up.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-b1.html" title="Settle from chat" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-b2"><header class="tsp-card-head"><span class="tsp-n">B2</span><h3>Session sheet open</h3><a class="tsp-open" href="_frame-b2.html" target="_blank" aria-label="Open Session sheet open alone">↗</a></header><p class="tsp-why">Toasts sit above the scrim in the same place, instead of turning into a different component inside the sheet.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-b2.html" title="Session sheet open" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-b3"><header class="tsp-card-head"><span class="tsp-n">B3</span><h3>Typing, ask waiting, alert arrives</h3><a class="tsp-open" href="_frame-b3.html" target="_blank" aria-label="Open Typing, ask waiting, alert arrives alone">↗</a></header><p class="tsp-why">Max two cards, newest nearest the bar. The arrival toast and the error stack; the ask and composer never move.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-b3.html" title="Typing, ask waiting, alert arrives" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-b4"><header class="tsp-card-head"><span class="tsp-n">B4</span><h3>Motion</h3><a class="tsp-open" href="_frame-b4.html" target="_blank" aria-label="Open Motion alone">↗</a></header><p class="tsp-why">Drop in from under the bar, reflow smoothly, fade up on exit, swipe up to dismiss. Loops.</p><div class="tsp-stage" data-width="390" data-height="844"><iframe class="tsp-frame" src="_frame-b4.html" title="Motion" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Visual spec for the toast itself</h2></summary><div class="tsp-section-body">
+<table>
+<tr><th></th><th>Today</th><th>Proposed</th></tr>
+<tr><td>Shadow</td><td><code>0 8px 32px</code> at 40% (the modal shadow)</td><td>1px ring plus <code>0 1px 2px</code> and <code>0 12px 28px -10px</code>. Tight contact edge, no smear.</td></tr>
+<tr><td>Shape</td><td>Phone: full-width sheet. Desktop: 310px card.</td><td>Floating card everywhere. Phone inset 8px, desktop 400px. Radius 14.</td></tr>
+<tr><td>Anchor</td><td>Composer top, measured live</td><td>Bottom edge of the top bar. Fixed. Nothing to measure.</td></tr>
+<tr><td>Motion</td><td>Enter only (slide from side)</td><td>Drop in 240ms, reflow 260ms, exit fade-up 160ms, swipe up. Reduced motion: fade only.</td></tr>
+<tr><td>Short toasts</td><td>Title row, actions on a second row</td><td>One row with an inline action (Undo, Open). Two rows only when there is a body.</td></tr>
+</table>
+</div></details>
+
+</main>
+<footer class="tsp-foot">toast-placement · 2026-10-28T13:00</footer>
+<script>(() => {
+  const root = document.documentElement, KEY = 'tsp-theme';
+  const frames = [...document.querySelectorAll('iframe.tsp-frame')];
+
+  // Theme: one choice shared by every tsp page, applied to the designs only; the chrome stays light.
+  // Each frame gets data-theme, plus color-scheme inline with !important so it beats a design's own
+  // `color-scheme: light dark`, which would otherwise make light-dark() follow the OS.
+  const theme = (d, t) => {
+    d.documentElement.dataset.theme = t;
+    d.documentElement.style.setProperty('color-scheme', t, 'important');
+  };
+  const paint = t => {
+    root.dataset.designTheme = t;
+    for (const f of frames) try { theme(f.contentDocument, t) } catch {}
+  };
+  const toggle = document.querySelector('.tsp-theme');
+  if (toggle && !frames.length && !document.querySelector('[data-theme-only]')) toggle.hidden = true;
+  toggle?.addEventListener('click', () => {
+    const t = root.dataset.designTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(KEY, t);
+    paint(t);
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    if (!localStorage.getItem(KEY)) paint(e.matches ? 'dark' : 'light');
+  });
+
+  // Collapse / expand all sections.
+  const sections = [...document.querySelectorAll('details.tsp-section')];
+  const all = document.querySelector('[data-tsp=toggle-all]');
+  if (all && sections.length > 1) {
+    const label = () => { all.textContent = sections.some(s => s.open) ? 'Collapse all' : 'Expand all' };
+    all.hidden = false;
+    all.addEventListener('click', () => {
+      const open = !sections.some(s => s.open);
+      sections.forEach(s => { s.open = open });
+      label();
+    });
+    sections.forEach(s => s.addEventListener('toggle', label));
+    label();
+  }
+
+  // The home link only resolves when served under /tsp/ (not in committed copies).
+  const home = document.querySelector('.tsp-home');
+  if (home && location.pathname.startsWith('/tsp/') && location.pathname.split('/').filter(Boolean).length > 1) home.hidden = false;
+
+  // Frames: height follows content (or data-height); data-width designs scale down to fit.
+  const fit = f => {
+    const stage = f.parentElement, avail = stage.clientWidth;
+    if (!avail) return;
+    const w = +stage.dataset.width || 0;
+    let h = +stage.dataset.height || 0;
+    if (!h) {
+      try {
+        const b = f.contentDocument.body;
+        h = Math.min(Math.ceil(Math.max(b.scrollHeight, b.getBoundingClientRect().height)), 6000) || 240;
+      } catch { h = 480 }
+    }
+    const s = w && avail < w ? avail / w : 1;
+    f.style.width = w ? `${w}px` : '100%';
+    f.style.marginInline = w && s === 1 ? 'auto' : '0';
+    f.style.height = `${h}px`;
+    f.style.transform = s < 1 ? `scale(${s})` : '';
+    stage.style.height = `${Math.ceil(h * s) + 2}px`;
+  };
+  const stages = new ResizeObserver(es => es.forEach(e => fit(e.target.querySelector('iframe.tsp-frame'))));
+  for (const f of frames) {
+    stages.observe(f.parentElement);
+    const ready = () => {
+      try {
+        const d = f.contentDocument;
+        theme(d, root.dataset.designTheme);
+        new f.contentWindow.ResizeObserver(() => fit(f)).observe(d.body);
+      } catch {}
+      fit(f);
+    };
+    f.addEventListener('load', ready);
+    try { if (f.contentDocument?.readyState === 'complete' && f.contentDocument.URL !== 'about:blank') ready() } catch {}
+  }
+})();
+</script>
+</body></html>

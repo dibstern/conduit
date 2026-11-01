@@ -7,7 +7,7 @@ Scenario Outline: E1 desktop icons open the picker at each control's section and
   And the composer uses icons controls
   And the Claude accounts are claude as personal, self as work
   And the composer picker has the Claude catalog
-  When I tap the icons <control> control
+  When I open options from the icons <control> control
   Then the icons control opens the picker at <section>
   And the picker is a desktop popover
   And the model-picker region visually matches <baseline> at <threshold> percent
@@ -44,7 +44,7 @@ Examples:
   | wide   | composer-icons-picker-e1-model        | 98        |
   | narrow | composer-icons-picker-e1-model-narrow | 98        |
 
-Scenario Outline: E1 desktop icons mode uses the existing approvals menu
+Scenario Outline: E1 desktop icons mode opens the Session Permissions drill-in
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness
   And the harness logo is viewed in the <tier> tier
@@ -53,9 +53,10 @@ Scenario Outline: E1 desktop icons mode uses the existing approvals menu
   And approvals are ask
   When I tap the icons mode control
   Then the approvals menu is ranked dontAsk, plan, ask, acceptEdits, auto, full
-  And the shared composer picker is closed
+  And the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with ask selected
   When I set approvals to auto
   Then the approvals menu is closed
+  And the picker Permissions row reads Auto
   And the mode shield names Auto
   And the mode shield uses the auto tone
   And the composer region visually matches <baseline> at <threshold> percent
@@ -65,6 +66,86 @@ Examples:
   | wide   | composer-icons-mode-menu-wide   | 98        |
   | narrow | composer-icons-mode-menu-narrow | 98        |
 
+Scenario Outline: the permission control opens the Session Permissions drill-in
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer uses <control_style> controls
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  When I tap the <permission_control>
+  Then the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with ask selected
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | control_style | permission_control | baseline                                | threshold |
+  | wide  | words         | approvals word     | composer-picker-permission-word         | 98        |
+  | phone | icons         | icons mode control | composer-picker-permission-shield-phone | 98        |
+
+Scenario Outline: the checkout chip focuses Session Checkout and its row opens details
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the checkout branch can be renamed
+  And the checkout has uncommitted changes, 2 ahead, 1 behind
+  When I open the Session panel from the checkout chip
+  Then the checkout chip opens Session with Checkout focused
+  And the model-picker region visually matches <root_baseline> at <threshold> percent
+  When I view Checkout choices in the picker
+  Then the Checkout drill-in shows git tiles and Rename branch
+  And the model-picker region visually matches <details_baseline> at <threshold> percent
+
+Examples:
+  | tier  | root_baseline                           | details_baseline                           | threshold |
+  | wide  | composer-picker-checkout-chip-root       | composer-picker-checkout-chip-details       | 98        |
+  | phone | composer-picker-checkout-chip-root-phone | composer-picker-checkout-chip-details-phone | 98        |
+
+Scenario Outline: Account choices open from the Session root and Back restores focus
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as personal, self as work
+  And the quota check reads claude <usage_pct>% used, self 90% used
+  And the composer picker has the Claude catalog
+  When I open the model picker
+  Then the picker Account row reads personal with 5h <usage_pct>%
+  When I open the Account drill-in
+  Then the Account drill-in shows account cards and Add account
+  And the claude Account card is selected and in view
+  When I go Back in the picker
+  Then the Account row is focused
+  And the picker Account row reads personal with 5h <usage_pct>%
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | usage_pct | baseline                           | threshold |
+  | wide  | 42        | composer-picker-account-root        | 98        |
+  | phone | 42        | composer-picker-account-root        | 98        |
+
+Scenario Outline: Session actions reload skills and keep Escape inside the menu
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the harness logo is viewed in the <tier> tier
+  And the Claude accounts are claude as personal, self as work
+  And the composer picker has the Claude catalog
+  When I open the model picker
+  And I open the Session actions menu
+  Then the Session actions menu offers Reload skills & commands
+  When I press Escape in the Session actions menu
+  Then only the Session actions menu is closed
+  When I open the Session actions menu
+  And I reload skills and commands from Session actions
+  Then the shared composer picker is closed
+  And the composer region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | baseline                            | threshold |
+  | wide  | composer-picker-after-skills-reload  | 98        |
+  | phone | composer-picker-after-skills-reload  | 98        |
+
 Scenario Outline: C1 draft Claude accounts form a grid and bind the project on tap
   Given the conduit app is served with the connected mockup
   And the harness logo is viewed in the <tier> tier
@@ -73,10 +154,11 @@ Scenario Outline: C1 draft Claude accounts form a grid and bind the project on t
   And the quota check reads claude 62% used, self 90% used
   And I start a new session
   And the composer picker has the Claude catalog
+  When I view Harness choices in the picker
+  Then the picker root sections and rows are harness, account, model, context, effort, agent, permissions
   When I view Account choices in the picker
   Then the Account section has 2 equal-width cards and the caption 5-hour use
   And the picker has no account handoff note
-  And the picker root sections and rows are harness, account, model, context, effort, agent
   And the picker card claude is named personal and shows its account logo
   And the claude Account card shows 62% usage
   And the self Account card shows 90% usage
@@ -197,7 +279,8 @@ Scenario Outline: C2 open Claude cards lock current and limited accounts and swi
   Then the client Account card is selected and in view
   And the client Account card is disabled
   And the composer harness badge for client has its account identity colour
-  And the picker harness badge for client has its account identity colour
+  When I go Back in the picker
+  Then the picker harness badge for client has its account identity colour
 
 Examples:
   | tier  | reading     | baseline                       | threshold |
@@ -331,7 +414,7 @@ Examples:
   | wide  | unhealthy | composer-picker-account-c5-locked | 98        |
   | phone | starting  | composer-picker-account-c5-starting | 98      |
 
-Scenario Outline: C6 a single account or instance hides its section beneath two Harness tabs
+Scenario Outline: C6 a single switchable account keeps its row while a single instance hides it
   Given the conduit app is served with the connected mockup
   And the harness logo is viewed in the <tier> tier
   And the configured Harness choices are Claude, OpenCode
@@ -345,10 +428,10 @@ Scenario Outline: C6 a single account or instance hides its section beneath two 
 
 Examples:
   | tier  | harness  | rows                                   | baseline                            | threshold |
-  | wide  | Claude   | harness, model, context, effort, agent | composer-picker-account-c6-claude   | 98        |
-  | phone | Claude   | harness, model, context, effort, agent | composer-picker-account-c6-claude   | 98        |
-  | wide  | OpenCode | harness, model, context, agent         | composer-picker-account-c6-opencode | 98        |
-  | phone | OpenCode | harness, model, context, agent         | composer-picker-account-c6-opencode | 98        |
+  | wide  | Claude   | harness, account, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
+  | phone | Claude   | harness, account, model, context, effort, agent, permissions | composer-picker-account-c6-claude   | 98        |
+  | wide  | OpenCode | harness, model, context, agent                      | composer-picker-account-c6-opencode | 98        |
+  | phone | OpenCode | harness, model, context, agent                      | composer-picker-account-c6-opencode | 98        |
 
 Scenario Outline: C1 two harnesses are equal-width tabs in the picker root
   Given the conduit app is served with the connected mockup
@@ -484,7 +567,7 @@ Examples:
   | baseline                             | threshold |
   | composer-picker-context-static-phone | 98        |
 
-Scenario Outline: phone Default starts unselected and xhigh persists through the composer sheet
+Scenario Outline: phone Default starts unselected and xhigh persists through the Session panel
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And a session already exists on the Claude harness
@@ -495,9 +578,9 @@ Scenario Outline: phone Default starts unselected and xhigh persists through the
   When I select effort xhigh in the picker
   Then the picker effort xhigh is selected while the root remains open
   When I close the model picker
-  And I open the phone composer sheet
-  Then the phone composer Effort row reads xhigh
-  When I tap the phone composer Effort row
+  And I open the phone Session panel
+  Then the phone Session panel Effort row reads xhigh
+  When I tap the phone Session panel Effort row
   Then the picker effort xhigh is selected while the root remains open
 
 Examples:
@@ -534,3 +617,68 @@ Scenario Outline: desktop opens the same root rows in a popover
 Examples:
   | baseline                     | threshold |
   | composer-picker-root-desktop | 98        |
+
+Scenario Outline: Session Permissions choices update both the panel and composer control
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer uses icons controls
+  And the composer picker has the Claude catalog
+  And approvals are ask
+  When I open the model picker
+  Then the picker Permissions row reads Ask before edits
+  When I view Permissions choices in the picker
+  Then the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with ask selected
+  When I choose permission acceptEdits in the picker
+  Then the picker Permissions row reads Auto-accept edits
+  And the approvals chip shows Auto-accept edits
+  When I view Permissions choices in the picker
+  Then the picker lists permission modes dontAsk, plan, ask, acceptEdits, auto, full with acceptEdits selected
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | baseline                          | threshold |
+  | wide  | composer-picker-permissions       | 98        |
+  | phone | composer-picker-permissions-phone | 98        |
+
+Scenario Outline: Session Checkout lists worktrees and moves the current session
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the checkout worktrees are account-chip at /workspace/conduit and main at /workspace/conduit-main
+  When I open the model picker
+  Then the picker Checkout row reads conduit / account-chip
+  When I view Checkout choices in the picker
+  Then the picker lists both checkout worktrees with /workspace/conduit checked
+  When I choose the picker worktree at /workspace/conduit-main
+  Then the shared composer picker is closed
+  And the checkout Move RPC targets /workspace/conduit-main
+  When I view Checkout choices in the picker
+  Then the picker lists both checkout worktrees with /workspace/conduit-main checked
+  And the model-picker region visually matches <baseline> at <threshold> percent
+
+Examples:
+  | tier  | baseline                       | threshold |
+  | wide  | composer-picker-checkout       | 98        |
+  | phone | composer-picker-checkout-phone | 98        |
+
+Scenario Outline: Session Checkout mismatch shows one warning and an inline Dismiss action
+  Given the conduit app is served with the connected mockup
+  And the harness logo is viewed in the <tier> tier
+  And a session already exists on the Claude harness
+  And the composer picker has the Claude catalog
+  And the composer checkout is conduit / account-chip as worktree
+  And the session has a workspace mismatch at /workspace/conduit-actual
+  When I open the model picker
+  Then the picker Checkout row reads conduit / account-chip
+  And the picker Checkout row has one warning and an inline mismatch notice for /workspace/conduit-actual
+  And the model-picker region visually matches <baseline> at <threshold> percent
+  When I dismiss the picker checkout notice
+  Then the picker checkout warning and inline notice are cleared
+
+Examples:
+  | tier  | baseline                                 | threshold |
+  | wide  | composer-picker-checkout-mismatch         | 98        |
+  | phone | composer-picker-checkout-mismatch-phone   | 98        |

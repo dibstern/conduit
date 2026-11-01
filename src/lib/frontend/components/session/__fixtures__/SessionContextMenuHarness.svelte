@@ -2,6 +2,7 @@
 	import type { SessionInfo, ToastCard } from "../../../types.js";
 	import SessionContextMenu from "../SessionContextMenu.svelte";
 	import SnoozePickerHost from "../SnoozePickerHost.svelte";
+	import Toast from "../../overlays/Toast.svelte";
 	import { snoozePicker } from "../../../stores/snooze-picker.svelte.js";
 	import Button from "../../ui/Button.svelte";
 	import { chromeMenuActions } from "../../layout/chrome-actions.js";
@@ -45,6 +46,7 @@
 </div>
 
 <SnoozePickerHost />
+<Toast />
 
 {#if anchor}
 	<SessionContextMenu

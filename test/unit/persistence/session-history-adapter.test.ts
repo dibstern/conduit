@@ -66,6 +66,107 @@ function makeMessageWithParts(
 }
 
 describe("messageRowsToHistory", () => {
+	// Provider snapshots and projected rows must share the cap, and canonical
+	// fallback must run on the full input before that input is previewed.
+	it.each([
+		true,
+		false,
+	])("caps snapshot file changes and legacy fallback, recorded=%s", (recorded) => {
+		const after = "😀".repeat(2_500);
+		const fileChanges = [{ path: "a.ts", kind: "add", before: "", after }];
+		const input = { tool: "Write", filePath: "a.ts", content: after };
+		const [snapshot] = messageRowsToHistory(
+			[
+				makeMessageWithParts("snapshot", {
+					role: "assistant",
+					rest_payload: JSON.stringify({
+						id: "snapshot",
+						role: "assistant",
+						parts: [
+							{
+								id: "p",
+								type: "tool",
+								tool: "Write",
+								state: {
+									status: "completed",
+									input,
+									...(recorded ? { fileChanges } : {}),
+								},
+							},
+						],
+					}),
+				}),
+			],
+			{ pageSize: 50 },
+		).messages;
+		expect(snapshot?.parts?.[0]?.state).toMatchObject({
+			fileChanges: [{ ...fileChanges[0], after: "😀".repeat(2_000) }],
+			fileChangesBytes: Buffer.byteLength(after),
+		});
+	});
+	it.each([
+		true,
+		false,
+	])("serves typed file changes and legacy canonical fallback, recorded=%s", (recorded) => {
+		const fileChanges = [
+			{ path: "a.ts", kind: "update", before: "old", after: "new" },
+		];
+		const result = messageRowsToHistory(
+			[
+				makeMessageWithParts("m1", {
+					role: "assistant",
+					parts: [
+						makePartRow("p1", "m1", {
+							type: "tool",
+							tool_name: "Edit",
+							status: "completed",
+							input: JSON.stringify({
+								tool: "Edit",
+								filePath: "a.ts",
+								oldString: "old",
+								newString: "new",
+							}),
+							metadata: recorded ? JSON.stringify({ fileChanges }) : null,
+						}),
+					],
+				}),
+			],
+			{ pageSize: 50 },
+		);
+		expect(result.messages[0]?.parts?.[0]?.state?.fileChanges).toEqual(
+			fileChanges,
+		);
+	});
+	it("keeps failed tools free of inferred changes and moves presentation decoding out of cards", () => {
+		const result = messageRowsToHistory(
+			[
+				makeMessageWithParts("m1", {
+					role: "assistant",
+					parts: [
+						makePartRow("p1", "m1", {
+							type: "tool",
+							tool_name: "Write",
+							status: "error",
+							input: JSON.stringify({
+								tool: "Write",
+								filePath: "a.ts",
+								content: "new",
+							}),
+							metadata: JSON.stringify({
+								cursorToolType: "write",
+								plan: { content: "Plan text" },
+								fileChange: { filePath: "wrong.ts" },
+							}),
+						}),
+					],
+				}),
+			],
+			{ pageSize: 50 },
+		);
+		const state = result.messages[0]?.parts?.[0]?.state;
+		expect(state?.fileChanges).toBeUndefined();
+		expect(state?.presentation).toEqual({ plan: { content: "Plan text" } });
+	});
 	it.each([
 		{ status: "error", metadata: {}, outcome: "failed" },
 		{
@@ -402,6 +503,7 @@ describe("messageRowsToHistory", () => {
 				cursorToolType: "shellToolCall",
 				output: "first line\n",
 				truncated: true,
+				fileChange: { filePath: "a.ts", diff: "x".repeat(100_000) },
 			},
 			expected: {
 				cursorToolType: "shellToolCall",

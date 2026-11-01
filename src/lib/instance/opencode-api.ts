@@ -83,6 +83,16 @@ export interface OpenCodeAPIOptions {
  * clean, caller-friendly interface. All SDK calls pass through the
  * private `sdk()` helper which handles error translation.
  */
+const imagePart = (dataUrl: string) => {
+	const { mime, data, name } = parseAttachmentDataUrl(dataUrl);
+	return {
+		type: "file" as const,
+		mime,
+		...(name ? { filename: name } : {}),
+		url: `data:${mime};base64,${data}`,
+	};
+};
+
 export class OpenCodeAPI {
 	readonly processIdentity: string;
 	readonly promptProcessId: string | undefined;
@@ -365,7 +375,7 @@ class SessionNamespace {
 		);
 	}
 
-	/** Flatten the SDK's validated `{ info, parts }` message envelopes. */
+	/** Without a limit, OpenCode reads every native page before returning. */
 	async messages(
 		sessionId: string,
 		options?: { limit?: number; signal?: AbortSignal },
@@ -422,6 +432,18 @@ class SessionNamespace {
 		return flattenMessage(data);
 	}
 
+	async deleteMessage(sessionId: string, messageId: string): Promise<void> {
+		await this.api.sdk(
+			"session.deleteMessage",
+			decodeOpenCodeBooleanResponse,
+			() =>
+				this.api._sdk.session.deleteMessage({
+					sessionID: sessionId,
+					messageID: messageId,
+				}),
+		);
+	}
+
 	async prompt(sessionId: string, options: PromptOptions): Promise<void> {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({
@@ -436,21 +458,45 @@ class SessionNamespace {
 					...(options.text
 						? [{ type: "text" as const, text: options.text }]
 						: []),
-					...(options.images ?? []).map((value) => {
-						const { mime, data, name } = parseAttachmentDataUrl(value);
-						return {
-							type: "file" as const,
-							mime,
-							...(name ? { filename: name } : {}),
-							url: `data:${mime};base64,${data}`,
-						};
-					}),
+					...(options.images ?? []).map(imagePart),
 				],
 				...(options.system !== undefined ? { system: options.system } : {}),
 				...(options.model != null ? { model: options.model } : {}),
 				...(options.agent != null ? { agent: options.agent } : {}),
 				...(options.variant ? { variant: options.variant } : {}),
 			}),
+		);
+	}
+
+	/** Runs an OpenCode command. Unlike prompt, it replies only once the turn ends. */
+	async command(
+		sessionId: string,
+		command: { readonly name: string; readonly arguments: string },
+		options: Omit<PromptOptions, "text" | "system">,
+	): Promise<void> {
+		await this.api.sdk(
+			"session.command",
+			decodeOpenCodeMessageWithPartsResponse,
+			() =>
+				this.api._sdk.session.command({
+					sessionID: sessionId,
+					command: command.name,
+					arguments: command.arguments,
+					...(options.messageId !== undefined
+						? { messageID: options.messageId }
+						: {}),
+					...(options.directory !== undefined
+						? { directory: options.directory }
+						: {}),
+					...(options.images?.length
+						? { parts: options.images.map(imagePart) }
+						: {}),
+					...(options.model != null
+						? { model: `${options.model.providerID}/${options.model.modelID}` }
+						: {}),
+					...(options.agent != null ? { agent: options.agent } : {}),
+					...(options.variant ? { variant: options.variant } : {}),
+				}),
 		);
 	}
 
@@ -499,21 +545,6 @@ class SessionNamespace {
 	): Promise<SessionDetail> {
 		return this.api.sdk("session.fork", decodeSessionDetailResponse, () =>
 			this.api._sdk.session.fork({ sessionID: sessionId, ...options }),
-		);
-	}
-
-	async revert(
-		sessionId: string,
-		options: { messageID: string; partID?: string },
-	): Promise<void> {
-		await this.api.sdk("session.revert", decodeOpenCodeSessionResponse, () =>
-			this.api._sdk.session.revert({ sessionID: sessionId, ...options }),
-		);
-	}
-
-	async unrevert(sessionId: string): Promise<void> {
-		await this.api.sdk("session.unrevert", decodeOpenCodeSessionResponse, () =>
-			this.api._sdk.session.unrevert({ sessionID: sessionId }),
 		);
 	}
 

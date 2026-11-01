@@ -14,6 +14,7 @@ import {
 	accountsStateFromConfig,
 	defaultFor,
 	list,
+	NO_OPENCODE_HEALTH,
 	resolve,
 } from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
@@ -61,7 +62,7 @@ const state = (): AccountsState =>
 		launch,
 	);
 const route = (input: AccountsState, id: string) =>
-	resolve(input, { _tag: "Id", id });
+	resolve(input, { _tag: "Id", id }, NO_OPENCODE_HEALTH);
 const tempDirs: string[] = [];
 afterEach(() => {
 	for (const dir of tempDirs.splice(0))
@@ -76,7 +77,7 @@ describe("account directory reads", () => {
 				.filter((account) => account.isDefault)
 				.map((account) => account.id),
 		).toEqual(["claude", "opencode"]);
-		expect(defaultFor(input, "claude")).toEqual(
+		expect(defaultFor(input, "claude", NO_OPENCODE_HEALTH)).toEqual(
 			Option.some(Either.getOrThrow(route(input, "claude"))),
 		);
 		expect(Either.getOrThrow(route(input, "work"))).toMatchObject({
@@ -122,9 +123,13 @@ describe("account directory reads", () => {
 		};
 		for (const id of ["claude", "claude-sdk", "removed"])
 			expect(route(moved, id)).toEqual(Either.succeed(work));
-		expect(resolve(moved, { _tag: "DriverDefault", driver: "claude" })).toEqual(
-			Either.succeed(work),
-		);
+		expect(
+			resolve(
+				moved,
+				{ _tag: "DriverDefault", driver: "claude" },
+				NO_OPENCODE_HEALTH,
+			),
+		).toEqual(Either.succeed(work));
 	});
 
 	it("rejects unknown ids and defaults of drivers with no accounts, naming the ref", () => {
@@ -141,7 +146,7 @@ describe("account directory reads", () => {
 			{ _tag: "DriverDefault", driver: "claude" },
 			{ _tag: "DriverDefault", driver: "opencode" },
 		] as const) {
-			const result = resolve(empty, ref);
+			const result = resolve(empty, ref, NO_OPENCODE_HEALTH);
 			expect(Either.isFailure(result)).toBe(true);
 			if (Either.isFailure(result)) {
 				expect(result.failure.ref).toEqual(ref);
@@ -150,8 +155,12 @@ describe("account directory reads", () => {
 				);
 			}
 		}
-		expect(defaultFor(empty, "claude")).toEqual(Option.none());
-		expect(defaultFor(empty, "opencode")).toEqual(Option.none());
+		expect(defaultFor(empty, "claude", NO_OPENCODE_HEALTH)).toEqual(
+			Option.none(),
+		);
+		expect(defaultFor(empty, "opencode", NO_OPENCODE_HEALTH)).toEqual(
+			Option.none(),
+		);
 		expect(list(empty)).toEqual([]);
 	});
 
@@ -165,10 +174,16 @@ describe("account directory reads", () => {
 					claude: Option.some(AccountIdSchema.make(id)),
 				},
 			};
-			expect(defaultFor(dangling, "claude")).toEqual(Option.none());
+			expect(defaultFor(dangling, "claude", NO_OPENCODE_HEALTH)).toEqual(
+				Option.none(),
+			);
 			expect(
 				Either.isFailure(
-					resolve(dangling, { _tag: "DriverDefault", driver: "claude" }),
+					resolve(
+						dangling,
+						{ _tag: "DriverDefault", driver: "claude" },
+						NO_OPENCODE_HEALTH,
+					),
 				),
 			).toBe(true);
 		}

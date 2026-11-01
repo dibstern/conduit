@@ -281,7 +281,7 @@ export const surfacingReplyHandlers: StepHandler[] = [
 		name: "assert the phone summary sheet gives the composer back",
 		match: /^the summary is closed only on a phone$/,
 		run: async ({ world }) => {
-			const phone = (world.page.viewportSize()?.width ?? 1440) < 600;
+			const phone = (world.page.viewportSize()?.width ?? 1440) < 768;
 			await expect(summary(world.page)).toHaveCount(phone ? 0 : 1);
 			await expect(world.page.locator("#input")).toBeVisible();
 		},

@@ -23,6 +23,7 @@ import {
 	accountsStateFromConfig,
 	defaultFor,
 	list,
+	NO_OPENCODE_HEALTH,
 	resolve,
 } from "../../../src/lib/account-directory.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../../src/lib/contracts/worktree.js";
@@ -133,9 +134,11 @@ describe("account config migration", () => {
 		expect(
 			config.instances?.find((account) => account.id === "claude"),
 		).toMatchObject({ configDir: folder });
-		expect(defaultFor(accounts, "claude")).toEqual(
+		expect(defaultFor(accounts, "claude", NO_OPENCODE_HEALTH)).toEqual(
 			Option.some(
-				Either.getOrThrow(resolve(accounts, { _tag: "Id", id: "claude" })),
+				Either.getOrThrow(
+					resolve(accounts, { _tag: "Id", id: "claude" }, NO_OPENCODE_HEALTH),
+				),
 			),
 		);
 		expect(decode(config)).toEqual(config);
@@ -161,7 +164,10 @@ describe("account config migration", () => {
 				},
 			],
 		});
-		expect(config.accountDefaults).toEqual({ claude: "claude" });
+		expect(config.accountDefaults).toEqual({
+			claude: "claude",
+			opencode: "opencode",
+		});
 	});
 
 	it("saves a migrated snapshot once and decodes the saved config identically", async () => {
@@ -205,7 +211,9 @@ describe("account config migration", () => {
 				}),
 			]);
 			expect(
-				Either.getOrThrow(resolve(accounts, { _tag: "Id", id: "claude" })),
+				Either.getOrThrow(
+					resolve(accounts, { _tag: "Id", id: "claude" }, NO_OPENCODE_HEALTH),
+				),
 			).not.toHaveProperty("configuredFolder");
 		}
 		await saveDaemonConfig(defaultDaemonConfig(), dir);
@@ -235,15 +243,19 @@ describe("account config migration", () => {
 			claudeConfigDir: "/retired-login",
 			accountDefaults,
 		});
-		expect(config.accountDefaults).toEqual({});
+		expect(config.accountDefaults).toEqual({ opencode: "opencode" });
 		await saveDaemonConfig(config, dir);
 		const restarted = Either.getOrThrow(loadAccountsState(dir, launch));
 		expect(
 			list(restarted).filter((account) => account.driver === "claude"),
 		).toEqual([]);
-		expect(defaultFor(restarted, "claude")).toEqual(Option.none());
+		expect(defaultFor(restarted, "claude", NO_OPENCODE_HEALTH)).toEqual(
+			Option.none(),
+		);
 		expect(
-			Either.isFailure(resolve(restarted, { _tag: "Id", id: "claude" })),
+			Either.isFailure(
+				resolve(restarted, { _tag: "Id", id: "claude" }, NO_OPENCODE_HEALTH),
+			),
 		).toBe(true);
 		expect(decode(config)).toEqual(config);
 	});
@@ -281,7 +293,11 @@ describe("account config migration", () => {
 		]) {
 			expect(
 				Either.getOrThrow(
-					resolve(accounts, accountRefFromSelection(selection)),
+					resolve(
+						accounts,
+						accountRefFromSelection(selection),
+						NO_OPENCODE_HEALTH,
+					),
 				),
 			).toMatchObject({
 				id: "personal",
@@ -289,7 +305,9 @@ describe("account config migration", () => {
 			});
 		}
 		expect(
-			Either.getOrThrow(resolve(accounts, { _tag: "Id", id: "claude" })),
+			Either.getOrThrow(
+				resolve(accounts, { _tag: "Id", id: "claude" }, NO_OPENCODE_HEALTH),
+			),
 		).toMatchObject({
 			id: "claude",
 			folder: configuredClaudeConfigDir("/original"),

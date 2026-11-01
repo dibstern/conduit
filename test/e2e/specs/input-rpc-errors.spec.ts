@@ -131,7 +131,9 @@ test("background task stop shows the server refusal and keeps the task", async (
 			},
 		],
 	});
-	await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
+	await page
+		.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
+		.click();
 	await page.getByTestId("background-task-stop").click();
 	const toast = page.getByRole("alert");
 	await expect(toast).toContainText("Failed to stop background task");
@@ -190,7 +192,7 @@ for (const ending of [
 		};
 		rpc.upsertShellRow(row);
 		await expect(
-			page.getByRole("button", { name: "2 background tasks", exact: true }),
+			page.getByRole("button", { name: /^2 background tasks(:|$)/ }),
 		).toBeVisible();
 		await page.locator("#stop").click();
 		const cancel = await rpc.waitForRequest(
@@ -236,8 +238,7 @@ for (const ending of [
 				// Requests alone do not remove tasks; the server owns their rows.
 				await expect(
 					page.getByRole("button", {
-						name: "2 background tasks",
-						exact: true,
+						name: /^2 background tasks(:|$)/,
 					}),
 				).toBeVisible();
 				rpc.upsertShellRow({ ...row, status: "idle", backgroundTasks: [] });

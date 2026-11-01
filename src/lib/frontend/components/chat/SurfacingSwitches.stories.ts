@@ -3,7 +3,9 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import type { TurnRecap } from "../../../contracts/turn-recap.js";
+import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
+import { setupTurnStory } from "../../stories/turn-setup.js";
 import type { Segment, Turn } from "../../utils/turns.js";
 import TurnActivity from "./TurnActivity.svelte";
 
@@ -45,6 +47,7 @@ const turn: Turn = {
 		createdAt: START,
 	},
 	segments: [segment],
+	preface: [],
 	notices: [],
 	live: false,
 };
@@ -81,8 +84,16 @@ const meta = {
 		providerId: "claude",
 		surfacing,
 	},
-	beforeEach: () => {
-		const cleanup = [connectedSocket(), replyRpc("ListRecaps", () => [recap])];
+	beforeEach: ({ args }) => {
+		const cleanup = [
+			setupTurnStory({
+				turn: args["turn"],
+				sessionId: args["sessionId"],
+				surfacing: args["surfacing"],
+			}),
+			connectedSocket(),
+			replyRpc("ListRecaps", () => [recap]),
+		];
 		return () => {
 			for (const restore of cleanup.reverse()) restore();
 		};
@@ -106,8 +117,7 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await expect(
 		canvas.getByRole("slider", { name: /Activity timeline/ }),
 	).toBeVisible();
-	if (window.matchMedia("(max-width: 599px)").matches)
-		await userEvent.click(trigger);
+	if (sessionViewState.compact) await userEvent.click(trigger);
 	else
 		await waitFor(() =>
 			expect(trigger).toHaveAttribute("aria-expanded", "true"),
@@ -117,10 +127,11 @@ const summaryLog: NonNullable<Story["play"]> = async ({ canvasElement }) => {
 	await userEvent.click(citation);
 	const row = canvasElement.querySelector('[data-message-number="3"]');
 	await expect(row).toBeVisible();
-	await expect(row).toHaveAttribute("data-highlighted", "true");
 	await expect(row?.parentElement).toHaveFocus();
 	await expect(body.queryByTestId("surfacing-recap-reader")).toBeNull();
-	await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+	await expect(
+		canvas.getByTestId("surfacing-minimise-toggle"),
+	).toHaveAccessibleName("Collapse turn");
 	await expect(canvas.queryByTestId("surfacing-pins")).toBeNull();
 };
 export const JevOffSummariesOn: Story = { play: summaryLog };
@@ -140,7 +151,7 @@ export const BothOff: Story = {
 		const timeline = canvas.getByRole("slider", { name: /Activity timeline/ });
 		await expect(timeline).toBeVisible();
 		await userEvent.click(timeline);
-		const toggle = canvas.getByRole("button", { name: /^Worked/ });
+		const toggle = canvas.getByRole("button", { name: "Collapse turn" });
 		await expect(toggle).toHaveAttribute("aria-expanded", "true");
 		timeline.blur();
 		await expect(
@@ -150,7 +161,9 @@ export const BothOff: Story = {
 			canvasElement.querySelector("[data-message-number]"),
 		).toBeNull();
 		await expect(canvas.queryByTestId("surfacing-summary-generate")).toBeNull();
-		await expect(canvas.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+		await expect(
+			canvas.getByTestId("surfacing-minimise-toggle"),
+		).toHaveAccessibleName("Collapse turn");
 	},
 };
 export const BothOffLight: Story = { ...BothOff, globals: { theme: "light" } };

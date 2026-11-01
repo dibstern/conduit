@@ -294,6 +294,7 @@ describe("createProjectRelay override-state defaults", () => {
 			opencodeUrl: "http://127.0.0.1:9",
 			projectDir: process.cwd(),
 			slug: "test-aborted-relay",
+			// A shared fixed path inherits another branch's stale schema.
 			persistenceDbPath: join(
 				mkdtempSync(join(tmpdir(), "conduit-aborted-relay-")),
 				"events.db",

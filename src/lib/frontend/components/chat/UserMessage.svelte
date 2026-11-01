@@ -13,6 +13,7 @@
 	import { SvelteSet } from "svelte/reactivity";
 	import type { UserMessage } from "../../types.js";
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
+	import { openMediaViewer } from "../../stores/ui.svelte.js";
 	import {
 		discoveryState,
 		getModelDisplayName,
@@ -52,7 +53,7 @@
 	const failedImages = new SvelteSet<string>();
 </script>
 
-<div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid}>
+<div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid} data-message-id={message.messageId}>
 	<AvatarPicker>
 		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start h-[28px] rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
 	</AvatarPicker>
@@ -88,7 +89,9 @@
 						{#if failedImages.has(url)}
 							<span role="img" aria-label={attachment.name} class="flex size-[96px] items-center justify-center rounded-[10px] bg-bg-raised p-2 text-center text-xs text-text-muted">image unavailable</span>
 						{:else}
-							<img src={url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" onerror={() => failedImages.add(url)} />
+							<Button variant="ghost" hoverFill="none" size="content" ariaLabel={`View image ${attachment.name}`} class="rounded-[10px] cursor-zoom-in" onclick={(event) => openMediaViewer({ kind: "image", src: url }, event.currentTarget)}>
+								<img src={url} alt={attachment.name} class="size-[96px] rounded-[10px] bg-bg-raised object-contain" onerror={() => failedImages.add(url)} />
+							</Button>
 						{/if}
 					{:else}
 						<FileAttachmentChip testid="user-message-file" name={attachment.name} detail={attachment.size === undefined ? attachment.mime : `${attachment.mime} · ${formatFileSize(attachment.size)}`} />

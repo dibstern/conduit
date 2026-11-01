@@ -74,6 +74,9 @@ const DIRECTORY_EVENTS = [
 // These are the only captured envelopes with no directory. project.updated
 // instead carries the literal "global", not the directory that triggered it.
 const NO_DIRECTORY_EVENTS = ["server.connected", "server.heartbeat"];
+// The shared server's own instance is this checkout, so any edit in it during
+// the run publishes file-watcher and VCS envelopes under its real project id.
+const SERVER_DIRECTORY = realpathSync(process.cwd());
 
 function assertRouting(envelopes: Envelope[], sessions: Map<string, string>) {
 	const directories = [...new Set(sessions.values())];
@@ -81,6 +84,7 @@ function assertRouting(envelopes: Envelope[], sessions: Map<string, string>) {
 	expect(sessions.size).toBe(4);
 	for (const envelope of envelopes) {
 		const { payload, directory } = envelope;
+		if (directory === SERVER_DIRECTORY) continue;
 		expect(payload.id).toEqual(expect.any(String));
 		if (NO_DIRECTORY_EVENTS.includes(payload.type)) {
 			expect(envelope).not.toHaveProperty("directory");

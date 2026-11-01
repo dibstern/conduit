@@ -167,6 +167,7 @@ export const taskDrillInHandlers: StepHandler[] = [
 				id: parentOf(world.page),
 				// undefined drops out of the JSON snapshot, clearing the tasks.
 				backgroundWork: undefined,
+				attention: undefined,
 				backgroundTasks: undefined,
 			});
 			upsertRow(world.page, { id: FLAKY_TEST_SESSION, status: "idle" });
@@ -316,7 +317,7 @@ export const taskDrillInHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert the pull-down reopened",
-		match: /^the background tasks pull-down is open again$/,
+		match: /^the background tasks pull-down is (?:open again|still open)$/,
 		run: async ({ world }) => {
 			await expect(panel(world.page)).toBeVisible();
 			await expect(

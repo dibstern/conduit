@@ -33,8 +33,13 @@ export function createCursorSdkPort(account?: {
 					tracePath,
 					process.env["NODE_ENV"] === "test"
 						? {
-								...(account && typeof account.id === "string"
-									? { accountId: account.id }
+								...(account
+									? {
+											accountId:
+												typeof account.id === "string"
+													? account.id
+													: "__cursor_login__",
+										}
 									: {}),
 								...(authStatePath ? { authStatePath } : {}),
 								loginDelayMs: Number(

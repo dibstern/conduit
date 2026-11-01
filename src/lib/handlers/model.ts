@@ -8,7 +8,6 @@ import {
 	Ref,
 	Result,
 } from "effect";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../account-directory.js";
 import type { Account } from "../contracts/account.js";
 import type { AccountUnroutable } from "../contracts/limit-recovery.js";
 import {
@@ -59,7 +58,10 @@ import { formatErrorDetail } from "../errors.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { isSameModelIdentity } from "../provider/claude/claude-api-model-id.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
-import { resolveTitleGeneration } from "../provider/title-generation.js";
+import {
+	resolveTitleGeneration,
+	resolveTitleGenerationAccount,
+} from "../provider/title-generation.js";
 import {
 	catalogFromProviderList,
 	findCatalogModel,
@@ -355,17 +357,22 @@ export const getModelsResponse = (
 				yield* discover(fallback);
 		}
 
+		const defaultOpenCode = Option.getOrUndefined(
+			yield* directory.defaultFor("opencode"),
+		);
 		const inventoryInstanceId =
 			(getProviderDriver(activeDriver)?.catalogSource === "server"
 				? activeAccount?.id
-				: undefined) ?? instanceId;
+				: undefined) ??
+			instanceId ??
+			defaultOpenCode?.id;
 		const providers: ProviderInfo[] = [];
 		let nativeDefaultModel: string | undefined;
 		if (
 			getProviderDriver(instanceDriver)?.catalogSource === "server" ||
 			(instanceDriver === undefined &&
 				(getProviderDriver(activeDriver)?.catalogSource === "server" ||
-					((yield* directory.defaultFor("opencode"))._tag === "Some" &&
+					(defaultOpenCode !== undefined &&
 						(account === undefined || account.id === listedId))))
 		) {
 			const openCodeProviderResult = yield* Effect.result(
@@ -383,11 +390,7 @@ export const getModelsResponse = (
 					openCodeProviderResult.success.nativeDefaultModel,
 				);
 				const { globalSync } = yield* ProjectSettingsTag;
-				if (
-					inventoryInstanceId === undefined ||
-					inventoryInstanceId ===
-						(config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID)
-				)
+				if (inventoryInstanceId === defaultOpenCode?.id)
 					yield* globalSync.withPermits(1)(
 						Effect.gen(function* () {
 							const state = yield* Ref.get(yield* OverridesStateTag);
@@ -585,8 +588,6 @@ export const getModelsResponse = (
 
 		return {
 			projectSlug: input.projectSlug ?? "",
-			defaultOpenCodeInstanceId:
-				config.openCodeInstanceId ?? MANAGED_OPENCODE_ACCOUNT_ID,
 			...((activeAccount?.id ?? instanceId) === undefined
 				? {}
 				: { instanceId: activeAccount?.id ?? instanceId }),
@@ -868,20 +869,21 @@ export const setTitleGenerationForRelay = (
 ) =>
 	Effect.gen(function* () {
 		const config = yield* ConfigTag;
-		let saved = selection;
 		if (selection !== null) {
 			const directory = yield* AccountDirectory;
-			const accounts = yield* directory.snapshot;
+			const account = yield* resolveTitleGenerationAccount(
+				selection,
+				directory,
+			);
 			const candidate = resolveTitleGeneration(
 				selection,
-				accounts,
+				account,
 				() => undefined,
 			);
-			if (candidate.status !== "unverified")
+			if (candidate.status !== "unverified" || !account)
 				return yield* Effect.fail(
 					new Error(candidate.problem ?? "Invalid title generation selection"),
 				);
-			const account = yield* directory.resolve(candidate.pick.account);
 			const catalog = yield* loadModelCatalog(account.driver, account.id, {
 				startIfStopped: true,
 			});
@@ -892,7 +894,7 @@ export const setTitleGenerationForRelay = (
 			}
 			const resolved = resolveTitleGeneration(
 				selection,
-				accounts,
+				account,
 				() => catalog,
 			);
 			if (resolved.status !== "ok")
@@ -901,10 +903,9 @@ export const setTitleGenerationForRelay = (
 						resolved.problem ?? "Title generation catalog is unavailable",
 					),
 				);
-			saved = resolved.pick;
 		}
 		yield* saveRelaySettingsEffect(
-			{ titleGeneration: saved },
+			{ titleGeneration: selection },
 			config.configDir,
 		);
 		yield* publishGlobalProjectSetting("titleGeneration");

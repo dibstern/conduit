@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
+import { expect, waitFor } from "storybook/test";
 import { flushSync } from "svelte";
 import {
 	applyApprovalEnvelope,
@@ -74,7 +75,7 @@ function setupAttention(opts: {
 
 		applyApprovalEnvelope({
 			_tag: "snapshot",
-			sequence: 1,
+			sequence: ++sequence,
 			rows: (opts.permissions ?? []).map((p) => ({
 				_tag: "permission" as const,
 				requestId: p.id as PermissionId,
@@ -121,50 +122,38 @@ export const ErrorToast: Story = {
 	},
 };
 
-export const AttentionOnly: Story = {
-	beforeEach: () => {
-		setupAttention({
-			permissions: [
-				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },
-			],
-			questionSessions: ["ses_other2"],
-			sessionTitles: {
-				ses_other1: "Fix authentication bug",
-				ses_other2: "API redesign",
-			},
-		});
-	},
+const titles = {
+	ses_other1: "Fix authentication bug",
+	ses_other2: "API redesign",
+	ses_other3: "Release notes",
 };
 
-export const Combined: Story = {
-	name: "Permissions + Questions + Toasts",
+/** Release notes was already waiting at load, so only the two arrivals toast. */
+export const ArrivalToasts: Story = {
+	name: "Other sessions start needing you",
 	beforeEach: () => {
+		setupAttention({ questionSessions: ["ses_other3"], sessionTitles: titles });
+	},
+	play: async () => {
+		await expect(
+			document.querySelectorAll('[data-testid="toast"]'),
+		).toHaveLength(0);
 		setupAttention({
 			permissions: [
 				{ id: "perm-1", sessionId: "ses_other1", toolName: "bash" },
-				{ id: "perm-2", sessionId: "ses_other1", toolName: "edit" },
 			],
-			questionSessions: ["ses_other2"],
-			sessionTitles: {
-				ses_other1: "Fix authentication bug",
-				ses_other2: "API redesign",
-			},
+			questionSessions: ["ses_other2", "ses_other3"],
+			sessionTitles: titles,
 		});
-		setToasts([
-			{
-				id: "t2",
-				title: "Rate limited",
-				actions: [],
-				variant: "warn",
-				duration: 999999,
-			},
-			{
-				id: "t3",
-				title: "Failed to send message",
-				actions: [],
-				variant: "error",
-				duration: 999999,
-			},
-		]);
+		await waitFor(() =>
+			expect(
+				[...document.querySelectorAll('[data-testid="toast"]')].map((toast) =>
+					toast.textContent?.trim(),
+				),
+			).toEqual([
+				expect.stringContaining("API redesign has a question"),
+				expect.stringContaining("Fix authentication bug needs approval"),
+			]),
+		);
 	},
 };

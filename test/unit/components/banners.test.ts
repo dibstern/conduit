@@ -170,7 +170,7 @@ describe("Banners", () => {
 	it.each([
 		undefined,
 		"work-oc",
-	])("uses the relay's default alias with project instance %s", async (projectInstanceId) => {
+	])("keeps managed connection status separate with project instance %s", async (projectInstanceId) => {
 		applyInstanceListResponse({
 			instances: [{ ...unhealthyInstance, id: "work-oc", driver: "opencode" }],
 		});
@@ -207,7 +207,7 @@ describe("Banners", () => {
 
 		await renderBanners();
 
-		expect(screen.getByText("Reconnecting to OpenCode…")).toBeTruthy();
+		expect(screen.queryByText("Reconnecting to OpenCode…")).toBeNull();
 	});
 
 	it("uses the published Claude account instead of stale OpenCode discovery", async () => {

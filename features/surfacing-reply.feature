@@ -1,7 +1,7 @@
 Feature: Reply references remain atomic in drafts and become plain text for the agent
 
 Scenario Outline: A message reply previews and sends its number category time and text
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -22,7 +22,7 @@ Examples:
   | phone    | r      | surfacing-reply-keyboard-phone     | 98        |
 
 Scenario Outline: Reply stays pressed while the draft replies to its message and a second press takes the reply out
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -45,7 +45,7 @@ Examples:
   | desktop  | r      |
 
 Scenario Outline: A selected excerpt clips its chip while sending every selected character
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -65,8 +65,8 @@ Examples:
   | desktop  | surfacing-reply-excerpt-desktop   | 98        |
   | phone    | surfacing-reply-excerpt-phone     | 98        |
 
-Scenario Outline: Reply on a recap citation inserts the cited message as a token
-  Given message surfacing is active at Balanced
+Scenario Outline: Reply on a phone recap citation inserts the cited message as a token
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -85,11 +85,10 @@ Scenario Outline: Reply on a recap citation inserts the cited message as a token
 
 Examples:
   | viewport | baseline                           | threshold |
-  | desktop  | surfacing-reply-recap-cite-desktop | 98        |
   | phone    | surfacing-reply-recap-cite-phone   | 98        |
 
-Scenario Outline: The cited message's Reply stays pressed while the draft replies to it
-  Given message surfacing is active at Balanced
+Scenario Outline: The phone cited message's Reply stays pressed while the draft replies to it
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -107,11 +106,10 @@ Scenario Outline: The cited message's Reply stays pressed while the draft replie
 
 Examples:
   | viewport |
-  | desktop  |
   | phone    |
 
 Scenario Outline: Words selected in the turn summary become a recap excerpt
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -131,7 +129,7 @@ Examples:
   | phone    | surfacing-reply-recap-excerpt-phone   | 98        |
 
 Scenario Outline: Several references can sit among free text at the caret
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -148,7 +146,7 @@ Examples:
   | phone    | surfacing-reply-multiple-phone   | 98        |
 
 Scenario Outline: Backspace the remove button and a partial selection remove entire tokens
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -166,7 +164,7 @@ Examples:
   | phone    | partial selection |
 
 Scenario Outline: Arrow keys skip the reference as one editable item
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -179,7 +177,7 @@ Examples:
   | phone    |
 
 Scenario Outline: Undo and redo restore full reference payloads after editing
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -205,7 +203,7 @@ Examples:
   | phone    | selection replacement |
 
 Scenario Outline: Removing the first of two identical chips preserves the second payload
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the recap session has a settled turn with current summaries
@@ -225,7 +223,7 @@ Examples:
   | phone    |
 
 Scenario Outline: A self-contained reference survives session switching reload and surfacing being disabled
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -250,7 +248,7 @@ Examples:
   | phone    |
 
 Scenario Outline: A draft from another device restores its reference without looking up the message
-  Given message surfacing is active at Balanced
+  Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn

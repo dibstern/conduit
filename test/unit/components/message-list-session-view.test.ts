@@ -1,5 +1,5 @@
-import { cleanup, render } from "@testing-library/svelte";
-import { flushSync } from "svelte";
+import { cleanup, fireEvent, render, within } from "@testing-library/svelte";
+import { flushSync, tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MessageList from "../../../src/lib/frontend/components/chat/MessageList.svelte";
 import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -18,6 +18,7 @@ beforeEach(() => {
 		"ResizeObserver",
 		class {
 			observe() {}
+			unobserve() {}
 			disconnect() {}
 		},
 	);
@@ -25,7 +26,7 @@ beforeEach(() => {
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe("MessageList session-view publication", () => {
+describe("MessageList reader follow", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 		openSessionForSetup("session-view-first", "project-a");
@@ -35,6 +36,7 @@ describe("MessageList session-view publication", () => {
 
 	afterEach(() => {
 		cleanup();
+		sessionViewState.compact = false;
 		vi.clearAllTimers();
 		vi.useRealTimers();
 	});
@@ -59,42 +61,66 @@ describe("MessageList session-view publication", () => {
 		flushSync();
 	}
 
-	it("publishes detach, re-follow and programmatic follow without false detach", () => {
-		const { transcript, getByRole } = mountTranscript();
-		expect(sessionViewState.atBottom).toBe(true);
+	it("keeps the phone bar open when shrinking content clamps a detached reader to the bottom", () => {
+		sessionViewState.compact = true;
+		const { transcript } = mountTranscript();
+		scrollTo(transcript, 1440);
+		expect(sessionViewState.barOpen).toBe(true);
+		Object.defineProperty(transcript, "scrollHeight", { value: 1800 });
+		scrollTo(transcript, 1300);
+		expect(sessionViewState.barOpen).toBe(true);
+	});
+
+	it("closes the phone bar for reader arrival and jump-to-latest, without false detach", async () => {
+		sessionViewState.compact = true;
+		const { transcript, getByRole, queryByRole } = mountTranscript();
+		expect(sessionViewState.barOpen).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
 
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
+		expect(sessionViewState.barOpen).toBe(true);
 
 		scrollTo(transcript, 1500);
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(false);
 		vi.runOnlyPendingTimers();
 
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		sessionViewState.barOpen = true;
 		getByRole("button", { name: /Latest/ }).click();
 		flushSync();
-		expect(sessionViewState.atBottom).toBe(true);
+		await tick();
+		flushSync();
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(false);
 
 		// Content growth can leave the programmatic scroll away from the bottom.
 		// Its pending event must still be ignored by the controller.
+		Object.defineProperty(transcript, "scrollHeight", { value: 3000 });
+		sessionViewState.barOpen = true;
+		transcript.dispatchEvent(new Event("scroll"));
+		flushSync();
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(true);
+		// Moving from that written position is user intent, even in this frame.
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(true);
-		vi.runOnlyPendingTimers();
-		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
+		expect(sessionViewState.barOpen).toBe(true);
 	});
 
-	it("counts loading as at-bottom even after detaching", () => {
-		const { transcript } = mountTranscript();
+	it("hides the jump control while loading without closing the phone bar", () => {
+		sessionViewState.compact = true;
+		const { transcript, getByRole, queryByRole } = mountTranscript();
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
 
 		for (const lifecycle of ["empty", "loading"] as const) {
 			getOrCreateSessionSlot("session-view-first").messages.loadLifecycle =
 				lifecycle;
 			flushSync();
-			expect(sessionViewState.atBottom).toBe(true);
+			expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+			expect(sessionViewState.barOpen).toBe(true);
 		}
 	});
 
@@ -102,21 +128,53 @@ describe("MessageList session-view publication", () => {
 		"loading",
 		"ready",
 	] as const)("resets a detached transcript when switching to a %s session", (lifecycle) => {
-		const { transcript } = mountTranscript();
+		sessionViewState.compact = true;
+		const { transcript, getByRole, queryByRole } = mountTranscript();
 		scrollTo(transcript, 200);
-		expect(sessionViewState.atBottom).toBe(false);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
 
 		getOrCreateSessionSlot("session-view-next").messages.loadLifecycle =
 			lifecycle;
 		openSessionForSetup("session-view-next", "project-a");
 		flushSync();
-		expect(sessionViewState.atBottom).toBe(true);
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(true);
+	});
+
+	it("keeps the phone bar open when a turn collapses to fit", async () => {
+		sessionViewState.compact = true;
+		getOrCreateSessionSlot("session-view-first").messages.messages = [
+			{ type: "user", uuid: "collapse-prompt", text: "Check the files" },
+			{
+				type: "tool",
+				uuid: "collapse-tool",
+				id: "collapse-tool",
+				name: "Read",
+				input: { tool: "Read", filePath: "/a.ts" },
+				status: "completed",
+			},
+			{ type: "result", uuid: "collapse-result", cost: 0.01 },
+		];
+		const { transcript, getByTestId, getByRole, queryByRole } =
+			mountTranscript();
+		const toggle = getByTestId("surfacing-minimise-toggle");
+		if (toggle.getAttribute("aria-expanded") === "false")
+			await fireEvent.click(toggle);
+		scrollTo(transcript, 200);
+		expect(getByRole("button", { name: /Latest/ })).toBeTruthy();
+		Object.defineProperty(transcript, "scrollHeight", { value: 500 });
+		transcript.scrollTop = 0;
+		await fireEvent.click(toggle);
+		await tick();
+		flushSync();
+		expect(queryByRole("button", { name: /Latest/ })).toBeNull();
+		expect(sessionViewState.barOpen).toBe(true);
 	});
 
 	it.each([
 		"assistant",
 		"tool",
-	])("renders resumed %s activity as working after a result", (kind) => {
+	])("renders resumed %s activity as working after a result", async (kind) => {
 		const slot = getOrCreateSessionSlot("session-view-first");
 		slot.activity.phase = "processing";
 		slot.messages.messages = [
@@ -135,6 +193,9 @@ describe("MessageList session-view publication", () => {
 		expect(container.querySelectorAll(".turn-activity")).toHaveLength(1);
 		expect(container.textContent).toContain("Worked");
 		expect(container.textContent).not.toContain("Working");
+		const toggle = within(container).getByTestId("surfacing-minimise-toggle");
+		if (toggle.getAttribute("aria-expanded") === "false")
+			await fireEvent.click(toggle);
 
 		slot.messages.messages = [
 			...slot.messages.messages,
@@ -156,7 +217,7 @@ describe("MessageList session-view publication", () => {
 					},
 		];
 		flushSync();
-		expect(container.querySelectorAll(".turn-activity")).toHaveLength(2);
+		expect(container.querySelectorAll(".turn-activity")).toHaveLength(1);
 		expect(
 			container.querySelectorAll(
 				'.turn-activity [data-testid="turn-live-head"]',
@@ -164,7 +225,7 @@ describe("MessageList session-view publication", () => {
 		).toHaveLength(1);
 		expect(container.textContent).toContain("Working");
 		expect(container.textContent).toContain(
-			kind === "assistant" ? "One more check" : "Reading",
+			kind === "assistant" ? "One more check" : "Running",
 		);
 
 		slot.messages.messages = [
@@ -177,7 +238,7 @@ describe("MessageList session-view publication", () => {
 		).toBeNull();
 		expect(container.textContent).not.toContain("Working");
 		if (kind === "assistant")
-			expect(container.querySelector(".result-bar")).not.toBeNull();
+			expect(container.querySelector(".result-bar")).toBeNull();
 		slot.messages.messages = [];
 		slot.activity.phase = "idle";
 	});

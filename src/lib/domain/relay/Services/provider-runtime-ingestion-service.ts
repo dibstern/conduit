@@ -399,7 +399,7 @@ export const makeProviderRuntimeIngestionLive = (
 										)
 											continue;
 										// After an auto-switch this reads the new account; the old one's
-										// limit is already known and the 5-minute sampler catches up.
+										// limit is already known and its own schedule reads it again.
 										const [session] = yield* sql<{ provider: string }>`
 											SELECT provider FROM sessions WHERE id = ${event.sessionId}
 										`.pipe(

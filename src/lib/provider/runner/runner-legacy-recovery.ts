@@ -1,6 +1,10 @@
 import { Effect, Result, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
-import { accountsStateFromConfig, resolve } from "../../account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+	resolve,
+} from "../../account-directory.js";
 import { AccountSchema } from "../../contracts/account.js";
 import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
 import { ProjectShellEnvConfigSchema } from "../../contracts/project-shell-env.js";
@@ -452,10 +456,14 @@ export const replayLegacyRunnerSend = (options: {
 						),
 					);
 				const account = Result.getOrUndefined(
-					resolve(accounts, {
-						_tag: "Id",
-						id: admittedInput.account?.id ?? row.provider_id,
-					}),
+					resolve(
+						accounts,
+						{
+							_tag: "Id",
+							id: admittedInput.account?.id ?? row.provider_id,
+						},
+						NO_OPENCODE_HEALTH,
+					),
 				);
 				const input =
 					driverKind === "claude" && account

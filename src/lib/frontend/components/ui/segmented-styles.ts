@@ -93,24 +93,21 @@ export const SEGMENTED_VARIANTS = {
 		selected: "bg-selection text-text font-medium max-md:bg-settings-card",
 		unselected: "text-text-secondary hover:text-text max-md:text-text",
 	},
-	/**
-	 * chat/SurfacingCard's level control on the strip axis. Painted at the
-	 * axis's 21px; a transparent ::before takes the tap at 44px on phones, so
-	 * the chip track does not grow into a lozenge.
-	 */
-	level: {
-		list: "inline-flex rounded-[8px] bg-chip p-[2px]",
-		item: "relative inline-flex h-[21px] items-center gap-[4px] rounded-[6px] px-[6px] font-sans text-[11.5px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:content-[''] max-md:before:h-[44px]",
-		selected: "bg-bg text-text shadow-settings-segment",
-		unselected: "text-text-secondary hover:text-text",
+	/** Flat tabs on the Turn panel's footer, with an accent top edge. */
+	footer: {
+		list: "flex items-stretch overflow-x-auto bg-turn-bg",
+		item: "relative inline-flex min-h-[36px] shrink-0 whitespace-nowrap items-center gap-[4px] border-t-2 px-[9px] font-sans text-[12px] font-medium cursor-pointer transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-text disabled:opacity-50",
+		selected: "border-accent text-text",
+		unselected: "border-transparent text-text-secondary hover:text-text",
 	},
 } as const satisfies Record<string, SegmentedRecipe>;
 
-export type SegmentedVariant = keyof typeof SEGMENTED_VARIANTS;
+export type TabVariant = keyof typeof SEGMENTED_VARIANTS;
+export type SegmentedVariant = Exclude<TabVariant, "footer">;
 
-export const SEGMENTED_VARIANT_NAMES = Object.keys(
+export const TAB_VARIANT_NAMES = Object.keys(
 	SEGMENTED_VARIANTS,
-) as SegmentedVariant[];
+) as TabVariant[];
 
 /**
  * One option in a strip. Generic so a call site holding a narrowed union
@@ -136,7 +133,7 @@ export type SegmentedOption<T extends string = string> = {
  * two utilities in the same Tailwind group collide on stylesheet order.
  */
 export const segmentedItemClass = (
-	variant: SegmentedVariant,
+	variant: TabVariant,
 	isSelected: boolean,
 	className?: string,
 ): string => {

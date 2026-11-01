@@ -434,6 +434,37 @@ const resolveAsyncQuestion = <E = never, R = never>(
 	});
 
 /**
+ * Dismisses the session's open Codex async questions asked before the input was
+ * first admitted. A typed reply moves past them, and nothing else would close
+ * their cards: the provider never waits on them, so no turn end retires them.
+ * The admission time, not now, is the cutoff: the input's own turn, or a retry
+ * of it, must not dismiss a question asked since.
+ */
+export const retireAsyncQuestions = (sessionId: string, inputId: string) =>
+	Effect.gen(function* () {
+		const pending = yield* Effect.serviceOption(PendingInteractionServiceTag);
+		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
+		if (Option.isNone(pending) || Option.isNone(sql)) return;
+		const [admitted] = yield* sql.value<{ at: number | null }>`
+			SELECT MIN(created_at) AS at FROM events
+			WHERE session_id = ${sessionId} AND type = 'input.admitted'
+				AND json_extract(data, '$.inputId') = ${inputId}`;
+		const admittedAt = admitted?.at;
+		if (admittedAt == null) return;
+		const questions = yield* pending.value.listPendingQuestions(sessionId);
+		yield* Effect.forEach(
+			questions.filter(
+				(question) =>
+					question.delivery === "async" &&
+					question.sessionId === sessionId &&
+					question.timestamp < admittedAt,
+			),
+			(question) => resolveAsyncQuestion(question, null),
+			{ discard: true },
+		);
+	});
+
+/**
  * An OpenCode permission the relay timed out with no turn awaiting it: recorded
  * as rejected, which takes its card down. OpenCode itself is not told.
  */
@@ -744,14 +775,9 @@ const resolveOpenCodePromptTarget = (
 			call?.account.id ??
 			(yield* engine.value.getProviderForSessionEffect(sessionId));
 		const boundId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
-		const selectedId =
-			!call && boundId === MANAGED_OPENCODE_ACCOUNT_ID
-				? (Option.getOrUndefined(yield* Effect.serviceOption(ConfigTag))
-						?.openCodeInstanceId ?? boundId)
-				: boundId;
 		const running = providerProcessId
-			? yield* instances.value.ifRunning(selectedId, directory)
-			: Option.some(yield* instances.value.use(selectedId, directory));
+			? yield* instances.value.ifRunning(boundId, directory)
+			: Option.some(yield* instances.value.use(boundId, directory));
 		if (
 			Option.isNone(running) ||
 			(providerProcessId && running.value.promptProcessId !== providerProcessId)

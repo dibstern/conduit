@@ -2,12 +2,12 @@ Feature: Surfacing marks correct one message with a reason and a reversible abso
 
 Scenario Outline: Raise uses the most popular reasons for its direction and changes only the chosen message
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at Balanced
+  And message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
   Then the surfacing marks theme is applied
-  When I set the surfacing level to All
+  When I set the surfacing level to All messages
   And I Raise surfaced message #3 from the card
   Then the mark Why row proposes Raise #3 from all to balanced
   And the Why row offers the three most used raise reasons
@@ -16,15 +16,15 @@ Scenario Outline: Raise uses the most popular reasons for its direction and chan
   When I save the mark with reason chip changed the plan
   Then message #3 has an absolute balanced raise mark with reason changed the plan
   And the card and pin for #3 show the ▲ mark with reason changed the plan
-  And the surfacing mark toast says ▲ Raised #3 to Balanced
-  When I set the surfacing level to Balanced
-  Then the surfacing pins are 1,2,3,4,5,8 and level counts are Key 3, Balanced 6, All 6
+  And the surfacing mark toast says ▲ Raised #3 to Most
+  When I set the surfacing level to Most
+  Then the surfacing pins are 1,2,3,4,5,8 and level counts are Key 3, Most 6, All messages 6
   And the messages region visually matches <savedBaseline> at <threshold> percent
   When I undo the surfacing mark
   Then the surfacing mark for #3 is cleared
   When I pick surfaced message #1
   Then the surfaced card shows #1 and announces its category and position
-  And the surfacing pins are 1,2,4,5,8 and level counts are Key 3, Balanced 5, All 6
+  And the surfacing pins are 1,2,4,5,8 and level counts are Key 3, Most 5, All messages 6
 
 Examples:
   | viewport | theme | whyBaseline                     | savedBaseline                  | threshold |
@@ -33,9 +33,9 @@ Examples:
   | desktop  | light | marks-raise-why-desktop-light    | marks-raised-desktop-light     | 98        |
   | phone    | light | marks-raise-why-phone-light      | marks-raised-phone-light       | 98        |
 
-Scenario Outline: Lower from All keeps the card open in the log and pressing the active mark clears it
+Scenario Outline: Lower from All messages keeps the card open in the log and pressing the active mark clears it
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at All
+  And message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -61,7 +61,7 @@ Examples:
 
 Scenario Outline: Enter saves a free text reason and Undo restores the previous absolute mark
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at All
+  And message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -84,7 +84,7 @@ Examples:
 
 Scenario Outline: Retype chooses an active category before asking why and stores its weighted level
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at All
+  And message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -106,9 +106,9 @@ Examples:
   | desktop  | light | marks-retyped-desktop-light | 98        |
   | phone    | light | marks-retyped-phone-light   | 98        |
 
-Scenario Outline: Step log marks report surfaced false alarms and routine misses within Key and log limits
+Scenario Outline: Full log rows open cards for marking false alarms and routine misses
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at All
+  And message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -123,7 +123,7 @@ Scenario Outline: Step log marks report surfaced false alarms and routine misses
   When I Raise surfaced message #6 from the step log
   And I save the mark without a reason
   Then message #6 has an absolute all raise mark with no reason
-  And the surfacing pins are 1,2,3,4,5,6,8 and level counts are Key 3, Balanced 5, All 7
+  And the surfacing pins are 1,2,3,4,5,6,8 and level counts are Key 3, Most 5, All messages 7
 
 Examples:
   | viewport | theme |
@@ -134,7 +134,7 @@ Examples:
 
 Scenario Outline: Mark shortcuts cancel without writing and return focus to the card
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at Balanced
+  And message surfacing is active at Most
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -149,7 +149,7 @@ Examples:
 
 Scenario Outline: Undo expires after six seconds
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at All
+  And message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
@@ -168,19 +168,19 @@ Examples:
 
 Scenario Outline: A remote clear after save acknowledgement removes the local mark without resurrecting it
   Given a surfacing marks ledger is available in the <theme> theme
-  And message surfacing is active at All
+  And message surfacing is active at All messages
   And the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the surfacing session has a settled turn
   When I Raise surfaced message #3 from the card
   And I save the mark without a reason
   Then message #3 has an absolute balanced raise mark with no reason
-  And the surfacing mark toast says ▲ Raised #3 to Balanced
+  And the surfacing mark toast says ▲ Raised #3 to Most
   When another device clears surfacing mark #3
   Then the selected message #3 has no mark label or pressed Raise
-  When I set the surfacing level to Balanced
+  When I set the surfacing level to Most
   And I pick surfaced message #1
-  Then the surfacing pins are 1,2,4,5,8 and level counts are Key 3, Balanced 5, All 6
+  Then the surfacing pins are 1,2,4,5,8 and level counts are Key 3, Most 5, All messages 6
 
 Examples:
   | viewport | theme |

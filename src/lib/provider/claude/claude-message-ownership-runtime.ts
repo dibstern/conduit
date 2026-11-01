@@ -1,6 +1,8 @@
 import { Clock, Duration, Effect, Fiber, type Scope, Semaphore } from "effect";
 import { createLogger } from "../../logger.js";
 import { ClaudeEventPersistEffectTag } from "../../persistence/effect/claude-event-persist-effect.js";
+import { createEventId } from "../../persistence/events.js";
+import { isRecord } from "../../utils.js";
 import {
 	type ClaudeAdapterError,
 	ClaudeBoundaryError,
@@ -155,9 +157,49 @@ export function decideClaudeMessageOwnershipEffect(
 			// Once an issuer is registered, deliver its tool before another input can
 			// use it. Finish reserved deliveries before a final read interrupts a poll.
 			Effect.uninterruptible(
-				Effect.suspend(() =>
-					applyDecisions(ctx.messageOwnership?.decide(timedInput) ?? []),
-				),
+				Effect.suspend(() => {
+					const decisions = ctx.messageOwnership?.decide(timedInput) ?? [];
+					// Record terminal reports before delivery can fork a final read.
+					// Replayed held reports take this path as well as live SDK input.
+					for (const decision of decisions) {
+						if (decision.kind !== "route" || !decision.tool) continue;
+						const message = decision.message;
+						if (message.type !== "system") continue;
+						const status =
+							message.subtype === "task_notification"
+								? message.status
+								: message.subtype === "task_updated"
+									? message.patch.status
+									: undefined;
+						if (
+							status !== "completed" &&
+							status !== "failed" &&
+							status !== "stopped" &&
+							status !== "killed"
+						)
+							continue;
+						if (!("task_id" in message)) continue;
+						ctx.subagentTasks?.set(message.task_id, {
+							...ctx.subagentTasks.get(message.task_id),
+							toolUseId: decision.tool.toolUseId,
+							outcome:
+								status === "completed"
+									? "completed"
+									: status === "failed"
+										? "error"
+										: "interrupted",
+							...(status === "failed" && message.subtype === "task_notification"
+								? { failureMessage: message.summary }
+								: {}),
+							...(status === "failed" &&
+							message.subtype === "task_updated" &&
+							message.patch.error
+								? { failureMessage: message.patch.error }
+								: {}),
+						});
+					}
+					return applyDecisions(decisions);
+				}),
 			),
 		);
 	});
@@ -228,7 +270,42 @@ export function applyClaudeOwnershipDecisionEffect(
 				});
 				// Ownership holds its permit through reservation and every event push.
 				commitClaudeSubagentTranscriptCursor(cursor, stage.cursor);
-				for (const event of stage.events) yield* sink.push(event);
+				// As for Codex children, the child's prompt opens an observed run
+				// that owns its turn until child or ownership-end settlement. After
+				// ownership ends, late history still persists but opens no run.
+				const runs = (ctx.subagentRunIds ??= new Map());
+				for (const event of stage.events) {
+					const promptId =
+						!ctx.subagentRunsClosed &&
+						event.type === "message.created" &&
+						isRecord(event.data) &&
+						event.data["role"] === "user" &&
+						!runs.has(childSessionId)
+							? String(event.data["messageId"])
+							: undefined;
+					const runId = promptId ? createEventId() : runs.get(childSessionId);
+					yield* sink.push(runId ? { ...event, runId } : event);
+					if (promptId && runId) {
+						yield* sink.push(
+							claudeRuntimeEvent(
+								"run.started",
+								childSessionId,
+								{ inputId: promptId, requestedRunId: runId },
+								runId,
+							),
+						);
+						// A sweep can only claim runs whose start has committed. If it
+						// closed ownership during delivery, settle this late start here.
+						if (ctx.subagentRunsClosed)
+							yield* settleClaudeSubagentRunEffect(
+								ctx,
+								childSessionId,
+								runId,
+								SUBAGENT_POLL_TIMEOUT_MS,
+							);
+						else runs.set(childSessionId, runId);
+					}
+				}
 				return;
 			}
 			if (decision.kind !== "route" || !decision.tool) return;
@@ -512,6 +589,81 @@ export function startClaudeSubagentFeedEffect(
 	});
 }
 
+function settleClaudeSubagentRunEffect(
+	ctx: ClaudeSessionContext,
+	sessionId: string,
+	runId: string,
+	timeoutMs: number,
+): Effect.Effect<void> {
+	const task = [...(ctx.subagentTasks?.values() ?? [])].find(
+		(task) => task.childSessionId === sessionId,
+	);
+	const outcome = task?.outcome ?? "interrupted";
+	const event =
+		outcome === "error"
+			? claudeRuntimeEvent(
+					"turn.error",
+					sessionId,
+					{
+						messageId: "",
+						error: task?.failureMessage || "Claude subagent failed",
+					},
+					runId,
+				)
+			: claudeRuntimeEvent(
+					outcome === "interrupted" ? "turn.interrupted" : "turn.completed",
+					sessionId,
+					{ messageId: "" },
+					runId,
+				);
+	return (ctx.eventSink?.push(event) ?? Effect.void).pipe(
+		Effect.interruptible,
+		Effect.timeoutOrElse({
+			duration: Duration.millis(timeoutMs),
+			orElse: () =>
+				Effect.sync(() =>
+					log.warn(
+						`Claude child run settlement ${sessionId}/${runId} timed out; runner-exit recovery will interrupt the open run`,
+					),
+				),
+		}),
+		Effect.catch((err) =>
+			Effect.sync(() =>
+				log.warn(
+					`Claude child run settlement ${sessionId}/${runId} failed; runner-exit recovery will interrupt the open run: ${err}`,
+				),
+			),
+		),
+	);
+}
+
+/** Claim delivery attempts synchronously; open store rows remain recoverable on exit. */
+function settleClaudeSubagentRunsEffect(
+	deps: SubagentDeps,
+	ctx: ClaudeSessionContext,
+	childSessionId?: string,
+): Effect.Effect<void> {
+	return Effect.suspend(() => {
+		if (childSessionId === undefined) ctx.subagentRunsClosed = true;
+		const runs = [...(ctx.subagentRunIds ?? [])].filter(
+			([sessionId]) =>
+				childSessionId === undefined || sessionId === childSessionId,
+		);
+		for (const [sessionId] of runs) ctx.subagentRunIds?.delete(sessionId);
+		return Effect.forEach(
+			runs,
+			([sessionId, runId]) =>
+				settleClaudeSubagentRunEffect(
+					ctx,
+					sessionId,
+					runId,
+					subagentPollTimeoutMs(deps),
+				),
+			{ concurrency: 2, discard: true },
+		);
+	}).pipe(Effect.uninterruptible);
+}
+
 export function finalReadClaudeSubagentFeedEffect(
 	deps: SubagentDeps,
 	ctx: ClaudeSessionContext,
@@ -547,6 +699,9 @@ export function finalReadClaudeSubagentFeedEffect(
 			{ allowInactive: true },
 		);
 	}).pipe(
+		Effect.ensuring(
+			settleClaudeSubagentRunsEffect(deps, ctx, decision.childSessionId),
+		),
 		Effect.catch((err) =>
 			Effect.sync(() =>
 				log.warn(
@@ -568,7 +723,7 @@ export function endClaudeMessageOwnershipEffect(
 		const decisions = yield* permit.withPermits(1)(
 			Effect.sync(() => ctx.messageOwnership?.decide({ kind: "end" }) ?? []),
 		);
-		// Settle every child before a slow final read can consume the shared budget.
+		// Publish idle before a slow final read can consume the shared budget.
 		yield* Effect.forEach(
 			decisions,
 			(decision) =>
@@ -615,17 +770,22 @@ export function endClaudeMessageOwnershipEffect(
 		);
 	}).pipe(
 		Effect.interruptible,
-		// One budget covers the permit wait and every end-time read, regardless
-		// of how many agents remain. Callers fork this after foreground cleanup.
-		Effect.timeoutOrElse({
-			duration: Duration.millis(subagentPollTimeoutMs(deps)),
-			orElse: () =>
-				Effect.fail(
-					new ClaudeRuntimeError({
-						message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
-					}),
+		// Sweep before cancelling reads: interruption may wait for an already
+		// reserved, uninterruptible transcript delivery to finish.
+		Effect.raceFirst(
+			Effect.sleep(Duration.millis(subagentPollTimeoutMs(deps))).pipe(
+				// A completed read or caller cancellation also sweeps before the
+				// race waits for its other fiber's uninterruptible delivery.
+				Effect.ensuring(settleClaudeSubagentRunsEffect(deps, ctx)),
+				Effect.andThen(
+					Effect.fail(
+						new ClaudeRuntimeError({
+							message: `Claude subagent finalization ${ctx.sessionId} timed out after ${subagentPollTimeoutMs(deps)}ms`,
+						}),
+					),
 				),
-		}),
+			),
+		),
 		Effect.catch((err) =>
 			Effect.sync(() =>
 				log.warn(
@@ -643,6 +803,9 @@ export function endClaudeMessageOwnershipEffect(
 					if (poller.fiber)
 						yield* Effect.sync(() => poller.fiber?.interruptUnsafe());
 				}
+				// Final reads queued behind the shared budget never enter their own
+				// finalizers. Claim every remaining run here, including those children.
+				yield* settleClaudeSubagentRunsEffect(deps, ctx);
 			}),
 		),
 	);

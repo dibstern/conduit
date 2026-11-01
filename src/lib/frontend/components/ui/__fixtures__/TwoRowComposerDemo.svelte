@@ -45,7 +45,7 @@
 				<div class="flex">
 					<Button variant="ghost" size="content" iconOnly icon="settings" ariaLabel="Model" class="w-8 h-8" />
 					<Button variant="ghost" size="content" iconOnly icon="sliders-horizontal" ariaLabel="Effort" class="w-8 h-8" />
-					<Button variant="ghost" size="content" iconOnly icon="shield" ariaLabel="Approvals" class="w-8 h-8" />
+					<Button variant="ghost" size="content" iconOnly icon="shield" ariaLabel="Permissions" class="w-8 h-8" />
 				</div>
 			{/if}
 		{/snippet}

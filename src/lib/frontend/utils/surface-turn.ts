@@ -3,27 +3,103 @@ import {
 	type SurfacingMark,
 	surfacingLevel,
 } from "../../contracts/category-set.js";
-import type { MessageSurfacingPreferences } from "../../contracts/message-surfacing.js";
 import type { AssistantMessage } from "../types.js";
 import { categoryColour } from "./category-colour.js";
+import {
+	cardLevelFor,
+	type PanelView,
+	pendingMessage,
+	SURFACE_RANK as rank,
+	STOPS,
+	type SurfaceLevel,
+	stopForLevel,
+} from "./turn-stops.js";
 import type { ActivityPart } from "./turns.js";
 
-export type SurfaceLevel = MessageSurfacingPreferences["defaultLevel"];
+export type { SurfaceLevel } from "./turn-stops.js";
+
+/** Which card the turn shows: auto follows the turn's default fold, latest pins the newest card open. */
+export type CardSelection =
+	| { kind: "auto" }
+	| { kind: "latest" }
+	| { kind: "picked"; uuid: string }
+	| { kind: "folded" };
+
+export type SurfaceCommand =
+	| { kind: "step"; to: "previous" | "next" | "first" | "last" }
+	| { kind: "number"; n: number }
+	| { kind: "ask" }
+	| { kind: "unread" }
+	| { kind: "summary" }
+	| { kind: "toggleRead" }
+	| { kind: "reply" }
+	| { kind: "fold" }
+	| { kind: "collapse" };
+
+const KEY_COMMANDS = new Map<string, SurfaceCommand>([
+	["ArrowLeft", { kind: "step", to: "previous" }],
+	["ArrowRight", { kind: "step", to: "next" }],
+	["Home", { kind: "step", to: "first" }],
+	["End", { kind: "step", to: "last" }],
+	["a", { kind: "ask" }],
+	["u", { kind: "unread" }],
+	["s", { kind: "summary" }],
+	["m", { kind: "toggleRead" }],
+	["r", { kind: "reply" }],
+	["Escape", { kind: "fold" }],
+	["h", { kind: "collapse" }],
+]);
+
+/** Parse one focused-turn key: digits accumulate a message number that Enter jumps to; any other key clears it. */
+export function surfaceKey(
+	buffer: string,
+	key: string,
+): { buffer: string; command: SurfaceCommand | null } {
+	if (/^\d$/.test(key))
+		return { buffer: (buffer + key).slice(-8), command: null };
+	if (key === "Enter")
+		return {
+			buffer: "",
+			command: buffer ? { kind: "number", n: Number(buffer) } : null,
+		};
+	return { buffer: "", command: KEY_COMMANDS.get(key) ?? null };
+}
+
 export type SurfacePart = AssistantMessage & {
 	/** Annotation owners supply these; surfacing never writes them. */
 	surfacingMark?: SurfacingMark | null;
 	surfacingRead?: boolean;
 };
 
-export const SURFACE_LEVELS = ["final", "key", "balanced", "all"] as const;
-export const SURFACE_LABELS = {
-	final: "Final",
-	key: "Key",
-	balanced: "Balanced",
-	all: "All",
-	hidden: "the log",
-};
-const rank = { hidden: 0, all: 1, balanced: 2, key: 3, final: 4 };
+/** Settled messages without a verdict remain readable in the log. */
+export function canOpenSurfaceMessage(
+	part: SurfacePart,
+	live: boolean,
+): boolean {
+	return (
+		live || part.surfacingProbabilities !== undefined || !!part.surfacingMark
+	);
+}
+
+/** The latest visible Ask belongs only to the transcript's last Turn. */
+export function openAsk(
+	turnParts: readonly ActivityPart[],
+	categorySet: CategorySet,
+	latestTurn: boolean,
+): SurfacePart | null {
+	if (!latestTurn) return null;
+	for (let i = turnParts.length - 1; i >= 0; i--) {
+		const part = turnParts[i];
+		if (part?.type !== "assistant") continue;
+		const result = surfacingLevel(
+			{ probabilities: part.surfacingProbabilities ?? null },
+			categorySet,
+			part.surfacingMark ?? undefined,
+		);
+		if (result.category === "ask" && result.level !== "hidden") return part;
+	}
+	return null;
+}
 
 export function surfaceTime(milliseconds: number): string {
 	const seconds = Math.max(0, Math.floor(milliseconds / 1000));
@@ -37,27 +113,23 @@ export function surfaceTurn(input: {
 	positions: readonly { left: number; width: number }[];
 	categorySet: CategorySet;
 	level: SurfaceLevel;
+	view: PanelView | null;
 	live: boolean;
 	latestTurn: boolean;
 	latestBlock?: boolean;
 	start: number;
-	picked: string | null;
-	folded: boolean | null;
+	selection: CardSelection;
 	hasRecap?: boolean;
 	/** A summary citation can reveal its pin without changing the chosen level. */
 	citedOrdinal?: number | null;
 }) {
-	const newest = [...input.parts]
-		.reverse()
-		.find((part) => part.type === "assistant");
+	const cardLevel = cardLevelFor(input.view);
+	const level = cardLevel ?? input.level;
+	const pendingPart = pendingMessage(input.parts, input.live);
 	const messages = input.parts.flatMap((part, step) => {
 		if (part.type !== "assistant") return [];
 		const message: SurfacePart = part;
-		const pending =
-			input.live &&
-			part === newest &&
-			part.surfacingProbabilities === undefined &&
-			!message.surfacingMark;
+		const pending = part === pendingPart;
 		const result = surfacingLevel(
 			{ probabilities: part.surfacingProbabilities ?? null },
 			input.categorySet,
@@ -103,62 +175,55 @@ export function surfaceTurn(input: {
 			},
 		];
 	});
-	const visibleAt = (level: SurfaceLevel) =>
-		level === "final"
-			? []
-			: messages.filter(
-					(message) => message.pending || rank[message.level] >= rank[level],
-				);
-	const counts = {
-		final: 0,
-		key: visibleAt("key").length,
-		balanced: visibleAt("balanced").length,
-		all: visibleAt("all").length,
-	};
-	const visible = visibleAt(input.level);
+	const visibleAt = (level: Exclude<SurfaceLevel, "final">) =>
+		messages.filter(
+			(message) => message.pending || rank[message.level] >= rank[level],
+		);
+	const pickedUuid =
+		input.selection.kind === "picked" ? input.selection.uuid : null;
 	const picked = messages.find(
 		({ part }) =>
-			part.uuid === input.picked &&
-			(input.live ||
-				part.surfacingProbabilities !== undefined ||
-				!!part.surfacingMark),
+			part.uuid === pickedUuid && canOpenSurfaceMessage(part, input.live),
 	);
 	const short =
 		turnMessages.filter(({ level }) => level !== "hidden").length < 4;
 	const folded =
-		input.folded ??
-		(!input.latestTurn ||
-			input.latestBlock === false ||
-			(!!input.hasRecap && !short));
-	const pins =
-		input.level === "final"
-			? []
-			: messages.filter(
-					(message) =>
-						visible.includes(message) ||
-						(!folded && message === picked) ||
-						(input.citedOrdinal != null &&
-							message.number === input.citedOrdinal),
-				);
+		input.selection.kind === "folded" ||
+		(input.selection.kind === "auto" &&
+			(!input.latestTurn ||
+				input.latestBlock === false ||
+				(!!input.hasRecap && !short)));
+	// Answer has no automatic content, even while Jev is pending. A direct pick
+	// can still open its one pin without admitting a citation or the live edge.
+	const shown = (() => {
+		if (level === "final")
+			return { visible: [], pins: picked ? [picked] : [], empty: false };
+		const visible = visibleAt(level);
+		// Full log pins at All messages but lists every message, so it is never empty.
+		const fullLog = input.view?.kind === "show" && input.view.stop === "log";
+		return {
+			visible,
+			empty: visible.length === 0 && !fullLog,
+			pins: messages.filter(
+				(message) =>
+					visible.includes(message) ||
+					(!folded && message === picked) ||
+					(input.citedOrdinal != null && message.number === input.citedOrdinal),
+			),
+		};
+	})();
+	const visible = shown.visible;
+	const pins = cardLevel === null ? [] : shown.pins;
 	const target =
-		input.level === "final" || folded
-			? null
-			: (picked ?? visible.at(-1) ?? null);
+		cardLevel === null || folded ? null : (picked ?? visible.at(-1) ?? null);
 	const cardIndex = target ? pins.indexOf(target) : -1;
 	const belowLevel =
-		target !== null &&
-		!target.pending &&
-		rank[target.level] < rank[input.level];
-	const ask = input.latestTurn
-		? [...turnMessages]
-				.reverse()
-				.find(({ category, level }) => category === "ask" && level !== "hidden")
-				?.part
-		: null;
+		target !== null && !target.pending && rank[target.level] < rank[level];
 	const unread = visible.filter(({ read }) => read === false);
 	return {
+		level,
 		nearestPin: (x: number) =>
-			input.level === "final"
+			cardLevel === null
 				? null
 				: visible.reduce<(typeof visible)[number] | null>(
 						(nearest, pin) =>
@@ -170,7 +235,6 @@ export function surfaceTurn(input: {
 		pins,
 		citedOrdinal: input.citedOrdinal ?? null,
 		messages,
-		counts,
 		card: target,
 		cardIndex,
 		folded,
@@ -180,17 +244,19 @@ export function surfaceTurn(input: {
 			: "No message selected",
 		cardNote:
 			belowLevel && target
-				? target.level === "hidden"
-					? "Hidden at this level · in the step log"
-					: `At ${SURFACE_LABELS[target.level]}, below ${SURFACE_LABELS[input.level]} · opened directly`
+				? `At ${STOPS[stopForLevel(target.level)].short}, below ${STOPS[level].short} · opened directly`
 				: "",
-		openAsk: ask ?? null,
+		openAsk: openAsk(
+			input.turnParts ?? input.parts,
+			input.categorySet,
+			input.latestTurn,
+		),
 		unreadCount: unread.length,
 		// The recap and its bulk action cover the whole turn, including hand-backs.
 		unreadPartIds: turnMessages.flatMap(({ part, level }) =>
 			part.surfacingRead === false &&
 			part.partId &&
-			(rank[level] >= rank[input.level] ||
+			(rank[level] >= rank[cardLevel ?? input.level] ||
 				visible.some((pin) => pin.pending && pin.part === part))
 				? [part.partId]
 				: [],
@@ -204,35 +270,39 @@ export function surfaceTurn(input: {
 			({ part }) => part.surfacingProbabilities === null,
 		).length,
 		// Everything a reply reference names, for any message the turn's summary can cite.
-		numbers: turnMessages.flatMap(({ part, level, category: id }) => {
-			if (part.surfacingOrdinal === undefined) return [];
-			const category = input.categorySet.categories.find(
-				(candidate) => candidate.id === id,
-			);
-			return [
-				{
-					number: part.surfacingOrdinal,
-					part,
-					level,
-					belowLevel: rank[level] < rank[input.level],
-					label: category?.label ?? "Message",
-					builtinCategory:
-						category?.origin === "builtin" ? category.id : undefined,
-					glyph: category?.glyph ?? "·",
-					colour:
-						category?.origin === "builtin"
-							? categoryColour(category)
-							: undefined,
-					time: surfaceTime((part.createdAt ?? input.start) - input.start),
-				},
-			];
-		}),
-		following: input.live && input.picked === null,
+		numbers: turnMessages.flatMap(
+			({ part, level: messageLevel, category: id }) => {
+				if (part.surfacingOrdinal === undefined) return [];
+				const category = input.categorySet.categories.find(
+					(candidate) => candidate.id === id,
+				);
+				return [
+					{
+						number: part.surfacingOrdinal,
+						part,
+						level: messageLevel,
+						belowLevel: rank[messageLevel] < rank[level],
+						label: category?.label ?? "Message",
+						builtinCategory:
+							category?.origin === "builtin" ? category.id : undefined,
+						glyph: category?.glyph ?? "·",
+						colour:
+							category?.origin === "builtin"
+								? categoryColour(category)
+								: undefined,
+						time: surfaceTime((part.createdAt ?? input.start) - input.start),
+					},
+				];
+			},
+		),
+		following:
+			input.live &&
+			(input.selection.kind === "auto" || input.selection.kind === "latest"),
 		previous: pins[cardIndex - 1] ?? null,
 		next: pins[cardIndex + 1] ?? null,
 		first: pins[0] ?? null,
 		last: pins.at(-1) ?? null,
-		empty: input.level !== "final" && visible.length === 0,
+		empty: shown.empty,
 	};
 }
 
@@ -279,7 +349,7 @@ export function surfacePinRows(
 ): SurfacePinGroup[] {
 	const width = laneWidth > 0 ? laneWidth : 1000;
 	const gap = 10;
-	const digit = phone ? 7.2 : 6.6;
+	const digit = 6.6;
 	const fixed = (pin: SurfacePin) =>
 		pin.pending || pin.part.uuid === view.openAsk?.uuid;
 	// A Blocked always leads; otherwise the most urgent, then the latest.
@@ -291,8 +361,8 @@ export function surfacePinRows(
 			Math.max(
 				...members.map(
 					(pin) =>
-						(phone ? 26 : 22) +
-						String(pin.number ?? "").length * digit +
+						22 +
+						(phone ? 0 : String(pin.number ?? "").length * digit) +
 						(pin.part.surfacingMark ? 8 : 0),
 				),
 			) +

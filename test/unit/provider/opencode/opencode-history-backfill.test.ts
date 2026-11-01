@@ -26,6 +26,46 @@ const message: Message = {
 };
 
 describe("OpenCode REST snapshots", () => {
+	it("retains completed provider file changes in historical snapshots", () => {
+		const payload = snapshotPayload({
+			...message,
+			parts: [
+				{
+					id: "edit",
+					type: "tool",
+					tool: "edit",
+					state: {
+						status: "completed",
+						input: {
+							filePath: "/src/main.ts",
+							oldString: "old",
+							newString: "new",
+						},
+						metadata: {
+							filediff: {
+								file: "/src/main.ts",
+								before: "whole old",
+								after: "whole new",
+								additions: 1,
+								deletions: 1,
+							},
+						},
+					},
+				},
+			],
+		});
+		expect(payload.message.parts[0]?.["state"]).toMatchObject({
+			fileChanges: [
+				{
+					path: "/src/main.ts",
+					kind: "update",
+					before: "whole old",
+					after: "whole new",
+				},
+			],
+		});
+	});
+
 	it("retains every part and normalizes tool input", () => {
 		const payload = snapshotPayload(message);
 		expect(payload.message.parts.map((part) => part.type)).toEqual([

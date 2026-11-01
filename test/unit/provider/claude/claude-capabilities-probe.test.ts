@@ -1,7 +1,75 @@
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Effect } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { createTestLogger } from "../../../../src/lib/logger.js";
-import { probeClaudeCapabilities } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
+import {
+	type ProbeDeps,
+	probeClaudeCapabilitiesEffect,
+} from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
+import { claudeSdk as fakeSdk } from "../../../helpers/fake-claude-process-sdk.js";
+import { claudeSdk as replaySdk } from "../../../helpers/replay-claude-process-sdk.js";
+
+const probeClaudeCapabilities = (deps: ProbeDeps) =>
+	Effect.runPromise(probeClaudeCapabilitiesEffect(deps));
+
+describe.each([
+	["process", fakeSdk],
+	["replay", replaySdk],
+] as const)("%s SDK capability query", (_name, sdk) => {
+	it("initializes and ends without consuming a user turn", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "claude-zero-turn-"));
+		const proof = join(directory, "proof.ndjson");
+		writeFileSync(proof, "");
+		const failGate = join(directory, "fail-next-initialization");
+		const holdGate = join(directory, "hold-next-initialization");
+		writeFileSync(failGate, "fail once");
+		writeFileSync(holdGate, "hold once");
+		const next = vi.fn(() => {
+			throw new Error("A zero-turn capability query consumed a user turn");
+		});
+		vi.stubEnv("CONDUIT_TEST_PROCESS_PROOF", proof);
+		vi.stubEnv("CONDUIT_TEST_QUERY_INITIALIZATION_FAILURES", "1000000");
+		vi.stubEnv(
+			"CONDUIT_TEST_CLAUDE_OPTIONS_FILE",
+			join(directory, "options.ndjson"),
+		);
+		try {
+			const query = sdk.query({
+				configDir: configuredClaudeConfigDir(directory),
+				prompt: { [Symbol.asyncIterator]: () => ({ next }) },
+				options: { maxTurns: 0, cwd: directory, settingSources: [] },
+			});
+			expect(await query.initializationResult()).toMatchObject({
+				models: [],
+				commands: [],
+				agents: [],
+				account: { subscriptionType: "max" },
+			});
+			expect(await query.next()).toMatchObject({
+				done: false,
+				value: { type: "system", subtype: "init", skills: [] },
+			});
+			expect(await query.next()).toMatchObject({ done: true });
+			query.close();
+			expect(next).not.toHaveBeenCalled();
+			expect(existsSync(failGate)).toBe(true);
+			expect(existsSync(holdGate)).toBe(true);
+			expect(readFileSync(proof, "utf8")).toBe("");
+		} finally {
+			vi.unstubAllEnvs();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	});
+});
 
 describe("probeClaudeCapabilities", () => {
 	const workspaceRoot = "/tmp/claude-workspace";
@@ -62,6 +130,9 @@ describe("probeClaudeCapabilities", () => {
 			workspaceRoot,
 			configDir,
 		});
+		expect(
+			queryFactory.mock.calls[0]?.[0]?.options?.enableFileCheckpointing,
+		).toBe(false);
 		expect(result.models).toHaveLength(2);
 		expect(result.models[0]).toMatchObject({
 			id: "claude-opus-4-7",
@@ -703,6 +774,18 @@ describe("probeClaudeCapabilities", () => {
 			"local",
 		]);
 		expect(callArg.options["abortController"]).toBeInstanceOf(AbortController);
+	});
+
+	it("passes the resolved account and an asynchronous zero-turn prompt to the injected SDK", async () => {
+		const queryFactory = makeFakeQuery({ initResult: { models: [] } });
+		await probeClaudeCapabilities({ queryFactory, workspaceRoot, configDir });
+		expect(queryFactory).toHaveBeenCalledExactlyOnceWith({
+			configDir,
+			prompt: expect.objectContaining({
+				[Symbol.asyncIterator]: expect.any(Function),
+			}),
+			options: expect.objectContaining({ maxTurns: 0, cwd: workspaceRoot }),
+		});
 	});
 
 	it("aborts the controller in finally on success", async () => {
