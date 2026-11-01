@@ -160,6 +160,10 @@ for (const { name, mode } of [
 		name: "fallback status distinguishes a finished primary from a never-received fallback",
 		mode: "fallback-status",
 	},
+	{
+		name: "stamps the host's query count on every frame and keeps it across a reconnect",
+		mode: "query-seq",
+	},
 ]) {
 	it(name, async () => {
 		const directory = mkdtempSync(join(tmpdir(), "stale-host-"));
@@ -583,6 +587,7 @@ for (const { name, mode } of [
 										attempt: 0,
 										nativeResumeFallback: false,
 										reason,
+										querySeq: 0,
 									},
 								]);
 								expect(payload.admittedInputs).toEqual([]);
@@ -611,6 +616,97 @@ for (const { name, mode } of [
 								).toEqual(payload.result);
 								expect(payload.admittedInputs).toEqual(["shared-cut-off"]);
 							}
+							return;
+						}
+						if (mode === "query-seq") {
+							const send = (inputId: string) =>
+								client.commandEffect(inputId, {
+									type: "send-turn",
+									sinkId: `${inputId}-sink`,
+									aborted: false,
+									input: {
+										...sourceInput,
+										inputId,
+										runId: `${inputId}-run`,
+										prompt: inputId,
+										history: [],
+									},
+								});
+							const stamps = () =>
+								receivedFrames.splice(0).map((frame) => frame.querySeq);
+							expect(
+								receivedFrames.find((frame) => frame.type === "hello")
+									?.querySeq,
+							).toBe(0);
+							yield* send("first-query");
+							// The first query is no replacement: the hello and its frames read 0.
+							callbacks.queryStarted();
+							yield* send("first-query-again");
+							const first = stamps();
+							expect(first.length).toBeGreaterThan(4);
+							expect(new Set(first)).toEqual(new Set([0]));
+							callbacks.queryStarted();
+							yield* send("replacement-query");
+							// A late notice of the earlier send keeps the count it was emitted under.
+							const replaced = receivedFrames
+								.filter((frame) =>
+									JSON.stringify(frame).includes("replacement-query"),
+								)
+								.map((frame) => frame.querySeq);
+							expect(replaced.length).toBeGreaterThan(2);
+							expect(new Set(replaced)).toEqual(new Set([1]));
+							client.destroy();
+							yield* Deferred.await(clientClosed);
+							yield* Deferred.await(serverDisconnected);
+							const rehello = yield* Deferred.make<
+								number | undefined,
+								SessionFailure
+							>();
+							const reconnectClosed = yield* Deferred.make<void>();
+							const reconnectDisconnected = yield* Deferred.make<void>();
+							disconnectSignal = reconnectDisconnected;
+							const reconnectSocket = new Socket();
+							reconnectSocket.once("close", () =>
+								Deferred.doneUnsafe(reconnectClosed, Effect.void),
+							);
+							const reconnect = new RunnerSocket(
+								reconnectSocket,
+								(message) => {
+									if (message.type === "hello")
+										Deferred.doneUnsafe(
+											rehello,
+											Effect.succeed(message.querySeq),
+										);
+									if (message.type === "refused")
+										Deferred.doneUnsafe(rehello, Effect.fail(message.failure));
+								},
+								(failure) => Deferred.doneUnsafe(rehello, Effect.fail(failure)),
+							);
+							yield* Effect.addFinalizer(() =>
+								Effect.sync(() => reconnect.destroy()).pipe(
+									Effect.andThen(Deferred.await(reconnectClosed)),
+									Effect.andThen(Deferred.await(reconnectDisconnected)),
+								),
+							);
+							yield* Effect.tryPromise(
+								() =>
+									new Promise<void>((done, fail) => {
+										reconnectSocket.once("error", fail);
+										reconnectSocket.connect(socketPath, done);
+									}),
+							);
+							reconnect.write({
+								type: "hello",
+								driverKind: "claude",
+								protocolVersion: RUNNER_PROTOCOL_VERSION,
+								buildId: runnerBuildId(),
+								config: {
+									workspaceRoot: directory,
+									daemonConfigDir: directory,
+								},
+							});
+							// A surviving host keeps its count across a daemon reconnect (6.1).
+							expect(yield* Deferred.await(rehello)).toBe(1);
 							return;
 						}
 						if (mode === "hello-drain" || mode === "status-before-execution") {

@@ -48,7 +48,8 @@ export interface RunnerWireCodec {
 	) => string;
 }
 
-export const RUNNER_PROTOCOL_VERSION = 5;
+/** 6: the host stamps `querySeq` on every frame and its hello (CONTRACT 6.1, 9). */
+export const RUNNER_PROTOCOL_VERSION = 6;
 
 export const runnerBuildId = (): string =>
 	process.env["NODE_ENV"] === "test"
@@ -189,7 +190,11 @@ type RunnerReply =
 			readonly failure?: SessionFailure;
 	  };
 
-export type RunnerMessage =
+/**
+ * querySeq: the host's count of query replacements (CONTRACT 6.1), stamped on every
+ * frame it writes. Daemon frames carry none.
+ */
+export type RunnerMessage = { readonly querySeq?: number } & (
 	| RunnerHello
 	| {
 			readonly type: "command-refused";
@@ -247,7 +252,8 @@ export type RunnerMessage =
 			/** Legacy peers may send it; current runners ignore it. */
 			readonly preserveRole?: boolean;
 			readonly acknowledgedSequence: number;
-	  };
+	  }
+);
 
 /** Only the outbound wire accepts the pre-attachment-ref send shape. */
 export type RunnerWireMessage =
@@ -459,6 +465,8 @@ export class RunnerSocket {
 	private peerAttachmentRefs = false;
 	private peerSettlesAnswers = false;
 	scopedCursorCredentials = false;
+	/** The host's stamp; a frame stamped at production keeps its own (CONTRACT 6.1). */
+	querySeq: (() => number) | undefined;
 	private peerDriverKind: string | undefined;
 	private helloSends: RunnerHello["sendCommands"];
 	private readonly completedCommands = new Map<
@@ -664,7 +672,10 @@ export class RunnerSocket {
 
 	write(message: RunnerMessage): void {
 		if (this.socket.destroyed) return;
-		let frame: RunnerWireMessage = message;
+		let frame: RunnerWireMessage =
+			this.querySeq && message.querySeq === undefined
+				? { ...message, querySeq: this.querySeq() }
+				: message;
 		if (!this.peerAttachmentRefs && message.type === "command") {
 			const command = message.command;
 			if (command.type === "send-turn")

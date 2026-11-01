@@ -144,7 +144,7 @@ async function fixture(
 	let closing = false;
 	const transport = { checkpointAllowed: true, checkpointAttempts: 0 };
 	const fibers: Fiber.Fiber<void, unknown>[] = [];
-	const spool = new RunnerSpool(join(directory, "runner.spool"));
+	const spool = new RunnerSpool(join(directory, "runner.spool"), () => 0);
 	const socketPath = join(directory, "runner.sock");
 	const server = createServer((socket) => {
 		const peer = new ClaudeRunnerSocket(

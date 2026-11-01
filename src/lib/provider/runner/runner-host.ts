@@ -75,6 +75,8 @@ export interface RunnerLaunchCallbacks {
 	/** A rebind excludes the executing send's own command and admitted turn. */
 	readonly isBackgroundBusy: (ignoredCommands?: number) => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
+	/** Every native query start after the host's first is a replacement (CONTRACT 6.1). */
+	readonly queryStarted: () => void;
 	/** Only the producer can finish this exact terminal delivery. */
 	readonly sourceDelivery?: (
 		source: Pick<RunnerSourceDelivery, "sessionId" | "inputId" | "runId">,
@@ -288,7 +290,10 @@ export const runSessionRunner = (
 		let sendJournal: RunnerSendJournal | undefined;
 		let initializing = false;
 		let helloCount = 0;
-		const spool = new RunnerSpool(`${socketPath}.spool`);
+		// The host owns querySeq; a surviving host keeps it across daemon reconnects (6.1).
+		let querySeq = 0;
+		let queryStarted = false;
+		const spool = new RunnerSpool(`${socketPath}.spool`, () => querySeq);
 		let backgroundSnapshot:
 			| Extract<SessionOutput, { type: "background-task" }>
 			| undefined;
@@ -390,6 +395,10 @@ export const runSessionRunner = (
 				idle?.setTurnInFlight(inFlight);
 				reportUpgradeState();
 				if (!inFlight) retireWhenQuiescent();
+			},
+			queryStarted: () => {
+				if (queryStarted) querySeq++;
+				queryStarted = true;
 			},
 			sourceDelivery: (source) => {
 				const owner = sourceSinkId ? bindings.get(sourceSinkId) : undefined;
@@ -1149,6 +1158,7 @@ export const runSessionRunner = (
 				undefined,
 				launch.wire,
 			);
+			peer.querySeq = () => querySeq;
 			connection = peer;
 			runFork(
 				peer.readToEndEffect.pipe(

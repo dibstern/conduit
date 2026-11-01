@@ -113,6 +113,7 @@ it.each([
 					isCandidate: () => false,
 					isBackgroundBusy: () => false,
 					turnStateChanged: () => {},
+					queryStarted: () => {},
 					readThread: () => Effect.succeed({ items: [] }),
 				});
 				const runner = yield* launch.makeRunner(
