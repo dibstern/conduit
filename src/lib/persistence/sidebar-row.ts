@@ -39,6 +39,7 @@ export const SidebarRowSchema = Schema.Struct({
 			"updatedAt",
 			"backgroundWork",
 			"backgroundTasks",
+			"servers",
 			"compacting",
 			"retrying",
 			"snoozedAt",

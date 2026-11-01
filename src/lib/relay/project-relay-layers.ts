@@ -75,6 +75,7 @@ import {
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
+import { PortWatcherLive } from "../domain/persistence/Services/port-watcher.js";
 import { RunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -1039,7 +1040,7 @@ export function createProjectRelayLayers({
 		bridgeLayers,
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
-		Layer.merge(StatusPollerLive, RunLedgerSchedulerLive),
+		Layer.mergeAll(StatusPollerLive, RunLedgerSchedulerLive, PortWatcherLive),
 		relayStateAndBridges,
 	);
 	const relayStateWithRecaps = Layer.merge(

@@ -266,6 +266,19 @@ export const BackgroundTaskSchema = Schema.Struct({
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
+/** A live server of the session's (8.7): the Run Ledger's entry for one port. */
+export const SessionServerSchema = Schema.Struct({
+	port: Schema.Number,
+	pid: Schema.Number,
+	/** Epoch ms the listening process started. */
+	startedAt: Schema.Number,
+	command: Schema.String,
+	cwd: Schema.String,
+	source: Schema.Literals(["detected", "declared"]),
+	role: Schema.Literals(["serving", "awaited"]),
+});
+export type SessionServer = typeof SessionServerSchema.Type;
+
 export interface SessionGit {
 	branch?: string;
 	head?: string;
@@ -387,6 +400,8 @@ export const SessionInfoSchema = Schema.Struct({
 	backgroundWork: Schema.optional(BackgroundWorkSchema),
 	/** The live tasks behind backgroundWork, oldest first. */
 	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+	/** The session's live servers by port, read from the Run Ledger; absent with none. */
+	servers: Schema.optional(Schema.Array(SessionServerSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */
 	compacting: Schema.optional(Schema.String),
 	/** A provider retry's reason while it waits: transient status, never logged (C1). */
