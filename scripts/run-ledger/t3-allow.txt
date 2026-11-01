@@ -2064,3 +2064,9 @@ send that never reached the agent (released JournalAbsent, transmission 2).	poin
 its guard is row 202's fence read in markRunning	pointer
 the forced-stop artifact. 8ee9e4b8 covers B24	pointer
 7 direct settles; the closer is the stop commit's post-commit step	pointer
+25scs landed on wt/82tn3225: 4a397165 (rows 202 and 212	pointer
+Rows 203, 204 and 214 are deleted; the Stop accept body reads no view	pointer
+frees the dead runner's socket. A send whose run the stopping runner still	pointer
+R2 entry scope (5f5ffd8c, 58976bb4 on wt/82tn32r3): each runner entry now has one scope	pointer
+whether a send released unsent at an end-session goes to a fresh runner	pointer
+32.4 landed on wt/82tn323 in 6eebff33. When a runner is retired	pointer
