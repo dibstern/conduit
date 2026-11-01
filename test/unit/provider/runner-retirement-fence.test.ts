@@ -59,7 +59,11 @@ import {
 } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	currentRunnerWriteOrigin,
+	currentWriteAuthorization,
+	makeCommitAndSignal,
+} from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -3667,6 +3671,108 @@ for (const ending of [
 		),
 	);
 }
+
+// CONTRACT.md 6.11: memory teardown needs no authority.
+it.effect(
+	"a runner killed mid-turn releases its prompt waiter and open sink once without consulting a grant",
+	() => {
+		const warnings: string[] = [];
+		return runRetirement(
+			Effect.gen(function* () {
+				const releases: { authorized: boolean; origin: unknown }[] = [];
+				const f = yield* sendScopeFixture({
+					use: (account, work) =>
+						Effect.acquireUseRelease(
+							Effect.void,
+							() => work(account),
+							() =>
+								Effect.gen(function* () {
+									releases.push({
+										authorized:
+											(yield* currentWriteAuthorization) !== undefined,
+										origin: yield* currentRunnerWriteOrigin,
+									});
+								}),
+						),
+				});
+				const journal = new RunnerSendJournal(
+					runnerRegistry.runnerDirectory(f.root, f.root),
+					"s",
+					"claude",
+				);
+				f.replaySend.execute = (id, command, attempt) =>
+					journal.execute(
+						id,
+						attempt ?? 0,
+						command.input.nativeResumeFallback === true,
+						Effect.succeed({
+							status: "accepted",
+							cost: 0,
+							tokens: { input: 0, output: 0 },
+							durationMs: 0,
+							providerStateUpdates: [],
+						}),
+					);
+				const asked = yield* Deferred.make<void>();
+				let interrupted = 0;
+				vi.mocked(f.eventSink.requestPermission).mockImplementation(() =>
+					Deferred.succeed(asked, undefined).pipe(
+						Effect.andThen(Effect.never),
+						Effect.onInterrupt(() =>
+							Effect.sync(() => {
+								interrupted++;
+							}),
+						),
+					),
+				);
+				yield* f.instance.sendTurnEffect(f.input);
+				const old = f.attachments[0];
+				const child = f.childProcesses.get(100_020);
+				if (!old || !child) return yield* Effect.die("missing live runner");
+				yield* old.emit(
+					{
+						type: "permission-request",
+						sinkId: f.sinkId,
+						request: {
+							requestId: "pending-approval",
+							sessionId: "s",
+							turnId: f.input.inputId,
+							providerItemId: "tool",
+							toolName: "Bash",
+							toolInput: { command: "pwd" },
+						},
+					},
+					"s",
+				);
+				yield* Deferred.await(asked);
+				f.processes.delete(100_020);
+				Object.assign(child, { exitCode: 0 });
+				child.emit("exit", 0, null);
+				yield* f.assertReleased();
+				expect(interrupted).toBe(1);
+				expect(releases).toEqual([{ authorized: false, origin: undefined }]);
+				yield* old.emit({ type: "release-sink", sinkId: f.sinkId }, "s");
+				yield* f.assertReleased();
+				expect(interrupted).toBe(1);
+				expect(releases).toHaveLength(1);
+				expect(
+					warnings.filter((warning) =>
+						warning.startsWith("Dropped stale runner write"),
+					),
+				).toEqual([]);
+			}),
+		).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((options) => {
+						if (options.logLevel === "Warn")
+							warnings.push(String(options.message));
+					}),
+				]),
+			),
+		);
+	},
+);
 
 it.effect(
 	"send scope releases each resource once on cancel after sink binding",
