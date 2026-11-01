@@ -114,6 +114,7 @@ it.each([
 					isBackgroundBusy: () => false,
 					turnStateChanged: () => {},
 					queryStarted: () => {},
+					isReplacedQuery: () => false,
 					readThread: () => Effect.succeed({ items: [] }),
 				});
 				const runner = yield* launch.makeRunner(

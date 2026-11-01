@@ -20,9 +20,10 @@ import type {
 	RunnerLiveQueryConfiguration,
 	RunnerSettingsSnapshot,
 } from "../runner/runner-upgrade.js";
-import type {
-	NativeSessionRunner,
-	SessionFailure,
+import {
+	currentRunnerQuery,
+	type NativeSessionRunner,
+	type SessionFailure,
 } from "../runner/session-runner.js";
 import {
 	type ClaudeSessionRunnerDeps,
@@ -490,60 +491,67 @@ export const makeClaudeRunnerLaunch = (
 								reportUpgradeState();
 							},
 						},
-						(output) => {
-							if (
-								output.type === "event" &&
-								output.event.sessionId === sessionId &&
-								output.event.type === "turn.completed"
-							) {
-								const nativeSessionId =
-									output.event.providerRefs.providerSessionId;
-								if (nativeSessionId && nativeSessionId !== resumeSessionId) {
-									resumeSessionId = nativeSessionId;
-									// Completion can immediately trigger another send.
-									reportUpgradeState();
+						(output) =>
+							Effect.gen(function* () {
+								// A replaced query's workspace move or native id would retarget the
+								// new query, so only the current query's output updates them (6.1).
+								const current = !callbacks.isReplacedQuery(
+									yield* currentRunnerQuery,
+								);
+								if (
+									current &&
+									output.type === "event" &&
+									output.event.sessionId === sessionId &&
+									output.event.type === "turn.completed"
+								) {
+									const nativeSessionId =
+										output.event.providerRefs.providerSessionId;
+									if (nativeSessionId && nativeSessionId !== resumeSessionId) {
+										resumeSessionId = nativeSessionId;
+										// Completion can immediately trigger another send.
+										reportUpgradeState();
+									}
 								}
-							}
-							if (
-								output.type === "event" &&
-								output.event.type === "workspace.changed" &&
-								snapshot
-							) {
-								let workspaceRoot = output.event.data.path;
-								try {
-									workspaceRoot = realpathSync(workspaceRoot);
-								} catch {
-									// The relay validates folders. Retain the actual reported cwd
-									// for restart comparison if the directory has disappeared.
+								if (
+									current &&
+									output.type === "event" &&
+									output.event.type === "workspace.changed" &&
+									snapshot
+								) {
+									let workspaceRoot = output.event.data.path;
+									try {
+										workspaceRoot = realpathSync(workspaceRoot);
+									} catch {
+										// The relay validates folders. Retain the actual reported cwd
+										// for restart comparison if the directory has disappeared.
+									}
+									if (workspaceRoot !== snapshot.input.workspaceRoot) {
+										const workspaceDirectories =
+											snapshot.workspaceDirectories ?? [
+												snapshot.input.workspaceRoot,
+												...(snapshot.input.extraFolders ?? []),
+											];
+										snapshot = {
+											...snapshot,
+											workspacePreviousRoot: snapshot.input.workspaceRoot,
+											workspaceDirectories,
+											input: { ...snapshot.input, workspaceRoot },
+											options: {
+												...snapshot.options,
+												cwd: workspaceRoot,
+												additionalDirectories: workspaceDirectories.filter(
+													(folder) => folder !== workspaceRoot,
+												),
+											},
+										};
+										if (frozenSnapshot) frozenSnapshot = snapshot;
+									}
 								}
-								if (workspaceRoot !== snapshot.input.workspaceRoot) {
-									const workspaceDirectories =
-										snapshot.workspaceDirectories ?? [
-											snapshot.input.workspaceRoot,
-											...(snapshot.input.extraFolders ?? []),
-										];
-									snapshot = {
-										...snapshot,
-										workspacePreviousRoot: snapshot.input.workspaceRoot,
-										workspaceDirectories,
-										input: { ...snapshot.input, workspaceRoot },
-										options: {
-											...snapshot.options,
-											cwd: workspaceRoot,
-											additionalDirectories: workspaceDirectories.filter(
-												(folder) => folder !== workspaceRoot,
-											),
-										},
-									};
-									if (frozenSnapshot) frozenSnapshot = snapshot;
-								}
-							}
-							if (
-								output.type !== "event" ||
-								output.event.sessionId !== sessionId
-							)
-								return emit(output);
-							return Effect.gen(function* () {
+								if (
+									output.type !== "event" ||
+									output.event.sessionId !== sessionId
+								)
+									return yield* emit(output);
 								const cursor = yield* sessionRunner?.getResumeSessionIdEffect?.(
 									sessionId,
 								) ?? Effect.succeed(undefined);
@@ -556,8 +564,7 @@ export const makeClaudeRunnerLaunch = (
 									reportUpgradeState();
 								}
 								return yield* emit(output);
-							});
-						},
+							}),
 					);
 					return sessionRunner;
 				}),

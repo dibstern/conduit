@@ -13,6 +13,7 @@ import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
 } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { makeClaudeRunnerLaunch } from "../../../src/lib/provider/claude/claude-runner-launch.js";
 import type { ClaudeSessionRunnerDeps } from "../../../src/lib/provider/claude/claude-runner-payload.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
@@ -54,6 +55,36 @@ import {
 } from "../../helpers/runner-provider-admission.js";
 
 type Emit = Parameters<RunnerLaunch["makeRunner"]>[1];
+
+// The Claude launch's own output callback, recorded as the launch hands it to the payload.
+const launched = vi.hoisted(() => ({ output: undefined as Emit | undefined }));
+vi.mock("../../../src/lib/provider/claude/claude-sdk-module.js", async () => {
+	const { Effect } = await import("effect");
+	const { createMockQuery } = await import("../../helpers/mock-sdk.js");
+	return {
+		loadClaudeSdkTestModule: Effect.succeed({
+			claudeSdk: { query: () => createMockQuery([]) },
+		}),
+	};
+});
+vi.mock(
+	"../../../src/lib/provider/claude/claude-runner-payload.js",
+	async (importActual) => {
+		const actual =
+			await importActual<
+				typeof import("../../../src/lib/provider/claude/claude-runner-payload.js")
+			>();
+		return {
+			...actual,
+			makeClaudeSessionRunner: (
+				...args: Parameters<typeof actual.makeClaudeSessionRunner>
+			) => {
+				launched.output = args[1];
+				return actual.makeClaudeSessionRunner(...args);
+			},
+		};
+	},
+);
 type OutputFrame = Extract<RunnerMessage, { type: "output" }>;
 
 const event = (
@@ -669,6 +700,117 @@ it("never warms a query while another query for the session is live or setting u
 							),
 						),
 				},
+			),
+		),
+	);
+});
+
+it("keeps a replaced query's workspace move and native id out of the Claude launch's state", async () => {
+	let launch: RunnerLaunch | undefined;
+	const started: object[] = [];
+	const output = (
+		eventId: string,
+		event:
+			| { readonly type: "workspace.changed"; readonly path: string }
+			| { readonly type: "turn.completed"; readonly nativeId: string },
+	): SessionOutput => ({
+		type: "event",
+		sinkId: "sink-1",
+		event: {
+			eventId,
+			providerId: "claude",
+			sessionId: "session-1",
+			runId: "run-1",
+			rawSource: { kind: "claude.sdk" },
+			createdAt: 0,
+			...(event.type === "workspace.changed"
+				? {
+						type: event.type,
+						providerRefs: {},
+						data: { path: event.path, source: "tool" as const },
+					}
+				: {
+						type: event.type,
+						providerRefs: { providerSessionId: event.nativeId },
+						data: {},
+					}),
+		},
+	});
+	await Effect.runPromise(
+		Effect.scoped(
+			withHost(
+				({ callbacks, runner }) =>
+					Effect.gen(function* () {
+						const warm = {
+							type: "pre-warm" as const,
+							sessionId: "session-1",
+							input: claudeTurn("warm").input,
+						};
+						launch?.acceptCommand(warm);
+						yield* runner.executeNativeEffect(warm);
+						const [replaced] = started;
+						const replacement = {};
+						callbacks.queryStarted(replacement);
+						const under = (query: object | undefined, frame: SessionOutput) =>
+							(launched.output?.(frame) ?? Effect.die("No launch output")).pipe(
+								Effect.provideService(currentRunnerQuery, query),
+							);
+						yield* under(
+							replaced,
+							output("replaced-move", {
+								type: "workspace.changed",
+								path: "/tmp/ws-replaced",
+							}),
+						);
+						// Its terminal still reaches the daemon (6.1), but names no native session to resume.
+						yield* under(
+							replaced,
+							output("replaced-end", {
+								type: "turn.completed",
+								nativeId: "replaced-native",
+							}),
+						);
+						expect(launch?.upgradeState()).toMatchObject({
+							snapshot: { input: { workspaceRoot: "/tmp/ws" } },
+						});
+						expect(launch?.upgradeState().resumeSessionId).toBeUndefined();
+						yield* under(
+							replacement,
+							output("current-move", {
+								type: "workspace.changed",
+								path: "/tmp/ws-current",
+							}),
+						);
+						yield* under(
+							replacement,
+							output("current-end", {
+								type: "turn.completed",
+								nativeId: "current-native",
+							}),
+						);
+						expect(launch?.upgradeState()).toMatchObject({
+							snapshot: { input: { workspaceRoot: "/tmp/ws-current" } },
+							resumeSessionId: "current-native",
+						});
+					}),
+				(callbacks, emit) =>
+					makeClaudeRunnerLaunch({
+						...callbacks,
+						queryStarted: (query) => {
+							started.push(query);
+							callbacks.queryStarted(query);
+						},
+					}).pipe(
+						Effect.orDie,
+						Effect.tap((made) =>
+							Effect.sync(() => {
+								launch = made;
+							}),
+						),
+						Effect.flatMap((made) =>
+							made.makeRunner({ workspaceRoot: "/tmp/ws" }, emit),
+						),
+					),
 			),
 		),
 	);
