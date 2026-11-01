@@ -14,13 +14,21 @@
 // Row 211, the outcome body returns a start cancelled before it reached the agent. How it could fail:
 // 8. its text is dropped, as main, or it returns but not behind the pause;
 // 9. a start whose message was placed is returned too, so its value is both shown and re-sent.
-// Row 206, requeueFailedSteers places a steer a runner failure left possibly reached. How it could fail:
+// Row 206, requeueFailedSteers places a steer its Run's end left possibly reached (CONTRACT.md 970-972).
+// How it could fail:
 // 10. it returns to the inbox, as main, so its value is both possibly reached and re-sent;
+// 10a. only a runner failure places it, so a Stop's retire (main's provider_failure) still returns it;
 // 11. it is placed without its text, images or run, or a later sweep returns it again;
-// 12. a steer the view marks never reached, or one main failed for another cause, is placed too.
+// 12. a steer the view marks never reached is placed too;
+// 12a. a steer whose Run is still active is placed, never tried again in it (3.6).
 // Row 207, commitAndSignal's sweep cancels a steer the view marks failed. How it could fail:
 // 13. it is requeued but not cancelled, or cancelled in a later batch a restart can split;
 // 14. a caller without `cancelFinal` cancels, or a steer the view does not mark failed is cancelled.
+// Row 207's writer, the reactor's reply for a direct steer (CONTRACT.md 973-977). How it could fail:
+// 1. its permanent refusal leaves no outcome, so the view never fails it and the sweep only requeues;
+// 2. the outcome names a control's `tx:` token, which the view rejects, not the steer's runId;
+// 3. it lands in a later write than the failure, so that write's sweep requeues and never cancels;
+// 4. a retryable refusal or a Stop's own cancel (4.8, 9) is failed too.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -113,19 +121,27 @@ const dispatched = (
 	),
 ];
 
-/** Main's outbox row and receipt for u1's send, as the command's commit writes them. */
-const seedSend = (sql: SqlClient.SqlClient, provider: string) =>
+/** Main's outbox row and receipt for an input's send (u1's, run r1, by default), as the command's commit writes them. */
+const seedSend = (
+	sql: SqlClient.SqlClient,
+	provider: string,
+	[inputId, runId, sequence]: readonly [string, string, number] = [
+		"u1",
+		"r1",
+		1,
+	],
+) =>
 	Effect.all([
 		sql`INSERT INTO command_receipts (command_id, session_id, status, created_at, command_type,
 			project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
-			VALUES ('u1', 's1', 'side_effect_requested', 1003, 'send_turn', 'test-project',
-				'sha256:abc', 1, 1, 1003)`,
+			VALUES (${inputId}, 's1', 'side_effect_requested', 1003, 'send_turn', 'test-project',
+				'sha256:abc', 1, ${sequence}, 1003)`,
 		sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id,
 			provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
-			VALUES (1, 'u1', 'test-project', 's1', ${provider}, 'send_turn', ${JSON.stringify(
+			VALUES (${sequence}, ${inputId}, 'test-project', 's1', ${provider}, 'send_turn', ${JSON.stringify(
 				{
 					sessionId: "s1",
-					inputId: "u1",
+					inputId,
 					prompt: "hi",
 					history: [],
 					providerState: {},
@@ -133,7 +149,7 @@ const seedSend = (sql: SqlClient.SqlClient, provider: string) =>
 					configDir: configuredClaudeConfigDir("/tmp/25scs-test-claude"),
 					folderSource: "account",
 				},
-			)}, 'r1', 'pending', 0, 1003, 1003)`,
+			)}, ${runId}, 'pending', 0, 1003, 1003)`,
 	]);
 
 const provider = (
@@ -228,15 +244,15 @@ const failSteer = (sql: SqlClient.SqlClient, provider: string, code: string) =>
 		provider_id, effect_type, payload_json, run_id, status, attempt_count, error_code, requested_at, updated_at)
 		VALUES (2, 'u2', 'test-project', 's1', ${provider}, 'send_turn', '{}', 'r2', 'failed', 1, ${code}, 1008, 1009)`;
 
-/** The runner failure's terminal: main's `runner_stopped` `turn.error` on r1. */
-const runnerStopped = (provider: string) =>
+/** r1's end: main's `turn.error` with `code` (a runner failure's `runner_stopped`, a retire's `provider_failure`). */
+const runEnded = (provider: string, code: string) =>
 	canonicalEvent(
 		"turn.error",
 		"s1",
 		{
 			messageId: "m1",
 			error: "Provider process stopped",
-			code: "runner_stopped",
+			code,
 		},
 		{ provider, createdAt: 1011, metadata: { runId: "r1" } },
 	);
@@ -465,70 +481,72 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 				),
 		);
 
-	it.effect(
-		"row 206: a steer a runner failure left possibly reached is placed as sent, never returned",
-		() =>
-			withStore(
-				Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					const commit = yield* makeCommitAndSignal;
-					yield* commit(
-						steered("claude", [
+	for (const [cause, code] of [
+		["a runner failure", "runner_stopped"],
+		["a Stop's retire", "provider_failure"],
+	] as const)
+		it.effect(
+			`row 206: a steer ${cause} left possibly reached is placed as sent, never returned`,
+			() =>
+				withStore(
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						const commit = yield* makeCommitAndSignal;
+						yield* commit(
+							steered("claude", [
+								canonicalEvent(
+									"run.dispatched",
+									"s1",
+									{
+										runId: "r1",
+										runnerId: "rn",
+										commandId: "u2",
+										transmission: 1,
+									},
+									{
+										provider: "claude",
+										createdAt: 1009,
+										metadata: { runId: "r1" },
+									},
+								),
+							]),
+						);
+						yield* failSteer(sql, "claude", code);
+						yield* commit([runEnded("claude", code)]);
+						// 10, 10a, 11: main's placement, with its text, image and run; no requeue.
+						expect(
+							(yield* steerEvents(sql)).map((event) => [
+								event.type,
+								event.run_id,
+							]),
+						).toEqual([
+							["message.created", "r2"],
+							["text.delta", null],
+							["file.attached", null],
+						]);
+						expect(
+							yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u2'`,
+						).toEqual([{ state: "removed" }]);
+						expect(
+							yield* sql`SELECT role, input_id FROM messages WHERE id = 'u2'`,
+						).toEqual([{ role: "user", input_id: "u2" }]);
+						// 11: a later sweep finds a messages row and returns nothing.
+						yield* commit([
 							canonicalEvent(
-								"run.dispatched",
+								"session.status",
 								"s1",
-								{
-									runId: "r1",
-									runnerId: "rn",
-									commandId: "u2",
-									transmission: 1,
-								},
-								{
-									provider: "claude",
-									createdAt: 1009,
-									metadata: { runId: "r1" },
-								},
+								{ sessionId: "s1", status: "idle" },
+								{ provider: "claude", createdAt: 1012 },
 							),
-						]),
-					);
-					yield* failSteer(sql, "claude", "runner_stopped");
-					yield* commit([runnerStopped("claude")]);
-					// 10, 11: main's placement, with its text, image and run; no requeue.
-					expect(
-						(yield* steerEvents(sql)).map((event) => [
-							event.type,
-							event.run_id,
-						]),
-					).toEqual([
-						["message.created", "r2"],
-						["text.delta", null],
-						["file.attached", null],
-					]);
-					expect(
-						yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u2'`,
-					).toEqual([{ state: "removed" }]);
-					expect(
-						yield* sql`SELECT role, input_id FROM messages WHERE id = 'u2'`,
-					).toEqual([{ role: "user", input_id: "u2" }]);
-					// 11: a later sweep finds a messages row and returns nothing.
-					yield* commit([
-						canonicalEvent(
-							"session.status",
-							"s1",
-							{ sessionId: "s1", status: "idle" },
-							{ provider: "claude", createdAt: 1012 },
-						),
-					]);
-					expect((yield* steerEvents(sql)).map((event) => event.type)).toEqual([
-						"message.created",
-						"text.delta",
-						"file.attached",
-					]);
-				}),
-			),
-	);
+						]);
+						expect(
+							(yield* steerEvents(sql)).map((event) => event.type),
+						).toEqual(["message.created", "text.delta", "file.attached"]);
+					}),
+				),
+		);
 
-	for (const [name, end, code] of [
+	for (const [name, end, code, sweep] of [
 		[
 			"the runner released it unsent",
 			[
@@ -552,9 +570,10 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 				),
 			],
 			"runner_stopped",
+			runEnded("claude", "runner_stopped"),
 		],
 		[
-			"main failed it for another cause",
+			"its Run is still active",
 			[
 				canonicalEvent(
 					"run.dispatched",
@@ -564,6 +583,13 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 				),
 			],
 			"provider_error",
+			// 12a: r1 runs on, so the sweep's commit ends nothing.
+			canonicalEvent(
+				"session.status",
+				"s1",
+				{ sessionId: "s1", status: "busy" },
+				{ provider: "claude", createdAt: 1011 },
+			),
 		],
 	] as const)
 		it.effect(`row 206: a steer is returned as main when ${name}`, () =>
@@ -573,8 +599,8 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 					const commit = yield* makeCommitAndSignal;
 					yield* commit(steered("claude", end));
 					yield* failSteer(sql, "claude", code);
-					yield* commit([runnerStopped("claude")]);
-					// 12: main's requeue, paused, and nothing placed.
+					yield* commit([sweep]);
+					// 12, 12a: main's requeue, paused, and nothing placed.
 					expect((yield* steerEvents(sql)).map((event) => event.type)).toEqual([
 						"input.requeued",
 					]);
@@ -583,6 +609,76 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 					).toEqual([{ state: "queued" }]);
 				}),
 			),
+		);
+
+	const refusal = (code: string, retryable: boolean) =>
+		Effect.fail(
+			new ProviderInstanceFailure({
+				providerId: "opencode",
+				operation: "sendTurn",
+				cause: { code, message: "OpenCode said no", retryable },
+			}),
+		);
+	for (const [name, reply, evidence] of [
+		["refuses it permanently", refusal("HTTP400", false), true],
+		["fails it retryably", refusal("ECONNRESET", true), false],
+		[
+			"ends it cancelled, a Stop's own",
+			Effect.succeed<TurnResult>({ ...completed, status: "cancelled" }),
+			false,
+		],
+	] as const)
+		it.live(
+			`row 207: a direct steer's send the provider ${name} is ${evidence ? "failed, final" : "not failed"}`,
+			() =>
+				withStore(
+					Effect.gen(function* () {
+						const { sql, commit, reactor } = yield* reactorFor(
+							provider("opencode", () => reply),
+							() => 2000,
+							Duration.seconds(1),
+						);
+						yield* commit(steered("opencode", []));
+						yield* seedSend(sql, "opencode", ["u2", "r2", 2]);
+						yield* reactor.drain();
+						// 1, 2, 4: the reply's write names the steer's own token (its runId), permanent only.
+						expect(
+							yield* sql`SELECT json_extract(data, '$.token') AS token, json_extract(data, '$.transmission') AS transmission,
+								json_extract(data, '$.outcome.tag') AS tag, json_extract(data, '$.outcome.code') AS code
+								FROM events WHERE type = 'evidence.effect_outcome'`,
+						).toEqual(
+							evidence
+								? [
+										{
+											token: "r2",
+											transmission: 1,
+											tag: "permanent",
+											code: "HTTP400",
+										},
+									]
+								: [],
+						);
+						// 3, 13: the same write's sweep requeues then cancels it, final.
+						const events = yield* sql<{
+							type: string;
+							sequence: number;
+						}>`SELECT type, sequence FROM events WHERE type IN ('input.requeued', 'input.cancelled')
+							AND json_extract(data, '$.inputId') = 'u2' ORDER BY sequence`;
+						if (evidence) {
+							expect(events.map((event) => event.type)).toEqual([
+								"input.requeued",
+								"input.cancelled",
+							]);
+							expect(events[1]?.sequence).toBe((events[0]?.sequence ?? 0) + 1);
+							expect(
+								yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u2'`,
+							).toEqual([{ state: "removed" }]);
+						} else
+							expect(events.map((event) => event.type)).not.toContain(
+								"input.cancelled",
+							);
+					}),
+				),
 		);
 
 	it.effect(
