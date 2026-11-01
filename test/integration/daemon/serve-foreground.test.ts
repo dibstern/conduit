@@ -576,9 +576,7 @@ describe("foreground conduit serve", () => {
 			await vi.waitFor(() => {
 				const proof = harness?.proof() as { logTail: string };
 				expect(proof.logTail).toContain(
-					JSON.stringify(
-						'Failed to recover relay for project "rollback-project"',
-					),
+					'Failed to recover relay for project "rollback-project"',
 				);
 			});
 			expect(alive(failed.runner.pid)).toBe(true);
@@ -684,9 +682,7 @@ describe("foreground conduit serve", () => {
 					() => {
 						const proof = harness?.proof() as { logTail: string };
 						expect(proof.logTail).toContain(
-							JSON.stringify(
-								'Failed to recover relay for project "process-test"',
-							),
+							'Failed to recover relay for project "process-test"',
 						);
 					},
 					{ timeout: 5000 },
@@ -821,9 +817,7 @@ describe("foreground conduit serve", () => {
 				() => {
 					const proof = harness?.proof() as { logTail: string };
 					expect(proof.logTail).toContain(
-						JSON.stringify(
-							'Failed to recover relay for project "process-test"',
-						),
+						'Failed to recover relay for project "process-test"',
 					);
 				},
 				{ timeout: 5000 },
