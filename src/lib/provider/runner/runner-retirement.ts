@@ -171,7 +171,10 @@ export const makeRunnerRunLifecycle = (
 								provider: string;
 								status: string;
 								runner_id: string | null;
-							}>`SELECT owner.id, session.provider, owner.status, owner.runner_id
+								joined_into: string | null;
+								requested_runner_id: string | null;
+							}>`SELECT owner.id, session.provider, owner.status, owner.runner_id,
+							requested.joined_into, requested.runner_id AS requested_runner_id
 						FROM provider_runs requested JOIN provider_runs owner
 							ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
 						JOIN sessions session ON session.id = requested.session_id
@@ -181,11 +184,20 @@ export const makeRunnerRunLifecycle = (
 								(owner.status !== "pending" && owner.status !== "running")
 							)
 								return { _tag: "Ended" };
-							const commandId = yield* runSendCommandIdQuery(
+							// From 32.5 a joined steer is bound under its own commandId: its count,
+							// hold and dispatch are its own run's, its status and coverage its
+							// owner's (4.3, 4.8; CONTRACT 1535-1537, 1868-1869).
+							const ownerCommandId = yield* runSendCommandIdQuery(
 								sql,
 								input.sessionId,
 								owner.id,
 							);
+							const run =
+								owner.joined_into !== null && input.commandId !== ownerCommandId
+									? { id: input.runId, runnerId: owner.requested_runner_id }
+									: { id: owner.id, runnerId: owner.runner_id };
+							const commandId =
+								run.id === owner.id ? ownerCommandId : input.commandId;
 							if (commandId === undefined || commandId !== input.commandId)
 								return { _tag: "Ended" };
 							const [command] = yield* sql<{
@@ -193,12 +205,12 @@ export const makeRunnerRunLifecycle = (
 								attempt_count: number;
 							}>`SELECT request_sequence, attempt_count FROM provider_command_outbox
 						WHERE session_id = ${input.sessionId} AND command_id = ${commandId}
-							AND run_id = ${owner.id} AND effect_type = 'send_turn' AND status = 'running'
+							AND run_id = ${run.id} AND effect_type = 'send_turn' AND status = 'running'
 						ORDER BY request_sequence DESC LIMIT 1`;
 							if (!command) return { _tag: "Ended" };
 							const send = {
 								sessionId: input.sessionId,
-								runId: owner.id,
+								runId: run.id,
 								commandId,
 								requestSequence: command.request_sequence,
 								attempt: command.attempt_count,
@@ -210,11 +222,11 @@ export const makeRunnerRunLifecycle = (
 								afterCommit: (effect) => followUps.push(effect),
 							};
 							if (yield* stopCovers(sql, input.sessionId, owner.id)) {
-								if (owner.runner_id === null)
+								if (run.runnerId === null)
 									yield* settleSend(tx, { _tag: "covered", send, observedAt });
 								return { _tag: "Covered" };
 							}
-							if (owner.runner_id !== null) return { _tag: "Busy" };
+							if (run.runnerId !== null) return { _tag: "Busy" };
 							// n counts every transmission of the commandId and never restarts, so no
 							// token repeats (CONTRACT 66-67, 4.11). The cap counts only tries since the
 							// input's latest reservation, so a re-queued input gets it whole again (4.8).
@@ -240,7 +252,7 @@ export const makeRunnerRunLifecycle = (
 											{ commandId },
 											{
 												provider: owner.provider,
-												metadata: { runId: owner.id },
+												metadata: { runId: run.id },
 											},
 										),
 									]),
@@ -317,12 +329,12 @@ export const makeRunnerRunLifecycle = (
 										"run.dispatched",
 										input.sessionId,
 										{
-											runId: owner.id,
+											runId: run.id,
 											runnerId: serving.runner_id,
 											commandId,
 											transmission,
 										},
-										{ provider: owner.provider, metadata: { runId: owner.id } },
+										{ provider: owner.provider, metadata: { runId: run.id } },
 									),
 								]),
 							);
@@ -2208,9 +2220,12 @@ export const makeRunnerRetirement = (
 									input.sessionId,
 								);
 								const changed = commit.committed();
+								// A joined steer lives as long as its owner's Run (4.1; CONTRACT 1413).
 								const [run] = yield* sql<{
 									status: string;
-								}>`SELECT status FROM provider_runs WHERE id = ${input.runId} AND session_id = ${input.sessionId}`;
+								}>`SELECT owner.status FROM provider_runs requested JOIN provider_runs owner
+									ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
+									WHERE requested.id = ${input.runId} AND requested.session_id = ${input.sessionId}`;
 								const ended =
 									!run ||
 									!["pending", "running"].includes(run.status) ||

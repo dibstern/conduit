@@ -1850,8 +1850,9 @@ export const makeTurnProjector = defineProjector(() => ({
 				yield* sql`UPDATE provider_runs SET runner_id = ${event.data.runnerId},
 					held_transmission = ${event.data.transmission ?? null}
 					WHERE session_id = ${event.sessionId} AND id = ${event.data.runId}
-					AND EXISTS (SELECT 1 FROM provider_runs owner
-						WHERE owner.id = ${event.data.runId} AND owner.session_id = ${event.sessionId}
+					AND EXISTS (SELECT 1 FROM provider_runs requested JOIN provider_runs owner
+						ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
+						WHERE requested.id = ${event.data.runId} AND requested.session_id = ${event.sessionId}
 						AND owner.status IN ('pending', 'running'))`;
 				return { sessions: [], messages: [] };
 			}

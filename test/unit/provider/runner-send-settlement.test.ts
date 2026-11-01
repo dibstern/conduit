@@ -3800,3 +3800,68 @@ for (const policy of ["retry handled", "steer declined"] as const)
 				}),
 			),
 	);
+
+it.effect(
+	"a steer joined during its NotSent transmission is re-held through the feeder while its owner's Run is open",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				// 4.8: its re-hold is the feeder's, under its own transmissions, and lives
+				// as long as its owner's Run (CONTRACT 1413, 1535-1537, 1868-1869).
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("head", 1, 1, "held");
+				yield* f.hello(journalHello("head", undefined, undefined, "running"));
+				yield* f.recover;
+				const steer = yield* f.seed("steer", 2, 1, "unheld");
+				let sends = 0;
+				// Its run.started joins it to the owner before the NotSent reply lands.
+				f.replaySend.execute = () =>
+					++sends === 1
+						? f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`.pipe(
+								Effect.orDie,
+								Effect.andThen(
+									Effect.fail({
+										operation: "send-turn",
+										code: "not_sent",
+										message: "no bytes",
+										delivery: { _tag: "NotSent" },
+									}),
+								),
+							)
+						: Effect.succeed(terminalResult("joined"));
+				const sending = yield* f.instance
+					.sendTurnEffect(steer)
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust("5 seconds");
+				expect(sending.pollUnsafe()).toMatchObject({ _tag: "Success" });
+				expect((yield* Fiber.join(sending))?.status).toBe("joined");
+				expect(
+					yield* f.sql`SELECT type, json_extract(data, '$.commandId') AS commandId,
+						json_extract(data, '$.transmission') AS transmission, json_extract(data, '$.reason') AS reason FROM events
+						WHERE type IN ('run.dispatched', 'run.released') AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+				).toEqual([
+					{
+						type: "run.dispatched",
+						commandId: "steer",
+						transmission: 1,
+						reason: null,
+					},
+					{
+						type: "run.released",
+						commandId: "steer",
+						transmission: 1,
+						reason: "NotSent",
+					},
+					{
+						type: "run.dispatched",
+						commandId: "steer",
+						transmission: 2,
+						reason: null,
+					},
+				]);
+				expect(f.commands.filter((c) => c.type === "send-turn")).toHaveLength(
+					2,
+				);
+			}),
+		),
+);
