@@ -53,6 +53,7 @@ describe("Schema Migration", () => {
 					[87, "provider_run_holder"],
 					[88, "provider_run_held_transmission"],
 					[89, "runner_cursors"],
+					[90, "run_ledger"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -126,6 +127,7 @@ describe("Schema Migration", () => {
 					[87, "provider_run_holder"],
 					[88, "provider_run_held_transmission"],
 					[89, "runner_cursors"],
+					[90, "run_ledger"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -177,6 +179,8 @@ describe("Schema Migration", () => {
 				"provider_runs",
 				"provider_state",
 				"read_model_counter",
+				"run_ledger_entries",
+				"run_ledger_sessions",
 				"sent_alerts",
 				"session_git_published",
 				"session_goal_checks",
@@ -391,6 +395,11 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_provider_command_outbox_ledger_effect",
+					table: "provider_command_outbox",
+					unique: true,
+				},
+				{
 					name: "idx_provider_command_outbox_process",
 					table: "provider_command_outbox",
 					unique: false,
@@ -428,6 +437,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_provider_runs_session_status",
 					table: "provider_runs",
+					unique: false,
+				},
+				{
+					name: "idx_run_ledger_sessions_alarm",
+					table: "run_ledger_sessions",
 					unique: false,
 				},
 				{

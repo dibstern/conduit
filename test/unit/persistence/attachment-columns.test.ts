@@ -44,6 +44,9 @@ const cannotHoldRefs = {
 		"project_key session_id turn_id command_id status user_message_id assistant_message_id error_code tombstone_reason",
 	provider_runs: "id session_id status joined_into runner_id",
 	provider_state: "session_id key value",
+	// The arm folds admit's request without its images (run-ledger-arm.ts).
+	run_ledger_entries: "session_id stamp entry_json",
+	run_ledger_sessions: "session_id provider state",
 	sent_alerts: "session_id alert_key anchor state claim_id",
 	session_git_published: "directory git workspace_missing",
 	session_goal_checks: "event_id session_id condition reason judge_model",

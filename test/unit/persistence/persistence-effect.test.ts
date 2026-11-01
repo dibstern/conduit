@@ -169,6 +169,8 @@ describe("Persistence Effect", () => {
 					"provider_runs",
 					"provider_state",
 					"read_model_counter",
+					"run_ledger_entries",
+					"run_ledger_sessions",
 					"sent_alerts",
 					"session_git_published",
 					"session_goal_checks",
@@ -367,6 +369,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 87, name: "provider_run_holder" },
 				{ migration_id: 88, name: "provider_run_held_transmission" },
 				{ migration_id: 89, name: "runner_cursors" },
+				{ migration_id: 90, name: "run_ledger" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`

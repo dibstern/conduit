@@ -10,10 +10,10 @@ import {
 import {
 	flushPendingWrites,
 	makeCommitAndSignal,
-	queuePendingWrite,
 } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { queuePendingWrite } from "../../../src/lib/persistence/effect/pending-writes.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";

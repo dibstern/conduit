@@ -26,6 +26,7 @@ import {
 } from "../tool-wire-projection.js";
 import { inheritForkHistory } from "./inherit-fork-history.js";
 import { makeProviderStateEffect } from "./provider-state-effect.js";
+import { makeRunLedgerArm } from "./run-ledger-arm.js";
 import { rerootSession } from "./sidebar-projection.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
@@ -2558,6 +2559,8 @@ const PROJECTORS = [
 	makeProviderProjector,
 	makeApprovalProjector,
 	makeInputProjector,
+	// Last: the ledger arm folds what main's projectors already wrote in this write (3.1).
+	makeRunLedgerArm,
 ] as const;
 
 type HandledBy<P extends EffectProjector> = P["handles"][number];
@@ -2573,22 +2576,10 @@ export type UnprojectedReasons<T extends LiveEventType> = [T] extends [never]
 
 // Every unhandled live event needs a reason; handled or retired entries are stale.
 export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
-	"interrupt.requested":
-		"Control intent; delivery acknowledgement does not end a run",
-	"session.end_requested":
-		"Control intent; provider lifecycle owns session retirement",
 	"session.provider_cleanup_failed":
 		"Audit receipt for failed upstream cleanup; no materialized projection needed",
 	"session.handoff_delivered":
 		"Delivery receipt needs no materialized projection",
-	"evidence.process_started": "Run Ledger evidence; the ledger arm folds it",
-	"evidence.process_lost": "Run Ledger evidence; the ledger arm folds it",
-	"evidence.alarm_fired": "Run Ledger evidence; the ledger arm folds it",
-	"evidence.effect_outcome": "Run Ledger evidence; the ledger arm folds it",
-	"evidence.turn_started": "Run Ledger evidence; the ledger arm folds it",
-	"evidence.turn_ended": "Run Ledger evidence; the ledger arm folds it",
-	"evidence.delivery_indeterminate":
-		"Run Ledger evidence; the ledger arm folds it",
 };
 
 /**

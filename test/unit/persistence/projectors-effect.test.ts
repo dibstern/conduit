@@ -2872,6 +2872,7 @@ describe("ProjectionRunnerEffect", () => {
 			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
 			{ projector_name: "provider", last_applied_seq: 1 },
+			{ projector_name: "run-ledger", last_applied_seq: 1 },
 			{ projector_name: "session", last_applied_seq: 1 },
 			{ projector_name: "turn", last_applied_seq: 1 },
 		]);
@@ -3057,6 +3058,7 @@ describe("ProjectionRunnerEffect", () => {
 			{ projector_name: "input", last_applied_seq: 1 },
 			{ projector_name: "message", last_applied_seq: 1 },
 			{ projector_name: "provider", last_applied_seq: 1 },
+			{ projector_name: "run-ledger", last_applied_seq: 1 },
 			{ projector_name: "session", last_applied_seq: 1 },
 			{ projector_name: "turn", last_applied_seq: 1 },
 		]);
@@ -3134,6 +3136,7 @@ describe("ProjectionRunnerEffect", () => {
 			{ projector_name: "input", last_applied_seq: 3 },
 			{ projector_name: "message", last_applied_seq: 3 },
 			{ projector_name: "provider", last_applied_seq: 3 },
+			{ projector_name: "run-ledger", last_applied_seq: 3 },
 			{ projector_name: "session", last_applied_seq: 3 },
 			{ projector_name: "turn", last_applied_seq: 3 },
 		]);
@@ -3283,6 +3286,7 @@ describe("ProjectionRunnerEffect", () => {
 					{ projector_name: "input", last_applied_seq: 4 },
 					{ projector_name: "message", last_applied_seq: 4 },
 					{ projector_name: "provider", last_applied_seq: 4 },
+					{ projector_name: "run-ledger", last_applied_seq: 4 },
 					{ projector_name: "session", last_applied_seq: 4 },
 					{ projector_name: "turn", last_applied_seq: 4 },
 				]);
@@ -3385,7 +3389,8 @@ describe("ProjectionRunnerEffect", () => {
 				expect(first).toMatchObject({
 					startCursor: 0,
 					endCursor: 501,
-					totalReplayed: 1002,
+					// The ledger arm also reads each session.status (CONTRACT.md 3.1).
+					totalReplayed: 1502,
 				});
 				expect(firstSession).toEqual([
 					{ status: "busy", title: "Test Session" },
@@ -3395,6 +3400,7 @@ describe("ProjectionRunnerEffect", () => {
 					{ projector_name: "input", last_applied_seq: 501 },
 					{ projector_name: "message", last_applied_seq: 501 },
 					{ projector_name: "provider", last_applied_seq: 501 },
+					{ projector_name: "run-ledger", last_applied_seq: 501 },
 					{ projector_name: "session", last_applied_seq: 501 },
 					{ projector_name: "turn", last_applied_seq: 501 },
 				]);
@@ -3780,7 +3786,7 @@ describe("ProjectionRunnerEffect", () => {
 				expect(cursor?.lastAppliedSeq).toBe(0);
 				expect(
 					(yield* cursorRepo.get(
-						"@batch:approval,input,message,provider,session,turn",
+						"@batch:approval,input,message,provider,run-ledger,session,turn",
 					))?.lastAppliedSeq,
 				).toBe(e2.sequence);
 				expect((yield* runner.recover()).totalReplayed).toBe(0);

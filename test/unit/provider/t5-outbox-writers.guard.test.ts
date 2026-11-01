@@ -143,7 +143,8 @@ const statusWrites = sources.flatMap((file) => {
 		const site = `${relative(root, file)}#${writerName(node)}`;
 		if (verb.startsWith("DELETE")) return [`${site}: ${guard(sql)} -> deleted`];
 		if (verb.startsWith("INSERT")) {
-			const values = sql.slice(sql.search(/\bVALUES\b/));
+			// INSERT ... VALUES, or the ledger arm's INSERT ... SELECT.
+			const values = sql.slice(sql.search(/\b(VALUES|SELECT)\b/));
 			return [`${site}: new -> ${statusesIn(values).join(",") || "<dynamic>"}`];
 		}
 		const target = assignment(sql);
@@ -180,6 +181,10 @@ describe("T5-writers", () => {
 				// transaction (open send rows), not in the UPDATE's text. Gap, reported.
 				"src/lib/persistence/effect/projectors-effect.ts#settleRunCommands: any -> completed,failed,retryable_failed",
 				"src/lib/provider/orchestration-engine.ts#acceptStopEffect: retryable_failed -> deleted",
+				// The ledger arm's keyed INSERT OR IGNORE of probe, stop_task and cancel_request.
+				"src/lib/persistence/effect/run-ledger-arm.ts#project: new -> pending",
+				// The ledger effects' executor: its claimed row's outcome, with its effect_outcome.
+				"src/lib/provider/orchestration-side-effect-reactor.ts#runLedgerEffect: running -> completed,failed,retryable_failed,cancelled",
 				// Outside the machine (3.12): the two migration-time deletes.
 				"src/lib/persistence/effect/migrations.ts#runPurgeBackgroundShellSessionsMigration: any -> deleted",
 				"src/lib/persistence/effect/migrations.ts#runPurgeLegacySkeletonSessionsMigration: any -> deleted",
