@@ -47,6 +47,7 @@ import type { makeRunnerSends } from "./runner-sends.js";
 import { CANCELLED_TURN, type makeRunnerStarter } from "./runner-starter.js";
 import type { SendScope } from "./send-scope.js";
 import {
+	classify,
 	retrySettlementWrite,
 	type SendEvidence,
 	type StoreFault,
@@ -376,6 +377,21 @@ export const makeRunnerSendFeeder = (options: {
 											});
 										if (live)
 											yield* Deferred.succeed(live.reply, reply.success);
+										// A joined steer's retryable reply leaves its command open, so after the
+										// backoff the feeder holds it again from its stored send as its next
+										// transmission; any other send's Run ends on it, and with it this
+										// capability (CONTRACT 1864-1873, 2021-2025, 2667).
+										const result = terminalTurnResult(reply.success);
+										if (
+											result &&
+											classify({ _tag: "replied", result }) === "retryable"
+										) {
+											yield* Effect.sleep(sendRetryBackoff(hold.transmission));
+											if (capabilities.get(key(item.input)) === item) {
+												if (item.live === live) item.live = undefined;
+												enqueueCapability(item);
+											}
+										}
 									}),
 								);
 								if (

@@ -2159,11 +2159,22 @@ export const makeTurnProjector = defineProjector(() => ({
 			if (!["pending", "running"].includes(run.status)) {
 				// From 32.5 a joined steer's own settlement ends its command, never its
 				// owner's run (4.8; CONTRACT 1555-1556, 1868-1869).
-				if (
-					run.status === "joined" &&
-					runTerminalStatus(event, event.provider)
-				) {
-					yield* settleRunCommands(runId, event);
+				const terminal = runTerminalStatus(event, event.provider);
+				if (run.status === "joined" && terminal) {
+					// Its retryable reply ends only that held transmission: the command stays open and
+					// the feeder holds it again as its next transmission while its owner's Run is open,
+					// never a reactor re-send on a fresh Run (4.8; CONTRACT 1864-1870, 2021-2025, 2667).
+					const [released] =
+						isEventType(event, "turn.error") &&
+						event.data.retryable === true &&
+						event.data.retryHandled !== true
+							? yield* sql`UPDATE provider_runs SET runner_id = NULL, held_transmission = NULL
+								WHERE id = ${runId} AND session_id = ${event.sessionId} AND held_transmission IS NOT NULL
+									AND EXISTS (SELECT 1 FROM provider_runs owner WHERE owner.id = provider_runs.joined_into
+										AND owner.session_id = provider_runs.session_id AND owner.status IN ('pending', 'running'))
+								RETURNING id`
+							: [];
+					if (!released) yield* settleRunCommands(runId, event);
 					return { sessions: [event.sessionId], messages: woken };
 				}
 				// A background task finishing after its run ended wakes Claude into

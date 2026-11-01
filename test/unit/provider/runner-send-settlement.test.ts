@@ -3587,6 +3587,93 @@ it.effect(
 		),
 );
 
+// From 32.5 a joined steer's retry after a retryable reply is its own Run's next transmission,
+// held by the feeder under its own run id, never a fresh Run (CONTRACT 1864-1870, 2021-2025, 2667).
+// How it could fail: the retry is claimed on a fresh Run, so the steer leaves its owner's Run and
+// restarts its cap; it is re-sent before its backoff; it is never re-sent and stays stranded; or
+// its outcome ends its owner's Run.
+it.effect(
+	"a joined steer's retryable reply is re-held as its own Run's next transmission, never a fresh Run",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("head", 1, 1, "held");
+				yield* f.hello(journalHello("head", undefined, undefined, "running"));
+				yield* f.recover;
+				yield* f.seed("steer", 2, 0);
+				f.preparation.gate =
+					f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`.pipe(
+						Effect.orDie,
+						Effect.asVoid,
+					);
+				const replies = [
+					terminalResult("error", {
+						code: "temporary",
+						message: "transient",
+						retryable: true,
+					}),
+					terminalResult("joined"),
+				];
+				const sent: string[] = [];
+				f.replaySend.execute = (_id, command) =>
+					Effect.sync(() => {
+						sent.push(command.input.inputId);
+						return replies.shift() ?? terminalResult("joined");
+					});
+				yield* f.reactor.runCommand("steer").pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				// Its reply leaves the steer's command open and unheld until its backoff.
+				expect(
+					yield* f.sql`SELECT command.status, command.run_id, run.runner_id, run.held_transmission
+						FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id
+						WHERE command.command_id = 'steer'`,
+				).toEqual([
+					{
+						status: "running",
+						run_id: "run:steer",
+						runner_id: null,
+						held_transmission: null,
+					},
+				]);
+				expect(sent).toEqual(["steer"]);
+				yield* TestClock.adjust("999 millis");
+				expect(sent).toEqual(["steer"]);
+				yield* TestClock.adjust("1 millis");
+				expect(sent).toEqual(["steer", "steer"]);
+				expect(
+					yield* f.sql`SELECT id, status FROM provider_runs WHERE joined_into IS NULL`,
+				).toEqual([{ id: "run:head", status: "pending" }]);
+				expect(
+					yield* f.sql`SELECT status, joined_into FROM provider_runs WHERE id = 'run:steer'`,
+				).toEqual([{ status: "joined", joined_into: "run:head" }]);
+				expect(
+					yield* f.sql`SELECT command_id, status, attempt_count, run_id FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "head",
+						status: "running",
+						attempt_count: 1,
+						run_id: "run:head",
+					},
+					{
+						command_id: "steer",
+						status: "running",
+						attempt_count: 1,
+						run_id: "run:steer",
+					},
+				]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.commandId') AS commandId, json_extract(data, '$.transmission') AS transmission
+						FROM events WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+				).toEqual([
+					{ commandId: "steer", transmission: 1 },
+					{ commandId: "steer", transmission: 2 },
+				]);
+			}),
+		),
+);
+
 // An account revoked under the reactor's call fails that call before any hold.
 const revoked = (retryable: boolean | undefined) =>
 	new ProviderInstanceFailure({

@@ -419,14 +419,16 @@ describe("Run Ledger arrival-order permutation gate (M9)", () => {
 		expect(result.permuted).toBeGreaterThan(500);
 	});
 
+	// test-waits-allow timeout-override: replays every provider's traces in every order: 5s alone on a loaded host, 17 to 30s beside a 2-worker unit run, so 60s.
 	it("keeps each position's time, so a ledger that rejects a backwards clock passes (failure 5)", () => {
 		const result = permutationGate(
 			clockChecked as LedgerImplementation<unknown, unknown>,
 			traces,
 		);
 		expect(result.differences).toEqual([]);
-	});
+	}, 60_000);
 
+	// test-waits-allow timeout-override: replays every provider's traces in every order: 5s alone on a loaded host, 17 to 30s beside a 2-worker unit run, so 60s.
 	it("fails a ledger whose Run end depends on arrival order (failure 4)", () => {
 		const result = permutationGate(
 			orderSensitive as LedgerImplementation<unknown, unknown>,
@@ -435,5 +437,5 @@ describe("Run Ledger arrival-order permutation gate (M9)", () => {
 		expect(
 			result.differences.some(({ what }) => what.startsWith("window end")),
 		).toBe(true);
-	});
+	}, 60_000);
 });
