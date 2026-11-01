@@ -14,114 +14,23 @@
  * 5. Clock: a moved fact keeping its own time runs the clock backwards. Each position keeps its
  *    time; only the facts move.
  */
-import fc from "fast-check";
 import { assert, describe, expect, it } from "vitest";
 import type {
 	IssuedEffect,
-	LedgerCommand,
 	LedgerView,
-	ProviderKind,
 	RunEnded,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import { splitLabel, traceAction } from "./fake-provider.js";
+import { splitLabel } from "./fake-provider.js";
 import {
 	type LedgerImplementation,
 	policy,
 	referenceImplementation,
-	TraceDriver,
 	writeTraceArtifact,
 } from "./harness.js";
-import { reviewTraces } from "./review-traces.js";
-import { Driver, type Stepped, scenarios } from "./scenarios.js";
-
-interface Timed {
-	readonly command: LedgerCommand;
-	readonly now: number;
-}
-interface Trace {
-	readonly id: string;
-	readonly provider: ProviderKind;
-	readonly steps: readonly Timed[];
-}
+import { allTraces, providers, type Timed, type Trace } from "./traces.js";
 
 /** M9 (CONTRACT.md 5405): up to 6 settlements per window. */
 const windowSize = 6;
-const providers = ["claude", "codex", "cursor", "opencode"] as const;
-const generatedRuns = 12;
-const generatedCommands = 40;
-
-/** Records a catalogue scenario's commands; the WeakMap is set before a subclass field could be. */
-const recorded = new WeakMap<Driver, Timed[]>();
-class RecordingDriver extends Driver {
-	override step(command: LedgerCommand, now?: number): Stepped {
-		const stepped = super.step(command, now);
-		recorded.set(this, [
-			...(recorded.get(this) ?? []),
-			{ command, now: this.now },
-		]);
-		return stepped;
-	}
-}
-
-function catalogueTraces(): Trace[] {
-	return scenarios.map((scenario) => {
-		const d = new RecordingDriver(scenario.provider);
-		scenario.run(d);
-		return {
-			id: `catalogue ${scenario.id}`,
-			provider: scenario.provider,
-			steps: recorded.get(d) ?? [],
-		};
-	});
-}
-
-/** A review or generated trace may stop at a fake-side check; its oracle steps so far still stand. */
-function traceDriverTrace(
-	id: string,
-	provider: ProviderKind,
-	drive: (d: TraceDriver) => void,
-): Trace {
-	const d = new TraceDriver(provider);
-	try {
-		drive(d);
-	} catch {}
-	return { id, provider, steps: d.commands };
-}
-
-function generatedTraces(provider: ProviderKind): Trace[] {
-	return fc
-		.sample(
-			fc.array(traceAction, {
-				minLength: generatedCommands,
-				maxLength: generatedCommands,
-			}),
-			{
-				seed: 82_217_000,
-				numRuns: generatedRuns,
-			},
-		)
-		.map((actions, run) =>
-			traceDriverTrace(`generated ${provider} ${run}`, provider, (d) => {
-				d.step({
-					verb: "settle",
-					settlement: {
-						kind: "process_started",
-						label: d.label,
-						reattached: false,
-					},
-				});
-				for (const action of actions) {
-					const packet = d.host.next(action, {
-						issued: d.issued,
-						view: d.view(),
-						now: d.now,
-						alarmAt: d.alarmAt,
-					});
-					d.step(packet.command, packet.now);
-				}
-			}),
-		);
-}
 
 const isFact = ({ command }: Timed) =>
 	command.verb === "observe" || command.verb === "settle";
@@ -482,13 +391,7 @@ const clockChecked: LedgerImplementation<
 };
 
 describe("Run Ledger arrival-order permutation gate (M9)", () => {
-	const traces = [
-		...catalogueTraces(),
-		...reviewTraces.map((trace) =>
-			traceDriverTrace(`review ${trace.id}`, trace.provider, trace.run),
-		),
-		...providers.flatMap(generatedTraces),
-	];
+	const traces = allTraces();
 
 	it.each(
 		providers,
