@@ -2073,3 +2073,4 @@ whether a send released unsent at an end-session goes to a fresh runner	pointer
 hold facts, and the named tests for main's tokened and	pointer
 tokened entries, and a repeated main observation are all asserted by named	pointer
 The box asking for wake labels in the interrupt is	pointer
+restart, a hung wake that runs past the Stop's deadline ends forced, and the	pointer
