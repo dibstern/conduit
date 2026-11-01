@@ -3281,6 +3281,18 @@ for (const invalidation of ["none", "after retry"] as const) {
 							"s",
 						);
 						yield* f.assertReleased();
+						// The refusal's real release retires the old runner in its stop commit, which
+						// records the runner's loss once, after that commit's release (CONTRACT 6.5).
+						const trail = yield* f.sql<{
+							type: string;
+						}>`SELECT type FROM events WHERE type IN ('run.released', 'evidence.process_lost') AND json_extract(data, '$.runnerId') = ${old.runnerId} ORDER BY sequence`;
+						expect(trail.slice(0, 2)).toEqual([
+							{ type: "run.released" },
+							{ type: "evidence.process_lost" },
+						]);
+						expect(
+							trail.filter(({ type }) => type === "evidence.process_lost"),
+						).toHaveLength(1);
 					}).pipe(Effect.ensuring(Deferred.succeed(resume, undefined)));
 				}),
 			),
