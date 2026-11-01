@@ -14,7 +14,10 @@ import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { RunLedgerSchedulerLive } from "../../../src/lib/domain/persistence/Services/run-ledger-scheduler.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignal,
+	makeCommitAndSignal,
+} from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectContext,
@@ -22,15 +25,25 @@ import {
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
-/** One store over the file, with the scheduler running until the effect ends (a restart's unit). */
+/**
+ * One store over the file, with the scheduler running until the body ends (a restart's unit). A
+ * test sees the scheduler only through its commits, so the body gets the commit seam, whose
+ * `committed()` captures the next commit when called, and the scheduler's first commit, captured
+ * before the scheduler starts.
+ */
 const open = <A, E>(
 	file: string,
-	effect: Effect.Effect<A, E, PersistenceEffectContext>,
+	body: (
+		commit: CommitAndSignal,
+		started: Effect.Effect<void>,
+	) => Effect.Effect<A, E, PersistenceEffectContext>,
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const started = commit.committed();
 			yield* Layer.build(RunLedgerSchedulerLive);
-			return yield* effect;
+			return yield* body(commit, started);
 		}),
 	).pipe(Effect.provide(makePersistenceEffectLayer(file, "test-project")));
 
@@ -97,15 +110,6 @@ const observed = Effect.gen(function* () {
 	};
 });
 
-/** Let the scheduler's fiber run its write after the clock moves. */
-const settle = Effect.gen(function* () {
-	for (let index = 0; index < 50; index++) yield* Effect.yieldNow;
-	yield* Effect.promise(
-		() => new Promise((resolve) => setTimeout(resolve, 20)),
-	);
-	for (let index = 0; index < 50; index++) yield* Effect.yieldNow;
-});
-
 describe("Run Ledger alarm scheduler", () => {
 	it.effect(
 		"keeps one timer on the earliest alarm, fires each once, and fires the ledger stop deadline after a restart",
@@ -115,12 +119,9 @@ describe("Run Ledger alarm scheduler", () => {
 				(dir) =>
 					Effect.gen(function* () {
 						const file = join(dir, "events.db");
-						const before = yield* open(
-							file,
+						const before = yield* open(file, (commit) =>
 							Effect.gen(function* () {
 								const sql = yield* SqlClient.SqlClient;
-								const commit = yield* makeCommitAndSignal;
-								yield* settle;
 								// The scheduler is idle with no alarm; these commits must wake it.
 								yield* commit(wakeThenStop("s1", 5000));
 								yield* commit(wakeThenStop("s2", 3000));
@@ -134,28 +135,29 @@ describe("Run Ledger alarm scheduler", () => {
 								yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state, alarm_at)
 									VALUES ('s3', 'claude', 'Open', 2000)`;
 								yield* commit(wakeThenStop("s4", 9000));
-								yield* settle;
 								const armed = yield* observed;
+								// Each wait is for the scheduler's next commit. A fire's created_at is the clock
+								// it read, so a fire at 1999 shows as 1999, not 2000.
+								const first = commit.committed();
 								yield* TestClock.adjust(1999);
-								yield* settle;
-								const early = yield* observed;
 								yield* TestClock.adjust(1);
-								yield* settle;
-								yield* TestClock.adjust(500);
-								yield* settle;
+								yield* first;
 								const spurious = yield* observed;
-								yield* TestClock.adjust(500);
-								yield* settle;
-								return { armed, early, spurious, s2: yield* observed };
+								// A refire of the spurious row would be this next commit, not s2's.
+								const second = commit.committed();
+								yield* TestClock.adjust(1000);
+								yield* second;
+								return { armed, spurious, s2: yield* observed };
 							}),
 						);
 						// A restart before s1's deadline: a fresh graph over the same file.
-						const after = yield* open(
-							file,
+						const after = yield* open(file, (commit, started) =>
 							Effect.gen(function* () {
-								yield* settle;
+								// A fresh scheduler fires the due spurious row once more, at its start.
+								yield* started;
+								const deadline = commit.committed();
 								yield* TestClock.adjust(2000);
-								yield* settle;
+								yield* deadline;
 								return yield* observed;
 							}),
 						);
@@ -164,7 +166,7 @@ describe("Run Ledger alarm scheduler", () => {
 				(dir) =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			).pipe(
-				Effect.tap(({ armed, early, spurious, s2, after }) =>
+				Effect.tap(({ armed, spurious, s2, after }) =>
 					Effect.sync(() => {
 						// L6: each Stop commit opened the ledger stop deadline at its deadlineAt.
 						expect(armed.rows).toEqual([
@@ -174,9 +176,7 @@ describe("Run Ledger alarm scheduler", () => {
 							{ session_id: "s4", alarm_at: 9000 },
 						]);
 						expect(armed.alarms).toEqual([]);
-						// 1: nothing fires before its time.
-						expect(early.alarms).toEqual([]);
-						// 3: the spurious row fired once at 2000 and not again; its row is as it was.
+						// 1, 3: the spurious row fired at 2000, not before, and not again; its row is as it was.
 						expect(spurious.alarms).toEqual([
 							{ session_id: "s3", created_at: 2000 },
 						]);

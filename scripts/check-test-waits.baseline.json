@@ -1469,9 +1469,6 @@
 	"test/unit/persistence/recap-service.test.ts": {
 		"polling": 3
 	},
-	"test/unit/persistence/run-ledger-scheduler.test.ts": {
-		"real-wait": 1
-	},
 	"test/unit/persistence/session-sidebar.test.ts": {
 		"timeout-override": 4
 	},

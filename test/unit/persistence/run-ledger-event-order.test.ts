@@ -405,9 +405,11 @@ describe("Run Ledger event order (11.3)", () => {
 						const smallest = (list: typeof violations) =>
 							[...list].sort((a, b) => a.steps.length - b.steps.length)[0] ??
 							null;
-						mkdirSync("test-results", { recursive: true });
+						// Beside the test, ignored by git; Playwright wipes test-results/.
+						const artifacts = join(import.meta.dirname, "artifacts");
+						mkdirSync(artifacts, { recursive: true });
 						writeFileSync(
-							"test-results/run-ledger-event-order.json",
+							join(artifacts, "run-ledger-event-order.json"),
 							`${JSON.stringify(
 								{
 									orderings: sequences.length,

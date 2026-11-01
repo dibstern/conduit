@@ -19,6 +19,13 @@
 // 15. the folded outcome leaves the control's issue live, or its replay inserts an outbox row.
 // One transaction (3.12, S9.2). How it could fail:
 // 16. a provider event commits while the ledger decision it carries fails, or the reverse.
+// Transmissions (3.4, D59). How they could fail:
+// 17. a runner-held send's fresh-run retry run.requested is a transmission too, so the retry counts
+//     twice, once at its request and once at its dispatch;
+// 18. a fresh-run retry reserves a second Run, or a direct send's retry is no transmission of its Run.
+// Load (3.12). How it could fail:
+// 19. a session whose only open work is unknown background tasks reads Quiescent, so a restart's
+//     load, which rebuilds only Open rows, skips it.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -329,6 +336,202 @@ describe("Run Ledger arm", () => {
 					expect((yield* loadLedgerView("s1"))?.active).toBeDefined();
 				}),
 			),
+	);
+
+	it.effect(
+		"D59: a runner-held fresh-run retry is one transmission, its dispatch; a direct send's run.requested is one",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					// The direct marker's event, its token the runId it names (3.4).
+					const marker = (
+						sessionId: string,
+						runId: string,
+						createdAt: number,
+					) =>
+						canonicalEvent(
+							"evidence.delivery_indeterminate",
+							sessionId,
+							{ runId, commandId: "c1" },
+							at(createdAt, { runId }),
+						);
+					const step = (event: CanonicalEvent) =>
+						Effect.gen(function* () {
+							const entries = sql<{
+								n: number;
+							}>`SELECT COUNT(*) AS n FROM run_ledger_entries`;
+							const [before] = yield* entries;
+							yield* projectOnline([event]);
+							const [after] = yield* entries;
+							const view = yield* loadLedgerView(event.sessionId);
+							return {
+								folded: (after?.n ?? 0) > (before?.n ?? 0),
+								runId: view?.active?.runId,
+								inputs: view?.active?.inputs.map((input) => input.state.tag),
+								live: view?.live.map((issue) =>
+									issue.tag === "Main" ? issue.commandId : issue.token,
+								),
+							};
+						});
+					// Main's retry on a fresh run (4.8): a new runId for an input Run r1 holds.
+					const retry = (sessionId: string) =>
+						canonicalEvent(
+							"run.requested",
+							sessionId,
+							{ runId: "r2", inputId: "u1" },
+							at(1007, { runId: "r2" }),
+						);
+					// Claude: dispatched as c1's transmission 1, then released unsent (an unlaunch, 3.6).
+					yield* projectOnline([
+						...turn("s1", "claude").slice(0, 4),
+						canonicalEvent(
+							"evidence.process_started",
+							"s1",
+							{ runnerId: "rn", label: "rn:1", reattached: false },
+							at(1004, {}, "claude"),
+						),
+						canonicalEvent(
+							"run.dispatched",
+							"s1",
+							{ runId: "r1", runnerId: "rn", commandId: "c1", transmission: 1 },
+							at(1005, { runId: "r1" }, "claude"),
+						),
+						canonicalEvent(
+							"run.released",
+							"s1",
+							{
+								runId: "r1",
+								runnerId: "rn",
+								commandId: "c1",
+								transmission: 1,
+								reason: "NotSent",
+							},
+							at(1006, { runId: "r1" }, "claude"),
+						),
+					]);
+					const held = [
+						yield* step(retry("s1")),
+						yield* step(marker("s1", "r2", 1008)),
+						yield* step(
+							canonicalEvent(
+								"run.dispatched",
+								"s1",
+								{
+									runId: "r2",
+									runnerId: "rn",
+									commandId: "c1",
+									transmission: 2,
+								},
+								at(1009, { runId: "r2" }, "claude"),
+							),
+						),
+					];
+					// 17, 18: the retry names Run r1 and transmits nothing; the marker naming r2 finds no
+					// transmission; the dispatch is the retry's one transmission.
+					expect(held).toEqual([
+						{ folded: true, runId: "r1", inputs: ["Queued"], live: [] },
+						{ folded: false, runId: "r1", inputs: ["Queued"], live: [] },
+						{ folded: true, runId: "r1", inputs: ["Queued"], live: ["c1"] },
+					]);
+
+					// OpenCode: run.requested r1 is the direct start's transmission, under its input's id.
+					yield* projectOnline(turn("s2", "opencode").slice(0, 4));
+					const direct = [
+						yield* step(marker("s2", "r9", 1006)),
+						yield* step(retry("s2")),
+						yield* step(marker("s2", "r2", 1008)),
+					];
+					// 18: an unknown runId is no transmission; the retry names Run r1 and is one.
+					expect(direct).toEqual([
+						{
+							folded: false,
+							runId: "r1",
+							inputs: ["Dispatching"],
+							live: ["u1"],
+						},
+						{
+							folded: true,
+							runId: "r1",
+							inputs: ["Dispatching"],
+							live: ["u1"],
+						},
+						{ folded: true, runId: "r1", inputs: ["Delivered"], live: ["u1"] },
+					]);
+				}),
+			),
+	);
+
+	it.effect(
+		"keeps a session with only unknown background tasks Open, the row a restart's load rebuilds",
+		() =>
+			Effect.gen(function* () {
+				const dir = mkdtempSync(join(tmpdir(), "run-ledger-arm-"));
+				const file = join(dir, "events.db");
+				const open = <A, E>(
+					effect: Effect.Effect<A, E, PersistenceEffectContext>,
+				) =>
+					effect.pipe(
+						Effect.provide(makePersistenceEffectLayer(file, "test-project")),
+					);
+				const process = (sessionId: string, reattached: boolean) =>
+					canonicalEvent(
+						"evidence.process_started",
+						sessionId,
+						{
+							runnerId: `rn-${sessionId}`,
+							label: `rn-${sessionId}:1`,
+							reattached,
+						},
+						at(1004, {}, "claude"),
+					);
+				const observed = Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						rows: yield* sql`SELECT session_id, state FROM run_ledger_sessions ORDER BY session_id`,
+						tasks: (yield* loadLedgerView("s1"))?.tasks,
+					};
+				});
+				const before = yield* open(
+					Effect.gen(function* () {
+						// s1's runner survived a restart: its tasks are unknown, its only open work. s2's
+						// is fresh, with none.
+						yield* projectOnline([
+							makeSessionCreatedEvent("s1", {
+								provider: "claude",
+								createdAt: 1000,
+							}),
+							process("s1", true),
+							makeSessionCreatedEvent("s2", {
+								provider: "claude",
+								createdAt: 1000,
+							}),
+							process("s2", false),
+						]);
+						return yield* observed;
+					}),
+				);
+				// A fresh graph over the same file, as a restart's.
+				const after = yield* open(
+					Effect.gen(function* () {
+						yield* (yield* ProjectionRunnerEffectTag).recover();
+						return yield* observed;
+					}),
+				).pipe(
+					Effect.ensuring(
+						Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+					),
+				);
+				// 19: the row is Open, so the load rebuilds s1 with its tasks unknown.
+				expect(before).toEqual({
+					rows: [
+						{ session_id: "s1", state: "Open" },
+						{ session_id: "s2", state: "Quiescent" },
+					],
+					tasks: { tag: "unknown", label: "rn-s1:1" },
+				});
+				expect(after).toEqual(before);
+			}),
 	);
 	it.live(
 		"runs a Stop's ledger effects beside a running send, woken by their commit, each outcome folded in its write",

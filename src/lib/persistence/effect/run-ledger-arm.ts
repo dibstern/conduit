@@ -441,11 +441,13 @@ const commandFor = (
 			case "evidence.delivery_indeterminate":
 				return {
 					verb: "observe",
-					// 3.4: a direct start's token is its run.requested runId.
+					// The direct marker reads as delivery_unknown, never the hold fact a send with no hold
+					// cannot produce (CONTRACT.md 527, 1818); a direct start's token is its runId (3.4).
 					observation: {
 						tag: "Answer",
 						token: event.data.runId as SendToken,
-						kind: "delivery_indeterminate",
+						kind: "effect_outcome",
+						outcome: { tag: "delivery_unknown" },
 					},
 				};
 			default:
