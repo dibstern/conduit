@@ -229,6 +229,22 @@ export const makeRunnerRunLifecycle = (
 							AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
 							const transmission = (count?.n ?? 0) + 1;
 							if ((count?.tries ?? 0) >= 5) {
+								// 4.3 (CONTRACT 1521-1524): the cap's settlement, then its turn.error. The
+								// ledger fails the input in this write, so the commit's sweep cancels a
+								// steer instead of requeueing it (row 207).
+								yield* project(
+									yield* eventStore.appendBatch([
+										canonicalEvent(
+											"evidence.hold_exhausted",
+											input.sessionId,
+											{ commandId },
+											{
+												provider: owner.provider,
+												metadata: { runId: owner.id },
+											},
+										),
+									]),
+								);
 								yield* settleSend(tx, {
 									_tag: "failed",
 									send,

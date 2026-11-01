@@ -1171,6 +1171,8 @@ export const CanonicalEvents = {
 		}),
 	),
 	"evidence.turn_ended": live(Schema.Struct({ label: Schema.String })),
+	/** holdRun's cap (4.3): the held send under commandId spent its five transmissions. */
+	"evidence.hold_exhausted": live(Schema.Struct({ commandId: Schema.String })),
 	/** The direct send's delivery_indeterminate marker (3.4); a direct start's token is its runId. */
 	"evidence.delivery_indeterminate": live(
 		Schema.Struct({ runId: Schema.String, commandId: Schema.String }),

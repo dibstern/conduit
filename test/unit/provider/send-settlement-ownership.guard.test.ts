@@ -87,7 +87,8 @@ describe("send settlement ownership", () => {
 		);
 	});
 
-	it("constructs only dispatch and release domain events in the lifecycle gate", () => {
+	// The cap reports its own ledger evidence (CONTRACT 1521-1524); its turn.error is Settle's.
+	it("constructs only dispatch, release and the cap's evidence in the lifecycle gate", () => {
 		const file = join(root, "src/lib/provider/runner/runner-retirement.ts");
 		const source = ts.createSourceFile(
 			file,
@@ -107,7 +108,11 @@ describe("send settlement ownership", () => {
 			ts.forEachChild(node, visit);
 		};
 		visit(source);
-		expect(kinds.sort()).toEqual(["run.dispatched", "run.released"]);
+		expect(kinds.sort()).toEqual([
+			"evidence.hold_exhausted",
+			"run.dispatched",
+			"run.released",
+		]);
 	});
 
 	it("constructs delivery_unknown evidence only in Settle", () => {
