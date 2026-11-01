@@ -2559,7 +2559,7 @@ function settle(
 			if (run === undefined) return noop("unknown token (3.4)");
 			if (run.phase === "Ended")
 				return noop("late evidence for an Ended Run (3.8)");
-			const send =
+			let send =
 				[...runSends(world, run)]
 					.reverse()
 					.find(
@@ -2569,6 +2569,18 @@ function settle(
 					(item) => item.held && item.commandId === undefined,
 				);
 			if (send === undefined) return noop("unknown token (3.4)");
+			// D50, F58: an unlaunched Run's next unheld try is main's relaunch, a new execution's transmission.
+			if (run.phase === "Queued") {
+				const { effect } = send;
+				launch(run);
+				send = issue(
+					world,
+					effect.kind === "start"
+						? { ...effect, mode: nextMode(world) }
+						: effect,
+					true,
+				);
+			}
 			send.commandId ??= settlement.commandId;
 			const tx = transmit(world, send, undefined);
 			effectOutcome(world, step, send, tx, settlement.outcome);
