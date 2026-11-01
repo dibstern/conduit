@@ -339,24 +339,24 @@ const commandFor = (
 				const deadlineAt = event.data.stop?.deadlineAt ?? null;
 				// 5.1 D58: Run now is the interrupt main's interruptForInput commits after its
 				// input.interrupt_requested; the stored interrupt names no input (gap, reported).
-				const [forInput] = yield* sql<{ input_id: string }>`
-					SELECT json_extract(data, '$.inputId') AS input_id FROM events
-					WHERE session_id = ${event.sessionId} AND type = 'input.interrupt_requested'
+				// Keyed by session, so the read never walks other sessions' history (RL-063).
+				const [latest] = yield* sql<{ type: string; input_id: string }>`
+					SELECT type, json_extract(data, '$.inputId') AS input_id FROM events
+					WHERE session_id = ${event.sessionId}
+						AND type IN ('input.interrupt_requested', 'interrupt.requested')
 						AND sequence < ${event.sequence}
-						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-							WHERE session_id = ${event.sessionId} AND type = 'interrupt.requested'
-								AND sequence < ${event.sequence}), 0)
 					ORDER BY sequence DESC LIMIT 1`;
 				return {
 					verb: "control",
-					control: forInput
-						? {
-								kind: "run_now",
-								commandId,
-								inputId: forInput.input_id,
-								deadlineAt,
-							}
-						: { kind: "stop", commandId, deadlineAt },
+					control:
+						latest?.type === "input.interrupt_requested"
+							? {
+									kind: "run_now",
+									commandId,
+									inputId: latest.input_id,
+									deadlineAt,
+								}
+							: { kind: "stop", commandId, deadlineAt },
 				};
 			}
 			case "session.end_requested": {

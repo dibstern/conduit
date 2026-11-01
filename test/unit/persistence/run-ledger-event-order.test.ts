@@ -262,14 +262,7 @@ const firstViolation = (trace: readonly LedgerView[], runEnds: number) => {
 	let inbox = new Set<string>();
 	let lostNow = new Set<string>();
 	for (const [step, view] of trace.entries()) {
-		// Whether the Run had ended (no active Run) in an earlier view.
-		const fail = (reason: string) => ({
-			step,
-			reason,
-			afterEnd: trace
-				.slice(1, step)
-				.some((earlier) => earlier.active === undefined),
-		});
+		const fail = (reason: string) => ({ step, reason });
 		const issues = new Set(
 			view.live.map((issue) =>
 				issue.tag === "Main"
@@ -330,11 +323,7 @@ const firstViolation = (trace: readonly LedgerView[], runEnds: number) => {
 		lostNow = nextLost;
 	}
 	return runEnds > 1
-		? {
-				step: trace.length - 1,
-				reason: "1: the Run ended twice",
-				afterEnd: false,
-			}
+		? { step: trace.length - 1, reason: "1: the Run ended twice" }
 		: undefined;
 };
 
@@ -383,28 +372,16 @@ describe("Run Ledger event order (11.3)", () => {
 							const committedAt = sequence.steps.flatMap((step, position) =>
 								step === "restart" ? [] : [position],
 							);
-							const steps = sequence.steps.slice(
-								0,
-								(committedAt[found.step - 1] ?? -1) + 1,
-							);
-							// A decider finding, not the arm's: a run.dispatched after its Run ended (a native
-							// terminal, or a Stop before the claim) binds a live start for the ended Run (3.4:
-							// dispatched() refuses only a dropped issue, H3). Kept apart, so any other fails.
 							return [
 								{
-									steps,
+									steps: sequence.steps.slice(
+										0,
+										(committedAt[found.step - 1] ?? -1) + 1,
+									),
 									reason: found.reason,
-									known:
-										found.afterEnd &&
-										/^[12]: /.test(found.reason) &&
-										["claim", "retryClaim"].includes(steps.at(-1) ?? ""),
 								},
 							];
 						});
-						const unexplained = violations.filter((found) => !found.known);
-						const smallest = (list: typeof violations) =>
-							[...list].sort((a, b) => a.steps.length - b.steps.length)[0] ??
-							null;
 						// Beside the test, ignored by git; Playwright wipes test-results/.
 						const artifacts = join(import.meta.dirname, "artifacts");
 						mkdirSync(artifacts, { recursive: true });
@@ -416,14 +393,11 @@ describe("Run Ledger event order (11.3)", () => {
 									groups: GROUPS,
 									entries: live.length,
 									runEnds: [...ends.values()].reduce((a, b) => a + b, 0),
-									violations: unexplained.length,
-									smallest: smallest(unexplained),
-									decider: {
-										violations: violations.length - unexplained.length,
-										smallest: smallest(
-											violations.filter((found) => found.known),
-										),
-									},
+									violations: violations.length,
+									smallest:
+										[...violations].sort(
+											(a, b) => a.steps.length - b.steps.length,
+										)[0] ?? null,
 									replayMatches:
 										JSON.stringify(replayed) === JSON.stringify(live),
 								},
@@ -431,14 +405,14 @@ describe("Run Ledger event order (11.3)", () => {
 								"\t",
 							)}\n`,
 						);
-						return { unexplained, live, replayed, ends };
+						return { violations, live, replayed, ends };
 					}),
 				(dir) =>
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 			).pipe(
-				Effect.tap(({ unexplained, live, replayed, ends }) =>
+				Effect.tap(({ violations, live, replayed, ends }) =>
 					Effect.sync(() => {
-						expect(unexplained.slice(0, 3)).toEqual([]);
+						expect(violations.slice(0, 3)).toEqual([]);
 						expect(replayed).toEqual(live);
 						// The orderings reach the Run's end, so 1's end count is exercised.
 						expect(ends.size).toBeGreaterThan(sequences.length / 2);
