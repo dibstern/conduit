@@ -1166,6 +1166,86 @@ it.effect(
 		),
 );
 
+// From 32.5 restart recovery re-holds a joined steer's unsent transmission through the feeder
+// under the steer's own run id, keeping its claim (CONTRACT 1862-1869, 2021-2025).
+// How it could fail: recovery reads the steer under its owner's run id, so the hold ends it
+// unsent or skips it as held; it is marked for a fresh reactor re-send with a new attempt; its
+// held transmission is never released, so it stays stuck; or its owner's Run is ended.
+for (const transmission of ["unheld", "held"] as const)
+	it.effect(
+		`restart re-holds a joined steer's ${transmission} unsent transmission under its own run id`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("claude");
+					yield* f.seed("head", 1, 1, "held");
+					yield* f.seed("steer", 2, 1, transmission);
+					yield* f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`;
+					// The runner reports the owner's send running and never received the steer's.
+					yield* f.hello((hello) => ({
+						...journalHello("head", undefined, undefined, "running")(hello),
+						drainsConnections: true,
+					}));
+					const sent: string[] = [];
+					f.replaySend.execute = (_id, command) =>
+						Effect.sync(() => {
+							sent.push(command.input.inputId);
+							return terminalResult("joined");
+						});
+					yield* f.recover;
+					yield* TestClock.adjust("1 second");
+					expect(sent).toEqual(["steer"]);
+					expect(
+						yield* f.sql`SELECT type, json_extract(data, '$.commandId') AS commandId,
+							json_extract(data, '$.transmission') AS transmission, json_extract(data, '$.reason') AS reason FROM events
+							WHERE type IN ('run.dispatched', 'run.released') AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+					).toEqual(
+						transmission === "unheld"
+							? [
+									{
+										type: "run.dispatched",
+										commandId: "steer",
+										transmission: 1,
+										reason: null,
+									},
+								]
+							: [
+									{
+										type: "run.dispatched",
+										commandId: "steer",
+										transmission: 1,
+										reason: null,
+									},
+									{
+										type: "run.released",
+										commandId: "steer",
+										transmission: 1,
+										reason: "NotSent",
+									},
+									{
+										type: "run.dispatched",
+										commandId: "steer",
+										transmission: 2,
+										reason: null,
+									},
+								],
+					);
+					expect(
+						yield* f.sql`SELECT command_id, status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+					).toEqual([
+						{ command_id: "head", status: "running", attempt_count: 1 },
+						{ command_id: "steer", status: "running", attempt_count: 1 },
+					]);
+					expect(
+						yield* f.sql`SELECT id, status FROM provider_runs WHERE id IN ('run:head', 'run:steer') ORDER BY id`,
+					).toEqual([
+						{ id: "run:head", status: "pending" },
+						{ id: "run:steer", status: "joined" },
+					]);
+				}),
+			),
+	);
+
 for (const refusal of [false, true])
 	it.effect(
 		`F73 restart after release prepares fresh mode once and ${refusal ? "fails a fresh refusal visibly" : "completes"}`,
@@ -1413,8 +1493,10 @@ for (const pickup of ["live caller", "restart scan"] as const)
 							// a restart meets Cleaning only from a candidate registered
 							// after that (an upgrade); register it as the scan reads the run.
 							if (
-								query.includes("joined_into IS NULL AND runner_id IS NULL") &&
-								params.includes("run:clean-fault")
+								query.includes(
+									"SELECT run.id FROM provider_command_outbox command",
+								) &&
+								query.includes("run.runner_id IS NULL")
 							)
 								return execute(
 									"UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = '131313131313'",

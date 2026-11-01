@@ -979,12 +979,18 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					// served stays with the reactor's project gate; the project's
 					// attachment recovers it once it is served.
 					if (!(yield* deps.projectRootForSession(row.session_id))) continue;
-					const [unheld] =
-						yield* sql`SELECT 1 FROM provider_runs WHERE id = ${row.run_id} AND session_id = ${row.session_id}
-					AND joined_into IS NULL AND runner_id IS NULL AND status IN ('pending','running')`;
+					// row.run_id names a joined steer's owner; from 32.5 the steer is re-held under
+					// its own run id while its owner's Run is open (CONTRACT 1868-1869, 2021-2025).
+					const [unheld] = yield* sql<{
+						id: string;
+					}>`SELECT run.id FROM provider_command_outbox command
+					JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+					JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
+					WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}
+						AND run.runner_id IS NULL AND owner.status IN ('pending','running')`;
 					if (
 						!unheld ||
-						(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
+						(yield* legacyRunnerRunQuery(sql, row.session_id, unheld.id))
 					)
 						continue;
 					const [rejected] = yield* sql<{
@@ -1018,7 +1024,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					}
 					yield* feeder.enqueue({
 						sessionId: row.session_id,
-						runId: row.run_id,
+						runId: unheld.id,
 						commandId: row.command_id,
 						requestSequence: row.request_sequence,
 						attempt: row.attempt_count,
