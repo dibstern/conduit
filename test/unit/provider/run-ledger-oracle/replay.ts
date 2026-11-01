@@ -55,6 +55,7 @@ import {
 import { sessionPickEvents } from "../../../../src/lib/domain/relay/Services/session-pick.js";
 import { OpenCodeApiError } from "../../../../src/lib/errors.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { __setProbeOverrideForTesting } from "../../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import { makeClaudeSessionRunner } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
@@ -131,6 +132,35 @@ export interface ReplayResult {
 		readonly rpc: string;
 		readonly why: string;
 	}[];
+	/** Main's state once each step settles, raw, for the step-by-step comparison (32.2.17.2). */
+	readonly snapshots: readonly StepSnapshot[];
+}
+
+/** Main's tables the comparison reads beside the event log (gap P9). */
+export const mainTables = [
+	"provider_command_outbox",
+	"provider_command_interactions",
+	"provider_command_turns",
+	"provider_command_sessions",
+	"pending_inputs",
+	"pending_approvals",
+	"command_receipts",
+] as const;
+
+export interface StepSnapshot {
+	readonly fact: number;
+	/** The events this step appended. */
+	readonly events: readonly Readonly<Record<string, unknown>>[];
+	/** Every row of `mainTables`, by table. */
+	readonly rows: Readonly<
+		Record<
+			(typeof mainTables)[number],
+			readonly Readonly<Record<string, unknown>>[]
+		>
+	>;
+	readonly inbox: unknown;
+	/** The calls main made during this step. */
+	readonly calls: readonly Call[];
 }
 
 const sessionId = "replay-session";
@@ -485,6 +515,10 @@ export function replayTrace(
 				}
 			}).pipe(Effect.timeoutOption("1 second"));
 
+			const read = yield* ReadQueryEffectTag;
+			const snapshots: StepSnapshot[] = [];
+			let seen = 0;
+			let callsSeen = 0;
 			const tokenCall = new Map<string, RecordedCall>();
 			const rpcs: {
 				readonly fact: number;
@@ -647,6 +681,26 @@ export function replayTrace(
 						break;
 				}
 				yield* settle;
+				const events = yield* sql<Record<string, unknown>>`
+					SELECT sequence, session_id, type, data, metadata, provider FROM events
+					WHERE sequence > ${seen} ORDER BY sequence`.pipe(Effect.orDie);
+				seen = Number(events.at(-1)?.["sequence"] ?? seen);
+				const rows = yield* Effect.forEach(mainTables, (table) =>
+					sql<
+						Record<string, unknown>
+					>`SELECT * FROM ${sql(table)} ORDER BY rowid`.pipe(
+						Effect.orDie,
+						Effect.map((found) => [table, found] as const),
+					),
+				);
+				snapshots.push({
+					fact: step.fact,
+					events: events.map(({ sequence: _, ...event }) => event),
+					rows: Object.fromEntries(rows) as StepSnapshot["rows"],
+					inbox: yield* read.readInboxState(sessionId).pipe(Effect.orDie),
+					calls: calls.slice(callsSeen).map(({ call }) => call),
+				});
+				callsSeen = calls.length;
 			}
 			for (const { fact, rpc, fiber } of rpcs) {
 				const exit = fiber.pollUnsafe();
@@ -665,6 +719,7 @@ export function replayTrace(
 				unanswered: calls.filter((made) => !made.bound).map(({ call }) => call),
 				unmatched,
 				refusals,
+				snapshots,
 			};
 		}).pipe(
 			Effect.scoped,
