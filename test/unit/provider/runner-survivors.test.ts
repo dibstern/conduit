@@ -2226,6 +2226,42 @@ it.effect(
 		),
 );
 
+// An idle exit the runner reports as a failure commits Exited, not Idle. Its
+// sendless owners still lost their runner: process lost (3.8 reason 2.3), and
+// a crash keeps its own code.
+for (const exit of ["idle", "crash"] as const)
+	it.effect(
+		`32.2.15 a runner's ${exit} exit that commits Exited ends a sendless owner process lost`,
+		() =>
+			run(
+				Effect.gen(function* () {
+					const f = yield* stopIntentFixture;
+					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('wake-run', 's', 'running', 1, ${f.runner.runnerId})`;
+					f.exitOnSignal();
+					f.processes.set(f.runner.pid ?? 0, { state: "gone" });
+					f.runner.onClose(
+						exit === "idle"
+							? {
+									...runnerFailure("socket", "Runner exited while idle"),
+									code: "runner_idle_exit",
+								}
+							: runnerFailure("socket", "runner exited"),
+					);
+					yield* TestClock.adjust("12 seconds");
+					expect(
+						yield* f.sql`SELECT type, json_extract(data, '$.code') AS code FROM events
+							WHERE json_extract(metadata, '$.runId') = 'wake-run'
+							AND type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+					).toEqual([
+						{
+							type: "turn.error",
+							code: exit === "idle" ? "runner_stopped" : "provider_error",
+						},
+					]);
+				}),
+			),
+	);
+
 it.effect(
 	"R2 a send held during an Idle stop's Committing is released NotSent and delivered once on the next runner",
 	() =>
