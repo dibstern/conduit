@@ -10,11 +10,6 @@ import {
 	Option,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import {
-	ConnectionError,
-	ConstraintError,
-	SqlError,
-} from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import {
@@ -47,13 +42,6 @@ import {
 	type ProviderSideEffectReactorOptions,
 } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
-import { makeRunnerProviderInstance } from "../../../src/lib/provider/runner/runner-provider-instance.js";
-import type { SendScope } from "../../../src/lib/provider/runner/send-scope.js";
-import type {
-	SessionCommand,
-	SessionFailure,
-	SessionRunner,
-} from "../../../src/lib/provider/runner/session-runner.js";
 import type {
 	EventSink,
 	PermissionResponse,
@@ -523,216 +511,33 @@ describe("ProviderSideEffectReactor", () => {
 						]);
 					}).pipe(Effect.provide(reactorTestLayer)),
 			);
-	for (const fault of ["StoreRejected", "StoreUnavailable"] as const)
-		it.effect(`recall aborts local intake before ${fault} settlement`, () =>
-			Effect.scoped(
-				Effect.gen(function* () {
-					const sql = yield* SqlClient.SqlClient;
-					const commit = yield* makeCommitAndSignal;
-					const ingestion = yield* ProviderRuntimeIngestionTag;
-					yield* seedSendTurnOutbox(sql);
-					const sent = yield* Deferred.make<void>();
-					const abortSend = vi.fn();
-					function execute(
-						command: Extract<SessionCommand, { type: "send-turn" }>,
-						send: SendScope,
-					): Effect.Effect<TurnResult, SessionFailure>;
-					function execute(
-						command: Exclude<SessionCommand, { type: "send-turn" }>,
-						send?: SendScope,
-					): Effect.Effect<void, SessionFailure>;
-					function execute(
-						command: SessionCommand,
-						send: SendScope,
-					): Effect.Effect<TurnResult | undefined, SessionFailure>;
-					function execute(
-						command: SessionCommand,
-						_send?: SendScope,
-					): Effect.Effect<TurnResult | undefined, SessionFailure> {
-						return command.type === "send-turn"
-							? Deferred.succeed(sent, undefined).pipe(
-									Effect.andThen(Effect.never),
-								)
-							: Effect.succeed(undefined);
-					}
-					const provider = yield* makeRunnerProviderInstance(
-						{
-							accounts: Effect.succeed(
-								accountsStateFromInstances(
-									[],
-									configuredClaudeConfigDir("/tmp/test-claude-recall"),
-								),
-							),
-						},
-						{
-							driverKind: "claude",
-							discoverEffect: () => Effect.succeed(emptyCapabilities),
-							generateTextEffect: () => Effect.die("unused generation"),
-							prepareTurnEffect: (input) => Effect.succeed({ input }),
-						},
-						() =>
-							Effect.succeed({
-								hasLiveProcessEffect: () => Effect.succeed(false),
-								abortSend,
-								executeEffect: execute,
-							} satisfies SessionRunner),
-					);
-					let rejectWrites = false;
-					let failedWrites = 0;
-					const reactor = new ProviderSideEffectReactor({
-						projectId: "test-project",
-						sql,
-						ingestion,
-						registry: new ProviderRegistry([provider]),
-						write: (body, options) =>
-							commit.write(
-								(project, stamp) =>
-									Effect.gen(function* () {
-										if (rejectWrites) {
-											failedWrites++;
-											return yield* new SqlError({
-												reason:
-													fault === "StoreUnavailable"
-														? new ConnectionError({ cause: "recall outage" })
-														: new ConstraintError({
-																cause: "recall rejection",
-															}),
-											});
-										}
-										return yield* body(project, stamp);
-									}),
-								options,
-							),
-					});
-					yield* Effect.forkChild(
-						reactor.runCommand("cmd-1").pipe(Effect.result),
-					);
-					yield* Deferred.await(sent);
-					rejectWrites = true;
-					yield* TestClock.adjust("122 seconds");
-					expect(failedWrites).toBeGreaterThan(0);
-					expect(abortSend).toHaveBeenCalledTimes(1);
-					expect(
-						yield* sql`SELECT status, held_transmission FROM provider_runs`,
-					).toEqual([{ status: "pending", held_transmission: null }]);
-				}),
-			).pipe(Effect.provide(reactorTestLayer)),
-		);
-	for (const recall of [
-		"cancelled",
-		"indeterminate",
-		"silent",
-		"interrupted",
-	] as const)
-		it.effect(`intake deadline is bounded after local recall (${recall})`, () =>
+	it.effect(
+		"a start in intake has no clock: no deadline recalls it (2.1 row 202)",
+		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* seedSendTurnOutbox(sql);
 				const sent = yield* Deferred.make<ResolvedSendTurnInput>();
-				const sendTurn = vi.fn((input: ResolvedSendTurnInput) =>
-					Deferred.succeed(sent, input).pipe(
-						Effect.andThen(
-							Effect.callback<void>((resume) => {
-								input.abortSignal.addEventListener(
-									"abort",
-									() => {
-										if (recall !== "silent") resume(Effect.void);
-									},
-									{ once: true },
-								);
-							}),
-						),
-						Effect.as({
-							...completedTurn,
-							status: recall === "silent" ? ("indeterminate" as const) : recall,
-						}),
-					),
-				);
 				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([makeProvider(sendTurn)]),
+					registry: new ProviderRegistry([
+						makeProvider((input: ResolvedSendTurnInput) =>
+							Deferred.succeed(sent, input).pipe(
+								Effect.andThen(Effect.never),
+								Effect.as(completedTurn),
+							),
+						),
+					]),
 				});
 				const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
 				const input = yield* Deferred.await(sent);
-				const [claimedVersion] = yield* sql<{
-					version: number;
-				}>`SELECT version FROM sessions WHERE id = 'session-1'`;
-				yield* TestClock.adjust("122 seconds");
-				expect(input.abortSignal.aborted).toBe(true);
-				expect(caller.pollUnsafe()).toBeDefined();
-				const result = yield* Fiber.join(caller);
-				if (recall === "cancelled") {
-					expect(result).toMatchObject({
-						status: "error",
-						error: { code: "processing_timeout" },
-					});
-					expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
-						{ status: "error" },
-					]);
-					return;
-				}
-				expect(result.status).toBe("indeterminate");
-				const [indeterminateVersion] = yield* sql<{
-					version: number;
-				}>`SELECT version FROM sessions WHERE id = 'session-1'`;
-				expect(indeterminateVersion?.version).toBeGreaterThan(
-					claimedVersion?.version ?? 0,
-				);
+				yield* TestClock.adjust("10 minutes");
+				expect(input.abortSignal.aborted).toBe(false);
+				expect(caller.pollUnsafe()).toBeUndefined();
 				expect(
 					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([
-					{ status: "running", error_code: "delivery_indeterminate" },
-				]);
-				expect(
-					yield* sql`SELECT status, error_code FROM command_receipts`,
-				).toEqual([
-					{
-						status: "side_effect_requested",
-						error_code: "delivery_indeterminate",
-					},
-				]);
-				expect(
-					yield* sql`SELECT status, started_at FROM provider_runs`,
-				).toEqual([{ status: "pending", started_at: null }]);
-				// A new reactor represents daemon restart: the unknown attempt is never delivered twice.
-				const restarted = yield* makeReactor({
-					registry: new ProviderRegistry([makeProvider(sendTurn)]),
-				});
-				expect((yield* restarted.runCommand("cmd-1")).status).toBe(
-					"indeterminate",
-				);
-				expect(yield* restarted.runOnce()).toBe(0);
-				yield* seedSendTurnOutbox(sql, {
-					commandId: "cmd-c",
-					requestSequence: 11,
-				});
-				const next = yield* Effect.forkChild(restarted.runCommand("cmd-c"));
-				yield* TestClock.adjust("1 second");
-				expect(sendTurn).toHaveBeenCalledOnce();
-				expect(next.pollUnsafe()).toBeUndefined();
-				expect(
-					yield* sql`SELECT status FROM provider_command_outbox WHERE command_id = 'cmd-c'`,
-				).toEqual([{ status: "pending" }]);
-				// Real native acceptance, then its terminal, still owns the original reservation.
-				const ingestion = yield* ProviderRuntimeIngestionTag;
-				for (const type of ["run.started", "turn.completed"] as const)
-					yield* ingestion.ingest({
-						eventId: `late-${type}`,
-						type,
-						providerId: "claude",
-						sessionId: input.sessionId,
-						runId: input.runId,
-						providerRefs: {},
-						rawSource: { kind: "test.native" },
-						createdAt: 130000,
-						data:
-							type === "run.started"
-								? { inputId: "legacy-user-1", requestedRunId: input.runId }
-								: { messageId: "answer" },
-					});
-				expect((yield* restarted.runCommand("cmd-1")).status).toBe("completed");
-				expect(sendTurn).toHaveBeenCalledOnce();
+				).toEqual([{ status: "running", error_code: null }]);
 			}).pipe(Effect.provide(reactorTestLayer)),
-		);
+	);
 	it.effect(
 		"acknowledges an adapter's committed failure without emitting a second terminal",
 		() =>

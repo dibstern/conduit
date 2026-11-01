@@ -1425,6 +1425,62 @@ describe("ProviderTurnService", () => {
 			},
 		);
 
+		// Row 213 (CONTRACT.md 223, 8.4) failure modes: the deadline step retires a
+		// process whose tasks are unknown or live; the gate reads a stale or absent
+		// view and also blocks a retire with no tasks; the gate releases the Stop
+		// with an error instead of leaving the process running.
+		for (const reattached of [undefined, true] as const) {
+			it.effect(
+				`the deadline step ${reattached ? "leaves a process with unknown tasks running" : "retires a process with no tasks"}`,
+				() => {
+					const issued = Deferred.makeUnsafe<void>();
+					const dispatchEffect = vi.fn((command: OrchestrationCommand) =>
+						command.type === "end_session"
+							? Effect.succeed(completedTurn())
+							: Deferred.succeed(issued, undefined).pipe(
+									Effect.andThen(Effect.never),
+								),
+					) as unknown as OrchestrationEngine["dispatchEffect"];
+					return Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSession;
+						yield* seedClaimedRun("active-input", 1);
+						if (reattached)
+							yield* (yield* makeCommitAndSignal)([
+								canonicalEvent(
+									"evidence.process_started",
+									"session-1",
+									{ runnerId: "rn", label: "rn:1", reattached },
+									{ provider: "claude" },
+								),
+							]);
+						const stopping = yield* Effect.forkChild(interruptTurn());
+						yield* Deferred.await(issued);
+						yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+						yield* Fiber.join(stopping);
+						expect(
+							vi
+								.mocked(dispatchEffect)
+								.mock.calls.map(([command]) => command.type),
+						).toEqual(
+							reattached
+								? ["interrupt_turn"]
+								: ["interrupt_turn", "end_session"],
+						);
+						expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+							{ status: "running" },
+						]);
+					}).pipe(
+						Effect.provide(
+							serviceLayer({
+								engine: makeEngine({ providerId: "claude", dispatchEffect }),
+							}).liveLayer,
+						),
+					);
+				},
+			);
+		}
+
 		for (const missingTable of [
 			"provider_runs",
 			"provider_command_outbox",

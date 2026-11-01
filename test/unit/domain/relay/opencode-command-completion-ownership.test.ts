@@ -847,7 +847,7 @@ for (const duplicate of [false, true]) {
 // Idle clears the relay timer; the executor must resolve missing intake safely.
 for (const confirmedStop of [false, true]) {
 	it.effect(
-		`bounds a missed OpenCode intake after idle clears the processing timer (confirmed stop=${confirmedStop})`,
+		`a missed OpenCode intake after idle clears the processing timer waits with no clock (2.1 row 202) until a confirmed stop (confirmed stop=${confirmedStop})`,
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -964,12 +964,10 @@ for (const confirmedStop of [false, true]) {
 				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
 					{ status: "side_effect_requested" },
 				]);
-				expect((yield* Fiber.join(send)).status).toBe("indeterminate");
+				expect(send.pollUnsafe()).toBeUndefined();
 				expect(
 					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
-				).toEqual([
-					{ status: "running", error_code: "delivery_indeterminate" },
-				]);
+				).toEqual([{ status: "running", error_code: null }]);
 				expect(
 					yield* sql`SELECT type FROM events WHERE type IN ('run.started', 'turn.error')`,
 				).toEqual([]);
