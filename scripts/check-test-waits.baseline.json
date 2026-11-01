@@ -734,6 +734,7 @@
 		"timeout-override": 13
 	},
 	"test/integration/daemon/daemon-cli-rpc.test.ts": {
+		"polling": 1,
 		"timeout-override": 4
 	},
 	"test/integration/daemon/daemon-config-memory.test.ts": {
@@ -747,7 +748,7 @@
 		"timeout-override": 6
 	},
 	"test/integration/daemon/daemon-list-fanout.test.ts": {
-		"polling": 11,
+		"polling": 10,
 		"timeout-override": 2
 	},
 	"test/integration/daemon/daemon-orchestration-engine.test.ts": {

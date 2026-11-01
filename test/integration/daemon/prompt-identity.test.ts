@@ -646,6 +646,8 @@ describe("Conduit prompt identity through the daemon and Claude runner", () => {
 			harness = ProcessHarness.create({
 				dist: "dist",
 				restartProof: true,
+				// The failed write is a warning; the harness default level is error.
+				logLevel: "warn",
 				...(mode === "recovered"
 					? {
 							holdRunnerOutput:

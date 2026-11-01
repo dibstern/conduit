@@ -178,6 +178,11 @@ export interface SessionUpstreamAdapter {
 export type ApplySessionCommandOptions = {
 	readonly pick?: TurnSettings;
 	readonly source?: AutoTitleSource;
+	/**
+	 * The directory a created session was made in. Its workspace is recorded in
+	 * a later commit, and readers between the two resolve this, not the root.
+	 */
+	readonly nativeDirectory?: string;
 	/** A standalone commit may decline before append, under its write permit and transaction. */
 	readonly beforeWrite?: Effect.Effect<boolean, SqlError>;
 	/**
@@ -344,7 +349,12 @@ export const applySessionCommand = (
 				const metadata = {
 					provider: appendProvider,
 					createdAt: Date.now(),
-					metadata: { source: options.source ?? "relay" },
+					metadata: {
+						source: options.source ?? "relay",
+						...(options.nativeDirectory === undefined
+							? {}
+							: { nativeDirectory: options.nativeDirectory }),
+					},
 				};
 				const events = [
 					command.type === "session.deleted"
@@ -551,6 +561,7 @@ export const createOpenCodeSession = (
 				},
 				{
 					pick: settings,
+					...(directory === undefined ? {} : { nativeDirectory: directory }),
 					...(draftChange ? { draftChange: draftChange(session.id) } : {}),
 				},
 			);

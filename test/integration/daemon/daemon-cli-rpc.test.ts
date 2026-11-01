@@ -296,16 +296,18 @@ describe("CLI and browser daemon RPC parity", () => {
 			}
 			await daemon.stop();
 			daemon = await startForegroundDaemon(options);
-			// Restored OpenCode accounts remain stopped until first use.
-			expect(
-				(await sendRpcRequest(socketPath, { _tag: "GetInstances" })).instances
-					.filter(({ driver }) => driver === "opencode")
-					.map(({ id, status }) => ({ id, status }))
-					.sort((left, right) => left.id.localeCompare(right.id)),
-			).toEqual([
-				{ id: "healthy", status: "stopped" },
-				{ id: "unhealthy", status: "stopped" },
-			]);
+			// Restored named external servers are health-polled from boot.
+			await expect
+				.poll(async () =>
+					(await sendRpcRequest(socketPath, { _tag: "GetInstances" })).instances
+						.filter(({ driver }) => driver === "opencode")
+						.map(({ id, status }) => ({ id, status }))
+						.sort((left, right) => left.id.localeCompare(right.id)),
+				)
+				.toEqual([
+					{ id: "healthy", status: "healthy" },
+					{ id: "unhealthy", status: "unhealthy" },
+				]);
 			let output = "";
 			let errors = "";
 			const exits: number[] = [];
