@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	realpathSync,
 	unlinkSync,
+	watch,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -300,6 +301,11 @@ export type ProcessMark =
 			effectiveSettingsJson: string;
 	  }
 	| {
+			kind: "stop-accept-paused";
+			commandId: string;
+			sessionId: string;
+	  }
+	| {
 			kind: "query-update";
 			queryId: string;
 			model?: string;
@@ -483,6 +489,26 @@ export const resolveSettings: typeof import("@anthropic-ai/claude-agent-sdk").re
 		});
 		return resolved;
 	};
+
+// A test holds a Stop between its snapshot and acceptance with this gate file.
+export const beforeStopAcceptance = async (input: {
+	readonly commandId: string;
+	readonly sessionId: string;
+}): Promise<void> => {
+	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+	const gate = proof && join(dirname(proof), "conduit-test-stop-acceptance");
+	if (!gate || !existsSync(gate)) return;
+	mark({ kind: "stop-accept-paused", ...input });
+	await new Promise<void>((done) => {
+		const release = () => {
+			if (existsSync(gate)) return;
+			watcher.close();
+			done();
+		};
+		const watcher = watch(dirname(gate), release);
+		release();
+	});
+};
 
 export const claudeSubagentSdk: ClaudeSubagentSdk = {
 	listSubagents: async () => [],
