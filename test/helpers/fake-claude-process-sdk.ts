@@ -7,7 +7,6 @@ import {
 	readFileSync,
 	realpathSync,
 	unlinkSync,
-	watch,
 	writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
@@ -499,15 +498,11 @@ export const beforeStopAcceptance = async (input: {
 	const gate = proof && join(dirname(proof), "conduit-test-stop-acceptance");
 	if (!gate || !existsSync(gate)) return;
 	mark({ kind: "stop-accept-paused", ...input });
-	await new Promise<void>((done) => {
-		const release = () => {
-			if (existsSync(gate)) return;
-			watcher.close();
-			done();
-		};
-		const watcher = watch(dirname(gate), release);
-		release();
-	});
+	// A poll, not fs.watch: macOS arms a directory watch asynchronously, so an unlink in the first
+	// tens of milliseconds after watch() returns is never reported and the Stop would pause for good.
+	while (existsSync(gate))
+		// test-waits-allow real-wait: the gate is another process's file, and fs.watch misses its early unlink.
+		await new Promise<void>((done) => setTimeout(done, 10));
 };
 
 export const claudeSubagentSdk: ClaudeSubagentSdk = {
