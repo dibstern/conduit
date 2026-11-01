@@ -3415,9 +3415,11 @@ export class FakeProvider {
 							tag: "Main",
 							eventId: `main:${this.serial++}`,
 							kind: "run_started",
+							// 3.9: main's run.started names the run it started the steer in and the steer's own
+							// requested run, as main writes metadata.runId and requestedRunId.
+							runId: open?.runId === steer.parent ? steer.parent : steer.runId,
 							inputId: steer.inputId,
-							requestedRunId:
-								open?.runId === steer.parent ? steer.parent : steer.runId,
+							requestedRunId: steer.runId,
 						});
 					if (!open || open.started) continue;
 					open.started = true;
@@ -3425,6 +3427,7 @@ export class FakeProvider {
 						tag: "Main",
 						eventId: `main:${this.serial++}`,
 						kind: "run_started",
+						runId: open.runId,
 						inputId: open.inputId,
 						requestedRunId: open.runId,
 					});

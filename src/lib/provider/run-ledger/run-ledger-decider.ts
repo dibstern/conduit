@@ -2127,10 +2127,16 @@ function observe(
 					const input = book.inputs.get(observation.inputId);
 					const run = findRun(
 						book,
-						book.mainRuns.get(observation.requestedRunId)?.runId,
+						(
+							book.mainRuns.get(observation.runId) ??
+							book.mainRuns.get(observation.requestedRunId)
+						)?.runId,
 					);
 					if (input === undefined || run === undefined)
 						return noop("run.started for an unknown run");
+					// 3.9 (CONTRACT.md 148, 956): a run main observed for a native message, the requested Run
+					// joined into it, names that Run; main's terminal comes under it.
+					const observed = !book.mainRuns.has(observation.runId);
 					if (run.phase === "Ended") {
 						// 3.9 (CONTRACT.md 978-981): a steer its Run's end left unconsumed, the Run's own joined
 						// steer included, is a Run of its own, its reservation's, Launched with its send.
@@ -2151,9 +2157,16 @@ function observe(
 						input.runId = runId;
 						for (const id of [observation.requestedRunId, runId])
 							book.mainRuns.set(id, { runId, open: true });
+						if (observed)
+							book.mainRuns.set(observation.runId, { runId, open: true });
 						return changed;
 					}
-					if (input.runId === run.runId) return noop();
+					if (observed)
+						book.mainRuns.set(observation.runId, {
+							runId: run.runId,
+							open: true,
+						});
+					if (input.runId === run.runId) return observed ? changed : noop();
 					// 3.9: the input joins the Run main started it in.
 					const from = findRun(book, input.runId);
 					const at = from?.inputs.indexOf(observation.inputId) ?? -1;

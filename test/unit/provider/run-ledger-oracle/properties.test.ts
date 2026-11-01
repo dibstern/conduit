@@ -200,12 +200,6 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 							? [p.observation]
 							: [],
 					);
-				const requested = main.find(
-					(m) =>
-						m.kind === "run_requested" &&
-						e.kind === "run_started" &&
-						m.runId === e.requestedRunId,
-				);
 				hit(
 					main.some((m) => m.eventId === e.eventId)
 						? "main:repeat"
@@ -213,7 +207,7 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 							? `main:run_requested:${e.direct ? "direct" : "held"}`
 							: e.kind === "run_terminal"
 								? `main:run_terminal:${e.outcome}`
-								: `main:run_started:${requested?.kind === "run_requested" && requested.inputId === e.inputId ? "own" : "joined"}`,
+								: `main:run_started:${e.runId === e.requestedRunId ? "own" : "joined"}`,
 				);
 			}
 			// 3.4: OpenCode's turn.error pair folds back to back, in either order.

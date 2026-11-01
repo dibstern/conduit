@@ -277,6 +277,8 @@ const commandFor = (
 						tag: "Main",
 						eventId: event.eventId,
 						kind: "run_started",
+						// 3.9: the run main started the input in; a native message's names the requested Run.
+						runId: event.metadata.runId ?? event.data.requestedRunId,
 						inputId: event.data.inputId,
 						requestedRunId: event.data.requestedRunId,
 					},

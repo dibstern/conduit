@@ -278,6 +278,8 @@ describe("[32.2.5] plain Run path differential", () => {
 								tag: "Main",
 								eventId: `s${event}`,
 								kind: "run_started",
+								// The fake's steer joins and the named join test cover a distinct started run.
+								runId: requestedRunId,
 								inputId,
 								requestedRunId,
 							},
@@ -1895,7 +1897,12 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 			const b = begin(d, "B", "steer");
 			complete(d, a.token);
 			expect(d.view().active).toBeUndefined();
-			main(d, { kind: "run_started", inputId: "B", requestedRunId: b.runId });
+			main(d, {
+				kind: "run_started",
+				runId: b.runId,
+				inputId: "B",
+				requestedRunId: b.runId,
+			});
 			expect(d.view().active).toMatchObject({
 				runId: b.runId,
 				tag: "Running",
@@ -1904,6 +1911,28 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 				main(d, { kind: "run_terminal", runId: b.runId, outcome: "completed" })
 					.ended,
 			).toMatchObject([{ runId: b.runId, reason: { tag: "completed" } }]);
+		});
+	});
+
+	it("a run main started for a native message and joined a requested Run into names that Run, so its terminal ends it (CONTRACT.md 148, 956)", () => {
+		// 3.9: main joins the requested Run into the run it observed open; its run.started names that
+		// run as metadata.runId and the Run as requestedRunId, and main's terminal comes under the former.
+		agreed("opencode", (d) => {
+			const a = running(d);
+			main(d, {
+				kind: "run_started",
+				runId: "observed-run",
+				inputId: "A",
+				requestedRunId: a.runId,
+			});
+			expect(
+				main(d, {
+					kind: "run_terminal",
+					runId: "observed-run",
+					outcome: "completed",
+				}).ended,
+			).toMatchObject([{ runId: a.runId, reason: { tag: "completed" } }]);
+			expect(d.view().active).toBeUndefined();
 		});
 	});
 

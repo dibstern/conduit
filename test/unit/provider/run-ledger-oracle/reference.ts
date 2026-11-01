@@ -2064,10 +2064,15 @@ function mainEvent(
 		}
 		case "run_started": {
 			const input = world.inputs.get(observation.inputId);
-			const target = world.mainRuns.get(observation.requestedRunId);
+			// CONTRACT.md 148, 956: the arm folds run.started with its join: the input joins the run main
+			// started it in; a run the ledger never saw, main's for a native message, names the requested Run.
+			const target =
+				world.mainRuns.get(observation.runId) ??
+				world.mainRuns.get(observation.requestedRunId);
 			const run = findRun(world, target?.runId);
 			if (input === undefined || run === undefined)
 				return noop("run.started for an unknown run");
+			const unseen = !world.mainRuns.has(observation.runId);
 			if (run.phase === "Ended") {
 				// 3.9 (CONTRACT.md 975-980): a steer its Run's end left unconsumed is a Run of its own, its
 				// reservation's, Launched with its send. Oracle edit (32.2.8): this holds for a steer that
@@ -2091,9 +2096,16 @@ function mainEvent(
 				input.runId = own.runId;
 				for (const runId of [observation.requestedRunId, own.runId])
 					world.mainRuns.set(runId, { runId: own.runId, open: true });
+				if (unseen)
+					world.mainRuns.set(observation.runId, {
+						runId: own.runId,
+						open: true,
+					});
 				return changed;
 			}
-			if (input.runId === run.runId) return noop();
+			if (unseen)
+				world.mainRuns.set(observation.runId, { runId: run.runId, open: true });
+			if (input.runId === run.runId) return unseen ? changed : noop();
 			const from = findRun(world, input.runId);
 			if (from !== undefined) {
 				const at = from.inputs.indexOf(input.inputId);

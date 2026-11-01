@@ -67,9 +67,14 @@ export type MainRunEvent =
 			readonly inputId: string;
 			readonly direct: boolean;
 	  }
-	/** 3.9: joins its input to requestedRunId's Run, or starts a steer's own Run. */
+	/**
+	 * 3.9: joins its input, requested under requestedRunId, into the run main started it in (runId,
+	 * main's metadata.runId), or starts a steer's own Run. A runId the ledger does not know, a run
+	 * main observed for a native message, names the requested Run (CONTRACT.md 148, 956).
+	 */
 	| {
 			readonly kind: "run_started";
+			readonly runId: string;
 			readonly inputId: string;
 			readonly requestedRunId: string;
 	  }
