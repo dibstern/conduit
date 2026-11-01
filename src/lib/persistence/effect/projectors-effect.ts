@@ -2581,6 +2581,14 @@ export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
 		"Audit receipt for failed upstream cleanup; no materialized projection needed",
 	"session.handoff_delivered":
 		"Delivery receipt needs no materialized projection",
+	"evidence.process_started": "Run Ledger evidence; the ledger arm folds it",
+	"evidence.process_lost": "Run Ledger evidence; the ledger arm folds it",
+	"evidence.alarm_fired": "Run Ledger evidence; the ledger arm folds it",
+	"evidence.effect_outcome": "Run Ledger evidence; the ledger arm folds it",
+	"evidence.turn_started": "Run Ledger evidence; the ledger arm folds it",
+	"evidence.turn_ended": "Run Ledger evidence; the ledger arm folds it",
+	"evidence.delivery_indeterminate":
+		"Run Ledger evidence; the ledger arm folds it",
 };
 
 /**
