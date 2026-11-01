@@ -316,6 +316,7 @@ const stopIntentFixture = Effect.gen(function* () {
 			: Effect.succeed({}),
 	);
 	const connections: Array<Parameters<ProcessRunnerDriver["connect"]>[0]> = [];
+	const sockets: RunnerSocket[] = [];
 	const commands: Array<{
 		runnerId: string;
 		type: string;
@@ -329,6 +330,7 @@ const stopIntentFixture = Effect.gen(function* () {
 				() => {},
 				() => {},
 			);
+			sockets.push(connection);
 			vi.spyOn(connection, "destroy").mockImplementation(() => {});
 			const journal = new RunnerSendJournal(
 				dirname(options.socketPath),
@@ -437,6 +439,7 @@ const stopIntentFixture = Effect.gen(function* () {
 		...f,
 		runner,
 		connections,
+		sockets,
 		commands,
 		input,
 		dispatch,
@@ -2163,6 +2166,251 @@ for (const first of ["send", "Stop"] as const)
 				}),
 			),
 	);
+
+// The write gate (4.4) and the stop commit's releases (4.5), through the real
+// runner, its SQLite store and the session send interface.
+const idleSends = (
+	f: Effect.Success<typeof stopIntentFixture>,
+	runId: string,
+) =>
+	f.commands.filter(
+		(command) => command.type === "send-turn" && command.runId === runId,
+	);
+
+it.effect(
+	"R2 a frame held when idle-exit is read is never written; the Idle stop releases it NotSent and the next runner delivers it once",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* stopIntentFixture;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('idle-run', 's', 'running', 1)`;
+				const socket = f.sockets[0];
+				const write = socket
+					? vi.mocked(socket.commandEffect).getMockImplementation()
+					: undefined;
+				if (!socket || !write) return yield* Effect.die("missing socket");
+				// The runner's idle-exit is read after the hold commits, before the write.
+				let exiting = true;
+				vi.mocked(socket.commandEffect).mockImplementation(
+					(id, command, attempt, canWrite) => {
+						if (command.type === "send-turn" && exiting) {
+							exiting = false;
+							f.runner.onIdleExit?.();
+						}
+						return write(id, command, attempt, canWrite);
+					},
+				);
+				const sending = yield* f
+					.dispatch("idle-run")
+					.pipe(Effect.result, Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(
+					yield* f.sql`SELECT stop_reason FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId} AND retired_at IS NOT NULL`,
+				).toEqual([{ stop_reason: '{"_tag":"Idle"}' }]);
+				f.exitOnSignal();
+				yield* TestClock.adjust("12 seconds");
+				yield* Fiber.join(sending);
+				const [delivered, ...again] = idleSends(f, "idle-run");
+				expect(again).toEqual([]);
+				expect(delivered?.runnerId).not.toBe(f.runner.runnerId);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.runnerId') AS runner, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ runner: f.runner.runnerId, reason: "NotSent" }]);
+				expect(
+					yield* f.sql`SELECT status, runner_id FROM provider_runs WHERE id = 'idle-run'`,
+				).toEqual([{ status: "running", runner_id: delivered?.runnerId }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
+				).toEqual([]);
+			}),
+		),
+);
+
+it.effect(
+	"R2 a send held during an Idle stop's Committing is released NotSent and delivered once on the next runner",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* stopIntentFixture;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('late-run', 's', 'running', 1)`;
+				const writer = yield* makeCommitAndSignal;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const blocked = yield* writer
+					.write(() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+						),
+					)
+					.pipe(Effect.forkChild);
+				yield* Deferred.await(entered);
+				f.exitOnSignal();
+				yield* Effect.gen(function* () {
+					// The send queues behind the writer, the Idle stop enters
+					// Committing, and the hold commits on the stopping runner before
+					// the stop's transaction. Its read (4.5) finds the hold unwritten.
+					const sending = yield* f
+						.dispatch("late-run")
+						.pipe(Effect.result, Effect.forkChild);
+					yield* TestClock.adjust(0);
+					f.runner.onIdleExit?.();
+					yield* TestClock.adjust(0);
+					expect(idleSends(f, "late-run")).toEqual([]);
+					yield* Deferred.succeed(release, undefined);
+					yield* Fiber.join(blocked);
+					yield* TestClock.adjust("12 seconds");
+					yield* Fiber.join(sending);
+					const [delivered, ...again] = idleSends(f, "late-run");
+					expect(again).toEqual([]);
+					expect(delivered?.runnerId).not.toBe(f.runner.runnerId);
+					expect(
+						yield* f.sql`SELECT json_extract(data, '$.runnerId') AS runner, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+					).toEqual([{ runner: f.runner.runnerId, reason: "NotSent" }]);
+					expect(
+						yield* f.sql`SELECT type FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
+					).toEqual([]);
+				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+			}),
+		),
+);
+
+it.effect(
+	"R2 an Idle stop whose commit faults releases the send held meanwhile NotSent on the retry, and the next runner delivers it once",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* stopIntentFixture;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('fault-run', 's', 'running', 1)`;
+				yield* f.sql`CREATE TABLE stop_commit_parent (id TEXT PRIMARY KEY)`;
+				yield* f.sql`CREATE TABLE stop_commit_check (id TEXT REFERENCES stop_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)`;
+				yield* f.sql`CREATE TRIGGER fail_stop_commit BEFORE INSERT ON claude_runner_cursors
+		WHEN NEW.retired_at IS NOT NULL BEGIN INSERT INTO stop_commit_check VALUES ('missing'); END`;
+				f.exitOnSignal();
+				f.runner.onIdleExit?.();
+				yield* TestClock.adjust(0);
+				// Held while the stop retries: the closed gate keeps it unwritten.
+				const sending = yield* f
+					.dispatch("fault-run")
+					.pipe(Effect.result, Effect.forkChild);
+				yield* TestClock.adjust("2 seconds");
+				expect(idleSends(f, "fault-run")).toEqual([]);
+				expect(
+					yield* f.sql`SELECT runner_id, held_transmission IS NOT NULL AS held FROM provider_runs WHERE id = 'fault-run'`,
+				).toEqual([{ runner_id: f.runner.runnerId, held: 1 }]);
+				expect(
+					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId}`,
+				).toEqual([{ retired_at: null }]);
+				yield* f.sql`DROP TRIGGER fail_stop_commit`;
+				yield* TestClock.adjust("12 seconds");
+				yield* Fiber.join(sending);
+				const [delivered, ...again] = idleSends(f, "fault-run");
+				expect(again).toEqual([]);
+				expect(delivered?.runnerId).not.toBe(f.runner.runnerId);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.runnerId') AS runner, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ runner: f.runner.runnerId, reason: "NotSent" }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
+				).toEqual([]);
+			}),
+		),
+);
+
+it.effect(
+	"R2 a rejected Idle stop returns to Running, reopening the gate, and the held frame writes on its runner",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* stopIntentFixture;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('reopened-run', 's', 'running', 1)`;
+				// A store fault keeps the Idle stop Committing while the frame waits.
+				yield* f.sql`CREATE TABLE stop_commit_parent (id TEXT PRIMARY KEY)`;
+				yield* f.sql`CREATE TABLE stop_commit_check (id TEXT REFERENCES stop_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)`;
+				yield* f.sql`CREATE TRIGGER fail_stop_commit BEFORE INSERT ON claude_runner_cursors
+		WHEN NEW.retired_at IS NOT NULL BEGIN INSERT INTO stop_commit_check VALUES ('missing'); END`;
+				const socket = f.sockets[0];
+				const write = socket
+					? vi.mocked(socket.commandEffect).getMockImplementation()
+					: undefined;
+				if (!socket || !write) return yield* Effect.die("missing socket");
+				let exiting = true;
+				let gateClosed = false;
+				vi.mocked(socket.commandEffect).mockImplementation(
+					(id, command, attempt, canWrite) => {
+						if (command.type === "send-turn" && exiting) {
+							exiting = false;
+							f.runner.onIdleExit?.();
+						}
+						return write(id, command, attempt, (refusal) => {
+							const open = canWrite?.(refusal) ?? true;
+							gateClosed ||= !open;
+							return open;
+						});
+					},
+				);
+				const sending = yield* f
+					.dispatch("reopened-run")
+					.pipe(Effect.result, Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(gateClosed).toBe(true);
+				expect(idleSends(f, "reopened-run")).toEqual([]);
+				// The retry then reads an undecodable row: a rejection (6.3).
+				yield* f.sql`UPDATE claude_runner_cursors SET member_snapshot = '{}' WHERE runner_id = ${f.runner.runnerId}`;
+				yield* f.sql`DROP TRIGGER fail_stop_commit`;
+				yield* TestClock.adjust("6 seconds");
+				expect((yield* Fiber.join(sending))._tag).toBe("Success");
+				expect(idleSends(f, "reopened-run")).toEqual([
+					{
+						runnerId: f.runner.runnerId,
+						type: "send-turn",
+						runId: "reopened-run",
+					},
+				]);
+				expect(
+					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId}`,
+				).toEqual([{ retired_at: null }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('run.released', 'turn.interrupted', 'turn.error')`,
+				).toEqual([]);
+				expect(
+					yield* f.sql`SELECT runner_id FROM provider_runs WHERE id = 'reopened-run'`,
+				).toEqual([{ runner_id: f.runner.runnerId }]);
+			}),
+		),
+);
+
+it.effect(
+	"R2 a restart's Stop of a surviving runner, before any hello, neither releases nor re-sends the frame the earlier daemon wrote",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* stopIntentFixture;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('written-run', 's', 'running', 1)`;
+				yield* f.dispatch("written-run");
+				f.accept("written-run");
+				expect(idleSends(f, "written-run")).toHaveLength(1);
+				yield* Scope.close(f.managerScope, Exit.void);
+				// The runner survives, but the restarted daemon never reaches its hello.
+				f.connect.mockImplementation(() =>
+					Effect.fail(runnerFailure("connect", "runner socket busy")),
+				);
+				const restarted = yield* f.makeManager();
+				const recovering = yield* restarted.manager.recoverEffect.pipe(
+					Effect.result,
+					Effect.forkChild,
+				);
+				yield* TestClock.adjust("1 minute");
+				yield* Fiber.join(recovering);
+				expect(
+					yield* f.sql`SELECT retired_at IS NOT NULL AS retired FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId}`,
+				).toEqual([{ retired: 1 }]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type = 'run.released'`,
+				).toEqual([]);
+				expect(idleSends(f, "written-run")).toHaveLength(1);
+			}),
+		),
+);
 
 it.effect(
 	"STOP-INTENT a transferred run survives its former holder and legacy unheld runs still settle",
