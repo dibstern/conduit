@@ -213,6 +213,8 @@ export const makeInputDrafts: Effect.Effect<
 			),
 		);
 	// Ids derive from the input, so restoring the same refusal twice adds nothing.
+	// A ref whose blob is gone restores nothing: OR IGNORE does not cover the
+	// blob foreign key, and a failed send's settlement must not roll back on it.
 	const restoreAttachments = (
 		key: InputDraftKey,
 		inputId: string,
@@ -224,9 +226,10 @@ export const makeInputDrafts: Effect.Effect<
 			(ref, index) =>
 				sql`INSERT OR IGNORE INTO draft_attachments
 				(id, draft_key, position, name, hash, state, created_at)
-				SELECT ${`${inputId}:${index}`}, ${keyOf(key)}, COALESCE(MAX(position), -1) + 1,
-				${ref.name ?? null}, ${ref.attachmentHash}, 'live', ${observedAt}
-				FROM draft_attachments WHERE draft_key = ${keyOf(key)}`,
+				SELECT ${`${inputId}:${index}`}, ${keyOf(key)},
+				(SELECT COALESCE(MAX(position), -1) + 1 FROM draft_attachments WHERE draft_key = ${keyOf(key)}),
+				${ref.name ?? null}, blob.hash, 'live', ${observedAt}
+				FROM attachment_blobs blob WHERE blob.hash = ${ref.attachmentHash}`,
 			{ discard: true },
 		);
 	const ensureDraft = (
