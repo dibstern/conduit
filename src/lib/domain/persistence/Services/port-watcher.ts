@@ -225,6 +225,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 		const held = new Map<number, { key: string; since: number }>();
 		let firstScanAt: number | undefined;
 		let known = false;
+		const startedAt = yield* Clock.currentTimeMillis;
 		// Warn once per run of failures: a host without lsof fails every scan.
 		let failing = false;
 		let published = new Set<string>();
@@ -350,15 +351,16 @@ export const PortWatcherLive = Layer.effectDiscard(
 			Effect.catchCause((cause) =>
 				Failure.isInterruptedOnly(cause)
 					? Effect.interrupt
-					: failing
-						? Effect.void
-						: Effect.logWarning("PortWatcher scan failed", cause).pipe(
-								Effect.andThen(
-									Effect.sync(() => {
-										failing = true;
-									}),
-								),
-							),
+					: Effect.gen(function* () {
+							// CONTRACT.md 2987-2988 ("auto-settle waits") is silent on a host with no
+							// working scanner (Linux until /proc): when every scan fails through the
+							// first hold, servers read as absent rather than holding auto-settle forever.
+							const now = yield* Clock.currentTimeMillis;
+							known ||= firstScanAt === undefined && now - startedAt >= holdMs;
+							if (failing) return;
+							failing = true;
+							yield* Effect.logWarning("PortWatcher scan failed", cause);
+						}),
 			),
 			Effect.andThen(
 				Effect.flatMap(Clock.currentTimeMillis, (now) =>

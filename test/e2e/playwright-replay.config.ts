@@ -5,6 +5,10 @@
 
 import { defineConfig } from "@playwright/test";
 
+// Auto-settle waits for the PortWatcher's first scan and hold (CONTRACT.md 8.7). Specs sweep
+// within seconds of starting a relay, so the hold is zero here: readiness is the first scan.
+process.env["CONDUIT_PORT_WATCH_HOLD_MS"] ??= "0";
+
 export default defineConfig({
 	testDir: "./specs",
 	// New replay specs are included by default. Keep specs with a different harness

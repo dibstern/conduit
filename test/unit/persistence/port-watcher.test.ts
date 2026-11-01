@@ -14,7 +14,8 @@
 //    later-started;
 // 10. after a restart the watcher records server_seen again for a server already in the ledger, or
 //     never records server_gone for one that died while it was down;
-// 11. servers read as known before the first successful scan and one hold.
+// 11. servers read as known before the first successful scan and one hold;
+// 12. a host whose every scan fails (no lsof) never reads as known, so auto-settle waits forever.
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
@@ -530,6 +531,30 @@ describe("PortWatcher", () => {
 						expect(after).toEqual(events);
 						expect(s1.map((server) => server.key)).toEqual([seen600.server]);
 						expect(s2).toEqual([]);
+					}),
+				),
+			),
+	);
+
+	it.live(
+		"12: a host whose every scan fails reads as known once the first hold has passed",
+		() =>
+			withDir((dir, fake) => {
+				fake.uninstallLsof();
+				return open(join(dir, "events.db"), () =>
+					Effect.gen(function* () {
+						const known = portWatcherKnown.get(yield* SqlClient.SqlClient);
+						const before = known?.();
+						const started = Date.now();
+						yield* until(() => known?.() === true);
+						return { before, waited: Date.now() - started };
+					}),
+				);
+			}).pipe(
+				Effect.tap(({ before, waited }) =>
+					Effect.sync(() => {
+						expect(before).toBe(false);
+						expect(waited).toBeGreaterThanOrEqual(HOLD_MS - INTERVAL_MS);
 					}),
 				),
 			),

@@ -73,8 +73,16 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				for (const sessionId of sessions) changed(sessionId);
 			}
 		})();
+		const background = makeSessionBackgroundLiveness(changed);
+		const servers = new Map<string, readonly SessionServer[]>();
 		return {
-			background: makeSessionBackgroundLiveness(changed),
+			// A live server is live work: it pauses auto-settle and holds archive, delete and the
+			// worktree sweep back (8.7 "A live server pauses auto-settle").
+			background: {
+				...background,
+				hasLiveWork: (sessionId) =>
+					background.hasLiveWork(sessionId) || servers.has(sessionId),
+			},
 			compactions: {
 				...compactions,
 				observe: (events) => {
@@ -91,7 +99,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 					return moved;
 				},
 			},
-			servers: new Map(),
+			servers,
 			hintDismissals,
 			viewers: new Map(),
 			connectionInterests,
