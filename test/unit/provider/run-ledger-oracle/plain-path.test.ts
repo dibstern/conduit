@@ -999,6 +999,43 @@ describe("[32.2.5] plain Run path differential", () => {
 				).toEqual([]);
 			});
 	});
+
+	it("a relaunch's run.dispatched moves its input from Queued to Dispatching, with or without main's fresh-run run.requested (3.6, 3.9, 4.11)", () => {
+		for (const fresh of [false, true])
+			agreed("claude", (d) => {
+				const a = begin(d);
+				observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+				expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
+				// Main's retry on a fresh run names the Run its input holds and transmits nothing (3.4).
+				const runId = fresh ? `main-A-${d.next()}` : a.runId;
+				if (fresh)
+					main(d, {
+						kind: "run_requested",
+						runId,
+						inputId: "A",
+						direct: false,
+					});
+				expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
+				const t2 = "hold-A-2" as SendToken;
+				observe(d, t2, {
+					kind: "run_dispatched",
+					runId,
+					runnerId: "r1",
+					commandId: "cmd-A-1",
+					transmission: 2,
+				});
+				expect(d.view().active).toMatchObject({
+					runId: a.runId,
+					tag: "Starting",
+				});
+				expect(visibleInput(d, "A")?.state).toEqual({ tag: "Dispatching" });
+				observe(d, t2, { kind: "input_accepted", nativeMessageId: "native-A" });
+				expect(visibleInput(d, "A")?.state).toEqual({
+					tag: "Accepted",
+					nativeMessageId: "native-A",
+				});
+			});
+	});
 });
 
 /**

@@ -1733,16 +1733,25 @@ function dispatched(
 		.filter((item) => item.commandId === evidence.commandId)
 		.at(-1);
 	if (send !== undefined) {
-		// 3.6 D50: a relaunch is a new transmission of the same issue, in a new execution.
-		if (run.phase === "Queued") {
-			launch(run);
-			send = issue(
-				book,
-				send.effect.kind === "start"
-					? { ...send.effect, mode: nextMode(book) }
-					: send.effect,
-				true,
-			);
+		// 3.6 D50: a relaunch is a new transmission of the same issue, in a new execution. Main's
+		// fresh-run run.requested (3.4, 4.8) may have launched it already, its issue pending there.
+		if (run.phase === "Queued" || send.exec !== run.exec.n) {
+			const { effect } = send;
+			if (run.phase === "Queued") launch(run);
+			send =
+				deliverySends(book, run).find(
+					(item) =>
+						item.held &&
+						item.commandId === undefined &&
+						item.effect.inputId === effect.inputId,
+				) ??
+				issue(
+					book,
+					effect.kind === "start"
+						? { ...effect, mode: nextMode(book) }
+						: effect,
+					true,
+				);
 			send.commandId = evidence.commandId;
 		}
 	} else {

@@ -1927,16 +1927,27 @@ function dispatched(
 		.reverse()
 		.find((item) => item.commandId === observation.commandId);
 	if (send !== undefined) {
-		// 3.6: a relaunch is a new transmission of the same Run, in a new execution.
-		if (run.phase === "Queued") {
-			launch(run);
-			send = issue(
-				world,
-				send.effect.kind === "start"
-					? { ...send.effect, mode: nextMode(world) }
-					: send.effect,
-				true,
-			);
+		// 3.6: a relaunch is a new transmission of the same Run, in a new execution. Main's fresh-run
+		// run.requested (3.4, 4.8) may have launched it already, its issue pending there.
+		if (run.phase === "Queued" || send.exec !== run.exec.n) {
+			const { effect } = send;
+			if (run.phase === "Queued") launch(run);
+			send =
+				deliverySends(world, run).find(
+					(item) =>
+						item.held &&
+						item.commandId === undefined &&
+						"inputId" in item.effect &&
+						"inputId" in effect &&
+						item.effect.inputId === effect.inputId,
+				) ??
+				issue(
+					world,
+					effect.kind === "start"
+						? { ...effect, mode: nextMode(world) }
+						: effect,
+					true,
+				);
 			send.commandId = observation.commandId;
 		}
 	} else {

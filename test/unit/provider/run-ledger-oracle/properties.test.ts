@@ -2118,6 +2118,9 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				);
 				assert.equal(result.failed, false, String(result.errorInstance));
 			},
+			// A seed takes about 2.5 s alone, so the 10 s default fails it under the pre-commit hook's
+			// parallel build and typecheck.
+			30_000,
 		);
 		// The differential also checks the oracle against the fake, so a seed pended for their
 		// convergence stays pended here.
@@ -2194,6 +2197,7 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				);
 				assert.equal(result.failed, false, String(result.errorInstance));
 			},
+			30_000,
 		);
 	}
 	it("LI2 joins commute across send outcomes and receipt orders", ({
