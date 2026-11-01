@@ -5,6 +5,7 @@ import type {
 	Decision,
 	EndReason,
 	Evidence,
+	InputPlacement,
 	InputState,
 	InteractionView,
 	InterruptBy,
@@ -521,13 +522,19 @@ const runWork = (book: Book, run: Run) =>
 			send.effect.kind !== "end_session" &&
 			(send.effect.kind !== "interrupt" || rules(book).fences(send.effect)),
 	);
-/** L6: label work, the fence members that may still act. */
-const labelWorkOutstanding = (book: Book) =>
+/** A claim's own transmission, minted at its run.requested and not yet sent (2.1 rows 202, 212). */
+const claimOf = (tx: Tx, claim: string | undefined) =>
+	claim !== undefined &&
+	tx.token === claim &&
+	tx.transport.tag === "Issued" &&
+	tx.consumption.tag === "None";
+/** L6: label work, the fence members that may still act; a claim's own transmission aside. */
+const labelWorkOutstanding = (book: Book, claim?: string) =>
 	book.wakes.some((wake) => wake.ended === undefined) ||
 	book.sends.some(
 		(send) =>
 			rules(book).fences(send.effect) &&
-			send.txs.some((tx) => mayStillAct(book, send, tx)),
+			send.txs.some((tx) => !claimOf(tx, claim) && mayStillAct(book, send, tx)),
 	);
 
 // ---------------------------------------------------------------------------------------------
@@ -3116,5 +3123,51 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 				},
 			];
 		}),
+	};
+}
+
+/** 3.5 `fenceHolds`, read by `markRunning` before a start's claim `claim` (2.1 row 202). */
+export const fenceHolds = (state: SessionLedgerState, claim?: string) =>
+	labelWorkOutstanding(bookOf(state), claim);
+
+/**
+ * One input as main's units read it (2.1 rows 206, 207, 210-212): its Run's delivery sends (D53),
+ * every execution's, so a relaunch keeps its tries (4.8); undefined for an input never admitted.
+ */
+export function inputPlacement(
+	state: SessionLedgerState,
+	inputId: string,
+	claim?: string,
+): InputPlacement | undefined {
+	const book = bookOf(state);
+	const input = book.inputs.get(inputId);
+	if (input === undefined) return undefined;
+	const run = findRun(book, input.runId);
+	const sends = book.sends.filter(
+		(send): send is Send<StartEffect | SteerEffect> =>
+			delivers(send) &&
+			send.runId === input.runId &&
+			send.effect.inputId === inputId,
+	);
+	return {
+		start: !(
+			input.delivery === "steer" &&
+			run !== undefined &&
+			run.inputs[0] !== inputId
+		),
+		steer: input.delivery === "steer",
+		place:
+			input.failed !== undefined
+				? "failed"
+				: sends.some(
+							(send) =>
+								sendValue(send) === "reached" ||
+								(sendValue(send) === "possibly" && !sendUnconsumed(send)),
+						)
+					? "sent"
+					: "unplaced",
+		transmissions: sends
+			.flatMap((send) => send.txs)
+			.filter((tx) => !tx.notSent && !claimOf(tx, claim)).length,
 	};
 }

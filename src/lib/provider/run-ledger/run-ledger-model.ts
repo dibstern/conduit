@@ -463,6 +463,18 @@ export interface InputView {
 	readonly state: InputState;
 }
 
+/** What main's units read of one input (2.1 rows 202, 206, 207, 210-212). */
+export interface InputPlacement {
+	/** It opened its Run, so it is sent as a start (3.9). */
+	readonly start: boolean;
+	/** Main handed it off as a steer (`input.sent`); declined, `steerDeclined` returns it (3.9). */
+	readonly steer: boolean;
+	/** D53: `sent` when reached, or possibly reached and not unconsumed; `failed` is final (3.9). */
+	readonly place: "sent" | "failed" | "unplaced";
+	/** 4.8: its transmissions in its reservation, but `not_sent` ones and the claim's own. */
+	readonly transmissions: number;
+}
+
 /**
  * A union by Run tag (3.6); `by` only on Interrupting. The stop owns the deadline while the Run
  * has work in it or its start waits on that work (3.7 End); Settling owns its own.

@@ -37,7 +37,6 @@ import {
 	InputDraftsTag,
 } from "../domain/relay/Services/input-drafts.js";
 import type { ProviderRuntimeIngestion } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-overrides-state.js";
 import * as Failure from "../effect/failure-classification.js";
 import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
@@ -61,6 +60,8 @@ import {
 	endedRowOutcome,
 	LEDGER_EFFECT_TYPES,
 	ledgerEffectWakes,
+	ledgerFenceWakes,
+	loadLedger,
 } from "../persistence/effect/run-ledger-arm.js";
 import { SessionRollupProjects } from "../persistence/effect/session-rollup-projects.js";
 import { type CanonicalEvent, canonicalEvent } from "../persistence/events.js";
@@ -85,6 +86,7 @@ import type {
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
+import { fenceHolds, inputPlacement } from "./run-ledger/run-ledger-decider.js";
 import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
 import {
 	classify,
@@ -292,6 +294,7 @@ const PROBE_AFTER_ABORT = `NOT (candidate.effect_type = 'probe' AND EXISTS (
 		AND abort.project_key = candidate.project_key AND abort.session_id = candidate.session_id
 		AND abort.request_sequence < candidate.request_sequence))`;
 
+/** 4.8: the cap, 5 transmissions per send or control effect. */
 const maxControlAttempts = 5;
 const runnerControlReplyGraceMs = 5000;
 const maxControlRetryAfterMs = 30_000;
@@ -417,15 +420,6 @@ export class ProviderSideEffectReactor {
 				Option.getOrUndefined(yield* Effect.serviceOption(Scope.Scope));
 			if (!this.ledgerWakeRegistered && wakeScope) {
 				this.ledgerWakeRegistered = true;
-				const kicks = yield* Queue.sliding<void>(1);
-				const wake = () => Queue.offerUnsafe(kicks, undefined);
-				const wakes =
-					ledgerEffectWakes.get(this.options.sql) ?? new Set<() => void>();
-				ledgerEffectWakes.set(this.options.sql, wakes.add(wake));
-				yield* Scope.addFinalizer(
-					wakeScope,
-					Effect.sync(() => wakes.delete(wake)),
-				);
 				const ledgerEffects = this.options.sql<ProviderCommandOutboxRow>`
 					SELECT request_sequence, command_id, project_key, session_id, provider_id,
 						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
@@ -444,7 +438,12 @@ export class ProviderSideEffectReactor {
 									// A returned abort releases the probes held behind it.
 									Effect.tap(() =>
 										row.effect_type === "cancel_request"
-											? Effect.sync(wake)
+											? Effect.sync(() => {
+													for (const kick of ledgerEffectWakes.get(
+														this.options.sql,
+													) ?? [])
+														kick();
+												})
 											: Effect.void,
 									),
 								),
@@ -452,16 +451,41 @@ export class ProviderSideEffectReactor {
 						),
 					),
 				);
-				yield* Effect.forkIn(
-					Queue.take(kicks).pipe(
-						Effect.andThen(ledgerEffects),
-						Effect.catch((cause) =>
-							Effect.logError("Run Ledger effect wake failed", cause),
+				// 2.1 row 202 (CONTRACT.md 215, 714-717): the commit that releases a fence claims the
+				// held starts, each through its session lane, and stops at the first control.
+				const heldStarts = this.nextPendingRequests().pipe(
+					Effect.flatMap((heads) =>
+						Effect.forEach(
+							heads.filter((head) => head.effect_type === "send_turn"),
+							(head) => this.drainSessionLane(head, makeInteractions, true),
+							{ concurrency: "unbounded", discard: true },
 						),
-						Effect.forever,
 					),
-					wakeScope,
 				);
+				for (const [wakes, work] of [
+					[ledgerEffectWakes, ledgerEffects],
+					[ledgerFenceWakes, heldStarts],
+				] as const) {
+					const kicks = yield* Queue.sliding<void>(1);
+					const wake = () => Queue.offerUnsafe(kicks, undefined);
+					const registered =
+						wakes.get(this.options.sql) ?? new Set<() => void>();
+					wakes.set(this.options.sql, registered.add(wake));
+					yield* Scope.addFinalizer(
+						wakeScope,
+						Effect.sync(() => registered.delete(wake)),
+					);
+					yield* Effect.forkIn(
+						Queue.take(kicks).pipe(
+							Effect.andThen(work),
+							Effect.catch((cause) =>
+								Effect.logError("Run Ledger wake failed", cause),
+							),
+							Effect.forever,
+						),
+						wakeScope,
+					);
+				}
 			}
 			yield* this.admission.withPermit(
 				Effect.gen({ self: this }, function* () {
@@ -532,8 +556,9 @@ export class ProviderSideEffectReactor {
 					.pipe(Effect.mapError(storeFailure("cancelInactiveControls")));
 			}
 			const heads = yield* this.nextPendingRequests();
-			// Arm before running heads too: a held turn can outlast a later retryAt.
-			yield* this.armRetryWake(makeInteractions);
+			// Arm before running heads too: a held turn can outlast a later retryAt. The heads are this
+			// drain's to run, so a wake for one would only race it for its session lane.
+			yield* this.armRetryWake(makeInteractions, heads);
 			yield* Effect.forEach(
 				heads,
 				(head) =>
@@ -541,30 +566,7 @@ export class ProviderSideEffectReactor {
 						head.effect_type !== "send_turn") ||
 					LEDGER_EFFECT_TYPES.some((type) => type === head.effect_type)
 						? this.runBackgroundRow(head, makeInteractions).pipe(Effect.asVoid)
-						: this.withDrainSession(
-								head.session_id,
-								Effect.gen({ self: this }, function* () {
-									let row: ProviderCommandOutboxRow | undefined = head;
-									while (row) {
-										if (
-											(yield* this.runBackgroundRow(row, makeInteractions)) ===
-											0
-										)
-											return;
-										const next = (yield* this.nextPendingRequests(
-											head.session_id,
-										))[0];
-										// A refusal can race project recovery and leave its head
-										// unchanged. Defer it to the scheduler's next drain.
-										if (
-											next?.request_sequence === row.request_sequence &&
-											next.attempt_count === row.attempt_count
-										)
-											return;
-										row = next;
-									}
-								}),
-							)
+						: this.drainSessionLane(head, makeInteractions)
 					).pipe(
 						// A failed session must not interrupt another session's live turn.
 						Effect.catchCause((cause) =>
@@ -584,6 +586,7 @@ export class ProviderSideEffectReactor {
 
 	private armRetryWake(
 		makeInteractions?: ProviderCommandInteractionSinkFactory,
+		running: readonly ProviderCommandOutboxRow[] = [],
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return this.admission.withPermit(
 			Effect.gen({ self: this }, function* () {
@@ -598,6 +601,7 @@ export class ProviderSideEffectReactor {
 				}>`SELECT MIN(next_attempt_at) AS due
 				FROM provider_command_outbox candidate
 				WHERE status = 'retryable_failed' AND next_attempt_at IS NOT NULL
+					AND request_sequence NOT IN ${this.options.sql.in(running.map((row) => row.request_sequence))}
 					AND (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 					AND (next_attempt_at > ${now}
 						OR command_id NOT IN ${this.options.sql.in([...this.liveCommands])})
@@ -637,6 +641,33 @@ export class ProviderSideEffectReactor {
 					),
 					scope,
 				);
+			}),
+		);
+	}
+
+	/** Runs a session's rows from its head, in order; `sendsOnly` stops at the first control. */
+	private drainSessionLane(
+		head: ProviderCommandOutboxRow,
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+		sendsOnly?: true,
+	) {
+		return this.withDrainSession(
+			head.session_id,
+			Effect.gen({ self: this }, function* () {
+				let row: ProviderCommandOutboxRow | undefined = head;
+				while (row && (!sendsOnly || row.effect_type === "send_turn")) {
+					if ((yield* this.runBackgroundRow(row, makeInteractions)) === 0)
+						return;
+					const next = (yield* this.nextPendingRequests(head.session_id))[0];
+					// A refusal can race project recovery and leave its head
+					// unchanged. Defer it to the scheduler's next drain.
+					if (
+						next?.request_sequence === row.request_sequence &&
+						next.attempt_count === row.attempt_count
+					)
+						return;
+					row = next;
+				}
 			}),
 		);
 	}
@@ -916,15 +947,27 @@ export class ProviderSideEffectReactor {
 			if (row.effect_type === "send_turn")
 				ownedSend = `${row.request_sequence}:${row.attempt_count}`;
 			const cancellation = new AbortController();
-			const delivery = this.runProviderEffect(
-				row,
-				options?.interactions,
-				options?.makeInteractions,
-				options?.abortSignal
-					? AbortSignal.any([options.abortSignal, cancellation.signal])
-					: cancellation.signal,
-				options?.liveContext,
-			);
+			// 2.1 row 212: a claim past the cap sends nothing and fails its input through main's path.
+			const delivery = claimed.exhausted
+				? Effect.fail(
+						new ProviderInstanceFailure({
+							providerId: row.provider_id,
+							operation: "sendTurn",
+							cause: Object.assign(
+								new Error("Provider send attempts exhausted"),
+								{ code: "provider_send_attempts_exhausted", retryable: false },
+							),
+						}),
+					)
+				: this.runProviderEffect(
+						row,
+						options?.interactions,
+						options?.makeInteractions,
+						options?.abortSignal
+							? AbortSignal.any([options.abortSignal, cancellation.signal])
+							: cancellation.signal,
+						options?.liveContext,
+					);
 			const result = yield* Effect.result(
 				row.effect_type !== "send_turn"
 					? delivery
@@ -958,6 +1001,8 @@ export class ProviderSideEffectReactor {
 									}),
 								);
 							});
+							// 2.1 row 202 (CONTRACT.md 215): the fence replaces the intake recall's deadline, so
+							// only another writer's durable error recalls the queue.
 							return yield* Effect.raceFirst(
 								wait,
 								this.durableOutcome(row.command_id).pipe(
@@ -965,33 +1010,6 @@ export class ProviderSideEffectReactor {
 										outcome.error ? recall.pipe(Effect.as(outcome)) : wait,
 									),
 								),
-							).pipe(
-								Effect.timeoutOrElse({
-									duration: PROCESSING_TIMEOUT_DURATION,
-									orElse: () =>
-										recall.pipe(
-											Effect.flatMap((ack) =>
-												ack.status !== "cancelled"
-													? Effect.succeed({
-															...REACTOR_COMPLETED_RESULT,
-															status: "indeterminate" as const,
-														})
-													: Effect.fail(
-															new ProviderInstanceFailure({
-																providerId: row.provider_id,
-																operation: "awaitIntake",
-																cause: Object.assign(
-																	new Error("Input recalled before intake"),
-																	{
-																		code: "processing_timeout",
-																		retryable: false,
-																	},
-																),
-															}),
-														),
-											),
-										),
-								}),
 							);
 						}),
 			);
@@ -1188,7 +1206,8 @@ export class ProviderSideEffectReactor {
 								...(Option.isSome(drafts) ? { inputDrafts: drafts.value } : {}),
 								afterCommit: (effect) => followUps.push(effect),
 							};
-							if (!row.run_id) return;
+							const runId = row.run_id;
+							if (!runId) return;
 							const [run] = yield* this.options.sql<{
 								runner_id: string | null;
 								held_transmission: number | null;
@@ -1198,73 +1217,137 @@ export class ProviderSideEffectReactor {
 						WHERE run.id = ${row.run_id} AND run.session_id = ${row.session_id}
 							AND run.status IN ('pending', 'running')`;
 							if (!run) return;
-							const payload = yield* this.parseSendTurnPayload(row).pipe(
-								Effect.catch(() => Effect.succeed(undefined)),
+							const ledger = yield* loadLedger(row.session_id).pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
 							);
-							const driver =
-								payload?.account?.driver ??
-								(this.options.registry.getInstance(row.provider_id)
-									? row.provider_id
-									: run.provider);
-							const settlementTx: SettlementTx = {
-								...tx,
-								driverKind: driver,
-							};
-							if (
-								!(
-									this.options.registry.getInstance(driver) instanceof
-									RunnerProviderInstance
-								)
-							) {
-								if (scope === "unheld_runner") return;
-								return yield* settleDirectSend(
-									settlementTx,
-									row,
-									result,
-									failure,
-									now,
-									Duration.toMillis(
-										(this.options.retryBackoff ?? defaultRetryBackoff)(
-											row.attempt_count,
+							const input =
+								ledger && inputPlacement(ledger.state, row.command_id);
+							// 2.1 row 210 (CONTRACT.md 220, 1852-1858): a declined start is tried again up to
+							// the cap, a retryable outcome with main's backoff under main's settle guards. A
+							// steer, its own Run's start included, is returned by `steerDeclined` (CONTRACT.md 978-983).
+							const reply: TurnResult | undefined =
+								result?.status === "steer-declined" && input?.steer === false
+									? {
+											...result,
+											status: "error",
+											error: {
+												code: "input_declined",
+												message: "The provider declined the start",
+												retryable: true,
+											},
+										}
+									: result;
+							yield* Effect.gen({ self: this }, function* () {
+								const payload = yield* this.parseSendTurnPayload(row).pipe(
+									Effect.catch(() => Effect.succeed(undefined)),
+								);
+								const driver =
+									payload?.account?.driver ??
+									(this.options.registry.getInstance(row.provider_id)
+										? row.provider_id
+										: run.provider);
+								const settlementTx: SettlementTx = {
+									...tx,
+									driverKind: driver,
+								};
+								if (
+									!(
+										this.options.registry.getInstance(driver) instanceof
+										RunnerProviderInstance
+									)
+								) {
+									if (scope === "unheld_runner") return;
+									return yield* settleDirectSend(
+										settlementTx,
+										row,
+										reply,
+										failure,
+										now,
+										Duration.toMillis(
+											(this.options.retryBackoff ?? defaultRetryBackoff)(
+												row.attempt_count,
+											),
 										),
+									);
+								}
+								const legacy = yield* LegacySendKey.prove(
+									this.options.sql,
+									row,
+								);
+								if (legacy) {
+									if (scope === "unheld_runner") return;
+									return yield* settleLegacySend(
+										settlementTx,
+										legacy,
+										reply,
+										failure,
+										now,
+									);
+								}
+								const send = {
+									sessionId: row.session_id,
+									runId,
+									commandId: row.command_id,
+									requestSequence: row.request_sequence,
+									attempt: row.attempt_count,
+								};
+								if (failure) {
+									// A transport failure after a hold is owned by reply recovery or Settle.
+									return yield* settleSend(settlementTx, {
+										_tag: "failed",
+										send,
+										failure,
+										observedAt: now,
+									});
+								}
+								const terminal = terminalTurnResult(reply);
+								if (terminal && reply?.runnerSend)
+									yield* settleSend(settlementTx, {
+										_tag: "replied",
+										send: { ...send, ...reply.runnerSend },
+										result: terminal,
+										observedAt: now,
+									});
+							});
+							// 2.1 row 211 (CONTRACT.md 221): a start cancelled before it reached the agent is
+							// Stop's own; it returns behind the pause in this write once its Run is interrupted. A
+							// placed message is main's proof of reach the view may not hold yet (D53, gap, reported).
+							if (
+								result?.status !== "cancelled" ||
+								!input?.start ||
+								input.place !== "unplaced"
+							)
+								return;
+							const [sent] = yield* this.options.sql<{ sequence: number }>`
+								SELECT MAX(sequence) AS sequence FROM events WHERE session_id = ${row.session_id}
+									AND type = 'input.sent' AND json_extract(data, '$.inputId') = ${row.command_id}
+									AND EXISTS (SELECT 1 FROM provider_runs WHERE id = ${row.run_id}
+										AND session_id = ${row.session_id} AND status = 'interrupted')
+									AND NOT EXISTS (SELECT 1 FROM messages WHERE session_id = ${row.session_id}
+										AND input_id = ${row.command_id})
+								HAVING MAX(sequence) IS NOT NULL`;
+							if (!sent) return;
+							const store = yield* makeEventStoreEffect.pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
+								Effect.provideService(PersistenceProjectTag, {
+									projectId: row.project_key,
+								}),
+							);
+							yield* project(
+								yield* store.appendBatch([
+									canonicalEvent(
+										"input.requeued",
+										row.session_id,
+										{
+											sessionId: row.session_id,
+											inputId: row.command_id,
+											sentSequence: sent.sequence,
+											reason: "failed",
+										},
+										{ createdAt: now, metadata: { runId: row.run_id } },
 									),
-								);
-							}
-							const legacy = yield* LegacySendKey.prove(this.options.sql, row);
-							if (legacy) {
-								if (scope === "unheld_runner") return;
-								return yield* settleLegacySend(
-									settlementTx,
-									legacy,
-									result,
-									failure,
-									now,
-								);
-							}
-							const send = {
-								sessionId: row.session_id,
-								runId: row.run_id,
-								commandId: row.command_id,
-								requestSequence: row.request_sequence,
-								attempt: row.attempt_count,
-							};
-							if (failure) {
-								// A transport failure after a hold is owned by reply recovery or Settle.
-								return yield* settleSend(settlementTx, {
-									_tag: "failed",
-									send,
-									failure,
-									observedAt: now,
-								});
-							}
-							const terminal = terminalTurnResult(result);
-							if (terminal && result?.runnerSend)
-								yield* settleSend(settlementTx, {
-									_tag: "replied",
-									send: { ...send, ...result.runnerSend },
-									result: terminal,
-									observedAt: now,
-								});
+								]),
+							);
 						}),
 					{
 						afterCommit: Effect.suspend(() =>
@@ -1587,7 +1670,7 @@ export class ProviderSideEffectReactor {
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
 	): Effect.Effect<
-		ProviderCommandOutboxRow | undefined,
+		(ProviderCommandOutboxRow & { readonly exhausted?: true }) | undefined,
 		ProviderCommandStoreFailure
 	> {
 		const runId = randomUUID();
@@ -1595,6 +1678,27 @@ export class ProviderSideEffectReactor {
 		return this.options
 			.write((project, stamp) =>
 				Effect.gen({ self: this }, function* () {
+					let exhausted = false;
+					if (row.effect_type === "send_turn") {
+						const ledger = yield* loadLedger(row.session_id).pipe(
+							Effect.provideService(SqlClient.SqlClient, this.options.sql),
+						);
+						const claim = row.run_id ?? undefined;
+						const input =
+							ledger && inputPlacement(ledger.state, row.command_id, claim);
+						// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits with no clock while some
+						// label has work; the commit that releases the fence wakes the drain.
+						if (ledger && input?.start && fenceHolds(ledger.state, claim))
+							return undefined;
+						// 2.1 row 212 (CONTRACT.md 1873-1876): 5 transmissions per direct send; a runner-held
+						// one is holdRun's to cap. The view folds a retry's run.requested on an ended Run only
+						// from 32.2.6 (CONTRACT.md 3583), so main's own claims are the floor (gap, reported).
+						exhausted =
+							ledger !== undefined &&
+							getProviderDriver(ledger.provider)?.runsOpenCodeServer === true &&
+							Math.max(input?.transmissions ?? 0, row.attempt_count) >=
+								maxControlAttempts;
+					}
 					const [claimed] = yield* this.options.sql<ProviderCommandOutboxRow>`
 				UPDATE provider_command_outbox SET status = 'running',
 					attempt_count = attempt_count + 1, error_code = NULL, next_attempt_at = NULL, updated_at = ${updatedAt},
@@ -1655,7 +1759,9 @@ export class ProviderSideEffectReactor {
 							),
 						);
 					}
-					return claimed;
+					return claimed && exhausted
+						? { ...claimed, exhausted: true as const }
+						: claimed;
 				}),
 			)
 			.pipe(

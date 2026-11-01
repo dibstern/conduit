@@ -17,6 +17,7 @@ import type { InputRequest } from "../../contracts/stored-event.js";
 import {
 	decide,
 	evolve,
+	fenceHolds,
 	initialSessionLedgerState,
 	type LedgerEvent,
 	type SessionLedgerState,
@@ -68,6 +69,12 @@ export const ledgerEffectWakes = new WeakMap<
 	Set<() => void>
 >();
 const wakeKey = Symbol("run-ledger-effect-wake");
+/** The reactors' wakes for the commit that releases a fence, so a held start is claimed (2.1 row 202). */
+export const ledgerFenceWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<() => void>
+>();
+const fenceWakeKey = Symbol("run-ledger-fence-wake");
 /** The alarm schedulers' wakes for a committed change of a session row's alarm_at (3.7). */
 export const ledgerAlarmWakes = new WeakMap<
 	SqlClient.SqlClient,
@@ -611,6 +618,10 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 						inserted ||= written.length > 0;
 					}
 					if (inserted) wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
+					// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits on the fence with no clock, so the
+					// commit that releases it wakes the held starts (gap, reported).
+					if (fenceHolds(ledger.state) && !fenceHolds(state))
+						wakeAfterCommit(sql, fenceWakeKey, ledgerFenceWakes);
 				}
 				// A folded fact advances the read model (A.21): its session row takes the version.
 				const stamped = yield* sql<{ id: string }>`
