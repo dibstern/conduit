@@ -599,6 +599,70 @@ describe("durable run holder", () => {
 			}).pipe(Effect.provide(layer)),
 	);
 
+	// 4.3, 4.8 (CONTRACT 1535-1537, 1868-1869): from 32.5 a joined steer is bound
+	// under its own commandId, its count and hold its own, while its owner's start
+	// stays held on the same runner.
+	it.effect(
+		"binds a joined steer under its own commandId with its own count and hold",
+		() =>
+			Effect.gen(function* () {
+				const { sql, commit, lifecycle } = yield* setup;
+				yield* lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				yield* commit([requested("joined")]);
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
+					VALUES (1, 'steer', 'project', 'session', 'claude', 'send_turn', '{}', 'joined', 'running', 1, 1)`;
+				yield* sql`UPDATE provider_runs SET joined_into = 'run', status = 'joined' WHERE id = 'joined'`;
+				const hold = lifecycle.holdRun({
+					sessionId: "session",
+					runId: "joined",
+					commandId: "steer",
+				});
+				expect(yield* hold).toEqual({
+					_tag: "Held",
+					runner: "runner",
+					transmission: 1,
+				});
+				expect(yield* hold).toEqual({ _tag: "Busy" });
+				yield* commit([
+					canonicalEvent(
+						"run.released",
+						"session",
+						{
+							runId: "joined",
+							runnerId: "runner",
+							commandId: "steer",
+							transmission: 1,
+							reason: "NotSent",
+						},
+						{ provider: "claude", metadata: { runId: "joined" } },
+					),
+				]);
+				expect(yield* hold).toEqual({
+					_tag: "Held",
+					runner: "runner",
+					transmission: 2,
+				});
+				expect(
+					yield* sql`SELECT json_extract(data, '$.runId') AS runId, json_extract(data, '$.commandId') AS commandId,
+						json_extract(data, '$.transmission') AS transmission FROM events WHERE type = 'run.dispatched' ORDER BY sequence`,
+				).toEqual([
+					{ runId: "run", commandId: "send", transmission: 1 },
+					{ runId: "joined", commandId: "steer", transmission: 1 },
+					{ runId: "joined", commandId: "steer", transmission: 2 },
+				]);
+				expect(
+					yield* sql`SELECT id, runner_id, held_transmission FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "joined", runner_id: "runner", held_transmission: 2 },
+					{ id: "run", runner_id: "runner", held_transmission: 1 },
+				]);
+			}).pipe(Effect.provide(layer)),
+	);
+
 	it.effect(
 		"refuses missing, foreign, or terminal runs without appending a dispatch",
 		() =>
