@@ -2618,6 +2618,60 @@ describe("ProviderSideEffectReactor", () => {
 				});
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
+
+	// Run Ledger 32.3 (CONTRACT.md 2.1 row 216, 3.12): D59 removed the ledger's kill, so main's
+	// end_session is the one destruction, and it keeps its session lane. How it could fail: the send
+	// claims while the kill row is pending, or while it runs, or never once it settles.
+	it.effect(
+		"claims a send issued after an end_session only once that row settles",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSendTurnOutbox(sql, { requestSequence: 11 });
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key,
+					session_id, provider_id, effect_type, payload_json, provider_process_id, status,
+					attempt_count, requested_at, updated_at)
+					VALUES (10, 'kill', 'test-project', 'session-1', 'claude', 'end_session',
+						${JSON.stringify({ type: "end_session", sessionId: "session-1", providerProcessId: "p1" })},
+						'p1', 'pending', 0, 1000, 1000)`;
+				const killing = yield* Deferred.make<void>();
+				const killed = yield* Deferred.make<void>();
+				const sendTurn = vi.fn(() => Effect.succeed(completedTurn));
+				const reactor = yield* makeReactor({
+					registry: new ProviderRegistry([
+						{
+							...makeProvider(sendTurn),
+							endSessionEffect: () =>
+								Deferred.succeed(killing, undefined).pipe(
+									Effect.andThen(Deferred.await(killed)),
+								),
+						},
+					]),
+				});
+				const outbox = sql<{
+					command_id: string;
+					status: string;
+				}>`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`;
+				const kill = yield* Effect.forkChild(reactor.runOnce());
+				yield* Deferred.await(killing);
+				// The kill row runs: the send behind it in the session's lane is not a candidate.
+				expect(yield* reactor.runOnce()).toBe(0);
+				expect(sendTurn).not.toHaveBeenCalled();
+				expect(yield* outbox).toEqual([
+					{ command_id: "kill", status: "running" },
+					{ command_id: "cmd-1", status: "pending" },
+				]);
+				yield* Deferred.succeed(killed, undefined);
+				expect(yield* Fiber.join(kill)).toBe(1);
+				expect((yield* outbox)[0]).toEqual({
+					command_id: "kill",
+					status: "completed",
+				});
+				// Settled, it holds nothing: the next drain claims the send.
+				yield* reactor.runOnce();
+				expect(sendTurn).toHaveBeenCalledOnce();
+			}).pipe(Effect.provide(reactorTestLayer)),
+	);
 });
 
 const reactorTestLayer = Layer.provideMerge(
