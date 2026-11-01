@@ -9,6 +9,7 @@ import type {
 	LedgerView,
 	ProviderKind,
 	SendToken,
+	Settlement,
 	Task,
 	TaskKey,
 	Unsolicited,
@@ -1544,6 +1545,186 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	/** A runner-held start that ended before any hold, so main's run.dispatched never came (3.4, 4.4). */
+	const unheld = (
+		d: Driver,
+		outcome: Extract<Settlement, { kind: "unheld_outcome" }>["outcome"],
+	) => {
+		admit(d, "A");
+		const runId = `main-A-${d.next()}`;
+		main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+		return step(d, {
+			verb: "settle",
+			settlement: {
+				kind: "unheld_outcome",
+				runId,
+				commandId: "cmd-A-1",
+				outcome,
+			},
+		});
+	};
+	const released = (
+		d: Driver,
+		reason: Extract<Evidence, { kind: "run_released" }>["reason"],
+	) => observe(d, begin(d).token, { kind: "run_released", reason });
+
+	// The relaunch's run.dispatched counts holds per commandId; an unheld try took none (4.3).
+	it.each<readonly [string, (d: Driver) => Decision<unknown>, number]>([
+		["a NotSent release", (d) => released(d, "NotSent"), 2],
+		["a JournalAbsent release", (d) => released(d, "JournalAbsent"), 2],
+		["a ResumeRejected release", (d) => released(d, "ResumeRejected"), 2],
+		...(["exiting", "retiring", "interrupted"] as const).map(
+			(why) =>
+				[
+					`a Refused ${why} release`,
+					(d: Driver) => released(d, { tag: "Refused", why }),
+					2,
+				] as const,
+		),
+		[
+			"a retryable try before any hold",
+			(d) => unheld(d, { tag: "retryable", retryAt: d.now + 50 }),
+			1,
+		],
+		[
+			"a not_sent try before any hold",
+			(d) => unheld(d, { tag: "not_sent", retryAt: d.now + 50 }),
+			1,
+		],
+	])("(32.2.5 D50) %s unlaunches the Run to Queued, and main's relaunch under the same commandId is its next transmission (CONTRACT.md 664-670)", (_, cause, transmission) => {
+		agreed("claude", (d) => {
+			expect(cause(d)).toMatchObject({ tag: "Accepted", ended: [] });
+			const runId = "main-A-1";
+			expect(d.view().active).toMatchObject({ runId, tag: "Queued" });
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
+			const t2 = "hold-A-relaunch" as SendToken;
+			observe(d, t2, {
+				kind: "run_dispatched",
+				runId,
+				runnerId: "r1",
+				commandId: "cmd-A-1",
+				transmission,
+			});
+			expect(d.view().active).toMatchObject({ runId, tag: "Starting" });
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Dispatching" });
+			observe(d, t2, { kind: "input_accepted", nativeMessageId: "native-A" });
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-A",
+			});
+		});
+	});
+
+	it("(32.2.5 D50) a permanent try before any hold ends the Run refused instead of unlaunching it (3.8, CONTRACT.md 667-668)", () => {
+		agreed("claude", (d) => {
+			expect(
+				unheld(d, { tag: "permanent", code: "project_inactive" }).ended,
+			).toMatchObject([
+				{
+					runId: "main-A-1",
+					outcome: "error",
+					reason: { tag: "refused", code: "project_inactive" },
+				},
+			]);
+			expect(d.view().active).toBeUndefined();
+		});
+	});
+
+	it("(32.2.5 D50) Run now on a Run not yet delivered ends it interrupted at once with no effect (CONTRACT.md 664-666)", () => {
+		const queued = (d: Driver) => {
+			admit(d, "A");
+			const runId = `main-A-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+			lose(d, "r1");
+			return runId;
+		};
+		const launched = (d: Driver) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+			return a.runId;
+		};
+		for (const notDelivered of [queued, launched])
+			agreed("claude", (d) => {
+				const runId = notDelivered(d);
+				admit(d, "B");
+				const committed = runNow(d, "B");
+				expect(committed.ended).toMatchObject([
+					{ runId, reason: { tag: "interrupted", forced: false } },
+				]);
+				expect(committed.issued).toEqual([]);
+			});
+	});
+
+	it("(32.2.6) a steer the unlaunched Run issued is tried again in the relaunched execution after its start (3.9, L2 case 2, CONTRACT.md 680-681)", () => {
+		agreed("claude", (d) => {
+			const a = begin(d);
+			const b = begin(d, "B", "steer");
+			// The release covers every send of the Run, so none was handed over (4.5, D50).
+			for (const token of [a.token, b.token])
+				observe(d, token, { kind: "run_released", reason: "NotSent" });
+			expect(d.view().active).toMatchObject({ runId: a.runId, tag: "Queued" });
+			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Queued" });
+			const relaunched = (input: string, runId: string, commandId: string) => {
+				const token = `hold-${input}-relaunch` as SendToken;
+				observe(d, token, {
+					kind: "run_dispatched",
+					runId,
+					runnerId: "r1",
+					commandId,
+					transmission: 2,
+				});
+				return token;
+			};
+			const a2 = relaunched("A", a.runId, "cmd-A-1");
+			const b2 = relaunched("B", b.runId, "cmd-B-2");
+			expect(d.view().active).toMatchObject({
+				runId: a.runId,
+				tag: "Starting",
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Dispatching" });
+			observe(d, a2, { kind: "started" });
+			observe(d, a2, { kind: "input_accepted", nativeMessageId: "native-A" });
+			observe(d, b2, { kind: "input_accepted", nativeMessageId: "native-B" });
+			expect(visibleInput(d, "B")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-B",
+			});
+			expect(complete(d, a2)).toMatchObject([
+				{ runId: a.runId, outcome: "completed" },
+			]);
+		});
+	});
+
+	it("(32.2.14 R5 r2) a Claude follow-up after a completed Run launches at once into the live query, with no wait and no close (9, D59)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			// Claude's work ends at its result, so the fence lifts with no query_ended (9).
+			expect(
+				observe(d, a.token, { kind: "result", outcome: "completed" }).ended,
+			).toMatchObject([{ runId: a.runId, outcome: "completed" }]);
+			const b = begin(d, "B");
+			expect(d.view().active).toMatchObject({
+				runId: b.runId,
+				tag: "Starting",
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Dispatching" });
+			expect(d.label).toBe("r1:1");
+			expect(
+				d.issued.filter(({ effect }) =>
+					["end_session", "interrupt"].includes(effect.kind),
+				),
+			).toEqual([]);
+			observe(d, b.token, {
+				kind: "input_accepted",
+				nativeMessageId: "native-B",
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-B",
+			});
+		});
+	});
+
 	it("a Refused release after the Run ended process lost finds it Ended, and the input runs on a new Run (F40)", () => {
 		agreed("claude", (d) => {
 			const a = running(d);
@@ -1725,6 +1906,31 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			]);
 			expect(d.view()).toMatchObject({ live: [], anythingMayAct: false });
 		});
+	});
+
+	it("(32.2.8 8-A) an end with a deadlineAt and no active Run adds nothing to the stop, where a Stop would add its label work (8.4, CONTRACT.md 2889-2898)", () => {
+		for (const commit of ["end", "stop"] as const)
+			agreed("opencode", (d) => {
+				// A send of an ended main run is label work no open main run owns (788-789).
+				const a = running(d);
+				stop(d, 5_000);
+				main(d, {
+					kind: "run_terminal",
+					runId: a.runId,
+					outcome: "interrupted",
+				});
+				expect(d.view().active).toBeUndefined();
+				const committed = commit === "stop" ? stop(d, 9_000) : end(d, 9_000);
+				// The Stop's own probe deadline fires first (3.7).
+				while ((d.alarmAt ?? 9_000) < 9_000) fire(d);
+				if (commit === "stop") expect(d.alarmAt).toBe(9_000);
+				else {
+					expect(committed.issued.map(({ effect }) => effect.kind)).toEqual([
+						"end_session",
+					]);
+					expect(d.alarmAt).not.toBe(9_000);
+				}
+			});
 	});
 
 	it("a Stop or end with a deadlineAt and no label work outside main's runs opens no ledger stop deadline (L6)", () => {
@@ -1966,6 +2172,19 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 	it.each([
 		["its runner's retirement", (d: Driver) => lose(d, "r1")],
 		["a Stop's commit", (d: Driver) => stop(d)],
+		[
+			"a Run now's commit (8-A)",
+			(d: Driver) =>
+				step(d, {
+					verb: "control",
+					control: {
+						kind: "run_now",
+						commandId: "run-now-1",
+						inputId: "B",
+						deadlineAt: null,
+					},
+				}),
+		],
 		[
 			"the session's end",
 			(d: Driver) => {
@@ -2520,6 +2739,90 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		});
 	});
 
+	it("(11-A) a second Stop adds the wake work started since the first and keeps the first's deadline (L6, REDESIGN-7)", () => {
+		agreed("claude", (d) => {
+			wake(d);
+			const runId = d.view().active?.runId;
+			stop(d, 5_000);
+			// A turn joining the wake Run under a newer label is a wake execution of its own (D28).
+			wake(d, "r1:2");
+			stop(d, 9_000);
+			expect(d.alarmAt).toBe(5_000);
+			expect(fire(d).ended).toMatchObject([
+				{ runId, reason: { tag: "interrupted", forced: true } },
+			]);
+			expect(d.view()).toMatchObject({ live: [] });
+			expect(d.view().active).toBeUndefined();
+			expect(d.alarmAt).toBeUndefined();
+		});
+	});
+
+	it("(11-B) an interaction on a label no Run reads stays Pending and is answered with a null runId (3.10)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			unsolicited(d, {
+				kind: "interaction_requested",
+				interactionId: "p",
+				interactionKind: "question",
+			});
+			complete(d, a.token);
+			expect(d.view().active).toBeUndefined();
+			expect(d.view().interactions).toMatchObject([
+				{ tag: "Pending", interactionId: "p" },
+			]);
+			step(d, {
+				verb: "control",
+				control: {
+					kind: "answer",
+					commandId: "answer-p",
+					interactionId: "p",
+					answer: "yes",
+				},
+			});
+			expect(d.latest("deliver_answer").effect).toEqual({
+				kind: "deliver_answer",
+				runId: null,
+				label: "r1:1",
+				interactionId: "p",
+				answer: "yes",
+			});
+		});
+	});
+
+	it("(11-D) a Run main launches under a Stop with no foreground Run waits at the Claude wake's fence, and the wake's turn_ended leaves it no deadline to force it (D59, L6)", () => {
+		agreed("claude", (d) => {
+			wake(d);
+			const wakeRunId = d.view().active?.runId;
+			stop(d, 5_000);
+			admit(d, "A");
+			const runId = `main-A-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+			// Main launched A after the commit; its start waits at the wake's fence (8.3, L6).
+			const waiting = {
+				runId,
+				origin: "input",
+				tag: "Starting",
+				inputs: [{ inputId: "A", state: { tag: "Queued" } }],
+			};
+			expect(d.view().active).toEqual(waiting);
+			const ended = unsolicited(d, { kind: "turn_ended" });
+			expect(ended.ended).toMatchObject([
+				{ runId: wakeRunId, reason: { tag: "interrupted", forced: false } },
+			]);
+			expect(d.view().active).toEqual(waiting);
+			// The wake was the stop's only work, so no deadline is left to force A.
+			expect(d.alarmAt).toBeUndefined();
+			observe(d, `hold-A-${runId}` as SendToken, {
+				kind: "run_dispatched",
+				runId,
+				runnerId: "r1",
+				commandId: "cmd-A",
+				transmission: 1,
+			});
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Dispatching" });
+		});
+	});
+
 	it("D59: a Claude wake's turn_ended is its own end, interrupted and not forced after a Stop; other providers' turn_ended is Rejected", () => {
 		agreed("claude", (d) => {
 			wake(d);
@@ -2873,6 +3176,14 @@ describe("[32.2.12] core destructive confirm and lost work: the bead's acceptanc
 		const confirmed = gated((d) => confirm(d));
 		expect(confirmed).toHaveLength(1);
 		expect(gated((d) => snapshot(d, []))).toEqual(confirmed);
+		// A clearing process_started: a newer label of the gated runner ends the gated label's scope
+		// (L5, D44). The same end_session issues, addressed to the runner's latest label (L2, 3.3).
+		expect(gated((d) => started(d, "r1:2"))).toEqual([
+			{
+				...confirmed[0],
+				effect: { kind: "end_session", runId: null, label: "r1:2" },
+			},
+		]);
 	});
 
 	it("lost work is decided once per label, and a later scope end of a decided label records nothing (L5)", () => {
