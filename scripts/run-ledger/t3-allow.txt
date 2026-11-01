@@ -2071,3 +2071,5 @@ R2 entry scope (5f5ffd8c, 58976bb4 on wt/82tn32r3): each runner entry now has on
 whether a send released unsent at an end-session goes to a fresh runner	pointer
 32.4 landed on wt/82tn323 in 6eebff33. When a runner is retired	pointer
 hold facts, and the named tests for main's tokened and	pointer
+tokened entries, and a repeated main observation are all asserted by named	pointer
+The box asking for wake labels in the interrupt is	pointer
