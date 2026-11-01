@@ -13,6 +13,7 @@ import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
 } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import type { ClaudeSessionRunnerDeps } from "../../../src/lib/provider/claude/claude-runner-payload.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	CanUseTool,
@@ -36,12 +37,17 @@ import { RunnerSpool } from "../../../src/lib/provider/runner/runner-spool.js";
 import {
 	currentRunnerQuery,
 	type NativeSessionRunner,
+	type SessionCommand,
 	type SessionFailure,
 	type SessionOutput,
 	type SessionOutputReply,
 } from "../../../src/lib/provider/runner/session-runner.js";
 
-import { createMockQuery, makeSuccessResult } from "../../helpers/mock-sdk.js";
+import {
+	createMockQuery,
+	makeErrorResult,
+	makeSuccessResult,
+} from "../../helpers/mock-sdk.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
@@ -427,9 +433,7 @@ it("keeps a coalesced delta with the query that produced it", async () => {
 
 const claudeTurn = (
 	inputId: string,
-	input: { readonly shellConfig?: { readonly interactive: boolean } } & {
-		readonly configDir?: ReturnType<typeof configuredClaudeConfigDir>;
-	} = {},
+	input: Partial<Extract<SessionCommand, { type: "send-turn" }>["input"]> = {},
 ) => ({
 	type: "send-turn" as const,
 	sinkId: inputId,
@@ -449,21 +453,27 @@ const claudeTurn = (
 	},
 });
 
-/** The real Claude payload on SDK queries that answer each prompt with a result. */
+/** The real Claude payload on SDK queries that answer each prompt with a result (by default, success). */
 const withClaudeHost = (
 	body: (host: {
 		readonly runner: NativeSessionRunner;
 		readonly outputs: () => readonly OutputFrame[];
 		readonly queries: readonly { readonly canUseTool?: CanUseTool }[];
 	}) => Effect.Effect<void, unknown, import("effect").Scope.Scope>,
+	options: {
+		readonly answer?: (query: number) => SDKMessage;
+		readonly prepareQuery?: ClaudeSessionRunnerDeps["prepareQuery"];
+	} = {},
 ) => {
 	const queries: { readonly canUseTool?: CanUseTool }[] = [];
 	const queryFactory: NonNullable<
 		ClaudeProviderInstanceDeps["queryFactory"]
-	> = ({ prompt, options }) => {
-		queries.push(options?.canUseTool ? { canUseTool: options.canUseTool } : {});
+	> = ({ prompt, options: query }) => {
+		const index = queries.length;
+		queries.push(query?.canUseTool ? { canUseTool: query.canUseTool } : {});
 		const stream = (async function* (): AsyncGenerator<SDKMessage> {
-			for await (const _message of prompt) yield makeSuccessResult();
+			for await (const _message of prompt)
+				yield options.answer?.(index) ?? makeSuccessResult();
 		})();
 		return Object.assign(createMockQuery([]), {
 			[Symbol.asyncIterator]: () => stream,
@@ -486,6 +496,9 @@ const withClaudeHost = (
 							),
 					},
 					onQueryStarted: callbacks.queryStarted,
+					...(options.prepareQuery
+						? { prepareQuery: options.prepareQuery }
+						: {}),
 				},
 				emit,
 			),
@@ -560,6 +573,60 @@ it.each([
 						),
 					).toBe(false);
 				}),
+			),
+		),
+	);
+});
+
+it.each([
+	["agent change", { agent: "plan" }],
+	["rewind", { rewind: { resumeSessionAt: null } }],
+	["fresh native id", { startFreshNativeSession: true }],
+	["stop-after-foreground dispose", {}],
+	["native-resume fallback", { nativeResumeFallback: true }],
+] as const)("labels the Claude turn after a replacement by %s under its new query", async (path, replacing) => {
+	const fallback = path === "native-resume fallback";
+	await Effect.runPromise(
+		Effect.scoped(
+			withClaudeHost(
+				({ runner, outputs, queries }) =>
+					Effect.gen(function* () {
+						const admission = yield* makeRunnerAdmission(runner, "claude");
+						// The fallback's first send fails its resume, so the daemon retries it fresh.
+						yield* admitRunnerCommand(
+							admission,
+							runner,
+							claudeTurn(
+								"turn-1",
+								fallback ? { resumeSessionId: "stale-native" } : {},
+							),
+						).pipe(Effect.exit);
+						if (path === "stop-after-foreground dispose")
+							yield* runner.executeEffect({
+								type: "interrupt",
+								sessionId: "session-1",
+								runIds: [],
+							});
+						yield* admitRunnerCommand(
+							admission,
+							runner,
+							claudeTurn("turn-2", replacing),
+						);
+						expect(queries).toHaveLength(2);
+						expect(completions(outputs())).toEqual(fallback ? [1] : [0, 1]);
+					}),
+				fallback
+					? {
+							answer: (query) =>
+								query === 0
+									? makeErrorResult({
+											errors: [
+												"Resume rejected by --resume-drops-turn: native context cannot be preserved",
+											],
+										})
+									: makeSuccessResult(),
+						}
+					: {},
 			),
 		),
 	);
