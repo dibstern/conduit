@@ -217,9 +217,9 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 							sends.route(command.sinkId)?.sendScope !== send))
 				)
 					return;
-				// Owner sends end through settleSend or a durable Stop; non-owner
-				// sends (joined steers, legacy and direct sends) keep the
-				// in-memory cancel the recall needs.
+				// Owner-bound sends, joined steers included from 32.5, end through
+				// settleSend or a durable Stop (CONTRACT 1625-1632); legacy and direct
+				// sends keep the in-memory cancel the recall needs.
 				const pending = sends.pending(send);
 				if (pending && !sends.dispatched(send) && !pending.owner) {
 					yield* Deferred.succeed(pending.cancelled, undefined);

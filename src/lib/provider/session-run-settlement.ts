@@ -14,13 +14,11 @@ export const runSendCommandIdQuery = (
 	sessionId: string,
 	runId: string,
 ) =>
-	sql<{ command_id: string }>`SELECT command.command_id
-		FROM provider_runs requested JOIN provider_command_outbox command
-			ON command.run_id = COALESCE(requested.joined_into, requested.id)
-			AND command.session_id = requested.session_id
-		WHERE requested.id = ${runId} AND requested.session_id = ${sessionId}
-			AND command.effect_type = 'send_turn' AND command.status = 'running'
-		ORDER BY command.request_sequence LIMIT 1`.pipe(
+	// From 32.5 a joined steer sends under its own command, not its owner's (CONTRACT 2021-2025).
+	sql<{ command_id: string }>`SELECT command_id FROM provider_command_outbox
+		WHERE run_id = ${runId} AND session_id = ${sessionId}
+			AND effect_type = 'send_turn' AND status = 'running'
+		ORDER BY request_sequence LIMIT 1`.pipe(
 		Effect.map((rows) => rows[0]?.command_id),
 	);
 

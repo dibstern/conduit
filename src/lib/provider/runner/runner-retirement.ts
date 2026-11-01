@@ -2206,7 +2206,7 @@ export const makeRunnerRetirement = (
 				);
 			},
 			awaitRun: (
-				input: Pick<OwnerSend, "sessionId" | "runId">,
+				input: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
 				includeCoverage = false,
 			) =>
 				Effect.gen(function* () {
@@ -2220,15 +2220,24 @@ export const makeRunnerRetirement = (
 									input.sessionId,
 								);
 								const changed = commit.committed();
-								// A joined steer lives as long as its owner's Run (4.1; CONTRACT 1413).
+								// A joined steer lives as long as its owner's Run (4.1; CONTRACT 1413), and
+								// its send until its own command settles: a recall settles the steer alone
+								// and leaves its owner's Run open (CONTRACT 1625-1632, 2021-2025).
 								const [run] = yield* sql<{
 									status: string;
-								}>`SELECT owner.status FROM provider_runs requested JOIN provider_runs owner
+									steerSettled: number;
+								}>`SELECT owner.status, requested.joined_into IS NOT NULL AND NOT EXISTS (
+										SELECT 1 FROM provider_command_outbox command
+										WHERE command.session_id = requested.session_id AND command.run_id = requested.id
+											AND command.command_id = ${input.commandId} AND command.effect_type = 'send_turn'
+											AND command.status = 'running') AS steerSettled
+									FROM provider_runs requested JOIN provider_runs owner
 									ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
 									WHERE requested.id = ${input.runId} AND requested.session_id = ${input.sessionId}`;
 								const ended =
 									!run ||
 									!["pending", "running"].includes(run.status) ||
+									run.steerSettled === 1 ||
 									(includeCoverage &&
 										(yield* stopCovers(sql, input.sessionId, input.runId)));
 								return { ended, changed };

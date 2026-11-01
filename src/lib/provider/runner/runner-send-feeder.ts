@@ -602,15 +602,6 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 				return dispatch(command, send, recovered);
 			const runId = command.input.runId;
 			return Effect.gen(function* () {
-				const [run] = yield* sql<{
-					joined_into: string | null;
-					runner_id: string | null;
-					held_transmission: number | null;
-				}>`SELECT joined_into, runner_id, held_transmission
-					FROM provider_runs WHERE id = ${runId} AND session_id = ${command.input.sessionId}`.pipe(
-					retrySettlementWrite,
-					Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-				);
 				const legacy = yield* legacyRunnerRunQuery(
 					sql,
 					command.input.sessionId,
@@ -619,7 +610,8 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					retrySettlementWrite,
 					Effect.mapError((cause) => runnerFailure("send-turn", cause)),
 				);
-				if (run?.joined_into || legacy)
+				// From 32.5 a joined steer goes through the feeder and the hold (CONTRACT 1555-1556).
+				if (legacy)
 					return yield* dispatch(command, send, recovered, undefined, legacy);
 				const commandId =
 					(yield* runSendCommandIdQuery(
