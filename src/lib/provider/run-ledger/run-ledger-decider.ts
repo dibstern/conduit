@@ -1722,6 +1722,10 @@ function dispatched(
 		return noop("no hold is written on a retired runner (4.3)");
 	const run = findRun(book, book.mainRuns.get(evidence.runId)?.runId);
 	if (run === undefined) return noop("unknown or never-issued token (3.4)");
+	// H3, 4.3 step 2 (CONTRACT.md 1514-1518, 1560-1563), 12A (891-894): a hold for an Ended Run,
+	// a dropped issue's included, finds no running send and the feeder drops it, so it binds nothing.
+	if (run.phase === "Ended")
+		return noop("an Ended Run's hold finds no running send (H3)");
 	const heldSends = book.sends
 		.filter(delivers)
 		.filter((send) => send.held && send.runId === run.runId);
@@ -1740,11 +1744,7 @@ function dispatched(
 				true,
 			);
 			send.commandId = evidence.commandId;
-		} else if (
-			run.phase === "Ended" &&
-			send.txs.some((tx) => tx.ended === "dropped")
-		)
-			return noop("the dropped issue's hold finds no running send (H3)");
+		}
 	} else {
 		send = heldSends.find((item) => item.commandId === undefined);
 		if (send === undefined) return noop("unknown or never-issued token (3.4)");

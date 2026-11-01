@@ -37,6 +37,7 @@ import {
 	scenarios,
 	step,
 	stop,
+	terminal,
 	tokenOf,
 	transmissions,
 	unsolicited,
@@ -970,6 +971,34 @@ describe("[32.2.5] plain Run path differential", () => {
 			// A generated trace takes 4 to 7 s alone, so the 10 s default fails it under the
 			// pre-commit hook's parallel build and typecheck.
 		}, 30_000);
+
+	it("a run.dispatched after its Run ended, by a native terminal or a Stop before the claim, binds no live start (H3, 12A)", () => {
+		for (const end of ["nativeTerminal", "stop"] as const)
+			agreed("claude", (d) => {
+				admit(d, "A");
+				const runId = `main-A-${d.next()}`;
+				main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+				if (end === "stop") stop(d);
+				else terminal(d, runId);
+				expect(d.view().active).toBeUndefined();
+				for (const transmission of [1, 2])
+					noLifecycleChange(d, {
+						verb: "observe",
+						observation: {
+							tag: "Answer",
+							token: `hold-A-${transmission}` as SendToken,
+							kind: "run_dispatched",
+							runId,
+							runnerId: "r1",
+							commandId: "cmd-A",
+							transmission,
+						},
+					});
+				expect(
+					d.view().live.filter((issue) => issue.effect.kind === "start"),
+				).toEqual([]);
+			});
+	});
 });
 
 /**

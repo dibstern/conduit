@@ -1916,6 +1916,10 @@ function dispatched(
 	// 3.4: run.dispatched names its Run by main's runId and the issue in that Run by commandId.
 	const run = findRun(world, world.mainRuns.get(observation.runId)?.runId);
 	if (run === undefined) return noop("unknown or never-issued token (3.4)");
+	// H3, 4.3 step 2 (CONTRACT.md 1514-1518, 1560-1563), 12A (891-894): a hold for an Ended Run,
+	// a dropped issue's included, finds no running send and the feeder drops it, so it binds nothing.
+	if (run.phase === "Ended")
+		return noop("an Ended Run's hold finds no running send (H3)");
 	const held = world.sends.filter(
 		(item) => item.held && item.runId === run.runId,
 	);
@@ -1934,11 +1938,7 @@ function dispatched(
 				true,
 			);
 			send.commandId = observation.commandId;
-		} else if (
-			run.phase === "Ended" &&
-			send.txs.some((tx) => tx.ended === "dropped")
-		)
-			return noop("the dropped issue's hold finds no running send (H3)");
+		}
 	} else {
 		send = held.find((item) => item.commandId === undefined);
 		if (send === undefined) return noop("unknown or never-issued token (3.4)");
