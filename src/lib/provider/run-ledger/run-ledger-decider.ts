@@ -3155,6 +3155,7 @@ export function inputPlacement(
 			run !== undefined &&
 			run.inputs[0] !== inputId
 		),
+		steer: input.delivery === "steer",
 		place:
 			input.failed !== undefined
 				? "failed"

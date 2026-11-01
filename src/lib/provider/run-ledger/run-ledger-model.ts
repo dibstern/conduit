@@ -467,6 +467,8 @@ export interface InputView {
 export interface InputPlacement {
 	/** It opened its Run, so it is sent as a start (3.9). */
 	readonly start: boolean;
+	/** Main handed it off as a steer (`input.sent`); declined, `steerDeclined` returns it (3.9). */
+	readonly steer: boolean;
 	/** D53: `sent` when reached, or possibly reached and not unconsumed; `failed` is final (3.9). */
 	readonly place: "sent" | "failed" | "unplaced";
 	/** 4.8: its transmissions in its reservation, but `not_sent` ones and the claim's own. */

@@ -13,16 +13,25 @@
 // Row 211, the outcome body returns a start cancelled before it reached the agent. How it could fail:
 // 8. its text is dropped, as main, or it returns but not behind the pause;
 // 9. a start whose message was placed is returned too, so its value is both shown and re-sent.
+// Row 206, requeueFailedSteers places a steer a runner failure left possibly reached. How it could fail:
+// 10. it returns to the inbox, as main, so its value is both possibly reached and re-sent;
+// 11. it is placed without its text, images or run, or a later sweep returns it again;
+// 12. a steer the view marks never reached, or one main failed for another cause, is placed too.
+// Row 207, commitAndSignal's sweep cancels a steer the view marks failed. How it could fail:
+// 13. it is requeued but not cancelled, or cancelled in a later batch a restart can split;
+// 14. a caller without `cancelFinal` cancels, or a steer the view does not mark failed is cancelled.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Duration, Effect, Layer, Scope } from "effect";
+import { Duration, Effect, Layer, Schema, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
+import { AttachmentRefSchema } from "../../../src/lib/contracts/attachment-ref.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { requeueFailedSteers } from "../../../src/lib/persistence/effect/input-requeue-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
@@ -165,6 +174,81 @@ const reactorFor = (
 		});
 		return { sql, commit, reactor, persistUserMessage };
 	});
+
+const IMAGE = Schema.decodeUnknownSync(AttachmentRefSchema)({
+	attachmentHash: "a".repeat(64),
+	mime: "image/png",
+});
+
+/** u1's Run r1 started on runner rn, and steer u2 sent into it (its own send's run r2), then `end`. */
+const steered = (provider: string, end: readonly CanonicalEvent[]) => [
+	...dispatched(provider),
+	canonicalEvent(
+		"run.dispatched",
+		"s1",
+		{ runId: "r1", runnerId: "rn", commandId: "u1", transmission: 1 },
+		{ provider, createdAt: 1004, metadata: { runId: "r1" } },
+	),
+	canonicalEvent(
+		"run.started",
+		"s1",
+		{ inputId: "u1", requestedRunId: "r1" },
+		{ provider, createdAt: 1005, metadata: { runId: "r1" } },
+	),
+	canonicalEvent(
+		"input.admitted",
+		"s1",
+		{
+			sessionId: "s1",
+			inputId: "u2",
+			delivery: "steer",
+			request: { text: "more", images: [IMAGE] },
+		},
+		{ createdAt: 1006 },
+	),
+	canonicalEvent(
+		"input.sent",
+		"s1",
+		{ sessionId: "s1", inputId: "u2", steer: true },
+		{ createdAt: 1007 },
+	),
+	canonicalEvent(
+		"run.requested",
+		"s1",
+		{ runId: "r2", inputId: "u2" },
+		{ provider, createdAt: 1008, metadata: { runId: "r2" } },
+	),
+	...end,
+];
+
+/** u2's send failed with `code`, as main's settlement leaves it. */
+const failSteer = (sql: SqlClient.SqlClient, provider: string, code: string) =>
+	sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id,
+		provider_id, effect_type, payload_json, run_id, status, attempt_count, error_code, requested_at, updated_at)
+		VALUES (2, 'u2', 'test-project', 's1', ${provider}, 'send_turn', '{}', 'r2', 'failed', 1, ${code}, 1008, 1009)`;
+
+/** The runner failure's terminal: main's `runner_stopped` `turn.error` on r1. */
+const runnerStopped = (provider: string) =>
+	canonicalEvent(
+		"turn.error",
+		"s1",
+		{
+			messageId: "m1",
+			error: "Provider process stopped",
+			code: "runner_stopped",
+		},
+		{ provider, createdAt: 1011, metadata: { runId: "r1" } },
+	);
+
+const steerEvents = (sql: SqlClient.SqlClient) =>
+	sql<{
+		type: string;
+		data: string;
+		run_id: string | null;
+	}>`SELECT type, data, json_extract(metadata, '$.runId') AS run_id FROM events
+		WHERE type IN ('input.requeued', 'input.cancelled', 'message.created', 'text.delta', 'file.attached')
+		AND 'u2' IN (json_extract(data, '$.inputId'), json_extract(data, '$.messageId'))
+		ORDER BY sequence`;
 
 const sendRow = (sql: SqlClient.SqlClient) =>
 	sql<{
@@ -370,4 +454,174 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 					}),
 				),
 		);
+
+	it.effect(
+		"row 206: a steer a runner failure left possibly reached is placed as sent, never returned",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit(
+						steered("claude", [
+							canonicalEvent(
+								"run.dispatched",
+								"s1",
+								{
+									runId: "r1",
+									runnerId: "rn",
+									commandId: "u2",
+									transmission: 1,
+								},
+								{
+									provider: "claude",
+									createdAt: 1009,
+									metadata: { runId: "r1" },
+								},
+							),
+						]),
+					);
+					yield* failSteer(sql, "claude", "runner_stopped");
+					yield* commit([runnerStopped("claude")]);
+					// 10, 11: main's placement, with its text, image and run; no requeue.
+					expect(
+						(yield* steerEvents(sql)).map((event) => [
+							event.type,
+							event.run_id,
+						]),
+					).toEqual([
+						["message.created", "r2"],
+						["text.delta", null],
+						["file.attached", null],
+					]);
+					expect(
+						yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u2'`,
+					).toEqual([{ state: "removed" }]);
+					expect(
+						yield* sql`SELECT role, input_id FROM messages WHERE id = 'u2'`,
+					).toEqual([{ role: "user", input_id: "u2" }]);
+					// 11: a later sweep finds a messages row and returns nothing.
+					yield* commit([
+						canonicalEvent(
+							"session.status",
+							"s1",
+							{ sessionId: "s1", status: "idle" },
+							{ provider: "claude", createdAt: 1012 },
+						),
+					]);
+					expect((yield* steerEvents(sql)).map((event) => event.type)).toEqual([
+						"message.created",
+						"text.delta",
+						"file.attached",
+					]);
+				}),
+			),
+	);
+
+	for (const [name, end, code] of [
+		[
+			"the runner released it unsent",
+			[
+				canonicalEvent(
+					"run.dispatched",
+					"s1",
+					{ runId: "r1", runnerId: "rn", commandId: "u2", transmission: 1 },
+					{ provider: "claude", createdAt: 1009, metadata: { runId: "r1" } },
+				),
+				canonicalEvent(
+					"run.released",
+					"s1",
+					{
+						runId: "r1",
+						runnerId: "rn",
+						commandId: "u2",
+						transmission: 1,
+						reason: "NotSent",
+					},
+					{ provider: "claude", createdAt: 1010, metadata: { runId: "r1" } },
+				),
+			],
+			"runner_stopped",
+		],
+		[
+			"main failed it for another cause",
+			[
+				canonicalEvent(
+					"run.dispatched",
+					"s1",
+					{ runId: "r1", runnerId: "rn", commandId: "u2", transmission: 1 },
+					{ provider: "claude", createdAt: 1009, metadata: { runId: "r1" } },
+				),
+			],
+			"provider_error",
+		],
+	] as const)
+		it.effect(`row 206: a steer is returned as main when ${name}`, () =>
+			withStore(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit(steered("claude", end));
+					yield* failSteer(sql, "claude", code);
+					yield* commit([runnerStopped("claude")]);
+					// 12: main's requeue, paused, and nothing placed.
+					expect((yield* steerEvents(sql)).map((event) => event.type)).toEqual([
+						"input.requeued",
+					]);
+					expect(
+						yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u2'`,
+					).toEqual([{ state: "queued" }]);
+				}),
+			),
+		);
+
+	it.effect(
+		"row 207: a failed steer is requeued and cancelled in one batch by commitAndSignal's sweep only",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit(steered("opencode", []));
+					yield* failSteer(sql, "opencode", "provider_error");
+					// 14: a sweep without the option (session-inbox's, the OpenCode ingress's) only requeues.
+					const persisted: string[][] = [];
+					yield* requeueFailedSteers(sql, {
+						persistEvents: (events) =>
+							Effect.sync(() => {
+								persisted.push(events.map((event) => event.type));
+							}),
+					});
+					expect(persisted).toEqual([["input.requeued"]]);
+					// The direct steer's permanent outcome: the view marks it failed.
+					yield* commit([
+						canonicalEvent(
+							"evidence.effect_outcome",
+							"s1",
+							{
+								commandId: "u2",
+								transmission: 1,
+								token: "r2",
+								outcome: { tag: "permanent", code: "provider_error" },
+							},
+							{ provider: "opencode", createdAt: 1010 },
+						),
+					]);
+					// 13: the requeue then main's Cancel event, adjacent in the one commit.
+					const events = yield* sql<{
+						type: string;
+						sequence: number;
+					}>`SELECT type, sequence FROM events WHERE type IN ('input.requeued', 'input.cancelled')
+						AND json_extract(data, '$.inputId') = 'u2' ORDER BY sequence`;
+					expect(events.map((event) => event.type)).toEqual([
+						"input.requeued",
+						"input.cancelled",
+					]);
+					expect(events[1]?.sequence).toBe((events[0]?.sequence ?? 0) + 1);
+					expect(
+						yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u2'`,
+					).toEqual([{ state: "removed" }]);
+				}),
+			),
+	);
 });

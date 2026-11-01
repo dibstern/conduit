@@ -522,6 +522,7 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 										undefined,
 										undefined,
 										eventStore.projectId ?? options.projectId,
+										{ cancelFinal: true },
 									);
 								flushedWrites = yield* applyPendingWrites(sql);
 								// Pending writes can suspend: authorize only after the last one.

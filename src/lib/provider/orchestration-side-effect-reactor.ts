@@ -1156,9 +1156,10 @@ export class ProviderSideEffectReactor {
 							const input =
 								ledger && inputPlacement(ledger.state, row.command_id);
 							// 2.1 row 210 (CONTRACT.md 220, 1852-1858): a declined start is tried again up to
-							// the cap, a retryable outcome with main's backoff under main's settle guards.
+							// the cap, a retryable outcome with main's backoff under main's settle guards. A
+							// steer, its own Run's start included, is returned by `steerDeclined` (CONTRACT.md 978-983).
 							const reply: TurnResult | undefined =
-								result?.status === "steer-declined" && input?.start
+								result?.status === "steer-declined" && input?.steer === false
 									? {
 											...result,
 											status: "error",
