@@ -2221,6 +2221,66 @@ it.effect(
 		),
 );
 
+// A token names one transmission (CONTRACT 66-67). An older runner's replayed
+// claim whose resume is rejected must not send its fresh fallback under the
+// claim's token: the fallback is the next transmission (4.8).
+it.effect(
+	"a legacy replay's rejected resume never sends a fallback under its claim's token",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("legacy-resume");
+				yield* f.sql`INSERT INTO provider_state (session_id,key,value) VALUES ('s','nativeThread:account',${JSON.stringify({ configDir: configuredClaudeConfigDir(f.root), resumeSessionId: "stale", firstSequence: 0, deliveredThrough: 0 })})`;
+				yield* f.hello(
+					({
+						sendJournalAnswers: _capability,
+						sendAnswers: _answers,
+						...hello
+					}) => ({
+						...hello,
+						bindings: [],
+						sendTokens: [],
+						completedCommands: [],
+					}),
+				);
+				const frames: Array<{ token: string; fresh: boolean }> = [];
+				f.replaySend.execute = (token, command) =>
+					Effect.sync(() => {
+						const fresh = command.input.nativeResumeFallback === true;
+						frames.push({ token, fresh });
+						return fresh
+							? terminalResult()
+							: {
+									...terminalResult(),
+									status: "error" as const,
+									error: {
+										code: "claude_resume_refused",
+										message:
+											"Resume rejected by --resume-drops-turn: native context rejected",
+										retryable: false,
+									},
+								};
+					});
+				yield* f.recover;
+				yield* TestClock.adjust("5 seconds");
+				expect(frames[0]).toEqual({
+					token: sendToken("tx", "legacy-resume", 1),
+					fresh: false,
+				});
+				expect(new Set(frames.map(({ token }) => token)).size).toBe(
+					frames.length,
+				);
+				// The claim requeues with the marker; its next claim sends the fallback.
+				expect(
+					yield* f.sql`SELECT status, attempt_count, json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "retryable_failed", attempt_count: 1, fallback: 1 },
+				]);
+			}),
+		),
+);
+
 for (const stale of ["claim", "transmission"] as const)
 	it.effect(
 		`F74 retained reply from stale ${stale} cannot mutate run, receipt, state or draft`,

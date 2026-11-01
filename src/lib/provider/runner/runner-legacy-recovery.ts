@@ -60,6 +60,7 @@ import {
 	classify,
 	retrySettlementWrite,
 	sendRetryBackoff,
+	terminalFailureResult,
 	toStoreFault,
 } from "./send-settlement.js";
 import { LegacySendKey } from "./send-settlement-outbox.js";
@@ -495,7 +496,7 @@ export const replayLegacyRunnerSend = (options: {
 					input.autoSettleAfterDays !== undefined
 						? input.autoSettleAfterDays
 						: yield* deps.autoSettleAfterDays ?? Effect.succeed(undefined);
-				let nativeResumeFallback = input.nativeResumeFallback === true;
+				const nativeResumeFallback = input.nativeResumeFallback === true;
 				switch (driverKind) {
 					case "claude":
 						break;
@@ -586,6 +587,7 @@ export const replayLegacyRunnerSend = (options: {
 					call?.account.id ?? input.instanceId ?? row.provider_id;
 				const shellEnv = call?.shellEnv ?? input.shellEnv ?? { ...process.env };
 				const read = yield* makeReadQueryEffect;
+				let primary: TurnResult | undefined;
 				const result = yield* sendPreparedClaudeTurn({
 					sessionId: row.session_id,
 					instanceId,
@@ -606,49 +608,64 @@ export const replayLegacyRunnerSend = (options: {
 							input.contextWindow === "1m" ? 1000000 : undefined,
 					},
 					send: (prepared, fallback) => {
-						nativeResumeFallback = fallback;
-						// A legacy in-claim fallback keeps its claim's token (32.13 deletes this path).
-						return options.send(currentSendToken(row), {
-							type: "send-turn",
-							sinkId: options.resolveSinkId(
-								row.command_id,
-								input.inputId,
-								row.attempt_count,
-								fallback,
-							),
-							aborted: false,
-							autoSettleAfterDays,
-							shellEnv,
-							shellConfig: call?.shellConfig ?? input.shellConfig,
-							claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
-							input: {
-								...resolved,
-								...(call
-									? {
-											projectId: call.projectId,
-											account: call.account,
-											workspaceRoot: call.workspaceRoot,
-											extraFolders: call.extraFolders,
-											shellEnv: call.shellEnv,
-											shellConfig: call.shellConfig,
-										}
-									: {}),
-								instanceId,
-								prompt: prepared.prompt,
-								text: input.prompt,
-								configDir: prepared.configDir,
-								resumeSessionId: prepared.resumeSessionId,
-								resumeSessionAt: prepared.resumeSessionAt,
-								forkSession: prepared.forkSession,
-								clearInheritedGoal: prepared.clearInheritedGoal,
-								startFreshNativeSession:
-									prepared.resumeSessionId === undefined ||
-									input.rewind !== undefined,
-								nativeResumeFallback: fallback,
-								nativeThread: prepared.nativeThread,
-								...(prepared.handoff ? { handoff: prepared.handoff } : {}),
-							},
-						});
+						// A fresh fallback is the next transmission, never this claim's token
+						// (4.8): the claim ends as its primary's rejection, which requeues it.
+						if (fallback && !nativeResumeFallback)
+							return Effect.succeed(primary);
+						return options
+							.send(currentSendToken(row), {
+								type: "send-turn",
+								sinkId: options.resolveSinkId(
+									row.command_id,
+									input.inputId,
+									row.attempt_count,
+									fallback,
+								),
+								aborted: false,
+								autoSettleAfterDays,
+								shellEnv,
+								shellConfig: call?.shellConfig ?? input.shellConfig,
+								claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
+								input: {
+									...resolved,
+									...(call
+										? {
+												projectId: call.projectId,
+												account: call.account,
+												workspaceRoot: call.workspaceRoot,
+												extraFolders: call.extraFolders,
+												shellEnv: call.shellEnv,
+												shellConfig: call.shellConfig,
+											}
+										: {}),
+									instanceId,
+									prompt: prepared.prompt,
+									text: input.prompt,
+									configDir: prepared.configDir,
+									resumeSessionId: prepared.resumeSessionId,
+									resumeSessionAt: prepared.resumeSessionAt,
+									forkSession: prepared.forkSession,
+									clearInheritedGoal: prepared.clearInheritedGoal,
+									startFreshNativeSession:
+										prepared.resumeSessionId === undefined ||
+										input.rewind !== undefined,
+									nativeResumeFallback: fallback,
+									nativeThread: prepared.nativeThread,
+									...(prepared.handoff ? { handoff: prepared.handoff } : {}),
+								},
+							})
+							.pipe(
+								Effect.tap((result) =>
+									Effect.sync(() => {
+										primary = result;
+									}),
+								),
+								Effect.tapError((failure) =>
+									Effect.sync(() => {
+										primary = terminalFailureResult(failure);
+									}),
+								),
+							);
 					},
 				}).pipe(
 					Effect.provideService(ProviderStateEffectTag, state),
