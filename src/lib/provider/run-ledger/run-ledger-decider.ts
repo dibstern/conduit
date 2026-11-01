@@ -2399,11 +2399,24 @@ function settle(
 			if (run.phase === "Ended")
 				return noop("late evidence for an Ended Run (3.8)");
 			const sends = deliverySends(book, run).filter((item) => item.held);
-			const send =
+			let send =
 				sends
 					.filter((item) => item.commandId === settlement.commandId)
 					.at(-1) ?? sends.find((item) => item.commandId === undefined);
 			if (send === undefined) return noop("unknown token (3.4)");
+			// D50 (CONTRACT.md 674-676, F58 3322-3329): an unlaunched Run's next unheld try is main's
+			// relaunch under the same commandId, a new execution's transmission, not the dropped one's.
+			if (run.phase === "Queued") {
+				const { effect } = send;
+				launch(run);
+				send = issue(
+					book,
+					effect.kind === "start"
+						? { ...effect, mode: nextMode(book) }
+						: effect,
+					true,
+				);
+			}
 			send.commandId ??= settlement.commandId;
 			const tx = transmit(book, send, undefined);
 			effectOutcome(book, fact, send, tx, settlement.outcome);
