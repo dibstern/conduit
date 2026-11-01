@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Effect, Fiber, type Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, type Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { ConnectionError, SqlError, UnknownError } from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
@@ -14,6 +14,7 @@ import { runnerFailure } from "../../../src/lib/provider/runner/runner-protocol.
 import {
 	makeRunnerReceiptStore,
 	type RunnerRetirement,
+	type StopReason,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
 	makeRunnerRunLifecycle,
@@ -73,6 +74,9 @@ const harness = Effect.gen(function* () {
 	const live = new Set([123, 124]);
 	const fault = {
 		down: false,
+		defect: false,
+		// Holds the stop commit's first read, so the stop stays Committing.
+		gate: undefined as Deferred.Deferred<void> | undefined,
 		fences: 0,
 		error: new SqlError({
 			reason: new ConnectionError({ cause: "Stop commit unavailable" }),
@@ -84,11 +88,19 @@ const harness = Effect.gen(function* () {
 		.spyOn(connection, "execute")
 		.mockImplementation((query, params, transform) => {
 			if (
+				fault.gate &&
+				query.startsWith("SELECT *, COALESCE(retired_at, 0) AS retired_at")
+			)
+				return Deferred.await(fault.gate).pipe(
+					Effect.andThen(execute(query, params, transform)),
+				);
+			if (
 				query.includes(
 					"SELECT retired_at, role, session_id FROM claude_runner_cursors",
 				)
 			) {
 				fault.fences++;
+				if (fault.defect) return Effect.die("Stop commit defect");
 				if (fault.down) return Effect.fail(fault.error);
 			}
 			return execute(query, params, transform);
@@ -157,6 +169,7 @@ const harness = Effect.gen(function* () {
 		retired,
 	};
 });
+type Harness = Effect.Success<typeof harness>;
 const run = <A, E>(
 	effect: Effect.Effect<
 		A,
@@ -687,6 +700,93 @@ it.effect(
 				expect(yield* f.retired("runner")).toMatchObject([
 					{ retired_at: null },
 				]);
+			}),
+		),
+);
+
+// A rejection, a Superseded failure, a defect and Ignored each return the stop
+// to Running (6.3): the gate reopens, and a refusal that joined the stop
+// commits its own release with no second stop (6.4).
+it.effect.each([
+	{
+		cause: "a rejection",
+		reason: { _tag: "Explicit" },
+		requested: false,
+		fail: (f: Harness) =>
+			f.sql`UPDATE claude_runner_cursors SET member_snapshot = 'not json' WHERE runner_id = 'runner'`,
+	},
+	{
+		cause: "a Superseded failure",
+		reason: { _tag: "Superseded", successor: "abcdef012345" },
+		requested: false,
+	},
+	{
+		cause: "a defect",
+		reason: { _tag: "Explicit" },
+		requested: false,
+		fail: (f: Harness) =>
+			Effect.sync(() => {
+				f.fault.defect = true;
+			}),
+	},
+	{ cause: "Ignored", reason: { _tag: "CandidateAbandoned" }, requested: true },
+] satisfies ReadonlyArray<{
+	cause: string;
+	reason: StopReason;
+	requested: boolean;
+	fail?: (f: Harness) => Effect.Effect<unknown, unknown>;
+}>)(
+	"a stop returned to Running by $cause reopens the gate, and a joined refusal commits its own release",
+	({ reason, requested, fail }) =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				// The cause is armed before the gated read; the commit's
+				// transaction holds the store until the gate opens.
+				if (fail) yield* Effect.orDie(fail(f));
+				const gate = yield* Deferred.make<void>();
+				f.fault.gate = gate;
+				const stopping = yield* f.reconciler
+					.requestStop(target("runner", 123), reason)
+					.pipe(Effect.exit, Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.reconciler.state("runner")._tag).toBe("Committing");
+				const releasing = yield* f.reconciler
+					.release({ ...refusal, refusalReason: "retiring" })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.actions).toEqual([]);
+				yield* Deferred.succeed(gate, undefined);
+				yield* TestClock.adjust(0);
+				expect(Exit.isSuccess(yield* Fiber.join(stopping))).toBe(requested);
+				yield* Fiber.join(releasing);
+				expect(f.reconciler.state("runner")._tag).toBe("Running");
+				expect(f.actions).toEqual(["released runner"]);
+				expect(
+					yield* f.sql<{
+						reason: string;
+					}>`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ reason: "Refused" }]);
+				expect(yield* f.retired("runner")).toMatchObject([
+					{ retired_at: null },
+				]);
+				expect(
+					yield* f.lifecycle.holdRun({
+						sessionId: "session",
+						runId: "run",
+						commandId: "send",
+					}),
+				).toMatchObject({ _tag: "Held", runner: "runner" });
 			}),
 		),
 );
