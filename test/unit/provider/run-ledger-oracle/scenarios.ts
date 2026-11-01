@@ -1548,6 +1548,39 @@ export const scenarios: readonly OracleScenario[] = [
 			expect(d.alarmAt).toBeUndefined();
 		},
 	},
+	{
+		id: "D56-202",
+		title:
+			"[2.1 row 202] an input admitted during a Claude wake waits for the wake to end",
+		provider: "claude",
+		run(d) {
+			// The wake's frames ride the query A's start opened.
+			const a = running(d);
+			observe(d, a.token, { kind: "result", outcome: "completed" });
+			wake(d);
+			admit(d, "B");
+			// 3.5: the wake's label has work, so the ledger starts nothing.
+			expect(transmissions(d, "B")).toEqual([]);
+			const b = request(d, "B");
+			unsolicited(d, { kind: "turn_ended" });
+			observe(d, b.token, { kind: "started" });
+			observe(d, b.token, { kind: "result", outcome: "completed" });
+		},
+	},
+	{
+		id: "D56-211",
+		title: "[2.1 row 211] Claude cancels a start's intake before it starts",
+		provider: "claude",
+		run(d) {
+			admit(d, "A");
+			request(d, "A");
+			unsolicited(d, {
+				kind: "command_lifecycle",
+				state: "cancelled",
+				commandId: "A",
+			});
+		},
+	},
 ];
 
 export const sourceOnlyCases = [
