@@ -2074,3 +2074,4 @@ hold facts, and the named tests for main's tokened and	pointer
 tokened entries, and a repeated main observation are all asserted by named	pointer
 The box asking for wake labels in the interrupt is	pointer
 restart, a hung wake that runs past the Stop's deadline ends forced, and the	pointer
+branch, so staying green before 32.2.9 is enforced there	pointer
