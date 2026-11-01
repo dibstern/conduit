@@ -2075,3 +2075,7 @@ tokened entries, and a repeated main observation are all asserted by named	point
 The box asking for wake labels in the interrupt is	pointer
 restart, a hung wake that runs past the Stop's deadline ends forced, and the	pointer
 branch, so staying green before 32.2.9 is enforced there	pointer
+just after a Stop commit (claude 1, codex 1), answer in delivery	pointer
+commit (11/11/9/130), async question at a Stop commit (56/13/36/25)	pointer
+deadline step (codex 1, opencode 1), Claude steer started after its Run	pointer
+2026-11-02 row 21 (wt/82tn323 49c79269, 812a14ae): fake draws reach every	pointer

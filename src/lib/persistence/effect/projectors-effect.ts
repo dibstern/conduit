@@ -2157,6 +2157,15 @@ export const makeTurnProjector = defineProjector(() => ({
 					return { sessions: [event.sessionId], messages: woken };
 			}
 			if (!["pending", "running"].includes(run.status)) {
+				// From 32.5 a joined steer's own settlement ends its command, never its
+				// owner's run (4.8; CONTRACT 1555-1556, 1868-1869).
+				if (
+					run.status === "joined" &&
+					runTerminalStatus(event, event.provider)
+				) {
+					yield* settleRunCommands(runId, event);
+					return { sessions: [event.sessionId], messages: woken };
+				}
 				// A background task finishing after its run ended wakes Claude into
 				// a new turn under the same run. Its end is new output to read,
 				// unless a newer run owns the session or it repeats a counted reply.
@@ -2609,9 +2618,6 @@ export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
 		"Audit receipt for failed upstream cleanup; no materialized projection needed",
 	"session.handoff_delivered":
 		"Delivery receipt needs no materialized projection",
-	// Delete when the ledger arm folds it into its hold_exhausted settlement (core).
-	"evidence.hold_exhausted":
-		"Run Ledger evidence the arm does not fold yet; main's projectors ignore it",
 };
 
 /**
