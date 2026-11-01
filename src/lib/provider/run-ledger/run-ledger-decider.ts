@@ -224,6 +224,8 @@ interface Wake {
 		| "forced"
 		| undefined;
 	outcome?: FoldItem | undefined;
+	/** 8.3 (CONTRACT.md 2821-2824): older-label evidence cleared it without authority, so its Run stays. */
+	older?: true | undefined;
 }
 
 /** 8.5: a native command, a projection of its send. */
@@ -681,6 +683,7 @@ function wakeEnd(
 	const wake = book.wakes
 		.filter((item) => item.label === latest && item.runId === run.runId)
 		.at(-1);
+	if (wake?.older) return undefined;
 	switch (wake?.ended) {
 		case undefined:
 			return undefined;
@@ -1930,6 +1933,7 @@ function unsolicited(
 			// 8.3, D59: a Claude wake's own end.
 			if (wake === undefined)
 				return unchanged("no wake execution on its label (8.3)");
+			if (older) wake.older = true;
 			wake.ended = "own";
 			return changed;
 		case "activity":
@@ -1976,6 +1980,7 @@ function unsolicited(
 			}
 			// 9: OpenCode's wake ends at its query_ended or a covering idle probe.
 			if (runEnd(book) === "query_ended") return unchanged();
+			if (older) wake.older = true;
 			wake.ended = "result";
 			wake.outcome = {
 				seq: book.seq,
@@ -1988,7 +1993,10 @@ function unsolicited(
 		case "query_ended": {
 			if (wake === undefined && runEnd(book) !== "query_ended")
 				return unchanged("no wake execution on its label (8.3)");
-			if (wake !== undefined) wake.ended = "own";
+			if (wake !== undefined) {
+				if (older) wake.older = true;
+				wake.ended = "own";
+			}
 			// 9: OpenCode's query end ends its label's starts and steers, never an abort or
 			// cancel_request (CONTRACT.md 334-338, 3101-3106).
 			let moved = wake !== undefined;

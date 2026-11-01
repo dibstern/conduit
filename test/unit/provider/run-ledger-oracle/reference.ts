@@ -181,6 +181,8 @@ interface Wake {
 		| "forced"
 		| undefined;
 	outcome?: FoldItem | undefined;
+	/** 8.3 (CONTRACT.md 2821-2824): older-label evidence cleared it without authority, so its Run stays. */
+	older?: true | undefined;
 }
 
 interface Interaction {
@@ -635,7 +637,7 @@ function wakeEnd(
 	const wake = [...world.wakes]
 		.reverse()
 		.find((item) => item.label === latest && item.runId === run.runId);
-	if (wake?.ended === undefined) return undefined;
+	if (wake?.ended === undefined || wake.older) return undefined;
 	switch (wake.ended) {
 		case "process_lost":
 		case "session_ended":
@@ -1308,6 +1310,7 @@ function unsolicited(
 		case "turn_ended":
 			if (wake === undefined)
 				return noop("no wake execution on its label (8.3)");
+			if (place === "older") wake.older = true;
 			endWork(wake, "own");
 			return changed;
 		case "activity":
@@ -1336,6 +1339,7 @@ function unsolicited(
 				return changed;
 			}
 			if (world.provider === "opencode") return noop();
+			if (place === "older") wake.older = true;
 			endWork(wake, "result");
 			wake.outcome = {
 				seq: world.seq,
@@ -1350,6 +1354,7 @@ function unsolicited(
 					return noop("no wake execution on its label (8.3)");
 				return queryEnded(world, label) ? changed : noop();
 			}
+			if (place === "older") wake.older = true;
 			endWork(wake, "own");
 			if (world.provider === "opencode") queryEnded(world, label);
 			return changed;
