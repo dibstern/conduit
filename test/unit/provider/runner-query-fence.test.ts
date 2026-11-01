@@ -631,3 +631,45 @@ it.each([
 		),
 	);
 });
+
+it("never warms a query while another query for the session is live or setting up", async () => {
+	const preparing = Deferred.makeUnsafe<void>();
+	const prepared = Deferred.makeUnsafe<void>();
+	await Effect.runPromise(
+		Effect.scoped(
+			withClaudeHost(
+				({ runner, outputs, queries }) =>
+					Effect.gen(function* () {
+						const admission = yield* makeRunnerAdmission(runner, "claude");
+						const preWarm = runner.executeEffect({
+							type: "pre-warm",
+							sessionId: "session-1",
+							input: claudeTurn("warm").input,
+						});
+						const first = yield* Effect.forkChild(
+							admitRunnerCommand(admission, runner, claudeTurn("turn-1")),
+						);
+						yield* Deferred.await(preparing);
+						yield* preWarm;
+						yield* Deferred.succeed(prepared, undefined);
+						yield* Fiber.join(first);
+						yield* preWarm;
+						yield* admitRunnerCommand(admission, runner, claudeTurn("turn-2"));
+						expect(queries).toHaveLength(1);
+						expect(completions(outputs())).toEqual([0, 0]);
+					}),
+				{
+					// Only the first cold query's setup waits, so a warm query cannot deadlock it.
+					prepareQuery: () =>
+						Effect.runPromise(
+							Deferred.succeed(preparing, undefined).pipe(
+								Effect.andThen((first) =>
+									first ? Deferred.await(prepared) : Effect.void,
+								),
+							),
+						),
+				},
+			),
+		),
+	);
+});
