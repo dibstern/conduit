@@ -139,6 +139,8 @@ const controlErrorSchema = Schema.Struct({
 			"project_inactive",
 			"project_unavailable",
 			"model_parameters_unavailable",
+			"codex_version_unsupported",
+			"runner_detached",
 		]),
 	),
 	causeMessage: Schema.String,
@@ -1020,7 +1022,7 @@ export class ProviderSideEffectReactor {
 				result.success.status === "indeterminate"
 			) {
 				yield* this.options
-					.write((_project, stamp) =>
+					.write((project, stamp) =>
 						Effect.gen({ self: this }, function* () {
 							// Direct providers keep their nonterminal uncertainty marker.
 							// Runner sends wait for Settle, including between released holds.
@@ -1055,6 +1057,17 @@ export class ProviderSideEffectReactor {
 										Effect.map((rows) => rows.map(({ id }) => id)),
 									),
 								);
+								// CONTRACT.md 2.1 row 215, 4.10: the direct marker's event, in the marker's
+								// write; a direct start's token is its runId (3.4).
+								if (row.run_id)
+									yield* this.appendInWrite(project, row.project_key, [
+										canonicalEvent(
+											"evidence.delivery_indeterminate",
+											row.session_id,
+											{ runId: row.run_id, commandId: row.command_id },
+											{ provider: row.provider_id },
+										),
+									]);
 							}
 						}),
 					)
@@ -1209,14 +1222,19 @@ export class ProviderSideEffectReactor {
 							};
 							const runId = row.run_id;
 							if (!runId) return;
+							// From 32.5 a joined steer's runner send is settled on its own while its
+							// owner's Run is open (CONTRACT 1625-1632, 2021-2025).
 							const [run] = yield* this.options.sql<{
 								runner_id: string | null;
 								held_transmission: number | null;
 								provider: string;
-							}>`SELECT run.runner_id, run.held_transmission, session.provider FROM provider_runs run
+								joined: number;
+							}>`SELECT run.runner_id, run.held_transmission, session.provider, run.joined_into IS NOT NULL AS joined
+						FROM provider_runs run
+						JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
 						JOIN sessions session ON session.id = run.session_id
 						WHERE run.id = ${row.run_id} AND run.session_id = ${row.session_id}
-							AND run.status IN ('pending', 'running')`;
+							AND owner.status IN ('pending', 'running')`;
 							if (!run) return;
 							const ledger = yield* loadLedger(row.session_id).pipe(
 								Effect.provideService(SqlClient.SqlClient, this.options.sql),
@@ -1257,7 +1275,7 @@ export class ProviderSideEffectReactor {
 										RunnerProviderInstance
 									)
 								) {
-									if (scope === "unheld_runner") return;
+									if (scope === "unheld_runner" || run.joined === 1) return;
 									yield* settleDirectSend(
 										settlementTx,
 										row,
@@ -1305,7 +1323,7 @@ export class ProviderSideEffectReactor {
 									row,
 								);
 								if (legacy) {
-									if (scope === "unheld_runner") return;
+									if (scope === "unheld_runner" || run.joined === 1) return;
 									return yield* settleLegacySend(
 										settlementTx,
 										legacy,

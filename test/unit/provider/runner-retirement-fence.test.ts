@@ -109,6 +109,7 @@ import { RunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-
 import type { RunnerSinkBindings } from "../../../src/lib/provider/runner/runner-sink-bindings.js";
 import { SendAdmissionTimeout } from "../../../src/lib/provider/runner/send-admission.js";
 import type { SendScope } from "../../../src/lib/provider/runner/send-scope.js";
+import { settleSend } from "../../../src/lib/provider/runner/send-settlement-outbox.js";
 import type {
 	SessionCommand,
 	SessionFailure,
@@ -3752,16 +3753,21 @@ it.effect(
 		),
 );
 
-// The reactor's recall aborts a queued send and fails it as processing_timeout
-// only once the runner reports it cancelled. A steer is not an owner send, so
-// settleSend never writes for it and abort must keep its in-memory cancel.
+// From 32.5 a joined steer goes through the feeder and the hold like any send (CONTRACT 1555-1556,
+// 2021-2025), so no in-memory cancel of it remains: the reactor's recall of it while unheld aborts
+// its sink and settles it failed through Send Settlement (1625-1632). The feeder takes a send once
+// it is claimed (1550), so the steer has its running outbox row.
+// How it could fail: the steer bypasses the feeder and the abort alone cancels it; its hold reads
+// its owner's command and ends it unsent; its caller waits on its owner's Run, which never ends;
+// its settlement ends its owner's Run; or a send reaches the runner after the recall.
 it.effect(
-	"abort cancels a queued steer into a joined run before its runner is ready",
+	"a recall settles a queued steer into a joined run before its runner is ready",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
 				const f = yield* retirementFixture(false);
-				yield* (yield* makeCommitAndSignal)([
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
 					canonicalEvent(
 						"session.created",
 						"s",
@@ -3778,6 +3784,15 @@ it.effect(
 					}),
 				]);
 				yield* f.sql`UPDATE provider_runs SET status = 'joined', joined_into = 'run:owner' WHERE id = 'run:steer'`;
+				const input = {
+					...f.input,
+					inputId: "steer",
+					runId: "run:steer",
+					prompt: "steer",
+					history: [],
+				};
+				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id)
+					VALUES (2, 'steer', 'test-project', 's', 'account', 'send_turn', ${JSON.stringify(input)}, 'running', 1, 1, 1, 'run:steer')`;
 				f.replacementGate.hold = true;
 				const steering = yield* Effect.forkChild(
 					f
@@ -3785,28 +3800,43 @@ it.effect(
 							type: "send-turn",
 							sinkId: "steer-sink",
 							aborted: false,
-							input: {
-								...f.input,
-								inputId: "steer",
-								runId: "run:steer",
-								prompt: "steer",
-								history: [],
-							},
+							input,
 						})
 						.pipe(Effect.result),
 				);
 				yield* Deferred.await(f.replacementConnecting);
-				const aborting = yield* Effect.forkChild(
-					f.manager.executeEffect(
-						{ type: "abort", sinkId: "steer-sink" },
-						f.sendHandles.at(-1),
+				yield* f.manager.executeEffect(
+					{ type: "abort", sinkId: "steer-sink" },
+					f.sendHandles.at(-1),
+				);
+				yield* TestClock.adjust(0);
+				const cancelledByAbort = steering.pollUnsafe() !== undefined;
+				yield* commit.write((project, stamp) =>
+					settleSend(
+						{ sql: f.sql, project, stamp },
+						{
+							_tag: "failed",
+							send: {
+								sessionId: "s",
+								runId: "run:steer",
+								commandId: "steer",
+								requestSequence: 2,
+								attempt: 1,
+							},
+							observedAt: 2,
+							failure: {
+								operation: "awaitIntake",
+								code: "processing_timeout",
+								message: "Input recalled before intake",
+							},
+						},
 					),
 				);
 				yield* TestClock.adjust(0);
-				const cancelledBeforeReady = steering.pollUnsafe() !== undefined;
+				const settledBeforeReady = steering.pollUnsafe() !== undefined;
 				yield* Deferred.succeed(f.replacementReady, undefined);
-				yield* Fiber.join(aborting);
-				expect(cancelledBeforeReady).toBe(true);
+				expect(cancelledByAbort).toBe(false);
+				expect(settledBeforeReady).toBe(true);
 				expect(yield* Fiber.join(steering)).toMatchObject({
 					_tag: "Success",
 					success: { status: "cancelled" },
@@ -3814,6 +3844,15 @@ it.effect(
 				expect(
 					f.commands.filter((command) => command.type === "send-turn"),
 				).toEqual([]);
+				expect(
+					yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "run:owner", status: "pending" },
+					{ id: "run:steer", status: "joined" },
+				]);
+				expect(
+					yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'steer'`,
+				).toEqual([{ status: "failed", error_code: "processing_timeout" }]);
 			}),
 		),
 );

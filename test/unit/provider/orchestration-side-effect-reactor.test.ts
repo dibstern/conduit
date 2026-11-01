@@ -45,9 +45,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import type {
 	EventSink,
 	PermissionResponse,
-	ProviderCall,
 	ProviderCapabilities,
-	ProviderControlContext,
 	ProviderInstance,
 	ResolvedSendTurnInput,
 	TurnResult,
@@ -2482,8 +2480,7 @@ describe("ProviderSideEffectReactor", () => {
 
 	// 4.6 (CONTRACT.md 1555-1556 ref. 4.4, M3): a Stop's interrupt names its committed cohort's runs.
 	// How it could fail: the reactor passes the Stop's input ids, which a run-bound instance matches
-	// to no turn; it passes only the owners still covered; it drops a legacy payload's turnIds; or the
-	// cohort still rides the control context, a second path for the same fact.
+	// to no turn; it passes only the owners still covered; or it drops a legacy payload's turnIds.
 	for (const stop of [true, false])
 		it.effect(
 			`interrupts ${stop ? "a Stop's committed runs" : "a legacy payload's turnIds"}`,
@@ -2515,12 +2512,7 @@ describe("ProviderSideEffectReactor", () => {
 					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
 						VALUES ('original-run', 'session-1', 'running', 1000)`;
 					const interruptTurnEffect = vi.fn(
-						(
-							_sessionId: string,
-							_runIds?: readonly string[],
-							_call?: ProviderCall,
-							_control?: ProviderControlContext,
-						) => Effect.void,
+						(_sessionId: string, _runIds?: readonly string[]) => Effect.void,
 					);
 					const reactor = yield* makeReactor({
 						registry: new ProviderRegistry([
@@ -2535,16 +2527,22 @@ describe("ProviderSideEffectReactor", () => {
 					expect(call?.[1]).toEqual(
 						stop ? ["original-run"] : ["original-input"],
 					);
-					expect(call?.[3]).not.toHaveProperty("stopRunIds");
 				}).pipe(Effect.provide(reactorTestLayer)),
 		);
 
 	// How it could fail: a stored control failure whose code the reactor's schema omits fails to
 	// decode, so a later caller sees a store failure instead of the provider's own code.
-	it.effect("recalls a stored control failure with its own code", () =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key,
+	for (const code of [
+		"model_parameters_unavailable",
+		"codex_version_unsupported",
+		"runner_detached",
+	] as const)
+		it.effect(
+			`recalls a stored ${code} control failure with its own code`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key,
 				session_id, provider_id, effect_type, payload_json, provider_process_id, status,
 				attempt_count, requested_at, updated_at)
 				VALUES (10, 'stop', 'test-project', 'session-1', 'claude', 'interrupt_turn',
@@ -2555,31 +2553,31 @@ describe("ProviderSideEffectReactor", () => {
 						turnIds: ["original-input"],
 					})},
 					'p1', 'pending', 0, 1000, 1000)`;
-			yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at,
+					yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at,
 				command_type, project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
 				VALUES ('stop', 'session-1', 'side_effect_requested', 1000, 'interrupt_turn',
 					'test-project', 'sha256:abc', 1, 10, 1000)`;
-			const reactor = yield* makeReactor({
-				registry: new ProviderRegistry([
-					{
-						...makeProvider(() => Effect.succeed(completedTurn)),
-						interruptTurnEffect: () =>
-							Effect.fail(
-								new ProviderInstanceFailure({
-									providerId: "claude",
-									operation: "interruptTurn",
-									code: "model_parameters_unavailable",
-									cause: new Error("no such effort"),
-								}),
-							),
-					},
-				]),
-			});
-			yield* reactor.runOnce();
-			const failure = yield* Effect.flip(reactor.runCommand("stop"));
-			expect(failure).toMatchObject({ code: "model_parameters_unavailable" });
-		}).pipe(Effect.provide(reactorTestLayer)),
-	);
+					const reactor = yield* makeReactor({
+						registry: new ProviderRegistry([
+							{
+								...makeProvider(() => Effect.succeed(completedTurn)),
+								interruptTurnEffect: () =>
+									Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "interruptTurn",
+											code,
+											cause: new Error("no such effort"),
+										}),
+									),
+							},
+						]),
+					});
+					yield* reactor.runOnce();
+					const failure = yield* Effect.flip(reactor.runCommand("stop"));
+					expect(failure).toMatchObject({ code });
+				}).pipe(Effect.provide(reactorTestLayer)),
+		);
 });
 
 const reactorTestLayer = Layer.provideMerge(

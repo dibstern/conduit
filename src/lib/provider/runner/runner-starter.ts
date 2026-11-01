@@ -1410,11 +1410,15 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								),
 							);
 							if (sql && !isLegacyRunner(hello)) {
+								// From 32.5 a joined steer's held transmission is released under its own run
+								// id while its owner's Run is open, and the feeder re-holds it (CONTRACT 1868-1869).
 								const held = yield* sql<{
 									run_id: string;
 									command_id: string;
 									transmission: number;
-								}>`SELECT run.id AS run_id, command.command_id, run.held_transmission AS transmission FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.session_id = ${sessionId} AND run.runner_id = ${entry.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn'`;
+								}>`SELECT run.id AS run_id, command.command_id, run.held_transmission AS transmission FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id
+									JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
+									WHERE run.session_id = ${sessionId} AND run.runner_id = ${entry.runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running') AND command.effect_type = 'send_turn'`;
 								for (const transmission of held) {
 									const token = sendToken(
 										"hold",

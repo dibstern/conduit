@@ -96,7 +96,8 @@ export const runningRunnerCommands = (
 				? sql`(${projectId} IS NULL OR outbox.project_key = ${projectId})`
 				: sql`outbox.session_id = ${sessionId} AND outbox.project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})`;
 		const owner = ownerSend
-			? sql`outbox.command_id = ${ownerSend.commandId} AND COALESCE(run.joined_into, run.id) = ${ownerSend.runId}`
+			? // From 32.5 a joined steer's send is its own run's (CONTRACT 2021-2025).
+				sql`outbox.command_id = ${ownerSend.commandId} AND outbox.run_id = ${ownerSend.runId}`
 			: sql`1`;
 		const rows = yield* sql<{
 			request_sequence: number;

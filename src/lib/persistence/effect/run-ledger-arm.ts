@@ -32,6 +32,7 @@ import type {
 	SendToken,
 } from "../../provider/run-ledger/run-ledger-model.js";
 import { sendToken } from "../../provider/runner/runner-protocol.js";
+import { harnessForModelProvider } from "../../provider/turn-settings.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
@@ -192,15 +193,20 @@ export const loadLedger = (
 			alarm_at: number | null;
 		}>`SELECT provider, state, alarm_at FROM run_ledger_sessions WHERE session_id = ${sessionId}`;
 		const [session] = row
-			? [row]
+			? [{ provider: row.provider, model_provider: null }]
 			: yield* sql<{
 					provider: string;
-				}>`SELECT provider FROM sessions WHERE id = ${sessionId}`;
+					model_provider: string | null;
+				}>`SELECT provider, model_provider FROM sessions WHERE id = ${sessionId}`;
 		if (!session) return undefined;
-		// An account id names no driver kind: the ledger reads it as Claude's (gap, reported).
+		// 3.12: the ledger's provider is the instance's driver kind. A named instance's id
+		// ("work-oc") names none, so its session's model pick names it: creation holds a pick's
+		// harness to the instance's driver. With neither, Claude's (gap, reported).
 		const provider = isKnownDriverKind(session.provider)
 			? session.provider
-			: "claude";
+			: session.model_provider
+				? harnessForModelProvider(session.model_provider)
+				: "claude";
 		const entries = yield* sql<{
 			entry_seq: number;
 			event_sequence: number;
@@ -466,6 +472,42 @@ const commandFor = (
 					verb: "settle",
 					settlement: { kind: "server_gone", server: event.data.server },
 				};
+			case "permission.asked":
+			case "question.asked":
+			case "permission.resolved":
+			case "question.resolved": {
+				// 2.1 row 205, 3.10 (CONTRACT.md 216, 999-1006): an OpenCode interaction belongs to the
+				// label its session's process reported last; the arm folds its request and its native
+				// resolution there (gap, reported). Claude's come from its runner.
+				if (getProviderDriver(provider)?.runsOpenCodeServer !== true)
+					return undefined;
+				const [started] = yield* sql<{ label: string }>`
+					SELECT json_extract(data, '$.label') AS label FROM events
+					WHERE session_id = ${event.sessionId} AND type = 'evidence.process_started'
+						AND sequence < ${event.sequence}
+					ORDER BY sequence DESC LIMIT 1`;
+				if (!started) return undefined;
+				const at = {
+					tag: "Unsolicited",
+					label: started.label,
+					eventId: event.eventId,
+					interactionId: event.data.id,
+				} as const;
+				return {
+					verb: "observe",
+					observation:
+						event.type === "permission.asked" || event.type === "question.asked"
+							? {
+									...at,
+									kind: "interaction_requested",
+									interactionKind:
+										event.type === "permission.asked"
+											? "permission"
+											: "question",
+								}
+							: { ...at, kind: "interaction_resolved" },
+				};
+			}
 			case "evidence.delivery_indeterminate":
 				return {
 					verb: "observe",
@@ -512,6 +554,10 @@ const HANDLES = [
 	"evidence.hold_exhausted",
 	"evidence.server_seen",
 	"evidence.server_gone",
+	"permission.asked",
+	"permission.resolved",
+	"question.asked",
+	"question.resolved",
 ] as const;
 
 const untouched: ProjectionTouch = {

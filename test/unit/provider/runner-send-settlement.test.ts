@@ -1166,6 +1166,86 @@ it.effect(
 		),
 );
 
+// From 32.5 restart recovery re-holds a joined steer's unsent transmission through the feeder
+// under the steer's own run id, keeping its claim (CONTRACT 1862-1869, 2021-2025).
+// How it could fail: recovery reads the steer under its owner's run id, so the hold ends it
+// unsent or skips it as held; it is marked for a fresh reactor re-send with a new attempt; its
+// held transmission is never released, so it stays stuck; or its owner's Run is ended.
+for (const transmission of ["unheld", "held"] as const)
+	it.effect(
+		`restart re-holds a joined steer's ${transmission} unsent transmission under its own run id`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("claude");
+					yield* f.seed("head", 1, 1, "held");
+					yield* f.seed("steer", 2, 1, transmission);
+					yield* f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`;
+					// The runner reports the owner's send running and never received the steer's.
+					yield* f.hello((hello) => ({
+						...journalHello("head", undefined, undefined, "running")(hello),
+						drainsConnections: true,
+					}));
+					const sent: string[] = [];
+					f.replaySend.execute = (_id, command) =>
+						Effect.sync(() => {
+							sent.push(command.input.inputId);
+							return terminalResult("joined");
+						});
+					yield* f.recover;
+					yield* TestClock.adjust("1 second");
+					expect(sent).toEqual(["steer"]);
+					expect(
+						yield* f.sql`SELECT type, json_extract(data, '$.commandId') AS commandId,
+							json_extract(data, '$.transmission') AS transmission, json_extract(data, '$.reason') AS reason FROM events
+							WHERE type IN ('run.dispatched', 'run.released') AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+					).toEqual(
+						transmission === "unheld"
+							? [
+									{
+										type: "run.dispatched",
+										commandId: "steer",
+										transmission: 1,
+										reason: null,
+									},
+								]
+							: [
+									{
+										type: "run.dispatched",
+										commandId: "steer",
+										transmission: 1,
+										reason: null,
+									},
+									{
+										type: "run.released",
+										commandId: "steer",
+										transmission: 1,
+										reason: "NotSent",
+									},
+									{
+										type: "run.dispatched",
+										commandId: "steer",
+										transmission: 2,
+										reason: null,
+									},
+								],
+					);
+					expect(
+						yield* f.sql`SELECT command_id, status, attempt_count FROM provider_command_outbox ORDER BY request_sequence`,
+					).toEqual([
+						{ command_id: "head", status: "running", attempt_count: 1 },
+						{ command_id: "steer", status: "running", attempt_count: 1 },
+					]);
+					expect(
+						yield* f.sql`SELECT id, status FROM provider_runs WHERE id IN ('run:head', 'run:steer') ORDER BY id`,
+					).toEqual([
+						{ id: "run:head", status: "pending" },
+						{ id: "run:steer", status: "joined" },
+					]);
+				}),
+			),
+	);
+
 for (const refusal of [false, true])
 	it.effect(
 		`F73 restart after release prepares fresh mode once and ${refusal ? "fails a fresh refusal visibly" : "completes"}`,
@@ -1413,8 +1493,10 @@ for (const pickup of ["live caller", "restart scan"] as const)
 							// a restart meets Cleaning only from a candidate registered
 							// after that (an upgrade); register it as the scan reads the run.
 							if (
-								query.includes("joined_into IS NULL AND runner_id IS NULL") &&
-								params.includes("run:clean-fault")
+								query.includes(
+									"SELECT run.id FROM provider_command_outbox command",
+								) &&
+								query.includes("run.runner_id IS NULL")
 							)
 								return execute(
 									"UPDATE claude_runner_cursors SET role = 'candidate' WHERE runner_id = '131313131313'",
@@ -3453,6 +3535,145 @@ it.effect(
 		),
 );
 
+// From 32.5 a joined steer is sent through the feeder, so the reactor settles its own reply
+// through Send Settlement while its owner's Run is open (CONTRACT 1625-1632, 2021-2025).
+// How it could fail: the reactor skips the reply because the steer's own Run is joined, not
+// open; the settlement ends its owner's Run; or the steer is sent outside the feeder's hold.
+it.effect(
+	"reactor settles a joined steer's terminal reply and leaves its owner's Run open",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("head", 1, 1, "held");
+				yield* f.hello(journalHello("head", undefined, undefined, "running"));
+				yield* f.recover;
+				yield* f.seed("steer", 2, 0);
+				// Its claim requests its Run, so it is joined once claimed, before the feeder's submit.
+				f.preparation.gate =
+					f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`.pipe(
+						Effect.orDie,
+						Effect.asVoid,
+					);
+				f.replaySend.execute = () =>
+					Effect.succeed(
+						terminalResult("error", {
+							code: "permanent_refusal",
+							message: "refused",
+						}),
+					);
+				yield* f.reactor.runCommand("steer").pipe(Effect.forkChild);
+				yield* TestClock.adjust("1 second");
+				expect(
+					yield* f.sql`SELECT id, status FROM provider_runs WHERE id IN ('run:head', 'run:steer') ORDER BY id`,
+				).toEqual([
+					{ id: "run:head", status: "pending" },
+					{ id: "run:steer", status: "joined" },
+				]);
+				expect(
+					yield* f.sql`SELECT command_id, status, error_code FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{ command_id: "head", status: "running", error_code: null },
+					{
+						command_id: "steer",
+						status: "failed",
+						error_code: "permanent_refusal",
+					},
+				]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.commandId') AS commandId FROM events WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:steer'`,
+				).toEqual([{ commandId: "steer" }]);
+			}),
+		),
+);
+
+// From 32.5 a joined steer's retry after a retryable reply is its own Run's next transmission,
+// held by the feeder under its own run id, never a fresh Run (CONTRACT 1864-1870, 2021-2025, 2667).
+// How it could fail: the retry is claimed on a fresh Run, so the steer leaves its owner's Run and
+// restarts its cap; it is re-sent before its backoff; it is never re-sent and stays stranded; or
+// its outcome ends its owner's Run.
+it.effect(
+	"a joined steer's retryable reply is re-held as its own Run's next transmission, never a fresh Run",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("head", 1, 1, "held");
+				yield* f.hello(journalHello("head", undefined, undefined, "running"));
+				yield* f.recover;
+				yield* f.seed("steer", 2, 0);
+				f.preparation.gate =
+					f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`.pipe(
+						Effect.orDie,
+						Effect.asVoid,
+					);
+				const replies = [
+					terminalResult("error", {
+						code: "temporary",
+						message: "transient",
+						retryable: true,
+					}),
+					terminalResult("joined"),
+				];
+				const sent: string[] = [];
+				f.replaySend.execute = (_id, command) =>
+					Effect.sync(() => {
+						sent.push(command.input.inputId);
+						return replies.shift() ?? terminalResult("joined");
+					});
+				yield* f.reactor.runCommand("steer").pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				// Its reply leaves the steer's command open and unheld until its backoff.
+				expect(
+					yield* f.sql`SELECT command.status, command.run_id, run.runner_id, run.held_transmission
+						FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id
+						WHERE command.command_id = 'steer'`,
+				).toEqual([
+					{
+						status: "running",
+						run_id: "run:steer",
+						runner_id: null,
+						held_transmission: null,
+					},
+				]);
+				expect(sent).toEqual(["steer"]);
+				yield* TestClock.adjust("999 millis");
+				expect(sent).toEqual(["steer"]);
+				yield* TestClock.adjust("1 millis");
+				expect(sent).toEqual(["steer", "steer"]);
+				expect(
+					yield* f.sql`SELECT id, status FROM provider_runs WHERE joined_into IS NULL`,
+				).toEqual([{ id: "run:head", status: "pending" }]);
+				expect(
+					yield* f.sql`SELECT status, joined_into FROM provider_runs WHERE id = 'run:steer'`,
+				).toEqual([{ status: "joined", joined_into: "run:head" }]);
+				expect(
+					yield* f.sql`SELECT command_id, status, attempt_count, run_id FROM provider_command_outbox ORDER BY request_sequence`,
+				).toEqual([
+					{
+						command_id: "head",
+						status: "running",
+						attempt_count: 1,
+						run_id: "run:head",
+					},
+					{
+						command_id: "steer",
+						status: "running",
+						attempt_count: 1,
+						run_id: "run:steer",
+					},
+				]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.commandId') AS commandId, json_extract(data, '$.transmission') AS transmission
+						FROM events WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+				).toEqual([
+					{ commandId: "steer", transmission: 1 },
+					{ commandId: "steer", transmission: 2 },
+				]);
+			}),
+		),
+);
+
 // An account revoked under the reactor's call fails that call before any hold.
 const revoked = (retryable: boolean | undefined) =>
 	new ProviderInstanceFailure({
@@ -3559,9 +3780,7 @@ const failSessionStore = (
 				Effect.suspend(() => {
 					const selected =
 						operation === "read"
-							? query.includes(
-									"SELECT joined_into, runner_id, held_transmission",
-								)
+							? query.includes(" AS legacy")
 							: query.includes("INSERT INTO claude_runner_cursors") &&
 								query.includes("role");
 					if (selected) {
@@ -3627,7 +3846,9 @@ for (const operation of ["read"] as const)
 					fault.recover();
 					yield* TestClock.adjust("1 second");
 					expect(sending.pollUnsafe()).toMatchObject({ _tag: "Success" });
-					expect(fault.attempts()).toBe(2);
+					// The submit's legacy read fails once and is retried; the reply's
+					// settlement then proves the send modern with the same read.
+					expect(fault.attempts()).toBe(operation === "read" ? 3 : 2);
 					expect(spawned.spawn).toHaveBeenCalledTimes(starts);
 					expect(f.commands.filter((c) => c.type === "send-turn")).toHaveLength(
 						1,

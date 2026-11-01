@@ -33,6 +33,11 @@
 // 22. detection of a declared server's own ServerKey overwrites its source or role, or a new
 //     ServerKey on the port inherits the declaration;
 // 23. a live server leaves anythingMayAct false or the row Quiescent, so a restart's load skips it.
+// Driver kind (3.12). How it could fail:
+// 24. a session on a named instance ("work-oc") reads as Claude's, so OpenCode's rules never apply.
+// OpenCode interactions (2.1 row 205, 3.10). How they could fail:
+// 25. an OpenCode permission or question is never folded, so a Stop's commit sees no Pending one;
+// 26. it is folded on no label or another session's, or stays Pending after its resolution.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -152,6 +157,35 @@ const projectOnline = (events: readonly CanonicalEvent[]) =>
 	});
 
 describe("Run Ledger arm", () => {
+	it.effect(
+		"reads a session on a named OpenCode instance as OpenCode's, from its model pick's harness",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* projectOnline([
+						makeSessionCreatedEvent("s1", {
+							provider: "work-oc",
+							createdAt: 1000,
+						}),
+						canonicalEvent(
+							"session.model_changed",
+							"s1",
+							{
+								sessionId: "s1",
+								modelId: "claude-sonnet",
+								providerId: "anthropic",
+							},
+							at(1000),
+						),
+						...turn("s1", "opencode").slice(1),
+					]);
+					expect((yield* ledgerRows).sessions).toMatchObject([
+						{ session_id: "s1", provider: "opencode" },
+					]);
+				}),
+			),
+	);
+
 	it.effect(
 		"folds main's events in the projecting write; a wake's turn.completed ends nothing",
 		() =>
@@ -545,6 +579,66 @@ describe("Run Ledger arm", () => {
 				});
 				expect(after).toEqual(before);
 			}),
+	);
+
+	it.effect(
+		"folds an OpenCode permission and question as Pending on the session's current label until resolved",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const pending = Effect.map(loadLedgerView("s1"), (view) =>
+						view?.interactions.filter(({ tag }) => tag === "Pending"),
+					);
+					yield* projectOnline([
+						makeSessionCreatedEvent("s1", {
+							provider: "opencode",
+							createdAt: 1000,
+						}),
+						canonicalEvent(
+							"evidence.process_started",
+							"s1",
+							{ runnerId: "oc-1", label: "oc-1:0", reattached: false },
+							at(1001),
+						),
+						canonicalEvent(
+							"permission.asked",
+							"s1",
+							{
+								id: "perm-1",
+								sessionId: "s1",
+								toolName: "bash",
+								input: { command: "ls" },
+							},
+							at(1002),
+						),
+						canonicalEvent(
+							"question.asked",
+							"s1",
+							{ id: "q-1", sessionId: "s1", questions: [] },
+							at(1003),
+						),
+					]);
+					expect(yield* pending).toEqual([
+						{ tag: "Pending", interactionId: "perm-1", kind: "permission" },
+						{ tag: "Pending", interactionId: "q-1", kind: "question" },
+					]);
+					yield* projectOnline([
+						canonicalEvent(
+							"permission.resolved",
+							"s1",
+							{ id: "perm-1", decision: "once" },
+							at(1004),
+						),
+						canonicalEvent(
+							"question.resolved",
+							"s1",
+							{ id: "q-1", answers: {} },
+							at(1005),
+						),
+					]);
+					expect(yield* pending).toEqual([]);
+				}),
+			),
 	);
 	it.effect(
 		"folds the interrupt after input.interrupt_requested as Run now, and the next one as a Stop",

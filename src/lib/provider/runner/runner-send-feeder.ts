@@ -47,6 +47,7 @@ import type { makeRunnerSends } from "./runner-sends.js";
 import { CANCELLED_TURN, type makeRunnerStarter } from "./runner-starter.js";
 import type { SendScope } from "./send-scope.js";
 import {
+	classify,
 	retrySettlementWrite,
 	type SendEvidence,
 	type StoreFault,
@@ -376,6 +377,21 @@ export const makeRunnerSendFeeder = (options: {
 											});
 										if (live)
 											yield* Deferred.succeed(live.reply, reply.success);
+										// A joined steer's retryable reply leaves its command open, so after the
+										// backoff the feeder holds it again from its stored send as its next
+										// transmission; any other send's Run ends on it, and with it this
+										// capability (CONTRACT 1864-1873, 2021-2025, 2667).
+										const result = terminalTurnResult(reply.success);
+										if (
+											result &&
+											classify({ _tag: "replied", result }) === "retryable"
+										) {
+											yield* Effect.sleep(sendRetryBackoff(hold.transmission));
+											if (capabilities.get(key(item.input)) === item) {
+												if (item.live === live) item.live = undefined;
+												enqueueCapability(item);
+											}
+										}
 									}),
 								);
 								if (
@@ -602,15 +618,6 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 				return dispatch(command, send, recovered);
 			const runId = command.input.runId;
 			return Effect.gen(function* () {
-				const [run] = yield* sql<{
-					joined_into: string | null;
-					runner_id: string | null;
-					held_transmission: number | null;
-				}>`SELECT joined_into, runner_id, held_transmission
-					FROM provider_runs WHERE id = ${runId} AND session_id = ${command.input.sessionId}`.pipe(
-					retrySettlementWrite,
-					Effect.mapError((cause) => runnerFailure("send-turn", cause)),
-				);
 				const legacy = yield* legacyRunnerRunQuery(
 					sql,
 					command.input.sessionId,
@@ -619,7 +626,8 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					retrySettlementWrite,
 					Effect.mapError((cause) => runnerFailure("send-turn", cause)),
 				);
-				if (run?.joined_into || legacy)
+				// From 32.5 a joined steer goes through the feeder and the hold (CONTRACT 1555-1556).
+				if (legacy)
 					return yield* dispatch(command, send, recovered, undefined, legacy);
 				const commandId =
 					(yield* runSendCommandIdQuery(
@@ -987,12 +995,18 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					// served stays with the reactor's project gate; the project's
 					// attachment recovers it once it is served.
 					if (!(yield* deps.projectRootForSession(row.session_id))) continue;
-					const [unheld] =
-						yield* sql`SELECT 1 FROM provider_runs WHERE id = ${row.run_id} AND session_id = ${row.session_id}
-					AND joined_into IS NULL AND runner_id IS NULL AND status IN ('pending','running')`;
+					// row.run_id names a joined steer's owner; from 32.5 the steer is re-held under
+					// its own run id while its owner's Run is open (CONTRACT 1868-1869, 2021-2025).
+					const [unheld] = yield* sql<{
+						id: string;
+					}>`SELECT run.id FROM provider_command_outbox command
+					JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+					JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
+					WHERE command.request_sequence = ${row.request_sequence} AND command.project_key = ${row.project_key}
+						AND run.runner_id IS NULL AND owner.status IN ('pending','running')`;
 					if (
 						!unheld ||
-						(yield* legacyRunnerRunQuery(sql, row.session_id, row.run_id))
+						(yield* legacyRunnerRunQuery(sql, row.session_id, unheld.id))
 					)
 						continue;
 					const [rejected] = yield* sql<{
@@ -1026,7 +1040,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					}
 					yield* feeder.enqueue({
 						sessionId: row.session_id,
-						runId: row.run_id,
+						runId: unheld.id,
 						commandId: row.command_id,
 						requestSequence: row.request_sequence,
 						attempt: row.attempt_count,
