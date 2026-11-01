@@ -1,13 +1,16 @@
 import { Effect, Option, Schema } from "effect";
 import { SqlClient } from "effect/sql";
 import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
-import { inputPlacement } from "../../provider/run-ledger/run-ledger-decider.js";
+import {
+	inputPlacement,
+	viewLedger,
+} from "../../provider/run-ledger/run-ledger-decider.js";
 import { type CanonicalEvent, canonicalEvent } from "../events.js";
 import { loadLedger } from "./run-ledger-arm.js";
 
 /**
  * Requeue unplaced handoffs after failure or confirmed loss of a removed runner. The ledger view
- * read in this write places a steer a runner failure left possibly reached (2.1 row 206), and with
+ * read in this write places a steer its Run's end left possibly reached (2.1 row 206), and with
  * `cancelFinal` cancels each steer it marks failed after its requeue, in one batch (row 207).
  */
 export const requeueFailedSteers = <E>(
@@ -69,9 +72,15 @@ export const requeueFailedSteers = <E>(
 					sentSequence: row.sent_sequence,
 					reason: row.error_code === "steer-declined" ? "declined" : "failed",
 				});
-				// Row 206 (CONTRACT.md 217): narrowed to a runner failure, main's `runner_stopped`; a
-				// steer main failed otherwise keeps main's requeue until its outcome evidence lands (gap).
-				if (ledger && place === "sent" && row.error_code === "runner_stopped") {
+				// Row 206 (CONTRACT.md 217) at any end of its Run (970-972): a steer the view reads possibly
+				// reached is placed, never re-sent. While its Run is active main's requeue stays (3.6, gap).
+				if (
+					ledger &&
+					place === "sent" &&
+					!viewLedger(ledger.state).active?.inputs.some(
+						(input) => input.inputId === row.input_id,
+					)
+				) {
 					const provider = { provider: ledger.provider };
 					const meta = {
 						...provider,

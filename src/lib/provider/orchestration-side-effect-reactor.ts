@@ -1257,7 +1257,7 @@ export class ProviderSideEffectReactor {
 									)
 								) {
 									if (scope === "unheld_runner") return;
-									return yield* settleDirectSend(
+									yield* settleDirectSend(
 										settlementTx,
 										row,
 										reply,
@@ -1269,6 +1269,35 @@ export class ProviderSideEffectReactor {
 											),
 										),
 									);
+									// 2.1 row 207 (CONTRACT.md 218, 973-977): a steer this write failed permanently, not
+									// by Stop (4.8, 9), is failed in the view in the same write, so commitAndSignal's
+									// requeue cancels it. Row 215 (224) names this writer only as "each writer of its
+									// row's outcome"; it names a direct send's token, its runId (3.4), as the decider
+									// reads it, not (commandId, transmission) (gap).
+									if (input?.start !== false) return;
+									const [failed] = yield* this.options.sql<{
+										error_code: string | null;
+									}>`SELECT error_code FROM provider_command_outbox
+										WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
+											AND attempt_count = ${row.attempt_count} AND status = 'failed' AND updated_at = ${now}
+											AND COALESCE(error_code, '') NOT IN ('interrupted', 'cancelled')`;
+									if (!failed) return;
+									return yield* this.appendInWrite(project, row.project_key, [
+										canonicalEvent(
+											"evidence.effect_outcome",
+											row.session_id,
+											{
+												commandId: row.command_id,
+												transmission: row.attempt_count,
+												token: runId,
+												outcome: {
+													tag: "permanent",
+													code: failed.error_code ?? "provider_failure",
+												},
+											},
+											{ provider: row.provider_id, createdAt: now },
+										),
+									]);
 								}
 								const legacy = yield* LegacySendKey.prove(
 									this.options.sql,
