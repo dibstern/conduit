@@ -9,7 +9,6 @@ import {
 	References,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -31,12 +30,12 @@ const testLayer = Layer.merge(
 );
 
 it.effect(
-	"grants enforce the policy and a cancelled candidate has no cleanup rights",
+	"grants enforce the policy and revoke takes no cohort and leaves no cleanup state",
 	() =>
 		Effect.gen(function* () {
 			const authority = yield* makeRunnerAuthority();
 			const starting = (yield* authority.adopt(
-				[{ runnerId: "warm", sessionId: "s" }],
+				[{ runnerId: "warm", sessionId: "s", ownedRunIds: ["run"] }],
 				"starting",
 			)).grants.get("warm");
 			if (!starting) return yield* Effect.die("missing starting grant");
@@ -58,22 +57,8 @@ it.effect(
 					),
 				),
 			).toBe("fact");
-			const cancelled = yield* authority.revoke(starting, "retired", {
-				ownedRunIds: ["not-owned"],
-			});
-			expect(cancelled.target.ownedRunIds).toEqual([]);
-			expect(
-				Option.isNone(
-					yield* authority.guarded(
-						cancelled,
-						{ kind: "cleanup" },
-						() => "cleanup",
-					),
-				),
-			).toBe(true);
-			expect(yield* authority.revoke(starting, "retired")).toBe(cancelled);
 			const live = (yield* authority.adopt(
-				[{ runnerId: "live", sessionId: "s" }],
+				[{ runnerId: "live", sessionId: "s", ownedRunIds: ["run"] }],
 				"live",
 			)).grants.get("live");
 			if (!live) return yield* Effect.die("missing live grant");
@@ -83,48 +68,30 @@ it.effect(
 					yield* authority.guarded(live, { kind: "output" }, () => ++writes),
 				),
 			).toBe(true);
-			const cleanup = yield* authority.revoke(live, "superseded", {
-				ownedRunIds: ["run"],
-			});
-			expect(
-				Option.isNone(
-					yield* authority.guarded(live, { kind: "output" }, () => ++writes),
-				),
-			).toBe(true);
-			expect(
-				Option.isNone(
-					yield* authority.guarded(live, { kind: "cleanup" }, () => ++writes),
-				),
-			).toBe(true);
-			expect(cleanup.target.ownedRunIds).toEqual(["run"]);
-			expect(
-				Option.isSome(
-					yield* authority.guarded(
-						cleanup,
-						{ kind: "cleanup" },
-						() => ++writes,
+			for (const [grant, runnerId] of [
+				[starting, "warm"],
+				[live, "live"],
+			] as const) {
+				expect(yield* authority.revoke(grant, "retired")).toBeUndefined();
+				const record = authority.records.get(runnerId);
+				expect(record?.tag._tag).toBe("Retired");
+				expect(record).not.toHaveProperty("cleanup");
+				expect(record?.identity.ownedRunIds).toEqual(["run"]);
+				expect(
+					Option.isNone(
+						yield* authority.guarded(grant, { kind: "output" }, () => ++writes),
 					),
-				),
-			).toBe(true);
-			yield* TestClock.adjust("3 seconds");
-			expect(
-				Option.isNone(
-					yield* authority.guarded(
-						cleanup,
-						{ kind: "cleanup" },
-						() => ++writes,
+				).toBe(true);
+				expect(
+					Option.isSome(
+						yield* authority.guarded(
+							grant,
+							{ kind: "evidence" },
+							() => ++writes,
+						),
 					),
-				),
-			).toBe(true);
-			expect(
-				Option.isSome(
-					yield* authority.guarded(
-						cleanup,
-						{ kind: "evidence" },
-						() => ++writes,
-					),
-				),
-			).toBe(true);
+				).toBe(true);
+			}
 			expect(writes).toBe(3);
 		}),
 );
@@ -144,10 +111,11 @@ it.effect("snapshots cannot mutate records and stale grants never revive", () =>
 		expect(snapshot?.observation).toBe("Pending");
 		expect(authority.records.get("r")?.observation).toBe("Observed");
 		yield* authority.revoke(grant, "exited");
-		for (const kind of ["output", "cleanup"] as const)
-			expect(
-				Option.isNone(yield* authority.guarded(grant, { kind }, () => "no")),
-			).toBe(true);
+		expect(
+			Option.isNone(
+				yield* authority.guarded(grant, { kind: "output" }, () => "no"),
+			),
+		).toBe(true);
 		authority.forget("r");
 		yield* authority.adopt([{ runnerId: "r", sessionId: "s" }], "live");
 		expect(
@@ -232,17 +200,16 @@ it.effect(
 					)).grants.get(reason);
 					if (!grant) return yield* Effect.die("missing grant");
 					yield* authority.revoke(grant, reason);
-					for (const write of [
-						{ kind: "output" },
-						{ kind: "cleanup" },
-					] as const) {
-						for (let repeat = 0; repeat < 2; repeat++)
-							expect(
-								Option.isNone(
-									yield* authority.guarded(grant, write, () => ++calls),
+					for (let repeat = 0; repeat < 2; repeat++)
+						expect(
+							Option.isNone(
+								yield* authority.guarded(
+									grant,
+									{ kind: "output" },
+									() => ++calls,
 								),
-							).toBe(true);
-					}
+							),
+						).toBe(true);
 					expect(
 						Option.isSome(
 							yield* authority.guarded(
@@ -258,8 +225,8 @@ it.effect(
 				Effect.provide(logs),
 				Effect.provideService(References.MinimumLogLevel, "Warn"),
 			);
-			expect(warnings).toHaveLength(6);
-			expect(new Set(warnings).size).toBe(6);
+			expect(warnings).toHaveLength(3);
+			expect(new Set(warnings).size).toBe(3);
 		}),
 );
 
@@ -347,44 +314,12 @@ it.effect(
 				signalled: true,
 			});
 			expect(snapshot?.identity.pid).toBeUndefined();
-			yield* authority.revoke(grant, "retired", { ownedRunIds: ["owned"] });
+			yield* authority.revoke(grant, "retired");
 			expect(authority.captureBeforeRevoke("r", { ...evidence, pid: 99 })).toBe(
 				false,
 			);
 			expect(authority.records.get("r")?.identity.pid).toBe(42);
 		}),
-);
-
-it.effect("cleanup transitions cannot settle a cancelled Starting runner", () =>
-	Effect.gen(function* () {
-		const authority = yield* makeRunnerAuthority();
-		for (const phase of ["starting", "live"] as const) {
-			const grant = (yield* authority.adopt(
-				[{ runnerId: phase, sessionId: phase }],
-				phase,
-			)).grants.get(phase);
-			if (!grant) return yield* Effect.die("missing grant");
-			const cleanup = yield* authority.revoke(grant, "retired", {
-				ownedRunIds: ["run"],
-			});
-			const snapshot = authority.records.get(phase);
-			expect(snapshot?.cleanup?._tag).toBe(
-				phase === "live" ? "Ready" : "Unavailable",
-			);
-			expect(authority.beginCleanup(phase)).toBe(phase === "live");
-			expect(authority.records.get(phase)?.cleanup?._tag).toBe(
-				phase === "live" ? "Settling" : "Unavailable",
-			);
-			expect(snapshot?.cleanup?._tag).toBe(
-				phase === "live" ? "Ready" : "Unavailable",
-			);
-			authority.finishCleanup(phase);
-			expect(authority.records.get(phase)?.cleanup?._tag).toBe(
-				phase === "live" ? "Ready" : "Unavailable",
-			);
-			expect(yield* authority.revoke(grant, "retired")).toBe(cleanup);
-		}
-	}),
 );
 
 it.effect("copied grants are refused for every write kind", () =>
@@ -398,7 +333,6 @@ it.effect("copied grants are refused for every write kind", () =>
 			)).grants.get(phase);
 			if (!grant) return yield* Effect.die("missing grant");
 			granted.push(grant);
-			granted.push(yield* authority.revoke(grant, "retired"));
 		}
 		const live = (yield* authority.adopt(
 			[{ runnerId: "current", sessionId: "current" }],
@@ -410,11 +344,10 @@ it.effect("copied grants are refused for every write kind", () =>
 			const copy = { ...grant };
 			const writes: readonly Write[] = [
 				{ kind: "output" },
-				{ kind: "cleanup" },
 				{ kind: "evidence" },
 			];
 			for (const write of writes) {
-				expect(Option.isNone(authority.authorize(copy, write, 0))).toBe(true);
+				expect(Option.isNone(authority.authorize(copy, write))).toBe(true);
 				expect(
 					Option.isNone(yield* authority.guarded(copy, write, () => "forged")),
 				).toBe(true);

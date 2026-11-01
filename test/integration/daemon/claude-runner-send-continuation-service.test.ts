@@ -173,7 +173,6 @@ describe("Send continuation through the provider service and engine", () => {
 		await harness.restart({
 			serviceEnvironment: {
 				CONDUIT_TEST_SEND_CONTINUATION_PAUSE: "before-hold",
-				CONDUIT_TEST_STOP_ACCEPT_PAUSE: "1",
 			},
 		});
 		const browser = await harness.connect();

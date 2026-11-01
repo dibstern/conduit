@@ -17,6 +17,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../provider/orchestration-read-model.js";
@@ -222,7 +223,14 @@ export const DaemonOrchestrationLive = Layer.effect(
 			sessionWorkspace,
 			shellEnv: () => ({ env: {}, declared: {} }),
 		}).pipe(Effect.provideService(ReadQueryEffectTag, read));
+		const beforeStopAcceptance = (yield* loadClaudeSdkTestModule.pipe(
+			Effect.orDie,
+		))?.beforeStopAcceptance;
 		const engine = new OrchestrationEngine({
+			...(beforeStopAcceptance && {
+				beforeStopAcceptance: (input) =>
+					Effect.promise(() => beforeStopAcceptance(input)),
+			}),
 			registry: adapters.registry,
 			attachmentStore: Context.get(store, AttachmentStoreTag),
 			secretAnswers,
