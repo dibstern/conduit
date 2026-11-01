@@ -697,6 +697,7 @@ export const generatedShapes = [
 	"unlaunch by not_sent",
 	"unlaunch by retirement",
 	"relaunch after unlaunch",
+	"direct re-send after a retryable steer",
 	"Stop on a not-yet-delivered Run",
 	"Run now on a not-yet-delivered Run",
 	"End on a not-yet-delivered Run",
@@ -741,6 +742,8 @@ export class Coverage {
 	private readonly unlaunched = new Set<string>();
 	/** How many of the trace's issues the relaunch count has read. */
 	private seenIssues = 0;
+	/** Inputs whose direct steer got a retryable outcome, until main's next steer of each (3.6). */
+	private readonly retryableSteers = new Set<string>();
 	/** This runner's release Answers by token and reason, until its process_lost (3.13, 4.5). */
 	private readonly releases = new Map<SendToken, string>();
 	record(
@@ -1037,10 +1040,24 @@ export class Coverage {
 						: outcome === "retryable" || outcome === "not_sent"
 							? outcome
 							: undefined;
-		// D60, 3.6: main's relaunch is a new issue of the unlaunched Run's start, drawn after its unlaunch.
-		for (const { effect } of d.issued.slice(this.seenIssues))
+		const retried =
+			answer?.kind === "effect_outcome" && answer.outcome.tag === "retryable"
+				? d.bindings.find((item) => item.send.token === answer.token)?.send
+						.effect
+				: undefined;
+		if (d.provider === "opencode" && retried?.kind === "steer")
+			this.retryableSteers.add(retried.inputId);
+		// D60, 3.6: main's relaunch is a new issue of the unlaunched Run's start, drawn after its unlaunch;
+		// a direct steer's retry is main's fresh issue of the same input (692-698).
+		for (const { effect } of d.issued.slice(this.seenIssues)) {
 			if (effect.kind === "start" && this.unlaunched.delete(effect.runId))
 				hit("relaunch after unlaunch");
+			if (
+				effect.kind === "steer" &&
+				this.retryableSteers.delete(effect.inputId)
+			)
+				hit("direct re-send after a retryable steer");
+		}
 		this.seenIssues = d.issued.length;
 		if (unlaunchedRun !== undefined && trigger !== undefined) {
 			this.unlaunched.add(unlaunchedRun);

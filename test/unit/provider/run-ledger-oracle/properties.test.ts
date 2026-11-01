@@ -2497,6 +2497,7 @@ describe("generated D34 coverage", () => {
 		"unlaunch by not_sent", // 3.6 D50, G4 option B
 		"unlaunch by retirement", // 3.6 D50, L1
 		"relaunch after unlaunch", // 3.6 D50, 3.7
+		"direct re-send after a retryable steer", // 3.6 692-698
 		"Stop on a not-yet-delivered Run", // 3.6 D50
 		"Run now on a not-yet-delivered Run", // 3.6 D50
 		"End on a not-yet-delivered Run", // 3.6, 5.1
