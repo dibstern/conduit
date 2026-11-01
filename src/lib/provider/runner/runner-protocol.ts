@@ -398,12 +398,29 @@ export const runnerIdleFailure = (): SessionFailure => ({
 	retryable: true,
 });
 
+export type RunnerRefusalReason = "exiting" | "retiring" | "interrupted";
+
 export type RunnerDeliveryEvidence =
-	| {
-			readonly _tag: "Refused";
-			readonly reason: "exiting" | "retiring" | "interrupted";
-	  }
+	| { readonly _tag: "Refused"; readonly reason: RunnerRefusalReason }
 	| { readonly _tag: "NotSent" };
+
+/** The write gate, read with the frame's refusal reader in the write's synchronous step (4.4). */
+export type RunnerWriteGate = (
+	refusal: () => RunnerRefusalReason | undefined,
+) => boolean;
+
+/** The gate refused the write; it carries no delivery evidence (4.4). */
+export const RUNNER_WRITE_GATE_CLOSED = "runner_write_gate_closed";
+
+interface PendingReply {
+	reply: (reply: RunnerReply) => void;
+	retryOnIdle: boolean;
+	accepted: boolean;
+	commandAttempt?: number;
+	nativeResumeFallback?: boolean;
+	/** The host's refusal of this frame, read before its reply resolves. */
+	refused?: RunnerRefusalReason;
+}
 
 export interface RunnerCommandFailure extends SessionFailure {
 	readonly delivery?: RunnerDeliveryEvidence;
@@ -431,18 +448,13 @@ export function runnerDeliveryEvidence(
 
 /** Bidirectional NDJSON, including replies for server-owned output operations. */
 export class RunnerSocket {
-	private readonly pending = new Map<
-		string,
-		{
-			reply: (reply: RunnerReply) => void;
-			retryOnIdle: boolean;
-			accepted: boolean;
-			commandAttempt?: number;
-			nativeResumeFallback?: boolean;
-		}
-	>();
+	private readonly pending = new Map<string, PendingReply>();
 	private failure: SessionFailure | undefined;
-	private idleExiting = false;
+	/**
+	 * The connection's first idle-exit or `retiring` refusal (4.6 host fact):
+	 * a frame still pending and unaccepted when it was read is never accepted.
+	 */
+	private exitRead: "exiting" | "retiring" | undefined;
 	private peerTaggedConfigDir = false;
 	private peerAttachmentRefs = false;
 	private peerSettlesAnswers = false;
@@ -488,6 +500,7 @@ export class RunnerSocket {
 						code: "runner_command_refused",
 						delivery: { _tag: "Refused", reason: message.reason },
 					};
+					if (message.reason === "retiring") this.exitRead ??= "retiring";
 					message = { ...message, type: "command-reply", failure };
 				}
 				if (message.type === "command-reply" && message.failure) {
@@ -555,7 +568,7 @@ export class RunnerSocket {
 						message.commandId,
 						message.failure ? "failed" : "completed",
 					);
-				if (message.type === "idle-exit") this.idleExiting = true;
+				if (message.type === "idle-exit") this.exitRead ??= "exiting";
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
 					if (
@@ -612,6 +625,11 @@ export class RunnerSocket {
 							};
 							message = { ...message, failure };
 						}
+						const refusal =
+							message.type === "command-reply" && message.failure
+								? runnerDeliveryEvidence(message.failure)
+								: undefined;
+						if (refusal?._tag === "Refused") reply.refused = refusal.reason;
 						reply.reply(message);
 					} else onMessage(message);
 				} else onMessage(message);
@@ -696,7 +714,7 @@ export class RunnerSocket {
 		commandId: string,
 		command: SessionCommand,
 		attempt?: number,
-		canWrite?: () => boolean,
+		canWrite?: RunnerWriteGate,
 	): Effect.Effect<TurnResult | undefined, RunnerCommandFailure> {
 		if (command.type === "send-turn" && command.input.runId)
 			command = { ...command, runId: command.input.runId };
@@ -820,43 +838,16 @@ export class RunnerSocket {
 	private requestEffect<A>(
 		key: string,
 		message: RunnerMessage,
-		canWrite?: () => boolean,
+		canWrite?: RunnerWriteGate,
 	): Effect.Effect<A, RunnerCommandFailure> {
 		const connection = this;
 		return Effect.gen(function* () {
 			const result = yield* Deferred.make<A, RunnerCommandFailure>();
 			const dispatch = Effect.try({
 				try: () => {
-					if (canWrite && !canWrite()) {
-						const failure: RunnerCommandFailure = {
-							...runnerFailure(
-								"write runner frame",
-								"Transmission was released before write",
-							),
-							delivery: { _tag: "NotSent" },
-						};
-						throw failure;
-					}
 					const retryOnIdle =
 						message.type === "command" && message.command.type === "send-turn";
-					if (connection.idleExiting && retryOnIdle) {
-						const failure: RunnerCommandFailure = {
-							...runnerIdleFailure(),
-							delivery: { _tag: "NotSent" },
-						};
-						throw failure;
-					}
-					if (connection.failure || connection.socket.destroyed) {
-						const failure: RunnerCommandFailure = {
-							...(connection.failure ??
-								runnerFailure("runner socket", "Socket is closed")),
-							...(retryOnIdle
-								? { delivery: { _tag: "NotSent" as const } }
-								: {}),
-						};
-						throw failure;
-					}
-					connection.pending.set(key, {
+					const entry: PendingReply = {
 						retryOnIdle,
 						accepted: false,
 						...(message.type === "command"
@@ -887,7 +878,39 @@ export class RunnerSocket {
 									: Effect.succeed(reply.result as A),
 							);
 						},
-					});
+					};
+					// The gate is read in this synchronous step, with the write (4.4).
+					if (
+						canWrite &&
+						!canWrite(
+							() =>
+								entry.refused ??
+								(connection.pending.get(key) === entry && !entry.accepted
+									? connection.exitRead
+									: undefined),
+						)
+					) {
+						// No delivery evidence: the stop commit or coverage owns the release.
+						const failure: RunnerCommandFailure = {
+							...runnerFailure(
+								"write runner frame",
+								"The write gate is closed",
+							),
+							code: RUNNER_WRITE_GATE_CLOSED,
+						};
+						throw failure;
+					}
+					if (connection.failure || connection.socket.destroyed) {
+						const failure: RunnerCommandFailure = {
+							...(connection.failure ??
+								runnerFailure("runner socket", "Socket is closed")),
+							...(retryOnIdle
+								? { delivery: { _tag: "NotSent" as const } }
+								: {}),
+						};
+						throw failure;
+					}
+					connection.pending.set(key, entry);
 					connection.write(message);
 				},
 				catch: (cause) =>

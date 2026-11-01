@@ -94,6 +94,11 @@ const harness = Effect.gen(function* () {
 			return execute(query, params, transform);
 		});
 	yield* Effect.addFinalizer(() => Effect.sync(() => injected.mockRestore()));
+	// The stop commit's evidence read, by run: the release it carries.
+	const evidence = {
+		reads: 0,
+		releases: new Map<string, Pick<RunRelease, "reason" | "refusalReason">>(),
+	};
 	const record =
 		(action: string) =>
 		(retired: { readonly runnerId: string }): Effect.Effect<void> =>
@@ -113,11 +118,19 @@ const harness = Effect.gen(function* () {
 		},
 		holdRun: (sessionId, runId, commandId) =>
 			lifecycle.holdRun({ sessionId, runId, commandId }),
-		release: (input, stop) =>
+		release: (input) =>
 			lifecycle
-				.releaseRun(input, stop ?? (() => Effect.succeed(undefined)))
+				.releaseRun(input)
 				.pipe(Effect.mapError((cause) => runnerFailure("release run", cause))),
 		released: record("released"),
+		// Each commit attempt reads the evidence again (4.5, 6.3).
+		commitStop: (stopped, mutation) =>
+			Effect.suspend(() => {
+				evidence.reads++;
+				return lifecycle.commitStop(mutation, stopped.runnerId, (held) =>
+					evidence.releases.get(held.runId),
+				);
+			}),
 		committed: record("committed"),
 		shutdown: record("shutdown"),
 		evict: record("evict"),
@@ -140,6 +153,7 @@ const harness = Effect.gen(function* () {
 		actions,
 		live,
 		fault,
+		evidence,
 		retired,
 	};
 });
@@ -404,7 +418,7 @@ it.effect(
 );
 
 it.effect(
-	"F59 a release stops the serving row its transaction read, not the stale registry's",
+	"F59 a refusal stops the serving row SQL names, not the stale registry's, and that commit carries its release",
 	() =>
 		run(
 			Effect.gen(function* () {
@@ -429,15 +443,292 @@ it.effect(
 						commandId: "send",
 					}),
 				).toMatchObject({ _tag: "Held", runner: "runner" });
+				f.evidence.releases.set("run", {
+					reason: "Refused",
+					refusalReason: "exiting",
+				});
 				yield* f.reconciler.release(refusal);
+				// The stop commit carried the release, before the stop's cleanup.
 				expect(f.actions.slice(0, 2)).toEqual([
 					"released runner",
 					"committed runner",
 				]);
+				expect(f.actions.filter((a) => a === "released runner")).toHaveLength(
+					1,
+				);
 				expect(yield* f.retired("runner")).toEqual([
 					{ retired_at: 0, stop_reason: '{"_tag":"Idle"}', role: "serving" },
 				]);
 				expect(f.reconciler.serving("session")).toBeUndefined();
+			}),
+		),
+);
+
+// A refusal names its leaving runner's stop and never sets Committing itself
+// (4.5, 6.4): exiting raises Idle, retiring Exited, and a Committing stop is
+// joined. Its write fiber's release commits once that stop leaves Committing.
+it.effect(
+	"an exiting refusal raises the Idle stop, a racing Stop joins it, and the release commits after it",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				f.fault.down = true;
+				const releasing = yield* f.reconciler
+					.release(refusal)
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.reconciler.state("runner")._tag).toBe("Committing");
+				const stopping = yield* f.reconciler
+					.requestStop(target("runner", 123), { _tag: "Explicit" })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.fault.fences).toBe(1);
+				f.fault.down = false;
+				yield* TestClock.adjust("1 second");
+				yield* Fiber.join(releasing);
+				expect(yield* Fiber.join(stopping)).toBe("Requested");
+				expect(f.fault.fences).toBe(2);
+				expect(f.actions.slice(0, 2)).toEqual([
+					"committed runner",
+					"released runner",
+				]);
+				expect(yield* f.retired("runner")).toEqual([
+					{ retired_at: 1000, stop_reason: '{"_tag":"Idle"}', role: "serving" },
+				]);
+			}),
+		),
+);
+
+it.effect(
+	"a retiring refusal joins a Committing Stop and raises no second one",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				f.fault.down = true;
+				const stopping = yield* f.reconciler
+					.requestStop(target("runner", 123), { _tag: "Explicit" })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				const releasing = yield* f.reconciler
+					.release({ ...refusal, refusalReason: "retiring" })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.reconciler.state("runner")._tag).toBe("Committing");
+				expect(f.fault.fences).toBe(1);
+				f.fault.down = false;
+				yield* TestClock.adjust("1 second");
+				expect(yield* Fiber.join(stopping)).toBe("Requested");
+				yield* Fiber.join(releasing);
+				expect(f.fault.fences).toBe(2);
+				expect(f.actions.filter((a) => a === "released runner")).toHaveLength(
+					1,
+				);
+				expect(yield* f.retired("runner")).toEqual([
+					{
+						retired_at: 1000,
+						stop_reason: '{"_tag":"Explicit"}',
+						role: "serving",
+					},
+				]);
+			}),
+		),
+);
+
+it.effect(
+	"a retiring refusal on a Running runner raises an Exited stop whose commit carries the Refused release",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				const retiring = { ...refusal, refusalReason: "retiring" } as const;
+				f.evidence.releases.set("run", {
+					reason: "Refused",
+					refusalReason: "retiring",
+				});
+				yield* f.reconciler.release(retiring);
+				expect(f.actions.slice(0, 2)).toEqual([
+					"released runner",
+					"committed runner",
+				]);
+				// The write fiber's own release found the hold already ended.
+				expect(f.actions.filter((a) => a === "released runner")).toHaveLength(
+					1,
+				);
+				expect(yield* f.retired("runner")).toEqual([
+					{ retired_at: 0, stop_reason: '{"_tag":"Exited"}', role: "serving" },
+				]);
+				expect(
+					yield* f.sql<{
+						reason: string;
+					}>`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released' ORDER BY sequence LIMIT 1`,
+				).toEqual([{ reason: "Refused" }]);
+			}),
+		),
+);
+
+it.effect.each([
+	{ carried: true, events: 2 },
+	{ carried: false, events: 1 },
+])(
+	"an exiting refusal read after the Idle stop committed releases at once and raises no second stop (commit carried it: $carried)",
+	({ carried, events }) =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				if (carried)
+					f.evidence.releases.set("run", {
+						reason: "Refused",
+						refusalReason: "exiting",
+					});
+				expect(
+					yield* f.reconciler.requestStop(target("runner", 123), {
+						_tag: "Idle",
+					}),
+				).toBe("Requested");
+				const fences = f.fault.fences;
+				// Not forked: the release neither joins nor raises a stop.
+				yield* f.reconciler.release(refusal);
+				expect(f.fault.fences).toBe(fences);
+				expect(f.actions.filter((a) => a === "released runner")).toHaveLength(
+					1,
+				);
+				// A stale release still appends its event; the projection ignores it.
+				expect(
+					yield* f.sql<{
+						reason: string;
+					}>`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual(
+					Array.from({ length: events }, () => ({ reason: "Refused" })),
+				);
+				expect(yield* f.retired("runner")).toEqual([
+					{ retired_at: 0, stop_reason: '{"_tag":"Idle"}', role: "serving" },
+				]);
+			}),
+		),
+);
+
+it.effect(
+	"a refusal joining a Committing stop that is rejected commits its own release once the stop returns to Running",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				f.fault.down = true;
+				const stopping = yield* f.reconciler
+					.requestStop(target("runner", 123), { _tag: "Explicit" })
+					.pipe(Effect.exit, Effect.forkChild);
+				yield* TestClock.adjust(0);
+				const releasing = yield* f.reconciler
+					.release({ ...refusal, refusalReason: "retiring" })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.reconciler.state("runner")._tag).toBe("Committing");
+				// The retry decodes a corrupt row and rejects the stop.
+				yield* f.sql`UPDATE claude_runner_cursors SET member_snapshot = 'not json' WHERE runner_id = 'runner'`;
+				f.fault.down = false;
+				yield* TestClock.adjust("1 second");
+				yield* Fiber.join(stopping);
+				yield* Fiber.join(releasing);
+				expect(f.reconciler.state("runner")._tag).toBe("Running");
+				expect(f.fault.fences).toBe(2);
+				expect(f.actions).toEqual(["released runner"]);
+				expect(yield* f.retired("runner")).toMatchObject([
+					{ retired_at: null },
+				]);
+			}),
+		),
+);
+
+it.effect(
+	"an Idle stop whose commit faults reads its evidence again on the retry and carries what that read finds",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				f.fault.down = true;
+				const stopping = yield* f.reconciler
+					.requestStop(target("runner", 123), { _tag: "Idle" })
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
+				expect(f.evidence.reads).toBe(1);
+				expect(f.actions).toEqual([]);
+				// Held after the first read: the retry's read sees it unwritten.
+				f.evidence.releases.set("run", { reason: "NotSent" });
+				f.fault.down = false;
+				yield* TestClock.adjust("1 second");
+				expect(yield* Fiber.join(stopping)).toBe("Requested");
+				expect(f.evidence.reads).toBe(2);
+				expect(f.actions.slice(0, 2)).toEqual([
+					"released runner",
+					"committed runner",
+				]);
+				expect(
+					yield* f.sql<{
+						reason: string;
+					}>`SELECT json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ reason: "NotSent" }]);
 			}),
 		),
 );

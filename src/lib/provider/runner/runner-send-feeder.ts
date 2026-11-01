@@ -106,6 +106,19 @@ export const makeRunnerSendFeeder = (options: {
 	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 	/** The ledger's current hold for a run, set inside the hold's commit. */
 	readonly currentHold: (run: OwnerSend) => number | undefined;
+	/** The write gate (4.4), read in the write's synchronous step. */
+	readonly gate: {
+		readonly write: (
+			run: OwnerSend,
+			transmission: number,
+			take: () => boolean,
+			refusal: () => RunRelease["refusalReason"],
+		) => boolean;
+		readonly reopened: (
+			run: OwnerSend,
+			transmission: number,
+		) => Effect.Effect<boolean>;
+	};
 	readonly releases: PubSub.PubSub<RunRelease>;
 }) =>
 	Effect.gen(function* () {
@@ -249,11 +262,22 @@ export const makeRunnerSendFeeder = (options: {
 						const consumed = Deferred.makeUnsafe<void>();
 						const live = item.live;
 						const permission: WritePermission = {
-							current: () =>
-								options.currentHold(item.input) === hold.transmission,
+							write: (refusal) =>
+								options.gate.write(
+									item.input,
+									hold.transmission,
+									() => Deferred.doneUnsafe(consumed, Effect.void),
+									refusal,
+								),
 							consume: () =>
 								options.currentHold(item.input) === hold.transmission &&
 								Deferred.doneUnsafe(consumed, Effect.void),
+							// Coverage's take ends the wait: that write never happens.
+							reopened: Effect.suspend(() =>
+								Deferred.isDoneUnsafe(consumed)
+									? Effect.succeed(false)
+									: options.gate.reopened(item.input, hold.transmission),
+							),
 						};
 						runFork(
 							Effect.gen(function* () {
@@ -495,6 +519,7 @@ interface RunnerSendGateOptions {
 		| "clean"
 		| "closing"
 		| "currentHold"
+		| "gate"
 		| "holdRun"
 		| "park"
 		| "refuse"
@@ -883,7 +908,6 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 											transmission: held.transmission,
 											reason: "NotSent",
 										},
-										() => Effect.void,
 										evidence,
 									);
 								}),
@@ -932,6 +956,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 			park: stops.park,
 			transmitAdopted: transmitStoredOwner,
 			currentHold: stops.currentHold,
+			gate: stops.gate,
 			releases: stops.releases,
 		});
 

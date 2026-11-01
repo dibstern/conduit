@@ -1,5 +1,5 @@
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Fiber } from "effect";
+import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import {
@@ -43,132 +43,6 @@ const release: RunRelease = {
 };
 const layer = makePersistenceEffectLayer(":memory:", "project");
 
-// Refusal commits must preserve the continuation handle before revocation;
-// failed commits must leave both Stop and release eligible for a new attempt.
-it.effect(
-	"release preserves the live handle before Stop cleanup and joins racing Stops",
-	() =>
-		Effect.scoped(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const receipts = yield* makeRunnerReceiptStore(sql);
-				const entered = yield* Deferred.make<void>();
-				const proceed = yield* Deferred.make<void>();
-				const actions: string[] = [];
-				let commits = 0;
-				const reconciler = yield* makeRunnerStopReconciler({
-					receipts,
-					processTable: {
-						inspect: () => ({
-							state: "running",
-							startTime: "started",
-							pgid: 123,
-						}),
-						signal: () => undefined,
-					},
-					release: (_input, stop) =>
-						Effect.gen(function* () {
-							commits++;
-							yield* Deferred.succeed(entered, undefined);
-							yield* Deferred.await(proceed);
-							// The serving row this transaction read is the stopped runner.
-							const result = yield* sql.withTransaction(
-								stop ? stop(record) : Effect.succeed(undefined),
-							);
-							actions.push("commit");
-							return { released: true, stop: result };
-						}).pipe(Effect.orDie),
-					released: () =>
-						Effect.sync(() => {
-							actions.push("requeue");
-						}),
-					committed: () =>
-						Effect.sync(() => {
-							actions.push("cleanup");
-						}),
-					shutdown: () => Effect.void,
-					evict: () => Effect.void,
-					prune: () => Effect.void,
-					notice: () => Effect.succeed(false),
-				});
-				yield* reconciler.register(
-					"runner",
-					{ sessionId: "session", pid: 123, startTime: "started" },
-					"serving",
-				);
-				const releasing = yield* reconciler
-					.release(release)
-					.pipe(Effect.forkChild);
-				yield* Deferred.await(entered);
-				expect(reconciler.state("runner")._tag).toBe("Committing");
-				const stopping = yield* reconciler
-					.requestStop(record)
-					.pipe(Effect.forkChild);
-				yield* Effect.yieldNow;
-				yield* Deferred.succeed(proceed, undefined);
-				yield* Fiber.join(releasing);
-				yield* Fiber.join(stopping);
-				expect(commits).toBe(1);
-				expect(actions.slice(0, 3)).toEqual(["commit", "requeue", "cleanup"]);
-				expect(reconciler.serving("session")).toBeUndefined();
-				expect((yield* receipts.retirements()).rows).toMatchObject([
-					{ stopReason: '{"_tag":"Idle"}' },
-				]);
-			}),
-		).pipe(Effect.provide(layer)),
-);
-
-it.effect(
-	"a release that finds no serving row clears Committing and wakes a racing explicit Stop",
-	() =>
-		Effect.scoped(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const receipts = yield* makeRunnerReceiptStore(sql);
-				const entered = yield* Deferred.make<void>();
-				const proceed = yield* Deferred.make<void>();
-				const reconciler = yield* makeRunnerStopReconciler({
-					receipts,
-					processTable: {
-						inspect: () => ({ state: "gone" }),
-						signal: () => undefined,
-					},
-					release: () =>
-						Deferred.succeed(entered, undefined).pipe(
-							Effect.andThen(Deferred.await(proceed)),
-							Effect.as({ released: true }),
-						),
-					released: () => Effect.void,
-					committed: () => Effect.void,
-					shutdown: () => Effect.void,
-					evict: () => Effect.void,
-					prune: () => Effect.void,
-					notice: () => Effect.succeed(false),
-				});
-				yield* reconciler.register(
-					"runner",
-					{ sessionId: "session", pid: 123, startTime: "started" },
-					"serving",
-				);
-				const releasing = yield* reconciler
-					.release(release)
-					.pipe(Effect.forkChild);
-				yield* Deferred.await(entered);
-				const stopping = yield* reconciler
-					.requestStop(record)
-					.pipe(Effect.forkChild);
-				yield* Effect.yieldNow;
-				yield* Deferred.succeed(proceed, undefined);
-				yield* Fiber.join(releasing);
-				yield* Fiber.join(stopping);
-				expect((yield* receipts.retirements()).rows).toMatchObject([
-					{ stopReason: '{"_tag":"Explicit"}' },
-				]);
-				expect(reconciler.state("runner")._tag).not.toBe("Committing");
-			}),
-		).pipe(Effect.provide(layer)),
-);
-
 it.effect(
 	"a stale release never requeues the send or stops its current serving runner",
 	() =>
@@ -211,7 +85,8 @@ it.effect(
 					{ sessionId: "session", pid: 123, startTime: "started" },
 					"serving",
 				);
-				yield* reconciler.release(release);
+				// An interrupted refusal names no leaving runner.
+				yield* reconciler.release({ ...release, refusalReason: "interrupted" });
 				expect(actions).toEqual([]);
 				expect(reconciler.state("runner")).toEqual({ _tag: "Running" });
 				expect(reconciler.serving("session")).toBe("runner");
@@ -258,10 +133,7 @@ for (const cached of ["missing", "candidate"])
 							}),
 							signal: () => undefined,
 						},
-						release: (input, stop) =>
-							lifecycle
-								.releaseRun(input, stop ?? (() => Effect.succeed(undefined)))
-								.pipe(Effect.orDie),
+						release: (input) => lifecycle.releaseRun(input).pipe(Effect.orDie),
 						released: () => Effect.void,
 						committed: () => Effect.void,
 						shutdown: () => Effect.void,

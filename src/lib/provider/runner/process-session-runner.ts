@@ -370,18 +370,16 @@ export const makeProcessSessionRunner = (
 								),
 						}
 					: {}),
-				release: (input, stop) =>
+				release: (input) =>
 					Effect.gen(function* () {
 						if (!sql) return { released: true };
 						const { lifecycle } = yield* sessionCommit(input.sessionId);
-						return yield* lifecycle
-							.releaseRun(input, stop ?? (() => Effect.succeed(undefined)))
-							.pipe(
-								Effect.mapError((cause) => ({
-									...runnerFailure("release runner hold", cause),
-									cause,
-								})),
-							);
+						return yield* lifecycle.releaseRun(input).pipe(
+							Effect.mapError((cause) => ({
+								...runnerFailure("release runner hold", cause),
+								cause,
+							})),
+						);
 					}),
 				released: (input) =>
 					Effect.gen(function* () {

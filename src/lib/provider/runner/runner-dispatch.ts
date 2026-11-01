@@ -22,7 +22,11 @@ import type {
 } from "./process-runner-types.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import * as Entry from "./runner-entry-lifecycle.js";
-import { runnerBuildId, runnerFailure } from "./runner-protocol.js";
+import {
+	RUNNER_WRITE_GATE_CLOSED,
+	runnerBuildId,
+	runnerFailure,
+} from "./runner-protocol.js";
 import { currentRunnerOutput } from "./runner-receipts.js";
 import type { makeRunnerRetirement } from "./runner-retirement.js";
 import type { makeRunnerSends, SendBinding } from "./runner-sends.js";
@@ -485,9 +489,12 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 							existing ||
 							(command.type !== "send-turn" && command.type !== "pre-warm")
 						) {
+							// A held frame goes to the write, where the write gate
+							// (4.4) or the host's refusal (4.6) decides.
 							const draining =
 								command.type === "send-turn" &&
 								existing !== undefined &&
+								!held &&
 								Entry.mustDrainBeforeSend(existing.lifecycle);
 							if (
 								existing &&
@@ -878,21 +885,24 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 						sends.route(command.sinkId)?.sendScope !== send))
 			)
 				return;
-			if (command.type === "send-turn" && permission && !permission.consume())
-				return yield* Effect.fail({
-					...runnerFailure(
-						"send-turn",
-						"Transmission was released before write",
-					),
-					delivery: { _tag: "NotSent" },
-				});
-			const execution = connection.commandEffect(
+			const write = connection.commandEffect(
 				commandId,
 				payload,
 				command.type === "send-turn" ? command.input.commandAttempt : undefined,
-				permission?.current,
+				permission?.write,
 			);
-			const result = yield* execution;
+			// The write fiber waits while the gate is closed: it writes after a
+			// return to Running, or ends without writing once released (4.4).
+			// That end carries no delivery evidence; the release is its outcome.
+			let result = yield* Effect.result(write);
+			while (
+				permission &&
+				result._tag === "Failure" &&
+				result.failure.code === RUNNER_WRITE_GATE_CLOSED &&
+				(yield* permission.reopened)
+			)
+				result = yield* Effect.result(write);
+			if (result._tag === "Failure") return yield* Effect.fail(result.failure);
 			// Legacy resolve commands acknowledge the answer without releasing
 			// canUseTool. Complete that handshake inside the outbox attempt, using
 			// its original reply rather than the runner's redacted notification.
@@ -915,7 +925,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 					});
 				}
 			}
-			return result;
+			return result.success;
 		}).pipe(
 			Effect.ensuring(
 				Effect.sync(() => {

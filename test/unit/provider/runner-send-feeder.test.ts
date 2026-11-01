@@ -31,6 +31,7 @@ const makeFeeder = (
 		| "park"
 		| "transmitAdopted"
 		| "currentHold"
+		| "gate"
 		| "releases"
 	> & {
 		readonly hold: (
@@ -73,6 +74,13 @@ const makeFeeder = (
 			start: (input) =>
 				options.start(input).pipe(Effect.as("Started" as const)),
 			currentHold: (run) => current.get(key(run)),
+			// The runner's stop is always Running here.
+			gate: {
+				write: (run, transmission, take) =>
+					current.get(key(run)) === transmission && take(),
+				reopened: (run, transmission) =>
+					Effect.sync(() => current.get(key(run)) === transmission),
+			},
 			releases,
 		});
 		return {
@@ -116,8 +124,9 @@ it.effect(
 							yield* Deferred.succeed(entered, undefined);
 							yield* Deferred.await(unblock);
 						}
-						if (permission.consume()) writes.push(held.transmission);
-						expect(permission.consume()).toBe(false);
+						if (permission.write(() => undefined))
+							writes.push(held.transmission);
+						expect(permission.write(() => undefined)).toBe(false);
 						return undefined;
 					}),
 				)
@@ -514,6 +523,11 @@ for (const prerequisite of ["Cleaning", "predecessor"] as const)
 						}),
 					transmitAdopted: () => Effect.die("Unexpected adopted transmission"),
 					currentHold: () => (holds >= 4 ? 1 : undefined),
+					gate: {
+						write: (_run, transmission, take) =>
+							holds >= 4 && transmission === 1 && take(),
+						reopened: () => Effect.succeed(false),
+					},
 					releases: yield* PubSub.unbounded<RunRelease>(),
 				});
 				const sending = yield* feeder
@@ -521,7 +535,8 @@ for (const prerequisite of ["Cleaning", "predecessor"] as const)
 						{ sessionId: "s", runId: "r", commandId: "c" },
 						(held, permission) =>
 							Effect.sync(() => {
-								if (permission.consume()) writes.push(held.transmission);
+								if (permission.write(() => undefined))
+									writes.push(held.transmission);
 								return undefined;
 							}),
 					)
@@ -919,7 +934,7 @@ it.effect(
 						Effect.gen(function* () {
 							yield* Deferred.succeed(entered, undefined);
 							yield* Deferred.await(unblock);
-							if (permission.consume()) writes++;
+							if (permission.write(() => undefined)) writes++;
 							return result;
 						}),
 				)
@@ -970,7 +985,7 @@ it.effect("the coverage read stops once the write permission is taken", () =>
 				{ sessionId: "s", runId: "r", commandId: "c" },
 				(_held, permission) =>
 					Effect.gen(function* () {
-						expect(permission.consume()).toBe(true);
+						expect(permission.write(() => undefined)).toBe(true);
 						yield* Deferred.succeed(written, undefined);
 						return yield* Effect.never;
 					}),

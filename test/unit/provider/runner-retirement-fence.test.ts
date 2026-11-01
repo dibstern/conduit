@@ -82,6 +82,7 @@ import {
 	type RunnerCommandFailure,
 	type RunnerHello,
 	type RunnerSocket,
+	type RunnerWriteGate,
 	runnerBuildId,
 	runnerFailure,
 	runnerSinkId,
@@ -121,6 +122,7 @@ import {
 	makeRunnerAdmission,
 	reserveTestRun,
 } from "../../helpers/runner-provider-admission.js";
+import { gatedWrite } from "../../helpers/runner-write-gate.js";
 
 const spawned = vi.hoisted(() => ({
 	spawn: vi.fn(),
@@ -239,40 +241,44 @@ const retirementFixture = (
 							id: string,
 							command: SessionCommand,
 							attempt: number,
+							canWrite?: RunnerWriteGate,
 						) =>
-							Effect.suspend<TurnResult | undefined, SessionFailure, never>(
-								() => {
-									commands.push({
-										runnerId: options.runnerId,
-										type: command.type,
-									});
-									if (command.type === "send-turn" && replaySend.execute)
-										return replaySend.execute(id, command, attempt);
-									return command.type === "send-turn" &&
-										options.runnerId === runnerId
-										? journal.execute(
-												id,
-												attempt ?? 0,
-												command.input.nativeResumeFallback === true,
-												Deferred.succeed(sending, undefined).pipe(
-													Effect.andThen(Deferred.await(pending)),
-												),
-											)
-										: command.type === "send-turn"
+							gatedWrite(
+								canWrite,
+								Effect.suspend<TurnResult | undefined, SessionFailure, never>(
+									() => {
+										commands.push({
+											runnerId: options.runnerId,
+											type: command.type,
+										});
+										if (command.type === "send-turn" && replaySend.execute)
+											return replaySend.execute(id, command, attempt);
+										return command.type === "send-turn" &&
+											options.runnerId === runnerId
 											? journal.execute(
 													id,
 													attempt ?? 0,
 													command.input.nativeResumeFallback === true,
-													Effect.succeed({
-														status: "completed" as const,
-														cost: 0,
-														tokens: { input: 0, output: 0 },
-														durationMs: 0,
-														providerStateUpdates: [],
-													}),
+													Deferred.succeed(sending, undefined).pipe(
+														Effect.andThen(Deferred.await(pending)),
+													),
 												)
-											: Effect.succeed(undefined);
-								},
+											: command.type === "send-turn"
+												? journal.execute(
+														id,
+														attempt ?? 0,
+														command.input.nativeResumeFallback === true,
+														Effect.succeed({
+															status: "completed" as const,
+															cost: 0,
+															tokens: { input: 0, output: 0 },
+															durationMs: 0,
+															providerStateUpdates: [],
+														}),
+													)
+												: Effect.succeed(undefined);
+									},
+								),
 							),
 						retireEffect: () => Effect.succeed(true),
 						destroy: () => destroyed(options.runnerId),
@@ -6312,13 +6318,17 @@ for (const failed of ["receipt", "ownership SQL"] as const) {
 						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
 					);
 					yield* TestClock.adjust("4 seconds");
+					if (failed === "ownership SQL") {
+						// The stop commit reads the runner's held runs (4.5), so it
+						// retries the store fault until the table returns.
+						yield* f.sql`ALTER TABLE unavailable_provider_runs RENAME TO provider_runs`;
+						yield* TestClock.adjust("30 seconds");
+					}
 					yield* Fiber.await(stopping);
 					expect(
 						yield* f.sql`SELECT attachment_id FROM claude_runner_cursors WHERE runner_id = ${old.runnerId} AND retired_at IS NOT NULL`,
 					).toEqual([{ attachment_id: "" }]);
 
-					if (failed === "ownership SQL")
-						yield* f.sql`ALTER TABLE unavailable_provider_runs RENAME TO provider_runs`;
 					vi.mocked(f.driver.connect).mockClear();
 					const restarted = yield* makeProcessSessionRunner(
 						{
