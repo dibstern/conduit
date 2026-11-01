@@ -75,6 +75,7 @@ import {
 	type ProviderSideEffectReactorOptions,
 } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import { makeInProcessSessionRunner } from "../../../src/lib/provider/runner/in-process-session-runner.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
@@ -90,6 +91,7 @@ import {
 	runnerBuildId,
 	runnerFailure,
 	runnerSinkId,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
 	makeRunnerProviderInstance,
@@ -208,9 +210,8 @@ const retirementFixture = (
 		const sending = yield* Deferred.make<void>();
 		const replaySend: {
 			execute?: (
-				commandId: string,
+				token: SendToken,
 				command: Extract<SessionCommand, { type: "send-turn" }>,
-				attempt: number,
 			) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 		} = {};
 		const destroyed = vi.fn();
@@ -241,10 +242,10 @@ const retirementFixture = (
 					}
 					const connection = {
 						closed: false,
+						// A send's frame id is its Send Token.
 						commandEffect: (
-							id: string,
+							id: SendToken,
 							command: SessionCommand,
-							attempt: number,
 							canWrite?: RunnerWriteGate,
 						) =>
 							gatedWrite(
@@ -256,13 +257,11 @@ const retirementFixture = (
 											type: command.type,
 										});
 										if (command.type === "send-turn" && replaySend.execute)
-											return replaySend.execute(id, command, attempt);
+											return replaySend.execute(id, command);
 										return command.type === "send-turn" &&
 											options.runnerId === runnerId
 											? journal.execute(
 													id,
-													attempt ?? 0,
-													command.input.nativeResumeFallback === true,
 													Deferred.succeed(sending, undefined).pipe(
 														Effect.andThen(Deferred.await(pending)),
 													),
@@ -270,8 +269,6 @@ const retirementFixture = (
 											: command.type === "send-turn"
 												? journal.execute(
 														id,
-														attempt ?? 0,
-														command.input.nativeResumeFallback === true,
 														Effect.succeed({
 															status: "completed" as const,
 															cost: 0,
@@ -298,15 +295,13 @@ const retirementFixture = (
 							protocolVersion: 1,
 							buildId: runnerBuildId(),
 							stampsRunIds: true,
-							crossAttemptNativeResumeFallback: true,
 							runnerId: options.runnerId,
 							sessionId: "s",
 							pid: options.pid ?? 0,
 							bindings:
 								options.runnerId === runnerId
 									? retainedSinkIds.map((sinkId) => ({
-											commandId: sinkId,
-											attempt: 0,
+											token: sendToken("tx", sinkId, 0),
 											sinkId,
 											sessionId: "s",
 											released: false,
@@ -316,9 +311,7 @@ const retirementFixture = (
 							sendAnswers:
 								options.runnerId === runnerId
 									? retainedSinkIds.map((commandId) => ({
-											commandId,
-											attempt: 0,
-											nativeResumeFallback: false,
+											token: sendToken("tx", commandId, 0),
 											status: "running" as const,
 										}))
 									: [],
@@ -1107,7 +1100,7 @@ const s7Fixture = (
 						const retained = transform(hello);
 						Object.defineProperty(connection, "retainedSends", {
 							configurable: true,
-							get: () => retained.sendCommands,
+							get: () => retained.sendTokens,
 						});
 						return f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(!isLegacyRunner(retained))} WHERE runner_id = ${options.runnerId}`.pipe(
 							Effect.orDie,
@@ -1191,6 +1184,12 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 					durationMs: 0,
 					providerStateUpdates: [],
 				} satisfies TurnResult;
+				// A held send's token is its hold's transmission, else its claim's.
+				const token = sendToken(
+					answer === "uncertain" ? "hold" : "tx",
+					"answer",
+					1,
+				);
 				yield* f.hello((hello) => ({
 					...hello,
 					sendJournalAnswers: true,
@@ -1199,9 +1198,7 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 							? []
 							: [
 									{
-										commandId: "answer",
-										attempt: 1,
-										nativeResumeFallback: false,
+										token,
 										status: answer,
 										...(answer === "finished" ? { result } : {}),
 									},
@@ -1210,15 +1207,14 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 						answer === "running"
 							? [
 									{
-										commandId: "answer",
-										attempt: 1,
+										token,
 										sessionId: "s",
 										sinkId: runnerSinkId("answer", 1),
 										released: false,
 									},
 								]
 							: [],
-					sendCommands: [],
+					sendTokens: answer === "absent" ? [] : [token],
 					completedCommands: [],
 				}));
 				yield* f.recover;
@@ -1228,9 +1224,7 @@ for (const answer of ["running", "finished", "uncertain", "absent"] as const)
 						return yield* Effect.die("missing answer reply handler");
 					const reply = {
 						type: "command-reply",
-						commandId: "answer",
-						attempt: 1,
-						nativeResumeFallback: false,
+						commandId: token,
 						result,
 					} as const;
 					yield* attachment.onCommandReply(reply);
@@ -1300,36 +1294,17 @@ for (const status of ["accepted", "joined", "indeterminate"] as const)
 							providerStateUpdates: [],
 						};
 						const sinkId = runnerSinkId("native-held", 1, fallback);
-						yield* f.hello(
-							({
-								crossAttemptNativeResumeFallback: _capability,
-								...hello
-							}) => ({
-								...hello,
-								sendCommands: [],
-								bindings: [
-									{
-										commandId: "native-held",
-										attempt: 1,
-										nativeResumeFallback: fallback,
-										sessionId: "s",
-										sinkId,
-										released: false,
-									},
-								],
-								sendJournalAnswers: true,
-								sendAnswers: [
-									{
-										status: "finished",
-										attempt: 1,
-										nativeResumeFallback: fallback,
-										commandId: "native-held",
-
-										result,
-									},
-								],
-							}),
-						);
+						// The send's mode lives on its payload; its token is the claim's.
+						if (fallback)
+							yield* f.sql`UPDATE provider_command_outbox SET payload_json = json_set(payload_json, '$.nativeResumeFallback', json('true')) WHERE command_id = 'native-held'`;
+						const token = sendToken("tx", "native-held", 1);
+						yield* f.hello((hello) => ({
+							...hello,
+							sendTokens: [],
+							bindings: [{ token, sessionId: "s", sinkId, released: false }],
+							sendJournalAnswers: true,
+							sendAnswers: [{ status: "finished", token, result }],
+						}));
 						yield* f.recover;
 						expect(f.sendHandles).toHaveLength(1);
 						expect(f.account).toEqual({ acquired: 1, released: 0 });
@@ -1420,19 +1395,16 @@ it.effect(
 					"s",
 					"cursor",
 				);
-				yield* journal.execute(
-					"attach-retry",
-					1,
-					false,
-					Effect.succeed(result),
-				);
+				// An older build keys a send by the frame id it was sent, attempt 0.
+				const token = sendToken("tx", "attach-retry", 1);
+				yield* journal.execute(token, 0, false, Effect.succeed(result));
 				const replayed = vi.fn();
-				f.replaySend.execute = (id, command, attempt) =>
+				f.replaySend.execute = (id, command) =>
 					Effect.sync(() => replayed()).pipe(
 						Effect.andThen(
 							journal.execute(
 								id,
-								attempt,
+								0,
 								command.input.nativeResumeFallback === true,
 								Effect.die("cached retry key must not execute"),
 							),
@@ -1446,7 +1418,7 @@ it.effect(
 					}) => ({
 						...hello,
 						bindings: [],
-						sendCommands: journal.commands,
+						sendTokens: [token],
 						completedCommands: [],
 					}),
 				);
@@ -1522,11 +1494,12 @@ it.effect(
 					"s",
 					"cursor",
 				);
-				yield* journal.execute("main-race", 1, false, Effect.succeed(result));
-				f.replaySend.execute = (id, command, attempt) =>
+				const token = sendToken("tx", "main-race", 1);
+				yield* journal.execute(token, 0, false, Effect.succeed(result));
+				f.replaySend.execute = (id, command) =>
 					journal.execute(
 						id,
-						attempt,
+						0,
 						command.input.nativeResumeFallback === true,
 						Effect.die("cached main key must not execute"),
 					);
@@ -1538,7 +1511,7 @@ it.effect(
 					}) => ({
 						...hello,
 						bindings: [],
-						sendCommands: journal.commands,
+						sendTokens: [token],
 						completedCommands: [],
 					}),
 				);
@@ -1614,24 +1587,18 @@ for (const binding of ["missing", "released"] as const)
 					const f = yield* s7Fixture();
 					yield* f.seed("owned-answer");
 					yield* f.seed("owned-next", 2, 0);
+					const token = sendToken("tx", "owned-answer", 1);
 					yield* f.hello((hello) => ({
 						...hello,
 						sendJournalAnswers: true,
-						sendAnswers: [
-							{
-								commandId: "owned-answer",
-								attempt: 1,
-								nativeResumeFallback: false,
-								status: "running",
-							},
-						],
+						sendTokens: [token],
+						sendAnswers: [{ token, status: "running" }],
 						bindings:
 							binding === "missing"
 								? []
 								: [
 										{
-											commandId: "owned-answer",
-											attempt: 1,
+											token,
 											sinkId: runnerSinkId("owned-answer", 1),
 											sessionId: "s",
 											released: true,
@@ -1660,9 +1627,7 @@ for (const binding of ["missing", "released"] as const)
 						return yield* Effect.die("missing owned-answer attachment");
 					yield* attachment.onCommandReply({
 						type: "command-reply",
-						commandId: "owned-answer",
-						attempt: 1,
-						nativeResumeFallback: false,
+						commandId: token,
 						result,
 					});
 					yield* f.reactor.drain();
@@ -1679,6 +1644,8 @@ for (const scenario of [
 	"finished inherited sendCommands",
 	"unfinished inherited sendCommands",
 	"replayed cached key",
+	// The claim's send went out before main held the run: it keeps its claim's token.
+	"replayed cached key once held",
 	"input-keyed live retry",
 	"started without dispatch",
 	"transmitted before start without dispatch",
@@ -1706,7 +1673,12 @@ for (const scenario of [
 						scenario === "input-keyed live retry"
 							? 2
 							: 1;
-					yield* f.seed("main-command", 1, attempt);
+					yield* f.seed(
+						"main-command",
+						1,
+						attempt,
+						scenario === "replayed cached key once held" ? "held" : "legacy",
+					);
 					if (scenario.endsWith("without dispatch")) {
 						yield* f.sql`DELETE FROM events WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:main-command'`;
 						yield* f.sql`UPDATE provider_runs SET runner_id = NULL, held_transmission = NULL,
@@ -1742,26 +1714,29 @@ for (const scenario of [
 					};
 					const liveResult = yield* Deferred.make<TurnResult>();
 					const begun = yield* Deferred.make<void>();
-					const active =
+					const live =
 						scenario === "input-keyed live retry" ||
-						scenario === "unfinished inherited sendCommands"
-							? yield* original
-									.execute(
-										"main-command",
-										attempt,
-										false,
-										Deferred.succeed(begun, undefined).pipe(
-											Effect.andThen(Deferred.await(liveResult)),
-										),
-									)
-									.pipe(Effect.forkChild)
-							: undefined;
+						scenario === "unfinished inherited sendCommands";
+					// An older build keys a send by the frame id it was sent, attempt 0.
+					const executed = sendToken("tx", "main-command", live ? attempt : 1);
+					const active = live
+						? yield* original
+								.execute(
+									executed,
+									0,
+									false,
+									Deferred.succeed(begun, undefined).pipe(
+										Effect.andThen(Deferred.await(liveResult)),
+									),
+								)
+								.pipe(Effect.forkChild)
+						: undefined;
 					if (active) yield* Deferred.await(begun);
 					else
 						yield* Effect.result(
 							original.execute(
-								"main-command",
-								1,
+								executed,
+								0,
 								false,
 								scenario === "finished inherited sendCommands"
 									? Effect.fail(failure)
@@ -1772,16 +1747,14 @@ for (const scenario of [
 					const replayed = yield* Deferred.make<void>();
 					const deliveries = vi.fn();
 					const keys: Array<{
-						commandId: string;
-						attempt: number;
+						token: SendToken;
 						fallback: boolean;
 						sinkId: string;
 					}> = [];
-					f.replaySend.execute = (commandId, command, keyAttempt) =>
+					f.replaySend.execute = (token, command) =>
 						Effect.gen(function* () {
 							keys.push({
-								commandId,
-								attempt: keyAttempt,
+								token,
 								fallback: command.input.nativeResumeFallback === true,
 								sinkId: command.sinkId,
 							});
@@ -1792,8 +1765,8 @@ for (const scenario of [
 							}
 							return yield* retained
 								.execute(
-									commandId,
-									keyAttempt,
+									token,
+									0,
 									command.input.nativeResumeFallback === true,
 									Effect.sync(() => deliveries()).pipe(Effect.as(result)),
 								)
@@ -1808,28 +1781,27 @@ for (const scenario of [
 							...hello
 						}) => ({
 							...hello,
-							bindings:
-								scenario === "replayed cached key"
-									? []
-									: [
-											{
-												commandId: "main-command",
-												sessionId: "s",
-												sinkId: runnerSinkId("main-command", 1),
-												released: true,
-											},
-											...(scenario === "input-keyed live retry"
-												? [
-														{
-															commandId: "main-command",
-															sessionId: "s",
-															sinkId: runnerSinkId(inputId, 2),
-															released: false,
-														},
-													]
-												: []),
-										],
-							sendCommands: retained.commands,
+							bindings: scenario.startsWith("replayed cached key")
+								? []
+								: [
+										{
+											token: sendToken("tx", "main-command", 1),
+											sessionId: "s",
+											sinkId: runnerSinkId("main-command", 1),
+											released: true,
+										},
+										...(scenario === "input-keyed live retry"
+											? [
+													{
+														token: sendToken("tx", "main-command", 2),
+														sessionId: "s",
+														sinkId: runnerSinkId(inputId, 2),
+														released: false,
+													},
+												]
+											: []),
+									],
+							sendTokens: [executed],
 							completedCommands:
 								scenario === "finished inherited sendCommands" ||
 								scenario === "unfinished inherited sendCommands" ||
@@ -1843,8 +1815,7 @@ for (const scenario of [
 					if (scenario === "input-keyed live retry") {
 						expect(keys).toEqual([
 							{
-								commandId: "main-command",
-								attempt: 2,
+								token: sendToken("tx", "main-command", 2),
 								fallback: false,
 								sinkId: runnerSinkId(inputId, 2),
 							},
@@ -1873,8 +1844,7 @@ for (const scenario of [
 					} else {
 						expect(keys).toEqual([
 							{
-								commandId: "main-command",
-								attempt,
+								token: sendToken("tx", "main-command", attempt),
 								fallback: false,
 								sinkId: runnerSinkId("main-command", attempt),
 							},
@@ -1899,7 +1869,7 @@ for (const scenario of [
 						expect(
 							yield* f.sql`SELECT error_code FROM provider_command_outbox WHERE command_id='main-command'`,
 						).toEqual([{ error_code: "runner_send_uncertain" }]);
-					if (scenario === "replayed cached key") {
+					if (scenario.startsWith("replayed cached key")) {
 						expect(f.sendHandles).toHaveLength(1);
 						expect(f.sendHandles.map((send) => send.assignment._tag)).toEqual([
 							"Closed",
@@ -1995,25 +1965,22 @@ for (const current of [true, false])
 							durationMs: 0,
 							providerStateUpdates: [],
 						} satisfies TurnResult;
-						yield* journal.execute(
-							"fallback-answer",
-							1,
-							false,
-							Effect.succeed(rejection),
-						);
+						// The claim's token; an older build keys it by frame id, attempt 0.
+						const token = sendToken("tx", "fallback-answer", 1);
+						yield* journal instanceof RunnerSendJournal
+							? journal.execute(token, Effect.succeed(rejection))
+							: journal.execute(token, 0, false, Effect.succeed(rejection));
 						const delivered = vi.fn();
-						const keys: Array<{ attempt: number; fallback: boolean }> = [];
-						f.replaySend.execute = (commandId, command, attempt) => {
-							keys.push({
-								attempt,
-								fallback: command.input.nativeResumeFallback === true,
-							});
-							return journal.execute(
-								commandId,
-								attempt,
-								command.input.nativeResumeFallback === true,
-								Effect.sync(() => delivered()).pipe(Effect.as(result)),
+						const keys: Array<{ token: SendToken; fallback: boolean }> = [];
+						f.replaySend.execute = (id, command) => {
+							const fallback = command.input.nativeResumeFallback === true;
+							keys.push({ token: id, fallback });
+							const delivery = Effect.sync(() => delivered()).pipe(
+								Effect.as(result),
 							);
+							return journal instanceof RunnerSendJournal
+								? journal.execute(id, delivery)
+								: journal.execute(id, 0, fallback, delivery);
 						};
 						yield* f.hello(
 							({
@@ -2027,16 +1994,14 @@ for (const current of [true, false])
 											sendJournalAnswers: true as const,
 											sendAnswers: [
 												{
-													commandId: "fallback-answer",
-													attempt: 1,
-													nativeResumeFallback: false,
+													token,
 													status: "finished" as const,
 													result: rejection,
 												},
 											],
 										}
 									: {
-											sendCommands: journal.commands,
+											sendTokens: [token],
 											completedCommands: [
 												{ commandId: "fallback-answer", result: rejection },
 											],
@@ -2048,28 +2013,32 @@ for (const current of [true, false])
 						const send = vi
 							.spyOn(f.instance, "sendTurnEffect")
 							.mockImplementation((input) =>
-								journal
-									.execute(
-										input.inputId,
-										input.commandAttempt ?? 0,
-										input.nativeResumeFallback === true,
-										Effect.sync(() => delivered()).pipe(Effect.as(result)),
-									)
-									.pipe(
-										Effect.flatMap((value) =>
-											value
-												? f.reply(input, value)
-												: Effect.die("missing fallback result"),
-										),
-										Effect.mapError(
-											(cause) =>
-												new ProviderInstanceFailure({
-													providerId: "claude",
-													operation: "send-turn",
-													cause,
-												}),
-										),
+								(journal instanceof RunnerSendJournal
+									? journal.execute(
+											sendToken("tx", input.inputId, input.commandAttempt ?? 0),
+											Effect.sync(() => delivered()).pipe(Effect.as(result)),
+										)
+									: journal.execute(
+											input.inputId,
+											input.commandAttempt ?? 0,
+											input.nativeResumeFallback === true,
+											Effect.sync(() => delivered()).pipe(Effect.as(result)),
+										)
+								).pipe(
+									Effect.flatMap((value) =>
+										value
+											? f.reply(input, value)
+											: Effect.die("missing fallback result"),
 									),
+									Effect.mapError(
+										(cause) =>
+											new ProviderInstanceFailure({
+												providerId: "claude",
+												operation: "send-turn",
+												cause,
+											}),
+									),
+								),
 							);
 						yield* TestClock.adjust(0);
 						yield* f.reactor.drain();
@@ -2099,10 +2068,10 @@ for (const current of [true, false])
 						else
 							expect(keys).toEqual(
 								markerCommitted
-									? [{ attempt: 1, fallback: true }]
+									? [{ token, fallback: true }]
 									: [
-											{ attempt: 1, fallback: false },
-											{ attempt: 1, fallback: true },
+											{ token, fallback: false },
+											{ token, fallback: true },
 										],
 							);
 						expect(
@@ -2113,7 +2082,7 @@ for (const current of [true, false])
 		);
 
 it.effect(
-	"S10 an adopted fallback ignores the same-attempt primary reply and settles its own reply once",
+	"S10 an adopted fallback ignores an earlier transmission's reply and settles its own reply once",
 	() =>
 		runRetirement(
 			Effect.gen(function* () {
@@ -2122,22 +2091,16 @@ it.effect(
 				yield* f.seed("held-fallback-next", 2, 0);
 				yield* f.sql`UPDATE provider_command_outbox SET payload_json=json_set(payload_json,'$.nativeResumeFallback',json('true')) WHERE command_id='held-fallback'`;
 				const sinkId = runnerSinkId("held-fallback", 2, true);
+				// The fallback is its own transmission (4.8), so its own token.
+				const token = sendToken("tx", "held-fallback", 2);
 				yield* f.hello((hello) => ({
 					...hello,
 					sendJournalAnswers: true,
-					sendAnswers: [
-						{
-							commandId: "held-fallback",
-							attempt: 2,
-							nativeResumeFallback: true,
-							status: "running",
-						},
-					],
+					// The host recorded this transmission as the fresh fallback (4.8).
+					sendAnswers: [{ token, fresh: true, status: "running" }],
 					bindings: [
 						{
-							commandId: "held-fallback",
-							attempt: 2,
-							nativeResumeFallback: true,
+							token,
 							sinkId,
 							sessionId: "s",
 							released: false,
@@ -2163,9 +2126,7 @@ it.effect(
 				} satisfies TurnResult;
 				yield* attachment.onCommandReply({
 					type: "command-reply",
-					commandId: "held-fallback",
-					attempt: 2,
-					nativeResumeFallback: false,
+					commandId: sendToken("tx", "held-fallback", 1),
 					result: rejection,
 				});
 				expect(
@@ -2176,9 +2137,7 @@ it.effect(
 				).toEqual([]);
 				const reply = {
 					type: "command-reply",
-					commandId: "held-fallback",
-					attempt: 2,
-					nativeResumeFallback: true,
+					commandId: token,
 					result: rejection,
 				} as const;
 				yield* attachment.onCommandReply(reply);
@@ -2227,19 +2186,13 @@ for (const finished of [false, true])
 						durationMs: 0,
 						providerStateUpdates: [],
 					} satisfies TurnResult;
-					if (finished)
-						yield* previous.execute(
-							"predecessor",
-							1,
-							false,
-							Effect.succeed(result),
-						);
+					// A held send's token is its hold's transmission, else its claim's.
+					const token = sendToken(finished ? "tx" : "hold", "predecessor", 1);
+					if (finished) yield* previous.execute(token, Effect.succeed(result));
 					else {
 						yield* previous
 							.execute(
-								"predecessor",
-								1,
-								false,
+								token,
 								Deferred.succeed(begun, undefined).pipe(
 									Effect.andThen(Deferred.await(gate)),
 								),
@@ -2253,7 +2206,7 @@ for (const finished of [false, true])
 						sendJournalAnswers: true,
 						sendAnswers: journal.answers,
 						bindings: [],
-						sendCommands: journal.commands,
+						sendTokens: journal.tokens,
 						completedCommands: [],
 					}));
 					yield* f.recover;
@@ -2296,9 +2249,11 @@ for (const outcome of ["completed", "failed", "older attempt"] as const)
 						sendAnswers: [
 							{
 								status: "finished",
-								nativeResumeFallback: false,
-								commandId: "finished",
-								attempt: outcome === "older attempt" ? 0 : 1,
+								token: sendToken(
+									"tx",
+									"finished",
+									outcome === "older attempt" ? 0 : 1,
+								),
 								...(outcome === "failed"
 									? {
 											failure: {
@@ -2365,11 +2320,12 @@ it.effect(
 			Effect.gen(function* () {
 				const f = yield* s7Fixture();
 				yield* f.seed("finished");
+				const token = sendToken("tx", "finished", 1);
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [
 						{
-							commandId: "finished",
+							token,
 							sinkId: runnerSinkId("finished", 1),
 							sessionId: "s",
 							released: false,
@@ -2379,9 +2335,7 @@ it.effect(
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: false,
-							commandId: "finished",
-							attempt: 1,
+							token,
 							result: {
 								status: "completed",
 								cost: 0,
@@ -2475,20 +2429,18 @@ for (const [helloAttempt, bindingAttempt, rowAttempt] of [
 						...hello,
 						bindings: [
 							{
-								commandId: "held",
+								token: sendToken("tx", "held", bindingAttempt),
 								sinkId: runnerSinkId("held", bindingAttempt),
-								attempt: bindingAttempt,
 								sessionId: "s",
 								released: false,
 							},
 						],
 						sendJournalAnswers: true,
+						sendTokens: [sendToken("tx", "held", helloAttempt)],
 						sendAnswers: [
 							{
 								status: "running",
-								nativeResumeFallback: false,
-								commandId: "held",
-								attempt: helloAttempt,
+								token: sendToken("tx", "held", helloAttempt),
 							},
 						],
 					}));
@@ -2522,18 +2474,13 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					sendJournalAnswers: true,
+					sendTokens: [sendToken("tx", "held", 2)],
 					sendAnswers: [
-						{
-							status: "running",
-							nativeResumeFallback: false,
-							commandId: "held",
-							attempt: 2,
-						},
+						{ status: "running", token: sendToken("tx", "held", 2) },
 					],
 					bindings: [
 						{
-							commandId: "held",
-							attempt: 1,
+							token: sendToken("tx", "held", 1),
 							sinkId: runnerSinkId("held", 2),
 							sessionId: "s",
 							released: false,
@@ -2879,15 +2826,12 @@ it.effect(
 					sendAnswers: [
 						{
 							status: "running",
-							nativeResumeFallback: false,
-							commandId: "live",
-							attempt: 1,
+							token: sendToken("tx", "live", 1),
 						},
 					],
 					bindings: [
 						{
-							commandId: "live",
-							attempt: 1,
+							token: sendToken("tx", "live", 1),
 							sinkId: runnerSinkId("live", 1),
 							sessionId: "s",
 							released: false,
@@ -2994,9 +2938,7 @@ for (const fault of ["read", "settlement"] as const)
 						sendAnswers: [
 							{
 								status: "finished",
-								nativeResumeFallback: false,
-								commandId: "finished",
-								attempt: 1,
+								token: sendToken("tx", "finished", 1),
 								result: {
 									status: "completed",
 									cost: 0,
@@ -3106,9 +3048,7 @@ for (const outcome of ["completed", "failed"] as const)
 										sendAnswers: [
 											{
 												status: "finished",
-												nativeResumeFallback: false,
-												commandId: "finished",
-												attempt: 1,
+												token: sendToken("tx", "finished", 1),
 												...(outcome === "failed"
 													? {
 															failure: {
@@ -3579,11 +3519,9 @@ for (const ending of [
 						"s",
 						"claude",
 					);
-					f.replaySend.execute = (id, command, attempt) =>
+					f.replaySend.execute = (id) =>
 						journal.execute(
 							id,
-							attempt ?? 0,
-							command.input.nativeResumeFallback === true,
 							Effect.succeed({
 								status: "accepted",
 								cost: 0,
@@ -3700,11 +3638,9 @@ it.effect(
 					"s",
 					"claude",
 				);
-				f.replaySend.execute = (id, command, attempt) =>
+				f.replaySend.execute = (id) =>
 					journal.execute(
 						id,
-						attempt ?? 0,
-						command.input.nativeResumeFallback === true,
 						Effect.succeed({
 							status: "accepted",
 							cost: 0,
@@ -4998,8 +4934,7 @@ it.effect(
 									bindings: [
 										{
 											sinkId: f.sinkId,
-											commandId: "intake-completed",
-											attempt: 0,
+											token: sendToken("tx", "intake-completed", 0),
 											sessionId: "s",
 											released: false,
 										},
@@ -5051,17 +4986,14 @@ it.effect(
 										sendJournalAnswers: true,
 										sendAnswers: [
 											{
-												commandId: "adopted-command",
-												attempt: 0,
-												nativeResumeFallback: false,
+												token: sendToken("tx", "adopted-command", 0),
 												status: "running",
 											},
 										],
 										bindings: [
 											{
 												sinkId: f.sinkId,
-												commandId: "adopted-command",
-												attempt: 0,
+												token: sendToken("tx", "adopted-command", 0),
 												sessionId: "s",
 												released: false,
 											},
@@ -6133,9 +6065,7 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 					const received = yield* Deferred.make<void>();
 					yield* journal
 						.execute(
-							"old-command",
-							1,
-							false,
+							sendToken("hold", "old-command", 1),
 							Deferred.succeed(received, undefined).pipe(
 								Effect.andThen(Effect.never),
 							),
@@ -6437,9 +6367,7 @@ for (const failed of ["receipt", "ownership SQL"] as const) {
 										sendAnswers: [
 											{
 												status: "running",
-												nativeResumeFallback: false,
-												commandId: "old-command",
-												attempt: 1,
+												token: sendToken("tx", "old-command", 1),
 											},
 										],
 									},
@@ -7768,14 +7696,12 @@ it.effect("R2audit cached failed unplaced steer returns to queued", () =>
 			yield* f.hello((hello) => ({
 				...hello,
 				bindings: [],
-				sendCommands: [],
+				sendTokens: [],
 				sendJournalAnswers: true,
 				sendAnswers: [
 					{
 						status: "finished",
-						nativeResumeFallback: false,
-						commandId: "steer",
-						attempt: 1,
+						token: sendToken("tx", "steer", 1),
 						failure: {
 							operation: "send-turn",
 							code: "provider_failure",
@@ -7809,14 +7735,12 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: false,
-							commandId: "resume",
-							attempt: 1,
+							token: sendToken("tx", "resume", 1),
 							result: {
 								status: "error",
 								nativeResumeRejected: true,
@@ -7873,20 +7797,17 @@ it.effect(
 									sessionId: "s",
 									pid: 100_088,
 									stampsRunIds: true,
-									sendCommands: [],
+									sendTokens: [],
 									sendJournalAnswers: true,
 									sendAnswers: [
 										{
 											status: "running",
-											nativeResumeFallback: false,
-											commandId: "late-reply",
-											attempt: 1,
+											token: sendToken("tx", "late-reply", 1),
 										},
 									],
 									bindings: [
 										{
-											commandId: "late-reply",
-											attempt: 1,
+											token: sendToken("tx", "late-reply", 1),
 											sessionId: "s",
 											sinkId: runnerSinkId("late-reply", 1),
 											released: false,
@@ -7935,8 +7856,7 @@ it.effect(
 					});
 					const reply = {
 						type: "command-reply",
-						commandId: "late-reply",
-						attempt: 1,
+						commandId: sendToken("tx", "late-reply", 1),
 						result: {
 							status: "error",
 							nativeResumeRejected: true,
@@ -7952,7 +7872,6 @@ it.effect(
 					} satisfies {
 						readonly type: "command-reply";
 						readonly commandId: string;
-						readonly attempt: number;
 						readonly result: TurnResult;
 					};
 
@@ -7993,7 +7912,7 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [],
 				}));
@@ -8065,14 +7984,12 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: false,
-							commandId: "fresh-resume",
-							attempt: 1,
+							token: sendToken("tx", "fresh-resume", 1),
 							result: {
 								status: "error",
 								nativeResumeRejected: true,
@@ -8168,14 +8085,14 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: true,
-							commandId: "rejected-fallback",
-							attempt: 1,
+							token: sendToken("tx", "rejected-fallback", 1),
+							// The host recorded this transmission as the fresh fallback (4.8).
+							fresh: true,
 							result: {
 								status: "error",
 								nativeResumeRejected: true,
@@ -8228,14 +8145,12 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: false,
-							commandId: "cached-timeout",
-							attempt: 1,
+							token: sendToken("tx", "cached-timeout", 1),
 							failure: {
 								operation: "send-turn",
 								code: "send_admission_timeout",
@@ -8322,20 +8237,17 @@ for (const admissionTimeout of [false, true])
 										sessionId: "s",
 										pid: 100_088,
 										stampsRunIds: true,
-										sendCommands: [],
+										sendTokens: [],
 										sendJournalAnswers: true,
 										sendAnswers: [
 											{
 												status: "running",
-												nativeResumeFallback: false,
-												commandId: "socket-held",
-												attempt: 1,
+												token: sendToken("tx", "socket-held", 1),
 											},
 										],
 										bindings: [
 											{
-												commandId: "socket-held",
-												attempt: 1,
+												token: sendToken("tx", "socket-held", 1),
 												sessionId: "s",
 												sinkId: runnerSinkId("socket-held", 1),
 												released: false,
@@ -8357,7 +8269,7 @@ for (const admissionTimeout of [false, true])
 								) {
 									const input = message.command.input;
 									sent.push(input.inputId);
-									const sinkId = runnerSinkId(input.inputId, message.attempt);
+									const sinkId = message.command.sinkId;
 									peer?.write({
 										type: "output",
 										outputId: "socket-next-place",
@@ -8409,9 +8321,6 @@ for (const admissionTimeout of [false, true])
 									peer?.write({
 										type: "command-reply",
 										commandId: message.commandId,
-										...(message.attempt !== undefined
-											? { attempt: message.attempt }
-											: {}),
 										result: {
 											status: "completed",
 											cost: 0,
@@ -8456,8 +8365,7 @@ for (const admissionTimeout of [false, true])
 					};
 					peer?.write({
 						type: "command-reply",
-						commandId: "socket-held",
-						attempt: 0,
+						commandId: sendToken("tx", "socket-held", 0),
 						failure,
 					});
 					yield* Effect.promise(
@@ -8478,14 +8386,12 @@ for (const admissionTimeout of [false, true])
 
 					peer?.write({
 						type: "command-reply",
-						commandId: "socket-held",
-						attempt: 1,
+						commandId: sendToken("tx", "socket-held", 1),
 						failure,
 					});
 					peer?.write({
 						type: "command-reply",
-						commandId: "socket-held",
-						attempt: 1,
+						commandId: sendToken("tx", "socket-held", 1),
 						failure,
 					});
 					for (let count = 0; count < 100; count++) {
@@ -8564,14 +8470,12 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					bindings: [],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: false,
-							commandId: "fork-refusal",
-							attempt: 1,
+							token: sendToken("tx", "fork-refusal", 1),
 							result: {
 								status: "error",
 								nativeResumeRejected: true,
@@ -8676,15 +8580,13 @@ for (const order of [
 					yield* f.hello((hello) => ({
 						...hello,
 						bindings: [],
-						sendCommands: [],
+						sendTokens: [],
 						sendJournalAnswers: true,
 						sendAnswers:
 							order === "hello"
 								? [
 										{
-											commandId: "native-steer",
-											attempt: 1,
-											nativeResumeFallback: false,
+											token: sendToken("tx", "native-steer", 1),
 											status: "finished",
 											result,
 										},
@@ -8840,9 +8742,7 @@ it.effect(
 					providerStateUpdates: [],
 				} satisfies TurnResult;
 				yield* journal.execute(
-					"fallback-window",
-					1,
-					false,
+					sendToken("tx", "fallback-window", 1),
 					Effect.succeed(rejection),
 				);
 				yield* f.sql`INSERT INTO provider_state (session_id, key, value) VALUES ('s','nativeThread:account','stale')`;
@@ -8862,21 +8762,18 @@ it.effect(
 					...hello,
 					bindings: [
 						{
-							commandId: "fallback-window",
+							token: sendToken("tx", "fallback-window", 1),
 							sessionId: "s",
 							sinkId: runnerSinkId("fallback-window", 1),
-							attempt: 1,
 							released: true,
 						},
 					],
-					sendCommands: [],
+					sendTokens: [],
 					sendJournalAnswers: true,
 					sendAnswers: [
 						{
 							status: "finished",
-							nativeResumeFallback: false,
-							commandId: "fallback-window",
-							attempt: 1,
+							token: sendToken("tx", "fallback-window", 1),
 							result: {
 								status: "error",
 								nativeResumeRejected: true,
@@ -8926,9 +8823,7 @@ it.effect(
 					expect(input.resumeSessionId).toBeUndefined();
 					return journal
 						.execute(
-							"fallback-window",
-							input.commandAttempt ?? 0,
-							input.nativeResumeFallback === true,
+							sendToken("tx", "fallback-window", input.commandAttempt ?? 0),
 							delivered().pipe(
 								Effect.mapError((cause) =>
 									runnerFailure("test native completion", cause),
@@ -9258,7 +9153,7 @@ it.effect(
 					}) => ({
 						...hello,
 						bindings: [],
-						sendCommands: [],
+						sendTokens: [],
 						completedCommands: [],
 					}),
 				);
@@ -9373,20 +9268,17 @@ for (const answerAtHello of [true, false])
 						...hello,
 						bindings: [
 							{
-								commandId: "held-uncertainty",
-								attempt: 1,
+								token: sendToken("hold", "held-uncertainty", 1),
 								sessionId: "s",
 								sinkId: runnerSinkId("held-uncertainty", 1),
 								released: false,
 							},
 						],
-						sendCommands: [],
+						sendTokens: [],
 						sendJournalAnswers: true,
 						sendAnswers: [
 							{
-								commandId: "held-uncertainty",
-								attempt: 1,
-								nativeResumeFallback: false,
+								token: sendToken("hold", "held-uncertainty", 1),
 								...(answerAtHello
 									? { status: "finished" as const, result }
 									: { status: "running" as const }),
@@ -9400,9 +9292,7 @@ for (const answerAtHello of [true, false])
 							return yield* Effect.die("Missing recovered reply boundary");
 						const reply = {
 							type: "command-reply" as const,
-							commandId: "held-uncertainty",
-							attempt: 1,
-							nativeResumeFallback: false,
+							commandId: sendToken("hold", "held-uncertainty", 1),
 							result,
 						};
 						yield* attachment.onCommandReply(reply);

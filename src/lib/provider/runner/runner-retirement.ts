@@ -61,6 +61,7 @@ import {
 	type RunnerSocket,
 	runnerBuildId,
 	runnerFailure,
+	sendToken,
 } from "./runner-protocol.js";
 import {
 	makeRunnerReceiptStore,
@@ -814,7 +815,7 @@ export const makeRunnerStopReconciler = (options: {
 			entry: RunnerChild | undefined,
 			command: {
 				readonly command_id: string;
-				readonly attempt_count: number;
+				readonly transmission: number;
 				readonly payload_json: string;
 			},
 		) =>
@@ -859,10 +860,12 @@ export const makeRunnerStopReconciler = (options: {
 								directory: journalDirectory,
 								sessionId: retirement.sessionId,
 								driverKind: settlement.driverKind,
+								token: sendToken(
+									"hold",
+									command.command_id,
+									command.transmission,
+								),
 								commandId: command.command_id,
-								attempt: command.attempt_count,
-								nativeResumeFallback:
-									isRecord(payload) && payload["nativeResumeFallback"] === true,
 							})
 						: { _tag: "Unreadable" as const };
 				return { journalBuild, journal, payload };

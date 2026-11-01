@@ -4,6 +4,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { sendToken } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
@@ -230,13 +231,16 @@ describe("Claude session process runner", () => {
 		).toHaveLength(1);
 		await settled(harness, sessionId, 3);
 		const { events, commands } = persisted(harness, sessionId);
+		// A send's frame id is its Send Token: each send is held once (4.11).
 		expect(
 			harness.marks
 				.filter(
 					(mark) => mark.kind === "runner-command" && mark.type === "send-turn",
 				)
 				.map((mark) => (mark.kind === "runner-command" ? mark.commandId : "")),
-		).toEqual(commands.map((command) => command.command_id));
+		).toEqual(
+			commands.map((command) => sendToken("hold", command.command_id, 1)),
+		);
 		expect(
 			harness.marks.some(
 				(mark) =>

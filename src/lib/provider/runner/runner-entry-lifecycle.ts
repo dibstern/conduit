@@ -431,7 +431,7 @@ export const observeDelivery = (
 		previous &&
 		previous.generation === delivery.generation &&
 		previous.sinkId === delivery.sinkId &&
-		previous.commandId === delivery.commandId &&
+		previous.token === delivery.token &&
 		previous.inputId === delivery.inputId &&
 		previous.runId === delivery.runId;
 	writable.sourceDelivery =

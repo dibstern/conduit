@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { Deferred, Effect, FiberSet, Scope } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { TurnResult } from "../types.js";
 import { makeRunnerIdleExit } from "./runner-idle.js";
 import {
@@ -405,7 +406,7 @@ export const runSessionRunner = (
 				if (
 					source.sessionId !== sessionId ||
 					!sourceSinkId ||
-					!owner?.commandId ||
+					!owner?.token ||
 					owner.sessionId !== source.sessionId ||
 					owner.inputId !== source.inputId ||
 					owner.runId !== source.runId
@@ -414,7 +415,7 @@ export const runSessionRunner = (
 				const delivery: RunnerSourceDelivery = {
 					...source,
 					runnerId,
-					commandId: owner.commandId,
+					token: owner.token,
 					sinkId: sourceSinkId,
 					generation: ++deliveryGeneration,
 				};
@@ -454,9 +455,7 @@ export const runSessionRunner = (
 				sessionId: string;
 				inputId?: string;
 				runId?: string;
-				commandId?: string;
-				attempt?: number;
-				fallback?: boolean;
+				token?: SendToken;
 				providerRunId?: string;
 				released?: boolean;
 			}
@@ -469,8 +468,6 @@ export const runSessionRunner = (
 			string,
 			{
 				commandId: string;
-				attempt: number;
-				nativeResumeFallback?: boolean;
 				result?: TurnResult;
 				failure?: SessionFailure;
 			}
@@ -561,16 +558,11 @@ export const runSessionRunner = (
 												binding.released = true;
 											const recordRun =
 												runId &&
-												binding?.commandId &&
+												binding?.token &&
 												sendJournal &&
 												binding.providerRunId !== runId
 													? sendJournal
-															.reportProviderRun(
-																binding.commandId,
-																binding.attempt ?? 0,
-																binding.fallback === true,
-																runId,
-															)
+															.reportProviderRun(binding.token, runId)
 															.pipe(
 																Effect.tap(() =>
 																	Effect.sync(() => {
@@ -666,12 +658,7 @@ export const runSessionRunner = (
 									bindings: [...bindings].map(([sinkId, binding]) => ({
 										sinkId,
 										sessionId: binding.sessionId,
-										...(binding.commandId
-											? { commandId: binding.commandId }
-											: {}),
-										...(binding.attempt !== undefined
-											? { attempt: binding.attempt }
-											: {}),
+										...(binding.token ? { token: binding.token } : {}),
 										...(process.env["NODE_ENV"] === "test" &&
 										process.env[
 											"CONDUIT_TEST_RUNNER_HELLO_WITHOUT_BINDING_RELEASE_STATE"
@@ -681,14 +668,13 @@ export const runSessionRunner = (
 									})),
 									pendingOutputs: spool.pendingOutputs,
 									completedCommands: [...completedCommands.values()],
-									crossAttemptNativeResumeFallback: true,
 									...(sendJournal?.canAnswerRetainedSends
 										? {
 												sendJournalAnswers: true,
 												sendAnswers: sendJournal.answers,
 											}
 										: {}),
-									sendCommands: sendJournal?.commands ?? [],
+									sendTokens: sendJournal?.tokens ?? [],
 									upgradeState: upgradeState(),
 									...launch.capabilities,
 								});
@@ -740,7 +726,7 @@ export const runSessionRunner = (
 						runFork(
 							Effect.try({
 								try: () => {
-									const records = journal.acknowledge(message.commands);
+									const records = journal.acknowledge(message.tokens);
 									const proof =
 										process.env["NODE_ENV"] === "test"
 											? process.env["CONDUIT_TEST_PROCESS_PROOF"]
@@ -752,7 +738,7 @@ export const runSessionRunner = (
 										);
 									peer.write({
 										type: "settled-commands-ack",
-										commands: message.commands,
+										tokens: message.tokens,
 									});
 								},
 								catch: (cause) => runnerFailure("prune runner sends", cause),
@@ -797,27 +783,15 @@ export const runSessionRunner = (
 										);
 									while (existsSync(gate)) yield* Effect.sleep("20 millis");
 								}
-								const primaryKey = `${message.commandId}:${message.attempt ?? 0}`;
-								const commandKey = `${primaryKey}${message.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
-								const receipt = completedCommands.get(primaryKey);
-								const completed =
-									message.nativeResumeFallback === undefined ||
-									receipt?.nativeResumeFallback === message.nativeResumeFallback
-										? receipt
-										: undefined;
+								const completed = completedCommands.get(message.commandId);
 								peer.write({
 									type: "command-status-reply",
 									requestId: message.requestId,
-									...(message.nativeResumeFallback !== undefined
-										? { nativeResumeFallback: message.nativeResumeFallback }
-										: {}),
 									result: completed
 										? completed.failure
 											? "failed"
 											: "completed"
-										: commands.has(commandKey) ||
-												(message.nativeResumeFallback === undefined &&
-													commands.has(`${primaryKey}:native-resume-fallback`))
+										: commands.has(message.commandId)
 											? "running"
 											: "not_received",
 								});
@@ -845,13 +819,6 @@ export const runSessionRunner = (
 							peer.write({
 								type: "command-refused",
 								commandId: message.commandId,
-								attempt: message.attempt ?? 0,
-								...(command.type === "send-turn"
-									? {
-											nativeResumeFallback:
-												command.input.nativeResumeFallback === true,
-										}
-									: {}),
 								reason: refused,
 							});
 							return;
@@ -865,25 +832,21 @@ export const runSessionRunner = (
 						// Retirement is a reservation until the server commits its route.
 						// A command selected on the old route cancels it without waiting.
 						role = decideRunnerRole(role, { _tag: "Command" });
-						const deduplicationKey = `${message.commandId}:${message.attempt ?? 0}${command.type === "send-turn" && command.input.nativeResumeFallback ? ":native-resume-fallback" : ""}`;
-						const existing = commands.get(deduplicationKey);
+						// A send's frame id is its Send Token, unique per transmission (4.9, 4.11).
+						const token = message.commandId as SendToken;
+						const existing = commands.get(message.commandId);
 						const result =
 							existing ??
 							Deferred.makeUnsafe<TurnResult | undefined, SessionFailure>();
 						if (!existing) {
 							// Register receipt before a later frame or drained reconnect can
 							// answer status, even if execution yields before its first step.
-							commands.set(deduplicationKey, result);
-							// A native-resume fallback replaces the primary reply within this attempt.
-							completedCommands.delete(
-								`${message.commandId}:${message.attempt ?? 0}`,
-							);
+							commands.set(message.commandId, result);
 						}
 						if (command.type === "send-turn") {
 							peer.write({
 								type: "command-accepted",
 								commandId: message.commandId,
-								attempt: message.attempt ?? 0,
 								sinkId: command.sinkId,
 							});
 							idle?.beginTurn(command.autoSettleAfterDays);
@@ -891,22 +854,14 @@ export const runSessionRunner = (
 						idle?.activity();
 						activeCommands++;
 						if (command.type === "send-turn") {
-							const binding = bindings.get(command.sinkId);
-							if (
-								binding?.commandId !== message.commandId ||
-								binding.attempt !== (message.attempt ?? 0) ||
-								binding.fallback !==
-									(command.input.nativeResumeFallback === true)
-							)
+							if (bindings.get(command.sinkId)?.token !== token)
 								bindings.set(command.sinkId, {
 									sessionId: command.input.sessionId,
 									inputId: command.input.inputId,
 									...(command.input.runId
 										? { runId: command.input.runId }
 										: {}),
-									commandId: message.commandId,
-									attempt: message.attempt ?? 0,
-									fallback: command.input.nativeResumeFallback === true,
+									token,
 								});
 						}
 						reportUpgradeState();
@@ -973,12 +928,7 @@ export const runSessionRunner = (
 								});
 								const exit = yield* Effect.exit(
 									command.type === "send-turn" && sendJournal
-										? sendJournal.execute(
-												message.commandId,
-												message.attempt ?? 0,
-												command.input.nativeResumeFallback === true,
-												execution,
-											)
+										? sendJournal.execute(token, execution, command.mode)
 										: execution,
 								);
 								yield* Deferred.done(result, exit);
@@ -1028,33 +978,16 @@ export const runSessionRunner = (
 												while (existsSync(gate))
 													yield* Effect.sleep("20 millis");
 											}
-											completedCommands.set(
-												`${message.commandId}:${message.attempt ?? 0}`,
-												{
-													commandId: message.commandId,
-													attempt: message.attempt ?? 0,
-													...(command.type === "send-turn"
-														? {
-																nativeResumeFallback:
-																	command.input.nativeResumeFallback === true,
-															}
-														: {}),
-													failure: runnerFailure(
-														command.type,
-														Failure.squashCause(cause),
-													),
-												},
-											);
+											completedCommands.set(message.commandId, {
+												commandId: message.commandId,
+												failure: runnerFailure(
+													command.type,
+													Failure.squashCause(cause),
+												),
+											});
 											connection?.write({
 												type: "command-reply",
 												commandId: message.commandId,
-												attempt: message.attempt ?? 0,
-												...(command.type === "send-turn"
-													? {
-															nativeResumeFallback:
-																command.input.nativeResumeFallback === true,
-														}
-													: {}),
 												failure: runnerFailure(
 													command.type,
 													Failure.squashCause(cause),
@@ -1073,20 +1006,10 @@ export const runSessionRunner = (
 												yield* spool
 													.drainEffect()
 													.pipe(Effect.timeout("500 millis"), Effect.ignore);
-											completedCommands.set(
-												`${message.commandId}:${message.attempt ?? 0}`,
-												{
-													commandId: message.commandId,
-													attempt: message.attempt ?? 0,
-													...(command.type === "send-turn"
-														? {
-																nativeResumeFallback:
-																	command.input.nativeResumeFallback === true,
-															}
-														: {}),
-													...(result ? { result } : {}),
-												},
-											);
+											completedCommands.set(message.commandId, {
+												commandId: message.commandId,
+												...(result ? { result } : {}),
+											});
 											if (
 												process.env["NODE_ENV"] === "test" &&
 												(command.type === "resolve-permission" ||
@@ -1110,13 +1033,6 @@ export const runSessionRunner = (
 											connection?.write({
 												type: "command-reply",
 												commandId: message.commandId,
-												attempt: message.attempt ?? 0,
-												...(command.type === "send-turn"
-													? {
-															nativeResumeFallback:
-																command.input.nativeResumeFallback === true,
-														}
-													: {}),
 												...(result ? { result } : {}),
 											});
 											if (

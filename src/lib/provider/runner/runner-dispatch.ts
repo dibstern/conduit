@@ -26,6 +26,7 @@ import {
 	RUNNER_WRITE_GATE_CLOSED,
 	runnerBuildId,
 	runnerFailure,
+	sendToken,
 } from "./runner-protocol.js";
 import { currentRunnerOutput } from "./runner-receipts.js";
 import type { makeRunnerRetirement } from "./runner-retirement.js";
@@ -845,7 +846,17 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 				connection = entry.connection ?? (yield* Deferred.await(entry.ready));
 				child = entry;
 			}
-			if (command.type === "send-turn" && turn?.sendScope) {
+			// A send's frame id is its Send Token: a hold's transmission, else the claim's.
+			// A claim's send the runner already holds keeps its token once held (4.11).
+			const claimed =
+				command.type === "send-turn"
+					? sendToken("tx", commandId, command.input.commandAttempt ?? 0)
+					: undefined;
+			const token =
+				held && claimed && !connection.retainedSends?.includes(claimed)
+					? sendToken("hold", commandId, held.transmission)
+					: claimed;
+			if (command.type === "send-turn" && turn?.sendScope && token) {
 				const demand = sends.demand(turn.sendScope);
 				if (
 					turn.sendScope.assignment._tag === "Closed" ||
@@ -855,7 +866,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 				sends.dispatch(turn.sendScope, entry, {
 					sinkId: command.sinkId,
 					commandId,
-					attempt: command.input.commandAttempt ?? 0,
+					token,
 				});
 			}
 			sentToRunner = true;
@@ -886,9 +897,8 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 			)
 				return;
 			const write = connection.commandEffect(
-				commandId,
+				token ?? commandId,
 				payload,
-				command.type === "send-turn" ? command.input.commandAttempt : undefined,
 				permission?.write,
 			);
 			// The write fiber waits while the gate is closed: it writes after a

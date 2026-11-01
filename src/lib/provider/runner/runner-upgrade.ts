@@ -4,6 +4,7 @@ import type {
 	RunnerLiveQueryConfiguration,
 	RunnerSettingsSnapshot,
 } from "../claude/claude-runner-snapshot.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import { runnerRetrySchedule } from "./runner-retry.js";
 import type { SessionFailure } from "./session-runner.js";
 
@@ -16,7 +17,7 @@ export type {
 export interface RunnerSourceDelivery {
 	readonly sessionId: string;
 	readonly runnerId: string;
-	readonly commandId: string;
+	readonly token: SendToken;
 	readonly sinkId: string;
 	readonly inputId: string;
 	readonly runId: string;

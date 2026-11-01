@@ -22,7 +22,9 @@ import {
 	cursorSessionStorePath,
 	readCursorSessionIdentity,
 } from "../../../src/lib/provider/cursor/cursor-session-recovery.js";
+import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import {
+	currentSendToken,
 	RUNNER_PROTOCOL_VERSION,
 	type RunnerHello,
 	RunnerSocket,
@@ -77,9 +79,10 @@ function persisted(fixture: ProcessHarness, sessionId: string) {
 						status: string;
 						error_code: string | null;
 						payload_json: string;
+						held_transmission: number | null;
 					}
 				>(
-					"SELECT command_id, run_id, attempt_count, status, error_code, payload_json FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					"SELECT outbox.command_id, outbox.run_id, outbox.attempt_count, outbox.status, outbox.error_code, outbox.payload_json, run.held_transmission FROM provider_command_outbox outbox LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
 				)
 				.all(sessionId),
 			sessions: db
@@ -260,9 +263,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 		if (owned?.kind !== "runner-started") return [];
 		const directory = join(dirname(owned.socketPath), "sends", id);
 		if (!existsSync(directory)) return [];
-		const commandIds = new Set(
-			persisted(fixture, id).commands.map(({ command_id }) => command_id),
-		);
+		// The directory is the session's; a record names its send by an opaque token.
 		return readdirSync(directory)
 			.map(
 				(file) =>
@@ -271,7 +272,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 						unknown
 					>,
 			)
-			.filter((record) => commandIds.has(String(record["commandId"])));
+			.filter((record) => typeof record["token"] === "string");
 	}
 
 	function prunedJournal(fixture: ProcessHarness, id: string) {
@@ -286,6 +287,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 		const owned = runner(fixture, id);
 		const command = persisted(fixture, id).commands[0];
 		if (!command) throw new Error("Missing admitted command");
+		const token = currentSendToken(command);
 		const socket = createConnection(owned.socketPath);
 		let peer: RunnerSocket | undefined;
 		let acceptedCount = 0;
@@ -293,13 +295,10 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 		const accepted = new Promise<void>((done) => {
 			accept = done;
 		});
-		let settle: (commands: NonNullable<RunnerHello["sendCommands"]>) => void =
-			() => {};
-		const settled = new Promise<NonNullable<RunnerHello["sendCommands"]>>(
-			(done) => {
-				settle = done;
-			},
-		);
+		let settle: (tokens: readonly SendToken[]) => void = () => {};
+		const settled = new Promise<readonly SendToken[]>((done) => {
+			settle = done;
+		});
 		const greeted = new Promise<RunnerHello>((done, fail) => {
 			peer = new RunnerSocket(
 				socket,
@@ -307,7 +306,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 					if (message.type === "hello") done(message);
 					if (message.type === "command-accepted" && ++acceptedCount === 2)
 						accept();
-					if (message.type === "settled-commands-ack") settle(message.commands);
+					if (message.type === "settled-commands-ack") settle(message.tokens);
 				},
 				(failure) => fail(new Error(failure.message)),
 			);
@@ -329,15 +328,14 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				Effect.tryPromise(() => greeted).pipe(Effect.timeout("30 seconds")),
 			);
 			const sinkId = hello.bindings?.find(
-				(binding) => binding.commandId === command.command_id,
+				(binding) => binding.token === token,
 			)?.sinkId;
 			if (!sinkId || !peer) throw new Error("Missing live command binding");
 			// The old runner's Deferred must absorb both deliveries before reattachment.
 			for (let attempt = 0; attempt < 2; attempt++)
 				peer.write({
 					type: "command",
-					commandId: command.command_id,
-					attempt: command.attempt_count,
+					commandId: token,
 					command: {
 						type: "send-turn",
 						aborted: false,
@@ -352,11 +350,19 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 				Effect.tryPromise(() => accepted).pipe(Effect.timeout("30 seconds")),
 			);
 			const before = journal(fixture, id);
-			expect(before).toMatchObject([{ attempt: command.attempt_count }]);
+			expect(before).toMatchObject([{ token }]);
+			// An acknowledgement names exact tokens; an earlier transmission's leaves this one.
 			const stale = [
-				{ commandId: command.command_id, attempt: command.attempt_count - 1 },
+				currentSendToken({
+					command_id: command.command_id,
+					attempt_count: command.attempt_count - 1,
+					held_transmission:
+						command.held_transmission === null
+							? null
+							: command.held_transmission - 1,
+				}),
 			];
-			peer.write({ type: "settled-commands", commands: stale });
+			peer.write({ type: "settled-commands", tokens: stale });
 			expect(
 				await Effect.runPromise(
 					Effect.tryPromise(() => settled).pipe(Effect.timeout("30 seconds")),
@@ -365,7 +371,7 @@ describe("Cursor recovery through the built daemon and detached runner", () => {
 			expect(journal(fixture, id)).toEqual(before);
 			scenarios.push({
 				scenario: "stale completion acknowledgement",
-				activeAttempt: command.attempt_count,
+				activeToken: token,
 				acknowledged: stale,
 				preservedJournal: before,
 			});

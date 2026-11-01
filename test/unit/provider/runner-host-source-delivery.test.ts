@@ -12,6 +12,7 @@ import {
 	claudeLoginChange,
 	configuredClaudeConfigDir,
 } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import {
 	type RunnerLaunch,
 	type RunnerLaunchCallbacks,
@@ -21,8 +22,10 @@ import {
 	RUNNER_PROTOCOL_VERSION,
 	RunnerSocket,
 	runnerBuildId,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
+import { readRunnerSendJournal } from "../../../src/lib/provider/runner/runner-send-journal.js";
 import { RunnerSpool } from "../../../src/lib/provider/runner/runner-spool.js";
 import type {
 	RunnerSourceDelivery,
@@ -478,36 +481,42 @@ for (const { name, mode } of [
 									history: [],
 								},
 							};
-							yield* client.commandEffect("resume", primary, 1);
-							expect(yield* client.commandStatusEffect("resume", 1)).toBe(
+							// A fresh fallback is a new transmission with its own token (4.8).
+							const resume = sendToken("hold", "resume", 1);
+							const fallback = sendToken("hold", "resume", 2);
+							yield* client.commandEffect(resume, primary);
+							expect(yield* client.commandStatusEffect(resume)).toBe(
 								"completed",
 							);
-							expect(
-								yield* client.commandStatusEffect("resume", 1, false),
-							).toBe("completed");
-							expect(yield* client.commandStatusEffect("resume", 1, true)).toBe(
+							expect(yield* client.commandStatusEffect(fallback)).toBe(
 								"not_received",
 							);
-							expect(
-								wireFrames
-									.filter((frame) => frame.type === "command-status-reply")
-									.map((frame) =>
-										"nativeResumeFallback" in frame
-											? frame.nativeResumeFallback
-											: undefined,
-									),
-							).toEqual([undefined, false, true]);
-							yield* client.commandEffect(
-								"resume",
-								{
-									...primary,
-									input: { ...primary.input, nativeResumeFallback: true },
-								},
-								1,
-							);
-							expect(yield* client.commandStatusEffect("resume", 1, true)).toBe(
+							yield* client.commandEffect(fallback, {
+								...primary,
+								input: { ...primary.input, nativeResumeFallback: true },
+							});
+							expect(yield* client.commandStatusEffect(fallback)).toBe(
 								"completed",
 							);
+							expect(yield* client.commandStatusEffect(resume)).toBe(
+								"completed",
+							);
+							// The host records each transmission's mode from its frame, so a
+							// later reader never takes it from the payload's marker (4.8).
+							const read = (token: SendToken) =>
+								readRunnerSendJournal({
+									directory,
+									sessionId: "session-1",
+									driverKind: "claude",
+									token,
+									commandId: "resume",
+								});
+							expect(read(resume)).toMatchObject({ _tag: "Present" });
+							expect(read(resume)).not.toHaveProperty("state.fresh");
+							expect(read(fallback)).toMatchObject({
+								_tag: "Present",
+								state: { status: "finished", fresh: true },
+							});
 							expect(payload.admittedInputs).toEqual(["resume-input"]);
 							return;
 						}
@@ -584,8 +593,6 @@ for (const { name, mode } of [
 									{
 										type: "command-refused",
 										commandId: "covered-send",
-										attempt: 0,
-										nativeResumeFallback: false,
 										reason,
 										querySeq: 0,
 									},
@@ -722,6 +729,7 @@ for (const { name, mode } of [
 									import("../../../src/lib/provider/runner/runner-protocol.js").RunnerHello
 								>();
 							const nextReply = yield* Deferred.make<void>();
+							const lastOld = sendToken("tx", "last-old-command", 0);
 							const next = new RunnerSocket(
 								nextSocket,
 								(message) => {
@@ -729,7 +737,7 @@ for (const { name, mode } of [
 										Deferred.doneUnsafe(nextHello, Effect.succeed(message));
 									if (
 										message.type === "command-reply" &&
-										message.commandId === "last-old-command"
+										message.commandId === lastOld
 									)
 										Deferred.doneUnsafe(nextReply, Effect.void);
 								},
@@ -767,7 +775,7 @@ for (const { name, mode } of [
 							expect(yield* Deferred.isDone(nextHello)).toBe(false);
 							client.write({
 								type: "command",
-								commandId: "last-old-command",
+								commandId: lastOld,
 								command: {
 									type: "send-turn",
 									sinkId: "last-old-sink",
@@ -785,19 +793,17 @@ for (const { name, mode } of [
 							const answered = yield* Deferred.await(nextHello);
 							if (mode === "status-before-execution") {
 								expect(resumeCommand).toBeDefined();
-								expect(
-									yield* next.commandStatusEffect("last-old-command", 0),
-								).toBe("running");
+								expect(yield* next.commandStatusEffect(lastOld)).toBe(
+									"running",
+								);
 								resumeCommand?.();
 								yield* Deferred.await(nextReply);
-								expect(
-									yield* next.commandStatusEffect("last-old-command", 0),
-								).toBe("completed");
+								expect(yield* next.commandStatusEffect(lastOld)).toBe(
+									"completed",
+								);
 								return;
 							}
-							expect(answered.sendCommands).toEqual([
-								{ commandId: "last-old-command", attempt: 0 },
-							]);
+							expect(answered.sendTokens).toEqual([lastOld]);
 							expect(payload.admittedInputs).toEqual(["last-old-input"]);
 							return;
 						}
@@ -905,8 +911,9 @@ for (const { name, mode } of [
 							expect((yield* Deferred.await(reconnected)).quiescent).toBe(true);
 							return;
 						}
+						const source = sendToken("tx", "source-command", 1);
 						expect(
-							yield* client.commandEffect("source-command", {
+							yield* client.commandEffect(source, {
 								type: "send-turn",
 								sinkId: "source-sink",
 								aborted: false,
@@ -932,7 +939,7 @@ for (const { name, mode } of [
 							expect(token).toEqual({
 								sessionId: "session-1",
 								runnerId: "runner-1",
-								commandId: "source-command",
+								token: source,
 								sinkId: "source-sink",
 								inputId: "source-input",
 								runId: "source-run",

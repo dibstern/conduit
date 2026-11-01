@@ -38,15 +38,18 @@ import {
 } from "../claude/claude-sdk-env.js";
 import { sendPreparedClaudeTurn } from "../claude/prepare-turn.js";
 import { resolveTurnImages } from "../resolve-turn-images.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type {
 	ProviderCall,
 	ProviderNativeSession,
 	TurnResult,
 } from "../types.js";
 import {
+	currentSendToken,
 	type RunnerSendAnswer,
 	type RunnerSocket,
 	runnerFailure,
+	sendToken,
 } from "./runner-protocol.js";
 import type {
 	RunnerDriverPieces,
@@ -180,14 +183,16 @@ export const recoverLegacyRunnerCommands = (options: {
 	readonly driverKind: string;
 	readonly accounts?: RunnerProviderInstanceDeps["accounts"];
 	readonly ownsPendingSend: (row: RunningRunnerCommand) => boolean;
-	readonly retain: (commandId: string, attempt: number) => void;
+	readonly retain: (token: SendToken, commandId: string) => void;
 	readonly ready: Effect.Effect<void, SessionFailure>;
 	readonly replay: (
 		row: RunningRunnerCommand,
 		replayLock: Semaphore.Semaphore,
 	) => Effect.Effect<LegacyReplayOutcome, SessionFailure>;
 	readonly settle: (
-		answer: Extract<RunnerSendAnswer, { readonly status: "finished" }>,
+		answer: Extract<RunnerSendAnswer, { readonly status: "finished" }> & {
+			readonly nativeResumeFallback: boolean;
+		},
 		key: LegacySendKey | undefined,
 	) => Effect.Effect<void, SessionFailure>;
 	readonly release: (commandId: string) => Effect.Effect<void>;
@@ -217,7 +222,7 @@ export const recoverLegacyRunnerCommands = (options: {
 				options.ownsPendingSend(row)
 			)
 				continue;
-			options.retain(row.command_id, row.attempt_count);
+			options.retain(currentSendToken(row), row.command_id);
 			const work = Effect.gen(function* () {
 				// A cached key can reply immediately. Failure handling becomes active
 				// only once the attachment has finished its recovery transition.
@@ -259,8 +264,7 @@ export const recoverLegacyRunnerCommands = (options: {
 				yield* options
 					.settle(
 						{
-							commandId: row.command_id,
-							attempt: row.attempt_count,
+							token: currentSendToken(row),
 							status: "finished",
 							nativeResumeFallback:
 								outcome._tag === "Success"
@@ -329,14 +333,12 @@ export const replayLegacyRunnerSend = (options: {
 		nativeResumeFallback?: boolean,
 	) => string;
 	readonly send: (
-		commandId: string,
+		token: SendToken,
 		command: Extract<SessionCommand, { type: "send-turn" }>,
-		attempt: number,
 	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 	readonly sendRetained?: (
-		commandId: string,
+		token: SendToken,
 		command: Extract<SessionCommand, { type: "send-turn" }>,
-		attempt: number,
 	) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 	readonly closing: () => boolean;
 }): Effect.Effect<LegacyReplayOutcome, SessionFailure> =>
@@ -406,14 +408,13 @@ export const replayLegacyRunnerSend = (options: {
 		switch (driverKind) {
 			case "claude":
 				break;
-			default:
-				if (
-					options.connection?.retainedSends?.some(
-						(send) =>
-							send.commandId === row.command_id &&
-							send.attempt === row.attempt_count,
-					)
-				) {
+			default: {
+				// A send keeps the token it went out under: its claim's, even once held.
+				const retained = [
+					currentSendToken(row),
+					sendToken("tx", row.command_id, row.attempt_count),
+				].find((token) => options.connection?.retainedSends?.includes(token));
+				if (retained && options.connection) {
 					// The unchanged key makes main's journal answer without running this payload.
 					// No credentials, attachment bytes or provider preparation are needed.
 					const { images: _images, ...turn } = input;
@@ -427,12 +428,8 @@ export const replayLegacyRunnerSend = (options: {
 						input,
 						sinkId,
 						(options.sendRetained
-							? options.sendRetained(row.command_id, command, row.attempt_count)
-							: options.connection.commandEffect(
-									row.command_id,
-									command,
-									row.attempt_count,
-								)
+							? options.sendRetained(retained, command)
+							: options.connection.commandEffect(retained, command)
 						).pipe(
 							Effect.map((result) => ({
 								result,
@@ -442,6 +439,7 @@ export const replayLegacyRunnerSend = (options: {
 						true,
 					);
 				}
+			}
 		}
 		const admittedInput = input;
 		return yield* options.admitReplay(
@@ -529,22 +527,18 @@ export const replayLegacyRunnerSend = (options: {
 									recoveryFailure("prepare turn", cause),
 								),
 							);
-						const result = yield* options.send(
-							row.command_id,
-							{
-								type: "send-turn",
-								sinkId: options.resolveSinkId(
-									row.command_id,
-									input.inputId,
-									row.attempt_count,
-									input.nativeResumeFallback,
-								),
-								aborted: false,
-								autoSettleAfterDays,
-								...prepared,
-							},
-							row.attempt_count,
-						);
+						const result = yield* options.send(currentSendToken(row), {
+							type: "send-turn",
+							sinkId: options.resolveSinkId(
+								row.command_id,
+								input.inputId,
+								row.attempt_count,
+								input.nativeResumeFallback,
+							),
+							aborted: false,
+							autoSettleAfterDays,
+							...prepared,
+						});
 						return { result, nativeResumeFallback };
 					}
 				}
@@ -613,51 +607,48 @@ export const replayLegacyRunnerSend = (options: {
 					},
 					send: (prepared, fallback) => {
 						nativeResumeFallback = fallback;
-						return options.send(
-							row.command_id,
-							{
-								type: "send-turn",
-								sinkId: options.resolveSinkId(
-									row.command_id,
-									input.inputId,
-									row.attempt_count,
-									fallback,
-								),
-								aborted: false,
-								autoSettleAfterDays,
-								shellEnv,
-								shellConfig: call?.shellConfig ?? input.shellConfig,
-								claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
-								input: {
-									...resolved,
-									...(call
-										? {
-												projectId: call.projectId,
-												account: call.account,
-												workspaceRoot: call.workspaceRoot,
-												extraFolders: call.extraFolders,
-												shellEnv: call.shellEnv,
-												shellConfig: call.shellConfig,
-											}
-										: {}),
-									instanceId,
-									prompt: prepared.prompt,
-									text: input.prompt,
-									configDir: prepared.configDir,
-									resumeSessionId: prepared.resumeSessionId,
-									resumeSessionAt: prepared.resumeSessionAt,
-									forkSession: prepared.forkSession,
-									clearInheritedGoal: prepared.clearInheritedGoal,
-									startFreshNativeSession:
-										prepared.resumeSessionId === undefined ||
-										input.rewind !== undefined,
-									nativeResumeFallback: fallback,
-									nativeThread: prepared.nativeThread,
-									...(prepared.handoff ? { handoff: prepared.handoff } : {}),
-								},
+						// A legacy in-claim fallback keeps its claim's token (32.13 deletes this path).
+						return options.send(currentSendToken(row), {
+							type: "send-turn",
+							sinkId: options.resolveSinkId(
+								row.command_id,
+								input.inputId,
+								row.attempt_count,
+								fallback,
+							),
+							aborted: false,
+							autoSettleAfterDays,
+							shellEnv,
+							shellConfig: call?.shellConfig ?? input.shellConfig,
+							claudeSettingsOverrides: deps.claudeSettingsOverrides?.(),
+							input: {
+								...resolved,
+								...(call
+									? {
+											projectId: call.projectId,
+											account: call.account,
+											workspaceRoot: call.workspaceRoot,
+											extraFolders: call.extraFolders,
+											shellEnv: call.shellEnv,
+											shellConfig: call.shellConfig,
+										}
+									: {}),
+								instanceId,
+								prompt: prepared.prompt,
+								text: input.prompt,
+								configDir: prepared.configDir,
+								resumeSessionId: prepared.resumeSessionId,
+								resumeSessionAt: prepared.resumeSessionAt,
+								forkSession: prepared.forkSession,
+								clearInheritedGoal: prepared.clearInheritedGoal,
+								startFreshNativeSession:
+									prepared.resumeSessionId === undefined ||
+									input.rewind !== undefined,
+								nativeResumeFallback: fallback,
+								nativeThread: prepared.nativeThread,
+								...(prepared.handoff ? { handoff: prepared.handoff } : {}),
 							},
-							row.attempt_count,
-						);
+						});
 					},
 				}).pipe(
 					Effect.provideService(ProviderStateEffectTag, state),

@@ -11,14 +11,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { it } from "@effect/vitest";
-import { Deferred, Effect, Exit, Fiber, FiberSet } from "effect";
+import { Deferred, Effect, Fiber, FiberSet } from "effect";
 import { expect } from "vitest";
 import { connectRunner } from "../../../src/lib/provider/runner/runner-connection.js";
-import type { RunnerHello } from "../../../src/lib/provider/runner/runner-protocol.js";
+import {
+	type RunnerHello,
+	sendToken,
+} from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 
-// Completion receipts and late replies must keep one send attempt from answering another.
-it.effect("runner hello and status keep completed send attempts separate", () =>
+// Completion receipts and late replies must keep one transmission from answering another.
+it.effect("runner hello and status keep each send token separate", () =>
 	Effect.gen(function* () {
 		const root = yield* Effect.acquireRelease(
 			Effect.sync(() => mkdtempSync(join(tmpdir(), "runner-attempt-"))),
@@ -95,7 +98,6 @@ it.effect("runner hello and status keep completed send attempts separate", () =>
 		});
 		let connection = yield* connect;
 		expect(hello).toMatchObject({
-			crossAttemptNativeResumeFallback: true,
 			sendJournalAnswers: true,
 			sendAnswers: [],
 		});
@@ -136,20 +138,21 @@ it.effect("runner hello and status keep completed send attempts separate", () =>
 				images: [],
 			},
 		};
-		expect(yield* connection.commandEffect("send", send, 1)).toMatchObject({
+		const send1 = sendToken("tx", "send", 1);
+		const send2 = sendToken("tx", "send", 2);
+		const send3 = sendToken("tx", "send", 3);
+		expect(yield* connection.commandEffect(send1, send)).toMatchObject({
 			cost: 1,
 		});
-		expect(yield* connection.commandEffect("send", send, 1)).toMatchObject({
+		expect(yield* connection.commandEffect(send1, send)).toMatchObject({
 			cost: 1,
 		});
 		expect(
-			yield* connection.commandEffect("send", { ...send, sinkId: "send:2" }, 2),
+			yield* connection.commandEffect(send2, { ...send, sinkId: "send:2" }),
 		).toMatchObject({ cost: 2 });
-		expect(yield* connection.commandStatusEffect("send", 1)).toBe("completed");
-		expect(yield* connection.commandStatusEffect("send", 2)).toBe("completed");
-		expect(yield* connection.commandStatusEffect("send", 3)).toBe(
-			"not_received",
-		);
+		expect(yield* connection.commandStatusEffect(send1)).toBe("completed");
+		expect(yield* connection.commandStatusEffect(send2)).toBe("completed");
+		expect(yield* connection.commandStatusEffect(send3)).toBe("not_received");
 		let executing = yield* Deferred.make<void>();
 		const onExecuting = (message: unknown) => {
 			if (
@@ -164,114 +167,88 @@ it.effect("runner hello and status keep completed send attempts separate", () =>
 		};
 		child.on("message", onExecuting);
 		const held = yield* connection
-			.commandEffect(
-				"send",
-				{
-					...send,
-					sinkId: "send:3",
-					input: { ...send.input, prompt: "held" },
-				},
-				3,
-			)
+			.commandEffect(send3, {
+				...send,
+				sinkId: "send:3",
+				input: { ...send.input, prompt: "held" },
+			})
 			.pipe(Effect.forkChild);
 		yield* Deferred.await(executing);
-		expect(yield* connection.commandStatusEffect("send", 3)).toBe("running");
-		expect(yield* connection.commandStatusEffect("send", 4)).toBe(
-			"not_received",
-		);
+		expect(yield* connection.commandStatusEffect(send3)).toBe("running");
+		expect(
+			yield* connection.commandStatusEffect(sendToken("tx", "send", 4)),
+		).toBe("not_received");
 		yield* Fiber.interrupt(held);
 		expect(
-			yield* connection.commandEffect(
-				"terminal-send",
-				{ ...send, sinkId: "terminal-send:1" },
-				1,
-			),
+			yield* connection.commandEffect(sendToken("tx", "terminal-send", 1), {
+				...send,
+				sinkId: "terminal-send:1",
+			}),
 		).toMatchObject({ status: "completed" });
 		for (const status of ["accepted", "joined", "indeterminate"]) {
 			expect(
-				yield* connection.commandEffect(
-					status,
-					{
-						...send,
-						sinkId: `${status}:1`,
-						input: { ...send.input, prompt: status },
-					},
-					1,
-				),
+				yield* connection.commandEffect(sendToken("tx", status, 1), {
+					...send,
+					sinkId: `${status}:1`,
+					input: { ...send.input, prompt: status },
+				}),
 			).toMatchObject({ status });
 		}
 		expect(
-			yield* connection.commandEffect(
-				"fallback",
-				{
-					...send,
-					sinkId: "fallback:1",
-					input: { ...send.input, prompt: "resume-rejected" },
-				},
-				1,
-			),
+			yield* connection.commandEffect(sendToken("tx", "fallback", 1), {
+				...send,
+				sinkId: "fallback:1",
+				input: { ...send.input, prompt: "resume-rejected" },
+			}),
 		).toMatchObject({ nativeResumeRejected: true });
 
-		// S7 increments the attempt; the real host must keep that fallback's identity.
-		yield* connection.commandEffect(
-			"requeued",
-			{
-				...send,
-				sinkId: "requeued:1",
-				input: { ...send.input, prompt: "resume-rejected" },
-			},
-			1,
-		);
+		// A fresh fallback after a rejected resume is its own transmission (4.8).
+		const requeued1 = sendToken("tx", "requeued", 1);
+		const requeued2 = sendToken("tx", "requeued", 2);
+		yield* connection.commandEffect(requeued1, {
+			...send,
+			sinkId: "requeued:1",
+			input: { ...send.input, prompt: "resume-rejected" },
+		});
 		yield* disconnect;
 		connection = yield* connect;
 		expect(hello?.sendAnswers).toContainEqual(
-			expect.objectContaining({
-				commandId: "requeued",
-				attempt: 1,
-				nativeResumeFallback: false,
-				status: "finished",
-			}),
+			expect.objectContaining({ token: requeued1, status: "finished" }),
 		);
 		const fresh = {
 			...send,
-			sinkId: "requeued:2:native-resume-fallback",
+			sinkId: "requeued:2",
 			input: { ...send.input, prompt: "fresh", nativeResumeFallback: true },
 		};
-		const freshResult = yield* connection.commandEffect("requeued", fresh, 2);
+		const freshResult = yield* connection.commandEffect(requeued2, fresh);
 		expect(freshResult).toMatchObject({ status: "completed" });
-		expect(yield* connection.commandEffect("requeued", fresh, 2)).toEqual(
+		expect(yield* connection.commandEffect(requeued2, fresh)).toEqual(
 			freshResult,
 		);
-		const repeatedFallback = yield* Effect.exit(
-			connection.commandEffect(
-				"requeued",
-				{ ...fresh, sinkId: "requeued:3:native-resume-fallback" },
-				3,
-			),
-		);
-		expect(Exit.isFailure(repeatedFallback)).toBe(true);
 		yield* disconnect;
 		connection = yield* connect;
-		expect(hello?.sendAnswers).toContainEqual(
-			expect.objectContaining({
-				commandId: "requeued",
-				attempt: 2,
-				nativeResumeFallback: true,
-				status: "finished",
-			}),
+		expect(hello?.sendAnswers).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					token: requeued1,
+					status: "finished",
+					result: expect.objectContaining({ nativeResumeRejected: true }),
+				}),
+				expect.objectContaining({
+					token: requeued2,
+					status: "finished",
+					result: expect.objectContaining({ status: "completed" }),
+				}),
+			]),
 		);
 		executing = yield* Deferred.make<void>();
 		child.on("message", onExecuting);
 		const fallback = yield* connection
-			.commandEffect(
-				"fallback",
-				{
-					...send,
-					sinkId: "fallback:1:native-resume-fallback",
-					input: { ...send.input, prompt: "held", nativeResumeFallback: true },
-				},
-				1,
-			)
+			.commandEffect(sendToken("tx", "fallback", 2), {
+				...send,
+				sinkId: "fallback:2",
+				input: { ...send.input, prompt: "held", nativeResumeFallback: true },
+			})
 			.pipe(Effect.forkChild);
 		yield* Deferred.await(executing);
 		yield* Fiber.interrupt(fallback);
@@ -283,9 +260,7 @@ it.effect("runner hello and status keep completed send attempts separate", () =>
 		yield* disconnect;
 		connection = yield* connect;
 		expect(hello?.sendAnswers).toContainEqual({
-			commandId: "send",
-			attempt: 3,
-			nativeResumeFallback: false,
+			token: send3,
 			status: "running",
 		});
 		for (const commandId of [
@@ -296,60 +271,47 @@ it.effect("runner hello and status keep completed send attempts separate", () =>
 		])
 			expect(hello?.sendAnswers).toContainEqual(
 				expect.objectContaining({
-					commandId,
-					attempt: 1,
-					nativeResumeFallback: false,
+					token: sendToken("tx", commandId, 1),
 					status: "finished",
 				}),
 			);
+		// The fallback went out fresh; the host's answer carries that mode (4.8).
 		expect(hello?.sendAnswers).toContainEqual({
-			commandId: "fallback",
-			attempt: 1,
-			nativeResumeFallback: true,
+			token: sendToken("tx", "fallback", 2),
+			fresh: true,
 			status: "running",
 		});
 		expect(
 			hello?.completedCommands?.some(
-				({ commandId }) => commandId === "fallback",
+				({ commandId }) => commandId === sendToken("tx", "fallback", 2),
 			),
 		).toBe(false);
 		expect(hello?.bindings).toEqual(
 			expect.arrayContaining([
+				expect.objectContaining({ sinkId: "send:1", token: send1 }),
+				expect.objectContaining({ sinkId: "send:2", token: send2 }),
+				expect.objectContaining({ sinkId: "send:3", token: send3 }),
 				expect.objectContaining({
-					sinkId: "send:1",
-					commandId: "send",
-					attempt: 1,
-				}),
-				expect.objectContaining({
-					sinkId: "send:2",
-					commandId: "send",
-					attempt: 2,
-				}),
-				expect.objectContaining({
-					sinkId: "send:3",
-					commandId: "send",
-					attempt: 3,
-				}),
-				expect.objectContaining({
-					sinkId: "fallback:1:native-resume-fallback",
-					commandId: "fallback",
-					attempt: 1,
+					sinkId: "fallback:2",
+					token: sendToken("tx", "fallback", 2),
 				}),
 			]),
 		);
 		expect(hello?.completedCommands).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					commandId: "send",
-					attempt: 1,
+					commandId: send1,
 					result: expect.objectContaining({ cost: 1 }),
 				}),
 				expect.objectContaining({
-					commandId: "send",
-					attempt: 2,
+					commandId: send2,
 					result: expect.objectContaining({ cost: 2 }),
 				}),
-				expect.objectContaining({ commandId: "control", attempt: 0 }),
+				expect.objectContaining({
+					commandId: sendToken("tx", "fallback", 1),
+					result: expect.objectContaining({ nativeResumeRejected: true }),
+				}),
+				expect.objectContaining({ commandId: "control" }),
 			]),
 		);
 	}),

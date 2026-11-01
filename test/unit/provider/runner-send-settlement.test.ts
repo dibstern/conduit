@@ -57,6 +57,7 @@ import {
 	type RunnerWriteGate,
 	runnerBuildId,
 	runnerFailure,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
 	makeRunnerProviderInstance,
@@ -169,9 +170,8 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 		} = {};
 		const replaySend: {
 			execute?: (
-				commandId: string,
+				token: string,
 				command: Extract<SessionCommand, { type: "send-turn" }>,
-				attempt: number,
 			) => Effect.Effect<TurnResult | undefined, SessionFailure>;
 		} = {};
 		const driver: ProcessRunnerDriver = {
@@ -188,7 +188,6 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 						commandEffect: (
 							id: string,
 							command: SessionCommand,
-							attempt: number,
 							canWrite?: RunnerWriteGate,
 						) =>
 							gatedWrite(
@@ -199,7 +198,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 										type: command.type,
 									});
 									return command.type === "send-turn"
-										? (replaySend.execute?.(id, command, attempt) ??
+										? (replaySend.execute?.(id, command) ??
 												Effect.succeed(terminalResult()))
 										: Effect.succeed(undefined);
 								}),
@@ -214,7 +213,6 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 						protocolVersion: 1,
 						buildId: runnerBuildId(),
 						stampsRunIds: true,
-						crossAttemptNativeResumeFallback: true,
 						runnerId: options.runnerId,
 						sessionId: "s",
 						pid: options.pid ?? 0,
@@ -401,7 +399,7 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 						const retained = transform(value);
 						Object.defineProperty(connection, "retainedSends", {
 							configurable: true,
-							get: () => retained.sendCommands,
+							get: () => retained.sendTokens,
 						});
 						return options.onHello(retained, connection, replay);
 					},
@@ -899,7 +897,7 @@ it.effect(
 				yield* f.hello((hello) => ({
 					...hello,
 					drainsConnections: true,
-					sendCommands: [],
+					sendTokens: [],
 					sendAnswers: [],
 				}));
 				yield* f.recover;
@@ -960,9 +958,7 @@ it.effect(
 					"s",
 					"claude",
 				).execute(
-					"corrupt-gone",
-					1,
-					false,
+					sendToken("hold", "corrupt-gone", 1),
 					Effect.succeed(
 						terminalResult("error", { code: "refused", message: "permanent" }),
 					),
@@ -1954,13 +1950,11 @@ const journalHello =
 	(hello: RunnerHello): RunnerHello => ({
 		...hello,
 		bindings: [],
-		sendCommands: [],
+		sendTokens: [],
 		sendJournalAnswers: true,
 		sendAnswers: [
 			{
-				commandId,
-				attempt: 1,
-				nativeResumeFallback: false,
+				token: sendToken("hold", commandId, 1),
 				status: state,
 				...(result ? { result } : {}),
 				...(failure ? { failure } : {}),
@@ -2200,7 +2194,7 @@ it.effect(
 					}) => ({
 						...hello,
 						bindings: [],
-						sendCommands: [],
+						sendTokens: [],
 						completedCommands: [],
 					}),
 				);
@@ -2265,9 +2259,7 @@ for (const stale of ["claim", "transmission"] as const)
 						return yield* Effect.die("missing retained reply interface");
 					yield* attachment.onCommandReply({
 						type: "command-reply",
-						commandId: "stale",
-						attempt: 1,
-						nativeResumeFallback: false,
+						commandId: sendToken("hold", "stale", 1),
 						result: {
 							...terminalResult("error", {
 								code: "late",
@@ -2316,9 +2308,7 @@ it.effect(
 					return yield* Effect.die("missing retained reply interface");
 				yield* attachment.onCommandReply({
 					type: "command-reply",
-					commandId: "placed",
-					attempt: 1,
-					nativeResumeFallback: false,
+					commandId: sendToken("hold", "placed", 1),
 					result: terminalResult("error", {
 						code: "permanent_refusal",
 						message: "refused",
@@ -2448,6 +2438,80 @@ it.effect(
 		),
 );
 
+// CONTRACT 1802-1807: the wait behind a delivery_unknown send is the hold's. A fresh
+// fallback goes out only behind a ResumeRejected release, which needs a finished answer.
+it.effect(
+	"an uncertain primary keeps its hold and sends no fresh fallback",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("uncertain", 1, 1, "held");
+				const token = sendToken("hold", "uncertain", 1);
+				yield* f.hello((hello) => ({
+					...hello,
+					bindings: [],
+					sendTokens: [token],
+					sendJournalAnswers: true,
+					sendAnswers: [{ token, status: "uncertain" }],
+				}));
+				yield* f.recover;
+				yield* TestClock.adjust("1 second");
+				expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([]);
+				expect(
+					yield* f.sql`SELECT json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
+				).toEqual([{ fallback: null }]);
+				expect(
+					yield* f.sql`SELECT type, json_extract(data, '$.transmission') AS transmission FROM events WHERE type IN ('run.dispatched', 'run.released')`,
+				).toEqual([{ type: "run.dispatched", transmission: 1 }]);
+			}),
+		),
+);
+
+// CONTRACT 7.3: a runner refused as an older build settles its held sends
+// delivery_indeterminate without reading its journal, so no record of it is answered.
+it.effect(
+	"a refused older-build runner's held send settles without its journal being read",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				const matches = vi
+					.spyOn(runnerRegistry, "runnerPidMatchesRegistration")
+					.mockReturnValue(true);
+				yield* Effect.addFinalizer(() =>
+					Effect.sync(() => matches.mockRestore()),
+				);
+				yield* f.seed("older", 1, 1, "held");
+				// A finished answer that would complete the turn if the journal were read.
+				yield* new RunnerSendJournal(
+					prepareRunnerDirectory(f.root, f.root),
+					"s",
+					"claude",
+				).execute(
+					sendToken("hold", "older", 1),
+					Effect.succeed(terminalResult()),
+				);
+				vi.mocked(f.driver.connect).mockImplementation(() =>
+					Effect.fail({
+						...runnerFailure("hello", "unsupported runner protocol"),
+						code: "runner_incompatible",
+					}),
+				);
+				yield* f.recover;
+				f.processes.clear();
+				yield* TestClock.adjust("10 seconds");
+				expect(f.commands.filter((c) => c.type === "send-turn")).toEqual([]);
+				expect(
+					yield* f.sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+				).toEqual([{ type: "turn.error" }]);
+				expect(
+					yield* f.sql`SELECT status FROM provider_command_outbox`,
+				).toEqual([{ status: "failed" }]);
+			}),
+		),
+);
+
 // CONTRACT 4.9, 6.7: a send that meets a refused runner during its failure
 // stop must not retire it again as an interrupted adoption; Settle still
 // reads the refusal's code for the runs it owned.
@@ -2525,15 +2589,15 @@ it.effect(
 					}) => ({
 						...hello,
 						bindings: [],
-						sendCommands: [],
+						sendTokens: [],
 						completedCommands: [],
 					}),
 				);
 				const attempted = yield* Deferred.make<void>();
-				const keys: Array<{ commandId: string; attempt: number }> = [];
-				f.replaySend.execute = (commandId, _command, attempt) =>
+				const keys: string[] = [];
+				f.replaySend.execute = (token) =>
 					Effect.gen(function* () {
-						keys.push({ commandId, attempt });
+						keys.push(token);
 						if (keys.length === 1) {
 							yield* Deferred.succeed(attempted, undefined);
 							return yield* Effect.fail({
@@ -2552,8 +2616,8 @@ it.effect(
 				).toEqual([{ status: "running" }]);
 				yield* TestClock.adjust("1 second");
 				expect(keys).toEqual([
-					{ commandId: "legacy-transient", attempt: 1 },
-					{ commandId: "legacy-transient", attempt: 1 },
+					sendToken("tx", "legacy-transient", 1),
+					sendToken("tx", "legacy-transient", 1),
 				]);
 				expect(
 					yield* f.sql`SELECT status FROM provider_command_outbox`,
@@ -2675,9 +2739,7 @@ for (const source of ["adoption", "retained reply", "reactor reply"] as const)
 								? f.reactor.runOnce()
 								: (attachment?.onCommandReply?.({
 										type: "command-reply",
-										commandId: "atomic",
-										attempt: 1,
-										nativeResumeFallback: false,
+										commandId: sendToken("hold", "atomic", 1),
 										result,
 									}) ?? Effect.die("missing retained reply interface"))
 					).pipe(Effect.forkChild);
@@ -2835,9 +2897,7 @@ for (const source of [
 						source === "Gone explicit process lost"
 					)
 						yield* journal.execute(
-							"gone",
-							1,
-							false,
+							sendToken("hold", "gone", 1),
 							Effect.succeed(
 								terminalResult(
 									source === "Gone explicit process lost"
@@ -2850,9 +2910,7 @@ for (const source of [
 						const started = yield* Deferred.make<void>();
 						yield* journal
 							.execute(
-								"gone",
-								1,
-								false,
+								sendToken("hold", "gone", 1),
 								Deferred.succeed(started, undefined).pipe(
 									Effect.andThen(Effect.never),
 								),
@@ -2953,9 +3011,7 @@ it.effect(
 					"s",
 					"claude",
 				).execute(
-					"gone",
-					1,
-					false,
+					sendToken("hold", "gone", 1),
 					Effect.succeed(
 						terminalResult("error", {
 							code: "permanent_refusal",
@@ -3086,9 +3142,7 @@ for (const source of ["adoption", "Settle"] as const)
 							"claude",
 						);
 						yield* journal.execute(
-							"retry-wake",
-							1,
-							false,
+							sendToken("hold", "retry-wake", 1),
 							Effect.succeed(retry),
 						);
 						f.processes.clear();
@@ -3162,9 +3216,7 @@ for (const source of ["adoption", "retained reply", "reactor reply"] as const)
 								? f.reactor.runOnce()
 								: (attachment?.onCommandReply?.({
 										type: "command-reply",
-										commandId: "stable",
-										attempt: 1,
-										nativeResumeFallback: false,
+										commandId: sendToken("hold", "stable", 1),
 										result,
 									}) ?? Effect.die("missing retained reply interface"))
 					).pipe(Effect.forkChild);
@@ -3227,9 +3279,7 @@ it.effect(
 				const replying = yield* attachment
 					.onCommandReply({
 						type: "command-reply",
-						commandId: "corrupt",
-						attempt: 1,
-						nativeResumeFallback: false,
+						commandId: sendToken("hold", "corrupt", 1),
 						result: terminalResult(),
 					})
 					.pipe(Effect.result, Effect.forkChild);
@@ -3268,9 +3318,7 @@ it.effect(
 					return yield* Effect.die("missing retained reply interface");
 				yield* attachment.onCommandReply({
 					type: "command-reply",
-					commandId: "legacy",
-					attempt: 1,
-					nativeResumeFallback: false,
+					commandId: sendToken("hold", "legacy", 1),
 					result: terminalResult("error", {
 						code: "permanent_refusal",
 						message: "refused",

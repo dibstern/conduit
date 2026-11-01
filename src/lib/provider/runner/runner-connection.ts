@@ -5,6 +5,7 @@ import { Deferred, Effect, Semaphore } from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
@@ -84,9 +85,7 @@ export const connectRunner = (options: {
 	readonly onCommandReply?: (
 		reply: Extract<RunnerMessage, { readonly type: "command-reply" }>,
 	) => Effect.Effect<void, SessionFailure>;
-	readonly onCommandsSettled?: (
-		commands: NonNullable<RunnerHello["sendCommands"]>,
-	) => void;
+	readonly onCommandsSettled?: (tokens: readonly SendToken[]) => void;
 	readonly onUpgradeState?: (state: RunnerUpgradeState) => void;
 	readonly onOutputCommitted?: (output: SessionOutput) => void;
 }) =>
@@ -199,7 +198,7 @@ export const connectRunner = (options: {
 						return;
 					}
 					if (message.type === "settled-commands-ack") {
-						options.onCommandsSettled?.(message.commands);
+						options.onCommandsSettled?.(message.tokens);
 						return;
 					}
 					if (message.type === "refused") {
