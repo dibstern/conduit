@@ -12,8 +12,8 @@
  *    `unmatched` step, data for the comparison (32.2.17.2), never a hang.
  * 3. Frames reach the wrong turn: a token's frames go to the query or session its call arrived
  *    on; frames whose call never arrived are `unmatched`, never sent elsewhere.
- * 4. Steps race main: each step settles first, until the event log, the outbox and the calls
- *    stop moving.
+ * 4. Steps race main: each step runs its action, then advances a fake clock past the stack's
+ *    polls, draining ready work between ticks, so a step's work never lands in the next one.
  * 5. Teardown calls (a closing query's interrupt) count as unanswered: calls are judged after the
  *    last step settles, before the stack closes.
  */
@@ -494,29 +494,46 @@ export function replayTrace(
 			yield* (yield* SessionInboxTag).start;
 			const sql = yield* SqlClient.SqlClient;
 
-			// Failure 4: settled once the log, the outbox and the calls hold still for 110ms, longer
-			// than the stack's 100ms polls (a runner interrupt's wait for its turn to end,
-			// claude-runner-payload.ts 3021; a Stop's wait, provider-turn-service.ts 246), so work a
-			// poll would release lands in the step that released it, never the next.
-			const fingerprint = sql<{
-				readonly n: number;
-				readonly outbox: string | null;
-			}>`
-				SELECT (SELECT count(*) FROM events) AS n,
-					(SELECT group_concat(command_id || ':' || status) FROM provider_command_outbox) AS outbox`.pipe(
-				Effect.map(([row]) => `${row?.n}|${row?.outbox}|${calls.length}`),
-				Effect.orDie,
+			const origin = Date.UTC(2026, 0, 1);
+			// Failure 4: steps run on a fake clock (timers and Date; Effect's scheduler stays on the real
+			// setImmediate). A step first moves it to the step's trace time, then 600ms past its action,
+			// beyond the reactor's 500ms polls (orchestration-side-effect-reactor.ts 291), in 5ms ticks,
+			// draining the stack's ready work before each tick, so whatever a step's timers release
+			// lands in that step.
+			yield* Effect.acquireRelease(
+				Effect.sync(() =>
+					vi.useFakeTimers({
+						toFake: [
+							"setTimeout",
+							"clearTimeout",
+							"setInterval",
+							"clearInterval",
+							"Date",
+						],
+						now: origin,
+					}),
+				),
+				() => Effect.sync(() => vi.useRealTimers()),
 			);
-			const settle = Effect.gen(function* () {
-				let last = yield* fingerprint;
-				let still = 0;
-				while (still < 22) {
-					yield* Effect.sleep("5 millis");
-					const next = yield* fingerprint;
-					still = next === last ? still + 1 : 0;
-					last = next;
-				}
-			}).pipe(Effect.timeoutOption("1 second"));
+			// Ready work: Effect's scheduler queues setImmediate, and the stack's fs calls (FSReqPromise)
+			// finish on libuv's pool, so drained once neither is pending.
+			const drain = Effect.promise(async () => {
+				do await new Promise<void>((resolve) => setImmediate(resolve));
+				while (
+					process
+						.getActiveResourcesInfo()
+						.some((kind) => kind === "Immediate" || kind.startsWith("FSReq"))
+				);
+			});
+			const settle = (until: number) =>
+				Effect.gen(function* () {
+					while (Date.now() < until) {
+						yield* drain;
+						vi.advanceTimersByTime(5);
+					}
+					yield* drain;
+				});
+			let ingesting: Fiber.Fiber<unknown, unknown> | undefined;
 
 			const read = yield* ReadQueryEffectTag;
 			const snapshots: StepSnapshot[] = [];
@@ -599,6 +616,9 @@ export function replayTrace(
 
 			for (const step of steps) {
 				current = step.fact;
+				// A fact at a later trace time first moves the clock there, so main's own deadlines (a
+				// Stop's 30s wait, a send's backoff) fall due where the trace's do.
+				yield* settle(origin + step.at);
 				switch (step.kind) {
 					case "browser": {
 						if (stopping(step.command)) stopReplies.push(step.reply);
@@ -610,27 +630,20 @@ export function replayTrace(
 						// A stop's reply waits for the native turn to end, which a later step may bring, so
 						// the RPC runs on and its reply is read when the trace ends.
 						const fiber = yield* Effect.forkScoped(browser(step.command));
-						yield* Fiber.await(fiber).pipe(Effect.timeoutOption("500 millis"));
 						rpcs.push({ fact: step.fact, rpc: step.command.rpc, fiber });
 						break;
 					}
 					case "call": {
 						const { call } = step;
-						const arrived = yield* Effect.sleep("5 millis").pipe(
-							Effect.map(() =>
-								calls.find(
-									(made) =>
-										made.call.kind === "send" &&
-										call.kind === "send" &&
-										made.call.inputId === call.inputId &&
-										made.call.transmission === call.transmission,
-								),
-							),
-							Effect.repeat({ until: (made) => made !== undefined }),
-							Effect.timeoutOption("500 millis"),
+						// The step before settled, so a call main makes for this step has arrived.
+						const arrived = calls.find(
+							(made) =>
+								made.call.kind === "send" &&
+								call.kind === "send" &&
+								made.call.inputId === call.inputId &&
+								made.call.transmission === call.transmission,
 						);
-						if (arrived._tag === "Some" && arrived.value !== undefined)
-							tokenCall.set(step.token, arrived.value);
+						if (arrived !== undefined) tokenCall.set(step.token, arrived);
 						else
 							unmatched.push({
 								fact: step.fact,
@@ -654,27 +667,29 @@ export function replayTrace(
 							else for (const frame of step.frames) target.query.push(frame);
 							break;
 						}
-						for (const frame of step.frames) {
-							const event: SSEEvent = JSON.parse(
-								JSON.stringify(frame)
-									.replaceAll(placeholder.session, target.session)
-									.replaceAll(
-										placeholder.message,
-										target.messageId ?? placeholder.message,
-									),
-							);
-							const ingested = yield* ingress
-								.onSSEEventEffect(event, target.session, "opencode", {
-									providerProcessId: api.promptProcessId,
-									directory: scratch,
-								})
-								.pipe(Effect.timeoutOption("3 seconds"));
-							if (ingested._tag === "None")
-								unmatched.push({
-									fact: step.fact,
-									why: `${event.type} not ingested in 3s`,
-								});
-						}
+						// Forked: a frame whose handling waits on a timer would otherwise wait on a clock
+						// nothing advances until the step settles.
+						ingesting = yield* Effect.forkScoped(
+							Effect.forEach(step.frames, (frame) => {
+								const event: SSEEvent = JSON.parse(
+									JSON.stringify(frame)
+										.replaceAll(placeholder.session, target.session)
+										.replaceAll(
+											placeholder.message,
+											target.messageId ?? placeholder.message,
+										),
+								);
+								return ingress.onSSEEventEffect(
+									event,
+									target.session,
+									"opencode",
+									{
+										providerProcessId: api.promptProcessId,
+										directory: scratch,
+									},
+								);
+							}),
+						);
 						break;
 					}
 					case "start":
@@ -683,7 +698,16 @@ export function replayTrace(
 					case "unwired":
 						break;
 				}
-				yield* settle;
+				yield* settle(Date.now() + 600);
+				if (ingesting !== undefined) {
+					if (ingesting.pollUnsafe() === undefined)
+						unmatched.push({
+							fact: step.fact,
+							why: "frames not ingested by the step's end",
+						});
+					else yield* Fiber.join(ingesting);
+					ingesting = undefined;
+				}
 				const events = yield* sql<Record<string, unknown>>`
 					SELECT sequence, session_id, type, data, metadata, provider FROM events
 					WHERE sequence > ${seen} ORDER BY sequence`.pipe(Effect.orDie);

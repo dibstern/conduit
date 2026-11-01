@@ -1568,6 +1568,29 @@ export const scenarios: readonly OracleScenario[] = [
 		},
 	},
 	{
+		id: "D56-213",
+		title:
+			"[2.1 row 213] a Claude Stop its turn never answers reaches main's 30s deadline step with a task live",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			unsolicited(d, {
+				kind: "tasks_snapshot",
+				tasks: [
+					{
+						key: { taskId: "t1" },
+						taskType: "local_bash",
+						description: "watch",
+						ambient: false,
+					},
+				],
+			});
+			stop(d);
+			// A Claude Stop opens no ledger alarm (L6); the turn ends 40s on, past main's 30s wait.
+			observe(d, a.token, { kind: "result", outcome: "interrupted" }, 40_000);
+		},
+	},
+	{
 		id: "D56-211",
 		title: "[2.1 row 211] Claude cancels a start's intake before it starts",
 		provider: "claude",
