@@ -37,6 +37,8 @@ describe("Cursor accepted run ownership", () => {
 		"recall-before-send",
 		"recall-after-send",
 		"unprepared",
+		// Signed in, but the send lacks prepare's facts.
+		"unprepared-facts",
 	] as const)("keeps intake and terminal ownership with %s evidence", async (evidence) => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-run-ownership-"));
 		const events: ProviderRuntimeEvent[] = [];
@@ -157,6 +159,14 @@ describe("Cursor accepted run ownership", () => {
 								configDir: configuredClaudeConfigDir(root),
 								folderSource: "account",
 								model: { providerId: "cursor", modelId: "composer-2.5" },
+								...(evidence === "unprepared-facts"
+									? {}
+									: {
+											facts: {
+												_tag: "Cursor" as const,
+												model: { _tag: "Resolved" as const, params: [] },
+											},
+										}),
 							};
 							return admission
 								.admitSendEffect(
@@ -178,7 +188,7 @@ describe("Cursor accepted run ownership", () => {
 						};
 						const accepted = () =>
 							events.filter((event) => event.type === "run.started");
-						if (evidence === "unprepared") {
+						if (evidence === "unprepared" || evidence === "unprepared-facts") {
 							const result = yield* send("unprepared", "run-unprepared");
 							expect(result).toMatchObject({
 								status: "error",
@@ -368,6 +378,131 @@ describe("Cursor accepted run ownership", () => {
 								.filter((event) => event.type === "text.delta")
 								.map((event) => event.runId),
 						).toEqual(["run-a", "run-c"]);
+					}),
+				),
+			);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	// 4.6: a Stop names runs, never reusable input ids, so a late frame never
+	// stops a newer send's turn: the turn runs on to its own completion.
+	it("a late interrupt naming an older run never stops a newer send's turn", async () => {
+		const root = mkdtempSync(join(tmpdir(), "cursor-run-stop-"));
+		try {
+			await Effect.runPromise(
+				Effect.scoped(
+					Effect.gen(function* () {
+						const finish = yield* Deferred.make<void>();
+						const cancel = vi.fn(async () => {
+							await Effect.runPromise(Deferred.succeed(finish, undefined));
+						});
+						let sends = 0;
+						const port: CursorSdkPort = {
+							probeRuntime: async () => ({ available: true }),
+							authLogin: async () => {},
+							authStatus: async () => ({ status: "logged-out" }),
+							authLogout: async () => {},
+							storedCredential: async () => undefined,
+							modelsList: async () => [],
+							openStore: async () => ({ dispose: async () => {} }),
+							getActiveRun: async () => undefined,
+							deleteAgent: async () => {},
+							primeSandbox: async () => {},
+							resumeAgent: (_id, options, credential, store, tools) =>
+								port.createAgent(options, credential, store, tools),
+							createAgent: async () => ({
+								id: String(running["agent_id"]),
+								getUsage: async () => undefined,
+								close: async () => {},
+								send: async () => {
+									sends += 1;
+									const nativeId = String(running["run_id"]);
+									return {
+										id: nativeId,
+										steer: async () => "complete_delivered" as const,
+										cancel,
+										stream: (async function* () {
+											yield { ...running, run_id: nativeId };
+											await Effect.runPromise(Deferred.await(finish));
+										})(),
+										wait: async () => {
+											await Effect.runPromise(Deferred.await(finish));
+											return { ...terminal, id: nativeId };
+										},
+									};
+								},
+							}),
+						};
+						const started = yield* Deferred.make<void>();
+						const ended = yield* Deferred.make<ProviderRuntimeEvent>();
+						const runner = yield* makeCursorSessionRunner(
+							{
+								workspaceRoot: root,
+								daemonConfigDir: root,
+								port,
+								credential: () =>
+									cursorCredentialFixture("inert-test-key", "environment"),
+								environment: () => ({ CURSOR_API_KEY: "inert-test-key" }),
+							},
+							(output) =>
+								(output.type !== "event"
+									? Effect.void
+									: output.event.type === "run.started"
+										? Deferred.succeed(started, undefined)
+										: [
+													"turn.interrupted",
+													"turn.completed",
+													"turn.error",
+												].includes(output.event.type)
+											? Deferred.succeed(ended, output.event)
+											: Effect.void
+								).pipe(Effect.as({})),
+						);
+						const admission = yield* makeRunnerAdmission(runner, "cursor");
+						const input: SessionTurn = {
+							sessionId: "session",
+							inputId: "shared-input",
+							runId: "run-new",
+							prompt: "Answer",
+							history: [],
+							providerState: {},
+							workspaceRoot: root,
+							extraFolders: [],
+							configDir: configuredClaudeConfigDir(root),
+							folderSource: "account",
+							model: { providerId: "cursor", modelId: "composer-2.5" },
+							facts: {
+								_tag: "Cursor",
+								model: { _tag: "Resolved", params: [] },
+							},
+						};
+						yield* Effect.forkChild(
+							admission.admitSendEffect(
+								{ origin: { _tag: "Fresh" }, sinkId: "shared-input", input },
+								(handle) =>
+									runner.executeEffect(
+										{
+											type: "send-turn",
+											sinkId: "shared-input",
+											aborted: false,
+											input,
+										},
+										handle,
+									),
+							),
+						);
+						yield* Deferred.await(started);
+						yield* runner.executeEffect({
+							type: "interrupt",
+							sessionId: "session",
+							runIds: ["run-old"],
+						});
+						yield* Deferred.succeed(finish, undefined);
+						expect((yield* Deferred.await(ended)).type).toBe("turn.completed");
+						expect(cancel).not.toHaveBeenCalled();
+						expect(sends).toBe(1);
 					}),
 				),
 			);

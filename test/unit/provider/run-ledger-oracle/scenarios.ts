@@ -1809,6 +1809,41 @@ export const scenarios: readonly OracleScenario[] = [
 		},
 	},
 	{
+		id: "D56-206",
+		title:
+			"[2.1 row 206] a Claude steer still unanswered when main's 30s deadline step retires its Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			// Row 206 places B at any end of its Run (CONTRACT.md 970-972) once the view reads it possibly
+			// reached, but the replay's in-process Claude runner writes no run.dispatched, so the view reads
+			// B unplaced and both stacks requeue it (gap). The unit rows test drives the placement.
+			begin(d, "B", "steer");
+			stop(d);
+			// A Claude Stop opens no ledger alarm (L6); the turn ends 40s on, past main's 30s wait.
+			observe(d, a.token, { kind: "result", outcome: "interrupted" }, 40_000);
+		},
+	},
+	{
+		id: "D56-207",
+		title:
+			"[2.1 row 207] OpenCode refuses a steer's send permanently while its Run runs on",
+		provider: "opencode",
+		run(d) {
+			// OpenCode steers by queue (provider-instance.ts), so main's inbox refuses B (no_steering) and
+			// never makes its send: no difference, and row 207's direct-steer writer has no shipping route
+			// (gap). The unit rows test drives the writer through the reactor.
+			const a = running(d);
+			const b = begin(d, "B", "steer");
+			// 3.9 (CONTRACT.md 973-977): the refusal fails B, final, its text back in the composer.
+			observe(d, b.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "permanent", code: "HTTP400" },
+			});
+			complete(d, a.token);
+		},
+	},
+	{
 		id: "D56-211",
 		title: "[2.1 row 211] Claude cancels a start's intake before it starts",
 		provider: "claude",

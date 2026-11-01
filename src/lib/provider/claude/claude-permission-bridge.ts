@@ -8,6 +8,7 @@
  */
 import { Effect } from "effect";
 import type { ClaudeAdapterError } from "../event-sink-errors.js";
+import { currentRunnerQuery } from "../runner/session-runner.js";
 import type { EventSink, PermissionDecision } from "../types.js";
 import {
 	ClaudePermissionService,
@@ -60,7 +61,9 @@ export class ClaudePermissionBridge {
 	): Promise<PermissionResult> {
 		try {
 			return await runPermissionRequestAtSdkBoundary(
-				this.service.handlePermissionEffect(ctx, toolName, toolInput, options),
+				this.service
+					.handlePermissionEffect(ctx, toolName, toolInput, options)
+					.pipe(Effect.provideService(currentRunnerQuery, ctx.query)),
 			);
 		} catch {
 			return {

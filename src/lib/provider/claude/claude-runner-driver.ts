@@ -198,6 +198,7 @@ export const makeClaudeRunnerDriver = (
 					configDir: folder,
 					folderSource: input.folderSource ?? "account",
 					...(account ? { instanceId: account.id } : {}),
+					facts: { _tag: "Claude" as const },
 				};
 				const claudeSettingsOverrides = yield* Effect.try({
 					try: () => deps.claudeSettingsOverrides?.(),

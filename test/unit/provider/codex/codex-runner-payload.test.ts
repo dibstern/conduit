@@ -1,11 +1,11 @@
 // Failure modes: process exit hides a native missing-thread error; a session
 // retains the previous account's home after an account switch.
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
-import { Effect } from "effect";
+import { Deferred, Effect } from "effect";
 import { expect } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -80,6 +80,11 @@ describe("Codex runner preparation", () => {
 							configDir: configuredClaudeConfigDir(root),
 							folderSource: "account",
 							model: { providerId: "codex", modelId: "gpt-6.1-sol" },
+							facts: {
+								_tag: "Codex",
+								skill: { _tag: "None" },
+								truncate: { _tag: "None" },
+							},
 							account: {
 								id: AccountIdSchema.make(home),
 								driver: "codex",
@@ -119,5 +124,154 @@ describe("Codex runner preparation", () => {
 					}),
 				);
 			}),
+	);
+
+	// 4.6: a Stop names runs, never reusable input ids, so a late frame never
+	// stops a newer send's turn. Each interrupt returns after its turn/interrupt
+	// reply, and the capture records every request synchronously.
+	it.live(
+		"a late interrupt naming an older run never stops a newer send's turn",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-stop-"))),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const capture = join(root, "capture.jsonl");
+				const started = yield* Deferred.make<void>();
+				const ended = yield* Deferred.make<ProviderRuntimeEvent>();
+				const runner = yield* makeCodexSessionRunner(
+					{
+						workspaceRoot: root,
+						daemonConfigDir: root,
+						environment: () => ({
+							CODEX_HOME: root,
+							NODE_ENV: "test",
+							CONDUIT_CODEX_APP_SERVER_TRACE: fileURLToPath(
+								new URL(
+									"../../../fixtures/codex-app-server-traces/stop-queued.jsonl",
+									import.meta.url,
+								),
+							),
+							CONDUIT_CODEX_APP_SERVER_CAPTURE: capture,
+						}),
+					},
+					(output) =>
+						(output.type !== "event"
+							? Effect.void
+							: output.event.type === "run.started"
+								? Deferred.succeed(started, undefined)
+								: ["turn.interrupted", "turn.completed", "turn.error"].includes(
+											output.event.type,
+										)
+									? Deferred.succeed(ended, output.event)
+									: Effect.void
+						).pipe(Effect.as({})),
+				);
+				const admission = yield* makeRunnerAdmission(runner, "codex");
+				yield* admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: "input",
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId: "shared-input",
+						runId: "run-new",
+						prompt: "Say hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "codex", modelId: "gpt-5.4" },
+						facts: {
+							_tag: "Codex",
+							skill: { _tag: "None" },
+							truncate: { _tag: "None" },
+						},
+					},
+				}).pipe(Effect.forkScoped);
+				const interruptRequests = () =>
+					readFileSync(capture, "utf8")
+						.split("\n")
+						.filter((line) => line.includes('"method":"turn/interrupt"'))
+						.length;
+				yield* Deferred.await(started);
+				yield* runner.executeEffect({
+					type: "interrupt",
+					sessionId: "session",
+					runIds: ["run-old"],
+				});
+				expect(interruptRequests()).toBe(0);
+				expect(yield* Deferred.isDone(ended)).toBe(false);
+				yield* runner.executeEffect({
+					type: "interrupt",
+					sessionId: "session",
+					runIds: ["run-new"],
+				});
+				expect(interruptRequests()).toBe(1);
+				expect(yield* Deferred.await(ended)).toMatchObject({
+					type: "turn.interrupted",
+					runId: "run-new",
+				});
+			}),
+	);
+
+	// The runner never re-derives what prepare decided: a turn without its
+	// facts fails before any native turn starts.
+	it.live("a send without prepared turn facts fails unprepared", () =>
+		Effect.gen(function* () {
+			const root = yield* Effect.acquireRelease(
+				Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-facts-"))),
+				(path) =>
+					Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+			);
+			const capture = join(root, "capture.jsonl");
+			const runner = yield* makeCodexSessionRunner(
+				{
+					workspaceRoot: root,
+					daemonConfigDir: root,
+					environment: () => ({
+						CODEX_HOME: root,
+						NODE_ENV: "test",
+						CONDUIT_CODEX_APP_SERVER_TRACE: fileURLToPath(
+							new URL(
+								"../../../fixtures/codex-app-server-traces/stop-queued.jsonl",
+								import.meta.url,
+							),
+						),
+						CONDUIT_CODEX_APP_SERVER_CAPTURE: capture,
+					}),
+				},
+				() => Effect.succeed({}),
+			);
+			const admission = yield* makeRunnerAdmission(runner, "codex");
+			expect(
+				yield* admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: "input",
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId: "input",
+						runId: "run",
+						prompt: "Say hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "codex", modelId: "gpt-5.4" },
+						facts: { _tag: "Claude" },
+					},
+				}),
+			).toMatchObject({ status: "error", error: { code: "turn_unprepared" } });
+			expect(
+				existsSync(capture) ? readFileSync(capture, "utf8") : "",
+			).not.toContain('"method":"turn/start"');
+		}),
 	);
 });

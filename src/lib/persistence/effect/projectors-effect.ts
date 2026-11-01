@@ -1850,8 +1850,9 @@ export const makeTurnProjector = defineProjector(() => ({
 				yield* sql`UPDATE provider_runs SET runner_id = ${event.data.runnerId},
 					held_transmission = ${event.data.transmission ?? null}
 					WHERE session_id = ${event.sessionId} AND id = ${event.data.runId}
-					AND EXISTS (SELECT 1 FROM provider_runs owner
-						WHERE owner.id = ${event.data.runId} AND owner.session_id = ${event.sessionId}
+					AND EXISTS (SELECT 1 FROM provider_runs requested JOIN provider_runs owner
+						ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
+						WHERE requested.id = ${event.data.runId} AND requested.session_id = ${event.sessionId}
 						AND owner.status IN ('pending', 'running'))`;
 				return { sessions: [], messages: [] };
 			}
@@ -2156,6 +2157,15 @@ export const makeTurnProjector = defineProjector(() => ({
 					return { sessions: [event.sessionId], messages: woken };
 			}
 			if (!["pending", "running"].includes(run.status)) {
+				// From 32.5 a joined steer's own settlement ends its command, never its
+				// owner's run (4.8; CONTRACT 1555-1556, 1868-1869).
+				if (
+					run.status === "joined" &&
+					runTerminalStatus(event, event.provider)
+				) {
+					yield* settleRunCommands(runId, event);
+					return { sessions: [event.sessionId], messages: woken };
+				}
 				// A background task finishing after its run ended wakes Claude into
 				// a new turn under the same run. Its end is new output to read,
 				// unless a newer run owns the session or it repeats a counted reply.

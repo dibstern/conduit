@@ -72,7 +72,12 @@ const fixture = (deps: Partial<RunnerProviderInstanceDeps> = {}) =>
 				generateTextEffect: () => Effect.die("Unexpected generation"),
 				prepareTurnEffect: (input) =>
 					Effect.succeed({
-						input: { ...input, configDir, folderSource: "account" },
+						input: {
+							...input,
+							configDir,
+							folderSource: "account",
+							facts: { _tag: "Claude" as const },
+						},
 					}),
 			},
 			() =>

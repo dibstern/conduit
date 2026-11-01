@@ -236,7 +236,11 @@ interface World {
 	readonly inputs: Map<string, Input>;
 	readonly sends: Send[];
 	readonly tokens: Map<string, { send: number; tx: number }>;
-	readonly mainRuns: Map<string, { runId: string; open: boolean }>;
+	/** `steer`: a joined steer's own run, not yet started; its end is the steer's, not its Run's (4.8). */
+	readonly mainRuns: Map<
+		string,
+		{ runId: string; open: boolean; readonly steer?: true }
+	>;
 	readonly seen: Set<string>;
 	/** The seq of the last session end or rejected resume (3.4). */
 	freshSince: number;
@@ -2066,21 +2070,26 @@ function mainEvent(
 			const run = findRun(world, input.runId);
 			if (run === undefined || run.phase === "Ended")
 				return noop("run.requested for an ended Run (3.8)");
-			world.mainRuns.set(observation.runId, { runId: run.runId, open: true });
+			const steer =
+				input.delivery === "steer" && run.inputs[0] !== input.inputId;
+			world.mainRuns.set(observation.runId, {
+				runId: run.runId,
+				open: true,
+				...(steer ? { steer } : {}),
+			});
 			if (run.phase === "Queued") launch(run);
 			const prior = deliverySends(world, run).find(
 				(send) =>
 					"inputId" in send.effect && send.effect.inputId === input.inputId,
 			);
-			const effect: RunEffect =
-				input.delivery === "steer" && run.inputs[0] !== input.inputId
-					? { kind: "steer", runId: run.runId, inputId: input.inputId }
-					: {
-							kind: "start",
-							runId: run.runId,
-							inputId: input.inputId,
-							mode: nextMode(world),
-						};
+			const effect: RunEffect = steer
+				? { kind: "steer", runId: run.runId, inputId: input.inputId }
+				: {
+						kind: "start",
+						runId: run.runId,
+						inputId: input.inputId,
+						mode: nextMode(world),
+					};
 			// 3.4: a direct send's run.requested is its transmission, its token the runId; a runner-held
 			// send's names its Run, and run.dispatched is its transmission.
 			const send = prior ?? issue(world, effect, !observation.direct);
@@ -2147,6 +2156,13 @@ function mainEvent(
 		case "run_terminal": {
 			const target = world.mainRuns.get(observation.runId);
 			if (target === undefined) return noop("run_terminal for an unknown run");
+			// 4.8 (CONTRACT.md 1864-1869), 4.3 (1521-1524): from 32.5 a joined steer has its own
+			// transmissions and cap, so its unstarted run's end, a fresh-run retry's failed try or the
+			// cap's error, is the steer's alone: its Run neither ends nor names that run again.
+			if (target.steer) {
+				world.mainRuns.delete(observation.runId);
+				return changed;
+			}
 			target.open = false;
 			const run = findRun(world, target.runId);
 			if (run === undefined || run.phase === "Ended") return changed;

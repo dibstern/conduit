@@ -31,9 +31,10 @@ export interface RunnerPayload {
 		sink: EventSink,
 		signal: AbortSignal,
 	): Effect.Effect<TurnResult, PayloadFailure>;
+	/** With `runIds`, never a send's turn whose run they do not name (4.6). */
 	interrupt(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 		requestedAt?: number,
 	): Effect.Effect<void, PayloadFailure>;
 	applySettings(

@@ -166,7 +166,11 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					sessionId: "session-1",
 				});
 
-				expect(instance.interruptTurnEffect).toHaveBeenCalledWith("session-1");
+				expect(instance.interruptTurnEffect).toHaveBeenCalledWith(
+					"session-1",
+					undefined,
+					undefined,
+				);
 				expect(yield* engine.getProviderForSessionEffect("session-1")).toBe(
 					"claude",
 				);
@@ -176,7 +180,7 @@ describe("OrchestrationEngine dispatchEffect", () => {
 	);
 
 	it.effect(
-		"forwards the original input identity when interrupting a session",
+		"forwards a Stop's run ids, never its input ids, when interrupting a session",
 		() =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -196,11 +200,20 @@ describe("OrchestrationEngine dispatchEffect", () => {
 					commandId: "cmd-bound-interrupt",
 					sessionId: "session-1",
 					turnIds: ["original-input"],
+					stop: {
+						deadlineAt: 0,
+						owners: [{ runId: "original-run" }],
+						turnIds: ["original-input"],
+						runnerBacked: true,
+						retainedSteers: false,
+					},
 				});
 
-				expect(instance.interruptTurnEffect).toHaveBeenCalledWith("session-1", [
-					"original-input",
-				]);
+				expect(instance.interruptTurnEffect).toHaveBeenCalledWith(
+					"session-1",
+					["original-run"],
+					undefined,
+				);
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),

@@ -12,11 +12,12 @@ import type {
 	QuestionRequest,
 } from "../types.js";
 import type { SendScope } from "./send-scope.js";
-import type {
-	SessionCommand,
-	SessionFailure,
-	SessionOutput,
-	SessionOutputReply,
+import {
+	currentRunnerQuery,
+	type SessionCommand,
+	type SessionFailure,
+	type SessionOutput,
+	type SessionOutputReply,
 } from "./session-runner.js";
 
 // Batch storage writes while keeping streamed text visible within 50 ms.
@@ -31,6 +32,8 @@ export class RunnerSinkBindings {
 			readonly sinkId: string;
 			event: ProviderRuntimeEvent & { readonly data: TextDeltaPayload };
 			readonly timer: ReturnType<typeof setTimeout>;
+			/** Whoever flushes it, a held delta stays its own query's output (CONTRACT 6.1). */
+			readonly query: object | undefined;
 		}
 	>();
 	private readonly lastDeltaParts = new Map<string, string>();
@@ -94,7 +97,10 @@ export class RunnerSinkBindings {
 					type: "event",
 					sinkId: pending.sinkId,
 					event: pending.event,
-				}).pipe(Effect.asVoid)
+				}).pipe(
+					Effect.provideService(currentRunnerQuery, pending.query),
+					Effect.asVoid,
+				)
 			: Effect.void;
 	}
 
@@ -130,10 +136,12 @@ export class RunnerSinkBindings {
 							event: { ...output.event, data: { ...output.event.data } },
 						}
 					: undefined;
+			const query = yield* currentRunnerQuery;
 			const pending = this.pendingDeltas.get(sessionId);
 			if (
 				delta &&
 				pending &&
+				pending.query === query &&
 				pending.sinkId === delta.sinkId &&
 				pending.event.type === delta.event.type &&
 				pending.event.data.messageId === delta.event.data.messageId &&
@@ -168,7 +176,7 @@ export class RunnerSinkBindings {
 							),
 						);
 					}, DELTA_COALESCE_WINDOW_MS);
-					this.pendingDeltas.set(sessionId, { ...delta, timer });
+					this.pendingDeltas.set(sessionId, { ...delta, timer, query });
 					return {};
 				}
 				this.lastDeltaParts.set(sessionId, key);

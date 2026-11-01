@@ -20,13 +20,13 @@ export const landedUnitRows = [
 		row: 206,
 		unit: "requeueFailedSteers",
 		change:
-			"a steer a runner_stopped failure left possibly reached is placed as its message, never returned to the inbox",
+			"a steer the view reads as possibly reached is placed as its message once its Run is no longer active, never returned to the inbox",
 	},
 	{
 		row: 207,
 		unit: "requeueFailedSteers",
 		change:
-			"with { cancelFinal: true } (commitAndSignal), a steer the view marks failed gets input.cancelled after input.requeued in the same batch",
+			"with { cancelFinal: true } (commitAndSignal), a steer the view marks failed gets input.cancelled after input.requeued in the same batch; recordSendReply writes the permanent outcome a direct steer's refused send needs for that",
 	},
 	{
 		row: 210,

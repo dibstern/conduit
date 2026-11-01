@@ -61,14 +61,15 @@ import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import type { RunnerProviderInstanceDeps } from "../runner/runner-provider-instance.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import { makeSendAdmissionWait } from "../runner/send-admission.js";
-import type {
-	NativeSessionRunner,
-	SessionCommand,
-	SessionFailure,
-	SessionOutput,
-	SessionOutputReply,
-	SessionRunner,
-	SessionTurn,
+import {
+	currentRunnerQuery,
+	type NativeSessionRunner,
+	type SessionCommand,
+	type SessionFailure,
+	type SessionOutput,
+	type SessionOutputReply,
+	type SessionRunner,
+	type SessionTurn,
 } from "../runner/session-runner.js";
 import type {
 	EventSink,
@@ -270,6 +271,8 @@ export type ClaudeSessionRunnerDeps = Pick<
 		nativeSessionId: string,
 	) => void;
 	readonly prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>;
+	/** Each SDK query this runner creates, as its output names it (CONTRACT 6.1). */
+	readonly onQueryStarted?: (query: Query) => void;
 };
 
 export interface ClaudeProviderRuntimeState {
@@ -324,6 +327,7 @@ export const makeClaudeSessionRunner = (
 						deps.prepareQuery,
 						deps.readGoalStatus,
 						deps.onNativeSessionId,
+						deps.onQueryStarted,
 					);
 					payload = new ClaudeRunnerPayload(
 						deps,
@@ -520,10 +524,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	}
 	interrupt(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 		requestedAt?: number,
 	): Effect.Effect<void, SessionFailure> {
-		return this.interruptTurnEffect(sessionId, turnIds, requestedAt).pipe(
+		return this.interruptTurnEffect(sessionId, runIds, requestedAt).pipe(
 			Effect.mapError((cause) => sessionFailure("interrupt", cause)),
 		);
 	}
@@ -1388,6 +1392,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 					}));
 				activeQuery = query;
+				this.deps.onQueryStarted?.(query);
 				if (launchInput.clearInheritedGoal)
 					yield* Effect.tryPromise({
 						try: () => query.initializationResult(),
@@ -1437,7 +1442,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				streamFiber = yield* FiberMap.run(
 					this.streamFibers,
 					sessionId,
-					this.runStreamConsumerEffect(ctx, translator),
+					this.runStreamConsumerEffect(ctx, translator).pipe(
+						Effect.provideService(currentRunnerQuery, ctx.query),
+					),
 				);
 			});
 
@@ -2780,25 +2787,31 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	interruptTurnEffect(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 		requestedAt?: number,
 	): Effect.Effect<void, ProviderInstanceFailure> {
 		const attributes = { providerId: this.providerId, sessionId };
 		return this.mapProviderFailure(
 			"interruptTurn",
-			this.interruptSessionEffect(sessionId, turnIds, requestedAt).pipe(
+			this.interruptSessionEffect(sessionId, runIds, requestedAt).pipe(
 				Effect.annotateLogs(attributes),
 				Effect.withSpan("claude.interrupt", { attributes }),
 			),
 		);
 	}
 
+	/**
+	 * With `runIds` (a Stop's cohort, 4.6), a send's turn or unplaced input is
+	 * interrupted only when its run is named, never by a reusable input id.
+	 */
 	private interruptSessionEffect(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 		requestedAt?: number,
 	): Effect.Effect<void, ClaudeAdapterError> {
-		const bound = turnIds !== undefined;
+		const bound = runIds !== undefined;
+		const named = (runId: string | undefined) =>
+			runId !== undefined && runIds?.includes(runId) === true;
 		return Effect.gen({ self: this }, function* () {
 			if (!bound) {
 				yield* FiberMap.remove(this.shutdownFibers, sessionId);
@@ -2820,7 +2833,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						...ctx.pendingApprovals.values(),
 						...ctx.pendingQuestions.values(),
 					].some((pending) => Date.parse(pending.createdAt) <= requestedAt);
-				if (ctx && bound && turnIds.length === 0 && !recoverBlocked) {
+				if (ctx && bound && runIds.length === 0 && !recoverBlocked) {
 					const foreground =
 						(ctx.turnInFlight && ctx.currentRunId !== undefined) ||
 						(yield* pendingIntakes(this.stateRef, sessionId)).size > 0;
@@ -2863,11 +2876,21 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				// A queued lifecycle start can change the active admission while Stop
 				// waits for message ownership. Select its candidate under that permit.
 				const boundTurnId = bound ? ctx?.currentTurnId : undefined;
+				// Before the SDK starts it, a send's run is its waiter's.
+				const boundRunNamed = named(
+					ctx?.currentRunId ??
+						(boundTurnId
+							? (ctx?.messageRunIds?.get(boundTurnId) ??
+								(yield* pendingIntakes(this.stateRef, sessionId)).get(
+									boundTurnId,
+								)?.unplaced?.runId)
+							: undefined),
+				);
 				if (bound && !ctx) {
 					// Stop setup too: it may still be placing the user message and
 					// otherwise create a cold query after the warm query is discarded.
 					const waiters = yield* pendingIntakes(this.stateRef, sessionId);
-					if (!turnIds.some((turnId) => waiters.has(turnId)))
+					if (![...waiters.values()].some((w) => named(w.unplaced?.runId)))
 						return Effect.void;
 					const setupLock = yield* getSetupLock(this.stateRef, sessionId);
 					if (
@@ -2883,7 +2906,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						if (yield* getSession(this.stateRef, sessionId))
 							yield* this.interruptSessionEffect(
 								sessionId,
-								turnIds,
+								runIds,
 								requestedAt,
 							);
 						return Effect.void;
@@ -2891,8 +2914,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				} else if (
 					ctx &&
 					bound &&
-					((!recoverBlocked &&
-						(!boundTurnId || !turnIds.includes(boundTurnId))) ||
+					((!recoverBlocked && !boundRunNamed) ||
 						!(yield* isCurrentSession(this.stateRef, ctx)))
 				)
 					return Effect.void;
@@ -2900,7 +2922,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					ctx &&
 					bound &&
 					recoverBlocked &&
-					(!boundTurnId || !turnIds.includes(boundTurnId)) &&
+					!boundRunNamed &&
 					ctx.turnInFlight &&
 					requestedAt !== undefined &&
 					ctx.currentTurnStartedAt !== undefined &&
@@ -2948,7 +2970,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					if (!ctx.turnInFlight) {
 						if (
 							bound &&
-							[...waiters.keys()].some((id) => !turnIds.includes(id))
+							[...waiters.values()].some((w) => !named(w.unplaced?.runId))
 						)
 							return Effect.void;
 						if ((ctx.liveBackgroundTaskCount ?? 0) > 0) return Effect.void;
@@ -2981,10 +3003,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					// stays closed; rejection still leaves the durable run untouched.
 					for (const id of [
 						ctx.currentRunId,
-						...(turnIds ?? [inputId]).map(
-							(id) =>
-								ctx.messageRunIds?.get(id) ?? waiters.get(id)?.unplaced?.runId,
-						),
+						...(runIds ?? [
+							ctx.messageRunIds?.get(inputId) ??
+								waiters.get(inputId)?.unplaced?.runId,
+						]),
 					])
 						if (id) closed.add(id);
 					const acknowledged = yield* this.interruptQueryEffect(ctx).pipe(

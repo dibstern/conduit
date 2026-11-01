@@ -775,11 +775,12 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 
 	interruptTurnEffect(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 		call?: ProviderCall,
 		_control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		if (turnIds?.length === 0) return Effect.void;
+		// OpenCode aborts the whole session; an empty cohort has nothing to stop.
+		if (runIds?.length === 0) return Effect.void;
 		return this.resolveClientEffect(
 			sessionId,
 			call?.account,

@@ -214,7 +214,7 @@ export class InProcessSessionRunner implements NativeSessionRunner {
 				case "interrupt":
 					return yield* this.payload.interrupt(
 						command.sessionId,
-						command.turnIds,
+						command.runIds,
 						command.control?.requestedAt,
 					);
 				case "apply-live-settings":

@@ -858,9 +858,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 														admittedSend = send;
 														const pending = {
 															sessionId,
-															turnId:
-																input.continuation?.cutOffMessageId ??
-																input.inputId,
+															runId: input.runId,
 															cancelled: yield* Deferred.make<void>(),
 														};
 														yield* stops
@@ -1569,7 +1567,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 															.commandEffect(randomUUID(), {
 																type: "interrupt",
 																sessionId,
-																...(inputId ? { turnIds: [inputId] } : {}),
+																...(runId ? { runIds: [runId] } : {}),
+																unrecorded: true,
 															})
 															.pipe(Effect.ignore),
 													),

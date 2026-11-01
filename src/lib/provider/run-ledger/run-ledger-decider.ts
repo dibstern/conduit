@@ -268,7 +268,11 @@ interface Book {
 	readonly sends: Send[];
 	/** Cache written only by record (3.2). */
 	readonly tokens: Map<string, { readonly send: number; readonly tx: number }>;
-	readonly mainRuns: Map<string, { readonly runId: string; open: boolean }>;
+	/** `steer`: a joined steer's own run, not yet started; its end is the steer's, not its Run's (4.8). */
+	readonly mainRuns: Map<
+		string,
+		{ readonly runId: string; open: boolean; readonly steer?: true }
+	>;
 	readonly seen: Set<string>;
 	/** The seq of the last session end or rejected resume (3.4). */
 	freshSince: number;
@@ -2108,20 +2112,22 @@ function observe(
 					const run = findRun(book, input.runId);
 					if (run === undefined || run.phase === "Ended")
 						return noop("run.requested for an ended Run (3.8)");
+					// 3.9: a steer is delivered into its Run's live query unless it opens the Run.
+					const steer =
+						input.delivery === "steer" && run.inputs[0] !== observation.inputId;
 					book.mainRuns.set(observation.runId, {
 						runId: run.runId,
 						open: true,
+						...(steer ? { steer } : {}),
 					});
 					if (run.phase === "Queued") launch(run);
-					// 3.9: a steer is delivered into its Run's live query unless it opens the Run.
 					const send =
 						deliverySends(book, run).find(
 							(item) => item.effect.inputId === observation.inputId,
 						) ??
 						issue(
 							book,
-							input.delivery === "steer" &&
-								run.inputs[0] !== observation.inputId
+							steer
 								? {
 										kind: "steer",
 										runId: run.runId,
@@ -2199,6 +2205,13 @@ function observe(
 					const target = book.mainRuns.get(observation.runId);
 					if (target === undefined)
 						return noop("run_terminal for an unknown run");
+					// 4.8 (CONTRACT.md 1864-1869), 4.3 (1521-1524): from 32.5 a joined steer has its own
+					// transmissions and cap, so its unstarted run's end, a fresh-run retry's failed try or the
+					// cap's error, is the steer's alone: its Run neither ends nor names that run again.
+					if (target.steer) {
+						book.mainRuns.delete(observation.runId);
+						return changed;
+					}
 					target.open = false;
 					const run = findRun(book, target.runId);
 					if (run === undefined || run.phase === "Ended") return changed;

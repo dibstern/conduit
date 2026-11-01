@@ -140,7 +140,7 @@ for (const { name, mode } of [
 		mode: "interrupted-runs",
 	},
 	{
-		name: "an older interrupt without run ids does not fence later sends",
+		name: "a session-wide interrupt does not fence later sends",
 		mode: "legacy-interrupt",
 	},
 	{
@@ -534,7 +534,6 @@ for (const { name, mode } of [
 								yield* client.commandEffect("stop-before-send", {
 									type: "interrupt",
 									sessionId: "session-1",
-									turnIds: ["shared-cut-off"],
 									...(mode === "interrupted-runs"
 										? { runIds: ["covered-run"] }
 										: {}),
@@ -647,12 +646,12 @@ for (const { name, mode } of [
 							).toBe(0);
 							yield* send("first-query");
 							// The first query is no replacement: the hello and its frames read 0.
-							callbacks.queryStarted();
+							callbacks.queryStarted({});
 							yield* send("first-query-again");
 							const first = stamps();
 							expect(first.length).toBeGreaterThan(4);
 							expect(new Set(first)).toEqual(new Set([0]));
-							callbacks.queryStarted();
+							callbacks.queryStarted({});
 							yield* send("replacement-query");
 							// A late notice of the earlier send keeps the count it was emitted under.
 							const replaced = receivedFrames
@@ -950,7 +949,7 @@ for (const { name, mode } of [
 								const stop: Extract<SessionCommand, { type: "interrupt" }> = {
 									type: "interrupt",
 									sessionId: "session-1",
-									turnIds: ["obsolete-input"],
+									runIds: ["obsolete-run"],
 								};
 								expect(
 									yield* client.commandEffect("stale-stop", stop),

@@ -1,4 +1,10 @@
-import type { Effect, Option, Scope, Stream } from "effect";
+import {
+	Context,
+	type Effect,
+	type Option,
+	type Scope,
+	type Stream,
+} from "effect";
 import type { Account } from "../../contracts/account.js";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
@@ -29,12 +35,16 @@ import type {
 import type { UsageRead } from "../usage-reader.js";
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 import type { SendScope, SendScopes } from "./send-scope.js";
+import type { TurnFacts } from "./turn-facts.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type SessionTurn = Omit<
 	ResolvedSendTurnInput,
 	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
->;
+> & {
+	/** Prepare's decisions; Cursor and Codex payloads refuse a turn without them. */
+	readonly facts?: TurnFacts;
+};
 
 /** The outbox keeps refs until replay crosses the provider boundary. */
 export type DurableSessionTurn = Omit<
@@ -133,11 +143,13 @@ export type SessionCommand = (
 	| {
 			readonly type: "interrupt";
 			readonly sessionId: string;
-			// No capability flag: runners predating it ignore the field and
-			// interrupt session-wide, bounded by the daemon's Stop wait like OpenCode.
-			readonly turnIds?: readonly string[];
-			/** The committed Stop cohort; never inferred from reusable input ids. */
+			/**
+			 * The committed Stop cohort (4.6): the host records it, and interrupts
+			 * no send's turn whose run it does not name. Absent is session-wide.
+			 */
 			readonly runIds?: readonly string[];
+			/** One daemon-side send's cancel, not a Stop: target `runIds`, record nothing. */
+			readonly unrecorded?: true;
 	  }
 	| {
 			readonly type: "end-session" | "shutdown-after-turn";
@@ -235,6 +247,12 @@ export type SessionOutput =
 					};
 			  }
 	  ));
+
+/** The SDK query whose callbacks produce this fiber's outputs. The host drops a replaced query's output by its identity (CONTRACT 6.1). */
+export const currentRunnerQuery = Context.Reference<object | undefined>(
+	"conduit/provider/currentRunnerQuery",
+	{ defaultValue: () => undefined },
+);
 
 /** Plain-data reply to an output operation; events and notifications return {}. */
 export interface SessionOutputReply {

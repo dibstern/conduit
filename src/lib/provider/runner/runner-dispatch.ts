@@ -200,9 +200,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 					? sends.pending(turn.sendScope)
 					: undefined) ?? {
 					sessionId: command.input.sessionId,
-					turnId:
-						command.input.continuation?.cutOffMessageId ??
-						command.input.inputId,
+					runId: command.runId ?? command.input.runId,
 					cancelled,
 				};
 				if (turn?.sendScope)
@@ -229,7 +227,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 				}
 			}
 			if (command.type === "interrupt") {
-				yield* sends.cancelUndispatched(command.sessionId, command.turnIds);
+				yield* sends.cancelUndispatched(command.sessionId, command.runIds);
 			}
 			if (command.type === "shutdown") {
 				yield* stops.shutdown;

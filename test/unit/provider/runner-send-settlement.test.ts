@@ -178,7 +178,12 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 			driverKind,
 			legacyPrepareTurnEffect: (input) =>
 				Effect.succeed({
-					input: { ...input, prompt: input.text ?? "send", history: [] },
+					input: {
+						...input,
+						prompt: input.text ?? "send",
+						history: [],
+						facts: { _tag: "Claude" as const },
+					},
 				}),
 			connect: vi.fn<ProcessRunnerDriver["connect"]>((options) =>
 				Effect.gen(function* () {
@@ -294,7 +299,12 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 				prepareTurnEffect: (turn) =>
 					(preparation.gate ?? Effect.void).pipe(
 						Effect.as({
-							input: { ...turn, prompt: turn.text ?? "send", history: [] },
+							input: {
+								...turn,
+								prompt: turn.text ?? "send",
+								history: [],
+								facts: { _tag: "Claude" as const },
+							},
 						}),
 					),
 			},
@@ -2221,6 +2231,66 @@ it.effect(
 		),
 );
 
+// A token names one transmission (CONTRACT 66-67). An older runner's replayed
+// claim whose resume is rejected must not send its fresh fallback under the
+// claim's token: the fallback is the next transmission (4.8).
+it.effect(
+	"a legacy replay's rejected resume never sends a fallback under its claim's token",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("legacy-resume");
+				yield* f.sql`INSERT INTO provider_state (session_id,key,value) VALUES ('s','nativeThread:account',${JSON.stringify({ configDir: configuredClaudeConfigDir(f.root), resumeSessionId: "stale", firstSequence: 0, deliveredThrough: 0 })})`;
+				yield* f.hello(
+					({
+						sendJournalAnswers: _capability,
+						sendAnswers: _answers,
+						...hello
+					}) => ({
+						...hello,
+						bindings: [],
+						sendTokens: [],
+						completedCommands: [],
+					}),
+				);
+				const frames: Array<{ token: string; fresh: boolean }> = [];
+				f.replaySend.execute = (token, command) =>
+					Effect.sync(() => {
+						const fresh = command.input.nativeResumeFallback === true;
+						frames.push({ token, fresh });
+						return fresh
+							? terminalResult()
+							: {
+									...terminalResult(),
+									status: "error" as const,
+									error: {
+										code: "claude_resume_refused",
+										message:
+											"Resume rejected by --resume-drops-turn: native context rejected",
+										retryable: false,
+									},
+								};
+					});
+				yield* f.recover;
+				yield* TestClock.adjust("5 seconds");
+				expect(frames[0]).toEqual({
+					token: sendToken("tx", "legacy-resume", 1),
+					fresh: false,
+				});
+				expect(new Set(frames.map(({ token }) => token)).size).toBe(
+					frames.length,
+				);
+				// The claim requeues with the marker; its next claim sends the fallback.
+				expect(
+					yield* f.sql`SELECT status, attempt_count, json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "retryable_failed", attempt_count: 1, fallback: 1 },
+				]);
+			}),
+		),
+);
+
 for (const stale of ["claim", "transmission"] as const)
 	it.effect(
 		`F74 retained reply from stale ${stale} cannot mutate run, receipt, state or draft`,
@@ -3730,3 +3800,68 @@ for (const policy of ["retry handled", "steer declined"] as const)
 				}),
 			),
 	);
+
+it.effect(
+	"a steer joined during its NotSent transmission is re-held through the feeder while its owner's Run is open",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				// 4.8: its re-hold is the feeder's, under its own transmissions, and lives
+				// as long as its owner's Run (CONTRACT 1413, 1535-1537, 1868-1869).
+				const f = yield* s7Fixture("claude");
+				yield* f.seed("head", 1, 1, "held");
+				yield* f.hello(journalHello("head", undefined, undefined, "running"));
+				yield* f.recover;
+				const steer = yield* f.seed("steer", 2, 1, "unheld");
+				let sends = 0;
+				// Its run.started joins it to the owner before the NotSent reply lands.
+				f.replaySend.execute = () =>
+					++sends === 1
+						? f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`.pipe(
+								Effect.orDie,
+								Effect.andThen(
+									Effect.fail({
+										operation: "send-turn",
+										code: "not_sent",
+										message: "no bytes",
+										delivery: { _tag: "NotSent" },
+									}),
+								),
+							)
+						: Effect.succeed(terminalResult("joined"));
+				const sending = yield* f.instance
+					.sendTurnEffect(steer)
+					.pipe(Effect.forkChild);
+				yield* TestClock.adjust("5 seconds");
+				expect(sending.pollUnsafe()).toMatchObject({ _tag: "Success" });
+				expect((yield* Fiber.join(sending))?.status).toBe("joined");
+				expect(
+					yield* f.sql`SELECT type, json_extract(data, '$.commandId') AS commandId,
+						json_extract(data, '$.transmission') AS transmission, json_extract(data, '$.reason') AS reason FROM events
+						WHERE type IN ('run.dispatched', 'run.released') AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+				).toEqual([
+					{
+						type: "run.dispatched",
+						commandId: "steer",
+						transmission: 1,
+						reason: null,
+					},
+					{
+						type: "run.released",
+						commandId: "steer",
+						transmission: 1,
+						reason: "NotSent",
+					},
+					{
+						type: "run.dispatched",
+						commandId: "steer",
+						transmission: 2,
+						reason: null,
+					},
+				]);
+				expect(f.commands.filter((c) => c.type === "send-turn")).toHaveLength(
+					2,
+				);
+			}),
+		),
+);

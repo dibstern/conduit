@@ -226,7 +226,7 @@ describe("in-process Claude session runner", () => {
 					yield* runner.executeEffect({
 						type: "interrupt",
 						sessionId: "session-1",
-						turnIds: [],
+						runIds: [],
 					});
 					const stopped = outputs
 						.slice(before)
@@ -878,7 +878,7 @@ effectIt.effect(
 								runner.executeEffect({
 									type: "interrupt",
 									sessionId: "session-1",
-									turnIds: ["obsolete-input"],
+									runIds: ["obsolete-run"],
 								}),
 							),
 						),
