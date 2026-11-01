@@ -52,3 +52,4 @@ media/_test_output/
 /test/e2e/macos-service/artifacts/
 /test/e2e/opencode-default/artifacts/
 /test/unit/persistence/artifacts/
+/test/integration/daemon/artifacts/

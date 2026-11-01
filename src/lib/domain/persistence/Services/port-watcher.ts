@@ -244,7 +244,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 				if (held.get(server.port)?.key !== key)
 					held.set(server.port, { key, since: now });
 			}
-			const read = yield* commit.write((project) =>
+			const moved = yield* commit.write((project, stamp) =>
 				Effect.gen(function* () {
 					// A live server keeps its row Open (8.3) and was recorded by a server_seen, so
 					// those rows and the scan's markers name every session this scan can change.
@@ -297,36 +297,52 @@ export const PortWatcherLive = Layer.effectDiscard(
 						events.map((event) => event.sessionId),
 					))
 						read.set(sessionId, (yield* loadLedgerView(sessionId))?.servers);
-					return read;
+					// Readers see the Servers this write left; a session no longer read has none.
+					for (const sessionId of published)
+						if (!read.has(sessionId)) read.set(sessionId, undefined);
+					published = new Set(
+						[...read].flatMap(([id, servers]) => (servers?.size ? [id] : [])),
+					);
+					// The copy moves before COMMIT, so a reader woken by this write's advance
+					// already sees it; a rolled-back write is corrected by the next scan.
+					const moved = [...read].flatMap(([sessionId, servers]) => {
+						const list = [...(servers?.values() ?? [])].map(
+							({ key, command, cwd, source, role }): SessionServer => ({
+								port: key.port,
+								pid: key.pid,
+								startedAt: key.startedAt,
+								command,
+								cwd,
+								source,
+								role,
+							}),
+						);
+						if (
+							JSON.stringify(activity.servers.get(sessionId) ?? []) ===
+							JSON.stringify(list)
+						)
+							return [];
+						if (list.length === 0) activity.servers.delete(sessionId);
+						else activity.servers.set(sessionId, list);
+						return [sessionId];
+					});
+					// The sidebar applies servers at read time, so its row's version moves for the
+					// shell feed to re-read it.
+					if (moved.length > 0)
+						yield* stamp((version) =>
+							sql<{
+								session_id: string;
+							}>`UPDATE session_sidebar SET version = ${version}
+								WHERE row IS NOT NULL AND session_id IN (SELECT COALESCE(root_id, id) FROM sessions
+									WHERE id IN (SELECT value FROM json_each(${JSON.stringify(moved)})))
+								RETURNING session_id`.pipe(
+								Effect.map((rows) => rows.map(({ session_id }) => session_id)),
+							),
+						);
+					return moved;
 				}),
 			);
-			// Readers see the Servers this write left; a session no longer read has none.
-			for (const sessionId of published)
-				if (!read.has(sessionId)) read.set(sessionId, undefined);
-			for (const [sessionId, servers] of read) {
-				const list = [...(servers?.values() ?? [])].map(
-					({ key, command, cwd, source, role }): SessionServer => ({
-						port: key.port,
-						pid: key.pid,
-						startedAt: key.startedAt,
-						command,
-						cwd,
-						source,
-						role,
-					}),
-				);
-				if (
-					JSON.stringify(activity.servers.get(sessionId) ?? []) ===
-					JSON.stringify(list)
-				)
-					continue;
-				if (list.length === 0) activity.servers.delete(sessionId);
-				else activity.servers.set(sessionId, list);
-				activity.changed(sessionId);
-			}
-			published = new Set(
-				[...read].flatMap(([id, servers]) => (servers?.size ? [id] : [])),
-			);
+			for (const sessionId of moved) activity.changed(sessionId);
 			firstScanAt ??= now;
 			known ||= now - firstScanAt >= holdMs;
 			failing = false;
