@@ -32,6 +32,8 @@ describe("Managed OpenCode starts on first use", () => {
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,
 			autoStartOpenCode,
+			// Backfill retries log a warning; the harness default level is error.
+			logLevel: "warn",
 		});
 		return harness;
 	}

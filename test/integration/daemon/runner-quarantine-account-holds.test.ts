@@ -185,7 +185,7 @@ it.each([
 		);
 		await changing;
 		await vi.waitFor(
-			() => expect(states()).toEqual(["interrupted", "interrupted", "running"]),
+			() => expect(states()).toEqual(["error", "interrupted", "running"]),
 			{ timeout: 15_000 },
 		);
 		expect(
@@ -226,7 +226,7 @@ it.each([
 			),
 		).toBeUndefined();
 		if (change === "update") {
-			expect(states()).toEqual(["interrupted", "interrupted", "running"]);
+			expect(states()).toEqual(["error", "interrupted", "running"]);
 			// Removing the updated account must not reattach the retired native turn.
 			await fixture.requestRpc({
 				_tag: "RemoveInstance",
@@ -234,7 +234,7 @@ it.each([
 			});
 		}
 		await vi.waitFor(
-			() => expect(states()).toEqual(["interrupted", "interrupted", "running"]),
+			() => expect(states()).toEqual(["error", "interrupted", "running"]),
 			{ timeout: 15_000 },
 		);
 		const terminals = db
@@ -242,9 +242,10 @@ it.each([
 				"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.error', 'turn.interrupted') ORDER BY sequence",
 			)
 			.all(sessionId);
-		// Retirement settled the old runner's exact turn before account changes.
+		// Retirement settled the old runner's reached turn as process lost before
+		// account changes (CONTRACT 3.8 reason 2.3, 82tn.32.2.16).
 		expect(terminals).toContainEqual({
-			type: "turn.interrupted",
+			type: "turn.error",
 		});
 		evidence["recoveredTerminal"] = terminals;
 		await fixture.requestRpc({
@@ -252,8 +253,7 @@ it.each([
 			instanceId: otherAccountId,
 		});
 		await vi.waitFor(
-			() =>
-				expect(states()).toEqual(["interrupted", "interrupted", "interrupted"]),
+			() => expect(states()).toEqual(["error", "interrupted", "interrupted"]),
 			{ timeout: 15_000 },
 		);
 		evidence["finalStates"] = states();

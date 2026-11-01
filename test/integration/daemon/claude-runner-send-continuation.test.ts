@@ -573,11 +573,22 @@ describe("send continuation through real daemon and runner processes", () => {
 					}
 					const result = await completed(harness, sessionId, inputId, prompt);
 					evidence["completed"] = result;
-					const releases = runEvents(
-						result.state,
-						command.run_id,
-						"run.released",
-					).map((event) => JSON.parse(event.data) as { reason: string });
+					// A release the stop commit carried may be appended again by the
+					// write fiber; that stale repeat is a no-op (CONTRACT 4.5).
+					const releases = [
+						...new Map(
+							runEvents(result.state, command.run_id, "run.released").map(
+								(event) => {
+									const data = JSON.parse(event.data) as {
+										reason: string;
+										runnerId: string;
+										transmission: number;
+									};
+									return [`${data.runnerId}:${data.transmission}`, data];
+								},
+							),
+						).values(),
+					];
 					const reason =
 						mode === 19 || mode === 29
 							? "Refused"

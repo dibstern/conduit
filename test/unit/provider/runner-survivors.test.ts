@@ -331,6 +331,9 @@ const stopIntentFixture = Effect.gen(function* () {
 				() => {},
 			);
 			sockets.push(connection);
+			// The socket is never connected, so a real write fails it on a later
+			// tick and the runner reads as closed only if the scheduler yields first.
+			vi.spyOn(connection, "write").mockImplementation(() => {});
 			vi.spyOn(connection, "destroy").mockImplementation(() => {});
 			const journal = new RunnerSendJournal(
 				dirname(options.socketPath),

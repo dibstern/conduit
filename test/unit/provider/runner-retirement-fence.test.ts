@@ -6027,6 +6027,52 @@ it.effect(
 		),
 );
 
+it.effect(
+	"a runner ending its own session stays live to the recovery sweep until its End escalates",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture();
+				const old = f.attachments[0];
+				if (!old)
+					return yield* Effect.fail(runnerFailure("test", "No old attachment"));
+				const commit = yield* makeCommitAndSignal;
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const writer = yield* Effect.forkChild(
+					commit.write(() =>
+						Deferred.succeed(entered, undefined).pipe(
+							Effect.andThen(Deferred.await(release)),
+						),
+					),
+				);
+				yield* Deferred.await(entered);
+				yield* Effect.gen(function* () {
+					const stopping = yield* Effect.forkChild(
+						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
+					);
+					yield* TestClock.adjust("1 second");
+					// The End's Stop is Committing behind the busy writer: the sweep must not take it.
+					expect(stopping.pollUnsafe()).toBeUndefined();
+					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+						true,
+					);
+					yield* Deferred.succeed(release, undefined);
+					yield* Fiber.join(writer);
+					yield* TestClock.adjust("1 second");
+					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+						true,
+					);
+					yield* TestClock.adjust("3 seconds");
+					yield* Fiber.join(stopping);
+					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+						false,
+					);
+				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+			}),
+		),
+);
+
 for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 	it.effect(
 		`orphan recovery settles a retired cohort after ${cleanupFailure} and remains idempotent`,

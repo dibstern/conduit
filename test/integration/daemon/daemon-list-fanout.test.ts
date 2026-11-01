@@ -301,20 +301,13 @@ describe("daemon instance and project lists fan out to every connection", () => 
 				managed: false,
 				url: health.url,
 			});
-			// Restart so the persisted instance gets a real health poller. External
-			// instances are health-checked from first use, so start it once; the
-			// start rejects while the server is unhealthy.
+			// Restart so the persisted instance gets its boot health poller: named
+			// external servers are polled from startup, with no request at all.
 			await daemon.stop();
 			daemon = await startForegroundDaemon(options);
 			subscriber = subscribe(daemon.getStatus().port);
-			const probe = () =>
-				subscriber?.instances.at(-1)?.find((i) => i.name === "probe");
-			const probeStatus = () => probe()?.status;
-			await expect.poll(probeStatus, { timeout: 15_000 }).toBe("stopped");
-			await sendRpcRequest(socketPath, {
-				_tag: "StartInstance",
-				instanceId: probe()?.id ?? "",
-			}).catch(() => undefined);
+			const probeStatus = () =>
+				subscriber?.instances.at(-1)?.find((i) => i.name === "probe")?.status;
 			await expect
 				.poll(probeStatus, { timeout: 15_000, interval: 100 })
 				.toBe("unhealthy");

@@ -214,11 +214,15 @@ export const makeRunnerRunLifecycle = (
 								return { _tag: "Covered" };
 							}
 							if (owner.runner_id !== null) return { _tag: "Busy" };
+							// The cap counts within the input's latest reservation, so a re-queued input gets it whole again (CONTRACT 4.8).
 							const [count] = yield* sql<{
 								n: number;
 							}>`SELECT COUNT(*) AS n FROM events
 						WHERE session_id = ${input.sessionId} AND type = 'run.dispatched'
-							AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
+							AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}
+							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+								WHERE session_id = ${input.sessionId} AND type = 'input.sent'
+									AND json_valid(data) AND json_extract(data, '$.inputId') = ${commandId}), 0)`;
 							const transmission = (count?.n ?? 0) + 1;
 							if (transmission > 5) {
 								yield* settleSend(tx, {
@@ -842,17 +846,22 @@ export const makeRunnerStopReconciler = (options: {
 					decodedPayload._tag === "Success"
 						? decodedPayload.success
 						: undefined;
-				const journal = journalDirectory
-					? readRunnerSendJournal({
-							directory: journalDirectory,
-							sessionId: retirement.sessionId,
-							driverKind: settlement.driverKind,
-							commandId: command.command_id,
-							attempt: command.attempt_count,
-							nativeResumeFallback:
-								isRecord(payload) && payload["nativeResumeFallback"] === true,
-						})
-					: { _tag: "Unreadable" as const };
+				// A runner refused as an older build: its journal answers read as
+				// Unreadable, never Absent (CONTRACT 7.3: "Unreadable, or a runner
+				// from an older build: delivery_indeterminate, never re-sent").
+				const journal =
+					journalDirectory &&
+					entry?.lifecycle.failure?.code !== "runner_incompatible"
+						? readRunnerSendJournal({
+								directory: journalDirectory,
+								sessionId: retirement.sessionId,
+								driverKind: settlement.driverKind,
+								commandId: command.command_id,
+								attempt: command.attempt_count,
+								nativeResumeFallback:
+									isRecord(payload) && payload["nativeResumeFallback"] === true,
+							})
+						: { _tag: "Unreadable" as const };
 				return { journalBuild, journal, payload };
 			});
 		/**

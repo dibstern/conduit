@@ -70,6 +70,8 @@ interface Tx {
 	absent: boolean;
 	/** A result answered it (3.8 5C: proof after an unknown delivery). */
 	resulted: boolean;
+	/** L1 item 1, 3.4: its coverage, recorded whatever its tries got, so after its work ended too (3.8 reason 2.3). */
+	covered?: "process_lost" | "session_ended" | undefined;
 	/** The first delivery-recovery probe's deadline (3.7, D20). */
 	recovery?: { readonly at: number; readonly opened: number } | undefined;
 	/** Its answers, the evidence section 9's work-ended column reads. */
@@ -88,6 +90,8 @@ interface Tx {
 		| "dropped"
 		| "forced"
 		| undefined;
+	/** D59: main's terminal ended its Run, but this OpenCode abort or cancel_request stays a fence member (3101-3106). */
+	mainEnded?: boolean | undefined;
 	nativeMessageId?: string | undefined;
 	accounted: boolean;
 }
@@ -369,12 +373,10 @@ function joinConsumption(a: Consumption, b: Consumption): Consumption {
 /** L1: split at the last `:` when a decimal querySeq follows. */
 function splitLabel(label: Label): { runnerId: string; querySeq: number } {
 	const at = label.lastIndexOf(":");
-	return at < 0
-		? { runnerId: label, querySeq: 0 }
-		: {
-				runnerId: label.slice(0, at),
-				querySeq: Number(label.slice(at + 1)) || 0,
-			};
+	const suffix = label.slice(at + 1);
+	return at >= 0 && /^\d+$/.test(suffix)
+		? { runnerId: label.slice(0, at), querySeq: Number(suffix) }
+		: { runnerId: label, querySeq: 0 };
 }
 
 function value(tx: Tx): Value {
@@ -576,6 +578,7 @@ function retryPending(book: Book, run: Run, send: Send): boolean {
 		send.exhausted ||
 		latest?.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		latest.mainEnded ||
 		latest.resumeRejected ||
 		latest.stopOwn ||
 		send.txs.some((tx) => tx.consumption.tag === "Accepted") ||
@@ -632,7 +635,7 @@ function nothingMayAct(book: Book, run: Run): boolean {
 		}) &&
 		runWork(book, run).every(
 			(send) =>
-				!send.txs.some((tx) => mayStillAct(book, send, tx)) &&
+				!send.txs.some((tx) => !tx.mainEnded && mayStillAct(book, send, tx)) &&
 				!retryPending(book, run, send),
 		) &&
 		!(exec.evidence && !exec.endEvidence && exec.endedBy === undefined)
@@ -706,7 +709,7 @@ function summarize(book: Book, run: Run): RunSummary {
 	const txs = sends.flatMap((send) => send.txs);
 	const covers = txs
 		.filter((tx) => sealedValue(tx) !== "never")
-		.map((tx) => tx.ended);
+		.map((tx) => tx.covered);
 	const covered =
 		covers.includes("session_ended") || exec.endedBy === "session_ended"
 			? "session_ended"
@@ -992,6 +995,7 @@ function transmit(
 	// L1 item 1, L2: a transmission to a retired address is covered at once.
 	if (runnerId !== null && book.runners.get(runnerId)?.retired) {
 		seal(tx);
+		tx.covered ??= "process_lost";
 		tx.ended ??= "process_lost";
 	}
 	if (token !== undefined)
@@ -1176,6 +1180,8 @@ function effectOutcome(
 	tx: Tx,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): Outcome {
+	// 3101-3106: the returned call of an abort its Run's terminal left open ends it.
+	if (tx.mainEnded) tx.ended ??= "main";
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
@@ -1268,9 +1274,12 @@ function sessionEnd(book: Book, before: number): boolean {
 		for (const tx of send.txs)
 			if (
 				tx.seq < before &&
-				(tx.sealed === undefined || tx.ended === undefined)
+				(tx.sealed === undefined ||
+					tx.ended === undefined ||
+					tx.covered === undefined)
 			) {
 				seal(tx);
+				tx.covered ??= "session_ended";
 				tx.ended ??= "session_ended";
 				moved = true;
 			}
@@ -1392,7 +1401,9 @@ const evidenceTable: EvidenceTable = {
 				run !== undefined &&
 				run.phase !== "Ended" &&
 				send.exec === run.exec.n &&
-				(tx.ended === undefined || tx.ended === "evidence");
+				(tx.ended === undefined || tx.ended === "evidence") &&
+				// 3.4: a covered transmission's evidence changes nothing, its work ended by evidence first too.
+				tx.covered === undefined;
 			const byResult = runEnd(book) === "result";
 			if (!authority) return changed;
 			run.exec.evidence = true;
@@ -1420,9 +1431,10 @@ const evidenceTable: EvidenceTable = {
 		merge(book, _fact, { tx, run, live }) {
 			// 9: query_ended ends only an owned execution's work, and its own by the work-ended column.
 			if (runEnd(book) !== "query_ended") return noop();
-			// 9: it ends its label's fence members.
+			// 9: it ends its label's starts and steers; an abort or cancel_request acts on the native
+			// session, not the query, so a query end never covers them (CONTRACT.md 334-338, 3101-3106).
 			for (const send of book.sends)
-				if (rules(book).fences(send.effect))
+				if (delivers(send))
 					for (const other of send.txs)
 						if (tx.label !== null && other.label === tx.label)
 							other.ended ??= "evidence";
@@ -1821,6 +1833,8 @@ function unsolicited(
 		!capabilities.commandReceipts
 	)
 		return rejected(`${kind} is Claude's (3.4, 9, D46)`);
+	if (kind === "turn_started" && !capabilities.wakeTurns)
+		return rejected(`${book.provider} starts no unsolicited turn (8.3)`);
 	// L1 (CONTRACT.md 353-355): a runner not started has no authority and changes nothing.
 	const { runnerId, querySeq } = splitLabel(label);
 	const runner = book.runners.get(runnerId);
@@ -1975,11 +1989,12 @@ function unsolicited(
 			if (wake === undefined && runEnd(book) !== "query_ended")
 				return unchanged("no wake execution on its label (8.3)");
 			if (wake !== undefined) wake.ended = "own";
-			// 9: OpenCode's query end ends its label's fence members.
+			// 9: OpenCode's query end ends its label's starts and steers, never an abort or
+			// cancel_request (CONTRACT.md 334-338, 3101-3106).
 			let moved = wake !== undefined;
 			if (runEnd(book) === "query_ended")
 				for (const send of book.sends)
-					if (rules(book).fences(send.effect))
+					if (delivers(send))
 						for (const tx of send.txs)
 							if (tx.label === label && tx.ended === undefined) {
 								tx.ended = "evidence";
@@ -2120,10 +2135,16 @@ function observe(
 					const input = book.inputs.get(observation.inputId);
 					const run = findRun(
 						book,
-						book.mainRuns.get(observation.requestedRunId)?.runId,
+						(
+							book.mainRuns.get(observation.runId) ??
+							book.mainRuns.get(observation.requestedRunId)
+						)?.runId,
 					);
 					if (input === undefined || run === undefined)
 						return noop("run.started for an unknown run");
+					// 3.9 (CONTRACT.md 148, 956): a run main observed for a native message, the requested Run
+					// joined into it, names that Run; main's terminal comes under it.
+					const observed = !book.mainRuns.has(observation.runId);
 					if (run.phase === "Ended") {
 						// 3.9 (CONTRACT.md 978-981): a steer its Run's end left unconsumed, the Run's own joined
 						// steer included, is a Run of its own, its reservation's, Launched with its send.
@@ -2144,9 +2165,16 @@ function observe(
 						input.runId = runId;
 						for (const id of [observation.requestedRunId, runId])
 							book.mainRuns.set(id, { runId, open: true });
+						if (observed)
+							book.mainRuns.set(observation.runId, { runId, open: true });
 						return changed;
 					}
-					if (input.runId === run.runId) return noop();
+					if (observed)
+						book.mainRuns.set(observation.runId, {
+							runId: run.runId,
+							open: true,
+						});
+					if (input.runId === run.runId) return observed ? changed : noop();
 					// 3.9: the input joins the Run main started it in.
 					const from = findRun(book, input.runId);
 					const at = from?.inputs.indexOf(observation.inputId) ?? -1;
@@ -2163,9 +2191,22 @@ function observe(
 					target.open = false;
 					const run = findRun(book, target.runId);
 					if (run === undefined || run.phase === "Ended") return changed;
-					// D59: main's terminal ends its Run's work as main.
+					// D59: main's terminal ends its Run's work as main, except an OpenCode abort or cancel_request
+					// whose call has not returned: session-wide, its delivery unknown, it stays a fence member until
+					// the call returns, a probe issued after it returns native_idle, or the stop's deadline step,
+					// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
+					// 3101-3106; a reading, reported as a gap).
 					for (const send of runSends(book, run))
-						for (const tx of send.txs) tx.ended ??= "main";
+						for (const tx of send.txs)
+							if (
+								(send.effect.kind === "interrupt" ||
+									send.effect.kind === "cancel_request") &&
+								rules(book).fences(send.effect) &&
+								observation.code !== "stop_unconfirmed" &&
+								tx.transport.tag === "Issued"
+							)
+								tx.mainEnded = true;
+							else tx.ended ??= "main";
 					run.exec.fold.push({
 						seq: book.seq,
 						outcome: observation.outcome,
@@ -2291,6 +2332,7 @@ function retire(book: Book, runnerId: string): void {
 		for (const tx of send.txs)
 			if (addressed(send, tx)) {
 				seal(tx);
+				tx.covered ??= "process_lost";
 				tx.ended ??= "process_lost";
 			}
 		if (

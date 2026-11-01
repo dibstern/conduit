@@ -565,14 +565,20 @@ it.each([
 					yield* Deferred.succeed(lastRelease, undefined);
 					yield* Fiber.join(lastWorker).pipe(Effect.timeout("3 seconds"));
 					yield* Effect.forEach(workers, (worker) => Fiber.await(worker));
-					expect(
-						owner.ownsPendingSend(
-							"session",
-							"command",
-							attempts === 3 ? 1 : attempts,
-							attempts,
-						),
-					).toBe(false);
+					// The reactor's due-retry wake can claim the last attempt itself. The
+					// last worker then only reads the durable outcome, which commits before
+					// the wake's executor releases ownership, so wait for that release.
+					yield* Effect.gen(function* () {
+						while (
+							owner.ownsPendingSend(
+								"session",
+								"command",
+								attempts === 3 ? 1 : attempts,
+								attempts,
+							)
+						)
+							yield* Effect.sleep("1 millis");
+					}).pipe(Effect.timeout("3 seconds"));
 					expect(calls).toBe(attempts);
 					expect(concurrent).toBe(attempts);
 					const final =
