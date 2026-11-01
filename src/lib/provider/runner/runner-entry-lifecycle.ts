@@ -1,8 +1,12 @@
 import type { ChildProcess } from "node:child_process";
-import { type Cause, Deferred, Effect, type Semaphore } from "effect";
+import { Cause, Deferred, Effect, Exit, Scope, type Semaphore } from "effect";
 import type { PendingInteractionService } from "../../domain/relay/Services/pending-interaction-service.js";
 import type { ProviderRuntimeIngestion } from "../../domain/relay/Services/provider-runtime-ingestion-service.js";
-import type { RunnerHello, RunnerSocket } from "./runner-protocol.js";
+import {
+	type RunnerHello,
+	type RunnerSocket,
+	runnerFailure,
+} from "./runner-protocol.js";
 import type { RunnerMember } from "./runner-receipts.js";
 import type { currentPendingSendOwner } from "./runner-recovery.js";
 import type {
@@ -28,6 +32,8 @@ export interface RunnerChild {
 		| Pick<SessionTurn, "workspaceRoot" | "extraFolders">
 		| undefined;
 	readonly launchSnapshot?: RunnerUpgradeState["snapshot"];
+	/** The entry's memory: closing it releases every waiter below (CONTRACT 6.11). */
+	readonly scope: Scope.Closeable;
 	readonly ready: Deferred.Deferred<RunnerSocket, SessionFailure>;
 	readonly drained: Deferred.Deferred<void>;
 	readonly socketPath: string;
@@ -314,8 +320,13 @@ export const notifyEntry = (entry: RunnerChild): void => {
 	waiters.delete(entry);
 	for (const waiter of armed) Deferred.doneUnsafe(waiter, Effect.void);
 };
-/** Completes `changed` at the entry's next notification. */
+/** Completes `changed` at the entry's next notification, or at once once its scope closed. */
 export const watch = (entry: RunnerChild, changed: Deferred.Deferred<void>) => {
+	// A waiter registers only while the entry scope that releases it is open (B25).
+	if (entry.scope.state._tag === "Closed") {
+		Deferred.doneUnsafe(changed, Effect.void);
+		return;
+	}
 	const armed = waiters.get(entry) ?? new Set();
 	waiters.set(entry, armed.add(changed));
 };
@@ -509,18 +520,54 @@ export const end = (entry: RunnerChild) => {
 	notifyEntry(entry);
 };
 
-/** Wakes the entry's waiters: ready fails with the cause, drained and an End release settle. */
-export const releaseWaiters = (
+/**
+ * An entry's one scope and the waiters it owns (CONTRACT 6.11). A child of the
+ * provider instance's scope, so the instance's close is the last closer.
+ */
+export const open = (parent: Scope.Scope) =>
+	Effect.gen(function* () {
+		return {
+			scope: yield* Scope.fork(parent, "sequential"),
+			ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
+			drained: yield* Deferred.make<void>(),
+		};
+	});
+
+/**
+ * The entry scope's finalizers. They run in reverse: the runner's sends still
+ * dispatched to it close, then every waiter is released with the close cause.
+ * Neither takes the runner lock or touches the runner socket.
+ */
+export const own = (
 	entry: RunnerChild,
-	cause: Cause.Cause<SessionFailure>,
+	closeSends: (runnerId: string) => Effect.Effect<void>,
 ) =>
 	Effect.gen(function* () {
-		notifyEntry(entry);
-		yield* Deferred.failCause(entry.ready, cause);
-		yield* Deferred.succeed(entry.drained, undefined);
-		const ending = entry.lifecycle.end;
-		if (ending) yield* Deferred.succeed(ending.released, undefined);
+		yield* Scope.addFinalizerExit(entry.scope, (exit) =>
+			Effect.gen(function* () {
+				end(entry);
+				yield* Deferred.failCause(
+					entry.ready,
+					Exit.isFailure(exit)
+						? exit.cause
+						: Cause.fail(
+								entry.lifecycle.failure ??
+									runnerFailure("stop runner", "Provider process stopped"),
+							),
+				);
+				yield* Deferred.succeed(entry.drained, undefined);
+				const ending = entry.lifecycle.end;
+				if (ending) yield* Deferred.succeed(ending.released, undefined);
+			}),
+		);
+		yield* Scope.addFinalizer(entry.scope, closeSends(entry.runnerId));
 	});
+
+/** Closes the entry scope; idempotent. Its closers are listed in CONTRACT 6.11. */
+export const close = (
+	entry: RunnerChild,
+	cause?: Cause.Cause<SessionFailure>,
+) => Scope.close(entry.scope, cause ? Exit.failCause(cause) : Exit.void);
 
 /** Ends the entry and lets go of its connection and child, without stopping the process. */
 export const detach = (entry: RunnerChild, failure?: SessionFailure) => {

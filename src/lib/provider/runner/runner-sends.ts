@@ -230,7 +230,7 @@ export const makeRunnerSends = (deps: {
 			refusedReleases.set(runnerId, refused.add(sinkId));
 			return true;
 		},
-		/** Closes the runner's dispatched sends, except those whose run it still holds. */
+		/** The entry scope's send finalizer (6.11): closes the runner's dispatched sends, except those whose run it still holds. */
 		closeRunner: (runnerId: string, held?: readonly string[]) =>
 			Effect.gen(function* () {
 				refusedReleases.delete(runnerId);

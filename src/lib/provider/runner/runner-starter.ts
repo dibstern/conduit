@@ -199,6 +199,25 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			wakeReactor,
 		} = options;
 		const clock = yield* Clock.Clock;
+		const instanceScope = yield* Effect.scope;
+		// The entry scope's send finalizer (6.11). A run its runner still holds
+		// keeps its send until its release requeues it or Settle ends it (G6).
+		const closeSends = (runnerId: string) =>
+			sql
+				? sql<{
+						id: string;
+					}>`SELECT id FROM provider_runs WHERE runner_id = ${runnerId} AND held_transmission IS NOT NULL AND status IN ('pending', 'running')`.pipe(
+						Effect.flatMap((held) =>
+							sends.closeRunner(
+								runnerId,
+								held.map(({ id }) => id),
+							),
+						),
+						Effect.catchCause((cause) =>
+							Effect.logError("Runner send close failed", cause),
+						),
+					)
+				: sends.closeRunner(runnerId);
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
 		const startupTimeoutMs =
 			process.env["NODE_ENV"] === "test"
@@ -219,6 +238,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			Effect.gen(function* () {
 				const entry = record.identity.entry;
 				const alreadyRetired = record.tag._tag === "Retired";
+				// The commit closes the entry scope, which fails ready with this cause.
+				if (entry) Entry.transition(entry, { _tag: "Fail", failure: cause });
 				yield* stops.requestStop(
 					entry
 						? stops.retirementFor(entry)
@@ -228,11 +249,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					log.warn(
 						`Retired surviving runner ${record.identity.runnerId}: ${cause.message}`,
 					);
-				if (entry) {
-					Entry.transition(entry, { _tag: "Fail", failure: cause });
-					Entry.transition(entry, { _tag: "Recovered" });
-					yield* Entry.releaseWaiters(entry, Cause.fail(cause));
-				}
+				if (entry) Entry.transition(entry, { _tag: "Recovered" });
 			});
 		const retireSurvivor = (
 			entry: RunnerChild,
@@ -259,8 +276,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							Entry.transition(entry, { _tag: "Fail", failure: detached });
 							Entry.detach(entry, detached);
 							stops.detach(entry.runnerId);
-							yield* sends.closeRunner(entry.runnerId);
-							yield* Entry.releaseWaiters(entry, Cause.fail(detached));
+							// CONTRACT 6.11 names no detach closer; a project letting go of
+							// its runner is that runner's shutdown for this daemon (gap G3).
+							yield* Entry.close(entry, Cause.fail(detached));
 						}
 					}),
 				)
@@ -453,7 +471,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						_tag: "EndSession",
 						orphan: true,
 					})
-					.pipe(Effect.ensuring(Deferred.succeed(entry.drained, undefined)));
+					// A rejected stop never reaches its post-commit closer (gap G5).
+					.pipe(Effect.onError((cause) => Entry.close(entry, cause)));
 			});
 
 		const failed = (
@@ -2084,8 +2103,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							})
 						: Entry.initialRunnerLifecycle(),
 					runnerId,
-					ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
-					drained: yield* Deferred.make<void>(),
+					...(yield* Entry.open(instanceScope)),
 					upgrade: { activity: 0, inFlight: false, failures: 0, retryAt: 0 },
 					outputs: yield* Semaphore.make(1),
 					socketPath: join(
@@ -2093,6 +2111,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						runnerId,
 					),
 				} satisfies RunnerChild;
+				yield* Entry.own(entry, closeSends);
 				yield* stops.adoptEntry(entry, "starting");
 				return entry;
 			});
@@ -2257,7 +2276,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								Entry.touch(replacement);
 								replacement.connection?.write({ type: "upgrade-activate" });
 								yield* stops.adoptEntry(replacement, "live");
-								yield* sends.closeRunner(old.runnerId);
 								yield* observeProcess(sessionId, replacement).pipe(
 									Effect.catchCause((cause) =>
 										Effect.logWarning(
@@ -2266,18 +2284,20 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										),
 									),
 								);
-								// Keep the old process visible to shutdown and liveness while
-								// stopping, without granting it the warming candidate's output.
-
-								Entry.end(old);
 								upgradeMark(sessionId, old, "switched", replacement);
 								return true;
 							}),
 						);
 					}).pipe(
+						// The promote closes old's entry scope as any stop's post-commit
+						// step does, after upgrade-activate and the switched mark (6.9).
 						Effect.ensuring(
 							Effect.suspend(() =>
-								!committed && !stops.closing ? cancel : Effect.void,
+								committed
+									? Entry.close(old)
+									: stops.closing
+										? Effect.void
+										: cancel,
 							),
 						),
 					);
@@ -2651,9 +2671,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									retryAt: 0,
 								},
 								outputs: yield* Semaphore.make(1),
-								drained: yield* Deferred.make<void>(),
-								ready: yield* Deferred.make<RunnerSocket, SessionFailure>(),
+								...(yield* Entry.open(instanceScope)),
 							};
+							yield* Entry.own(entry, closeSends);
 							yield* lock.withPermits(1)(
 								Effect.gen(function* () {
 									if (stops.closing)
@@ -2721,8 +2741,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							) =>
 								runFork(
 									stop.pipe(
+										// A rejected stop never reaches its post-commit closer (gap G5).
 										Effect.catchCause((cause) =>
-											Entry.releaseWaiters(entry, cause).pipe(
+											Entry.close(entry, cause).pipe(
 												// Shutdown interrupts a Stop still committing; that is not an error.
 												Effect.andThen(
 													Failure.isInterruptedOnly(cause)
@@ -2785,7 +2806,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											Entry.transition(entry, { _tag: "Recovered" });
 											Entry.transition(entry, { _tag: "Fail", failure });
 											yield* stops.stopRunner(entry);
-											yield* Entry.releaseWaiters(entry, Cause.fail(failure));
 										}),
 									);
 									return;
@@ -2812,16 +2832,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											failure: abandonedFailure,
 										});
 										stopUnawaited(
-											stops
-												.stopRunner(entry, undefined, "failure")
-												.pipe(
-													Effect.andThen(
-														Entry.releaseWaiters(
-															entry,
-															Cause.fail(abandonedFailure),
-														),
-													),
-												),
+											stops.stopRunner(entry, undefined, "failure"),
 										);
 										return;
 									}
@@ -2832,14 +2843,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								if (abandoned) {
 									Entry.transition(entry, { _tag: "Recovered" });
 									yield* Deferred.succeed(entry.ready, connected.success);
-									// Shutdown skips retirement; waiters must still be released.
-									stopUnawaited(
-										retireOrphan(entry).pipe(
-											Effect.ensuring(
-												Deferred.succeed(entry.drained, undefined),
-											),
-										),
-									);
+									// The orphan stop's commit closes the entry scope; shutdown closes it otherwise.
+									stopUnawaited(retireOrphan(entry));
 									return;
 								}
 								yield* lock.withPermits(1)(
@@ -2863,9 +2868,10 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								Effect.onExit((exit) => {
 									if (exit._tag === "Success" || stops.closing)
 										return Effect.void;
-									// Interruption is no stop reason (6.3), but its waiters must settle.
+									// Interruption is no stop reason (6.3) and reaches no
+									// post-commit closer, but its waiters must settle (gap G5).
 									if (Failure.isInterruptedOnly(exit.cause))
-										return Entry.releaseWaiters(entry, exit.cause);
+										return Entry.close(entry, exit.cause);
 									return Effect.sync(() => {
 										Entry.transition(entry, { _tag: "Recovered" });
 										Entry.transition(entry, {
@@ -2876,15 +2882,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											),
 										});
 										entry.connection?.destroy();
-										stopUnawaited(
-											stops
-												.stopRunner(entry)
-												.pipe(
-													Effect.andThen(
-														Entry.releaseWaiters(entry, exit.cause),
-													),
-												),
-										);
+										stopUnawaited(stops.stopRunner(entry));
 									});
 								}),
 							);
