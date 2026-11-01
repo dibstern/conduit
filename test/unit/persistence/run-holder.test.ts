@@ -108,7 +108,7 @@ describe("durable run holder", () => {
 			}).pipe(Effect.provide(layer)),
 	);
 	it.effect(
-		"releaseRun appends stale evidence without Stop side effects and rolls matching release back with its Stop",
+		"releaseRun appends stale evidence without releasing and rolls a failed matching release back",
 		() =>
 			Effect.gen(function* () {
 				const { sql, lifecycle } = yield* setup;
@@ -117,45 +117,29 @@ describe("durable run holder", () => {
 					runId: "run",
 					commandId: "send",
 				});
-				let stops = 0;
-				const stop =
-					sql`UPDATE claude_runner_cursors SET retired_at = 1 WHERE runner_id = 'runner'`.pipe(
-						Effect.tap(() =>
-							Effect.sync(() => {
-								stops++;
-							}),
-						),
-						Effect.as("stopped"),
-					);
 				const release = (transmission: number) =>
-					lifecycle.releaseRun(
-						{
-							sessionId: "session",
-							runId: "run",
-							runnerId: "runner",
-							commandId: "send",
-							transmission,
-							reason: "Refused",
-						},
-						() => stop,
-					);
-				expect(yield* release(0)).toEqual({ released: false, stop: undefined });
-				expect(stops).toBe(0);
+					lifecycle.releaseRun({
+						sessionId: "session",
+						runId: "run",
+						runnerId: "runner",
+						commandId: "send",
+						transmission,
+						reason: "Refused",
+					});
+				expect(yield* release(0)).toEqual({ released: false });
 				expect(
 					yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
 				).toEqual([{ runner_id: "runner", held_transmission: 1 }]);
-				yield* sql`CREATE TRIGGER reject_release_stop BEFORE UPDATE OF retired_at ON claude_runner_cursors BEGIN SELECT RAISE(ABORT, 'stop failed'); END`;
+				yield* sql`CREATE TRIGGER reject_release BEFORE INSERT ON events WHEN NEW.type = 'run.released' BEGIN SELECT RAISE(ABORT, 'release failed'); END`;
 				expect((yield* Effect.result(release(1)))._tag).toBe("Failure");
-				expect(stops).toBe(0);
 				expect(
 					yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
 				).toEqual([{ runner_id: "runner", held_transmission: 1 }]);
 				expect(
 					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'run.released'`,
 				).toEqual([{ n: 1 }]);
-				yield* sql`DROP TRIGGER reject_release_stop`;
-				expect(yield* release(1)).toEqual({ released: true, stop: "stopped" });
-				expect(stops).toBe(1);
+				yield* sql`DROP TRIGGER reject_release`;
+				expect(yield* release(1)).toEqual({ released: true });
 				expect(
 					yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
 				).toEqual([{ runner_id: null, held_transmission: null }]);
@@ -165,39 +149,29 @@ describe("durable run holder", () => {
 			}).pipe(Effect.provide(layer)),
 	);
 
-	it.effect(
-		"releaseRun clears a matching retired hold without running another Stop mutation",
-		() =>
-			Effect.gen(function* () {
-				const { sql, lifecycle } = yield* setup;
-				yield* lifecycle.holdRun({
+	it.effect("releaseRun clears a matching retired hold", () =>
+		Effect.gen(function* () {
+			const { sql, lifecycle } = yield* setup;
+			yield* lifecycle.holdRun({
+				sessionId: "session",
+				runId: "run",
+				commandId: "send",
+			});
+			yield* sql`UPDATE claude_runner_cursors SET retired_at = 1 WHERE runner_id = 'runner'`;
+			expect(
+				yield* lifecycle.releaseRun({
 					sessionId: "session",
 					runId: "run",
+					runnerId: "runner",
 					commandId: "send",
-				});
-				yield* sql`UPDATE claude_runner_cursors SET retired_at = 1 WHERE runner_id = 'runner'`;
-				let stopped = false;
-				expect(
-					yield* lifecycle.releaseRun(
-						{
-							sessionId: "session",
-							runId: "run",
-							runnerId: "runner",
-							commandId: "send",
-							transmission: 1,
-							reason: "JournalAbsent",
-						},
-						() =>
-							Effect.sync(() => {
-								stopped = true;
-							}),
-					),
-				).toEqual({ released: true, stop: undefined });
-				expect(stopped).toBe(false);
-				expect(
-					yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
-				).toEqual([{ runner_id: null, held_transmission: null }]);
-			}).pipe(Effect.provide(layer)),
+					transmission: 1,
+					reason: "JournalAbsent",
+				}),
+			).toEqual({ released: true });
+			expect(
+				yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'run'`,
+			).toEqual([{ runner_id: null, held_transmission: null }]);
+		}).pipe(Effect.provide(layer)),
 	);
 	it.effect(
 		"returns Unserved without appending when no serving runner exists",

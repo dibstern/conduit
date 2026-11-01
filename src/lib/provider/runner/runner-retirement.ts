@@ -110,6 +110,24 @@ const stopWindowEnd = (record: {
 }) => (record.stopStartedAt ?? record.retiredAt) + 4_000;
 
 /** Owns the hold and release writes; the generic commit seam knows no runner state. */
+/** The one `run.released` constructor, for a self-release and a stop commit's releases. */
+const releasedEvent = (
+	input: EventPayloadMap["run.released"] & { readonly sessionId: string },
+	provider: string,
+) =>
+	canonicalEvent(
+		"run.released",
+		input.sessionId,
+		{
+			runId: input.runId,
+			runnerId: input.runnerId,
+			commandId: input.commandId,
+			transmission: input.transmission,
+			reason: input.reason,
+		},
+		{ provider, metadata: { runId: input.runId } },
+	);
+
 export const makeRunnerRunLifecycle = (
 	options: Omit<SettlementTx, "project" | "stamp" | "afterCommit"> & {
 		readonly commit: CommitAndSignal;
@@ -306,10 +324,8 @@ export const makeRunnerRunLifecycle = (
 					Effect.mapError(toStoreFault),
 				);
 		},
-		releaseRun: <A, E, R>(
+		releaseRun: (
 			input: EventPayloadMap["run.released"] & { readonly sessionId: string },
-			/** Receives the serving row this transaction read, never a cached one. */
-			stop: (serving: StopTarget) => Effect.Effect<A, E, R>,
 			failed?: Extract<SendEvidence, { readonly _tag: "failed" }>,
 		) => {
 			let released = false;
@@ -328,7 +344,7 @@ export const makeRunnerRunLifecycle = (
 									send.runId !== input.runId ||
 									send.commandId !== input.commandId
 								)
-									return { released: false, stop: undefined };
+									return { released: false };
 								const [current] =
 									yield* sql`SELECT 1 FROM provider_command_outbox command
 									JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
@@ -339,7 +355,7 @@ export const makeRunnerRunLifecycle = (
 									AND command.request_sequence = (SELECT MAX(latest.request_sequence) FROM provider_command_outbox latest WHERE latest.project_key = command.project_key AND latest.command_id = command.command_id)
 									AND run.status IN ('pending', 'running') AND run.joined_into IS NULL
 									AND run.runner_id = ${input.runnerId} AND run.held_transmission = ${input.transmission}`;
-								if (!current) return { released: false, stop: undefined };
+								if (!current) return { released: false };
 							}
 							const [held] = yield* sql<{
 								runner_id: string | null;
@@ -354,25 +370,10 @@ export const makeRunnerRunLifecycle = (
 							}>`SELECT provider FROM sessions WHERE id = ${input.sessionId}`;
 							yield* project(
 								yield* eventStore.appendBatch([
-									canonicalEvent(
-										"run.released",
-										input.sessionId,
-										{
-											runId: input.runId,
-											runnerId: input.runnerId,
-											commandId: input.commandId,
-											transmission: input.transmission,
-											reason: input.reason,
-										},
-										{
-											provider: session?.provider ?? "conduit",
-											metadata: { runId: input.runId },
-										},
-									),
+									releasedEvent(input, session?.provider ?? "conduit"),
 								]),
 							);
-							if (!released) return { released, stop: undefined };
-							if (failed)
+							if (released && failed)
 								yield* settleSend(
 									{
 										...options,
@@ -382,45 +383,7 @@ export const makeRunnerRunLifecycle = (
 									},
 									failed,
 								);
-							const [serving] = yield* sql<{
-								runner_id: string;
-								session_id: string;
-								driver_kind: string;
-								pid: number | null;
-								start_time: string | null;
-								reaper_pid: number | null;
-								reaper_start_time: string | null;
-							}>`SELECT runner_id, session_id, driver_kind, pid, start_time, reaper_pid, reaper_start_time FROM claude_runner_cursors
-					WHERE runner_id = ${input.runnerId} AND session_id = ${input.sessionId} AND role = 'serving' AND retired_at IS NULL`;
-							if (!serving) return { released, stop: undefined };
-							return {
-								released,
-								stop: yield* stop({
-									runnerId: serving.runner_id,
-									sessionId: serving.session_id,
-									driverKind: serving.driver_kind,
-									identity:
-										serving.pid !== null && serving.start_time !== null
-											? {
-													tag: "Verified",
-													pid: serving.pid,
-													startTime: serving.start_time,
-												}
-											: {
-													tag: "Unverifiable",
-													...(serving.pid === null ? {} : { pid: serving.pid }),
-												},
-									reaper:
-										serving.reaper_pid !== null &&
-										serving.reaper_start_time !== null
-											? {
-													pid: serving.reaper_pid,
-													startTime: serving.reaper_start_time,
-												}
-											: undefined,
-									members: [],
-								}),
-							};
+							return { released };
 						}),
 					{
 						afterCommit: Effect.gen(function* () {
@@ -438,6 +401,83 @@ export const makeRunnerRunLifecycle = (
 					),
 					Effect.mapError(toStoreFault),
 				);
+		},
+		/**
+		 * One stop transaction (4.5, 6.3): the Stop mutation, then a release for
+		 * each run its transaction reads held on the runner that `evidence` names.
+		 * Its failures pass through unmapped, so the commit worker still tells a
+		 * rejection from a store fault.
+		 */
+		commitStop: <E>(
+			stop: Effect.Effect<StopCommit, E>,
+			runnerId: string,
+			evidence: (held: {
+				readonly sessionId: string;
+				readonly runId: string;
+				readonly commandId: string;
+				readonly transmission: number;
+			}) => Pick<RunRelease, "reason" | "refusalReason"> | undefined,
+		) => {
+			let released: RunRelease[] = [];
+			return commit.write(
+				(project) =>
+					Effect.gen(function* () {
+						released = [];
+						const committed = yield* stop;
+						if (committed._tag !== "Requested")
+							return { stop: committed, released };
+						const held = yield* sql<{
+							session_id: string;
+							id: string;
+							command_id: string;
+							held_transmission: number;
+							provider: string | null;
+						}>`SELECT * FROM (SELECT run.session_id, run.id, run.held_transmission, session.provider,
+								(SELECT json_extract(dispatched.data, '$.commandId') FROM events dispatched
+									WHERE dispatched.session_id = run.session_id AND dispatched.type = 'run.dispatched' AND json_valid(dispatched.data)
+									AND json_extract(dispatched.data, '$.runId') = run.id AND json_extract(dispatched.data, '$.runnerId') = run.runner_id
+									AND json_extract(dispatched.data, '$.transmission') = run.held_transmission
+									ORDER BY dispatched.sequence DESC LIMIT 1) AS command_id
+							FROM provider_runs run LEFT JOIN sessions session ON session.id = run.session_id
+							WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running'))
+							WHERE command_id IS NOT NULL`;
+						const providers = new Map<string, string>();
+						for (const row of held) {
+							const input = {
+								sessionId: row.session_id,
+								runId: row.id,
+								runnerId,
+								commandId: row.command_id,
+								transmission: row.held_transmission,
+							};
+							const release = evidence(input);
+							if (!release) continue;
+							released.push({ ...input, ...release });
+							providers.set(row.id, row.provider ?? "conduit");
+						}
+						if (released.length > 0)
+							yield* project(
+								yield* eventStore.appendBatch(
+									released.map((input) =>
+										releasedEvent(
+											input,
+											providers.get(input.runId) ?? "conduit",
+										),
+									),
+								),
+							);
+						return { stop: committed, released };
+					}),
+				{
+					afterCommit: Effect.suspend(() =>
+						Effect.forEach(
+							released,
+							(input) => options.holds?.released(input) ?? Effect.void,
+							{ discard: true },
+						),
+					),
+				},
+			);
 		},
 	};
 };
@@ -575,17 +615,23 @@ export const makeRunnerStopReconciler = (options: {
 		runId: string,
 		commandId: string,
 	) => Effect.Effect<Hold, StoreFault>;
-	readonly release?: <A>(
+	readonly release?: (
 		input: RunRelease,
-		stop?: (serving: StopTarget) => Effect.Effect<A, unknown>,
-	) => Effect.Effect<
-		{
-			readonly released: boolean;
-			readonly stop?: A | undefined;
-		},
-		SessionFailure
-	>;
+	) => Effect.Effect<{ readonly released: boolean }, SessionFailure>;
 	readonly released?: (input: RunRelease) => Effect.Effect<void>;
+	/**
+	 * The stop transaction that carries the releases its evidence names (4.5,
+	 * 6.3). `journalAbsent` keys `[runId, transmission]` of a confirmed-exited
+	 * target's held transmissions whose journal reads Absent.
+	 */
+	readonly commitStop?: (
+		target: StopTarget,
+		mutation: Effect.Effect<StopCommit, unknown>,
+		journalAbsent: ReadonlySet<string>,
+	) => Effect.Effect<
+		{ readonly stop: StopCommit; readonly released: readonly RunRelease[] },
+		unknown
+	>;
 	readonly committed: (
 		record: RunnerRetirement,
 	) => Effect.Effect<void, unknown>;
@@ -626,13 +672,17 @@ export const makeRunnerStopReconciler = (options: {
 		const watching = new Set<string>();
 		const get = (runnerId: string): RunnerStop =>
 			states.get(runnerId) ?? { _tag: "Running" };
-		// Every Stop state write wakes awaitStop, so End resolves at the exit.
+		// Every Stop state write wakes awaitStop, so End resolves at the exit,
+		// and wakes the write gate's waiters (4.4).
 		let stopChanged = Deferred.makeUnsafe<void>();
-		const setStop = (runnerId: string, state: RunnerStop) => {
-			states.set(runnerId, state);
+		const wake = () => {
 			const changed = stopChanged;
 			stopChanged = Deferred.makeUnsafe<void>();
 			Deferred.doneUnsafe(changed, Effect.void);
+		};
+		const setStop = (runnerId: string, state: RunnerStop) => {
+			states.set(runnerId, state);
+			wake();
 		};
 		const serving = (sessionId: string) =>
 			[...rows.values()].find(
@@ -731,13 +781,116 @@ export const makeRunnerStopReconciler = (options: {
 				});
 			});
 		};
+		const heldCommands = (
+			sql: SqlClient.SqlClient,
+			retirement: Pick<StopTarget, "runnerId" | "sessionId">,
+		) =>
+			sql<{
+				request_sequence: number;
+				project_key: string;
+				session_id: string;
+				command_id: string;
+				attempt_count: number;
+				provider_id: string;
+				run_id: string;
+				payload_json: string;
+				transmission: number;
+			}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running')`;
+		/** Settle's journal read (7.3), typed Absent, Present or Unreadable. */
+		const readJournal = (
+			settlement: NonNullable<typeof options.settlement>,
+			sql: SqlClient.SqlClient,
+			retirement: Pick<StopTarget, "runnerId" | "sessionId">,
+			entry: RunnerChild | undefined,
+			command: {
+				readonly command_id: string;
+				readonly attempt_count: number;
+				readonly payload_json: string;
+			},
+		) =>
+			Effect.gen(function* () {
+				const root =
+					entry?.registrationRoot ??
+					(yield* settlement.projectRoot(retirement.sessionId));
+				const directory = entry
+					? dirname(entry.socketPath)
+					: root
+						? runnerDirectory(root, settlement.configDir)
+						: undefined;
+				const evidence = readRunnerEvidence(
+					settlement.configDir,
+					retirement.runnerId,
+					retirement.sessionId,
+				);
+				const [cursor] = yield* sql<{
+					journals_before_execution: number | null;
+				}>`SELECT journals_before_execution FROM claude_runner_cursors WHERE runner_id = ${retirement.runnerId}`;
+				const journalBuild = journalsBeforeExecution(
+					cursor,
+					evidence?.buildId === runnerBuildId(),
+				);
+				const journalDirectory = evidence
+					? dirname(evidence.socketPath)
+					: directory;
+				const decodedPayload = yield* Effect.result(
+					Effect.try((): unknown => JSON.parse(command.payload_json)),
+				);
+				const payload =
+					decodedPayload._tag === "Success"
+						? decodedPayload.success
+						: undefined;
+				const journal = journalDirectory
+					? readRunnerSendJournal({
+							directory: journalDirectory,
+							sessionId: retirement.sessionId,
+							driverKind: settlement.driverKind,
+							commandId: command.command_id,
+							attempt: command.attempt_count,
+							nativeResumeFallback:
+								isRecord(payload) && payload["nativeResumeFallback"] === true,
+						})
+					: { _tag: "Unreadable" as const };
+				return { journalBuild, journal, payload };
+			});
+		/**
+		 * The stop commit's JournalAbsent evidence (4.5): each held transmission
+		 * of a target already confirmed exited whose journal reads Absent.
+		 */
+		const journalAbsent = (target: StopTarget) =>
+			Effect.gen(function* () {
+				const absent = new Set<string>();
+				const settlement = options.settlement;
+				const { identity } = target;
+				if (!settlement?.sql || identity.tag !== "Verified") return absent;
+				const observed = options.processTable.inspect(identity.pid);
+				if (
+					observed.state !== "gone" &&
+					observed.state !== "zombie" &&
+					(observed.startTime === undefined ||
+						observed.startTime === identity.startTime)
+				)
+					return absent;
+				const entry = settlement.entry(target.runnerId);
+				for (const command of yield* heldCommands(settlement.sql, target)) {
+					const { journalBuild, journal } = yield* readJournal(
+						settlement,
+						settlement.sql,
+						target,
+						entry,
+						command,
+					);
+					if (journalBuild && journal._tag === "Absent")
+						absent.add(JSON.stringify([command.run_id, command.transmission]));
+				}
+				return absent;
+			});
 		// One observation per held transmission survives a failed commit for the retry.
 		const pendingGoneSettlements = new Map<string, SendEvidence>();
 		const settle = (retirement: RunnerRetirement) =>
 			Effect.gen(function* () {
 				const settlement = options.settlement;
 				if (!settlement) return false;
-				const { sql, configDir } = settlement;
+				const { sql } = settlement;
 				if (!sql) return true;
 				const entry = settlement.entry(retirement.runnerId);
 				const sessionIngestion = yield* settlement.ingestion(
@@ -754,17 +907,7 @@ export const makeRunnerStopReconciler = (options: {
 						yield* options.receipts.settled(retirement.runnerId);
 					return true;
 				}
-				const commands = yield* sql<{
-					request_sequence: number;
-					project_key: string;
-					session_id: string;
-					command_id: string;
-					attempt_count: number;
-					provider_id: string;
-					run_id: string;
-					payload_json: string;
-					transmission: number;
-				}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running')`;
+				const commands = yield* heldCommands(sql, retirement);
 				for (const command of commands) {
 					const key = JSON.stringify([
 						retirement.runnerId,
@@ -775,48 +918,13 @@ export const makeRunnerStopReconciler = (options: {
 					]);
 					let observed = pendingGoneSettlements.get(key);
 					if (!observed) {
-						const root =
-							entry?.registrationRoot ??
-							(yield* settlement.projectRoot(retirement.sessionId));
-						const directory = entry
-							? dirname(entry.socketPath)
-							: root
-								? runnerDirectory(root, configDir)
-								: undefined;
-						const evidence = readRunnerEvidence(
-							configDir,
-							retirement.runnerId,
-							retirement.sessionId,
+						const { journalBuild, journal, payload } = yield* readJournal(
+							settlement,
+							sql,
+							retirement,
+							entry,
+							command,
 						);
-						const [cursor] = yield* sql<{
-							journals_before_execution: number | null;
-						}>`SELECT journals_before_execution FROM claude_runner_cursors WHERE runner_id = ${retirement.runnerId}`;
-						const journalBuild = journalsBeforeExecution(
-							cursor,
-							evidence?.buildId === runnerBuildId(),
-						);
-						const journalDirectory = evidence
-							? dirname(evidence.socketPath)
-							: directory;
-						const decodedPayload = yield* Effect.result(
-							Effect.try((): unknown => JSON.parse(command.payload_json)),
-						);
-						const payload =
-							decodedPayload._tag === "Success"
-								? decodedPayload.success
-								: undefined;
-						const journal = journalDirectory
-							? readRunnerSendJournal({
-									directory: journalDirectory,
-									sessionId: retirement.sessionId,
-									driverKind: settlement.driverKind,
-									commandId: command.command_id,
-									attempt: command.attempt_count,
-									nativeResumeFallback:
-										isRecord(payload) &&
-										payload["nativeResumeFallback"] === true,
-								})
-							: { _tag: "Unreadable" as const };
 						if (journalBuild && journal._tag === "Absent") {
 							yield* release({
 								sessionId: retirement.sessionId,
@@ -1242,14 +1350,39 @@ export const makeRunnerStopReconciler = (options: {
 			Effect.gen(function* () {
 				for (let attempt = 1; ; attempt++) {
 					const result = yield* Effect.exit(
-						commitStop(target, reason, false).pipe(
+						Effect.gen(function* () {
+							const sql = options.settlement?.sql;
+							// A deleted session deleted its runs, so its stop carries no
+							// release and needs no session-scoped commit.
+							const deleted =
+								sql !== undefined &&
+								(yield* sql`SELECT id FROM sessions WHERE id = ${target.sessionId}`)
+									.length === 0;
+							if (!options.commitStop || !options.receipts || deleted)
+								return {
+									stop: yield* commitStop(target, reason, false),
+									released: [],
+								};
+							// The evidence is read before the transaction, again on each
+							// retry (4.5, 6.3).
+							return yield* options.commitStop(
+								target,
+								options.receipts.requestStopMutation(target, reason, observe),
+								yield* journalAbsent(target),
+							);
+						}).pipe(
 							Effect.uninterruptible,
 							Effect.provideService(Scheduler.PreventSchedulerYield, true),
 						),
 					);
 					if (Exit.isSuccess(result)) {
-						if (result.value._tag === "Requested")
-							return yield* afterStop(result.value, waiters);
+						const { stop, released } = result.value;
+						if (stop._tag === "Requested") {
+							// The handle leaves the runner before cleanup can fail its waiters.
+							for (const input of released)
+								yield* options.released?.(input) ?? Effect.void;
+							return yield* afterStop(stop, waiters);
+						}
 						setStop(target.runnerId, { _tag: "Running" });
 						return yield* Deferred.succeed(waiters, "Ignored");
 					}
@@ -1320,6 +1453,13 @@ export const makeRunnerStopReconciler = (options: {
 						: Deferred.await(waiters);
 				}
 			});
+		/**
+		 * A write fiber's release (4.5). An exiting or retiring refusal joins the
+		 * runner's Committing stop, or raises one while Running (6.4); it never
+		 * sets Committing itself. Once the stop leaves Committing the release
+		 * commits; it is stale when that stop's commit carried it, and raises no
+		 * second stop.
+		 */
 		const release = (input: RunRelease): Effect.Effect<void, SessionFailure> =>
 			Effect.uninterruptible(
 				Effect.gen(function* () {
@@ -1331,11 +1471,6 @@ export const makeRunnerStopReconciler = (options: {
 								"Release persistence is unavailable",
 							),
 						);
-					let current = get(input.runnerId);
-					if (current._tag === "Committing") {
-						yield* Deferred.await(current.waiters);
-						current = get(input.runnerId);
-					}
 					const reason: StopReason | undefined =
 						input.reason === "Refused"
 							? input.refusalReason === "exiting"
@@ -1344,49 +1479,38 @@ export const makeRunnerStopReconciler = (options: {
 									? { _tag: "Exited" }
 									: undefined
 							: undefined;
-					if (!reason) {
-						const committed = yield* persistRelease(input);
-						if (committed.released)
-							yield* options.released?.(input) ?? Effect.void;
-						return;
+					const current = get(input.runnerId);
+					if (reason && current._tag === "Committing")
+						yield* Effect.exit(Deferred.await(current.waiters));
+					else if (reason && current._tag === "Running") {
+						// Durable role changes need not have reached the route cache.
+						const row =
+							rows.get(input.runnerId) ??
+							(options.receipts &&
+								(yield* options.receipts.runners(input.sessionId).pipe(
+									Effect.map(({ rows }) =>
+										rows.find(
+											(candidate) =>
+												candidate.runnerId === input.runnerId &&
+												candidate.retiredAt === null,
+										),
+									),
+									Effect.orElseSucceed(() => undefined),
+								)));
+						if (row)
+							yield* Effect.exit(requestStop({ ...row, members: [] }, reason));
 					}
-					const waiters = yield* Deferred.make<
-						"Requested" | "Ignored",
-						SessionFailure
-					>();
-					setStop(input.runnerId, { _tag: "Committing", waiters });
-					const result = yield* Effect.exit(
-						// releaseRun invokes this only for the serving row its own
-						// transaction read, beside the matching release evidence.
-						persistRelease(input, (serving) =>
-							commitStop(serving, reason, true),
-						),
-					);
-					if (Exit.isFailure(result)) {
-						setStop(input.runnerId, current);
-						// Joiners recheck and commit their own Stop.
-						yield* Deferred.succeed(waiters, "Ignored");
-						return yield* Effect.fail({
-							...runnerFailure("release run", result.cause),
-							cause:
-								Option.getOrUndefined(Failure.firstFailure(result.cause)) ??
-								result.cause,
-						});
-					}
-					// The handle must leave the releasing runner before revocation or
-					// admission waiters can trigger any retirement cleanup.
-					if (result.value.released)
+					const committed = yield* persistRelease(input);
+					if (committed.released)
 						yield* options.released?.(input) ?? Effect.void;
-					if (result.value.released && result.value.stop?._tag === "Requested")
-						yield* afterStop(result.value.stop, waiters);
-					else {
-						setStop(input.runnerId, current);
-						yield* Deferred.succeed(waiters, "Ignored");
-					}
-				}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true)),
+				}),
 			);
 		return {
 			state: get,
+			/** The next Stop state write or wake, captured when called. */
+			changed: () => Deferred.await(stopChanged),
+			/** Wakes the gate's waiters when a hold ends without a Stop write. */
+			wake,
 			serving,
 			register: (
 				runnerId: string,
@@ -1570,7 +1694,7 @@ export const makeRunnerRetirement = (
 				readonly commit: Pick<CommitAndSignal, "committed">;
 				readonly lifecycle: Pick<
 					ReturnType<typeof makeRunnerRunLifecycle>,
-					"releaseRun"
+					"releaseRun" | "commitStop"
 				>;
 			},
 			unknown
@@ -1596,10 +1720,16 @@ export const makeRunnerRetirement = (
 		const attachments = new WeakMap<RunnerChild, RunnerAttachment>();
 		const endCommands = new Map<string, string>();
 		const recoveredRunnerIds = new Set<string>();
-		// The transmission each held run may write, until its release commits.
+		// The transmission each held run may write, until its release commits,
+		// and the write evidence a stop's read takes (4.5): whether this daemon
+		// wrote it, and its connection's refusal reader.
 		const currentHolds = new Map<
 			string,
-			{ readonly runner: string; readonly transmission: number }
+			{
+				readonly runner: string;
+				readonly transmission: number;
+				written?: () => RunRelease["refusalReason"];
+			}
 		>();
 		const releases = yield* PubSub.unbounded<RunRelease>();
 		const holdKey = (
@@ -1670,6 +1800,59 @@ export const makeRunnerRetirement = (
 					driverKind: options.driverKind,
 					entry: entryOf,
 				},
+				commitStop: (target, mutation, journalAbsent) =>
+					Effect.gen(function* () {
+						// The evidence read (4.5): each of this daemon's holds on the
+						// runner, written or not, with the refusal its connection read.
+						// The closed gate keeps the set fixed while this stop commits.
+						const read = new Map(
+							[...currentHolds]
+								.filter(([, hold]) => hold.runner === target.runnerId)
+								.map(([key, hold]) => [
+									key,
+									{
+										transmission: hold.transmission,
+										written: hold.written !== undefined,
+										refusal: hold.written?.(),
+									},
+								]),
+						);
+						const { lifecycle } = yield* options.sessionCommit(
+							target.sessionId,
+						);
+						return yield* lifecycle.commitStop(
+							mutation,
+							target.runnerId,
+							(
+								held,
+							): Pick<RunRelease, "reason" | "refusalReason"> | undefined => {
+								const key = holdKey(held);
+								const evidence = read.get(key);
+								const live = currentHolds.get(key);
+								if (evidence?.transmission === held.transmission) {
+									if (evidence.refusal)
+										return {
+											reason: "Refused",
+											refusalReason: evidence.refusal,
+										};
+									if (!evidence.written) return { reason: "NotSent" };
+								} else if (
+									live?.runner === target.runnerId &&
+									live.transmission === held.transmission &&
+									!live.written
+								)
+									// Held after the read: the closed gate kept it unwritten.
+									return { reason: "NotSent" };
+								// Possibly written, or an earlier daemon's hold, which waits
+								// for adoption's hello or the journal.
+								return journalAbsent.has(
+									JSON.stringify([held.runId, held.transmission]),
+								)
+									? { reason: "JournalAbsent" }
+									: undefined;
+							},
+						);
+					}),
 				waitForExit: (retirement) => {
 					const child = entryOf(retirement.runnerId)?.child;
 					if (!child || child.exitCode !== null || child.signalCode !== null)
@@ -1716,6 +1899,7 @@ export const makeRunnerRetirement = (
 								for (const [key, hold] of currentHolds)
 									if (hold.runner === retirement.runnerId)
 										currentHolds.delete(key);
+								stops.wake();
 							}),
 						),
 					),
@@ -1842,20 +2026,58 @@ export const makeRunnerRetirement = (
 					currentHolds.set(key, hold);
 					// Identity, not transmission: a later hold may reuse an uncommitted number.
 					return () => {
-						if (currentHolds.get(key) === hold) currentHolds.delete(key);
+						if (currentHolds.get(key) !== hold) return;
+						currentHolds.delete(key);
+						stops.wake();
 					};
 				},
 				released: (input: RunRelease) =>
 					Effect.suspend(() => {
 						const key = holdKey(input);
-						if (currentHolds.get(key)?.transmission === input.transmission)
+						if (currentHolds.get(key)?.transmission === input.transmission) {
 							currentHolds.delete(key);
+							stops.wake();
+						}
 						return PubSub.publish(releases, input);
 					}).pipe(Effect.asVoid),
 			},
 			currentHold: (
 				run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
 			) => currentHolds.get(holdKey(run))?.transmission,
+			/** The write gate (4.4): a held frame writes only while its runner's stop is Running. */
+			gate: {
+				/** Called in the write's synchronous step; `take` is the write permission. */
+				write: (
+					run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
+					transmission: number,
+					take: () => boolean,
+					refusal: () => RunRelease["refusalReason"],
+				) => {
+					const hold = currentHolds.get(holdKey(run));
+					if (
+						hold?.transmission !== transmission ||
+						stops.state(hold.runner)._tag !== "Running" ||
+						!take()
+					)
+						return false;
+					hold.written = refusal;
+					return true;
+				},
+				/** True once the runner is Running again, false once the hold ended. */
+				reopened: (
+					run: Pick<OwnerSend, "sessionId" | "runId" | "commandId">,
+					transmission: number,
+				) =>
+					Effect.gen(function* () {
+						while (true) {
+							const changed = stops.changed();
+							const hold = currentHolds.get(holdKey(run));
+							if (hold?.transmission !== transmission) return false;
+							if (stops.state(hold.runner)._tag === "Running") return true;
+							yield* changed;
+						}
+					}),
+			},
 			/** Every committed release, for the feeder's re-enqueue only. */
 			releases,
 			/** Settles the send as failed; a held send is released in the same commit. */
@@ -1903,7 +2125,6 @@ export const makeRunnerRetirement = (
 									transmission: held.transmission,
 									reason: "NotSent",
 								},
-								() => Effect.void,
 								{
 									_tag: "failed",
 									observedAt,

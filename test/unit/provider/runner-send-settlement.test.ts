@@ -54,6 +54,7 @@ import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/proce
 import {
 	type RunnerHello,
 	type RunnerSocket,
+	type RunnerWriteGate,
 	runnerBuildId,
 	runnerFailure,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
@@ -76,6 +77,7 @@ import {
 	createMockEventSink,
 	makeBaseSendTurnInput,
 } from "../../helpers/mock-sdk.js";
+import { gatedWrite } from "../../helpers/runner-write-gate.js";
 
 const spawned = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock("node:child_process", async (original) => ({
@@ -187,17 +189,21 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 							id: string,
 							command: SessionCommand,
 							attempt: number,
+							canWrite?: RunnerWriteGate,
 						) =>
-							Effect.suspend(() => {
-								commands.push({
-									runnerId: options.runnerId,
-									type: command.type,
-								});
-								return command.type === "send-turn"
-									? (replaySend.execute?.(id, command, attempt) ??
-											Effect.succeed(terminalResult()))
-									: Effect.succeed(undefined);
-							}),
+							gatedWrite(
+								canWrite,
+								Effect.suspend(() => {
+									commands.push({
+										runnerId: options.runnerId,
+										type: command.type,
+									});
+									return command.type === "send-turn"
+										? (replaySend.execute?.(id, command, attempt) ??
+												Effect.succeed(terminalResult()))
+										: Effect.succeed(undefined);
+								}),
+							),
 						retireEffect: () => Effect.succeed(true),
 						commandStatusEffect: () => Effect.succeed("not_received"),
 						destroy: () => {},
@@ -794,7 +800,9 @@ for (const refusalReason of [undefined, "exiting", "retiring"] as const)
 					).toEqual([{ held_transmission: 1 }]);
 					unavailable = false;
 					yield* TestClock.adjust("1 second");
-					expect(releaseAttempts).toBe(2);
+					// A refusal's stop commit carries the release (4.5): its retry
+					// lands it, and the write fiber's own release then finds it stale.
+					expect(releaseAttempts).toBe(refusalReason ? 3 : 2);
 					if (refusalReason) yield* TestClock.adjust("4 seconds");
 					expect(sending.pollUnsafe()).toMatchObject({ _tag: "Success" });
 					expect(sends).toBe(2);

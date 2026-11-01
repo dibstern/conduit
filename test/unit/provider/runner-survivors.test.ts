@@ -336,30 +336,33 @@ const stopIntentFixture = Effect.gen(function* () {
 				"claude",
 			);
 			vi.spyOn(connection, "commandEffect").mockImplementation(
-				(id, command, attempt) =>
-					Effect.gen(function* () {
-						commands.push({
-							runnerId: options.runnerId,
-							type: command.type,
-							...(command.type === "send-turn"
-								? { runId: command.input.runId }
-								: {}),
-						});
-						return command.type === "send-turn"
-							? yield* journal.execute(
-									id,
-									attempt ?? command.input.commandAttempt ?? 0,
-									command.input.nativeResumeFallback === true,
-									Effect.succeed({
-										status: "accepted" as const,
-										cost: 0,
-										tokens: { input: 0, output: 0 },
-										durationMs: 0,
-										providerStateUpdates: [],
-									}),
-								)
-							: undefined;
-					}),
+				(id, command, attempt, canWrite) =>
+					gatedWrite(
+						canWrite,
+						Effect.gen(function* () {
+							commands.push({
+								runnerId: options.runnerId,
+								type: command.type,
+								...(command.type === "send-turn"
+									? { runId: command.input.runId }
+									: {}),
+							});
+							return command.type === "send-turn"
+								? yield* journal.execute(
+										id,
+										attempt ?? command.input.commandAttempt ?? 0,
+										command.input.nativeResumeFallback === true,
+										Effect.succeed({
+											status: "accepted" as const,
+											cost: 0,
+											tokens: { input: 0, output: 0 },
+											durationMs: 0,
+											providerStateUpdates: [],
+										}),
+									)
+								: undefined;
+						}),
+					),
 			);
 			yield* options.onHello(
 				{
@@ -571,7 +574,7 @@ const swapFixture = Effect.gen(function* () {
 				"claude",
 			);
 			vi.spyOn(socket, "commandEffect").mockImplementation(
-				(_id, command, attempt) => {
+				(_id, command, attempt, canWrite) => {
 					const execute = Effect.gen(function* () {
 						commands.push({
 							runnerId: options.runnerId,
@@ -617,11 +620,14 @@ const swapFixture = Effect.gen(function* () {
 							: undefined;
 					});
 					return command.type === "send-turn"
-						? journal.execute(
-								_id,
-								attempt ?? command.input.commandAttempt ?? 0,
-								command.input.nativeResumeFallback === true,
-								execute,
+						? gatedWrite(
+								canWrite,
+								journal.execute(
+									_id,
+									attempt ?? command.input.commandAttempt ?? 0,
+									command.input.nativeResumeFallback === true,
+									execute,
+								),
 							)
 						: execute;
 				},
@@ -1724,31 +1730,44 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId}`,
 				).toEqual([{ retired_at: null }]);
-				yield* f.dispatch("second-run");
-				f.accept("second-run");
+				// The write gate is closed while the stop commits (4.4): the second
+				// send waits, unwritten, and that stop's commit releases it NotSent.
+				const second = yield* f.dispatch("second-run").pipe(Effect.forkChild);
+				yield* TestClock.adjust(0);
 				expect(f.connections).toHaveLength(1);
 				expect(
 					f.commands
 						.filter((command) => command.type === "send-turn")
 						.map((command) => command.runId),
-				).toEqual(["first-run", "second-run"]);
+				).toEqual(["first-run"]);
 				yield* f.sql`DROP TRIGGER fail_stop_commit`;
 				f.exitOnSignal();
 				yield* TestClock.adjust("12 seconds");
 				for (const waiter of [first, concurrent])
 					expect((yield* Fiber.join(waiter))._tag).toBe("Success");
+				yield* Fiber.join(second);
+				const [stopped] = f.connections;
 				expect(
-					f.commands.filter((command) => command.type === "shutdown"),
+					f.commands.filter(
+						(command) =>
+							command.type === "shutdown" &&
+							command.runnerId === stopped?.runnerId,
+					),
 				).toHaveLength(1);
 				expect(
-					yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
-				).toEqual([
-					{ id: "first-run", status: "interrupted" },
-					{ id: "second-run", status: "interrupted" },
-				]);
+					f.commands
+						.filter((command) => command.type === "send-turn")
+						.map((command) => command.runId),
+				).toEqual(["first-run"]);
+				expect(
+					yield* f.sql`SELECT json_extract(data, '$.runId') AS run, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+				).toEqual([{ run: "second-run", reason: "NotSent" }]);
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'first-run'`,
+				).toEqual([{ status: "interrupted" }]);
 				expect(
 					yield* f.sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-				).toHaveLength(2);
+				).toHaveLength(1);
 			}),
 		),
 );
@@ -1840,7 +1859,7 @@ it.effect(
 				f.accept("joined-run");
 				const receipts = f.runner.receipts;
 				if (!receipts) return yield* Effect.die("missing stop-intent receipts");
-				const request = vi.spyOn(receipts, "requestStop");
+				const request = vi.spyOn(receipts, "requestStopMutation");
 				const writer = yield* makeCommitAndSignal;
 				const entered = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
@@ -2114,21 +2133,23 @@ for (const first of ["send", "Stop"] as const)
 								command.type === "send-turn" && command.runId === "racing-run",
 						);
 						if (first === "send") {
-							expect(received).toEqual([
-								{
-									runnerId: f.runner.runnerId,
-									type: "send-turn",
-									runId: "racing-run",
-								},
-							]);
+							// The Stop registered before the send's write: the closed gate
+							// kept it unwritten, the stop commit released it NotSent, and
+							// the next runner delivered it once (4.4, 4.5).
+							const [successor] = received;
+							expect(received).toHaveLength(1);
+							expect(successor?.runnerId).not.toBe(f.runner.runnerId);
 							expect(
 								yield* f.sql`SELECT status, runner_id FROM provider_runs WHERE id = 'racing-run'`,
 							).toEqual([
-								{ status: "interrupted", runner_id: f.runner.runnerId },
+								{ status: "running", runner_id: successor?.runnerId },
 							]);
 							expect(
-								yield* f.sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-							).toHaveLength(1);
+								yield* f.sql`SELECT json_extract(data, '$.runnerId') AS runner, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+							).toEqual([{ runner: f.runner.runnerId, reason: "NotSent" }]);
+							expect(
+								yield* f.sql`SELECT type FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
+							).toEqual([]);
 						} else {
 							expect(received).toEqual([]);
 							expect(
@@ -3614,6 +3635,7 @@ for (const removed of ["deleted", "archived"] as const)
 
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
+import { gatedWrite } from "../../helpers/runner-write-gate.js";
 
 // C2/C3 failure cases: a release races cleanup/reconciliation; every replacement
 // refuses; provider retry changes runs; journal evidence is uncertain or corrupt;
@@ -3701,11 +3723,18 @@ const continuationFixture = (
 				);
 				vi.spyOn(socket, "destroy").mockImplementation(() => {});
 				vi.spyOn(socket, "commandStatusEffect").mockImplementation(statuses);
-				vi.spyOn(socket, "commandEffect").mockImplementation((_id, command) => {
-					if (command.type !== "send-turn") return Effect.succeed(undefined);
-					sends.push({ runnerId: connection.runnerId, command });
-					return behavior(connection, command);
-				});
+				vi.spyOn(socket, "commandEffect").mockImplementation(
+					(_id, command, _attempt, canWrite) => {
+						if (command.type !== "send-turn") return Effect.succeed(undefined);
+						return gatedWrite(
+							canWrite,
+							Effect.suspend(() => {
+								sends.push({ runnerId: connection.runnerId, command });
+								return behavior(connection, command);
+							}),
+						);
+					},
+				);
 				// A real connection's hello claim records whether this runner journals.
 				yield* f.sql`UPDATE claude_runner_cursors SET journals_before_execution = ${Number(options.journalCapable !== false)} WHERE runner_id = ${connection.runnerId}`.pipe(
 					Effect.orDie,

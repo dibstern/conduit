@@ -82,9 +82,9 @@ const settle = (journals: boolean | undefined, buildId: string) =>
 			},
 			holdRun: (sessionId, runId, commandId) =>
 				lifecycle.holdRun({ sessionId, runId, commandId }),
-			release: (input, stop) =>
+			release: (input) =>
 				lifecycle
-					.releaseRun(input, stop ?? (() => Effect.succeed(undefined)))
+					.releaseRun(input)
 					.pipe(
 						Effect.mapError((cause) => runnerFailure("release run", cause)),
 					),

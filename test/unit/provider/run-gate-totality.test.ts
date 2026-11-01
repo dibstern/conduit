@@ -73,9 +73,7 @@ describe("total run gate", () => {
 				};
 				yield* sql`CREATE TRIGGER reject_preparation_terminal BEFORE INSERT ON events WHEN NEW.type = 'turn.error' BEGIN SELECT RAISE(ABORT, 'terminal write rejected'); END`;
 				expect(
-					(yield* Effect.result(
-						lifecycle.releaseRun(release, () => Effect.void, evidence),
-					))._tag,
+					(yield* Effect.result(lifecycle.releaseRun(release, evidence)))._tag,
 				).toBe("Failure");
 				expect(
 					yield* sql`SELECT runner_id, held_transmission, status FROM provider_runs WHERE id = 'run'`,
@@ -86,9 +84,9 @@ describe("total run gate", () => {
 					yield* sql`SELECT type FROM events WHERE type IN ('run.released', 'turn.error')`,
 				).toEqual([]);
 				yield* sql`DROP TRIGGER reject_preparation_terminal`;
-				expect(
-					yield* lifecycle.releaseRun(release, () => Effect.void, evidence),
-				).toEqual({ released: true, stop: undefined });
+				expect(yield* lifecycle.releaseRun(release, evidence)).toEqual({
+					released: true,
+				});
 				expect(
 					yield* sql`SELECT runner_id, held_transmission, status FROM provider_runs WHERE id = 'run'`,
 				).toEqual([
@@ -117,7 +115,6 @@ describe("total run gate", () => {
 							transmission: 1,
 							reason: "NotSent",
 						},
-						() => Effect.void,
 						{
 							_tag: "failed",
 							send: { ...input, requestSequence: 0, attempt: 0 },
@@ -129,7 +126,7 @@ describe("total run gate", () => {
 							observedAt: 1730,
 						},
 					),
-				).toEqual({ released: false, stop: undefined });
+				).toEqual({ released: false });
 				expect(
 					yield* sql`SELECT runner_id, held_transmission, status FROM provider_runs WHERE id = 'run'`,
 				).toEqual([
@@ -179,17 +176,14 @@ describe("total run gate", () => {
 								commandId: "send",
 							}),
 						).toEqual({ _tag: "Held", runner: "runner", transmission });
-						yield* lifecycle.releaseRun(
-							{
-								sessionId: "session",
-								runId: "run",
-								runnerId: "runner",
-								commandId: "send",
-								transmission,
-								reason: "NotSent",
-							},
-							() => Effect.void,
-						);
+						yield* lifecycle.releaseRun({
+							sessionId: "session",
+							runId: "run",
+							runnerId: "runner",
+							commandId: "send",
+							transmission,
+							reason: "NotSent",
+						});
 					}
 					if (shown)
 						yield* persist.persistUserMessage("session", "exhausted text", {

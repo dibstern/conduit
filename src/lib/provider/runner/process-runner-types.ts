@@ -113,7 +113,14 @@ export interface RunRelease {
 
 /** The feeder's write permission, as Dispatch consumes it, so Dispatch never imports the feeder. */
 export interface WritePermission {
-	readonly current: () => boolean;
-	/** Consume immediately before the first byte, without yielding before write. */
+	/**
+	 * The write's take, in the write's synchronous step (4.4): the hold is
+	 * current, coverage has not taken the permission and the runner's stop is
+	 * Running. Records the frame written with its connection's refusal reader.
+	 */
+	readonly write: (refusal: () => RunRelease["refusalReason"]) => boolean;
+	/** Coverage's take before the first byte (4.5 NotSent). */
 	readonly consume: () => boolean;
+	/** Waits while the gate is closed: true to try the write again, false once it never writes. */
+	readonly reopened: Effect.Effect<boolean>;
 }
