@@ -3106,7 +3106,7 @@ export class FakeProvider {
 		);
 		if (!steer) return undefined;
 		const claimed = this.mainTransmissions.get(steer.send.token);
-		return {
+		const failed: LedgerCommand = {
 			verb: "observe",
 			observation: {
 				tag: "Answer",
@@ -3122,6 +3122,11 @@ export class FakeProvider {
 				...(claimed ? { transmission: claimed.name } : {}),
 			},
 		};
+		// 4.5, 4.11: a held steer's runner reply follows its run.dispatched, read first while pending.
+		const dispatched = this.dispatchFirst((n) => n.token === steer.send.token);
+		if (!dispatched) return failed;
+		this.commit.unshift(failed);
+		return { verb: "observe", observation: dispatched };
 	}
 	/** A claimed answer's success, followed at once by a Stop commit (3.10). */
 	private answered(): LedgerCommand | undefined {
@@ -4051,11 +4056,15 @@ export class FakeProvider {
 			}
 			case 0:
 			case 1:
-				// D58: main's handoff; a steer delivery is main's send into an open run (3.9).
+				// D58: main's handoff; a steer delivery is main's send into an open run (3.9). OpenCode's
+				// composer never offers one (CONTRACT.md 4431-4432, 5901).
 				command = {
 					verb: "admit",
 					inputId,
-					delivery: action.operation === 1 ? "steer" : "queue",
+					delivery:
+						action.operation === 1 && this.provider !== "opencode"
+							? "steer"
+							: "queue",
 					request: { text: `text:${action.input}` },
 				};
 				break;

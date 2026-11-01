@@ -19,7 +19,7 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 			[
 				"LI8, CONTRACT.md 871-876 against 3086-3089 (gap, GAP 5 against section 9: when OpenCode work ends. GAP 5 ends a main-run Run once main's terminal folds; section 9 keeps the native fence until a covering idle probe. Wrong side undecided: the oracle hides an unfinished native send, the fake keeps it)",
 				[
-					"opencode oracle traces, seed 82103302",
+					"opencode oracle traces, seed 82103301",
 					"review trace R1-2",
 					"review trace R1-3",
 					"review trace R1-4",
@@ -28,16 +28,11 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 				],
 			],
 			[
-				"the first check each seed below fails since row 21's draws reshaped generation, each a disagreement no gap above names: opencode 82103200 3.4 (a swept Stop row stays live after a raced succeeded), opencode 82103202 LI1 (a resume start overlaps a running wake fence), opencode 82103203 D50 (a Stop leaves a retired runner's not-yet-delivered steer Run unended), opencode 82103301 LI8 (a direct steer requested after its runner's retirement hides its unfinished Run). Wrong side not yet triaged",
-				[
-					"opencode oracle traces, seed 82103200",
-					"opencode oracle traces, seed 82103202",
-					"opencode oracle traces, seed 82103203",
-					"opencode oracle traces, seed 82103301",
-				],
+				"coverage, CONTRACT.md 978-997 and 4084 (gap, 3.9: OpenCode never steers (4431-4432, 5901), so a steer's send failure is runner-held, and its input shows Failed in the open Run only if the steer joins that Run, undecided at 984. Wrong side undecided: the oracle keeps a held steer's input out of the open Run until it starts)",
+				["generated traces reach steer send failure with inputs queued"],
 			],
 			[
-				"coverage, CONTRACT.md 3456-3477 (11.2: fc.check stops at the first failing trace, so the OpenCode and steer seeds above cut generation short before these shapes. Wrong side: neither, the shapes wait on the seeds above)",
+				"coverage, CONTRACT.md 3456-3477 (11.2: fc.check stops at the first failing trace, so the seeds pended above for the steer join (984) and GAP 5 cut generation short before these shapes. Wrong side: neither, the shapes wait on those two gaps)",
 				[
 					"confirm copied before a query replacement",
 					"not_sent start ended its Run",

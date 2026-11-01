@@ -1226,6 +1226,9 @@ function effectOutcome(
 				send.txs.pop();
 			tx.permanent = outcome.code;
 			tx.resumeRejected = outcome.code === "native_resume_rejected";
+			// 3.4 (CONTRACT.md 465, 476): a permanent outcome ends its control row, so no issue stays in
+			// live after it; a raced outcome on the transmission joins its chains but revives nothing.
+			if (tx.n !== undefined) tx.ended ??= "evidence";
 			tx.transport = joinTransport(tx.transport, {
 				tag: "Failed",
 				code: outcome.code,

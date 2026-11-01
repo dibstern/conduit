@@ -227,6 +227,10 @@ function permutationGate(
 				command.observation.tag === "Unsolicited"
 			)
 				own.add(`runner:${splitLabel(command.observation.label).runnerId}`);
+			// Main appends its events in its own order: its next run_requested follows the terminal
+			// that freed the session (one active Run, 3.9), so main's events keep their order.
+			if (command.verb === "observe" && command.observation.tag === "Main")
+				own.add("main");
 			for (const id of reference.minted.get(index) ?? []) own.add(id);
 			namesOf(reference.issued.get(index) ?? [], own);
 			for (const name of own) {

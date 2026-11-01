@@ -659,6 +659,10 @@ describe.each(providers)("%s fixed-seed alphabet generation", (provider) => {
 				? {
 						"main:run_requested:held":
 							"OpenCode main dispatches directly (D60, 4.11)",
+						"admit:steer":
+							"OpenCode queues steers; its composer never offers one (CONTRACT.md 4431-4432, 5901)",
+						"main:run_started:joined":
+							"only a steer's run.started names another Run, and OpenCode never steers (3.9; CONTRACT.md 4431-4432, 5901)",
 					}
 				: {
 						"main:run_requested:direct":
@@ -2497,7 +2501,6 @@ describe("generated D34 coverage", () => {
 		"unlaunch by not_sent", // 3.6 D50, G4 option B
 		"unlaunch by retirement", // 3.6 D50, L1
 		"relaunch after unlaunch", // 3.6 D50, 3.7
-		"direct re-send after a retryable steer", // 3.6 692-698
 		"Stop on a not-yet-delivered Run", // 3.6 D50
 		"Run now on a not-yet-delivered Run", // 3.6 D50
 		"End on a not-yet-delivered Run", // 3.6, 5.1
