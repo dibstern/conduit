@@ -2724,6 +2724,28 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		});
 	});
 
+	it("(11-C) after a restart, a hung wake past the deadline ends forced, and the owner Run open at the Stop stays main's with no process loss or ledger effect (REDESIGN-11, CONTRACT.md 807-816)", () => {
+		agreed("claude", (d) => {
+			wake(d);
+			const wakeRunId = d.view().active?.runId;
+			const a = begin(d);
+			stop(d, 5_000);
+			const owner = d.view().active;
+			d.restart();
+			expect(d.alarmAt).toBe(5_000);
+			const fired = fire(d);
+			expect(fired.ended).toEqual([
+				expect.objectContaining({
+					runId: wakeRunId,
+					reason: expect.objectContaining({ tag: "interrupted", forced: true }),
+				}),
+			]);
+			expect(fired.issued).toEqual([]);
+			expect(d.view().active).toEqual(owner);
+			expect(d.view().active?.runId).toBe(a.runId);
+		});
+	});
+
 	it("a wake Run's interrupt is addressed to its turn_started label's runner and covered when that runner retires (3.3, L2 case 2)", () => {
 		agreed("claude", (d) => {
 			wake(d);

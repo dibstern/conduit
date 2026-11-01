@@ -342,9 +342,26 @@ function unconsumed(tx: Tx): boolean {
 		return tx.consumption.why !== "released";
 	return tx.retryable || tx.permanent !== undefined;
 }
-/** D52: a transmission is sealed at its first closing fact, reading its value then. */
-function seal(tx: Tx): void {
-	tx.sealed ??= { value: value(tx), unconsumed: unconsumed(tx) };
+/** D52: a transmission is sealed at its first closing fact, reading its value then (A.18 T4: the Seal row's one writer). */
+function seal(
+	tx: Tx,
+	sealed: NonNullable<Tx["sealed"]> = {
+		value: value(tx),
+		unconsumed: unconsumed(tx),
+	},
+): void {
+	tx.sealed ??= sealed;
+}
+/** 3.5, 8.3: a transmission's or wake execution's work ends at its first ending fact (A.18 T4: the Label work and Wake execution rows' one writer). */
+function endWork<End extends string>(
+	work: { ended?: End | undefined },
+	why: NoInfer<End>,
+): void {
+	work.ended ??= why;
+}
+/** 3.10: an interaction resolves once (A.18 T4: the Interaction row's one writer). */
+function resolveInteraction(interaction: Interaction): void {
+	interaction.resolved = true;
 }
 const sealedValue = (tx: Tx): Value => tx.sealed?.value ?? value(tx);
 
@@ -682,7 +699,7 @@ function reconcile(world: World, step: Step): void {
 				}
 				// 3.6 D50: unlaunch back to Queued; the execution's sends are dropped.
 				for (const send of sends)
-					for (const tx of send.txs) tx.ended ??= "dropped";
+					for (const tx of send.txs) endWork(tx, "dropped");
 				for (const send of runSends(world, run)) send.dropped = true;
 				run.retryAt = sends.flatMap((send) => send.txs).at(-1)?.retryAt;
 				run.phase = "Queued";
@@ -843,10 +860,10 @@ function issue(world: World, effect: RunEffect, held: boolean): Send {
 	world.sends.push(send);
 	// L1 item 1, L2: a held send addressed to a retired runner is covered at issue, never handed over.
 	if (held && send.runnerId !== null && isRetired(world, send.runnerId))
-		transmit(world, send, undefined).sealed = {
+		seal(transmit(world, send, undefined), {
 			value: "never",
 			unconsumed: false,
-		};
+		});
 	return send;
 }
 
@@ -885,7 +902,7 @@ function transmit(
 	if (runnerId !== null && isRetired(world, runnerId)) {
 		seal(tx);
 		tx.covered ??= "process_lost";
-		tx.ended ??= "process_lost";
+		endWork(tx, "process_lost");
 	}
 	if (token !== undefined)
 		world.tokens.set(token, {
@@ -1010,7 +1027,7 @@ function sessionEnd(
 			if (tx.seq < before) {
 				seal(tx);
 				tx.covered ??= cause;
-				tx.ended ??= cause;
+				endWork(tx, cause);
 			}
 	// 3.4 (CONTRACT.md 535-537): an end_session success covers only what was issued before it.
 	for (const run of world.runs)
@@ -1025,8 +1042,8 @@ function sessionEnd(
 				))
 		)
 			run.exec.endedBy ??= cause;
-	for (const wake of world.wakes) if (wake.seq < before) wake.ended ??= cause;
-	for (const interaction of world.interactions) interaction.resolved = true;
+	for (const wake of world.wakes) if (wake.seq < before) endWork(wake, cause);
+	for (const interaction of world.interactions) resolveInteraction(interaction);
 }
 
 /** L5: each label's lost work is decided once, when its scope first ends. */
@@ -1291,7 +1308,7 @@ function unsolicited(
 		case "turn_ended":
 			if (wake === undefined)
 				return noop("no wake execution on its label (8.3)");
-			wake.ended = "own";
+			endWork(wake, "own");
 			return changed;
 		case "activity":
 			if (wake === undefined)
@@ -1319,7 +1336,7 @@ function unsolicited(
 				return changed;
 			}
 			if (world.provider === "opencode") return noop();
-			wake.ended = "result";
+			endWork(wake, "result");
 			wake.outcome = {
 				seq: world.seq,
 				outcome: observation.outcome,
@@ -1333,7 +1350,7 @@ function unsolicited(
 					return noop("no wake execution on its label (8.3)");
 				return queryEnded(world, label) ? changed : noop();
 			}
-			wake.ended = "own";
+			endWork(wake, "own");
 			if (world.provider === "opencode") queryEnded(world, label);
 			return changed;
 		case "interaction_requested":
@@ -1361,7 +1378,7 @@ function unsolicited(
 			// D61: native or confirming an answer, by its interaction.
 			const interaction = interactionOf(world, observation.interactionId);
 			if (interaction === undefined || interaction.resolved) return noop();
-			interaction.resolved = true;
+			resolveInteraction(interaction);
 			return changed;
 		}
 	}
@@ -1377,7 +1394,7 @@ function queryEnded(world: World, label: Label): boolean {
 		if (send.effect.kind === "start" || send.effect.kind === "steer")
 			for (const tx of send.txs)
 				if (tx.label === label && tx.ended === undefined) {
-					tx.ended = "evidence";
+					endWork(tx, "evidence");
 					moved = true;
 				}
 	return moved;
@@ -1439,7 +1456,7 @@ function answerResult(
 		(tx.ended === undefined || tx.ended === "evidence") &&
 		// 3.4: a covered transmission's evidence changes nothing, its work ended by evidence first too.
 		tx.covered === undefined;
-	if (world.provider !== "opencode") tx.ended ??= "evidence";
+	if (world.provider !== "opencode") endWork(tx, "evidence");
 	if (!authority || run === undefined) return;
 	run.exec.evidence = true;
 	run.exec.result = true;
@@ -1624,7 +1641,7 @@ function answer(
 			if (world.provider !== "opencode")
 				// 9: query_ended ends no Claude send's work, only a wake's.
 				return noop();
-			tx.ended ??= "evidence";
+			endWork(tx, "evidence");
 			if (tx.label !== null) queryEnded(world, tx.label);
 			if (live && run !== undefined) run.exec.endEvidence = true;
 			return changed;
@@ -1671,7 +1688,7 @@ function answer(
 				seal(tx);
 				// 9: a Claude send's work ends at journal absent with no acceptance.
 				if (world.provider === "claude" && tx.consumption.tag !== "Accepted")
-					tx.ended ??= "evidence";
+					endWork(tx, "evidence");
 				return changed;
 			}
 			tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
@@ -1726,13 +1743,13 @@ function effectOutcome(
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): Outcome {
 	// 3101-3106: the returned call of an abort its Run's terminal left open ends it.
-	if (tx.mainEnded) tx.ended ??= "main";
+	if (tx.mainEnded) endWork(tx, "main");
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
 			if (send.effect.kind === "end_session") {
 				seal(tx);
-				tx.ended ??= "evidence";
+				endWork(tx, "evidence");
 				sessionEnd(world, send.seq, "session_ended");
 				return changed;
 			}
@@ -1786,7 +1803,7 @@ function effectOutcome(
 			if (send.effect.kind === "deliver_answer") {
 				// 3.10 (amends 10B): a permanent refusal ends the delivery, which resolves the interaction.
 				const interaction = interactionOf(world, send.effect.interactionId);
-				if (interaction !== undefined) interaction.resolved = true;
+				if (interaction !== undefined) resolveInteraction(interaction);
 			}
 			break;
 		}
@@ -1902,9 +1919,9 @@ function probeResult(
 							item.resulted ||
 							consumptionRank[item.consumption.tag] >= 2)
 					)
-						item.ended = "evidence";
+						endWork(item, "evidence");
 			}
-			for (const wake of world.wakes) wake.ended ??= "own";
+			for (const wake of world.wakes) endWork(wake, "own");
 			break;
 	}
 	return changed;
@@ -2140,7 +2157,7 @@ function mainEvent(
 						tx.transport.tag === "Issued"
 					)
 						tx.mainEnded = true;
-					else tx.ended ??= "main";
+					else endWork(tx, "main");
 			run.exec.fold.push({
 				seq: world.seq,
 				outcome: observation.outcome,
@@ -2184,7 +2201,7 @@ function commit(
 				return send?.txs.some((tx) => mayStillAct(world, send, tx)) ?? false;
 			})
 		)
-			interaction.resolved = true;
+			resolveInteraction(interaction);
 	if (run !== undefined) {
 		run.asked = true;
 		if (run.phase !== "Queued") {
@@ -2294,13 +2311,13 @@ function deadlines(world: World, step: Step): Due[] {
 					if (!stopItemOpen(world, item)) continue;
 					if (item.tag === "wake") {
 						const wake = world.wakes[item.wake];
-						if (wake !== undefined) wake.ended = "forced";
+						if (wake !== undefined) endWork(wake, "forced");
 					} else {
 						const tx = world.sends[item.send]?.txs[item.tx];
-						if (tx !== undefined) tx.ended = "forced";
+						if (tx !== undefined) endWork(tx, "forced");
 					}
 				}
-				world.stop = undefined;
+				// Every item is now ended, so the stop is closed; commit stays its one writer (A.18 T4).
 			},
 		});
 	for (const run of world.runs) {
@@ -2478,7 +2495,7 @@ function retire(world: World, runnerId: string): void {
 			if (addressed(send, tx)) {
 				seal(tx);
 				tx.covered ??= "process_lost";
-				tx.ended ??= "process_lost";
+				endWork(tx, "process_lost");
 			}
 		const run = findRun(world, send.runId);
 		if (
@@ -2489,10 +2506,10 @@ function retire(world: World, runnerId: string): void {
 			run.phase !== "Ended"
 		)
 			// 3.6: retirement before any hold of its start leaves it never handed over.
-			transmit(world, send, undefined).sealed = {
+			seal(transmit(world, send, undefined), {
 				value: "never",
 				unconsumed: false,
-			};
+			});
 	}
 	for (const run of world.runs)
 		if (
@@ -2504,9 +2521,9 @@ function retire(world: World, runnerId: string): void {
 		)
 			run.exec.endedBy ??= "process_lost";
 	for (const wake of world.wakes)
-		if (onRunner(wake.label)) wake.ended ??= "process_lost";
+		if (onRunner(wake.label)) endWork(wake, "process_lost");
 	for (const interaction of world.interactions)
-		if (onRunner(interaction.label)) interaction.resolved = true;
+		if (onRunner(interaction.label)) resolveInteraction(interaction);
 }
 
 function settle(
@@ -2542,7 +2559,7 @@ function settle(
 			if (run === undefined) return noop("unknown token (3.4)");
 			if (run.phase === "Ended")
 				return noop("late evidence for an Ended Run (3.8)");
-			const send =
+			let send =
 				[...runSends(world, run)]
 					.reverse()
 					.find(
@@ -2552,6 +2569,18 @@ function settle(
 					(item) => item.held && item.commandId === undefined,
 				);
 			if (send === undefined) return noop("unknown token (3.4)");
+			// D50, F58: an unlaunched Run's next unheld try is main's relaunch, a new execution's transmission.
+			if (run.phase === "Queued") {
+				const { effect } = send;
+				launch(run);
+				send = issue(
+					world,
+					effect.kind === "start"
+						? { ...effect, mode: nextMode(world) }
+						: effect,
+					true,
+				);
+			}
 			send.commandId ??= settlement.commandId;
 			const tx = transmit(world, send, undefined);
 			effectOutcome(world, step, send, tx, settlement.outcome);

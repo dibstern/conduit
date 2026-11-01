@@ -85,6 +85,10 @@ export class Driver implements CoverageReader {
 		return this.ledger.view();
 	}
 
+	restart(): void {
+		this.ledger.restart();
+	}
+
 	/** A Tokened issue by its token; a Main one by its run.dispatched token, direct runId or claim (3.4). */
 	answered(
 		token: SendToken,
@@ -1087,6 +1091,218 @@ export const scenarios: readonly OracleScenario[] = [
 			expect(d.view().active?.tag).toBe("Starting");
 		},
 	},
+	...(["start result", "retirement"] as const).map(
+		(end): OracleScenario => ({
+			id: `F57-${end}`,
+			title: `[F57] a retained first-attempt ack changes nothing for a stopped Run on attempt 2, and B starts only after its ${end} ends the stop's work`,
+			provider: "claude",
+			run(d) {
+				const a = begin(d);
+				observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+				const retry = "hold-A-relaunch" as SendToken;
+				observe(d, retry, {
+					kind: "run_dispatched",
+					runId: a.runId,
+					runnerId: "r1",
+					commandId: "cmd-A-1",
+					transmission: 2,
+				});
+				stop(d, 5_000);
+				noLifecycleChange(d, {
+					verb: "observe",
+					observation: {
+						tag: "Answer",
+						token: a.token,
+						kind: "runner_reply",
+						outcome: { tag: "succeeded" },
+					},
+				});
+				// L6: attempt 2's start is the stop's work, open until its Run's end (3.8).
+				const attempt2 = expect.objectContaining({
+					effect: expect.objectContaining({ kind: "start", runId: a.runId }),
+				});
+				expect(d.view().active).toMatchObject({ tag: "Interrupting" });
+				expect(d.view().live).toContainEqual(attempt2);
+				if (end === "start result") {
+					observe(d, retry, {
+						kind: "runner_reply",
+						outcome: { tag: "succeeded" },
+					});
+					expect(d.view().live).toContainEqual(attempt2);
+					terminal(d, a.runId, "interrupted");
+				} else {
+					// The host's stop deadline step retires the runner (6.5); a new one serves B (L1).
+					step(d, {
+						verb: "settle",
+						settlement: {
+							kind: "process_lost",
+							runnerId: "r1",
+							retiredAt: d.now,
+						},
+					});
+					step(d, {
+						verb: "settle",
+						settlement: {
+							kind: "process_started",
+							label: "r2:1",
+							reattached: false,
+						},
+					});
+				}
+				expect(d.ended).toMatchObject([
+					{
+						runId: a.runId,
+						reason: { tag: "interrupted", forced: false },
+					},
+				]);
+				expect(d.view().live).toEqual([]);
+				admit(d, "B");
+				request(d, "B", end === "start result" ? "r1" : "r2");
+				expect(d.view().active).toEqual({
+					runId: expect.stringMatching(/^main-B-/),
+					origin: "input",
+					tag: "Starting",
+					inputs: [{ inputId: "B", state: { tag: "Dispatching" } }],
+				});
+			},
+		}),
+	),
+	{
+		id: "F58-removal",
+		title:
+			"[F58] after a project removal retires A's runner, a late receipt changes nothing and Run now's B is refused project_inactive with nothing sent",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			admit(d, "B");
+			step(d, {
+				verb: "control",
+				control: {
+					kind: "run_now",
+					commandId: `run-now-${d.next()}`,
+					inputId: "B",
+					deadlineAt: null,
+				},
+			});
+			// L1: the removal retires A's runner, which ends A.
+			step(d, {
+				verb: "settle",
+				settlement: { kind: "process_lost", runnerId: "r1", retiredAt: d.now },
+			});
+			expect(d.ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "interrupted" } },
+			]);
+			const before = d.view();
+			d.step({
+				verb: "observe",
+				observation: {
+					tag: "Answer",
+					token: a.token,
+					kind: "input_accepted",
+					nativeMessageId: "native-A-late",
+				},
+			});
+			expect(d.view()).toEqual(before);
+			const runId = `main-B-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "B", direct: false });
+			// H4: a start stepped during the removal is not sent, and B goes back to Queued (D50).
+			step(d, {
+				verb: "settle",
+				settlement: {
+					kind: "unheld_outcome",
+					runId,
+					commandId: "cmd-B-1",
+					outcome: { tag: "not_sent", retryAt: d.now + 50 },
+				},
+			});
+			expect(d.view().active).toMatchObject({ runId, tag: "Queued" });
+			// Its next try, after the removal finished, is refused (3.8).
+			expect(
+				step(d, {
+					verb: "settle",
+					settlement: {
+						kind: "unheld_outcome",
+						runId,
+						commandId: "cmd-B-1",
+						outcome: { tag: "permanent", code: "project_inactive" },
+					},
+				}).ended,
+			).toMatchObject([
+				{
+					runId,
+					outcome: "error",
+					reason: { tag: "refused", code: "project_inactive" },
+				},
+			]);
+			expect(d.view().active).toBeUndefined();
+			expect(transmissions(d, "B")).toEqual([]);
+		},
+	},
+	{
+		id: "F58-load-error",
+		title:
+			"[F58] a relay load error leaves Run now's B Queued with no transmission counted, tried again at each backoff and delivered once",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			admit(d, "B");
+			step(d, {
+				verb: "control",
+				control: {
+					kind: "run_now",
+					commandId: `run-now-${d.next()}`,
+					inputId: "B",
+					deadlineAt: null,
+				},
+			});
+			terminal(d, a.runId, "interrupted");
+			const runId = `main-B-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "B", direct: false });
+			// Each try is at the last one's backoff while the error lasts (3.7).
+			const backoff = d.now + 50;
+			for (const [at, retryAt] of [
+				[d.now + 1, backoff],
+				[backoff, backoff + 100],
+			] as const) {
+				step(
+					d,
+					{
+						verb: "settle",
+						settlement: {
+							kind: "unheld_outcome",
+							runId,
+							commandId: "cmd-B-1",
+							outcome: { tag: "not_sent", retryAt },
+						},
+					},
+					at,
+				);
+				expect(d.view().active).toMatchObject({
+					runId,
+					tag: "Queued",
+					retryAt,
+				});
+			}
+			// 4.3: an unheld try took no hold, so the served relaunch is transmission 1.
+			const token = "hold-B-served" as SendToken;
+			observe(d, token, {
+				kind: "run_dispatched",
+				runId,
+				runnerId: "r1",
+				commandId: "cmd-B-1",
+				transmission: 1,
+			});
+			observe(d, token, {
+				kind: "input_accepted",
+				nativeMessageId: "native-B",
+			});
+			expect(visibleInput(d, "B")?.state).toEqual({
+				tag: "Accepted",
+				nativeMessageId: "native-B",
+			});
+			expect(transmissions(d, "B")).toHaveLength(1);
+		},
+	},
 	{
 		id: "R10-3",
 		title:
@@ -1546,6 +1762,78 @@ export const scenarios: readonly OracleScenario[] = [
 			// 3.7: finishing an obligation removes its deadline; nothing extends it.
 			expect(d.view().active?.tag).not.toBe("Settling");
 			expect(d.alarmAt).toBeUndefined();
+		},
+	},
+	{
+		id: "D56-202",
+		title:
+			"[2.1 row 202] an input admitted during a Claude wake waits for the wake to end",
+		provider: "claude",
+		run(d) {
+			// The wake's frames ride the query A's start opened.
+			const a = running(d);
+			observe(d, a.token, { kind: "result", outcome: "completed" });
+			wake(d);
+			admit(d, "B");
+			// 3.5: the wake's label has work, so the ledger starts nothing.
+			expect(transmissions(d, "B")).toEqual([]);
+			const b = request(d, "B");
+			unsolicited(d, { kind: "turn_ended" });
+			observe(d, b.token, { kind: "started" });
+			observe(d, b.token, { kind: "result", outcome: "completed" });
+		},
+	},
+	{
+		id: "D56-213",
+		title:
+			"[2.1 row 213] a Claude Stop its turn never answers reaches main's 30s deadline step with a task live",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			unsolicited(d, {
+				kind: "tasks_snapshot",
+				tasks: [
+					{
+						key: { taskId: "t1" },
+						taskType: "local_bash",
+						description: "watch",
+						ambient: false,
+					},
+				],
+			});
+			stop(d);
+			// A Claude Stop opens no ledger alarm (L6); the turn ends 40s on, past main's 30s wait.
+			observe(d, a.token, { kind: "result", outcome: "interrupted" }, 40_000);
+		},
+	},
+	{
+		id: "D56-206",
+		title:
+			"[2.1 row 206] a Claude steer still unanswered when main's 30s deadline step retires its Run",
+		provider: "claude",
+		run(d) {
+			const a = running(d);
+			// The retire fails B's send with provider_failure, so both stacks requeue B. Row 206's branch
+			// needs runner_stopped, which only a runner's exit, a project's removal or a restart's recovery
+			// write (runner-retirement.ts 225-242, 931; runner-recovery.ts 232 at 6c9ff950): no wire (gap P5).
+			begin(d, "B", "steer");
+			stop(d);
+			// A Claude Stop opens no ledger alarm (L6); the turn ends 40s on, past main's 30s wait.
+			observe(d, a.token, { kind: "result", outcome: "interrupted" }, 40_000);
+		},
+	},
+	{
+		id: "D56-211",
+		title: "[2.1 row 211] Claude cancels a start's intake before it starts",
+		provider: "claude",
+		run(d) {
+			admit(d, "A");
+			request(d, "A");
+			unsolicited(d, {
+				kind: "command_lifecycle",
+				state: "cancelled",
+				commandId: "A",
+			});
 		},
 	},
 ];

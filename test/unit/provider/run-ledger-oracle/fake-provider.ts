@@ -246,6 +246,12 @@ export class FakeProvider {
 		readonly runId: string;
 		readonly parent: string;
 	}[] = [];
+	/** Direct steers a retryable outcome answered (3.6, CONTRACT.md 692-698): main tries each again into its open parent. */
+	private readonly steerRetries: {
+		readonly token: SendToken;
+		readonly inputId: string;
+		readonly parent: string;
+	}[] = [];
 	/** Main's run events (D60), for a repeat by event id. */
 	private readonly mainEvents: Observation[] = [];
 	/** Main's starts and steers the driver has not read (D60): decide issues none of them. */
@@ -1830,6 +1836,16 @@ export class FakeProvider {
 					ranks[observation.outcome.tag],
 				);
 				this.refreshQuery(native);
+				if (
+					this.provider === "opencode" &&
+					effect.kind === "steer" &&
+					observation.outcome.tag === "retryable"
+				)
+					this.steerRetries.push({
+						token: observation.token,
+						inputId: effect.inputId,
+						parent: effect.runId,
+					});
 				// D50: a retryable or not_sent outcome unlaunches a not-yet-delivered Run; a dropped
 				// execution's try no longer moves it.
 				if (
@@ -3362,6 +3378,36 @@ export class FakeProvider {
 			return issue;
 		};
 		const open = this.mainRun;
+		// 3.6 (CONTRACT.md 692-698): main's first move is to try a direct steer with a retry pending, its
+		// retryable outcome unconsumed, again into its open parent, a fresh run.requested of the same input.
+		const retry = this.steerRetries.find((item) => {
+			const native = this.sends.get(item.token);
+			return (
+				item.parent === open?.runId &&
+				!open.stopped &&
+				native !== undefined &&
+				!native.accepted &&
+				!native.lifecycleStarted &&
+				!native.deliveryConfirmed
+			);
+		});
+		if (direct && open && retry) {
+			this.steerRetries.splice(this.steerRetries.indexOf(retry), 1);
+			const runId = `main-run:${this.serial++}`;
+			dispatch(runId, {
+				kind: "steer",
+				runId: open.runId,
+				inputId: retry.inputId,
+			});
+			return emit({
+				tag: "Main",
+				eventId: `main:${this.serial++}`,
+				kind: "run_requested",
+				runId,
+				inputId: retry.inputId,
+				direct,
+			});
+		}
 		// Main makes the first move it can, starting at the chosen one; with none, time passes.
 		for (const offset of [0, 1, 2, 3, 4])
 			switch ((action.variant + offset) % 5) {
@@ -3893,6 +3939,22 @@ export class FakeProvider {
 								this.executions.some((x) => x.runId === active.runId)
 							? active.runId
 							: this.mainRun?.runId;
+				// 3.6 (CONTRACT.md 692-698): direct, one input in four answers an unanswered steer into main's
+				// open run retryable (variant 13), so main tries it again into that run.
+				const retriedSteer =
+					action.operation === 27 &&
+					this.provider === "opencode" &&
+					action.input % 4 === 3 &&
+					this.mainRun?.stopped === false
+						? [...this.sends.values()]
+								.reverse()
+								.find(
+									({ send, transportRank }) =>
+										send.effect.kind === "steer" &&
+										send.effect.runId === this.mainRun?.runId &&
+										transportRank === 0,
+								)?.send
+						: undefined;
 				const joinedStart =
 					target === undefined
 						? undefined
@@ -3904,14 +3966,17 @@ export class FakeProvider {
 										send.effect.runId === target,
 								)?.send;
 				const drawn =
-					joinedStart === undefined
-						? action
-						: {
-								...action,
-								selection: 0,
-								variant: [2, 7, 8, 9, 10][action.variant % 5] ?? 7,
-							};
-				const selected = joinedStart ?? this.select(snapshot, drawn);
+					retriedSteer !== undefined
+						? { ...action, selection: 0, variant: 13 }
+						: joinedStart === undefined
+							? action
+							: {
+									...action,
+									selection: 0,
+									variant: [2, 7, 8, 9, 10][action.variant % 5] ?? 7,
+								};
+				const selected =
+					retriedSteer ?? joinedStart ?? this.select(snapshot, drawn);
 				const send = this.untransmitted(selected) ? undefined : selected;
 				// G2: run_dispatched on a transmitted no-hold send is produced; bound-only metadata never is.
 				if (
