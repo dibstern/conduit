@@ -282,6 +282,16 @@ export interface ProviderSideEffectReactorOptions {
 
 const defaultRetryBackoff = (failureCount: number): Duration.Input =>
 	Duration.millis(Math.min(1000 * 2 ** Math.max(0, failureCount - 1), 30_000));
+/**
+ * 9 (CONTRACT.md 3101-3103): a probe is called after an earlier abort of its session only once the
+ * abort's call returns, so its idle answer never ends a cancel still in flight.
+ */
+const PROBE_AFTER_ABORT = `NOT (candidate.effect_type = 'probe' AND EXISTS (
+	SELECT 1 FROM provider_command_outbox AS abort
+	WHERE abort.effect_type = 'cancel_request' AND abort.status IN ('pending', 'running')
+		AND abort.project_key = candidate.project_key AND abort.session_id = candidate.session_id
+		AND abort.request_sequence < candidate.request_sequence))`;
+
 const maxControlAttempts = 5;
 const runnerControlReplyGraceMs = 5000;
 const maxControlRetryAfterMs = 30_000;
@@ -419,17 +429,27 @@ export class ProviderSideEffectReactor {
 				const ledgerEffects = this.options.sql<ProviderCommandOutboxRow>`
 					SELECT request_sequence, command_id, project_key, session_id, provider_id,
 						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
-					FROM provider_command_outbox
+					FROM provider_command_outbox AS candidate
 					WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 						AND status = 'pending' AND effect_type IN ${this.options.sql.in(LEDGER_EFFECT_TYPES)}
+						AND ${this.options.sql.literal(PROBE_AFTER_ABORT)}
 					ORDER BY request_sequence
 				`.pipe(
 					Effect.mapError(storeFailure("ledgerEffects")),
 					Effect.flatMap((rows) =>
-						Effect.forEach(rows, (row) => this.runLedgerEffect(row), {
-							concurrency: "unbounded",
-							discard: true,
-						}),
+						Effect.forEach(
+							rows,
+							(row) =>
+								this.runLedgerEffect(row).pipe(
+									// A returned abort releases the probes held behind it.
+									Effect.tap(() =>
+										row.effect_type === "cancel_request"
+											? Effect.sync(wake)
+											: Effect.void,
+									),
+								),
+							{ concurrency: "unbounded", discard: true },
+						),
 					),
 				);
 				yield* Effect.forkIn(
@@ -1376,6 +1396,7 @@ export class ProviderSideEffectReactor {
 					OR (status = 'retryable_failed' AND next_attempt_at <= ${nowMs})
 					OR (status = 'running' AND effect_type <> 'send_turn' AND attempt_count >= ${maxControlAttempts}
 						AND command_id NOT IN ${this.options.sql.in([...this.executingControls])}))
+				AND ${this.options.sql.literal(PROBE_AFTER_ABORT)}
 				-- 3.12: the ledger's three effects neither wait in nor hold the session lane.
 				AND (candidate.effect_type IN ${this.options.sql.in(LEDGER_EFFECT_TYPES)} OR NOT EXISTS (
 					SELECT 1 FROM provider_command_outbox AS earlier

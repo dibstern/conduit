@@ -743,6 +743,73 @@ describe("Run Ledger arm", () => {
 			}),
 	);
 	it.live(
+		"calls a Stop's idle probe only after its cancel_request's call returns, so the probe is issued after the abort (CONTRACT.md 3101-3103)",
+		() =>
+			Effect.gen(function* () {
+				const calls: string[] = [];
+				yield* withStore(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							const commit = yield* makeCommitAndSignal;
+							yield* projectOnline(turn("s1", "opencode"));
+							const reactor = new ProviderSideEffectReactor({
+								sql,
+								write: commit.write,
+								ingestion: {
+									ingest: () => Effect.die("unused"),
+									ingestBatch: () => Effect.die("unused"),
+								},
+								registry: new ProviderRegistry([
+									{
+										providerId: "opencode",
+										generateTextEffect: () => Effect.die("unused"),
+										discoverEffect: () => Effect.die("unused"),
+										sendTurnEffect: () => Effect.die("unused"),
+										// The abort's call blocks, as OpenCode's does while the turn winds down.
+										interruptTurnEffect: () =>
+											Effect.sync(() => calls.push("abort called")).pipe(
+												Effect.andThen(Effect.sleep(50)),
+												Effect.andThen(
+													Effect.sync(() => calls.push("abort returned")),
+												),
+											),
+										getNativeSessionEffect: () =>
+											Effect.sync(() => {
+												calls.push("probe called");
+												return undefined;
+											}),
+										resolvePermissionEffect: () => Effect.void,
+										resolveQuestionEffect: () => Effect.void,
+										shutdownEffect: () => Effect.void,
+										endSessionEffect: () => Effect.void,
+									},
+								]),
+								scope: yield* Scope.Scope,
+								nowMs: () => 1010,
+							});
+							yield* reactor.drain();
+							yield* commit([
+								canonicalEvent(
+									"interrupt.requested",
+									"s1",
+									{ providerProcessId: "p1", stop: null },
+									at(1010, { commandId: "c-stop" }),
+								),
+							]);
+							for (let tries = 0; tries < 200 && calls.length < 3; tries++)
+								yield* Effect.sleep(10);
+						}),
+					),
+				);
+				expect(calls).toEqual([
+					"abort called",
+					"abort returned",
+					"probe called",
+				]);
+			}),
+	);
+	it.live(
 		"appends one effect_outcome where each writer ends a control row, n 0 when unclaimed",
 		() =>
 			Effect.gen(function* () {
