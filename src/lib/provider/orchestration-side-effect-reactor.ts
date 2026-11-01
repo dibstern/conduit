@@ -1292,14 +1292,16 @@ export class ProviderSideEffectReactor {
 									// by Stop (4.8, 9), is failed in the view in the same write, so commitAndSignal's
 									// requeue cancels it. Row 215 (224) names this writer only as "each writer of its
 									// row's outcome"; it names a direct send's token, its runId (3.4), as the decider
-									// reads it, not (commandId, transmission) (gap).
+									// reads it, not (commandId, transmission) (gap). A decline is not a failure:
+									// `steerDeclined` returns it (CONTRACT.md 973), stored as `steer-declined` as
+									// the inbox's requeue reads it.
 									if (input?.start !== false) return;
 									const [failed] = yield* this.options.sql<{
 										error_code: string | null;
 									}>`SELECT error_code FROM provider_command_outbox
 										WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 											AND attempt_count = ${row.attempt_count} AND status = 'failed' AND updated_at = ${now}
-											AND COALESCE(error_code, '') NOT IN ('interrupted', 'cancelled')`;
+											AND COALESCE(error_code, '') NOT IN ('interrupted', 'cancelled', 'steer-declined')`;
 									if (!failed) return;
 									return yield* this.appendInWrite(project, row.project_key, [
 										canonicalEvent(
