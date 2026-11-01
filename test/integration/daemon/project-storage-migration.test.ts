@@ -77,7 +77,8 @@ describe("project storage migration through the daemon", () => {
 
 	it("moves legacy history, reclaims migrated free pages, and archives the original", async () => {
 		scenario = "migration";
-		harness = await ProcessHarness.start();
+		// Both asserted entries are info; the harness default level is error.
+		harness = await ProcessHarness.start({ logLevel: "info" });
 		const before = await harness.connect();
 		const sessionId = await before.createSession("Legacy history");
 		await before.send(sessionId, "legacy-history");

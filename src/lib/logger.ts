@@ -108,8 +108,12 @@ function buildPrettyDestination(output: Writable): DestinationStream {
 		colorize: false,
 		ignore: "pid,hostname,component,time,level",
 		messageFormat: (log: Record<string, unknown>, messageKey: string) => {
-			const component = (log["component"] as string[] | undefined) ?? [];
-			const tag = formatComponentTag(component);
+			// Effect.annotateLogs("component", name) binds a string. A throw here
+			// destroys the pretty stream and silences every later line.
+			const component = log["component"] ?? [];
+			const tag = formatComponentTag(
+				Array.isArray(component) ? component : [String(component)],
+			);
 			const padded = padTag(tag);
 			return `${padded}${log[messageKey]}`;
 		},

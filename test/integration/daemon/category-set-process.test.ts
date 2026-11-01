@@ -18,6 +18,8 @@ it(
 		const harness = ProcessHarness.create({
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,
+			// The quarantine is a warning; the harness default level is error.
+			logLevel: "warn",
 		});
 		const observations: Record<string, unknown> = {};
 		let passed = false;
