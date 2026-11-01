@@ -494,10 +494,12 @@ export function replayTrace(
 			yield* (yield* SessionInboxTag).start;
 			const sql = yield* SqlClient.SqlClient;
 
+			const origin = Date.UTC(2026, 0, 1);
 			// Failure 4: steps run on a fake clock (timers and Date; Effect's scheduler stays on the real
-			// setImmediate). Each step advances it 600ms, past the reactor's 500ms polls
-			// (orchestration-side-effect-reactor.ts 291), in 5ms ticks, and drains the stack's ready
-			// work before each tick, so whatever a step's timers release lands in that step.
+			// setImmediate). A step first moves it to the step's trace time, then 600ms past its action,
+			// beyond the reactor's 500ms polls (orchestration-side-effect-reactor.ts 291), in 5ms ticks,
+			// draining the stack's ready work before each tick, so whatever a step's timers release
+			// lands in that step.
 			yield* Effect.acquireRelease(
 				Effect.sync(() =>
 					vi.useFakeTimers({
@@ -508,7 +510,7 @@ export function replayTrace(
 							"clearInterval",
 							"Date",
 						],
-						now: Date.UTC(2026, 0, 1),
+						now: origin,
 					}),
 				),
 				() => Effect.sync(() => vi.useRealTimers()),
@@ -523,13 +525,14 @@ export function replayTrace(
 						.some((kind) => kind === "Immediate" || kind.startsWith("FSReq"))
 				);
 			});
-			const settle = Effect.gen(function* () {
-				for (let tick = 0; tick < 120; tick++) {
+			const settle = (until: number) =>
+				Effect.gen(function* () {
+					while (Date.now() < until) {
+						yield* drain;
+						vi.advanceTimersByTime(5);
+					}
 					yield* drain;
-					vi.advanceTimersByTime(5);
-				}
-				yield* drain;
-			});
+				});
 			let ingesting: Fiber.Fiber<unknown, unknown> | undefined;
 
 			const read = yield* ReadQueryEffectTag;
@@ -613,6 +616,9 @@ export function replayTrace(
 
 			for (const step of steps) {
 				current = step.fact;
+				// A fact at a later trace time first moves the clock there, so main's own deadlines (a
+				// Stop's 30s wait, a send's backoff) fall due where the trace's do.
+				yield* settle(origin + step.at);
 				switch (step.kind) {
 					case "browser": {
 						if (stopping(step.command)) stopReplies.push(step.reply);
@@ -692,7 +698,7 @@ export function replayTrace(
 					case "unwired":
 						break;
 				}
-				yield* settle;
+				yield* settle(Date.now() + 600);
 				if (ingesting !== undefined) {
 					if (ingesting.pollUnsafe() === undefined)
 						unmatched.push({
