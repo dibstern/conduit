@@ -93,6 +93,8 @@ export function driver<State, Entry>(
 	implementation: LedgerImplementation<State, Entry>,
 	provider: ProviderKind,
 	prefix: string,
+	/** Per-step purity and LI4 refold checks; off only where a test proves something else at volume. */
+	invariants = true,
 ): PublicDriver {
 	let state = implementation.initialSessionLedgerState(
 		"trace-session",
@@ -111,23 +113,25 @@ export function driver<State, Entry>(
 	const replay = () => implementation.viewLedger(refold());
 	return {
 		step(command, now) {
-			const before = structuredClone(view());
+			const before = invariants ? structuredClone(view()) : undefined;
 			const result = implementation.decide(state, command, {
 				now,
 				policy,
 				newId: () => `${prefix}:${++serial}`,
 			});
-			assert.deepEqual(view(), before, "decide must not mutate its input");
+			if (before)
+				assert.deepEqual(view(), before, "decide must not mutate its input");
 			lastEventCount = result.tag === "Accepted" ? result.events.length : 0;
 			if (result.tag === "Rejected") return result;
 			state = result.events.reduce(implementation.evolve, state);
 			entries.push(...result.events);
 			alarmAt = result.alarmAt;
-			assert.deepEqual(
-				view(),
-				replay(),
-				"LI4: entries replay to the live public view",
-			);
+			if (invariants)
+				assert.deepEqual(
+					view(),
+					replay(),
+					"LI4: entries replay to the live public view",
+				);
 			return result;
 		},
 		view,
