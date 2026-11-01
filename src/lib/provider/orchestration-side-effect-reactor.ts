@@ -1139,7 +1139,8 @@ export class ProviderSideEffectReactor {
 								...(Option.isSome(drafts) ? { inputDrafts: drafts.value } : {}),
 								afterCommit: (effect) => followUps.push(effect),
 							};
-							if (!row.run_id) return;
+							const runId = row.run_id;
+							if (!runId) return;
 							const [run] = yield* this.options.sql<{
 								runner_id: string | null;
 								held_transmission: number | null;
@@ -1149,73 +1150,136 @@ export class ProviderSideEffectReactor {
 						WHERE run.id = ${row.run_id} AND run.session_id = ${row.session_id}
 							AND run.status IN ('pending', 'running')`;
 							if (!run) return;
-							const payload = yield* this.parseSendTurnPayload(row).pipe(
-								Effect.catch(() => Effect.succeed(undefined)),
+							const ledger = yield* loadLedger(row.session_id).pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
 							);
-							const driver =
-								payload?.account?.driver ??
-								(this.options.registry.getInstance(row.provider_id)
-									? row.provider_id
-									: run.provider);
-							const settlementTx: SettlementTx = {
-								...tx,
-								driverKind: driver,
-							};
-							if (
-								!(
-									this.options.registry.getInstance(driver) instanceof
-									RunnerProviderInstance
-								)
-							) {
-								if (scope === "unheld_runner") return;
-								return yield* settleDirectSend(
-									settlementTx,
-									row,
-									result,
-									failure,
-									now,
-									Duration.toMillis(
-										(this.options.retryBackoff ?? defaultRetryBackoff)(
-											row.attempt_count,
+							const input =
+								ledger && inputPlacement(ledger.state, row.command_id);
+							// 2.1 row 210 (CONTRACT.md 220, 1852-1858): a declined start is tried again up to
+							// the cap, a retryable outcome with main's backoff under main's settle guards.
+							const reply: TurnResult | undefined =
+								result?.status === "steer-declined" && input?.start
+									? {
+											...result,
+											status: "error",
+											error: {
+												code: "input_declined",
+												message: "The provider declined the start",
+												retryable: true,
+											},
+										}
+									: result;
+							yield* Effect.gen({ self: this }, function* () {
+								const payload = yield* this.parseSendTurnPayload(row).pipe(
+									Effect.catch(() => Effect.succeed(undefined)),
+								);
+								const driver =
+									payload?.account?.driver ??
+									(this.options.registry.getInstance(row.provider_id)
+										? row.provider_id
+										: run.provider);
+								const settlementTx: SettlementTx = {
+									...tx,
+									driverKind: driver,
+								};
+								if (
+									!(
+										this.options.registry.getInstance(driver) instanceof
+										RunnerProviderInstance
+									)
+								) {
+									if (scope === "unheld_runner") return;
+									return yield* settleDirectSend(
+										settlementTx,
+										row,
+										reply,
+										failure,
+										now,
+										Duration.toMillis(
+											(this.options.retryBackoff ?? defaultRetryBackoff)(
+												row.attempt_count,
+											),
 										),
+									);
+								}
+								const legacy = yield* LegacySendKey.prove(
+									this.options.sql,
+									row,
+								);
+								if (legacy) {
+									if (scope === "unheld_runner") return;
+									return yield* settleLegacySend(
+										settlementTx,
+										legacy,
+										reply,
+										failure,
+										now,
+									);
+								}
+								const send = {
+									sessionId: row.session_id,
+									runId,
+									commandId: row.command_id,
+									requestSequence: row.request_sequence,
+									attempt: row.attempt_count,
+								};
+								if (failure) {
+									// A transport failure after a hold is owned by reply recovery or Settle.
+									return yield* settleSend(settlementTx, {
+										_tag: "failed",
+										send,
+										failure,
+										observedAt: now,
+									});
+								}
+								const terminal = terminalTurnResult(reply);
+								if (terminal && reply?.runnerSend)
+									yield* settleSend(settlementTx, {
+										_tag: "replied",
+										send: { ...send, ...reply.runnerSend },
+										result: terminal,
+										observedAt: now,
+									});
+							});
+							// 2.1 row 211 (CONTRACT.md 221): a start cancelled before it reached the agent is
+							// Stop's own; it returns behind the pause in this write once its Run is interrupted. A
+							// placed message is main's proof of reach the view may not hold yet (D53, gap, reported).
+							if (
+								result?.status !== "cancelled" ||
+								!input?.start ||
+								input.place !== "unplaced"
+							)
+								return;
+							const [sent] = yield* this.options.sql<{ sequence: number }>`
+								SELECT MAX(sequence) AS sequence FROM events WHERE session_id = ${row.session_id}
+									AND type = 'input.sent' AND json_extract(data, '$.inputId') = ${row.command_id}
+									AND EXISTS (SELECT 1 FROM provider_runs WHERE id = ${row.run_id}
+										AND session_id = ${row.session_id} AND status = 'interrupted')
+									AND NOT EXISTS (SELECT 1 FROM messages WHERE session_id = ${row.session_id}
+										AND input_id = ${row.command_id})
+								HAVING MAX(sequence) IS NOT NULL`;
+							if (!sent) return;
+							const store = yield* makeEventStoreEffect.pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
+								Effect.provideService(PersistenceProjectTag, {
+									projectId: row.project_key,
+								}),
+							);
+							yield* project(
+								yield* store.appendBatch([
+									canonicalEvent(
+										"input.requeued",
+										row.session_id,
+										{
+											sessionId: row.session_id,
+											inputId: row.command_id,
+											sentSequence: sent.sequence,
+											reason: "failed",
+										},
+										{ createdAt: now, metadata: { runId: row.run_id } },
 									),
-								);
-							}
-							const legacy = yield* LegacySendKey.prove(this.options.sql, row);
-							if (legacy) {
-								if (scope === "unheld_runner") return;
-								return yield* settleLegacySend(
-									settlementTx,
-									legacy,
-									result,
-									failure,
-									now,
-								);
-							}
-							const send = {
-								sessionId: row.session_id,
-								runId: row.run_id,
-								commandId: row.command_id,
-								requestSequence: row.request_sequence,
-								attempt: row.attempt_count,
-							};
-							if (failure) {
-								// A transport failure after a hold is owned by reply recovery or Settle.
-								return yield* settleSend(settlementTx, {
-									_tag: "failed",
-									send,
-									failure,
-									observedAt: now,
-								});
-							}
-							const terminal = terminalTurnResult(result);
-							if (terminal && result?.runnerSend)
-								yield* settleSend(settlementTx, {
-									_tag: "replied",
-									send: { ...send, ...result.runnerSend },
-									result: terminal,
-									observedAt: now,
-								});
+								]),
+							);
 						}),
 					{
 						afterCommit: Effect.suspend(() =>

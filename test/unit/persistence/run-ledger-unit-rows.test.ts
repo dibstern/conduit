@@ -7,6 +7,12 @@
 // Row 212, markRunning reads the cap. How it could fail:
 // 4. a direct send that always fails retryably is sent forever, or fewer than 5 times;
 // 5. past the cap the input is not failed, or fails without main's code and terminal.
+// Row 210, the outcome body retries a declined start. How it could fail:
+// 6. the declined start ends `interrupted` with its text dropped, as main;
+// 7. it is retried with no backoff, or its retry is not a fresh claim of the same row.
+// Row 211, the outcome body returns a start cancelled before it reached the agent. How it could fail:
+// 8. its text is dropped, as main, or it returns but not behind the pause;
+// 9. a start whose message was placed is returned too, so its value is both shown and re-sent.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +21,10 @@ import { Duration, Effect, Layer, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
 import {
 	type CanonicalEvent,
@@ -65,7 +73,7 @@ const completed: TurnResult = {
 
 /** A session, its input u1 admitted and handed off, and main's run.requested r1 at dispatch. */
 const dispatched = (
-	provider: "claude" | "opencode",
+	provider: string,
 	before: readonly CanonicalEvent[] = [],
 ) => [
 	makeSessionCreatedEvent("s1", { provider, createdAt: 1000 }),
@@ -133,11 +141,17 @@ const provider = (
 	endSessionEffect: () => Effect.void,
 });
 
-const reactorFor = (instance: ProviderInstance, nowMs = () => 2000) =>
+const reactorFor = (
+	instance: ProviderInstance,
+	nowMs = () => 2000,
+	backoff: Duration.Input = Duration.zero,
+) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const commit = yield* makeCommitAndSignal;
+		const { persistUserMessage } = yield* ClaudeEventPersistEffectTag;
 		const reactor = new ProviderSideEffectReactor({
+			persistUserMessage,
 			sql,
 			write: commit.write,
 			ingestion: {
@@ -147,9 +161,9 @@ const reactorFor = (instance: ProviderInstance, nowMs = () => 2000) =>
 			registry: new ProviderRegistry([instance]),
 			scope: yield* Scope.Scope,
 			nowMs,
-			retryBackoff: () => Duration.zero,
+			retryBackoff: () => backoff,
 		});
-		return { sql, commit, reactor };
+		return { sql, commit, reactor, persistUserMessage };
 	});
 
 const sendRow = (sql: SqlClient.SqlClient) =>
@@ -264,4 +278,96 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 				}),
 			),
 	);
+
+	it.live(
+		"row 210: a declined start is retried with main's backoff, and its retry lands",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					let now = 2000;
+					const replies: TurnResult[] = [
+						{ ...completed, status: "steer-declined" },
+						completed,
+					];
+					let sends = 0;
+					const { sql, commit, reactor } = yield* reactorFor(
+						provider("codex", () =>
+							Effect.sync(() => replies[sends++] ?? completed),
+						),
+						() => now,
+						Duration.seconds(1),
+					);
+					yield* commit(dispatched("codex"));
+					yield* seedSend(sql, "codex");
+					yield* reactor.drain();
+					// 6: the decline is a retryable outcome, not an interrupted end.
+					expect(sends).toBe(1);
+					expect(
+						yield* sql`SELECT status, error_code, next_attempt_at FROM provider_command_outbox`,
+					).toEqual([
+						{
+							status: "retryable_failed",
+							error_code: "input_declined",
+							next_attempt_at: 3000,
+						},
+					]);
+					expect(
+						yield* sql`SELECT json_extract(data, '$.code') AS code, json_extract(data, '$.retryable') AS retryable
+							FROM events WHERE type IN ('turn.error', 'turn.interrupted')`,
+					).toEqual([{ code: "input_declined", retryable: 1 }]);
+					// 7: not before its backoff, then a fresh claim of the same row.
+					yield* reactor.drain();
+					expect(sends).toBe(1);
+					now = 3000;
+					yield* reactor.drain();
+					expect(sends).toBe(2);
+					expect(yield* sendRow(sql)).toEqual([
+						{ status: "completed", attempt_count: 2, error_code: null },
+					]);
+				}),
+			),
+	);
+
+	for (const placed of [false, true])
+		it.live(
+			`row 211: a start cancelled before it reached the agent returns behind the pause (placed=${placed})`,
+			() =>
+				withStore(
+					Effect.gen(function* () {
+						const { sql, commit, reactor, persistUserMessage } =
+							yield* reactorFor(
+								provider("claude", () =>
+									Effect.succeed<TurnResult>({
+										...completed,
+										status: "cancelled",
+									}),
+								),
+							);
+						yield* commit(dispatched("claude"));
+						if (placed)
+							yield* persistUserMessage("s1", "hi", {
+								messageId: "m-u1",
+								inputId: "u1",
+								runId: "r1",
+								provider: "claude",
+							});
+						yield* seedSend(sql, "claude");
+						yield* reactor.drain();
+						expect(yield* sql`SELECT status FROM provider_runs`).toEqual([
+							{ status: "interrupted" },
+						]);
+						// 8: returned to the inbox, paused; 9: never when its message was placed.
+						expect(
+							yield* sql`SELECT json_extract(metadata, '$.runId') AS run_id FROM events WHERE type = 'input.requeued'`,
+						).toEqual(placed ? [] : [{ run_id: "r1" }]);
+						expect(
+							yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'u1'`,
+						).toEqual([{ state: placed ? "removed" : "queued" }]);
+						const read = yield* ReadQueryEffectTag;
+						expect(yield* read.readInboxState("s1")).toMatchObject({
+							paused: !placed,
+						});
+					}),
+				),
+		);
 });
