@@ -217,7 +217,11 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 			// Last lifecycle state per instance; only transitions are broadcast.
 			const states = new Map<
 				string,
-				{ state: OpenCodeConnectionStatus; managedStopped: boolean }
+				{
+					state: OpenCodeConnectionStatus;
+					managedStopped: boolean;
+					stoppedProcessId?: string | undefined;
+				}
 			>();
 			// Reconcilers report demand changes from callbacks; settled in order.
 			const demandChanged = yield* Queue.unbounded<string>();
@@ -259,6 +263,7 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				instanceId: string,
 				state: OpenCodeConnectionStatus,
 				managedStopped = false,
+				stoppedProcessId?: string,
 			) => {
 				const previous = states.get(instanceId);
 				if (
@@ -266,13 +271,14 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 					previous.managedStopped === managedStopped
 				)
 					return;
-				states.set(instanceId, { state, managedStopped });
+				states.set(instanceId, { state, managedStopped, stoppedProcessId });
 				log.info("OpenCode instance state", { instanceId, state });
 				broadcast({
 					_tag: "connection",
 					instanceId,
 					state,
 					...(managedStopped ? { managedStopped } : {}),
+					...(stoppedProcessId ? { stoppedProcessId } : {}),
 					health:
 						streams.get(instanceId)?.source.getHealth() ?? NO_STREAM_HEALTH,
 				});
@@ -543,28 +549,40 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 				done: Deferred.Deferred<void>,
 				stopProcess: boolean,
 			) =>
-				(control && stopProcess
-					? control.stop(instanceId).pipe(Effect.provide(context))
-					: Effect.succeed(false)
-				).pipe(
-					Effect.onExit((terminated) =>
-						gate
-							.withPermits(1)(
-								Effect.gen(function* () {
-									const endpoint = yield* resolveIn(instanceId);
-									stopping.delete(instanceId);
-									setState(
-										instanceId,
-										"stopped",
-										Exit.isSuccess(terminated) &&
+				Effect.flatMap(resolveIn(instanceId), (running) =>
+					(control && stopProcess
+						? control.stop(instanceId).pipe(Effect.provide(context))
+						: Effect.succeed(false)
+					).pipe(
+						Effect.onExit((terminated) =>
+							gate
+								.withPermits(1)(
+									Effect.gen(function* () {
+										const endpoint = yield* resolveIn(instanceId);
+										stopping.delete(instanceId);
+										const managedStopped =
+											Exit.isSuccess(terminated) &&
 											terminated.value &&
-											endpoint?.managed === true,
-									);
-								}),
-							)
-							.pipe(Effect.andThen(Deferred.done(done, Exit.void))),
+											endpoint?.managed === true;
+										setState(
+											instanceId,
+											"stopped",
+											managedStopped,
+											// The stopped process's id, as its stream labelled its events
+											// (CONTRACT.md 9: its process_lost).
+											managedStopped && running
+												? openCodePromptProcessId(
+														instanceId,
+														running.processIdentity ?? running.url,
+													)
+												: undefined,
+										);
+									}),
+								)
+								.pipe(Effect.andThen(Deferred.done(done, Exit.void))),
+						),
+						Effect.asVoid,
 					),
-					Effect.asVoid,
 				);
 
 			/**
@@ -1111,13 +1129,17 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 												),
 										);
 										const stream = streams.get(subscribedId);
-										for (const [id, { state, managedStopped }] of states) {
+										for (const [
+											id,
+											{ state, managedStopped, stoppedProcessId },
+										] of states) {
 											if (id !== subscribedId && !managedStopped) continue;
 											subscriber.send({
 												_tag: "connection",
 												instanceId: id,
 												state,
 												...(managedStopped ? { managedStopped } : {}),
+												...(stoppedProcessId ? { stoppedProcessId } : {}),
 												health:
 													streams.get(id)?.source.getHealth() ??
 													NO_STREAM_HEALTH,

@@ -101,6 +101,11 @@ export interface ProviderRuntimeIngestion {
 			/** Runs inside the append transaction, before any projection. */
 			readonly beforeProject?: Effect.Effect<void, SqlError>;
 			readonly beforeCommit?: Effect.Effect<void, SqlError>;
+			/**
+			 * Evidence events (CONTRACT.md 2.1 row 215) the write observes, read inside the append
+			 * transaction and appended after the batch's session creation, ahead of its other events.
+			 */
+			readonly evidence?: Effect.Effect<readonly CanonicalEvent[], SqlError>;
 			/** Read current owners and settle them inside the append transaction. */
 			readonly settleRuns?: {
 				readonly sessionId: string;
@@ -527,6 +532,16 @@ export const makeProviderRuntimeIngestionLive = (
 													? yield* commitRunnerOutput(sql, receipt)
 													: yield* ownsRunnerAttachment(sql, context);
 											if (!appended) return;
+											if (ingestOptions.evidence) {
+												let at = 0;
+												for (const [index, event] of domainEvents.entries())
+													if (event.type === "session.created") at = index + 1;
+												domainEvents.splice(
+													at,
+													0,
+													...(yield* ingestOptions.evidence),
+												);
+											}
 											if (ingestOptions.settleRuns) {
 												const settlement = ingestOptions.settleRuns;
 												const settlements = yield* settleSessionRuns(

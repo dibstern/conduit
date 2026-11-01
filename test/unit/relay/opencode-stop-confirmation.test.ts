@@ -14,6 +14,7 @@ import {
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { stopManagedOpenCode } from "../../../src/lib/instance/managed-opencode-process.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { openCodePromptProcessId } from "../../../src/lib/provider/opencode-process-identity.js";
 
 vi.mock(
 	"../../../src/lib/instance/managed-opencode-process.js",
@@ -211,6 +212,12 @@ describe("managed OpenCode stop confirmation", () => {
 						throw new Error("Expected lifecycle replay");
 					expect(event.state).toBe(operation === "stop" ? "stopped" : "failed");
 					expect(event.managedStopped).toBe(terminated ? true : undefined);
+					// CONTRACT.md 9: a confirmed stop names the stopped process for its process_lost.
+					expect(event.stoppedProcessId).toBe(
+						terminated && operation === "stop"
+							? openCodePromptProcessId("opencode", "a".repeat(64))
+							: undefined,
+					);
 					expect(stopManagedOpenCode).toHaveBeenCalled();
 					const record = (yield* getPersistedInstanceConfigs).find(
 						({ id }) => id === "opencode",

@@ -105,7 +105,13 @@ const makeChannel = (log: Logger | undefined) => {
 					break;
 				case "connection":
 					for (const callback of callbacks.status)
-						notify(() => callback(message.state, message.managedStopped));
+						notify(() =>
+							callback(
+								message.state,
+								message.managedStopped,
+								message.stoppedProcessId,
+							),
+						);
 			}
 		},
 	};
