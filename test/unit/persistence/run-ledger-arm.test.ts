@@ -17,6 +17,8 @@
 //     cancel, pending-prompt retirement) appends no effect_outcome, or appends it in another write;
 // 14. an unclaimed row's outcome names a transmission other than 0, or a claimed one's another n;
 // 15. the folded outcome leaves the control's issue live, or its replay inserts an outbox row.
+// One transaction (3.12, S9.2). How it could fail:
+// 16. a provider event commits while the ledger decision it carries fails, or the reverse.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -732,5 +734,40 @@ describe("Run Ledger arm", () => {
 				expect(replayed.entries).toEqual(online.rows.entries);
 				expect(replayed.sessions).toEqual(online.rows.sessions);
 			}),
+	);
+
+	it.effect(
+		"commits a provider event and its ledger decision together: a failed fold leaves neither",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					yield* commit(turn("s1", "claude"));
+					const before = yield* ledgerRows;
+					const view = yield* loadLedgerView("s1");
+					const completed = canonicalEvent(
+						"turn.completed",
+						"s1",
+						{ messageId: "m1" },
+						at(1005, { runId: "r1" }, "claude"),
+					);
+					// A crash inside the arm's write, after the event's insert.
+					yield* sql`CREATE TRIGGER crash BEFORE INSERT ON run_ledger_entries
+						BEGIN SELECT RAISE(ABORT, 'crash'); END`;
+					const crashed = yield* Effect.exit(commit([completed]));
+					const stored = sql<{
+						n: number;
+					}>`SELECT COUNT(*) AS n FROM events WHERE type = 'turn.completed'`;
+					expect(crashed._tag).toBe("Failure");
+					expect(yield* stored).toEqual([{ n: 0 }]);
+					expect(yield* ledgerRows).toEqual(before);
+					expect(yield* loadLedgerView("s1")).toEqual(view);
+					yield* sql`DROP TRIGGER crash`;
+					yield* commit([completed]);
+					expect(yield* stored).toEqual([{ n: 1 }]);
+					expect((yield* loadLedgerView("s1"))?.active).toBeUndefined();
+				}),
+			),
 	);
 });
