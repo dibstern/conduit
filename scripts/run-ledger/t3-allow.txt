@@ -2050,3 +2050,5 @@ differential pending keyed per provider. Gaps: 8.2 serving (2778-2781),	pointer
 the gate opens at the Stop commit for runner hosts, and a	pointer
 Run-less Stop of label work opens no gate. The native-command deadline issue	pointer
 Built in dfc85394 on wt/82tn3225. The confirm gate stores only the step	pointer
+process_lost and session_ended. Recorded gap (frozen contract): 'waiting	pointer
+Covered native command deadline fixed (1acfa27f): deadlines() in the decider	pointer
