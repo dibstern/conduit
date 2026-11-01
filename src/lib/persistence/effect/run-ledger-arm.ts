@@ -32,6 +32,7 @@ import type {
 	SendToken,
 } from "../../provider/run-ledger/run-ledger-model.js";
 import { sendToken } from "../../provider/runner/runner-protocol.js";
+import { harnessForModelProvider } from "../../provider/turn-settings.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
@@ -192,15 +193,20 @@ export const loadLedger = (
 			alarm_at: number | null;
 		}>`SELECT provider, state, alarm_at FROM run_ledger_sessions WHERE session_id = ${sessionId}`;
 		const [session] = row
-			? [row]
+			? [{ provider: row.provider, model_provider: null }]
 			: yield* sql<{
 					provider: string;
-				}>`SELECT provider FROM sessions WHERE id = ${sessionId}`;
+					model_provider: string | null;
+				}>`SELECT provider, model_provider FROM sessions WHERE id = ${sessionId}`;
 		if (!session) return undefined;
-		// An account id names no driver kind: the ledger reads it as Claude's (gap, reported).
+		// 3.12: the ledger's provider is the instance's driver kind. A named instance's id
+		// ("work-oc") names none, so its session's model pick names it: creation holds a pick's
+		// harness to the instance's driver. With neither, Claude's (gap, reported).
 		const provider = isKnownDriverKind(session.provider)
 			? session.provider
-			: "claude";
+			: session.model_provider
+				? harnessForModelProvider(session.model_provider)
+				: "claude";
 		const entries = yield* sql<{
 			entry_seq: number;
 			event_sequence: number;

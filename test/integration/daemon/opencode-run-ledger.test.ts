@@ -5,7 +5,9 @@
 // 2. the next send runs under the old id, or under no id, so it has no authority;
 // 3. the ledger's id and the control path's promptProcessId differ for the same process;
 // 4. a conduit stop writes no loss, or one per settlement instead of one;
-// 5. a daemon restart that reuses the process reports a new id, or no reattach, or ends the Run.
+// 5. a daemon restart that reuses the process reports a new id, or no reattach, or ends the Run;
+// 6. a session on a named instance ("managed-test") reads as Claude's, so a crash unlaunches the
+//    held Run instead of ending it as lost.
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -19,7 +21,10 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/account.js";
+import {
+	AccountIdSchema,
+	MANAGED_OPENCODE_ACCOUNT_ID,
+} from "../../../src/lib/contracts/account.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // The default managed instance: its sessions' provider names the OpenCode driver.
@@ -40,10 +45,10 @@ describe("OpenCode on the Run Ledger", () => {
 		);
 	});
 
-	const start = async () => {
+	const start = async (id = instanceId) => {
 		harness = await ProcessHarness.start({
 			managedOpenCode: true,
-			managedOpenCodeId: instanceId,
+			managedOpenCodeId: id,
 			autoStartOpenCode: true,
 			managedOpenCodeStopGraceMs: 100,
 		});
@@ -103,6 +108,7 @@ describe("OpenCode on the Run Ledger", () => {
 		fixture: ProcessHarness,
 		browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
 		sessionId: string,
+		id = instanceId,
 	) => {
 		const held = join(fixture.configDir, "fake-opencode-hold-turn");
 		const prompts = fixture
@@ -136,21 +142,24 @@ describe("OpenCode on the Run Ledger", () => {
 			{ timeout: 15_000 },
 		);
 		unlinkSync(held);
-		await fixture.emitOpenCodeEvent({
-			directory: realpathSync(fixture.projectDir),
-			payload: {
-				id: randomUUID(),
-				type: "message.updated",
-				properties: {
-					info: {
-						id: messageId,
-						sessionID: sessionId,
-						role: "user",
-						time: { created: Date.now() },
+		await fixture.emitOpenCodeEvent(
+			{
+				directory: realpathSync(fixture.projectDir),
+				payload: {
+					id: randomUUID(),
+					type: "message.updated",
+					properties: {
+						info: {
+							id: messageId,
+							sessionID: sessionId,
+							role: "user",
+							time: { created: Date.now() },
+						},
 					},
 				},
 			},
-		});
+			id,
+		);
 		await vi.waitFor(
 			() =>
 				expect(read(fixture, sessionId).runs.at(-1)?.status).toBe("running"),
@@ -171,27 +180,31 @@ describe("OpenCode on the Run Ledger", () => {
 			},
 			{ timeout: 30_000, interval: 100 },
 		);
-	const idle = (fixture: ProcessHarness, sessionId: string) =>
+	const idle = (fixture: ProcessHarness, sessionId: string, id = instanceId) =>
 		fixture.setOpenCodeStatus(
 			fixture.projectDir,
 			sessionId,
 			{ type: "idle" },
-			instanceId,
+			id,
 		);
 	const started = (ledger: Ledger) =>
 		ledger.evidence.filter(({ type }) => type === "evidence.process_started");
 	const lost = (ledger: Ledger) =>
 		ledger.evidence.filter(({ type }) => type === "evidence.process_lost");
 
-	it("a restart after a crash mid-Run ends that Run as lost, once, and the next send runs under the new id", async () => {
-		const fixture = await start();
+	// A named instance's sessions carry its id, not the driver kind, as their provider.
+	it.each([
+		instanceId,
+		AccountIdSchema.make("managed-test"),
+	])("on %s, a restart after a crash mid-Run ends that Run as lost, once, and the next send runs under the new id", async (id) => {
+		const fixture = await start(id);
 		const browser = await fixture.connect();
 		const sessionId = await browser.createSession(
 			"Crash mid-Run",
-			instanceId,
+			id,
 			"opencode",
 		);
-		const before = await hold(fixture, browser, sessionId);
+		const before = await hold(fixture, browser, sessionId, id);
 		const [first] = started(before);
 		const heldRun = before.runs[0]?.id;
 		expect(first).toMatchObject({
@@ -205,7 +218,7 @@ describe("OpenCode on the Run Ledger", () => {
 		// The supervisor respawns it.
 		await streaming(fixture, 1);
 		// The replacement's first event for the session reports its start, retiring the old id.
-		await idle(fixture, sessionId);
+		await idle(fixture, sessionId, id);
 		await vi.waitFor(
 			() => expect(started(read(fixture, sessionId))).toHaveLength(2),
 			{ timeout: 15_000 },
@@ -215,7 +228,7 @@ describe("OpenCode on the Run Ledger", () => {
 		const after = read(fixture, sessionId);
 		const [, second] = started(after);
 		const nextRun = after.runs[1]?.id;
-		proofs.push({ scenario: "crash-restart", before, after });
+		proofs.push({ scenario: `crash-restart:${id}`, before, after });
 		expect(second?.runnerId).not.toBe(first?.runnerId);
 		expect(second).toMatchObject({
 			label: `${second?.runnerId}:0`,

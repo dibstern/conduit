@@ -28,6 +28,8 @@
 //     load, which rebuilds only Open rows, skips it.
 // Run now (5.1). How it could fail:
 // 20. the interrupt after main's input.interrupt_requested folds as a Stop, or a later Stop as Run now.
+// Driver kind (3.12). How it could fail:
+// 21. a session on a named instance ("work-oc") reads as Claude's, so OpenCode's rules never apply.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -147,6 +149,35 @@ const projectOnline = (events: readonly CanonicalEvent[]) =>
 	});
 
 describe("Run Ledger arm", () => {
+	it.effect(
+		"reads a session on a named OpenCode instance as OpenCode's, from its model pick's harness",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* projectOnline([
+						makeSessionCreatedEvent("s1", {
+							provider: "work-oc",
+							createdAt: 1000,
+						}),
+						canonicalEvent(
+							"session.model_changed",
+							"s1",
+							{
+								sessionId: "s1",
+								modelId: "claude-sonnet",
+								providerId: "anthropic",
+							},
+							at(1000),
+						),
+						...turn("s1", "opencode").slice(1),
+					]);
+					expect((yield* ledgerRows).sessions).toMatchObject([
+						{ session_id: "s1", provider: "opencode" },
+					]);
+				}),
+			),
+	);
+
 	it.effect(
 		"folds main's events in the projecting write; a wake's turn.completed ends nothing",
 		() =>
