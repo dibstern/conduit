@@ -37,6 +37,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { sendPreparedClaudeTurn } from "../../../src/lib/provider/claude/prepare-turn.js";
+import type { SendToken } from "../../../src/lib/provider/run-ledger/run-ledger-model.js";
 import type { ProcessRunnerDriver } from "../../../src/lib/provider/runner/process-runner-types.js";
 import { makeProcessSessionRunner } from "../../../src/lib/provider/runner/process-session-runner.js";
 import * as RunnerConnection from "../../../src/lib/provider/runner/runner-connection.js";
@@ -47,6 +48,7 @@ import {
 	RunnerSocket,
 	runnerBuildId,
 	runnerFailure,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import * as RunnerRecovery from "../../../src/lib/provider/runner/runner-recovery.js";
 import {
@@ -341,7 +343,7 @@ const stopIntentFixture = Effect.gen(function* () {
 				"claude",
 			);
 			vi.spyOn(connection, "commandEffect").mockImplementation(
-				(id, command, attempt, canWrite) =>
+				(id, command, canWrite) =>
 					gatedWrite(
 						canWrite,
 						Effect.gen(function* () {
@@ -354,9 +356,7 @@ const stopIntentFixture = Effect.gen(function* () {
 							});
 							return command.type === "send-turn"
 								? yield* journal.execute(
-										id,
-										attempt ?? command.input.commandAttempt ?? 0,
-										command.input.nativeResumeFallback === true,
+										id as SendToken,
 										Effect.succeed({
 											status: "accepted" as const,
 											cost: 0,
@@ -580,7 +580,7 @@ const swapFixture = Effect.gen(function* () {
 				"claude",
 			);
 			vi.spyOn(socket, "commandEffect").mockImplementation(
-				(_id, command, attempt, canWrite) => {
+				(id, command, canWrite) => {
 					const execute = Effect.gen(function* () {
 						commands.push({
 							runnerId: options.runnerId,
@@ -626,15 +626,7 @@ const swapFixture = Effect.gen(function* () {
 							: undefined;
 					});
 					return command.type === "send-turn"
-						? gatedWrite(
-								canWrite,
-								journal.execute(
-									_id,
-									attempt ?? command.input.commandAttempt ?? 0,
-									command.input.nativeResumeFallback === true,
-									execute,
-								),
-							)
+						? gatedWrite(canWrite, journal.execute(id as SendToken, execute))
 						: execute;
 				},
 			);
@@ -2203,12 +2195,12 @@ it.effect(
 				// The runner's idle-exit is read after the hold commits, before the write.
 				let exiting = true;
 				vi.mocked(socket.commandEffect).mockImplementation(
-					(id, command, attempt, canWrite) => {
+					(id, command, canWrite) => {
 						if (command.type === "send-turn" && exiting) {
 							exiting = false;
 							f.runner.onIdleExit?.();
 						}
-						return write(id, command, attempt, canWrite);
+						return write(id, command, canWrite);
 					},
 				);
 				const sending = yield* f
@@ -2383,12 +2375,12 @@ it.effect(
 				let exiting = true;
 				let gateClosed = false;
 				vi.mocked(socket.commandEffect).mockImplementation(
-					(id, command, attempt, canWrite) => {
+					(id, command, canWrite) => {
 						if (command.type === "send-turn" && exiting) {
 							exiting = false;
 							f.runner.onIdleExit?.();
 						}
-						return write(id, command, attempt, (refusal) => {
+						return write(id, command, (refusal) => {
 							const open = canWrite?.(refusal) ?? true;
 							gateClosed ||= !open;
 							return open;
@@ -3195,7 +3187,7 @@ for (const crossDirectory of [false, true])
 							JSON.stringify({ ...move, socketPath }),
 						);
 					}
-					// The host journal records the process and command attempt before send.
+					// The host journal records the process and send token before send.
 					// Unlike control commands, production send_turn rows have no process ID.
 					for (const [host, commandId] of [
 						[older, "old-command"],
@@ -3211,18 +3203,13 @@ for (const crossDirectory of [false, true])
 							"s",
 						);
 						mkdirSync(directory, { recursive: true });
+						const token = sendToken("tx", commandId, 1);
 						const key = createHash("sha256")
-							.update(JSON.stringify(["claude", "s", commandId, 1, false]))
+							.update(JSON.stringify(["claude", "s", token]))
 							.digest("hex");
 						writeFileSync(
 							join(directory, `${key}.json`),
-							JSON.stringify({
-								commandId,
-								attempt: 1,
-								runnerPid: host.pid,
-								startedAt: 3,
-								nativeResumeFallback: false,
-							}),
+							JSON.stringify({ token, runnerPid: host.pid, startedAt: 3 }),
 						);
 					}
 					f.connect.mockImplementation((options) =>
@@ -3239,7 +3226,6 @@ for (const crossDirectory of [false, true])
 									protocolVersion: 1,
 									buildId: runnerBuildId(),
 									stampsRunIds: true,
-									crossAttemptNativeResumeFallback: true,
 									runnerId: options.runnerId,
 									sessionId: "s",
 									pid: options.pid ?? 0,
@@ -3247,12 +3233,13 @@ for (const crossDirectory of [false, true])
 									sendJournalAnswers: true,
 									sendAnswers: [
 										{
-											commandId:
+											token: sendToken(
+												"tx",
 												options.runnerId === older.runnerId
 													? "old-command"
 													: "new-command",
-											attempt: 1,
-											nativeResumeFallback: false,
+												1,
+											),
 											status: "running",
 										},
 									],
@@ -4019,7 +4006,7 @@ const continuationFixture = (
 				vi.spyOn(socket, "destroy").mockImplementation(() => {});
 				vi.spyOn(socket, "commandStatusEffect").mockImplementation(statuses);
 				vi.spyOn(socket, "commandEffect").mockImplementation(
-					(_id, command, _attempt, canWrite) => {
+					(_id, command, canWrite) => {
 						if (command.type !== "send-turn") return Effect.succeed(undefined);
 						return gatedWrite(
 							canWrite,
@@ -4450,14 +4437,16 @@ for (const discovery of [true, false])
 						if (evidence === "received") {
 							const journal = new RunnerSendJournal(directory, "s", "claude");
 							yield* journal
-								.execute("send", 1, false, Effect.never)
+								.execute(sendToken("hold", "send", 1), Effect.never)
 								.pipe(Effect.forkChild);
 							yield* TestClock.adjust(0);
 						} else if (evidence === "corrupt") {
 							const folder = join(directory, "sends", "s");
 							mkdirSync(folder, { recursive: true });
 							const digest = createHash("sha256")
-								.update(JSON.stringify(["claude", "s", "send", 1, false]))
+								.update(
+									JSON.stringify(["claude", "s", sendToken("hold", "send", 1)]),
+								)
 								.digest("hex");
 							writeFileSync(join(folder, `${digest}.json`), "{corrupt");
 						}
@@ -4518,14 +4507,16 @@ for (const evidence of ["received", "corrupt", "older-build"] as const)
 					if (evidence === "received") {
 						const journal = new RunnerSendJournal(directory, "s", "claude");
 						yield* journal
-							.execute("send", 1, false, Effect.never)
+							.execute(sendToken("hold", "send", 1), Effect.never)
 							.pipe(Effect.forkChild);
 						yield* TestClock.adjust(0);
 					} else if (evidence === "corrupt") {
 						const folder = join(directory, "sends", "s");
 						mkdirSync(folder, { recursive: true });
 						const digest = createHash("sha256")
-							.update(JSON.stringify(["claude", "s", "send", 1, false]))
+							.update(
+								JSON.stringify(["claude", "s", sendToken("hold", "send", 1)]),
+							)
 							.digest("hex");
 						writeFileSync(join(folder, `${digest}.json`), "{corrupt");
 					}
@@ -4789,9 +4780,7 @@ for (const exited of [false, true])
 						const f = yield* continuationFixture({
 							drainsConnections: true,
 							adoptionAnswer: {
-								commandId: "send",
-								attempt: 1,
-								nativeResumeFallback: false,
+								token: sendToken("hold", "send", 1),
 								status: "finished",
 								...(variant === "failure" ? { failure } : { result }),
 							},
@@ -4810,9 +4799,7 @@ for (const exited of [false, true])
 						);
 						yield* journal
 							.execute(
-								"send",
-								1,
-								false,
+								sendToken("hold", "send", 1),
 								variant === "failure"
 									? Effect.fail(failure)
 									: Effect.succeed(result),
@@ -4866,9 +4853,7 @@ it.effect(
 				const f = yield* continuationFixture({
 					drainsConnections: true,
 					adoptionAnswer: {
-						commandId: "send",
-						attempt: 1,
-						nativeResumeFallback: false,
+						token: sendToken("hold", "send", 1),
 						status: "finished",
 						failure,
 					},
@@ -4898,12 +4883,14 @@ it.effect(
 					"claude",
 				);
 				yield* journal
-					.execute("send", 1, false, Effect.fail(failure))
+					.execute(sendToken("hold", "send", 1), Effect.fail(failure))
 					.pipe(Effect.result);
 				yield* Fiber.interrupt(sending);
 				yield* Scope.close(f.managerScope, Exit.void);
-				f.statuses.mockImplementation((_command, _attempt, fallback) =>
-					Effect.succeed(fallback ? "not_received" : "completed"),
+				// The fallback is its own transmission, so it has its own token (4.11).
+				const fallback = sendToken("hold", "send", 2);
+				f.statuses.mockImplementation((token) =>
+					Effect.succeed(token === fallback ? "not_received" : "completed"),
 				);
 				f.respond(f.complete);
 				const recovered = yield* f.makeManager();
@@ -4912,7 +4899,7 @@ it.effect(
 				);
 				yield* TestClock.adjust("12 seconds");
 				yield* Fiber.join(recovering);
-				expect(f.statuses).toHaveBeenCalledWith("send", 1, true);
+				expect(f.statuses).toHaveBeenCalledWith(fallback);
 				expect(f.delivered).toEqual(["send"]);
 				expect(f.sends).toHaveLength(3);
 				expect(f.sends[2]?.command.input.nativeResumeFallback).toBe(true);
@@ -4949,9 +4936,7 @@ it.effect(
 				);
 				yield* journal
 					.execute(
-						"send",
-						1,
-						false,
+						sendToken("hold", "send", 1),
 						Effect.fail({
 							...runnerFailure("native resume", "stale"),
 							code: "claude_resume_refused",
@@ -5022,9 +5007,7 @@ for (const answer of [
 							? {}
 							: {
 									adoptionAnswer: {
-										commandId: "send",
-										attempt: 1,
-										nativeResumeFallback: false,
+										token: sendToken("hold", "send", 1),
 										status: answer,
 										...(answer === "finished"
 											? {
@@ -5055,9 +5038,7 @@ for (const answer of [
 						if (answer === "finished")
 							yield* journal
 								.execute(
-									"send",
-									1,
-									false,
+									sendToken("hold", "send", 1),
 									Effect.fail({
 										...runnerFailure("retained journal", "native refusal"),
 										code: "retained_native_refusal",
@@ -5066,7 +5047,7 @@ for (const answer of [
 								.pipe(Effect.result);
 						else {
 							yield* journal
-								.execute("send", 1, false, Effect.never)
+								.execute(sendToken("hold", "send", 1), Effect.never)
 								.pipe(Effect.forkChild);
 							yield* TestClock.adjust(0);
 						}
@@ -5199,9 +5180,7 @@ for (const status of ["accepted", "completed"] as const)
 						"claude",
 					);
 					yield* journal.execute(
-						"send",
-						1,
-						false,
+						sendToken("hold", "send", 1),
 						Effect.succeed({ ...f.accepted, status }),
 					);
 					f.processes.set(first.pid, { state: "gone" });
@@ -5255,7 +5234,7 @@ it.effect(
 					"claude",
 				);
 				yield* journal
-					.execute("send", 1, false, Effect.never)
+					.execute(sendToken("hold", "send", 1), Effect.never)
 					.pipe(Effect.forkChild);
 				yield* TestClock.adjust(0);
 				yield* f.sql`CREATE TRIGGER reject_exit_stop BEFORE UPDATE OF retired_at ON claude_runner_cursors WHEN NEW.retired_at IS NOT NULL BEGIN SELECT RAISE(FAIL, 'initial Stop temporarily unavailable'); END`;
@@ -5395,7 +5374,7 @@ it.effect(
 					"claude",
 				);
 				yield* journal
-					.execute("send", 1, false, Effect.never)
+					.execute(sendToken("hold", "send", 1), Effect.never)
 					.pipe(Effect.forkChild);
 				yield* TestClock.adjust(0);
 				yield* Scope.close(f.managerScope, Exit.void);
@@ -5480,7 +5459,10 @@ it.effect(
 					"s",
 					"claude",
 				);
-				yield* journal.execute("send", 1, false, Effect.succeed(f.accepted));
+				yield* journal.execute(
+					sendToken("hold", "send", 1),
+					Effect.succeed(f.accepted),
+				);
 				f.processes.set(first.pid, { state: "gone" });
 				const stopping = yield* f.manager
 					.executeEffect({ type: "end-session", sessionId: "s" })

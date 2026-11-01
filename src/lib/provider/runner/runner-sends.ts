@@ -3,6 +3,7 @@ import { Deferred, Effect, Exit, Fiber } from "effect";
 import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { isRecord } from "../../utils.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { RunnerChild } from "./runner-entry-lifecycle.js";
 import { type RunnerSocket, runnerFailure } from "./runner-protocol.js";
 import type { RunnerSourceDelivery } from "./runner-upgrade.js";
@@ -20,6 +21,8 @@ export interface SendBinding {
 	readonly inputId?: string;
 	readonly runId?: string | undefined;
 	readonly commandId?: string;
+	/** The transmission this sink carries (4.11). */
+	readonly token?: SendToken;
 	/** What a failed send places when the SDK never started it. */
 	readonly placement?: {
 		readonly inputId: string;
@@ -69,7 +72,11 @@ export const makeRunnerSends = (deps: {
 	// Sinks each runner was refused a release for; dropped when its sends close.
 	const refusedReleases = new Map<string, Set<string>>();
 	// Acknowledgement retention lives as long as its entry.
-	const pendingCommands = new WeakMap<RunnerChild, Map<string, number>>();
+	// Each retained token names its outbox command, composed when main issued it.
+	const pendingCommands = new WeakMap<
+		RunnerChild,
+		Map<SendToken, string | undefined>
+	>();
 	let admission: AdmitSend | undefined;
 	/** Whether the send was handed to a runner; a requeue clears it. */
 	const dispatched = (send: SendScope) =>
@@ -154,7 +161,7 @@ export const makeRunnerSends = (deps: {
 				delivery !== undefined &&
 				binding?.sessionId === entry.sessionId &&
 				runnerOf(binding) === entry.runnerId &&
-				binding.commandId === delivery.commandId &&
+				binding.token === delivery.token &&
 				binding.inputId === delivery.inputId &&
 				binding.runId === delivery.runId
 			);
@@ -166,16 +173,19 @@ export const makeRunnerSends = (deps: {
 			command?: {
 				readonly sinkId: string;
 				readonly commandId: string;
-				readonly attempt: number;
+				readonly token: SendToken;
 			},
 		) => {
 			sendScopes.dispatch(send, entry.runnerId);
 			if (!command) return;
-			pendingCommands.get(entry)?.set(command.commandId, command.attempt);
+			pendingCommands.get(entry)?.set(command.token, command.commandId);
 			const binding: Writable<SendBinding> | undefined = sinks.get(
 				command.sinkId,
 			);
-			if (binding) binding.commandId = command.commandId;
+			if (binding) {
+				binding.commandId = command.commandId;
+				binding.token = command.token;
+			}
 		},
 		/** Records the run and assistant message a runner event names. */
 		observe: (output: SessionOutput, binding: SendBinding | undefined) => {
@@ -247,32 +257,22 @@ export const makeRunnerSends = (deps: {
 		/** The runner's hello replaces what it still retains. */
 		recovered: (
 			entry: RunnerChild,
-			commands: Iterable<{
-				readonly commandId: string;
-				readonly attempt?: number | undefined;
-			}>,
+			tokens: ReadonlyMap<SendToken, string | undefined>,
 		) => {
-			const pending = new Map<string, number>();
-			for (const command of commands)
-				if (command.attempt !== undefined)
-					pending.set(
-						command.commandId,
-						Math.max(pending.get(command.commandId) ?? -1, command.attempt),
-					);
-			pendingCommands.set(entry, pending);
+			pendingCommands.set(entry, new Map(tokens));
 		},
-		retain: (entry: RunnerChild, commandId: string, attempt: number) => {
-			pendingCommands.get(entry)?.set(commandId, attempt);
+		retain: (entry: RunnerChild, token: SendToken, commandId: string) => {
+			pendingCommands.get(entry)?.set(token, commandId);
 		},
-		pendingAttempt: (entry: RunnerChild, commandId: string) =>
-			pendingCommands.get(entry)?.get(commandId),
-		pendingOn: (entry: RunnerChild) => [
-			...(pendingCommands.get(entry)?.keys() ?? []),
-		],
-		/** Drops the command unless a newer attempt replaced it. */
-		settled: (entry: RunnerChild, commandId: string, attempt: number) => {
+		isPending: (entry: RunnerChild, token: SendToken) =>
+			pendingCommands.get(entry)?.has(token) === true,
+		pendingOn: (
+			entry: RunnerChild,
+		): ReadonlyMap<SendToken, string | undefined> =>
+			pendingCommands.get(entry) ?? new Map(),
+		settled: (entry: RunnerChild, tokens: readonly SendToken[]) => {
 			const pending = pendingCommands.get(entry);
-			if (pending?.get(commandId) === attempt) pending.delete(commandId);
+			for (const token of tokens) pending?.delete(token);
 		},
 		admit,
 		setAdmission: (admit: AdmitSend) => {

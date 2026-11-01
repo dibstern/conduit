@@ -87,9 +87,10 @@ function sendState(harness: ProcessHarness, sessionId: string, prompt: string) {
 					status: string;
 					runner_id: string | null;
 					held_transmission: number | null;
+					input_id: string;
 				}
 			>(
-				"SELECT run.id, run.status, run.runner_id, run.held_transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ? AND command.effect_type = 'send_turn' AND instr(command.payload_json, ?) > 0 ORDER BY command.request_sequence DESC LIMIT 1",
+				"SELECT run.id, run.status, run.runner_id, run.held_transmission, command.command_id AS input_id FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ? AND command.effect_type = 'send_turn' AND instr(command.payload_json, ?) > 0 ORDER BY command.request_sequence DESC LIMIT 1",
 			)
 			.get(sessionId, JSON.stringify(prompt));
 		assert(run, `Missing run for ${prompt}`);
@@ -547,6 +548,95 @@ syncBuiltinESMExports();
 			harness.assertNoRunners();
 		}
 	}, 90_000);
+
+	// CONTRACT 9 (32.5): a host from the previous protocol, mid-turn when the
+	// daemon restarts on the new build, is refused new work; its turn settles
+	// without a second native start and the next send runs on a new runner.
+	it("settles an older-protocol host's turn across a two-build restart", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+			logLevel: "warn",
+			runnerLifecycle: {
+				runnerHelloAfterFirst: true,
+				// Version 5 is the last protocol before Send Tokens and querySeq.
+				runnerHelloProtocolVersion: 5,
+			},
+		});
+		const evidence: Record<string, unknown> = { passed: false };
+		try {
+			const browser = await harness.connect();
+			const sessionId = await browser.createSession("Two-build survivor");
+			await browser.send(sessionId, "before-two-build");
+			const owner = discoverRunners(harness.projectDir, harness.configDir).find(
+				(entry) => entry.sessionId === sessionId,
+			);
+			assert(owner);
+			const pending = browser.send(sessionId, "upgrade-long-turn");
+			void pending.catch(() => undefined);
+			await harness.waitForMark(
+				(mark) =>
+					mark.kind === "assistant-held" && mark.prompt === "upgrade-long-turn",
+			);
+			await harness.kill();
+			await pending.catch(() => undefined);
+			await harness.restart();
+			const restored = await harness.connect(sessionId);
+			await restored.waitForTurnEnd(
+				sessionId,
+				0,
+				undefined,
+				sendState(harness, sessionId, "upgrade-long-turn").run.input_id,
+			);
+			// The refusal retires the old runner; its registration is gone once it exits.
+			expect(harness.logTail).toMatch(/protocol mismatch/i);
+			const settled = sendState(harness, sessionId, "upgrade-long-turn");
+			evidence["settled"] = settled;
+			expect(settled.run).toMatchObject({
+				status: "error",
+				runner_id: owner.runnerId,
+			});
+			// The old host's journal reads Unreadable, never Absent: the turn ends
+			// indeterminate and is never re-sent.
+			expect(settled.terminals.map(({ type }) => type)).toEqual(["turn.error"]);
+			expect(JSON.parse(settled.terminals[0]?.data ?? "null")).toMatchObject({
+				code: "delivery_indeterminate",
+			});
+			expect(
+				harness.marks.filter(
+					(mark) =>
+						mark.kind === "enqueue" && mark.prompt === "upgrade-long-turn",
+				),
+			).toHaveLength(1);
+			const next = await restored.send(sessionId, "after-two-build");
+			expect(next.chunks.join("")).toBe(
+				responseChunks("after-two-build").join(""),
+			);
+			const replacement = discoverRunners(
+				harness.projectDir,
+				harness.configDir,
+			).find(
+				(entry) =>
+					entry.sessionId === sessionId && entry.runnerId !== owner.runnerId,
+			);
+			assert(replacement);
+			expect(replacement.pid).not.toBe(owner.pid);
+			evidence["oldRunner"] = owner;
+			evidence["replacement"] = replacement;
+			evidence["passed"] = true;
+		} finally {
+			evidence["proof"] = harness.proof();
+			evidence["logTail"] = harness.logTail;
+			await harness.dispose();
+			evidence["remainingRunnerPids"] = harness.remainingRunnerPids();
+			mkdirSync("test-results/82tn-32-5", { recursive: true });
+			writeFileSync(
+				"test-results/82tn-32-5/two-build-restart.json",
+				JSON.stringify(evidence, null, 2),
+			);
+			harness.assertNoRunners();
+		}
+	});
 
 	it.each([
 		"protocol",

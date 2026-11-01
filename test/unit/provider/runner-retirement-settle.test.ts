@@ -19,6 +19,7 @@ import type { RunRelease } from "../../../src/lib/provider/runner/process-runner
 import {
 	runnerBuildId,
 	runnerFailure,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import {
 	makeRunnerReceiptStore,
@@ -100,9 +101,7 @@ const settle = (
 		});
 		if (answer)
 			yield* new RunnerSendJournal(directory, "session", "claude").execute(
-				"send",
-				1,
-				false,
+				sendToken("hold", "send", 1),
 				Effect.succeed(answer),
 			);
 		const released: RunRelease[] = [];

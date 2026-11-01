@@ -53,6 +53,7 @@ import {
 	runnerBuildId,
 	runnerFailure,
 	runnerIdleFailure,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { failRunnerTurn } from "../../../src/lib/provider/runner/runner-turn-failure.js";
@@ -372,7 +373,7 @@ it("preserves an unaccepted reservation when idle exit retries on a replacement"
 								runnerId: options.runnerId,
 								sessionId: "s",
 								pid: child.pid,
-								sendCommands: [],
+								sendTokens: [],
 								bindings: [],
 							},
 							connection,
@@ -561,7 +562,7 @@ for (const [
 							},
 							commandEffect: () => Effect.succeed(undefined),
 						} as unknown as RunnerSocket;
-						// This fixture advertises the retained legacy sendCommands shape.
+						// This fixture advertises the retained legacy sendTokens shape.
 						// Its command-less dispatch event selects that same recovery path;
 						// modern unheld owner sends belong to the continuation feeder.
 						const commit = legacyCommit;
@@ -588,18 +589,15 @@ for (const [
 								runnerId: options.runnerId,
 								sessionId: options.sessionId,
 								pid: child.pid,
-								crossAttemptNativeResumeFallback: true,
-								sendCommands: childOnly
+								sendTokens: childOnly
 									? []
-									: [{ commandId: "old-command", attempt: 1 }],
+									: [sendToken("tx", "old-command", 1)],
 								bindings: [],
 							},
 							connection,
 						);
 						if (acknowledged)
-							options.onCommandsSettled?.([
-								{ commandId: "old-command", attempt: 1 },
-							]);
+							options.onCommandsSettled?.([sendToken("tx", "old-command", 1)]);
 						return connection;
 					}),
 				settingsDeferredCode: "test-deferred",
@@ -1045,7 +1043,7 @@ effectIt.effect(
 								sourceDelivery: {
 									sessionId: options.sessionId,
 									runnerId: options.runnerId,
-									commandId: "source-command",
+									token: sendToken("tx", "source-command", 1),
 									sinkId: "source-command:1",
 									inputId: "source-input",
 									runId: "source-run",
@@ -1063,13 +1061,13 @@ effectIt.effect(
 									sessionId: options.sessionId,
 									pid: child.pid,
 									upgradeState: helloState,
-									sendCommands: [],
+									sendTokens: [],
 									// The completed turn's native query still owns its sink.
 									bindings: [
 										{
 											sinkId: "source-command:1",
 											sessionId: options.sessionId,
-											commandId: "source-command",
+											token: sendToken("tx", "source-command", 1),
 											released: false,
 										},
 									],
@@ -1160,7 +1158,6 @@ effectIt.effect(
 					expect.any(String),
 					expect.objectContaining({ type: "pre-warm", input }),
 					undefined,
-					undefined,
 				);
 				const target = yield* Effect.forkChild(
 					admitRunnerCommand(admission, runner, {
@@ -1211,7 +1208,7 @@ effectIt.effect(
 					return yield* Effect.failCause(targetExit.cause);
 				expect(dispatch).toHaveBeenCalledTimes(2);
 				expect(dispatch).toHaveBeenLastCalledWith(
-					"target-input",
+					sendToken("hold", "target-input", 1),
 					expect.objectContaining({
 						type: "send-turn",
 						input: expect.objectContaining({
@@ -1219,7 +1216,6 @@ effectIt.effect(
 							configDir: accountB.folder,
 						}),
 					}),
-					1,
 					expect.any(Function),
 				);
 				expect(target.pollUnsafe()).toEqual(

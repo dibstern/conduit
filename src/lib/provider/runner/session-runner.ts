@@ -86,6 +86,8 @@ export type SessionCommand = (
 			readonly type: "send-turn";
 			/** Current daemons stamp this from input.runId; absent on older peers. */
 			readonly runId?: string;
+			/** A start's prepare: a resume, or the fresh fallback after a rejected one (4.8). */
+			readonly mode?: "resume" | "fresh";
 			/** Daemon memory snapshot retained until another turn is admitted. */
 			readonly autoSettleAfterDays?: number | null | undefined;
 			/** Ephemeral launch credentials, excluded from durable command inputs. */

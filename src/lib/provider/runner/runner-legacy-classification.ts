@@ -26,7 +26,7 @@ export const journalsBeforeExecution = (
 // its unchanged journal key, exactly as ecb3840d did, never from the legacy hello.
 export const legacyRunnerRetainedSends = (
 	hello: RunnerHello,
-): NonNullable<RunnerHello["sendCommands"]> => hello.sendCommands ?? [];
+): NonNullable<RunnerHello["sendTokens"]> => hello.sendTokens ?? [];
 
 export const legacyRunnerAnswerCompletions = (
 	hello: RunnerHello,

@@ -41,6 +41,7 @@ import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/
 import { isRecord } from "../../utils.js";
 import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import { STOP_ABORT_WAIT_MS } from "../orchestration-command-contracts.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { ProviderNativeSession, TurnResult } from "../types.js";
 import type {
 	OwnerSend,
@@ -61,12 +62,14 @@ import {
 	replayLegacyRunnerSend,
 } from "./runner-legacy-recovery.js";
 import {
+	currentSendToken,
 	type RunnerHello,
 	type RunnerSendAnswer,
 	type RunnerSocket,
 	runnerBuildId,
 	runnerFailure,
 	runnerSinkId,
+	sendToken,
 } from "./runner-protocol.js";
 import {
 	currentRunnerOutput,
@@ -178,6 +181,68 @@ interface RunnerStarterOptions {
 	) => Effect.Effect<ProviderRuntimeIngestion | undefined>;
 	readonly wakeReactor: (sessionId: string) => Effect.Effect<void>;
 }
+
+/**
+ * Which outbox command issued each token, found by composing every token main
+ * issued for the session's sends (4.11). A token is never parsed.
+ */
+const issuedSendTokens = (
+	sql: SqlClient.SqlClient | undefined,
+	sessionId: string,
+	tokens: readonly SendToken[],
+) =>
+	Effect.gen(function* () {
+		const issued = new Map<
+			SendToken,
+			| {
+					readonly commandId: string;
+					readonly attempt: number;
+					readonly fallback: boolean;
+					readonly runId: string | null;
+			  }
+			| undefined
+		>(tokens.map((token) => [token, undefined]));
+		if (!sql || !tokens.length) return issued;
+		const rows = yield* sql<{
+			command_id: string;
+			attempt_count: number;
+			fallback: number | null;
+			run_id: string | null;
+			transmissions: string;
+		}>`SELECT command.command_id, command.attempt_count,
+			json_extract(command.payload_json, '$.nativeResumeFallback') AS fallback,
+			COALESCE(run.joined_into, run.id) AS run_id,
+			(SELECT json_group_array(json_extract(dispatched.data, '$.transmission')) FROM events dispatched
+				WHERE dispatched.session_id = command.session_id AND dispatched.type = 'run.dispatched' AND json_valid(dispatched.data)
+				AND json_extract(dispatched.data, '$.commandId') = command.command_id) AS transmissions
+			FROM provider_command_outbox command
+			LEFT JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id
+			WHERE command.session_id = ${sessionId} AND command.effect_type = 'send_turn'`;
+		for (const row of rows) {
+			const transmissions: unknown = JSON.parse(row.transmissions);
+			const candidates = [
+				...(Array.isArray(transmissions) ? transmissions : []).flatMap((n) =>
+					typeof n === "number" ? [sendToken("hold", row.command_id, n)] : [],
+				),
+				...Array.from({ length: row.attempt_count + 1 }, (_, n) =>
+					sendToken("tx", row.command_id, n),
+				),
+			];
+			for (const token of candidates)
+				if (issued.has(token))
+					issued.set(token, {
+						commandId: row.command_id,
+						attempt: row.attempt_count,
+						fallback: row.fallback === 1,
+						runId: row.run_id,
+					});
+		}
+		return issued;
+	}).pipe(
+		Effect.mapError((cause) =>
+			runnerFailure("resolve runner send tokens", cause),
+		),
+	);
 
 export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 	Effect.gen(function* () {
@@ -351,32 +416,31 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			connection: RunnerSocket,
 		) =>
 			Effect.gen(function* () {
-				const pending = sends.pendingOn(entry);
-				if (!sql || !pending.length) return;
+				const pending = [...sends.pendingOn(entry)];
+				const commandIds = pending.flatMap(([, commandId]) =>
+					commandId ? [commandId] : [],
+				);
+				if (!sql || !commandIds.length) return;
 				const rows = yield* sql<{
 					command_id: string;
-					attempt: number;
-				}>`SELECT command_id, MAX(attempt_count) AS attempt FROM provider_command_outbox
+				}>`SELECT command_id FROM provider_command_outbox
 				WHERE session_id = ${sessionId} AND effect_type = 'send_turn'
-					AND status IN ('completed', 'failed') AND command_id IN ${sql.in(pending)}
-				GROUP BY command_id`;
+					AND status IN ('completed', 'failed') AND command_id IN ${sql.in(commandIds)}`;
+				const settled = new Set(rows.map((row) => row.command_id));
+				const tokens = pending.flatMap(([token, commandId]) =>
+					commandId && settled.has(commandId) ? [token] : [],
+				);
 				if (
 					stops.closing ||
 					entry.connection !== connection ||
 					connection.closed
 				)
 					return;
-				if (rows.length)
+				if (tokens.length)
 					yield* lock.withPermits(1)(
 						Effect.sync(() => {
 							Entry.touch(entry);
-							connection.write({
-								type: "settled-commands",
-								commands: rows.map((row) => ({
-									commandId: row.command_id,
-									attempt: row.attempt,
-								})),
-							});
+							connection.write({ type: "settled-commands", tokens });
 							// This command invalidates a warming attempt, but may be the
 							// last work at the current idle boundary. Keep its retry wake.
 							upgrade(sessionId, entry);
@@ -526,18 +590,16 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					);
 
 				let recoveredHello: RunnerHello | undefined;
-				const recoveredSendRefs = new Map<string, HeldSendRef>();
-				const legacySendKeys = new Map<string, LegacySendKey>();
-				const legacyKey = (commandId: string, attempt: number) =>
-					JSON.stringify([commandId, attempt]);
-				const answerKey = (
-					commandId: string,
-					attempt: number,
-					fallback: boolean,
-				) => JSON.stringify([commandId, attempt, fallback]);
-				let recoveryBindings: NonNullable<RunnerHello["bindings"]> = [];
+				const recoveredSendRefs = new Map<SendToken, HeldSendRef>();
+				const legacySendKeys = new Map<SendToken, LegacySendKey>();
+				// Hello bindings name tokens; the commands come from main's own rows.
+				let recoveryBindings: readonly (NonNullable<
+					RunnerHello["bindings"]
+				>[number] & { readonly commandId?: string })[] = [];
 				const settleRecoveredSends = (
-					answers: readonly RunnerSendAnswer[],
+					answers: readonly (RunnerSendAnswer & {
+						readonly nativeResumeFallback?: boolean;
+					})[],
 					requeueMissing: boolean,
 					source: "journal" | "reply" = "journal",
 				) => {
@@ -636,35 +698,26 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 														)
 													)
 														continue;
-													const legacy = legacySendKeys.get(
-														legacyKey(row.command_id, row.attempt_count),
-													);
+													const token = currentSendToken(row);
+													const legacy = legacySendKeys.get(token);
 													const [modern] = legacy
 														? []
 														: yield* sql`SELECT 1 FROM provider_runs run
 															WHERE run.id = ${row.run_id} AND run.session_id = ${sessionId} AND run.joined_into IS NULL
 															AND NOT ${legacyRunnerRunPredicate(sql, sessionId, sql`run.id`)}`;
-													const [mode] = modern
-														? yield* sql<{
-																fallback: number | null;
-															}>`SELECT json_extract(payload_json, '$.nativeResumeFallback') AS fallback FROM provider_command_outbox WHERE request_sequence = ${row.request_sequence}`
-														: [];
 													const answer = answers.find(
-														({ commandId, attempt, nativeResumeFallback }) =>
-															commandId === row.command_id &&
-															attempt === row.attempt_count &&
-															(!modern ||
-																nativeResumeFallback ===
-																	(mode?.fallback === 1)),
+														(answer) => answer.token === token,
 													);
 													if (answer?.status === "running") continue;
 													const completed =
 														answer?.status === "finished" ? answer : undefined;
 													if (completed) {
 														// Modern resume refusals continue only after their C3 release.
+														// The transmission's mode, not the payload's marker: a fresh
+														// fallback's rejection is terminal (4.8).
 														if (
 															modern &&
-															!completed.nativeResumeFallback &&
+															completed.fresh !== true &&
 															(completed.result?.nativeResumeRejected ||
 																isClaudeResumeRefused(
 																	completed.failure ?? completed.result?.error,
@@ -673,11 +726,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 															continue;
 														if (modern) {
 															const send = recoveredSendRefs.get(
-																answerKey(
-																	completed.commandId,
-																	completed.attempt,
-																	completed.nativeResumeFallback,
-																),
+																completed.token,
 															);
 															if (!send) continue;
 															if (source === "reply") {
@@ -709,7 +758,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 																	observedAt,
 																	{
 																		nativeResumeFallback:
-																			completed.nativeResumeFallback,
+																			completed.nativeResumeFallback ??
+																			completed.fresh === true,
 																		driverKind: driver.driverKind,
 																	},
 																);
@@ -771,8 +821,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											row.request_sequence,
 											row.attempt_count,
 										) === true,
-									retain: (commandId, attempt) =>
-										sends.retain(entry, commandId, attempt),
+									retain: (token, commandId) =>
+										sends.retain(entry, token, commandId),
 									ready: Deferred.await(entry.ready).pipe(Effect.asVoid),
 									replay: (row, replayLock) => {
 										let admittedSend: SendScope | undefined;
@@ -845,7 +895,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 																			{
 																				sessionId,
 																				commandId: row.command_id,
-																				attempt: row.attempt_count,
+																				token: currentSendToken(row),
 																				sinkId,
 																				released: false,
 																			},
@@ -947,7 +997,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 												stops.currentEntry(sessionId) !== entry ||
 												entry.connection !== connection ||
 												connection.closed,
-											send: (commandId, command, attempt) => {
+											send: (token, command) => {
 												const dispatch = (send: SendScope) =>
 													Effect.gen(function* () {
 														if (send.assignment._tag === "Closed")
@@ -967,9 +1017,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 														sends.dispatch(send, entry);
 														const targetConnection = connection;
 														return yield* targetConnection.commandEffect(
-															commandId,
+															token,
 															command,
-															attempt,
 														);
 													});
 												const retained = sends.route(command.sinkId)?.sendScope;
@@ -997,11 +1046,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										);
 									},
 									settle: (answer, key) => {
-										if (key)
-											legacySendKeys.set(
-												legacyKey(answer.commandId, answer.attempt),
-												key,
-											);
+										if (key) legacySendKeys.set(answer.token, key);
 										return settleRecoveredSends([answer], false);
 									},
 									release: (commandId) =>
@@ -1192,11 +1237,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								);
 								for (const row of rows) {
 									const key = yield* LegacySendKey.prove(sql, row);
-									if (key)
-										legacySendKeys.set(
-											legacyKey(row.command_id, row.attempt_count),
-											key,
-										);
+									if (key) legacySendKeys.set(currentSendToken(row), key);
 								}
 							}
 							// A main-built runner's replay settles its held sends too (C 7.4).
@@ -1207,10 +1248,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									request_sequence: number;
 									attempt_count: number;
 									transmission: number;
-									fallback: number | null;
 								}>`SELECT run.id AS run_id, command.command_id, command.request_sequence,
-									command.attempt_count, run.held_transmission AS transmission,
-									json_extract(command.payload_json, '$.nativeResumeFallback') AS fallback
+									command.attempt_count, run.held_transmission AS transmission
 									FROM provider_runs run JOIN provider_command_outbox command
 									ON command.run_id = run.id AND command.session_id = run.session_id
 									WHERE run.session_id = ${sessionId} AND run.runner_id = ${entry.runnerId}
@@ -1218,11 +1257,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									AND command.effect_type = 'send_turn'`;
 								for (const row of held)
 									recoveredSendRefs.set(
-										answerKey(
-											row.command_id,
-											row.attempt_count,
-											row.fallback === 1,
-										),
+										sendToken("hold", row.command_id, row.transmission),
 										{
 											sessionId,
 											runId: row.run_id,
@@ -1234,19 +1269,36 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										},
 									);
 							}
-							recoveryBindings = isLegacyRunner(hello)
+							const bindings = isLegacyRunner(hello)
 								? legacyRunnerBindings(hello)
 								: (hello.bindings ?? []);
+							const issued = yield* issuedSendTokens(sql, sessionId, [
+								...new Set([
+									...(hello.sendTokens ?? []),
+									...bindings.flatMap((binding) =>
+										binding.token ? [binding.token] : [],
+									),
+								]),
+							]);
+							recoveryBindings = bindings.map((binding) => {
+								const command = binding.token
+									? issued.get(binding.token)
+									: undefined;
+								return command
+									? { ...binding, commandId: command.commandId }
+									: binding;
+							});
 							if (!isLegacyRunner(hello)) {
 								// The journal owns classification. A retained call needs an admission
 								// even when it has not emitted an output binding yet.
 								for (const answer of hello.sendAnswers ?? []) {
+									const command = issued.get(answer.token);
 									if (
 										answer.status !== "running" ||
+										!command ||
 										recoveryBindings.some(
 											(binding) =>
-												binding.commandId === answer.commandId &&
-												binding.attempt === answer.attempt &&
+												binding.token === answer.token &&
 												binding.released !== true,
 										)
 									)
@@ -1255,13 +1307,13 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										...recoveryBindings,
 										{
 											sessionId,
-											commandId: answer.commandId,
-											attempt: answer.attempt,
+											commandId: command.commandId,
+											token: answer.token,
 											released: false,
 											sinkId: runnerSinkId(
-												answer.commandId,
-												answer.attempt,
-												answer.nativeResumeFallback,
+												command.commandId,
+												command.attempt,
+												command.fallback,
 											),
 										},
 									];
@@ -1352,29 +1404,32 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							// Acknowledgement retention is independent of recovery ownership.
 							sends.recovered(
 								entry,
-								isLegacyRunner(hello)
-									? legacyRunnerRetainedSends(hello)
-									: (hello.sendAnswers ?? []),
+								new Map(
+									legacyRunnerRetainedSends(hello).map((token) => [
+										token,
+										issued.get(token)?.commandId,
+									]),
+								),
 							);
 							if (sql && !isLegacyRunner(hello)) {
 								const held = yield* sql<{
 									run_id: string;
 									command_id: string;
 									transmission: number;
-									attempt_count: number;
-									native_resume_fallback: number | null;
-								}>`SELECT run.id AS run_id, command.command_id, run.held_transmission AS transmission, command.attempt_count, json_extract(command.payload_json, '$.nativeResumeFallback') AS native_resume_fallback FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.session_id = ${sessionId} AND run.runner_id = ${entry.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn'`;
+								}>`SELECT run.id AS run_id, command.command_id, run.held_transmission AS transmission FROM provider_runs run JOIN provider_command_outbox command ON command.run_id = run.id AND command.session_id = run.session_id WHERE run.session_id = ${sessionId} AND run.runner_id = ${entry.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running') AND command.effect_type = 'send_turn'`;
 								for (const transmission of held) {
-									const answer = hello.sendAnswers?.find(
-										(answer) =>
-											answer.commandId === transmission.command_id &&
-											answer.attempt === transmission.attempt_count &&
-											answer.nativeResumeFallback ===
-												(transmission.native_resume_fallback === 1),
+									const token = sendToken(
+										"hold",
+										transmission.command_id,
+										transmission.transmission,
 									);
+									const answer = hello.sendAnswers?.find(
+										(answer) => answer.token === token,
+									);
+									// A fresh fallback's rejection is terminal (4.8), never re-released.
 									if (
 										answer?.status === "finished" &&
-										!answer.nativeResumeFallback &&
+										answer.fresh !== true &&
 										(answer.result?.nativeResumeRejected ||
 											isClaudeResumeRefused(
 												answer.failure ?? answer.result?.error,
@@ -1393,13 +1448,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									// Retained journal evidence owns this transmission. Finished
 									// answers settle below; uncertain answers must remain held.
 									if (answer || hello.drainsConnections !== true) continue;
-									const status = yield* connection.commandStatusEffect(
-										transmission.command_id,
-										transmission.attempt_count,
-										transmission.native_resume_fallback === 1
-											? true
-											: undefined,
-									);
+									const status = yield* connection.commandStatusEffect(token);
 									if (status === "not_received")
 										yield* stops.release({
 											sessionId,
@@ -1435,7 +1484,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										assistant_message_id: string | null;
 										turn_state: string | null;
 										run_state: string | null;
-									}>`SELECT outbox.request_sequence, outbox.provider_id, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
+										command_id: string;
+										held_transmission: number | null;
+									}>`SELECT outbox.request_sequence, outbox.provider_id, outbox.command_id, reservation.held_transmission, COALESCE(json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS input_id,
 										COALESCE(reservation.joined_into, reservation.id) AS run_id,
 										outbox.status, outbox.attempt_count, turns.assistant_message_id, turns.state AS turn_state, owner.status AS run_state
 										FROM provider_command_outbox outbox
@@ -1463,11 +1514,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										)
 											continue;
 										if (!isLegacyRunner(hello) && row.status === "running") {
+											const token = currentSendToken(row);
 											const answer = hello.sendAnswers?.find(
-												(answer) =>
-													answer.commandId ===
-														(binding.commandId ?? binding.sinkId) &&
-													answer.attempt === row.attempt_count,
+												(answer) => answer.token === token,
 											);
 											if (!answer || answer.status === "uncertain") continue;
 											if (
@@ -1479,7 +1528,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 														)))
 											)
 												continue;
-											if (binding.attempt !== row.attempt_count) continue;
+											if (binding.token !== token) continue;
 										}
 										commandAttempt = row.attempt_count;
 										accountId = row.provider_id;
@@ -1708,19 +1757,12 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						),
 					onCommandReply: (reply) =>
 						Effect.gen(function* () {
-							if (
-								!recoveredHello ||
-								isLegacyRunner(recoveredHello) ||
-								reply.attempt === undefined
-							)
-								return;
+							if (!recoveredHello || isLegacyRunner(recoveredHello)) return;
+							// A send's frame id is its token.
 							const held = recoveredHello.sendAnswers?.find(
 								(answer) =>
 									answer.status === "running" &&
-									answer.commandId === reply.commandId &&
-									answer.attempt === reply.attempt &&
-									answer.nativeResumeFallback ===
-										(reply.nativeResumeFallback === true),
+									answer.token === reply.commandId,
 							);
 							if (!held) return;
 							yield* settleRecoveredSends(
@@ -1736,21 +1778,20 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								"reply",
 							);
 						}),
-					onCommandsSettled: (commands) => {
+					onCommandsSettled: (tokens) => {
 						runFork(
 							entry.outputs
 								.withPermits(1)(
 									Effect.gen(function* () {
-										for (const { commandId, attempt } of commands) {
-											const pending = sends.pendingAttempt(entry, commandId);
-											if (pending === undefined || pending > attempt) continue;
-											if (sql) {
+										for (const token of tokens) {
+											if (!sends.isPending(entry, token)) continue;
+											const commandId = sends.pendingOn(entry).get(token);
+											if (sql && commandId) {
 												const rows = yield* sql<{
 													run_id: string | null;
 												}>`SELECT run_id
 											FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
-											AND session_id = ${sessionId} AND command_id = ${commandId}
-											AND attempt_count = ${pending}`;
+											AND session_id = ${sessionId} AND command_id = ${commandId}`;
 												for (const row of rows)
 													if (row.run_id)
 														yield* stops.guarded(
@@ -1761,12 +1802,11 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 															},
 														);
 											}
-											if (sends.pendingAttempt(entry, commandId) === pending)
-												yield* stops.guarded(
-													stops.grantOf(outputAuthority),
-													{ kind: "output" },
-													() => sends.settled(entry, commandId, pending),
-												);
+											yield* stops.guarded(
+												stops.grantOf(outputAuthority),
+												{ kind: "output" },
+												() => sends.settled(entry, [token]),
+											);
 										}
 									}),
 								)
@@ -2499,25 +2539,11 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										catch: (cause) =>
 											runnerFailure("recover runner journal", cause),
 									});
-									const owned =
-										sql && commands.length
-											? yield* sql<{
-													command_id: string;
-													attempt_count: number;
-													run_id: string;
-												}>`
-								SELECT command.command_id, command.attempt_count, COALESCE(run.joined_into, run.id) AS run_id
-								FROM provider_command_outbox command JOIN provider_runs run
-									ON run.id = command.run_id AND run.session_id = command.session_id
-								WHERE command.session_id = ${identity.sessionId}
-									AND command.project_key = (SELECT project_id FROM sessions WHERE id = ${identity.sessionId})
-									AND command.effect_type = 'send_turn'
-									AND command.command_id IN ${sql.in(commands.map((command) => command.commandId))}`.pipe(
-													Effect.mapError((cause) =>
-														runnerFailure("recover runner cohort", cause),
-													),
-												)
-											: [];
+									const owned = yield* issuedSendTokens(
+										sql,
+										identity.sessionId,
+										commands,
+									);
 									return {
 										...identity,
 										ownedRunIds: [
@@ -2526,15 +2552,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 												...(cursorOwners.rows.find(
 													(owner) => owner.runnerId === identity.runnerId,
 												)?.ownedRunIds ?? []),
-												...owned
-													.filter((row) =>
-														commands.some(
-															(command) =>
-																command.commandId === row.command_id &&
-																command.attempt === row.attempt_count,
-														),
-													)
-													.map((row) => row.run_id),
+												...[...owned.values()].flatMap((command) =>
+													command?.runId ? [command.runId] : [],
+												),
 											]),
 										],
 									};

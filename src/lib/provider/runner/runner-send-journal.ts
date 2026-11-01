@@ -15,45 +15,37 @@ import { Data, Effect, Schema } from "effect";
 import { SessionHandoffDeliveredPayloadSchema } from "../../contracts/stored-event.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { isRecord } from "../../utils.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { TurnResult } from "../types.js";
 import { type RunnerSendAnswer, runnerFailure } from "./runner-protocol.js";
 import { discoverRunners, runnerDirectory } from "./runner-registry.js";
 import type { SessionFailure } from "./session-runner.js";
 
+/** One record per transmission, keyed by its Send Token (CONTRACT 4.9). */
 interface SendRecord {
-	readonly commandId: string;
-	readonly attempt: number;
+	readonly token: SendToken;
 	readonly runnerPid: number;
 	readonly startedAt: number;
-	readonly nativeResumeFallback: boolean;
 	readonly providerRunId?: string;
 	readonly completedAt?: number;
 	readonly result?: TurnResult;
 	readonly failure?: SessionFailure;
+	readonly fresh?: true;
 }
 
-const sendKey = (
-	driverKind: string,
-	sessionId: string,
-	commandId: string,
-	attempt: number,
-	fallback: boolean,
-) =>
+const sendKey = (driverKind: string, sessionId: string, token: SendToken) =>
 	createHash("sha256")
-		.update(
-			JSON.stringify([driverKind, sessionId, commandId, attempt, fallback]),
-		)
+		.update(JSON.stringify([driverKind, sessionId, token]))
 		.digest("hex");
 
-const isSendRecord = Schema.is(
+const isSendRecordShape = Schema.is(
 	Schema.Struct({
-		commandId: Schema.String,
-		attempt: Schema.Number,
+		token: Schema.String,
 		runnerPid: Schema.Number,
 		startedAt: Schema.Number,
-		nativeResumeFallback: Schema.Boolean,
 		providerRunId: Schema.optionalKey(Schema.String),
 		completedAt: Schema.optionalKey(Schema.Number),
+		fresh: Schema.optionalKey(Schema.Literal(true)),
 		failure: Schema.optionalKey(
 			Schema.Struct({
 				operation: Schema.String,
@@ -102,42 +94,44 @@ const isSendRecord = Schema.is(
 		),
 	}),
 );
+// The token is opaque, so any string read back names one.
+const isSendRecord = (record: unknown): record is SendRecord =>
+	isSendRecordShape(record);
 
 export type RunnerSendJournalRead =
 	| { readonly _tag: "Absent" }
 	| { readonly _tag: "Present"; readonly state: RunnerSendAnswer }
 	| { readonly _tag: "Unreadable" };
 
-/** Absence proves non-delivery only after the caller confirms the host exited. */
+/**
+ * Absence proves non-delivery only after the caller confirms the host exited. An older
+ * build's attempt-keyed record of the same command reads Unreadable, never Absent (4.9).
+ */
 export function readRunnerSendJournal(input: {
 	readonly directory: string;
 	readonly sessionId: string;
 	readonly driverKind: string;
+	readonly token: SendToken;
 	readonly commandId: string;
-	readonly attempt: number;
-	readonly nativeResumeFallback: boolean;
 }): RunnerSendJournalRead {
-	const filename = join(
-		input.directory,
-		"sends",
-		input.sessionId,
-		`${sendKey(input.driverKind, input.sessionId, input.commandId, input.attempt, input.nativeResumeFallback)}.json`,
-	);
+	const sends = join(input.directory, "sends", input.sessionId);
 	try {
-		const record: unknown = JSON.parse(readFileSync(filename, "utf8"));
-		if (
-			!isSendRecord(record) ||
-			record.commandId !== input.commandId ||
-			record.attempt !== input.attempt ||
-			record.nativeResumeFallback !== input.nativeResumeFallback
-		)
+		const record: unknown = JSON.parse(
+			readFileSync(
+				join(
+					sends,
+					`${sendKey(input.driverKind, input.sessionId, input.token)}.json`,
+				),
+				"utf8",
+			),
+		);
+		if (!isSendRecord(record) || record.token !== input.token)
 			return { _tag: "Unreadable" };
 		return {
 			_tag: "Present",
 			state: {
-				commandId: record.commandId,
-				attempt: record.attempt,
-				nativeResumeFallback: record.nativeResumeFallback,
+				token: record.token,
+				...(record.fresh ? { fresh: true as const } : {}),
 				...(record.completedAt === undefined
 					? { status: "uncertain" as const }
 					: {
@@ -148,11 +142,23 @@ export function readRunnerSendJournal(input: {
 			},
 		};
 	} catch (cause) {
-		return {
-			_tag:
-				isRecord(cause) && cause["code"] === "ENOENT" ? "Absent" : "Unreadable",
-		};
+		if (!isRecord(cause) || cause["code"] !== "ENOENT")
+			return { _tag: "Unreadable" };
 	}
+	try {
+		for (const name of readdirSync(sends)) {
+			if (!name.endsWith(".json")) continue;
+			const record: unknown = JSON.parse(
+				readFileSync(join(sends, name), "utf8"),
+			);
+			if (isRecord(record) && record["commandId"] === input.commandId)
+				return { _tag: "Unreadable" };
+		}
+	} catch (cause) {
+		if (!isRecord(cause) || cause["code"] !== "ENOENT")
+			return { _tag: "Unreadable" };
+	}
+	return { _tag: "Absent" };
 }
 
 /** Read legacy ownership before discovery can revoke a host, without replaying it. */
@@ -161,7 +167,7 @@ export function runnerSendCommandsForProcess(
 	sessionId: string,
 	driverKind: string,
 	pid: number,
-): readonly Pick<SendRecord, "commandId" | "attempt">[] {
+): readonly SendToken[] {
 	const sends = join(directory, "sends", sessionId);
 	let names: string[];
 	try {
@@ -170,7 +176,7 @@ export function runnerSendCommandsForProcess(
 		// No verified process identity can be recovered from an unreadable journal.
 		return [];
 	}
-	const commands: Pick<SendRecord, "commandId" | "attempt">[] = [];
+	const tokens: SendToken[] = [];
 	for (const name of names) {
 		if (!name.endsWith(".json")) continue;
 		try {
@@ -180,15 +186,14 @@ export function runnerSendCommandsForProcess(
 			if (
 				isSendRecord(record) &&
 				record.runnerPid === pid &&
-				name ===
-					`${sendKey(driverKind, sessionId, record.commandId, record.attempt, record.nativeResumeFallback)}.json`
+				name === `${sendKey(driverKind, sessionId, record.token)}.json`
 			)
-				commands.push({ commandId: record.commandId, attempt: record.attempt });
+				tokens.push(record.token);
 		} catch {
 			// A partial/unreadable key supplies no process identity.
 		}
 	}
-	return commands;
+	return tokens;
 }
 
 class RunnerSendCleanupError extends Data.TaggedError(
@@ -241,15 +246,11 @@ export class RunnerSendJournal {
 			const filename = join(this.directory, name);
 			try {
 				const record: unknown = JSON.parse(readFileSync(filename, "utf8"));
-				if (
-					!isSendRecord(record) ||
-					filename !==
-						this.filename(
-							record.commandId,
-							record.attempt,
-							record.nativeResumeFallback,
-						)
-				)
+				// An older build's attempt-keyed record answers no token. The daemon
+				// reads it as Unreadable for its command (4.9); it fences nothing here.
+				if (isRecord(record) && !("token" in record) && "commandId" in record)
+					continue;
+				if (!isSendRecord(record) || filename !== this.filename(record.token))
 					throw new RunnerSendJournalReadError({
 						message: "Retained runner send record is invalid",
 					});
@@ -277,95 +278,54 @@ export class RunnerSendJournal {
 
 	/** Disk evidence gives the outcome; only a call in this journal gives ownership. */
 	get answers(): readonly RunnerSendAnswer[] {
-		const answers = new Map<string, RunnerSendAnswer>();
-		for (const filename of this.retained) {
+		return [...this.retained].flatMap((filename): RunnerSendAnswer[] => {
 			const record = this.records.get(filename);
-			if (!record) continue;
-			const key = {
-				commandId: record.commandId,
-				attempt: record.attempt,
-				nativeResumeFallback: record.nativeResumeFallback,
-			};
-			const identity = JSON.stringify([record.commandId, record.attempt]);
-			// The fallback supersedes its primary within the same outbox attempt.
-			if (
-				answers.get(identity)?.nativeResumeFallback &&
-				!record.nativeResumeFallback
-			)
-				continue;
-			answers.set(
-				identity,
+			if (!record) return [];
+			const fresh = record.fresh ? { fresh: true as const } : {};
+			return [
 				record.completedAt !== undefined
 					? {
-							...key,
+							token: record.token,
+							...fresh,
 							status: "finished",
 							...(record.result ? { result: record.result } : {}),
 							...(record.failure ? { failure: record.failure } : {}),
 						}
 					: {
-							...key,
+							token: record.token,
+							...fresh,
 							status: this.owningCalls.has(filename) ? "running" : "uncertain",
 						},
-			);
-		}
-		return [...answers.values()];
+			];
+		});
 	}
 
-	private filename(commandId: string, attempt: number, fallback: boolean) {
-		const digest = sendKey(
-			this.driverKind,
-			this.sessionId,
-			commandId,
-			attempt,
-			fallback,
+	private filename(token: SendToken) {
+		return join(
+			this.directory,
+			`${sendKey(this.driverKind, this.sessionId, token)}.json`,
 		);
-		return join(this.directory, `${digest}.json`);
 	}
 
-	get commands(): readonly Pick<SendRecord, "commandId" | "attempt">[] {
-		const commands = new Map<string, number>();
-		for (const filename of this.retained) {
+	get tokens(): readonly SendToken[] {
+		return [...this.retained].flatMap((filename) => {
 			const record = this.records.get(filename);
-			if (record)
-				commands.set(
-					record.commandId,
-					Math.max(commands.get(record.commandId) ?? 0, record.attempt),
-				);
-		}
-		return [...commands].map(([commandId, attempt]) => ({
-			commandId,
-			attempt,
-		}));
+			return record ? [record.token] : [];
+		});
 	}
 
 	/** Only the daemon's terminal outbox receipt makes a disk fence disposable. */
-	acknowledge(
-		commands: readonly Pick<SendRecord, "commandId" | "attempt">[],
-	): readonly SendRecord[] {
-		const acknowledged = new Map(
-			commands.map(({ commandId, attempt }) => [commandId, attempt]),
-		);
+	acknowledge(tokens: readonly SendToken[]): readonly SendRecord[] {
+		const acknowledged = new Set(tokens);
 		const removed: SendRecord[] = [];
 		for (const filename of this.retained) {
 			const record = this.records.get(filename);
-			if (
-				!record ||
-				record.attempt > (acknowledged.get(record.commandId) ?? -1)
-			)
-				continue;
+			if (!record || !acknowledged.has(record.token)) continue;
 			let latest: SendRecord;
 			try {
 				// A retiring host may have completed this record after our hello.
 				const decoded: unknown = JSON.parse(readFileSync(filename, "utf8"));
-				if (
-					!isSendRecord(decoded) ||
-					filename !==
-						this.filename(
-							decoded.commandId,
-							decoded.attempt,
-							decoded.nativeResumeFallback,
-						)
-				)
+				if (!isSendRecord(decoded) || filename !== this.filename(decoded.token))
 					throw new RunnerSendCleanupError({
 						message: "Retained send record is invalid",
 					});
@@ -409,15 +369,10 @@ export class RunnerSendJournal {
 		this.retained.add(filename);
 	}
 
-	reportProviderRun(
-		commandId: string,
-		attempt: number,
-		fallback: boolean,
-		providerRunId: string,
-	) {
+	reportProviderRun(token: SendToken, providerRunId: string) {
 		return Effect.try({
 			try: () => {
-				const filename = this.filename(commandId, attempt, fallback);
+				const filename = this.filename(token);
 				const record = this.records.get(filename);
 				if (
 					record &&
@@ -433,13 +388,13 @@ export class RunnerSendJournal {
 		});
 	}
 
+	/** `mode` is the send-turn frame's: a transmission's meaning is fixed when it goes out. */
 	execute(
-		commandId: string,
-		attempt: number,
-		fallback: boolean,
+		token: SendToken,
 		execute: Effect.Effect<TurnResult | undefined, SessionFailure>,
+		mode: "resume" | "fresh" = "resume",
 	): Effect.Effect<TurnResult | undefined, SessionFailure> {
-		const filename = this.filename(commandId, attempt, fallback);
+		const filename = this.filename(token);
 		const uncertain: SessionFailure = {
 			operation: "recover runner send",
 			message:
@@ -467,32 +422,12 @@ export class RunnerSendJournal {
 					if (existing.completedAt !== undefined) return existing.result;
 					return yield* Effect.fail(uncertain);
 				}
-				if (fallback) {
-					let original: SendRecord | undefined;
-					// Requeue can skip unsent attempts. The latest recorded send alone
-					// decides whether this fallback is allowed; a partial file is a fence.
-					for (let previous = attempt; previous >= 0; previous--) {
-						if (this.retained.has(this.filename(commandId, previous, true)))
-							break;
-						const primary = this.filename(commandId, previous, false);
-						if (!this.retained.has(primary)) continue;
-						original = this.records.get(primary);
-						break;
-					}
-					// Only a completed rejection before a provider turn permits fallback.
-					if (
-						!original?.completedAt ||
-						!original.result?.nativeResumeRejected ||
-						original.providerRunId
-					)
-						return yield* Effect.fail(uncertain);
-				}
+				// A fresh fallback is its own transmission (4.8): no marker gates it here.
 				let record: SendRecord = {
-					commandId,
-					attempt,
+					token,
 					runnerPid: process.pid,
 					startedAt: Date.now(),
-					nativeResumeFallback: fallback,
+					...(mode === "fresh" ? { fresh: true as const } : {}),
 				};
 				yield* persist(() => {
 					const fd = openSync(filename, "wx", 0o600);

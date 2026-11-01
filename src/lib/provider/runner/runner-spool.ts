@@ -27,7 +27,11 @@ export class RunnerSpool {
 		string,
 		{ sequence: number; output: SessionOutput }
 	>();
-	constructor(private readonly filename: string) {
+	constructor(
+		private readonly filename: string,
+		/** Stamped at emit, so a replay keeps its origin query's count (CONTRACT 6.1). */
+		private readonly querySeq: () => number,
+	) {
 		writeFileSync(filename, "", { mode: 0o600 });
 	}
 
@@ -135,6 +139,7 @@ export class RunnerSpool {
 				outputId: String(sequence),
 				sequence,
 				output,
+				querySeq: this.querySeq(),
 			};
 			if (
 				output.type === "permission-request" ||

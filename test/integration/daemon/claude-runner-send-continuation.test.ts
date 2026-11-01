@@ -528,12 +528,13 @@ describe("send continuation through real daemon and runner processes", () => {
 						await abandoned;
 					} else if (mode === 40 || mode === 34) {
 						rmSync(pauseGate, { force: true });
+						// A send's frame id is its Send Token; its run id names the run.
 						await waitRecord(
 							harness,
 							"frame-written",
 							(item) =>
-								(item["message"] as { commandId?: string }).commandId ===
-								command.command_id,
+								(item["message"] as { command?: { runId?: string } }).command
+									?.runId === command.run_id,
 						);
 						expect(
 							records(join(harness.root, "sdk-proof.ndjson")).filter(

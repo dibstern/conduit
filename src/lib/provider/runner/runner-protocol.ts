@@ -6,6 +6,7 @@ import { BUILD_ID } from "../../build-id.js";
 import { attachmentFromDataUrl } from "../../persistence/attachment-store.js";
 import { isRecord } from "../../utils.js";
 import type { CursorBackendUrl } from "../cursor/cursor-credential.js";
+import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { ProviderControlCommandStatus, TurnResult } from "../types.js";
 import {
 	isLegacyRunner,
@@ -48,7 +49,11 @@ export interface RunnerWireCodec {
 	) => string;
 }
 
-export const RUNNER_PROTOCOL_VERSION = 5;
+/**
+ * 6: the host stamps `querySeq` on every frame and its hello (CONTRACT 6.1, 9), and keys
+ * every send by its Send Token (4.9, 4.11).
+ */
+export const RUNNER_PROTOCOL_VERSION = 6;
 
 export const runnerBuildId = (): string =>
 	process.env["NODE_ENV"] === "test"
@@ -63,10 +68,30 @@ export const runnerSinkId = (
 ): string =>
 	`${commandId}:${attempt}${nativeResumeFallback ? ":native-resume-fallback" : ""}`;
 
+/**
+ * The one Send Token composer (CONTRACT 3.4, 4.11): a hold's `run.dispatched` names
+ * a "hold" transmission, an outbox claim with no hold a "tx" one. Write-only, never parsed.
+ */
+export const sendToken = (
+	minter: "hold" | "tx",
+	commandId: string,
+	transmission: number,
+) => `${minter}:${commandId}:${transmission}` as SendToken;
+
+/** A row's current transmission: its hold's, else its outbox claim's. */
+export const currentSendToken = (row: {
+	readonly command_id: string;
+	readonly attempt_count: number;
+	readonly held_transmission: number | null;
+}) =>
+	row.held_transmission === null
+		? sendToken("tx", row.command_id, row.attempt_count)
+		: sendToken("hold", row.command_id, row.held_transmission);
+
 export type RunnerSendAnswer = {
-	readonly commandId: string;
-	readonly attempt: number;
-	readonly nativeResumeFallback: boolean;
+	readonly token: SendToken;
+	/** The transmission went out as a fresh fallback (4.8): its rejection is terminal. */
+	readonly fresh?: true;
 } & (
 	| { readonly status: "running" }
 	| { readonly status: "uncertain" }
@@ -101,8 +126,6 @@ export interface RunnerHello {
 	readonly declaresLogin?: true;
 	/** Cursor sends consume the daemon's admitted account credential envelope. */
 	readonly scopedCursorCredentials?: true;
-	/** The journal accepts a fresh fallback after an earlier attempt's rejection. */
-	readonly crossAttemptNativeResumeFallback?: true;
 	/** The journal reports each retained send's outcome and process call ownership. */
 	readonly sendJournalAnswers?: true;
 	/** A new hello cannot overtake unread commands from the previous socket. */
@@ -115,9 +138,7 @@ export interface RunnerHello {
 	readonly bindings?: readonly {
 		readonly sinkId: string;
 		readonly sessionId: string;
-		readonly commandId?: string;
-		/** Absent on older runners; the sink identity supplies its legacy attempt. */
-		readonly attempt?: number;
+		readonly token?: SendToken;
 		/** Absent on older runners; the daemon falls back to its turn records. */
 		readonly released?: boolean;
 	}[];
@@ -125,19 +146,13 @@ export interface RunnerHello {
 		readonly sequence: number;
 		readonly output: SessionOutput;
 	}[];
+	/** The host's command receipts by frame id; a send's frame id is its token. */
 	readonly completedCommands?: readonly {
 		readonly commandId: string;
-		/** Older runners did not report the attempt in completion receipts. */
-		readonly attempt?: number;
-		/** Identifies the send that replied, independently of daemon preparation. */
-		readonly nativeResumeFallback?: boolean;
 		readonly result?: TurnResult;
 		readonly failure?: SessionFailure;
 	}[];
-	readonly sendCommands?: readonly {
-		readonly commandId: string;
-		readonly attempt: number;
-	}[];
+	readonly sendTokens?: readonly SendToken[];
 	readonly config?: {
 		readonly workspaceRoot: string;
 		readonly extraFolders?: readonly string[];
@@ -155,10 +170,7 @@ type RunnerReply =
 	| {
 			readonly type: "command-status-reply";
 			readonly requestId: string;
-			readonly nativeResumeFallback?: boolean;
-			readonly result:
-				| Exclude<ProviderControlCommandStatus, "gone">
-				| "unknown";
+			readonly result: Exclude<ProviderControlCommandStatus, "gone">;
 			readonly failure?: SessionFailure;
 	  }
 	| {
@@ -176,8 +188,6 @@ type RunnerReply =
 	| {
 			readonly type: "command-reply";
 			readonly commandId: string;
-			readonly attempt?: number;
-			readonly nativeResumeFallback?: boolean;
 			readonly result?: TurnResult;
 			readonly failure?: SessionFailure;
 	  }
@@ -189,21 +199,21 @@ type RunnerReply =
 			readonly failure?: SessionFailure;
 	  };
 
-export type RunnerMessage =
+/**
+ * querySeq: the host's count of query replacements (CONTRACT 6.1), stamped on every
+ * frame it writes. Daemon frames carry none.
+ */
+export type RunnerMessage = { readonly querySeq?: number } & (
 	| RunnerHello
 	| {
 			readonly type: "command-refused";
 			readonly commandId: string;
-			readonly attempt?: number;
-			readonly nativeResumeFallback?: boolean;
 			readonly reason: "exiting" | "retiring" | "interrupted";
 	  }
 	| {
 			readonly type: "command-status";
 			readonly requestId: string;
 			readonly commandId: string;
-			readonly attempt?: number;
-			readonly nativeResumeFallback?: boolean;
 	  }
 	| {
 			readonly type: "thread-read";
@@ -220,21 +230,20 @@ export type RunnerMessage =
 	| { readonly type: "idle-exit" | "idle-exit-ack" }
 	| {
 			readonly type: "settled-commands" | "settled-commands-ack";
-			readonly commands: NonNullable<RunnerHello["sendCommands"]>;
+			readonly tokens: readonly SendToken[];
 	  }
 	| {
 			readonly type: "command-accepted";
 			readonly commandId: string;
-			readonly attempt?: number;
 			readonly sinkId: string;
 	  }
 	| { readonly type: "refused"; readonly failure: SessionFailure }
 	| RunnerReply
 	| {
 			readonly type: "command";
+			/** The frame id; a send's is its Send Token. */
 			readonly commandId: string;
 			readonly command: SessionCommand;
-			readonly attempt?: number;
 	  }
 	| {
 			readonly type: "output";
@@ -247,7 +256,8 @@ export type RunnerMessage =
 			/** Legacy peers may send it; current runners ignore it. */
 			readonly preserveRole?: boolean;
 			readonly acknowledgedSequence: number;
-	  };
+	  }
+);
 
 /** Only the outbound wire accepts the pre-attachment-ref send shape. */
 export type RunnerWireMessage =
@@ -416,8 +426,6 @@ interface PendingReply {
 	reply: (reply: RunnerReply) => void;
 	retryOnIdle: boolean;
 	accepted: boolean;
-	commandAttempt?: number;
-	nativeResumeFallback?: boolean;
 	/** The host's refusal of this frame, read before its reply resolves. */
 	refused?: RunnerRefusalReason;
 }
@@ -459,8 +467,10 @@ export class RunnerSocket {
 	private peerAttachmentRefs = false;
 	private peerSettlesAnswers = false;
 	scopedCursorCredentials = false;
+	/** The host's stamp; a frame stamped at production keeps its own (CONTRACT 6.1). */
+	querySeq: (() => number) | undefined;
 	private peerDriverKind: string | undefined;
-	private helloSends: RunnerHello["sendCommands"];
+	private helloSends: readonly SendToken[] | undefined;
 	private readonly completedCommands = new Map<
 		string,
 		"completed" | "failed"
@@ -477,7 +487,7 @@ export class RunnerSocket {
 		| undefined;
 
 	/** The original hello journal, unaffected by acknowledgements or new sends. */
-	get retainedSends(): RunnerHello["sendCommands"] {
+	get retainedSends(): readonly SendToken[] | undefined {
 		return this.helloSends;
 	}
 
@@ -519,7 +529,7 @@ export class RunnerSocket {
 					this.peerDriverKind = message.driverKind;
 					this.helloSends = isLegacyRunner(message)
 						? legacyRunnerRetainedSends(message)
-						: (message.sendAnswers ?? []);
+						: (message.sendAnswers ?? []).map((answer) => answer.token);
 					if (!this.peerSettlesAnswers && isLegacyRunner(message))
 						for (const command of legacyRunnerAnswerCompletions(message))
 							if (command.commandId.endsWith(":answer"))
@@ -571,12 +581,7 @@ export class RunnerSocket {
 				if (message.type === "idle-exit") this.exitRead ??= "exiting";
 				if (message.type === "command-accepted") {
 					const pending = this.pending.get(`command:${message.commandId}`);
-					if (
-						pending &&
-						(message.attempt === undefined ||
-							message.attempt === pending.commandAttempt)
-					)
-						pending.accepted = true;
+					if (pending) pending.accepted = true;
 				}
 				if (
 					message.type === "command-reply" ||
@@ -596,22 +601,7 @@ export class RunnerSocket {
 										? `command:${message.commandId}`
 										: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
-					if (
-						reply &&
-						(message.type !== "command-reply" ||
-							((message.attempt === undefined ||
-								message.attempt === reply.commandAttempt) &&
-								(message.nativeResumeFallback === undefined ||
-									message.nativeResumeFallback === reply.nativeResumeFallback)))
-					) {
-						if (
-							message.type === "command-status-reply" &&
-							reply.nativeResumeFallback !== undefined &&
-							message.nativeResumeFallback !== reply.nativeResumeFallback
-						) {
-							// An older peer cannot distinguish the primary from its fallback.
-							message = { ...message, result: "unknown" };
-						}
+					if (reply) {
 						// Only a legacy reply before acceptance proves non-delivery.
 						if (
 							message.type === "command-reply" &&
@@ -664,7 +654,10 @@ export class RunnerSocket {
 
 	write(message: RunnerMessage): void {
 		if (this.socket.destroyed) return;
-		let frame: RunnerWireMessage = message;
+		let frame: RunnerWireMessage =
+			this.querySeq && message.querySeq === undefined
+				? { ...message, querySeq: this.querySeq() }
+				: message;
 		if (!this.peerAttachmentRefs && message.type === "command") {
 			const command = message.command;
 			if (command.type === "send-turn")
@@ -710,23 +703,24 @@ export class RunnerSocket {
 		});
 	}
 
+	/** A send's `commandId` is its Send Token, unique per transmission (4.11). */
 	commandEffect(
 		commandId: string,
 		command: SessionCommand,
-		attempt?: number,
 		canWrite?: RunnerWriteGate,
 	): Effect.Effect<TurnResult | undefined, RunnerCommandFailure> {
-		if (command.type === "send-turn" && command.input.runId)
-			command = { ...command, runId: command.input.runId };
+		if (command.type === "send-turn")
+			command = {
+				...command,
+				...(command.input.runId ? { runId: command.input.runId } : {}),
+				mode: command.input.nativeResumeFallback ? "fresh" : "resume",
+			};
 		if (
 			this.peerDriverKind === "cursor" &&
 			!this.scopedCursorCredentials &&
 			(command.type === "pre-warm" ||
 				(command.type === "send-turn" &&
-					!this.retainedSends?.some(
-						(send) =>
-							send.commandId === commandId && send.attempt === (attempt ?? 0),
-					)))
+					!this.retainedSends?.some((token) => token === commandId)))
 		)
 			return Effect.fail({
 				...runnerFailure(
@@ -764,7 +758,6 @@ export class RunnerSocket {
 				type: "command",
 				commandId,
 				command,
-				...(attempt !== undefined ? { attempt } : {}),
 			},
 			canWrite,
 		);
@@ -782,25 +775,8 @@ export class RunnerSocket {
 
 	commandStatusEffect(
 		commandId: string,
-		attempt?: number,
 	): Effect.Effect<
 		Exclude<ProviderControlCommandStatus, "gone">,
-		SessionFailure
-	>;
-	commandStatusEffect(
-		commandId: string,
-		attempt: number | undefined,
-		nativeResumeFallback: boolean | undefined,
-	): Effect.Effect<
-		Exclude<ProviderControlCommandStatus, "gone"> | "unknown",
-		SessionFailure
-	>;
-	commandStatusEffect(
-		commandId: string,
-		attempt?: number,
-		nativeResumeFallback?: boolean,
-	): Effect.Effect<
-		Exclude<ProviderControlCommandStatus, "gone"> | "unknown",
 		SessionFailure
 	> {
 		const requestId = randomUUID();
@@ -808,8 +784,6 @@ export class RunnerSocket {
 			type: "command-status",
 			requestId,
 			commandId,
-			...(attempt !== undefined ? { attempt } : {}),
-			...(nativeResumeFallback !== undefined ? { nativeResumeFallback } : {}),
 		});
 	}
 
@@ -850,18 +824,6 @@ export class RunnerSocket {
 					const entry: PendingReply = {
 						retryOnIdle,
 						accepted: false,
-						...(message.type === "command"
-							? {
-									commandAttempt: message.attempt ?? 0,
-									nativeResumeFallback:
-										message.command.type === "send-turn" &&
-										message.command.input.nativeResumeFallback === true,
-								}
-							: {}),
-						...(message.type === "command-status" &&
-						message.nativeResumeFallback !== undefined
-							? { nativeResumeFallback: message.nativeResumeFallback }
-							: {}),
 						reply: (reply) => {
 							connection.pending.delete(key);
 							// Capture the output boundary when the failed reply arrives.

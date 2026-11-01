@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
+import { currentSendToken } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
@@ -23,7 +24,7 @@ function stored(harness: ProcessHarness, sessionId: string) {
 		return {
 			commands: db
 				.prepare(
-					"SELECT command_id, run_id, payload_json, attempt_count, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+					"SELECT outbox.command_id, outbox.run_id, outbox.payload_json, outbox.attempt_count, outbox.status, run.held_transmission FROM provider_command_outbox outbox LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
 				)
 				.all(sessionId) as Array<{
 				command_id: string;
@@ -31,6 +32,7 @@ function stored(harness: ProcessHarness, sessionId: string) {
 				payload_json: string;
 				attempt_count: number;
 				status: string;
+				held_transmission: number | null;
 			}>,
 			turns: db
 				.prepare(
@@ -111,6 +113,7 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 				throw new Error("Missing owned runner");
 			const command = stored(harness, sessionId).commands[0];
 			if (!command) throw new Error("Missing admitted command");
+			const token = currentSendToken(command);
 			const journalDirectory = join(
 				dirname(original.socketPath),
 				"sends",
@@ -125,10 +128,9 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 								readFileSync(join(journalDirectory, filename), "utf8"),
 							) as Record<string, unknown>,
 					)
-					.find((record) => record["commandId"] === command.command_id);
+					.find((record) => record["token"] === token);
 				expect(journal).toMatchObject({
-					commandId: command.command_id,
-					attempt: command.attempt_count,
+					token,
 					runnerPid: original.pid,
 					startedAt: expect.any(Number),
 				});
@@ -158,7 +160,7 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 							JSON.parse(
 								readFileSync(join(journalDirectory, file), "utf8"),
 							) as Record<string, unknown>
-						)["commandId"] === command.command_id,
+						)["token"] === token,
 				);
 				if (!filename) throw new Error("Missing admission fence");
 				writeFileSync(join(journalDirectory, filename), "{");
@@ -253,20 +255,16 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 				for (let replay = 0; replay < 2; replay++) {
 					const result = await Effect.runPromise(
 						direct
-							.commandEffect(
-								command.command_id,
-								{
-									type: "send-turn",
-									sinkId: `${command.command_id}:${command.attempt_count}`,
-									aborted: false,
-									input: {
-										...(JSON.parse(command.payload_json) as SessionTurn),
-										runId: command.run_id,
-										commandAttempt: command.attempt_count,
-									},
+							.commandEffect(token, {
+								type: "send-turn",
+								sinkId: `${command.command_id}:${command.attempt_count}`,
+								aborted: false,
+								input: {
+									...(JSON.parse(command.payload_json) as SessionTurn),
+									runId: command.run_id,
+									commandAttempt: command.attempt_count,
 								},
-								command.attempt_count,
-							)
+							})
 							.pipe(Effect.result, Effect.timeout("15 seconds")),
 					);
 					expect(result).toMatchObject({
@@ -290,6 +288,7 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 							original,
 							replacement,
 							command,
+							token,
 							journal,
 							partialJournal,
 							failures,

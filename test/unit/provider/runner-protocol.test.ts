@@ -10,6 +10,7 @@ import {
 	RunnerSocket,
 	runnerDeliveryEvidence,
 	runnerFailure,
+	sendToken,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { SessionCommand } from "../../../src/lib/provider/runner/session-runner.js";
 
@@ -32,41 +33,40 @@ const send: SessionCommand = {
 	},
 };
 
-for (const echo of [undefined, false, true] as const)
-	effectIt.effect(
-		`fallback status requires an exact echoed identity (${String(echo)})`,
-		() =>
-			Effect.gen(function* () {
-				const requests: RunnerMessage[] = [];
-				const f = yield* Effect.acquireRelease(
-					Effect.tryPromise(() =>
-						fixture((message, socket) => {
-							if (message.type !== "command-status") return;
-							requests.push(message);
-							socket.write(
-								`${JSON.stringify({ type: "command-status-reply", requestId: message.requestId, result: "not_received", ...(echo === undefined ? {} : { nativeResumeFallback: echo }) })}\n`,
-							);
-						}),
-					),
-					(f) => Effect.tryPromise(() => f.close()).pipe(Effect.orDie),
-				);
-				expect(yield* f.client.commandStatusEffect("resume", 1, true)).toBe(
-					echo === true ? "not_received" : "unknown",
-				);
-				expect(requests).toMatchObject([
-					{
-						type: "command-status",
-						commandId: "resume",
-						attempt: 1,
-						nativeResumeFallback: true,
-					},
-				]);
-				// Old daemons asking an unscoped status preserve their prior behavior.
-				expect(yield* f.client.commandStatusEffect("legacy", 1)).toBe(
-					"not_received",
-				);
-			}).pipe(Effect.scoped),
-	);
+effectIt.effect("fallback status asks by the transmission's token alone", () =>
+	Effect.gen(function* () {
+		const requests: RunnerMessage[] = [];
+		const f = yield* Effect.acquireRelease(
+			Effect.tryPromise(() =>
+				fixture((message, socket) => {
+					if (message.type !== "command-status") return;
+					requests.push(message);
+					socket.write(
+						`${JSON.stringify({ type: "command-status-reply", requestId: message.requestId, result: message.commandId === fallback ? "not_received" : "completed" })}\n`,
+					);
+				}),
+			),
+			(f) => Effect.tryPromise(() => f.close()).pipe(Effect.orDie),
+		);
+		// A rejected resume and its fresh fallback are distinct transmissions (4.8).
+		const primary = sendToken("hold", "resume", 1);
+		const fallback = sendToken("hold", "resume", 2);
+		expect(yield* f.client.commandStatusEffect(primary)).toBe("completed");
+		expect(yield* f.client.commandStatusEffect(fallback)).toBe("not_received");
+		expect(requests).toEqual([
+			{
+				type: "command-status",
+				requestId: expect.any(String),
+				commandId: primary,
+			},
+			{
+				type: "command-status",
+				requestId: expect.any(String),
+				commandId: fallback,
+			},
+		]);
+	}).pipe(Effect.scoped),
+);
 
 async function fixture(
 	reply: (message: RunnerMessage, socket: Socket) => void,

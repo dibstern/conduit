@@ -54,7 +54,7 @@ function fixture() {
 	const directory = mkdtempSync(join(tmpdir(), "conduit-spool-regression-"));
 	directories.push(directory);
 	const filename = join(directory, "runner.spool");
-	const spool = new RunnerSpool(filename);
+	const spool = new RunnerSpool(filename, () => 0);
 	const socket = new Socket();
 	sockets.push(socket);
 	const connection = new ClaudeRunnerSocket(

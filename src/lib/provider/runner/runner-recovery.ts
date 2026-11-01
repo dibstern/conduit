@@ -111,8 +111,9 @@ export const runningRunnerCommands = (
 			user_message_id: string | null;
 			attempt_count: number;
 			assistant_message_id: string | null;
+			held_transmission: number | null;
 		}>`SELECT outbox.request_sequence, outbox.project_key, outbox.session_id, outbox.provider_id, outbox.command_id, outbox.payload_json,
-		COALESCE(run.joined_into, run.id) AS run_id,
+		COALESCE(run.joined_into, run.id) AS run_id, run.held_transmission,
 		COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId')) AS user_message_id,
 		outbox.error_code, outbox.status, outbox.attempt_count, turns.assistant_message_id
 		FROM provider_command_outbox outbox

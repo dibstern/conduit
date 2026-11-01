@@ -18,9 +18,10 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
-import type {
-	RunnerHello,
-	RunnerMessage,
+import {
+	currentSendToken,
+	type RunnerHello,
+	type RunnerMessage,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { RunnerMember } from "../../../src/lib/provider/runner/runner-receipts.js";
 import {
@@ -483,14 +484,16 @@ describe("Claude runners survive server replacement through built dist", () => {
 		const db = new Database(harness.daemonStorePath());
 		const command = db
 			.prepare(
-				"SELECT command_id, run_id, payload_json, attempt_count FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+				"SELECT outbox.command_id, outbox.run_id, outbox.payload_json, outbox.attempt_count, run.held_transmission FROM provider_command_outbox outbox LEFT JOIN provider_runs run ON run.id = outbox.run_id AND run.session_id = outbox.session_id WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn'",
 			)
 			.get(sessionId) as {
 			command_id: string;
 			run_id: string;
 			payload_json: string;
 			attempt_count: number;
+			held_transmission: number | null;
 		};
+		const token = currentSendToken(command);
 		const runBoundary =
 			db.prepare(`SELECT run.status, run.completed_at, interruption.created_at AS interrupted_at
 			FROM provider_command_outbox command JOIN provider_runs run
@@ -557,8 +560,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					if (message.type === "hello")
 						cachedJournalAnswer = message.sendAnswers?.find(
 							(answer) =>
-								answer.commandId === command.command_id &&
-								answer.attempt === command.attempt_count &&
+								answer.token === token &&
 								answer.status === "finished" &&
 								answer.result?.status === "accepted",
 						);
@@ -636,7 +638,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 				sessionId,
 			});
 			const binding = directHello.bindings?.find(
-				(candidate) => candidate.commandId === command.command_id,
+				(candidate) => candidate.token === token,
 			);
 			if (!binding) throw new Error("Missing original runner binding");
 			// No replay attachment: the SDK's interrupted result stays spooled while
@@ -665,20 +667,16 @@ describe("Claude runners survive server replacement through built dist", () => {
 			);
 			cachedIntake = await Effect.runPromise(
 				Effect.result(
-					direct.commandEffect(
-						command.command_id,
-						{
-							type: "send-turn",
-							sinkId: binding.sinkId,
-							aborted: false,
-							input: {
-								...(JSON.parse(command.payload_json) as SessionTurn),
-								runId: command.run_id,
-								commandAttempt: command.attempt_count,
-							},
+					direct.commandEffect(token, {
+						type: "send-turn",
+						sinkId: binding.sinkId,
+						aborted: false,
+						input: {
+							...(JSON.parse(command.payload_json) as SessionTurn),
+							runId: command.run_id,
+							commandAttempt: command.attempt_count,
 						},
-						command.attempt_count,
-					),
+					}),
 				).pipe(Effect.timeout("15 seconds")),
 			);
 			expect(cachedIntake).toMatchObject({
@@ -725,9 +723,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 			expect(terminalIndex).toBeGreaterThanOrEqual(0);
 			// SEND-SCOPE-6 S10.1: the journal answers in hello without a send replay.
 			expect(cachedJournalAnswer).toMatchObject({
-				commandId: command.command_id,
-				attempt: command.attempt_count,
-				nativeResumeFallback: false,
+				token,
 				status: "finished",
 				result: { status: "accepted" },
 			});
