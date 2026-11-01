@@ -80,6 +80,8 @@ export interface PublicDriver {
 	step(command: LedgerCommand, now: number): Decision<unknown>;
 	view(): LedgerView;
 	replay(): LedgerView;
+	/** A restart: the state becomes its entries' refold, and the alarm row survives (CONTRACT.md 815-816). */
+	restart(): void;
 	readonly lastEventCount: number;
 	readonly alarmAt: number | undefined;
 }
@@ -101,13 +103,12 @@ export function driver<State, Entry>(
 	let alarmAt: number | undefined;
 	let lastEventCount = 0;
 	const view = () => implementation.viewLedger(state);
-	const replay = () =>
-		implementation.viewLedger(
-			entries.reduce(
-				implementation.evolve,
-				implementation.initialSessionLedgerState("trace-session", provider),
-			),
+	const refold = () =>
+		entries.reduce(
+			implementation.evolve,
+			implementation.initialSessionLedgerState("trace-session", provider),
 		);
+	const replay = () => implementation.viewLedger(refold());
 	return {
 		step(command, now) {
 			const before = structuredClone(view());
@@ -131,6 +132,9 @@ export function driver<State, Entry>(
 		},
 		view,
 		replay,
+		restart() {
+			state = refold();
+		},
 		get lastEventCount() {
 			return lastEventCount;
 		},

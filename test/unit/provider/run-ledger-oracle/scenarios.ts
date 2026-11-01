@@ -85,6 +85,10 @@ export class Driver implements CoverageReader {
 		return this.ledger.view();
 	}
 
+	restart(): void {
+		this.ledger.restart();
+	}
+
 	/** A Tokened issue by its token; a Main one by its run.dispatched token, direct runId or claim (3.4). */
 	answered(
 		token: SendToken,
