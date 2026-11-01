@@ -12,28 +12,40 @@
 // 10. its status and effect_outcome land in separate writes, or the outcome is never folded;
 // 11. a probe's provider call outlives its retry deadline, or its timeout is not retryable at it;
 // 12. a replay of the outcome inserts an outbox row.
+// Main's control outcomes (3.4, 3.12, 2.1 row 215). How they could fail:
+// 13. a writer that ends a control row (the executor, the refusal sweep, drain's removed-project
+//     cancel, pending-prompt retirement) appends no effect_outcome, or appends it in another write;
+// 14. an unclaimed row's outcome names a transmission other than 0, or a claimed one's another n;
+// 15. the folded outcome leaves the control's issue live, or its replay inserts an outbox row.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Scope } from "effect";
+import { Effect, Ref, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
+import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	makeEventStoreEffect,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectContext,
 } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { makeRetireReplacedProcessPrompts } from "../../../src/lib/persistence/effect/retire-pending-prompts.js";
 import {
 	loadLedgerView,
 	makeRunLedgerArm,
 } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
+import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
@@ -470,6 +482,248 @@ describe("Run Ledger arm", () => {
 						const runner = yield* ProjectionRunnerEffectTag;
 						for (const event of [...opened, stop, ...online.answers])
 							yield* store.append(event);
+						yield* runner.recover();
+						return yield* ledgerRows;
+					}),
+				);
+				expect(replayed.outbox).toEqual([]);
+				expect(replayed.entries).toEqual(online.rows.entries);
+				expect(replayed.sessions).toEqual(online.rows.sessions);
+			}),
+	);
+	it.live(
+		"appends one effect_outcome where each writer ends a control row, n 0 when unclaimed",
+		() =>
+			Effect.gen(function* () {
+				const interrupts: string[] = [];
+				// s2 lives in a project that is later removed; the others in test-project.
+				const opened = ["s1", "s2", "s3", "s4"].map((id) =>
+					turn(id, "opencode"),
+				);
+				const stops = ["s1", "s2", "s3", "s4"].map((id, index) =>
+					canonicalEvent(
+						"interrupt.requested",
+						id,
+						{ providerProcessId: "p1", stop: null },
+						at(1010, { commandId: `c${index + 1}` }),
+					),
+				);
+				const online = yield* withStore(
+					Effect.scoped(
+						Effect.gen(function* () {
+							const sql = yield* SqlClient.SqlClient;
+							const commit = yield* makeCommitAndSignal;
+							const runner = yield* ProjectionRunnerEffectTag;
+							const local = yield* EventStoreEffectTag;
+							const gone = yield* makeEventStoreEffect.pipe(
+								Effect.provideService(PersistenceProjectTag, {
+									projectId: "gone",
+								}),
+							);
+							yield* runner.recover();
+							for (const [index, events] of opened.entries())
+								for (const event of [...events, stops[index]])
+									if (event)
+										yield* runner.projectEvent(
+											yield* (index === 1 ? gone : local).append(event),
+										);
+							const live = (sessionId: string) =>
+								loadLedgerView(sessionId).pipe(
+									Effect.map((view) =>
+										(view?.live ?? []).flatMap((issued) =>
+											// Main's controls; u1 is the running turn's send.
+											issued.tag === "Main" && issued.commandId !== "u1"
+												? [issued.commandId]
+												: [],
+										),
+									),
+								);
+							const issued = [
+								yield* live("s1"),
+								yield* live("s2"),
+								yield* live("s3"),
+								yield* live("s4"),
+							];
+							const control = (index: number) =>
+								sql`INSERT INTO provider_command_outbox (request_sequence, command_id,
+									project_key, session_id, provider_id, effect_type, payload_json, run_id,
+									provider_process_id, status, attempt_count, requested_at, updated_at)
+									VALUES (${100 + index}, ${`c${index + 1}`}, ${index === 1 ? "gone" : "test-project"},
+										${`s${index + 1}`}, 'opencode', 'interrupt_turn',
+										${JSON.stringify({ type: "interrupt_turn", sessionId: `s${index + 1}`, providerProcessId: "p1", stop: null })},
+										'r1', ${index === 0 || index === 3 ? "p1" : null}, 'pending', 0, 1010, 1010)`;
+							const reactor = (
+								isProjectReady?: (
+									projectId: string,
+									sessionId: string,
+								) => Effect.Effect<boolean, ProviderInstanceFailure>,
+							) =>
+								new ProviderSideEffectReactor({
+									sql,
+									write: commit.write,
+									ingestion: {
+										ingest: () => Effect.die("unused"),
+										ingestBatch: () => Effect.die("unused"),
+									},
+									registry: new ProviderRegistry([
+										{
+											providerId: "opencode",
+											generateTextEffect: () => Effect.die("unused"),
+											discoverEffect: () => Effect.die("unused"),
+											sendTurnEffect: () => Effect.die("unused"),
+											interruptTurnEffect: (sessionId) =>
+												Effect.sync(() => {
+													interrupts.push(sessionId);
+												}),
+											getNativeSessionEffect: () => Effect.succeed(undefined),
+											// c1's process is live; c4's expired with it but is retired by its session.
+											getControlProcessIdEffect: () => Effect.succeed("p1"),
+											resolvePermissionEffect: () => Effect.void,
+											resolveQuestionEffect: () => Effect.void,
+											shutdownEffect: () => Effect.void,
+											endSessionEffect: () => Effect.void,
+										},
+									]),
+									...(isProjectReady ? { isProjectReady } : {}),
+									nowMs: () => 2000,
+								});
+							// Pending-prompt retirement ends c4, bound to the expired process p1.
+							yield* control(3);
+							const retire = yield* makeRetireReplacedProcessPrompts;
+							yield* retire(null, { sessionId: "s4", expiredProcessId: "p1" });
+							// The refusal sweep ends c3, and every ledger row still open.
+							yield* control(2);
+							yield* reactor((_, sessionId) =>
+								Effect.fail(
+									new ProviderInstanceFailure({
+										providerId: "opencode",
+										operation: sessionId,
+										cause: new Error("unavailable"),
+										code: "project_unavailable",
+									}),
+								),
+							).drain();
+							// drain cancels c2, whose project is no longer registered.
+							yield* control(1);
+							const registered = yield* Ref.make<readonly string[]>([
+								"test-project",
+							]);
+							const removedProjectDrain = reactor()
+								.drain()
+								.pipe(Effect.provideService(SessionRollupProjects, registered));
+							yield* removedProjectDrain;
+							// The executor claims c1 and records its success.
+							yield* control(0);
+							yield* removedProjectDrain;
+							return {
+								issued,
+								after: [
+									yield* live("s1"),
+									yield* live("s2"),
+									yield* live("s3"),
+									yield* live("s4"),
+								],
+								controls:
+									yield* sql`SELECT command_id, status, attempt_count FROM provider_command_outbox
+									WHERE effect_type = 'interrupt_turn' ORDER BY command_id`,
+								outcomes: yield* sql<{
+									sequence: number;
+									project_id: string;
+									data: string;
+								}>`SELECT sequence, project_id, data FROM events
+									WHERE type = 'evidence.effect_outcome'
+										AND json_extract(data, '$.token') IS NULL ORDER BY sequence`,
+								folded: yield* sql<{
+									event_sequence: number;
+								}>`SELECT DISTINCT event_sequence FROM run_ledger_entries`,
+								// Both projects' outcomes, as canonical events: the read is not project-scoped.
+								answers: (yield* local.readFromSequence(0)).flatMap((event) =>
+									event.type === "evidence.effect_outcome"
+										? [
+												canonicalEvent(
+													event.type,
+													event.sessionId,
+													event.data,
+													{
+														createdAt: event.createdAt,
+														provider: event.provider,
+														metadata: event.metadata,
+													},
+												),
+											]
+										: [],
+								),
+								rows: yield* ledgerRows,
+							};
+						}),
+					),
+				);
+				expect(online.issued).toEqual([["c1"], ["c2"], ["c3"], ["c4"]]);
+				expect(interrupts).toEqual(["s1"]);
+				expect(online.controls).toEqual([
+					{ command_id: "c1", status: "completed", attempt_count: 1 },
+					{ command_id: "c2", status: "cancelled", attempt_count: 0 },
+					{ command_id: "c3", status: "failed", attempt_count: 0 },
+					{ command_id: "c4", status: "cancelled", attempt_count: 0 },
+				]);
+				// 13, 14: one outcome per ended control, in its row's project.
+				expect(
+					online.outcomes.map(({ project_id, data }) => ({
+						project_id,
+						...JSON.parse(data),
+					})),
+				).toEqual([
+					{
+						project_id: "test-project",
+						commandId: "c4",
+						transmission: 0,
+						outcome: { tag: "permanent", code: "provider_process_gone" },
+					},
+					{
+						project_id: "test-project",
+						commandId: "c3",
+						transmission: 0,
+						outcome: { tag: "permanent", code: "project_unavailable" },
+					},
+					{
+						project_id: "gone",
+						commandId: "c2",
+						transmission: 0,
+						outcome: { tag: "permanent", code: "project_inactive" },
+					},
+					{
+						project_id: "test-project",
+						commandId: "c1",
+						transmission: 1,
+						outcome: { tag: "succeeded" },
+					},
+				]);
+				// 15: each was folded in its write; a swept control's issue ends, while c1's delivered
+				// interrupt stays live until its Run ends.
+				for (const { sequence } of online.outcomes)
+					expect(online.folded.map((row) => row.event_sequence)).toContain(
+						sequence,
+					);
+				expect(online.after).toEqual([["c1"], [], [], []]);
+
+				// 15: a cold replay of both projects' logs folds the same and inserts no row.
+				const replayed = yield* withStore(
+					Effect.gen(function* () {
+						const local = yield* EventStoreEffectTag;
+						const gone = yield* makeEventStoreEffect.pipe(
+							Effect.provideService(PersistenceProjectTag, {
+								projectId: "gone",
+							}),
+						);
+						const runner = yield* ProjectionRunnerEffectTag;
+						for (const event of [
+							...opened.flatMap((events, index) => [
+								...events,
+								...(stops[index] ? [stops[index]] : []),
+							]),
+							...online.answers,
+						])
+							yield* (event.sessionId === "s2" ? gone : local).append(event);
 						yield* runner.recover();
 						return yield* ledgerRows;
 					}),

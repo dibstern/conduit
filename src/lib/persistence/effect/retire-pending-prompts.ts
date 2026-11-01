@@ -3,13 +3,18 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
-import { canonicalEvent } from "../events.js";
+import { type CanonicalEvent, canonicalEvent } from "../events.js";
 import { makeCommitAndSignal } from "./commit-and-signal.js";
 import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
 } from "./event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "./projection-runner-effect.js";
+import {
+	ENDED_ROW_COLUMNS,
+	type EndedOutboxRow,
+	endedRowOutcome,
+} from "./run-ledger-arm.js";
 
 interface PendingPrompt {
 	readonly id: string;
@@ -17,10 +22,16 @@ interface PendingPrompt {
 	readonly type: "permission" | "question";
 }
 
-/** Expiration is a durable resolution, just like an answer. */
+/**
+ * Expiration is a durable resolution, just like an answer. cancelControls returns the outcomes of
+ * the controls it ends, appended in this write (3.12).
+ */
 export const retirePendingPrompts = (
 	prompts: readonly PendingPrompt[],
-	cancelControls: Effect.Effect<void, SqlError> = Effect.void,
+	cancelControls: Effect.Effect<
+		readonly CanonicalEvent[],
+		SqlError
+	> = Effect.succeed([]),
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -29,7 +40,7 @@ export const retirePendingPrompts = (
 		const pending = yield* Effect.serviceOption(PendingInteractionServiceTag);
 		const retired = yield* commit.write((project) =>
 			Effect.gen(function* () {
-				yield* cancelControls;
+				const outcomes = yield* cancelControls;
 				const remaining: PendingPrompt[] = [];
 				for (const prompt of prompts) {
 					const rows = yield* sql`SELECT pa.id FROM pending_approvals pa
@@ -40,23 +51,26 @@ export const retirePendingPrompts = (
 							AND s.project_id = ${eventStore.projectId}`;
 					if (rows.length > 0) remaining.push(prompt);
 				}
-				if (remaining.length === 0) return remaining;
-				const events = remaining.map((prompt) =>
-					prompt.type === "permission"
-						? canonicalEvent(
-								"permission.resolved",
-								prompt.sessionId,
-								{ id: prompt.id, decision: "reject" },
-								{ metadata: { source: "provider-process-expired" } },
-							)
-						: canonicalEvent(
-								"question.resolved",
-								prompt.sessionId,
-								{ id: prompt.id, answers: {} },
-								{ metadata: { source: "provider-process-expired" } },
-							),
+				const events = remaining.map(
+					(prompt): CanonicalEvent =>
+						prompt.type === "permission"
+							? canonicalEvent(
+									"permission.resolved",
+									prompt.sessionId,
+									{ id: prompt.id, decision: "reject" },
+									{ metadata: { source: "provider-process-expired" } },
+								)
+							: canonicalEvent(
+									"question.resolved",
+									prompt.sessionId,
+									{ id: prompt.id, answers: {} },
+									{ metadata: { source: "provider-process-expired" } },
+								),
 				);
-				yield* project(yield* eventStore.appendBatch(events));
+				if (outcomes.length + events.length > 0)
+					yield* project(
+						yield* eventStore.appendBatch([...outcomes, ...events]),
+					);
 				return remaining;
 			}),
 		);
@@ -142,11 +156,9 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 				})),
 				Effect.gen(function* () {
 					const now = Date.now();
-					const cancelled = yield* client<{
-						command_id: string;
-						provider_id: string;
-						effect_type: string;
-					}>`UPDATE provider_command_outbox
+					const cancelled = yield* client<
+						EndedOutboxRow & { effect_type: string }
+					>`UPDATE provider_command_outbox
 						SET status = 'cancelled', payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END, error_code = 'provider_process_gone', next_attempt_at = NULL, updated_at = ${now}
 						WHERE effect_type <> 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
 							AND (${"sessionId" in scope ? (scope.exceptCommandId ?? null) : null} IS NULL
@@ -156,11 +168,12 @@ export const makeRetireReplacedProcessPrompts = Effect.gen(function* () {
 							AND (${currentProcessId} IS NULL OR (provider_process_id IS NOT NULL AND provider_process_id <> ${currentProcessId}))
 							AND session_id IN (SELECT s.id FROM sessions s WHERE s.project_id = ${projectId}
 								AND ${"sessionId" in scope ? client`s.id = ${scope.sessionId}` : client`s.provider IN ${client.in(scope.providerInstanceIds)}`})
-						RETURNING command_id, provider_id, effect_type`;
+						RETURNING effect_type, ${client.literal(ENDED_ROW_COLUMNS)}`;
 					for (const command of cancelled)
 						yield* client`UPDATE command_receipts SET status = 'side_effect_failed', error_code = 'provider_process_gone',
 						error = ${JSON.stringify({ _tag: "ProviderInstanceFailure", providerId: command.provider_id, operation: command.effect_type, code: "provider_process_gone", causeMessage: "The target provider process is no longer available" })}, updated_at = ${now}
 						WHERE project_key = ${projectId} AND command_id = ${command.command_id}`;
+					return cancelled.map(endedRowOutcome);
 				}),
 			).pipe(Effect.provideService(EventStoreEffectTag, store));
 		}).pipe(Effect.provide(context));

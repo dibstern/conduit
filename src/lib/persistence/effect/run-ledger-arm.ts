@@ -30,7 +30,7 @@ import type {
 	RunEffect,
 	SendToken,
 } from "../../provider/run-ledger/run-ledger-model.js";
-import type { StoredEvent } from "../events.js";
+import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
 	EffectProjector,
@@ -68,6 +68,53 @@ export const ledgerEffectWakes = new WeakMap<
 	Set<() => void>
 >();
 const wakeKey = Symbol("run-ledger-effect-wake");
+
+/** An outbox row a writer ended, as its RETURNING ENDED_ROW_COLUMNS reads it. */
+export interface EndedOutboxRow {
+	readonly command_id: string;
+	readonly session_id: string;
+	readonly provider_id: string;
+	readonly attempt_count: number;
+	readonly status: string;
+	readonly error_code: string | null;
+	readonly next_attempt_at: number | null;
+	readonly updated_at: number;
+	readonly token: string | null;
+}
+
+/** A ledger effect's row names decide's token (3.4); main's controls name none. */
+export const ENDED_ROW_COLUMNS = `command_id, session_id, provider_id, attempt_count, status,
+	error_code, next_attempt_at, updated_at, CASE WHEN effect_type IN ('probe', 'stop_task',
+	'cancel_request') THEN json_extract(payload_json, '$.token') END AS token`;
+
+/**
+ * The effect_outcome a writer appends in the write that ends an outbox row (3.4, 3.12): it names
+ * (command_id, attempt_count), n 0 when no claim reached the row. completed reads succeeded,
+ * retryable_failed reads retryable at its next_attempt_at with its error_code, and failed or
+ * cancelled reads permanent with its error_code.
+ */
+export const endedRowOutcome = (row: EndedOutboxRow) =>
+	canonicalEvent(
+		"evidence.effect_outcome",
+		row.session_id,
+		{
+			commandId: row.command_id,
+			transmission: row.attempt_count,
+			...(row.token === null ? {} : { token: row.token }),
+			outcome:
+				row.status === "completed"
+					? { tag: "succeeded" as const }
+					: row.status === "retryable_failed"
+						? {
+								tag: "retryable" as const,
+								// Main's retryable writes set next_attempt_at; NULL is due now.
+								retryAt: row.next_attempt_at ?? row.updated_at,
+								...(row.error_code === null ? {} : { code: row.error_code }),
+							}
+						: { tag: "permanent" as const, code: row.error_code ?? row.status },
+		},
+		{ provider: row.provider_id, createdAt: row.updated_at },
+	);
 
 /** The per-session row (3.12): Quiescent, or Open with its earliest alarm. */
 export interface LedgerRow {

@@ -41,7 +41,10 @@ import { PROCESSING_TIMEOUT_DURATION } from "../domain/relay/Services/session-ov
 import * as Failure from "../effect/failure-classification.js";
 import type { AttachmentStore } from "../persistence/attachment-store.js";
 import type { ClaudeEventPersistEffect } from "../persistence/effect/claude-event-persist-effect.js";
-import type { CommitAndSignal } from "../persistence/effect/commit-and-signal.js";
+import type {
+	CommitAndSignal,
+	CommitAndSignalProject,
+} from "../persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../persistence/effect/event-store-effect.js";
 import {
 	makeProviderStateEffect,
@@ -53,6 +56,9 @@ import {
 } from "../persistence/effect/read-query-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../persistence/effect/retire-pending-prompts.js";
 import {
+	ENDED_ROW_COLUMNS,
+	type EndedOutboxRow,
+	endedRowOutcome,
 	LEDGER_EFFECT_TYPES,
 	ledgerEffectWakes,
 } from "../persistence/effect/run-ledger-arm.js";
@@ -462,25 +468,27 @@ export class ProviderSideEffectReactor {
 				// Removed projects retain history but have no executor. Release their
 				// process queue heads before selecting another project's controls.
 				yield* this.options
-					.write(() =>
+					.write((project) =>
 						Effect.gen({ self: this }, function* () {
 							const projects = yield* Ref.get(registered);
 							const now = yield* this.currentTimeMillis();
-							const cancelled = yield* this.options.sql<{
-								command_id: string;
-								project_key: string;
-								provider_id: string;
-								effect_type: string;
-							}>`UPDATE provider_command_outbox
+							const cancelled = yield* this.options.sql<
+								EndedOutboxRow & { project_key: string; effect_type: string }
+							>`UPDATE provider_command_outbox
 						SET status = 'cancelled', payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END, error_code = 'project_inactive', next_attempt_at = NULL, updated_at = ${now}
 						WHERE effect_type <> 'send_turn' AND status IN ('pending', 'running', 'retryable_failed')
 							AND project_key NOT IN ${this.options.sql.in(projects)}
-						RETURNING command_id, project_key, provider_id, effect_type`;
-							for (const row of cancelled)
+						RETURNING project_key, effect_type, ${this.options.sql.literal(ENDED_ROW_COLUMNS)}`;
+							for (const row of cancelled) {
 								yield* this.options
 									.sql`UPDATE command_receipts SET status = 'side_effect_failed', error_code = 'project_inactive',
 							error = ${JSON.stringify({ _tag: "ProviderInstanceFailure", providerId: row.provider_id, operation: row.effect_type, code: "project_inactive", causeMessage: "The target project is no longer registered" })}, updated_at = ${now}
 							WHERE command_id = ${row.command_id} AND project_key = ${row.project_key} AND status = 'side_effect_requested'`;
+								// 3.12: each cancelled control appends its outcome under its own project.
+								yield* this.appendInWrite(project, row.project_key, [
+									endedRowOutcome(row),
+								]);
+							}
 						}),
 					)
 					.pipe(Effect.mapError(storeFailure("cancelInactiveControls")));
@@ -2449,27 +2457,50 @@ export class ProviderSideEffectReactor {
 		);
 	}
 
+	/** A control row's success, with its effect_outcome in the same write (3.4, 3.12). */
 	private markCompleted(
 		row: ProviderCommandOutboxRow,
 		updatedAt: number,
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		const { sql } = this.options;
-		return sql
-			.withTransaction(
-				Effect.all([
-					sql`
+		return this.options
+			.write((project) =>
+				Effect.gen({ self: this }, function* () {
+					const ended = yield* sql<EndedOutboxRow>`
 					UPDATE provider_command_outbox
 					SET status = 'completed', payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END, updated_at = ${updatedAt}
 					WHERE request_sequence = ${row.request_sequence}
-						AND project_key = ${row.project_key}`,
-					sql`
+						AND project_key = ${row.project_key}
+					RETURNING ${sql.literal(ENDED_ROW_COLUMNS)}`;
+					yield* sql`
 					UPDATE command_receipts
 					SET status = 'side_effect_completed', updated_at = ${updatedAt}
 					WHERE command_id = ${row.command_id}
-						AND project_key = ${row.project_key}`,
-				]),
+						AND project_key = ${row.project_key}`;
+					yield* this.appendInWrite(
+						project,
+						row.project_key,
+						ended.map(endedRowOutcome),
+					);
+				}),
 			)
-			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markCompleted")));
+			.pipe(Effect.mapError(storeFailure("markCompleted")));
+	}
+
+	/** Append and project events in the caller's write, under the row's project (3.12). */
+	private appendInWrite(
+		project: CommitAndSignalProject,
+		projectId: string,
+		events: readonly CanonicalEvent[],
+	) {
+		return events.length === 0
+			? Effect.void
+			: makeEventStoreEffect.pipe(
+					Effect.provideService(SqlClient.SqlClient, this.options.sql),
+					Effect.provideService(PersistenceProjectTag, { projectId }),
+					Effect.flatMap((store) => store.appendBatch(events)),
+					Effect.flatMap(project),
+				);
 	}
 
 	private recordControlOutcome(
@@ -2536,35 +2567,27 @@ export class ProviderSideEffectReactor {
 								})
 							: null;
 						const changed = yield* this.options
-							.sql`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END, error_code = ${errorCode}, next_attempt_at = ${nextAttemptAt}, updated_at = ${updatedAt}
+							.sql<EndedOutboxRow>`UPDATE provider_command_outbox SET status = ${failure?.code === "provider_process_gone" || failure?.code === "provider_process_unavailable" ? "cancelled" : retryable ? "retryable_failed" : failure ? "failed" : "completed"}, payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END, error_code = ${errorCode}, next_attempt_at = ${nextAttemptAt}, updated_at = ${updatedAt}
 				WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 					AND (status = 'running' OR (${row.attempt_count >= maxControlAttempts} AND status IN ('pending', 'retryable_failed')))
-					AND attempt_count = ${row.attempt_count} RETURNING command_id`;
+					AND attempt_count = ${row.attempt_count} RETURNING ${this.options.sql.literal(ENDED_ROW_COLUMNS)}`;
 						if (changed.length) {
 							yield* this.options
 								.sql`UPDATE command_receipts SET status = ${retryable ? "side_effect_requested" : failure ? "side_effect_failed" : "side_effect_completed"}, error_code = ${errorCode}, error = ${errorJson}, updated_at = ${updatedAt}
 				WHERE command_id = ${row.command_id} AND project_key = ${row.project_key} AND status = 'side_effect_requested'`;
-							if (reopened) {
-								const current = yield* this.options
-									.sql`SELECT id FROM pending_approvals WHERE id = ${reopened.event.data.id} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved' AND version = ${reopened.version}`;
-								if (current.length) {
-									const store = yield* makeEventStoreEffect.pipe(
-										Effect.provideService(
-											SqlClient.SqlClient,
-											this.options.sql,
-										),
-										Effect.provideService(PersistenceProjectTag, {
-											projectId: row.project_key,
-										}),
-									);
-									yield* project(
-										yield* store.appendBatch([
+							const current = reopened
+								? yield* this.options
+										.sql`SELECT id FROM pending_approvals WHERE id = ${reopened.event.data.id} AND session_id = ${row.session_id} AND provider_process_id = ${row.provider_process_id} AND status = 'resolved' AND version = ${reopened.version}`
+								: [];
+							yield* this.appendInWrite(project, row.project_key, [
+								...changed.map(endedRowOutcome),
+								...(reopened && current.length
+									? [
 											reopened.event,
 											...(reopened.notice ? [reopened.notice] : []),
-										]),
-									);
-								}
-							}
+										]
+									: []),
+							]);
 						}
 					}),
 				),
@@ -2832,14 +2855,21 @@ export class ProviderSideEffectReactor {
 						)
 							return;
 						const changed = yield* this.options
-							.sql`UPDATE provider_command_outbox
+							.sql<EndedOutboxRow>`UPDATE provider_command_outbox
 					SET status = ${code === "project_inactive" ? "cancelled" : "failed"}, error_code = ${code},
 						payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END,
 						next_attempt_at = NULL, updated_at = ${now}, run_id = ${unstarted?.id ?? row.run_id}
 					WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
 						AND attempt_count = ${row.attempt_count} AND status IN ('pending', 'running', 'retryable_failed')
-					RETURNING command_id`;
+					RETURNING ${this.options.sql.literal(ENDED_ROW_COLUMNS)}`;
 						if (changed.length === 0) return;
+						// 3.12: a control row the refusal sweep ends appends its outcome, n 0 unclaimed.
+						if (row.effect_type !== "send_turn")
+							yield* this.appendInWrite(
+								project,
+								row.project_key,
+								changed.map(endedRowOutcome),
+							);
 						yield* this.options
 							.sql`UPDATE command_receipts SET status = 'side_effect_failed',
 					error_code = ${code}, error = ${JSON.stringify({
@@ -2960,8 +2990,10 @@ export class ProviderSideEffectReactor {
 			? updatedAt + Duration.toMillis(retryBackoff(row.attempt_count))
 			: null;
 		const { sql } = this.options;
-		const updates = Effect.all([
-			sql`
+		return this.options
+			.write((project) =>
+				Effect.gen({ self: this }, function* () {
+					const ended = yield* sql<EndedOutboxRow>`
 					UPDATE provider_command_outbox
 					SET status = ${retryable ? "retryable_failed" : "failed"},
 					    payload_json = CASE WHEN ${retryable} OR NOT json_valid(payload_json) THEN payload_json ELSE json_remove(payload_json, '$.images') END,
@@ -2969,16 +3001,22 @@ export class ProviderSideEffectReactor {
 					    next_attempt_at = ${nextAttemptAt},
 					    updated_at = ${updatedAt}
 					WHERE request_sequence = ${row.request_sequence}
-						AND project_key = ${row.project_key}`,
-			sql`
+						AND project_key = ${row.project_key}
+					RETURNING ${sql.literal(ENDED_ROW_COLUMNS)}`;
+					yield* sql`
 					UPDATE command_receipts
 					SET status = 'side_effect_failed', error_code = ${errorCode}, updated_at = ${updatedAt}
 					WHERE command_id = ${row.command_id}
-						AND project_key = ${row.project_key}`,
-		]).pipe(Effect.asVoid);
-		return sql
-			.withTransaction(updates)
-			.pipe(Effect.asVoid, Effect.mapError(storeFailure("markFailed")));
+						AND project_key = ${row.project_key}`;
+					// A control row's failure, with its effect_outcome in the same write (3.4, 3.12).
+					yield* this.appendInWrite(
+						project,
+						row.project_key,
+						ended.map(endedRowOutcome),
+					);
+				}),
+			)
+			.pipe(Effect.mapError(storeFailure("markFailed")));
 	}
 
 	/**
