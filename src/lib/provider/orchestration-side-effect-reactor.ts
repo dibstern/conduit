@@ -139,6 +139,8 @@ const controlErrorSchema = Schema.Struct({
 			"project_inactive",
 			"project_unavailable",
 			"model_parameters_unavailable",
+			"codex_version_unsupported",
+			"runner_detached",
 		]),
 	),
 	causeMessage: Schema.String,

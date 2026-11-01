@@ -2532,10 +2532,17 @@ describe("ProviderSideEffectReactor", () => {
 
 	// How it could fail: a stored control failure whose code the reactor's schema omits fails to
 	// decode, so a later caller sees a store failure instead of the provider's own code.
-	it.effect("recalls a stored control failure with its own code", () =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key,
+	for (const code of [
+		"model_parameters_unavailable",
+		"codex_version_unsupported",
+		"runner_detached",
+	] as const)
+		it.effect(
+			`recalls a stored ${code} control failure with its own code`,
+			() =>
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key,
 				session_id, provider_id, effect_type, payload_json, provider_process_id, status,
 				attempt_count, requested_at, updated_at)
 				VALUES (10, 'stop', 'test-project', 'session-1', 'claude', 'interrupt_turn',
@@ -2546,31 +2553,31 @@ describe("ProviderSideEffectReactor", () => {
 						turnIds: ["original-input"],
 					})},
 					'p1', 'pending', 0, 1000, 1000)`;
-			yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at,
+					yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at,
 				command_type, project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
 				VALUES ('stop', 'session-1', 'side_effect_requested', 1000, 'interrupt_turn',
 					'test-project', 'sha256:abc', 1, 10, 1000)`;
-			const reactor = yield* makeReactor({
-				registry: new ProviderRegistry([
-					{
-						...makeProvider(() => Effect.succeed(completedTurn)),
-						interruptTurnEffect: () =>
-							Effect.fail(
-								new ProviderInstanceFailure({
-									providerId: "claude",
-									operation: "interruptTurn",
-									code: "model_parameters_unavailable",
-									cause: new Error("no such effort"),
-								}),
-							),
-					},
-				]),
-			});
-			yield* reactor.runOnce();
-			const failure = yield* Effect.flip(reactor.runCommand("stop"));
-			expect(failure).toMatchObject({ code: "model_parameters_unavailable" });
-		}).pipe(Effect.provide(reactorTestLayer)),
-	);
+					const reactor = yield* makeReactor({
+						registry: new ProviderRegistry([
+							{
+								...makeProvider(() => Effect.succeed(completedTurn)),
+								interruptTurnEffect: () =>
+									Effect.fail(
+										new ProviderInstanceFailure({
+											providerId: "claude",
+											operation: "interruptTurn",
+											code,
+											cause: new Error("no such effort"),
+										}),
+									),
+							},
+						]),
+					});
+					yield* reactor.runOnce();
+					const failure = yield* Effect.flip(reactor.runCommand("stop"));
+					expect(failure).toMatchObject({ code });
+				}).pipe(Effect.provide(reactorTestLayer)),
+		);
 });
 
 const reactorTestLayer = Layer.provideMerge(
