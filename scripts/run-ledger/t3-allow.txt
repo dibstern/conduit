@@ -2060,3 +2060,4 @@ T5-writers, 11.3 event-order test (2160 orderings, restart, replay equal),	point
 process_started from register/swap/recover is 32.6's; raw-write loss append	pointer
 dispatched; direct run.requested is one), arm fix: the direct marker folds	pointer
 as effect_outcome delivery_unknown, not a hold fact (CONTRACT 527/1818), a	pointer
+send that never reached the agent (released JournalAbsent, transmission 2).	pointer

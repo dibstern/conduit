@@ -428,11 +428,17 @@ describe("Run Ledger arm", () => {
 						),
 					];
 					// 17, 18: the retry names Run r1 and transmits nothing; the marker naming r2 finds no
-					// transmission; the dispatch is the retry's one transmission.
+					// transmission; the dispatch is the retry's one transmission, which moves its input to
+					// Dispatching (3.9, 4.11).
 					expect(held).toEqual([
 						{ folded: true, runId: "r1", inputs: ["Queued"], live: [] },
 						{ folded: false, runId: "r1", inputs: ["Queued"], live: [] },
-						{ folded: true, runId: "r1", inputs: ["Queued"], live: ["c1"] },
+						{
+							folded: true,
+							runId: "r1",
+							inputs: ["Dispatching"],
+							live: ["c1"],
+						},
 					]);
 
 					// OpenCode: run.requested r1 is the direct start's transmission, under its input's id.
