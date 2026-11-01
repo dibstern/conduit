@@ -35,7 +35,7 @@ export function cursorSessionConfig(input: {
 	readonly extraFolders: readonly string[];
 	readonly permissionMode?: SessionPermissionMode | undefined;
 	readonly modelId: string;
-	readonly modelParams?: readonly CursorModelParameter[] | undefined;
+	readonly modelParams: readonly CursorModelParameter[];
 	readonly credential: Pick<CursorCredential, "fingerprint">;
 }): CursorSessionConfig {
 	const mode = input.permissionMode ?? "ask";
@@ -76,7 +76,7 @@ export function cursorSessionConfig(input: {
 		send: {
 			model: {
 				id: input.modelId,
-				params: input.modelParams ?? [],
+				params: input.modelParams,
 			},
 			mode: mode === "plan" ? "plan" : "agent",
 		},

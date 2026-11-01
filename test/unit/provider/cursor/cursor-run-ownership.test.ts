@@ -37,6 +37,8 @@ describe("Cursor accepted run ownership", () => {
 		"recall-before-send",
 		"recall-after-send",
 		"unprepared",
+		// Signed in, but the send lacks prepare's facts.
+		"unprepared-facts",
 	] as const)("keeps intake and terminal ownership with %s evidence", async (evidence) => {
 		const root = mkdtempSync(join(tmpdir(), "cursor-run-ownership-"));
 		const events: ProviderRuntimeEvent[] = [];
@@ -157,6 +159,14 @@ describe("Cursor accepted run ownership", () => {
 								configDir: configuredClaudeConfigDir(root),
 								folderSource: "account",
 								model: { providerId: "cursor", modelId: "composer-2.5" },
+								...(evidence === "unprepared-facts"
+									? {}
+									: {
+											facts: {
+												_tag: "Cursor" as const,
+												model: { _tag: "Resolved" as const, params: [] },
+											},
+										}),
 							};
 							return admission
 								.admitSendEffect(
@@ -178,7 +188,7 @@ describe("Cursor accepted run ownership", () => {
 						};
 						const accepted = () =>
 							events.filter((event) => event.type === "run.started");
-						if (evidence === "unprepared") {
+						if (evidence === "unprepared" || evidence === "unprepared-facts") {
 							const result = yield* send("unprepared", "run-unprepared");
 							expect(result).toMatchObject({
 								status: "error",
@@ -463,6 +473,10 @@ describe("Cursor accepted run ownership", () => {
 							configDir: configuredClaudeConfigDir(root),
 							folderSource: "account",
 							model: { providerId: "cursor", modelId: "composer-2.5" },
+							facts: {
+								_tag: "Cursor",
+								model: { _tag: "Resolved", params: [] },
+							},
 						};
 						yield* Effect.forkChild(
 							admission.admitSendEffect(

@@ -3,6 +3,7 @@ import {
 	Deferred,
 	Effect,
 	Exit,
+	Option,
 	Queue,
 	Schema,
 	Scope,
@@ -26,6 +27,7 @@ import type {
 	SessionOutputReply,
 	SessionTurn,
 } from "../runner/session-runner.js";
+import { TurnFacts } from "../runner/turn-facts.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import { openAppServerTransport } from "./app-server/app-server.js";
 import {
@@ -37,7 +39,6 @@ import {
 import {
 	decodeNotification,
 	type RateLimitSnapshotSchema,
-	SkillInputSchema,
 	ThreadCompactStartResponseSchema,
 	ThreadForkResponseSchema,
 	ThreadGoalClearResponseSchema,
@@ -78,7 +79,7 @@ import {
 import { codexUsageReading, mergeCodexRateLimits } from "./codex-usage.js";
 
 const log = createLogger("codex-runner");
-const decodeSkillInput = Schema.decodeUnknownOption(SkillInputSchema);
+const decodeTurnFacts = Schema.decodeUnknownOption(TurnFacts);
 
 export interface CodexRunnerDeps {
 	readonly workspaceRoot: string;
@@ -266,7 +267,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 				});
 				// The identity pins the home the thread was created under.
 				const codexHome = identity?.codexHome ?? prepared.home;
-				const digest = input.providerState["codex.forkDigest"];
+				// The send's facts are decoded below; a malformed one fails the turn there.
+				const digest =
+					input.facts?._tag === "Codex" ? input.facts.forkDigest : undefined;
 				session = {
 					cwd: identity?.cwd ?? input.workspaceRoot ?? this.deps.workspaceRoot,
 					...(codexHome ? { codexHome } : {}),
@@ -568,6 +571,16 @@ export class CodexRunnerPayload implements RunnerPayload {
 									Date.now(),
 								),
 							);
+						const facts = decodeTurnFacts(input.facts);
+						if (Option.isNone(facts) || facts.value._tag !== "Codex")
+							return yield* apply(
+								failCodexTurn(
+									active.state,
+									"turn_unprepared",
+									"Codex turn has no prepared turn facts",
+									Date.now(),
+								),
+							);
 						const child = yield* Effect.raceFirst(
 							Effect.gen({ self: this }, function* () {
 								const previousPid = current.controllerPid;
@@ -605,21 +618,20 @@ export class CodexRunnerPayload implements RunnerPayload {
 							items: { ...active.state.items, threadId: current.threadId },
 						};
 						if (input.rewind) {
-							const beforeTurnId =
-								input.providerState["codex.revertBeforeTurnId"];
-							if (typeof beforeTurnId === "string") {
+							const truncate = facts.value.truncate;
+							if (truncate._tag === "Before") {
 								yield* child.client
 									.request(
 										"thread/revert",
 										{
 											threadId: current.threadId,
-											beforeTurnId,
+											beforeTurnId: truncate.turnId,
 										},
 										ThreadRevertResponseSchema,
 									)
 									.pipe(
 										Effect.mapError((cause) => ({
-											message: `Codex conversation rewind failed before turn ${beforeTurnId}: ${cause.message}`,
+											message: `Codex conversation rewind failed before turn ${truncate.turnId}: ${cause.message}`,
 										})),
 									);
 								current.tokenUsageTotal = undefined;
@@ -686,16 +698,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 							active.state = { ...active.state, goalActivationPending: true };
 						}
 						const digest =
-							current.resumeFallbackDigest ??
-							input.providerState["codex.forkDigest"];
+							current.resumeFallbackDigest ?? facts.value.forkDigest;
 						const seed =
 							current.forkSeedPending &&
 							typeof digest === "string" &&
 							digest.length > 0
 								? digest
 								: undefined;
-						const effort = input.providerState["codex.effort"];
-						const skill = decodeSkillInput(input.providerState["codex.skill"]);
+						const { effort, skill } = facts.value;
 						// No yield between checking cancellation and submitting the turn.
 						if (active.cancelRequested)
 							return yield* apply(interruptCodexTurn(active.state, Date.now()));
@@ -726,7 +736,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 														: input.prompt,
 											text_elements: [],
 										},
-										...(skill._tag === "Some" ? [skill.value] : []),
+										...(skill._tag === "Skill"
+											? [{ type: "skill", name: skill.name, path: skill.path }]
+											: []),
 										...(input.images ?? []).map(({ dataUrl }) => ({
 											type: "image",
 											url: dataUrl,
@@ -734,13 +746,13 @@ export class CodexRunnerPayload implements RunnerPayload {
 									],
 									cwd: current.cwd,
 									model: input.model.modelId,
-									...(typeof effort === "string" ? { effort } : {}),
+									...(effort !== undefined ? { effort } : {}),
 									summary: "detailed",
 									...codexSessionConfig({
 										permissionMode: input.permissionMode,
 										cwd: current.cwd,
 										modelId: input.model.modelId,
-										effort: typeof effort === "string" ? effort : undefined,
+										effort,
 									}),
 								},
 								TurnStartResponseSchema,

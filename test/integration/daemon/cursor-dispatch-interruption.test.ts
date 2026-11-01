@@ -105,6 +105,7 @@ it.live(
 						configDir: configuredClaudeConfigDir(root),
 						folderSource: "account",
 						model: { providerId: "cursor", modelId: "composer-2.5" },
+						facts: { _tag: "Cursor", model: { _tag: "Resolved", params: [] } },
 					},
 				}).pipe(Effect.forkChild({ startImmediately: true }));
 				yield* runner.executeEffect({

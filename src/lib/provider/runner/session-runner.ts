@@ -29,12 +29,16 @@ import type {
 import type { UsageRead } from "../usage-reader.js";
 import type { RunnerSettingsSnapshot } from "./runner-upgrade.js";
 import type { SendScope, SendScopes } from "./send-scope.js";
+import type { TurnFacts } from "./turn-facts.js";
 
 /** Provider-Owned Payload fields contain JSON data, as on the event ingress. */
 export type SessionTurn = Omit<
 	ResolvedSendTurnInput,
 	"eventSink" | "abortSignal" | "awaitIntake" | "reconcileIntake"
->;
+> & {
+	/** Prepare's decisions; Cursor and Codex payloads refuse a turn without them. */
+	readonly facts?: TurnFacts;
+};
 
 /** The outbox keeps refs until replay crosses the provider boundary. */
 export type DurableSessionTurn = Omit<

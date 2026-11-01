@@ -4,6 +4,7 @@ import {
 	Effect,
 	Exit,
 	Fiber,
+	Option,
 	Queue,
 	Result,
 	Schema,
@@ -26,10 +27,10 @@ import type {
 	SessionOutputReply,
 	SessionTurn,
 } from "../runner/session-runner.js";
+import { TurnFacts } from "../runner/turn-facts.js";
 import type { EventSink, TurnErrorCode, TurnResult } from "../types.js";
 import type { CursorCredentialEnvelope } from "./cursor-credential.js";
 import { cursorAskUserTool } from "./cursor-questions.js";
-import { CursorModelParameters } from "./cursor-runner-driver.js";
 import { createCursorSdkPort } from "./cursor-sdk.js";
 import { cursorSessionConfig } from "./cursor-session-config.js";
 import {
@@ -91,6 +92,7 @@ interface CursorSession {
 		| undefined;
 }
 
+const decodeTurnFacts = Schema.decodeUnknownOption(TurnFacts);
 const decodeSteeredMessage = Schema.decodeUnknownResult(
 	Schema.Struct({
 		type: Schema.Literal("user-message-appended"),
@@ -564,19 +566,13 @@ export class CursorRunnerPayload implements RunnerPayload {
 							"sandbox_unavailable",
 							"Cursor sandbox initialization failed; restart the runner before retrying",
 						);
-					const modelParams =
-						input.providerState["cursor.modelParams"] === undefined
-							? undefined
-							: yield* Schema.decodeUnknownEffect(CursorModelParameters)(
-									input.providerState["cursor.modelParams"],
-								).pipe(
-									Effect.mapError(
-										(): SessionFailure => ({
-											operation: "model parameters",
-											message: "Invalid Cursor model parameters",
-										}),
-									),
-								);
+					const facts = decodeTurnFacts(input.facts);
+					if (Option.isNone(facts) || facts.value._tag !== "Cursor")
+						return yield* finish(
+							"error",
+							"turn_unprepared",
+							"Cursor turn has no prepared turn facts",
+						);
 					const config = cursorSessionConfig({
 						cwd: session.cwd,
 						storePath: cursorSessionStorePath(
@@ -587,7 +583,11 @@ export class CursorRunnerPayload implements RunnerPayload {
 						extraFolders: input.extraFolders,
 						permissionMode: input.permissionMode,
 						modelId: input.model.modelId,
-						modelParams,
+						// Signed out, the SDK reports the auth error the runner owns.
+						modelParams:
+							facts.value.model._tag === "Resolved"
+								? facts.value.model.params
+								: [],
 						credential,
 					});
 					if (
@@ -702,20 +702,17 @@ export class CursorRunnerPayload implements RunnerPayload {
 							}),
 						);
 					}
-					const digest = input.providerState["cursor.forkDigest"];
+					const digest = facts.value.forkDigest;
 					// A recorded accepted run can settle the seed after a crash.
 					// A rejected send leaves it pending for a new input.
-					if (
-						typeof digest === "string" &&
-						session.forkSeedPending === undefined
-					)
+					if (digest !== undefined && session.forkSeedPending === undefined)
 						session.forkSeedPending = true;
 					if (
 						session.forkSeedPending &&
 						(activeRun?.requestId != null || activeRun?.startedAt != null)
 					)
 						session.forkSeedPending = false;
-					const seed = session.forkSeedPending && typeof digest === "string";
+					const seed = session.forkSeedPending && digest !== undefined;
 					const persistIdentity = () =>
 						Effect.try({
 							try: () =>

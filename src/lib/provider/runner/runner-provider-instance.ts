@@ -1,5 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { Deferred, Effect, Exit, Fiber, FiberMap, Option, Scope } from "effect";
+import {
+	Brand,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	FiberMap,
+	Option,
+	Scope,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { AccountsState } from "../../account-directory.js";
 import type { Account } from "../../contracts/account.js";
@@ -75,6 +84,7 @@ import type {
 	SessionRunner,
 	SessionTurn,
 } from "./session-runner.js";
+import type { TurnFacts } from "./turn-facts.js";
 
 const log = createLogger("runner-provider-instance");
 
@@ -105,10 +115,22 @@ export const assertSessionRunnerAvailable = (
 		}
 	});
 
-type PreparedTurn = Omit<
+type PreparedTurnFields = Omit<
 	Extract<SessionCommand, { type: "send-turn" }>,
-	"type" | "sinkId" | "aborted"
->;
+	"type" | "sinkId" | "aborted" | "input"
+> & { readonly input: SessionTurn & { readonly facts: TurnFacts } };
+
+/** A send-turn's prepared fields; only launchRunnerTurn builds one. */
+export type PreparedTurn = PreparedTurnFields & Brand.Brand<"PreparedTurn">;
+
+const preparedTurn = Brand.nominal<PreparedTurn>();
+
+/** First delivery and recovery alike launch a turn through the driver's prepare. */
+export const launchRunnerTurn = (
+	driver: Pick<RunnerDriverPieces, "prepareTurnEffect">,
+	input: SessionTurn,
+): Effect.Effect<PreparedTurn, ProviderInstanceFailure> =>
+	driver.prepareTurnEffect(input).pipe(Effect.map(preparedTurn));
 
 /** Provider policy only; sink, interaction and runner lifetime belong to the instance. */
 export interface RunnerDriverPieces {
@@ -122,7 +144,7 @@ export interface RunnerDriverPieces {
 	readonly generateTextEffect: ProviderInstance["generateTextEffect"];
 	prepareTurnEffect(
 		input: SessionTurn,
-	): Effect.Effect<PreparedTurn, ProviderInstanceFailure>;
+	): Effect.Effect<PreparedTurnFields, ProviderInstanceFailure>;
 	readonly preparePreWarmEffect?: (
 		input: PreWarmSessionInput,
 		scope: Scope.Scope,
@@ -1122,7 +1144,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 				payload.shellEnv === undefined
 					? yield* prepareCall ?? Effect.succeed(undefined)
 					: undefined;
-			const prepared = yield* this.driver.prepareTurnEffect({
+			const prepared = yield* launchRunnerTurn(this.driver, {
 				...payload,
 				...(call
 					? { shellEnv: call.shellEnv, shellConfig: call.shellConfig }

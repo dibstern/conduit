@@ -225,7 +225,12 @@ const retirementFixture = (
 			driverKind,
 			legacyPrepareTurnEffect: (input) =>
 				Effect.succeed({
-					input: { ...input, prompt: input.text ?? "send", history: [] },
+					input: {
+						...input,
+						prompt: input.text ?? "send",
+						history: [],
+						facts: { _tag: "Claude" as const },
+					},
 				}),
 			...(withAccountScope ? { withAccountScope } : {}),
 			connect: vi.fn<ProcessRunnerDriver["connect"]>((options) =>
@@ -717,6 +722,7 @@ const sendScopeFixture = (
 								runId,
 								prompt: input.text ?? "send",
 								history: [],
+								facts: { _tag: "Claude" as const },
 							},
 						};
 					}),
@@ -3923,7 +3929,12 @@ it.effect(
 						generateTextEffect: () => Effect.die("unused generation"),
 						prepareTurnEffect: (input) =>
 							Effect.succeed({
-								input: { ...input, prompt: "send", history: [] },
+								input: {
+									...input,
+									prompt: "send",
+									history: [],
+									facts: { _tag: "Claude" as const },
+								},
 							}),
 					},
 					(emit) =>
@@ -4601,7 +4612,12 @@ it.effect(
 						generateTextEffect: () => Effect.die("unused"),
 						prepareTurnEffect: (input) =>
 							Effect.succeed({
-								input: { ...input, prompt: "send", history: [] },
+								input: {
+									...input,
+									prompt: "send",
+									history: [],
+									facts: { _tag: "Claude" as const },
+								},
 							}),
 					},
 					(emit) =>
@@ -4690,7 +4706,12 @@ it.effect(
 						generateTextEffect: () => Effect.die("unused"),
 						prepareTurnEffect: (input) =>
 							Effect.succeed({
-								input: { ...input, prompt: "send", history: [] },
+								input: {
+									...input,
+									prompt: "send",
+									history: [],
+									facts: { _tag: "Claude" as const },
+								},
 							}),
 					},
 					(emit) =>
@@ -5779,6 +5800,7 @@ for (const failure of ["connection failure", "process exit"] as const) {
 										prompt: "cold",
 										history: [],
 										account: accounts.accounts[0],
+										facts: { _tag: "Claude" as const },
 									},
 								}),
 						},

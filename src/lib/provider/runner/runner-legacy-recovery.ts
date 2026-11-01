@@ -51,9 +51,10 @@ import {
 	runnerFailure,
 	sendToken,
 } from "./runner-protocol.js";
-import type {
-	RunnerDriverPieces,
-	RunnerProviderInstanceDeps,
+import {
+	launchRunnerTurn,
+	type RunnerDriverPieces,
+	type RunnerProviderInstanceDeps,
 } from "./runner-provider-instance.js";
 import { runningRunnerCommands } from "./runner-recovery.js";
 import {
@@ -514,20 +515,21 @@ export const replayLegacyRunnerSend = (options: {
 								message: `Recovery preparation is unavailable for ${driverKind}`,
 								retryable: false,
 							});
-						const prepared = yield* options
-							.prepareTurnEffect({
+						const prepared = yield* launchRunnerTurn(
+							{ prepareTurnEffect: options.prepareTurnEffect },
+							{
 								...resolved,
 								// Credentials are omitted from the outbox; keep the admitted identity.
 								account: input.account
 									? { ...input.account, env: account.env }
 									: account,
 								autoSettleAfterDays,
-							})
-							.pipe(
-								Effect.mapError((cause) =>
-									recoveryFailure("prepare turn", cause),
-								),
-							);
+							},
+						).pipe(
+							Effect.mapError((cause) =>
+								recoveryFailure("prepare turn", cause),
+							),
+						);
 						const result = yield* options.send(currentSendToken(row), {
 							type: "send-turn",
 							sinkId: options.resolveSinkId(

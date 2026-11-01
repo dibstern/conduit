@@ -362,7 +362,10 @@ describe("Claude runner admission socket probes", () => {
 						driverKind: "claude",
 						discoverEffect: () => Effect.die("unused discovery"),
 						generateTextEffect: () => Effect.die("unused text generation"),
-						prepareTurnEffect: (input) => Effect.succeed({ input }),
+						prepareTurnEffect: (input) =>
+							Effect.succeed({
+								input: { ...input, facts: { _tag: "Claude" as const } },
+							}),
 					},
 					(emit) =>
 						makeProcessClaudeSessionRunner(

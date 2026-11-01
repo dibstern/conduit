@@ -178,7 +178,12 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 			driverKind,
 			legacyPrepareTurnEffect: (input) =>
 				Effect.succeed({
-					input: { ...input, prompt: input.text ?? "send", history: [] },
+					input: {
+						...input,
+						prompt: input.text ?? "send",
+						history: [],
+						facts: { _tag: "Claude" as const },
+					},
 				}),
 			connect: vi.fn<ProcessRunnerDriver["connect"]>((options) =>
 				Effect.gen(function* () {
@@ -294,7 +299,12 @@ const s7Fixture = (driverKind: "claude" | "cursor" = "cursor") =>
 				prepareTurnEffect: (turn) =>
 					(preparation.gate ?? Effect.void).pipe(
 						Effect.as({
-							input: { ...turn, prompt: turn.text ?? "send", history: [] },
+							input: {
+								...turn,
+								prompt: turn.text ?? "send",
+								history: [],
+								facts: { _tag: "Claude" as const },
+							},
 						}),
 					),
 			},

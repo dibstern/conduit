@@ -1,6 +1,6 @@
 // Failure modes: process exit hides a native missing-thread error; a session
 // retains the previous account's home after an account switch.
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,6 +80,11 @@ describe("Codex runner preparation", () => {
 							configDir: configuredClaudeConfigDir(root),
 							folderSource: "account",
 							model: { providerId: "codex", modelId: "gpt-6.1-sol" },
+							facts: {
+								_tag: "Codex",
+								skill: { _tag: "None" },
+								truncate: { _tag: "None" },
+							},
 							account: {
 								id: AccountIdSchema.make(home),
 								driver: "codex",
@@ -181,6 +186,11 @@ describe("Codex runner preparation", () => {
 						configDir: configuredClaudeConfigDir(root),
 						folderSource: "account",
 						model: { providerId: "codex", modelId: "gpt-5.4" },
+						facts: {
+							_tag: "Codex",
+							skill: { _tag: "None" },
+							truncate: { _tag: "None" },
+						},
 					},
 				}).pipe(Effect.forkScoped);
 				const interruptRequests = () =>
@@ -207,5 +217,61 @@ describe("Codex runner preparation", () => {
 					runId: "run-new",
 				});
 			}),
+	);
+
+	// The runner never re-derives what prepare decided: a turn without its
+	// facts fails before any native turn starts.
+	it.live("a send without prepared turn facts fails unprepared", () =>
+		Effect.gen(function* () {
+			const root = yield* Effect.acquireRelease(
+				Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-facts-"))),
+				(path) =>
+					Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+			);
+			const capture = join(root, "capture.jsonl");
+			const runner = yield* makeCodexSessionRunner(
+				{
+					workspaceRoot: root,
+					daemonConfigDir: root,
+					environment: () => ({
+						CODEX_HOME: root,
+						NODE_ENV: "test",
+						CONDUIT_CODEX_APP_SERVER_TRACE: fileURLToPath(
+							new URL(
+								"../../../fixtures/codex-app-server-traces/stop-queued.jsonl",
+								import.meta.url,
+							),
+						),
+						CONDUIT_CODEX_APP_SERVER_CAPTURE: capture,
+					}),
+				},
+				() => Effect.succeed({}),
+			);
+			const admission = yield* makeRunnerAdmission(runner, "codex");
+			expect(
+				yield* admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: "input",
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId: "input",
+						runId: "run",
+						prompt: "Say hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "codex", modelId: "gpt-5.4" },
+						facts: { _tag: "Claude" },
+					},
+				}),
+			).toMatchObject({ status: "error", error: { code: "turn_unprepared" } });
+			expect(
+				existsSync(capture) ? readFileSync(capture, "utf8") : "",
+			).not.toContain('"method":"turn/start"');
+		}),
 	);
 });

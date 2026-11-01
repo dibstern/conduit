@@ -49,6 +49,7 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 		| "attachment_missing"
 		| "auth_required"
 		| "codex_version_unsupported"
+		| "model_parameters_unavailable"
 		| "provider_process_gone"
 		| "provider_process_unavailable"
 		| "provider_control_timeout"

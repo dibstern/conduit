@@ -114,7 +114,15 @@ export const makeRunnerAdmission = (
 			discoverEffect: () => Effect.die("Unexpected discovery"),
 			generateTextEffect: () => Effect.die("Unexpected generation"),
 			prepareTurnEffect: (input) =>
-				reserveTestRun(input).pipe(Effect.map((input) => ({ input }))),
+				reserveTestRun(input).pipe(
+					// A test's own facts stand in for the driver's prepare.
+					Effect.map((input) => ({
+						input: {
+							...input,
+							facts: input.facts ?? { _tag: "Claude" as const },
+						},
+					})),
+				),
 		},
 		() => Effect.succeed(runner),
 	);

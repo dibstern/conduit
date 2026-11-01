@@ -144,8 +144,10 @@ describe.skipIf(!runLive)("Cursor in-process runner live smoke", () => {
 										prompt:
 											"Do not call tools or create subagents. Think briefly about 17 times 19, then reply with exactly CURSOR_LIVE_SMOKE_OK.",
 										history: [],
-										providerState: {
-											"cursor.modelParams": model.params ?? [],
+										providerState: {},
+										facts: {
+											_tag: "Cursor",
+											model: { _tag: "Resolved", params: model.params ?? [] },
 										},
 										workspaceRoot,
 										extraFolders: [],
@@ -370,8 +372,13 @@ async function recordModelSelections(scenario: "parameter-change" | "reroute") {
 							prompt:
 								"Do not call tools or create subagents. Reply with exactly CURSOR_MODEL_SELECTION_OK.",
 							history: [],
-							providerState: {
-								"cursor.modelParams": selection.model.params ?? [],
+							providerState: {},
+							facts: {
+								_tag: "Cursor" as const,
+								model: {
+									_tag: "Resolved" as const,
+									params: selection.model.params ?? [],
+								},
 							},
 							workspaceRoot,
 							extraFolders: [],
