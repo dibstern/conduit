@@ -265,6 +265,8 @@ if (!/claude-session-runner\\.(js|ts)$/.test(process.argv[1] ?? "")) {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
+			// The survivor's retirement is proven by its warning in the log tail.
+			logLevel: "warn",
 		});
 		const evidence: Record<string, unknown> = { passed: false };
 		try {
@@ -434,15 +436,16 @@ syncBuiltinESMExports();
 				() =>
 					expect(
 						sendState(harness, sessionId, "upgrade-long-turn").run.status,
-					).toBe("interrupted"),
+					).toBe("error"),
 				{ timeout: 35_000 },
 			);
+			// A reached send whose runner was retired, not stopped by the user,
+			// ends process lost (CONTRACT 3.8 reason 2.3, 82tn.32.2.16).
 			const settled = sendState(harness, sessionId, "upgrade-long-turn");
-			expect(settled.terminals.map(({ type }) => type)).toEqual([
-				"turn.interrupted",
-			]);
+			expect(settled.terminals.map(({ type }) => type)).toEqual(["turn.error"]);
 			expect(JSON.parse(settled.terminals[0]?.data ?? "null")).toMatchObject({
-				reason: "Provider process stopped",
+				code: "runner_stopped",
+				error: "Provider process stopped",
 			});
 			expect(ownership(harness, sessionId).runs).not.toContainEqual(
 				expect.objectContaining({ status: "running" }),
@@ -553,6 +556,8 @@ syncBuiltinESMExports();
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
+			// The refusal and retirement are proven by their warnings in the log tail.
+			logLevel: "warn",
 			...(mode === "candidate-stop"
 				? {}
 				: {

@@ -16,6 +16,8 @@ describe("durable controls on retired runners", () => {
 		const harness = await ProcessHarness.start({
 			dist: "dist",
 			restartProof: true,
+			// The survivor's retirement is proven by its warning in the log tail.
+			logLevel: "warn",
 		});
 		const evidence: Record<string, unknown> = { passed: false };
 		let db: Database.Database | undefined;
