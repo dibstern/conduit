@@ -2053,3 +2053,8 @@ Built in dfc85394 on wt/82tn3225. The confirm gate stores only the step	pointer
 process_lost and session_ended. Recorded gap (frozen contract): 'waiting	pointer
 Covered native command deadline fixed (1acfa27f): deadlines() in the decider	pointer
 the contract's process_lost ownership (CONTRACT 6.5)	pointer
+process_lost ownership (CONTRACT 6.5). Main merged into wt/82tn32	pointer
+outcome events, row-215 evidence kinds, effect_outcome at every control-	pointer
+(alarm_fired only, ledger stop deadline from the session row after restart),	pointer
+T5-writers, 11.3 event-order test (2160 orderings, restart, replay equal),	pointer
+process_started from register/swap/recover is 32.6's; raw-write loss append	pointer
