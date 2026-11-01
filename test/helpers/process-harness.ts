@@ -3170,6 +3170,16 @@ export class ProcessBrowser {
 		);
 	}
 
+	async setSettled(sessionId: string, settled: boolean): Promise<void> {
+		await this.run(
+			this.rpc.SetSessionSettled({
+				sessionId,
+				settled,
+				originId: this.originId,
+			}),
+		);
+	}
+
 	async switchAgent(sessionId: string, agentId: string): Promise<void> {
 		await this.followSession(sessionId);
 		await this.run(

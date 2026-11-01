@@ -3,9 +3,12 @@
 // is not a server_seen then a server_gone naming the same ServerKey (CONTRACT.md 8.7).
 // Auto-settle: an overdue session settles before the first scan and hold have passed, settles
 // while its server is live, or never settles once the server is gone.
+// Ended sessions: a settled session's server lives on, waits out the hold, survives a restart or a
+// later start, dies only by SIGKILL, takes its agent with it, or another daemon's marked server is
+// killed; a deleted session's server lives on or records a server_gone.
 import { type ChildProcess, spawn } from "node:child_process";
-import { once } from "node:events";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createInterface } from "node:readline";
 import Database from "better-sqlite3";
 import { afterEach, expect, it } from "vitest";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -22,25 +25,51 @@ server.listen(0, "127.0.0.1", () =>
 	console.log(JSON.stringify({ pid: process.pid, port: server.address().port })));`;
 
 let harness: ProcessHarness | undefined;
-let agent: ChildProcess | undefined;
+const agents: ChildProcess[] = [];
 
-// The fake agent is a shell marked with the session; the server is its background child.
+// The fake agent is a shell marked with the session; the server is its background child. The
+// shell outlives the server, reporting the server's exit status, as an agent outlives a Stop.
 const startAgent = async (sessionId: string) => {
-	agent = spawn("/bin/sh", ["-c", 'node -e "$SERVER" & wait'], {
-		env: { ...process.env, SERVER, CONDUIT_SESSION_ID: sessionId },
-		stdio: ["ignore", "pipe", "inherit"],
-		detached: true,
-	});
-	const [line] = await once(agent.stdout ?? agent, "data");
-	return JSON.parse(String(line)) as { pid: number; port: number };
+	const agent = spawn(
+		"/bin/sh",
+		["-c", 'node -e "$SERVER" & wait $!; echo "{\\"exit\\":$?}"; sleep 60'],
+		{
+			env: { ...process.env, SERVER, CONDUIT_SESSION_ID: sessionId },
+			stdio: ["ignore", "pipe", "inherit"],
+			detached: true,
+		},
+	);
+	agents.push(agent);
+	const lines = createInterface({ input: agent.stdout ?? process.stdin })[
+		Symbol.asyncIterator
+	]();
+	const { pid, port } = JSON.parse(String((await lines.next()).value)) as {
+		pid: number;
+		port: number;
+	};
+	const exited = lines
+		.next()
+		// An agent reaped by afterEach ends its output with no exit line.
+		.then(({ done, value }) =>
+			done ? undefined : (JSON.parse(value) as { exit: number }).exit,
+		);
+	return { agent, pid, port, exited };
+};
+const alive = (pid: number) => {
+	try {
+		return process.kill(pid, 0);
+	} catch {
+		return false;
+	}
 };
 
 afterEach(async () => {
-	// The agent leads its own process group, so this also reaps a server it left behind.
-	if (agent?.pid !== undefined && agent.exitCode === null)
-		process.kill(-agent.pid, "SIGKILL");
+	// Each agent leads its own process group, so this also reaps a server it left behind.
+	for (const agent of agents.splice(0))
+		if (agent.pid !== undefined && agent.exitCode === null)
+			process.kill(-agent.pid, "SIGKILL");
 	await harness?.dispose();
-	harness = agent = undefined;
+	harness = undefined;
 });
 
 it("a marked agent's real node server reaches the browser after the hold and leaves when it exits", async () => {
@@ -169,4 +198,97 @@ it("an overdue session waits for the first scan and hold, stays open while its s
 	} finally {
 		db.close();
 	}
+});
+
+it("settling kills the session's servers without the hold, now, after a restart and when started later, and spares the agent and another daemon's server", async () => {
+	// A hold the kills must beat: an ended session's servers skip it.
+	const hold = 3000;
+	const environment = {
+		...ENVIRONMENT,
+		CONDUIT_PORT_WATCH_HOLD_MS: String(hold),
+	};
+	harness = ProcessHarness.create({ logLevel: "warn" });
+	await harness.restart({ serviceEnvironment: environment });
+	const browser = await harness.connect();
+	const sessionId = await browser.createSession("Settled");
+	// A marker this daemon cannot resolve belongs to someone else: it is never read as ended.
+	const stranger = await startAgent("another-daemons-session");
+	const first = await startAgent(sessionId);
+	const settled = performance.now();
+	await browser.setSettled(sessionId, true);
+	// 143 is SIGTERM: the server went before the 5s SIGKILL.
+	expect(await first.exited).toBe(143);
+	const firstKilledMs = performance.now() - settled;
+	expect(firstKilledMs).toBeLessThan(hold);
+	expect(first.agent.pid !== undefined && alive(first.agent.pid)).toBe(true);
+
+	const started = performance.now();
+	const later = await startAgent(sessionId);
+	expect(await later.exited).toBe(143);
+	const laterKilledMs = performance.now() - started;
+	expect(laterKilledMs).toBeLessThan(hold);
+
+	await harness.shutdown();
+	const whileDown = await startAgent(sessionId);
+	await harness.restart({ serviceEnvironment: environment });
+	expect(await whileDown.exited).toBe(143);
+	expect(alive(stranger.pid)).toBe(true);
+
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/ended-session-kills.json`,
+		JSON.stringify(
+			{
+				sessionId,
+				holdMs: hold,
+				firstKilledMs,
+				laterKilledMs,
+				exits: [143, 143, 143],
+				strangerAlive: alive(stranger.pid),
+			},
+			null,
+			2,
+		),
+	);
+});
+
+it("deleting a session kills its server and records no server_gone for it", async () => {
+	harness = ProcessHarness.create({ logLevel: "warn" });
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const browser = await harness.connect();
+	await browser.followSessions();
+	const deleted = await browser.createSession("Deleted");
+	const probe = await browser.createSession("Probe");
+	const serving =
+		(sessionId: string, port: number) => (frame: Record<string, unknown>) =>
+			frame["type"] === "session_row" &&
+			frame["id"] === sessionId &&
+			((frame["servers"] ?? []) as readonly { port: number }[]).some(
+				(server) => server.port === port,
+			);
+	const doomed = await startAgent(deleted);
+	await browser.waitFor(serving(deleted, doomed.port));
+	await browser.deleteSession(deleted);
+	expect(await doomed.exited).toBe(143);
+	// A server first seen after the kill proves scans ran after it: one would have recorded the
+	// deleted session's server_gone.
+	const cursor = browser.frames.length;
+	const witness = await startAgent(probe);
+	await browser.waitFor(serving(probe, witness.port), cursor);
+
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	const types = db
+		.prepare<[string], { type: string }>(
+			"SELECT type FROM events WHERE session_id = ? AND (type = 'session.deleted' OR type LIKE 'evidence.server_%') ORDER BY sequence",
+		)
+		.all(deleted)
+		.map(({ type }) => type);
+	db.close();
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/deleted-session-kill.json`,
+		JSON.stringify({ deleted, port: doomed.port, types }, null, 2),
+	);
+	// Deletion keeps only the session.deleted event; nothing may follow it.
+	expect(types).toEqual(["session.deleted"]);
 });

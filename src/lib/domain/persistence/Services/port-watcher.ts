@@ -10,6 +10,7 @@
  * Gap (CONTRACT.md 2976): "One PortWatcher per daemon". Servers live in each project's own store,
  * so this runs once per project relay, each recording only its own store's sessions.
  */
+import { basename } from "node:path";
 import { Clock, Config, Data, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
@@ -47,6 +48,68 @@ const keyOf = (key: ServerKey) => `${key.pid}:${key.startedAt}:${key.port}`;
 const MARKER = /(?:^|\s)CONDUIT_SESSION_ID=(\S+)/g;
 const PS_ROW =
 	/^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+
+const PS_TREE =
+	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+
+/**
+ * The one kill routine (8.7 Stop) for Stop and ended sessions: the server's process group, unless
+ * its leader is conduit, a runner host, an agent CLI or a shell, then the server's process tree.
+ * SIGTERM, then SIGKILL after 5s. Before each signal it re-reads the process table and sends
+ * nothing once the pid no longer has the key's start time.
+ */
+export const killServer = (server: ServerKey) =>
+	Effect.gen(function* () {
+		const subprocess = yield* Subprocess;
+		const signal = (name: NodeJS.Signals) =>
+			Effect.gen(function* () {
+				const { stdout } = yield* subprocess.run(
+					"ps",
+					["-axww", "-o", "pid=,ppid=,pgid=,lstart=,command="],
+					{
+						timeoutMs: 5000,
+						maxBuffer: 16 * 1024 * 1024,
+						env: { ...process.env, LC_ALL: "C" },
+					},
+				);
+				const procs = new Map<
+					number,
+					{ ppid: number; pgid: number; startedAt: number; command: string }
+				>();
+				for (const line of stdout.split("\n")) {
+					const row = PS_TREE.exec(line);
+					if (row)
+						procs.set(Number(row[1]), {
+							ppid: Number(row[2]),
+							pgid: Number(row[3]),
+							startedAt: Date.parse(row[4] ?? ""),
+							command: row[5] ?? "",
+						});
+				}
+				const proc = procs.get(server.pid);
+				if (proc?.startedAt !== server.startedAt) return false;
+				const leader = procs.get(proc.pgid)?.command;
+				const ownGroup =
+					leader !== undefined &&
+					!/^-?(?:a|ba|c|da|k|tc|z)?sh$|^fish$/.test(
+						basename(leader.split(" ")[0] ?? ""),
+					) &&
+					!/\b(?:conduit|claude|codex|opencode|cursor-agent)\b/.test(leader);
+				const tree = [server.pid];
+				for (const pid of tree)
+					for (const [child, { ppid }] of procs)
+						if (ppid === pid && !tree.includes(child)) tree.push(child);
+				for (const target of ownGroup ? [-proc.pgid] : tree)
+					try {
+						process.kill(target, name);
+					} catch {
+						// Exited since the table was read.
+					}
+				return true;
+			});
+		if (yield* signal("SIGTERM"))
+			yield* Effect.sleep(5000).pipe(Effect.andThen(signal("SIGKILL")));
+	});
 
 /** `lsof -F` output as [pid, names]; malformed lines fail the scan. */
 const lsofFields = (stdout: string) =>
@@ -221,6 +284,8 @@ export const PortWatcherLive = Layer.effectDiscard(
 			);
 		});
 
+		// Servers of ended sessions this watcher is killing, by key.
+		const stopping = new Set<string>();
 		// Hold candidates: each port's ServerKey and when this watcher first saw it there.
 		const held = new Map<number, { key: string; since: number }>();
 		let firstScanAt: number | undefined;
@@ -344,6 +409,28 @@ export const PortWatcherLive = Layer.effectDiscard(
 				}),
 			);
 			for (const sessionId of moved) activity.changed(sessionId);
+			// 8.7: ended sessions have no servers. Only this store's sessions count, so a marker
+			// this daemon cannot resolve is never read as ended; the hold does not apply.
+			const ended = yield* sql<{ id: string }>`
+				SELECT value AS id FROM json_each(${JSON.stringify(scanned.map((entry) => entry.sessionId))})
+					WHERE value IN (SELECT id FROM sessions WHERE project_id = ${store.projectId}
+							AND (settled_at IS NOT NULL OR archived_at IS NOT NULL))
+						OR EXISTS (SELECT 1 FROM events WHERE session_id = value
+							AND type = 'session.deleted' AND project_id = ${store.projectId})`;
+			for (const { sessionId, server } of scanned) {
+				const key = keyOf(server);
+				if (stopping.has(key) || !ended.some((row) => row.id === sessionId))
+					continue;
+				stopping.add(key);
+				yield* killServer(server).pipe(
+					Effect.provideService(Subprocess, subprocess),
+					Effect.catchCause((cause) =>
+						Effect.logWarning("PortWatcher could not stop a server", cause),
+					),
+					Effect.ensuring(Effect.sync(() => stopping.delete(key))),
+					Effect.forkScoped,
+				);
+			}
 			firstScanAt ??= now;
 			known ||= now - firstScanAt >= holdMs;
 			failing = false;
