@@ -453,6 +453,10 @@ it.live("an unrelated native echo never accepts an indeterminate send", () =>
 		expect(
 			yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'a'`,
 		).toEqual([{ status: "running", error_code: "delivery_indeterminate" }]);
+		// CONTRACT.md 2.1 row 215: the marker's write carries its evidence event, once.
+		expect(
+			yield* sql`SELECT data FROM events WHERE type = 'evidence.delivery_indeterminate'`,
+		).toEqual([{ data: JSON.stringify({ runId: "run-a", commandId: "a" }) }]);
 		expect(
 			yield* sql`SELECT status FROM command_receipts WHERE command_id = 'a'`,
 		).toEqual([{ status: "side_effect_requested" }]);

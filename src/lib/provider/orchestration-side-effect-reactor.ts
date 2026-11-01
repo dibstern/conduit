@@ -1022,7 +1022,7 @@ export class ProviderSideEffectReactor {
 				result.success.status === "indeterminate"
 			) {
 				yield* this.options
-					.write((_project, stamp) =>
+					.write((project, stamp) =>
 						Effect.gen({ self: this }, function* () {
 							// Direct providers keep their nonterminal uncertainty marker.
 							// Runner sends wait for Settle, including between released holds.
@@ -1057,6 +1057,17 @@ export class ProviderSideEffectReactor {
 										Effect.map((rows) => rows.map(({ id }) => id)),
 									),
 								);
+								// CONTRACT.md 2.1 row 215, 4.10: the direct marker's event, in the marker's
+								// write; a direct start's token is its runId (3.4).
+								if (row.run_id)
+									yield* this.appendInWrite(project, row.project_key, [
+										canonicalEvent(
+											"evidence.delivery_indeterminate",
+											row.session_id,
+											{ runId: row.run_id, commandId: row.command_id },
+											{ provider: row.provider_id },
+										),
+									]);
 							}
 						}),
 					)
