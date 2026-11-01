@@ -531,8 +531,9 @@ export class ProviderSideEffectReactor {
 					.pipe(Effect.mapError(storeFailure("cancelInactiveControls")));
 			}
 			const heads = yield* this.nextPendingRequests();
-			// Arm before running heads too: a held turn can outlast a later retryAt.
-			yield* this.armRetryWake(makeInteractions);
+			// Arm before running heads too: a held turn can outlast a later retryAt. The heads are this
+			// drain's to run, so a wake for one would only race it for its session lane.
+			yield* this.armRetryWake(makeInteractions, heads);
 			yield* Effect.forEach(
 				heads,
 				(head) =>
@@ -560,6 +561,7 @@ export class ProviderSideEffectReactor {
 
 	private armRetryWake(
 		makeInteractions?: ProviderCommandInteractionSinkFactory,
+		running: readonly ProviderCommandOutboxRow[] = [],
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return this.admission.withPermit(
 			Effect.gen({ self: this }, function* () {
@@ -574,6 +576,7 @@ export class ProviderSideEffectReactor {
 				}>`SELECT MIN(next_attempt_at) AS due
 				FROM provider_command_outbox candidate
 				WHERE status = 'retryable_failed' AND next_attempt_at IS NOT NULL
+					AND request_sequence NOT IN ${this.options.sql.in(running.map((row) => row.request_sequence))}
 					AND (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
 					AND (next_attempt_at > ${now}
 						OR command_id NOT IN ${this.options.sql.in([...this.liveCommands])})

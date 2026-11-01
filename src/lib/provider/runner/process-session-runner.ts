@@ -1,7 +1,6 @@
 import { appendFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
-	Cause,
 	Clock,
 	Deferred,
 	Effect,
@@ -322,32 +321,6 @@ export const makeProcessSessionRunner = (
 				)
 				.pipe(Effect.asVoid);
 
-		const closeStoppedSends = (runnerId: string) =>
-			Effect.gen(function* () {
-				if (!sql) return yield* sends.closeRunner(runnerId);
-				const held = yield* sql<{
-					id: string;
-				}>`SELECT id FROM provider_runs WHERE runner_id = ${runnerId} AND held_transmission IS NOT NULL AND status IN ('pending', 'running')`;
-				yield* sends.closeRunner(
-					runnerId,
-					held.map(({ id }) => id),
-				);
-			}).pipe(
-				Effect.mapError((cause) => runnerFailure("close stopped sends", cause)),
-			);
-		const evictStoppedEntry = (entry: RunnerChild) =>
-			Effect.gen(function* () {
-				Entry.end(entry);
-				entry.connection?.destroy();
-				yield* closeStoppedSends(entry.runnerId);
-				yield* Entry.releaseWaiters(
-					entry,
-					Cause.fail(
-						entry.lifecycle.failure ??
-							runnerFailure("stop runner", "Provider process stopped"),
-					),
-				);
-			});
 		const stops: Effect.Success<ReturnType<typeof makeRunnerRetirement>> =
 			yield* makeRunnerRetirement({
 				receipts,
@@ -356,7 +329,6 @@ export const makeProcessSessionRunner = (
 				close: {
 					lock,
 					sends: sendScopes.closeAll,
-					release: Entry.releaseWaiters,
 					detach: Entry.detach,
 				},
 				...(sql
@@ -391,9 +363,6 @@ export const makeProcessSessionRunner = (
 						const entry = stops.records.get(retirement.runnerId)?.identity
 							.entry;
 						if (!entry) return;
-						// Release daemon resources after the durable fence, independently
-						// of process survival and Gone-only outcome settlement.
-						yield* closeStoppedSends(entry.runnerId);
 						// A runner that never became ready has no connection to stop; the
 						// Signal action owns its process. An interrupted adoption fails
 						// ready with interruption, which Effect.ignore would not absorb.
@@ -411,6 +380,7 @@ export const makeProcessSessionRunner = (
 				settlement: {
 					sql,
 					configDir,
+					closeSends: sends.closeRunner,
 					ingestion: (sessionId, entry) =>
 						deps.recoveryForSession
 							? ingestionForSession(sessionId)
@@ -448,8 +418,9 @@ export const makeProcessSessionRunner = (
 									),
 								)
 								.pipe(Effect.interruptible, Effect.timeout("1 second"));
-							if (record.identity.entry)
-								yield* evictStoppedEntry(record.identity.entry);
+							// The entry scope closed at the stop's commit (6.11); eviction
+							// lets go only of the dead runner's socket.
+							record.identity.entry?.connection?.destroy();
 						}
 					}),
 				prune: (retirement) =>

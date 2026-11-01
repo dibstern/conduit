@@ -455,17 +455,15 @@ export const makeRunnerRunLifecycle = (
 							released.push({ ...input, ...release });
 							providers.set(row.id, row.provider ?? "conduit");
 						}
-						if (released.length > 0)
-							yield* project(
-								yield* eventStore.appendBatch(
-									released.map((input) =>
-										releasedEvent(
-											input,
-											providers.get(input.runId) ?? "conduit",
-										),
-									),
-								),
-							);
+						// The releases precede the loss, so the arm reads them first (6.5 2399).
+						const events = [
+							...released.map((input) =>
+								releasedEvent(input, providers.get(input.runId) ?? "conduit"),
+							),
+							...committed.lost,
+						];
+						if (events.length > 0)
+							yield* project(yield* eventStore.appendBatch(events));
 						return { stop: committed, released };
 					}),
 				{
@@ -642,6 +640,8 @@ export const makeRunnerStopReconciler = (options: {
 		readonly configDir: string;
 		readonly driverKind: string;
 		readonly entry: (runnerId: string) => RunnerChild | undefined;
+		/** Closes the sends still dispatched to a runner once Settle ended its holds. */
+		readonly closeSends: (runnerId: string) => Effect.Effect<void>;
 		readonly ingestion: (
 			sessionId: string,
 			entry: RunnerChild | undefined,
@@ -740,6 +740,7 @@ export const makeRunnerStopReconciler = (options: {
 								session: [...rows.values()].filter(
 									(cached) => cached.sessionId === target.sessionId,
 								),
+								lost: [],
 							});
 				if (row?.role === "serving" && reason._tag === "CandidateAbandoned")
 					return Effect.succeed<StopCommit>({ _tag: "Ignored" });
@@ -778,6 +779,8 @@ export const makeRunnerStopReconciler = (options: {
 									? { ...cached, role: "serving" as const }
 									: cached,
 						),
+					// Without a store there is no event log to record a loss in.
+					lost: [],
 				});
 			});
 		};
@@ -1184,6 +1187,10 @@ export const makeRunnerStopReconciler = (options: {
 							}
 							case "Settle":
 								if (!(yield* settle(record))) return;
+								// A run still held at the commit kept its send (6.11); Settle
+								// ended it at Gone, so its send closes now.
+								if (options.settlement)
+									yield* options.settlement.closeSends(record.runnerId);
 								break;
 							case "Evict":
 								yield* options.evict(record);
@@ -1710,10 +1717,6 @@ export const makeRunnerRetirement = (
 		readonly close: {
 			readonly lock: Semaphore.Semaphore;
 			readonly sends: Effect.Effect<void>;
-			readonly release: (
-				entry: RunnerChild,
-				cause: Cause.Cause<SessionFailure>,
-			) => Effect.Effect<void>;
 			readonly detach: (entry: RunnerChild) => void;
 		};
 	},
@@ -1892,6 +1895,12 @@ export const makeRunnerRetirement = (
 							);
 						if (record && record.tag._tag !== "Retired")
 							yield* authority.revoke(record.grant, "retired");
+						// A swap's promote closes old's scope after upgrade-activate (6.9).
+						if (
+							entry &&
+							!retirement.stopReason?.startsWith('{"_tag":"Superseded"')
+						)
+							yield* Entry.close(entry);
 					}),
 				prune: (retirement) =>
 					options.prune(retirement).pipe(
@@ -2275,7 +2284,7 @@ export const makeRunnerRetirement = (
 						const release = Effect.forEach(
 							entries,
 							(entry) =>
-								options.close.release(
+								Entry.close(
 									entry,
 									Cause.fail(
 										runnerFailure("shutdown", "Runners are shutting down"),

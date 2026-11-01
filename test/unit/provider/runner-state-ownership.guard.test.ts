@@ -145,6 +145,74 @@ describe("runner state ownership", () => {
 		});
 	});
 
+	it("releases runner entry waiters only through the entry scope (B25)", () => {
+		const owner = "src/lib/provider/runner/runner-entry-lifecycle.ts";
+		const reads = new Set(["make", "await", "isDone", "isDoneUnsafe", "poll"]);
+		const offenders: string[] = [];
+		const scopes: Record<string, { open: number; own: number }> = {};
+		for (const file of provider.filter((source) => source.fileName !== owner)) {
+			// Only a module that can see an entry can reach its scope.
+			const seesEntries = file.statements.some(
+				(statement) =>
+					ts.isImportDeclaration(statement) &&
+					ts.isStringLiteral(statement.moduleSpecifier) &&
+					statement.moduleSpecifier.text === "./runner-entry-lifecycle.js",
+			);
+			ts.forEachChild(file, function visit(node): void {
+				if (ts.isIdentifier(node) && node.text === "releaseWaiters")
+					offenders.push(`${at(node)} releaseWaiters`);
+				if (
+					ts.isCallExpression(node) &&
+					ts.isPropertyAccessExpression(node.expression) &&
+					ts.isIdentifier(node.expression.expression)
+				) {
+					const [target] = node.arguments;
+					const module = node.expression.expression.text;
+					const name = node.expression.name.text;
+					const field =
+						target && ts.isPropertyAccessExpression(target)
+							? target.name.text
+							: undefined;
+					// drained and the End latch have no producer: only the scope settles them.
+					if (
+						module === "Deferred" &&
+						!reads.has(name) &&
+						(field === "drained" || field === "released")
+					)
+						offenders.push(`${at(node)} Deferred.${name}(.${field})`);
+					if (seesEntries && module === "Scope" && field === "scope")
+						offenders.push(`${at(node)} Scope.${name}(.scope)`);
+					if (module === "Entry" && (name === "open" || name === "own")) {
+						const counts = (scopes[file.fileName] ??= { open: 0, own: 0 });
+						counts[name]++;
+					}
+				}
+				if (ts.isObjectLiteralExpression(node)) {
+					const names = new Set(
+						node.properties.flatMap((property) =>
+							property.name ? [property.name.getText(file)] : [],
+						),
+					);
+					if (
+						names.has("ready") &&
+						(names.has("drained") || names.has("scope"))
+					)
+						offenders.push(
+							`${at(node)} entry waiters built outside Entry.open`,
+						);
+				}
+				ts.forEachChild(node, visit);
+			});
+		}
+		expect({
+			offenders,
+			unowned: Object.entries(scopes).filter(
+				([, counts]) => counts.open !== counts.own,
+			),
+			opened: Object.values(scopes).some((counts) => counts.open > 0),
+		}).toEqual({ offenders: [], unowned: [], opened: true });
+	});
+
 	it("writes send binding fields only in runner-sends.ts, and derives a send's runner", () => {
 		const owner = "src/lib/provider/runner/runner-sends.ts";
 		const sends = declarations(["SendBinding", "PendingSend"]);

@@ -26,6 +26,7 @@ import { boundProjectMismatch } from "./bind-event-store-effect.js";
 import {
 	EventStoreEffectTag,
 	type EventStoreError,
+	makeUnboundEventStoreEffect,
 	type UnboundEventStoreEffect,
 	UnboundEventStoreEffectTag,
 } from "./event-store-effect.js";
@@ -268,6 +269,31 @@ export const flushPendingWrites = <E = never, R = never>(
 		);
 	}).pipe(Effect.uninterruptible);
 
+// Sessions whose events a raw write appended unprojected, per store (CONTRACT 6.5).
+const unprojected = new WeakMap<SqlClient.SqlClient, ReadonlySet<string>>();
+
+/**
+ * Inside a raw write (`flushPendingWrites`): append events no projection sees
+ * yet and mark the store. The next projecting write recovers before its batch
+ * moves a projector cursor past them, and announces their sessions (6.5 2402-2406).
+ * A failed append is a defect that rolls the raw write back with it (A.21 T6).
+ */
+export const appendUnprojected = (
+	sql: SqlClient.SqlClient,
+	events: readonly CanonicalEvent[],
+) =>
+	Effect.gen(function* () {
+		if (events.length === 0) return;
+		yield* (yield* makeUnboundEventStoreEffect).appendBatch(events);
+		unprojected.set(
+			sql,
+			new Set([
+				...(unprojected.get(sql) ?? []),
+				...events.map((event) => event.sessionId),
+			]),
+		);
+	}).pipe(Effect.provideService(SqlClient.SqlClient, sql), Effect.orDie);
+
 const scheduledFlushes = new WeakSet<SqlClient.SqlClient>();
 
 /** Coalesce standalone maintenance, independent of the caller's transaction and grant. */
@@ -344,7 +370,8 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 
 				const result = yield* withCommitPermit(
 					Effect.gen(function* () {
-						if (!(yield* projectionRunner.isRecovered())) {
+						const lost = unprojected.get(sql);
+						if (lost || !(yield* projectionRunner.isRecovered())) {
 							yield* projectionRunner
 								.recover()
 								.pipe(Effect.provideService(SqlClient.SqlClient, sql));
@@ -497,6 +524,15 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 										return sessionIds;
 									});
 
+								// Replay announces nothing, so this commit announces what the
+								// recovery above folded (6.5; A.21 N13). Contract silent on how.
+								if (lost)
+									yield* stamp((version) =>
+										sql<{ id: string }>`UPDATE sessions SET version = ${version}
+											WHERE id IN ${sql.in([...lost])} RETURNING id`.pipe(
+											Effect.map((rows) => rows.map(({ id }) => id)),
+										),
+									);
 								const result = yield* body(project, stamp);
 								// A direct write to a session row can change what its
 								// family shows in the sidebar, as a projected one can. At
@@ -539,6 +575,7 @@ const makeCommitAndSignalWithStore = Effect.fn(function* (
 						);
 						yield* signalCommitted(sql);
 						clearCommittedWrites(sql, flushedWrites);
+						if (lost) unprojected.delete(sql);
 						observeTurnTimelineCommit(stored);
 						const { stamped, removed, collections } = mergeTouches(
 							advances.map((advance) => ({
