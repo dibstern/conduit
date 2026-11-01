@@ -411,15 +411,24 @@ describe("Project provenance through the built daemon", () => {
 			try {
 				const columns =
 					"event_id, session_id, stream_version, type, data, metadata, provider, created_at";
+				const stamped = old
+					.prepare(`SELECT ${columns} FROM events ORDER BY sequence`)
+					.all();
+				// CONTRACT.md 224 (row 215): startup retires the send's surviving runner before it
+				// serves, and the write that retires it appends one process_lost after the history.
+				const events = db
+					.prepare<[string], { type: string; session_id: string }>(
+						`SELECT ${columns} FROM events WHERE project_id = ? ORDER BY sequence`,
+					)
+					.all(before.slug);
+				expect(events.slice(0, stamped.length)).toEqual(stamped);
 				expect(
-					db
-						.prepare(
-							`SELECT ${columns} FROM events WHERE project_id = ? ORDER BY sequence`,
-						)
-						.all(before.slug),
-				).toEqual(
-					old.prepare(`SELECT ${columns} FROM events ORDER BY sequence`).all(),
-				);
+					events
+						.slice(stamped.length)
+						.map(({ type, session_id }) => ({ type, session_id })),
+				).toEqual([
+					{ type: "evidence.process_lost", session_id: before.sessionId },
+				]);
 			} finally {
 				db.close();
 				old.close();

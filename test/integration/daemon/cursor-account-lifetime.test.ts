@@ -245,9 +245,10 @@ it.each([
 			expected === "completed" ? "completed" : "failed",
 		);
 		if (outcome === "dead") {
-			// The runner held the send and died: indeterminate, never re-sent, so
-			// the missing account is never consulted.
-			expect(outbox?.error_code).toBe("delivery_indeterminate");
+			// The agent accepted the send and its runner died: retirement ends it
+			// process lost (CONTRACT.md 904, 3960-3961), never re-sent, so the
+			// missing account is never consulted.
+			expect(outbox?.error_code).toBe("runner_stopped");
 		} else if (outcome === "error") {
 			expect(terminalEvents[0]?.data).toContain("offline provider failure");
 			expect(outbox?.error_code).not.toBe("account_unavailable");
