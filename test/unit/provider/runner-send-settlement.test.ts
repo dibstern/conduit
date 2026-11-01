@@ -2090,6 +2090,57 @@ it.effect(
 );
 
 it.effect(
+	"a re-queued input gets the full cap again: three tries, a new reservation, then five more before exhaustion",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("cursor");
+				yield* f.seed("retry", 1, 0);
+				yield* f.recover;
+				f.replaySend.execute = () =>
+					Effect.succeed(
+						terminalResult("error", {
+							code: "transient",
+							message: "try again",
+							retryable: true,
+						}),
+					);
+				const retry = Effect.gen(function* () {
+					yield* f.reactor.runOnce();
+					const [row] = yield* f.sql<{
+						status: string;
+						next_attempt_at: number;
+					}>`SELECT status, next_attempt_at FROM provider_command_outbox`;
+					expect(row?.status).toBe("retryable_failed");
+					yield* TestClock.adjust(
+						(row?.next_attempt_at ?? 0) - (yield* Clock.currentTimeMillis),
+					);
+				});
+				for (let attempt = 1; attempt <= 3; attempt++) yield* retry;
+				// Stop then Resume re-admits the input under its id: its dispatch writes a new reservation.
+				yield* f.commit([
+					canonicalEvent(
+						"input.sent",
+						"s",
+						{ sessionId: "s", inputId: "retry" },
+						{ provider: "cursor" },
+					),
+				]);
+				for (let attempt = 1; attempt <= 5; attempt++) yield* retry;
+				yield* f.reactor.runOnce();
+				expect(
+					yield* f.sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "failed", error_code: "provider_send_attempts_exhausted" },
+				]);
+				expect(f.commands.filter((c) => c.type === "send-turn")).toHaveLength(
+					8,
+				);
+			}),
+		),
+);
+
+it.effect(
 	"F69 legacy replay with retryable unset fails once without replay",
 	() =>
 		runRetirement(
