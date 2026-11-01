@@ -841,17 +841,22 @@ export const makeRunnerStopReconciler = (options: {
 					decodedPayload._tag === "Success"
 						? decodedPayload.success
 						: undefined;
-				const journal = journalDirectory
-					? readRunnerSendJournal({
-							directory: journalDirectory,
-							sessionId: retirement.sessionId,
-							driverKind: settlement.driverKind,
-							commandId: command.command_id,
-							attempt: command.attempt_count,
-							nativeResumeFallback:
-								isRecord(payload) && payload["nativeResumeFallback"] === true,
-						})
-					: { _tag: "Unreadable" as const };
+				// A runner refused as an older build: its journal answers read as
+				// Unreadable, never Absent (CONTRACT 7.3: "Unreadable, or a runner
+				// from an older build: delivery_indeterminate, never re-sent").
+				const journal =
+					journalDirectory &&
+					entry?.lifecycle.failure?.code !== "runner_incompatible"
+						? readRunnerSendJournal({
+								directory: journalDirectory,
+								sessionId: retirement.sessionId,
+								driverKind: settlement.driverKind,
+								commandId: command.command_id,
+								attempt: command.attempt_count,
+								nativeResumeFallback:
+									isRecord(payload) && payload["nativeResumeFallback"] === true,
+							})
+						: { _tag: "Unreadable" as const };
 				return { journalBuild, journal, payload };
 			});
 		/**

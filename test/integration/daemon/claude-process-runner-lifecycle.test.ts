@@ -911,6 +911,8 @@ describe("built-dist Claude runner lifecycle", () => {
 		const harness = ProcessHarness.create({
 			dist: resolve("dist"),
 			deadline: performance.now() + LIFECYCLE_TIMEOUT_MS,
+			// An adoption refusal is proven by its warning in the log tail.
+			logLevel: "warn",
 			...(runnerLifecycle ? { runnerLifecycle } : {}),
 		});
 		const fixture: { harness: ProcessHarness; sessionId?: string } = {
