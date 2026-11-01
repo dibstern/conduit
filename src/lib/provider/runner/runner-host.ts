@@ -823,7 +823,7 @@ export const runSessionRunner = (
 							});
 							return;
 						}
-						if (command.type === "interrupt")
+						if (command.type === "interrupt" && !command.unrecorded)
 							for (const interruptedRun of command.runIds ?? [])
 								interruptedRuns.add(interruptedRun);
 						// Fence later frames synchronously, while the accepted Stop is

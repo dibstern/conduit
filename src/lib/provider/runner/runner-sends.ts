@@ -36,7 +36,7 @@ export interface SendBinding {
 
 export interface PendingSend {
 	readonly sessionId: string;
-	readonly turnId: string;
+	readonly runId: string | undefined;
 	readonly cancelled: Deferred.Deferred<void>;
 	readonly owner?: boolean;
 }
@@ -135,10 +135,10 @@ export const makeRunnerSends = (deps: {
 								}),
 						),
 			),
-		/** Cancels every undispatched non-owner send the interrupt names. */
+		/** Cancels every undispatched non-owner send of a run the interrupt names. */
 		cancelUndispatched: (
 			sessionId: string,
-			turnIds: readonly string[] | undefined,
+			runIds: readonly string[] | undefined,
 		) =>
 			Effect.forEach(
 				[...pendingSends].filter(
@@ -146,7 +146,8 @@ export const makeRunnerSends = (deps: {
 						!dispatched(send) &&
 						!pending.owner &&
 						pending.sessionId === sessionId &&
-						(turnIds === undefined || turnIds.includes(pending.turnId)),
+						(runIds === undefined ||
+							(pending.runId !== undefined && runIds.includes(pending.runId))),
 				),
 				([, pending]) => Deferred.succeed(pending.cancelled, undefined),
 				{ discard: true },
@@ -332,7 +333,8 @@ export const makeRunnerSends = (deps: {
 									.commandEffect(randomUUID(), {
 										type: "interrupt",
 										sessionId: send.sessionId,
-										...(binding.inputId ? { turnIds: [binding.inputId] } : {}),
+										...(binding.runId ? { runIds: [binding.runId] } : {}),
+										unrecorded: true,
 									})
 									.pipe(Effect.asVoid);
 							}),

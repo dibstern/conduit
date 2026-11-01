@@ -192,6 +192,7 @@ describe("turn-only Stop interactions", () => {
 							queryFactory: factory,
 						});
 						const input = makeBaseSendTurnInput({
+							runId: "run-1",
 							eventSink: createMockEventSink(),
 							model: { providerId: "claude", modelId: "sonnet" },
 						});
@@ -199,7 +200,7 @@ describe("turn-only Stop interactions", () => {
 						yield* Deferred.await(started);
 						const stopping = yield* Effect.forkChild(
 							runtime
-								.interruptTurnEffect(input.sessionId, [input.inputId])
+								.interruptTurnEffect(input.sessionId, ["run-1"])
 								.pipe(Effect.result),
 						);
 						yield* Effect.promise(() =>

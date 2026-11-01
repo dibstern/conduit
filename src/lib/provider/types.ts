@@ -58,7 +58,11 @@ export interface ProviderControlContext {
 	readonly requestedAt?: number;
 	/** Conditional End for the original Stop cohort only. */
 	readonly retireRunIds?: readonly string[];
-	/** The committed cohort fenced by interrupt at the runner host. */
+	/**
+	 * The committed cohort fenced by interrupt at the runner host. Until the
+	 * reactor passes the cohort as `interruptTurnEffect`'s `runIds`, runner
+	 * instances read it from here.
+	 */
 	readonly stopRunIds?: readonly string[];
 	/** An End that retires the runner for its project's removal (3.11). */
 	readonly projectRemoved?: true;
@@ -504,10 +508,13 @@ export interface ProviderInstance {
 		input: PreWarmSessionInput,
 	) => Effect.Effect<void, ProviderInstanceFailure>;
 
-	/** Interrupt an in-progress turn, or only one admitted under `turnIds`. */
+	/**
+	 * Interrupt the in-progress turn. With `runIds` (a Stop's committed cohort,
+	 * 4.6), never a send's turn whose run it does not name.
+	 */
 	interruptTurnEffect(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 		call?: ProviderCall,
 		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;

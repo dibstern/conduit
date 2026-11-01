@@ -662,7 +662,7 @@ describe("Claude runner admission socket probes", () => {
 								runner.executeEffect({
 									type: "interrupt",
 									sessionId: fixture.send.input.sessionId,
-									turnIds: ["unrelated-input"],
+									runIds: ["unrelated-run"],
 								}),
 							);
 							yield* Effect.sleep("20 millis");
@@ -670,15 +670,12 @@ describe("Claude runner admission socket probes", () => {
 								type: "release-sink",
 								sinkId: fixture.send.sinkId,
 							});
+							// A Stop naming runs never reaches a send that has none;
+							// a session-wide interrupt does.
 							yield* Effect.forkChild(
 								runner.executeEffect({
 									type: "interrupt",
 									sessionId: fixture.send.input.sessionId,
-									turnIds: [
-										mode === "continuation-interrupt"
-											? "original-user"
-											: fixture.send.input.inputId,
-									],
 								}),
 							);
 						}

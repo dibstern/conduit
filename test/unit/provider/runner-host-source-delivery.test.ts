@@ -140,7 +140,7 @@ for (const { name, mode } of [
 		mode: "interrupted-runs",
 	},
 	{
-		name: "an older interrupt without run ids does not fence later sends",
+		name: "a session-wide interrupt does not fence later sends",
 		mode: "legacy-interrupt",
 	},
 	{
@@ -534,7 +534,6 @@ for (const { name, mode } of [
 								yield* client.commandEffect("stop-before-send", {
 									type: "interrupt",
 									sessionId: "session-1",
-									turnIds: ["shared-cut-off"],
 									...(mode === "interrupted-runs"
 										? { runIds: ["covered-run"] }
 										: {}),
@@ -950,7 +949,7 @@ for (const { name, mode } of [
 								const stop: Extract<SessionCommand, { type: "interrupt" }> = {
 									type: "interrupt",
 									sessionId: "session-1",
-									turnIds: ["obsolete-input"],
+									runIds: ["obsolete-run"],
 								};
 								expect(
 									yield* client.commandEffect("stale-stop", stop),

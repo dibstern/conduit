@@ -1870,25 +1870,19 @@ export class OrchestrationEngine {
 				log.info(`Dispatching interruptTurn: session=${command.sessionId}`),
 			);
 
-			return yield* (
-				call
-					? instance.interruptTurnEffect(
-							command.sessionId,
-							command.turnIds,
-							call,
-						)
-					: command.turnIds === undefined
-						? instance.interruptTurnEffect(command.sessionId)
-						: instance.interruptTurnEffect(command.sessionId, command.turnIds)
-			).pipe(
-				Effect.tapError((error) =>
-					Effect.sync(() =>
-						log.error(
-							`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+			// A Stop names its committed cohort's runs, never reusable input ids (4.6).
+			const runIds = command.stop?.owners.map(({ runId }) => runId);
+			return yield* instance
+				.interruptTurnEffect(command.sessionId, runIds, call)
+				.pipe(
+					Effect.tapError((error) =>
+						Effect.sync(() =>
+							log.error(
+								`interruptTurn failed: session=${command.sessionId} provider=${providerId}: ${error.message}`,
+							),
 						),
 					),
-				),
-			);
+				);
 		});
 	}
 

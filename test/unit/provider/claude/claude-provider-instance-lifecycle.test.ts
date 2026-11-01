@@ -246,7 +246,9 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			try {
 				await vi.waitFor(() => expect(prepareQuery).toHaveBeenCalledOnce());
 				await Effect.runPromise(
-					instance.interruptTurnEffect("sess-stop-setup", [inputId]),
+					instance.interruptTurnEffect("sess-stop-setup", [
+						"setup-reservation",
+					]),
 				);
 				releaseSetup();
 				expect(await send).toMatchObject({
@@ -309,6 +311,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			});
 			const input = makeBaseSendTurnInput({
 				inputId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				runId: "setup-run",
 				eventSink,
 				model: { providerId: "claude", modelId: "sonnet" },
 			});
@@ -323,7 +326,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			try {
 				await vi.waitFor(() => expect(prepareQuery).toHaveBeenCalledOnce());
 				stop = Effect.runPromise(
-					instance.interruptTurnEffect(input.sessionId, [input.inputId]),
+					instance.interruptTurnEffect(input.sessionId, ["setup-run"]),
 				);
 				await Effect.runPromise(Deferred.await(interrupted));
 				releaseSetup();
@@ -332,7 +335,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				expect(replied).toBe(false);
 				await Effect.runPromise(
 					instance
-						.interruptTurnEffect(input.sessionId, [input.inputId])
+						.interruptTurnEffect(input.sessionId, ["setup-run"])
 						.pipe(Effect.timeout("100 millis")),
 				);
 				Effect.runSync(Deferred.succeed(persisted, undefined));
@@ -356,6 +359,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			await Effect.runPromise(ownership.take(1));
 			const ctx = makeFakeSessionContext("sess-1", {
 				currentTurnId: "previous-input",
+				currentRunId: "previous-run",
 				turnInFlight: true,
 				liveBackgroundTaskCount: 1,
 				messageOwnershipPermit: ownership,
@@ -365,10 +369,11 @@ describe("ClaudeProviderInstance lifecycle", () => {
 				ownership.withPermits(1)(
 					Effect.sync(() => {
 						ctx.currentTurnId = "active-input";
+						ctx.currentRunId = "active-run";
 					}),
 				),
 			);
-			const candidates = ["previous-input", "active-input"];
+			const candidates = ["previous-run", "active-run"];
 			const stopping = Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", candidates),
 			);
@@ -381,6 +386,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.query.interrupt).toHaveBeenCalledOnce();
 			expect(ctx.query.close).not.toHaveBeenCalled();
 			ctx.currentTurnId = "replacement-input";
+			ctx.currentRunId = "replacement-run";
 			await Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", candidates),
 			);
@@ -392,20 +398,20 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		// The newest admitted steer may still be queued; only the runtime knows which
 		// admitted input is active. A later replacement must never match this Stop.
 		it.each([
-			"previous-input",
-			"active-input",
-		])("stops runtime-confirmed %s while placement and another admitted steer lag", async (activeInput) => {
+			"previous-run",
+			"active-run",
+		])("stops runtime-confirmed %s while placement and another admitted steer lag", async (activeRun) => {
 			const instance = makeTestClaudeProviderInstance({});
 			const placement = Semaphore.makeUnsafe(1);
 			await Effect.runPromise(placement.take(1));
 			const ctx = makeFakeSessionContext("sess-1", {
-				currentTurnId: activeInput,
+				currentRunId: activeRun,
 				turnInFlight: true,
 				liveBackgroundTaskCount: 1,
 				messageOwnershipPermit: placement,
 			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
-			const admitted = ["queued-steer", "active-input", "previous-input"];
+			const admitted = ["queued-run", "active-run", "previous-run"];
 			const stopping = Effect.runPromise(
 				instance.interruptTurnEffect("sess-1", admitted),
 			);
@@ -415,6 +421,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.query.interrupt).toHaveBeenCalledOnce();
 			expect(ctx.query.close).not.toHaveBeenCalled();
 			ctx.currentTurnId = "replacement-input";
+			ctx.currentRunId = "replacement-run";
 			await Effect.runPromise(instance.interruptTurnEffect("sess-1", admitted));
 			expect(ctx.query.interrupt).toHaveBeenCalledOnce();
 			expect(ctx.stopped).toBe(false);
@@ -425,6 +432,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const ack = await Effect.runPromise(Deferred.make<void, Error>());
 			const ctx = makeFakeSessionContext("sess-1", {
 				turnInFlight: true,
+				currentRunId: "run-1",
 				liveBackgroundTaskCount: 1,
 			});
 			vi.mocked(ctx.query.interrupt).mockImplementationOnce(() =>
@@ -434,14 +442,14 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			// The rejection fails the Stop, so the caller can report it.
 			const rejected = Effect.runPromise(
-				Effect.result(instance.interruptTurnEffect("sess-1", ["turn-1"])),
+				Effect.result(instance.interruptTurnEffect("sess-1", ["run-1"])),
 			);
 			await Effect.runPromise(
 				Deferred.fail(ack, new Error("interrupt rejected")),
 			);
 			expect((await rejected)._tag).toBe("Failure");
 			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]),
+				instance.interruptTurnEffect("sess-1", ["run-1"]),
 			);
 
 			expect(ctx.query.interrupt).toHaveBeenCalledTimes(2);
@@ -453,6 +461,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			const instance = makeTestClaudeProviderInstance({});
 			const ack = await Effect.runPromise(Deferred.make<void, Error>());
 			const ctx = makeFakeSessionContext("sess-1", {
+				currentRunId: "run-1",
 				turnInFlight: true,
 				liveBackgroundTaskCount: 1,
 			});
@@ -463,21 +472,22 @@ describe("ClaudeProviderInstance lifecycle", () => {
 
 			// The older Stop awaits its acknowledgement without holding ownership.
 			const rejected = Effect.runPromise(
-				Effect.result(instance.interruptTurnEffect("sess-1", ["turn-1"])),
+				Effect.result(instance.interruptTurnEffect("sess-1", ["run-1"])),
 			);
 			await vi.waitFor(() =>
 				expect(ctx.query.interrupt).toHaveBeenCalledOnce(),
 			);
 			ctx.currentTurnId = "replacement-input";
+			ctx.currentRunId = "replacement-run";
 			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["replacement-input"]),
+				instance.interruptTurnEffect("sess-1", ["replacement-run"]),
 			);
 			await Effect.runPromise(
 				Deferred.fail(ack, new Error("old interrupt rejected")),
 			);
 			expect((await rejected)._tag).toBe("Failure");
 			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["replacement-input"]),
+				instance.interruptTurnEffect("sess-1", ["replacement-run"]),
 			);
 
 			expect(ctx.interruptInputId).toBe("replacement-input");
@@ -486,16 +496,42 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			expect(ctx.stopped).toBe(false);
 		});
 
-		it("ignores an interrupt bound to a replaced input", async () => {
+		// 4.6: a Stop names runs, never reusable input ids, so a late frame never
+		// stops a newer send's turn, even one that shares the older send's input id.
+		it("a late interrupt naming an older run never stops a newer send's turn", async () => {
+			const instance = makeTestClaudeProviderInstance({});
+			const ctx = makeFakeSessionContext("sess-1", {
+				currentTurnId: "shared-input",
+				currentRunId: "run-new",
+				turnInFlight: true,
+				liveBackgroundTaskCount: 1,
+			});
+			setClaudeRuntimeSessionForTest(instance, "sess-1", ctx);
+
+			await Effect.runPromise(
+				instance.interruptTurnEffect("sess-1", ["run-old"]),
+			);
+			expect(ctx.query.interrupt).not.toHaveBeenCalled();
+
+			await Effect.runPromise(
+				instance.interruptTurnEffect("sess-1", ["run-new"]),
+			);
+			expect(ctx.query.interrupt).toHaveBeenCalledOnce();
+			expect(ctx.closedRunIds).toEqual(new Set(["run-new"]));
+			expect(ctx.stopped).toBe(false);
+		});
+
+		it("ignores an interrupt naming a replaced run", async () => {
 			const instance = makeTestClaudeProviderInstance({});
 			const replacement = makeFakeSessionContext("sess-1", {
 				currentTurnId: "replacement-input",
+				currentRunId: "replacement-run",
 				turnInFlight: true,
 			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", replacement);
 
 			await Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["old-input"]),
+				instance.interruptTurnEffect("sess-1", ["old-run"]),
 			);
 
 			expect(replacement.query.interrupt).not.toHaveBeenCalled();
@@ -509,14 +545,17 @@ describe("ClaudeProviderInstance lifecycle", () => {
 		] as const)("awaits a bound interrupt acknowledgement that can %s and preserves replacement waiters", async (settlement) => {
 			const instance = makeTestClaudeProviderInstance({});
 			const ack = await Effect.runPromise(Deferred.make<void, Error>());
-			const original = makeFakeSessionContext("sess-1", { turnInFlight: true });
+			const original = makeFakeSessionContext("sess-1", {
+				currentRunId: "run-1",
+				turnInFlight: true,
+			});
 			vi.mocked(original.query.interrupt).mockImplementation(() =>
 				Effect.runPromise(Deferred.await(ack)).then(() => undefined),
 			);
 			setClaudeRuntimeSessionForTest(instance, "sess-1", original);
 
 			const interruption = Effect.runPromise(
-				instance.interruptTurnEffect("sess-1", ["turn-1"]).pipe(Effect.result),
+				instance.interruptTurnEffect("sess-1", ["run-1"]).pipe(Effect.result),
 			);
 			const released = await Promise.race([
 				interruption.then(() => true),
@@ -524,6 +563,7 @@ describe("ClaudeProviderInstance lifecycle", () => {
 			]);
 			const replacement = makeFakeSessionContext("sess-1", {
 				currentTurnId: "replacement-input",
+				currentRunId: "replacement-run",
 				turnInFlight: true,
 			});
 			setClaudeRuntimeSessionForTest(instance, "sess-1", replacement);

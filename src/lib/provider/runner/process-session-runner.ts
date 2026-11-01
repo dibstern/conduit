@@ -798,7 +798,7 @@ export const makeProcessSessionRunner = (
 				R,
 				T extends Pick<
 					SessionTurn,
-					"sessionId" | "inputId" | "account" | "continuation"
+					"sessionId" | "inputId" | "runId" | "account" | "continuation"
 				>,
 			>(
 				input: T,
@@ -810,7 +810,7 @@ export const makeProcessSessionRunner = (
 				return Effect.gen(function* () {
 					const pending = sends.pending(scope) ?? {
 						sessionId: input.sessionId,
-						turnId: input.continuation?.cutOffMessageId ?? input.inputId,
+						runId: input.runId,
 						cancelled: yield* Deferred.make<void>(),
 					};
 					yield* sends.bindPending(scope, sinkId, pending);

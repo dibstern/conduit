@@ -3609,7 +3609,11 @@ describe("ProviderTurnService", () => {
 					yield* Deferred.await(sendStarted);
 					yield* interruptTurn();
 
-					expect(interruptTurnEffect).toHaveBeenCalledWith("session-1", []);
+					expect(interruptTurnEffect).toHaveBeenCalledWith(
+						"session-1",
+						[],
+						undefined,
+					);
 					expect(api.session.abort).not.toHaveBeenCalled();
 
 					yield* Deferred.succeed(releaseSend, undefined);

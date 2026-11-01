@@ -102,7 +102,8 @@ interface CodexChild {
 interface ActiveTurn {
 	state: CodexTurnState;
 	readonly sink: EventSink;
-	readonly inputIds: Set<string>;
+	/** The runs whose sends this turn carries: its start's and its steers'. */
+	readonly runIds: Set<string>;
 	readonly interactions: CodexInteractions;
 	readonly started: Deferred.Deferred<string | undefined>;
 	readonly cancelled: Deferred.Deferred<void>;
@@ -328,10 +329,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 					...(input.goalState ? { goalState: input.goalState } : {}),
 					tokenUsageBaseline: current.tokenUsageTotal,
 				}),
-				inputIds: new Set([
-					input.inputId,
-					...(input.continuation ? [input.continuation.cutOffMessageId] : []),
-				]),
+				runIds: new Set(input.runId ? [input.runId] : []),
 				started: yield* Deferred.make<string | undefined>(),
 				cancelled: yield* Deferred.make<void>(),
 				cancelRequested: false,
@@ -917,13 +915,13 @@ export class CodexRunnerPayload implements RunnerPayload {
 
 	interrupt(
 		sessionId: string,
-		turnIds?: readonly string[],
+		runIds?: readonly string[],
 	): Effect.Effect<void, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const session = this.sessions.get(sessionId);
 			if (!session) return;
 			const active = session.active;
-			if (turnIds && !turnIds.some((id) => active?.inputIds.has(id))) return;
+			if (runIds && !runIds.some((id) => active?.runIds.has(id))) return;
 			session.subagents?.beginInterrupt();
 			if (!active) {
 				yield* this.interruptChildren(session);
@@ -1117,7 +1115,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 					sinkId
 				) {
 					if (!claim()) return { ...declined, status: "cancelled" as const };
-					active.inputIds.add(input.inputId);
+					if (input.runId) active.runIds.add(input.runId);
 					const facts = yield* this.goalCommand(session, command).pipe(
 						Effect.mapError(
 							(cause): SessionFailure => ({
@@ -1141,7 +1139,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 				)
 					return declined;
 				if (!claim()) return { ...declined, status: "cancelled" as const };
-				active.inputIds.add(input.inputId);
+				if (input.runId) active.runIds.add(input.runId);
 				const delivered = yield* session.child.client
 					.request(
 						"turn/steer",

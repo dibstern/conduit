@@ -110,7 +110,7 @@ it.live(
 				yield* runner.executeEffect({
 					type: "interrupt",
 					sessionId: "session",
-					turnIds: ["input"],
+					runIds: ["run"],
 				});
 				const outcome = yield* Effect.result(
 					Deferred.await(terminal).pipe(Effect.timeout("1 second")),

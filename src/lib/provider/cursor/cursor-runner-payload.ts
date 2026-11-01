@@ -77,7 +77,8 @@ interface CursorSession {
 		| undefined;
 	run?: CursorRun | undefined;
 	busy: boolean;
-	inputIds?: Set<string> | undefined;
+	/** The runs whose sends the busy turn carries: its start's and its steers'. */
+	runIds?: Set<string> | undefined;
 	cancelRequested: boolean;
 	questionAbort?: AbortController | undefined;
 	onCancel?: (() => void) | undefined;
@@ -312,10 +313,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 					? yield* session.steer(input, sink, claim)
 					: this.result(session, "steer-declined", 0);
 			session.busy = true;
-			session.inputIds = new Set([
-				input.inputId,
-				...(input.continuation ? [input.continuation.cutOffMessageId] : []),
-			]);
+			session.runIds = new Set(input.runId ? [input.runId] : []);
 			this.onTurnStateChanged?.(true);
 			session.cancelRequested = false;
 			const questionAbort = new AbortController();
@@ -409,7 +407,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 								},
 							});
 							currentInputId = inputId;
-							session.inputIds?.add(inputId);
+							if (pending.input.runId) session.runIds?.add(pending.input.runId);
 							events.currentUserMessageId = inputId;
 							if (events.runId && pending.input.runId)
 								yield* events.push("run.started", {
@@ -1063,7 +1061,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							Effect.sync(() => {
 								acceptingUpdates = false;
 								session.busy = false;
-								session.inputIds = undefined;
+								session.runIds = undefined;
 								session.run = undefined;
 								session.questionAbort = undefined;
 								session.onCancel = undefined;
@@ -1143,12 +1141,12 @@ export class CursorRunnerPayload implements RunnerPayload {
 		});
 	}
 
-	interrupt(sessionId: string, turnIds?: readonly string[]) {
+	interrupt(sessionId: string, runIds?: readonly string[]) {
 		return Effect.suspend(() => {
 			const session = this.sessions.get(sessionId);
 			if (
-				turnIds !== undefined &&
-				!turnIds.some((inputId) => session?.inputIds?.has(inputId))
+				runIds !== undefined &&
+				!runIds.some((runId) => session?.runIds?.has(runId))
 			)
 				return Effect.void;
 			if (session) {
