@@ -462,6 +462,42 @@ const commandFor = (
 						kind: "turn_ended",
 					},
 				};
+			case "permission.asked":
+			case "question.asked":
+			case "permission.resolved":
+			case "question.resolved": {
+				// 2.1 row 205, 3.10 (CONTRACT.md 216, 999-1006): an OpenCode interaction belongs to the
+				// label its session's process reported last; the arm folds its request and its native
+				// resolution there (gap, reported). Claude's come from its runner.
+				if (getProviderDriver(provider)?.runsOpenCodeServer !== true)
+					return undefined;
+				const [started] = yield* sql<{ label: string }>`
+					SELECT json_extract(data, '$.label') AS label FROM events
+					WHERE session_id = ${event.sessionId} AND type = 'evidence.process_started'
+						AND sequence < ${event.sequence}
+					ORDER BY sequence DESC LIMIT 1`;
+				if (!started) return undefined;
+				const at = {
+					tag: "Unsolicited",
+					label: started.label,
+					eventId: event.eventId,
+					interactionId: event.data.id,
+				} as const;
+				return {
+					verb: "observe",
+					observation:
+						event.type === "permission.asked" || event.type === "question.asked"
+							? {
+									...at,
+									kind: "interaction_requested",
+									interactionKind:
+										event.type === "permission.asked"
+											? "permission"
+											: "question",
+								}
+							: { ...at, kind: "interaction_resolved" },
+				};
+			}
 			case "evidence.delivery_indeterminate":
 				return {
 					verb: "observe",
@@ -506,6 +542,10 @@ const HANDLES = [
 	"evidence.turn_ended",
 	"evidence.delivery_indeterminate",
 	"evidence.hold_exhausted",
+	"permission.asked",
+	"permission.resolved",
+	"question.asked",
+	"question.resolved",
 ] as const;
 
 const untouched: ProjectionTouch = {

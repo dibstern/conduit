@@ -30,6 +30,9 @@
 // 20. the interrupt after main's input.interrupt_requested folds as a Stop, or a later Stop as Run now.
 // Driver kind (3.12). How it could fail:
 // 21. a session on a named instance ("work-oc") reads as Claude's, so OpenCode's rules never apply.
+// OpenCode interactions (2.1 row 205, 3.10). How they could fail:
+// 22. an OpenCode permission or question is never folded, so a Stop's commit sees no Pending one;
+// 23. it is folded on no label or another session's, or stays Pending after its resolution.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -571,6 +574,66 @@ describe("Run Ledger arm", () => {
 				});
 				expect(after).toEqual(before);
 			}),
+	);
+
+	it.effect(
+		"folds an OpenCode permission and question as Pending on the session's current label until resolved",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const pending = Effect.map(loadLedgerView("s1"), (view) =>
+						view?.interactions.filter(({ tag }) => tag === "Pending"),
+					);
+					yield* projectOnline([
+						makeSessionCreatedEvent("s1", {
+							provider: "opencode",
+							createdAt: 1000,
+						}),
+						canonicalEvent(
+							"evidence.process_started",
+							"s1",
+							{ runnerId: "oc-1", label: "oc-1:0", reattached: false },
+							at(1001),
+						),
+						canonicalEvent(
+							"permission.asked",
+							"s1",
+							{
+								id: "perm-1",
+								sessionId: "s1",
+								toolName: "bash",
+								input: { command: "ls" },
+							},
+							at(1002),
+						),
+						canonicalEvent(
+							"question.asked",
+							"s1",
+							{ id: "q-1", sessionId: "s1", questions: [] },
+							at(1003),
+						),
+					]);
+					expect(yield* pending).toEqual([
+						{ tag: "Pending", interactionId: "perm-1", kind: "permission" },
+						{ tag: "Pending", interactionId: "q-1", kind: "question" },
+					]);
+					yield* projectOnline([
+						canonicalEvent(
+							"permission.resolved",
+							"s1",
+							{ id: "perm-1", decision: "once" },
+							at(1004),
+						),
+						canonicalEvent(
+							"question.resolved",
+							"s1",
+							{ id: "q-1", answers: {} },
+							at(1005),
+						),
+					]);
+					expect(yield* pending).toEqual([]);
+				}),
+			),
 	);
 	it.effect(
 		"folds the interrupt after input.interrupt_requested as Run now, and the next one as a Stop",
