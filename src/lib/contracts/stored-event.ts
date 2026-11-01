@@ -1116,6 +1116,65 @@ export const CanonicalEvents = {
 			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
+	// Evidence events (CONTRACT.md 2.1 row 215, 3.9): a fact the Run Ledger's arm folds that has
+	// no main event, appended by its one observer in the write that observes it. Main's
+	// projectors ignore them.
+	"evidence.process_started": live(
+		Schema.Struct({
+			runnerId: Schema.String,
+			label: Schema.String,
+			reattached: Schema.Boolean,
+		}),
+	),
+	"evidence.process_lost": live(
+		Schema.Struct({ runnerId: Schema.String, retiredAt: Schema.Number }),
+	),
+	"evidence.alarm_fired": live(Schema.Struct({ alarmAt: Schema.Number })),
+	/**
+	 * An effect's outcome, in the write that sets its outbox status (3.4). transmission is the
+	 * row's attempt_count, 0 when no claim reached it; token names a ledger effect's
+	 * transmission, which decide minted (3.12).
+	 */
+	"evidence.effect_outcome": live(
+		Schema.Struct({
+			commandId: Schema.String,
+			transmission: Schema.Number,
+			token: Schema.optionalKey(Schema.String),
+			outcome: Schema.Union([
+				Schema.Struct({ tag: Schema.Literal("succeeded") }),
+				Schema.Struct({
+					tag: Schema.Literal("retryable"),
+					retryAt: Schema.Number,
+					code: Schema.optionalKey(Schema.String),
+				}),
+				Schema.Struct({
+					tag: Schema.Literal("permanent"),
+					code: Schema.String,
+				}),
+				Schema.Struct({
+					tag: Schema.Literal("not_sent"),
+					retryAt: Schema.Number,
+				}),
+				Schema.Struct({ tag: Schema.Literal("delivery_unknown") }),
+			]),
+		}),
+	),
+	"evidence.turn_started": live(
+		Schema.Struct({
+			label: Schema.String,
+			wakeTask: Schema.optionalKey(
+				Schema.Struct({
+					taskId: Schema.String,
+					runId: Schema.optionalKey(Schema.String),
+				}),
+			),
+		}),
+	),
+	"evidence.turn_ended": live(Schema.Struct({ label: Schema.String })),
+	/** The direct send's delivery_indeterminate marker (3.4); a direct start's token is its runId. */
+	"evidence.delivery_indeterminate": live(
+		Schema.Struct({ runId: Schema.String, commandId: Schema.String }),
+	),
 	"permission.asked": live(
 		Schema.Struct({
 			id: Schema.String,

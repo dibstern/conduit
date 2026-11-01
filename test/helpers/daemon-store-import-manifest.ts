@@ -61,6 +61,7 @@ const eventColumns: Readonly<Record<string, readonly string[]>> = {
 	projection_failures: ["event_sequence"],
 	provider_command_meta: ["last_applied_sequence"],
 	provider_command_tombstones: ["event_sequence"],
+	run_ledger_entries: ["event_sequence"],
 };
 const outboxColumns: Readonly<Record<string, readonly string[]>> = {
 	provider_command_outbox: ["request_sequence"],

@@ -1631,6 +1631,31 @@ export const effectMigrationEntries = {
 				yield* sql`UPDATE claude_runner_cursors SET signal_state = 'KillSent' WHERE signalled = 1`;
 		}
 	}),
+	// Run Ledger (CONTRACT.md 3.7, 3.12): the arm's entry log and per-session row, and the
+	// keyed insert of the three effects decide issues. The entry log stands in for 3.12's Runs
+	// and Run Inputs tables: state is the fold of its entries (gap, reported).
+	"0090_run_ledger": executeSqlStatements(`
+		CREATE TABLE IF NOT EXISTS run_ledger_entries (
+			session_id TEXT NOT NULL,
+			entry_seq INTEGER NOT NULL,
+			event_sequence INTEGER NOT NULL,
+			stamp TEXT NOT NULL,
+			entry_json TEXT NOT NULL,
+			PRIMARY KEY (session_id, entry_seq)
+		);
+		CREATE TABLE IF NOT EXISTS run_ledger_sessions (
+			session_id TEXT PRIMARY KEY,
+			provider TEXT NOT NULL,
+			state TEXT NOT NULL CHECK (state IN ('Quiescent', 'Open')),
+			alarm_at INTEGER,
+			CHECK (state = 'Open' OR alarm_at IS NULL)
+		);
+		CREATE INDEX IF NOT EXISTS idx_run_ledger_sessions_alarm
+			ON run_ledger_sessions (alarm_at) WHERE alarm_at IS NOT NULL;
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_provider_command_outbox_ledger_effect
+			ON provider_command_outbox (project_key, command_id)
+			WHERE effect_type IN ('probe', 'stop_task', 'cancel_request');
+	`),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

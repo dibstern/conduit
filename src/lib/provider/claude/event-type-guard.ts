@@ -238,6 +238,34 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		reason:
 			"Relay-owned: the Session Inbox commits it before interrupting a turn",
 	},
+	"evidence.process_started": {
+		produced: false,
+		reason: "Run Ledger evidence: the runner lifecycle module's register",
+	},
+	"evidence.process_lost": {
+		produced: false,
+		reason: "Run Ledger evidence: the write that first retires a runner",
+	},
+	"evidence.alarm_fired": {
+		produced: false,
+		reason: "Run Ledger evidence: the main-side ledger alarm scheduler",
+	},
+	"evidence.effect_outcome": {
+		produced: false,
+		reason: "Run Ledger evidence: the outbox writer of the effect's outcome",
+	},
+	"evidence.turn_started": {
+		produced: false,
+		reason: "Run Ledger evidence: a Claude wake's start, landed with 32.6",
+	},
+	"evidence.turn_ended": {
+		produced: false,
+		reason: "Run Ledger evidence: a Claude wake's end, landed with 32.6",
+	},
+	"evidence.delivery_indeterminate": {
+		produced: false,
+		reason: "Run Ledger evidence: the direct send's marker, an OpenCode write",
+	},
 } as const satisfies Record<
 	LiveEventType,
 	| { readonly produced: true }

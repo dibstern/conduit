@@ -131,6 +131,9 @@ const copiedTables = [
 	"session_git_published",
 	"session_pick_backfill",
 	"surfacing_marks",
+	// The Run Ledger's fold: its arm's cursor is raised to the frontier with the others.
+	"run_ledger_entries",
+	"run_ledger_sessions",
 ] as const;
 const singletonTables = [
 	"projector_cursors",
@@ -933,7 +936,10 @@ function copyProject(
 				"last_applied_sequence",
 				offsets.event,
 			);
-		if (table === "provider_command_tombstones")
+		if (
+			table === "provider_command_tombstones" ||
+			table === "run_ledger_entries"
+		)
 			expressions["event_sequence"] = eventNumber(
 				"event_sequence",
 				offsets.event,
