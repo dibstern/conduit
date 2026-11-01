@@ -203,7 +203,10 @@ export async function stopBackgroundTasks(
 }
 
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */
-export function taskAge(task: BackgroundTask, now: number): string {
+export function taskAge(
+	task: Pick<BackgroundTask, "firstSeenAt">,
+	now: number,
+): string {
 	const seconds = Math.max(0, Math.floor((now - task.firstSeenAt) / 1000));
 	if (seconds < 60) return `${seconds}s`;
 	const minutes = Math.floor(seconds / 60);

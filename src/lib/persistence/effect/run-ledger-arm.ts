@@ -456,6 +456,16 @@ const commandFor = (
 						kind: "turn_ended",
 					},
 				};
+			case "evidence.server_seen":
+				return {
+					verb: "settle",
+					settlement: { kind: "server_seen", ...event.data },
+				};
+			case "evidence.server_gone":
+				return {
+					verb: "settle",
+					settlement: { kind: "server_gone", server: event.data.server },
+				};
 			case "evidence.delivery_indeterminate":
 				return {
 					verb: "observe",
@@ -500,6 +510,8 @@ const HANDLES = [
 	"evidence.turn_ended",
 	"evidence.delivery_indeterminate",
 	"evidence.hold_exhausted",
+	"evidence.server_seen",
+	"evidence.server_gone",
 ] as const;
 
 const untouched: ProjectionTouch = {

@@ -127,6 +127,7 @@ export const makeSessionRows = (
 									});
 						const compacting = activity.compactions.compactingOf(session.id);
 						const retrying = activity.retries.retryingOf(session.id);
+						const servers = activity.servers.get(session.id);
 						const git = yield* (
 							sessionGit._tag === "Some"
 								? sessionGit.value.read(session.id)
@@ -165,6 +166,7 @@ export const makeSessionRows = (
 									}),
 							...(compacting === undefined ? {} : { compacting }),
 							...(retrying === undefined ? {} : { retrying }),
+							...(servers === undefined ? {} : { servers }),
 						};
 					}),
 				);

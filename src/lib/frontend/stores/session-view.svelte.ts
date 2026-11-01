@@ -23,7 +23,7 @@ const isCompactPose = (pose: Pose): boolean =>
 const initiallyCompact =
 	typeof matchMedia === "function" && matchMedia(COMPACT_QUERY).matches;
 
-export type RightPaneView = "files" | "diff" | "closed";
+export type RightPaneView = "files" | "diff" | "servers" | "closed";
 
 type RightPaneMemory = { view: RightPaneView; width: number | null };
 let rightPaneMemory: Map<string, RightPaneMemory> | undefined;
@@ -33,7 +33,13 @@ function storedPaneView(
 	entry: Record<string, unknown>,
 ): RightPaneView | undefined {
 	const view = entry["view"];
-	if (view === "files" || view === "diff" || view === "closed") return view;
+	if (
+		view === "files" ||
+		view === "diff" ||
+		view === "servers" ||
+		view === "closed"
+	)
+		return view;
 	if (view !== undefined || typeof entry["filesOpen"] !== "boolean")
 		return undefined;
 	return entry["filesOpen"] ? "files" : "closed";

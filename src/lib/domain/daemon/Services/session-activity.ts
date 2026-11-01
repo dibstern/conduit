@@ -15,6 +15,7 @@ import type {
 import { makeSessionBackgroundLiveness } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
+import type { SessionServer } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 
@@ -22,6 +23,11 @@ export interface SessionActivity {
 	readonly background: ReturnType<typeof makeSessionBackgroundLiveness>;
 	readonly compactions: ReturnType<typeof makeSessionCompactions>;
 	readonly retries: ReturnType<typeof makeSessionRetries>;
+	/**
+	 * Each session's live servers as the PortWatcher last read them from the Run Ledger, the
+	 * ledger's Servers (8.7); a reader's copy, never the PortWatcher's comparison basis.
+	 */
+	readonly servers: Map<string, readonly SessionServer[]>;
 	readonly hintDismissals: Map<string, number>;
 	readonly viewers: Map<string, number>;
 	readonly connectionInterests: Map<EventDelivery, Interests>;
@@ -85,6 +91,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 					return moved;
 				},
 			},
+			servers: new Map(),
 			hintDismissals,
 			viewers: new Map(),
 			connectionInterests,

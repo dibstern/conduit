@@ -20,7 +20,7 @@
 	const width = $derived(Math.min(maxWidth, sessionViewState.rightPaneWidth ?? defaultWidth));
 	const forcedExpanded = $derived(!sessionViewState.compact && rowWidth < CHAT_MIN_WIDTH + DIVIDER_WIDTH + RIGHT_PANE_MIN_WIDTH);
 	const expanded = $derived(open && !sessionViewState.compact && (sessionViewState.rightPaneExpanded || forcedExpanded));
-	const label = $derived(view === "diff" ? "Diff" : "Files");
+	const label = $derived(sessionViews.find((entry) => entry.id === view)?.label ?? "Files");
 	const expandLabel = $derived(forcedExpanded ? `Not enough room to show chat beside ${label}` : `${expanded ? "Restore" : "Expand"} ${label} pane`);
 	const preview = $derived(view === "files" && sessionViewState.filePreview !== null);
 
@@ -104,7 +104,11 @@
 		<div id="right-pane" data-testid="side-pane-files" aria-label={`${label} pane`} class="flex min-h-0 min-w-0 flex-col bg-bg-surface" class:fixed={sessionViewState.compact} class:inset-0={sessionViewState.compact} class:z-50={sessionViewState.compact} class:relative={!sessionViewState.compact} style:flex={expanded ? "1 1 0%" : "0 0 auto"} style:width={sessionViewState.compact || expanded ? undefined : `${width}px`} style:padding-top={sessionViewState.compact ? "max(env(safe-area-inset-top, 0px), var(--phone-chrome-clearance, 0px))" : undefined} style:padding-bottom={sessionViewState.compact ? "env(safe-area-inset-bottom, 0px)" : undefined}>
 			<div class="flex min-h-[44px] md:min-h-9 shrink-0 items-center gap-1 border-b border-border-subtle px-2">
 				<div id="files-pane-title" class="shrink-0">
-					<Tabs value={view} options={[{ value: "files", label: "Files" }, { value: "diff", label: "Diff" }]} label="Right pane" variant="pill" onValueChange={setRightPaneView} />
+					{#if view === "servers"}
+						<h2 class="m-0 px-1 text-sm font-medium text-text">Servers</h2>
+					{:else}
+						<Tabs value={view} options={[{ value: "files", label: "Files" }, { value: "diff", label: "Diff" }]} label="Right pane" variant="pill" onValueChange={setRightPaneView} />
+					{/if}
 				</div>
 				{#if preview}
 					<span class="min-w-0 truncate rounded-full border border-border-subtle bg-bg-alt px-2 py-0.5 font-mono text-xs text-text-muted" dir="rtl" title={sessionViewState.filePreview?.path}>{sessionViewState.filePreview?.path}</span>

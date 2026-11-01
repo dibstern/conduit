@@ -350,6 +350,11 @@ export const EventMetadataSchema = Schema.Struct({
 const MessageRoleSchema = Schema.Literals(["user", "assistant"]);
 const SessionStatusSchema = Schema.Literals(["idle", "busy", "retry", "error"]);
 const PermissionDecisionSchema = Schema.Literals(["once", "always", "reject"]);
+const ServerKeySchema = Schema.Struct({
+	pid: Schema.Number,
+	startedAt: Schema.Number,
+	port: Schema.Number,
+});
 
 const TokensSchema = Schema.Struct({
 	input: Schema.optionalKey(Schema.Number),
@@ -1173,6 +1178,26 @@ export const CanonicalEvents = {
 	"evidence.turn_ended": live(Schema.Struct({ label: Schema.String })),
 	/** holdRun's cap (4.3): the held send under commandId spent its five transmissions. */
 	"evidence.hold_exhausted": live(Schema.Struct({ commandId: Schema.String })),
+	/**
+	 * The PortWatcher's server observations (8.2, 8.7), naming the session, never a label. A
+	 * ServerKey is the listening process's pid, its start time and the port.
+	 */
+	"evidence.server_seen": live(
+		Schema.Struct({
+			server: ServerKeySchema,
+			command: Schema.String,
+			cwd: Schema.String,
+			taskKey: Schema.optionalKey(
+				Schema.Struct({
+					taskId: Schema.String,
+					runId: Schema.optionalKey(Schema.String),
+				}),
+			),
+			source: Schema.Literals(["detected", "declared"]),
+			role: Schema.optionalKey(Schema.Literals(["serving", "awaited"])),
+		}),
+	),
+	"evidence.server_gone": live(Schema.Struct({ server: ServerKeySchema })),
 	/** The direct send's delivery_indeterminate marker (3.4); a direct start's token is its runId. */
 	"evidence.delivery_indeterminate": live(
 		Schema.Struct({ runId: Schema.String, commandId: Schema.String }),

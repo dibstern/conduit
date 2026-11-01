@@ -2556,6 +2556,10 @@ function settle(
 	settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
 ): Outcome {
 	switch (settlement.kind) {
+		// 8.7: servers are the PortWatcher's session facts; the reference compares none (32.33.1).
+		case "server_seen":
+		case "server_gone":
+			return noop("servers are not modelled by the reference");
 		case "alarm_fired": {
 			// 3.7: fire every deadline with at <= now, in deadline order, once.
 			const due = deadlines(world, step).filter(

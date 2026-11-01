@@ -28,6 +28,11 @@
 //     load, which rebuilds only Open rows, skips it.
 // Run now (5.1). How it could fail:
 // 20. the interrupt after main's input.interrupt_requested folds as a Stop, or a later Stop as Run now.
+// Servers (8.2, 8.7). How they could fail:
+// 21. a late or repeated server_gone for an older ServerKey removes the entry that replaced it;
+// 22. detection of a declared server's own ServerKey overwrites its source or role, or a new
+//     ServerKey on the port inherits the declaration;
+// 23. a live server leaves anythingMayAct false or the row Quiescent, so a restart's load skips it.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1083,6 +1088,100 @@ describe("Run Ledger arm", () => {
 					yield* commit([completed]);
 					expect(yield* stored).toEqual([{ n: 1 }]);
 					expect((yield* loadLedgerView("s1"))?.active).toBeUndefined();
+				}),
+			),
+	);
+
+	it.effect(
+		"keeps one server per port: only its own ServerKey's gone removes it, and a declaration is its key's",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const commit = yield* makeCommitAndSignal;
+					const server = { pid: 41, startedAt: 5000, port: 5173 };
+					const reused = { ...server, pid: 42 };
+					const seen = (
+						key: typeof server,
+						source: "detected" | "declared",
+						createdAt: number,
+						role?: "awaited",
+					) =>
+						canonicalEvent(
+							"evidence.server_seen",
+							"s1",
+							{
+								server: key,
+								command: "vite",
+								cwd: "/w",
+								source,
+								...(role ? { role } : {}),
+							},
+							at(createdAt, {}, "claude"),
+						);
+					const gone = (key: typeof server, createdAt: number) =>
+						canonicalEvent(
+							"evidence.server_gone",
+							"s1",
+							{ server: key },
+							at(createdAt, {}, "claude"),
+						);
+					const servers = Effect.map(loadLedgerView("s1"), (view) => [
+						...(view?.servers?.values() ?? []),
+					]);
+					yield* commit([
+						makeSessionCreatedEvent("s1", {
+							provider: "claude",
+							createdAt: 1000,
+						}),
+						seen(server, "declared", 1001, "awaited"),
+						seen(server, "detected", 1002),
+					]);
+					// 22: detection of the declared key keeps the declaration.
+					expect(yield* servers).toEqual([
+						{
+							key: server,
+							command: "vite",
+							cwd: "/w",
+							source: "declared",
+							role: "awaited",
+						},
+					]);
+					// 23: a live server may act, so the row is Open for a restart's load.
+					expect((yield* loadLedgerView("s1"))?.anythingMayAct).toBe(true);
+					expect((yield* ledgerRows).sessions).toEqual([
+						{
+							session_id: "s1",
+							provider: "claude",
+							state: "Open",
+							alarm_at: null,
+						},
+					]);
+					// 21, 22: the port changes hands; the old key's late gone is a no-op.
+					yield* commit([
+						gone(server, 1003),
+						seen(reused, "detected", 1004),
+						gone(server, 1005),
+					]);
+					expect(yield* servers).toEqual([
+						{
+							key: reused,
+							command: "vite",
+							cwd: "/w",
+							source: "detected",
+							role: "serving",
+						},
+					]);
+					yield* commit([gone(reused, 1006)]);
+					expect(yield* servers).toEqual([]);
+					expect((yield* loadLedgerView("s1"))?.anythingMayAct).toBe(false);
+					expect((yield* ledgerRows).sessions).toEqual([
+						{
+							session_id: "s1",
+							provider: "claude",
+							state: "Quiescent",
+							alarm_at: null,
+						},
+					]);
 				}),
 			),
 	);
