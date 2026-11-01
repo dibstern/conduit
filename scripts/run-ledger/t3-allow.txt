@@ -2070,3 +2070,4 @@ frees the dead runner's socket. A send whose run the stopping runner still	point
 R2 entry scope (5f5ffd8c, 58976bb4 on wt/82tn32r3): each runner entry now has one scope	pointer
 whether a send released unsent at an end-session goes to a fresh runner	pointer
 32.4 landed on wt/82tn323 in 6eebff33. When a runner is retired	pointer
+hold facts, and the named tests for main's tokened and	pointer
