@@ -85,6 +85,8 @@ interface Tx {
 	ended?: WorkEnd | undefined;
 	/** D59: main's terminal ended its Run, but this OpenCode abort or cancel_request stays a fence member (3101-3106). */
 	mainEnded?: boolean | undefined;
+	/** L1 item 1, 3.4: its coverage, recorded whatever its tries got, so after its work ended too (3.8 reason 2.3). */
+	covered?: "process_lost" | "session_ended" | undefined;
 	nativeMessageId?: string | undefined;
 	resulted: boolean;
 	/** The first delivery-recovery probe's deadline (3.7, D20). */
@@ -691,9 +693,7 @@ function reconcile(world: World, step: Step): void {
 			const covered = sends
 				.flatMap((send) => send.txs)
 				.filter(
-					(tx) =>
-						sealedValue(tx) !== "never" &&
-						(tx.ended === "process_lost" || tx.ended === "session_ended"),
+					(tx) => sealedValue(tx) !== "never" && tx.covered !== undefined,
 				);
 			const firstCode = fold(foldItems(world, run), false);
 			if (
@@ -728,7 +728,7 @@ function reconcile(world: World, step: Step): void {
 				});
 			else if (covered.length > 0 || run.exec.endedBy !== undefined) {
 				const cause =
-					covered.some((tx) => tx.ended === "session_ended") ||
+					covered.some((tx) => tx.covered === "session_ended") ||
 					run.exec.endedBy === "session_ended"
 						? "session_ended"
 						: "process_lost";
@@ -884,6 +884,7 @@ function transmit(
 	// L1 item 1, L2: a transmission to a retired address is covered at once, a reclaim's included.
 	if (runnerId !== null && isRetired(world, runnerId)) {
 		seal(tx);
+		tx.covered ??= "process_lost";
 		tx.ended ??= "process_lost";
 	}
 	if (token !== undefined)
@@ -1008,6 +1009,7 @@ function sessionEnd(
 		for (const tx of send.txs)
 			if (tx.seq < before) {
 				seal(tx);
+				tx.covered ??= cause;
 				tx.ended ??= cause;
 			}
 	// 3.4 (CONTRACT.md 535-537): an end_session success covers only what was issued before it.
@@ -1434,7 +1436,9 @@ function answerResult(
 		run !== undefined &&
 		run.phase !== "Ended" &&
 		send.exec === run.exec.n &&
-		(tx.ended === undefined || tx.ended === "evidence");
+		(tx.ended === undefined || tx.ended === "evidence") &&
+		// 3.4: a covered transmission's evidence changes nothing, its work ended by evidence first too.
+		tx.covered === undefined;
 	if (world.provider !== "opencode") tx.ended ??= "evidence";
 	if (!authority || run === undefined) return;
 	run.exec.evidence = true;
@@ -2473,6 +2477,7 @@ function retire(world: World, runnerId: string): void {
 		for (const tx of send.txs)
 			if (addressed(send, tx)) {
 				seal(tx);
+				tx.covered ??= "process_lost";
 				tx.ended ??= "process_lost";
 			}
 		const run = findRun(world, send.runId);

@@ -70,6 +70,8 @@ interface Tx {
 	absent: boolean;
 	/** A result answered it (3.8 5C: proof after an unknown delivery). */
 	resulted: boolean;
+	/** L1 item 1, 3.4: its coverage, recorded whatever its tries got, so after its work ended too (3.8 reason 2.3). */
+	covered?: "process_lost" | "session_ended" | undefined;
 	/** The first delivery-recovery probe's deadline (3.7, D20). */
 	recovery?: { readonly at: number; readonly opened: number } | undefined;
 	/** Its answers, the evidence section 9's work-ended column reads. */
@@ -707,7 +709,7 @@ function summarize(book: Book, run: Run): RunSummary {
 	const txs = sends.flatMap((send) => send.txs);
 	const covers = txs
 		.filter((tx) => sealedValue(tx) !== "never")
-		.map((tx) => tx.ended);
+		.map((tx) => tx.covered);
 	const covered =
 		covers.includes("session_ended") || exec.endedBy === "session_ended"
 			? "session_ended"
@@ -993,6 +995,7 @@ function transmit(
 	// L1 item 1, L2: a transmission to a retired address is covered at once.
 	if (runnerId !== null && book.runners.get(runnerId)?.retired) {
 		seal(tx);
+		tx.covered ??= "process_lost";
 		tx.ended ??= "process_lost";
 	}
 	if (token !== undefined)
@@ -1271,9 +1274,12 @@ function sessionEnd(book: Book, before: number): boolean {
 		for (const tx of send.txs)
 			if (
 				tx.seq < before &&
-				(tx.sealed === undefined || tx.ended === undefined)
+				(tx.sealed === undefined ||
+					tx.ended === undefined ||
+					tx.covered === undefined)
 			) {
 				seal(tx);
+				tx.covered ??= "session_ended";
 				tx.ended ??= "session_ended";
 				moved = true;
 			}
@@ -1395,7 +1401,9 @@ const evidenceTable: EvidenceTable = {
 				run !== undefined &&
 				run.phase !== "Ended" &&
 				send.exec === run.exec.n &&
-				(tx.ended === undefined || tx.ended === "evidence");
+				(tx.ended === undefined || tx.ended === "evidence") &&
+				// 3.4: a covered transmission's evidence changes nothing, its work ended by evidence first too.
+				tx.covered === undefined;
 			const byResult = runEnd(book) === "result";
 			if (!authority) return changed;
 			run.exec.evidence = true;
@@ -2324,6 +2332,7 @@ function retire(book: Book, runnerId: string): void {
 		for (const tx of send.txs)
 			if (addressed(send, tx)) {
 				seal(tx);
+				tx.covered ??= "process_lost";
 				tx.ended ??= "process_lost";
 			}
 		if (
