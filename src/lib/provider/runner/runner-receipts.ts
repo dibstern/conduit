@@ -1,6 +1,13 @@
 import { Clock, Context, Data, type Deferred, Effect, Schema } from "effect";
 import type { SqlClient } from "effect/sql";
-import { flushPendingWrites } from "../../persistence/effect/commit-and-signal.js";
+import {
+	appendUnprojected,
+	flushPendingWrites,
+} from "../../persistence/effect/commit-and-signal.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+} from "../../persistence/events.js";
 import type { PermissionResponse } from "../types.js";
 import { legacyRunnerRanking } from "./runner-registry.js";
 import { type StoreFault, toStoreFault } from "./send-settlement.js";
@@ -176,6 +183,11 @@ export type StopCommit =
 			readonly candidates: readonly RunnerRetirement[];
 			/** The session's rows as the committing transaction left them. */
 			readonly session: readonly RunnerRow[];
+			/**
+			 * The loss of each runner this commit first retired (6.5). Its caller
+			 * appends them in the same transaction, after any releases it makes.
+			 */
+			readonly lost: readonly CanonicalEvent[];
 	  }
 	| { readonly _tag: "Ignored" };
 
@@ -411,6 +423,29 @@ export const makeRunnerReceiptStore = (
 				ON CONFLICT(runner_id) DO UPDATE SET retired_at = excluded.retired_at, attachment_id = '', session_id = excluded.session_id, driver_kind = excluded.driver_kind, pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time, member_snapshot = excluded.member_snapshot, stop_state = 'Requested', stop_reason = excluded.stop_reason`.pipe(
 				Effect.asVoid,
 			);
+		// The one reader of 6.5's loss: for runners the caller's write first retired,
+		// none for a runner whose session row is gone or has no project.
+		const processLost = (runnerIds: readonly string[]) =>
+			sql<{
+				session_id: string;
+				runner_id: string;
+				retired_at: number;
+				provider: string;
+			}>`SELECT runner.session_id, runner.runner_id, runner.retired_at, session.provider
+				FROM claude_runner_cursors runner JOIN sessions session ON session.id = runner.session_id
+				WHERE runner.runner_id IN ${sql.in(runnerIds)} AND runner.retired_at IS NOT NULL
+				AND COALESCE(session.project_id, '') <> '' ORDER BY runner.rowid`.pipe(
+				Effect.map((rows) =>
+					rows.map((row) =>
+						canonicalEvent(
+							"evidence.process_lost",
+							row.session_id,
+							{ runnerId: row.runner_id, retiredAt: row.retired_at },
+							{ provider: row.provider, createdAt: row.retired_at },
+						),
+					),
+				),
+			);
 		const runners = (sessionId?: string) =>
 			sql<{
 				runner_id: string;
@@ -498,6 +533,7 @@ export const makeRunnerReceiptStore = (
 							record: existing,
 							candidates: [],
 							session: (yield* runners(target.sessionId)).rows,
+							lost: [],
 						} satisfies StopCommit;
 					}
 					// An abandoned candidate that was promoted keeps serving.
@@ -560,6 +596,10 @@ export const makeRunnerReceiptStore = (
 					record: saved ? yield* decodeRetirement(saved) : record,
 					candidates,
 					session: (yield* runners(target.sessionId)).rows,
+					lost: yield* processLost([
+						target.runnerId,
+						...candidates.map((candidate) => candidate.runnerId),
+					]),
 				} satisfies StopCommit;
 			});
 		return {
@@ -625,6 +665,11 @@ export const makeRunnerReceiptStore = (
 									committed = saved;
 								}),
 							),
+							Effect.tap((saved) =>
+								saved._tag === "Requested"
+									? appendUnprojected(sql, saved.lost)
+									: Effect.void,
+							),
 						),
 					);
 					return committed;
@@ -641,14 +686,22 @@ export const makeRunnerReceiptStore = (
 			commitRetirement: (record: RunnerRetirement) =>
 				flushPendingWrites(
 					sql,
-					sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, reaper_pid, reaper_start_time, member_snapshot)
+					Effect.gen(function* () {
+						const [before] = yield* sql<{
+							retired_at: number | null;
+						}>`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${record.runnerId}`;
+						yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, session_id, driver_kind, retired_at, pid, start_time, reaper_pid, reaper_start_time, member_snapshot)
 				VALUES (${record.runnerId}, 0, '', ${record.sessionId}, ${record.driverKind}, ${record.retiredAt}, ${record.identity.pid ?? null}, ${record.identity.tag === "Verified" ? record.identity.startTime : null}, ${record.reaper?.pid ?? null}, ${record.reaper?.startTime ?? null}, ${JSON.stringify(record.members)})
 				ON CONFLICT(runner_id) DO UPDATE SET retired_at = COALESCE(claude_runner_cursors.retired_at, excluded.retired_at), attachment_id = '',
 				pid = excluded.pid, start_time = excluded.start_time, reaper_pid = excluded.reaper_pid, reaper_start_time = excluded.reaper_start_time,
 				session_id = excluded.session_id, driver_kind = excluded.driver_kind,
-				member_snapshot = (SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(claude_runner_cursors.member_snapshot) UNION ALL SELECT value FROM json_each(excluded.member_snapshot) WHERE value NOT IN (SELECT value FROM json_each(claude_runner_cursors.member_snapshot))))`.pipe(
-						Effect.asVoid,
-					),
+				member_snapshot = (SELECT json_group_array(json(value)) FROM (SELECT value FROM json_each(claude_runner_cursors.member_snapshot) UNION ALL SELECT value FROM json_each(excluded.member_snapshot) WHERE value NOT IN (SELECT value FROM json_each(claude_runner_cursors.member_snapshot))))`;
+						if (before?.retired_at == null)
+							yield* appendUnprojected(
+								sql,
+								yield* processLost([record.runnerId]),
+							);
+					}),
 				),
 			appendSignalLog: (
 				runnerId: string,
