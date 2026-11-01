@@ -589,7 +589,8 @@ export interface ProviderDecisionRules {
 	) => boolean;
 	readonly workEnded: (evidence: readonly Evidence[]) => boolean;
 }
-export type ProviderPolicy = {
+/** Each provider's own row (section 9, OPEN-6): never another provider's rules with flags. */
+export interface ProviderPolicy {
 	readonly capabilities: {
 		readonly backgroundTasks: boolean;
 		/** 4.10: a runner hosts its Runs; L2 case 2 addresses a Run's sends to its execution's runner. */
@@ -598,15 +599,9 @@ export type ProviderPolicy = {
 		readonly commandReceipts: boolean;
 	};
 	readonly runEnd: "result" | "query_ended";
-} & (
-	| {
-			readonly tag: "Ready";
-			readonly intake: ProviderIntake;
-			readonly rules: ProviderDecisionRules;
-	  }
-	/** Never silently borrow another provider's rules. */
-	| { readonly tag: "Pending"; readonly ticket: string }
-);
+	readonly intake: ProviderIntake;
+	readonly rules: ProviderDecisionRules;
+}
 export type ProviderPolicyTable = {
 	readonly [P in ProviderKind]: ProviderPolicy;
 };

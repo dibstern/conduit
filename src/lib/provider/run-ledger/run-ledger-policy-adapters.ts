@@ -3,7 +3,6 @@ import type {
 	Observation,
 	ProviderDecisionRules,
 	ProviderIntake,
-	ProviderKind,
 	ProviderPolicyTable,
 	RunEffect,
 } from "./run-ledger-model.js";
@@ -73,16 +72,6 @@ const openCodeTerminal: ProviderIntake["terminal"] = (
 const runnerIntake: ProviderIntake = { terminal: runnerTerminal };
 const openCodeIntake: ProviderIntake = { terminal: openCodeTerminal };
 
-/** Canonical-event intake is known independently of the unresolved decision rules. */
-export const nativeIntakes: {
-	readonly [P in ProviderKind]: ProviderIntake | undefined;
-} = {
-	claude: runnerIntake,
-	codex: undefined,
-	cursor: runnerIntake,
-	opencode: openCodeIntake,
-};
-
 const startOrSteer = (effect: RunEffect) =>
 	effect.kind === "start" || effect.kind === "steer";
 const has = (
@@ -110,7 +99,6 @@ const claudeRules: ProviderDecisionRules = {
 
 export const nativePolicies: ProviderPolicyTable = {
 	claude: {
-		tag: "Ready",
 		capabilities: {
 			backgroundTasks: true,
 			runnerHost: true,
@@ -120,18 +108,26 @@ export const nativePolicies: ProviderPolicyTable = {
 		intake: runnerIntake,
 		rules: claudeRules,
 	},
+	// OPEN-6 (CONTRACT.md 3143-3154): runner-held, its own row. Background terminals are its tasks
+	// (8.2); it sends no command receipts and no turn_ended, so a wake ends at its result (8.3).
 	codex: {
-		tag: "Pending",
 		capabilities: {
 			backgroundTasks: true,
 			runnerHost: true,
 			commandReceipts: false,
 		},
 		runEnd: "result",
-		ticket: "conduit-test-82tn.32.2.13",
+		intake: runnerIntake,
+		rules: {
+			fences: startOrSteer,
+			// Section 9 gives Codex no idle proof: thread/status idle covers nothing.
+			idleCovers: () => false,
+			// The runner withholds its result across a goal chain, and a successor after the deadline is
+			// a wake Run, so the result the ledger sees ends the work (CONTRACT.md 3087, 3118-3119).
+			workEnded: (evidence) => has(evidence, "result"),
+		},
 	},
 	cursor: {
-		tag: "Ready",
 		capabilities: {
 			backgroundTasks: false,
 			runnerHost: true,
@@ -146,7 +142,6 @@ export const nativePolicies: ProviderPolicyTable = {
 		},
 	},
 	opencode: {
-		tag: "Ready",
 		capabilities: {
 			backgroundTasks: false,
 			runnerHost: false,

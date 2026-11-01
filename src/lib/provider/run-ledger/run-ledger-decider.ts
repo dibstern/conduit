@@ -414,7 +414,8 @@ function mayStillAct(book: Book, send: Send, tx: Tx): boolean {
 		)
 			return false;
 	}
-	// 8.5: a native command's work ends at its completion, cancellation or failure.
+	// 8.5: a native command's work ends at its completion, cancellation or failure. Gap (CONTRACT.md
+	// 2930-2934): Codex sends no receipts, so only coverage or a permanent outcome finishes its send.
 	if (effect.kind === "send_native_command") {
 		const state = book.nativeCommands.find(
 			(item) => item.commandId === effect.commandId,
@@ -1318,19 +1319,8 @@ export type EvidenceTable = {
 
 const runEnd = (book: Book) => nativePolicies[book.provider].runEnd;
 /** Section 9's fence membership, idle proof and work-ended column (CONTRACT.md 3076-3093). */
-function rules(book: Book): ProviderDecisionRules {
-	const policy = nativePolicies[book.provider];
-	// Gap (CONTRACT.md 3087, 32.2.13): a Pending row's start fences, has no idle proof, and its
-	// work ends at its runEnd evidence, the nearest reading until its row is decided.
-	return policy.tag === "Ready"
-		? policy.rules
-		: {
-				fences: (effect) => effect.kind === "start",
-				idleCovers: () => false,
-				workEnded: (evidence) =>
-					evidence.some((item) => item.kind === policy.runEnd),
-			};
-}
+const rules = (book: Book): ProviderDecisionRules =>
+	nativePolicies[book.provider].rules;
 const never = () => false;
 /** 3.4, 8.3, D61: background evidence and a native command's receipts are never an answer. */
 const unsolicitedOnly = () =>

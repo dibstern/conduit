@@ -44,9 +44,6 @@ import {
 	wake,
 } from "./scenarios.js";
 
-/** Inputs the 32.2.12 slice leaves to a later lane; a trace that reaches one stops there. */
-const notBuilt = /^not yet built \(32\.2\.13\): /;
-
 /** 8.2: a shell, a subagent under a native run_id, and an ambient monitor (kind and class from task_type). */
 const shell = {
 	key: { taskId: "t1" },
@@ -81,8 +78,7 @@ const publicStep = (decision: Decision<unknown>, view: LedgerView) =>
 
 /**
  * The oracle and the real decider fed one trace in lockstep. Each step also checks LI4 (the view is
- * its entries' replay) and that decide mutates nothing, through the harness driver. Returns false
- * once the decider reaches a lane it has not built.
+ * its entries' replay) and that decide mutates nothing, through the harness driver.
  */
 function lockstep(provider: ProviderKind) {
 	assert(referenceImplementation, "the oracle is available");
@@ -91,11 +87,9 @@ function lockstep(provider: ProviderKind) {
 	return (
 		command: LedgerCommand,
 		now: number,
-	): { decision: Decision<unknown>; view: LedgerView } | undefined => {
+	): { decision: Decision<unknown>; view: LedgerView } => {
 		const want = expected.step(command, now);
 		const got = actual.step(command, now);
-		if (got.tag === "Rejected" && notBuilt.test(got.diagnostic))
-			return undefined;
 		assert.deepEqual(
 			publicStep(got, actual.view()),
 			publicStep(want, expected.view()),
@@ -117,12 +111,11 @@ class Recording extends Driver {
 describe("[32.2.5] plain Run path differential", () => {
 	it.each(
 		scenarios.map((scenario) => [scenario.id, scenario] as const),
-	)("fixed trace %s agrees with the oracle up to its first unbuilt input", (_id, scenario) => {
+	)("fixed trace %s agrees with the oracle at every step", (_id, scenario) => {
 		const recorded = new Recording(scenario.provider);
 		scenario.run(recorded);
 		const step = lockstep(scenario.provider);
-		for (const [command, now] of recorded.log ?? [])
-			if (step(command, now) === undefined) return;
+		for (const [command, now] of recorded.log ?? []) step(command, now);
 	});
 
 	const inputs = ["A", "B"] as const;
@@ -664,12 +657,12 @@ describe("[32.2.5] plain Run path differential", () => {
 		["claude", 822501],
 		["cursor", 822502],
 		["opencode", 822503],
+		["codex", 822505],
 	] as const)
 		it(`${provider} generated plain-path traces agree with the oracle at every step, seed ${seed}`, ({
 			task,
 		}) => {
 			const reached = { views: new Set<string>(), ends: new Set<string>() };
-			let stopped = 0;
 			fc.assert(
 				fc.property(
 					// Rounds of main's plain path (admit, run.requested, mostly a runner's hold) under
@@ -863,10 +856,6 @@ describe("[32.2.5] plain Run path differential", () => {
 						for (const [command, elapsed] of trace) {
 							now += elapsed;
 							const stepped = step(command, now);
-							if (stepped === undefined) {
-								stopped += 1;
-								return;
-							}
 							const active = stepped.view.active;
 							// 3.6: a relaunch is a Queued Run starting again under its runId.
 							if (
@@ -930,7 +919,6 @@ describe("[32.2.5] plain Run path differential", () => {
 				{
 					seed,
 					numRuns: 300,
-					stopped,
 					views: [...reached.views].sort(),
 					ends: [...reached.ends].sort(),
 				},
@@ -961,15 +949,12 @@ describe("[32.2.5] plain Run path differential", () => {
 					"native:Unconfirmed",
 					"native:Failed",
 					...(provider === "cursor" ? [] : ["wake"]),
+					// 8.2: Claude's tasks and Codex's background terminals.
+					...(provider === "claude" || provider === "codex"
+						? ["tasks:unknown", "tasks:live", "stop_task"]
+						: []),
 					...(provider === "claude"
-						? [
-								"tasks:unknown",
-								"tasks:live",
-								"stop_task",
-								"native:Queued",
-								"native:Started",
-								"native:Completed",
-							]
+						? ["native:Queued", "native:Started", "native:Completed"]
 						: []),
 				]),
 			);
@@ -997,8 +982,7 @@ function agreed(provider: ProviderKind, trace: (d: Driver) => void) {
 	const recorded = new Recording(provider);
 	trace(recorded);
 	const step = lockstep(provider);
-	for (const [command, now] of recorded.log ?? [])
-		assert(step(command, now), `${JSON.stringify(command)} is built`);
+	for (const [command, now] of recorded.log ?? []) step(command, now);
 	return d;
 }
 const scenario = (id: string) => {
@@ -1298,11 +1282,7 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		const kinds = new Set<string>();
 		for (const fixed of scenarios) {
 			const d = new Driver(fixed.provider, "decider");
-			try {
-				fixed.run(d);
-			} catch (error) {
-				if (!String(error).match(/not yet built/)) throw error;
-			}
+			fixed.run(d);
 			for (const { effect } of d.issued) kinds.add(effect.kind);
 		}
 		expect(kinds).not.toContain("quarantine");
@@ -2339,6 +2319,7 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		["claude", 821101],
 		["cursor", 821102],
 		["opencode", 821103],
+		["codex", 821104],
 	] as const)("LI5 to LI10 hold against the fake on %s's generated traces, seed %i", (provider, seed) => {
 		// The fake checks LI1 to LI10 at every step (assertStep). Every trace runs through; one is
 		// discarded only where the oracle itself fails the fake (the pended convergence suite).
@@ -2392,8 +2373,9 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 			kinds: [...kinds].sort(),
 		});
 		expect(tally.checked).toBeGreaterThan(tally.oracle);
-		// 32.2.12: Claude's traces reach the confirm gate and lost work on the real decider (8.4, L5).
-		if (provider === "claude") {
+		// 32.2.12, 32.2.13: Claude's tasks and Codex's background terminals reach the confirm gate and
+		// lost work on the real decider (8.4, L5).
+		if (provider === "claude" || provider === "codex") {
 			expect(tally.gated).toBeGreaterThan(0);
 			expect(tally.lost).toBeGreaterThan(0);
 		}
@@ -2401,13 +2383,11 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 			expect.arrayContaining([
 				"activity",
 				...(provider === "cursor" ? [] : ["turn_started"]),
+				...(provider === "claude" || provider === "codex"
+					? ["tasks_snapshot", "task_event"]
+					: []),
 				...(provider === "claude"
-					? [
-							"tasks_snapshot",
-							"task_event",
-							"command_lifecycle",
-							"command_result",
-						]
+					? ["command_lifecycle", "command_result"]
 					: []),
 			]),
 		);
@@ -2728,5 +2708,237 @@ describe("[32.2.12] core destructive confirm and lost work: the bead's acceptanc
 			expect(d.view().lostWork).toEqual([lostShell]);
 		});
 		expect(relabelled.coverage.races["a label change mid-interrupt"]).toBe(1);
+	});
+});
+
+describe("[32.2.13] core Codex policy: the bead's acceptance criteria", () => {
+	const native = (d: Driver, commandId: string, text: string) =>
+		step(d, {
+			verb: "control",
+			control: { kind: "native_command", commandId, text },
+		});
+	const snapshot = (d: Driver, tasks: (typeof shell)[]) =>
+		unsolicited(d, { kind: "tasks_snapshot", tasks }, d.label);
+	const result = (d: Driver, token: SendToken) =>
+		observe(d, token, { kind: "result", outcome: "completed" });
+	/** An unsolicited observation's decision tag, Rejected included. */
+	const offered = (d: Driver, evidence: Unsolicited) =>
+		d.step({
+			verb: "observe",
+			observation: {
+				tag: "Unsolicited",
+				label: d.label,
+				eventId: `offered-${d.next()}`,
+				...evidence,
+			},
+		}).tag;
+	const goalPause = {
+		tag: "Main",
+		commandId: "n1",
+		effect: {
+			kind: "send_native_command",
+			commandId: "n1",
+			text: "/goal pause",
+		},
+	} as const;
+
+	it("a turn_started that matches no pending host turn request is a wake Run; one while a host turn request is pending or running joins that Run (8.3, OPEN-6)", () => {
+		// Codex sends no continuation marker: an idle self-started turn is a wake Run.
+		agreed("codex", (d) => {
+			expect(wake(d).issued).toEqual([]);
+			expect(d.view().active).toMatchObject({ origin: "wake", inputs: [] });
+		});
+		// An admitted input main has not requested is no pending host turn request.
+		const queued = agreed("codex", (d) => {
+			admit(d, "A");
+			wake(d);
+			expect(d.view().active).toMatchObject({ origin: "wake", inputs: [] });
+		});
+		expect(queued.coverage.races["a wake turn while an input is queued"]).toBe(
+			1,
+		);
+		agreed("codex", (d) => {
+			const pending = begin(d);
+			expect(wake(d).issued).toEqual([]);
+			expect(d.view().active).toMatchObject({
+				runId: pending.runId,
+				origin: "input",
+			});
+			observe(d, pending.token, { kind: "started" });
+			wake(d);
+			expect(d.view().active).toMatchObject({
+				runId: pending.runId,
+				origin: "input",
+			});
+		});
+	});
+
+	it("the runner's result ends a Codex Run (9: CONTRACT.md 3087)", () => {
+		agreed("codex", (d) => {
+			const a = running(d);
+			expect(result(d, a.token).ended).toMatchObject([
+				{ runId: a.runId, outcome: "completed" },
+			]);
+			expect(d.view()).toMatchObject({ anythingMayAct: false });
+			expect(d.view().active).toBeUndefined();
+		});
+	});
+
+	it("must not happen: Stop pausing the goal. Stop interrupts only, and the goal stays active, so its next turn is a wake Run (8.1, 8.6, 11.2)", () => {
+		agreed("codex", (d) => {
+			// The idle-Stop goal-pause stopgap is deleted (8.1).
+			stop(d);
+			const a = running(d);
+			expect(stop(d).issued.map(({ effect }) => effect.kind)).toEqual([
+				"interrupt",
+			]);
+			expect(
+				observe(d, a.token, { kind: "result", outcome: "interrupted" }).ended,
+			).toMatchObject([{ runId: a.runId, outcome: "interrupted" }]);
+			expect(
+				d.issued.filter(({ effect }) => effect.kind === "send_native_command"),
+			).toEqual([]);
+			expect(d.view().nativeCommands).toEqual([]);
+			wake(d);
+			expect(d.view().active).toMatchObject({ origin: "wake", inputs: [] });
+		});
+	});
+
+	it("background terminals are tasks: thread/backgroundTerminals/list is the snapshot and stop_tasks issues stop_task per terminal (8.2, 8.4)", () => {
+		agreed("codex", (d) => {
+			expect(d.view().tasks).toEqual({ tag: "none" });
+			snapshot(d, [shell]);
+			expect(d.view()).toMatchObject({
+				anythingMayAct: true,
+				tasks: {
+					tag: "live",
+					label: d.label,
+					tasks: [{ ...shell, kind: "shell", class: "work" }],
+				},
+			});
+			const stopped = step(d, {
+				verb: "control",
+				control: { kind: "stop_tasks", tasks: "all" },
+			});
+			expect(stopped.issued).toMatchObject([
+				{ tag: "Tokened", effect: { kind: "stop_task", key: shell.key } },
+			]);
+		});
+	});
+
+	it("late terminal events after the turn ends update the snapshot only: no Run reopens and none is Rejected, a terminated terminal reading failed (8.2)", () => {
+		agreed("codex", (d) => {
+			const a = running(d);
+			snapshot(d, [shell]);
+			result(d, a.token);
+			const late = unsolicited(d, {
+				kind: "task_event",
+				key: shell.key,
+				event: "failed",
+			});
+			expect(late).toMatchObject({ issued: [], ended: [] });
+			const reread = snapshot(d, []);
+			expect(reread).toMatchObject({ issued: [], ended: [] });
+			expect(d.view().active).toBeUndefined();
+			expect(d.view().tasks).toEqual({ tag: "none" });
+		});
+	});
+
+	it("a Codex wake ends at its result; turn_ended and command receipts are not Codex evidence (8.3, D46, 9)", () => {
+		agreed("codex", (d) => {
+			wake(d);
+			expect(offered(d, { kind: "turn_ended" })).toBe("Rejected");
+			const ended = unsolicited(d, { kind: "result", outcome: "completed" });
+			expect(ended.ended).toMatchObject([{ outcome: "completed" }]);
+			expect(d.view().active).toBeUndefined();
+			native(d, "n1", "/goal clear");
+			for (const receipt of [
+				{ kind: "command_lifecycle", commandId: "n1", state: "started" },
+				{ kind: "command_result", commandId: "n1" },
+			] as const)
+				expect(offered(d, receipt)).toBe("Rejected");
+		});
+	});
+
+	it("a goal command issues at once with no Run and, with no receipts, is Unconfirmed at its deadline (8.5, LI6, LI10)", () => {
+		agreed("codex", (d) => {
+			expect(native(d, "n1", "/goal pause").issued).toEqual([goalPause]);
+			expect(d.view()).toMatchObject({
+				live: [goalPause],
+				anythingMayAct: true,
+			});
+			expect(d.view().active).toBeUndefined();
+			expect(d.alarmAt).toBe(d.now + policy.nativeCommandMs);
+			fire(d);
+			expect(d.view().nativeCommands).toEqual([
+				{ commandId: "n1", tag: "Unconfirmed" },
+			]);
+			expect(d.view().active).toBeUndefined();
+		});
+	});
+
+	describe("the Pause race: the ledger's side is the Pause's send and the turn's result (8.6, OPEN-6)", () => {
+		it("a successor turn that wins the Pause race is a wake Run, ending at its result, and moves no foreground authority", () => {
+			agreed("codex", (d) => {
+				const a = running(d);
+				native(d, "n1", "/goal pause");
+				expect(result(d, a.token).ended).toMatchObject([{ runId: a.runId }]);
+				wake(d);
+				expect(d.view().active).toMatchObject({ origin: "wake", inputs: [] });
+				expect(
+					unsolicited(d, { kind: "result", outcome: "completed" }).ended,
+				).toMatchObject([{ outcome: "completed" }]);
+				expect(d.view().nativeCommands).toMatchObject([
+					{ commandId: "n1", tag: "Sent" },
+				]);
+			});
+		});
+
+		// Gap (CONTRACT.md 3461-3463 against the bead's fourth criterion): Codex Pause then
+		// budgetLimited is the goal tracker's (32.27), outside this ledger's coverage gate; the ledger
+		// has no goal status, so its side is a Run ended at its result and no successor.
+		it("Pause then budgetLimited: no successor turn, so the Run's result leaves only the Pause acting, Unconfirmed at its deadline for the tracker's thread/goal/get (11.2)", () => {
+			agreed("codex", (d) => {
+				const a = running(d);
+				native(d, "n1", "/goal pause");
+				result(d, a.token);
+				expect(d.view().active).toBeUndefined();
+				expect(d.view().live).toEqual([goalPause]);
+				fire(d);
+				// Gap (CONTRACT.md 2930-2934): with no receipts a Codex native command's send never
+				// finishes, so it may act until coverage, as the oracle holds.
+				expect(d.view()).toMatchObject({
+					anythingMayAct: true,
+					live: [goalPause],
+					nativeCommands: [{ commandId: "n1", tag: "Unconfirmed" }],
+				});
+			});
+		});
+	});
+
+	it("Codex's policy is its own row, not Claude's with flags: its evidence differs from every other provider's (9, OPEN-6)", () => {
+		const row = (provider: ProviderKind) => {
+			const tags: string[] = [];
+			agreed(provider, (d) => {
+				tags.length = 0;
+				tags.push(offered(d, { kind: "tasks_snapshot", tasks: [shell] }));
+				tags.push(offered(d, { kind: "turn_started" }));
+				tags.push(offered(d, { kind: "turn_ended" }));
+				native(d, "n1", "/goal clear");
+				tags.push(offered(d, { kind: "command_result", commandId: "n1" }));
+			});
+			return tags.join(" ");
+		};
+		expect({
+			claude: row("claude"),
+			codex: row("codex"),
+			cursor: row("cursor"),
+			opencode: row("opencode"),
+		}).toEqual({
+			claude: "Accepted Accepted Accepted Accepted",
+			codex: "Accepted Accepted Rejected Rejected",
+			cursor: "Rejected Accepted Rejected Rejected",
+			opencode: "Rejected Accepted Rejected Rejected",
+		});
 	});
 });

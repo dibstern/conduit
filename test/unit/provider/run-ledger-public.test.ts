@@ -163,21 +163,25 @@ describe("Run Ledger public model", () => {
 			// @ts-expect-error The policy has no interrupt budget; the stop's is the commit's.
 			interruptMs: 1,
 		};
-		const pending = {
-			tag: "Pending",
+		const policy: ProviderPolicyTable["cursor"] = {
 			capabilities: {
 				backgroundTasks: false,
 				runnerHost: true,
 				commandReceipts: false,
 			},
 			runEnd: "result",
-			ticket: "t",
-		} as const;
+			intake: { terminal: () => undefined },
+			rules: {
+				fences: () => true,
+				idleCovers: () => false,
+				workEnded: () => false,
+			},
+		};
 		// @ts-expect-error The policy table is exhaustive for every ProviderKind, Codex included.
 		const missingCodex: ProviderPolicyTable = {
-			claude: pending,
-			cursor: pending,
-			opencode: pending,
+			claude: policy,
+			cursor: policy,
+			opencode: policy,
 		};
 		expect([
 			answer,
