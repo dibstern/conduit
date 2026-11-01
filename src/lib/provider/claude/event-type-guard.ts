@@ -262,6 +262,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Run Ledger evidence: a Claude wake's end, landed with 32.6",
 	},
+	"evidence.hold_exhausted": {
+		produced: false,
+		reason: "Run Ledger evidence: holdRun's cap, a runner write",
+	},
 	"evidence.delivery_indeterminate": {
 		produced: false,
 		reason: "Run Ledger evidence: the direct send's marker, an OpenCode write",

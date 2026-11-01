@@ -339,7 +339,11 @@ describe("OrchestrationEngine", () => {
 				sessionId: "s1",
 			});
 
-			expect(opencode.interruptTurnEffect).toHaveBeenCalledWith("s1");
+			expect(opencode.interruptTurnEffect).toHaveBeenCalledWith(
+				"s1",
+				undefined,
+				undefined,
+			);
 		});
 
 		it("throws when session has no provider binding", async () => {

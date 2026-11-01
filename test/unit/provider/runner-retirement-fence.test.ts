@@ -225,7 +225,12 @@ const retirementFixture = (
 			driverKind,
 			legacyPrepareTurnEffect: (input) =>
 				Effect.succeed({
-					input: { ...input, prompt: input.text ?? "send", history: [] },
+					input: {
+						...input,
+						prompt: input.text ?? "send",
+						history: [],
+						facts: { _tag: "Claude" as const },
+					},
 				}),
 			...(withAccountScope ? { withAccountScope } : {}),
 			connect: vi.fn<ProcessRunnerDriver["connect"]>((options) =>
@@ -717,6 +722,7 @@ const sendScopeFixture = (
 								runId,
 								prompt: input.text ?? "send",
 								history: [],
+								facts: { _tag: "Claude" as const },
 							},
 						};
 					}),
@@ -2044,36 +2050,32 @@ for (const current of [true, false])
 						yield* f.reactor.drain();
 						yield* TestClock.adjust(0);
 						yield* f.reactor.drain();
+						// An older journal sends a fallback only under its rejected primary's
+						// key, but a token names one transmission (CONTRACT 66-67): the claim
+						// requeues, and the older journal refuses the fresh token's fallback.
+						const refused = !current && !markerCommitted;
 						expect(
 							yield* f.sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = 'fallback-answer'`,
 						).toEqual([
-							{ status: "completed", attempt_count: current ? 2 : 1 },
+							refused
+								? { status: "failed", attempt_count: 2 }
+								: { status: "completed", attempt_count: current ? 2 : 1 },
 						]);
 						if (!current) {
 							expect(f.sendHandles.map((send) => send.assignment._tag)).toEqual(
-								markerCommitted ? ["Closed"] : ["Closed", "Closed"],
+								["Closed"],
 							);
-							expect(f.account).toEqual({
-								acquired: markerCommitted ? 1 : 2,
-								released: markerCommitted ? 1 : 2,
-							});
+							expect(f.account).toEqual({ acquired: 1, released: 1 });
 						}
-						expect(delivered).toHaveBeenCalledTimes(2);
-						if (current)
+						expect(delivered).toHaveBeenCalledTimes(refused ? 1 : 2);
+						if (!markerCommitted || current)
 							expect(send.mock.calls[0]?.[0]).toMatchObject({
 								inputId: "fallback-answer",
 								commandAttempt: 2,
 								nativeResumeFallback: true,
 							});
-						else
-							expect(keys).toEqual(
-								markerCommitted
-									? [{ token, fallback: true }]
-									: [
-											{ token, fallback: false },
-											{ token, fallback: true },
-										],
-							);
+						if (!current)
+							expect(keys).toEqual([{ token, fallback: markerCommitted }]);
 						expect(
 							yield* f.sql`SELECT status FROM provider_command_outbox WHERE command_id = 'fallback-next'`,
 						).toEqual([{ status: "completed" }]);
@@ -3939,7 +3941,12 @@ it.effect(
 						generateTextEffect: () => Effect.die("unused generation"),
 						prepareTurnEffect: (input) =>
 							Effect.succeed({
-								input: { ...input, prompt: "send", history: [] },
+								input: {
+									...input,
+									prompt: "send",
+									history: [],
+									facts: { _tag: "Claude" as const },
+								},
 							}),
 					},
 					(emit) =>
@@ -4617,7 +4624,12 @@ it.effect(
 						generateTextEffect: () => Effect.die("unused"),
 						prepareTurnEffect: (input) =>
 							Effect.succeed({
-								input: { ...input, prompt: "send", history: [] },
+								input: {
+									...input,
+									prompt: "send",
+									history: [],
+									facts: { _tag: "Claude" as const },
+								},
 							}),
 					},
 					(emit) =>
@@ -4706,7 +4718,12 @@ it.effect(
 						generateTextEffect: () => Effect.die("unused"),
 						prepareTurnEffect: (input) =>
 							Effect.succeed({
-								input: { ...input, prompt: "send", history: [] },
+								input: {
+									...input,
+									prompt: "send",
+									history: [],
+									facts: { _tag: "Claude" as const },
+								},
 							}),
 					},
 					(emit) =>
@@ -5795,6 +5812,7 @@ for (const failure of ["connection failure", "process exit"] as const) {
 										prompt: "cold",
 										history: [],
 										account: accounts.accounts[0],
+										facts: { _tag: "Claude" as const },
 									},
 								}),
 						},

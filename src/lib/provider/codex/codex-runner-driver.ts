@@ -10,6 +10,7 @@ import { renderForkDigest } from "../fork-digest.js";
 import { historicalMessageText } from "../historical-message-text.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
+import type { TurnFacts } from "../runner/turn-facts.js";
 import { modelParameterChoices } from "../turn-settings.js";
 import { discoverCodex, discoverCodexEffect } from "./codex-discovery.js";
 import { codexAccountHome, prepareCodexAccount } from "./codex-home.js";
@@ -96,6 +97,7 @@ export const makeCodexRunnerDriver = (
 						providerId: "codex",
 						operation: "prepare turn",
 						cause: choice.failure,
+						code: "model_parameters_unavailable",
 					}),
 				);
 			}
@@ -232,24 +234,23 @@ export const makeCodexRunnerDriver = (
 						}),
 				});
 			}
+			const facts: TurnFacts = {
+				_tag: "Codex",
+				...(resolvedEffort ? { effort: resolvedEffort } : {}),
+				skill: skill?.path
+					? { _tag: "Skill", name: skill.name, path: skill.path }
+					: { _tag: "None" },
+				truncate: revertBeforeTurnId
+					? { _tag: "Before", turnId: revertBeforeTurnId }
+					: { _tag: "None" },
+				...(typeof digest === "string" ? { forkDigest: digest } : {}),
+			};
 			return {
 				input: {
 					...input,
 					prompt,
 					instanceId: input.account?.id ?? input.instanceId ?? "codex",
-					providerState: {
-						...input.providerState,
-						...(revertBeforeTurnId
-							? { "codex.revertBeforeTurnId": revertBeforeTurnId }
-							: {}),
-						"codex.skill": skill?.path
-							? { type: "skill", name: skill.name, path: skill.path }
-							: null,
-						...(resolvedEffort ? { "codex.effort": resolvedEffort } : {}),
-						...(typeof digest === "string"
-							? { "codex.forkDigest": digest }
-							: {}),
-					},
+					facts,
 				},
 			};
 		}),

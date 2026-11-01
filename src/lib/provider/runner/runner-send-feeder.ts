@@ -632,9 +632,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 					)) ?? command.input.inputId;
 				const pending = sends.pending(send) ?? {
 					sessionId: command.input.sessionId,
-					turnId:
-						command.input.continuation?.cutOffMessageId ??
-						command.input.inputId,
+					runId: command.runId ?? command.input.runId,
 					cancelled: yield* Deferred.make<void>(),
 				};
 				yield* sends.bindPending(send, command.sinkId, {
@@ -852,7 +850,7 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 										admitted = send;
 										const pending = sends.pending(send) ?? {
 											sessionId: turn.sessionId,
-											turnId: turn.inputId,
+											runId: turn.runId,
 											cancelled: yield* Deferred.make<void>(),
 										};
 										yield* sends.bindPending(send, sinkId, {

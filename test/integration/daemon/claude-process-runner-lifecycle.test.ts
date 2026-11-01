@@ -362,7 +362,10 @@ describe("Claude runner admission socket probes", () => {
 						driverKind: "claude",
 						discoverEffect: () => Effect.die("unused discovery"),
 						generateTextEffect: () => Effect.die("unused text generation"),
-						prepareTurnEffect: (input) => Effect.succeed({ input }),
+						prepareTurnEffect: (input) =>
+							Effect.succeed({
+								input: { ...input, facts: { _tag: "Claude" as const } },
+							}),
 					},
 					(emit) =>
 						makeProcessClaudeSessionRunner(
@@ -662,7 +665,7 @@ describe("Claude runner admission socket probes", () => {
 								runner.executeEffect({
 									type: "interrupt",
 									sessionId: fixture.send.input.sessionId,
-									turnIds: ["unrelated-input"],
+									runIds: ["unrelated-run"],
 								}),
 							);
 							yield* Effect.sleep("20 millis");
@@ -670,15 +673,12 @@ describe("Claude runner admission socket probes", () => {
 								type: "release-sink",
 								sinkId: fixture.send.sinkId,
 							});
+							// A Stop naming runs never reaches a send that has none;
+							// a session-wide interrupt does.
 							yield* Effect.forkChild(
 								runner.executeEffect({
 									type: "interrupt",
 									sessionId: fixture.send.input.sessionId,
-									turnIds: [
-										mode === "continuation-interrupt"
-											? "original-user"
-											: fixture.send.input.inputId,
-									],
 								}),
 							);
 						}
@@ -1715,9 +1715,11 @@ describe("built-dist Claude runner lifecycle", () => {
 		});
 	});
 
-	it("persists the adapter failure once and requeues its unstarted steer without a user message", async () => {
+	it("persists the adapter failure once and places its possibly reached steer as sent", async () => {
 		// Hold initialization until the steer reaches the runner, before an
-		// approval can refuse it.
+		// approval can refuse it. The runner holds the steer when the adapter
+		// fails, so its Run's end leaves it possibly reached: it is placed as
+		// sent and never re-sent (CONTRACT 217 row 206, 970-972), not requeued.
 		expect(existsSync("dist/src/bin/claude-session-runner.js")).toBe(true);
 		const harness = await ProcessHarness.start({
 			dist: resolve("dist"),
@@ -1771,7 +1773,7 @@ describe("built-dist Claude runner lifecycle", () => {
 		await waitFor(harness, () => {
 			const state = snapshot(harness, sessionId);
 			expect(state.session).toEqual({ status: "idle" });
-			expect(state.turns).toEqual([{ state: "error" }]);
+			expect(state.turns).toEqual([{ state: "error" }, { state: "error" }]);
 			expect(state.commands).toEqual([
 				{ status: "failed" },
 				{ status: "failed" },
@@ -1784,28 +1786,19 @@ describe("built-dist Claude runner lifecycle", () => {
 				[...state.runReservations].sort(),
 			);
 			expect(new Set(state.errorOwners).size).toBe(2);
-			expect(state.queued).toEqual([{ inputId: steerId }]);
+			expect(state.queued).toEqual([]);
 			expect(
 				state.events.filter((event) => event.type === "input.requeued"),
-			).toEqual([
-				{
-					type: "input.requeued",
-					data: {
-						sessionId,
-						inputId: steerId,
-						sentSequence: expect.any(Number),
-						reason: "failed",
-					},
-				},
-			]);
+			).toEqual([]);
 			const userMessages = state.events.filter(
 				(event) =>
 					event.type === "message.created" &&
 					isRecord(event.data) &&
 					event.data["role"] === "user",
 			);
-			expect(userMessages).toHaveLength(1);
+			expect(userMessages).toHaveLength(2);
 			expect(userMessages[0]?.data).not.toMatchObject({ inputId: steerId });
+			expect(userMessages[1]?.data).toMatchObject({ inputId: steerId });
 		});
 	});
 }, 125_000);

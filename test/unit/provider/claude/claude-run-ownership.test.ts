@@ -430,9 +430,7 @@ describe("Claude accepted run ownership", () => {
 			// A live monitor keeps the query open. The interrupt is acknowledged,
 			// but no SDK result arrives before Stop's bound retires this cohort.
 			const stopping = Effect.runPromise(
-				instance
-					.interruptTurnEffect(sessionId, [inputs[0]])
-					.pipe(Effect.result),
+				instance.interruptTurnEffect(sessionId, ["run-0"]).pipe(Effect.result),
 			);
 			await vi.waitFor(() => expect(query.interrupt).toHaveBeenCalledOnce());
 			if (!lateRejection) expect((await stopping)._tag).toBe("Success");

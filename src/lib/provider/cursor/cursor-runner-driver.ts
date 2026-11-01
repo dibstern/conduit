@@ -9,6 +9,7 @@ import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect
 import { ProviderInstanceFailure } from "../errors.js";
 import { resolveRunnerForkDigest } from "../runner/runner-fork-digest.js";
 import type { RunnerDriverPieces } from "../runner/runner-provider-instance.js";
+import type { TurnFacts } from "../runner/turn-facts.js";
 import { skillCommand } from "../skill-discovery.js";
 import { modelParameterChoices } from "../turn-settings.js";
 import type { ModelInfo, ProviderCapabilities } from "../types.js";
@@ -31,10 +32,6 @@ import type {
 	CursorSdkPort,
 	CursorStore,
 } from "./sdk-port.js";
-
-export const CursorModelParameters = Schema.Array(
-	Schema.Struct({ id: Schema.String, value: Schema.String }),
-);
 
 /** Picker keys describe combinations; the values retain Cursor's native ids. */
 export function cursorModelInfo(model: CursorModel): ModelInfo {
@@ -552,11 +549,11 @@ export const makeCursorRunnerDriver = (
 						Effect.catch((failure) =>
 							// The runner owns the auth error and its durable turn terminal.
 							failure.code === "auth_required"
-								? Effect.succeed({ models: [] })
+								? Effect.succeed(undefined)
 								: Effect.fail(failure),
 						),
 					);
-					const model = catalog.models.find(
+					const model = catalog?.models.find(
 						({ id }) => id === input.model?.modelId,
 					);
 					const choice = modelParameterChoices(
@@ -568,9 +565,9 @@ export const makeCursorRunnerDriver = (
 								providerId: "cursor",
 								operation: "prepare turn",
 								cause: choice.failure,
+								code: "model_parameters_unavailable",
 							}),
 						);
-					const params = choice.success.values;
 					const digest = yield* resolveRunnerForkDigest(
 						input,
 						"cursor.forkDigest",
@@ -585,6 +582,13 @@ export const makeCursorRunnerDriver = (
 								}),
 						),
 					);
+					const facts: TurnFacts = {
+						_tag: "Cursor",
+						model: catalog
+							? { _tag: "Resolved", params: choice.success.values }
+							: { _tag: "SignedOut" },
+						...(typeof digest === "string" ? { forkDigest: digest } : {}),
+					};
 					return {
 						cursorCredential: credential,
 						shellEnv: {},
@@ -596,13 +600,7 @@ export const makeCursorRunnerDriver = (
 								? { account: { ...input.account, env: {} } }
 								: {}),
 							instanceId: input.account?.id ?? input.instanceId ?? "cursor",
-							providerState: {
-								...input.providerState,
-								"cursor.modelParams": params,
-								...(typeof digest === "string"
-									? { "cursor.forkDigest": digest }
-									: {}),
-							},
+							facts,
 						},
 					};
 				});
