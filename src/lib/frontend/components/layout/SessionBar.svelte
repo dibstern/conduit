@@ -314,7 +314,7 @@
 	const duoFolded = $derived(sessionViewState.pose === "duo-folded-portrait");
 	const chipsFolded = $derived(isDuoChipRowFolded() && !goalDetails.open && !tasksPanel.open);
 	const viewBadgeCount = $derived(
-		sessionViews.reduce((total, view) => total + (view.badge?.() ?? 0), 0),
+		sessionViews.reduce((total, view) => total + (view.hidden?.() ? 0 : (view.badge?.() ?? 0)), 0),
 	);
 	// The island is phone-only, so its commands and the keyboard share one list.
 	const commands = $derived(session
@@ -381,7 +381,10 @@
 {#snippet viewCards()}
 	<MenuRadioGroup value={activeView} aria-label="Views" class="grid grid-cols-4 gap-[8px]">
 		{#each sessionViews as view (view.id)}
+			<!-- Servers has no phone card until its phone view lands (32.33.4). -->
+			{#if view.id !== "servers"}
 			<ViewCard value={view.id} preview={view.id} label={view.label} icon={view.icon} badge={view.badge?.()} disabled={view.disabled === true} data-testid={`overflow-view-${view.id}`} onselect={view.select} />
+			{/if}
 		{/each}
 	</MenuRadioGroup>
 {/snippet}

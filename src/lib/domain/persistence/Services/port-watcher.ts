@@ -225,6 +225,8 @@ export const PortWatcherLive = Layer.effectDiscard(
 		const held = new Map<number, { key: string; since: number }>();
 		let firstScanAt: number | undefined;
 		let known = false;
+		// Warn once per run of failures: a host without lsof fails every scan.
+		let failing = false;
 		let published = new Set<string>();
 		portWatcherKnown.set(sql, () => known);
 		yield* Effect.addFinalizer(() =>
@@ -327,11 +329,20 @@ export const PortWatcherLive = Layer.effectDiscard(
 			);
 			firstScanAt ??= now;
 			known ||= now - firstScanAt >= holdMs;
+			failing = false;
 		}).pipe(
 			Effect.catchCause((cause) =>
 				Failure.isInterruptedOnly(cause)
 					? Effect.interrupt
-					: Effect.logWarning("PortWatcher scan failed", cause),
+					: failing
+						? Effect.void
+						: Effect.logWarning("PortWatcher scan failed", cause).pipe(
+								Effect.andThen(
+									Effect.sync(() => {
+										failing = true;
+									}),
+								),
+							),
 			),
 			Effect.andThen(
 				Effect.flatMap(Clock.currentTimeMillis, (now) =>

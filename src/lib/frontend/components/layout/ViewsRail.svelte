@@ -5,14 +5,14 @@
 	import { sessionViews, viewShortcutHint } from "./session-views.js";
 
 	// Chat is always visible on desktop, so the rail only toggles side views.
-	const railViews = sessionViews.filter((view) => view.id !== "chat");
-	const options = railViews.map((view) => ({
+	const railViews = $derived(sessionViews.filter((view) => view.id !== "chat" && !view.hidden?.()));
+	const options = $derived(railViews.map((view) => ({
 		value: view.id,
-		label: view.label,
+		label: view.title?.() ?? view.label,
 		shortcut: viewShortcutHint(view),
 		disabled: view.disabled === true,
 		testId: `views-rail-${view.id}`,
-	}));
+	})));
 	const pressed = $derived(railViews.filter((view) => view.isOn()).map((view) => view.id));
 </script>
 

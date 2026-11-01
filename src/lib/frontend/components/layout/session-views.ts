@@ -1,5 +1,7 @@
 import { type Component, tick } from "svelte";
+import { findSession, sessionState } from "../../stores/session.svelte.js";
 import {
+	type RightPaneView,
 	sessionViewState,
 	setRightPaneView,
 } from "../../stores/session-view.svelte.js";
@@ -7,12 +9,16 @@ import { closePanel, terminalState } from "../../stores/terminal.svelte.js";
 import { toggleTerminal } from "./chrome-actions.js";
 
 export type SessionView = {
-	id: "chat" | "terminal" | "diff" | "files";
+	id: "chat" | "terminal" | "diff" | "files" | "servers";
 	label: string;
+	/** The rail tooltip, when it says more than the label. */
+	title?: () => string;
 	icon: string;
 	badge?: () => number | undefined;
 	shortcut: number;
 	disabled?: boolean;
+	/** A hidden view leaves the rail, the phone view cards and its shortcut. */
+	hidden?: () => boolean;
 	loadPane?: () => Promise<{
 		default: Component<{
 			pane?: boolean;
@@ -84,9 +90,29 @@ export const sessionViews: readonly SessionView[] = [
 			(!sessionViewState.compact || !terminalState.panelOpen),
 		select: () => selectPane("files"),
 	},
+	{
+		id: "servers",
+		label: "Servers",
+		title: () => `Servers · ${currentServers().length} running`,
+		icon: "globe",
+		shortcut: 5,
+		badge: () => currentServers().length || undefined,
+		// The phone Servers view is its own ticket (32.33.4), so phones hide it for now.
+		hidden: () => sessionViewState.compact || currentServers().length === 0,
+		loadPane: () => import("../session/SessionServers.svelte"),
+		isOn: () =>
+			sessionViewState.rightPaneView === "servers" &&
+			(!sessionViewState.compact || !terminalState.panelOpen),
+		select: () => selectPane("servers"),
+	},
 ];
 
-function selectPane(view: "files" | "diff"): void {
+/** The open session's live dev servers, as the daemon's PortWatcher last saw them. */
+export function currentServers() {
+	return findSession(sessionState.currentId ?? "")?.servers ?? [];
+}
+
+function selectPane(view: Exclude<RightPaneView, "closed">): void {
 	if (sessionViewState.compact) closePanel();
 	setRightPaneView(
 		!sessionViewState.compact && sessionViewState.rightPaneView === view
@@ -113,7 +139,9 @@ export function matchSessionViewShortcut(
 		event.repeat
 	)
 		return undefined;
-	return sessionViews.find((view) => event.code === `Digit${view.shortcut}`);
+	return sessionViews.find(
+		(view) => event.code === `Digit${view.shortcut}` && !view.hidden?.(),
+	);
 }
 
 export function activeSessionView(): string {

@@ -34,7 +34,10 @@ describe("session view registry", () => {
 				shiftKey: false,
 				repeat: false,
 			};
-			expect(matchSessionViewShortcut(event)).toBe(view);
+			// A hidden view (Servers with none running) keeps its digit but answers nothing.
+			expect(matchSessionViewShortcut(event)).toBe(
+				view.hidden?.() ? undefined : view,
+			);
 			expect(viewShortcutHint(view)).toBe(`⌥${index + 1}`);
 			for (const modifier of [
 				"ctrlKey",
