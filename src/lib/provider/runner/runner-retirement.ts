@@ -970,11 +970,11 @@ export const makeRunnerStopReconciler = (options: {
 						const answer =
 							journal._tag === "Present" ? journal.state : undefined;
 						const finished = answer?.status === "finished" ? answer : undefined;
-						// An uncertain offline journal or an intake-only result under a
-						// deliberate stop retains the existing interrupted process-loss outcome.
-						// Missing or unreadable evidence remains delivery unknown (7.3).
-						const consumedOnly =
-							answer?.status === "uncertain" ||
+						// A send the agent accepted lost its runner: process lost for every
+						// StopReason (3.8 reason 2.3). An uncertain journal is process lost
+						// under a deliberate stop; after an exit it, like missing or
+						// unreadable evidence, remains delivery unknown (7.3).
+						const reached =
 							finished?.result?.status === "accepted" ||
 							finished?.result?.status === "joined";
 						if (
@@ -988,8 +988,9 @@ export const makeRunnerStopReconciler = (options: {
 								observedAt,
 							};
 						} else if (
-							consumedOnly &&
-							retirement.stopReason !== '{"_tag":"Exited"}'
+							reached ||
+							(answer?.status === "uncertain" &&
+								retirement.stopReason !== '{"_tag":"Exited"}')
 						) {
 							const reason: StopReason = yield* Schema.decodeUnknownEffect(
 								Schema.fromJsonString(
@@ -997,11 +998,15 @@ export const makeRunnerStopReconciler = (options: {
 										Schema.Struct({
 											_tag: Schema.Literals([
 												"Explicit",
-												"EndSession",
 												"ProjectRemoved",
 												"Idle",
+												"Exited",
 												"CandidateAbandoned",
 											]),
+										}),
+										Schema.Struct({
+											_tag: Schema.Literal("EndSession"),
+											orphan: Schema.optionalKey(Schema.Literal(true)),
 										}),
 										Schema.Struct({
 											_tag: Schema.Literal("Superseded"),
@@ -1030,15 +1035,20 @@ export const makeRunnerStopReconciler = (options: {
 					WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
 					AND COALESCE(send_run.joined_into, send_run.id) = owner.id))
 			AND (owner.runner_id = ${retirement.runnerId} OR (owner.runner_id IS NULL AND requested.id IN ${sql.in(retirement.ownedRunIds)}))`;
-				// Removal ends launched runs process lost (3.11), as an error as on main.
+				// Every retirement but the user's End ends its launched runs process
+				// lost, an error as on main (3.8, 3.11). An orphan's EndSession
+				// carries `orphan`, so only the user's End reads interrupted.
+				// GAP (32.2.15): an idle exit that commits Exited, not Idle, still ends
+				// its sendless owners interrupted; 3.8 reason 2.3 and main say
+				// runner_stopped. No test reaches it without a live runner entry.
 				const errorCode =
 					retirement.stopReason === '{"_tag":"Exited"}'
 						? entry?.lifecycle.idleExiting
 							? undefined
 							: String(entry?.lifecycle.failure?.code ?? "provider_error")
-						: retirement.stopReason === '{"_tag":"ProjectRemoved"}'
-							? "runner_stopped"
-							: undefined;
+						: retirement.stopReason === '{"_tag":"EndSession"}'
+							? undefined
+							: "runner_stopped";
 				// Claude's durable backstop: tool-linked child runs absent from memory.
 				if (settlement.driverKind === "claude")
 					yield* settleToolChildRuns(

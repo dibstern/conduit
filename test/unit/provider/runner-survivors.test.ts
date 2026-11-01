@@ -995,7 +995,7 @@ for (const retired of [true, false])
 					yield* TestClock.adjust("60 seconds");
 					expect(
 						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'valid-run'`,
-					).toEqual([{ status: "interrupted" }]);
+					).toEqual([{ status: "error" }]);
 					expect(
 						yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`,
 					).toEqual(before);
@@ -2682,12 +2682,12 @@ it.effect(
 				yield* TestClock.adjust("10 seconds");
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
-				).toEqual([{ status: "interrupted" }]);
+				).toEqual([{ status: "error" }]);
 				expect(
 					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
 				).toEqual([]);
 				expect(
-					yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.interrupted'`,
+					yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.error'`,
 				).toHaveLength(1);
 			}),
 		),
@@ -2730,7 +2730,7 @@ it.effect(
 				yield* TestClock.adjust("20 seconds");
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
-				).toEqual([{ status: "interrupted" }]);
+				).toEqual([{ status: "error" }]);
 				expect(
 					yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
 				).toEqual([]);
@@ -2739,7 +2739,7 @@ it.effect(
 					yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
 				).toEqual([]);
 				expect(
-					yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.interrupted'`,
+					yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.error'`,
 				).toHaveLength(1);
 			}),
 		),
@@ -3239,7 +3239,7 @@ for (const crossDirectory of [false, true])
 						yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
 					).toEqual([
 						{ id: "new-run", status: "running" },
-						{ id: "old-run", status: "interrupted" },
+						{ id: "old-run", status: "error" },
 					]);
 					expect(
 						yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${older.runnerId}`,
@@ -3270,7 +3270,7 @@ for (const processState of ["running", "gone", "zombie"] as const)
 						{ id: "new-run", status: "running" },
 						{
 							id: "old-run",
-							status: processState === "running" ? "running" : "interrupted",
+							status: processState === "running" ? "running" : "error",
 						},
 					]);
 					expect(
@@ -3284,10 +3284,10 @@ for (const processState of ["running", "gone", "zombie"] as const)
 						yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
 					).toEqual([
 						{ id: "new-run", status: "running" },
-						{ id: "old-run", status: "interrupted" },
+						{ id: "old-run", status: "error" },
 					]);
 					expect(
-						yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.interrupted'`,
+						yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.error'`,
 					).toHaveLength(1);
 				}),
 			),
@@ -4553,7 +4553,7 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'legacy-run'`,
 				).toEqual([
-					{ status: "interrupted", runner_id: null, held_transmission: null },
+					{ status: "error", runner_id: null, held_transmission: null },
 				]);
 				expect(
 					yield* f.sql`SELECT json_extract(data, '$.commandId') AS command FROM events WHERE type = 'run.dispatched'`,
@@ -5168,8 +5168,7 @@ for (const status of ["accepted", "completed"] as const)
 					).toEqual([
 						{
 							status: status === "completed" ? "completed" : "failed",
-							error_code:
-								status === "completed" ? null : "delivery_indeterminate",
+							error_code: status === "completed" ? null : "runner_stopped",
 						},
 					]);
 					expect(
@@ -5182,7 +5181,7 @@ for (const status of ["accepted", "completed"] as const)
 					).toEqual([
 						{
 							type: status === "completed" ? "turn.completed" : "turn.error",
-							code: status === "completed" ? null : "delivery_indeterminate",
+							code: status === "completed" ? null : "runner_stopped",
 						},
 					]);
 					expect(f.sends).toHaveLength(1);

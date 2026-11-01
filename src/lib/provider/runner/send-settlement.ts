@@ -169,10 +169,9 @@ export const classify = (evidence: NormalizedTerminalEvidence): SendOutcome => {
 		case "delivery_unknown":
 			return "delivery_unknown";
 		case "process_lost":
-			return evidence.reason._tag === "Exited" ||
-				evidence.reason._tag === "ProjectRemoved"
-				? "permanent"
-				: "cancelled";
+			return evidence.reason._tag === "EndSession" && !evidence.reason.orphan
+				? "cancelled"
+				: "permanent";
 		case "replied":
 		case "journal_finished": {
 			const { result } = evidence;
