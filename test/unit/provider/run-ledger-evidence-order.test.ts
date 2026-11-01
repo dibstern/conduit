@@ -77,7 +77,9 @@ function replay(
 	oldAcceptance: boolean,
 	preprobed: boolean,
 ) {
-	const d = new Driver("opencode", mode);
+	// The order property alone: every Driver-based test already checks purity and LI4 at each step, and
+	// here those checks cost four fifths of 8,000 replays, past the hook's 10s under load.
+	const d = new Driver("opencode", mode, undefined, false);
 	const a = running(d, "A");
 	observe(d, a.token, {
 		kind: "effect_outcome",

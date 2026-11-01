@@ -49,6 +49,7 @@ export class Driver implements CoverageReader {
 		readonly provider: ProviderKind,
 		mode: "reference" | "decider" = "reference",
 		mutation?: Mutation,
+		invariants = true,
 	) {
 		this.ledger =
 			mode === "reference"
@@ -63,8 +64,9 @@ export class Driver implements CoverageReader {
 						},
 						provider,
 						mode,
+						invariants,
 					)
-				: driver(decider, provider, mode);
+				: driver(decider, provider, mode, invariants);
 		// Every session starts on runner r1's first query; labels read `runnerId:querySeq` (3.3).
 		step(this, {
 			verb: "settle",
