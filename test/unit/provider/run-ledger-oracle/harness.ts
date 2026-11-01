@@ -711,6 +711,18 @@ export const generatedShapes = [
 	"Q28 adoption with not_received",
 	"Q28 journal settle",
 	"Q28 removed with a surviving runner",
+	// Rounds 16 and 17 (CONTRACT.md 4070-4085): REDESIGN-7 review round 1 and REDESIGN-9's kinds.
+	"message sent while Interrupting",
+	"held wake turn just before a Stop commit",
+	"held wake turn just after a Stop commit",
+	"answer in delivery at a Stop commit",
+	"async question at a Stop commit",
+	"async question at a retirement",
+	"end_session issued after the stop's deadline step",
+	"Claude steer started after its Run completed",
+	"Stop of a late steer's turn",
+	"runner failure with a steer possibly reached and an input queued",
+	"steer send failure with inputs queued",
 ] as const;
 export type GeneratedShape = (typeof generatedShapes)[number];
 export class Coverage {
@@ -748,6 +760,17 @@ export class Coverage {
 	private seenIssues = 0;
 	/** Inputs whose direct steer got a retryable outcome, until main's next steer of each (3.6). */
 	private readonly retryableSteers = new Set<string>();
+	/** Rounds 16 and 17: the command index of the last Stop commit and held-label wake turn. */
+	private stopAt = -1;
+	private heldWakeTurnAt = -1;
+	/** L6: the open stop's deadline step fired, until the next Stop commit or the session's end. */
+	private stopStepped = false;
+	/** Each steer main issued, by input, to the Run it steered (3.9). */
+	private readonly steerParents = new Map<string, string>();
+	/** Runs that ended completed, for a Claude steer its host starts later (3.9, REDESIGN-9). */
+	private readonly completedRuns = new Set<string>();
+	/** The Run of a Claude steer started after its Run completed, until it ends. */
+	private lateSteerRun: string | undefined;
 	/** This runner's release Answers by token and reason, until its process_lost (3.13, 4.5). */
 	private readonly releases = new Map<SendToken, string>();
 	record(
@@ -1061,6 +1084,10 @@ export class Coverage {
 				this.retryableSteers.delete(effect.inputId)
 			)
 				hit("direct re-send after a retryable steer");
+			if (effect.kind === "steer")
+				this.steerParents.set(effect.inputId, effect.runId);
+			if (effect.kind === "end_session" && this.stopStepped)
+				hit("end_session issued after the stop's deadline step");
 		}
 		this.seenIssues = d.issued.length;
 		if (unlaunchedRun !== undefined && trigger !== undefined) {
@@ -1088,6 +1115,116 @@ export class Coverage {
 			for (const terminal of result.ended)
 				if (terminal.reason.tag === "interrupted")
 					this.stopped.add(terminal.runId);
+		// Rounds 16 and 17 (CONTRACT.md 4070-4085). "Stop commit" reads as an accepted stop control and
+		// "async question" as a Pending question: the model has no async flag on an interaction (3.10).
+		const at = d.commands.length - 1;
+		const stopCommit =
+			command.verb === "control" && command.control.kind === "stop";
+		// D58: main's inbox is not in the view, so a queued input is one admitted and not yet
+		// requested, or one waiting in the active Run.
+		const queued = (except: string) =>
+			[...this.queuedInputs].some((inputId) => inputId !== except) ||
+			before.active?.inputs.some(
+				(input) => input.inputId !== except && input.state.tag === "Queued",
+			) === true;
+		if (command.verb === "admit" && before.active?.tag === "Interrupting")
+			hit("message sent while Interrupting");
+		const observation =
+			command.verb === "observe" ? command.observation : undefined;
+		if (
+			observation?.tag === "Unsolicited" &&
+			observation.kind === "turn_started" &&
+			d.bindings.some(({ issue, send }) => {
+				const issued = d.issued[issue];
+				return (
+					issued !== undefined &&
+					d.host.isHeld(issued) &&
+					"runId" in send.effect &&
+					send.effect.runId === before.active?.runId &&
+					d.host.labelFor(send) === observation.label
+				);
+			})
+		) {
+			this.heldWakeTurnAt = at;
+			if (this.stopAt === at - 1)
+				hit("held wake turn just after a Stop commit");
+		}
+		const pendingQuestion = before.interactions.some(
+			(item) => item.tag === "Pending" && item.kind === "question",
+		);
+		if (pendingQuestion && settlement?.kind === "process_lost")
+			hit("async question at a retirement");
+		if (stopCommit) {
+			this.stopAt = at;
+			this.stopStepped = false;
+			if (this.heldWakeTurnAt === at - 1)
+				hit("held wake turn just before a Stop commit");
+			if (
+				before.interactions.some(
+					(item) =>
+						item.tag === "Answered" &&
+						(item.delivery === "sent" || item.delivery === "unknown"),
+				)
+			)
+				hit("answer in delivery at a Stop commit");
+			if (pendingQuestion) hit("async question at a Stop commit");
+			if (
+				this.lateSteerRun !== undefined &&
+				before.active?.runId === this.lateSteerRun
+			)
+				hit("Stop of a late steer's turn");
+		}
+		if (result.ended.some((terminal) => terminal.runId === this.lateSteerRun))
+			this.lateSteerRun = undefined;
+		if (
+			settlement?.kind === "alarm_fired" &&
+			before.active?.deadline?.owner === "Stop" &&
+			before.active.deadline.at <= d.now
+		)
+			this.stopStepped = true;
+		if (settlement?.kind === "session_ended") this.stopStepped = false;
+		// 3.9 (CONTRACT.md 978-985): a Claude steer its Run's completed end left pending starts its own Run.
+		const lateParent =
+			observation?.tag === "Main" && observation.kind === "run_started"
+				? this.steerParents.get(observation.inputId)
+				: undefined;
+		if (
+			d.provider === "claude" &&
+			lateParent !== undefined &&
+			this.completedRuns.has(lateParent) &&
+			after.active?.runId !== lateParent
+		) {
+			hit("Claude steer started after its Run completed");
+			this.lateSteerRun = after.active?.runId;
+		}
+		for (const terminal of result.ended)
+			if (terminal.reason.tag === "completed")
+				this.completedRuns.add(terminal.runId);
+		const steers = (before.active?.inputs ?? []).filter((input) =>
+			this.steerParents.has(input.inputId),
+		);
+		if (
+			settlement?.kind === "process_lost" &&
+			steers.some(
+				(input) =>
+					(input.state.tag === "Dispatching" ||
+						input.state.tag === "Delivered") &&
+					queued(input.inputId),
+			)
+		)
+			hit("runner failure with a steer possibly reached and an input queued");
+		if (
+			steers.some(
+				(input) =>
+					input.state.tag !== "Failed" &&
+					after.active?.inputs.some(
+						(next) =>
+							next.inputId === input.inputId && next.state.tag === "Failed",
+					) &&
+					queued(input.inputId),
+			)
+		)
+			hit("steer send failure with inputs queued");
 		// D50: any other permanent outcome of a not-yet-delivered Run's start ends it refused (3.8).
 		const permanentStart =
 			answer?.kind === "effect_outcome" &&

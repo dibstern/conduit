@@ -2507,6 +2507,18 @@ describe("generated D34 coverage", () => {
 		"Q28 adoption with not_received", // Q28, 7.2
 		"Q28 journal settle", // Q28, 7.3
 		"Q28 removed with a surviving runner", // 4.4, Q28
+		// Rounds 16 and 17 (CONTRACT.md 4070-4085): REDESIGN-7 review round 1 and REDESIGN-9's kinds.
+		"message sent while Interrupting", // L6, 3.9 D53
+		"held wake turn just before a Stop commit", // 8.3, L6
+		"async question at a Stop commit", // 3.10, L6
+		"runner failure with a steer possibly reached and an input queued", // 3.9 D53, L1
+		"held wake turn just after a Stop commit", // 8.3, L6
+		"answer in delivery at a Stop commit", // 3.10, L6
+		"async question at a retirement", // 3.10, L1
+		"end_session issued after the stop's deadline step", // L6, 3.4
+		"Claude steer started after its Run completed", // 3.9 978-985
+		"Stop of a late steer's turn", // 3.9, L6
+		"steer send failure with inputs queued", // 3.9 D53
 		// Round 2d: the native clock no longer pauses at not_sent, so neither its pause nor its resume at
 		// re-issue is a shape (8.5).
 	] as const)

@@ -11,7 +11,6 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 				"LI8, CONTRACT.md 978-997 (gap, 3.9: a steer main dispatches into an open Run mints its own run.requested; whether it joins that Run, so main's terminal for the open Run ends it, is undecided, 984. Wrong side undecided: the oracle lets the open Run's terminal end the steer's work, the fake keeps its native send unfinished)",
 				[
 					"claude oracle traces, seed 82103302",
-					"codex oracle traces, seed 82103302",
 					"cursor oracle traces, seed 82103202",
 					"cursor oracle traces, seed 82103302",
 					"review trace R1-1",
@@ -20,9 +19,6 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 			[
 				"LI8, CONTRACT.md 871-876 against 3086-3089 (gap, GAP 5 against section 9: when OpenCode work ends. GAP 5 ends a main-run Run once main's terminal folds; section 9 keeps the native fence until a covering idle probe. Wrong side undecided: the oracle hides an unfinished native send, the fake keeps it)",
 				[
-					"opencode oracle traces, seed 82103200",
-					"opencode oracle traces, seed 82103203",
-					"opencode oracle traces, seed 82103300",
 					"opencode oracle traces, seed 82103302",
 					"review trace R1-2",
 					"review trace R1-3",
@@ -32,9 +28,11 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 				],
 			],
 			[
-				"D50, CONTRACT.md 871-876 against 3086-3089 and 3.6 692-698 (the same GAP 5 against section 9 gap: the retirement leaves a reached OpenCode Run unended while its native fence holds. Wrong side undecided)",
+				"the first check each seed below fails since row 21's draws reshaped generation, each a disagreement no gap above names: opencode 82103200 3.4 (a swept Stop row stays live after a raced succeeded), opencode 82103202 LI1 (a resume start overlaps a running wake fence), opencode 82103203 D50 (a Stop leaves a retired runner's not-yet-delivered steer Run unended), opencode 82103301 LI8 (a direct steer requested after its runner's retirement hides its unfinished Run). Wrong side not yet triaged",
 				[
+					"opencode oracle traces, seed 82103200",
 					"opencode oracle traces, seed 82103202",
+					"opencode oracle traces, seed 82103203",
 					"opencode oracle traces, seed 82103301",
 				],
 			],
@@ -46,7 +44,7 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 					"unheld_outcome after a reissue",
 					"unlaunch by retryable",
 					"joined Run's not_sent start retried in its execution",
-					"Q28 journal settle",
+					"Stop of a late steer's turn",
 				].map((shape) => `generated traces reach ${shape}`),
 			],
 		] as const
