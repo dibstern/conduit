@@ -2052,3 +2052,4 @@ Run-less Stop of label work opens no gate. The native-command deadline issue	poi
 Built in dfc85394 on wt/82tn3225. The confirm gate stores only the step	pointer
 process_lost and session_ended. Recorded gap (frozen contract): 'waiting	pointer
 Covered native command deadline fixed (1acfa27f): deadlines() in the decider	pointer
+the contract's process_lost ownership (CONTRACT 6.5)	pointer
