@@ -927,11 +927,14 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		expect(JSON.parse(stored.events[0]?.data ?? "null")).toMatchObject({
 			state: "failed",
 		});
+		// CONTRACT.md 1119-1121: the arm's probe and cancel rows share the outbox and name the
+		// Run, so the summarize is read from its own send row.
 		const state = () =>
 			Effect.runPromise(
 				Effect.gen(function* () {
 					return yield* (yield* SqlClient.SqlClient)`SELECT run.status, run.started_at, command.error_code FROM provider_runs run
-				JOIN provider_command_outbox command ON command.run_id = run.id WHERE run.session_id = ${sessionId}`;
+				JOIN provider_command_outbox command ON command.run_id = run.id
+				WHERE run.session_id = ${sessionId} AND command.effect_type = 'send_turn'`;
 				}).pipe(
 					Effect.provide(SqliteClient.layer({ filename: relay.eventsDbPath })),
 				),
