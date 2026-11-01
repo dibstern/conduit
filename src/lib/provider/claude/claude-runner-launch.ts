@@ -247,7 +247,6 @@ export const makeClaudeRunnerLaunch = (
 						options: queryOptions,
 					})
 				: sdkQuery({ prompt: params.prompt, options: queryOptions });
-			callbacks.queryStarted(query);
 			const {
 				abortController: _abort,
 				canUseTool: _tool,
@@ -484,6 +483,7 @@ export const makeClaudeRunnerLaunch = (
 								callbacks.turnStateChanged(inFlight),
 							onAbandonedRun: (inputId) =>
 								callbacks.retireAfterCommand?.(inputId),
+							onQueryStarted: callbacks.queryStarted,
 							onNativeSessionId: (_sessionId, nativeId) => {
 								if (nativeId === resumeSessionId) return;
 								resumeSessionId = nativeId;

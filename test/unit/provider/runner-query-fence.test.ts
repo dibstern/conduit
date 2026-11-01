@@ -8,6 +8,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber } from "effect";
 import { expect, it, vi } from "vitest";
+import { getConfigDir } from "../../../src/lib/daemon/config-persistence.js";
+import {
+	type ClaudeProviderInstanceDeps,
+	makeClaudeSessionRunner,
+} from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import type {
+	CanUseTool,
+	SDKMessage,
+} from "../../../src/lib/provider/claude/types.js";
+import { ClaudeBoundaryError } from "../../../src/lib/provider/event-sink-errors.js";
 import {
 	type RunnerLaunch,
 	type RunnerLaunchCallbacks,
@@ -20,13 +31,21 @@ import {
 	runnerBuildId,
 } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
+import { RunnerSinkBindings } from "../../../src/lib/provider/runner/runner-sink-bindings.js";
 import { RunnerSpool } from "../../../src/lib/provider/runner/runner-spool.js";
 import {
 	currentRunnerQuery,
+	type NativeSessionRunner,
 	type SessionFailure,
 	type SessionOutput,
 	type SessionOutputReply,
 } from "../../../src/lib/provider/runner/session-runner.js";
+
+import { createMockQuery, makeSuccessResult } from "../../helpers/mock-sdk.js";
+import {
+	admitRunnerCommand,
+	makeRunnerAdmission,
+} from "../../helpers/runner-provider-admission.js";
 
 type Emit = Parameters<RunnerLaunch["makeRunner"]>[1];
 type OutputFrame = Extract<RunnerMessage, { type: "output" }>;
@@ -34,7 +53,7 @@ type OutputFrame = Extract<RunnerMessage, { type: "output" }>;
 const event = (
 	eventId: string,
 	type: "text.delta" | "run.started" | "turn.interrupted",
-): SessionOutput => ({
+): Extract<SessionOutput, { type: "event" }> => ({
 	type: "event",
 	sinkId: "sink-1",
 	event:
@@ -78,10 +97,12 @@ const event = (
 const label = (frame: OutputFrame) =>
 	`${frame.output.type === "event" ? frame.output.event.eventId : frame.output.type}@${frame.querySeq}`;
 
-/** One in-process runner host on a fake payload whose test emits under a chosen query. */
+/** One in-process runner host on a payload (a fake by default) whose test emits under a chosen query. */
 const withHost = (
 	body: (host: {
 		readonly callbacks: RunnerLaunchCallbacks;
+		readonly runner: NativeSessionRunner;
+		readonly emit: Emit;
 		readonly emitUnder: (
 			query: object,
 			output: SessionOutput,
@@ -93,6 +114,18 @@ const withHost = (
 		) => Effect.Effect<void, unknown, import("effect").Scope.Scope>;
 		readonly disconnect: () => Effect.Effect<void>;
 	}) => Effect.Effect<void, unknown, import("effect").Scope.Scope>,
+	makePayload: (
+		callbacks: RunnerLaunchCallbacks,
+		emit: Emit,
+	) => ReturnType<RunnerLaunch["makeRunner"]> = () => {
+		const executeEffect = () =>
+			Effect.die("The fence fixture takes no commands");
+		return Effect.succeed({
+			hasLiveProcessEffect: () => Effect.succeed(true),
+			executeEffect,
+			executeNativeEffect: executeEffect,
+		});
+	},
 ) =>
 	Effect.gen(function* () {
 		const directory = mkdtempSync(join(tmpdir(), "query-fence-"));
@@ -145,7 +178,10 @@ const withHost = (
 			},
 		});
 		const launched = yield* Deferred.make<RunnerLaunchCallbacks>();
-		const emitReady = yield* Deferred.make<Emit>();
+		const ready = yield* Deferred.make<{
+			readonly emit: Emit;
+			readonly runner: NativeSessionRunner;
+		}>();
 		let serverDisconnected = Deferred.makeUnsafe<void>();
 		const disconnect = RunnerSpool.prototype.disconnect;
 		const disconnected = vi
@@ -162,16 +198,12 @@ const withHost = (
 				runSessionRunner("claude", (callbacks) =>
 					Deferred.succeed(launched, callbacks).pipe(
 						Effect.as({
-							makeRunner: (_config, emit) => {
-								Deferred.doneUnsafe(emitReady, Effect.succeed(emit));
-								const executeEffect = () =>
-									Effect.die("The fence fixture takes no commands");
-								return Effect.succeed({
-									hasLiveProcessEffect: () => Effect.succeed(true),
-									executeEffect,
-									executeNativeEffect: executeEffect,
-								});
-							},
+							makeRunner: (_config, emit) =>
+								makePayload(callbacks, emit).pipe(
+									Effect.tap((runner) =>
+										Deferred.succeed(ready, { emit, runner }),
+									),
+								),
 							upgradeState: () => ({}),
 							acceptCommand: () => {},
 							executeEffect: (runner, command) =>
@@ -243,9 +275,11 @@ const withHost = (
 			});
 		yield* connect(0, true);
 		yield* Effect.addFinalizer(() => disconnectClient());
-		const emit = yield* Deferred.await(emitReady);
+		const { emit, runner } = yield* Deferred.await(ready);
 		yield* body({
 			callbacks,
+			runner,
+			emit,
 			emitUnder: (query, output) =>
 				emit(output).pipe(Effect.provideService(currentRunnerQuery, query)),
 			outputs: () => received,
@@ -357,6 +391,174 @@ it("delivers every frame a query emitted before its replacement ahead of the new
 						"b-2@1",
 					]);
 					expect(outputs().map(label)).toEqual(ordered);
+				}),
+			),
+		),
+	);
+});
+
+it("keeps a coalesced delta with the query that produced it", async () => {
+	await Effect.runPromise(
+		Effect.scoped(
+			withHost(({ callbacks, emit, outputs }) =>
+				Effect.gen(function* () {
+					const replaced = {};
+					const replacement = {};
+					const sink = new RunnerSinkBindings(emit).makeSessionSink(
+						"sink-1",
+						"session-1",
+					);
+					callbacks.queryStarted(replaced);
+					for (const id of ["a-1", "a-2"])
+						yield* sink
+							.push(event(id, "text.delta").event)
+							.pipe(Effect.provideService(currentRunnerQuery, replaced));
+					callbacks.queryStarted(replacement);
+					// The replacement's next output flushes the held "a-2" in its own fiber.
+					yield* sink
+						.push(event("b-1", "run.started").event)
+						.pipe(Effect.provideService(currentRunnerQuery, replacement));
+					expect(outputs().map(label)).toEqual(["a-1@0", "b-1@1"]);
+				}),
+			),
+		),
+	);
+});
+
+const claudeTurn = (
+	inputId: string,
+	input: { readonly shellConfig?: { readonly interactive: boolean } } & {
+		readonly configDir?: ReturnType<typeof configuredClaudeConfigDir>;
+	} = {},
+) => ({
+	type: "send-turn" as const,
+	sinkId: inputId,
+	aborted: false,
+	input: {
+		sessionId: "session-1",
+		inputId,
+		prompt: inputId,
+		history: [],
+		providerState: {},
+		workspaceRoot: "/tmp/ws",
+		configDir: configuredClaudeConfigDir("/tmp/claude-account"),
+		folderSource: "account" as const,
+		extraFolders: [],
+		model: { providerId: "claude", modelId: "sonnet" },
+		...input,
+	},
+});
+
+/** The real Claude payload on SDK queries that answer each prompt with a result. */
+const withClaudeHost = (
+	body: (host: {
+		readonly runner: NativeSessionRunner;
+		readonly outputs: () => readonly OutputFrame[];
+		readonly queries: readonly { readonly canUseTool?: CanUseTool }[];
+	}) => Effect.Effect<void, unknown, import("effect").Scope.Scope>,
+) => {
+	const queries: { readonly canUseTool?: CanUseTool }[] = [];
+	const queryFactory: NonNullable<
+		ClaudeProviderInstanceDeps["queryFactory"]
+	> = ({ prompt, options }) => {
+		queries.push(options?.canUseTool ? { canUseTool: options.canUseTool } : {});
+		const stream = (async function* (): AsyncGenerator<SDKMessage> {
+			for await (const _message of prompt) yield makeSuccessResult();
+		})();
+		return Object.assign(createMockQuery([]), {
+			[Symbol.asyncIterator]: () => stream,
+		});
+	};
+	return withHost(
+		({ runner, outputs }) => body({ runner, outputs, queries }),
+		(callbacks, emit) =>
+			makeClaudeSessionRunner(
+				{
+					daemonConfigDir: getConfigDir(),
+					queryFactory,
+					capabilitiesService: {
+						get: () =>
+							Effect.fail(
+								new ClaudeBoundaryError({
+									operation: "probeCapabilities",
+									cause: "No live SDK in fence tests",
+								}),
+							),
+					},
+					onQueryStarted: callbacks.queryStarted,
+				},
+				emit,
+			),
+	);
+};
+
+/** querySeq of each completed turn, in order. */
+const completions = (outputs: readonly OutputFrame[]) =>
+	outputs.flatMap((frame) =>
+		frame.output.type === "event" &&
+		frame.output.event.type === "turn.completed"
+			? [frame.querySeq]
+			: [],
+	);
+
+it.each([
+	["rebind", "interactive", 1],
+	["discarded prewarm", "other-login", 1],
+	["adopted prewarm", "same-login", 0],
+] as const)("labels the Claude runner's %s under the query that produced it", async (_path, change, seq) => {
+	await Effect.runPromise(
+		Effect.scoped(
+			withClaudeHost(({ runner, outputs, queries }) =>
+				Effect.gen(function* () {
+					const admission = yield* makeRunnerAdmission(runner, "claude");
+					const first = claudeTurn("turn-1", {
+						shellConfig: { interactive: false },
+					});
+					if (change === "interactive")
+						yield* admitRunnerCommand(admission, runner, first);
+					else
+						yield* runner.executeEffect({
+							type: "pre-warm",
+							sessionId: "session-1",
+							input: first.input,
+						});
+					yield* admitRunnerCommand(
+						admission,
+						runner,
+						claudeTurn("turn-2", {
+							shellConfig: { interactive: change === "interactive" },
+							...(change === "other-login"
+								? { configDir: configuredClaudeConfigDir("/tmp/other-account") }
+								: {}),
+						}),
+					);
+					expect(queries).toHaveLength(seq + 1);
+					expect(completions(outputs())).toEqual(
+						change === "interactive" ? [0, 1] : [seq],
+					);
+					// The replaced query's late permission callback is refused, never asked.
+					if (seq === 0) return;
+					const late = yield* Effect.promise(
+						() =>
+							queries[0]?.canUseTool?.(
+								"Bash",
+								{ command: "true" },
+								{
+									signal: new AbortController().signal,
+									toolUseID: "late-tool",
+									requestId: "late-request",
+								},
+							) ??
+							Promise.reject(
+								new Error("The replaced query had no permission callback"),
+							),
+					);
+					expect(late?.behavior).toBe("deny");
+					expect(
+						outputs().some(
+							(frame) => frame.output.type === "permission-request",
+						),
+					).toBe(false);
 				}),
 			),
 		),

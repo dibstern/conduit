@@ -61,14 +61,15 @@ import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
 import type { RunnerProviderInstanceDeps } from "../runner/runner-provider-instance.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import { makeSendAdmissionWait } from "../runner/send-admission.js";
-import type {
-	NativeSessionRunner,
-	SessionCommand,
-	SessionFailure,
-	SessionOutput,
-	SessionOutputReply,
-	SessionRunner,
-	SessionTurn,
+import {
+	currentRunnerQuery,
+	type NativeSessionRunner,
+	type SessionCommand,
+	type SessionFailure,
+	type SessionOutput,
+	type SessionOutputReply,
+	type SessionRunner,
+	type SessionTurn,
 } from "../runner/session-runner.js";
 import type {
 	EventSink,
@@ -270,6 +271,8 @@ export type ClaudeSessionRunnerDeps = Pick<
 		nativeSessionId: string,
 	) => void;
 	readonly prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>;
+	/** Each SDK query this runner creates, as its output names it (CONTRACT 6.1). */
+	readonly onQueryStarted?: (query: Query) => void;
 };
 
 export interface ClaudeProviderRuntimeState {
@@ -324,6 +327,7 @@ export const makeClaudeSessionRunner = (
 						deps.prepareQuery,
 						deps.readGoalStatus,
 						deps.onNativeSessionId,
+						deps.onQueryStarted,
 					);
 					payload = new ClaudeRunnerPayload(
 						deps,
@@ -1388,6 +1392,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 					}));
 				activeQuery = query;
+				this.deps.onQueryStarted?.(query);
 				if (launchInput.clearInheritedGoal)
 					yield* Effect.tryPromise({
 						try: () => query.initializationResult(),
@@ -1437,7 +1442,9 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				streamFiber = yield* FiberMap.run(
 					this.streamFibers,
 					sessionId,
-					this.runStreamConsumerEffect(ctx, translator),
+					this.runStreamConsumerEffect(ctx, translator).pipe(
+						Effect.provideService(currentRunnerQuery, ctx.query),
+					),
 				);
 			});
 

@@ -242,6 +242,7 @@ export const makeClaudeWarmedQueryOwner = (
 	prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>,
 	readGoalStatus?: ReadClaudeGoalStatus,
 	onNativeSessionId?: (sessionId: string, nativeSessionId: string) => void,
+	onQueryStarted?: (query: Query) => void,
 ) =>
 	Effect.gen(function* () {
 		const initializing = yield* FiberMap.make<symbol, void>();
@@ -330,6 +331,8 @@ export const makeClaudeWarmedQueryOwner = (
 								input,
 								prepareQuery ? () => prepareQuery(input) : undefined,
 							);
+							// A warm query is the session's current one from creation (CONTRACT 6.1).
+							onQueryStarted?.(empty.query);
 							const resource: WarmedClaudeQuery = {
 								...empty,
 								bindContext: (ctx) => {
