@@ -209,9 +209,14 @@ function permutationGate(
 		// the Run its dispatch named.
 		const byToken = new Map<string, Set<string>>();
 		const names = trace.steps.map(({ command }, index) => {
+			// A wake's turn_started names nothing either: a process runs one turn at a time, so a wake
+			// only follows the end of whatever turn ran before it (gap P2).
 			if (
-				command.verb === "settle" &&
-				sessionWide.includes(command.settlement.kind)
+				(command.verb === "settle" &&
+					sessionWide.includes(command.settlement.kind)) ||
+				(command.verb === "observe" &&
+					command.observation.tag === "Unsolicited" &&
+					command.observation.kind === "turn_started")
 			)
 				return new Set<string>();
 			const own = namesOf(command);

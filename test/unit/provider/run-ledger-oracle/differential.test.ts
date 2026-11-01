@@ -137,8 +137,11 @@ interface Mask {
 }
 
 /**
- * Only rows 215 and 216 explain a difference the catalogue shows; no catalogue trace reaches the
- * branch a landed unit row changes, so those rows have no mask (gap P10).
+ * Only rows 215 and 216 explain a difference the catalogue shows, so only they have masks. D56-202
+ * and D56-211 reach the branches rows 202 and 211 change and differ nowhere: main's own gate holds
+ * a start through a Claude wake, and a Claude start's message is placed at dispatch, so the view
+ * never reads it unplaced. The other rows' branches need a wire fact this replay has none for, or a
+ * wall clock past 30s (gap P10).
  */
 const masks: readonly Mask[] = [
 	{
