@@ -524,6 +524,8 @@ export const requeueLegacySend = (
 			);
 	}).pipe(Effect.mapError(toStoreFault));
 
+// From 32.5 a joined steer's command settles under its own run while its owner's Run is open;
+// its hold is its own run's (4.8; CONTRACT 1555-1556, 1868-1869).
 export const settleSend = (
 	tx: SettlementTx,
 	evidence: SendEvidence,
@@ -561,11 +563,12 @@ export const settleSend = (
 			command.run_id, command.payload_json, run.runner_id, run.held_transmission
 			FROM provider_command_outbox command JOIN provider_runs run
 				ON run.id = command.run_id AND run.session_id = command.session_id
+			JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
 			JOIN sessions session ON session.id = command.session_id AND session.project_id = command.project_key
 			WHERE command.request_sequence = ${send.requestSequence}
 				AND command.session_id = ${send.sessionId} AND command.command_id = ${send.commandId}
 				AND command.attempt_count = ${send.attempt} AND run.id = ${send.runId}
-				AND run.joined_into IS NULL AND run.status IN ('pending', 'running')
+				AND owner.status IN ('pending', 'running')
 				AND command.effect_type = 'send_turn'
 				AND command.request_sequence = (SELECT MAX(latest.request_sequence)
 					FROM provider_command_outbox latest WHERE latest.project_key = command.project_key
