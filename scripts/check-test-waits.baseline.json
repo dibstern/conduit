@@ -884,6 +884,9 @@
 		"polling": 6,
 		"timeout-override": 4
 	},
+	"test/integration/daemon/opencode-run-ledger.test.ts": {
+		"polling": 7
+	},
 	"test/integration/daemon/opencode-session-deletion.test.ts": {
 		"polling": 1
 	},
