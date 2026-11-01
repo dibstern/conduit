@@ -31,6 +31,7 @@ import type {
 	RunEffect,
 	SendToken,
 } from "../../provider/run-ledger/run-ledger-model.js";
+import { sendToken } from "../../provider/runner/runner-protocol.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
@@ -315,7 +316,7 @@ const commandFor = (
 					verb: "observe",
 					observation: {
 						tag: "Answer",
-						token: holdToken(runId, commandId, transmission),
+						token: sendToken("hold", commandId, transmission),
 						kind: "run_dispatched",
 						runId,
 						runnerId,
@@ -329,8 +330,8 @@ const commandFor = (
 					verb: "observe",
 					observation: {
 						tag: "Answer",
-						token: holdToken(
-							event.data.runId,
+						token: sendToken(
+							"hold",
 							event.data.commandId,
 							event.data.transmission,
 						),
@@ -413,7 +414,7 @@ const commandFor = (
 						token === undefined
 							? {
 									tag: "Answer",
-									token: `tx:${commandId}:${transmission}` as SendToken,
+									token: sendToken("tx", commandId, transmission),
 									kind: "effect_outcome",
 									transmission: { commandId, transmission },
 									outcome,
@@ -463,9 +464,6 @@ const commandFor = (
 				return undefined;
 		}
 	});
-
-const holdToken = (runId: string, commandId: string, transmission: number) =>
-	`hold:${runId}:${commandId}:${transmission}` as SendToken;
 
 const ledgerEffect = (effect: RunEffect) =>
 	effect.kind === "probe" ||
