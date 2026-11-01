@@ -139,11 +139,12 @@ interface Mask {
 
 /**
  * Only rows 215 and 216 explain a difference any trace shows, so only they have masks. D56-202,
- * D56-211, D56-213 and D56-206 reach the units rows 202, 211, 213 and 206 change and differ nowhere:
- * main's own gate holds a start through a Claude wake; a Claude start's message is placed at
- * dispatch, so the view never reads it unplaced; the arm folds no tasks, so the view never reads a
- * task live; and a Stop's retire fails a steer provider_failure, never runner_stopped. The other
- * rows' branches need a wire fact this replay has none for (gap P10).
+ * D56-211, D56-213, D56-206 and D56-207 reach the units rows 202, 211, 213, 206 and 207 change and
+ * differ nowhere: main's own gate holds a start through a Claude wake; a Claude start's message is
+ * placed at dispatch, so the view never reads it unplaced; the arm folds no tasks, so the view never
+ * reads a task live; the in-process Claude runner writes no run.dispatched, so the view never reads
+ * a steer possibly reached; and main's inbox refuses an OpenCode steer, so no direct steer is sent.
+ * The other rows' branches need a wire fact this replay has none for (gap P10).
  */
 const masks: readonly Mask[] = [
 	{
