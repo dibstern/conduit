@@ -214,17 +214,20 @@ export const makeRunnerRunLifecycle = (
 								return { _tag: "Covered" };
 							}
 							if (owner.runner_id !== null) return { _tag: "Busy" };
-							// The cap counts within the input's latest reservation, so a re-queued input gets it whole again (CONTRACT 4.8).
+							// n counts every transmission of the commandId and never restarts, so no
+							// token repeats (CONTRACT 66-67, 4.11). The cap counts only tries since the
+							// input's latest reservation, so a re-queued input gets it whole again (4.8).
 							const [count] = yield* sql<{
 								n: number;
-							}>`SELECT COUNT(*) AS n FROM events
-						WHERE session_id = ${input.sessionId} AND type = 'run.dispatched'
-							AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}
-							AND sequence > COALESCE((SELECT MAX(sequence) FROM events
+								tries: number;
+							}>`SELECT COUNT(*) AS n, COALESCE(SUM(sequence > COALESCE((SELECT MAX(sequence) FROM events
 								WHERE session_id = ${input.sessionId} AND type = 'input.sent'
-									AND json_valid(data) AND json_extract(data, '$.inputId') = ${commandId}), 0)`;
+									AND json_valid(data) AND json_extract(data, '$.inputId') = ${commandId}), 0)), 0) AS tries
+							FROM events
+						WHERE session_id = ${input.sessionId} AND type = 'run.dispatched'
+							AND json_valid(data) AND json_extract(data, '$.commandId') = ${commandId}`;
 							const transmission = (count?.n ?? 0) + 1;
-							if (transmission > 5) {
+							if ((count?.tries ?? 0) >= 5) {
 								yield* settleSend(tx, {
 									_tag: "failed",
 									send,

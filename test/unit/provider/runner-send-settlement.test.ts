@@ -2141,6 +2141,51 @@ it.effect(
 );
 
 it.effect(
+	"a re-queued input's next dispatch gets a fresh transmission number, so no token repeats",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* s7Fixture("cursor");
+				yield* f.seed("retry", 1, 0);
+				yield* f.recover;
+				f.replaySend.execute = () =>
+					Effect.succeed(
+						terminalResult("error", {
+							code: "transient",
+							message: "try again",
+							retryable: true,
+						}),
+					);
+				const retry = Effect.gen(function* () {
+					yield* f.reactor.runOnce();
+					const [row] = yield* f.sql<{
+						next_attempt_at: number;
+					}>`SELECT next_attempt_at FROM provider_command_outbox`;
+					yield* TestClock.adjust(
+						(row?.next_attempt_at ?? 0) - (yield* Clock.currentTimeMillis),
+					);
+				});
+				yield* retry;
+				yield* retry;
+				yield* f.commit([
+					canonicalEvent(
+						"input.sent",
+						"s",
+						{ sessionId: "s", inputId: "retry" },
+						{ provider: "cursor" },
+					),
+				]);
+				yield* retry;
+				const dispatched = yield* f.sql<{
+					n: number;
+				}>`SELECT json_extract(data, '$.transmission') AS n FROM events
+					WHERE type = 'run.dispatched' ORDER BY sequence`;
+				expect(dispatched.map(({ n }) => n)).toEqual([1, 2, 3]);
+			}),
+		),
+);
+
+it.effect(
 	"F69 legacy replay with retryable unset fails once without replay",
 	() =>
 		runRetirement(
