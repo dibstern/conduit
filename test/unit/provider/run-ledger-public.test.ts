@@ -184,6 +184,13 @@ describe("Run Ledger public model", () => {
 			cursor: policy,
 			opencode: policy,
 		};
+		const pendingEntry: ProviderPolicyTable = {
+			claude: policy,
+			codex: policy,
+			cursor: policy,
+			// @ts-expect-error No provider's fence or idle rules are Pending; CONTRACT 9 states each (82tn.32.2.14).
+			opencode: { tag: "Pending" },
+		};
 		expect([
 			answer,
 			unsolicited,
@@ -194,6 +201,7 @@ describe("Run Ledger public model", () => {
 			heldToken,
 			interruptMs,
 			missingCodex,
-		]).toHaveLength(9);
+			pendingEntry,
+		]).toHaveLength(10);
 	});
 });
