@@ -1638,27 +1638,19 @@ export class ProviderSideEffectReactor {
 								AND status = 'running' AND attempt_count = ${claimed.attempt_count}
 							RETURNING command_id`;
 						if (!changed.length || Option.isNone(payload)) return;
-						const store = yield* makeEventStoreEffect.pipe(
-							Effect.provideService(SqlClient.SqlClient, this.options.sql),
-							Effect.provideService(PersistenceProjectTag, {
-								projectId: claimed.project_key,
-							}),
-						);
-						yield* project(
-							yield* store.appendBatch([
-								canonicalEvent(
-									"evidence.effect_outcome",
-									claimed.session_id,
-									{
-										commandId: claimed.command_id,
-										transmission: claimed.attempt_count,
-										token: payload.value.token,
-										outcome,
-									},
-									{ provider: claimed.provider_id, createdAt: now },
-								),
-							]),
-						);
+						yield* this.appendInWrite(project, claimed.project_key, [
+							canonicalEvent(
+								"evidence.effect_outcome",
+								claimed.session_id,
+								{
+									commandId: claimed.command_id,
+									transmission: claimed.attempt_count,
+									token: payload.value.token,
+									outcome,
+								},
+								{ provider: claimed.provider_id, createdAt: now },
+							),
+						]);
 					}),
 				)
 				.pipe(Effect.mapError(storeFailure("ledgerEffectOutcome")));
@@ -2634,20 +2626,33 @@ export class ProviderSideEffectReactor {
 			.pipe(Effect.mapError(storeFailure("markCompleted")));
 	}
 
-	/** Append and project events in the caller's write, under the row's project (3.12). */
+	/**
+	 * Append and project events in the caller's write, under the row's project (3.12). An event
+	 * for a session whose row is gone is dropped: deletion's retention drain has run or is
+	 * running, and an event after it would outlive the tombstone. CONTRACT.md 224 (row 215)
+	 * spares only `process_lost` there; `effect_outcome` takes the same reading (gap, reported).
+	 */
 	private appendInWrite(
 		project: CommitAndSignalProject,
 		projectId: string,
 		events: readonly CanonicalEvent[],
 	) {
-		return events.length === 0
-			? Effect.void
-			: makeEventStoreEffect.pipe(
-					Effect.provideService(SqlClient.SqlClient, this.options.sql),
-					Effect.provideService(PersistenceProjectTag, { projectId }),
-					Effect.flatMap((store) => store.appendBatch(events)),
-					Effect.flatMap(project),
-				);
+		return Effect.gen({ self: this }, function* () {
+			if (events.length === 0) return;
+			const live = new Set(
+				(yield* this.options.sql<{ id: string }>`SELECT id FROM sessions
+					WHERE id IN ${this.options.sql.in(events.map((event) => event.sessionId))}`).map(
+					(row) => row.id,
+				),
+			);
+			const kept = events.filter((event) => live.has(event.sessionId));
+			if (kept.length === 0) return;
+			const store = yield* makeEventStoreEffect.pipe(
+				Effect.provideService(SqlClient.SqlClient, this.options.sql),
+				Effect.provideService(PersistenceProjectTag, { projectId }),
+			);
+			yield* project(yield* store.appendBatch(kept));
+		});
 	}
 
 	private recordControlOutcome(
