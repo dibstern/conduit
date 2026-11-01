@@ -3,7 +3,8 @@
 // Row 202, markRunning reads the fence. How it could fail:
 // 1. a start is claimed and sent while a wake on its native session has work;
 // 2. nothing claims it once the wake ends, so it waits for an unrelated drain;
-// 3. the claim's own transmission, minted at its run.requested, holds its own fence.
+// 3. the claim's own transmission, minted at its run.requested, holds its own fence;
+// 4a. the wake claims main's controls too, which their callers execute (a Stop's interrupt).
 // Row 212, markRunning reads the cap. How it could fail:
 // 4. a direct send that always fails retryably is sent forever, or fewer than 5 times;
 // 5. past the cap the input is not failed, or fails without main's code and terminal.
@@ -291,6 +292,11 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 					);
 					yield* seedSend(sql, "claude");
 					yield* reactor.drain();
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key,
+						session_id, provider_id, effect_type, provider_process_id, payload_json, status,
+						attempt_count, requested_at, updated_at)
+						VALUES (2, 'stop', 'test-project', 's1', 'claude', 'interrupt_turn', 'rn', '{}',
+							'pending', 0, 1004, 1004)`;
 					// 1: the fence holds the start before its claim.
 					expect(sent).toEqual([]);
 					expect(yield* sendRow(sql)).toEqual([
@@ -308,6 +314,10 @@ describe("Run Ledger 2.1 unit rows (25scs)", () => {
 					for (let tries = 0; tries < 200 && sent.length === 0; tries++)
 						yield* Effect.sleep(10);
 					expect(sent).toEqual(["u1"]);
+					// 4a: the control behind it stays its caller's.
+					expect(
+						yield* sql`SELECT status, attempt_count FROM provider_command_outbox WHERE command_id = 'stop'`,
+					).toEqual([{ status: "pending", attempt_count: 0 }]);
 				}),
 			),
 	);

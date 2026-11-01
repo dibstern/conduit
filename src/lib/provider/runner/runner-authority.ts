@@ -1,4 +1,4 @@
-import { Clock, Data, Effect, Option, Scheduler } from "effect";
+import { Data, Effect, Option, Scheduler } from "effect";
 import {
 	currentRunnerWriteOrigin,
 	currentWriteAuthorization,
@@ -27,21 +27,8 @@ export interface StartingGrant extends GrantIdentity {
 export interface LiveGrant extends GrantIdentity {
 	readonly _tag: "Live";
 }
-export interface CohortTarget {
-	readonly runnerId: string;
-	readonly sessionId: string;
-	readonly ownedRunIds: readonly string[];
-}
-export interface CleanupGrant extends GrantIdentity {
-	readonly _tag: "Cleanup";
-	readonly target: CohortTarget;
-	readonly expiresAt: number;
-}
-export type Grant = StartingGrant | LiveGrant | CleanupGrant;
-export type Write =
-	| { readonly kind: "output" }
-	| { readonly kind: "cleanup" }
-	| { readonly kind: "evidence" };
+export type Grant = StartingGrant | LiveGrant;
+export type Write = { readonly kind: "output" } | { readonly kind: "evidence" };
 export interface AuthorizedWrite {
 	readonly [authorizedTypeId]: boolean;
 	readonly grant: Grant;
@@ -73,26 +60,13 @@ interface RecordBase<A> {
 	readonly observation: "Pending" | "Observed";
 	readonly watcher: "Idle" | "Watching";
 }
-interface CleanupBase {
-	readonly grant: CleanupGrant;
-	readonly deadline: number;
-	readonly ownedRunIds: readonly string[];
-}
-type Cleanup = CleanupBase &
-	(
-		| { readonly _tag: "Unavailable" }
-		| { readonly _tag: "Ready" }
-		| { readonly _tag: "Settling" }
-	);
 export interface Starting<A> extends RecordBase<A> {
 	readonly tag: { readonly _tag: "Starting" };
 	readonly grant: StartingGrant;
-	readonly cleanup?: never;
 }
 export interface Live<A> extends RecordBase<A> {
 	readonly tag: { readonly _tag: "Live" };
 	readonly grant: LiveGrant;
-	readonly cleanup?: never;
 }
 export interface Exiting<A> extends RecordBase<A> {
 	readonly tag: {
@@ -100,28 +74,24 @@ export interface Exiting<A> extends RecordBase<A> {
 		readonly reason: "superseded" | "exited";
 	};
 	readonly grant: StartingGrant | LiveGrant;
-	readonly cleanup: Cleanup;
 }
 export interface Retired<A> extends RecordBase<A> {
 	readonly tag: { readonly _tag: "Retired" };
 	readonly grant: StartingGrant | LiveGrant;
-	readonly cleanup: Cleanup;
 }
 export type RunnerRecord<A> = Starting<A> | Live<A> | Exiting<A> | Retired<A>;
 export type RunnerTag = RunnerRecord<never>["tag"];
 type Revocation = "superseded" | "exited" | "retired";
-type GrantState =
-	| {
-			readonly phase:
-				| "starting"
-				| "live"
-				| "stopping"
-				| "detached-starting"
-				| "detached-live"
-				| "forgotten";
-	  }
-	| { readonly phase: Revocation; readonly cleanup: CleanupGrant }
-	| { readonly phase: "cleanup" | "cancelled-cleanup" };
+type GrantState = {
+	readonly phase:
+		| "starting"
+		| "live"
+		| "stopping"
+		| "detached-starting"
+		| "detached-live"
+		| "forgotten"
+		| Revocation;
+};
 
 export class AuthorityUnavailable extends Data.TaggedError(
 	"AuthorityUnavailable",
@@ -135,7 +105,6 @@ export const makeRunnerAuthority = <A>(
 	retirement?: (runnerId: string) => RunnerRetirement | undefined,
 ) =>
 	Effect.gen(function* () {
-		const clock = yield* Clock.Clock;
 		const records = new Map<string, RunnerRecord<A>>();
 		const grants = new WeakMap<Grant, GrantState>();
 		const dropped = new Set<string>();
@@ -183,7 +152,6 @@ export const makeRunnerAuthority = <A>(
 			});
 		const save = (record: RunnerRecord<A>) => {
 			Object.freeze(record.tag);
-			if (record.cleanup) Object.freeze(record.cleanup);
 			const snapshot = Object.freeze(record);
 			records.set(record.identity.runnerId, snapshot);
 			return snapshot;
@@ -208,51 +176,15 @@ export const makeRunnerAuthority = <A>(
 			grants.set(grant, { phase: "live" });
 			return grant;
 		};
-		const cleanupFor = (
-			grant: Grant,
-			ownedRunIds: readonly string[],
-		): CleanupGrant => {
-			const state = grants.get(grant);
-			const previous = state && "cleanup" in state ? state.cleanup : undefined;
-			if (previous) return previous;
-			const permitsCleanup =
-				state?.phase === "live" ||
-				state?.phase === "stopping" ||
-				state?.phase === "detached-live";
-			const cleanup: CleanupGrant = Object.freeze({
-				[grantTypeId]: true,
-				_tag: "Cleanup",
-				runnerId: grant.runnerId,
-				sessionId: grant.sessionId,
-				target: Object.freeze({
-					runnerId: grant.runnerId,
-					sessionId: grant.sessionId,
-					ownedRunIds: Object.freeze(permitsCleanup ? [...ownedRunIds] : []),
-				}),
-				expiresAt: clock.currentTimeMillisUnsafe() + 3_000,
-			});
-			if (grants.has(grant))
-				grants.set(cleanup, {
-					phase: permitsCleanup ? "cleanup" : "cancelled-cleanup",
-				});
-			return cleanup;
-		};
+		// CONTRACT.md 6.2 lists authorize(g, w, now); 6.11 deleted the only
+		// rule that read the clock (the cleanup grant's expiry), so `now` went.
 		const authorize = (
 			grant: Grant,
 			write: Write,
-			now: number,
 		): Option.Option<AuthorizedWrite> => {
 			const state = grants.get(grant);
 			if (!state) return Option.none();
-			let allowed = write.kind === "evidence";
-			if (write.kind === "output") allowed = state.phase === "live";
-			if (write.kind === "cleanup")
-				allowed =
-					state.phase === "live" ||
-					state.phase === "stopping" ||
-					(grant._tag === "Cleanup" &&
-						state.phase === "cleanup" &&
-						now < grant.expiresAt);
+			const allowed = write.kind === "evidence" || state.phase === "live";
 			return allowed
 				? Option.some(Object.freeze({ [authorizedTypeId]: true, grant, write }))
 				: Option.none();
@@ -278,9 +210,7 @@ export const makeRunnerAuthority = <A>(
 					);
 				if (typeof op === "function")
 					return Effect.sync(() =>
-						Option.isSome(
-							authorize(grant, write, clock.currentTimeMillisUnsafe()),
-						)
+						Option.isSome(authorize(grant, write))
 							? Option.some(op())
 							: Option.none<B>(),
 					).pipe(
@@ -291,12 +221,7 @@ export const makeRunnerAuthority = <A>(
 				const stale = {};
 				let rejected = false;
 				const check = Effect.suspend(() => {
-					if (
-						Option.isSome(
-							authorize(grant, write, clock.currentTimeMillisUnsafe()),
-						)
-					)
-						return Effect.void;
+					if (Option.isSome(authorize(grant, write))) return Effect.void;
 					rejected = true;
 					return Effect.die(stale);
 				});
@@ -321,61 +246,35 @@ export const makeRunnerAuthority = <A>(
 					),
 				);
 			});
-		const revoke = (
-			grant: Grant,
-			reason: Revocation,
-			cohort?: { readonly ownedRunIds: readonly string[] },
-		) =>
+		/** Flips the tag synchronously (AI1). A revoked runner's memory goes with its entry (6.11). */
+		const revoke = (grant: Grant, reason: Revocation) =>
 			Effect.sync(() => {
-				if (grant._tag === "Cleanup") return grant;
-				const existing = grants.get(grant);
-				const previousCleanup =
-					existing && "cleanup" in existing ? existing.cleanup : undefined;
-				const record = records.get(grant.runnerId);
+				const phase = grants.get(grant)?.phase;
+				// A revoked grant never revives or changes reason (AI4).
 				if (
-					previousCleanup &&
-					(reason !== "retired" ||
-						record?.tag._tag === "Retired" ||
-						record?.grant !== grant)
+					!phase ||
+					phase === "superseded" ||
+					phase === "exited" ||
+					phase === "retired"
 				)
-					return previousCleanup;
-				if (existing && "cleanup" in existing) return existing.cleanup;
-				const cleanup = cleanupFor(grant, cohort?.ownedRunIds ?? []);
-				if (!existing) return cleanup;
-				grants.set(grant, {
-					phase: reason,
-					cleanup,
-				});
-				if (!record || record.grant !== grant) return cleanup;
-				const revokedBase = {
-					identity: normalize({
-						...record.identity,
-						ownedRunIds: cleanup.target.ownedRunIds,
-					}),
+					return;
+				grants.set(grant, { phase: reason });
+				const record = records.get(grant.runnerId);
+				if (record?.grant !== grant) return;
+				const base = {
+					identity: record.identity,
 					observation: record.observation,
 					watcher: record.watcher,
 					grant,
-					cleanup: {
-						grant: cleanup,
-						deadline: cleanup.expiresAt,
-						ownedRunIds: cleanup.target.ownedRunIds,
-						_tag:
-							grants.get(cleanup)?.phase === "cleanup"
-								? (record.cleanup?._tag ?? "Ready")
-								: "Unavailable",
-					} satisfies Cleanup,
 				};
-				if (reason === "retired")
-					save({ ...revokedBase, tag: { _tag: "Retired" } });
-				else save({ ...revokedBase, tag: { _tag: "Exiting", reason } });
-				return cleanup;
+				save(
+					reason === "retired"
+						? { ...base, tag: { _tag: "Retired" } }
+						: { ...base, tag: { _tag: "Exiting", reason } },
+				);
 			}).pipe(Effect.provideService(Scheduler.PreventSchedulerYield, true));
 		const isStarting = (record: RunnerRecord<A>): record is Starting<A> =>
 			record.tag._tag === "Starting";
-		const hasCleanup = (
-			record: RunnerRecord<A>,
-		): record is Exiting<A> | Retired<A> =>
-			record.tag._tag === "Exiting" || record.tag._tag === "Retired";
 		const promote = (record: Starting<A>): Live<A> => ({
 			...record,
 			tag: { _tag: "Live" },
@@ -465,14 +364,7 @@ export const makeRunnerAuthority = <A>(
 							(registration.attachmentId &&
 								registration.attachmentId !== record.identity.attachmentId);
 						if (changed) {
-							const cleanup = cleanupFor(
-								record.grant,
-								record.identity.ownedRunIds,
-							);
-							grants.set(record.grant, {
-								phase: "superseded",
-								cleanup,
-							});
+							grants.set(record.grant, { phase: "superseded" });
 							const base = {
 								identity,
 								observation: record.observation,
@@ -493,9 +385,7 @@ export const makeRunnerAuthority = <A>(
 						} else record = save({ ...record, identity });
 					}
 					if (tombstone) {
-						yield* revoke(record.grant, "retired", {
-							ownedRunIds: identity.ownedRunIds,
-						});
+						yield* revoke(record.grant, "retired");
 						const survivor = records.get(identity.runnerId);
 						if (survivor) survivors.push(survivor);
 						continue;
@@ -606,18 +496,6 @@ export const makeRunnerAuthority = <A>(
 						}),
 					});
 				}
-			},
-			beginCleanup: (runnerId: string) => {
-				const record = records.get(runnerId);
-				if (!record || !hasCleanup(record) || record.cleanup._tag !== "Ready")
-					return false;
-				save({ ...record, cleanup: { ...record.cleanup, _tag: "Settling" } });
-				return true;
-			},
-			finishCleanup: (runnerId: string) => {
-				const record = records.get(runnerId);
-				if (record && hasCleanup(record) && record.cleanup._tag === "Settling")
-					save({ ...record, cleanup: { ...record.cleanup, _tag: "Ready" } });
 			},
 		};
 	});

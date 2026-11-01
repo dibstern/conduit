@@ -1,6 +1,4 @@
 import { channel } from "node:diagnostics_channel";
-import { appendFileSync, existsSync } from "node:fs";
-import { dirname, join } from "node:path";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 
@@ -280,6 +278,11 @@ export interface OrchestrationEngineOptions {
 		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
 	>;
+	/** Process tests hold a Stop between its snapshot and its acceptance. */
+	readonly beforeStopAcceptance?: (input: {
+		readonly commandId: string;
+		readonly sessionId: string;
+	}) => Effect.Effect<void>;
 }
 
 interface DurableCommandRuntime {
@@ -343,6 +346,7 @@ export class OrchestrationEngine {
 	private readonly resolveCallContext: OrchestrationEngineOptions["resolveCallContext"];
 	private readonly autoSettleAfterDays: OrchestrationEngineOptions["autoSettleAfterDays"];
 	private readonly projectOfSession: OrchestrationEngineOptions["projectOfSession"];
+	private readonly beforeStopAcceptance: OrchestrationEngineOptions["beforeStopAcceptance"];
 	private readonly durable?: DurableCommandRuntime;
 	private readonly commandScope = Scope.makeUnsafe();
 	private readonly inFlightCommands = new Map<
@@ -375,6 +379,7 @@ export class OrchestrationEngine {
 		this.resolveCallContext = options.resolveCallContext;
 		this.autoSettleAfterDays = options.autoSettleAfterDays;
 		this.projectOfSession = options.projectOfSession;
+		this.beforeStopAcceptance = options.beforeStopAcceptance;
 		if (options.durableCommands) {
 			const durable = options.durableCommands;
 			this.durable = {
@@ -782,27 +787,8 @@ export class OrchestrationEngine {
 											traits?.keepsPendingSteersOnInterrupt ?? false,
 									},
 								);
-								const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
-								if (
-									process.env["NODE_ENV"] === "test" &&
-									process.env["CONDUIT_TEST_STOP_ACCEPT_PAUSE"] === "1" &&
-									proof
-								) {
-									const gate = join(
-										dirname(proof),
-										"conduit-test-stop-acceptance",
-									);
-									if (existsSync(gate)) {
-										const mark = {
-											channel: "conduit-process-test",
-											kind: "stop-accept-paused",
-											...input,
-										};
-										appendFileSync(proof, `${JSON.stringify(mark)}\n`);
-										process.send?.(mark);
-										while (existsSync(gate)) yield* Effect.sleep("10 millis");
-									}
-								}
+								if (this.beforeStopAcceptance)
+									yield* this.beforeStopAcceptance(input);
 								const pending = yield* durable.sql<{
 									command_id: string;
 									run_id: string;

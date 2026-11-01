@@ -5,6 +5,7 @@
 // 3. a fire the arm finds nothing due for is fired again and again;
 // 4. it appends something other than alarm_fired, or appends it in a write that does not fold it;
 // 5. after a restart it does not fire the ledger stop deadline from the session row (no U2 restore).
+// 6. its alarm forces a wake an observer already ended at its Stop's dispose (trace W, L6, A.21).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -106,7 +107,7 @@ const observed = Effect.gen(function* () {
 			WHERE e.type = 'evidence.alarm_fired' AND NOT EXISTS (SELECT 1 FROM run_ledger_entries r
 				WHERE r.event_sequence = e.sequence) ORDER BY e.sequence`,
 		forced: yield* sql<{ session_id: string }>`SELECT DISTINCT session_id
-			FROM run_ledger_entries WHERE entry_json LIKE '%forced%' ORDER BY session_id`,
+			FROM run_ledger_entries WHERE entry_json LIKE '%"forced":true%' ORDER BY session_id`,
 	};
 });
 
@@ -211,6 +212,62 @@ describe("Run Ledger alarm scheduler", () => {
 						expect(after.unfolded).toEqual([
 							{ session_id: "s3" },
 							{ session_id: "s3" },
+						]);
+					}),
+				),
+			),
+	);
+	it.effect(
+		"forces nothing at the deadline of a Stop whose wake already ended at its dispose (trace W)",
+		() =>
+			Effect.acquireUseRelease(
+				Effect.sync(() => mkdtempSync(join(tmpdir(), "run-ledger-scheduler-"))),
+				(dir) =>
+					open(join(dir, "events.db"), (commit) =>
+						Effect.gen(function* () {
+							// w: the Stop's dispose ends the wake at once, its turn_ended before deadlineAt.
+							yield* commit([
+								...wakeThenStop("w", 4000),
+								canonicalEvent(
+									"evidence.turn_ended",
+									"w",
+									{ label: "rn-w:1" },
+									{ provider: "claude", createdAt: 104 },
+								),
+							]);
+							// x: a wake no observer ends, whose fire at 6000 is the commit to wait for.
+							yield* commit(wakeThenStop("x", 6000));
+							const sql = yield* SqlClient.SqlClient;
+							const ended = yield* sql<{
+								entry_json: string;
+							}>`SELECT entry_json FROM run_ledger_entries WHERE session_id = 'w'
+								AND event_sequence = (SELECT MAX(sequence) FROM events
+									WHERE session_id = 'w' AND type = 'evidence.turn_ended')`;
+							const fired = commit.committed();
+							yield* TestClock.adjust(6000);
+							yield* fired;
+							return { ended, after: yield* observed };
+						}),
+					),
+				(dir) =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			).pipe(
+				Effect.tap(({ ended, after }) =>
+					Effect.sync(() => {
+						// 6: the wake's turn_ended ended its work, not forced.
+						expect(
+							ended
+								.map((row) => JSON.parse(row.entry_json))
+								.find((entry) => entry.kind === "end"),
+						).toMatchObject({
+							outcome: "interrupted",
+							reason: { tag: "interrupted", forced: false },
+						});
+						// Only x's unobserved wake is forced; w's deadline, passed, forced nothing.
+						expect(after.forced).toEqual([{ session_id: "x" }]);
+						expect(after.rows).toEqual([
+							{ session_id: "w", alarm_at: null },
+							{ session_id: "x", alarm_at: null },
 						]);
 					}),
 				),

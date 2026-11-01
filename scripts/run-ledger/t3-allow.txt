@@ -2061,3 +2061,6 @@ process_started from register/swap/recover is 32.6's; raw-write loss append	poin
 dispatched; direct run.requested is one), arm fix: the direct marker folds	pointer
 as effect_outcome delivery_unknown, not a hold fact (CONTRACT 527/1818), a	pointer
 send that never reached the agent (released JournalAbsent, transmission 2).	pointer
+its guard is row 202's fence read in markRunning	pointer
+the forced-stop artifact. 8ee9e4b8 covers B24	pointer
+7 direct settles; the closer is the stop commit's post-commit step	pointer

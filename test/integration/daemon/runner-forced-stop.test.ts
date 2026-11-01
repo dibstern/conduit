@@ -532,7 +532,12 @@ describe("runner forced stop with real processes", () => {
 			const fixture = await selectedRunner(harness, leaderExits);
 			members = [...fixture.members];
 			evidence["acceptedRun"] = fixture.acceptedRun;
+			expect(runnerProcessTable.inspect(fixture.descendant.pid)).toMatchObject({
+				state: "running",
+				pgid: fixture.leader.pid,
+			});
 			evidence["before"] = {
+				pgid: fixture.leader.pid,
 				leader: fixture.leader,
 				reaper: fixture.reaper,
 				descendant: fixture.descendant,
@@ -570,19 +575,35 @@ describe("runner forced stop with real processes", () => {
 					signal: "SIGTERM",
 				}),
 			);
-			if (!leaderExits) {
-				const signals = proof(harness).filter(
-					(mark) =>
-						mark["kind"] === "signal" &&
-						Math.abs(Number(mark["childPid"])) === fixture.leader.pid,
-				);
-				expect(signals.map((mark) => mark["signal"])).toEqual([
-					"SIGTERM",
-					"SIGKILL",
-				]);
+			// A pinned group gets -leader. With the leader exited and its reaper
+			// killed, escalation must target the descendant directly. A live
+			// reaper's own group KILL can beat the daemon's, so there the
+			// daemon's KILL is optional.
+			const signals = proof(harness).filter(
+				(mark) =>
+					mark["kind"] === "signal" &&
+					[fixture.leader.pid, fixture.descendant.pid].includes(
+						Math.abs(Number(mark["childPid"])),
+					),
+			);
+			const [term, kill, ...extra] = signals;
+			expect(term?.["signal"]).toBe("SIGTERM");
+			expect(extra).toEqual([]);
+			if (kill || !leaderExits || killReaper) {
+				expect(kill?.["signal"]).toBe("SIGKILL");
 				expect(
-					Number(signals[1]?.["at"]) - Number(signals[0]?.["at"]),
+					Number(kill?.["at"]) - Number(term?.["at"]),
 				).toBeGreaterThanOrEqual(2800);
+			}
+			if (killReaper) {
+				const exited = proof(harness).find(
+					(mark) =>
+						mark["kind"] === "leader-exit" &&
+						mark["pid"] === fixture.leader.pid,
+				);
+				expect(Number(kill?.["at"])).toBeGreaterThan(Number(exited?.["at"]));
+				expect(kill?.["childPid"]).toBe(fixture.descendant.pid);
+			} else if (!leaderExits) {
 				expect(proof(harness)).toContainEqual(
 					expect.objectContaining({
 						kind: "exit",

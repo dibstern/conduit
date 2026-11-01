@@ -60,6 +60,7 @@ import {
 	endedRowOutcome,
 	LEDGER_EFFECT_TYPES,
 	ledgerEffectWakes,
+	ledgerFenceWakes,
 	loadLedger,
 } from "../persistence/effect/run-ledger-arm.js";
 import { SessionRollupProjects } from "../persistence/effect/session-rollup-projects.js";
@@ -401,31 +402,65 @@ export class ProviderSideEffectReactor {
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return Effect.gen({ self: this }, function* () {
 			// 3.12, 2.1 row 216: a wake after the commit that inserts a ledger effect. Registered
-			// once, in the drain's scope, and removed when that scope closes.
+			// once, in the drain's scope, and removed when that scope closes. It runs only the
+			// ledger's effects: a whole drain would also claim main's controls from the callers
+			// that execute them, which then wait out an outcome poll.
 			const wakeScope =
 				this.options.scope ??
 				Option.getOrUndefined(yield* Effect.serviceOption(Scope.Scope));
 			if (!this.ledgerWakeRegistered && wakeScope) {
 				this.ledgerWakeRegistered = true;
-				const kicks = yield* Queue.sliding<void>(1);
-				const wake = () => Queue.offerUnsafe(kicks, undefined);
-				const wakes =
-					ledgerEffectWakes.get(this.options.sql) ?? new Set<() => void>();
-				ledgerEffectWakes.set(this.options.sql, wakes.add(wake));
-				yield* Scope.addFinalizer(
-					wakeScope,
-					Effect.sync(() => wakes.delete(wake)),
-				);
-				yield* Effect.forkIn(
-					Queue.take(kicks).pipe(
-						Effect.andThen(this.drain(makeInteractions)),
-						Effect.catch((cause) =>
-							Effect.logError("Run Ledger effect wake failed", cause),
-						),
-						Effect.forever,
+				const ledgerEffects = this.options.sql<ProviderCommandOutboxRow>`
+					SELECT request_sequence, command_id, project_key, session_id, provider_id,
+						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
+					FROM provider_command_outbox
+					WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
+						AND status = 'pending' AND effect_type IN ${this.options.sql.in(LEDGER_EFFECT_TYPES)}
+					ORDER BY request_sequence
+				`.pipe(
+					Effect.mapError(storeFailure("ledgerEffects")),
+					Effect.flatMap((rows) =>
+						Effect.forEach(rows, (row) => this.runLedgerEffect(row), {
+							concurrency: "unbounded",
+							discard: true,
+						}),
 					),
-					wakeScope,
 				);
+				// 2.1 row 202 (CONTRACT.md 215, 714-717): the commit that releases a fence claims the
+				// held starts, each through its session lane, and stops at the first control.
+				const heldStarts = this.nextPendingRequests().pipe(
+					Effect.flatMap((heads) =>
+						Effect.forEach(
+							heads.filter((head) => head.effect_type === "send_turn"),
+							(head) => this.drainSessionLane(head, makeInteractions, true),
+							{ concurrency: "unbounded", discard: true },
+						),
+					),
+				);
+				for (const [wakes, work] of [
+					[ledgerEffectWakes, ledgerEffects],
+					[ledgerFenceWakes, heldStarts],
+				] as const) {
+					const kicks = yield* Queue.sliding<void>(1);
+					const wake = () => Queue.offerUnsafe(kicks, undefined);
+					const registered =
+						wakes.get(this.options.sql) ?? new Set<() => void>();
+					wakes.set(this.options.sql, registered.add(wake));
+					yield* Scope.addFinalizer(
+						wakeScope,
+						Effect.sync(() => registered.delete(wake)),
+					);
+					yield* Effect.forkIn(
+						Queue.take(kicks).pipe(
+							Effect.andThen(work),
+							Effect.catch((cause) =>
+								Effect.logError("Run Ledger wake failed", cause),
+							),
+							Effect.forever,
+						),
+						wakeScope,
+					);
+				}
 			}
 			yield* this.admission.withPermit(
 				Effect.gen({ self: this }, function* () {
@@ -505,30 +540,7 @@ export class ProviderSideEffectReactor {
 						head.effect_type !== "send_turn") ||
 					LEDGER_EFFECT_TYPES.some((type) => type === head.effect_type)
 						? this.runBackgroundRow(head, makeInteractions).pipe(Effect.asVoid)
-						: this.withDrainSession(
-								head.session_id,
-								Effect.gen({ self: this }, function* () {
-									let row: ProviderCommandOutboxRow | undefined = head;
-									while (row) {
-										if (
-											(yield* this.runBackgroundRow(row, makeInteractions)) ===
-											0
-										)
-											return;
-										const next = (yield* this.nextPendingRequests(
-											head.session_id,
-										))[0];
-										// A refusal can race project recovery and leave its head
-										// unchanged. Defer it to the scheduler's next drain.
-										if (
-											next?.request_sequence === row.request_sequence &&
-											next.attempt_count === row.attempt_count
-										)
-											return;
-										row = next;
-									}
-								}),
-							)
+						: this.drainSessionLane(head, makeInteractions)
 					).pipe(
 						// A failed session must not interrupt another session's live turn.
 						Effect.catchCause((cause) =>
@@ -601,6 +613,33 @@ export class ProviderSideEffectReactor {
 					),
 					scope,
 				);
+			}),
+		);
+	}
+
+	/** Runs a session's rows from its head, in order; `sendsOnly` stops at the first control. */
+	private drainSessionLane(
+		head: ProviderCommandOutboxRow,
+		makeInteractions?: ProviderCommandInteractionSinkFactory,
+		sendsOnly?: true,
+	) {
+		return this.withDrainSession(
+			head.session_id,
+			Effect.gen({ self: this }, function* () {
+				let row: ProviderCommandOutboxRow | undefined = head;
+				while (row && (!sendsOnly || row.effect_type === "send_turn")) {
+					if ((yield* this.runBackgroundRow(row, makeInteractions)) === 0)
+						return;
+					const next = (yield* this.nextPendingRequests(head.session_id))[0];
+					// A refusal can race project recovery and leave its head
+					// unchanged. Defer it to the scheduler's next drain.
+					if (
+						next?.request_sequence === row.request_sequence &&
+						next.attempt_count === row.attempt_count
+					)
+						return;
+					row = next;
+				}
 			}),
 		);
 	}

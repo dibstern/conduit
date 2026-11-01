@@ -69,6 +69,12 @@ export const ledgerEffectWakes = new WeakMap<
 	Set<() => void>
 >();
 const wakeKey = Symbol("run-ledger-effect-wake");
+/** The reactors' wakes for the commit that releases a fence, so a held start is claimed (2.1 row 202). */
+export const ledgerFenceWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<() => void>
+>();
+const fenceWakeKey = Symbol("run-ledger-fence-wake");
 /** The alarm schedulers' wakes for a committed change of a session row's alarm_at (3.7). */
 export const ledgerAlarmWakes = new WeakMap<
 	SqlClient.SqlClient,
@@ -340,24 +346,24 @@ const commandFor = (
 				const deadlineAt = event.data.stop?.deadlineAt ?? null;
 				// 5.1 D58: Run now is the interrupt main's interruptForInput commits after its
 				// input.interrupt_requested; the stored interrupt names no input (gap, reported).
-				const [forInput] = yield* sql<{ input_id: string }>`
-					SELECT json_extract(data, '$.inputId') AS input_id FROM events
-					WHERE session_id = ${event.sessionId} AND type = 'input.interrupt_requested'
+				// Keyed by session, so the read never walks other sessions' history (RL-063).
+				const [latest] = yield* sql<{ type: string; input_id: string }>`
+					SELECT type, json_extract(data, '$.inputId') AS input_id FROM events
+					WHERE session_id = ${event.sessionId}
+						AND type IN ('input.interrupt_requested', 'interrupt.requested')
 						AND sequence < ${event.sequence}
-						AND sequence > COALESCE((SELECT MAX(sequence) FROM events
-							WHERE session_id = ${event.sessionId} AND type = 'interrupt.requested'
-								AND sequence < ${event.sequence}), 0)
 					ORDER BY sequence DESC LIMIT 1`;
 				return {
 					verb: "control",
-					control: forInput
-						? {
-								kind: "run_now",
-								commandId,
-								inputId: forInput.input_id,
-								deadlineAt,
-							}
-						: { kind: "stop", commandId, deadlineAt },
+					control:
+						latest?.type === "input.interrupt_requested"
+							? {
+									kind: "run_now",
+									commandId,
+									inputId: latest.input_id,
+									deadlineAt,
+								}
+							: { kind: "stop", commandId, deadlineAt },
 				};
 			}
 			case "session.end_requested": {
@@ -611,10 +617,11 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							RETURNING command_id`;
 						inserted ||= written.length > 0;
 					}
-					// 2.1 row 202 (CONTRACT.md 215): a start waits on the fence with no clock, so the commit
-					// that releases it wakes the drain that claims the start (gap, reported).
-					if (inserted || (fenceHolds(ledger.state) && !fenceHolds(state)))
-						wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
+					if (inserted) wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
+					// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits on the fence with no clock, so the
+					// commit that releases it wakes the held starts (gap, reported).
+					if (fenceHolds(ledger.state) && !fenceHolds(state))
+						wakeAfterCommit(sql, fenceWakeKey, ledgerFenceWakes);
 				}
 				// A folded fact advances the read model (A.21): its session row takes the version.
 				const stamped = yield* sql<{ id: string }>`

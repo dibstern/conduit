@@ -26,6 +26,8 @@
 // Load (3.12). How it could fail:
 // 19. a session whose only open work is unknown background tasks reads Quiescent, so a restart's
 //     load, which rebuilds only Open rows, skips it.
+// Run now (5.1). How it could fail:
+// 20. the interrupt after main's input.interrupt_requested folds as a Stop, or a later Stop as Run now.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -538,6 +540,44 @@ describe("Run Ledger arm", () => {
 				});
 				expect(after).toEqual(before);
 			}),
+	);
+	it.effect(
+		"folds the interrupt after input.interrupt_requested as Run now, and the next one as a Stop",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const interrupt = (createdAt: number, commandId: string) =>
+						canonicalEvent(
+							"interrupt.requested",
+							"s1",
+							{ providerProcessId: "p1", stop: null },
+							at(createdAt, { commandId }, "claude"),
+						);
+					yield* projectOnline([
+						...turn("s1", "claude"),
+						canonicalEvent(
+							"input.interrupt_requested",
+							"s1",
+							{ sessionId: "s1", inputId: "u1" },
+							at(1005),
+						),
+						interrupt(1006, "k1"),
+						interrupt(1007, "k2"),
+					]);
+					// 20
+					expect(
+						(yield* ledgerRows).entries.flatMap(({ entry_json }) => {
+							const entry = JSON.parse(entry_json) as {
+								command?: { control?: { kind: string; commandId: string } };
+							};
+							return entry.command?.control ? [entry.command.control] : [];
+						}),
+					).toMatchObject([
+						{ kind: "run_now", commandId: "k1", inputId: "u1" },
+						{ kind: "stop", commandId: "k2" },
+					]);
+				}),
+			),
 	);
 	it.live(
 		"runs a Stop's ledger effects beside a running send, woken by their commit, each outcome folded in its write",
