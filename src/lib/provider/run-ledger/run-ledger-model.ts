@@ -56,6 +56,19 @@ export type Observation =
 			readonly eventId: string;
 	  } & Unsolicited);
 
+/** 8.2 (CONTRACT.md 2783-2786): a declared role wins over detection for its own ServerKey. */
+export type ServerEvidence =
+	| {
+			readonly kind: "server_seen";
+			readonly server: ServerKey;
+			readonly command: string;
+			readonly cwd: string;
+			readonly taskKey?: TaskKey;
+			readonly source: "detected" | "declared";
+			readonly role?: "serving" | "awaited";
+	  }
+	| { readonly kind: "server_gone"; readonly server: ServerKey };
+
 export type MainRunEvent =
 	/**
 	 * 3.4: reserves its input's Run under runId, or names the Run that holds it; direct
@@ -293,7 +306,12 @@ export type Settlement =
 	| {
 			readonly kind: "session_ended";
 			readonly cause: "native_session_vanished";
-	  };
+	  }
+	/**
+	 * 8.2, 8.7: the PortWatcher's daemon observations name the session, never a label. Gap: 8.2 lists
+	 * them with the Evidence additions; a settlement is the one command that names only a session.
+	 */
+	| ServerEvidence;
 
 /**
  * decide issues only probe, stop_task and cancel_request (3.12), each Tokened; every other kind
@@ -518,6 +536,22 @@ export interface TaskKey {
 	readonly taskId: string;
 	readonly runId?: string;
 }
+/** 8.2: a listening process; pid reuse or a new process on the port is a new ServerKey. */
+export interface ServerKey {
+	readonly pid: number;
+	readonly startedAt: number;
+	readonly port: number;
+}
+export interface Server {
+	readonly key: ServerKey;
+	readonly command: string;
+	readonly cwd: string;
+	readonly taskKey?: TaskKey;
+	readonly source: "detected" | "declared";
+	readonly role: "serving" | "awaited";
+}
+/** By port, per session; survives labels, queries and restarts (8.2). */
+export type Servers = ReadonlyMap<number, Server>;
 /** kind from taskType; class per 8.2. */
 export type Task = Extract<
 	Evidence,
@@ -578,6 +612,11 @@ export interface LedgerView {
 	/** Work that may still act, in issue order. */
 	readonly live: readonly IssuedEffect[];
 	readonly tasks: TasksView;
+	/**
+	 * 8.7: the session's live servers. Absent means none, so a view with no server equals one built
+	 * before 32.33.1 (3.13's model has none, 8.2).
+	 */
+	readonly servers?: Servers;
 	readonly anythingMayAct: boolean;
 	readonly pendingConfirm?: PendingConfirm;
 	readonly lostWork: readonly LostWork[];

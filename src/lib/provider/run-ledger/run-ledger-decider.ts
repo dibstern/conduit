@@ -21,6 +21,7 @@ import type {
 	RunEnded,
 	RunOutcome,
 	SendToken,
+	Server,
 	Task,
 	TaskKey,
 	TasksView,
@@ -308,6 +309,8 @@ interface Book {
 		| undefined;
 	/** 8.4, D45: raised by every non-older snapshot, process_started and raised label. */
 	snapshotEntry: number;
+	/** 8.7: by port; only server_gone removes one (8.2). */
+	readonly servers: Map<number, Server>;
 }
 
 /**
@@ -340,6 +343,8 @@ type Outcome =
 	| { readonly tag: "Noop"; readonly diagnostic?: string | undefined }
 	| { readonly tag: "Rejected"; readonly diagnostic: string };
 const changed: Outcome = { tag: "Changed" };
+const sameServer = (a: Server["key"], b: Server["key"]) =>
+	a.pid === b.pid && a.startedAt === b.startedAt && a.port === b.port;
 const noop = (diagnostic?: string): Outcome => ({ tag: "Noop", diagnostic });
 const rejected = (diagnostic: string): Outcome => ({
 	tag: "Rejected",
@@ -2386,6 +2391,40 @@ function settle(
 	settlement: Extract<LedgerCommand, { verb: "settle" }>["settlement"],
 ): Outcome {
 	switch (settlement.kind) {
+		case "server_gone": {
+			const entry = book.servers.get(settlement.server.port);
+			if (entry === undefined || !sameServer(entry.key, settlement.server))
+				return noop("server_gone names another ServerKey (8.2)");
+			book.servers.delete(settlement.server.port);
+			return changed;
+		}
+		case "server_seen": {
+			const { server, source } = settlement;
+			const entry = book.servers.get(server.port);
+			// 8.2: a declared entry keeps its source and role against later detection of its own
+			// ServerKey; a new ServerKey on the port starts as its observation says.
+			const kept =
+				entry !== undefined &&
+				sameServer(entry.key, server) &&
+				entry.source === "declared" &&
+				source === "detected"
+					? entry
+					: undefined;
+			const next: Server = {
+				key: server,
+				command: settlement.command,
+				cwd: settlement.cwd,
+				...(settlement.taskKey === undefined
+					? {}
+					: { taskKey: settlement.taskKey }),
+				source: kept?.source ?? source,
+				role: kept?.role ?? settlement.role ?? "serving",
+			};
+			if (JSON.stringify(entry) === JSON.stringify(next))
+				return noop("server unchanged");
+			book.servers.set(server.port, next);
+			return changed;
+		}
 		case "alarm_fired": {
 			// 3.7: every deadline an alarm recorded after it opened reaches fires once, in order.
 			const due = deadlines(book).filter(
@@ -2894,6 +2933,7 @@ export function initialSessionLedgerState(
 		lostWork: [],
 		lostDecided: new Set(),
 		snapshotEntry: 0,
+		servers: new Map(),
 	});
 }
 
@@ -3098,12 +3138,15 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 		inbox: [],
 		live,
 		tasks,
-		// 8.3: a non-ended Run, a send that may still act, tasks live or unknown, or a wake execution.
+		...(book.servers.size === 0 ? {} : { servers: new Map(book.servers) }),
+		// 8.3: a non-ended Run, a send that may still act, tasks live or unknown, a wake execution, or
+		// a server live (8.7).
 		anythingMayAct:
 			run !== undefined ||
 			live.length > 0 ||
 			tasks.tag !== "none" ||
-			book.wakes.some((wake) => wake.ended === undefined),
+			book.wakes.some((wake) => wake.ended === undefined) ||
+			book.servers.size > 0,
 		// 8.4: a gate shows while its tasks are live or unknown; its labels are the current one.
 		...(book.confirm === undefined || tasks.tag === "none"
 			? {}

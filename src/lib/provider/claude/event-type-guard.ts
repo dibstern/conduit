@@ -266,6 +266,14 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Run Ledger evidence: holdRun's cap, a runner write",
 	},
+	"evidence.server_seen": {
+		produced: false,
+		reason: "Run Ledger evidence: the daemon PortWatcher",
+	},
+	"evidence.server_gone": {
+		produced: false,
+		reason: "Run Ledger evidence: the daemon PortWatcher",
+	},
 	"evidence.delivery_indeterminate": {
 		produced: false,
 		reason: "Run Ledger evidence: the direct send's marker, an OpenCode write",
