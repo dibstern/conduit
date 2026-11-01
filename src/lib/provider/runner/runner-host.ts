@@ -79,6 +79,8 @@ export interface RunnerLaunchCallbacks {
 	readonly turnStateChanged: (inFlight: boolean) => void;
 	/** Every native query start after the host's first is a replacement (CONTRACT 6.1). */
 	readonly queryStarted: (query: object) => void;
+	/** True for a query the host has seen replaced; no query (Codex, Cursor) is never replaced (6.1). */
+	readonly isReplacedQuery: (query: object | undefined) => boolean;
 	/** Only the producer can finish this exact terminal delivery. */
 	readonly sourceDelivery?: (
 		source: Pick<RunnerSourceDelivery, "sessionId" | "inputId" | "runId">,
@@ -295,6 +297,8 @@ export const runSessionRunner = (
 		// The host owns querySeq; a surviving host keeps it across daemon reconnects (6.1).
 		let querySeq = 0;
 		let currentQuery: object | undefined;
+		const isReplacedQuery = (query: object | undefined) =>
+			query !== undefined && query !== currentQuery;
 		const querySeqs = new WeakMap<object, number>();
 		const spool = new RunnerSpool(`${socketPath}.spool`, () => querySeq);
 		let backgroundSnapshot:
@@ -405,6 +409,7 @@ export const runSessionRunner = (
 				currentQuery = query;
 				querySeqs.set(query, querySeq);
 			},
+			isReplacedQuery,
 			sourceDelivery: (source) => {
 				const owner = sourceSinkId ? bindings.get(sourceSinkId) : undefined;
 				if (
@@ -532,8 +537,7 @@ export const runSessionRunner = (
 												// under its own querySeq.
 												const origin = yield* currentRunnerQuery;
 												if (
-													origin &&
-													origin !== currentQuery &&
+													isReplacedQuery(origin) &&
 													!(output.type === "event"
 														? [
 																"run.started",

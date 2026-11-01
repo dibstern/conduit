@@ -13,6 +13,8 @@ import {
 	type ClaudeProviderInstanceDeps,
 	makeClaudeSessionRunner,
 } from "../../../src/lib/provider/claude/claude-provider-runtime.js";
+import { makeClaudeRunnerLaunch } from "../../../src/lib/provider/claude/claude-runner-launch.js";
+import type { ClaudeSessionRunnerDeps } from "../../../src/lib/provider/claude/claude-runner-payload.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type {
 	CanUseTool,
@@ -36,18 +38,53 @@ import { RunnerSpool } from "../../../src/lib/provider/runner/runner-spool.js";
 import {
 	currentRunnerQuery,
 	type NativeSessionRunner,
+	type SessionCommand,
 	type SessionFailure,
 	type SessionOutput,
 	type SessionOutputReply,
 } from "../../../src/lib/provider/runner/session-runner.js";
 
-import { createMockQuery, makeSuccessResult } from "../../helpers/mock-sdk.js";
+import {
+	createMockQuery,
+	makeErrorResult,
+	makeSuccessResult,
+} from "../../helpers/mock-sdk.js";
 import {
 	admitRunnerCommand,
 	makeRunnerAdmission,
 } from "../../helpers/runner-provider-admission.js";
 
 type Emit = Parameters<RunnerLaunch["makeRunner"]>[1];
+
+// The Claude launch's own output callback, recorded as the launch hands it to the payload.
+const launched = vi.hoisted(() => ({ output: undefined as Emit | undefined }));
+vi.mock("../../../src/lib/provider/claude/claude-sdk-module.js", async () => {
+	const { Effect } = await import("effect");
+	const { createMockQuery } = await import("../../helpers/mock-sdk.js");
+	return {
+		loadClaudeSdkTestModule: Effect.succeed({
+			claudeSdk: { query: () => createMockQuery([]) },
+		}),
+	};
+});
+vi.mock(
+	"../../../src/lib/provider/claude/claude-runner-payload.js",
+	async (importActual) => {
+		const actual =
+			await importActual<
+				typeof import("../../../src/lib/provider/claude/claude-runner-payload.js")
+			>();
+		return {
+			...actual,
+			makeClaudeSessionRunner: (
+				...args: Parameters<typeof actual.makeClaudeSessionRunner>
+			) => {
+				launched.output = args[1];
+				return actual.makeClaudeSessionRunner(...args);
+			},
+		};
+	},
+);
 type OutputFrame = Extract<RunnerMessage, { type: "output" }>;
 
 const event = (
@@ -427,9 +464,7 @@ it("keeps a coalesced delta with the query that produced it", async () => {
 
 const claudeTurn = (
 	inputId: string,
-	input: { readonly shellConfig?: { readonly interactive: boolean } } & {
-		readonly configDir?: ReturnType<typeof configuredClaudeConfigDir>;
-	} = {},
+	input: Partial<Extract<SessionCommand, { type: "send-turn" }>["input"]> = {},
 ) => ({
 	type: "send-turn" as const,
 	sinkId: inputId,
@@ -449,21 +484,27 @@ const claudeTurn = (
 	},
 });
 
-/** The real Claude payload on SDK queries that answer each prompt with a result. */
+/** The real Claude payload on SDK queries that answer each prompt with a result (by default, success). */
 const withClaudeHost = (
 	body: (host: {
 		readonly runner: NativeSessionRunner;
 		readonly outputs: () => readonly OutputFrame[];
 		readonly queries: readonly { readonly canUseTool?: CanUseTool }[];
 	}) => Effect.Effect<void, unknown, import("effect").Scope.Scope>,
+	options: {
+		readonly answer?: (query: number) => SDKMessage;
+		readonly prepareQuery?: ClaudeSessionRunnerDeps["prepareQuery"];
+	} = {},
 ) => {
 	const queries: { readonly canUseTool?: CanUseTool }[] = [];
 	const queryFactory: NonNullable<
 		ClaudeProviderInstanceDeps["queryFactory"]
-	> = ({ prompt, options }) => {
-		queries.push(options?.canUseTool ? { canUseTool: options.canUseTool } : {});
+	> = ({ prompt, options: query }) => {
+		const index = queries.length;
+		queries.push(query?.canUseTool ? { canUseTool: query.canUseTool } : {});
 		const stream = (async function* (): AsyncGenerator<SDKMessage> {
-			for await (const _message of prompt) yield makeSuccessResult();
+			for await (const _message of prompt)
+				yield options.answer?.(index) ?? makeSuccessResult();
 		})();
 		return Object.assign(createMockQuery([]), {
 			[Symbol.asyncIterator]: () => stream,
@@ -486,6 +527,9 @@ const withClaudeHost = (
 							),
 					},
 					onQueryStarted: callbacks.queryStarted,
+					...(options.prepareQuery
+						? { prepareQuery: options.prepareQuery }
+						: {}),
 				},
 				emit,
 			),
@@ -560,6 +604,213 @@ it.each([
 						),
 					).toBe(false);
 				}),
+			),
+		),
+	);
+});
+
+it.each([
+	["agent change", { agent: "plan" }],
+	["rewind", { rewind: { resumeSessionAt: null } }],
+	["fresh native id", { startFreshNativeSession: true }],
+	["stop-after-foreground dispose", {}],
+	["native-resume fallback", { nativeResumeFallback: true }],
+] as const)("labels the Claude turn after a replacement by %s under its new query", async (path, replacing) => {
+	const fallback = path === "native-resume fallback";
+	await Effect.runPromise(
+		Effect.scoped(
+			withClaudeHost(
+				({ runner, outputs, queries }) =>
+					Effect.gen(function* () {
+						const admission = yield* makeRunnerAdmission(runner, "claude");
+						// The fallback's first send fails its resume, so the daemon retries it fresh.
+						yield* admitRunnerCommand(
+							admission,
+							runner,
+							claudeTurn(
+								"turn-1",
+								fallback ? { resumeSessionId: "stale-native" } : {},
+							),
+						).pipe(Effect.exit);
+						if (path === "stop-after-foreground dispose")
+							yield* runner.executeEffect({
+								type: "interrupt",
+								sessionId: "session-1",
+								runIds: [],
+							});
+						yield* admitRunnerCommand(
+							admission,
+							runner,
+							claudeTurn("turn-2", replacing),
+						);
+						expect(queries).toHaveLength(2);
+						expect(completions(outputs())).toEqual(fallback ? [1] : [0, 1]);
+					}),
+				fallback
+					? {
+							answer: (query) =>
+								query === 0
+									? makeErrorResult({
+											errors: [
+												"Resume rejected by --resume-drops-turn: native context cannot be preserved",
+											],
+										})
+									: makeSuccessResult(),
+						}
+					: {},
+			),
+		),
+	);
+});
+
+it("never warms a query while another query for the session is live or setting up", async () => {
+	const preparing = Deferred.makeUnsafe<void>();
+	const prepared = Deferred.makeUnsafe<void>();
+	await Effect.runPromise(
+		Effect.scoped(
+			withClaudeHost(
+				({ runner, outputs, queries }) =>
+					Effect.gen(function* () {
+						const admission = yield* makeRunnerAdmission(runner, "claude");
+						const preWarm = runner.executeEffect({
+							type: "pre-warm",
+							sessionId: "session-1",
+							input: claudeTurn("warm").input,
+						});
+						const first = yield* Effect.forkChild(
+							admitRunnerCommand(admission, runner, claudeTurn("turn-1")),
+						);
+						yield* Deferred.await(preparing);
+						yield* preWarm;
+						yield* Deferred.succeed(prepared, undefined);
+						yield* Fiber.join(first);
+						yield* preWarm;
+						yield* admitRunnerCommand(admission, runner, claudeTurn("turn-2"));
+						expect(queries).toHaveLength(1);
+						expect(completions(outputs())).toEqual([0, 0]);
+					}),
+				{
+					// Only the first cold query's setup waits, so a warm query cannot deadlock it.
+					prepareQuery: () =>
+						Effect.runPromise(
+							Deferred.succeed(preparing, undefined).pipe(
+								Effect.andThen((first) =>
+									first ? Deferred.await(prepared) : Effect.void,
+								),
+							),
+						),
+				},
+			),
+		),
+	);
+});
+
+it("keeps a replaced query's workspace move and native id out of the Claude launch's state", async () => {
+	let launch: RunnerLaunch | undefined;
+	const started: object[] = [];
+	const output = (
+		eventId: string,
+		event:
+			| { readonly type: "workspace.changed"; readonly path: string }
+			| { readonly type: "turn.completed"; readonly nativeId: string },
+	): SessionOutput => ({
+		type: "event",
+		sinkId: "sink-1",
+		event: {
+			eventId,
+			providerId: "claude",
+			sessionId: "session-1",
+			runId: "run-1",
+			rawSource: { kind: "claude.sdk" },
+			createdAt: 0,
+			...(event.type === "workspace.changed"
+				? {
+						type: event.type,
+						providerRefs: {},
+						data: { path: event.path, source: "tool" as const },
+					}
+				: {
+						type: event.type,
+						providerRefs: { providerSessionId: event.nativeId },
+						data: {},
+					}),
+		},
+	});
+	await Effect.runPromise(
+		Effect.scoped(
+			withHost(
+				({ callbacks, runner }) =>
+					Effect.gen(function* () {
+						const warm = {
+							type: "pre-warm" as const,
+							sessionId: "session-1",
+							input: claudeTurn("warm").input,
+						};
+						launch?.acceptCommand(warm);
+						yield* runner.executeNativeEffect(warm);
+						const [replaced] = started;
+						const replacement = {};
+						callbacks.queryStarted(replacement);
+						const under = (query: object | undefined, frame: SessionOutput) =>
+							(launched.output?.(frame) ?? Effect.die("No launch output")).pipe(
+								Effect.provideService(currentRunnerQuery, query),
+							);
+						yield* under(
+							replaced,
+							output("replaced-move", {
+								type: "workspace.changed",
+								path: "/tmp/ws-replaced",
+							}),
+						);
+						// Its terminal still reaches the daemon (6.1), but names no native session to resume.
+						yield* under(
+							replaced,
+							output("replaced-end", {
+								type: "turn.completed",
+								nativeId: "replaced-native",
+							}),
+						);
+						expect(launch?.upgradeState()).toMatchObject({
+							snapshot: { input: { workspaceRoot: "/tmp/ws" } },
+						});
+						expect(launch?.upgradeState().resumeSessionId).toBeUndefined();
+						yield* under(
+							replacement,
+							output("current-move", {
+								type: "workspace.changed",
+								path: "/tmp/ws-current",
+							}),
+						);
+						yield* under(
+							replacement,
+							output("current-end", {
+								type: "turn.completed",
+								nativeId: "current-native",
+							}),
+						);
+						expect(launch?.upgradeState()).toMatchObject({
+							snapshot: { input: { workspaceRoot: "/tmp/ws-current" } },
+							resumeSessionId: "current-native",
+						});
+					}),
+				(callbacks, emit) =>
+					makeClaudeRunnerLaunch({
+						...callbacks,
+						queryStarted: (query) => {
+							started.push(query);
+							callbacks.queryStarted(query);
+						},
+					}).pipe(
+						Effect.orDie,
+						Effect.tap((made) =>
+							Effect.sync(() => {
+								launch = made;
+							}),
+						),
+						Effect.flatMap((made) =>
+							made.makeRunner({ workspaceRoot: "/tmp/ws" }, emit),
+						),
+					),
 			),
 		),
 	);

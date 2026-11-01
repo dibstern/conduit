@@ -379,6 +379,8 @@ export class FakeProvider {
 	q28: "adopt" | "journal" | "survivor" | undefined;
 	/** The rest of a runner's stop commit, emitted before any other fact (4.5). */
 	private readonly commit: LedgerCommand[] = [];
+	/** stopRace's later steps, each drawn from the host its predecessor left; one per packet. */
+	private readonly deferred: (() => LedgerCommand | undefined)[] = [];
 	/** The time of the packet being drawn: a stop commit's retiredAt (6.5). */
 	private clock = 0;
 	/** Gated holds: a phantom send with no transmission (4.4, 4.8). */
@@ -3037,6 +3039,155 @@ export class FakeProvider {
 				return outcome(action.variant, now);
 		}
 	}
+	/**
+	 * Operation 20's draw for rounds 16 and 17 (CONTRACT.md 4071-4083): an async question on the active
+	 * Run's start, followed at once by a Stop commit, by its runner's retirement (3.10, L6, L1), or by its
+	 * answer, whose claimed success a Stop commit follows (3.10).
+	 */
+	private stopRace(
+		action: TraceAction,
+		snapshot: ProviderSnapshot,
+		now: number,
+	): LedgerCommand | undefined {
+		const start = [...this.sends.values()]
+			.reverse()
+			.find(
+				({ send, ended, covered }) =>
+					!ended &&
+					!covered &&
+					!this.untransmitted(send) &&
+					send.effect.kind === "start" &&
+					send.effect.runId === snapshot.view.active?.runId,
+			);
+		const runner = this.serving();
+		if (!start || runner === undefined) return undefined;
+		// (variant + input) even draws a question.
+		const observation = this.observation(
+			start.send,
+			snapshot,
+			{ ...action, selection: 0, variant: 4 + (action.input % 2) },
+			now,
+		);
+		// A run.dispatched the ledger has not read comes first; the question waits for a later draw.
+		// The retirement reads the host as the question left it, so its releases spare that send.
+		if (observation.kind === "interaction_requested") {
+			if (action.advance % 3 === 0) this.commit.push(this.stop(now + 1_000));
+			else if (action.advance % 3 === 1)
+				this.deferred.push(() => this.loss(runner, action.variant));
+			else
+				this.deferred.push(
+					() => ({
+						verb: "control",
+						control: {
+							kind: "answer",
+							commandId: `control:${this.serial++}`,
+							interactionId: observation.interactionId,
+							answer: { allow: action.input % 2 === 0 },
+						},
+					}),
+					() => this.answered(),
+				);
+		}
+		return { verb: "observe", observation };
+	}
+	/** D53, 3.9: a permanent failure of a steer's send its Run has not taken. */
+	private steerFailed(
+		inputId: string,
+		retryable: boolean,
+	): LedgerCommand | undefined {
+		const steer = [...this.sends.values()].find(
+			({ send, ended, accepted, transportRank }) =>
+				!ended &&
+				!accepted &&
+				transportRank === 0 &&
+				!this.untransmitted(send) &&
+				send.effect.kind === "steer" &&
+				send.effect.inputId === inputId,
+		);
+		if (!steer) return undefined;
+		const claimed = this.mainTransmissions.get(steer.send.token);
+		const failed: LedgerCommand = {
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: steer.send.token,
+				kind: "effect_outcome",
+				outcome: retryable
+					? {
+							tag: "retryable",
+							retryAt: this.clock + 100,
+							code: "TraceSteerFailure",
+						}
+					: { tag: "permanent", code: "TraceSteerFailure" },
+				...(claimed ? { transmission: claimed.name } : {}),
+			},
+		};
+		// 4.5, 4.11: a held steer's runner reply follows its run.dispatched, read first while pending.
+		const dispatched = this.dispatchFirst((n) => n.token === steer.send.token);
+		if (!dispatched) return failed;
+		this.commit.unshift(failed);
+		return { verb: "observe", observation: dispatched };
+	}
+	/** A claimed answer's success, followed at once by a Stop commit (3.10). */
+	private answered(): LedgerCommand | undefined {
+		const answer = [...this.sends.values()]
+			.reverse()
+			.find(
+				({ send, ended }) =>
+					!ended &&
+					!this.untransmitted(send) &&
+					send.effect.kind === "deliver_answer" &&
+					!this.controlOutcomes.has(send.token),
+			);
+		const claimed = answer && this.mainTransmissions.get(answer.send.token);
+		if (!answer || !claimed) return undefined;
+		this.commit.push(this.stop(this.clock + 1_000));
+		return {
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: answer.send.token,
+				kind: "effect_outcome",
+				outcome: { tag: "succeeded" },
+				transmission: claimed.name,
+			},
+		};
+	}
+	/** The latest native send of a Run's start. */
+	private nativeStart(runId: string): NativeSend | undefined {
+		return [...this.sends.values()]
+			.reverse()
+			.find(
+				({ send }) =>
+					send.effect.kind === "start" && send.effect.runId === runId,
+			);
+	}
+	/** Main's open Run is stopped once main stopped it or any interrupt names it (L6). */
+	private stopped(open: {
+		readonly runId: string;
+		readonly stopped: boolean;
+	}): boolean {
+		return (
+			open.stopped ||
+			[...this.sends.values()].some(
+				({ send }) =>
+					send.effect.kind === "interrupt" &&
+					(send.effect.runId === open.runId ||
+						send.effect.runIds.includes(open.runId)),
+			)
+		);
+	}
+	/** A Stop as main's own outbox row (3.4, L6). */
+	private stop(deadlineAt: number | null): LedgerCommand {
+		return {
+			verb: "control",
+			control: {
+				kind: "stop",
+				commandId: `control:${this.serial++}`,
+				deadlineAt,
+			},
+		};
+	}
 	private task(action: TraceAction): TaskDescription {
 		return {
 			key: {
@@ -3430,6 +3581,18 @@ export class FakeProvider {
 							runId,
 							parent: open.runId,
 						});
+						// Round 17 (CONTRACT.md 4083): one steer in three is followed by main's admit of another
+						// input, then by its send's failure: permanent (3.9 D53) or, every other time, retryable (3.6).
+						if (action.input % 3 === 0)
+							this.deferred.push(
+								() => ({
+									verb: "admit",
+									inputId: `input:queued-${this.serial++}`,
+									delivery: "queue",
+									request: { text: `text:${action.input}` },
+								}),
+								() => this.steerFailed(head.inputId, action.input % 2 === 1),
+							);
 					} else
 						this.mainRun = {
 							runId,
@@ -3455,6 +3618,67 @@ export class FakeProvider {
 				case 1: {
 					// run.started joins a steer to its open parent, starts one that outlived it as its own
 					// Run, or starts main's open run (3.9).
+					// REDESIGN-9 (CONTRACT.md 4081-4082, 3.9 978-985): in one draw in two, Claude's turn result comes
+					// before a steer into its Run starts: main starts the Run if it has not, completes it, then starts the
+					// steer as its own Run; one in four then stops it.
+					const late =
+						this.provider === "claude" &&
+						action.input % 2 === 0 &&
+						open &&
+						this.mainSteers[0]?.parent === open.runId
+							? this.mainSteers[0]
+							: undefined;
+					const native = late && open && this.nativeStart(open.runId);
+					if (
+						late &&
+						open &&
+						native &&
+						!native.ended &&
+						!this.unlaunchedTries.has(native.send.token) &&
+						!this.stopped(open)
+					) {
+						this.mainSteers.shift();
+						this.mainRun = undefined;
+						const ended: LedgerCommand = {
+							verb: "observe",
+							observation: {
+								tag: "Answer",
+								token: native.send.token,
+								kind: "result",
+								outcome: "completed",
+							},
+						};
+						const first = open.started
+							? ended
+							: emit({
+									tag: "Main",
+									eventId: `main:${this.serial++}`,
+									kind: "run_started",
+									runId: open.runId,
+									inputId: open.inputId,
+									requestedRunId: open.runId,
+								});
+						this.commit.push(
+							...(open.started ? [] : [ended]),
+							emit({
+								tag: "Main",
+								eventId: `main:${this.serial++}`,
+								kind: "run_terminal",
+								runId: open.runId,
+								outcome: "completed",
+							}),
+							emit({
+								tag: "Main",
+								eventId: `main:${this.serial++}`,
+								kind: "run_started",
+								runId: late.runId,
+								inputId: late.inputId,
+								requestedRunId: late.runId,
+							}),
+							...(action.input % 4 === 0 ? [this.stop(null)] : []),
+						);
+						return first;
+					}
 					const steer = this.mainSteers.shift();
 					if (steer)
 						return emit({
@@ -3482,21 +3706,8 @@ export class FakeProvider {
 					// Main's terminal follows native truth: a clean end completes, a permanent failure
 					// errors, and OpenCode's stop with no confirming evidence is interrupted (L6, 3.9).
 					if (!open) continue;
-					const native = [...this.sends.values()]
-						.reverse()
-						.find(
-							({ send }) =>
-								send.effect.kind === "start" &&
-								send.effect.runId === open.runId,
-						);
-					const stopped =
-						open.stopped ||
-						[...this.sends.values()].some(
-							({ send }) =>
-								send.effect.kind === "interrupt" &&
-								(send.effect.runId === open.runId ||
-									send.effect.runIds.includes(open.runId)),
-						);
+					const native = this.nativeStart(open.runId);
+					const stopped = this.stopped(open);
 					// OpenCode's turn.error ends the turn and its query in one write: main's error terminal and the
 					// start's query_ended fold back to back, in either order, and the Run ends once (3.4, 3.8 GAP 5).
 					if (
@@ -3790,6 +4001,8 @@ export class FakeProvider {
 		// A stop commit's facts fold in one transaction: nothing interleaves them (4.5).
 		const committed = this.commit.shift();
 		if (committed) return { command: committed, now: snapshot.now };
+		const deferred = this.deferred.shift()?.();
+		if (deferred) return { command: deferred, now: snapshot.now };
 		if (
 			snapshot.view.pendingConfirm &&
 			!this.copiedConfirms.includes(snapshot.view.pendingConfirm.snapshotEntry)
@@ -3843,11 +4056,15 @@ export class FakeProvider {
 			}
 			case 0:
 			case 1:
-				// D58: main's handoff; a steer delivery is main's send into an open run (3.9).
+				// D58: main's handoff; a steer delivery is main's send into an open run (3.9). OpenCode's
+				// composer never offers one (CONTRACT.md 4431-4432, 5901).
 				command = {
 					verb: "admit",
 					inputId,
-					delivery: action.operation === 1 ? "steer" : "queue",
+					delivery:
+						action.operation === 1 && this.provider !== "opencode"
+							? "steer"
+							: "queue",
 					request: { text: `text:${action.input}` },
 				};
 				break;
@@ -3881,6 +4098,30 @@ export class FakeProvider {
 				const control =
 					controls[action.variant % controls.length] ?? controls[0];
 				command = { verb: "control", control };
+				// Round 16 (CONTRACT.md 4071-4072): one stop in two of a started Run is followed at once by a wake's
+				// turn_started on the current label, which a held send of the active Run is bound to (8.3, L6).
+				// Cursor starts no unsolicited turn.
+				const active = snapshot.view.active;
+				if (
+					control.kind === "stop" &&
+					action.input % 2 === 0 &&
+					this.provider !== "cursor" &&
+					(active?.tag === "Starting" || active?.tag === "Running") &&
+					[...this.sends.values()].some(
+						({ send, label }) =>
+							label === this.label &&
+							this.holdBindings.has(send.token) &&
+							"runId" in send.effect &&
+							send.effect.runId === active.runId,
+					)
+				)
+					this.commit.push({
+						verb: "observe",
+						observation: this.unsolicited(
+							{ ...action, variant: 28 },
+							this.label,
+						),
+					});
 				// 3.4, 8.4 (round 2d): each outbox row is its own Control under the commandId main gave it. With
 				// a Run active, `end`'s Stop commits as a stop or as an end_session (an end with its
 				// deadlineAt); a later end_session, U2's retire under `<Stop id>:retire` included, follows as
@@ -3928,6 +4169,14 @@ export class FakeProvider {
 			case 5:
 			case 20:
 			case 27: {
+				const raced =
+					action.operation === 20
+						? this.stopRace(action, snapshot, now)
+						: undefined;
+				if (raced) {
+					command = raced;
+					break;
+				}
 				// Weighted toward D47 (round 12): operation 27 answers the start of an input Run a turn
 				// joined, else of main's open run (D60), with Run-end evidence (declined, a result or a
 				// query end); with neither it is operation 20.
@@ -3991,15 +4240,10 @@ export class FakeProvider {
 					command = { verb: "settle", settlement: { kind: "alarm_fired" } };
 					break;
 				}
-				command = {
-					verb: "observe",
-					observation: this.observation(send, snapshot, drawn, now),
-				};
+				const observation = this.observation(send, snapshot, drawn, now);
+				command = { verb: "observe", observation };
 				// 4.5, 3.4: run.dispatched is a stream event read in order, never a delayed answer.
-				if (
-					action.operation === 5 &&
-					command.observation.kind !== "run_dispatched"
-				) {
+				if (action.operation === 5 && observation.kind !== "run_dispatched") {
 					this.delayed.push(command);
 					command = {
 						verb: "observe",
@@ -4012,7 +4256,7 @@ export class FakeProvider {
 				}
 				break;
 			}
-			case 6:
+			case 6: {
 				if (snapshot.alarmAt !== undefined) {
 					if (action.variant % 4 === 0)
 						now = Math.max(snapshot.now, snapshot.alarmAt);
@@ -4025,7 +4269,24 @@ export class FakeProvider {
 				if (action.variant % 8 === 7)
 					now = Math.max(0, snapshot.now - 1 - action.advance);
 				command = { verb: "settle", settlement: { kind: "alarm_fired" } };
+				// Round 16 (CONTRACT.md 4073): one stop deadline step in two is followed at once by main's
+				// end, an end_session issued after that step (L6, 3.4).
+				const deadline = snapshot.view.active?.deadline;
+				if (
+					deadline?.owner === "Stop" &&
+					deadline.at <= now &&
+					action.input % 2 === 0
+				)
+					this.commit.push({
+						verb: "control",
+						control: {
+							kind: "end",
+							commandId: `control:${this.serial++}`,
+							deadlineAt: null,
+						},
+					});
 				break;
+			}
 			case 7:
 			case 23:
 				// The serving runner, a known non-current runner, the spawning runner, or none issued (L1).
@@ -4072,14 +4333,7 @@ export class FakeProvider {
 				break;
 			}
 			case 10:
-				command = at(this.delivered, action.index) ?? {
-					verb: "control",
-					control: {
-						kind: "stop",
-						commandId: `control:${this.serial++}`,
-						deadlineAt: now + 1_000,
-					},
-				};
+				command = at(this.delivered, action.index) ?? this.stop(now + 1_000);
 				break;
 			case 11:
 				command = {
