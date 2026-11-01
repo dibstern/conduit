@@ -368,6 +368,89 @@ from its decisions.
 
 _Avoid_: runner state or outbox status as an independent authority on a Run.
 
+## History Graph
+
+The **History Graph** is a session's conversation as History Nodes joined by
+parent edges. Nothing is removed from it: rewound and abandoned branches stay
+addressable. The `messages` projection, and the parts and turns keyed by a
+message, are a view of the path from the root to the Head. A branch here is a
+path inside one session; a Fork is a new session.
+_Avoid_: deleting messages on rewind; transcript for the graph itself.
+
+**History Node** is one settled Run in any terminal state, with its Run Inputs,
+its assistant output and its parent node. There is one node per Run, not per
+turn, so a Run with a Steer is one node and a rewind to that Steer targets the
+Run's parent.
+_Avoid_: turn or message as the unit of history.
+
+**Head** is the History Node a session points at. The transcript shown is the
+path from the root to the Head, and the next Run settles as its child.
+_Avoid_: latest message, tip.
+
+**Head Move** is any change of a session's Head: rewind, undo,
+edit-and-resend, regenerate or branch switch. It is a canonical event with a
+cause, and it moves the conversation only or the conversation and its files.
+Every Head Move can be undone. A move into pruned history is refused only when
+it needs files.
+_Avoid_: pending rewind, truncate.
+
+**Head Log** is the list of a session's Head Moves with their causes. Undo
+moves the Head back to where an entry started and adds a new entry, so undo
+never loses a move.
+_Avoid_: undo stack; undo appends and never pops.
+
+**resume plan** is the Turn Launcher step that decides how the next Run
+continues from the Head: the provider's native resume when its own session
+contains the head path, otherwise a recorded context handoff. The UI shows
+which one before sending.
+_Avoid_: Resume, which names a session with a Limit Recovery continuing;
+Resume Planner; Continuation.
+
+## Tool Call
+
+A **tool call** is one tool invocation, recorded only by its existing tool row
+in the `message_parts` projection. The row carries the Run id, the folder, real
+start and end times and, inside a subagent, the parent tool call. It is open
+while its row is running; a background tool stays open while the Run Ledger
+reports its task live. It owns no lifecycle and records no file writes: Run
+state and busy belong to the Run Ledger, and file restore never reads it.
+_Avoid_: Execution Span, Tool Span, a separate span table.
+
+## Folder Timeline
+
+The **Folder Timeline** owns the Folder Snapshots of one real folder path,
+shared by every session that runs there. It keeps them in a private object
+store under the config directory, is the only code that evicts them, and never
+writes the user's repository: its index, refs and HEAD stay untouched.
+_Avoid_: shadow repository, snapshot cache.
+
+**Folder Snapshot** is one instant of a folder: its index and working tree as
+trees in the private store. Snapshots are taken at Run start, at Run end, and
+before and after every restore, never per tool call. A git folder's snapshot
+covers tracked files and untracked files that are not ignored.
+_Avoid_: checkpoint, which already names compaction's message replay
+checkpoints and Claude's own file checkpointing; per-tool snapshot.
+
+**Change Unit** is one path's change in one folder over one Run: the path, its
+content in the Run's start and end snapshots, and the Run id. It belongs to
+that Run's History Node and feeds the turn diff. In a shared folder it may hold
+another session's or the user's writes; it is never split by tool call.
+_Avoid_: tool call change, attribution.
+
+**Restore Plan** is the preview of a Head Move with files: per folder, the
+target Folder Snapshot and the paths that would change, or a typed refusal
+naming the other session. A restore is refused when another session ran in the
+folder after the target snapshot or has a Run open there now; sessions that
+never ran there do not count. A refused user can still move the conversation
+only, or branch into a worktree.
+_Avoid_: ambiguous, conflict or merged rows; nothing is attributed per path.
+
+**Restore Receipt** is the durable record of an applied restore: per folder,
+the Folder Snapshot taken just before it and the target it restored. Undo
+restores the earlier snapshot, and startup uses the receipt to finish or roll
+back an interrupted apply.
+_Avoid_: restore log; Head Log entry, which records the conversation move.
+
 ## Usage Limits
 
 **Usage Reading** is one account's usage at a moment: how full each window is
