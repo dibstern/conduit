@@ -494,7 +494,10 @@ export function replayTrace(
 			yield* (yield* SessionInboxTag).start;
 			const sql = yield* SqlClient.SqlClient;
 
-			// Failure 4: settled once the log, the outbox and the calls hold still for 20ms.
+			// Failure 4: settled once the log, the outbox and the calls hold still for 110ms, longer
+			// than the stack's 100ms polls (a runner interrupt's wait for its turn to end,
+			// claude-runner-payload.ts 3021; a Stop's wait, provider-turn-service.ts 246), so work a
+			// poll would release lands in the step that released it, never the next.
 			const fingerprint = sql<{
 				readonly n: number;
 				readonly outbox: string | null;
@@ -507,7 +510,7 @@ export function replayTrace(
 			const settle = Effect.gen(function* () {
 				let last = yield* fingerprint;
 				let still = 0;
-				while (still < 4) {
+				while (still < 22) {
 					yield* Effect.sleep("5 millis");
 					const next = yield* fingerprint;
 					still = next === last ? still + 1 : 0;

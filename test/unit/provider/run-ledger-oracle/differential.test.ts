@@ -15,6 +15,14 @@
  * 3. The comparison skips a part: a difference planted in one step's events, rows, inbox or
  *    calls is listed at that step and part.
  * 4. A side cannot run a trace: both sides must settle every step of every catalogue trace.
+ *
+ * Each difference is then masked by the 2.1 row that explains it, a typed mask (CONTRACT.md 210-211,
+ * 3592; rows 215 and 216 are mask classes). How the masks could fail, written before the code:
+ * 5. A difference no row explains passes: once masked, every catalogue trace must differ nowhere.
+ * 6. A mask that never applies passes: each mask must, left out alone, leave some catalogue trace
+ *    differing.
+ * 7. A mask hides more than its class: a difference planted in any part still differs once masked.
+ * 8. Masks depend on their order: each reads the step as recorded and edits only the masked copy.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -28,6 +36,8 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LEDGER_EFFECT_TYPES } from "../../../../src/lib/persistence/effect/run-ledger-arm.js";
+import type { landedUnitRows } from "../../../../src/lib/provider/run-ledger/run-ledger-unit-rows.js";
 import { writeTraceArtifact } from "./harness.js";
 import {
 	mainTables,
@@ -119,9 +129,75 @@ const compare = (
 		});
 	});
 
+/** A 2.1 row's difference, masked on both sides of a step (`recorded` is the step unmasked). */
+interface Mask {
+	readonly row: (typeof landedUnitRows)[number]["row"] | 215 | 216;
+	readonly explains: string;
+	readonly mask: (step: StepSnapshot, recorded: StepSnapshot) => StepSnapshot;
+}
+
+/**
+ * Only rows 215 and 216 explain a difference the catalogue shows; no catalogue trace reaches the
+ * branch a landed unit row changes, so those rows have no mask (gap P10).
+ */
+const masks: readonly Mask[] = [
+	{
+		row: 215,
+		explains:
+			"the evidence events, which main's projectors ignore, and the event sequence they take from the native thread's delivered-through cursor",
+		mask: (step) => ({
+			...step,
+			events: step.events.filter(
+				({ type }) => typeof type !== "string" || !type.startsWith("evidence."),
+			),
+			rows: JSON.parse(
+				JSON.stringify(step.rows).replace(
+					/(deliveredThrough[\\"]*:)\d+/g,
+					"$1-1",
+				),
+			),
+		}),
+	},
+	{
+		row: 216,
+		explains:
+			"the ledger effects' outbox rows (main has no arm to insert them) and the stop call each cancel_request its executor sent makes",
+		mask: (step, recorded) => {
+			const sent = recorded.events.filter(
+				({ type, data }) =>
+					type === "evidence.effect_outcome" &&
+					typeof data === "string" &&
+					/"commandId":"ledger:[^:"]+:cancel_request:/.test(data) &&
+					!data.includes('"tag":"not_sent"'),
+			).length;
+			const stops = step.calls.flatMap((call, index) =>
+				call.kind === "stop" ? [index] : [],
+			);
+			const dropped = new Set(stops.slice(stops.length - sent));
+			return {
+				...step,
+				rows: {
+					...step.rows,
+					provider_command_outbox: step.rows.provider_command_outbox.filter(
+						(row) =>
+							!LEDGER_EFFECT_TYPES.some((type) => type === row["effect_type"]),
+					),
+				},
+				calls: step.calls.filter((_, index) => !dropped.has(index)),
+			};
+		},
+	},
+];
+
+const masked = (snapshots: readonly StepSnapshot[], by: readonly Mask[]) =>
+	snapshots.map((step) =>
+		by.reduce((copy, { mask }) => mask(copy, step), step),
+	);
+
 const scratch = mkdtempSync(join(tmpdir(), "conduit-main-units-"));
 let mainReplay: typeof replayTrace;
 const listed: Difference[] = [];
+const applied = new Set<Mask["row"]>();
 
 /**
  * Main's side is a copy of the current tree with R2's units written over it, imported from the
@@ -200,13 +276,20 @@ describe("Run ledger: main's units beside the ledger build", () => {
 				(step) => ({ ...step, calls: [{ kind: "stop" }, ...step.calls] }),
 			],
 		];
-		for (const [part, plant] of plants)
-			expect(
-				compare(
-					snapshots,
-					snapshots.map((step, index) => (index === last ? plant(step) : step)),
-				).map(({ fact, part }) => [fact, part]),
-			).toEqual([[snapshots[last]?.fact, part]]);
+		// Failure 7: the masks leave a planted difference standing.
+		for (const by of [[], masks])
+			for (const [part, plant] of plants)
+				expect(
+					compare(
+						masked(snapshots, by),
+						masked(
+							snapshots.map((step, index) =>
+								index === last ? plant(step) : step,
+							),
+							by,
+						),
+					).map(({ fact, part }) => [fact, part]),
+				).toEqual([[snapshots[last]?.fact, part]]);
 	});
 
 	it.each(
@@ -229,11 +312,32 @@ describe("Run ledger: main's units beside the ledger build", () => {
 		const main = await mainReplay(trace, provider);
 		const build = await replayTrace(trace, provider);
 		const differences = compare(main.snapshots, build.snapshots);
+		const unmasked = compare(
+			masked(main.snapshots, masks),
+			masked(build.snapshots, masks),
+		);
+		// Failure 6: a mask applies where leaving it out alone leaves a difference.
+		const needed = masks.filter(
+			(mask) =>
+				compare(
+					masked(
+						main.snapshots,
+						masks.filter((other) => other !== mask),
+					),
+					masked(
+						build.snapshots,
+						masks.filter((other) => other !== mask),
+					),
+				).length > 0,
+		);
 		listed.push(...differences);
+		for (const { row } of needed) applied.add(row);
 		writeTraceArtifact(`differential-main-${trace.id}`, {
 			trace: trace.id,
 			provider,
 			differences,
+			masks: needed.map(({ row }) => row),
+			unmasked,
 			main: outcome(main),
 			build: outcome(build),
 		});
@@ -243,10 +347,19 @@ describe("Run ledger: main's units beside the ledger build", () => {
 		expect(build.snapshots.map(({ fact }) => fact)).toEqual(
 			trace.steps.map((_, fact) => fact),
 		);
+		// Failure 5.
+		expect(unmasked).toEqual([]);
 	});
 
 	// Failure 1: were main's side the current build, nothing would differ.
 	it("finds main's units differing from the build somewhere in the catalogue", () => {
 		expect(listed.length).toBeGreaterThan(0);
+	});
+
+	// Failure 6: a mask that applies to no catalogue trace fails.
+	it("applies every mask to some catalogue trace", () => {
+		expect(
+			masks.map(({ row }) => row).filter((row) => !applied.has(row)),
+		).toEqual([]);
 	});
 });
