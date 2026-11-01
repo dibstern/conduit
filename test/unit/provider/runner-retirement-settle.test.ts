@@ -128,6 +128,7 @@ const settle = (
 				sql,
 				configDir,
 				driverKind: "claude",
+				closeSends: () => Effect.void,
 				entry: () => undefined,
 				ingestion: () => Effect.succeed(ingestion),
 				projectRoot: () => Effect.succeed(root),

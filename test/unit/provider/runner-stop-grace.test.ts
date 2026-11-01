@@ -262,6 +262,7 @@ it.effect(
 						sql,
 						configDir: "unused",
 						driverKind: "claude",
+						closeSends: () => Effect.void,
 						entry: () => undefined,
 						ingestion: () => Effect.succeed(undefined),
 						projectRoot: () => Effect.succeed(undefined),

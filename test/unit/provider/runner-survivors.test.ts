@@ -1757,11 +1757,19 @@ it.effect(
 							command.runnerId === stopped?.runnerId,
 					),
 				).toHaveLength(1);
+				// The commit closed the stopped entry's scope (6.11), so the released
+				// send is re-held for a successor while the old process dies.
 				expect(
 					f.commands
 						.filter((command) => command.type === "send-turn")
-						.map((command) => command.runId),
-				).toEqual(["first-run"]);
+						.map((command) => [
+							command.runnerId === stopped?.runnerId,
+							command.runId,
+						]),
+				).toEqual([
+					[true, "first-run"],
+					[false, "second-run"],
+				]);
 				expect(
 					yield* f.sql`SELECT json_extract(data, '$.runId') AS run, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
 				).toEqual([{ run: "second-run", reason: "NotSent" }]);
