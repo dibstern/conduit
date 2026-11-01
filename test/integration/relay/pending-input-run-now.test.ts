@@ -43,6 +43,7 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
@@ -635,6 +636,9 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							yield* Effect.context<ProviderAdapterProjectContext>(),
 						);
 						yield* adapters.recover;
+						// Startup drains the outbox once recovery is done (daemon-orchestration-layer.ts start), and
+						// that drain arms the reactor's ledger effect wake (CONTRACT.md 2.1 row 216).
+						yield* (yield* OrchestrationEngineTag).drainSideEffects();
 						const client = yield* RpcTest.makeClient(WsRpcGroup);
 						const inbox = yield* SessionInboxTag;
 						const providerTurns = yield* ProviderTurnServiceTag;
@@ -908,13 +912,23 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									Effect.repeat({ until: (rows) => rows.length === 1 }),
 									Effect.timeout("3 seconds"),
 								);
-								expect(stopRequests).toEqual([]);
+								// Main's Stop finds the turn finished and sends no abort; the interrupt's ledger
+								// decision still issues cancel_request on the native session (CONTRACT.md 3.6
+								// OpenCode, 2.1 row 216).
+								expect(stopRequests).toEqual(
+									provider === "opencode" ? [sessionId] : [],
+								);
 								yield* awaitCondition(() => sent.length === 2);
 								expect(providerTurns.turnFences(sessionId).stopping).toBe(
 									false,
 								);
 							} else {
-								yield* awaitCondition(() => stopRequests.length === 1);
+								// Main's abort and, on OpenCode, the interrupt's ledger cancel_request
+								// (CONTRACT.md 3.6 OpenCode, 2.1 row 216).
+								yield* awaitCondition(
+									() =>
+										stopRequests.length === (provider === "opencode" ? 2 : 1),
+								);
 								if (provider === "opencode") {
 									expect(providerTurns.turnFences(sessionId).stopping).toBe(
 										true,
@@ -1163,7 +1177,10 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						expect(sent).toEqual(
 							provider === "claude" ? ["running", "selected"] : ["running"],
 						);
-						expect(stopRequests).toHaveLength(1);
+						// An OpenCode Stop is two native aborts: main's, and the cancel_request its ledger
+						// decision issues with a native_session probe (CONTRACT.md 3.6 OpenCode, 2.1 row 216).
+						const nativeAborts = provider === "opencode" ? 2 : 1;
+						yield* awaitCondition(() => stopRequests.length === nativeAborts);
 						if (manual && provider === "opencode")
 							expect(firstRequest.pollUnsafe() === undefined).toBe(true);
 						else if (scenario === "cancel-after-reservation") {
@@ -1211,7 +1228,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							ok: false,
 							reason: "already_started",
 						});
-						expect(stopRequests).toHaveLength(1);
+						expect(stopRequests).toHaveLength(nativeAborts);
 						for (const count of [3, 4, 5]) {
 							yield* finish();
 							if (count < 5) yield* awaitCondition(() => sent.length === count);

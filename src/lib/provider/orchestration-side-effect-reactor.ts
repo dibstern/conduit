@@ -399,7 +399,9 @@ export class ProviderSideEffectReactor {
 	): Effect.Effect<void, ProviderCommandStoreFailure> {
 		return Effect.gen({ self: this }, function* () {
 			// 3.12, 2.1 row 216: a wake after the commit that inserts a ledger effect. Registered
-			// once, in the drain's scope, and removed when that scope closes.
+			// once, in the drain's scope, and removed when that scope closes. It runs only the
+			// ledger's effects: a whole drain would also claim main's controls from the callers
+			// that execute them, which then wait out an outcome poll.
 			const wakeScope =
 				this.options.scope ??
 				Option.getOrUndefined(yield* Effect.serviceOption(Scope.Scope));
@@ -414,9 +416,25 @@ export class ProviderSideEffectReactor {
 					wakeScope,
 					Effect.sync(() => wakes.delete(wake)),
 				);
+				const ledgerEffects = this.options.sql<ProviderCommandOutboxRow>`
+					SELECT request_sequence, command_id, project_key, session_id, provider_id,
+						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
+					FROM provider_command_outbox
+					WHERE (${this.options.projectId ?? null} IS NULL OR project_key = ${this.options.projectId ?? null})
+						AND status = 'pending' AND effect_type IN ${this.options.sql.in(LEDGER_EFFECT_TYPES)}
+					ORDER BY request_sequence
+				`.pipe(
+					Effect.mapError(storeFailure("ledgerEffects")),
+					Effect.flatMap((rows) =>
+						Effect.forEach(rows, (row) => this.runLedgerEffect(row), {
+							concurrency: "unbounded",
+							discard: true,
+						}),
+					),
+				);
 				yield* Effect.forkIn(
 					Queue.take(kicks).pipe(
-						Effect.andThen(this.drain(makeInteractions)),
+						Effect.andThen(ledgerEffects),
 						Effect.catch((cause) =>
 							Effect.logError("Run Ledger effect wake failed", cause),
 						),

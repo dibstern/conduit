@@ -455,17 +455,15 @@ export const makeRunnerRunLifecycle = (
 							released.push({ ...input, ...release });
 							providers.set(row.id, row.provider ?? "conduit");
 						}
-						if (released.length > 0)
-							yield* project(
-								yield* eventStore.appendBatch(
-									released.map((input) =>
-										releasedEvent(
-											input,
-											providers.get(input.runId) ?? "conduit",
-										),
-									),
-								),
-							);
+						// The releases precede the loss, so the arm reads them first (6.5 2399).
+						const events = [
+							...released.map((input) =>
+								releasedEvent(input, providers.get(input.runId) ?? "conduit"),
+							),
+							...committed.lost,
+						];
+						if (events.length > 0)
+							yield* project(yield* eventStore.appendBatch(events));
 						return { stop: committed, released };
 					}),
 				{
@@ -742,6 +740,7 @@ export const makeRunnerStopReconciler = (options: {
 								session: [...rows.values()].filter(
 									(cached) => cached.sessionId === target.sessionId,
 								),
+								lost: [],
 							});
 				if (row?.role === "serving" && reason._tag === "CandidateAbandoned")
 					return Effect.succeed<StopCommit>({ _tag: "Ignored" });
@@ -780,6 +779,8 @@ export const makeRunnerStopReconciler = (options: {
 									? { ...cached, role: "serving" as const }
 									: cached,
 						),
+					// Without a store there is no event log to record a loss in.
+					lost: [],
 				});
 			});
 		};

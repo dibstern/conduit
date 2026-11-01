@@ -4,7 +4,8 @@
 // aborts the projecting write at the arm's entry insert or at the batch's last write, after the arm
 // folded, then the event is delivered again. How it could fail:
 // 1. a Run ends twice;
-// 2. a Tombstoned Run becomes the active Run again (it accepts a lifecycle event);
+// 2. a Tombstoned Run becomes the active Run again (it accepts a lifecycle event), or keeps a live
+//    issue (a late dispatch binds a start for it);
 // 3. an input whose delivery is unknown is transmitted again (delivered twice);
 // 4. a crashed write leaves an entry, a session row or a view behind (tables and views disagree
 //    after a rollback), or its stale cache forks the next fold;
@@ -245,6 +246,12 @@ const spec = (
 		if (view.active && ended.includes(view.active.runId))
 			return `2: Tombstoned ${view.active.runId} active at view ${step}`;
 		for (const issue of view.live) {
+			if (
+				"runId" in issue.effect &&
+				issue.effect.runId !== null &&
+				ended.includes(issue.effect.runId)
+			)
+				return `2: ${issue.effect.kind} live for Tombstoned ${issue.effect.runId} at view ${step}`;
 			if (issue.effect.kind !== "start") continue;
 			const inputId = issue.effect.inputId;
 			const key = issue.tag === "Main" ? issue.commandId : issue.token;
