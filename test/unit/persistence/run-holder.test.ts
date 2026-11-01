@@ -639,4 +639,125 @@ describe("durable run holder", () => {
 				).toEqual([{ n: 0 }]);
 			}).pipe(Effect.provide(layer)),
 	);
+
+	// CONTRACT 218, 973-977, 1521-1524 (2.1 row 207): a held steer past the cap is failed and
+	// final. How it could fail: the cap reports nothing to the ledger, so the commit's sweep
+	// requeues the steer and never cancels it; it reports an effect_outcome, which a held send
+	// cannot produce; it lands in a later write than the failure, whose sweep requeues first; or
+	// the cap's error under the steer's own run ends its owner's Run.
+	it.effect(
+		"fails a held steer past the cap final in the exhausting write",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				const commit = yield* makeCommitAndSignal;
+				const at = (runId: string) => ({
+					provider: "cursor",
+					metadata: { runId },
+				});
+				const hold = (runId: string, commandId: string, transmission: number) =>
+					canonicalEvent(
+						"run.dispatched",
+						"s",
+						{ runId, runnerId: "runner", commandId, transmission },
+						at(runId),
+					);
+				yield* commit([
+					canonicalEvent("session.created", "s", {
+						sessionId: "s",
+						title: "s",
+						provider: "cursor",
+					}),
+					canonicalEvent("input.admitted", "s", {
+						sessionId: "s",
+						inputId: "owner",
+						delivery: "queue",
+						request: { text: "owner" },
+					}),
+					canonicalEvent("input.sent", "s", {
+						sessionId: "s",
+						inputId: "owner",
+					}),
+					canonicalEvent(
+						"run.requested",
+						"s",
+						{ runId: "run:owner", inputId: "owner" },
+						at("run:owner"),
+					),
+					hold("run:owner", "owner", 1),
+					canonicalEvent(
+						"run.started",
+						"s",
+						{ inputId: "owner", requestedRunId: "run:owner" },
+						at("run:owner"),
+					),
+					canonicalEvent("input.admitted", "s", {
+						sessionId: "s",
+						inputId: "steer",
+						delivery: "steer",
+						request: { text: "steer" },
+					}),
+					canonicalEvent("input.sent", "s", {
+						sessionId: "s",
+						inputId: "steer",
+						steer: true,
+					}),
+					canonicalEvent(
+						"run.requested",
+						"s",
+						{ runId: "run:steer", inputId: "steer" },
+						at("run:steer"),
+					),
+				]);
+				yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at, command_type, project_key, fingerprint_hash, fingerprint_version, side_effect_sequence, updated_at)
+				VALUES ('steer', 's', 'side_effect_requested', 1, 'send_turn', 'project', 'sha256:steer', 1, 1, 1)`;
+				yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at)
+				VALUES (1, 'steer', 'project', 's', 'cursor', 'send_turn', '{}', 'run:steer', 'running', 1, 1, 1)`;
+				// Five holds the runner returned unsent: the cap counts each.
+				for (let transmission = 1; transmission <= 5; transmission++)
+					yield* commit([
+						hold("run:steer", "steer", transmission),
+						canonicalEvent(
+							"run.released",
+							"s",
+							{
+								runId: "run:steer",
+								runnerId: "runner",
+								commandId: "steer",
+								transmission,
+								reason: "NotSent",
+							},
+							at("run:steer"),
+						),
+					]);
+				const lifecycle = makeRunnerRunLifecycle({
+					sql,
+					commit,
+					eventStore: yield* EventStoreEffectTag,
+				});
+				expect(
+					yield* lifecycle.holdRun({
+						sessionId: "s",
+						runId: "run:steer",
+						commandId: "steer",
+					}),
+				).toEqual({ _tag: "Exhausted" });
+				expect(
+					yield* sql`SELECT status, error_code FROM provider_command_outbox`,
+				).toEqual([
+					{ status: "failed", error_code: "provider_send_attempts_exhausted" },
+				]);
+				expect(
+					yield* sql`SELECT type FROM events WHERE type IN ('input.requeued', 'input.cancelled')
+					AND json_extract(data, '$.inputId') = 'steer' ORDER BY sequence`,
+				).toEqual([{ type: "input.requeued" }, { type: "input.cancelled" }]);
+				expect(
+					yield* sql`SELECT state FROM pending_inputs WHERE input_id = 'steer'`,
+				).toEqual([{ state: "removed" }]);
+				// 4.8 (CONTRACT 1864-1869): the cap's error is the steer's; its owner's Run runs on.
+				expect(
+					yield* sql`SELECT state FROM run_ledger_sessions WHERE session_id = 's'`,
+				).toEqual([{ state: "Open" }]);
+			}).pipe(Effect.provide(layer)),
+	);
 });

@@ -404,6 +404,14 @@ const commandFor = (
 				};
 			case "evidence.alarm_fired":
 				return { verb: "settle", settlement: { kind: "alarm_fired" } };
+			case "evidence.hold_exhausted":
+				return {
+					verb: "settle",
+					settlement: {
+						kind: "hold_exhausted",
+						commandId: event.data.commandId,
+					},
+				};
 			case "evidence.effect_outcome": {
 				const { commandId, transmission, token, outcome } = event.data;
 				// 3.4: a ledger effect's outcome names decide's token; any other names main's
@@ -491,6 +499,7 @@ const HANDLES = [
 	"evidence.turn_started",
 	"evidence.turn_ended",
 	"evidence.delivery_indeterminate",
+	"evidence.hold_exhausted",
 ] as const;
 
 const untouched: ProjectionTouch = {

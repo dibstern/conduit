@@ -2608,9 +2608,6 @@ export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
 		"Audit receipt for failed upstream cleanup; no materialized projection needed",
 	"session.handoff_delivered":
 		"Delivery receipt needs no materialized projection",
-	// Delete when the ledger arm folds it into its hold_exhausted settlement (core).
-	"evidence.hold_exhausted":
-		"Run Ledger evidence the arm does not fold yet; main's projectors ignore it",
 };
 
 /**
