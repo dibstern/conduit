@@ -68,6 +68,24 @@ export const ledgerEffectWakes = new WeakMap<
 	Set<() => void>
 >();
 const wakeKey = Symbol("run-ledger-effect-wake");
+/** The alarm schedulers' wakes for a committed change of a session row's alarm_at (3.7). */
+export const ledgerAlarmWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<() => void>
+>();
+const alarmWakeKey = Symbol("run-ledger-alarm-wake");
+/** Calls each registered wake after the commit that lands this write, never on a rollback. */
+const wakeAfterCommit = (
+	sql: SqlClient.SqlClient,
+	key: symbol,
+	wakes: WeakMap<SqlClient.SqlClient, Set<() => void>>,
+) =>
+	queuePendingWrite(sql, key, {
+		apply: Effect.void,
+		committed: () => {
+			for (const wake of wakes.get(sql) ?? []) wake();
+		},
+	});
 
 /** An outbox row a writer ended, as its RETURNING ENDED_ROW_COLUMNS reads it. */
 export interface EndedOutboxRow {
@@ -542,6 +560,8 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 						VALUES (${event.sessionId}, ${ledger.provider}, ${row.state}, ${row.alarmAt})
 						ON CONFLICT (session_id) DO UPDATE SET state = excluded.state,
 							alarm_at = excluded.alarm_at`;
+				if (row.alarmAt !== (ledger.row?.alarmAt ?? null))
+					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
 				cache.set(event.sessionId, {
 					provider: ledger.provider,
 					state,
@@ -588,13 +608,7 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							RETURNING command_id`;
 						inserted ||= written.length > 0;
 					}
-					if (inserted)
-						queuePendingWrite(sql, wakeKey, {
-							apply: Effect.void,
-							committed: () => {
-								for (const wake of ledgerEffectWakes.get(sql) ?? []) wake();
-							},
-						});
+					if (inserted) wakeAfterCommit(sql, wakeKey, ledgerEffectWakes);
 				}
 				// A folded fact advances the read model (A.21): its session row takes the version.
 				const stamped = yield* sql<{ id: string }>`
