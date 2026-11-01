@@ -451,6 +451,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 				yield* stops
 					.stopRunner(entry, undefined, "stop", {
 						_tag: "EndSession",
+						orphan: true,
 					})
 					.pipe(Effect.ensuring(Deferred.succeed(entry.drained, undefined)));
 			});

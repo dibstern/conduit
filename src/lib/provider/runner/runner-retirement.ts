@@ -998,12 +998,15 @@ export const makeRunnerStopReconciler = (options: {
 										Schema.Struct({
 											_tag: Schema.Literals([
 												"Explicit",
-												"EndSession",
 												"ProjectRemoved",
 												"Idle",
 												"Exited",
 												"CandidateAbandoned",
 											]),
+										}),
+										Schema.Struct({
+											_tag: Schema.Literal("EndSession"),
+											orphan: Schema.optionalKey(Schema.Literal(true)),
 										}),
 										Schema.Struct({
 											_tag: Schema.Literal("Superseded"),
@@ -1033,8 +1036,11 @@ export const makeRunnerStopReconciler = (options: {
 					AND COALESCE(send_run.joined_into, send_run.id) = owner.id))
 			AND (owner.runner_id = ${retirement.runnerId} OR (owner.runner_id IS NULL AND requested.id IN ${sql.in(retirement.ownedRunIds)}))`;
 				// Every retirement but the user's End ends its launched runs process
-				// lost, an error as on main (3.8, 3.11).
-				// GAP (32.2.15): an idle exit's sendless owners still end interrupted.
+				// lost, an error as on main (3.8, 3.11). An orphan's EndSession
+				// carries `orphan`, so only the user's End reads interrupted.
+				// GAP (32.2.15): an idle exit that commits Exited, not Idle, still ends
+				// its sendless owners interrupted; 3.8 reason 2.3 and main say
+				// runner_stopped. No test reaches it without a live runner entry.
 				const errorCode =
 					retirement.stopReason === '{"_tag":"Exited"}'
 						? entry?.lifecycle.idleExiting

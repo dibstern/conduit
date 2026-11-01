@@ -11,12 +11,13 @@ export type StopReason =
 	| {
 			readonly _tag:
 				| "Explicit"
-				| "EndSession"
 				| "ProjectRemoved"
 				| "Idle"
 				| "Exited"
 				| "CandidateAbandoned";
 	  }
+	// A restart's orphan ends the native session too, but no user asked (6.3).
+	| { readonly _tag: "EndSession"; readonly orphan?: true }
 	| { readonly _tag: "Superseded"; readonly successor: string };
 export interface RunnerRow {
 	readonly runnerId: string;

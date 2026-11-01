@@ -2,10 +2,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
-import { Effect, Exit } from "effect";
+import { Effect, Exit, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
+import {
+	ProviderRuntimeIngestionLive,
+	ProviderRuntimeIngestionTag,
+} from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -36,8 +41,9 @@ import type { TurnResult } from "../../../src/lib/provider/types.js";
 // send with no journal is released only when the runner journals before it
 // executes. The cursor row records that at hello (BC-1); rows from before
 // migration 0089 have no record and fall back to the evidence file's build.
-// Each committed evidence settles through main's Send Settlement, so a test
-// reads the label a lost run ends with.
+// Each committed evidence settles through main's Send Settlement, and a
+// sendless owner through the runner's settleRuns, so a test reads the label
+// each lost run ends with.
 const runnerId = "0123456789ab";
 const settle = (
 	journals: boolean | undefined,
@@ -63,14 +69,19 @@ const settle = (
 				title: "session",
 				provider: "claude",
 			}),
-			canonicalEvent(
-				"run.requested",
-				"session",
-				{ runId: "run", inputId: "run" },
-				{ provider: "claude", metadata: { runId: "run" } },
+			...["run", "owner"].map((runId) =>
+				canonicalEvent(
+					"run.requested",
+					"session",
+					{ runId, inputId: runId },
+					{ provider: "claude", metadata: { runId } },
+				),
 			),
 		]);
+		// A sendless owner, such as a wake run, held by the runner.
+		yield* sql`UPDATE provider_runs SET runner_id = ${runnerId}, status = 'running' WHERE id = 'owner'`;
 		yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at) VALUES (1, 'send', 'project', 'session', 'claude', 'send_turn', '{"prompt":"text"}', 'run', 'running', 1, 1, 1)`;
+		const ingestion = yield* ProviderRuntimeIngestionTag;
 		const lifecycle = makeRunnerRunLifecycle({
 			sql,
 			commit,
@@ -118,8 +129,7 @@ const settle = (
 				configDir,
 				driverKind: "claude",
 				entry: () => undefined,
-				ingestion: () =>
-					Effect.succeed({ ingestBatch: () => Effect.succeed(0) }),
+				ingestion: () => Effect.succeed(ingestion),
 				projectRoot: () => Effect.succeed(root),
 				commit: (evidence) =>
 					Effect.sync(() => committed.push(evidence)).pipe(
@@ -186,6 +196,13 @@ const settle = (
 				sessionId: "session",
 			});
 		}
+		const ended = (runId: string) =>
+			sql<{
+				type: string;
+				code: string | null;
+			}>`SELECT type, json_extract(data, '$.code') AS code FROM events
+				WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')
+				AND json_extract(metadata, '$.runId') = ${runId}`;
 		return {
 			stop,
 			released: released.map(({ reason, runId }) => ({ reason, runId })),
@@ -193,11 +210,8 @@ const settle = (
 				_tag,
 				runId: send.runId,
 			})),
-			ended: yield* sql<{
-				type: string;
-				code: string | null;
-			}>`SELECT type, json_extract(data, '$.code') AS code FROM events
-				WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
+			ended: yield* ended("run"),
+			owner: yield* ended("owner"),
 			again: yield* lifecycle.holdRun({
 				sessionId: "session",
 				runId: "run",
@@ -208,10 +222,18 @@ const settle = (
 				error_code: string | null;
 			}>`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`,
 		};
-	}).pipe(
-		Effect.scoped,
-		Effect.provide(makePersistenceEffectLayer(":memory:", "project")),
-	);
+	}).pipe(Effect.scoped, (effect) => {
+		const persistence = makePersistenceEffectLayer(":memory:", "project").pipe(
+			Layer.provideMerge(SessionEventBusLive),
+		);
+		return Effect.provide(
+			effect,
+			Layer.merge(
+				persistence,
+				ProviderRuntimeIngestionLive.pipe(Layer.provide(persistence)),
+			),
+		);
+	});
 
 it.effect(
 	"BC-1 a gone journalling runner from an older build with no journal is released JournalAbsent",
@@ -250,15 +272,29 @@ it.effect(
 		}),
 );
 
-// 32.2.16 (CONTRACT 3.6 D50, 3.8, 6.5, 7.3): Gone-time settlement of a held
-// send, per StopReason that can retire its holder.
+// 32.2.16 and 32.2.15 (CONTRACT 3.6 D50, 3.8, 6.3, 6.5, 7.3): Gone-time
+// settlement of a held send and of a sendless owner, per StopReason that can
+// retire their holder. A restart's orphan commits EndSession too, but only the
+// user's End asked to end its runs (3.8 reason 2.1).
 const reasons: ReadonlyArray<StopReason> = [
 	{ _tag: "Explicit" },
 	{ _tag: "EndSession" },
+	{ _tag: "EndSession", orphan: true },
 	{ _tag: "ProjectRemoved" },
 	{ _tag: "Idle" },
 	{ _tag: "Exited" },
 ];
+const userEnd = (reason: StopReason) =>
+	reason._tag === "EndSession" && reason.orphan !== true;
+// Process lost for every retirement but the user's End; an exit without a
+// runner entry carries main's provider_error.
+const ownerEnd = (reason: StopReason) =>
+	userEnd(reason)
+		? { type: "turn.interrupted", code: null }
+		: {
+				type: "turn.error",
+				code: reason._tag === "Exited" ? "provider_error" : "runner_stopped",
+			};
 
 // A hold binds only the serving runner. The swap refuses a target that holds
 // a run, and an abandoned candidate that serves is Ignored (6.3), so neither
@@ -275,6 +311,7 @@ it.effect.each([
 				released: [],
 				committed: [],
 				ended: [],
+				owner: [],
 				again: { _tag: "Busy" },
 				send: [{ status: "running", error_code: null }],
 			});
@@ -282,7 +319,7 @@ it.effect.each([
 );
 
 it.effect.each(reasons)(
-	"a $_tag stop's send that never reached the agent is held again on the next runner",
+	"a %j stop's send that never reached the agent is held again on the next runner",
 	(reason) =>
 		Effect.gen(function* () {
 			const settled = yield* settle(true, runnerBuildId(), reason);
@@ -292,11 +329,12 @@ it.effect.each(reasons)(
 			expect(settled.committed).toEqual([]);
 			expect(settled.ended).toEqual([]);
 			expect(settled.again).toMatchObject({ _tag: "Held", transmission: 2 });
+			expect(settled.owner).toEqual([ownerEnd(reason)]);
 		}),
 );
 
 it.effect.each(reasons)(
-	"a $_tag stop's send the agent accepted ends process lost, interrupted only for the user's End",
+	"a %j stop's send the agent accepted ends process lost, interrupted only for the user's End",
 	(reason) =>
 		Effect.gen(function* () {
 			const settled = yield* settle(true, runnerBuildId(), reason, {
@@ -306,7 +344,7 @@ it.effect.each(reasons)(
 				durationMs: 0,
 				providerStateUpdates: [],
 			});
-			const end = reason._tag === "EndSession";
+			const end = userEnd(reason);
 			expect(settled.released).toEqual([]);
 			expect(settled.committed).toEqual([
 				{ _tag: "process_lost", runId: "run" },
@@ -323,5 +361,6 @@ it.effect.each(reasons)(
 				},
 			]);
 			expect(settled.again).toEqual({ _tag: "Ended" });
+			expect(settled.owner).toEqual([ownerEnd(reason)]);
 		}),
 );

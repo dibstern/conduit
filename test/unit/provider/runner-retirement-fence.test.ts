@@ -9536,7 +9536,7 @@ it.effect(
 				).toEqual([
 					{
 						retired_at: 0,
-						stop_reason: '{"_tag":"EndSession"}',
+						stop_reason: '{"_tag":"EndSession","orphan":true}',
 						role: "serving",
 					},
 				]);
