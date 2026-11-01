@@ -1891,9 +1891,7 @@ export const makeRunnerRetirement = (
 								`Retired surviving runner ${retirement.runnerId} for session ${retirement.sessionId}`,
 							);
 						if (record && record.tag._tag !== "Retired")
-							yield* authority.revoke(record.grant, "retired", {
-								ownedRunIds: record.identity.ownedRunIds,
-							});
+							yield* authority.revoke(record.grant, "retired");
 					}),
 				prune: (retirement) =>
 					options.prune(retirement).pipe(

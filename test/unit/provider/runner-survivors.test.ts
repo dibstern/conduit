@@ -2730,7 +2730,7 @@ it.effect(
 );
 
 it.effect(
-	"redrives settlement after the cleanup deadline while the commit permit is held",
+	"redrives settlement on a later watcher tick after a SQL stall holds the commit permit",
 	() =>
 		run(
 			Effect.gen(function* () {
