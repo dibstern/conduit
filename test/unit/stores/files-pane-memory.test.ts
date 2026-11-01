@@ -14,29 +14,30 @@ beforeEach(() => {
 });
 
 describe("Files pane session memory", () => {
-	it("starts closed and restores each session after reload", async () => {
+	it("restores Files or Diff and their shared width for each session after reload", async () => {
 		const {
 			noteSessionChanged,
 			sessionViewState,
-			setFilesOpen,
-			setFilesPaneWidth,
+			setRightPaneView,
+			setRightPaneWidth,
 		} = await import("../../../src/lib/frontend/stores/session-view.svelte.js");
 		noteSessionChanged("first");
-		expect(sessionViewState.filesOpen).toBe(false);
-		expect(sessionViewState.filesPaneWidth).toBeNull();
-		setFilesOpen(true);
-		setFilesPaneWidth(412);
+		expect(sessionViewState.rightPaneView).toBe("closed");
+		expect(sessionViewState.rightPaneWidth).toBeNull();
+		setRightPaneView("files");
+		setRightPaneWidth(412);
+		setRightPaneView("diff");
 		noteSessionChanged("second");
-		expect(sessionViewState.filesOpen).toBe(false);
+		expect(sessionViewState.rightPaneView).toBe("closed");
 		vi.resetModules();
 		const reloaded = await import(
 			"../../../src/lib/frontend/stores/session-view.svelte.js"
 		);
 		reloaded.noteSessionChanged("first");
-		expect(reloaded.sessionViewState.filesOpen).toBe(true);
-		expect(reloaded.sessionViewState.filesPaneWidth).toBe(412);
+		expect(reloaded.sessionViewState.rightPaneView).toBe("diff");
+		expect(reloaded.sessionViewState.rightPaneWidth).toBe(412);
 		reloaded.noteSessionChanged("second");
-		expect(reloaded.sessionViewState.filesOpen).toBe(false);
+		expect(reloaded.sessionViewState.rightPaneView).toBe("closed");
 	});
 
 	it("ignores malformed entries and retains only the 100 most recent sessions", async () => {
@@ -47,16 +48,15 @@ describe("Files pane session memory", () => {
 				valid: { filesOpen: true, width: 320 },
 			}),
 		);
-		const { noteSessionChanged, sessionViewState, setFilesOpen } = await import(
-			"../../../src/lib/frontend/stores/session-view.svelte.js"
-		);
+		const { noteSessionChanged, sessionViewState, setRightPaneView } =
+			await import("../../../src/lib/frontend/stores/session-view.svelte.js");
 		noteSessionChanged("bad");
-		expect(sessionViewState.filesOpen).toBe(false);
+		expect(sessionViewState.rightPaneView).toBe("closed");
 		noteSessionChanged("valid");
-		expect(sessionViewState.filesPaneWidth).toBe(320);
+		expect(sessionViewState.rightPaneWidth).toBe(320);
 		for (let i = 0; i < 101; i++) {
 			noteSessionChanged(`session-${i}`);
-			setFilesOpen(true);
+			setRightPaneView("files");
 		}
 		const entries = JSON.parse(
 			stored.get("files-pane-by-session") ?? "{}",
@@ -70,13 +70,13 @@ describe("Files pane session memory", () => {
 		const {
 			noteSessionChanged,
 			sessionViewState,
-			setFilesOpen,
-			setFilesPaneWidth,
+			setRightPaneView,
+			setRightPaneWidth,
 		} = await import("../../../src/lib/frontend/stores/session-view.svelte.js");
 		noteSessionChanged("phone");
 		sessionViewState.compact = true;
-		setFilesOpen(true);
-		setFilesPaneWidth(350);
+		setRightPaneView("files");
+		setRightPaneWidth(350);
 		expect(stored.has("files-pane-by-session")).toBe(false);
 	});
 });

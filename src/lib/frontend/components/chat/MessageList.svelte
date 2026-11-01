@@ -9,18 +9,15 @@
 <script lang="ts">
 	import TranscriptJump from "../ui/TranscriptJump.svelte";
 	import Icon from "../ui/Icon.svelte";
-	import { untrack } from "svelte";
+	import { tick, untrack } from "svelte";
 	import type { ChatMessage } from "../../types.js";
 	import {
 		consumeScrollRequest,
-		createEmptySessionMessages,
-		currentChat,
 		localSendsIn,
 		getSessionPhase,
 		isLlmActive,
 		isProcessing,
 		insertInputDraft,
-		sessionMessages,
 	} from "../../stores/chat.svelte.js";
 	import { clock } from "../../stores/clock.svelte.js";
 	import { findSession, rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
@@ -41,7 +38,6 @@
 	import {
 		noteScrollGesture,
 		noteSessionChanged,
-		publishAtBottom,
 		sessionViewState,
 	} from "../../stores/session-view.svelte.js";
 	import {
@@ -51,15 +47,19 @@
 		lastResult,
 		liveLaunchedTasks,
 		segmentTurns,
+		turnLog,
 		type Turn,
 	} from "../../utils/turns.js";
 	import UserMessage from "./UserMessage.svelte";
+	import MessageNavigationRail from "./MessageNavigationRail.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
 	import TurnActivity from "./TurnActivity.svelte";
+	import { createTurnPanel } from "../../stores/turn-panel.svelte.js";
+	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
+	import TurnOpening from "./TurnOpening.svelte";
 	import { insertComposerReference } from "../input/composer-reference.svelte.js";
 	import RunningPill from "./RunningPill.svelte";
 	import TurnEconomics from "./TurnEconomics.svelte";
-	import ToolItem from "./ToolItem.svelte";
 	import SystemMessage from "./SystemMessage.svelte";
 	import PermissionCard from "../permissions/PermissionCard.svelte";
 	import QuestionCard from "./QuestionCard.svelte";
@@ -72,22 +72,20 @@
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
 	import { formatSnoozeTime } from "../../utils/format.js";
 	import { retryFeedsNow } from "../../transport/supervise.js";
-	import { transcriptFeed } from "../../stores/transcript.svelte.js";
+	import { primaryTranscript, transcriptFeed, type TranscriptView } from "../../stores/transcript.svelte.js";
 
 	const END_OF_TRANSCRIPT = "end";
 	let messagesEl: HTMLDivElement | undefined = $state();
-	let { topClearance = 0, sessionId }: {
+	let { topClearance = 0, sessionId, view = primaryTranscript }: {
 		topClearance?: number;
 		sessionId?: string;
+		view?: TranscriptView;
 	} = $props();
 	const instanceId = $props.id();
 	const primary = $derived(sessionId === undefined);
 	const viewedSessionId = $derived(sessionId ?? sessionState.currentId);
 	const messagesId = $derived(primary ? "messages" : `messages-${instanceId}`);
-	const emptyChat = createEmptySessionMessages();
-	const chat = $derived(
-		primary ? currentChat() : sessionMessages.get(sessionId ?? "") ?? emptyChat,
-	);
+	const chat = $derived(view.chat);
 	const processing = $derived(
 		primary ? isProcessing() : isLlmActive(getSessionPhase(viewedSessionId ?? ""), chat.loadLifecycle),
 	);
@@ -134,7 +132,42 @@
 		return () => clearTimeout(timer);
 	});
 
-	const scrollCtrl = createScrollController(() => chat.loadLifecycle);
+	const scrollCtrl = createScrollController(
+		() => chat.loadLifecycle,
+		() => ({
+			historical: view.window.kind === "historical",
+			busy: view.navigation !== null,
+			topClearance,
+			identity: view.generation,
+		}),
+		{ onReaderFollow: () => { if (primary) noteScrollGesture("down"); } },
+	);
+	let paneWidth = $state(0);
+	let forkCollapsed = $state(true);
+	$effect(() => {
+		const id = viewedSessionId;
+		try { forkCollapsed = sessionStorage.getItem(`fork-collapsed-${id ?? ""}`) !== "false"; }
+		catch { forkCollapsed = true; }
+	});
+	function persistFork(collapsed: boolean) {
+		try { sessionStorage.setItem(`fork-collapsed-${viewedSessionId ?? ""}`, String(collapsed)); }
+		catch { /* Private browsing may disable storage. */ }
+	}
+	$effect(() => {
+		const request = view.navigation;
+		if (!messagesEl || request?.phase !== "placing") return;
+		const target = request.target;
+		if (target !== "latest" && view.prompts.some((prompt) => prompt.id === target.messageId && prompt.isInherited)) {
+			forkCollapsed = false;
+			persistFork(false);
+		}
+		let cancelled = false;
+		void tick().then(() => {
+			if (cancelled || view.navigation?.id !== request.id) return;
+			view.acknowledgePlacement(request.id, scrollCtrl.place(request.target));
+		});
+		return () => { cancelled = true; };
+	});
 
 	let handledFollowRequest = sessionViewState.followRequest;
 	$effect(() => {
@@ -142,14 +175,19 @@
 		const request = sessionViewState.followRequest;
 		if (request === handledFollowRequest) return;
 		handledFollowRequest = request;
-		untrack(() => scrollCtrl.requestFollow());
+		untrack(() => view.latest());
 	});
 
 	// Attach/detach the controller to the scroll container
 	$effect(() => {
 		if (messagesEl) {
+			const renderedView = view;
 			scrollCtrl.attach(messagesEl);
-			return () => scrollCtrl.detach();
+			renderedView.reposition = scrollCtrl.reposition;
+			return () => {
+				renderedView.reposition = undefined;
+				scrollCtrl.detach();
+			};
 		}
 		return undefined;
 	});
@@ -157,19 +195,8 @@
 	// Reset scroll state on session switch
 	$effect(() => {
 		const id = viewedSessionId;
-		scrollCtrl.resetForSession();
+		untrack(() => scrollCtrl.resetForSession());
 		if (primary) untrack(() => noteSessionChanged(id));
-	});
-
-	// Publish for chrome outside the transcript (e.g. the session bar) so the app
-	// never grows a second, differently-tuned definition of "at the bottom".
-	// Hydration states count as pinned, otherwise the bar flaps on session open.
-	$effect(() => {
-		if (!primary) return;
-		const state = scrollCtrl.state;
-		publishAtBottom(
-			state === "following" || state === "loading",
-		);
 	});
 
 	// The bar follows the reader's gesture, not scrollTop: the bar's own resize
@@ -231,8 +258,7 @@
 		const delta = appliedClearance === undefined ? 0 : topClearance - appliedClearance;
 		appliedClearance = topClearance;
 		if (delta === 0) return;
-		if (untrack(() => scrollCtrl.isPinned)) scrollCtrl.onContainerResize();
-		else scroller.scrollTop += delta;
+		untrack(() => scrollCtrl.onClearanceChange(delta));
 	});
 
 	// Scroll to bottom when the transcript becomes ready.
@@ -273,48 +299,19 @@
 	let prevScrollHeight = 0;
 	let prevScrollTop = 0;
 
-	// Derived first-message UUID — changes only on prepend or session switch,
-	// NOT on appends or content updates. This prevents the $effect.pre from
-	// firing spuriously when message html/status fields change.
-	const firstMessageUuid = $derived(chat.messages[0]?.uuid ?? "");
-
-	// Track previous state for prepend detection
-	let prevFirstUuid = "";
-	let prevMessageCount = 0;
-	let prevSessionId = $state("");
-
-	// Capture scroll state BEFORE DOM update using $effect.pre
+	// Window replacement and prepend have different placement semantics.
+	// The transcript owner identifies the transition before DOM updates.
+	let previousTransition: number | undefined;
 	$effect.pre(() => {
-		const currentSessionId = viewedSessionId ?? "";
-		const currentFirstUuid = firstMessageUuid;
-		const currentCount = chat.messages.length;
-
-		// Session changed — reset tracking, skip prepend detection
-		if (currentSessionId !== prevSessionId) {
-			prevSessionId = currentSessionId;
-			prevFirstUuid = currentFirstUuid;
-			prevMessageCount = currentCount;
-			return;
-		}
-
-		// Prepend detected within same session: first UUID changed AND count increased
-		if (
-			prevFirstUuid &&
-			currentFirstUuid &&
-			currentFirstUuid !== prevFirstUuid &&
-			currentCount > prevMessageCount &&
-			messagesEl
-		) {
-			awaitingPrepend = true;
+		const transition = view.transition;
+		if (!transition || transition.id === previousTransition) return;
+		previousTransition = transition.id;
+		awaitingPrepend = transition.kind === "prepend" && !!messagesEl;
+		if (awaitingPrepend && messagesEl) {
 			prevScrollHeight = messagesEl.scrollHeight;
 			prevScrollTop = messagesEl.scrollTop;
 		}
-
-		prevFirstUuid = currentFirstUuid;
-		prevMessageCount = currentCount;
 	});
-
-	// Restore scroll position AFTER DOM update (delegate to controller)
 	$effect(() => {
 		if (awaitingPrepend && messagesEl) {
 			scrollCtrl.onPrepend(prevScrollHeight, prevScrollTop);
@@ -336,7 +333,7 @@
 		}
 	}
 
-	const showJump = $derived(scrollCtrl.isDetached);
+	const showJump = $derived(scrollCtrl.isDetached || view.window.kind === "historical");
 
 	// Keep finished turns' props stable when only a later part changes.
 	function turnProjection() {
@@ -346,7 +343,8 @@
 		return (messages: ChatMessage[], processing: boolean): Turn[] => {
 			const next = segmentTurns(messages, processing).map((turn) => {
 				const held = previous.get(turn.id);
-				return held && held.user === turn.user && held.live === turn.live &&
+				return held && held.user === turn.user && held.live === turn.live && held.opening === turn.opening &&
+					same(held.preface, turn.preface) &&
 					same(held.notices, turn.notices) &&
 					held.segments.length === turn.segments.length &&
 					turn.segments.every((segment, i) => {
@@ -362,15 +360,11 @@
 	const projectTurns = turnProjection();
 	const projectInheritedTurns = turnProjection();
 	const projectCurrentTurns = turnProjection();
-	const turns = $derived(projectTurns(chat.messages, processing));
-	const emptyLiveTurn = $derived<Turn | undefined>(
-		processing && chat.loadLifecycle === "ready" && turns.length === 0
-			? { id: `turn-${viewedSessionId ?? instanceId}`, segments: [{ activity: [], reply: [] }], notices: [], live: true }
-			: undefined,
-	);
+	const windowProcessing = $derived(processing && view.window.kind === "latest");
+	const turns = $derived(projectTurns(chat.messages, windowProcessing));
 	$effect(() => {
 		const turn = turns.at(-1);
-		if (!processing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
+		if (!windowProcessing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
 		const sessionId = viewedSessionId;
 		if (!sessionId) return;
 		const key = JSON.stringify([sessionId, turn.id]);
@@ -450,24 +444,20 @@
 		projectInheritedTurns(forkSplit?.inherited ?? [], false),
 	);
 	const currentTurns = $derived(
-		projectCurrentTurns(forkSplit?.current ?? [], processing),
+		projectCurrentTurns(forkSplit?.current ?? [], windowProcessing),
 	);
-	// Each continuation leaves a divider before the first reply-side message
-	// created at or after it, or after the last message until one arrives. An
-	// activity panel renders as one collapsed row, so a divider that falls inside
-	// one goes before the whole panel. Keyed by the uuid it renders before.
+	// A continuation belongs before the next reply-side part, inside the log
+	// when that part is activity, or at the transcript end until work arrives.
 	const resumeDividers = $derived.by(() => {
 		const dividers = new Map<string, SessionResume[]>();
 		const resumes = activeSession?.resumes ?? [];
 		if (resumes.length === 0) return dividers;
-		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) =>
-			turn.segments.flatMap((segment) => [
-				...(segment.activity[0] ? [{ key: segment.activity[0].uuid, parts: segment.activity }] : []),
-				...segment.reply.map((reply) => ({ key: reply.uuid, parts: [reply] })),
-			]),
-		);
+		const slots = (forkSplit ? [...inheritedTurns, ...currentTurns] : turns).flatMap((turn) => {
+			const { segment } = turnLog(turn);
+			return [...segment.activity, ...segment.reply];
+		});
 		for (const resume of resumes) {
-			const key = slots.find((slot) => slot.parts.some((part) => (part.createdAt ?? -Infinity) >= resume.at))?.key ?? END_OF_TRANSCRIPT;
+			const key = slots.find((part) => (part.createdAt ?? -Infinity) >= resume.at)?.uuid ?? END_OF_TRANSCRIPT;
 			dividers.set(key, [...(dividers.get(key) ?? []), resume]);
 		}
 		return dividers;
@@ -496,7 +486,7 @@
 	const coldOpen = $derived(feed === "catchingUp" && !hasRows);
 	// Sends show from the click until the server places them. A draft's first
 	// send starts the pane, so it is not empty and never skeletons over it.
-	const localSends = $derived(primary ? localSendsIn(sessionState.currentId) : []);
+	const localSends = $derived(primary && view.window.kind === "latest" ? localSendsIn(sessionState.currentId) : []);
 	const firstSend = $derived(localSends.some((send) => send.opensSession));
 	// A cold pane has not heard from the feed, so it cannot yet claim the start.
 	const startConfirmed = $derived(transcript != null && transcript.hwm !== null);
@@ -508,10 +498,12 @@
 			.filter((turn) => !turn.live).at(-1)?.id,
 	);
 	const latestTurnId = $derived((forkSplit ? currentTurns.at(-1) ?? inheritedTurns.at(-1) : turns.at(-1))?.id);
+	const railVisible = $derived(view.prompts.length > 1 && !coldOpen && !(primary && uiState.rewindActive));
 
 </script>
 
 <!-- Focusable so keyboard users can scroll it and `u` can target the open session. -->
+<div class="relative flex flex-1 min-h-0 min-w-0">
 <!-- break-words is inherited, so a long path or URL in any row wraps instead of
      widening the transcript (overflow-y-auto makes overflow-x scroll too). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -522,19 +514,28 @@
 	aria-label="Transcript"
 	tabindex="0"
 	class="flex-1 overflow-y-auto pt-5 pb-3 relative break-words"
+	class:with-message-rail={railVisible}
 	style="-webkit-overflow-scrolling: touch;"
 	bind:this={messagesEl}
+	bind:clientWidth={paneWidth}
 >
 	<!-- History sentinel (triggers lazy-loading of older messages) -->
 	<div id={primary ? "history-sentinel" : `${messagesId}-history-sentinel`} class="h-1" bind:this={sentinelEl}></div>
 
 	<!-- Headless loader (no visual output) -->
-	<HistoryLoader {sentinelEl} {sessionId} scrollRoot={primary ? undefined : messagesEl} />
+	<!-- Older pages of a fork are all inherited. Collapsed, they add no height,
+	     so the sentinel never leaves view and every page would load in turn. -->
+	<HistoryLoader
+		{sentinelEl}
+		{view}
+		scrollRoot={primary ? undefined : messagesEl}
+		paused={!!forkSplit?.inherited.length && forkCollapsed}
+	/>
 
 	<!-- Zero-height sticky rail so the pill floats over the transcript without
 	     pushing it down; the lift parks it in the top padding so at rest
 	     it clears the first row. The pill fades in late, so fast switches never show it. -->
-	{#if feed !== "live" && (hasRows || feed === "failing")}
+	{#if (feed === "catchingUp" || feed === "failing") && (hasRows || feed === "failing")}
 		<div class="sticky top-4 z-10 h-0 flex items-start justify-center">
 			<div
 				class="feed-pill -translate-y-3 flex items-center gap-2 bg-bg-alt border border-border rounded-full px-3 py-0.5 text-xs text-text-secondary font-sans shadow-sm"
@@ -551,6 +552,17 @@
 				{/if}
 			</div>
 		</div>
+	{/if}
+
+	{#if view.navigation?.phase === "loading" || view.pageError}
+		<div class="sticky top-4 z-10 h-0 flex justify-center pointer-events-none">
+			<span role={view.pageError ? "alert" : "status"} class="max-w-[90%] rounded-full bg-bg-alt border border-border px-3 py-1 text-xs text-text-secondary shadow-sm">
+				{view.pageError ? "Couldn’t load messages. Select a marker to try again." : "Loading message…"}
+			</span>
+		</div>
+	{/if}
+	{#if view.window.kind === "historical" && view.window.hasEarlier}
+		<div class="flex justify-center py-3"><TextButton touchTarget disabled={view.navigation !== null} onclick={() => { void view.loadOlder().catch(() => {}); }}>Load earlier messages</TextButton></div>
 	{/if}
 
 	<!-- Beginning of session marker (was in HistoryView) -->
@@ -571,6 +583,9 @@
 
 	<!-- Turn rendering snippet (shared between fork and normal paths) -->
 	{#snippet turnItem(turn: Turn)}
+		{@const log = turnLog(turn, resumeDividers)}
+		{@const segment = log.segment}
+		{@const hasActivity = log.entries.length > 0}
 		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
@@ -580,47 +595,51 @@
 		{#if goal && turn.id === goalNoticeTurnId}
 			{@render goalNotice()}
 		{/if}
-		{#each turn.segments as segment, i}
-			{@const final = i === turn.segments.length - 1}
-			{#if segment.activity[0]}
-				{@render resumed(segment.activity[0].uuid)}
-			{/if}
-			{#if segment.activity.length > 0 || (final && turn.live)}
-				{@const reply = segment.reply[0]}
-				<TurnActivity latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} {final} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
-					onjump={scrollCtrl.requestJump}
-					onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
-					forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
-					modelExecution={turn.user?.modelExecution} />
-			{/if}
-			<!-- Notices sit between the final work and reply: they are lifted out of
-			     the activity log so a failure is never hidden behind a collapsed panel. -->
-			{#if final}
-				{#each turn.notices as notice (notice.uuid)}
-					<div class="msg-container">
-						<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
-					</div>
-				{/each}
-			{/if}
-			{#each segment.reply as reply (reply.uuid)}
-				{@render resumed(reply.uuid)}
-				<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
-					<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
-						hideHeader={reply === segment.reply[0] && (segment.activity.length > 0 || (final && turn.live))}
-						modelExecution={turn.user?.modelExecution} />
-				</div>
-			{/each}
-			{#if segment.handBack}
-				<div class="max-w-[820px] mx-auto px-[14px] md:px-[32px]">
-					<div class="md:ml-[42px]"><ToolItem message={segment.handBack} /></div>
-				</div>
-			{/if}
+		{#each turn.preface as part (part.uuid)}
+			<TurnOpening {part} />
 		{/each}
-		<!-- A final segment that did work carries its bill on the strip. A text-only
-		     final segment has no ledger, so it renders the same bill on its own line —
+		{#if turn.opening}
+			<TurnOpening opening={turn.opening} {providerId} />
+		{/if}
+		{#if hasActivity}
+			{@const reply = segment.reply[0]}
+			{@const panel = createTurnPanel({
+				get viewId() { return view.id; },
+				get sessionId() { return viewedSessionId ?? undefined; },
+				get turn() { return turn; },
+				get jev() { return sessionJevEnabled(findSession(viewedSessionId ?? ""), messageSurfacing.status); },
+				get processing() { return windowProcessing; },
+				get latestTurn() { return turn.id === latestTurnId; },
+				get newestSettledTurn() { return turn.id === newestEndedTurnId; },
+				get status() { return messageSurfacing.status; },
+				get categorySet() { return messageSurfacing.categorySet; },
+			})}
+			<TurnActivity {panel} {view} scrollRoot={messagesEl} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+				onreposition={scrollCtrl.reposition}
+				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
+				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
+				modelExecution={turn.user?.modelExecution} />
+		{/if}
+		<!-- Notices sit between the final work and reply: they are lifted out of
+		     the activity log so a failure is never hidden behind a collapsed panel. -->
+		{#each turn.notices as notice (notice.uuid)}
+			<div class="msg-container">
+				<SystemMessage message={notice} driver={viewedSessionId ? getSessionDriver(viewedSessionId) : undefined} accountId={activeSession?.accountId ?? undefined} />
+			</div>
+		{/each}
+		{#each segment.reply as reply (reply.uuid)}
+			{#if !log.resumedParts.has(reply.uuid)}{@render resumed(reply.uuid)}{/if}
+			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
+				<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
+					hideHeader={reply === segment.reply[0] && hasActivity}
+					modelExecution={turn.user?.modelExecution} />
+			</div>
+		{/each}
+		<!-- A turn that did work carries its bill on the strip. A text-only
+		     turn has no ledger, so it renders the same bill on its own line —
 		     one formatter for both, rather than a second dialect of the same facts.
 		     .result-bar is an E2E selector; .turn-meta rides on TurnEconomics. -->
-		{#if lastResult(turn) && turn.segments.at(-1)?.activity.length === 0 && (turn.segments.length === 1 || !turn.live)}
+		{#if lastResult(turn) && !hasActivity}
 			<!-- `now` only matters for a live turn, and this branch needs a result. -->
 			{@const bill = economics(turn, Date.now())}
 			<div class="msg-container">
@@ -642,14 +661,18 @@
 
 	{#snippet resumed(key: string)}
 		{#each resumeDividers.get(key) ?? [] as resume, i (i)}
-			{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
-				<ContinuationDivider {resume} sessionId={activeSession.id} />
-			{:else}
-				<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
-					↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
-				</TranscriptDivider>
-			{/if}
+			{@render resumeDivider(resume)}
 		{/each}
+	{/snippet}
+
+	{#snippet resumeDivider(resume: SessionResume)}
+		{#if resume.from !== undefined && resume.from !== resume.instanceId && activeSession}
+			<ContinuationDivider {resume} sessionId={activeSession.id} />
+		{:else}
+			<TranscriptDivider data-testid="transcript-divider" class="max-w-[760px] mx-auto px-5">
+				↻ Resumed on <b>{getInstanceById(resume.instanceId)?.name ?? resume.instanceId}</b>{resume.reason === "user" ? " · retried by you" : resume.reason === "reset" ? ` after reset · ${formatSnoozeTime(resume.at)}` : ""}
+			</TranscriptDivider>
+		{/if}
 	{/snippet}
 
 	{#snippet goalNotice()}
@@ -661,6 +684,7 @@
 		{/if}
 	{/snippet}
 
+	{#key viewedSessionId}
 	<!-- Single render loop for ALL messages (click delegation for rewind mode) -->
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -671,7 +695,7 @@
 		{@render goalNotice()}
 	{/if}
 	{#if forkSplit && forkSplit.inherited.length > 0}
-		<ForkContextBlock>
+		<ForkContextBlock bind:collapsed={forkCollapsed} onCollapsedChange={persistFork}>
 			{#each inheritedTurns as turn (turn.id)}
 				{@render turnItem(turn)}
 			{/each}
@@ -697,9 +721,10 @@
 			<UserMessage message={send.message} />
 		</div>
 	{/each}
-	{#if emptyLiveTurn}
-		{@render turnItem(emptyLiveTurn)}
+	{#if localSends.length > 0 || (windowProcessing && chat.loadLifecycle === "ready" && turns.length === 0)}
+		<TurnOpening opening="sending" {providerId} />
 	{/if}
+	{/key}
 
 	<!-- Cold open: turn-shaped placeholders fill the pane, bottom-anchored where
 	     the newest messages land; extra turns clip off the top. -->
@@ -723,9 +748,11 @@
 
 	<!-- Pending permission requests for the viewed session. -->
 	{#each localPermissions as perm (perm.id)}
+		{#if perm.toolName !== "ExitPlanMode" || !perm.toolUseId || !transcriptToolIds.has(perm.toolUseId)}
 		<div class="max-w-[760px] mx-auto mb-3 px-5">
 			<PermissionCard request={perm} />
 		</div>
+		{/if}
 	{/each}
 
 	<!-- Keep questions answerable when their tool message has not reached the transcript. -->
@@ -735,6 +762,10 @@
 		</div>
 	{/each}
 
+	{#if view.window.kind === "historical" && view.window.hasLater}
+		<div class="flex justify-center py-3"><TextButton touchTarget disabled={view.navigation !== null} onclick={() => { void view.loadNewer().catch(() => {}); }}>Load later messages</TextButton></div>
+	{/if}
+
 	<!-- Zero-height rail keeps the floating action out of transcript geometry. -->
 	<div class="sticky bottom-[10px] h-0 flex justify-center z-5" hidden={!showJump}>
 		<TranscriptJump
@@ -742,13 +773,20 @@
 			data-testid={processing ? "jump-to-live" : "jump-to-latest"}
 			live={processing}
 			class="-translate-y-full"
-			title={processing ? "Jump to live" : "Scroll to bottom"}
-			onclick={() => scrollCtrl.requestFollow()}
+			title={view.window.kind === "historical" ? "Jump to latest" : processing ? "Jump to live" : "Scroll to bottom"}
+			onclick={() => view.latest()}
 		/>
 	</div>
 </div>
+{#key viewedSessionId}
+	{#if railVisible}
+		<MessageNavigationRail prompts={view.prompts} activeId={scrollCtrl.activeMessageId} pending={view.navigation !== null} {paneWidth} {topClearance} onnavigate={view.navigate} />
+	{/if}
+{/key}
+</div>
 
 <style>
+	.with-message-rail { padding-left: 32px; }
 	/* The delays are the whole point: a switch that synchronizes first never
 	   shows either element. 250ms for a warm pane's pill, 150ms for a cold
 	   pane's skeleton, per the switching-visuals decision (3A). */

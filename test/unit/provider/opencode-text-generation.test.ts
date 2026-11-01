@@ -271,6 +271,7 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 			instructions: ["AGENTS.md"],
 			agent: { injected: {} },
 			mcp: { injected: {} },
+			snapshot: true,
 		};
 		run.clientForAccount.mockImplementation(() => {
 			const client = run.client("");
@@ -289,11 +290,6 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 				expect(env["OPENCODE_DISABLE_CLAUDE_CODE"]).toBe("1");
 				expect(env["OPENCODE_DISABLE_EXTERNAL_SKILLS"]).toBe("1");
 				expect(env["OPENCODE_PURE"]).toBe("1");
-				expect(JSON.parse(String(env["OPENCODE_CONFIG_CONTENT"]))).toEqual({
-					provider: config.provider,
-					enabled_providers: config.enabled_providers,
-					disabled_providers: config.disabled_providers,
-				});
 				return {
 					pid: 123456,
 					process: new childProcess.ChildProcess(),
@@ -307,6 +303,13 @@ describe("OpenCode ephemeral text generation from captured traffic", () => {
 		);
 		await Effect.runPromise(run.instance.generateTextEffect(run.input));
 		expect(run.spawn).toHaveBeenCalledOnce();
+		const env = run.spawn.mock.calls[0]?.[2];
+		expect(JSON.parse(env?.["OPENCODE_CONFIG_CONTENT"] ?? "{}")).toEqual({
+			snapshot: false,
+			provider: config.provider,
+			enabled_providers: config.enabled_providers,
+			disabled_providers: config.disabled_providers,
+		});
 		expect(existsSync(run.cwd())).toBe(false);
 	});
 

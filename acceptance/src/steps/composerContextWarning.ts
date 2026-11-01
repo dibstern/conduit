@@ -209,14 +209,15 @@ export const composerContextWarningHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert transcript Compacting notice",
-		match: /^the transcript has a Compacting notice$/,
+		name: "assert transcript Compacting rule",
+		match: /^the transcript has a Compacting context rule$/,
 		run: async ({ world }) => {
 			await expect(
-				world.page
-					.locator("#messages")
-					.getByText("Compacting…", { exact: true }),
+				world.page.getByTestId("turn-opening-compacting"),
 			).toBeVisible();
+			await expect(world.page.locator("#messages .system-notice")).toHaveCount(
+				0,
+			);
 		},
 	},
 	{

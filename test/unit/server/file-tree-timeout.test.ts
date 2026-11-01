@@ -27,6 +27,38 @@ import {
 	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
+// These timing tests use virtual folders. Filesystem containment has real-path
+// coverage in session-workspace-read.test.ts and must not race the TestClock.
+vi.mock(
+	"../../../src/lib/session/workspace-directories.js",
+	async (importOriginal) => {
+		const actual =
+			await importOriginal<
+				typeof import("../../../src/lib/session/workspace-directories.js")
+			>();
+		const { sessionFolders } = await import(
+			"../../../src/lib/session/session-workspace.js"
+		);
+		return {
+			...actual,
+			guardWorkspacePath: () => Effect.void,
+			readWorkspaceFolders: (
+				...args: Parameters<typeof actual.readWorkspaceFolders>
+			) => {
+				const folders = sessionFolders(args[0], args[1]);
+				return Effect.succeed({
+					...folders,
+					workspaceRootPresent: true,
+					effectiveFolders: folders.effectiveFolders.map((folder) => ({
+						...folder,
+						present: true,
+					})),
+				});
+			},
+		};
+	},
+);
+
 describe("file tree time limits", () => {
 	// Failure modes: folder resolution can stall outside the deadline; a slow
 	// resolution can give the walk a fresh budget; timeout can lose partial entries

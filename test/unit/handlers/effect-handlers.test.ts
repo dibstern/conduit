@@ -257,6 +257,7 @@ function openCodeModelLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
@@ -309,6 +310,7 @@ function openCodeModelAndSettingsLayer(client: OpenCodeAPI) {
 			Layer.provide(
 				Layer.mergeAll(
 					apiLayer,
+					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(OpenCodeInstancesTag)(
 						makeOpenCodeInstancesStub({ opencode: client }),
 					),
@@ -958,6 +960,7 @@ describe("switchModelForSession", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2536,6 +2539,7 @@ describe("handleNewSession", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2639,6 +2643,7 @@ describe("handleNewSession", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -2936,6 +2941,7 @@ describe("loadMoreHistoryForSession", () => {
 			readInboxState: () => Effect.succeed(undefined),
 			readStoreIdentity: () => Effect.succeed("store"),
 			readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+			readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 			readSessionTranscriptPage: vi.fn(() =>
 				Effect.succeed({
 					messages: [
@@ -3205,13 +3211,9 @@ describe("cancelSessionById", () => {
 });
 
 describe("rewindSessionToMessage", () => {
-	it.effect("reverts to a specific message", () => {
+	it.effect("records a local rewind without any OpenCode request", () => {
 		const log = mockLogger();
-		const client = makeHandlerOpenCodeAPI({
-			session: {
-				revert: vi.fn(async () => {}),
-			},
-		});
+		const client = makeHandlerOpenCodeAPI();
 
 		const layer = makeTestHandlerLayer({
 			api: client,
@@ -3233,9 +3235,8 @@ describe("rewindSessionToMessage", () => {
 		}).pipe(
 			Effect.provide(layer, { local: true }),
 			Effect.tap(() => Effect.sync(() => {
-				expect(client.session.revert).toHaveBeenCalledWith("session-1", {
-					messageID: "msg-1",
-				});
+				for (const request of Object.values(client.session))
+				expect(request).not.toHaveBeenCalled();
 				expect(log.info).toHaveBeenCalled();
 			})),
 		);
@@ -3515,6 +3516,7 @@ describe("handleMessage", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),
@@ -3798,6 +3800,7 @@ describe("handleMessage", () => {
 				readInboxState: () => Effect.succeed(undefined),
 				readStoreIdentity: () => Effect.succeed("store"),
 				readSessionTodos: vi.fn(() => Effect.succeed({ rows: [], version: 0 })),
+				readSessionPromptIndex: () => Effect.succeed({ rows: [], removed: [], version: 0 }),
 				readSessionTranscriptPage: vi.fn(() =>
 					Effect.succeed({ messages: [], hasMore: false, version: 0 }),
 				),

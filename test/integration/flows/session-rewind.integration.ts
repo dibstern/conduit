@@ -74,7 +74,7 @@ function persistedRewinds(harness: RelayHarness, sessionId: string) {
 				.get(sessionId) as { pending_rewind_message_id: string | null },
 			events: db
 				.prepare(
-					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('session.rewound', 'session.rewind_undone', 'session.rewind_committed', 'message.removed') ORDER BY sequence",
+					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('session.rewound', 'session.rewind_undone', 'session.rewind_committed', 'message.removed', 'turn.error') ORDER BY sequence",
 				)
 				.all(sessionId) as Array<{ type: string; data: string }>,
 			messages: db
@@ -96,6 +96,7 @@ async function seedTurns(
 	client: TestWsClient,
 	messageIds = seededIds,
 	withTools = false,
+	orderedClocks = false,
 ) {
 	const created = await client.createSession("Pending rewind", {
 		providerId: "opencode",
@@ -112,11 +113,30 @@ async function seedTurns(
 						id,
 						sessionID: sessionId,
 						role: index % 2 === 0 ? "user" : "assistant",
-						...(withTools && index % 2 === 1
-							? { parentID: messageIds[index - 1] }
-							: {}),
+						...(index % 2 === 0
+							? {
+									agent: "build",
+									model: {
+										providerID: "anthropic",
+										modelID: "claude-opus-4-5-20251101",
+									},
+								}
+							: {
+									parentID: messageIds[index - 1],
+									modelID: "claude-opus-4-5-20251101",
+									providerID: "anthropic",
+									mode: "build",
+									path: { cwd: process.cwd(), root: process.cwd() },
+									cost: 0,
+									tokens: {
+										input: 0,
+										output: 0,
+										reasoning: 0,
+										cache: { read: 0, write: 0 },
+									},
+								}),
 						time: {
-							created: createdAt,
+							created: createdAt + (orderedClocks ? index : 0),
 							...(!withTools ? { completed: createdAt } : {}),
 						},
 					},
@@ -268,10 +288,13 @@ describe("OpenCode pending rewind through the relay", () => {
 		const fixture = harness;
 		harness = undefined;
 		try {
+			evidence["bodies"] = fixture.mock.requestBodies;
 			evidence["requests"] = fixture.mock.diagnostics.filter(
 				(entry) =>
 					entry.event === "request" &&
-					/\/(revert|unrevert|prompt_async)(?:\?|$)/.test(entry.detail ?? ""),
+					/\/(revert|unrevert|fork|message\/[^/]+|prompt_async|prompt)(?:\?|$)/.test(
+						entry.detail ?? "",
+					),
 			);
 			await fixture.stop();
 		} finally {
@@ -602,7 +625,7 @@ describe("OpenCode pending rewind through the relay", () => {
 	// Failure cases: equal timestamps change the cut, another tab misses the
 	// pending point, paging leaks hidden messages, undo loses turns, or duplicate
 	// provider removals fail after the committed transcript has removed them.
-	it("commits a long tool transcript with one event and one client refresh, then replays it", async () => {
+	it("commits a long transcript when the cut is removed first, coalesces duplicate removals, then replays it", async () => {
 		harness = await createRelayHarness();
 		evidence = { ticket: "conduit-test-hiuf.4" };
 		const fixture = harness;
@@ -656,10 +679,10 @@ describe("OpenCode pending rewind through the relay", () => {
 			const { sequence: before } = db
 				.prepare("SELECT MAX(sequence) AS sequence FROM events")
 				.get() as { sequence: number };
-			// The first upstream removal commits the whole tail. Subsequent
-			// removals and content for that tail share its ingestion batch.
+			// The cut commits the whole range. Later duplicate removals and
+			// content for that range share its ingestion batch.
 			fixture.mock.injectSSEEvents([
-				...[...removedIds].reverse().map((messageID) => ({
+				...removedIds.map((messageID) => ({
 					type: "message.removed",
 					properties: { sessionID: sessionId, messageID },
 				})),
@@ -749,197 +772,329 @@ describe("OpenCode pending rewind through the relay", () => {
 		}
 	}, 60_000);
 
-	it("hides and restores turns across tabs, then commits once on the next prompt", async () => {
+	async function fixture(ids = seededIds, orderedClocks = false) {
 		harness = await createRelayHarness();
-		evidence = { tickets: ["conduit-test-qqqm", "conduit-test-bu61"] };
+		evidence = { ticket: "conduit-test-82tn.55" };
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		const sessionId = await seedTurns(harness, client);
+		const sessionId = await seedTurns(
+			harness,
+			client,
+			ids,
+			false,
+			orderedClocks,
+		);
 		const second = await harness.connectWsClient();
 		await second.switchSession(sessionId);
-		const target = hiddenIds[0] as string;
-		const rewind = () =>
-			client.rpcCall((rpc) =>
-				rpc.RewindSession({
-					sessionId,
-					messageId: target,
-				}),
-			);
+		return { relay: harness, client, second, sessionId };
+	}
 
-		await rewind();
-		expect(harness.mock.requestBodies).toContainEqual({
-			method: "POST",
-			path: `/session/${sessionId}/revert`,
-			body: JSON.stringify({ messageID: target }),
-		});
+	function wire(relay: RelayHarness, sessionId: string) {
+		return relay.mock.requestBodies.filter(
+			(request) =>
+				request.path.startsWith(`/session/${sessionId}/`) &&
+				(request.method === "DELETE" ||
+					/\/(prompt_async|prompt|revert|unrevert|fork)$/.test(request.path)),
+		);
+	}
+
+	async function nativeIds(relay: RelayHarness, sessionId: string) {
+		const response = await fetch(
+			`${relay.mock.url}/session/${sessionId}/message`,
+		);
+		const messages = (await response.json()) as Array<{ info: { id: string } }>;
+		return messages.map(({ info }) => info.id);
+	}
+
+	async function rewind(
+		client: TestWsClient,
+		sessionId: string,
+		messageId = "c-cut-user",
+	) {
+		await client.rpcCall((rpc) => rpc.RewindSession({ sessionId, messageId }));
+	}
+
+	it("hides and restores across tabs locally, then deletes the tail before prompting the same session", async () => {
+		const { relay, client, second, sessionId } = await fixture();
+		const before = relay.mock.diagnostics.length;
+		await rewind(client, sessionId);
 		await vi.waitFor(() => {
 			for (const tab of [client, second])
 				expect(detailState(tab, sessionId)).toEqual({
-					ids: [...keptIds].sort(),
-					pending: target,
+					ids: keptIds,
+					pending: hiddenIds[0],
 				});
 		});
-		const pendingPage = await second.loadMoreHistory(sessionId);
-		for (const id of hiddenIds)
-			expect(pendingPage.messages.map((message) => message.id)).not.toContain(
-				id,
-			);
-		expect(pendingPage.messages.map((message) => message.id)).toEqual(
-			expect.arrayContaining(keptIds),
-		);
-		await expect(
-			second.loadMoreHistory(sessionId, hiddenIds[1]),
-		).rejects.toThrow();
-		const earlier = await second.loadMoreHistory(sessionId, keptIds[1]);
-		expect(earlier.messages.map((message) => message.id)).toContain(keptIds[0]);
-		for (const id of hiddenIds)
-			expect(earlier.messages.map((message) => message.id)).not.toContain(id);
-		evidence["pending"] = persistedRewinds(harness, sessionId);
-		expect(
-			persistedRewinds(harness, sessionId).events.map(({ type }) => type),
-		).toEqual(["session.rewound"]);
-		expect(
-			persistedRewinds(harness, sessionId).messages.map(({ id }) => id),
-		).toEqual(expect.arrayContaining(seededIds));
-		const reloaded = await harness.connectWsClient();
-		await reloaded.switchSession(sessionId);
-		expect(detailState(reloaded, sessionId)).toEqual({
-			ids: [...keptIds].sort(),
-			pending: target,
-		});
-
 		await second.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
-		expect(
-			harness.mock.diagnostics.filter((entry) =>
-				entry.detail?.startsWith(`POST /session/${sessionId}/unrevert`),
-			),
-		).toHaveLength(1);
 		await vi.waitFor(() => {
-			for (const tab of [client, second, reloaded])
+			for (const tab of [client, second])
 				expect(detailState(tab, sessionId)).toEqual({
-					ids: [...seededIds].sort(),
+					ids: seededIds,
 					pending: null,
 				});
 		});
 		expect(
-			(await second.loadMoreHistory(sessionId)).messages.map(({ id }) => id),
-		).toEqual(expect.arrayContaining(seededIds));
-
-		await rewind();
+			relay.mock.diagnostics
+				.slice(before)
+				.filter(({ event }) => event === "request"),
+		).toEqual([]);
+		await rewind(client, sessionId);
+		const commitsBeforeDeletion: number[] = [];
+		const emit = relay.mock.emitTestEvent.bind(relay.mock);
+		vi.spyOn(relay.mock, "emitTestEvent").mockImplementation(
+			(type, properties) => {
+				if (type === "message.removed")
+					commitsBeforeDeletion.push(
+						persistedRewinds(relay, sessionId).events.filter(
+							({ type }) => type === "session.rewind_committed",
+						).length,
+					);
+				emit(type, properties);
+			},
+		);
 		await client.sendMessage("Commit the rewind", { sessionId });
 		await client.waitForTurnEnd(sessionId);
-		await vi.waitFor(() => {
-			const state = persistedRewinds(harness as RelayHarness, sessionId);
-			expect(state.session.pending_rewind_message_id).toBeNull();
-			for (const id of hiddenIds)
-				expect(state.messages.map((message) => message.id)).not.toContain(id);
-			expect(state.tombstones.map((tombstone) => tombstone.message_id)).toEqual(
-				expect.arrayContaining(hiddenIds),
-			);
-		});
-		const beforeDuplicate = persistedRewinds(harness, sessionId);
-		for (const id of hiddenIds)
-			harness.mock.emitTestEvent("message.removed", {
-				sessionID: sessionId,
-				messageID: id,
-			});
-		// A provider event after both repeated removals fences their ingestion.
-		harness.mock.injectSSEEvents([
-			{
-				type: "message.updated",
-				properties: {
-					info: {
-						id: "rewind-removal-fence",
-						sessionID: sessionId,
-						role: "assistant",
-						time: { created: Date.now() },
-					},
-				},
-			},
+		expect(
+			wire(relay, sessionId).map(({ method, path }) => `${method} ${path}`),
+		).toEqual([
+			`DELETE /session/${sessionId}/message/d-hidden-assistant`,
+			`DELETE /session/${sessionId}/message/c-cut-user`,
+			`POST /session/${sessionId}/prompt_async`,
 		]);
-		await vi.waitFor(() =>
-			expect(
-				persistedRewinds(harness as RelayHarness, sessionId).messages,
-			).toContainEqual({
-				id: "rewind-removal-fence",
-			}),
-		);
-		const committed = persistedRewinds(harness, sessionId);
-		expect(committed.tombstones).toEqual(beforeDuplicate.tombstones);
-		expect(committed.events).toEqual(beforeDuplicate.events);
-		const removals = committed.events
-			.filter((event) => event.type === "message.removed")
-			.map(
-				(event) => (JSON.parse(event.data) as { messageId: string }).messageId,
-			);
-		expect(removals).toEqual([]);
+		expect(commitsBeforeDeletion).toEqual([0, 0]);
+		const native = await nativeIds(relay, sessionId);
+		expect(native).toEqual(expect.arrayContaining(keptIds));
+		for (const id of hiddenIds) expect(native).not.toContain(id);
+		const committed = persistedRewinds(relay, sessionId);
+		expect(committed.session.pending_rewind_message_id).toBeNull();
 		expect(
 			committed.events.filter(
-				(event) => event.type === "session.rewind_committed",
+				({ type }) => type === "session.rewind_committed",
 			),
 		).toHaveLength(1);
-		const reopened = await harness.connectWsClient();
-		await reopened.switchSession(sessionId);
-		expect(detailState(reopened, sessionId)).toEqual({
-			ids: [...keptIds].sort(),
-			pending: null,
-		});
-		const history = await reopened.loadMoreHistory(sessionId);
-		for (const id of hiddenIds)
-			expect(history.messages.map((message) => message.id)).not.toContain(id);
-		await expect(
-			reopened.rpcCall((rpc) => rpc.UndoRewind({ sessionId })),
-		).rejects.toThrow();
-		evidence["committed"] = committed;
-		evidence["reload"] = history;
-	}, 60_000);
-
-	it("keeps the canonical transcript unchanged when revert or unrevert fails", async () => {
-		harness = await createRelayHarness();
-		evidence = { ticket: "conduit-test-bu61" };
-		const client = await harness.connectWsClient();
-		await client.waitForInitialState();
-		const sessionId = await seedTurns(harness, client);
-		const target = hiddenIds[0] as string;
-		const rewind = () =>
-			client.rpcCall((rpc) =>
-				rpc.RewindSession({
-					sessionId,
-					messageId: target,
-				}),
+		const history = await client.loadMoreHistory(sessionId);
+		const newIds = history.messages
+			.map(({ id }) => id)
+			.filter((id) => !seededIds.includes(id));
+		expect(newIds.length).toBeGreaterThanOrEqual(2);
+		for (const tab of [client, second]) {
+			await tab.waitForTranscriptMessage(
+				(message) => newIds.includes(message.id),
+				sessionId,
 			);
-		harness.mock.setExactResponse("POST", `/session/${sessionId}/revert`, 500, {
-			error: "revert failed",
-		});
-		await expect(rewind()).rejects.toThrow();
-		expect(persistedRewinds(harness, sessionId).events).toEqual([]);
-		expect(detailState(client, sessionId)).toEqual({
-			ids: [...seededIds].sort(),
-			pending: null,
-		});
-		harness.mock.setExactResponse("POST", `/session/${sessionId}/revert`, 200, {
-			id: sessionId,
-		});
-		await rewind();
-		const pending = persistedRewinds(harness, sessionId);
-		harness.mock.setExactResponse(
-			"POST",
-			`/session/${sessionId}/unrevert`,
+			expect(tab.getActiveSessionId()).toBe(sessionId);
+			expect(detailState(tab, sessionId)).toEqual({
+				ids: keptIds,
+				pending: null,
+			});
+			expect(
+				(await tab.loadMoreHistory(sessionId)).messages.map(({ id }) => id),
+			).toEqual(history.messages.map(({ id }) => id));
+		}
+		evidence["committed"] = committed;
+		evidence["native"] = native;
+		evidence["commitsBeforeDeletion"] = commitsBeforeDeletion;
+	});
+
+	it("keeps the cut pending and fails the send when deleting the cut fails", async () => {
+		const { relay, client, sessionId } = await fixture();
+		await rewind(client, sessionId);
+		relay.mock.setExactResponse(
+			"DELETE",
+			`/session/${sessionId}/message/c-cut-user`,
 			500,
-			{
-				error: "unrevert failed",
-			},
+			{ error: "cut delete failed" },
 		);
-		await expect(
-			client.rpcCall((rpc) => rpc.UndoRewind({ sessionId })),
-		).rejects.toThrow();
-		expect(persistedRewinds(harness, sessionId)).toEqual(pending);
-		const reloaded = await harness.connectWsClient();
-		await reloaded.switchSession(sessionId);
-		expect(detailState(reloaded, sessionId)).toEqual({
-			ids: [...keptIds].sort(),
-			pending: target,
+		await client.sendMessage("Must fail", { sessionId });
+		await client.waitForTurnEnd(sessionId);
+		const pending = persistedRewinds(relay, sessionId);
+		expect(
+			pending.events.some(
+				({ type, data }) =>
+					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
+			),
+		).toBe(true);
+		expect(pending.session.pending_rewind_message_id).toBe("c-cut-user");
+		expect(
+			pending.events.filter(({ type }) => type === "session.rewind_committed"),
+		).toEqual([]);
+		expect(wire(relay, sessionId).some(({ method }) => method === "POST")).toBe(
+			false,
+		);
+		evidence["pending"] = pending;
+	});
+
+	it("converges after partial truncation and commits the cut exactly once on resend", async () => {
+		const ids = [...seededIds, "e-middle-user", "f-last-assistant"];
+		const { relay, client, sessionId } = await fixture(ids);
+		await rewind(client, sessionId);
+		const failedPath = `/session/${sessionId}/message/e-middle-user`;
+		relay.mock.setExactResponse("DELETE", failedPath, 500, {
+			error: "interrupted delete",
 		});
-		evidence["pendingAfterFailure"] = pending;
-	}, 45_000);
+		await client.sendMessage("Interrupted turn", {
+			sessionId,
+			commandId: "retry-first",
+		});
+		await client.waitForTurnEnd(sessionId);
+		expect(
+			persistedRewinds(relay, sessionId).events.some(
+				({ type, data }) =>
+					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
+			),
+		).toBe(true);
+		expect(await nativeIds(relay, sessionId)).not.toContain("f-last-assistant");
+		expect(
+			persistedRewinds(relay, sessionId).session.pending_rewind_message_id,
+		).toBe("c-cut-user");
+		relay.mock.setExactResponse("DELETE", failedPath, 200, true);
+		await client.sendMessage("Second turn survives", {
+			sessionId,
+			commandId: "retry-second",
+		});
+		await client.waitForTurnEnd(sessionId);
+		const native = await nativeIds(relay, sessionId);
+		expect(native).toEqual(expect.arrayContaining(keptIds));
+		for (const id of ids.slice(2)) expect(native).not.toContain(id);
+		expect(
+			wire(relay, sessionId).filter(({ path }) =>
+				path.endsWith("/f-last-assistant"),
+			),
+		).toHaveLength(1);
+		expect(
+			wire(relay, sessionId).filter(({ method }) => method === "POST"),
+		).toHaveLength(1);
+		const state = persistedRewinds(relay, sessionId);
+		expect(state.session.pending_rewind_message_id).toBeNull();
+		expect(
+			state.events.filter(({ type }) => type === "session.rewind_committed"),
+		).toHaveLength(1);
+		const history = await client.loadMoreHistory(sessionId);
+		expect(
+			history.messages.some(({ id }) => id === "msg_conduit_retry-second"),
+		).toBe(true);
+		expect(
+			history.messages.some(({ id }) => id === "msg_conduit_retry-first"),
+		).toBe(false);
+		evidence["retry"] = { state, native, history };
+	});
+
+	it("truncates once for two rapid sends and preserves the second native turn", async () => {
+		const { relay, client, second, sessionId } = await fixture();
+		await rewind(client, sessionId);
+		await Promise.all([
+			client.sendMessage("First rapid turn", {
+				sessionId,
+				commandId: "rapid-first",
+			}),
+			second.sendMessage("Second rapid turn", {
+				sessionId,
+				commandId: "rapid-second",
+			}),
+		]);
+		expect(
+			wire(relay, sessionId).filter(({ method }) => method === "DELETE"),
+		).toHaveLength(2);
+		for (const id of ["msg_conduit_rapid-first", "msg_conduit_rapid-second"])
+			await client.waitForTranscriptMessage(
+				(message) => message.id === id,
+				sessionId,
+			);
+		const history = await client.loadMoreHistory(sessionId);
+		const native = await nativeIds(relay, sessionId);
+		expect(native).toHaveLength(6);
+		expect(history.messages.map(({ id }) => id).sort()).toEqual(native.sort());
+		expect(
+			wire(relay, sessionId)
+				.filter(({ method }) => method === "DELETE")
+				.map(({ path }) => path.split("/").at(-1)),
+		).toEqual([...hiddenIds].reverse());
+		expect(
+			persistedRewinds(relay, sessionId).events.filter(
+				({ type }) => type === "session.rewind_committed",
+			),
+		).toHaveLength(1);
+	});
+
+	it("orders native messages by creation time before id when a kept conduit id sorts last", async () => {
+		const ids = ["msg_conduit_z-kept-user", "b-kept-assistant", ...hiddenIds];
+		const { relay, client, sessionId } = await fixture(ids, true);
+		await rewind(client, sessionId);
+		await client.sendMessage("Clock ordered turn", { sessionId });
+		await client.waitForTurnEnd(sessionId);
+		expect(
+			wire(relay, sessionId)
+				.filter(({ method }) => method === "DELETE")
+				.map(({ path }) => path.split("/").at(-1)),
+		).toEqual([...hiddenIds].reverse());
+		expect(await nativeIds(relay, sessionId)).toContain(ids[0]);
+	});
+
+	it("fails closed when the rewind anchor is absent from native history", async () => {
+		const { relay, client, sessionId } = await fixture();
+		await rewind(client, sessionId);
+		relay.mock.setExactResponse(
+			"GET",
+			`/session/${sessionId}/message`,
+			200,
+			[],
+		);
+		await client.sendMessage("Cross provider cut", { sessionId });
+		await client.waitForTurnEnd(sessionId);
+		const pending = persistedRewinds(relay, sessionId);
+		expect(
+			pending.events.some(
+				({ type, data }) =>
+					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
+			),
+		).toBe(true);
+		expect(pending.session.pending_rewind_message_id).toBe("c-cut-user");
+		expect(
+			pending.events.filter(({ type }) => type === "session.rewind_committed"),
+		).toEqual([]);
+		expect(wire(relay, sessionId)).toEqual([]);
+	});
+
+	it("commits only on removal of the cut itself, never another tail message", async () => {
+		const { relay, client, sessionId } = await fixture();
+		await rewind(client, sessionId);
+		await relay.stack.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				expect(
+					yield* readPendingRewindCommit(sql, sessionId, "d-hidden-assistant"),
+				).toBeUndefined();
+				expect(
+					(yield* readPendingRewindCommit(sql, sessionId, "c-cut-user"))
+						?.events[0]?.type,
+				).toBe("session.rewind_committed");
+			}),
+		);
+		relay.mock.emitTestEvent("message.removed", {
+			sessionID: sessionId,
+			messageID: "d-hidden-assistant",
+		});
+		await vi.waitFor(() =>
+			expect(
+				persistedRewinds(relay, sessionId).messages.map(({ id }) => id),
+			).not.toContain("d-hidden-assistant"),
+		);
+		expect(
+			persistedRewinds(relay, sessionId).session.pending_rewind_message_id,
+		).toBe("c-cut-user");
+		relay.mock.emitTestEvent("message.removed", {
+			sessionID: sessionId,
+			messageID: "c-cut-user",
+		});
+		await vi.waitFor(() =>
+			expect(
+				persistedRewinds(relay, sessionId).session.pending_rewind_message_id,
+			).toBeNull(),
+		);
+		expect(
+			persistedRewinds(relay, sessionId).events.filter(
+				({ type }) => type === "session.rewind_committed",
+			),
+		).toHaveLength(1);
+	});
 });

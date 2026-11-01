@@ -1,10 +1,13 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Result as Either } from "effect";
+import { Effect, Result as Either, Option, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { openCodeStartSelection } from "../../../src/lib/contracts/start-selection.js";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { findFreePort } from "../../../src/lib/daemon/daemon-utils.js";
@@ -21,7 +24,7 @@ describe("OpenCode Instances use", () => {
 	let scenario = "routing";
 	let evidence: Record<string, unknown> = {};
 
-	async function start(name: string) {
+	async function start(name: string, defaultAccountId?: string) {
 		scenario = name;
 		evidence = { ticket: "conduit-test-pa3r.5", at: new Date().toISOString() };
 		harness = ProcessHarness.create({
@@ -29,10 +32,71 @@ describe("OpenCode Instances use", () => {
 			foregroundCli: true,
 			autoStartOpenCode: true,
 			managedOpenCode: true,
+			managedOpenCodeId: "opencode",
 		});
+		const config = Either.getOrThrow(loadDaemonConfigResult(harness.configDir));
+		const managed = config?.instances?.find(({ id }) => id === "opencode");
+		if (!config || !managed)
+			throw new Error("Missing managed OpenCode fixture");
+		// Concrete servers need separate fake stores as well as separate processes.
+		writeFileSync(
+			join(harness.configDir, "daemon.json"),
+			JSON.stringify({
+				...config,
+				...(defaultAccountId
+					? {
+							accountDefaults: {
+								...config.accountDefaults,
+								opencode: defaultAccountId,
+							},
+						}
+					: {}),
+				instances: [
+					...(config.instances ?? []),
+					{
+						...managed,
+						id: "managed-test",
+						name: "Named test",
+						env: {
+							...managed.env,
+							CONDUIT_TEST_OPENCODE_STATE_PREFIX: "named",
+						},
+					},
+				],
+			}),
+		);
 		await harness.restart();
 		return harness;
 	}
+
+	const sessionIdentity = (fixture: ProcessHarness, sessionId: string) => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			const identity = db
+				.prepare(
+					`SELECT s.id AS sessionId, s.provider_sid AS providerSessionId,
+					 sp.provider AS accountId, sp.provider_sid AS bindingProviderSessionId,
+					 COALESCE(s.provider_sid, s.id) AS nativeSessionId
+					 FROM sessions s JOIN session_providers sp ON sp.session_id = s.id
+					 WHERE s.id = ? AND sp.status = 'active'`,
+				)
+				.get(sessionId) as
+				| {
+						sessionId: string;
+						providerSessionId: string | null;
+						accountId: string;
+						bindingProviderSessionId: string | null;
+						nativeSessionId: string;
+				  }
+				| undefined;
+			if (!identity) throw new Error(`Missing OpenCode session ${sessionId}`);
+			expect(identity.nativeSessionId).toBe(sessionId);
+			expect(identity.bindingProviderSessionId).toBeNull();
+			return identity;
+		} finally {
+			db.close();
+		}
+	};
 
 	const permission = (id: string, sessionID: string) => ({
 		id: `evt_${id}`,
@@ -58,6 +122,11 @@ describe("OpenCode Instances use", () => {
 		if (!harness) return;
 		const fixture = harness;
 		try {
+			evidence["providerRequests"] = fixture
+				.opencodeRequests()
+				.filter(
+					({ url }) => url.startsWith("/session") && !url.includes("/message"),
+				);
 			await fixture.terminate();
 			evidence["streamConnections"] = fixture.opencodeStreamConnections();
 			evidence["failures"] =
@@ -77,23 +146,104 @@ describe("OpenCode Instances use", () => {
 		}
 	});
 
+	it("health-polls a saved external default after restart before its first use", async () => {
+		const fixture = await start("external-default");
+		const externalRoot = join(fixture.root, "external");
+		const externalConfig = join(externalRoot, "config");
+		mkdirSync(externalConfig, { recursive: true });
+		mkdirSync(join(externalRoot, "home"));
+		const server = spawn(
+			join(fixture.root, "bin", "opencode"),
+			["serve", "--port=0"],
+			{
+				env: {
+					PATH: process.env["PATH"],
+					CONDUIT_CONFIG_DIR: externalConfig,
+					HOME: join(externalRoot, "home"),
+				},
+				detached: true,
+				stdio: ["ignore", "pipe", "ignore"],
+			},
+		);
+		try {
+			const [line] = (await once(server.stdout, "data")) as [Buffer];
+			const url = /http:\/\/127\.0\.0\.1:\d+/.exec(line.toString())?.[0];
+			if (!url) throw new Error(`No external OpenCode URL in ${line}`);
+			const { addedInstanceId } = await fixture.requestRpc({
+				_tag: "AddInstance",
+				name: "External default",
+				driver: "opencode",
+				managed: false,
+				port: Number(new URL(url).port),
+				url,
+			});
+			if (!addedInstanceId) throw new Error("Missing external instance id");
+			await fixture.requestRpc({
+				_tag: "SetDefault",
+				instanceId: addedInstanceId,
+			});
+			await fixture.terminate();
+			await fixture.restart({ skipBrowserProbe: true });
+			const browser = await fixture.connect();
+			const snapshot = Option.getOrThrow(
+				await Effect.runPromise(
+					browser.rpc.SubscribeInstances({}).pipe(
+						Stream.filter(({ instances }) =>
+							instances.some(
+								(instance) =>
+									instance.id === addedInstanceId &&
+									instance.status === "healthy",
+							),
+						),
+						Stream.runHead,
+					),
+				),
+			);
+			expect(snapshot.instances).toContainEqual(
+				expect.objectContaining({
+					id: addedInstanceId,
+					managed: false,
+					isDefault: true,
+					status: "healthy",
+				}),
+			);
+			const sessionId = await browser.createSession(
+				"External default draft",
+				undefined,
+				"opencode",
+			);
+			expect(sessionIdentity(fixture, sessionId).accountId).toBe(
+				addedInstanceId,
+			);
+			evidence["externalDefault"] = {
+				url,
+				addedInstanceId,
+				sessionId,
+				snapshot,
+			};
+		} finally {
+			if (server.pid) process.kill(-server.pid, "SIGKILL");
+		}
+	});
+
 	it("routes events and prompts through each session's selected instance", async () => {
 		const fixture = await start("routing");
 		const socket = join(fixture.configDir, "relay.sock");
 		const { instances } = await sendRpcRequest(socket, {
 			_tag: "GetInstances",
 		});
-		const instanceA = instances.find(({ id }) => id === "managed-test");
+		const instanceA = instances.find(({ id }) => id === "opencode");
 		const { addedInstanceId: instanceBId } = await sendRpcRequest(socket, {
 			_tag: "AddInstance",
 			name: "Other OpenCode",
 			driver: "opencode",
 			managed: true,
 			port: await findFreePort(0),
+			env: { CONDUIT_TEST_OPENCODE_STATE_PREFIX: "other" },
 		});
 		if (!instanceA || !instanceBId)
 			throw new Error("Expected two OpenCode instances");
-		// Concrete named accounts avoid the canonical id's default-instance alias.
+		// Exercise the concrete managed account alongside the named accounts.
 		const pidOf = (id: string) => {
 			const pid = Either.getOrThrowWith(
 				loadDaemonConfigResult(fixture.configDir),
@@ -125,7 +275,11 @@ describe("OpenCode Instances use", () => {
 			a: { id: instanceA.id, pid: pids.a },
 			b: { id: instanceBId, pid: pids.b },
 		};
-		evidence["sessions"] = { sessionA, sessionB };
+		const identityA = sessionIdentity(fixture, sessionA);
+		const identityB = sessionIdentity(fixture, sessionB);
+		expect(identityA.accountId).toBe(instanceA.id);
+		expect(identityB.accountId).toBe(instanceBId);
+		evidence["sessions"] = { a: identityA, b: identityB };
 
 		// Prompt before any permission prompt is open: the session inbox holds
 		// queued input while a prompt waits on the user.
@@ -196,6 +350,120 @@ describe("OpenCode Instances use", () => {
 			a: { own: 1, cross: 0 },
 			b: { own: 1, cross: 0 },
 		});
+	}, 90_000);
+
+	it("uses the saved named OpenCode default and falls back to managed during its outage", async () => {
+		const fixture = await start("named-default-outage", "managed-test");
+		evidence["ticket"] = "conduit-test-3fc0.7";
+		const browser = await fixture.connect();
+		await browser.startInstance("managed-test");
+		await browser.startInstance("opencode");
+		const accounts = (await browser.instances()).instances;
+		const selected = accounts.find(({ id }) => id === "managed-test");
+		const managed = accounts.find(({ id }) => id === "opencode");
+		if (!selected?.pid || !managed?.pid)
+			throw new Error("Missing selected or managed OpenCode process");
+		expect(selected).toMatchObject({ isDefault: true, status: "healthy" });
+		expect(managed).toMatchObject({ isDefault: false, status: "healthy" });
+		expect(selected.pid).not.toBe(managed.pid);
+		expect(selected.port).not.toBe(managed.port);
+		evidence["accounts"] = [selected, managed];
+		await Effect.runPromise(
+			browser.rpc.SetDefaultModel({
+				projectSlug: "process-test",
+				provider: "fake",
+				model: "fake-model",
+			}),
+		);
+		const deliveries: Record<string, unknown>[] = [];
+		evidence["deliveries"] = deliveries;
+		const sendDefault = async (
+			accountId: string,
+			pid: number,
+			text: string,
+		) => {
+			const snapshot = (await browser.instances()).instances;
+			expect(
+				openCodeStartSelection(
+					snapshot,
+					new Map(snapshot.map(({ id, status }) => [id, status])),
+				).account.id,
+			).toBe(accountId);
+			const catalogCursor = fixture.opencodeRequests().length;
+			const catalog = await browser.getModels();
+			expect(catalog.providers.some((provider) => provider.id === "fake")).toBe(
+				true,
+			);
+			const catalogRequests = fixture
+				.opencodeRequests()
+				.slice(catalogCursor)
+				.filter(
+					(request) =>
+						request.method === "GET" &&
+						request.url.split("?")[0] === "/provider",
+				);
+			expect(catalogRequests.length).toBeGreaterThan(0);
+			expect(catalogRequests.every((request) => request.pid === pid)).toBe(
+				true,
+			);
+			const agentCursor = fixture.opencodeRequests().length;
+			await Effect.runPromise(
+				browser.rpc.GetAgents({ projectSlug: "process-test" }),
+			);
+			const agentRequests = fixture
+				.opencodeRequests()
+				.slice(agentCursor)
+				.filter(
+					(request) =>
+						request.method === "GET" && request.url.split("?")[0] === "/agent",
+				);
+			expect(agentRequests.length).toBeGreaterThan(0);
+			expect(agentRequests.every((request) => request.pid === pid)).toBe(true);
+			const sessionId = await browser.createSession(
+				text,
+				undefined,
+				"opencode",
+			);
+			const identity = sessionIdentity(fixture, sessionId);
+			expect(identity.accountId).toBe(accountId);
+			void browser.send(sessionId, text).catch(() => undefined);
+			const path = `/session/${identity.nativeSessionId}/prompt_async`;
+			const received = () =>
+				fixture
+					.opencodeRequestBodies()
+					.find(
+						(request) =>
+							request.method === "POST" &&
+							request.path === path &&
+							request.body.includes(text),
+					);
+			await vi.waitFor(() => expect(received()).toMatchObject({ pid, path }), {
+				timeout: 15_000,
+			});
+			deliveries.push({
+				...identity,
+				catalogPids: catalogRequests.map((request) => request.pid),
+				agentPids: agentRequests.map((request) => request.pid),
+				expectedPid: pid,
+				receivingPid: received()?.pid,
+				path,
+			});
+		};
+		await sendDefault(selected.id, selected.pid, "named default prompt");
+		await browser.stopInstance(selected.id);
+		await sendDefault(
+			managed.id,
+			managed.pid,
+			"managed outage fallback prompt",
+		);
+		const saved = Either.getOrThrow(loadDaemonConfigResult(fixture.configDir));
+		expect(saved?.accountDefaults?.opencode).toBe(selected.id);
+		expect(
+			(await browser.instances()).instances.find(
+				({ id }) => id === selected.id,
+			),
+		).toMatchObject({ isDefault: true, status: "stopped" });
+		evidence["savedDefault"] = saved?.accountDefaults?.opencode;
 	}, 90_000);
 
 	it("delivers a persisted session's live permission from non-selected instance B after restart without using B", async () => {

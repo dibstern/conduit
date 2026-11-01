@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
 import type { StepHandler } from "../runtime.js";
 import { mockMessageSurfacing, requireRpcControl } from "./shared.js";
+import { chooseShowStop } from "./turnActivityShow.js";
 
 export const surfacingSwitchesHandlers: StepHandler[] = [
 	{
@@ -35,7 +36,6 @@ export const surfacingSwitchesHandlers: StepHandler[] = [
 				"surfacing-msg-card",
 				"surfacing-ask-chip",
 				"surfacing-head-unread",
-				"surfacing-minimise-toggle",
 			])
 				await expect(world.page.getByTestId(id)).toHaveCount(0);
 			// Today's activity strip stays whenever Jev is off.
@@ -66,7 +66,6 @@ export const surfacingSwitchesHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const row = world.page.locator(`[data-message-number="${match[1]}"]`);
 			await expect(row).toBeVisible();
-			await expect(row).toHaveAttribute("data-highlighted", "true");
 			await expect(row.locator("..")).toBeFocused();
 			await expect(row).toBeInViewport();
 			await expect(
@@ -79,7 +78,10 @@ export const surfacingSwitchesHandlers: StepHandler[] = [
 		match: /^I open the plain turn log$/,
 		run: async ({ world }) => {
 			const toggle = world.page.locator(".turn-activity-toggle");
-			await toggle.click();
+			if ((await toggle.getAttribute("aria-expanded")) === "false")
+				await toggle.click();
+			if (await world.page.getByTestId("surfacing-level").count())
+				await chooseShowStop(world.page, "Full log");
 			await toggle.blur();
 			await world.page.mouse.move(1, 1);
 		},

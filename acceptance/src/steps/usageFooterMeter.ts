@@ -6,7 +6,12 @@ import type {
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { mockInstances, openModelPicker, requireRpcControl } from "./shared.js";
+import {
+	mockInstances,
+	openModelPicker,
+	openPickerAccounts,
+	requireRpcControl,
+} from "./shared.js";
 
 const states = {
 	normal: [41, 22],
@@ -1001,6 +1006,7 @@ export const usageFooterMeterHandlers: StepHandler[] = [
 			await newSession.click();
 			await openModelPicker(world.page);
 			await world.page.getByTestId("picker-harness-claude").click();
+			await openPickerAccounts(world.page);
 			await world.page.getByTestId(`picker-account-${match[1]}`).click();
 			await world.page.keyboard.press("Escape");
 			await expect(

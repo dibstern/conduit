@@ -116,6 +116,7 @@ describe("smart default", () => {
 			// ignore — may not have started
 		}
 		vi.unstubAllGlobals();
+		vi.unstubAllEnvs();
 		rmSync(tmpDir, { recursive: true, force: true });
 	});
 
@@ -242,6 +243,47 @@ describe("smart default", () => {
 			port: 4096,
 			status: "healthy",
 		});
+	});
+
+	it.each([
+		"default",
+		"inherited",
+		"instance",
+	] as const)("disables snapshots in the launched %s config while preserving other settings", async (source) => {
+		const existingConfig = {
+			snapshot: true,
+			model: "custom/model",
+			plugin: ["file:///existing-plugin.js"],
+		};
+		vi.stubEnv(
+			"OPENCODE_CONFIG_CONTENT",
+			source === "inherited" ? JSON.stringify(existingConfig) : "",
+		);
+		mockInstalled.mockResolvedValue(true);
+		const { first } = await startDefault({ smartDefault: false }, [
+			{
+				id: "opencode",
+				name: "Managed",
+				port: 4096,
+				managed: true,
+				...(source === "instance"
+					? { env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(existingConfig) } }
+					: {}),
+			},
+		]);
+		expect(Exit.isSuccess(first)).toBe(true);
+		expect(mockSpawnManagedOpenCode).toHaveBeenCalledOnce();
+		const env = mockSpawnManagedOpenCode.mock.calls[0]?.[2];
+		const config: unknown = JSON.parse(
+			env?.["OPENCODE_CONFIG_CONTENT"] ?? "{}",
+		);
+		expect(config).toMatchObject({ snapshot: false });
+		if (source !== "default") {
+			expect(config).toMatchObject({
+				model: existingConfig.model,
+				plugin: expect.arrayContaining(existingConfig.plugin),
+			});
+		}
 	});
 
 	it("fails the first start when nothing answers and the binary is missing", async () => {

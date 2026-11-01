@@ -80,12 +80,20 @@ tests alone).
 Run this when changing daemon, relay, server, session, or instance behavior that depends on a real relay stack or OpenCode interaction.
 
 ```bash
+pnpm build
 pnpm test:integration
 pnpm test:contract
 ```
 
-Integration files run in parallel in up to 4 fork workers. Set
+Integration files run in parallel in fork workers, half the CPU cores and at
+least 4. Set
 `CONDUIT_INTEGRATION_WORKERS=<positive integer>` to override the worker cap.
+
+Process harnesses use `dist/` by default in this suite. Rebuild after changing
+`src/`. Set `CONDUIT_TEST_DIST` to another build directory, or to an empty string
+to use source for fixtures without an explicit build. Tests that verify source
+behavior opt out explicitly.
+Stale or missing dist fails fast in integration and E2E groups; bypass with `CONDUIT_SKIP_DIST_CHECK=1`.
 
 ### Claude process runners
 
@@ -135,6 +143,20 @@ Each run writes `run.json` and raw turn traces to a unique directory under
 `test-results/q5u6-1.1-worktree/`, including failures and `CwdChanged` hook
 observations. If that hook fires, revisit it as the workspace move signal.
 
+### Acceptance
+
+Use `pnpm acceptance:functional` as the per-ticket behaviour check for
+`features/*.feature`. It skips screenshot steps and is not the visual gate.
+Select one feature the same way as with `pnpm acceptance:visual`:
+
+```bash
+ACCEPTANCE_FEATURE=composer-send-button pnpm acceptance:functional
+```
+
+Run `pnpm acceptance:visual` for the functional and visual gate. See
+[`acceptance/README.md`](../../acceptance/README.md) for baseline capture and
+the acceptance pipeline.
+
 ### E2E (Replay — Default)
 
 Run this when changing browser-visible workflows, WebSocket behavior, mobile flows, or end-to-end session lifecycles. Uses recorded WebSocket fixtures — no running OpenCode instance needed.
@@ -146,6 +168,12 @@ pnpm test:e2e --grep "<name>"                     # by test name
 ```
 
 Prefer a single spec or grep filter over the full suite.
+
+Tag a harness or daemon test `@timed` (`test(name, { tag: "@timed" }, ...)`)
+when it asserts a wall-clock budget: a latency ceiling, a long-task limit, or a
+timing ratio. `scripts/test-all.sh` runs those in a second phase on one worker,
+because other workers' load on a 4-vCPU CI runner breaks such budgets without
+any regression.
 
 If the frontend is already built or you need to avoid package-script argument forwarding, run Playwright directly:
 

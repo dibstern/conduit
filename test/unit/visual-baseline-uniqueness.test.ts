@@ -27,6 +27,8 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"876c6e84: Retry counts recovers, LiveRefresh finishes its refresh, and RetireRestore restores Ask; all finish by asserting SessionCounts, so their desktop terminal frame is identical",
 	"overlays-surfacingcategories--counts-unavailable | overlays-surfacingcategories--live-refresh | overlays-surfacingcategories--session-counts":
 		"876c6e84: successful retry and completed refresh finish at SessionCounts; RetireRestore differs on phone because its interaction scrolls to the restored category",
+	"input-inputarea--final-icons-phone | input-inputarea--phone-provider-effort-claude":
+		"conduit-test-npk3y.2 removes the phone model attention dot, so the Claude effort fixture (Sonnet, high) renders the default phone icons frame; its play() asserts the meter's levels and label, which the other provider fixtures vary",
 	"ui-sessionstatusglyph--running | ui-sessionstatusglyph--running-header":
 		"capture freezes the running packet to the same frame as the static header, while play() and flow.spec.ts assert their animation states",
 	// Verified legitimate: these interaction stories deliberately re-open the
@@ -80,8 +82,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// source; the two stories genuinely produce the same frame.
 	"model-contextwindowselector--premium-default | model-contextwindowselector--selected-1-m":
 		"premium default and an explicit 1M override both resolve to the same closed '1M (beta)' badge; they differ only inside the open dropdown",
-	"overlays-attentionbanner--permissions-and-questions | overlays-notificationstack--attention-only":
-		"both stories render NotificationStack with the same permission and question fixtures and no toasts",
 
 	// Verified legitimate (conduit-test-de3.35.9.3). For these three the
 	// identical bytes are the assertion, not a hole in one.
@@ -152,8 +152,6 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 	// sheet, and these stories end with the menu closed.
 	"session-gitidentity--moved-back | session-gitidentity--moved-back-phone":
 		"same closed control at both tiers; the phone story asserts the notice's img role in play()",
-	"session-gitidentity--workspace-hint | session-gitidentity--workspace-hint-phone":
-		"same closed control at both tiers; the hint asserts the same in play() at each",
 	"session-gitidentity--worktree-missing | session-gitidentity--worktree-missing-phone":
 		"same closed control at both tiers; the phone story asserts the missing-worktree label in play()",
 	"ui-microlabelbutton--cancelled-hold | ui-microlabelbutton--default | ui-microlabelbutton--hold-and-tap | ui-microlabelbutton--hold-lifecycle":
@@ -190,8 +188,20 @@ const ALLOWED_DUPLICATE_GROUPS: Record<string, string> = {
 		"both light stories inherit the same WorkingQueued fixture and play assertions",
 	"layout-chatlayout--phone-top-colour | layout-chatlayout--sidebar-collapsed":
 		"on phone both show the same session with its sidebar collapsed; PhoneTopColour additionally asserts matching top-edge, header and browser theme colours, then restores the theme",
-	"ui-activitytimeline--default | ui-activitytimeline--touch-scrub":
-		"TouchScrub changes aria-valuetext and emits onjump; without emphasis both stories paint the same segments",
+	"ui-activitytimeline--default | ui-activitytimeline--live-fade | ui-activitytimeline--touch-scrub":
+		"TouchScrub changes aria-valuetext and emits onstep, LiveFade asserts the 1.2s fade duration that capture freezes; without emphasis all three paint the same segments",
+
+	// Turn log redesign E (conduit-test-xdyjq.9). Each pair asserts different
+	// reveal() results or a different setup path that end in one Turn state.
+	"chat-surfacing-minimise--message-destination | chat-surfacing-minimise--superseded-destination":
+		"both end with part 4 revealed in an open Turn; they differ in reveal() results (a minimised start versus a superseded first reveal)",
+	"chat-surfacing-minimise--minimised | chat-surfacing-minimise--unmounted-destination":
+		"both end with the Turn collapsed and no card; UnmountedDestination asserts reveal() reports missing for a Turn with no mounted panel",
+	// The live Turn sits below the 852px phone fold, which phone captures do not paint (conduit-test-cou9).
+	"chat-messagelist--turn-ledger | chat-messagelist--turn-ledger-live":
+		"on phone the last Turn is below the fold that capture leaves blank (conduit-test-cou9); desktop differs",
+	"chat-messagelist--turn-ledger-light | chat-messagelist--turn-ledger-live-light":
+		"on phone the last Turn is below the fold that capture leaves blank (conduit-test-cou9); desktop differs",
 };
 
 const BASELINE_DIRECTORY = resolve(

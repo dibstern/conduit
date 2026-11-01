@@ -531,98 +531,194 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 				}
 
 				const promptResult = yield* Effect.result(
-					Effect.tryPromise({
-						try: async () => {
-							if (isCompaction) {
-								if (!abortSignal.aborted) {
-									const compactModel = promptOptions.model;
-									if (!compactModel)
-										throw this.providerFailure(
-											"summarize",
-											"A session model pick is required before compacting.",
-										);
+					Effect.gen({ self: this }, function* () {
+						if (input.rewind) {
+							const rewind = input.rewind;
+							const messages = yield* Effect.tryPromise({
+								try: () =>
+									client.session.messages(sessionId, { signal: abortSignal }),
+								catch: (cause) => cause,
+							});
+							messages.sort(
+								(a, b) =>
+									(a.time?.created ?? 0) - (b.time?.created ?? 0) ||
+									(a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+							);
+							// An outbox retry must never delete its own submitted turn.
+							if (
+								!messages.some(
+									({ id }) => id === openCodeInputMessageId(input.inputId),
+								)
+							) {
+								const anchor =
+									rewind.resumeSessionAt === null
+										? -1
+										: messages.findIndex(
+												({ id }) => id === rewind.resumeSessionAt,
+											);
+								if (rewind.resumeSessionAt !== null && anchor === -1)
+									return yield* Effect.fail(
+										sendFailure(
+											`OpenCode rewind anchor ${rewind.resumeSessionAt} is not in native session ${sessionId}`,
+										),
+									);
+								const tail = messages.slice(anchor + 1).reverse();
+								const cut = tail.find(
+									({ id }) => id === rewind.targetMessageId,
+								);
+								const deletions = tail.filter(
+									({ id }) => id !== rewind.targetMessageId,
+								);
+								if (cut) deletions.push(cut);
+								for (const message of deletions) {
 									if (abortSignal.aborted) return;
-									submitted = true;
-									const pending = { inputId: input.inputId };
-									const calls = this.compactions.get(sessionId) ?? [];
-									calls.push(pending);
-									this.compactions.set(sessionId, calls);
-									try {
-										await client.session.summarize(sessionId, compactModel);
-									} finally {
-										calls.splice(calls.indexOf(pending), 1);
-										if (
-											calls.length === 0 &&
-											this.compactions.get(sessionId) === calls
-										)
-											this.compactions.delete(sessionId);
+									yield* Effect.tryPromise({
+										try: () =>
+											client.session.deleteMessage(sessionId, message.id),
+										catch: (cause) => cause,
+									});
+								}
+								if (abortSignal.aborted) return;
+								if (rewind.targetMessageId)
+									yield* input.eventSink.push({
+										eventId: createEventId(),
+										type: "message.removed",
+										providerId: this.providerId,
+										sessionId,
+										providerRefs: { providerSessionId: sessionId },
+										rawSource: {
+											kind: "opencode.command",
+											endpoint: "session.deleteMessage",
+										},
+										createdAt: Date.now(),
+										data: { messageId: rewind.targetMessageId },
+									});
+							}
+						}
+
+						const command = yield* Effect.tryPromise({
+							try: async () => {
+								if (isCompaction) {
+									if (!abortSignal.aborted) {
+										const compactModel = promptOptions.model;
+										if (!compactModel)
+											throw this.providerFailure(
+												"summarize",
+												"A session model pick is required before compacting.",
+											);
+										if (abortSignal.aborted) return;
+										submitted = true;
+										const pending = { inputId: input.inputId };
+										const calls = this.compactions.get(sessionId) ?? [];
+										calls.push(pending);
+										this.compactions.set(sessionId, calls);
+										try {
+											await client.session.summarize(sessionId, compactModel);
+										} finally {
+											calls.splice(calls.indexOf(pending), 1);
+											if (
+												calls.length === 0 &&
+												this.compactions.get(sessionId) === calls
+											)
+												this.compactions.delete(sessionId);
+										}
+									}
+									return;
+								}
+								const session = await client.session.get(sessionId);
+								if (abortSignal.aborted) return;
+								// Existing sessions use their stored directory, ignoring prompt cwd.
+								if (
+									session.directory &&
+									session.directory !== input.workspaceRoot
+								)
+									await client.session.move(sessionId, input.workspaceRoot);
+								const current = new Map<
+									string,
+									PermissionRuleset[number]["action"]
+								>();
+								for (const rule of session.permission ?? []) {
+									// Leave catch-alls untouched when reconciling folder rules.
+									if (
+										rule.permission === "external_directory" &&
+										rule.pattern !== "*"
+									) {
+										current.set(rule.pattern, rule.action);
 									}
 								}
-								return;
-							}
-							const session = await client.session.get(sessionId);
-							if (abortSignal.aborted) return;
-							// Existing sessions use their stored directory, ignoring prompt cwd.
-							if (
-								session.directory &&
-								session.directory !== input.workspaceRoot
-							)
-								await client.session.move(sessionId, input.workspaceRoot);
-							const current = new Map<
-								string,
-								PermissionRuleset[number]["action"]
-							>();
-							for (const rule of session.permission ?? []) {
-								// Leave catch-alls untouched when reconciling folder rules.
-								if (
-									rule.permission === "external_directory" &&
-									rule.pattern !== "*"
-								) {
-									current.set(rule.pattern, rule.action);
+								const desired = new Set<string>();
+								for (const folder of extraFolders) {
+									let directory: string;
+									try {
+										directory = realpathSync(folder).replaceAll("\\", "/");
+									} catch {
+										// A folder can disappear after launch-folder resolution.
+										continue;
+									}
+									// Permission wildcards cannot escape a literal * or ?.
+									if (/[?*]/.test(directory)) continue;
+									desired.add(join(directory, "*").replaceAll("\\", "/"));
 								}
-							}
-							const desired = new Set<string>();
-							for (const folder of extraFolders) {
-								let directory: string;
-								try {
-									directory = realpathSync(folder).replaceAll("\\", "/");
-								} catch {
-									// A folder can disappear after launch-folder resolution.
-									continue;
+								// Updates append rules, so unchanged patterns need no patch.
+								const permission: PermissionRuleset = [];
+								for (const [pattern, action] of current) {
+									if (action === "allow" && !desired.has(pattern)) {
+										permission.push({
+											permission: "external_directory",
+											pattern,
+											action: "ask",
+										});
+									}
 								}
-								// Permission wildcards cannot escape a literal * or ?.
-								if (/[?*]/.test(directory)) continue;
-								desired.add(join(directory, "*").replaceAll("\\", "/"));
-							}
-							// Updates append rules, so unchanged patterns need no patch.
-							const permission: PermissionRuleset = [];
-							for (const [pattern, action] of current) {
-								if (action === "allow" && !desired.has(pattern)) {
-									permission.push({
-										permission: "external_directory",
-										pattern,
-										action: "ask",
-									});
+								for (const pattern of desired) {
+									if (current.get(pattern) !== "allow") {
+										permission.push({
+											permission: "external_directory",
+											pattern,
+											action: "allow",
+										});
+									}
 								}
-							}
-							for (const pattern of desired) {
-								if (current.get(pattern) !== "allow") {
-									permission.push({
-										permission: "external_directory",
-										pattern,
-										action: "allow",
-									});
+								if (permission.length > 0) {
+									await client.session.update(sessionId, { permission });
 								}
-							}
-							if (permission.length > 0) {
-								await client.session.update(sessionId, { permission });
-							}
-							if (!abortSignal.aborted) {
+								// `$init` arrives as `/init`; OpenCode's prompt endpoint would
+								// send it to the model as plain text, so route known commands.
+								const slash = prompt.trim().match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+								const command =
+									slash?.[1] &&
+									(await client.app.commands()).some(
+										({ name, source }) =>
+											name === slash[1] && source !== "skill",
+									)
+										? { name: slash[1], arguments: slash[2] ?? "" }
+										: undefined;
+								return command;
+							},
+							catch: (cause) => cause,
+						});
+						if (isCompaction || abortSignal.aborted) return;
+						yield* Effect.tryPromise({
+							try: async () => {
+								if (abortSignal.aborted) return;
 								submitted = true;
-								await client.session.prompt(sessionId, promptOptions);
-							}
-						},
-						catch: (cause) => cause,
+								if (!command) {
+									await client.session.prompt(sessionId, promptOptions);
+									return;
+								}
+								// The command endpoint replies only when the turn ends, well past
+								// the client's request timeout. Submit it like promptAsync: the
+								// echo establishes intake and the event stream carries the turn.
+								client.session
+									.command(sessionId, command, promptOptions)
+									.catch((cause: unknown) =>
+										log.warn(
+											`OpenCode command /${command.name} for session ${sessionId} ended with: ${cause instanceof Error ? cause.message : String(cause)}`,
+										),
+									);
+							},
+							catch: (cause) => cause,
+						});
 					}),
 				);
 				if (promptResult._tag === "Failure") {

@@ -2,7 +2,6 @@ import { query as sdkQuery } from "@anthropic-ai/claude-agent-sdk";
 import {
 	Context,
 	Effect,
-	Filter,
 	Layer,
 	ManagedRuntime,
 	Option,
@@ -13,7 +12,10 @@ import {
 	Tracer,
 } from "effect";
 import { SqlClient } from "effect/sql";
-import { accountsStateFromConfig } from "../account-directory.js";
+import {
+	accountsStateFromConfig,
+	NO_OPENCODE_HEALTH,
+} from "../account-directory.js";
 import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 	PROVIDER_DRIVERS,
@@ -145,7 +147,6 @@ import {
 	OpenCodeSettingsServiceLive,
 	type OpenCodeSettingsServiceTag,
 	type OrchestrationEngineTag,
-	openCodeInstanceTarget,
 	SessionCompactionsTag,
 	SessionRetriesTag,
 } from "../domain/relay/Services/services.js";
@@ -205,60 +206,51 @@ import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
 
 /**
- * Relay view of OpenCode Instances. Sessions bound to the default id run on
- * this relay's selected instance, so the default id maps to it both ways, and
- * clients default to the relay's directory scope.
+ * Relay view of concrete OpenCode accounts. Clients default to the relay's
+ * directory scope; managed OpenCode also delivers native sessions before use.
  */
 const relayOpenCodeInstances = (
 	instances: OpenCodeInstances,
 	config: ProjectRelayConfig,
 	persistedInstanceIds: readonly string[],
 ): OpenCodeInstances => {
-	const defaultId = MANAGED_OPENCODE_ACCOUNT_ID;
-	const selectedId = config.openCodeInstanceId ?? defaultId;
-	const target = openCodeInstanceTarget(selectedId);
 	const scope = config.noServer ? config.projectDir : undefined;
 	// Restored sessions receive events before the relay first uses their instance.
-	const used = new Set(persistedInstanceIds.map(target));
+	const used = new Set(persistedInstanceIds);
 	const use: OpenCodeInstances["use"] = (instanceId, directory = scope) =>
-		instances.use(target(instanceId), directory).pipe(
+		instances.use(instanceId, directory).pipe(
 			Effect.tap(() =>
 				Effect.sync(() => {
-					used.add(target(instanceId));
+					used.add(instanceId);
 				}),
 			),
 		);
 	return {
-		events: (directories, instanceId = defaultId) =>
+		events: (directories, instanceId = MANAGED_OPENCODE_ACCOUNT_ID) =>
 			instances
-				.events(directories, target(instanceId))
+				.events(directories, instanceId)
 				.pipe(
-					Stream.filterMap(
-						Filter.fromPredicateOption((message) =>
-							message.instanceId === selectedId
-								? Option.some({ ...message, instanceId: defaultId })
-								: used.has(message.instanceId)
-									? Option.some(message)
-									: Option.none(),
-						),
+					Stream.filter(
+						(message) =>
+							message.instanceId === MANAGED_OPENCODE_ACCOUNT_ID ||
+							used.has(message.instanceId),
 					),
 				),
 		use,
 		borrow: (instanceId, directory = scope) =>
-			instances.borrow(target(instanceId), directory).pipe(
+			instances.borrow(instanceId, directory).pipe(
 				Effect.tap(() =>
 					Effect.sync(() => {
-						used.add(target(instanceId));
+						used.add(instanceId);
 					}),
 				),
 			),
 		useIfRunning: (instanceId, directory = scope) =>
-			instances.useIfRunning(target(instanceId), directory),
+			instances.useIfRunning(instanceId, directory),
 		ifRunning: (instanceId, directory = scope) =>
-			instances.ifRunning(target(instanceId), directory),
-		isManagedStopped: (instanceId) =>
-			instances.isManagedStopped(target(instanceId)),
-		stop: (instanceId) => instances.stop(target(instanceId)),
+			instances.ifRunning(instanceId, directory),
+		isManagedStopped: (instanceId) => instances.isManagedStopped(instanceId),
+		stop: (instanceId) => instances.stop(instanceId),
 	};
 };
 
@@ -419,7 +411,12 @@ export function createProjectRelayLayers({
 			return ConfigPersistenceLive.pipe(
 				Layer.provideMerge(snapshot),
 				Layer.provide(makeConfigWriterLive(configDir)),
-				Layer.provideMerge(AccountDirectoryStateLive(accounts)),
+				Layer.provideMerge(
+					AccountDirectoryStateLive(
+						accounts,
+						Effect.succeed(NO_OPENCODE_HEALTH),
+					),
+				),
 			);
 		}),
 	).pipe(
@@ -874,7 +871,7 @@ export function createProjectRelayLayers({
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				daemonSettingsLayer,
 				openCodeInstancesLayer,
 				configLayer,
 				loggerLayer,

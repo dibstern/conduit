@@ -3,8 +3,8 @@
 <!-- tool-detail module, and a failed load says so with a retry rather than       -->
 <!-- passing the preview off as the whole.                                        -->
 <script lang="ts">
-	import { Option, Schema } from "effect";
 	import { type Snippet, untrack } from "svelte";
+	import type { ToolFileChange } from "../../../contracts/stored-event.js";
 	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
@@ -14,32 +14,6 @@
 	import { ensureCanonical } from "../../utils/tool-summarizers/ensure-canonical.js";
 	import Button from "../ui/Button.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
-
-	const decodePresentation = Schema.decodeUnknownOption(Schema.Struct({
-		fileChange: Schema.optional(Schema.Struct({
-			filePath: Schema.String,
-			diff: Schema.optional(Schema.String),
-			linesAdded: Schema.optional(Schema.Number),
-			linesRemoved: Schema.optional(Schema.Number),
-			fileSize: Schema.optional(Schema.Number),
-		})),
-		plan: Schema.optional(Schema.Struct({
-			title: Schema.optional(Schema.String),
-			content: Schema.String,
-		})),
-		computerUse: Schema.optional(Schema.Struct({
-			actions: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
-		})),
-		media: Schema.optional(Schema.Array(Schema.Struct({
-			path: Schema.optional(Schema.String),
-			mime: Schema.String,
-			url: Schema.optional(Schema.String),
-		}))),
-		truncated: Schema.optional(Schema.Boolean),
-		movedToBackground: Schema.optional(Schema.Boolean),
-		exitCode: Schema.optional(Schema.Number),
-		output: Schema.optional(Schema.String),
-	}));
 
 	const loadFromServer = async (tool: ToolMessage, session: SessionRef | undefined) =>
 		session && (await toolDetails.get(session, tool));
@@ -67,10 +41,8 @@
 	let attempt = $state(0);
 
 	const cut = $derived(shownCut(message));
-	const hasPresentation = $derived(typeof message.metadata?.['cursorToolType'] === "string");
-	const presentation = $derived(hasPresentation
-		? Option.getOrUndefined(decodePresentation(message.metadata))
-		: undefined);
+	const hasPresentation = $derived(message.presentation !== undefined);
+	const presentation = $derived(message.presentation);
 	const shown = $derived.by(() => {
 		const tool = full ?? message;
 		const output = message.metadata?.['output'];
@@ -79,6 +51,22 @@
 			: tool;
 	});
 	const input = $derived(hasPresentation ? ensureCanonical(shown.name, shown.input) : undefined);
+	// Count lines in whole text only: a transcript preview or a Cursor-truncated call would undercount.
+	const complete = $derived(!presentation?.truncated && shown.preview?.fileChangesBytes === undefined);
+
+	const marked = (lines: readonly string[], mark: "+" | "-") =>
+		lines.filter((line) => line.startsWith(mark) && !line.startsWith(mark.repeat(3))).length;
+
+	/** A patch's added and removed lines, or the lines of an add that has no patch. */
+	const lineCounts = (change: ToolFileChange): { added: number; removed?: number } | undefined => {
+		if (change.patch !== undefined) {
+			const lines = change.patch.split("\n");
+			return { added: marked(lines, "+"), removed: marked(lines, "-") };
+		}
+		if (change.kind !== "add" || change.after === undefined) return undefined;
+		const { after } = change;
+		return { added: after.split("\n").length - (after === "" || after.endsWith("\n") ? 1 : 0) };
+	};
 
 	// The session the tool is shown in: a fork repeats its parent's call ids.
 	const session = $derived.by((): SessionRef | undefined => {
@@ -117,6 +105,7 @@
 				...whole,
 				...(detail.input && { input: detail.input.value }),
 				...(detail.output && !tool.isError && { result: detail.output.text }),
+				...(detail.fileChanges !== undefined && { fileChanges: detail.fileChanges }),
 			};
 		}, fail);
 		return () => {
@@ -126,18 +115,21 @@
 </script>
 
 <div class={className}>
-{#if presentation?.fileChange}
-	{@const change = presentation.fileChange}
+<!-- Only Cursor cards render file changes inline; other providers' get f02e9.9's Diff action. -->
+{#if presentation && shown.fileChanges?.length}
+	{#each shown.fileChanges as change}
+	{@const counts = complete ? lineCounts(change) : undefined}
 	<div data-testid="tool-file-change" class="my-1 overflow-x-auto">
-		<div class="font-mono text-xs text-text-secondary">{change.filePath}</div>
+		<div class="font-mono text-xs text-text-secondary">{#if change.kind === "move"}{change.oldPath} → {/if}{change.path} <span class="text-text-muted">{change.kind}</span></div>
 		<div class="diff-stats flex gap-3 text-xs">
-			{#if change.linesAdded !== undefined}<span class="text-success">+{change.linesAdded}</span>{/if}
-			{#if change.linesRemoved !== undefined}<span class="text-error">-{change.linesRemoved}</span>{/if}
+			{#if counts}<span class="text-success">+{counts.added}</span>{#if counts.removed !== undefined}<span class="text-error">-{counts.removed}</span>{/if}{/if}
 		</div>
-		{#if change.diff}<pre class="tool-result font-mono text-xs whitespace-pre-wrap">{#each change.diff.split("\n") as line}<span class={line.startsWith("+") ? "text-success" : line.startsWith("-") ? "text-error" : "text-text-secondary"}>{line}{"\n"}</span>{/each}</pre>{/if}
-		{#if change.fileSize !== undefined}<div class="text-xs text-text-muted">{change.fileSize} bytes</div>{/if}
-		{#if input?.tool === "Write"}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-text-secondary">{input.content}</pre>{/if}
+		{#if change.patch !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap">{#each change.patch.split("\n") as line}<span class={line.startsWith("+") ? "text-success" : line.startsWith("-") ? "text-error" : "text-text-secondary"}>{line}{"\n"}</span>{/each}</pre>{:else}
+			{#if change.before !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-error" aria-label="Before">{change.before}</pre>{/if}
+			{#if change.after !== undefined}<pre class="tool-result font-mono text-xs whitespace-pre-wrap text-success" aria-label="After">{change.after}</pre>{/if}
+		{/if}
 	</div>
+	{/each}
 {:else if presentation?.plan}
 	<section data-testid="tool-plan" class="my-1">
 		{#if presentation.plan.title}<h3 class="text-sm font-medium">{presentation.plan.title}</h3>{/if}

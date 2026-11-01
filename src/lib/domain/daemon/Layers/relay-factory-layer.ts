@@ -93,7 +93,6 @@ import {
 	type broadcastProjectList,
 	getEffectiveWorktreeCleanup,
 	projectInfos as getEffectProjectInfos,
-	openCodeInstanceFor,
 	ProjectRegistryTag,
 	type removeProjectFromEffectRegistry,
 	type saveProject,
@@ -520,15 +519,6 @@ export const RelayFactoryLive = (
 								}),
 						});
 
-						// Read config for any runtime values needed
-						const _config = yield* Ref.get(configRef);
-						const instances = Array.from(
-							yield* getEffectInstances.pipe(
-								Effect.provideService(InstanceManagerStateTag, instanceState),
-								Effect.provideService(AccountDirectory, accounts),
-							),
-						);
-						const selectedInstance = openCodeInstanceFor(instances);
 						envResolver?.register(
 							project.folders[0],
 							project.shellEnv,
@@ -653,9 +643,6 @@ export const RelayFactoryLive = (
 											}
 										: {}),
 									...(usage ? { usage } : {}),
-									...(selectedInstance
-										? { openCodeInstanceId: selectedInstance.id }
-										: {}),
 									projectDir: project.folders[0],
 									extraFolders: project.folders.slice(1),
 									...(envResolver && {

@@ -32,7 +32,7 @@ import type {
 	ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
-import { openPickerRoot } from "../helpers/model-picker.js";
+import { openPickerAccounts, openPickerRoot } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/process-harness-fixture.js";
 import { closeSettings } from "../helpers/settings.js";
 import { AppPage } from "../page-objects/app.page.js";
@@ -71,9 +71,6 @@ const otherOpenCodeModel = {
 const pickerSelector =
 	'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible, [data-testid="composer-words-sheet-trigger"]:visible';
 
-// Each case starts a daemon and provider processes. Keep cases sequential
-// within a viewport, while desktop and mobile still run independently.
-test.describe.configure({ mode: "default" });
 test.setTimeout(120_000);
 test.use({
 	harnessOptions: {
@@ -657,6 +654,7 @@ async function observeSessionRpc(
 			arrived: () => void;
 			gate: Promise<void>;
 			once: boolean;
+			match: ((frame: RpcFrame, request: RpcFrame) => boolean) | undefined;
 		}
 	>();
 	await editRpc(page, async (frame, request) => {
@@ -669,7 +667,7 @@ async function observeSessionRpc(
 			const tag =
 				request.tag === "SubscribeDraftModels" ? "GetModels" : request.tag;
 			const hold = holds.get(`${tag}:${request.payload?.["sessionId"]}`);
-			if (hold) {
+			if (hold && (hold.match?.(frame, request) ?? true)) {
 				if (hold.once) holds.delete(`${tag}:${request.payload?.["sessionId"]}`);
 				hold.frames.push(frame);
 				hold.arrived();
@@ -721,7 +719,14 @@ async function observeSessionRpc(
 			);
 			return requestIds;
 		},
-		hold(tag: string, sessionId: string, options?: { once: boolean }) {
+		hold(
+			tag: string,
+			sessionId: string,
+			options?: {
+				once: boolean;
+				match?: (frame: RpcFrame, request: RpcFrame) => boolean;
+			},
+		) {
 			const key = `${tag}:${sessionId}`;
 			if (holds.has(key)) throw new Error(`A ${tag} reply is already held`);
 			let arrived = () => {};
@@ -733,7 +738,13 @@ async function observeSessionRpc(
 				release = resolve;
 			});
 			const frames: RpcFrame[] = [];
-			const held = { frames, arrived, gate, once: options?.once ?? false };
+			const held = {
+				frames,
+				arrived,
+				gate,
+				once: options?.once ?? false,
+				match: options?.match,
+			};
 			holds.set(key, held);
 			return {
 				wait,
@@ -1249,10 +1260,10 @@ test.describe("session composer owns its stored pick", () => {
 			browser.rpc.GetModels({ sessionId: sessionB }),
 		);
 		const mode = page.locator(
-			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="composer-more-mode"]:visible',
+			'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible, [data-testid="picker-row-permissions"]:visible',
 		);
 		const phoneWords = page.getByTestId("composer-words-sheet-trigger");
-		let openedComposer = false;
+		let openedPanel = false;
 		const older = observed.hold("GetModels", sessionA, { once: true });
 		let stage = "A-row-read";
 		let before: string | null | undefined;
@@ -1293,11 +1304,13 @@ test.describe("session composer owns its stored pick", () => {
 					phoneWords.getByText("full", { exact: true }),
 				).toBeVisible();
 			if (!(await mode.isVisible())) {
-				await picker.click();
-				openedComposer = true;
+				await openPickerRoot(page, picker);
+				openedPanel = true;
 			}
 			await expect(mode).toHaveAccessibleName(
-				"Approvals: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
 			stage = "A-stale-delivered";
 			older.release();
@@ -1310,9 +1323,11 @@ test.describe("session composer owns its stored pick", () => {
 			);
 			after = await picker.getAttribute("data-shown-permission-mode");
 			await expect(mode).toHaveAccessibleName(
-				"Approvals: Full access. Open options",
+				openedPanel
+					? /Permissions.*Full access/
+					: "Permissions: Full access. Open options",
 			);
-			if (openedComposer) await page.keyboard.press("Escape");
+			if (openedPanel) await page.keyboard.press("Escape");
 			if (await phoneWords.isVisible())
 				await expect(
 					phoneWords.getByText("full", { exact: true }),
@@ -1349,7 +1364,20 @@ test.describe("session composer owns its stored pick", () => {
 			"claude",
 			caseId,
 		);
-		const older = observed.hold("GetModels", sessionId, { once: true });
+		// Startup catalog reads can still be in flight here, so a hold only takes
+		// the reply to a read issued after it was armed that reports the switch.
+		const replyReporting = (variant: string) => {
+			const armedAt = observed.requests.length;
+			return (frame: RpcFrame, request: RpcFrame) =>
+				observed.requests.indexOf(request) >= armedAt &&
+				Schema.decodeUnknownOption(GetModelsResponseSchema)(
+					frame.exit?.value,
+				).pipe(Option.exists((reply) => reply.variant?.variant === variant));
+		};
+		const older = observed.hold("GetModels", sessionId, {
+			once: true,
+			match: replyReporting("high"),
+		});
 		let newer: ReturnType<typeof observed.hold> | undefined;
 		let stage = "older-row-read";
 		let shown: Pick | undefined;
@@ -1370,7 +1398,10 @@ test.describe("session composer owns its stored pick", () => {
 				).variant?.variant,
 			).toBe("high");
 			stage = "newer-row-read";
-			newer = observed.hold("GetModels", sessionId, { once: true });
+			newer = observed.hold("GetModels", sessionId, {
+				once: true,
+				match: replyReporting("low"),
+			});
 			await Effect.runPromise(
 				browser.rpc.SwitchVariant({
 					sessionId,
@@ -1450,7 +1481,15 @@ test.describe("session composer owns its stored pick", () => {
 		const { browser, slug, sessionId, picker, reported } =
 			await createGuardSession(page, harness, "claude", caseId);
 		rejectedSessionId = sessionId;
-		const rowRead = observed.hold("GetModels", sessionId, { once: true });
+		// A startup catalog read still in flight can also report the switch. Hold
+		// every reply that does, so the picker cannot show high before the click.
+		const rowRead = observed.hold("GetModels", sessionId, {
+			once: false,
+			match: (frame) =>
+				Schema.decodeUnknownOption(GetModelsResponseSchema)(
+					frame.exit?.value,
+				).pipe(Option.exists((reply) => reply.variant?.variant === "high")),
+		});
 		const rejection = observed.hold("SwitchVariant", sessionId, { once: true });
 		let stage = "stored-pick-changed";
 		let optimistic: Pick | undefined;
@@ -1823,7 +1862,9 @@ test.describe("session composer owns its stored pick", () => {
 					`${harness.baseUrl}/s/${encodeURIComponent(sessionId)}?p=${encodeURIComponent(slug)}`,
 				);
 				await expect(picker).toHaveAttribute("data-shown-harness", driver);
-				await held.wait;
+				// Startup reads agents twice, on connect and again once the shell
+				// synchronizes; count only after both so the tab's read is its own.
+				await expect.poll(() => held.frames.length).toBe(2);
 				const requestsBefore = observed.requests.length;
 				// Keep the initial agents read in flight so this tab must fetch agents.
 				await openModelsSettings(page);
@@ -1959,19 +2000,16 @@ async function selectFullPermission(page: Page): Promise<void> {
 	const trigger = page.locator(
 		'[data-testid="permission-mode-badge"]:visible, [data-testid="composer-word-approvals"]:visible',
 	);
-	if (await trigger.count()) {
+	const panel = (await trigger.count()) === 0;
+	if (!panel) {
 		await trigger.click();
 	} else {
-		await page.locator(pickerSelector).click();
-		await page.getByTestId("composer-more-mode").click();
+		await openPickerRoot(page, page.locator(pickerSelector));
+		await page.getByTestId("picker-row-permissions").click();
 	}
-	await page.getByTestId("permission-mode-option-full").click();
-	await expect(
-		page.getByRole("button", {
-			name: "Approvals: Full access. Open options",
-			exact: true,
-		}),
-	).toBeVisible();
+	await page.getByTestId("picker-permission-full").click();
+	// Picking returns to the Session root; OpenCode's root has no Permissions row.
+	await expect(page.getByTestId("picker-subtitle")).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page.locator(pickerSelector)).toHaveAttribute(
 		"data-shown-permission-mode",
@@ -2571,6 +2609,7 @@ test.describe("draft owns one complete pick", () => {
 		}
 		try {
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await held.wait;
 			await closePicker(page);
@@ -2591,7 +2630,9 @@ test.describe("draft owns one complete pick", () => {
 				expect(reply.response.providers).toEqual([]);
 			deliverEmpty = false;
 			await openPickerRoot(page, draft.picker);
+			await openPickerAccounts(page);
 			await page.getByTestId("picker-account-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${instanceB}`).click();
 			await closePicker(page);
 			await expect
@@ -4401,6 +4442,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 
 	test.describe("default harness with a named instance", () => {
 		test.use({
+			startHarness: false,
 			harnessOptions: {
 				managedOpenCode: true,
 				opencodeBorrowIdleTimeoutMs: borrowIdleTimeoutMs,
@@ -4408,7 +4450,38 @@ test.describe("OpenCode draft inventory borrows", () => {
 				restartProof: true,
 			},
 		});
-		test("9cn3-default-named-instance: a stopped named OpenCode default prefills on page load", async ({
+		test.beforeEach(async ({ harness }) => {
+			const config = Either.getOrThrow(
+				loadDaemonConfigResult(harness.configDir),
+			);
+			const named = config?.instances?.find(({ id }) => id === "managed-test");
+			if (!config || !named) throw new Error("Missing named OpenCode fixture");
+			// Concrete named accounts and managed fallback need independent servers.
+			writeFileSync(
+				join(harness.configDir, "daemon.json"),
+				JSON.stringify({
+					...config,
+					instances: [
+						...(config.instances ?? []),
+						{
+							...named,
+							id: "opencode",
+							name: "Managed fallback",
+							env: {
+								...named.env,
+								CONDUIT_TEST_OPENCODE_STATE_PREFIX: "fallback",
+							},
+						},
+					],
+					accountDefaults: {
+						...config.accountDefaults,
+						opencode: "managed-test",
+					},
+				}),
+			);
+			await harness.restart();
+		});
+		test("9cn3-default-named-instance: a stopped named OpenCode default prefills with managed fallback on page load", async ({
 			page,
 			harness,
 		}, testInfo) => {
@@ -4425,14 +4498,8 @@ test.describe("OpenCode draft inventory borrows", () => {
 					setup.slug,
 					"opencode",
 				);
-				await expect(picker).toHaveAttribute(
-					"data-instance-id",
-					"managed-test",
-				);
-				evidence["running"] = await waitForHealthy(
-					setup.browser,
-					"managed-test",
-				);
+				await expect(picker).toHaveAttribute("data-instance-id", "opencode");
+				evidence["running"] = await waitForHealthy(setup.browser, "opencode");
 				await expect(picker).toHaveAttribute("data-shown-model", model.modelID);
 				evidence["receipt"] = await sendShownPick(
 					page,
@@ -4441,8 +4508,15 @@ test.describe("OpenCode draft inventory borrows", () => {
 					setup.slug,
 					"9cn3-default-named-instance",
 					observed,
-					"managed-test",
+					"opencode",
 				);
+				expect((await instance(setup.browser, "managed-test"))?.status).toBe(
+					"stopped",
+				);
+				expect(
+					Either.getOrThrow(loadDaemonConfigResult(harness.configDir))
+						?.accountDefaults?.opencode,
+				).toBe("managed-test");
 			} finally {
 				evidence["finalInstance"] = await instance(
 					setup.browser,
@@ -4453,17 +4527,17 @@ test.describe("OpenCode draft inventory borrows", () => {
 		});
 
 		for (const catalogState of ["refreshed", "missing"] as const) {
-			test(`9cn3-review-alias-${catalogState}: an alias-bound turn validates the named default catalog`, async ({
+			test(`9cn3-review-named-${catalogState}: a named-account turn validates its own catalog`, async ({
 				harness,
 			}, testInfo) => {
-				const caseId = `9cn3-review-alias-${catalogState}`;
+				const caseId = `9cn3-review-named-${catalogState}`;
 				const setup = await prepareDraft(harness, "claude", "managed-test");
 				const { sessionId } = await Effect.runPromise(
 					setup.browser.rpc.CreateSession({
 						projectSlug: setup.slug,
 						originId: caseId,
 						permissionMode: "ask",
-						instanceId: AccountIdSchema.make("opencode"),
+						instanceId: AccountIdSchema.make("managed-test"),
 						model: {
 							providerId: "fake",
 							modelId: "fake-model",
@@ -4484,7 +4558,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 					evidence["before"] = readStoredState(harness, setup.slug, sessionId);
 					expect(
 						readStoredState(harness, setup.slug, sessionId).pick?.provider,
-					).toBe("opencode");
+					).toBe("managed-test");
 					if (catalogState === "refreshed") {
 						writeFileSync(
 							join(harness.configDir, "fake-opencode-model-catalog.json"),
@@ -4887,6 +4961,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const claudeBefore = await readShown(picker);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await expect(picker).toHaveAttribute("data-instance-id", namedId);
@@ -4911,6 +4986,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			await expect.poll(() => isProcessAlive(borrowed?.pid ?? 0)).toBe(false);
 			await openPickerRoot(page, picker);
 			await page.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(page);
 			await page.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(page);
 			await waitForHealthy(setup.browser, namedId);
@@ -4963,6 +5039,7 @@ test.describe("OpenCode draft inventory borrows", () => {
 			const otherPicker = await openDraftPage(otherPage, harness, setup.slug);
 			await openPickerRoot(otherPage, otherPicker);
 			await otherPage.getByTestId("picker-harness-opencode").click();
+			await openPickerAccounts(otherPage);
 			await otherPage.getByTestId(`picker-account-${namedId}`).click();
 			await closePicker(otherPage);
 			await waitForHealthy(setup.browser, namedId);
@@ -5239,7 +5316,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 				expect(response.ok).toBe(true);
 				const native = (await response.json()) as { id: string };
 				const expected = {
-					provider: "opencode",
+					provider: instanceId,
 					model_id: parentId ? "fake-source" : "fake-model",
 					model_provider: "fake",
 					variant: parentId ? "" : "high",
@@ -5336,7 +5413,7 @@ test.describe("runtime and stopped OpenCode picks", () => {
 					parent_id: parentId ?? null,
 					pick_event_count: 3,
 					created_event_count: 1,
-					bound_provider: "opencode",
+					bound_provider: instanceId,
 				});
 				expect(created.pick).toEqual(expected);
 				expect(typeof runtimeInstance.pid).toBe("number");

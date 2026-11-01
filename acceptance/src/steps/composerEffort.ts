@@ -3,21 +3,57 @@ import { dualDriverProviders } from "../../../test/e2e/fixtures/mockup-state.js"
 import type { StepHandler } from "../runtime.js";
 import {
 	effortOptions,
-	openComposerMoreSheet,
+	openModelPicker,
 	refetchModelCatalog,
 	rejectedEffortSwitches,
 	requireRpcControl,
 } from "./shared.js";
 
 async function effortControl(page: Page) {
-	if ((page.viewportSize()?.width ?? 0) < 768) {
-		await openComposerMoreSheet(page);
-		return page.getByTestId("composer-more-effort");
-	}
 	return page.getByTestId(/^(variant-badge|composer-word-effort)$/);
 }
 
 export const composerEffortHandlers: StepHandler[] = [
+	{
+		name: "activate effort control",
+		match:
+			/^I (click|Option-click|press Enter on|press Space on|press Shift\+F10 on) the effort control$/,
+		run: async ({ world, match }) => {
+			const control = world.page.getByTestId("variant-badge");
+			await expect(control).not.toHaveAttribute("aria-busy", "true");
+			const gesture = match[1] ?? "";
+			if (gesture.startsWith("press ")) {
+				await control.press(gesture.slice(6, -3));
+			} else {
+				await control.click({
+					modifiers: gesture === "Option-click" ? ["Alt"] : [],
+				});
+			}
+		},
+	},
+	{
+		name: "assert effort control name and hints",
+		match: /^the effort control names (.+)$/,
+		run: async ({ world, match }) => {
+			const control = world.page.getByTestId("variant-badge");
+			const phone = (world.page.viewportSize()?.width ?? 0) < 768;
+			await expect(control).not.toHaveAttribute("aria-busy", "true");
+			await expect(control).toHaveAccessibleName(
+				`Effort: ${match[1]}. ${phone ? "Tap to raise; hold for options" : "Click to raise; Option-click for options"}`,
+			);
+			await expect(control).toHaveAttribute(
+				"title",
+				`Effort ${match[1]}. ${phone ? "Tap to raise; hold for options" : "Click or Ctrl+T to raise; Option-click for options"}`,
+			);
+			for (const attribute of [
+				"aria-haspopup",
+				"aria-expanded",
+				"aria-controls",
+			]) {
+				await expect(control).not.toHaveAttribute(attribute);
+			}
+		},
+	},
 	{
 		name: "set model effort options",
 		match: /^the model offers effort levels (.+)$/,
@@ -74,7 +110,19 @@ export const composerEffortHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const picker = world.page.getByTestId("model-picker");
 			const alreadyOpen = await picker.isVisible();
-			if (!alreadyOpen) await (await effortControl(world.page)).click();
+			if (!alreadyOpen) {
+				if ((world.page.viewportSize()?.width ?? 0) < 768) {
+					await openModelPicker(world.page);
+				} else {
+					const control = await effortControl(world.page);
+					await control.click({
+						modifiers:
+							(await control.getAttribute("data-testid")) === "variant-badge"
+								? ["Alt"]
+								: [],
+					});
+				}
+			}
 			const option = picker.getByTestId(`picker-effort-option-${match[1]}`);
 			await expect(option).toBeEnabled();
 			await option.click();

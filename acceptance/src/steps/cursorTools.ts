@@ -1,13 +1,17 @@
 import { expect, type Page } from "@playwright/test";
+import { Schema } from "effect";
+import type { ToolFileChange } from "../../../src/lib/contracts/stored-event.js";
 import {
 	PartVersion,
 	ToolCallId,
+	ToolPresentationSchema,
 	Utf8Bytes,
 } from "../../../src/lib/contracts/tool-wire.js";
 import type {
 	HistoryMessage,
 	HistoryMessagePart,
 } from "../../../src/lib/shared-types.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
 
@@ -21,8 +25,9 @@ const image =
 // Two identical frames prevent native playback from treating this as zero-duration.
 const recording =
 	"data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMUbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAA+gAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAj50cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAA+gAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAASwAAACWAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAPoAAAAAAABAAAAAAG2bWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAQABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABYW1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAASFzdGJsAAAAvXN0c2QAAAAAAAAAAQAAAK1hdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAASwAlgBIAAAASAAAAAAAAAABFUxhdmM2Mi4yOC4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAAM2F2Y0MBQsAe/+EAGmdCwB6mEQTFe5sBEAAAAwAQAAADACDxYuEYAQAGaMhCBETIAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAMVAAADFQAAAAGHN0dHMAAAAAAAAAAQAAAAIAACAAAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAACAAAAAQAAABRzdHN6AAAAAAAAAxUAAAACAAAAFHN0Y28AAAAAAAAAAQAAA0QAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYyLjEyLjEwMgAAAAhmcmVlAAAGMm1kYXQAAAJ0BgX//3DcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MTYgZGVibG9jaz0xOi0zOi0zIGFuYWx5c2U9MHgxOjB4MTMxIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9Mi4wMDowLjcwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MCBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tNCB0aHJlYWRzPTUgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0wIHdlaWdodHA9MCBrZXlpbnQ9MjUwIGtleWludF9taW49MSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTYwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MzAuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMjAAgAAAAJlliIIDGc5MUAAWq7777777777777777776666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666668AAAJ0BgX//3DcRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY1IHIzMjIyIGIzNTYwNWEgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDI1IC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MTYgZGVibG9jaz0xOi0zOi0zIGFuYWx5c2U9MHgxOjB4MTMxIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9Mi4wMDowLjcwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MCBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tNCB0aHJlYWRzPTUgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz0wIHdlaWdodHA9MCBrZXlpbnQ9MjUwIGtleWludF9taW49MSBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTYwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MzAuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMjAAgAAAAJlliIIDGc5MUAAWq7777777777777777776666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666666668=";
-// Date is pinned just after the snapshot times so elapsed timers render a short, stable duration.
-const toolsClock = new Date("2026-10-02T00:00:05Z");
+// Snapshot times sit just before the driver's pinned clock so elapsed timers render a short,
+// stable duration. Moving the page clock instead races the once-a-second clock tick.
+const toolsClock = new Date(PINNED_CLOCK_MS);
 const row = (page: Page, id: string) =>
 	page.locator(`.tool-item[data-tool-id="cursor-tools-${id}"]`);
 
@@ -51,11 +56,36 @@ function tool(
 	};
 }
 
+function withFileChanges(
+	part: HistoryMessagePart,
+	fileChanges: readonly ToolFileChange[],
+): HistoryMessagePart {
+	return { ...part, state: { ...part.state, fileChanges } };
+}
+
+// The server decodes each Cursor part's metadata into its presentation.
+function withPresentation(part: HistoryMessagePart): HistoryMessagePart {
+	return part.state
+		? {
+				...part,
+				state: {
+					...part.state,
+					presentation: Schema.decodeUnknownSync(ToolPresentationSchema)(
+						part.state["metadata"],
+					),
+				},
+			}
+		: part;
+}
+
 // Publish the typed detail shape: the legacy tool mock drops metadata updates.
 function publish(page: Page, added: HistoryMessagePart[]): void {
 	const previous = parts.get(page) ?? [];
 	const replaced = new Set(added.map(({ id }) => id));
-	const next = [...previous.filter(({ id }) => !replaced.has(id)), ...added];
+	const next = [
+		...previous.filter(({ id }) => !replaced.has(id)),
+		...added.map(withPresentation),
+	];
 	parts.set(page, next);
 	const messages: HistoryMessage[] = [
 		{
@@ -162,8 +192,7 @@ export const cursorToolsHandlers: StepHandler[] = [
 	{
 		name: "start Cursor shell tool",
 		match: /^the Cursor shell starts with command (.+)$/,
-		run: async ({ world, match }) => {
-			await world.page.clock.setFixedTime(toolsClock);
+		run: ({ world, match }) => {
 			parts.set(world.page, []);
 			publish(world.page, [
 				tool(
@@ -279,52 +308,57 @@ export const cursorToolsHandlers: StepHandler[] = [
 		match: /^the Cursor relay publishes file changes$/,
 		run: ({ world }) =>
 			publish(world.page, [
-				tool(
-					"edit",
-					"Edit",
-					{
-						tool: "Edit",
-						filePath: "src/value.ts",
-						oldString: "old value",
-						newString: "new value",
-					},
-					"Updated src/value.ts",
-					{
-						fileChange: {
+				withFileChanges(
+					tool(
+						"edit",
+						"Edit",
+						{
+							tool: "Edit",
 							filePath: "src/value.ts",
-							diff: "@@ -1 +1 @@\n-old value\n+new value\n",
-							linesAdded: 1,
-							linesRemoved: 1,
+							oldString: "old value",
+							newString: "new value",
 						},
-					},
+						"Updated src/value.ts",
+					),
+					[
+						{
+							path: "src/value.ts",
+							kind: "update",
+							patch: "@@ -1 +1 @@\n-old value\n+new value\n",
+						},
+					],
 				),
-				tool(
-					"write",
-					"Write",
-					{
-						tool: "Write",
-						filePath: "src/new.ts",
-						content: "first line\nsecond line\n",
-					},
-					"Created src/new.ts",
-					{
-						fileChange: {
+				withFileChanges(
+					tool(
+						"write",
+						"Write",
+						{
+							tool: "Write",
 							filePath: "src/new.ts",
-							linesAdded: 2,
+							content: "first line\nsecond line\n",
 						},
-					},
+						"Created src/new.ts",
+					),
+					[
+						{
+							path: "src/new.ts",
+							kind: "add",
+							after: "first line\nsecond line\n",
+						},
+					],
 				),
-				tool(
-					"delete",
-					"Delete",
-					{ tool: "Unknown", name: "Delete", raw: { path: "src/deleted.ts" } },
-					"Deleted src/deleted.ts",
-					{
-						fileChange: {
-							filePath: "src/deleted.ts",
-							fileSize: 23,
+				withFileChanges(
+					tool(
+						"delete",
+						"Delete",
+						{
+							tool: "Unknown",
+							name: "Delete",
+							raw: { path: "src/deleted.ts" },
 						},
-					},
+						"Deleted src/deleted.ts",
+					),
+					[{ path: "src/deleted.ts", kind: "delete" }],
 				),
 			]),
 	},
@@ -363,14 +397,14 @@ export const cursorToolsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert Cursor delete SDK path and size",
+		name: "assert Cursor delete SDK path",
 		match:
-			/^the Cursor delete row shows its path and ([0-9]+) bytes without invented lines$/,
-		run: async ({ world, match }) => {
+			/^the Cursor delete row shows its path as deleted without invented lines$/,
+		run: async ({ world }) => {
 			await expand(world.page, "delete");
 			const change = row(world.page, "delete").getByTestId("tool-file-change");
 			await expect(change).toContainText("src/deleted.ts");
-			await expect(change).toContainText(`${match[1]} bytes`);
+			await expect(change.getByText("delete", { exact: true })).toBeVisible();
 			await expect(change.locator(".diff-stats span")).toHaveCount(0);
 			await expect(change.locator("pre")).toHaveCount(0);
 		},
@@ -659,8 +693,15 @@ export const cursorToolsHandlers: StepHandler[] = [
 						throw new Error("The recording must render a video element");
 					// Playback exits the native loading animation without waiting for its cooldown.
 					await video.play();
-					video.pause();
-					video.currentTime = 0;
+					// Seeking before pause settles can leave Chromium at the stopped position.
+					await new Promise<void>((resolve) => {
+						video.addEventListener("pause", () => resolve(), { once: true });
+						video.pause();
+					});
+					await new Promise<void>((resolve) => {
+						video.addEventListener("seeked", () => resolve(), { once: true });
+						video.currentTime = 0;
+					});
 				});
 				await expect
 					.poll(() =>
@@ -715,6 +756,26 @@ export const cursorToolsHandlers: StepHandler[] = [
 					"First page of tool output",
 					{ truncated: true },
 				),
+				withFileChanges(
+					tool(
+						"truncated-write",
+						"Write",
+						{
+							tool: "Write",
+							filePath: "src/cut.ts",
+							content: "first line\nsecond line\n",
+						},
+						"Created src/cut.ts",
+						{ truncated: true },
+					),
+					[
+						{
+							path: "src/cut.ts",
+							kind: "add",
+							after: "first line\nsecond line\n",
+						},
+					],
+				),
 			]),
 	},
 	{
@@ -751,6 +812,21 @@ export const cursorToolsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "assert truncated Cursor write has no count",
+		match:
+			/^the truncated Cursor write shows its content without an added count$/,
+		run: async ({ world }) => {
+			await expand(world.page, "truncated-write");
+			const change = row(world.page, "truncated-write").getByTestId(
+				"tool-file-change",
+			);
+			await expect(change.locator("pre")).toHaveText(
+				"first line\nsecond line\n",
+			);
+			await expect(change.locator(".diff-stats span")).toHaveCount(0);
+		},
+	},
+	{
 		name: "publish Cursor task progress",
 		match: /^the Cursor task reports progress (.+)$/,
 		run: ({ world, match }) =>
@@ -781,7 +857,8 @@ export const cursorToolsHandlers: StepHandler[] = [
 		name: "assert generic Cursor task",
 		match: /^the Cursor task remains a generic row$/,
 		run: async ({ world }) => {
-			await expect(row(world.page, "task")).toContainText("task");
+			// A running row reads "Running" with its progress, not its tool name.
+			await expect(row(world.page, "task")).toBeVisible();
 			await expect(
 				row(world.page, "task").getByRole("button", {
 					name: "Open subagent session",
@@ -805,7 +882,7 @@ export const cursorToolsHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			await expect(
 				world.page.locator('.tool-item[data-tool-id^="cursor-tools-"]'),
-			).toHaveCount(19);
+			).toHaveCount(20);
 		},
 	},
 ];

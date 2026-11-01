@@ -4,30 +4,26 @@
 	import type { ServerForm } from "./ServerSettingsTab.svelte";
 	import CursorAuthSettings from "./CursorAuthSettings.svelte";
 	import CodexAuthSettings from "./CodexAuthSettings.svelte";
-	import { refreshServerStatus } from "../../stores/server-status.svelte.js";
+	import AccountForm from "./AccountForm.svelte";
+	import { createAccountForm } from "./account-form.svelte.js";
+	import { createAccountActions } from "../../utils/account-actions.svelte.js";
+	import type { OpenCodeInstance } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import HarnessLogo from "../model/HarnessLogo.svelte";
 	import Icon from "../ui/Icon.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
-	import Textarea from "../ui/Textarea.svelte";
-	import TextInput from "../ui/TextInput.svelte";
-	import SegmentedControl from "../ui/SegmentedControl.svelte";
 	import Disclosure from "../ui/Disclosure.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
-	import SettingsRow from "../ui/SettingsRow.svelte";
-	import { applyDetectProxyResponse, applyInstanceListResponse, applyScanNowResponse, beginProxyDetection, beginScan, clearScanInFlight, getCachedInstances, getDriverTraits, getInstanceTraits, getProxyDetection, getScanResult, instanceStatusColor, isScanInFlight } from "../../stores/instance.svelte.js";
-	import { confirm, showToast } from "../../stores/ui.svelte.js";
+	import { getCachedInstances, getDriverTraits, getInstanceTraits, getProxyDetection, getScanResult, instanceStatusColor, isScanInFlight } from "../../stores/instance.svelte.js";
+	import { showToast } from "../../stores/ui.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { getProviderPresentation, PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
-	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { rpc } from "../../transport/ws-rpc-client.js";
 
 	const INSTANCE_KEY_COPY_FEEDBACK_MS = 2_000;
 	let { openForm, onToggleForm, onOpenUsage }: { openForm: ServerForm | null; onToggleForm: (form: ServerForm) => void; onOpenUsage: () => void } = $props();
 	const instanceFormMode = $derived(openForm === "instance-add" ? "add" : openForm?.startsWith("instance-edit:") ? "edit" : null);
-	const editingInstanceId = $derived(instanceFormMode === "edit" ? openForm?.slice("instance-edit:".length) : null);
 
 	let state = $state({
 		expandedInstanceId: null as string | null,
@@ -35,34 +31,22 @@
 		guidesOpen: false,
 		copiedKey: null as string | null,
 		copyTimer: null as ReturnType<typeof setTimeout> | null,
-		formDriver: "claude" as KnownProviderDriverKind,
-		formName: "",
-		formConfigDir: "",
-		formManaged: true,
-		formPort: "",
-		formUrl: "",
-		formEnv: "",
-		initialFormEnv: "",
-		formEnvOpen: false,
-		formSaving: false,
-		defaultSaving: false,
 	});
 
-	$effect(() => {
-		beginProxyDetection();
-		void rpc("DetectProxy", {})
-			.then(applyDetectProxyResponse)
-			.catch(() => applyDetectProxyResponse({ found: false, port: 8317 }));
+	const accountActions = createAccountActions();
+	const form = createAccountForm({
+		onclose: (target) => {
+			const key = target.mode === "edit" ? `instance-edit:${target.accountId}` as const : "instance-add";
+			if (openForm !== key) return;
+			if (target.mode === "edit") state.expandedInstanceId = null;
+			onToggleForm(key);
+		},
 	});
+	$effect(() => { void accountActions.detectProxy(); });
 	onDestroy(() => {
 		if (state.copyTimer) clearTimeout(state.copyTimer);
 	});
 	const DRIVER_OPTIONS = Object.keys(PROVIDER_PRESENTATION).filter(isKnownDriverKind);
-	const DRIVER_TAB_OPTIONS = $derived(DRIVER_OPTIONS.map((driver) => ({
-		value: driver,
-		label: `${PROVIDER_PRESENTATION[driver].label} ${getDriverTraits(driver)?.accountKind === "config-directory" ? "account" : "server"}`,
-		testId: `instance-form-driver-${driver}`,
-	})));
 	const instances = $derived(getCachedInstances());
 	const instancesByDriver = $derived.by(() => {
 		const grouped: Record<string, typeof instances> = {};
@@ -79,8 +63,6 @@
 	}));
 	const serverInstances = $derived(instances.filter((inst) => getProviderPresentation(inst.driver ?? "opencode") && getInstanceTraits(inst.id)?.runsOpenCodeServer));
 	const unknownInstances = $derived(instances.filter((inst) => !getProviderPresentation(inst.driver ?? "opencode")));
-	const formTraits = $derived(getDriverTraits(state.formDriver));
-	const formPresentation = $derived(PROVIDER_PRESENTATION[state.formDriver]);
 	const scanInFlight = $derived(isScanInFlight());
 	const scanResult = $derived(getScanResult());
 	const proxyResult = $derived(getProxyDetection());
@@ -88,167 +70,16 @@
 	function handleToggleInstance(instanceId: string) {
 		state.expandedInstanceId = state.expandedInstanceId === instanceId ? null : instanceId;
 	}
-	function handleStart(instanceId: string) {
-		void rpc("StartInstance", { instanceId })
-			.then(applyInstanceListResponse)
-			.then(refreshServerStatus)
-			.catch(toastFailure("Failed to start instance", "warn"));
-	}
-	function handleStop(instanceId: string) {
-		void rpc("StopInstance", { instanceId })
-			.then(applyInstanceListResponse)
-			.then(refreshServerStatus)
-			.catch(toastFailure("Failed to stop instance", "warn"));
-	}
-	async function handleMakeDefault(instanceId: string) {
-		if (state.defaultSaving) return;
-		state.defaultSaving = true;
-		try {
-			applyInstanceListResponse(await rpc("SetDefault", { instanceId }));
-		} catch (error: unknown) {
-			toastFailure("Failed to change default account", "warn")(error);
-		} finally {
-			state.defaultSaving = false;
-		}
-	}
-	async function handleRemove(instanceId: string, instanceName: string) {
-		const confirmed = await confirm(`Remove instance "${instanceName}"? This cannot be undone.`);
-		if (confirmed) {
-			void rpc("RemoveInstance", { instanceId })
-				.then(applyInstanceListResponse)
-				.then(refreshServerStatus)
-				.catch(toastFailure("Failed to remove instance", "warn"));
-		}
-	}
-	function closeInstanceForm() {
-		if (instanceFormMode === "edit") state.expandedInstanceId = null;
-		if (instanceFormMode !== null && openForm) onToggleForm(openForm);
-		state.formDriver = "claude";
-		state.formName = "";
-		state.formConfigDir = "";
-		state.formManaged = true;
-		state.formPort = "";
-		state.formUrl = "";
-		state.formEnv = "";
-		state.initialFormEnv = "";
-		state.formEnvOpen = false;
-		state.formSaving = false;
-	}
 	function openAddInstance(driver: KnownProviderDriverKind = "claude") {
-		if (openForm === "instance-add") { closeInstanceForm(); return; }
-		closeInstanceForm();
-		state.formDriver = driver;
+		if (openForm === "instance-add") { form.close(); return; }
+		form.close();
+		form.openAdd(driver);
 		onToggleForm("instance-add");
 	}
-	function openEditInstance(inst: {
-		id: string;
-		name: string;
-		driver?: string;
-		port?: number;
-		configDir?: string;
-		managed?: boolean;
-		url?: string;
-		env?: Record<string, string>;
-	}) {
-		if (openForm === `instance-edit:${inst.id}`) { closeInstanceForm(); return; }
-		state.formDriver = isKnownDriverKind(inst.driver) ? inst.driver : "opencode";
-		state.formName = inst.name;
-		state.formConfigDir = inst.configDir ?? "";
-		state.formManaged = inst.managed ?? false;
-		state.formPort = inst.port ? String(inst.port) : "";
-		state.formUrl = inst.url ?? `http://127.0.0.1:${inst.port}`;
-		state.formEnvOpen = false;
-		state.formEnv = inst.env
-			? Object.entries(inst.env)
-					.map(([k, v]) => `${k}=${v}`)
-					.join("\n")
-			: "";
-		state.initialFormEnv = state.formEnv;
+	function openEditInstance(inst: OpenCodeInstance) {
+		if (openForm === `instance-edit:${inst.id}`) { form.close(); return; }
+		form.openEdit(inst);
 		onToggleForm(`instance-edit:${inst.id}`);
-	}
-	/** Parse `KEY=VALUE` lines into an env record; blank/`#` lines are ignored. */
-	function parseEnv(text: string): Record<string, string> | undefined {
-		const env: Record<string, string> = {};
-		for (const line of text.split("\n")) {
-			const trimmed = line.trim();
-			if (!trimmed || trimmed.startsWith("#")) continue;
-			const eq = trimmed.indexOf("=");
-			if (eq <= 0) continue;
-			env[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
-		}
-		return Object.keys(env).length > 0 ? env : undefined;
-	}
-	function submitInstanceForm() {
-		if (state.formSaving || instanceFormMode === null) return;
-		const name = state.formName.trim();
-		if (!name) {
-			showToast("Instance name is required", { variant: "warn" });
-			return;
-		}
-		const usesConfigDirectory = formTraits?.accountKind === "config-directory";
-		const endpoint = state.formUrl.trim();
-		const portText = state.formManaged ? state.formPort.trim() : /^\d+$/.test(endpoint) ? endpoint : "";
-		const port = portText ? Number(portText) : undefined;
-		if (formTraits?.runsOpenCodeServer && port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
-			showToast("Port must be a whole number between 1 and 65535", { variant: "warn" });
-			return;
-		}
-		if (formTraits?.runsOpenCodeServer && !state.formManaged && !endpoint) {
-			showToast("URL is required", { variant: "warn" });
-			return;
-		}
-		const env = (formTraits?.runsOpenCodeServer && state.formManaged) || formPresentation.environment ? parseEnv(state.formEnv) : undefined;
-		const configEnv = formPresentation.environment && state.formEnv !== state.initialFormEnv ? { env: env ?? {} } : {};
-		const configDir = state.formConfigDir.trim() || undefined;
-		const url = !state.formManaged && port === undefined ? endpoint || undefined : undefined;
-		state.formSaving = true;
-		const request =
-			instanceFormMode === "edit" && editingInstanceId
-				? rpc("UpdateInstance", {
-						instanceId: editingInstanceId,
-						name,
-						...(usesConfigDirectory
-							? { configDir: configDir ?? "", ...configEnv }
-							: state.formManaged ? { ...(port !== undefined ? { port } : {}), env: env ?? {} } : {}),
-					})
-				: rpc("AddInstance", {
-						name,
-						driver: state.formDriver,
-						...(usesConfigDirectory
-							? {
-									managed: false,
-									...(configDir !== undefined ? { configDir } : {}),
-									...configEnv,
-								}
-							: {
-									managed: state.formManaged,
-									...(port !== undefined ? { port } : {}),
-									...(url !== undefined ? { url } : {}),
-									...(env !== undefined ? { env } : {}),
-								}),
-					});
-		const submittedForm = openForm;
-		void request
-			.then(async (response) => {
-				applyInstanceListResponse(response);
-				await refreshServerStatus();
-				state.formSaving = false;
-				if (openForm === submittedForm) closeInstanceForm();
-			})
-			.catch((error: unknown) => {
-				state.formSaving = false;
-				toastFailure(`Failed to ${submittedForm?.startsWith("instance-edit:") ? "update" : "add"} instance`, "warn")(error);
-			});
-	}
-	function handleScanNow() {
-		beginScan();
-		void rpc("ScanNow", {})
-			.then(applyScanNowResponse)
-			.then(refreshServerStatus)
-			.catch((error) => {
-				clearScanInFlight();
-				toastFailure("Port scan failed", "warn")(error);
-			});
 	}
 	async function handleCopy(text: string, key: string) {
 		const ok = await copyToClipboard(text);
@@ -280,7 +111,7 @@
 		size="sm"
 		data-testid="scan-now-btn"
 		disabled={scanInFlight}
-		onclick={handleScanNow}
+		onclick={() => void accountActions.scan()}
 	>
 		{#if scanInFlight}<ConduitMark size={12} variant="running" tone="inherit" />{:else}<Icon name="refresh-cw" size={12} />{/if}
 		{scanInFlight ? "Scanning..." : "Scan"}
@@ -291,7 +122,7 @@
 		data-testid="add-instance-btn"
 		aria-expanded={openForm === "instance-add"}
 		aria-controls="instance-form"
-		disabled={state.formSaving}
+		disabled={form.state.formSaving}
 		onclick={() => openAddInstance()}
 	>
 		<Icon name="plus" size={12} />
@@ -301,57 +132,7 @@
 </div>
 
 {#if instanceFormMode !== null}
-	<SettingsGroup>
-	<form id="instance-form" class="px-[14px] py-3 flex flex-col gap-3" data-server-form data-testid="instance-form" aria-label={instanceFormMode === "edit" ? "Edit instance" : "New instance"} novalidate onsubmit={(event) => { event.preventDefault(); submitInstanceForm(); }}>
-		<div class="flex flex-wrap items-center gap-[10px] text-[13.5px] max-md:text-[15px]">
-			<h4 class="font-semibold text-text">{instanceFormMode === "edit" ? `Edit ${instances.find((inst) => inst.id === editingInstanceId)?.name ?? "instance"}` : "New instance"}</h4>
-			{#if instanceFormMode === "add"}
-				<SegmentedControl bind:value={state.formDriver} label="Type" options={DRIVER_TAB_OPTIONS} variant="joined" class="max-w-full" />
-			{/if}
-		</div>
-		{#if formTraits?.runsOpenCodeServer}
-			<SettingsRow label="Conduit starts it" description="Off: connect to one you run" checked={state.formManaged} onchange={() => { state.formManaged = !state.formManaged; }} disabled={state.formSaving || instanceFormMode === "edit"} testId="instance-form-managed" class="p-0" />
-		{/if}
-		<div class="grid grid-cols-1 gap-2 md:grid-cols-2">
-			<label for="instance-form-name" class="flex flex-col gap-1 text-[12px] text-text-muted">
-				Name
-				<TextInput id="instance-form-name" data-testid="instance-form-name" placeholder={formPresentation.namePlaceholder} bind:value={state.formName} disabled={state.formSaving} required />
-			</label>
-			{#if formTraits?.accountKind === "config-directory"}
-				<label for="instance-form-configdir" class="flex flex-col gap-1 text-[12px] text-text-muted">
-					Config directory (optional)
-					<TextInput id="instance-form-configdir" data-testid="instance-form-configdir" placeholder={formPresentation.configDirPlaceholder} bind:value={state.formConfigDir} disabled={state.formSaving} />
-				</label>
-			{:else if state.formManaged}
-				<label for="instance-form-port" class="flex flex-col gap-1 text-[12px] text-text-muted">
-					Port
-					<TextInput id="instance-form-port" inputmode="numeric" data-testid="instance-form-port" placeholder="4098" bind:value={state.formPort} disabled={state.formSaving} />
-				</label>
-			{:else}
-				<label for="instance-form-url" class="flex flex-col gap-1 text-[12px] text-text-muted">
-					URL (or port)
-					<TextInput id="instance-form-url" data-testid="instance-form-url" placeholder="http://127.0.0.1:4098" bind:value={state.formUrl} readonly={instanceFormMode === "edit"} disabled={state.formSaving} />
-				</label>
-			{/if}
-		</div>
-		{#if formTraits?.accountKind === "config-directory"}
-			<p class="text-[12px] text-text-muted">Folder changes apply on the next turn. {state.formDriver === "codex" ? "An empty folder gives named accounts a separate Conduit-managed login. The built-in account keeps the default Codex home." : "Leave the folder empty to use the login Conduit was launched with."}</p>
-		{/if}
-		{#if formPresentation.environment || (formTraits?.runsOpenCodeServer && state.formManaged)}
-			<SettingsGroup title="Environment variables" summary="KEY=VALUE per line" collapsible bind:open={state.formEnvOpen}>
-				<label for="instance-form-env" class="block p-3">
-					<span class="sr-only">Environment variables</span>
-					<Textarea id="instance-form-env" data-testid="instance-form-env" rows={2} class="resize-y font-mono" placeholder={formPresentation.environment?.placeholder ?? "ANTHROPIC_API_KEY=sk-ant-..."} bind:value={state.formEnv} disabled={state.formSaving} />
-					{#if formPresentation.environment}<p class="mt-2 text-[12px] leading-[1.5] text-text-dimmer">{formPresentation.environment.hint}</p>{/if}
-				</label>
-			</SettingsGroup>
-		{/if}
-		<div class="flex justify-end gap-1.5">
-			<Button touchTarget variant="secondary" size="sm" data-testid="instance-form-cancel" disabled={state.formSaving} onclick={closeInstanceForm}>Cancel</Button>
-			<Button touchTarget variant="primary" size="sm" type="submit" data-testid="instance-form-save" disabled={state.formSaving}>{state.formSaving ? "Saving..." : instanceFormMode === "edit" ? "Save" : "Add instance"}</Button>
-		</div>
-	</form>
-	</SettingsGroup>
+	<AccountForm {form} />
 {/if}
 
 <div id="instance-settings-list" class="flex flex-col">
@@ -397,11 +178,11 @@
 									<dd class="text-text">{inst.isDefault ? "New sessions, unless you pick another account" : inst.usageEligible !== false && getDriverTraits(driver)?.usageHarness ? "Sessions you move to it, and auto-switch" : "Sessions you move to it"}</dd>
 								</dl>
 								<div class="flex flex-wrap items-center gap-2">
-									<Button touchTarget variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+									<Button touchTarget variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={form.state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
 									{#if !inst.isDefault}
-										<Button touchTarget variant="secondary" size="sm" data-testid="make-default-btn" disabled={state.formSaving || state.defaultSaving} onclick={() => handleMakeDefault(inst.id)}>Make default</Button>
+										<Button touchTarget variant="secondary" size="sm" data-testid="make-default-btn" disabled={form.state.formSaving || accountActions.defaultSaving} onclick={() => accountActions.makeDefault(inst.id)}>Make default</Button>
 									{/if}
-									<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+									<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => accountActions.remove(inst.id, inst.name)}>Remove</Button>
 								</div>
 							</div>
 						{/if}
@@ -412,7 +193,7 @@
 			<SettingsGroup title="{presentation.label} accounts" testId="{driver}-empty-state">
 				<div class="flex flex-wrap items-center justify-between gap-2 px-[14px] py-[10px] text-[12px] text-text-muted">
 					<p>No {presentation.label} accounts yet.</p>
-					<Button touchTarget variant="secondary" size="sm" data-testid="add-{driver}-account-settings-btn" disabled={state.formSaving} onclick={() => openAddInstance(driver)}>Add account</Button>
+					<Button touchTarget variant="secondary" size="sm" data-testid="add-{driver}-account-settings-btn" disabled={form.state.formSaving} onclick={() => openAddInstance(driver)}>Add account</Button>
 				</div>
 			</SettingsGroup>
 		{/if}
@@ -427,6 +208,7 @@
 					<HarnessLogo driver={inst.driver ?? "opencode"} instanceId={inst.id} size={18} aligned data-testid="account-logo" />
 					<div class="flex-1 min-w-0 flex items-center gap-[6px] text-[13.5px] max-md:text-[15px] text-text">
 						<span class="truncate">{inst.name}</span>
+						{#if inst.isDefault}<Badge variant="quiet" size="xs" shape="pill" data-testid="default-account-marker">default</Badge>{/if}
 						{#if !inst.managed}<Badge variant="quiet" size="xs" shape="pill">discovered</Badge>{/if}
 					</div>
 					<span data-testid="instance-status-dot" class={"size-[7px] rounded-full shrink-0 " + instanceStatusColor(inst.status)}></span>
@@ -444,22 +226,25 @@
 							<dd class="text-text">{inst.managed ? "Conduit" : "You (found by scan)"}</dd>
 						</dl>
 						<div class="flex flex-wrap items-center gap-2">
+							{#if !inst.isDefault}
+								<Button touchTarget variant="secondary" size="sm" data-testid="make-default-btn" disabled={form.state.formSaving || accountActions.defaultSaving} onclick={() => accountActions.makeDefault(inst.id)}>Make default</Button>
+							{/if}
 							{#if inst.managed}
 								{#if inst.status === "healthy" || inst.status === "starting"}
-									<Button touchTarget variant="secondary" size="sm" onclick={() => handleStop(inst.id)}>Stop</Button>
+									<Button touchTarget variant="secondary" size="sm" onclick={() => accountActions.stop(inst.id)}>Stop</Button>
 								{:else}
-									<Button touchTarget variant="secondary" size="sm" onclick={() => handleStart(inst.id)}>Start</Button>
+									<Button touchTarget variant="secondary" size="sm" onclick={() => accountActions.start(inst.id)}>Start</Button>
 								{/if}
 							{/if}
-							<Button touchTarget variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
-							<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+							<Button touchTarget variant="secondary" size="sm" data-testid="edit-instance-btn" disabled={form.state.formSaving} aria-expanded={openForm === `instance-edit:${inst.id}`} aria-controls="instance-form" onclick={() => openEditInstance(inst)}>Edit</Button>
+							<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => accountActions.remove(inst.id, inst.name)}>Remove</Button>
 						</div>
 					</div>
 				{/if}
 			</div>
 		{:else}
 			<div class="px-3 py-2 flex flex-col gap-2 text-xs text-text-muted" data-testid="opencode-empty-state">
-				<p>No OpenCode servers yet. Start one and it shows up here, or <TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" type="button" tone="accent" data-testid="scan-now-link" disabled={scanInFlight} onclick={handleScanNow}>{scanInFlight ? "Scanning..." : "scan now"}</TextButton>.</p>
+				<p>No OpenCode servers yet. Start one and it shows up here, or <TextButton class="max-md:min-h-[44px] max-md:min-w-[44px]" type="button" tone="accent" data-testid="scan-now-link" disabled={scanInFlight} onclick={() => void accountActions.scan()}>{scanInFlight ? "Scanning..." : "scan now"}</TextButton>.</p>
 					{@render cmdBlock("opencode serve --port 4098", "empty-serve")}
 				<SettingsGroup title="Setup guides" collapsible bind:open={state.guidesOpen} summary={`Direct key · CCS${ccsDetected ? " ✓" : ""} · Custom${proxyResult === null ? " · detecting..." : ""}`} testId="opencode-setup-guides">
 					<div>
@@ -539,7 +324,7 @@
 								{#if inst.url}<dt class="text-text-muted">Address</dt><dd class="font-mono text-text">{inst.url}</dd>{/if}
 							</dl>
 							<div class="flex flex-wrap items-center gap-2">
-								<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => handleRemove(inst.id, inst.name)}>Remove</Button>
+								<Button touchTarget variant="danger-outline" size="sm" data-testid="remove-instance-btn" onclick={() => accountActions.remove(inst.id, inst.name)}>Remove</Button>
 							</div>
 						</div>
 					{/if}

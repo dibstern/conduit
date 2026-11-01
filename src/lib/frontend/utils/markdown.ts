@@ -1,5 +1,5 @@
 // Renders markdown to sanitized HTML using marked + DOMPurify (npm packages).
-// highlight.js and mermaid are handled post-render by components.
+// highlight.js and diagrams are handled post-render by components.
 
 import DOMPurify from "dompurify";
 import { marked, Renderer } from "marked";

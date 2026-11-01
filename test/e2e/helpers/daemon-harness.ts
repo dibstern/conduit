@@ -17,6 +17,10 @@ import {
 	startForegroundDaemon,
 } from "../../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
+import {
+	captureExistingChildren,
+	stopDaemonAndAssertNoSurvivors,
+} from "./daemon-survivors.js";
 
 const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 
@@ -102,6 +106,7 @@ export async function createDaemonHarness(
 		}),
 	);
 
+	const existingChildren = captureExistingChildren();
 	const daemon = await startForegroundDaemon({
 		port: 0,
 		host: "127.0.0.1",
@@ -132,11 +137,13 @@ export async function createDaemonHarness(
 		projectUrl,
 		projectPath,
 		async stop(): Promise<void> {
-			try {
-				await daemon.stop();
-			} finally {
-				await stopPtyHost({ configDir: tmpDir, force: true });
-			}
+			await stopDaemonAndAssertNoSurvivors(async () => {
+				try {
+					await daemon.stop();
+				} finally {
+					await stopPtyHost({ configDir: tmpDir, force: true });
+				}
+			}, existingChildren);
 			try {
 				rmSync(tmpDir, { recursive: true, force: true });
 			} catch {

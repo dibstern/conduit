@@ -11,6 +11,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -349,6 +350,10 @@ describe("Worktree branch settlement through the built daemon", () => {
 			});
 		await browser.close();
 		await snapshot("beforeMerge");
+		// Git dates merges in whole seconds and settlement needs the merge to be
+		// strictly newer than the last message, so merge in a later second.
+		const nextSecond = Math.floor(Date.now() / 1000) * 1000 + 1000;
+		while (Date.now() < nextSecond) await sleep(nextSecond - Date.now());
 		git(seed, "fetch", fixture.projectDir, ownedBranch);
 		git(
 			seed,

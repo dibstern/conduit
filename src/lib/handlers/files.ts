@@ -4,6 +4,7 @@ import {
 	LoggerTag,
 	OpenCodeFileServiceTag,
 } from "../domain/relay/Services/services.js";
+import { guardWorkspacePath } from "../session/workspace-directories.js";
 
 /** Directories we always skip (even if .gitignore is unavailable). */
 const ALWAYS_SKIP = new Set([".git", ".svn", ".hg"]);
@@ -19,7 +20,11 @@ const loadGitignore = (directory?: string, startIfStopped = true) =>
 		const files = yield* OpenCodeFileServiceTag;
 		const ig = ignore();
 		const readResult = yield* Effect.result(
-			files.read(".gitignore", directory, { startIfStopped }),
+			Effect.gen(function* () {
+				if (directory !== undefined)
+					yield* guardWorkspacePath(directory, ".gitignore");
+				return yield* files.read(".gitignore", directory, { startIfStopped });
+			}),
 		);
 		if (readResult._tag === "Success" && readResult.success.content) {
 			ig.add(readResult.success.content);
@@ -100,6 +105,12 @@ export const getFileTreeEntries = (
 							if (next === undefined) break;
 							const { dir, depth } = next;
 							currentPath = dir;
+							if (directory !== undefined) {
+								const checked = yield* Effect.result(
+									guardWorkspacePath(directory, dir),
+								);
+								if (checked._tag === "Failure") continue;
+							}
 							const folderStartedAt = yield* Clock.currentTimeMillis;
 							const items = yield* files
 								.list(dir, directory, { startIfStopped: false })

@@ -1,6 +1,6 @@
 // Failure modes: enabling Jev hides a keyless summary's citations, log rows
 // disagree with those citations, or fallback numbering replaces saved ordinals.
-// Both switches off must retain the base strip's durations, captions and jump.
+// Both switches off must retain the base strip's durations and jump.
 import {
 	cleanup,
 	fireEvent,
@@ -15,6 +15,11 @@ import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/m
 import type { TurnRecap } from "../../../src/lib/contracts/turn-recap.js";
 import ActivityStrip from "../../../src/lib/frontend/components/chat/ActivityStrip.svelte";
 import TurnActivity from "../../../src/lib/frontend/components/chat/TurnActivity.svelte";
+import { sessionMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { reveal } from "../../../src/lib/frontend/stores/reveal.svelte.js";
+import type { ScrollController } from "../../../src/lib/frontend/stores/scroll-controller.svelte.js";
+import { primaryTranscript } from "../../../src/lib/frontend/stores/transcript.svelte.js";
+import { setupTurnStory } from "../../../src/lib/frontend/stories/turn-setup.js";
 import type { Segment, Turn } from "../../../src/lib/frontend/utils/turns.js";
 
 const rpc = vi.hoisted(() =>
@@ -72,6 +77,7 @@ const turn: Turn = {
 	storeId: "turn",
 	user: { type: "user", uuid: "turn", text: "Check routing", createdAt: START },
 	segments: [segment],
+	preface: [],
 	notices: [],
 	live: false,
 };
@@ -96,6 +102,7 @@ const recap: TurnRecap = {
 	durationMs: 1000,
 	createdAt: START + 4000,
 };
+let restoreTurn: () => void;
 
 beforeEach(() => {
 	rpc.mockImplementation(async (tag) => {
@@ -105,11 +112,62 @@ beforeEach(() => {
 	});
 	Element.prototype.scrollIntoView = vi.fn();
 	vi.stubGlobal("CSS", { escape: (value: string) => value });
+	restoreTurn = setupTurnStory({ turn, sessionId: "session", surfacing });
 });
 afterEach(() => {
 	cleanup();
+	restoreTurn();
 	rpc.mockReset();
 	vi.unstubAllGlobals();
+});
+
+it("lands a turn reveal only in its own view of the same session", async () => {
+	// A same-session panel must not scroll, focus, or acknowledge another view's reveal.
+	const chat = sessionMessages.get("session");
+	if (!chat) throw new Error("Missing story transcript");
+	const sourceView = {
+		...primaryTranscript,
+		id: Symbol("source-view"),
+		sessionId: "session",
+		chat,
+	};
+	const otherView = { ...sourceView, id: Symbol("other-view") };
+	const otherReposition = vi
+		.fn<ScrollController["reposition"]>()
+		.mockResolvedValue(undefined);
+	const sourceReposition = vi
+		.fn<ScrollController["reposition"]>()
+		.mockResolvedValue(undefined);
+	const other = render(TurnActivity, {
+		turn,
+		segment,
+		final: true,
+		sessionId: "session",
+		surfacing,
+		view: otherView,
+		onreposition: otherReposition,
+	});
+	const source = render(TurnActivity, {
+		turn,
+		segment,
+		final: true,
+		sessionId: "session",
+		surfacing,
+		view: sourceView,
+		onreposition: sourceReposition,
+	});
+
+	expect(
+		await reveal(
+			{ sessionId: "session", uuid: "first" },
+			sourceView,
+			source.container,
+		),
+	).toBe("landed");
+	expect(otherReposition).not.toHaveBeenCalled();
+	expect(sourceReposition).toHaveBeenCalled();
+	expect(other.container.contains(document.activeElement)).toBe(false);
+	expect(source.container.contains(document.activeElement)).toBe(true);
 });
 
 it("keeps a summary generated without Jev clickable and its log numbered after enabling Jev", async () => {
@@ -126,11 +184,13 @@ it("keeps a summary generated without Jev clickable and its log numbered after e
 	);
 	await fireEvent.click(await screen.findByTestId("surfacing-summary-new"));
 	await fireEvent.click(await screen.findByTestId("surfacing-recap-cite-1"));
-	expect(
-		container.querySelector(
-			'[data-log-part="first"] [data-message-number="1"]',
-		),
-	).not.toBeNull();
+	await waitFor(() =>
+		expect(
+			container.querySelector(
+				'[data-log-part="first"] [data-message-number="1"]',
+			),
+		).not.toBeNull(),
+	);
 	await rerender({
 		surfacing: {
 			...surfacing,
@@ -143,9 +203,11 @@ it("keeps a summary generated without Jev clickable and its log numbered after e
 		},
 	});
 	await fireEvent.click(screen.getByTestId("surfacing-recap-cite-1"));
-	expect(screen.getByTestId("surfacing-recap-reader").textContent).toContain(
-		"Unclassified update",
+	// With Jev on a citation is followed and opens its turn card (turn-reveal.feature), not a summary reader.
+	expect(screen.getByTestId("surfacing-recap-cite-1").dataset["followed"]).toBe(
+		"true",
 	);
+	expect(screen.queryByTestId("surfacing-recap-reader")).toBeNull();
 	expect(
 		container.querySelector(
 			'[data-log-part="first"] [data-message-number="1"]',
@@ -169,6 +231,7 @@ it("renders the base activity strip with both switches off and opens its unnumbe
 		turn,
 		segment,
 		final: true,
+		sessionId: "session",
 		surfacing: {
 			...surfacing,
 			status: { ...surfacing.status, summariesEnabled: false },
@@ -188,16 +251,15 @@ it("renders the base activity strip with both switches off and opens its unnumbe
 	base.unmount();
 	expect(timeline.getAttribute("aria-valuetext")).toContain("1s");
 	await fireEvent.focus(timeline);
-	await waitFor(() =>
-		expect(screen.getByRole("tooltip").textContent).toContain("1s"),
-	);
+	expect(screen.queryByRole("tooltip")).toBeNull();
 	await fireEvent.keyDown(timeline, { key: "Enter" });
-	// The strip opens the log at its step, as today, without moving focus into it.
+	// The mounted destination acknowledges the reveal and takes focus.
 	await waitFor(() =>
-		expect(container.querySelector('[data-highlighted="true"]')).not.toBeNull(),
+		expect(document.activeElement?.getAttribute("data-log-part")).toBe("first"),
 	);
-	expect(document.activeElement?.closest("[data-log-part]")).toBeNull();
 	expect(container.querySelector("[data-message-number]")).toBeNull();
 	expect(screen.queryByTestId("surfacing-summary-generate")).toBeNull();
-	expect(screen.queryByTestId("surfacing-minimise-toggle")).toBeNull();
+	expect(
+		screen.getByTestId("surfacing-minimise-toggle").getAttribute("aria-label"),
+	).toBe("Collapse turn");
 });

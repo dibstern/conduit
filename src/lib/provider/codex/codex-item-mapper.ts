@@ -4,9 +4,13 @@ import type {
 	ProviderRuntimeEventPayloadMap,
 	ProviderRuntimeEventType,
 } from "../../contracts/providers/provider-runtime-event.js";
-import type { CanonicalToolInput } from "../../contracts/stored-event.js";
+import type {
+	CanonicalToolInput,
+	ToolFileChange,
+} from "../../contracts/stored-event.js";
 import type { TurnTokens } from "../types.js";
 import type {
+	FileChangeItemSchema,
 	KnownNotification,
 	ThreadItemSchema,
 	TokenUsageBreakdownSchema,
@@ -19,6 +23,7 @@ type ToolPart = {
 	readonly toolName: string;
 	readonly input: CanonicalToolInput;
 	readonly result: unknown;
+	readonly fileChanges?: readonly ToolFileChange[];
 	readonly metadata: Record<string, unknown>;
 	readonly duration: number;
 	readonly output: string;
@@ -58,7 +63,10 @@ function toolForItem(
 	item: typeof ThreadItemSchema.Type,
 	output: string,
 	sessionId: string,
-): Pick<ToolPart, "toolName" | "input" | "result" | "metadata" | "duration"> {
+): Pick<
+	ToolPart,
+	"toolName" | "input" | "result" | "fileChanges" | "metadata" | "duration"
+> {
 	const generic = (raw: unknown) => ({
 		toolName: item.type,
 		input: { tool: "Unknown", name: item.type, raw: { item: raw } } as const,
@@ -104,6 +112,7 @@ function toolForItem(
 					filePaths: item.changes.map(({ path }) => path),
 				},
 				result: item.changes,
+				fileChanges: item.status === "completed" ? codexFileChanges(item) : [],
 				metadata: { ...metadata, ...(output ? { output } : {}) },
 				duration,
 			};
@@ -179,6 +188,28 @@ function toolForItem(
 	}
 }
 
+function codexFileChanges(
+	item: typeof FileChangeItemSchema.Type,
+): readonly ToolFileChange[] {
+	return item.changes.flatMap(({ path, kind, diff }): ToolFileChange[] => {
+		switch (kind?.type) {
+			case "add":
+				return [{ path, kind: "add", before: "", after: diff }];
+			case "delete":
+				return [{ path, kind: "delete", before: diff, after: "" }];
+			case "update":
+			case undefined:
+				return [
+					kind?.move_path
+						? { path: kind.move_path, oldPath: path, kind: "move", patch: diff }
+						: { path, kind: "update", patch: diff },
+				];
+			default:
+				return [];
+		}
+	});
+}
+
 export function codexSubagentSessionId(
 	parentSessionId: string,
 	threadId: string,
@@ -195,6 +226,7 @@ function toolCompletion(
 		partId: part.id,
 		input: part.input,
 		result: part.result,
+		...(part.fileChanges ? { fileChanges: part.fileChanges } : {}),
 		metadata: part.metadata,
 		duration: part.duration,
 	};
@@ -756,6 +788,7 @@ function codexMessageSnapshot(
 						state: {
 							status: part.closed ? "completed" : "running",
 							input: part.input,
+							...(part.fileChanges ? { fileChanges: part.fileChanges } : {}),
 							output:
 								typeof part.result === "string"
 									? part.result

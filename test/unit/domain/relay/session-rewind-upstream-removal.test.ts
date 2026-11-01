@@ -1,6 +1,7 @@
 // Failure modes: deleting the cut point exposes its hidden tail; deleting a
-// later member leaves an undoable half-removed range; deleting a kept message
-// commits an unrelated rewind; partial projection commits only part of a cut.
+// later member commits before the cut itself is gone (OpenCode deletes the tail
+// first, one event per message); deleting a kept message commits an unrelated
+// rewind; partial projection commits only part of a cut.
 
 import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
@@ -78,8 +79,8 @@ it.each([
 	{ messageId: "cut-user", commits: true, name: "target arrives first" },
 	{
 		messageId: "hidden-assistant",
-		commits: true,
-		name: "range member arrives before the target",
+		commits: false,
+		name: "range member is removed before the target",
 	},
 	{ messageId: "kept-assistant", commits: false, name: "kept row is removed" },
 ])("reconciles a pending rewind when an upstream $name", async ({
@@ -112,7 +113,11 @@ it.each([
 				.toBe(commits ? null : "cut-user");
 			expect
 				.soft(rows.map((row) => row.id))
-				.toEqual(commits ? expectedKept : [...expectedKept, ...HIDDEN_IDS]);
+				.toEqual(
+					commits
+						? expectedKept
+						: [...KEPT_IDS, ...HIDDEN_IDS].filter((id) => id !== messageId),
+				);
 			expect
 				.soft(tombstones.map((row) => row.message_id))
 				.toEqual(commits ? [...HIDDEN_IDS].sort() : [messageId]);

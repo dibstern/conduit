@@ -12,13 +12,13 @@ function storyUrl(storyId: string): string {
 }
 
 /**
- * The desktop effort control opens the model picker on its effort row
+ * Option-clicking the desktop effort control opens the picker on its effort row
  * (conduit-test-bn6x.8). Phones have no separate effort control beside the
  * picker: below a 480px composer, effort lives inside the picker sheet, and
  * ModelVariant's phone micro label is covered by the Model/ModelVariant stories.
  */
 async function openEffortMenu(page: Page): Promise<Locator> {
-	await page.getByTestId("variant-badge").click();
+	await page.getByTestId("variant-badge").click({ modifiers: ["Alt"] });
 	await expect(page.getByTestId("picker-row-effort")).toBeVisible();
 	return page.getByTestId("model-picker");
 }
@@ -43,7 +43,7 @@ test.describe("InstanceModelPicker", () => {
 		);
 	});
 
-	test("opens the harness and model root on click", async ({ page }) => {
+	test("opens the session root on click", async ({ page }) => {
 		await page.goto(storyUrl("model-instancemodelpicker--closed"), {
 			waitUntil: "domcontentloaded",
 		});
@@ -53,9 +53,7 @@ test.describe("InstanceModelPicker", () => {
 
 		await page.getByTestId("model-picker-trigger").click();
 		await expect(page.getByTestId("model-picker")).toBeVisible();
-		await expect(page.getByTestId("model-picker")).toContainText(
-			"Harness & model",
-		);
+		await expect(page.getByTestId("model-picker")).toContainText("Session");
 		// A lone harness offers no choice, so the root skips that section.
 		await expect(page.getByTestId("picker-harness-section")).toHaveCount(0);
 		await expect(page.getByTestId("picker-row-model")).toBeVisible();
@@ -201,7 +199,9 @@ test.describe("ModelVariant", () => {
 		);
 	});
 
-	test("opens the effort menu from the badge", async ({ page }) => {
+	test("opens the effort menu by Option-clicking the badge", async ({
+		page,
+	}) => {
 		await page.goto(closedStory, { waitUntil: "domcontentloaded" });
 		await expect(page.getByTestId("variant-badge")).toBeVisible();
 		await expect(page.getByTestId("model-picker")).toBeHidden();
@@ -242,7 +242,7 @@ test.describe("InstanceModelPicker + ModelVariant coordination", () => {
 		await page.getByTestId("model-picker-trigger").click();
 		await expect(page.getByTestId("model-picker")).toBeVisible();
 
-		await page.getByTestId("variant-badge").click();
+		await page.getByTestId("variant-badge").click({ modifiers: ["Alt"] });
 		await expect(page.getByTestId("picker-row-effort")).toBeVisible();
 		await page.mouse.click(5, 5);
 		await expect(page.getByTestId("model-picker")).toBeHidden();

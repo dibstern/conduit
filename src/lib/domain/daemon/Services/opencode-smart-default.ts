@@ -67,9 +67,9 @@ const probeReachable = (url: string, env?: Record<string, string>) =>
 		Effect.orElseSucceed(() => false),
 	);
 
-const hasOpenCodeBinary = Effect.tryPromise(() => isOpencodeInstalled()).pipe(
-	Effect.orElseSucceed(() => false),
-);
+const hasOpenCodeBinary = Effect.tryPromise((signal) =>
+	isOpencodeInstalled(signal),
+).pipe(Effect.orElseSucceed(() => false));
 
 const findAvailablePort = (startFrom: number) =>
 	Effect.tryPromise(() => findFreePort(startFrom)).pipe(

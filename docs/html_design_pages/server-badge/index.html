@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Server badge: conduit designs and competitors</title>
+<script>document.documentElement.dataset.designTheme=localStorage.getItem('tsp-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<style>/* tsp chrome. Styles the page around designs only; designs render in their own iframes.
+   The chrome is always light: the theme toggle switches the designs (data-design-theme), never the page. */
+:root{--bg:#f7f7f5;--surface:#fff;--text:#1c1c1a;--muted:#6b6b65;--line:#e3e3de;--soft:#efefea;--ring:#1c1c1a;color-scheme:light;
+--font:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.55 var(--font);overflow-x:clip}
+[hidden]{display:none!important}
+html:not([data-design-theme=dark]) [data-theme-only=dark],html[data-design-theme=dark] [data-theme-only=light]{display:none!important}
+
+.tsp-bar{position:sticky;top:0;z-index:10;display:flex;align-items:center;gap:12px;
+  padding:10px max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));
+  background:color-mix(in srgb,var(--bg) 86%,transparent);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.tsp-titles{flex:1;min-width:0}
+.tsp-home{display:inline-block;font:600 11px/1 var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);text-decoration:none;padding:4px 0}
+.tsp-bar h1{margin:0;font-size:clamp(17px,2.2vw,21px);line-height:1.25;font-weight:650;text-wrap:balance}
+.tsp-bar p{margin:2px 0 0;color:var(--muted);font-size:13px}
+.tsp-actions{display:flex;gap:8px;flex-shrink:0}
+.tsp-btn{min-height:44px;min-width:44px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);
+  color:var(--text);font:500 13px/1 var(--font);cursor:pointer;display:inline-grid;place-items:center}
+.tsp-btn:hover{background:var(--soft)}
+.tsp-btn:focus-visible,.tsp-section>summary:focus-visible,.tsp-open:focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.tsp-theme{padding:0}
+.tsp-theme svg{width:18px;height:18px}
+[data-design-theme=light] .tsp-sun,[data-design-theme=dark] .tsp-moon{display:none}
+
+.tsp-main{max-width:1440px;margin:0 auto;padding:20px max(16px,env(safe-area-inset-right)) 48px max(16px,env(safe-area-inset-left))}
+.tsp-main>*+*,.tsp-section-body>*+*{margin-top:16px}
+
+.tsp-section{border:1px solid var(--line);border-radius:14px;background:var(--surface)}
+.tsp-section>summary{list-style:none;display:flex;align-items:center;gap:10px;min-height:52px;padding:8px 16px;cursor:pointer;border-radius:14px}
+.tsp-section>summary::-webkit-details-marker{display:none}
+.tsp-section>summary h2{margin:0;flex:1;font-size:17px;line-height:1.3;font-weight:650}
+.tsp-chev{width:16px;height:16px;flex-shrink:0;color:var(--muted);transition:transform .15s}
+.tsp-section[open]>summary .tsp-chev{transform:rotate(90deg)}
+.tsp-count{font:12px var(--mono);color:var(--muted)}
+.tsp-section-body{padding:0 16px 16px}
+@media (max-width:520px){.tsp-section-body{padding:0 10px 10px}.tsp-section>summary{padding:8px 12px}}
+
+.tsp-grid{display:grid;align-items:start;gap:16px;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--tsp-min,340px)),1fr))}
+.tsp-card{display:flex;flex-direction:column;gap:6px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.tsp-wide{grid-column:1/-1}
+.tsp-card-head{display:flex;align-items:baseline;gap:8px}
+.tsp-n{font:600 12px/1 var(--mono);color:var(--muted)}
+.tsp-card h3{margin:0;flex:1;font-size:15px;line-height:1.35;font-weight:600}
+.tsp-open{display:inline-grid;place-items:center;min-width:44px;min-height:44px;margin:-14px -10px -14px 0;border-radius:8px;color:var(--muted);text-decoration:none}
+.tsp-open:hover{color:var(--text)}
+.tsp-why{margin:0;color:var(--muted);font-size:13px}
+.tsp-stage{overflow:hidden;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.tsp-frame{display:block;width:100%;height:240px;border:0;transform-origin:0 0}
+
+:where(.tsp-main) :is(h2,h3,h4){line-height:1.3;text-wrap:balance}
+:where(.tsp-main) :is(p,li){max-width:78ch}
+:where(.tsp-main) a{color:inherit;text-underline-offset:2px}
+:where(.tsp-main) code{font:.9em var(--mono);background:var(--soft);padding:.1em .35em;border-radius:5px}
+:where(.tsp-main) pre{overflow-x:auto;padding:12px 14px;background:var(--soft);border-radius:10px;font:13px/1.5 var(--mono)}
+:where(.tsp-main) pre code{background:none;padding:0}
+:where(.tsp-main) table{display:block;max-width:100%;overflow-x:auto;border-collapse:collapse;font-size:14px}
+:where(.tsp-main) :is(th,td){padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+:where(.tsp-main) :is(img,video){max-width:100%;height:auto}
+:where(.tsp-main) blockquote{margin:0;padding:2px 14px;border-left:3px solid var(--line);color:var(--muted)}
+
+.tsp-index{list-style:none;padding:0;display:grid;gap:10px}
+.tsp-index li{max-width:none;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--muted);font-size:13px}
+.tsp-index strong{color:var(--text);font-size:15px}
+.tsp-foot{padding:0 16px 32px;text-align:center;font:12px var(--mono);color:var(--muted)}
+@media (prefers-reduced-motion:reduce){.tsp-chev{transition:none}}
+</style></head>
+<body>
+<header class="tsp-bar"><div class="tsp-titles"><a class="tsp-home" href="/tsp/" hidden>tsp</a><h1>Server badge: conduit designs and competitors</h1><p>Where a running dev server shows, and what tapping it does</p></div>
+<div class="tsp-actions"><button class="tsp-btn" type="button" data-tsp="toggle-all" hidden>Collapse all</button>
+<button class="tsp-btn tsp-theme" type="button" aria-label="Switch the designs between light and dark">
+<svg class="tsp-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+<svg class="tsp-sun" viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+</button></div></header>
+<main class="tsp-main">
+
+
+<p><strong>What's fixed already:</strong> the status glyph stays honest (Q2 A). A server adds a small <code>◉ :port</code> badge. Tapping it opens the preview, or the Servers card when there are several. A server that stops or crashes just vanishes. These designs vary <em>where</em> the badge sits, <em>where</em> the Servers card lives, the phone flow, and chat links. Rows use conduit's real tokens, glyphs and layout. Use the toggle top right for dark mode.</p>
+
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Sidebar badge placement</h2><span class="tsp-count">6</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:340px">
+<article class="tsp-card" id="d-1"><header class="tsp-card-head"><span class="tsp-n">1</span><h3>Right column, replaces time</h3><a class="tsp-open" href="_frame-1.html" target="_blank" aria-label="Open Right column, replaces time alone">↗</a></header><p class="tsp-why">Follows bb, which puts its terminal glyph in the trailing status slot. Departs from everyone by showing the port. Costs the timestamp while serving. t3code: a pulsing teal terminal icon after the title, no port, and the time stays.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-1.html" title="Right column, replaces time" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-2"><header class="tsp-card-head"><span class="tsp-n">2</span><h3>Context line, after the branch</h3><a class="tsp-open" href="_frame-2.html" target="_blank" aria-label="Open Context line, after the branch alone">↗</a></header><p class="tsp-why">Follows paseo: a globe and service name on the metadata line, green, red when unhealthy. Title and time stay untouched. t3code: the same teal icon can sit on the branch line, before the PR and diff marks, but with no name or port.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-2.html" title="Context line, after the branch" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-3"><header class="tsp-card-head"><span class="tsp-n">3</span><h3>Glyph pip plus port in the time slot</h3><a class="tsp-open" href="_frame-3.html" target="_blank" aria-label="Open Glyph pip plus port in the time slot alone">↗</a></header><p class="tsp-why">No competitor does this. Quietest option: a green pip on the glyph, with the port before the time. Small tap target on phones. t3code: a separate icon; the status glyph itself never changes for a running process.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-3.html" title="Glyph pip plus port in the time slot" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-4"><header class="tsp-card-head"><span class="tsp-n">4</span><h3>Trailing the title, where the pin sits</h3><a class="tsp-open" href="_frame-4.html" target="_blank" aria-label="Open Trailing the title, where the pin sits alone">↗</a></header><p class="tsp-why">Follows t3code exactly: a pulsing teal terminal icon after the title and pin, tooltip &#x27;1 terminal process running. Open terminal&#x27;, no port. Long titles truncate sooner.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-4.html" title="Trailing the title, where the pin sits" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-5"><header class="tsp-card-head"><span class="tsp-n">5</span><h3>Port-free dot, count when several</h3><a class="tsp-open" href="_frame-5.html" target="_blank" aria-label="Open Port-free dot, count when several alone">↗</a></header><p class="tsp-why">Follows t3code and bb: an icon only. t3code shows one icon whatever the count, with the count only in the tooltip. Smallest, but you only learn the port by tapping.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-5.html" title="Port-free dot, count when several" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-6"><header class="tsp-card-head"><span class="tsp-n">6</span><h3>A Serving filter chip and group</h3><a class="tsp-open" href="_frame-6.html" target="_blank" aria-label="Open A Serving filter chip and group alone">↗</a></header><p class="tsp-why">No competitor does this; it departs from keeping each row in its honest group. Every preview is easy to find, but an unread session can hide under Serving. t3code: no server grouping found; the row stays where it was and only gains the icon.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-6.html" title="A Serving filter chip and group" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>The Servers card</h2><span class="tsp-count">4</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:420px">
+<article class="tsp-card" id="d-7"><header class="tsp-card-head"><span class="tsp-n">7</span><h3>Popover from the row badge</h3><a class="tsp-open" href="_frame-7.html" target="_blank" aria-label="Open Popover from the row badge alone">↗</a></header><p class="tsp-why">Follows paseo&#x27;s Scripts menu (open, copy, stop, exit badge) and diri&#x27;s hover card. Stopped servers stay listed until dismissed. t3code: the row icon opens the terminal. Agent servers are listed in the thread details &#x27;Servers&#x27; section, with open and a hover Stop.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-7.html" title="Popover from the row badge" loading="lazy"></iframe></div></article>
+<article class="tsp-card tsp-wide" id="d-8"><header class="tsp-card-head"><span class="tsp-n">8</span><h3>Header button in the session bar</h3><a class="tsp-open" href="_frame-8.html" target="_blank" aria-label="Open Header button in the session bar alone">↗</a></header><p class="tsp-why">Follows paseo, whose Scripts trigger sits in the workspace header. Always reachable, but takes header space. Closest to t3code: a per-thread &#x27;Servers&#x27; section in its thread details panel, with open and Stop, rather than a header button.</p><div class="tsp-stage" data-width="1280" data-height="560"><iframe class="tsp-frame" src="_frame-8.html" title="Header button in the session bar" loading="lazy"></iframe></div></article>
+<article class="tsp-card tsp-wide" id="d-9"><header class="tsp-card-head"><span class="tsp-n">9</span><h3>Tray above the composer</h3><a class="tsp-open" href="_frame-9.html" target="_blank" aria-label="Open Tray above the composer alone">↗</a></header><p class="tsp-why">Follows bb&#x27;s background-commands card above the composer (capy has an activity bar there too). Costs vertical space in every serving session. t3code: nothing above the composer.</p><div class="tsp-stage" data-width="1280" data-height="560"><iframe class="tsp-frame" src="_frame-9.html" title="Tray above the composer" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-10"><header class="tsp-card-head"><span class="tsp-n">10</span><h3>Dropped: Crash: red badge, exit code and last log lines</h3><a class="tsp-open" href="_frame-10.html" target="_blank" aria-label="Open Dropped: Crash: red badge, exit code and last log lines alone">↗</a></header><p class="tsp-why">Dropped: you chose vanish-on-exit, like t3code. Kept for comparison. Only paseo shows a red exit badge for a nonzero exit code. Nobody keeps a crash log; this hands the log to the agent in one tap. t3code: no crash state. The terminal prints &#x27;[terminal] Process exited&#x27; and the Browser shows &#x27;This site can&#x27;t be reached&#x27; with Reload.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-10.html" title="Dropped: Crash: red badge, exit code and last log lines" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Phone over Tailscale (C, with D fallback)</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:340px">
+<article class="tsp-card" id="d-11"><header class="tsp-card-head"><span class="tsp-n">11</span><h3>Badge tap opens a sheet</h3><a class="tsp-open" href="_frame-11.html" target="_blank" aria-label="Open Badge tap opens a sheet alone">↗</a></header><p class="tsp-why">Departs from &#x27;desktop only&#x27;, which paseo and bb use. t3code: its phone app streams the desktop&#x27;s browser if paired with preview access, otherwise &#x27;Preview is only available in the T3 Code desktop app&#x27;, and the phone row has no terminal icon. Conduit opens the real page through Tailscale.</p><div class="tsp-stage" data-width="390" data-height="780"><iframe class="tsp-frame" src="_frame-11.html" title="Badge tap opens a sheet" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-12"><header class="tsp-card-head"><span class="tsp-n">12</span><h3>Fallback D: can&#x27;t forward this one</h3><a class="tsp-open" href="_frame-12.html" target="_blank" aria-label="Open Fallback D: can&#x27;t forward this one alone">↗</a></header><p class="tsp-why">Follows paseo (&#x27;Browser is desktop-only&#x27;) and bb (&#x27;Browser tabs need the desktop app&#x27;), but names the reason and the address. t3code: &#x27;Preview is only available in the T3 Code desktop app&#x27;, with no address or reason.</p><div class="tsp-stage" data-width="390" data-height="780"><iframe class="tsp-frame" src="_frame-12.html" title="Fallback D: can&#x27;t forward this one" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Chat links and lifecycle</h2><span class="tsp-count">2</span></summary><div class="tsp-section-body">
+<div class="tsp-grid" style="--tsp-min:420px">
+<article class="tsp-card" id="d-13"><header class="tsp-card-head"><span class="tsp-n">13</span><h3>localhost links become live server chips</h3><a class="tsp-open" href="_frame-13.html" target="_blank" aria-label="Open localhost links become live server chips alone">↗</a></header><p class="tsp-why">bb already rewrites localhost hostnames silently and keeps the text unchanged. This goes further: a chip while the server is live; once it stops, the link goes back to plain text. t3code: ordinary links with a 14px favicon; localhost is not rewritten or marked.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-13.html" title="localhost links become live server chips" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-14"><header class="tsp-card-head"><span class="tsp-n">14</span><h3>One row through a server&#x27;s life (vanish on exit)</h3><a class="tsp-open" href="_frame-14.html" target="_blank" aria-label="Open One row through a server&#x27;s life (vanish on exit) alone">↗</a></header><p class="tsp-why">Follows t3code: discovery is live-only, so a stopped or crashed server just vanishes from the row and the Servers card. Only paseo keeps stopped entries. The &#x27;awaited&#x27; mark is conduit&#x27;s own.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-14.html" title="One row through a server&#x27;s life (vanish on exit)" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>Servers as a view, beside Terminal, Diff and Files</h2><span class="tsp-count">5</span></summary><div class="tsp-section-body">
+<p>The row badge is design 5 (an icon, with a count when there are several). The Servers list moves into conduit's views: the right rail on desktop (<code>ViewsRail.svelte</code>), the view cards in the ⋯ sheet on the phone (<code>SessionBar.svelte</code>). Tapping the row badge opens this view. Servers vanish when they exit.</p>
+<div class="tsp-grid" style="--tsp-min:420px">
+<article class="tsp-card tsp-wide" id="d-22"><header class="tsp-card-head"><span class="tsp-n">22</span><h3>Desktop: a Servers button on the views rail, opening a side pane</h3><a class="tsp-open" href="_frame-22.html" target="_blank" aria-label="Open Desktop: a Servers button on the views rail, opening a side pane alone">↗</a></header><p class="tsp-why">Follows t3code&#x27;s per-thread &#x27;Servers&#x27; section (open, Stop), but as a view like Files instead of a details panel. Gets ⌥5 like the other views. The pane shows the URL, Open, Copy link and Stop. Costs a pane&#x27;s width while open, same as Files.</p><div class="tsp-stage" data-width="1280" data-height="620"><iframe class="tsp-frame" src="_frame-22.html" title="Desktop: a Servers button on the views rail, opening a side pane" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-23"><header class="tsp-card-head"><span class="tsp-n">23</span><h3>Rail button states: always there vs only while serving, and which count mark</h3><a class="tsp-open" href="_frame-23.html" target="_blank" aria-label="Open Rail button states: always there vs only while serving, and which count mark alone">↗</a></header><p class="tsp-why">conduit&#x27;s Diff button is always shown, disabled when unused; Terminal shows an accent count for unread output. Options: (a) always shown, dim when no servers, (b) only appears while a server is live, (c) green count, (d) accent count like Terminal, (e) a green dot only. Chosen: (b) when no servers, (d) when there are some, so the rail never carries a dead button and the count matches Terminal&#x27;s.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-23.html" title="Rail button states: always there vs only while serving, and which count mark" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-24"><header class="tsp-card-head"><span class="tsp-n">24</span><h3>Not chosen: Servers as a fifth view card in the ⋯ sheet</h3><a class="tsp-open" href="_frame-24.html" target="_blank" aria-label="Open Not chosen: Servers as a fifth view card in the ⋯ sheet alone">↗</a></header><p class="tsp-why">Keeps the phone&#x27;s one place for views. Five cards fit at 390px only if each narrows to about 64px, so labels get tight. Tapping Servers opens the full-screen view in card 26.</p><div class="tsp-stage" data-width="390" data-height="780"><iframe class="tsp-frame" src="_frame-24.html" title="Not chosen: Servers as a fifth view card in the ⋯ sheet" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-25"><header class="tsp-card-head"><span class="tsp-n">25</span><h3>Chosen: view cards scroll sideways, Servers peeks in</h3><a class="tsp-open" href="_frame-25.html" target="_blank" aria-label="Open Chosen: view cards scroll sideways, Servers peeks in alone">↗</a></header><p class="tsp-why">Keeps today&#x27;s card size by letting the row scroll. Servers is easy to miss off the edge, so it comes first (after Chat) whenever a server is live.</p><div class="tsp-stage" data-width="390" data-height="780"><iframe class="tsp-frame" src="_frame-25.html" title="Chosen: view cards scroll sideways, Servers peeks in" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-26"><header class="tsp-card-head"><span class="tsp-n">26</span><h3>Phone: the Servers view itself</h3><a class="tsp-open" href="_frame-26.html" target="_blank" aria-label="Open Phone: the Servers view itself alone">↗</a></header><p class="tsp-why">What the view card or row badge opens on the phone. Same content as the desktop pane, sized for thumbs, with Open going through Tailscale (fallback D shows design 12).</p><div class="tsp-stage" data-width="390" data-height="780"><iframe class="tsp-frame" src="_frame-26.html" title="Phone: the Servers view itself" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+<details class="tsp-section" open><summary><svg class="tsp-chev" viewBox="0 0 20 20" aria-hidden="true"><path d="M7 4l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg><h2>What competitors do</h2><span class="tsp-count">7</span></summary><div class="tsp-section-body">
+<p><b>Where they converge.</b> Only t3code, bb and paseo mark the sidebar row, each with one icon or name and <b>no port</b>. Most keep a separate server list (t3code, paseo, zeron, diri, capy). <b>Only paseo</b> has stop, restart and an exit state. <b>Only bb</b> rewrites localhost links. Most give up on the phone ("desktop only"). <b>Nobody</b> shows a port on the row or a red crash badge, so designs 1, 3 and 10 are conduit's own.</p>
+<div class="tsp-grid" style="--tsp-min:400px">
+<article class="tsp-card" id="d-15"><header class="tsp-card-head"><span class="tsp-n">15</span><h3>t3code: terminal icon on the row, a Servers section in thread details</h3><a class="tsp-open" href="_frame-15.html" target="_blank" aria-label="Open t3code: terminal icon on the row, a Servers section in thread details alone">↗</a></header><p class="tsp-why">t3code 9c6429d74b. The row icon (pulsing teal terminal) covers only servers in t3code&#x27;s own terminals. Servers the Claude agent starts show in the thread details &#x27;Servers&#x27; section: localhost:port over &#x27;Agent · node&#x27;, click to open, hover to Stop. They stay listed after the turn ends and vanish when they exit. The Browser panel also lists all local servers.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-15.html" title="t3code: terminal icon on the row, a Servers section in thread details" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-16"><header class="tsp-card-head"><span class="tsp-n">16</span><h3>bb: shining terminal in the status slot, activity card above the composer</h3><a class="tsp-open" href="_frame-16.html" target="_blank" aria-label="Open bb: shining terminal in the status slot, activity card above the composer alone">↗</a></header><p class="tsp-why">bb 81825aa985. The terminal glyph takes the row&#x27;s trailing status slot (&#x27;Background command running&#x27;), and a spinner for agent work can hide it. Above the composer: &#x27;Running 2 background commands&#x27;. Chat rewrites localhost hostnames silently; the browser says &#x27;Server not reachable&#x27; when it&#x27;s down. No port list or stop button.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-16.html" title="bb: shining terminal in the status slot, activity card above the composer" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-17"><header class="tsp-card-head"><span class="tsp-n">17</span><h3>paseo: service name on the meta line, Scripts menu with lifecycle</h3><a class="tsp-open" href="_frame-17.html" target="_blank" aria-label="Open paseo: service name on the meta line, Scripts menu with lifecycle alone">↗</a></header><p class="tsp-why">paseo de45902652. The only one with lifecycle actions. The workspace row shows a globe and one service name, green or red when unhealthy, but no port or count, and touch layouts drop it. A Play trigger opens Scripts: status dot, View/Restart/Stop, the URL with Copy, and &#x27;exit N&#x27; with Play for stopped ones. Browser is desktop-only.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-17.html" title="paseo: service name on the meta line, Scripts menu with lifecycle" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-18"><header class="tsp-card-head"><span class="tsp-n">18</span><h3>zeron: a Ports card beside the session, server cards on the Browser start page</h3><a class="tsp-open" href="_frame-18.html" target="_blank" aria-label="Open zeron: a Ports card beside the session, server cards on the Browser start page alone">↗</a></header><p class="tsp-why">zeron ab189159f1. No server marker in the sidebar at all. A 272px Ports card in the session inspector lists name and :port; clicking opens the in-app Browser. No stop, restart, copy or crash state. Remote sessions get a banner: &#x27;Localhost opens on this device.&#x27;</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-18.html" title="zeron: a Ports card beside the session, server cards on the Browser start page" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-19"><header class="tsp-card-head"><span class="tsp-n">19</span><h3>diri: ports on hover, a Links popover, Local servers in the inspector</h3><a class="tsp-open" href="_frame-19.html" target="_blank" aria-label="Open diri: ports on hover, a Links popover, Local servers in the inspector alone">↗</a></header><p class="tsp-why">diri a74e3233a2. Ports never show on the row itself, only in its hover card. A toolbar Link button with a count opens a searchable list where running ports sit between pull requests and links. The inspector has a &#x27;Local servers&#x27; card that opens externally. No stop, no crash state, no phone support.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-19.html" title="diri: ports on hover, a Links popover, Local servers in the inspector" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-20"><header class="tsp-card-head"><span class="tsp-n">20</span><h3>monocode: orange bars and process names in the footer</h3><a class="tsp-open" href="_frame-20.html" target="_blank" aria-label="Open monocode: orange bars and process names in the footer alone">↗</a></header><p class="tsp-why">monocode 26465c6209. Project-wide, not per session: the footer shows three pulsing orange bars and the foreground process names (&#x27;vite · jest&#x27;, &#x27;vite ×2&#x27;). One process toggles its terminal; several open &#x27;Running terminals&#x27;. No ports, no preview, no row marker.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-20.html" title="monocode: orange bars and process names in the footer" loading="lazy"></iframe></div></article>
+<article class="tsp-card" id="d-21"><header class="tsp-card-head"><span class="tsp-n">21</span><h3>capy: dot grids, an activity bar, Services in the + menu (approximate)</h3><a class="tsp-open" href="_frame-21.html" target="_blank" aria-label="Open capy: dot grids, an activity bar, Services in the + menu (approximate) alone">↗</a></header><p class="tsp-why">capy docs only (2026-10-28). Approximate: the docs describe the parts but not their visuals. A dot grid on the row&#x27;s right reads Working, Waiting or Failed, and &#x27;Waiting&#x27; can cover a long-running command. An activity bar sits above the composer; the + menu lists Services by machine with status dots, logs and relaunch, and Overview lists &#x27;Exposed apps&#x27; with preview URLs.</p><div class="tsp-stage"><iframe class="tsp-frame" src="_frame-21.html" title="capy: dot grids, an activity bar, Services in the + menu (approximate)" loading="lazy"></iframe></div></article>
+</div>
+</div></details>
+
+</main>
+<footer class="tsp-foot">server-badge · 2026-10-29T15:48</footer>
+<script>(() => {
+  const root = document.documentElement, KEY = 'tsp-theme';
+  const frames = [...document.querySelectorAll('iframe.tsp-frame')];
+
+  // Theme: one choice shared by every tsp page, applied to the designs only; the chrome stays light.
+  // Each frame gets data-theme, plus color-scheme inline with !important so it beats a design's own
+  // `color-scheme: light dark`, which would otherwise make light-dark() follow the OS.
+  const theme = (d, t) => {
+    d.documentElement.dataset.theme = t;
+    d.documentElement.style.setProperty('color-scheme', t, 'important');
+  };
+  const paint = t => {
+    root.dataset.designTheme = t;
+    for (const f of frames) try { theme(f.contentDocument, t) } catch {}
+  };
+  const toggle = document.querySelector('.tsp-theme');
+  if (toggle && !frames.length && !document.querySelector('[data-theme-only]')) toggle.hidden = true;
+  toggle?.addEventListener('click', () => {
+    const t = root.dataset.designTheme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(KEY, t);
+    paint(t);
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    if (!localStorage.getItem(KEY)) paint(e.matches ? 'dark' : 'light');
+  });
+
+  // Collapse / expand all sections.
+  const sections = [...document.querySelectorAll('details.tsp-section')];
+  const all = document.querySelector('[data-tsp=toggle-all]');
+  if (all && sections.length > 1) {
+    const label = () => { all.textContent = sections.some(s => s.open) ? 'Collapse all' : 'Expand all' };
+    all.hidden = false;
+    all.addEventListener('click', () => {
+      const open = !sections.some(s => s.open);
+      sections.forEach(s => { s.open = open });
+      label();
+    });
+    sections.forEach(s => s.addEventListener('toggle', label));
+    label();
+  }
+
+  // The home link only resolves when served under /tsp/ (not in committed copies).
+  const home = document.querySelector('.tsp-home');
+  if (home && location.pathname.startsWith('/tsp/') && location.pathname.split('/').filter(Boolean).length > 1) home.hidden = false;
+
+  // Frames: height follows content (or data-height); data-width designs scale down to fit.
+  const fit = f => {
+    const stage = f.parentElement, avail = stage.clientWidth;
+    if (!avail) return;
+    const w = +stage.dataset.width || 0;
+    let h = +stage.dataset.height || 0;
+    if (!h) {
+      try {
+        const b = f.contentDocument.body;
+        h = Math.min(Math.ceil(Math.max(b.scrollHeight, b.getBoundingClientRect().height)), 6000) || 240;
+      } catch { h = 480 }
+    }
+    const s = w && avail < w ? avail / w : 1;
+    f.style.width = w ? `${w}px` : '100%';
+    f.style.marginInline = w && s === 1 ? 'auto' : '0';
+    f.style.height = `${h}px`;
+    f.style.transform = s < 1 ? `scale(${s})` : '';
+    stage.style.height = `${Math.ceil(h * s) + 2}px`;
+  };
+  const stages = new ResizeObserver(es => es.forEach(e => fit(e.target.querySelector('iframe.tsp-frame'))));
+  for (const f of frames) {
+    stages.observe(f.parentElement);
+    const ready = () => {
+      try {
+        const d = f.contentDocument;
+        theme(d, root.dataset.designTheme);
+        new f.contentWindow.ResizeObserver(() => fit(f)).observe(d.body);
+      } catch {}
+      fit(f);
+    };
+    f.addEventListener('load', ready);
+    try { if (f.contentDocument?.readyState === 'complete' && f.contentDocument.URL !== 'about:blank') ready() } catch {}
+  }
+})();
+</script>
+</body></html>

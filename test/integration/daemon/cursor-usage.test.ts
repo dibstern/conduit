@@ -701,7 +701,11 @@ describe("Cursor monthly usage through the built daemon", () => {
 				browser.send(sessionId, "Say hi despite unavailable usage.", TIMEOUT),
 			]);
 			expect(["unavailable", "unknown"]).toContain(reading?.status);
-			expect(reading?.reason).toEqual(expect.stringMatching(/.+/));
+			expect(reading).toMatchObject(
+				failure === "slow"
+					? { checking: true }
+					: { reason: expect.stringMatching(/.+/) },
+			);
 			expect(reading?.windows).toEqual([]);
 			expect(turn.chunks.join("")).toBe(BASIC_TEXT);
 			await vi.waitFor(

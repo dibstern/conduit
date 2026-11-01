@@ -69,6 +69,7 @@ import {
 import {
 	makeToolDetails,
 	type SessionRef,
+	shownCut,
 } from "../../../src/lib/frontend/stores/tool-details.js";
 import type { ToolMessage } from "../../../src/lib/frontend/types.js";
 
@@ -341,6 +342,29 @@ describe("memory", () => {
 });
 
 describe("wanted soon", () => {
+	it("loads cut file changes and includes their full bytes in the prefetch budget", async () => {
+		const s = server();
+		const details = makeToolDetails(s.fetch, opened);
+		const changed = (id: string, bytes: number): ToolMessage => ({
+			...tool(id),
+			name: "Patch",
+			fileChanges: [{ path: "a.ts", kind: "update", patch: "preview" }],
+			presentation: {},
+			preview: { fileChangesBytes: Utf8Bytes.make(bytes) },
+		});
+		expect(shownCut(changed("a", 3 * MB))).toBe("file changes");
+		// Only Cursor cards render file changes inline, so only they load them.
+		const { presentation: _cursor, ...other } = changed("other", 3 * MB);
+		expect(shownCut(other)).toBeUndefined();
+		details.wantSoon(session, [
+			changed("a", 3 * MB),
+			changed("too-big", 3 * MB),
+			changed("fits", MB),
+		]);
+		await tick();
+		expect(s.requests).toEqual([{ session, ids: ["a", "fits"] }]);
+		await s.answer();
+	});
 	it("prefetches cut, settled tools in one request, and an expand then asks nothing", async () => {
 		const s = server();
 		const details = makeToolDetails(s.fetch, opened);

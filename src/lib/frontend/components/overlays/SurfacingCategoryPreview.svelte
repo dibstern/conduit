@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { STOPS } from "../../utils/turn-stops.js";
 	import type { CategorySetContents } from "../../../contracts/category-set.js";
 	import type { CategoryTuningScore } from "../../../contracts/category-tuning.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -60,7 +61,7 @@
 		{#if !valid}Complete the category definitions to preview this draft.
 		{:else if preview?.complete && preview.levels.length === 0}No judged messages yet, so there is nothing to preview this draft against.
 		{:else if preview?.complete && baseline?.complete}
-			Of the last {preview.levels.length} judged messages: Balanced shows <b>{@render change(balanced(baseline), balanced(preview))}</b> · Key {@render change(key(baseline), key(preview))} · agrees with <b>{@render change(baseline.agree, preview.agree)}</b> of {preview.total} corrections
+			Of the last {preview.levels.length} judged messages: {STOPS.balanced.short} shows <b>{@render change(balanced(baseline), balanced(preview))}</b> · {STOPS.key.short} {@render change(key(baseline), key(preview))} · agrees with <b>{@render change(baseline.agree, preview.agree)}</b> of {preview.total} corrections
 		{:else if preview}{preview.unavailableReason ?? "Definitions changed, so Jev must re-judge the sample."}{#if preview.requiredCalls > 0}{" "}Testing uses {preview.requiredCalls} Jev calls; weights stay free.{/if}
 		{:else if checking}Checking preview…{/if}
 		{#if error}<p role="alert" class="text-error">{error}</p>{/if}

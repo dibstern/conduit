@@ -92,6 +92,7 @@ import {
 	addInstance,
 	applyAccountChange,
 	discoverInstances,
+	discoverInstancesFor,
 	getInstance,
 	getInstances,
 	type InstanceManagerStateTag,
@@ -99,6 +100,7 @@ import {
 	persistConfig,
 	removeInstance,
 	requestManagedOpenCodeShutdown,
+	startHealthPoller,
 	updateInstance,
 } from "../Services/instance-manager-service.js";
 import {
@@ -286,6 +288,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				| CursorAccountResources
 				| InstanceManagerStateTag
 				| PollerFibersTag
+				| InstanceHealthCheckTag
 				| ConfigPersistenceTag
 				| DaemonEventBusTag
 				| SessionActivityTag
@@ -349,10 +352,12 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			),
 		);
 		yield* run(ensureCodexAccount).pipe(Effect.forkIn(yield* Effect.scope));
-		const instanceList = Effect.gen(function* () {
-			yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
-			return Array.from(yield* discoverInstances);
-		});
+		const instanceList = (instanceId: string) =>
+			Effect.gen(function* () {
+				yield* PubSub.publish(bus, DaemonEvent.InstancesChanged());
+				// Mutation replies must not wait on another provider's inventory probe.
+				return Array.from(yield* discoverInstancesFor(instanceId));
+			});
 		const cursorResources = yield* CursorAccountResources;
 		const cursorScope = yield* Effect.scope;
 		const cursorSelection = yield* Semaphore.make(1);
@@ -880,7 +885,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
-							instances: yield* instanceList,
+							instances: yield* instanceList(request.instanceId),
 						};
 					}),
 				),
@@ -896,7 +901,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,
-							instances: yield* instanceList,
+							instances: yield* instanceList(request.instanceId),
 						};
 					}),
 				),
@@ -908,7 +913,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						yield* persistConfig;
 						return {
 							projectSlug: request.projectSlug,
-							instances: yield* instanceList,
+							instances: yield* instanceList(request.instanceId),
 						};
 					}),
 				),
@@ -920,7 +925,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						yield* persistConfig;
 						return {
 							projectSlug: request.projectSlug,
-							instances: yield* instanceList,
+							instances: yield* instanceList(request.instanceId),
 						};
 					}),
 				),
@@ -930,9 +935,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 					Effect.gen(function* () {
 						const instance = yield* addInstance(request);
 						yield* persistConfig;
+						if (!instance.managed) yield* startHealthPoller(instance.id);
 						return {
 							projectSlug: request.projectSlug,
-							instances: yield* instanceList,
+							instances: yield* instanceList(instance.id),
 							addedInstanceId: instance.id,
 						};
 					}),
@@ -945,7 +951,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						yield* persistConfig;
 						return {
 							projectSlug: request.projectSlug,
-							instances: yield* instanceList,
+							instances: yield* instanceList(request.instanceId),
 						};
 					}),
 				),
@@ -958,7 +964,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							id: request.instanceId,
 						});
 						yield* persistConfig;
-						return { instances: yield* instanceList };
+						return { instances: yield* instanceList(request.instanceId) };
 					}),
 				),
 			GetAutoSettleSetting: (request) =>

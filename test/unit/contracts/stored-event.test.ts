@@ -6,6 +6,38 @@ import fixture from "../../fixtures/stored-event-compatibility.json" with {
 };
 
 describe("tool completion outcome", () => {
+	it("rejects malformed typed file changes while preserving old events", () => {
+		const decode = (fileChanges?: unknown) =>
+			Effect.runSync(
+				decodeStoredEventRow(
+					{
+						project_id: "project",
+						sequence: 1,
+						event_id: "event",
+						session_id: "session",
+						stream_version: 0,
+						type: "tool.completed",
+						data: JSON.stringify({
+							messageId: "message",
+							partId: "part",
+							duration: 1,
+							...(fileChanges === undefined ? {} : { fileChanges }),
+						}),
+						metadata: "{}",
+						provider: "claude",
+						created_at: 1,
+					},
+					(cause) => cause,
+				),
+			);
+		expect(decode().data).not.toHaveProperty("fileChanges");
+		expect(() => decode([{ path: "a", kind: "invalid" }])).toThrow();
+		expect(
+			decode([{ path: "a", kind: "delete", before: "" }]).data,
+		).toMatchObject({
+			fileChanges: [{ path: "a", kind: "delete", before: "" }],
+		});
+	});
 	it.each([
 		{ metadata: { isError: true }, outcome: undefined, expected: "failed" },
 		{ metadata: { isError: false }, outcome: undefined, expected: "succeeded" },

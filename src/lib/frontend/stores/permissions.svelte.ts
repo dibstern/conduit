@@ -107,6 +107,16 @@ export function applyApprovalEnvelope(change: Change<Approval>): Approval[] {
 	);
 }
 
+/** The pending question correlated to a tool call by id, never by wording. */
+export function pendingQuestionFor(
+	toolId: string,
+): QuestionRequest | undefined {
+	return (
+		permissionsState.pendingQuestions.find((q) => q.toolUseId === toolId) ??
+		permissionsState.pendingQuestions.find((q) => q.toolId === toolId)
+	);
+}
+
 /** Whether an approval is still waiting on the user. */
 export function isApprovalPending(id: string): boolean {
 	return approvals.rows.has(id);

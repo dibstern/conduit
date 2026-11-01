@@ -120,9 +120,9 @@ export const runningRunnerCommands = (
 		LEFT JOIN turns ON turns.session_id = outbox.session_id
 			AND turns.user_message_id = COALESCE(json_extract(outbox.payload_json, '$.continuation.cutOffMessageId'), json_extract(outbox.payload_json, '$.inputId'), json_extract(outbox.payload_json, '$.userMessageId'), json_extract(outbox.payload_json, '$.commandId'), json_extract(outbox.payload_json, '$.turnId'))
 		WHERE ${scope} AND ${owner}
-			AND (outbox.status = 'running' OR (${includeHeld}
+			AND (outbox.status = 'running' OR (${includeHeld ? 1 : 0}
 				AND run.status IN ('pending', 'running') AND run.runner_id IS NOT NULL
-				AND run.held_transmission IS NOT NULL) OR (${includeInactive}
+				AND run.held_transmission IS NOT NULL) OR (${includeInactive ? 1 : 0}
 				AND outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
 				AND run.status IN ('pending', 'running')))
 			AND outbox.effect_type = 'send_turn'

@@ -78,11 +78,16 @@ update_linux() {
   # so every pre-existing linux baseline is stale by an amount smaller than the
   # tolerance that would decide whether to rewrite it. Strict sets threshold 0, so
   # "changed" means "differs at all" and the whole set is genuinely regenerated.
+  # 4, not the config default of 8: this leg runs Chromium under amd64 emulation,
+  # ~8x slower than native, so 8 workers on a busy host pushed play-function
+  # stories past the 10s test budget (conduit-test-r5yy7: 13-54 timeouts per run,
+  # zero pixel diffs). Measured 2026-10-28, same 62 stories: 8 workers p90 10.9s,
+  # 4 workers p90 8.1s and all green under load ~55.
   docker run --rm \
     -v "$ROOT_DIR":/work \
     -w /work \
     -e VISUAL_STRICT=1 \
-    -e VISUAL_WORKERS="${VISUAL_WORKERS:-8}" \
+    -e VISUAL_WORKERS="${VISUAL_WORKERS:-4}" \
     --platform linux/amd64 \
     -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
     "$DOCKER_IMAGE" \
@@ -118,9 +123,12 @@ clean_stale() {
     # Strip the trailing -<project>-<platform> suffix to get the story ID
     local story_id
     story_id=$(echo "$basename" | sed -E 's/-(desktop|mobile)-(darwin|linux)$//')
-    # Light captures use the same Storybook ID as their dark counterparts.
-    story_id=${story_id%-light}
-    if ! echo "$valid_ids" | grep -qxF "$story_id"; then
+    # Light captures use the same Storybook ID as their dark counterparts, but a
+    # story can itself be named Light (`...--light`), so try the ID both ways.
+    # Here-strings, not `echo | grep -q`: grep -q exits on the first match, echo
+    # takes SIGPIPE, and under pipefail the `if !` deletes a live baseline.
+    if ! grep -qxF "$story_id" <<<"$valid_ids" &&
+      ! grep -qxF "${story_id%-light}" <<<"$valid_ids"; then
       rm "$snap"
       removed=$((removed + 1))
     fi

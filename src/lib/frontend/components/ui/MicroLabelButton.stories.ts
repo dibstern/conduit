@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
+import { hold } from "../../actions/hold.js";
 import MicroLabelButtonDemo from "./__fixtures__/MicroLabelButtonDemo.svelte";
-import { hold } from "./actions/hold.js";
 
 const onTap = fn<(event: MouseEvent) => void>();
 const onHold = fn<() => void>();
@@ -29,7 +29,8 @@ const meta = {
 	},
 	args: {
 		label: "ASK",
-		accessibleName: "Approvals Ask. Activate to cycle; Shift+F10 opens options",
+		accessibleName:
+			"Permissions Ask. Activate to cycle; Shift+F10 opens options",
 		onTap,
 		onHold,
 		"data-testid": "micro-label-button",
@@ -134,7 +135,7 @@ export const Chip: Story = {
 		variant: "chip",
 		label: "Full access",
 		accessibleName:
-			"Approvals Full access. Activate to cycle; Shift+F10 opens options",
+			"Permissions Full access. Activate to cycle; Shift+F10 opens options",
 		tone: "var(--color-warning)",
 		tinted: true,
 	},
@@ -177,7 +178,7 @@ export const Tinted: Story = {
 	args: {
 		label: "FULL",
 		accessibleName:
-			"Approvals Full access. Activate to cycle; Shift+F10 opens options",
+			"Permissions Full access. Activate to cycle; Shift+F10 opens options",
 		tone: "var(--color-warning)",
 		tinted: true,
 	},

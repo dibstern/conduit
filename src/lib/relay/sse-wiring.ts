@@ -422,6 +422,8 @@ const recordSSEEventStartEffect = (
 					context,
 				)
 			: undefined;
+		if (ingested?.ok === false && ingested.reason === "foreign-instance")
+			return ingested;
 
 		if (eventSessionId && event.type.startsWith("message.")) {
 			const sessionService = yield* SessionManagerServiceTag;
@@ -702,6 +704,8 @@ export const handleSSEEventEffect = (
 			eventSessionId,
 			context,
 		);
+		if (ingested?.ok === false && ingested.reason === "foreign-instance")
+			return;
 		const isPrompt =
 			event.type === "permission.asked" ||
 			event.type === "permission.replied" ||
@@ -884,11 +888,16 @@ export const wireSSEConsumerEffect = (
 									yield* models.value.listProviders().pipe(Effect.ignore);
 							}
 							yield* refreshModelSettings;
-							if (managedStopped)
+							if (managedStopped) {
 								yield* deps.opencodeRuntimeIngress?.onInstanceStopped?.(
 									deps.providerInstanceId,
 									() => revision === connectionRevision,
 								) ?? Effect.void;
+								// Marks the end of stop work, which can outlive an immediate restart.
+								yield* Effect.logInfo("Managed stop settlement finished", {
+									instanceId: deps.providerInstanceId,
+								});
+							}
 						}),
 					);
 				},

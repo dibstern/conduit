@@ -127,6 +127,16 @@ const streamLog = (action, stream) =>
 		`${JSON.stringify({ pid: process.pid, at: Date.now(), action, ...stream })}\n`,
 	);
 const server = createServer(async (request, response) => {
+	// Log the request only once its body is in, so a request a test sees in
+	// fake-opencode-requests.jsonl always has its body recorded (lnm8.26).
+	let body = "";
+	for await (const chunk of request) body += chunk;
+	const path = new URL(request.url, "http://127.0.0.1").pathname;
+	if (body)
+		appendFileSync(
+			join(configDir, "fake-opencode-request-bodies.jsonl"),
+			`${JSON.stringify({ pid: process.pid, statePrefix, method: request.method, path, body })}\n`,
+		);
 	appendFileSync(
 		join(configDir, "fake-opencode-requests.jsonl"),
 		`${JSON.stringify({ pid: process.pid, at: Date.now(), method: request.method, url: request.url, directory: request.headers["x-opencode-directory"] })}\n`,
@@ -143,7 +153,6 @@ const server = createServer(async (request, response) => {
 	}
 	response.setHeader("Content-Type", "application/json");
 	const url = new URL(request.url, "http://127.0.0.1");
-	const path = url.pathname;
 	let directory =
 		url.searchParams.get("directory") ??
 		request.headers["x-opencode-directory"];
@@ -158,13 +167,6 @@ const server = createServer(async (request, response) => {
 	const sessionID = /^\/session\/([^/]+)/.exec(path)?.[1];
 	const stored = sessionID && sessions().find(({ id }) => id === sessionID);
 	if (stored?.directory) directory = stored.directory;
-	let body = "";
-	for await (const chunk of request) body += chunk;
-	if (body)
-		appendFileSync(
-			join(configDir, "fake-opencode-request-bodies.jsonl"),
-			`${JSON.stringify({ pid: process.pid, method: request.method, path, body })}\n`,
-		);
 	if (path === "/test/emit-event" && request.method === "POST") {
 		emit(JSON.parse(body));
 		response.end("{}");
@@ -470,8 +472,56 @@ const server = createServer(async (request, response) => {
 			{ sessionID: pending.sessionID, requestID },
 		);
 		response.end("true");
+	} else if (
+		/^\/session\/[^/]+\/abort$/.test(path) &&
+		request.method === "POST"
+	) {
+		response.end("true");
 	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
 		const sessionID = path.split("/")[2];
+		if (request.method === "POST") {
+			const input = JSON.parse(body || "{}");
+			if (input.agent !== "title") {
+				response
+					.writeHead(400)
+					.end('{"message":"Only title prompts are supported"}');
+				return;
+			}
+			const id = `msg_${randomUUID()}`;
+			response.end(
+				JSON.stringify({
+					info: {
+						id,
+						sessionID,
+						role: "assistant",
+						parentID: "title-input",
+						modelID: input.model.modelID,
+						providerID: input.model.providerID,
+						mode: "title",
+						path: { cwd: directory, root: directory },
+						time: { created: Date.now(), completed: Date.now() },
+						cost: 0,
+						tokens: {
+							input: 0,
+							output: 0,
+							reasoning: 0,
+							cache: { read: 0, write: 0 },
+						},
+						finish: "stop",
+					},
+					parts: [
+						{
+							id: `prt_${randomUUID()}`,
+							messageID: id,
+							sessionID,
+							type: "text",
+							text: "Managed OpenCode title",
+						},
+					],
+				}),
+			);
+			return;
+		}
 		const failureFile = join(configDir, "fake-opencode-history-failures.json");
 		const failures = existsSync(failureFile)
 			? JSON.parse(readFileSync(failureFile, "utf8"))
@@ -647,6 +697,10 @@ const server = createServer(async (request, response) => {
 	} else {
 		response.end("[]");
 	}
+});
+server.on("error", (error) => {
+	console.error(`${error.code ?? "UNKNOWN"}: ${error.message}`);
+	process.exit(1);
 });
 const listen = () =>
 	server.listen(port, "127.0.0.1", () => {

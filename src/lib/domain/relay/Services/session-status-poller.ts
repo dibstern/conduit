@@ -18,19 +18,21 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
-
+import { ENV } from "../../../env.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { busySessionIds } from "../../../session-busy.js";
 
-export const DEFAULT_RECONCILIATION_INTERVAL_MS = 7_000;
+export const DEFAULT_RECONCILIATION_INTERVAL_MS =
+	ENV.statusReconciliationIntervalMs;
 
 const POLLER_EVENT_BUFFER_CAPACITY = 64;
 const STATUS_RECONCILIATION_MAX_RETRIES = 5;
 
 /**
- * If a session has been "busy" for longer than this with no events,
- * it is flagged as stale and forcibly transitioned to idle. Sessions blocked
- * on an open question or permission are exempt: silence there is the user's.
+ * If a session has been "busy" this long since its row last changed, with no
+ * open provider run, it is flagged as stale and forcibly transitioned to idle.
+ * Sessions blocked on an open question or permission are exempt: silence there
+ * is the user's.
  */
 const SESSION_STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
 

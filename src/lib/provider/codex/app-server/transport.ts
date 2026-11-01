@@ -80,6 +80,7 @@ export const spawnAppServerTransport = (options: SpawnAppServerOptions = {}) =>
 							...(options.cwd === undefined ? {} : { cwd: options.cwd }),
 							env: options.env ?? process.env,
 							stdio: ["pipe", "pipe", "pipe"],
+							detached: process.platform !== "win32",
 						},
 					),
 				catch: (cause) => new AppServerIoError({ operation: "spawn", cause }),
@@ -98,7 +99,9 @@ export const spawnAppServerTransport = (options: SpawnAppServerOptions = {}) =>
 			});
 			const kill = (signal: NodeJS.Signals) => {
 				try {
-					child.kill(signal);
+					if (process.platform !== "win32" && child.pid)
+						process.kill(-child.pid, signal);
+					else child.kill(signal);
 				} catch {
 					// The process may have exited between the check and the signal.
 				}
@@ -173,6 +176,7 @@ export const spawnAppServerTransport = (options: SpawnAppServerOptions = {}) =>
 			// Keep an error listener even when no write is waiting (notably on EPIPE).
 			child.stdin.on("error", () => {});
 			child.on("exit", (exitCode, exitSignal) => {
+				if (process.platform !== "win32") kill("SIGKILL");
 				hasExited = true;
 				code = exitCode;
 				signal = exitSignal;

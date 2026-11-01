@@ -70,13 +70,14 @@ export const openCodeTextServerEffect = (
 				OPENCODE_DISABLE_DEFAULT_PLUGINS: "0",
 				OPENCODE_DISABLE_AUTOUPDATE: "1",
 				OPENCODE_AUTO_SHARE: "0",
-				OPENCODE_CONFIG_CONTENT: JSON.stringify(
-					Object.fromEntries(
+				OPENCODE_CONFIG_CONTENT: JSON.stringify({
+					...Object.fromEntries(
 						["provider", "enabled_providers", "disabled_providers"]
 							.filter((key) => config[key] !== undefined)
 							.map((key) => [key, config[key]]),
 					),
-				),
+					snapshot: false,
+				}),
 			});
 		});
 		const port = yield* Effect.tryPromise(() => availableOpenCodePort());

@@ -123,7 +123,7 @@ export const sessionRowsHandlers: StepHandler[] = [
 	},
 	{
 		name: "reduce Flow motion",
-		match: /^the Flow motion preference is reduced$/,
+		match: /^the (Flow )?motion preference is reduced$/,
 		run: async ({ world }) => {
 			await world.page.emulateMedia({ reducedMotion: "reduce" });
 		},

@@ -4,7 +4,7 @@ import { InputPage } from "../../../test/e2e/page-objects/input.page.js";
 import { DESKTOP_VIEWPORT, PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import {
-	openComposerMoreSheet,
+	openModelPicker,
 	openSessionRoute,
 	relayControls,
 	requireRelayControl,
@@ -15,7 +15,7 @@ import {
 const composerMessages = new WeakMap<Page, string>();
 const sendTapPoints = new WeakMap<Page, { x: number; y: number }>();
 
-async function tapAt(
+export async function tapAt(
 	cdp: CDPSession,
 	point: { x: number; y: number },
 ): Promise<void> {
@@ -30,22 +30,24 @@ async function tapAt(
 }
 
 async function openApprovalsMenu(page: Page): Promise<void> {
-	const menu = page.getByTestId("permission-mode-dropdown");
-	if (await menu.isVisible()) return;
-	let button = page.getByTestId(
+	const button = page.getByTestId(
 		/^(permission-mode-badge|composer-word-approvals)$/,
 	);
-	if ((page.viewportSize()?.width ?? 0) < 768) {
-		const row = page.getByTestId("composer-more-mode");
-		if (await row.isVisible()) button = row;
-		else if (!(await button.isVisible())) {
-			await openComposerMoreSheet(page);
-			button = row;
-		}
+	const picker = page.getByTestId("model-picker");
+	const choice = picker.getByTestId("picker-permission-ask");
+	if (await choice.isVisible()) return;
+	if ((await picker.isVisible()) || !(await button.isVisible())) {
+		await openModelPicker(page);
+		await picker.getByTestId("picker-row-permissions").click();
+	} else {
+		await expect(button).not.toHaveAttribute("aria-busy", "true");
+		await button.click();
 	}
-	await expect(button).not.toHaveAttribute("aria-busy", "true");
-	await button.click();
-	await expect(menu).toBeVisible();
+	await expect(choice).toBeVisible();
+}
+
+function approvalOption(page: Page, mode: string) {
+	return page.getByTestId(`picker-permission-${mode}`);
 }
 
 export const composerHandlers: StepHandler[] = [
@@ -345,7 +347,7 @@ export const composerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const mode = match[1] ?? "";
 			await openApprovalsMenu(world.page);
-			await world.page.getByTestId(`permission-mode-option-${mode}`).click();
+			await approvalOption(world.page, mode).click();
 		},
 	},
 	{
@@ -355,9 +357,7 @@ export const composerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			const mode = match[1] ?? "";
 			await openApprovalsMenu(world.page);
-			await expect(
-				world.page.getByTestId(`permission-mode-option-${mode}`),
-			).toHaveCount(0);
+			await expect(approvalOption(world.page, mode)).toHaveCount(0);
 		},
 	},
 	{
@@ -367,7 +367,7 @@ export const composerHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("permission-mode-badge"),
-			).toHaveAccessibleName(`Approvals: ${match[1]}. Open options`);
+			).toHaveAccessibleName(`Permissions: ${match[1]}. Open options`);
 		},
 	},
 	{
@@ -402,6 +402,11 @@ export const composerHandlers: StepHandler[] = [
 			);
 			await expect(button).not.toHaveAttribute("aria-busy", "true");
 			await button.click();
+			await expect(button).toHaveAttribute("aria-haspopup", "dialog");
+			await expect(button).toHaveAttribute("aria-expanded", "true");
+			await expect(
+				world.page.getByTestId("picker-permission-ask"),
+			).toBeVisible();
 		},
 	},
 	{
@@ -447,20 +452,14 @@ export const composerHandlers: StepHandler[] = [
 		match: /^the approvals menu is ranked (.+)$/,
 		run: async ({ world, match }) => {
 			const expected = (match[1] ?? "").split(", ");
-			const menu = world.page.getByTestId("permission-mode-dropdown");
-			await expect(menu).toBeVisible();
-			await expect(menu.getByRole("menuitemradio")).toHaveCount(
-				expected.length,
+			const options = world.page.getByTestId(/^picker-permission-/);
+			await expect(options.first()).toBeVisible();
+			await expect(options).toHaveCount(expected.length);
+			const actual = await options.evaluateAll((items) =>
+				items.map((item) =>
+					item.getAttribute("data-testid")?.replace(/^picker-permission-/, ""),
+				),
 			);
-			const actual = await menu
-				.getByRole("menuitemradio")
-				.evaluateAll((items) =>
-					items.map((item) =>
-						item
-							.getAttribute("data-testid")
-							?.replace("permission-mode-option-", ""),
-					),
-				);
 			if (actual.join(", ") !== expected.join(", ")) {
 				throw new Error(
 					`Expected approval order ${expected.join(", ")}, got ${actual.join(", ")}`,
@@ -473,9 +472,7 @@ export const composerHandlers: StepHandler[] = [
 		match:
 			/^the approvals option (dontAsk|plan|ask|acceptEdits|auto|full) describes (.+)$/,
 		run: async ({ world, match }) => {
-			const option = world.page.getByTestId(
-				`permission-mode-option-${match[1]}`,
-			);
+			const option = approvalOption(world.page, match[1] ?? "");
 			await expect(option).toContainText(match[2] ?? "");
 			await expect(option.locator("svg").first()).toBeVisible();
 		},
@@ -492,7 +489,7 @@ export const composerHandlers: StepHandler[] = [
 				"auto",
 				"full",
 			]) {
-				const option = world.page.getByTestId(`permission-mode-option-${mode}`);
+				const option = approvalOption(world.page, mode);
 				const tag = option.getByText("Claude", { exact: true });
 				await expect(tag).toHaveCount(
 					["dontAsk", "plan", "auto"].includes(mode) ? 1 : 0,
@@ -504,9 +501,11 @@ export const composerHandlers: StepHandler[] = [
 		name: "assert approvals menu closed",
 		match: /^the approvals menu is closed$/,
 		run: async ({ world }) => {
-			await expect(
-				world.page.getByTestId("permission-mode-dropdown"),
-			).toHaveCount(0);
+			await expect(world.page.getByTestId(/^picker-permission-/)).toHaveCount(
+				0,
+			);
+			// Picking returns to the Session root; OpenCode's root has no Permissions row.
+			await expect(world.page.getByTestId("picker-subtitle")).toBeVisible();
 		},
 	},
 ];

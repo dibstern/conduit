@@ -83,7 +83,7 @@ describe("Scroll lifecycle integration", () => {
 		expect(ctrl.isDetached).toBe(true);
 
 		// 5. User clicks scroll-to-bottom
-		ctrl.requestFollow();
+		ctrl.place("latest");
 		expect(ctrl.state).toBe("following");
 		expect(ctrl.isDetached).toBe(false);
 

@@ -972,7 +972,7 @@ describe("SessionTitleService", () => {
 	});
 
 	it.effect(
-		"times out after 30 seconds, aborts the query and applies the timestamp title",
+		"times out after 90 seconds, aborts the query and applies the timestamp title",
 		() => {
 			return Effect.gen(function* () {
 				const started = yield* Deferred.make<void>();
@@ -1003,7 +1003,10 @@ describe("SessionTitleService", () => {
 						message: "Fix auth",
 					});
 					yield* Deferred.await(started);
-					yield* TestClock.adjust("30 seconds");
+					// A cold Claude start under load can take 30s+; the budget must cover it.
+					yield* TestClock.adjust("89 seconds");
+					expect(signal?.aborted).toBe(false);
+					yield* TestClock.adjust("1 second");
 					yield* waitForSessionProjectorToReachLatestRename();
 					expect(yield* getSessionTitle()).toBe("Session 2026-05-17 10:11");
 					expect(signal?.aborted).toBe(true);

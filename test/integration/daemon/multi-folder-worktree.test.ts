@@ -110,7 +110,10 @@ describe("Multi-folder worktree sessions through the built daemon", () => {
 		names.clear();
 		paths.clear();
 		branches.clear();
-		harness = ProcessHarness.create({ managedOpenCode: true });
+		harness = ProcessHarness.create({
+			managedOpenCode: true,
+			managedOpenCodeId: "opencode",
+		});
 		const fixture = harness;
 		const secondary = join(fixture.root, "library");
 		const scratch = join(fixture.root, "notes");

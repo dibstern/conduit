@@ -32,6 +32,7 @@ function layout(activity: ActivityPart[]) {
 	const segment: Segment = { activity, reply: [] };
 	const turn: Turn = {
 		id: "turn",
+		preface: [],
 		segments: [segment],
 		notices: [],
 		live: false,

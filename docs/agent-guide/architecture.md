@@ -99,8 +99,11 @@ changes are its own branch and the default branches, not other worktrees'. One
 scoped daemon fiber probes directories sequentially using async stat calls, every
 500 ms viewed, 1 second running, 5 seconds listed and 10 seconds dormant. Targets
 are the checkout directory, HEAD, index, packed-refs in the git and common
-directories, and exact loose refs for the current branch, main and master.
-HEAD changes update the branch target, including nested branch names. Stat
+directories, the current branch's exact loose ref, and the reader's merge-ref
+dependencies: origin/HEAD and its symbolic target chain, main and master.
+Shared refs use the common directory for linked worktrees. Missing loose paths
+remain targets so ref creation and packed-to-loose moves are detected. HEAD and
+symbolic-ref changes update the targets, including nested branch names. Stat
 changes to HEAD and refs trigger async content comparisons before forcing a
 read; index and checkout-directory changes are hints. A hinted folder's presence
 is checked once per hint, before the scheduler reads the clock. Releasing an
@@ -122,7 +125,10 @@ by request fibers. The owner warns at most once per minute when reads request
 commands. `CONDUIT_STRICT_READ_SPAWN=1` turns this into a defect. The legacy
 Promise runner also rejects before enqueueing; session git's existing best-effort
 catches still return no git state. Strict mode remains opt-in while existing
-read paths still refresh git state.
+read paths still refresh git state. `SessionDiffList` and `SessionDiffFile` are
+named outside the read prefixes on purpose: a session diff snapshots folders into
+a private store under `<configDir>/folder-timeline/`, so it spawns git, and only
+while a Diff pane asks.
 
 `Subprocess.metrics` returns a JSON-serializable snapshot of spawn counts and
 cumulative wall and synchronous spawn time, globally and by command, plus active,
@@ -219,14 +225,19 @@ closing or sending the draft, or disconnecting the browser releases its hold.
 The same instance owner stops a server started exclusively for inventory 30
 seconds after its last hold releases. A real `use` or observed session activity
 permanently returns that start to the ordinary idle policy. A server already
-running when borrowed keeps the ordinary policy too. Instance aliases resolve
-to one registered identity before demand is counted. A borrow released during
+running when borrowed keeps the ordinary policy too. Account ids name concrete
+servers throughout routing and demand tracking. A borrow released during
 startup still arms grace when the shared start finishes.
 
-`GetModels.defaultOpenCodeInstanceId` identifies the project's configured
-OpenCode instance for initial draft selection, including a named instance beside
-the lazy Default. The browser waits for the instance and default snapshots before
-holding an initial pick. Draft inventory errors surface even when an older
+The account snapshot's default selects the OpenCode instance for new drafts.
+`openCodeStartSelection` in the contracts falls back to managed OpenCode while
+the selected server is unreachable, without changing the saved default.
+Without a selected default, the first configured OpenCode endpoint is used,
+excluding no-server placeholders; with no endpoint, managed OpenCode is used.
+Backend driver-default resolution uses the same rule and live runtime health.
+The browser waits
+for the instance and default snapshots before holding an initial pick.
+Draft inventory errors surface even when an older
 in-memory catalog exists; passive discovery retains its cached fallback.
 
 `CONDUIT_TEST_OPENCODE_BORROW_IDLE_TIMEOUT_MS` is a test-only positive integer

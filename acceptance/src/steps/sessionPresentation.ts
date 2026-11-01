@@ -57,6 +57,10 @@ export const sessionPresentationHandlers: StepHandler[] = [
 					)
 						? 24
 						: 44;
+				// The phone task row is wider than the screen: swipe its centre into view, as a user would before tapping.
+				await control.evaluate((el) =>
+					el.scrollIntoView({ block: "nearest", inline: "center" }),
+				);
 				const target = await control.evaluate(inspectTouchTarget, minimum);
 				expect(target.width, id).toBeGreaterThanOrEqual(minimum);
 				expect(target.height, id).toBeGreaterThanOrEqual(minimum);

@@ -348,9 +348,11 @@ export const sessionSkillsHandlers: StepHandler[] = [
 				"true",
 			);
 			await expect(step).toContainText("paged-skill");
-			await expect(step.getByRole("button").first()).toHaveClass(
-				/\bbg-selection\b/,
-			);
+			await expect(
+				panel.locator(
+					`[data-log-part="msg-skill-nav-agent-${turn}/part-skill-nav-skill-${turn}"]`,
+				),
+			).toBeFocused();
 			await expect(step).toBeInViewport({ ratio: 0.5 });
 		},
 	},
@@ -360,7 +362,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		run: async ({ world, match }) => {
 			await expect(
 				activityPanel(world.page, match[1] ?? "").locator(".skills-toggle"),
-			).toHaveAttribute("aria-expanded", "false");
+			).toHaveCount(0);
 		},
 	},
 	{
@@ -415,7 +417,7 @@ export const sessionSkillsHandlers: StepHandler[] = [
 			});
 			await expect(toast).toHaveText(match[1] ?? "");
 			await expect(toast).toHaveAttribute("aria-live", "polite");
-			await expect(toast).toHaveClass(/\bbg-bg-alt\b/);
+			await expect(toast).toHaveClass(/\bbg-popover-bg\b/);
 			await expect(toast).toBeVisible();
 		},
 	},

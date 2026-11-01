@@ -7,7 +7,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { BUILD_ID } from "../../../src/lib/build-id.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import { CLAUDE_DISPLAYABLE_SETTINGS_KEYS } from "../../../src/lib/contracts/claude-settings.js";
@@ -156,7 +159,7 @@ it("two Claude accounts sharing a folder probe and resolve settings with their o
 			Effect.provide(
 				Layer.mergeAll(
 					makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-					AccountDirectoryStateLive(state),
+					AccountDirectoryStateLive(state, Effect.succeed(NO_OPENCODE_HEALTH)),
 				),
 			),
 		),
@@ -239,7 +242,7 @@ it("invalidating Claude A cancels its title query while B on the same folder kee
 			Effect.provide(
 				Layer.mergeAll(
 					makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-					AccountDirectoryStateLive(state),
+					AccountDirectoryStateLive(state, Effect.succeed(NO_OPENCODE_HEALTH)),
 				),
 			),
 		),
@@ -345,7 +348,7 @@ it("Claude discovery shares first open, retries a failed open, then closes and r
 			Effect.provide(
 				Layer.mergeAll(
 					makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-					AccountDirectoryStateLive(state),
+					AccountDirectoryStateLive(state, Effect.succeed(NO_OPENCODE_HEALTH)),
 				),
 			),
 		),
@@ -432,7 +435,7 @@ it("removal during Claude scope open fences a late finalizer before the next gen
 			Effect.provide(
 				Layer.mergeAll(
 					makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-					AccountDirectoryStateLive(state),
+					AccountDirectoryStateLive(state, Effect.succeed(NO_OPENCODE_HEALTH)),
 				),
 			),
 		),
@@ -518,7 +521,7 @@ it("a removed admission keeps its identity without borrowing the default account
 			Effect.provide(
 				Layer.mergeAll(
 					makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-					AccountDirectoryStateLive(state),
+					AccountDirectoryStateLive(state, Effect.succeed(NO_OPENCODE_HEALTH)),
 				),
 			),
 		),
@@ -581,7 +584,7 @@ it("removing a Claude scope aborts its actual in-flight SDK capability probe", a
 			Effect.provide(
 				Layer.mergeAll(
 					makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-					AccountDirectoryStateLive(state),
+					AccountDirectoryStateLive(state, Effect.succeed(NO_OPENCODE_HEALTH)),
 				),
 			),
 		),
@@ -745,7 +748,10 @@ it("retiring a Claude reattachment releases its account scope across restart", a
 				Effect.provide(
 					Layer.mergeAll(
 						makeAccountResourceScopesLive({ idleTimeoutMs: 20 }),
-						AccountDirectoryStateLive(state),
+						AccountDirectoryStateLive(
+							state,
+							Effect.succeed(NO_OPENCODE_HEALTH),
+						),
 					),
 				),
 			),

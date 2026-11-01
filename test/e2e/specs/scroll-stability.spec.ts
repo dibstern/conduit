@@ -257,9 +257,271 @@ const TURN_COUNT = 40;
 const SCROLL_UP_PX = 2000;
 const MAX_DRIFT_PX = 5;
 
+test("revealing a trailing reply inside the follow hysteresis band holds position during growth", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	await mockWsRpc(page, {
+		stubs: {
+			GetSessionSkills: () => ({
+				loads: [
+					{
+						name: "scroll-proof",
+						invokedBy: "agent",
+						turnOrdinal: TURN_COUNT + 1,
+						at: Date.now(),
+						running: false,
+						anchor: { messageId: "reveal-reply", partId: "reply-text" },
+					},
+				],
+			}),
+		},
+	});
+	const initMessages = createInitMessages(TURN_COUNT);
+	const snapshot = initMessages.find(
+		(message) => message.type === "mock_transcript_snapshot",
+	);
+	if (!snapshot || !Array.isArray(snapshot["events"]))
+		throw new Error("Missing transcript fixture");
+	snapshot["events"].push(
+		{ type: "user_message", text: "Check the scroll position" },
+		{
+			type: "delta",
+			messageId: "reveal-reply",
+			partId: "reply-text",
+			text: "Scroll proof reply",
+		},
+		{ type: "done", code: 0 },
+	);
+	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+	await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+	await waitForInitialMessages(page);
+	await page.addStyleTag({
+		content:
+			"#messages .msg-container { content-visibility: visible !important; }",
+	});
+	const reply = page.locator('[data-uuid="reveal-reply/reply-text"]');
+	await expect(reply).toBeVisible();
+	await reply.evaluate((node) => {
+		const root = document.getElementById("messages");
+		if (!root) throw new Error("Missing transcript");
+		root.style.scrollPadding = "0px";
+		node.style.scrollMargin = "0px";
+		const spacer = document.createElement("div");
+		spacer.id = "reveal-growth";
+		spacer.style.height = "500px";
+		root.append(spacer);
+		root.scrollTop = root.scrollHeight;
+		const box = node.getBoundingClientRect();
+		const viewport = root.getBoundingClientRect();
+		spacer.style.height = `${500 + (box.top + box.bottom - viewport.top - viewport.bottom) / 2 + 30}px`;
+	});
+	await waitForStableScroll(page);
+	await expect(page.locator("#scroll-btn")).toBeHidden();
+	await page.getByTestId("session-skills-chip").click();
+	await page.getByTestId("session-skills-row").click();
+	await waitForStableScroll(page);
+	const gap = await page
+		.locator("#messages")
+		.evaluate((root) => root.scrollHeight - root.clientHeight - root.scrollTop);
+	expect(gap).toBeGreaterThan(5);
+	expect(gap).toBeLessThan(50);
+	await expect(page.locator("#scroll-btn")).toBeVisible();
+	const before = await getScrollTop(page);
+	await page.locator("#reveal-growth").evaluate((spacer) => {
+		spacer.style.height = `${spacer.getBoundingClientRect().height + 200}px`;
+	});
+	await waitForStableScroll(page);
+	expect(await getScrollTop(page)).toBe(before);
+	await testInfo.attach("trailing-reply-reveal.png", {
+		body: await page.screenshot(),
+		contentType: "image/png",
+	});
+});
+
+test("Tab exposes a log row beneath the sticky head before any reveal or dwell", async ({
+	page,
+	relayUrl,
+}, testInfo) => {
+	const initMessages = createInitMessages(4);
+	const snapshot = initMessages.find(
+		(message) => message.type === "mock_transcript_snapshot",
+	);
+	if (!snapshot || !Array.isArray(snapshot["events"]))
+		throw new Error("Missing transcript fixture");
+	snapshot["events"].push({
+		type: "user_message",
+		text: "Check every log row",
+	});
+	for (let index = 0; index < 30; index++) {
+		const id = `focus-check-${index}`;
+		snapshot["events"].push(
+			{ type: "tool_start", id, name: "Bash" },
+			{
+				type: "tool_executing",
+				id,
+				name: "Bash",
+				input: { command: `check ${index}` },
+			},
+			{ type: "tool_result", id, content: "ok", is_error: false },
+		);
+	}
+	snapshot["events"].push({ type: "done", code: 0 });
+	await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+	await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+	await waitForInitialMessages(page);
+	const turn = page.locator("#messages .turn-activity").last();
+	await turn.getByRole("button", { name: "Expand turn", exact: true }).click();
+	const rows = turn.locator("[data-log-part]");
+	await expect(rows).toHaveCount(30);
+	const row = rows.nth(4);
+	await row.evaluate((node) => {
+		const root = document.getElementById("messages");
+		if (!root) throw new Error("Missing transcript");
+		root.scrollTop +=
+			node.getBoundingClientRect().top - root.getBoundingClientRect().top - 10;
+	});
+	await waitForStableScroll(page);
+	const head = turn.locator(".turn-activity-sticky");
+	const headBottom = await head.evaluate(
+		(node) => node.getBoundingClientRect().bottom,
+	);
+	expect(
+		await row.evaluate((node) => node.getBoundingClientRect().top),
+	).toBeLessThan(headBottom);
+	await rows
+		.nth(3)
+		.getByRole("button")
+		.last()
+		.evaluate((node) => node.focus({ preventScroll: true }));
+	await page.keyboard.press("Tab");
+	await expect(row.getByRole("button").first()).toBeFocused();
+	await waitForStableScroll(page);
+	const rowTop = await row.evaluate((node) => node.getBoundingClientRect().top);
+	const afterHeadBottom = await head.evaluate(
+		(node) => node.getBoundingClientRect().bottom,
+	);
+	await testInfo.attach("sticky-tab-focus.json", {
+		body: JSON.stringify({ rowTop, headBottom: afterHeadBottom }),
+		contentType: "application/json",
+	});
+	await testInfo.attach("sticky-tab-focus.png", {
+		body: await page.screenshot({
+			path: testInfo.outputPath("sticky-tab-focus.png"),
+		}),
+		contentType: "image/png",
+	});
+	expect(rowTop).toBeGreaterThanOrEqual(afterHeadBottom);
+});
+
 test.describe("Scroll Stability — Mobile", () => {
 	test.describe.configure({ timeout: 45_000 });
 	test.use({ viewport: { width: 393, height: 852 } });
+
+	test("Tab exposes a log row beneath the sticky head after the phone bar expands", async ({
+		page,
+		relayUrl,
+	}, testInfo) => {
+		const initMessages = createInitMessages(4);
+		const snapshot = initMessages.find(
+			(message) => message.type === "mock_transcript_snapshot",
+		);
+		if (!snapshot || !Array.isArray(snapshot["events"]))
+			throw new Error("Missing transcript fixture");
+		snapshot["events"].push({
+			type: "user_message",
+			text: "Check every log row after expanding the phone bar",
+		});
+		for (let index = 0; index < 30; index++) {
+			const id = `phone-focus-check-${index}`;
+			snapshot["events"].push(
+				{ type: "tool_start", id, name: "Bash" },
+				{
+					type: "tool_executing",
+					id,
+					name: "Bash",
+					input: { command: `check ${index}` },
+				},
+				{ type: "tool_result", id, content: "ok", is_error: false },
+			);
+		}
+		snapshot["events"].push({ type: "done", code: 0 });
+		await mockRelayWebSocket(page, { initMessages, responses: new Map() });
+		await page.goto(new URL("/s/sess-scroll-001", relayUrl).href);
+		await waitForInitialMessages(page);
+		await page.locator("#messages").dispatchEvent("wheel", { deltaY: 120 });
+		const bar = page.getByTestId("session-bar");
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		const turn = page.locator("#messages .turn-activity").last();
+		await turn
+			.getByRole("button", { name: "Expand turn", exact: true })
+			.click();
+		const rows = turn.locator("[data-log-part]");
+		await expect(rows).toHaveCount(30);
+		await expect(bar).toHaveAttribute("data-collapsed", "true");
+		await waitForStableScroll(page);
+		const head = turn.locator(".turn-activity-sticky");
+		const collapsedHead = await head.evaluate((node) => ({
+			height: node.getBoundingClientRect().height,
+			top: Number.parseFloat(getComputedStyle(node).top),
+		}));
+		const row = rows.nth(4);
+		const focused = row.getByRole("button").first();
+		const collapsedHeadBottom = await head.evaluate(
+			(node) => node.getBoundingClientRect().bottom,
+		);
+		await focused.evaluate((node, headBottom) => {
+			const root = document.getElementById("messages");
+			if (!root) throw new Error("Missing transcript");
+			root.scrollTop += node.getBoundingClientRect().top - headBottom - 12;
+		}, collapsedHeadBottom);
+		await waitForStableScroll(page);
+		await page.getByTestId("session-bar-expand").click();
+		await expect(bar).toHaveAttribute("data-collapsed", "false");
+		await waitForStableScroll(page);
+		const expandedHead = await head.evaluate((node) => ({
+			height: node.getBoundingClientRect().height,
+			top: Number.parseFloat(getComputedStyle(node).top),
+		}));
+		expect(expandedHead.height).toBe(collapsedHead.height);
+		expect(expandedHead.top).toBeGreaterThan(collapsedHead.top);
+		const headBottom = await head.evaluate(
+			(node) => node.getBoundingClientRect().bottom,
+		);
+		expect(
+			await focused.evaluate((node) => node.getBoundingClientRect().top),
+		).toBeLessThan(headBottom);
+		await rows
+			.nth(3)
+			.getByRole("button")
+			.last()
+			.evaluate((node) => node.focus({ preventScroll: true }));
+		await page.keyboard.press("Tab");
+		await expect(focused).toBeFocused();
+		await waitForStableScroll(page);
+		const focusedTop = await focused.evaluate(
+			(node) => node.getBoundingClientRect().top,
+		);
+		const afterHeadBottom = await head.evaluate(
+			(node) => node.getBoundingClientRect().bottom,
+		);
+		await testInfo.attach("phone-expanded-bar-tab-focus.json", {
+			body: JSON.stringify({
+				collapsedHead,
+				expandedHead,
+				focusedTop,
+				headBottom: afterHeadBottom,
+			}),
+			contentType: "application/json",
+		});
+		await testInfo.attach("phone-expanded-bar-tab-focus.png", {
+			body: await page.screenshot({
+				path: testInfo.outputPath("phone-expanded-bar-tab-focus.png"),
+			}),
+			contentType: "image/png",
+		});
+		expect(focusedTop).toBeGreaterThanOrEqual(afterHeadBottom);
+	});
 
 	test("scroll position stays stable when background events arrive on inactive session", async ({
 		page,
@@ -581,8 +843,8 @@ test.describe("Scroll Controller — Streaming", () => {
 			.waitFor({ state: "hidden", timeout: 15_000 });
 		await waitForInitialMessages(page);
 
-		// A live turn with many steps and no reply yet shows only its newest
-		// steps until the reader opens the full log.
+		// Jev-off turns start collapsed. Once opened, a live turn shows only
+		// its newest steps until the reader opens the earlier steps.
 		wsMock.sendMessage({ type: "user_message", text: "Run every check" });
 		wsMock.sendMessage({ type: "status", status: "processing" });
 		const steps = 30;
@@ -603,12 +865,19 @@ test.describe("Scroll Controller — Streaming", () => {
 			});
 		}
 		const turn = page.locator("#messages .turn-activity").last();
+		await expect(turn.getByRole("slider")).toHaveAccessibleName(
+			`Activity timeline — ${steps} steps`,
+		);
+		await turn
+			.getByRole("button", { name: "Expand turn", exact: true })
+			.click();
 		const newest = turn.locator("[data-log-part]").last();
 		await expect(newest).toContainText(`check ${steps - 1}`);
+		await expect(turn.locator("[data-log-part]")).toHaveCount(3);
 		await waitForStableScroll(page);
 		await expect(newest).toBeInViewport();
 
-		const toggle = turn.locator(".turn-activity-toggle");
+		const toggle = turn.getByRole("button", { name: /earlier steps/ });
 		for (const expanded of ["true", "false", "true"]) {
 			await toggle.click();
 			await expect(toggle).toHaveAttribute("aria-expanded", expanded);
@@ -1176,6 +1445,107 @@ test.describe("Scroll Controller — Session Lifecycle", () => {
 
 		// 30 turns exceed the 50-row first page, so the start is only reached by paging.
 		await expect(page.locator(".history-beginning")).toBeAttached();
+	});
+
+	test("a fork with collapsed prior conversation does not page its inherited history", async ({
+		page,
+		relayUrl,
+	}) => {
+		// A side thread of a long session: every older page is inherited and
+		// lands inside the collapsed "Prior conversation" block, so the history
+		// sentinel never leaves view. Paging it all flashed "Loading history..."
+		// once per page and bounced the chat up and down.
+		const start = Date.parse("2026-10-27T10:00:00Z");
+		const forkId = "fork-paging";
+		const at = (i: number) => start + i * 60_000;
+		const history = (i: number) =>
+			[
+				{
+					id: `user-${i}`,
+					role: "user",
+					time: { created: at(i) },
+					parts: [{ id: `prompt-${i}`, type: "text", text: `Prompt ${i}` }],
+				},
+				{
+					id: `assistant-${i}`,
+					role: "assistant",
+					parentID: `user-${i}`,
+					time: { created: at(i) + 1000, completed: at(i) + 2000 },
+					parts: [{ id: `response-${i}`, type: "text", text: `Response ${i}` }],
+				},
+			] as const;
+		const rows = [28, 29, 30, 31].flatMap((i) =>
+			history(i).flatMap(({ parts, ...message }) => [
+				{ _tag: "message", message },
+				...parts.map((part) => ({
+					_tag: "part",
+					messageId: message.id,
+					sortOrder: 0,
+					part,
+				})),
+			]),
+		);
+		let pages = 0;
+		await mockWsRpc(page, {
+			stubs: {
+				ResolveSession: () => ({ projectSlug: "e2e-replay" }),
+				ViewSession: () => ({ ok: true }),
+				// Endless inherited history, always older than the last page.
+				LoadMoreHistory: ({ sessionId }) => {
+					pages += 1;
+					const first = 28 - pages * 2;
+					return {
+						projectSlug: "e2e-replay",
+						sessionId,
+						messages: [first, first + 1].flatMap(history),
+						hasMore: true,
+					};
+				},
+			},
+			streams: {
+				SubscribeSessionDetail: () => [
+					{ _tag: "snapshot", rows, sequence: 1, hasMore: true },
+					{ _tag: "synchronized" },
+				],
+			},
+		});
+		await mockRelayWebSocket(page, {
+			initMessages: [
+				{
+					type: "shell_snapshot",
+					roots: true,
+					sessions: [
+						{
+							id: forkId,
+							title: "Side question",
+							status: "idle",
+							updatedAt: at(31),
+							messageCount: 8,
+							forkedFrom: "fork-source",
+							forkPointMessageId: "assistant-30",
+							forkPointTimestamp: at(30) + 1500,
+						},
+					],
+				},
+			],
+			responses: new Map(),
+		});
+
+		await page.goto(new URL(`/s/${forkId}`, relayUrl).href);
+		await expect(page.locator(".msg-assistant").last()).toContainText(
+			"Response 31",
+		);
+		await expect(page.locator(".fork-context-toggle")).toBeVisible();
+		// test-waits-allow real-wait: proving no page loads needs a window; unpaused it loads dozens in this time.
+		await page.waitForTimeout(1000);
+		expect(pages).toBe(0);
+
+		// Expanded, the inherited history is on screen and pages as usual.
+		await page.locator(".fork-context-toggle").click();
+		await page.locator("#messages").evaluate((el) => {
+			el.scrollTop = 0;
+		});
+		await expect.poll(() => pages).toBeGreaterThan(0);
 	});
 
 	test("session switch while scrolled up resets to bottom on new session", async ({

@@ -196,10 +196,10 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 		await expect(page.getByRole("alert")).toHaveCount(0);
 		for (const client of [page, second]) {
 			await expect(
-				client.getByRole("button", { name: "4 background tasks", exact: true }),
+				client.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 			).toBeVisible();
 			await client
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await expect(
 				client.getByTestId("background-task-description"),
@@ -208,7 +208,9 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 		await expect(
 			second.getByTestId("toast").filter({ hasText: "Turn stopped." }),
 		).toHaveCount(0);
-		await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
+		await page
+			.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
+			.click();
 		const screenshot = testInfo.outputPath("turn-only-stop-toast.png");
 		await page.screenshot({ path: screenshot, animations: "disabled" });
 		await testInfo.attach("turn-only-stop-toast.png", {
@@ -232,7 +234,7 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 				taskStopFixture[0].task_id,
 			]);
 		await expect(
-			page.getByRole("button", { name: "4 background tasks", exact: true }),
+			page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 		).toBeVisible();
 		expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 		expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
@@ -240,7 +242,7 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 		for (const client of [page, second]) {
 			await expect(client.getByTestId("background-tasks-row")).toBeHidden();
 			await expect(
-				client.getByRole("button", { name: /^\d+ background tasks?$/ }),
+				client.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 			).toHaveCount(0);
 		}
 		expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
@@ -289,7 +291,7 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 	await expect(chat.stopBtn).toBeHidden();
 	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: "4 background tasks", exact: true }),
+		page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 	).toBeVisible();
 	const delivered = marks(harness).filter(
 		(mark) => mark["kind"] === "enqueue" && mark["request"] === next,
@@ -323,7 +325,7 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 			.map((call) => call.pid),
 	).toEqual([pid]);
 	await expect(
-		page.getByRole("button", { name: "4 background tasks", exact: true }),
+		page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 	).toBeVisible();
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 });
@@ -475,7 +477,9 @@ test("a Monitor counts as live work and the toast disappears on session navigati
 	await expect(chat.stopBtn).toBeHidden();
 	const toast = page.getByTestId("toast").filter({ hasText: "Turn stopped." });
 	await expect(toast).toContainText("Turn stopped. 1 task still running");
-	await page.getByRole("button", { name: /^\d+ background tasks?$/ }).click();
+	await page
+		.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
+		.click();
 	await expect(page.getByTestId("background-task-description")).toHaveText([
 		taskStopMonitorFixture[0].description,
 	]);
@@ -515,7 +519,7 @@ test("composer Stop with no live tasks waits for its terminal and shows no task 
 		page.getByTestId("toast").filter({ hasText: "Turn stopped." }),
 	).toHaveCount(0);
 	await expect(
-		page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+		page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 	).toHaveCount(0);
 });
 
@@ -570,7 +574,7 @@ test("correction: delayed idle cancel preserves the Monitor query and the next t
 			.map((call) => call.pid),
 	).toEqual([pid]);
 	await expect(
-		page.getByRole("button", { name: "1 background task", exact: true }),
+		page.getByRole("button", { name: /^1 background task(:|$)/ }),
 	).toBeVisible();
 });
 
@@ -593,7 +597,7 @@ test("correction: delayed idle cancel does not hide a real execution error on th
 	);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	await expect(
-		page.getByRole("button", { name: "1 background task", exact: true }),
+		page.getByRole("button", { name: /^1 background task(:|$)/ }),
 	).toBeVisible();
 });
 
@@ -660,7 +664,7 @@ test("correction: repeated cancel belongs to one input and Stop preserves the pe
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(2);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	await expect(
-		page.getByRole("button", { name: "1 background task", exact: true }),
+		page.getByRole("button", { name: /^1 background task(:|$)/ }),
 	).toBeVisible();
 	await app.sendMessage("task-stop-follow-up-after-steer");
 	await expect
@@ -824,7 +828,7 @@ test("correction: interrupt rejection keeps Stop pending until the SDK terminal"
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(0);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	await expect(
-		page.getByRole("button", { name: "1 background task", exact: true }),
+		page.getByRole("button", { name: /^1 background task(:|$)/ }),
 	).toBeVisible();
 });
 
@@ -870,6 +874,6 @@ test("correction: buffered foreground tools settle at the interrupted result", a
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	await expect(
-		page.getByRole("button", { name: "1 background task", exact: true }),
+		page.getByRole("button", { name: /^1 background task(:|$)/ }),
 	).toBeVisible();
 });

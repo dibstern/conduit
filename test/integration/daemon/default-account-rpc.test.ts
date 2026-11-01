@@ -6,14 +6,22 @@
  * - A live former default must stay on itself after moving the pointer.
  * - Zero Claude accounts must keep history visible with no invented account.
  * - Adding an account must refresh previously unroutable session lists.
- * - Unknown and OpenCode accounts must fail with a typed rejection.
+ * - Unknown accounts must fail; OpenCode defaults must persist like other drivers.
  * All config, account folders and environment variables are fixture-owned.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Result as Either, Layer, Queue, Stream } from "effect";
+import {
+	Effect,
+	Result as Either,
+	HashMap,
+	Layer,
+	Queue,
+	Ref,
+	Stream,
+} from "effect";
 import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, expect, vi } from "vitest";
@@ -28,7 +36,9 @@ import {
 	makeConfigWriterLive,
 } from "../../../src/lib/domain/daemon/Layers/config-persistence-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import type { DaemonInstanceConfig } from "../../../src/lib/domain/daemon/Services/daemon-state.js";
+import { InstanceManagerStateTag } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { daemonStorePath } from "../../../src/lib/persistence/project-storage.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
@@ -66,6 +76,7 @@ afterEach(({ task }) => {
 const fixture = (
 	projects: ReadonlyArray<StoredProject> = [],
 	claudeAccounts: "all" | "noOriginal" | "none" = "all",
+	additionalOpenCodeInstances: ReadonlyArray<DaemonInstanceConfig> = [],
 ) => {
 	const instances = (
 		[
@@ -85,6 +96,7 @@ const fixture = (
 				port: 0,
 				managed: false,
 			},
+			...additionalOpenCodeInstances,
 			{
 				id: "opencode",
 				name: "OpenCode",
@@ -104,11 +116,19 @@ const fixture = (
 		configDir: root,
 		launchLogin,
 		instances,
-		accountsState: accountsStateFromInstances(instances, launchLogin, 5, {
-			deleted: [
-				{ id: AccountIdSchema.make("deleted-claude"), driver: "claude" },
-			],
-		}),
+		accountsState: accountsStateFromInstances(
+			instances.map((instance) => ({
+				...instance,
+				driver: instance.driver ?? "opencode",
+			})),
+			launchLogin,
+			5,
+			{
+				deleted: [
+					{ id: AccountIdSchema.make("deleted-claude"), driver: "claude" },
+				],
+			},
+		),
 		persistence: ConfigPersistenceLive.pipe(
 			Layer.provide(
 				Layer.merge(
@@ -328,8 +348,9 @@ describe("default Claude account through daemon RPC", () => {
 					expect(
 						(yield* Queue.take(list))
 							.filter((item) => item.isDefault)
-							.map((item) => item.id),
-					).toEqual(["opencode", "claude"]);
+							.map((item) => item.id)
+							.sort(),
+					).toEqual(["claude", "opencode"]);
 				}
 				const statuses = yield* Queue.unbounded<void>();
 				yield* Stream.runForEach(second.SubscribeServerStatus({}), () =>
@@ -354,7 +375,10 @@ describe("default Claude account through daemon RPC", () => {
 						}),
 					);
 					expect(
-						updated.filter((item) => item.isDefault).map((item) => item.id),
+						updated
+							.filter((item) => item.isDefault)
+							.map((item) => item.id)
+							.sort(),
 					).toEqual(["opencode", "personal"]);
 				}
 				yield* Queue.take(statuses);
@@ -367,11 +391,78 @@ describe("default Claude account through daemon RPC", () => {
 	);
 
 	it.effect(
-		"rejects unknown and OpenCode defaults without moving the pointer",
+		"accepts OpenCode defaults and rejects unknown accounts without moving other defaults",
 		() =>
 			Effect.gen(function* () {
 				const client = yield* makeClient;
-				for (const instanceId of ["missing", "opencode"]) {
+				const accounts = yield* AccountDirectory;
+				const instances = yield* InstanceManagerStateTag;
+				yield* Ref.update(instances, (state) => ({
+					...state,
+					instances: HashMap.map(state.instances, (instance) =>
+						instance.driver === "opencode"
+							? { ...instance, status: "healthy" as const }
+							: instance,
+					),
+				}));
+				const unselected = yield* accounts.resolve({
+					_tag: "DriverDefault",
+					driver: "opencode",
+				});
+				expect(unselected.id).toBe("remote");
+				const unselectedDefault = yield* accounts.defaultFor("opencode");
+				expect(
+					unselectedDefault._tag === "Some" && unselectedDefault.value.id,
+				).toBe("remote");
+				yield* client.SetDefault({ instanceId: "opencode" });
+				expect(
+					Either.getOrThrowWith(loadDaemonConfigResult(root), (error) => error)
+						?.accountDefaults?.opencode,
+				).toBe("opencode");
+				expect(
+					(yield* accounts.resolve({
+						_tag: "DriverDefault",
+						driver: "opencode",
+					})).id,
+				).toBe("opencode");
+				yield* client.SetDefault({ instanceId: "remote" });
+				expect(
+					Either.getOrThrowWith(loadDaemonConfigResult(root), (error) => error)
+						?.accountDefaults?.opencode,
+				).toBe("remote");
+				const healthySelection = yield* accounts.resolve({
+					_tag: "DriverDefault",
+					driver: "opencode",
+				});
+				expect(healthySelection.id).toBe("remote");
+				yield* Ref.update(instances, (state) => ({
+					...state,
+					instances: HashMap.modify(state.instances, "remote", (instance) => ({
+						...instance,
+						status: "unhealthy" as const,
+					})),
+				}));
+				const outageDefault = yield* accounts.resolve({
+					_tag: "DriverDefault",
+					driver: "opencode",
+				});
+				expect(outageDefault.id).toBe("opencode");
+				const savedSelection = (yield* accounts.snapshot).defaults.opencode;
+				expect(savedSelection._tag === "Some" && savedSelection.value).toBe(
+					"remote",
+				);
+				expect(
+					(yield* accounts.resolve({ _tag: "Id", id: "opencode" })).id,
+				).toBe("opencode");
+				expect((yield* accounts.resolve({ _tag: "Id", id: "remote" })).id).toBe(
+					"remote",
+				);
+				accountObservations.push({
+					unselected: unselected.id,
+					healthySelection: healthySelection.id,
+					outageDefault: outageDefault.id,
+				});
+				for (const instanceId of ["missing"]) {
 					const result = yield* Effect.result(
 						client.SetDefault({ instanceId }),
 					);
@@ -385,6 +476,18 @@ describe("default Claude account through daemon RPC", () => {
 						initial.value.instances.find((item) => item.id === "claude")
 							?.isDefault,
 				).toBe(true);
-			}).pipe(Effect.provide(fixture())),
+			}).pipe(
+				Effect.provide(
+					fixture([], "all", [
+						{
+							id: "remote",
+							name: "Remote OpenCode",
+							driver: "opencode",
+							port: 4100,
+							managed: false,
+						},
+					]),
+				),
+			),
 	);
 });

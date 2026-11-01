@@ -9558,10 +9558,12 @@ it.effect(
 					survivor: { runnerId: "555555555555", sessionId: "e", pid: 100_055 },
 					defect: { runnerId: "545454545454", sessionId: "d", pid: 100_054 },
 				};
-				// Every path but the defect runs before the live runner: newest first.
+				// Recovery runs in sidebar order, then newest first among sessions
+				// without a row: every path but the defect runs before the live
+				// runner ('s', updated at 1), and the row-less defect runs last.
 				for (const [index, runner] of Object.values(runners).entries()) {
-					if (runner.sessionId !== "gone")
-						yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${runner.sessionId}, 'test-project', 'claude', 1, 1)`;
+					if (runner.sessionId !== "gone" && runner !== runners.defect)
+						yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES (${runner.sessionId}, 'test-project', 'claude', 1, ${10 - index})`;
 					yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, driver_kind, pid, start_time, role) VALUES (${runner.runnerId}, 0, ${runner.sessionId}, 'claude', ${runner.pid}, 'original', 'serving')`;
 					const socketPath = join(dirname(f.socketPath), runner.runnerId);
 					writeFileSync(
@@ -9673,7 +9675,7 @@ it.effect(
 				const f = yield* retirementFixture(false);
 				const orphan = "515151515151";
 				const rejected = "535353535353";
-				yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('c', 'test-project', 'claude', 1, 1)`;
+				yield* f.sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('c', 'test-project', 'claude', 1, 2)`;
 				for (const [runnerId, sessionId, pid, registeredAt] of [
 					[orphan, "gone", 100_051, 10],
 					[rejected, "c", 100_053, 9],
@@ -9735,14 +9737,15 @@ it.effect(
 				);
 				yield* TestClock.adjust("10 seconds");
 				expect(recovering.pollUnsafe()?._tag).toBe("Success");
+				// Sidebar order: the session-less orphan recovers last.
 				expect(
 					vi
 						.mocked(f.driver.connect)
 						.mock.calls.map(([options]) => options.runnerId),
-				).toEqual([orphan, rejected, "131313131313"]);
+				).toEqual([rejected, "131313131313", orphan]);
 				expect(f.attachments.map((options) => options.runnerId)).toEqual([
-					orphan,
 					"131313131313",
+					orphan,
 				]);
 				expect(
 					yield* f.sql`SELECT runner_id, session_id, retired_at IS NOT NULL AS retired FROM claude_runner_cursors ORDER BY runner_id`,

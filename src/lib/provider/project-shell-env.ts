@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	accessSync,
@@ -17,6 +16,7 @@ import type {
 	ProjectShellEnvConfig,
 	ProjectShellEnvSnapshot,
 } from "../contracts/project-shell-env.js";
+import { spawnOwnedSubprocess } from "../domain/daemon/Services/subprocess.js";
 import { createLogger } from "../logger.js";
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -85,6 +85,9 @@ export function findExecutable(
 
 /** Background-only shell I/O; get() always returns an immediate snapshot. */
 export class ProjectShellEnvResolver {
+	private readonly processes = new Set<
+		ReturnType<typeof spawnOwnedSubprocess>
+	>();
 	private readonly entries = new Map<string, CachedEnv>();
 	private readonly projectConfigs = new Map<string, ProjectShellEnvConfig>();
 	private readonly baseEnv: Env;
@@ -433,10 +436,11 @@ export class ProjectShellEnvResolver {
 			this.projectConfigs.delete(projectId);
 	}
 
-	close(): void {
+	async close(): Promise<void> {
 		this.closed = true;
 		for (const { directory, projectId } of this.entries.values())
 			this.remove(directory, projectId);
+		await Promise.all([...this.processes].map((process) => process.stop()));
 	}
 
 	private cacheKey(directory: string, projectId?: string): string {
@@ -495,33 +499,26 @@ export class ProjectShellEnvResolver {
 				);
 				return;
 			}
-			const child = spawn(command, args, {
+			const owned = spawnOwnedSubprocess(command, args, {
 				cwd,
 				env,
-				stdio: ["ignore", "pipe", "pipe"],
-				detached: process.platform !== "win32",
 			});
+			this.processes.add(owned);
+			const { child } = owned;
+			child.stdin.end();
 			const chunks: Buffer[] = [];
 			let size = 0;
 			let settled = false;
-			const kill = () => {
-				try {
-					if (process.platform !== "win32" && child.pid)
-						process.kill(-child.pid, "SIGKILL");
-					else child.kill("SIGKILL");
-				} catch {
-					/* The process may already have exited. */
-				}
-			};
 			const finish = (error?: ShellEnvResolveError) => {
 				if (settled) return;
 				settled = true;
 				clearTimeout(timeout);
 				signal.removeEventListener("abort", cancelled);
-				if (error) {
-					kill();
-					reject(error);
-				} else accept(Buffer.concat(chunks));
+				void owned.stop().then(() => {
+					this.processes.delete(owned);
+					if (error) reject(error);
+					else accept(Buffer.concat(chunks));
+				}, reject);
 			};
 			const cancelled = () =>
 				finish(
@@ -541,6 +538,7 @@ export class ProjectShellEnvResolver {
 			timeout.unref();
 			signal.addEventListener("abort", cancelled, { once: true });
 			child.stdout.on("data", (chunk: Buffer) => {
+				if (settled) return;
 				size += chunk.length;
 				if (size > 1024 * 1024)
 					finish(

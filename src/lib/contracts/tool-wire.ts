@@ -4,6 +4,35 @@
 // is its tag, so it cannot disagree with the sizes it carries.
 
 import { Schema } from "effect";
+import { ToolFileChangeSchema } from "./stored-event.js";
+
+/** Structured display data, decoded at the server boundary. */
+export const ToolPresentationSchema = Schema.Struct({
+	plan: Schema.optionalKey(
+		Schema.Struct({
+			title: Schema.optionalKey(Schema.String),
+			content: Schema.String,
+		}),
+	),
+	computerUse: Schema.optionalKey(
+		Schema.Struct({
+			actions: Schema.Array(Schema.Record(Schema.String, Schema.Unknown)),
+		}),
+	),
+	media: Schema.optionalKey(
+		Schema.Array(
+			Schema.Struct({
+				path: Schema.optionalKey(Schema.String),
+				mime: Schema.String,
+				url: Schema.optionalKey(Schema.String),
+			}),
+		),
+	),
+	truncated: Schema.optionalKey(Schema.Boolean),
+	movedToBackground: Schema.optionalKey(Schema.Boolean),
+	exitCode: Schema.optionalKey(Schema.Number),
+});
+export type ToolPresentation = typeof ToolPresentationSchema.Type;
 
 /** Tools that hand work to a subagent (Claude's Task and Agent, OpenCode's
  *  task): their reply is the point, and their run outlives the turn. */
@@ -80,5 +109,6 @@ export const ToolDetail = Schema.Struct({
 	settled: Schema.Boolean,
 	input: Schema.optionalKey(WholeInput),
 	output: Schema.optionalKey(WholeText),
+	fileChanges: Schema.optionalKey(Schema.Array(ToolFileChangeSchema)),
 });
 export type ToolDetail = typeof ToolDetail.Type;

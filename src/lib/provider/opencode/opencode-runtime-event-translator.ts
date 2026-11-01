@@ -33,6 +33,7 @@ import {
 	type FileReadEcho,
 	fileReadEcho,
 } from "./opencode-history-backfill.js";
+import { openCodeToolFileChanges } from "./opencode-tool-file-changes.js";
 
 interface TrackedPart {
 	readonly messageId: string;
@@ -665,6 +666,13 @@ export class OpenCodeRuntimeEventTranslator {
 			}
 
 			if (status === "completed" || status === "error") {
+				const fileChanges =
+					status === "completed"
+						? openCodeToolFileChanges(
+								normalizeToolInput(toolName, rawPart.state?.input),
+								metadata,
+							)
+						: [];
 				setTracked(stillEmpty);
 				const duration =
 					rawPart.time?.end && rawPart.time?.start
@@ -695,6 +703,7 @@ export class OpenCodeRuntimeEventTranslator {
 						// OpenCode's status owns the outcome; its private metadata is opaque.
 						outcome: status === "error" ? "failed" : "succeeded",
 						duration,
+						...(fileChanges.length > 0 ? { fileChanges } : {}),
 						...(metadata ? { metadata } : {}),
 						...(inputRefreshed
 							? { input: normalizeToolInput(toolName, rawPart.state?.input) }

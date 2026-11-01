@@ -1,18 +1,6 @@
 <!-- Renders assistant markdown with streaming support, code blocks with -->
-<!-- language headers + copy buttons, mermaid diagrams, and copy-on-click. -->
+<!-- language headers + copy buttons, pele diagrams, and copy-on-click. -->
 <!-- Preserves .msg-assistant class for E2E. -->
-
-<script module lang="ts">
-	import type { Mermaid } from "mermaid";
-
-	// Module-level: shared across all AssistantMessage instances.
-	// Avoids O(n) mermaid re-init when theme changes with many visible messages.
-	let mermaidInitialized = false;
-	// Mermaid is large, so it loads with the first diagram rather than at startup.
-	let mermaidModule: Promise<Mermaid> | null = null;
-	const loadMermaid = () =>
-		(mermaidModule ??= import("mermaid").then((m) => m.default));
-</script>
 
 <script lang="ts">
 	import { tick, onDestroy, mount, unmount } from "svelte";
@@ -21,8 +9,8 @@
 	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
 	import { initTableScrollShadows } from "../../utils/table-scroll.js";
 	import { loadHighlighter } from "../../utils/load-highlighter.js";
-	import { themeState } from "../../stores/theme.svelte.js";
 	import CodeBlockHeader from "../ui/CodeBlockHeader.svelte";
+	import Diagram from "./Diagram.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
 	let { message, forkMessageId, sessionId, hideHeader = false, modelExecution, providerId }: {
@@ -45,81 +33,6 @@
 	});
 
 
-	// Mermaid init (once globally)
-
-	function initializeMermaid(mermaid: Mermaid): void {
-		const styles = getComputedStyle(document.documentElement);
-		const get = (name: string, fallback: string) =>
-			styles.getPropertyValue(name).trim() || fallback;
-		const vars = {
-			darkMode: themeState.resolved === "dark",
-			background: get("--color-code-bg", "#141416"),
-			edgeLabelBackground: get("--color-code-bg", "#141416"),
-			clusterBkg: get("--color-bg-alt", "#232327"),
-			// Under theme "base", primaryColor IS the node fill, so it must be a
-			// surface token. Nodes read as panels; accent is reserved for emphasis.
-			primaryColor: get("--color-bg-alt", "#232327"),
-			primaryTextColor: get("--color-text", "#ededf0"),
-			primaryBorderColor: get("--color-border", "#2b2b31"),
-			lineColor: get("--color-text-muted", "#a1a1aa"),
-			secondaryColor: get("--color-bg-surface", "#1a1a1d"),
-			tertiaryColor: get("--color-bg", "#111113"),
-			fontFamily: get("--font-sans", "Geist, system-ui, sans-serif"),
-		};
-
-		mermaid.initialize({
-			startOnLoad: false,
-			// "base" is the only mermaid theme that honours themeVariables. The prebuilt
-			// "default"/"dark" themes recompute their own palette and discard most of
-			// what we pass, which left light-mode diagrams rendering mermaid's stock
-			// lavender (#ECECFF) instead of conduit's tokens.
-			theme: "base",
-			themeVariables: vars,
-		});
-	}
-
-	async function ensureMermaid(): Promise<Mermaid> {
-		const mermaid = await loadMermaid();
-		if (!mermaidInitialized) {
-			initializeMermaid(mermaid);
-			mermaidInitialized = true;
-		}
-		return mermaid;
-	}
-
-	// Re-initialize mermaid when theme changes and re-render existing diagrams.
-	// Until a diagram has loaded mermaid there is nothing to re-theme.
-	$effect(() => {
-		const _resolvedTheme = themeState.resolved;
-		void mermaidModule?.then((mermaid) => {
-			initializeMermaid(mermaid);
-			if (!containerEl) return;
-			const diagrams = containerEl.querySelectorAll(".mermaid-diagram");
-			for (const wrapper of diagrams) {
-				const svgEl = wrapper.querySelector("svg");
-				if (!svgEl) continue;
-				// Mermaid stores the original source in a data attribute
-				const source =
-					svgEl.getAttribute("data-mermaid-source") ??
-					wrapper.getAttribute("data-mermaid-source");
-				if (!source) continue;
-				const id = `mermaid-${Math.random().toString(36).slice(2, 8)}`;
-				mermaid
-					.render(id, source)
-					.then(({ svg }) => {
-						wrapper.innerHTML = svg;
-						// Preserve source for future re-renders
-						const newSvg = wrapper.querySelector("svg");
-						if (newSvg)
-							newSvg.setAttribute("data-mermaid-source", source);
-					})
-					.catch(() => {
-						// Diagram failed to re-render with new theme — keep old SVG
-					});
-			}
-		});
-	});
-
 	// Track table scroll shadow cleanup so we can tear down listeners/observers
 	// before re-attaching on the next render, and on component destroy.
 	let tableScrollCleanup: (() => void) | null = null;
@@ -137,28 +50,26 @@
 		tableScrollCleanup?.();
 		tableScrollCleanup = initTableScrollShadows(contentEl as HTMLElement).destroy;
 
-		// Add code block headers
-		addCodeBlockHeaders(contentEl as HTMLElement);
+		mountComponents(contentEl as HTMLElement);
 
 		void highlightCodeBlocks(contentEl as HTMLElement);
-
-		// Mermaid diagrams
-		renderMermaidBlocks(contentEl as HTMLElement);
 	}
 
 	// Re-render when HTML changes
 	$effect(() => {
-		// Track both html content and replaying flag.
-		// During replay: skip all post-render work (hljs, code headers, mermaid)
+		// Track html content, finalized (finishing often leaves the html unchanged)
+		// and the replaying flag.
+		// During replay: skip all post-render work (hljs, code headers, diagrams)
 		//   — these are wasted CPU for off-screen blocks rendered during event replay.
 		// When replay ends: replaying becomes false, effect re-fires, postRender runs.
 		// All mounted AssistantMessage instances will run postRender when replay ends.
 		// requestIdleCallback spreads the work across idle frames to avoid a single jank spike.
 		const _html = message.html;
+		void message.finalized;
 		const replaying = sessionId === undefined
 			? isLoading()
 			: sessionMessages.get(sessionId)?.loadLifecycle === "loading";
-		// @perf-guard C1 — removing this guard causes 50-300ms of wasted hljs/mermaid CPU during session switch replay
+		// @perf-guard C1 — removing this guard causes 50-300ms of wasted hljs/diagram CPU during session switch replay
 		if (!_html || replaying) return;
 
 		// Use requestIdleCallback to avoid a jank spike when replay ends
@@ -175,19 +86,22 @@
 		return undefined;
 	});
 
-	const codeHeaders = new Map<HTMLElement, ReturnType<typeof mount>>();
-	function addCodeBlockHeaders(container: HTMLElement): void {
-		for (const [element, component] of codeHeaders) {
-			if (container.contains(element)) continue;
-			void unmount(component);
-			codeHeaders.delete(element);
-		}
+	// Every component mounted into the message HTML: code headers and diagrams.
+	const mounted = new Map<HTMLElement, ReturnType<typeof mount>>();
+	function mountComponents(container: HTMLElement): void {
 		for (const pre of container.querySelectorAll("pre")) {
-			if (pre.querySelector(".code-header")) continue;
+			if (pre.closest("[data-diagram]")) continue;
 			const code = pre.querySelector("code");
 			if (!code) continue;
 			const language = [...code.classList].find((name) => name.startsWith("language-"))?.slice(9) ?? "";
-			if (language === "mermaid") continue;
+			// A streaming diagram stays a code block: half a diagram is a syntax error.
+			if (language === "mermaid" && message.finalized) {
+				const root = document.createElement("div");
+				pre.replaceWith(root);
+				mounted.set(root, mount(Diagram, { target: root, props: { source: code.textContent ?? "", variant: "inline" } }));
+				continue;
+			}
+			if (pre.querySelector(".code-header")) continue;
 			const text = code.textContent ?? "";
 			const lines = text.split("\n");
 			const diff = language === "diff" || language === "patch";
@@ -201,7 +115,7 @@
 			const header = document.createElement("div");
 			header.className = "code-header";
 			pre.prepend(header);
-			codeHeaders.set(header, mount(CodeBlockHeader, {
+			mounted.set(header, mount(CodeBlockHeader, {
 				target: header,
 				props: {
 					label: language || "code", filename, code: text,
@@ -210,12 +124,17 @@
 				},
 			}));
 		}
+		for (const [element, component] of mounted) {
+			if (container.contains(element)) continue;
+			void unmount(component);
+			mounted.delete(element);
+		}
 	}
 
 	async function highlightCodeBlocks(container: HTMLElement): Promise<void> {
 		const blocks = [...container.querySelectorAll<HTMLElement>(
 			"pre code:not(.hljs):not(.language-mermaid)",
-		)].filter((block) => !block.closest(".tool-result"));
+		)].filter((block) => !block.closest(".tool-result, [data-diagram]"));
 		if (!blocks.length) return;
 		const hljs = await loadHighlighter();
 		const highlight = () => {
@@ -240,40 +159,6 @@
 		}
 	}
 
-	async function renderMermaidBlocks(container: HTMLElement): Promise<void> {
-		const blocks = container.querySelectorAll("code.language-mermaid");
-		if (blocks.length === 0) return;
-		const mermaid = await ensureMermaid();
-
-		for (const code of blocks) {
-			const pre = code.parentElement;
-			if (!pre || pre.tagName !== "PRE") continue;
-			if (pre.classList.contains("mermaid-rendered")) continue;
-
-			const text = code.textContent ?? "";
-			const id = `mermaid-${Math.random().toString(36).slice(2, 8)}`;
-
-			try {
-				const { svg } = await mermaid.render(id, text);
-				const wrapper = document.createElement("div");
-				wrapper.className =
-					"mermaid-diagram my-2 p-4 bg-code-bg border border-border-subtle rounded-lg overflow-x-auto cursor-pointer text-center hover:border-border [&_svg]:max-w-full [&_svg]:h-auto";
-				wrapper.setAttribute("data-mermaid-source", text);
-				wrapper.innerHTML = svg;
-				// Also store source on the SVG for theme re-renders
-				const svgEl = wrapper.querySelector("svg");
-				if (svgEl) svgEl.setAttribute("data-mermaid-source", text);
-				pre.replaceWith(wrapper);
-			} catch {
-				pre.classList.add("mermaid-rendered", "border-error/30");
-				const hint = document.createElement("div");
-				hint.className = "text-xs text-error py-1 px-3 italic";
-				hint.textContent = "Diagram syntax error";
-				pre.appendChild(hint);
-			}
-		}
-	}
-
 	function handleClick(e: MouseEvent) {
 		if (!message.finalized) return;
 
@@ -281,6 +166,7 @@
 		const target = e.target as HTMLElement;
 		if (
 			target.closest(".assistant-header") ||
+			target.closest("[data-diagram]") ||
 			target.closest("button") ||
 			target.closest("[role=menuitem]") ||
 			target.closest("a") ||
@@ -305,7 +191,7 @@
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (!message.finalized) return;
-		if (e.target instanceof Element && e.target.closest("button, a, [role=menuitem]")) return;
+		if (e.target instanceof Element && e.target.closest("button, a, [role=menuitem], [data-diagram]")) return;
 		if (e.key !== "Enter" && e.key !== " ") return;
 		e.preventDefault();
 
@@ -321,7 +207,7 @@
 	onDestroy(() => {
 		if (copyResetTimer) clearTimeout(copyResetTimer);
 		tableScrollCleanup?.();
-		for (const component of codeHeaders.values()) void unmount(component);
+		for (const component of mounted.values()) void unmount(component);
 	});
 </script>
 

@@ -13,6 +13,7 @@
 		sm: "w-[40px]",
 		md: "w-[56px]",
 		lg: "w-[80px]",
+		panel: "w-[80px]",
 	} as const;
 
 	type QuotaUsed = number | "checking" | "unknown";
@@ -49,6 +50,7 @@
 	let {
 		used,
 		caption,
+		labelPrefix,
 		warnAt = 80,
 		limited = false,
 		size = "md",
@@ -64,6 +66,8 @@
 		used: QuotaUsed;
 		/** Replaces the default caption, e.g. "limited · Mon 9:00". */
 		caption?: string | undefined;
+		/** Short label before the track, e.g. "ctx" for a turn's context. */
+		labelPrefix?: string;
 		warnAt?: number | "off";
 		/** Whether Account Limit says to wait for this account or window. */
 		limited?: boolean;
@@ -86,8 +90,9 @@
 </script>
 
 <span data-testid="quota-meter" data-state={level} class="inline-flex shrink-0 items-center {variant === 'usage' ? 'max-w-full' : ''} {gap === 8 ? 'gap-[8px]' : ''} {className}" style:gap={gap === 8 ? undefined : `${gap}px`}>
+	{#if labelPrefix}<span class="font-mono text-[10.5px] text-text-secondary">{labelPrefix}</span>{/if}
 	{#if track}
-		<span data-testid={trackTestId} aria-hidden="true" class="block h-[4px] overflow-hidden rounded-full {variant === 'usage' ? 'bg-text-dimmer/32' : 'bg-border-chip'} {TRACK_WIDTH_CLASSES[size]} {trackWidth === undefined ? '' : 'custom-track'} {variant === 'usage' ? 'usage-track' : ''} {level === 'checking' ? 'opacity-50' : ''}" style:--quota-track-width={trackWidth === undefined ? undefined : `${trackWidth}px`}>
+		<span data-testid={trackTestId} aria-hidden="true" class="block {size === 'panel' ? 'h-[6px]' : 'h-[4px]'} overflow-hidden rounded-full {variant === 'usage' ? 'bg-text-dimmer/32' : 'bg-border-chip'} {TRACK_WIDTH_CLASSES[size]} {trackWidth === undefined ? '' : 'custom-track'} {variant === 'usage' ? 'usage-track' : ''} {level === 'checking' ? 'opacity-50' : ''}" style:--quota-track-width={trackWidth === undefined ? undefined : `${trackWidth}px`}>
 			{#if level === "normal" || level === "high" || level === "full"}
 				<span class="block h-full {variant === 'usage' ? USAGE_FILL_CLASSES[level] : FILL_CLASSES[level]}" style:width="{share}%"></span>
 			{/if}

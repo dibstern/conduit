@@ -101,7 +101,6 @@ async function openDraft(
 			PreWarmSession: () => undefined,
 			PreWarmDraft: () => undefined,
 			GetModels: (input) => ({
-				defaultOpenCodeInstanceId: "opencode",
 				projectSlug: "projectSlug" in input ? input.projectSlug : slug,
 				providers: modelProviders.filter(
 					({ id }) =>

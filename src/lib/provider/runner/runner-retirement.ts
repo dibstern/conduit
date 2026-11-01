@@ -36,6 +36,7 @@ import { isRecord } from "../../utils.js";
 import { isClaudeResumeRefused } from "../event-sink-errors.js";
 import {
 	runSendCommandIdQuery,
+	settleToolChildRuns,
 	stopCovers,
 } from "../session-run-settlement.js";
 import type {
@@ -909,13 +910,13 @@ export const makeRunnerStopReconciler = (options: {
 					pendingGoneSettlements.delete(key);
 					yield* settlement.wake(retirement.sessionId);
 				}
-				const owners = sql<{
+				const owners = (sessionId: string) => sql<{
 					runId: string;
 				}>`SELECT DISTINCT owner.id AS runId
 			FROM provider_runs requested JOIN provider_runs owner
 			ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
-			WHERE requested.session_id = ${retirement.sessionId} AND owner.status IN ('pending', 'running')
-			AND (${legacyRunnerRunPredicate(sql, retirement.sessionId, sql`owner.id`)}
+			WHERE requested.session_id = ${sessionId} AND owner.status IN ('pending', 'running')
+			AND (${legacyRunnerRunPredicate(sql, sessionId, sql`owner.id`)}
 				OR NOT EXISTS (SELECT 1 FROM provider_command_outbox command
 					JOIN provider_runs send_run ON send_run.id = command.run_id AND send_run.session_id = command.session_id
 					WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
@@ -930,11 +931,35 @@ export const makeRunnerStopReconciler = (options: {
 						: retirement.stopReason === '{"_tag":"ProjectRemoved"}'
 							? "runner_stopped"
 							: undefined;
+				// Claude's durable backstop: tool-linked child runs absent from memory.
+				if (settlement.driverKind === "claude")
+					yield* settleToolChildRuns(
+						sql,
+						retirement.sessionId,
+						"Provider process stopped",
+						(events) => sessionIngestion.ingestBatch(events),
+					);
+				// Exact cohorts in other sessions, such as subagent children, settle
+				// in their own session before the receipt-carrying commit below.
+				const foreignSessions = retirement.ownedRunIds.length
+					? yield* sql<{
+							session_id: string;
+						}>`SELECT DISTINCT session_id FROM provider_runs WHERE id IN ${sql.in(retirement.ownedRunIds)} AND session_id <> ${retirement.sessionId}`
+					: [];
+				for (const { session_id } of foreignSessions)
+					yield* sessionIngestion.ingestBatch([], {
+						settleRuns: {
+							sessionId: session_id,
+							reason: "Provider process stopped",
+							owners: owners(session_id),
+							...(errorCode ? { errorCode } : {}),
+						},
+					});
 				yield* sessionIngestion.ingestBatch([], {
 					settleRuns: {
 						sessionId: retirement.sessionId,
 						reason: "Provider process stopped",
-						owners,
+						owners: owners(retirement.sessionId),
 						...(errorCode ? { errorCode } : {}),
 					},
 					...(options.receipts

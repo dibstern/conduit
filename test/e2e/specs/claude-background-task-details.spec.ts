@@ -191,15 +191,31 @@ function observeTasks(page: Page, sessionId: string) {
 			for (const child of Object.values(value)) visit(child);
 		}
 	};
-	page.on("websocket", (socket) => {
-		socket.on("framereceived", ({ payload }) => {
-			for (const line of String(payload).trim().split("\n")) {
+	// Read only SubscribeShell rows, as the session store does. A family row is
+	// read before a newer shell row yet can arrive after it, so last-arrival
+	// across both streams shows a regression the UI never renders.
+	const frames = (payload: string | Buffer) =>
+		String(payload)
+			.trim()
+			.split("\n")
+			.flatMap((line) => {
 				try {
-					visit(JSON.parse(line));
+					const frame: unknown = JSON.parse(line);
+					return isRecord(frame) ? [frame] : [];
 				} catch {
-					// Non-JSON data-plane frames do not carry session snapshots.
+					return []; // Non-JSON data-plane frames carry no session rows.
 				}
-			}
+			});
+	page.on("websocket", (socket) => {
+		const shellRequests = new Set<string>();
+		socket.on("framesent", ({ payload }) => {
+			for (const frame of frames(payload))
+				if (frame["_tag"] === "Request" && frame["tag"] === "SubscribeShell")
+					shellRequests.add(String(frame["id"]));
+		});
+		socket.on("framereceived", ({ payload }) => {
+			for (const frame of frames(payload))
+				if (shellRequests.has(String(frame["requestId"]))) visit(frame);
 		});
 	});
 	return {
@@ -294,10 +310,10 @@ test.describe("Claude background task ages", () => {
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
 			await expect(
-				page.getByRole("button", { name: "4 background tasks", exact: true }),
+				page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 			).toBeVisible();
 			await page
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await report.record("original", snapshots.tasks);
 			const originalTasks = snapshots.tasks;
@@ -312,7 +328,7 @@ test.describe("Claude background task ages", () => {
 			await page.reload();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
 			await page
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await report.record("restored", snapshots.tasks);
 			expect(
@@ -369,7 +385,7 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(5);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				const panel = page.getByTestId("background-tasks-panel");
 				const row = (description: string) =>
@@ -403,13 +419,13 @@ for (const transcriptOnlySubagents of [false, true]) {
 				).toHaveCount(0);
 				await report.record("parent-result", snapshots.tasks);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				replayer.release();
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(6);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				await expect(
 					row("Sleep 40 seconds then print done marker").getByTestId(
@@ -440,16 +456,21 @@ for (const transcriptOnlySubagents of [false, true]) {
 				await page.reload();
 				await expect.poll(() => snapshots.tasks.length).toBe(6);
 				await page
-					.getByRole("button", { name: /^\d+ background tasks?$/ })
+					.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 					.click();
 				expect(snapshots.tasks).toEqual(original);
 				await expect(detail).toHaveAttribute("title", LONG_COMMAND);
 				await report.record("restored-details", snapshots.tasks);
 				await page.setViewportSize({ width: 1440, height: 900 });
+				// The phone sheet glides out while the desktop panel mounts, so
+				// both panels exist until the sheet's dialog is gone.
+				await expect(
+					page.getByRole("dialog", { name: "Background tasks" }),
+				).toHaveCount(0);
 				await expect(panel).toHaveCount(1);
 				if (!(await panel.isVisible()))
 					await page
-						.getByRole("button", { name: /^\d+ background tasks?$/ })
+						.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 						.click();
 				await panel.getByRole("button", { name: "Open agent A" }).click();
 				const drawer = page.getByTestId("task-drawer");
@@ -508,10 +529,10 @@ test.describe("Claude ended stream task liveness", () => {
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
 			await page
-				.getByRole("button", { name: /^\d+ background tasks?$/ })
+				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await expect(
-				page.getByRole("button", { name: "4 background tasks", exact: true }),
+				page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 			).toBeVisible();
 			await report.record("live-before-stream-end", snapshots.tasks);
 			const childId = snapshots.tasks.find(
@@ -578,7 +599,7 @@ test.describe("Claude ended stream task liveness", () => {
 			});
 			await expect(page.getByTestId("background-tasks-row")).toHaveCount(0);
 			await expect(
-				page.getByRole("button", { name: /^\d+ background tasks?$/ }),
+				page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 			).toHaveCount(0);
 			expect(snapshots.tasks).toEqual([]);
 		} finally {

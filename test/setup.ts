@@ -162,3 +162,28 @@ if (typeof document !== "undefined" && !document.fonts) {
 		value: new EventTarget(),
 	});
 }
+
+// 8. jsdom has no Web Animations API, which Svelte transitions and animate:
+//    directives run on. Finish each animation on the next microtask (not a
+//    timer, so fake timers cannot stall it): intros settle and outroing
+//    nodes leave the DOM, as they would once a real animation ends.
+if (typeof Element !== "undefined" && !Element.prototype.animate) {
+	Element.prototype.animate = function animate(): Animation {
+		const animation = {
+			playState: "running",
+			currentTime: 0,
+			effect: null,
+			onfinish: null as (() => void) | null,
+			cancel() {
+				animation.playState = "idle";
+			},
+		};
+		queueMicrotask(() => {
+			if (animation.playState !== "running") return;
+			animation.playState = "finished";
+			animation.onfinish?.();
+		});
+		return animation as unknown as Animation;
+	};
+	Element.prototype.getAnimations = () => [];
+}

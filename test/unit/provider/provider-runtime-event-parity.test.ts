@@ -64,6 +64,70 @@ function stateEntries(state: ProviderRuntimeDomainMapperState) {
 
 describe("translateProviderRuntimeEventToDomain", () => {
 	it.each([
+		"claude",
+		"codex",
+		"opencode",
+		"cursor",
+	])("preserves %s Tool File Change through completion and snapshots", (providerId) => {
+		const fileChanges = [
+			{ path: "new.txt", kind: "add", after: "new" },
+			{ path: "edited.txt", kind: "update", before: "old", after: "new" },
+			{ path: "removed.txt", kind: "delete", before: "removed" },
+			{
+				path: "moved.txt",
+				kind: "move",
+				oldPath: "original.txt",
+				patch: "patch",
+			},
+		];
+		const completed = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "tool-file-changes",
+				type: "tool.completed",
+				providerId,
+				data: {
+					messageId: "message",
+					partId: "tool",
+					result: "done",
+					duration: 1,
+					outcome: "succeeded",
+					fileChanges,
+				},
+			}),
+		);
+		expect(
+			completed.events.find(({ type }) => type === "tool.completed")?.data,
+		).toMatchObject({ fileChanges });
+		const snapshot = translateProviderRuntimeEventToDomain(
+			runtimeEvent({
+				eventId: "snapshot-file-changes",
+				type: "message.snapshot",
+				providerId,
+				data: {
+					messageId: "message",
+					digest: "snapshot",
+					message: {
+						id: "message",
+						sessionID: BASE_EVENT.sessionId,
+						role: "assistant",
+						parts: [
+							{
+								id: "tool",
+								type: "tool",
+								tool: "Edit",
+								state: { status: "completed", fileChanges },
+							},
+						],
+					},
+				},
+			}),
+		);
+		expect(snapshot.events[0]?.data).toMatchObject({
+			message: { parts: [{ state: { fileChanges } }] },
+		});
+	});
+
+	it.each([
 		"succeeded",
 		"failed",
 	] as const)("preserves the typed %s tool outcome", (outcome) => {

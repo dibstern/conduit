@@ -17,7 +17,10 @@ import {
 } from "effect/sql/SqlError";
 import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
-import { accountsStateFromInstances } from "../../../src/lib/account-directory.js";
+import {
+	accountsStateFromInstances,
+	NO_OPENCODE_HEALTH,
+} from "../../../src/lib/account-directory.js";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
 	decodeProviderRuntimeEvent,
@@ -449,31 +452,77 @@ describe("ProviderSideEffectReactor", () => {
 				expect(yield* reactor.runOnce()).toBe(0);
 			}).pipe(Effect.provide(reactorTestLayer)),
 	);
-	it.effect(
-		"settles a local recall returned before the executor deadline",
-		() =>
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* seedSendTurnOutbox(sql);
-				const reactor = yield* makeReactor({
-					registry: new ProviderRegistry([
-						makeProvider(() =>
-							Effect.succeed({ ...completedTurn, status: "cancelled" }),
-						),
-					]),
-				});
-				const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
-				yield* TestClock.adjust("1 second");
-				expect(caller.pollUnsafe()).toBeDefined();
-				expect((yield* Fiber.join(caller)).status).toBe("interrupted");
-				expect(
-					yield* sql`SELECT status, started_at FROM provider_runs`,
-				).toEqual([{ status: "interrupted", started_at: null }]);
-				expect(yield* sql`SELECT status FROM provider_command_outbox`).toEqual([
-					{ status: "failed" },
-				]);
-			}).pipe(Effect.provide(reactorTestLayer)),
-	);
+	for (const providerId of ["claude", "codex", "opencode", "cursor"])
+		for (const placed of [false, true])
+			it.effect(
+				`interrupts a ${providerId} local recall before intake (placed=${placed})`,
+				() =>
+					Effect.gen(function* () {
+						const sql = yield* SqlClient.SqlClient;
+						yield* seedSendTurnOutbox(sql, { providerId });
+						const { persistUserMessage } = yield* ClaudeEventPersistEffectTag;
+						if (placed) {
+							yield* (yield* makeCommitAndSignal)([
+								canonicalEvent("session.created", "session-1", {
+									sessionId: "session-1",
+									provider: providerId,
+									title: "Recall",
+								}),
+							]);
+							yield* persistUserMessage("session-1", "hello", {
+								messageId: "legacy-user-1",
+								inputId: "cmd-1",
+								runId: "run:cmd-1",
+								provider: providerId,
+							});
+						}
+						const reactor = yield* makeReactor({
+							persistUserMessage,
+							registry: new ProviderRegistry([
+								makeProvider(
+									() =>
+										Effect.succeed({ ...completedTurn, status: "cancelled" }),
+									providerId,
+								),
+							]),
+						});
+						const caller = yield* Effect.forkChild(reactor.runCommand("cmd-1"));
+						yield* TestClock.adjust("1 second");
+						expect(caller.pollUnsafe()).toBeDefined();
+						expect(yield* Fiber.join(caller)).toMatchObject({
+							status: "interrupted",
+							error: { code: "interrupted" },
+						});
+						expect(
+							yield* sql`SELECT status, started_at FROM provider_runs`,
+						).toEqual([{ status: "interrupted", started_at: null }]);
+						expect(
+							yield* sql`SELECT run_id, state, started_at FROM turns`,
+						).toEqual(
+							placed
+								? [
+										{
+											run_id: "run:cmd-1",
+											state: "interrupted",
+											started_at: null,
+										},
+									]
+								: [],
+						);
+						expect(
+							yield* sql`SELECT type, json_extract(metadata, '$.runId') AS run_id FROM events
+								WHERE type IN ('turn.error', 'turn.interrupted')`,
+						).toEqual([{ type: "turn.interrupted", run_id: "run:cmd-1" }]);
+						expect(
+							yield* sql`SELECT status, error_code FROM provider_command_outbox`,
+						).toEqual([{ status: "failed", error_code: "interrupted" }]);
+						expect(
+							yield* sql`SELECT status, error_code FROM command_receipts`,
+						).toEqual([
+							{ status: "side_effect_failed", error_code: "interrupted" },
+						]);
+					}).pipe(Effect.provide(reactorTestLayer)),
+			);
 	for (const fault of ["StoreRejected", "StoreUnavailable"] as const)
 		it.effect(`recall aborts local intake before ${fault} settlement`, () =>
 			Effect.scoped(
@@ -1245,6 +1294,7 @@ describe("ProviderSideEffectReactor", () => {
 						configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 					),
 				),
+				Effect.succeed(NO_OPENCODE_HEALTH),
 			);
 			const resolveAccount = vi.spyOn(accountDirectory, "resolve");
 			const reactor = yield* makeReactor({
@@ -1363,6 +1413,7 @@ describe("ProviderSideEffectReactor", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 
@@ -1430,6 +1481,7 @@ describe("ProviderSideEffectReactor", () => {
 								configuredClaudeConfigDir("/tmp/g4zp-test-default"),
 							),
 						),
+						Effect.succeed(NO_OPENCODE_HEALTH),
 					),
 				});
 

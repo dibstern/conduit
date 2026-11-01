@@ -99,11 +99,11 @@ Scenario: Rejected agent discovery still shows the viewed instance's stored warn
   When the mock relay reports OpenCode failed for instance work-oc
   Then the OpenCode connection banner reads OpenCode failed to start
 
-Scenario: The relay's first OpenCode instance uses its connection alias when discovery fails
+Scenario: The managed server's status does not warn on the first configured OpenCode instance
   Given the OpenCode session is persisted on instance work-oc as the first OpenCode instance with another instance healthy
   When the mock relay reports OpenCode reconnecting
   And I view the OpenCode session on instance work-oc with rejected agent discovery
-  Then the OpenCode connection banner reads Reconnecting to OpenCode…
+  Then the OpenCode connection banner is not visible
   And the generic instance health warning is not visible
 
 Scenario: Rejected discovery on a persisted Claude instance does not show an OpenCode warning

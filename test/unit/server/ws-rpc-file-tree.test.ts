@@ -50,7 +50,10 @@ describe("WsRpcServerLayer GetFileTree", () => {
 					Layer.provideMerge(
 						makeTestHandlerLayer({
 							api,
-							config: makeMockConfig({ slug: "project-a" }),
+							config: makeMockConfig({
+								slug: "project-a",
+								projectDir: process.cwd(),
+							}),
 						}),
 					),
 				),

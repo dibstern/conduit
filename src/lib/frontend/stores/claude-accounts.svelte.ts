@@ -11,7 +11,6 @@ import {
 	switchSessionAccount,
 } from "../utils/account-switch.js";
 import {
-	accountQuota,
 	planUsageWindows,
 	quotaReading,
 	usageDisplay,
@@ -49,11 +48,7 @@ type HandoffState =
 	  } & SwitchContext);
 
 class ClaudeAccounts {
-	quotas = $state<ReadonlyMap<string, UsageReading> | undefined>();
-	private sendQuotas = $state<ReadonlyMap<string, UsageReading> | undefined>();
 	handoff = $state<HandoffState>({ kind: "idle" });
-	private quotaTicket = 0;
-	private sendQuotaTicket = 0;
 	private previewTicket = 0;
 	private inFlightTarget = $state<string | null>(null);
 
@@ -91,45 +86,20 @@ class ClaudeAccounts {
 		);
 	}
 
-	quotaOf(instanceId: string): UsageReading | undefined {
-		const quota = accountQuota(this.quotas, instanceId);
-		return quota === undefined || quota.harness === this.harness
-			? quota
-			: { ...quota, harness: this.harness };
-	}
-
-	/** Closing or changing the composer must not invalidate a picker's read. */
-	invalidateSendQuotas(clear = true): void {
-		this.sendQuotaTicket++;
-		if (clear) this.sendQuotas = undefined;
-	}
-
-	/** Every open reads afresh; only the latest request may replace the result. */
-	async refreshQuotas(source: "shared" | "send" = "shared"): Promise<boolean> {
-		const ticket = ++this.quotaTicket;
-		const sendTicket = source === "send" ? ++this.sendQuotaTicket : undefined;
-		this.quotas = undefined;
-		if (source === "send") this.sendQuotas = undefined;
-		let checked: readonly UsageReading[] = [];
-		let refreshed = false;
+	/**
+	 * Asks the daemon to read every account. The readings arrive on the usage
+	 * stream; the reply, or undefined when the request failed, only says how it went.
+	 */
+	async readUsage(force = false): Promise<readonly UsageReading[] | undefined> {
 		try {
-			checked = await rpc("QuotaForAccounts", {
+			return await rpc("QuotaForAccounts", {
 				projectSlug: this.projectSlug,
 				originId: getBrowserClientId(),
+				...(force ? { force } : {}),
 			});
-			refreshed = true;
 		} catch {
-			// A failed read leaves accounts for the user to choose explicitly.
+			return undefined;
 		}
-		const quotas = new Map(
-			checked
-				.filter((reading) => reading.harness === this.harness)
-				.map((reading) => [reading.accountId, reading]),
-		);
-		if (ticket === this.quotaTicket) this.quotas = quotas;
-		// A picker's refresh must not discard the send menu's own fresh result.
-		if (sendTicket === this.sendQuotaTicket) this.sendQuotas = quotas;
-		return refreshed;
 	}
 
 	private accountLimitFor(reading: UsageReading | undefined) {
@@ -146,8 +116,8 @@ class ClaudeAccounts {
 		currentId = composerAccountId(findSession(sessionState.currentId ?? "")),
 	): AccountAvailability {
 		if (instanceId === currentId) return { kind: "current" };
-		const quota = this.quotaOf(instanceId);
-		const { limit, usageUnknown } = this.accountLimitFor(quota);
+		const reading = this.readingOf(instanceId);
+		const { limit, usageUnknown } = this.accountLimitFor(reading);
 		if (limit.kind === "signed-out") return limit;
 		if (limit.kind !== "go")
 			return {
@@ -157,7 +127,7 @@ class ClaudeAccounts {
 						? new Date(limit.until).toISOString()
 						: undefined,
 			};
-		const { used } = quotaReading(quota, clock.now);
+		const { used } = quotaReading(reading, clock.now);
 		return {
 			kind: "selectable",
 			usagePct: !usageUnknown && typeof used === "number" ? used : null,
@@ -175,10 +145,7 @@ class ClaudeAccounts {
 			.sort((a, b) => rank(a.id) - rank(b.id))
 			.flatMap((account) => {
 				if (account.id === currentId) return [];
-				const reading =
-					this.sendQuotas === undefined
-						? this.readingOf(account.id)
-						: this.sendQuotas.get(account.id);
+				const reading = this.readingOf(account.id);
 				const { limit, usageUnknown } = this.accountLimitFor(reading);
 				if (limit.kind !== "go") return [];
 				const windows = reading
@@ -209,7 +176,6 @@ class ClaudeAccounts {
 	}
 
 	suggestedAccount(currentId: string): string | undefined {
-		if (this.quotas === undefined) return undefined;
 		return this.configuredAccounts
 			.filter((account) => {
 				const choice = this.availabilityOf(account.id, currentId);
@@ -218,9 +184,9 @@ class ClaudeAccounts {
 			.reduce<(typeof this.configuredAccounts)[number] | undefined>(
 				(best, account) =>
 					best === undefined ||
-					(usageDisplay(this.quotaOf(account.id), "off", clock.now).binding
+					(usageDisplay(this.readingOf(account.id), "off", clock.now).binding
 						?.utilization ?? 100) <
-						(usageDisplay(this.quotaOf(best.id), "off", clock.now).binding
+						(usageDisplay(this.readingOf(best.id), "off", clock.now).binding
 							?.utilization ?? 100)
 						? account
 						: best,

@@ -26,6 +26,11 @@ import {
 	CategoryTuningProposalSchema,
 	CategoryTuningScoreSchema,
 } from "./category-tuning.js";
+import {
+	SessionDiffError,
+	SessionDiffListingSchema,
+	SessionDiffScopeSchema,
+} from "./session-diff.js";
 import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
 import {
 	ProjectWorktreeCleanupSchema,
@@ -85,13 +90,21 @@ import {
 	InputRequestSchema,
 	STEER_BLOCKERS,
 	TextSurfacedPayloadSchema,
+	ToolFileChangeSchema,
 } from "./stored-event.js";
 import { TerminalKeysSetting } from "./terminal-keys.js";
 import {
 	TitleGenerationSelectionSchema,
 	TitleGenerationStateSchema,
 } from "./title-generation.js";
-import { ToolCallId, ToolDetail, ToolInput, ToolText } from "./tool-wire.js";
+import {
+	ToolCallId,
+	ToolDetail,
+	ToolInput,
+	ToolPresentationSchema,
+	ToolText,
+	Utf8Bytes,
+} from "./tool-wire.js";
 import {
 	RecapScopeSchema,
 	RecapSnapshotSchema,
@@ -410,6 +423,9 @@ export const HistoryMessagePartSchema = Schema.Struct({
 			Schema.Struct({
 				input: Schema.optionalKey(ToolInput),
 				output: Schema.optionalKey(ToolText),
+				fileChanges: Schema.optionalKey(Schema.Array(ToolFileChangeSchema)),
+				fileChangesBytes: Schema.optionalKey(Utf8Bytes),
+				presentation: Schema.optionalKey(ToolPresentationSchema),
 			}),
 			[Schema.Record(Schema.String, Schema.Unknown)],
 		),
@@ -466,7 +482,43 @@ export const HistoryMessageSchema = Schema.Struct({
  * - `part`: one part of the message `messageId`, placed among that message's
  *   parts by `sortOrder`.
  */
+export const SessionDetailWindowRequestSchema = Schema.Struct({
+	anchorMessageId: NonEmptyString,
+	direction: Schema.Literals(["from", "before", "after"]),
+});
+export type SessionDetailWindowRequest =
+	typeof SessionDetailWindowRequestSchema.Type;
+export const SessionDetailWindowSchema = Schema.Struct({
+	kind: Schema.Literals(["latest", "historical"]),
+	firstMessageId: Schema.optional(NonEmptyString),
+	lastMessageId: Schema.optional(NonEmptyString),
+	hasEarlier: Schema.Boolean,
+	hasLater: Schema.Boolean,
+});
+export type SessionDetailWindow = typeof SessionDetailWindowSchema.Type;
+export const SessionPromptSummarySchema = Schema.Struct({
+	id: NonEmptyString,
+	createdAt: Schema.Number,
+	preview: Schema.String,
+	isInherited: Schema.Boolean,
+});
+export type SessionPromptSummary = typeof SessionPromptSummarySchema.Type;
+export const SessionPromptIndexEnvelopeSchema = Schema.Union([
+	EnvelopeSchema(SessionPromptSummarySchema),
+	Schema.Struct({
+		_tag: Schema.Literal("snapshotChunk"),
+		rows: Schema.Array(SessionPromptSummarySchema),
+		sequence: Schema.Number,
+	}),
+]);
+export type SessionPromptIndexEnvelope =
+	typeof SessionPromptIndexEnvelopeSchema.Type;
+
 export const SessionDetailItemSchema = Schema.Union([
+	Schema.Struct({
+		_tag: Schema.Literal("window"),
+		window: SessionDetailWindowSchema,
+	}),
 	Schema.Struct({
 		_tag: Schema.Literal("message"),
 		message: HistoryMessageSchema,
@@ -539,7 +591,6 @@ export type SessionDetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
 export const GetModelsResponseSchema = Schema.Struct({
 	projectSlug: Schema.String,
 	instanceId: Schema.optional(Schema.String),
-	defaultOpenCodeInstanceId: Schema.optional(Schema.String),
 	/** Explicit account reads include its discovered catalog; other discovery catalogs follow providerModels. */
 	providers: Schema.Array(ProviderInfoSchema),
 	active: Schema.optional(ModelSelectionSchema),
@@ -2460,6 +2511,8 @@ export const QuotaForAccounts = Rpc.make("QuotaForAccounts", {
 	payload: Schema.TaggedStruct("QuotaForAccounts", {
 		projectSlug: NonEmptyString,
 		originId: Schema.optional(NonEmptyString),
+		/** A user's explicit refresh: read again even after a recent failed read. */
+		force: Schema.optional(Schema.Boolean),
 	}),
 	success: QuotaForAccountsResponseSchema,
 	error: WsRpcError,
@@ -2585,6 +2638,31 @@ export const GetToolDetails = Rpc.make("GetToolDetails", {
 	}),
 	success: GetToolDetailsResponseSchema,
 	error: WsRpcError,
+});
+
+// Diff views run git on request, so these deliberately avoid read-RPC prefixes.
+export const SessionDiffList = Rpc.make("SessionDiffList", {
+	payload: Schema.TaggedStruct("SessionDiffList", {
+		sessionId: NonEmptyString,
+		scope: SessionDiffScopeSchema,
+	}),
+	success: SessionDiffListingSchema,
+	error: WsRpcError,
+});
+
+/** Serves only a file the listing named, by its folder, path and blob pair. */
+export const SessionDiffFile = Rpc.make("SessionDiffFile", {
+	payload: Schema.TaggedStruct("SessionDiffFile", {
+		sessionId: NonEmptyString,
+		scope: SessionDiffScopeSchema,
+		revision: NonEmptyString,
+		folder: NonEmptyString,
+		path: NonEmptyString,
+		before: Schema.NullOr(Schema.String),
+		after: Schema.NullOr(Schema.String),
+	}),
+	success: Schema.Struct({ patch: Schema.String }),
+	error: Schema.Union([WsRpcError, SessionDiffError]),
 });
 
 export const GetSkillContent = Rpc.make("GetSkillContent", {
@@ -3425,6 +3503,8 @@ const wsRpcRequests = [
 		}),
 	},
 	GetToolDetails,
+	SessionDiffList,
+	SessionDiffFile,
 	{
 		requests: [GetSkillContentForSession, GetSkillContent],
 		rpc: Rpc.make(GetSkillContent._tag, {
@@ -3612,6 +3692,7 @@ export const SubscribeShell = Rpc.make("SubscribeShell", {
 export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	payload: {
 		sessionId: NonEmptyString,
+		window: Schema.optional(SessionDetailWindowRequestSchema),
 		resumeFromSequence: Schema.optional(Schema.Number),
 		resumeBase: Schema.optional(ResumeBase),
 		// From a saved snapshot: the server resumes from this, not resumeBase.
@@ -3621,6 +3702,16 @@ export const SubscribeSessionDetail = Rpc.make("SubscribeSessionDetail", {
 	error: WsRpcError,
 	stream: true,
 });
+
+export const SubscribeSessionPromptIndex = Rpc.make(
+	"SubscribeSessionPromptIndex",
+	{
+		payload: { sessionId: NonEmptyString },
+		success: SessionPromptIndexEnvelopeSchema,
+		error: WsRpcError,
+		stream: true,
+	},
+);
 
 /** One session's todo list: the items its newest TodoWrite left behind. */
 export const SessionTodosSchema = Schema.Struct({
@@ -3951,6 +4042,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeRecaps,
 	SubscribeShell,
 	SubscribeSessionDetail,
+	SubscribeSessionPromptIndex,
 	SubscribeSessionTodos,
 	SubscribeSessionFamily,
 	SubscribePtys,

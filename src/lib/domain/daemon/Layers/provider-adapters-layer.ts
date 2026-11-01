@@ -404,7 +404,8 @@ export const makeProviderAdaptersLive = (
 							const instanceId =
 								account?.id ??
 								(yield* bindings.getProviderForSession(sessionId)) ??
-								MANAGED_OPENCODE_ACCOUNT_ID;
+								Option.getOrUndefined(yield* accounts.defaultFor("opencode"))
+									?.id;
 							const snapshot = yield* accounts.snapshot;
 							return snapshot.accounts.some(
 								(configured) =>
