@@ -229,6 +229,19 @@ beforeAll(async () => {
 			join(scratch, unit),
 			execFileSync("git", ["-C", repo, "show", `${r2}:${unit}`]),
 		);
+	// R2's reactor names a Stop's runs in its control context, which R2's runner read
+	// (6c9ff950 runner-provider-instance.ts 1306); the current runner reads them from runIds alone.
+	const runner = join(
+		scratch,
+		"src/lib/provider/runner/runner-provider-instance.ts",
+	);
+	const current = readFileSync(runner, "utf8");
+	const bridged = current.replace(
+		"// A bound Stop must leave a pre-warm",
+		"runIds = control?.stopRunIds ?? runIds;\n\t\t// A bound Stop must leave a pre-warm",
+	);
+	expect(bridged).not.toBe(current);
+	writeFileSync(runner, bridged);
 	const main: typeof import("./replay.js") = await import(
 		join(scratch, "test/unit/provider/run-ledger-oracle/replay.ts")
 	);

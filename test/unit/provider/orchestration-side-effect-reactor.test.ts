@@ -45,9 +45,7 @@ import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js
 import type {
 	EventSink,
 	PermissionResponse,
-	ProviderCall,
 	ProviderCapabilities,
-	ProviderControlContext,
 	ProviderInstance,
 	ResolvedSendTurnInput,
 	TurnResult,
@@ -2482,8 +2480,7 @@ describe("ProviderSideEffectReactor", () => {
 
 	// 4.6 (CONTRACT.md 1555-1556 ref. 4.4, M3): a Stop's interrupt names its committed cohort's runs.
 	// How it could fail: the reactor passes the Stop's input ids, which a run-bound instance matches
-	// to no turn; it passes only the owners still covered; it drops a legacy payload's turnIds; or the
-	// cohort still rides the control context, a second path for the same fact.
+	// to no turn; it passes only the owners still covered; or it drops a legacy payload's turnIds.
 	for (const stop of [true, false])
 		it.effect(
 			`interrupts ${stop ? "a Stop's committed runs" : "a legacy payload's turnIds"}`,
@@ -2515,12 +2512,7 @@ describe("ProviderSideEffectReactor", () => {
 					yield* sql`INSERT INTO provider_runs (id, session_id, status, requested_at)
 						VALUES ('original-run', 'session-1', 'running', 1000)`;
 					const interruptTurnEffect = vi.fn(
-						(
-							_sessionId: string,
-							_runIds?: readonly string[],
-							_call?: ProviderCall,
-							_control?: ProviderControlContext,
-						) => Effect.void,
+						(_sessionId: string, _runIds?: readonly string[]) => Effect.void,
 					);
 					const reactor = yield* makeReactor({
 						registry: new ProviderRegistry([
@@ -2535,7 +2527,6 @@ describe("ProviderSideEffectReactor", () => {
 					expect(call?.[1]).toEqual(
 						stop ? ["original-run"] : ["original-input"],
 					);
-					expect(call?.[3]).not.toHaveProperty("stopRunIds");
 				}).pipe(Effect.provide(reactorTestLayer)),
 		);
 

@@ -58,12 +58,6 @@ export interface ProviderControlContext {
 	readonly requestedAt?: number;
 	/** Conditional End for the original Stop cohort only. */
 	readonly retireRunIds?: readonly string[];
-	/**
-	 * The committed cohort fenced by interrupt at the runner host. Until the
-	 * reactor passes the cohort as `interruptTurnEffect`'s `runIds`, runner
-	 * instances read it from here.
-	 */
-	readonly stopRunIds?: readonly string[];
 	/** An End that retires the runner for its project's removal (3.11). */
 	readonly projectRemoved?: true;
 	readonly response?: PermissionResponse;

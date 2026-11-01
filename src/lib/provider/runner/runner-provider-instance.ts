@@ -1359,11 +1359,9 @@ export class RunnerProviderInstance implements ProviderInstance {
 		call?: ProviderCall,
 		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		// Bridge: the reactor still passes input ids here, and the cohort in control.
-		const cohort = control?.stopRunIds ?? runIds;
 		// A bound Stop must leave a pre-warm for a replacement turn alone.
 		return (
-			cohort === undefined
+			runIds === undefined
 				? FiberMap.remove(this.preWarmFibers, sessionId)
 				: Effect.void
 		).pipe(
@@ -1373,7 +1371,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					sessionId,
 					...(control ? { control } : {}),
 					...(call ? { call } : {}),
-					...(cohort !== undefined ? { runIds: cohort } : {}),
+					...(runIds !== undefined ? { runIds } : {}),
 				}),
 			),
 		);
