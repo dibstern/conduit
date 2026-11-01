@@ -306,14 +306,12 @@ function joinConsumption(a: Consumption, b: Consumption): Consumption {
 	return consumptionRank[b.tag] > consumptionRank[a.tag] ? b : a;
 }
 
+/** L1 (CONTRACT 344-345): the split is at the last `:` when a decimal querySeq follows; otherwise the whole label is the runnerId. */
 function splitLabel(label: Label): { runnerId: string; querySeq: number } {
-	const at = label.lastIndexOf(":");
-	return at < 0
-		? { runnerId: label, querySeq: 0 }
-		: {
-				runnerId: label.slice(0, at),
-				querySeq: Number(label.slice(at + 1)) || 0,
-			};
+	const match = /^(.*):(\d+)$/.exec(label);
+	return match
+		? { runnerId: match[1] ?? label, querySeq: Number(match[2]) }
+		: { runnerId: label, querySeq: 0 };
 }
 
 const reportsTasks = (provider: ProviderKind) =>
@@ -1203,6 +1201,9 @@ function unsolicited(
 		return rejected(
 			"only a Claude wake has a turn_ended (3.4, 2.1 row 215, 8.3)",
 		);
+	// 8.3 (CONTRACT.md 2808): Cursor starts no unsolicited turn, so it has no wake turn_started.
+	if (observation.kind === "turn_started" && world.provider === "cursor")
+		return rejected("Cursor starts no unsolicited turn (8.3)");
 	// L1 (CONTRACT.md 353-355): evidence under the label of a runner not started has no authority
 	// and changes nothing.
 	if (!world.runners.has(splitLabel(observation.label).runnerId))

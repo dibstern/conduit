@@ -368,12 +368,10 @@ function joinConsumption(a: Consumption, b: Consumption): Consumption {
 /** L1: split at the last `:` when a decimal querySeq follows. */
 function splitLabel(label: Label): { runnerId: string; querySeq: number } {
 	const at = label.lastIndexOf(":");
-	return at < 0
-		? { runnerId: label, querySeq: 0 }
-		: {
-				runnerId: label.slice(0, at),
-				querySeq: Number(label.slice(at + 1)) || 0,
-			};
+	const suffix = label.slice(at + 1);
+	return at >= 0 && /^\d+$/.test(suffix)
+		? { runnerId: label.slice(0, at), querySeq: Number(suffix) }
+		: { runnerId: label, querySeq: 0 };
 }
 
 function value(tx: Tx): Value {
@@ -1814,6 +1812,8 @@ function unsolicited(
 		!capabilities.commandReceipts
 	)
 		return rejected(`${kind} is Claude's (3.4, 9, D46)`);
+	if (kind === "turn_started" && !capabilities.wakeTurns)
+		return rejected(`${book.provider} starts no unsolicited turn (8.3)`);
 	// L1 (CONTRACT.md 353-355): a runner not started has no authority and changes nothing.
 	const { runnerId, querySeq } = splitLabel(label);
 	const runner = book.runners.get(runnerId);

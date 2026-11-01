@@ -1474,6 +1474,13 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 			end(d);
 			expect(d.latest("end_session").effect).toMatchObject({ label: null });
 		});
+		agreed("claude", (d) => {
+			// What follows the last ':' is not decimal, so the whole label is the runnerId (L1).
+			started(d, "host:abc");
+			lose(d, "host:abc");
+			end(d);
+			expect(d.latest("end_session").effect).toMatchObject({ label: null });
+		});
 	});
 
 	it("run_dispatched to an unstarted runner then its process_lost ends the Run process_lost, recording no lost work (L1, r3-1)", () => {
@@ -2407,6 +2414,23 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 				}).tag,
 			).toBe("Rejected");
 		});
+		// 8.3 (CONTRACT.md 2808): Cursor starts no unsolicited turn and has no turn_ended.
+		agreed("cursor", (d) => {
+			started(d, "r1:1");
+			for (const kind of ["turn_started", "turn_ended"] as const)
+				expect(
+					d.step({
+						verb: "observe",
+						observation: {
+							tag: "Unsolicited",
+							label: "r1:1",
+							eventId: kind,
+							kind,
+						},
+					}).tag,
+				).toBe("Rejected");
+			expect(d.view().active).toBeUndefined();
+		});
 	});
 
 	it("a Pause native command plus a wake Run leaves foreground authority unchanged, and a Stop issues no native command (8.5)", () => {
@@ -3051,7 +3075,8 @@ describe("[32.2.13] core Codex policy: the bead's acceptance criteria", () => {
 		}).toEqual({
 			claude: "Accepted Accepted Accepted Accepted",
 			codex: "Accepted Accepted Rejected Rejected",
-			cursor: "Rejected Accepted Rejected Rejected",
+			// 8.3 (CONTRACT.md 2808): Cursor starts no unsolicited turn.
+			cursor: "Rejected Rejected Rejected Rejected",
 			opencode: "Rejected Accepted Rejected Rejected",
 		});
 	});

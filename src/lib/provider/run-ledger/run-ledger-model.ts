@@ -597,6 +597,8 @@ export interface ProviderPolicy {
 		readonly runnerHost: boolean;
 		/** D46, 9: command receipts and a wake's turn_ended are this provider's evidence (CONTRACT.md 519-520). */
 		readonly commandReceipts: boolean;
+		/** 8.3: an unsolicited turn_started is this provider's evidence; Cursor starts none (CONTRACT.md 2808). */
+		readonly wakeTurns: boolean;
 	};
 	readonly runEnd: "result" | "query_ended";
 	readonly intake: ProviderIntake;
