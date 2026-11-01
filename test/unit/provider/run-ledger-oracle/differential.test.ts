@@ -202,8 +202,10 @@ const applied = new Set<Mask["row"]>();
 /**
  * Main's side is a copy of the current tree with R2's units written over it, imported from the
  * temp directory as a module graph of its own (gap P4). Mocking the units in place deadlocks:
- * they sit in import cycles, and a mock factory waits on itself.
+ * they sit in import cycles, and a mock factory waits on itself. The frontend is left out: no
+ * module outside it imports it, and it is half the tree's files.
  */
+// test-waits-allow timeout-override: main's graph is a second transform of ~900 modules on the shared vite server: 1.4s idle, 8s beside a 2-worker oracle run, past 10s under a merge hook's integration sweep, so 60s.
 beforeAll(async () => {
 	for (const tree of [
 		"tsconfig.json",
@@ -211,7 +213,10 @@ beforeAll(async () => {
 		"test/helpers",
 		"test/unit/provider/run-ledger-oracle",
 	])
-		cpSync(join(repo, tree), join(scratch, tree), { recursive: true });
+		cpSync(join(repo, tree), join(scratch, tree), {
+			recursive: true,
+			filter: (from) => from !== join(repo, "src/lib/frontend"),
+		});
 	symlinkSync(join(repo, "node_modules"), join(scratch, "node_modules"));
 	for (const unit of units)
 		writeFileSync(
@@ -222,7 +227,7 @@ beforeAll(async () => {
 		join(scratch, "test/unit/provider/run-ledger-oracle/replay.ts")
 	);
 	mainReplay = main.replayTrace;
-});
+}, 60_000);
 
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
 
