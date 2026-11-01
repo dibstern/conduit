@@ -2212,6 +2212,16 @@ function stopItemOpen(world: World, item: StopItem): boolean {
 	const tx = send?.txs[item.tx];
 	return send !== undefined && tx !== undefined && mayStillAct(world, send, tx);
 }
+/** 8.5: what covers a native command, its send's session_ended or process_lost, if anything. */
+function coveringCause(world: World, command: NativeCommandRec) {
+	const covers = (world.sends[command.send]?.txs ?? []).map((tx) => tx.ended);
+	return covers.includes("session_ended")
+		? "session_ended"
+		: covers.includes("process_lost")
+			? "process_lost"
+			: undefined;
+}
+
 const stopOpen = (world: World) =>
 	world.stop?.items.some((item) => stopItemOpen(world, item)) ?? false;
 
@@ -2285,8 +2295,12 @@ function deadlines(world: World, step: Step): Due[] {
 			});
 		}
 	}
+	// 8.5 (CONTRACT.md 2795-2796): only a waiting command carries a deadline, never a covered one.
 	for (const command of world.nativeCommands)
-		if (command.deadline !== undefined)
+		if (
+			command.deadline !== undefined &&
+			coveringCause(world, command) === undefined
+		)
 			due.push({
 				...command.deadline,
 				fire: () => {
@@ -2890,14 +2904,7 @@ export function viewLedger(state: ReferenceState): LedgerView {
 	const nativeCommands = world.nativeCommands.map(
 		(command): NativeCommandView => {
 			// 8.5 (CONTRACT.md 2933-2934): Failed with the covering cause when covered.
-			const covers = (world.sends[command.send]?.txs ?? []).map(
-				(tx) => tx.ended,
-			);
-			const covered = covers.includes("session_ended")
-				? "session_ended"
-				: covers.includes("process_lost")
-					? "process_lost"
-					: undefined;
+			const covered = coveringCause(world, command);
 			if (
 				covered !== undefined &&
 				command.state !== "Completed" &&

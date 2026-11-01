@@ -2006,6 +2006,54 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		});
 	});
 
+	it.each([
+		["process_lost", (d: Driver) => lose(d, "r1")],
+		[
+			"session_ended",
+			(d: Driver) =>
+				step(d, {
+					verb: "settle",
+					settlement: {
+						kind: "session_ended",
+						cause: "native_session_vanished",
+					},
+				}),
+		],
+	])("a covered native command carries no deadline, so no alarm fires it, whatever its waiting variant (%s, 8.5)", (code, cover) => {
+		agreed("claude", (d) => {
+			native(d, "n1", "/goal pause");
+			const sentDeadline = d.now + policy.nativeCommandMs;
+			native(d, "n2", "/goal clear");
+			receipt(d, {
+				kind: "command_lifecycle",
+				commandId: "n2",
+				state: "started",
+			});
+			native(d, "n3", "/goal resume");
+			receipt(d, {
+				kind: "command_lifecycle",
+				commandId: "n3",
+				state: "queued",
+			});
+			cover(d);
+			// A late start for the covered, queued n3 must not re-arm its paused deadline.
+			receipt(d, {
+				kind: "command_lifecycle",
+				commandId: "n3",
+				state: "started",
+			});
+			expect(d.view().nativeCommands).toEqual(
+				["n1", "n2", "n3"].map((commandId) => ({
+					commandId,
+					tag: "Failed",
+					code,
+				})),
+			);
+			expect(d.alarmAt).toBeUndefined();
+			expect(fire(d, sentDeadline + 60_000).events).toEqual([]);
+		});
+	});
+
 	it("a native command issued with no process is pending and resolves at the next process_started, whose loss covers it (L2 case 3, 8.5)", () => {
 		agreed("claude", (d) => {
 			lose(d, "r1");

@@ -773,6 +773,16 @@ function stopItemOpen(book: Book, item: StopItem): boolean {
 	const tx = send?.txs[item.tx];
 	return send !== undefined && tx !== undefined && mayStillAct(book, send, tx);
 }
+/** 8.5: what covers a native command, its send's session_ended or process_lost, if anything. */
+function coveringCause(book: Book, command: NativeCommandRec) {
+	const covers = (book.sends[command.send]?.txs ?? []).map((tx) => tx.ended);
+	return covers.includes("session_ended")
+		? "session_ended"
+		: covers.includes("process_lost")
+			? "process_lost"
+			: undefined;
+}
+
 const stopOpen = (book: Book) =>
 	book.stop?.items.some((item) => stopItemOpen(book, item)) ?? false;
 
@@ -846,9 +856,13 @@ function deadlines(book: Book): Due[] {
 				});
 		}
 	}
-	// 8.5: a native command's deadline drives only its view.
+	// 8.5 (CONTRACT.md 2795-2796): only a waiting command carries a deadline, never a covered one;
+	// it drives only its view.
 	for (const command of book.nativeCommands)
-		if (command.deadline !== undefined)
+		if (
+			command.deadline !== undefined &&
+			coveringCause(book, command) === undefined
+		)
 			due.push({
 				...command.deadline,
 				fire: () => {
@@ -3021,14 +3035,7 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 		// 8.5: a projection of its send; Failed with the covering cause when covered.
 		nativeCommands: book.nativeCommands.map((command): NativeCommandView => {
 			const { commandId, state } = command;
-			const covers = (book.sends[command.send]?.txs ?? []).map(
-				(tx) => tx.ended,
-			);
-			const covered = covers.includes("session_ended")
-				? "session_ended"
-				: covers.includes("process_lost")
-					? "process_lost"
-					: undefined;
+			const covered = coveringCause(book, command);
 			if (
 				covered !== undefined &&
 				state !== "Completed" &&
