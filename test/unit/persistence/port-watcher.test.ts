@@ -18,6 +18,15 @@
 // 12. a host whose every scan fails (no lsof) never reads as known, so auto-settle waits forever.
 // 13. a server whose stdout is a Claude task's output file is not linked to that task, or a server
 //     whose stdout is a terminal, another file, a `.output` file outside `tasks/`, or closed is.
+// 14. a Codex shell's server (CODEX_THREAD_ID, the native thread id) is not attributed to the
+//     session whose Codex binding holds that thread, or a native id is read as a Conduit id.
+// 15. an OpenCode shell's server (CONDUIT_OPENCODE_SESSION_ID with CONDUIT_OPENCODE_INSTANCE_ID) is
+//     not attributed to the session that instance binds to the native id, or another instance's
+//     session with the same native id gets it.
+// 16. a native marker no session here resolves (an unknown thread, another instance, an OpenCode
+//     marker without its instance) is attributed or fails the scan instead of being ignored.
+// 17. with agents nested (Claude inside a Codex shell, Codex inside a Claude shell), the outer
+//     agent's marker wins over the innermost one.
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
@@ -51,6 +60,7 @@ import {
 	type PersistenceEffectContext,
 } from "../../../src/lib/persistence/effect/live.js";
 import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
+import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
 const INTERVAL_MS = 20;
@@ -108,6 +118,8 @@ interface Proc {
 	readonly marker?: string;
 	/** What lsof names as fd 1, when it is open. */
 	readonly stdout?: string;
+	/** Further environment ps -E shows, as `NAME=value` words. */
+	readonly env?: string;
 }
 /**
  * The world: s1's agent (500) runs a shell (501) that runs a node server (600, its env not visible,
@@ -135,7 +147,7 @@ const showWorld = (fake: Fake, procs: readonly Proc[]) => {
 		procs
 			.map(
 				(p) =>
-					`${p.pid} ${p.command} HOME=/Users/u${p.marker ? ` CONDUIT_SESSION_ID=${p.marker}` : ""}\n`,
+					`${p.pid} ${p.command} HOME=/Users/u${p.marker ? ` CONDUIT_SESSION_ID=${p.marker}` : ""}${p.env ? ` ${p.env}` : ""}\n`,
 			)
 			.join(""),
 	);
@@ -466,6 +478,108 @@ describe("PortWatcher", () => {
 							[3002, undefined],
 							[3003, undefined],
 						]);
+					}),
+				),
+			),
+	);
+
+	it.live(
+		"14, 15, 16, 17: Codex and OpenCode markers resolve through their provider binding; unresolvable ones are ignored; the innermost agent wins",
+		() =>
+			withDir((dir, fake) =>
+				open(join(dir, "events.db"), (commit) =>
+					Effect.gen(function* () {
+						yield* sessions(commit);
+						const native = (id: string, provider: string, sid: string) =>
+							canonicalEvent(
+								"session.created",
+								id,
+								{ sessionId: id, title: id, provider, providerSessionId: sid },
+								{ createdAt: 100 },
+							);
+						yield* commit([
+							native("c1", "codex", "thread-c"),
+							native("o1", "inst-a", "ses_native"),
+							native("o2", "inst-c", "ses_native"),
+						]);
+						const proc = (
+							pid: number,
+							ppid: number,
+							command: string,
+							env?: string,
+							marker?: string,
+						): Proc => ({
+							pid,
+							ppid,
+							lstart: T.server,
+							command,
+							...(env === undefined ? {} : { env }),
+							...(marker === undefined ? {} : { marker }),
+						});
+						const codex = "CODEX_THREAD_ID=thread-c";
+						const opencode = (instance: string) =>
+							`CONDUIT_OPENCODE_INSTANCE_ID=${instance} CONDUIT_OPENCODE_SESSION_ID=ses_native`;
+						showWorld(fake, [
+							proc(700, 1, "codex app-server"),
+							proc(701, 700, "zsh", codex),
+							proc(702, 701, "node a.js"),
+							proc(
+								720,
+								1,
+								"opencode serve",
+								"CONDUIT_OPENCODE_INSTANCE_ID=inst-a",
+							),
+							proc(721, 720, "bash", opencode("inst-a")),
+							proc(722, 721, "node b.js"),
+							proc(731, 1, "bash", opencode("inst-b")),
+							proc(732, 731, "node c.js"),
+							proc(741, 1, "bash", "CODEX_THREAD_ID=thread-unknown"),
+							proc(742, 741, "node d.js"),
+							proc(746, 1, "bash", "CONDUIT_OPENCODE_SESSION_ID=ses_native"),
+							proc(747, 746, "node e.js"),
+							proc(750, 1, "zsh", codex),
+							proc(751, 750, "claude", codex, "s2"),
+							proc(752, 751, "node f.js", codex, "s2"),
+							proc(760, 1, "zsh", undefined, "s1"),
+							proc(761, 760, "codex", undefined, "s1"),
+							proc(762, 761, "zsh", codex, "s1"),
+							proc(763, 762, "node g.js"),
+						]);
+						showListeners(fake, [
+							[702, "*:4000"],
+							[722, "*:4001"],
+							[732, "*:4002"],
+							[742, "*:4003"],
+							[747, "*:4006"],
+							[752, "*:4004"],
+							[763, "*:4005"],
+						]);
+						yield* eventsUntil(4);
+						const ports = (id: string) =>
+							serversOf(id).pipe(
+								Effect.map((servers) =>
+									servers.map(({ key }) => key.port).sort(),
+								),
+							);
+						return {
+							c1: yield* ports("c1"),
+							o1: yield* ports("o1"),
+							o2: yield* ports("o2"),
+							s1: yield* ports("s1"),
+							s2: yield* ports("s2"),
+						};
+					}),
+				),
+			).pipe(
+				Effect.tap((ports) =>
+					Effect.sync(() => {
+						expect(ports).toEqual({
+							c1: [4000, 4005],
+							o1: [4001],
+							o2: [],
+							s1: [],
+							s2: [4004],
+						});
 					}),
 				),
 			),

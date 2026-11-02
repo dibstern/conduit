@@ -1,6 +1,6 @@
 /**
  * The PortWatcher (CONTRACT.md 8.7, 2.1 rows 181-182): a main-side fiber that scans the user's
- * listening TCP ports, attributes each to the session whose CONDUIT_SESSION_ID is innermost in its
+ * listening TCP ports, attributes each to the session whose agent marker is innermost in its
  * process ancestry, and records `server_seen` once a port has held its ServerKey for the hold time
  * and `server_gone` when a ledger entry is missing from a successful scan. It compares each scan
  * against the ledger's Servers, read in the write that appends the evidence, never against a copy;
@@ -40,7 +40,12 @@ interface Scanned {
 	readonly taskKey?: TaskKey;
 }
 
-/** A Claude background task's stdout file (8.7): `.../tasks/<task id>.output`. */
+/**
+ * A Claude background task's stdout file (8.7): `.../tasks/<task id>.output`.
+ * Codex's link (CONTRACT.md 2988-2989, a unique command and cwd match in
+ * `thread/backgroundTerminals/list`) waits for that snapshot (CONTRACT.md 2791, 32.21);
+ * until then Codex servers are session-level.
+ */
 const TASK_OUTPUT = /\/tasks\/([^/]+)\.output$/;
 
 /** Each store's readiness (8.7): true once a successful scan and one hold have passed. */
@@ -50,7 +55,15 @@ export const portWatcherKnown = new WeakMap<
 >();
 
 const keyOf = (key: ServerKey) => `${key.pid}:${key.startedAt}:${key.port}`;
-const MARKER = /(?:^|\s)CONDUIT_SESSION_ID=(\S+)/g;
+// 8.7 markers: Claude's carries the Conduit id; Codex's thread id and OpenCode's session id (stamped
+// by the managed plugin's shell.env hook, beside the instance's own id) resolve through the binding.
+const MARKER =
+	/(?:^|\s)(CONDUIT_SESSION_ID|CODEX_THREAD_ID|CONDUIT_OPENCODE_SESSION_ID|CONDUIT_OPENCODE_INSTANCE_ID)=(\S+)/g;
+const AGENT_MARKERS = [
+	"CONDUIT_SESSION_ID",
+	"CODEX_THREAD_ID",
+	"CONDUIT_OPENCODE_SESSION_ID",
+] as const;
 const PS_ROW =
 	/^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
 
@@ -282,7 +295,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 				[...servers.values()].flatMap((server) => chainOf(server.pid)),
 			);
 			// A platform binary's environment is not visible to ps -E; an ancestor's is.
-			const markers = new Map<number, string>();
+			const envs = new Map<number, ReadonlyMap<string, string>>();
 			for (const line of (yield* run("ps", [
 				"-wwE",
 				"-p",
@@ -290,15 +303,57 @@ export const PortWatcherLive = Layer.effectDiscard(
 				"-o",
 				"pid=,command=",
 			])).split("\n")) {
-				const pid = Number(/^\s*(\d+)\s/.exec(line)?.[1]);
-				const marker = [...line.matchAll(MARKER)].at(-1)?.[1];
-				if (marker !== undefined) markers.set(pid, marker);
+				const env = new Map(
+					[...line.matchAll(MARKER)].map(([, name = "", value = ""]) => [
+						name,
+						value,
+					]),
+				);
+				if (AGENT_MARKERS.some((name) => env.has(name)))
+					envs.set(Number(/^\s*(\d+)\s/.exec(line)?.[1]), env);
 			}
-			const marked = [...servers.values()].flatMap((server) => {
-				const owner = chainOf(server.pid).find((pid) => markers.has(pid));
-				const sessionId = owner === undefined ? undefined : markers.get(owner);
-				return sessionId === undefined ? [] : [{ server, sessionId }];
-			});
+			// The innermost agent set the marker whose value holds for the fewest marked ancestors.
+			const resolve = (pid: number) => {
+				const chain = chainOf(pid).flatMap((at) => envs.get(at) ?? []);
+				const inner = chain[0];
+				if (inner === undefined) return Effect.void;
+				const reach = (name: string) => {
+					const changed = chain.findIndex(
+						(env) => env.get(name) !== inner.get(name),
+					);
+					return changed < 0 ? chain.length : changed;
+				};
+				const [name] = AGENT_MARKERS.filter((marker) => inner.has(marker)).sort(
+					(a, b) => reach(a) - reach(b),
+				);
+				const id = inner.get(name ?? "") ?? "";
+				if (name === "CONDUIT_SESSION_ID") return Effect.succeed(id);
+				const provider =
+					name === "CODEX_THREAD_ID"
+						? "codex"
+						: inner.get("CONDUIT_OPENCODE_INSTANCE_ID");
+				if (provider === undefined) return Effect.void;
+				// The binding's native id within its provider (as findOpenCodeSession reads it);
+				// none or several sessions here leave the server unattributed.
+				return sql<{ id: string }>`SELECT session.id FROM sessions AS session
+					LEFT JOIN session_providers AS binding ON binding.id = (
+						SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
+						ORDER BY activated_at DESC, id DESC LIMIT 1)
+					WHERE session.project_id = ${store.projectId}
+						AND COALESCE(binding.provider, session.provider) = ${provider}
+						AND COALESCE(binding.provider_sid, session.provider_sid, session.id) = ${id}
+					LIMIT 2`.pipe(
+					Effect.map((rows) => (rows.length === 1 ? rows[0]?.id : undefined)),
+					Effect.mapError(
+						(cause) => new PortScanError({ reason: "marker lookup", cause }),
+					),
+				);
+			};
+			const marked: { server: ServerKey; sessionId: string }[] = [];
+			for (const server of servers.values()) {
+				const sessionId = yield* resolve(server.pid);
+				if (sessionId !== undefined) marked.push({ server, sessionId });
+			}
 			if (marked.length === 0) return [];
 			const cwds = yield* lsofFields(
 				yield* run("lsof", [
