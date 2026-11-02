@@ -15,12 +15,10 @@ import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-fil
 import {
 	CaCertProvider,
 	effectRouter,
-	effectRouterWithCors,
 	HealthProvider,
 	ProjectsProvider,
 	PushProvider,
 	type RouterProjectInfo,
-	SetupInfoProvider,
 } from "../../../src/lib/server/effect-http-router.js";
 
 const testProjects: RouterProjectInfo[] = [
@@ -281,33 +279,6 @@ describe("Effect HTTP Router", () => {
 				error: { code: string };
 			};
 			expect(body.error.code).toBe("NOT_FOUND");
-		});
-	});
-
-	describe("CORS middleware", () => {
-		it("effectRouterWithCors adds CORS headers to responses", async () => {
-			const { handler, dispose } = HttpRouter.toWebHandler(
-				effectRouterWithCors.pipe(
-					Layer.provideMerge(
-						Layer.mergeAll(
-							TestProjectsLayer,
-							baseRouterLayer(),
-							Layer.succeed(SetupInfoProvider)({
-								getPort: () => Effect.succeed(2633),
-								getIsTls: () => Effect.succeed(false),
-								getPublicUrl: () => Effect.succeed(null),
-							}),
-						),
-					),
-				),
-			);
-			disposers.push(dispose);
-
-			const response = await handler(new Request("http://localhost/info"));
-
-			expect(response.status).toBe(200);
-			// CORS middleware should add the access-control-allow-origin header
-			expect(response.headers.get("access-control-allow-origin")).toBe("*");
 		});
 	});
 

@@ -13,7 +13,7 @@ import { PersistenceStore } from "../../../persistence/effect/live.js";
 import {
 	AttachmentsProvider,
 	CaCertProvider,
-	effectRouterWithCors,
+	effectRouterWithOriginCheck,
 	HealthProvider,
 	type HttpAttachmentReader,
 	ProjectApiDelegateProvider,
@@ -171,7 +171,7 @@ const buildHttpRouterRequestHandlerEffect = (
 ) =>
 	Effect.gen(function* () {
 		const scope = yield* Scope.Scope;
-		const router = yield* HttpRouter.toHttpEffect(effectRouterWithCors);
+		const router = yield* HttpRouter.toHttpEffect(effectRouterWithOriginCheck);
 		const effectHandler = yield* NodeHttpServer.makeHandler(router, { scope });
 		return {
 			handleRequest: async (req, res) => {

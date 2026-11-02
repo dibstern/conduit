@@ -74,7 +74,11 @@ import {
 } from "../persistence/attachment-store.js";
 import { withPublishedProjectGit } from "../persistence/effect/session-git-publication.js";
 import type { OrchestrationLayer } from "../provider/orchestration-wiring.js";
-import { getClientIp, parseCookies } from "../server/http-utils.js";
+import {
+	getClientIp,
+	isOwnOrigin,
+	parseCookies,
+} from "../server/http-utils.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import {
@@ -948,6 +952,10 @@ export async function createRelayStack(
 	);
 
 	httpServer.on("upgrade", (req, socket, head) => {
+		if (!isOwnOrigin(req.headers)) {
+			socket.destroy();
+			return;
+		}
 		// Auth check (mirrors server.ts private checkAuth)
 		const auth = server.getAuth();
 		if (auth.hasPin()) {

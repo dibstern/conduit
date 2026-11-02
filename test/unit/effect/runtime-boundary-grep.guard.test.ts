@@ -1709,7 +1709,7 @@ describe("Effect runtime boundary grep", () => {
 
 	it("keeps daemon HTTP router ownership out of daemon-main", () => {
 		const retiredBridgePatterns = [
-			/effectRouterWithCors/,
+			/effectRouterWithOriginCheck/,
 			/NodeHttpServer\.makeHandler/,
 			/\bctx\.router\s*=/,
 			/\bProjectsProvider\b/,

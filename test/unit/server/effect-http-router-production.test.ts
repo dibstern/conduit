@@ -9,7 +9,7 @@ import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
-	effectRouterWithCors,
+	effectRouterWithOriginCheck,
 	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	type RouterProjectInfo,
@@ -71,7 +71,7 @@ function makeHandler(options?: {
 		NodePath.layer,
 	);
 	return HttpRouter.toWebHandler(
-		effectRouterWithCors.pipe(Layer.provideMerge(layer)),
+		effectRouterWithOriginCheck.pipe(Layer.provideMerge(layer)),
 	);
 }
 

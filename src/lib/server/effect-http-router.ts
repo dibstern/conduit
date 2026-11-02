@@ -39,6 +39,7 @@ import type {
 } from "../shared-types.js";
 import { getVersion } from "../version.js";
 import { SERVER_BUILD_ID } from "./build-update.js";
+import { isOwnOrigin } from "./http-utils.js";
 
 // Service Tags (dependency injection)
 // Each tag represents a capability the router needs. Concrete implementations
@@ -416,7 +417,7 @@ const staticCatchAllHandler = Effect.gen(function* () {
  * Requires: ProjectsProvider (always).
  * Optional: AttachmentsProvider, HealthProvider, PushProvider, CaCertProvider, SetupInfoProvider.
  *
- * Apply CORS middleware via `effectRouterWithCors` for production use.
+ * Production serves it through `effectRouterWithOriginCheck`.
  */
 const publicRoutes = Layer.mergeAll(
 	// Health check — two paths, same handler
@@ -471,17 +472,27 @@ export const effectRouter = Layer.mergeAll(
 );
 
 /**
- * Effect router with CORS middleware applied.
- * Mirrors the CORS headers from the existing router:
- *   Access-Control-Allow-Origin: *
- *   Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS
- *   Access-Control-Allow-Headers: Content-Type, Authorization, X-Relay-Pin
+ * The router behind conduit's one origin check: a request carrying another origin's Origin is
+ * refused before any route, preflights included, so no cross-origin page can act or read as the
+ * logged-in user. Conduit's own page is same-origin and needs no CORS.
  */
-export const effectRouterWithCors = Layer.merge(
+export const effectRouterWithOriginCheck = Layer.merge(
 	effectRouter,
-	HttpRouter.cors({
-		allowedOrigins: ["*"],
-		allowedMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
-		allowedHeaders: ["Content-Type", "Authorization", "X-Relay-Pin"],
-	}),
+	HttpRouter.middleware(
+		(httpApp) =>
+			Effect.gen(function* () {
+				const req = yield* HttpServerRequest.HttpServerRequest;
+				if (isOwnOrigin(req.headers)) return yield* httpApp;
+				return HttpServerResponse.jsonUnsafe(
+					{
+						error: {
+							code: "FORBIDDEN_ORIGIN",
+							message: "Requests from other origins are refused",
+						},
+					},
+					{ status: 403 },
+				);
+			}),
+		{ global: true },
+	),
 );

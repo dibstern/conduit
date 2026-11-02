@@ -46,3 +46,25 @@ export function parseCookies(header: string): Record<string, string> {
 	}
 	return result;
 }
+
+/**
+ * Whether a request may act for conduit's own page. A request without Origin is no browser's
+ * cross-origin request (the CLI, native clients, navigations) and is left to auth. Otherwise the
+ * Origin must be the origin the request was sent to: Tailscale Serve keeps Host and names the
+ * scheme in X-Forwarded-Proto. A browser cannot set those headers on an upgrade, a form post or a
+ * simple request, and the preflight a custom header needs is itself refused here.
+ */
+export function isOwnOrigin(
+	headers: Readonly<Record<string, string | readonly string[] | undefined>>,
+): boolean {
+	const first = (name: string) =>
+		[headers[name]].flat()[0]?.split(",")[0]?.trim() || undefined;
+	const origin = first("origin");
+	if (origin === undefined) return true;
+	const host = first("x-forwarded-host") ?? first("host");
+	if (!URL.canParse(origin) || host === undefined) return false;
+	const from = new URL(origin);
+	const scheme = first("x-forwarded-proto") ?? from.protocol.slice(0, -1);
+	const own = `${scheme}://${host}`;
+	return URL.canParse(own) && new URL(own).origin === from.origin;
+}

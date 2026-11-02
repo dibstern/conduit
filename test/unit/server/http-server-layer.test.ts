@@ -36,7 +36,7 @@ import {
 import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	effectRouter,
-	effectRouterWithCors,
+	effectRouterWithOriginCheck,
 	ProjectsProvider,
 	PushProvider,
 	type RouterProjectInfo,
@@ -266,7 +266,7 @@ describe("HTTP Server Layer", () => {
 
 	// layerTest binds IPv6 :: but its client dials IPv4 loopback. On macOS,
 	// another IPv4 listener can own that same port, so bind both ends to IPv4.
-	const TestServerLayer = HttpRouter.serve(effectRouterWithCors).pipe(
+	const TestServerLayer = HttpRouter.serve(effectRouterWithOriginCheck).pipe(
 		Layer.provideMerge(
 			HttpServer.layerTestClient.pipe(
 				Layer.provide(
@@ -316,15 +316,6 @@ describe("HTTP Server Layer", () => {
 			};
 			expect(data.projects).toHaveLength(1);
 			expect(data.projects[0]).toHaveProperty("slug", "test-project");
-		}).pipe(Effect.provide(TestServerLayer, { local: true })),
-	);
-
-	it.effect("CORS headers present on responses", () =>
-		Effect.gen(function* () {
-			const client = yield* HttpClient.HttpClient;
-			const response = yield* client.get("/info");
-			expect(response.status).toBe(200);
-			expect(response.headers["access-control-allow-origin"]).toBe("*");
 		}).pipe(Effect.provide(TestServerLayer, { local: true })),
 	);
 
@@ -378,7 +369,7 @@ describe("HttpServerLive layer construction", () => {
 				tlsKeyPath: undefined,
 			});
 
-			// HttpServerLive wires effectRouterWithCors into the server.
+			// HttpServerLive wires effectRouterWithOriginCheck into the server.
 			// We need to provide all router dependencies.
 			const fullLayer = HttpServerLive.pipe(
 				Layer.provide(configLayer),

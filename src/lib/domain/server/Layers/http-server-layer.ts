@@ -16,7 +16,7 @@ import { Context, Effect, Layer } from "effect";
 import type { HttpServerError } from "effect/http";
 import { HttpRouter } from "effect/http";
 import {
-	effectRouterWithCors,
+	effectRouterWithOriginCheck,
 	type ProjectsProvider,
 	type SetupInfoProvider,
 } from "../../../server/effect-http-router.js";
@@ -105,7 +105,7 @@ export const HttpServerLive: Layer.Layer<
 			host: config.host,
 		});
 
-		return HttpRouter.serve(effectRouterWithCors, {
+		return HttpRouter.serve(effectRouterWithOriginCheck, {
 			disableLogger: true,
 			disableListenLog: true,
 		}).pipe(Layer.provide(serverLayer));

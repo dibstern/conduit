@@ -14,7 +14,11 @@ import {
 } from "effect";
 import { WsRpcError } from "../../../contracts/ws-rpc.js";
 import * as Failure from "../../../effect/failure-classification.js";
-import { getClientIp, parseCookies } from "../../../server/http-utils.js";
+import {
+	getClientIp,
+	isOwnOrigin,
+	parseCookies,
+} from "../../../server/http-utils.js";
 import type {
 	AttachDaemonProject,
 	ResolveRpcContext,
@@ -55,6 +59,7 @@ export class WebSocketUpgradeError extends Data.TaggedError(
 	readonly reason:
 		| "invalid_path"
 		| "auth_failed"
+		| "foreign_origin"
 		| "relay_unavailable"
 		| "daemon_shutting_down"
 		| "server_unavailable";
@@ -381,6 +386,13 @@ export const WebSocketRoutingLive: Layer.Layer<
 				if (!isSharedRpc) {
 					return yield* new WebSocketUpgradeError({
 						reason: "invalid_path",
+						url: req.url ?? "",
+					});
+				}
+
+				if (!isOwnOrigin(req.headers)) {
+					return yield* new WebSocketUpgradeError({
+						reason: "foreign_origin",
 						url: req.url ?? "",
 					});
 				}
