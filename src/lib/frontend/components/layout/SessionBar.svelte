@@ -313,9 +313,16 @@
 	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open && !sideThreadsPanel.open && !tasksPanel.open);
 	const duoFolded = $derived(sessionViewState.pose === "duo-folded-portrait");
 	const chipsFolded = $derived(isDuoChipRowFolded() && !goalDetails.open && !tasksPanel.open);
+	// A running server is not an unread update, so Servers stays out of the island's count.
 	const viewBadgeCount = $derived(
-		sessionViews.reduce((total, view) => total + (view.hidden?.() ? 0 : (view.badge?.() ?? 0)), 0),
+		sessionViews.reduce((total, view) => total + (view.hidden?.() || view.id === "servers" ? 0 : (view.badge?.() ?? 0)), 0),
 	);
+	// Live servers are what a phone most often switches to after chat, so Servers comes second.
+	const viewCardOrder = $derived.by(() => {
+		const visible = sessionViews.filter((view) => !view.hidden?.());
+		const lead = (view: (typeof visible)[number]) => view.id === "chat" || view.id === "servers";
+		return [...visible.filter(lead), ...visible.filter((view) => !lead(view))];
+	});
 	// The island is phone-only, so its commands and the keyboard share one list.
 	const commands = $derived(session
 		? getSessionCommands(session, sessionState.now, { rename: async () => { forceBarOpen(); await tick(); renaming = true; } }, sessionViewState.compact ? "sheet" : "center")
@@ -379,12 +386,11 @@
 {/if}
 
 {#snippet viewCards()}
-	<MenuRadioGroup value={activeView} aria-label="Views" class="grid grid-cols-4 gap-[8px]">
-		{#each sessionViews as view (view.id)}
-			<!-- Servers has no phone card until its phone view lands (32.33.4). -->
-			{#if view.id !== "servers"}
-			<ViewCard value={view.id} preview={view.id} label={view.label} icon={view.icon} badge={view.badge?.()} disabled={view.disabled === true} data-testid={`overflow-view-${view.id}`} onselect={view.select} />
-			{/if}
+	<!-- Cards keep the four-across size and scroll past four. The negative
+	     margins give the corner badges room the scroller would clip. -->
+	<MenuRadioGroup value={activeView} aria-label="Views" class="-mt-[5px] -mr-[5px] grid auto-cols-[calc((100%-24px)/4)] grid-flow-col gap-[8px] overflow-x-auto pt-[5px] pr-[5px] [scrollbar-width:none]">
+		{#each viewCardOrder as view (view.id)}
+			<ViewCard value={view.id} preview={view.id} label={view.label} icon={view.icon} badge={view.badge?.()} badgeLabel={view.id === "servers" ? "running" : undefined} disabled={view.disabled === true} data-testid={`overflow-view-${view.id}`} onselect={view.select} />
 		{/each}
 	</MenuRadioGroup>
 {/snippet}

@@ -28,6 +28,8 @@ export type RightPaneView = "files" | "diff" | "servers" | "closed";
 type RightPaneMemory = { view: RightPaneView; width: number | null };
 let rightPaneMemory: Map<string, RightPaneMemory> | undefined;
 let activeSessionId: string | null = null;
+/** A view asked for before its session is the open one, shown on arrival. */
+let arrival: { sessionId: string; view: RightPaneView } | undefined;
 
 function storedPaneView(
 	entry: Record<string, unknown>,
@@ -184,11 +186,22 @@ export function noteSessionChanged(sessionId: string | null = null): void {
 		sessionId && !sessionViewState.compact
 			? loadRightPaneMemory().get(sessionId)
 			: undefined;
-	sessionViewState.rightPaneView = memory?.view ?? "closed";
+	const opening = arrival?.sessionId === sessionId ? arrival.view : undefined;
+	arrival = undefined;
+	sessionViewState.rightPaneView = opening ?? memory?.view ?? "closed";
 	sessionViewState.filePreview = null;
 	sessionViewState.rightPaneWidth = memory?.width ?? null;
 	sessionViewState.rightPaneExpanded = false;
-	if (memory) rememberRightPane();
+	if (memory || opening) rememberRightPane();
+}
+
+/** Opens a session's view now if it is the open session, else once it opens. */
+export function openSessionView(
+	sessionId: string,
+	view: Exclude<RightPaneView, "closed">,
+): void {
+	if (sessionId === activeSessionId) setRightPaneView(view);
+	else arrival = { sessionId, view };
 }
 
 export function setRightPaneView(view: RightPaneView): void {

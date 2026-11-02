@@ -7,6 +7,7 @@
 <script lang="ts">
 	import { clock } from "../../stores/clock.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -59,14 +60,17 @@
 				{@const stopState = stops[`${server.pid}:${server.startedAt}:${server.port}`]}
 				{@const stopping = stopState !== undefined && stopState.failure === undefined}
 				<li data-testid="session-server" class="flex flex-col gap-1 border-b border-border-subtle px-3 py-2.5 text-text">
-					<div class="flex min-w-0 items-center gap-2">
+					<!-- Phones give the actions their own row of thumb-sized buttons. -->
+					<div class="flex min-w-0 flex-wrap items-center gap-2">
 						<Icon name="globe" size={14} class="shrink-0 text-accent" />
 						<span data-testid="session-server-name" class="min-w-0 truncate font-medium">{name}</span>
 						<span data-testid="session-server-port" class="font-mono text-xs text-text-muted">:{server.port}</span>
 						<span class="flex-1"></span>
-						<Button href={link} target="_blank" rel="noopener noreferrer" variant="secondary" size="sm" icon="external-link" ariaLabel={`Open ${name} at ${link}`}>Open</Button>
-						<Button variant="secondary" size="sm" icon="copy" ariaLabel={`Copy link to ${name}`} onclick={() => copyLink(link)}>Copy link</Button>
-						<Button variant="secondary" size="sm" icon="square" iconSize={9} data-testid="session-server-stop" ariaLabel={`Stop ${name}`} loading={stopping} onclick={(event) => stop(server, name, event.currentTarget)}>{stopping ? "Stopping…" : "Stop"}</Button>
+						<div class="flex gap-2 {sessionViewState.compact ? 'order-last basis-full *:min-h-[44px] *:flex-1' : ''}">
+							<Button href={link} target="_blank" rel="noopener noreferrer" variant="secondary" size="sm" icon="external-link" ariaLabel={`Open ${name} at ${link}`}>Open</Button>
+							<Button variant="secondary" size="sm" icon="copy" ariaLabel={`Copy link to ${name}`} onclick={() => copyLink(link)}>Copy link</Button>
+							<Button variant="secondary" size="sm" icon="square" iconSize={9} data-testid="session-server-stop" ariaLabel={`Stop ${name}`} loading={stopping} onclick={(event) => stop(server, name, event.currentTarget)}>{stopping ? "Stopping…" : "Stop"}</Button>
+						</div>
 					</div>
 					<code data-testid="session-server-command" title={server.command} class="min-w-0 truncate font-mono text-[11px] text-text-secondary">{server.command}</code>
 					<small class="flex min-w-0 items-center gap-1 text-[11px] text-text-muted">

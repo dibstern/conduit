@@ -2,12 +2,14 @@
 	import { DropdownMenu, type DropdownMenuRadioItemProps } from "bits-ui";
 	import Icon from "./Icon.svelte";
 
-	let { value, label, icon, preview, badge = 0, disabled = false, onselect, class: className = "", ...rest }: {
+	let { value, label, icon, preview, badge = 0, badgeLabel = "unread view updates", disabled = false, onselect, class: className = "", ...rest }: {
 		value: string;
 		label: string;
 		icon: string;
-		preview: "chat" | "terminal" | "diff" | "files";
+		preview: "chat" | "terminal" | "diff" | "files" | "servers";
 		badge?: number | undefined;
+		/** What the corner count counts, read after it. */
+		badgeLabel?: string | undefined;
 		onselect?: (event: Event) => void;
 	} & Omit<DropdownMenuRadioItemProps, "children" | "child" | "onSelect" | "onselect" | "textValue"> = $props();
 	const badgeId = $props.id();
@@ -22,7 +24,7 @@
 
 <DropdownMenu.RadioItem {...itemProps}>
 	{#snippet child({ props, checked })}
-		<!-- The current view has nothing unread to point at. -->
+		<!-- The current view has nothing new to point at. -->
 		{@const showBadge = badge > 0 && !checked}
 		<button {...props} type="button" {disabled} aria-label={label} aria-describedby={showBadge ? badgeId : undefined} data-view-card class="relative min-h-[44px] min-w-0 cursor-pointer rounded-[14px] bg-chip p-[5px] text-left text-text outline-hidden disabled:cursor-not-allowed disabled:opacity-38 data-[highlighted]:ring-2 data-[highlighted]:ring-accent {checked ? 'inset-ring-[1.5px] inset-ring-accent' : ''} {className}">
 			<div aria-hidden="true" class="h-[60px] overflow-hidden whitespace-nowrap rounded-[9px] bg-bg px-[7px] py-[6px] font-mono text-[8px] leading-[11.04px] text-text-secondary">
@@ -38,13 +40,16 @@
 					<span class="text-success">+ const seen =</span><br />
 					<span class="text-error">- row.count</span><br />
 					<span class="text-success">+ m.at &gt; seen</span>
+				{:else if preview === "servers"}
+					<span class="text-success">●</span> vite :5173<br />
+					<span class="text-success">●</span> next :3000
 				{:else}
 					▾ stores<br />&nbsp;unread.ts <span class="text-status-pinned">M</span><br />
 					▾ test<br />&nbsp;unread.test.ts <span class="text-success">A</span>
 				{/if}
 			</div>
 			<span class="flex h-[26px] items-center gap-[5px] px-[3px] text-[12.5px] font-medium {checked ? 'text-accent' : ''}"><Icon name={icon} size={14} />{label}</span>
-			{#if showBadge}<span id={badgeId} class="absolute -top-[5px] -right-[5px] grid size-[18px] place-items-center rounded-full bg-accent font-sans text-[11px] font-semibold text-bg">{badge}<span class="sr-only"> unread view updates</span></span>{/if}
+			{#if showBadge}<span id={badgeId} data-view-card-badge class="absolute -top-[5px] -right-[5px] grid size-[18px] place-items-center rounded-full bg-accent font-sans text-[11px] font-semibold text-bg">{badge}<span class="sr-only"> {badgeLabel}</span></span>{/if}
 		</button>
 	{/snippet}
 </DropdownMenu.RadioItem>

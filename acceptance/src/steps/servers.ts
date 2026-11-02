@@ -56,6 +56,16 @@ async function setServers(
 }
 
 const railButton = (page: Page) => page.getByTestId("views-rail-servers");
+const sessionRow = (page: Page) =>
+	page.locator(
+		`#session-list [data-session-id="${new URL(page.url()).pathname.split("/")[2]}"]`,
+	);
+const viewCards = (page: Page) =>
+	page
+		.locator(
+			'[data-testid="session-bar-island-menu"], [data-testid="session-action-sheet"]',
+		)
+		.locator("[data-view-card]");
 const serverRow = (page: Page, port: string | undefined) =>
 	page.getByTestId("session-server").filter({ hasText: `:${port}` });
 const menuItem = (page: Page, verb: string) =>
@@ -67,7 +77,12 @@ export const serversHandlers: StepHandler[] = [
 		match: /^the session has (\d) detected servers$/,
 		run: async ({ world, match }) => {
 			await setServers(world.page, SERVERS.slice(0, Number(match[1])));
-			await expect(railButton(world.page)).toBeVisible();
+			// Phones have no views rail; the row badge is the fence there.
+			await expect(
+				railButton(world.page)
+					.or(sessionRow(world.page).getByTestId("session-server-badge"))
+					.first(),
+			).toBeAttached();
 		},
 	},
 	{
@@ -318,6 +333,103 @@ export const serversHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("toast")).toContainText(
 				match[1] ?? "",
 			);
+		},
+	},
+	{
+		name: "assert the row glyph and server badge",
+		match:
+			/^the session's row keeps its idle glyph and shows a server badge (with no count|counting (\d))$/,
+		run: async ({ world, match }) => {
+			const row = sessionRow(world.page);
+			await expect(row.locator(".session-status-glyph")).toHaveAttribute(
+				"data-state",
+				"idle",
+			);
+			const badge = row.getByTestId("session-server-badge");
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "tap the row's server badge",
+		match: /^I tap the session's server badge$/,
+		run: async ({ world }) => {
+			await sessionRow(world.page).getByTestId("session-server-badge").click();
+			await expect(world.page.getByTestId("session-servers")).toBeVisible();
+		},
+	},
+	{
+		name: "assert the phone view cards",
+		match: /^the view cards read (.+) at today's size$/,
+		run: async ({ world, match }) => {
+			const cards = viewCards(world.page);
+			const labels = (match[1] ?? "").split(", ");
+			await expect(cards).toHaveCount(labels.length);
+			for (const [i, label] of labels.entries())
+				await expect(cards.nth(i)).toHaveAttribute("aria-label", label);
+			// Today's size is a quarter of the row less its three 8px gaps; a fifth card scrolls.
+			const sizes = await cards.evaluateAll((nodes) =>
+				nodes.map((node) => {
+					const row = node.parentElement;
+					const style = row ? getComputedStyle(row) : undefined;
+					const content =
+						(row?.clientWidth ?? 0) -
+						Number.parseFloat(style?.paddingLeft ?? "0") -
+						Number.parseFloat(style?.paddingRight ?? "0");
+					return {
+						width: node.getBoundingClientRect().width,
+						quarter: (content - 24) / 4,
+						top: node.getBoundingClientRect().top,
+						scrolls: (row?.scrollWidth ?? 0) > (row?.clientWidth ?? 0),
+					};
+				}),
+			);
+			for (const { width, quarter, scrolls } of sizes) {
+				expect(Math.abs(width - quarter)).toBeLessThanOrEqual(1);
+				expect(scrolls).toBe(labels.length > 4);
+			}
+			expect(new Set(sizes.map(({ top }) => top)).size).toBe(1);
+		},
+	},
+	{
+		name: "assert the Servers card's corner badge",
+		match: /^the Servers card's corner badge (reads (\d)|is hidden)$/,
+		run: async ({ world, match }) => {
+			const card = viewCards(world.page).and(
+				world.page.getByTestId("overflow-view-servers"),
+			);
+			const badge = card.locator("[data-view-card-badge]");
+			if (match[2] === undefined) {
+				await expect(card).toHaveAttribute("aria-checked", "true");
+				await expect(badge).toHaveCount(0);
+			} else await expect(badge).toHaveText(new RegExp(`^${match[2]}`));
+		},
+	},
+	{
+		name: "choose the Servers view card",
+		match: /^I choose the Servers view card$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("overflow-view-servers").click();
+			await expect(world.page.getByTestId("session-servers")).toBeVisible();
+			// The tap leaves the pointer over a server's actions; park it on the empty pane below.
+			const viewport = world.page.viewportSize();
+			await world.page.mouse.move(8, (viewport?.height ?? 800) - 8);
+		},
+	},
+	{
+		name: "assert thumb-sized server actions",
+		match: /^each server's Open, Copy link and Stop are thumb-sized$/,
+		run: async ({ world }) => {
+			const rows = world.page.getByTestId("session-server");
+			for (let i = 0; i < (await rows.count()); i++)
+				for (const name of [/^Open /, /^Copy link/, /^Stop /]) {
+					const box = await rows
+						.nth(i)
+						.getByRole(name.source === "^Open " ? "link" : "button", { name })
+						.boundingBox();
+					expect(box?.height).toBeGreaterThanOrEqual(44);
+					expect(box?.width).toBeGreaterThanOrEqual(44);
+				}
 		},
 	},
 	{
