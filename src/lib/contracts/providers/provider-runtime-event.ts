@@ -57,6 +57,9 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"permission.resolved",
 	"question.asked",
 	"question.resolved",
+	// A Claude wake's start and end (CONTRACT 2.1 row 215); the daemon stamps their label.
+	"evidence.turn_started",
+	"evidence.turn_ended",
 ] as const;
 
 export const ProviderRuntimeEventTypeSchema = Schema.Literals([

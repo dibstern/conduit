@@ -321,6 +321,8 @@ export interface ClaudeSessionContext {
 	 *  know whether a turn is actually running. currentTurnId cannot answer
 	 *  that: it is set at submit and never cleared. */
 	turnInFlight?: boolean;
+	/** A wake's turnInFlight is set: its turn_started is reported, its turn_ended not yet (2.1 row 215). */
+	wakeTurn?: boolean;
 	/** Number of live tasks in the latest filtered SDK snapshot, including monitors. */
 	liveBackgroundTaskCount?: number;
 	/** Input whose Stop kept the query live for background tasks or a pending steer. */

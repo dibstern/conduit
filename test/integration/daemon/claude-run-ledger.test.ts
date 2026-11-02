@@ -8,6 +8,10 @@
 // 45. the swap commit misses R's process_started, or lands it before old's process_lost or in
 //     another write;
 // 47. the label's querySeq is not the hello's;
+// 50. a send's own turn reports a turn_started;
+// 51. a wake's turn_ended is missing at its first clear (its result);
+// 52. one wake reports two turn_endeds;
+// 53. a wake's label is not its runner's querySeq;
 // and the send's transcript changes, or its Run ends other than once.
 import { mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
@@ -26,7 +30,7 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.label') AS label, json_extract(data, '$.reattached') AS reattached FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.label') AS label, json_extract(data, '$.reattached') AS reattached, json_extract(data, '$.wakeTask.taskId') AS wakeTask FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				sequence: number;
@@ -34,6 +38,7 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 				runnerId: string | null;
 				label: string | null;
 				reattached: number | null;
+				wakeTask: string | null;
 			}[],
 			ends: db
 				.prepare(
@@ -75,9 +80,13 @@ const processEvidence = (ledger: Ledger) =>
 const endsOnce = (ledger: Ledger) => {
 	expect(ledger.runs.length).toBeGreaterThan(0);
 	expect(ledger.runs.every((run) => run.status === "completed")).toBe(true);
-	expect(ledger.ends.map((end) => end.runId).sort()).toEqual(
-		ledger.runs.map((run) => run.id).sort(),
-	);
+	const ids = ledger.runs.map((run) => run.id);
+	expect(
+		ledger.ends
+			.map((end) => end.runId)
+			.filter((runId) => ids.includes(runId))
+			.sort(),
+	).toEqual(ids.sort());
 };
 
 describe("Claude on the Run Ledger", () => {
@@ -95,11 +104,13 @@ describe("Claude on the Run Ledger", () => {
 		);
 	});
 
-	const start = async (buildId?: string) => {
+	const start = async (
+		options: Omit<Parameters<typeof ProcessHarness.start>[0], "dist"> = {},
+	) => {
 		harness = await ProcessHarness.start({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
-			...(buildId ? { buildId } : {}),
+			...options,
 		});
 		const browser = await harness.connect();
 		await browser.setAutoSettle(null);
@@ -129,6 +140,10 @@ describe("Claude on the Run Ledger", () => {
 				reattached: 0,
 			},
 		]);
+		// A send's own turn is no wake: it reports no turn evidence (2.1 row 215).
+		expect(
+			ledger.events.filter((event) => event.type.startsWith("evidence.turn_")),
+		).toEqual([]);
 		// 6.1: before any of its frames reach the ledger (its hold, its output).
 		const started = ledger.events.find(
 			(event) => event.type === "evidence.process_started",
@@ -190,7 +205,7 @@ describe("Claude on the Run Ledger", () => {
 	});
 
 	it("lands old's process_lost and R's process_started together in the swap commit", async () => {
-		const { fixture, browser } = await start(OLD_BUILD);
+		const { fixture, browser } = await start({ buildId: OLD_BUILD });
 		const sessionId = await browser.createSession("Claude ledger swap");
 		await browser.send(sessionId, "claude-ledger-before-swap");
 		const old = runnerOf(read(fixture, sessionId));
@@ -260,6 +275,54 @@ describe("Claude on the Run Ledger", () => {
 			old,
 			replacement: replacement.runnerId,
 			evidence,
+			ends: ledger.ends,
+			runs: ledger.runs,
+		});
+	});
+	it("reports a Claude wake's turn_started and turn_ended under its runner's label", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				// The background shell's notification wakes the agent after the first result.
+				turns: ["background-shell-turn", "pong-thinking-text-turn"],
+			},
+		});
+		const sessionId = await browser.createSession("Claude ledger wake");
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		// A start waits for the wake's turn (8.3), so the second send ends after the wake.
+		await browser.send(sessionId, "ping");
+		const ledger = read(fixture, sessionId);
+		expect(ledger.runs).toHaveLength(2);
+		endsOnce(ledger);
+		const runnerId = runnerOf(ledger);
+		const label = `${runnerId}:0`;
+		const turns = ledger.events.filter((event) =>
+			event.type.startsWith("evidence.turn_"),
+		);
+		expect(turns.map(({ type, label }) => ({ type, label }))).toEqual([
+			{ type: "evidence.turn_started", label },
+			{ type: "evidence.turn_ended", label },
+		]);
+		expect(turns[0]?.wakeTask).toBe("bxtrbpf91");
+		// The wake falls between the first send's end and the second's dispatch.
+		const dispatched = ledger.events.filter(
+			(event) => event.type === "run.dispatched",
+		);
+		const completed = ledger.events.filter(
+			(event) => event.type === "turn.completed",
+		);
+		expect(turns[0]?.sequence).toBeGreaterThan(completed[0]?.sequence ?? 0);
+		expect(turns[1]?.sequence).toBeLessThan(
+			dispatched[1]?.sequence ?? Number.POSITIVE_INFINITY,
+		);
+		// The ledger records the wake as a Run of its own and ends it at its turn_ended.
+		const wakeEnds = ledger.ends.filter(
+			(end) => !ledger.runs.some((run) => run.id === end.runId),
+		);
+		expect(wakeEnds).toHaveLength(1);
+		proofs.push({
+			case: "wake",
+			sessionId,
+			turns,
 			ends: ledger.ends,
 			runs: ledger.runs,
 		});

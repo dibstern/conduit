@@ -616,6 +616,21 @@ export function translateProviderRuntimeEventToDomain(
 			});
 		}
 
+		case "evidence.turn_started": {
+			const wakeTask = isRecord(data["wakeTask"])
+				? stringField(data["wakeTask"]["taskId"])
+				: undefined;
+			return singleEvent(event, state, "evidence.turn_started", {
+				label: stringField(data["label"]) ?? "",
+				...(wakeTask ? { wakeTask: { taskId: wakeTask } } : {}),
+			});
+		}
+
+		case "evidence.turn_ended":
+			return singleEvent(event, state, "evidence.turn_ended", {
+				label: stringField(data["label"]) ?? "",
+			});
+
 		default: {
 			const _exhaustive: never = event;
 			return { events: [], state };

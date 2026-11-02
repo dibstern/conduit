@@ -41,6 +41,7 @@ import type {
 	ClaudeSDKCommandLifecycleMessage,
 	ClaudeSDKPermissionMode,
 } from "../../contracts/providers/claude-agent-sdk.js";
+import type { ProviderRuntimeEventPayloadMap } from "../../contracts/providers/provider-runtime-event.js";
 import type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/claude-one-shot.js";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
@@ -2251,6 +2252,16 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							message.event.type === "message_start")) &&
 						message.parent_tool_use_id == null)
 				) {
+					// 2.1 row 215: a wake starts where turnInFlight sets with no send's run.
+					if (!ctx.turnInFlight && !ctx.currentRunId && !ctx.wakeTurn) {
+						ctx.wakeTurn = true;
+						yield* this.pushWakeEvidenceEffect(ctx, "evidence.turn_started", {
+							label: "",
+							...(message.type === "system"
+								? { wakeTask: { taskId: message.task_id } }
+								: {}),
+						});
+					}
 					ctx.turnInFlight = true;
 					this.deps.onTurnStateChanged?.(ctx.sessionId, true);
 				}
@@ -2422,6 +2433,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						);
 						if (endsCurrentRun)
 							this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+						yield* this.endWakeEffect(ctx);
 						yield* settleUnacceptedResultEffect(
 							this.stateRef,
 							ctx,
@@ -2780,9 +2792,34 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					const active = yield* getSession(this.stateRef, ctx.sessionId);
 					if (active === undefined || active === ctx)
 						this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+					// A failed wake stream's endTurn clears the flag first; its end reports here.
+					yield* this.endWakeEffect(ctx);
 				}),
 			),
 		);
+	}
+
+	private pushWakeEvidenceEffect<
+		K extends "evidence.turn_started" | "evidence.turn_ended",
+	>(
+		ctx: ClaudeSessionContext,
+		type: K,
+		data: ProviderRuntimeEventPayloadMap[K],
+	): Effect.Effect<void> {
+		return ctx.eventSink
+			? ctx.eventSink
+					.push(claudeRuntimeEvent(type, ctx.sessionId, data))
+					.pipe(Effect.ignore)
+			: Effect.void;
+	}
+
+	/** 2.1 row 215: a wake's turn_ended, at the first clear of the turnInFlight its turn_started set. */
+	private endWakeEffect(ctx: ClaudeSessionContext): Effect.Effect<void> {
+		if (!ctx.wakeTurn || ctx.turnInFlight) return Effect.void;
+		ctx.wakeTurn = false;
+		return this.pushWakeEvidenceEffect(ctx, "evidence.turn_ended", {
+			label: "",
+		});
 	}
 
 	interruptTurnEffect(
@@ -3201,6 +3238,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			ctx.turnInFlight = false;
 			ctx.currentRunId = undefined;
 			this.deps.onTurnStateChanged?.(ctx.sessionId, false);
+			yield* this.endWakeEffect(ctx);
 
 			yield* ctx.promptQueue.close().pipe(Effect.ignore);
 
