@@ -97,8 +97,7 @@ export const sessionViews: readonly SessionView[] = [
 		icon: "globe",
 		shortcut: 5,
 		badge: () => currentServers().length || undefined,
-		// The phone Servers view is its own ticket (32.33.4), so phones hide it for now.
-		hidden: () => sessionViewState.compact || currentServers().length === 0,
+		hidden: () => currentServers().length === 0,
 		loadPane: () => import("../session/SessionServers.svelte"),
 		isOn: () =>
 			sessionViewState.rightPaneView === "servers" &&

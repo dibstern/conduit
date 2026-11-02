@@ -1331,5 +1331,9 @@
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: py-1": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-error": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
 	"src/lib/frontend/components/chat/AssistantMessage.svelte :: text-xs": "The old mermaid failure line is gone: pele draws its own error box (styled by pele, coloured by the .pele variables in style.css), and Diagram.svelte shows the source below it.",
-	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: border-border-subtle,border-t,gap-[8px],max-w-[230px],min-h-[36px],ml-auto,pl-[20px],pr-[16px],text-[12.5px],text-text-secondary": "conduit-test-dsnbk replaces the bordered task row of chips with kind-coloured pills styled in the component's scoped CSS (desktop subline, phone swipe row)."
+	"src/lib/frontend/components/session/BackgroundTasksRow.svelte :: border-border-subtle,border-t,gap-[8px],max-w-[230px],min-h-[36px],ml-auto,pl-[20px],pr-[16px],text-[12.5px],text-text-secondary": "conduit-test-dsnbk replaces the bordered task row of chips with kind-coloured pills styled in the component's scoped CSS (desktop subline, phone swipe row).",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: grid-cols-4": {
+		"renamedTo": "auto-cols-[calc((100%-24px)/4)]",
+		"reason": "conduit-test-82tn.32.33.4 lets a fifth view card (Servers) scroll at the same four-across card size instead of squeezing five into the row."
+	}
 }

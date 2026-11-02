@@ -10,6 +10,7 @@
  * Gap (CONTRACT.md 2976): "One PortWatcher per daemon". Servers live in each project's own store,
  * so this runs once per project relay, each recording only its own store's sessions.
  */
+import { basename } from "node:path";
 import { Clock, Config, Data, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
@@ -47,6 +48,100 @@ const keyOf = (key: ServerKey) => `${key.pid}:${key.startedAt}:${key.port}`;
 const MARKER = /(?:^|\s)CONDUIT_SESSION_ID=(\S+)/g;
 const PS_ROW =
 	/^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+
+const PS_TREE =
+	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+
+export class ServerStopError extends Data.TaggedError("ServerStopError")<{
+	readonly message: string;
+	readonly cause?: unknown;
+}> {}
+
+/**
+ * The one kill routine (8.7 Stop) for Stop and ended sessions: the server's process group, unless
+ * its leader is conduit, a runner host, an agent CLI or a shell, then the server's process tree.
+ * SIGTERM, then SIGKILL after 5s. Before each signal it re-reads the process table and sends
+ * nothing once the pid no longer has the key's start time. It fails when a signal is refused or
+ * the server is still running a second after SIGKILL.
+ */
+export const killServer = (server: ServerKey) =>
+	Effect.gen(function* () {
+		const subprocess = yield* Subprocess;
+		// The process table while the key's pid still runs with its start time, else undefined.
+		const running = Effect.gen(function* () {
+			const { stdout } = yield* subprocess.run(
+				"ps",
+				["-axww", "-o", "pid=,ppid=,pgid=,stat=,lstart=,command="],
+				{
+					timeoutMs: 5000,
+					maxBuffer: 16 * 1024 * 1024,
+					env: { ...process.env, LC_ALL: "C" },
+				},
+			);
+			const procs = new Map<
+				number,
+				{ ppid: number; pgid: number; startedAt: number; command: string }
+			>();
+			for (const line of stdout.split("\n")) {
+				const row = PS_TREE.exec(line);
+				// An exited child its parent has not reaped yet is not running.
+				if (row && !row[4]?.startsWith("Z"))
+					procs.set(Number(row[1]), {
+						ppid: Number(row[2]),
+						pgid: Number(row[3]),
+						startedAt: Date.parse(row[5] ?? ""),
+						command: row[6] ?? "",
+					});
+			}
+			return procs.get(server.pid)?.startedAt === server.startedAt
+				? procs
+				: undefined;
+		});
+		const signal = (name: NodeJS.Signals) =>
+			Effect.gen(function* () {
+				const procs = yield* running;
+				const pgid = procs?.get(server.pid)?.pgid;
+				if (procs === undefined || pgid === undefined) return false;
+				const leader = procs.get(pgid)?.command;
+				const ownGroup =
+					leader !== undefined &&
+					!/^-?(?:a|ba|c|da|k|tc|z)?sh$|^fish$/.test(
+						basename(leader.split(" ")[0] ?? ""),
+					) &&
+					!/\b(?:conduit|claude|codex|opencode|cursor-agent)\b/.test(leader);
+				const tree = [server.pid];
+				for (const pid of tree)
+					for (const [child, { ppid }] of procs)
+						if (ppid === pid && !tree.includes(child)) tree.push(child);
+				for (const target of ownGroup ? [-pgid] : tree)
+					yield* Effect.try({
+						try: () => process.kill(target, name),
+						catch: (cause) =>
+							new ServerStopError({
+								message: `Could not send ${name} to ${target}`,
+								cause,
+							}),
+					}).pipe(
+						// Exited since the table was read.
+						Effect.catchIf(
+							(error) =>
+								error.cause instanceof Error &&
+								"code" in error.cause &&
+								error.cause.code === "ESRCH",
+							() => Effect.void,
+						),
+					);
+				return true;
+			});
+		if (!(yield* signal("SIGTERM"))) return;
+		yield* Effect.sleep(5000);
+		if (!(yield* signal("SIGKILL"))) return;
+		yield* Effect.sleep(1000);
+		if ((yield* running) !== undefined)
+			return yield* new ServerStopError({
+				message: `The server on port ${server.port} is still running after SIGKILL`,
+			});
+	});
 
 /** `lsof -F` output as [pid, names]; malformed lines fail the scan. */
 const lsofFields = (stdout: string) =>
@@ -221,10 +316,13 @@ export const PortWatcherLive = Layer.effectDiscard(
 			);
 		});
 
+		// Servers of ended sessions this watcher is killing, by key.
+		const stopping = new Set<string>();
 		// Hold candidates: each port's ServerKey and when this watcher first saw it there.
 		const held = new Map<number, { key: string; since: number }>();
 		let firstScanAt: number | undefined;
 		let known = false;
+		const startedAt = yield* Clock.currentTimeMillis;
 		// Warn once per run of failures: a host without lsof fails every scan.
 		let failing = false;
 		let published = new Set<string>();
@@ -244,7 +342,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 				if (held.get(server.port)?.key !== key)
 					held.set(server.port, { key, since: now });
 			}
-			const read = yield* commit.write((project) =>
+			const moved = yield* commit.write((project, stamp) =>
 				Effect.gen(function* () {
 					// A live server keeps its row Open (8.3) and was recorded by a server_seen, so
 					// those rows and the scan's markers name every session this scan can change.
@@ -297,36 +395,74 @@ export const PortWatcherLive = Layer.effectDiscard(
 						events.map((event) => event.sessionId),
 					))
 						read.set(sessionId, (yield* loadLedgerView(sessionId))?.servers);
-					return read;
+					// Readers see the Servers this write left; a session no longer read has none.
+					for (const sessionId of published)
+						if (!read.has(sessionId)) read.set(sessionId, undefined);
+					published = new Set(
+						[...read].flatMap(([id, servers]) => (servers?.size ? [id] : [])),
+					);
+					// The copy moves before COMMIT, so a reader woken by this write's advance
+					// already sees it; a rolled-back write is corrected by the next scan.
+					const moved = [...read].flatMap(([sessionId, servers]) => {
+						const list = [...(servers?.values() ?? [])].map(
+							({ key, command, cwd, source, role }): SessionServer => ({
+								port: key.port,
+								pid: key.pid,
+								startedAt: key.startedAt,
+								command,
+								cwd,
+								source,
+								role,
+							}),
+						);
+						if (
+							JSON.stringify(activity.servers.get(sessionId) ?? []) ===
+							JSON.stringify(list)
+						)
+							return [];
+						if (list.length === 0) activity.servers.delete(sessionId);
+						else activity.servers.set(sessionId, list);
+						return [sessionId];
+					});
+					// The sidebar applies servers at read time, so its row's version moves for the
+					// shell feed to re-read it.
+					if (moved.length > 0)
+						yield* stamp((version) =>
+							sql<{
+								session_id: string;
+							}>`UPDATE session_sidebar SET version = ${version}
+								WHERE row IS NOT NULL AND session_id IN (SELECT COALESCE(root_id, id) FROM sessions
+									WHERE id IN (SELECT value FROM json_each(${JSON.stringify(moved)})))
+								RETURNING session_id`.pipe(
+								Effect.map((rows) => rows.map(({ session_id }) => session_id)),
+							),
+						);
+					return moved;
 				}),
 			);
-			// Readers see the Servers this write left; a session no longer read has none.
-			for (const sessionId of published)
-				if (!read.has(sessionId)) read.set(sessionId, undefined);
-			for (const [sessionId, servers] of read) {
-				const list = [...(servers?.values() ?? [])].map(
-					({ key, command, cwd, source, role }): SessionServer => ({
-						port: key.port,
-						pid: key.pid,
-						startedAt: key.startedAt,
-						command,
-						cwd,
-						source,
-						role,
-					}),
-				);
-				if (
-					JSON.stringify(activity.servers.get(sessionId) ?? []) ===
-					JSON.stringify(list)
-				)
+			for (const sessionId of moved) activity.changed(sessionId);
+			// 8.7: ended sessions have no servers. Only this store's sessions count, so a marker
+			// this daemon cannot resolve is never read as ended; the hold does not apply.
+			const ended = yield* sql<{ id: string }>`
+				SELECT value AS id FROM json_each(${JSON.stringify(scanned.map((entry) => entry.sessionId))})
+					WHERE value IN (SELECT id FROM sessions WHERE project_id = ${store.projectId}
+							AND (settled_at IS NOT NULL OR archived_at IS NOT NULL))
+						OR EXISTS (SELECT 1 FROM events WHERE session_id = value
+							AND type = 'session.deleted' AND project_id = ${store.projectId})`;
+			for (const { sessionId, server } of scanned) {
+				const key = keyOf(server);
+				if (stopping.has(key) || !ended.some((row) => row.id === sessionId))
 					continue;
-				if (list.length === 0) activity.servers.delete(sessionId);
-				else activity.servers.set(sessionId, list);
-				activity.changed(sessionId);
+				stopping.add(key);
+				yield* killServer(server).pipe(
+					Effect.provideService(Subprocess, subprocess),
+					Effect.catchCause((cause) =>
+						Effect.logWarning("PortWatcher could not stop a server", cause),
+					),
+					Effect.ensuring(Effect.sync(() => stopping.delete(key))),
+					Effect.forkScoped,
+				);
 			}
-			published = new Set(
-				[...read].flatMap(([id, servers]) => (servers?.size ? [id] : [])),
-			);
 			firstScanAt ??= now;
 			known ||= now - firstScanAt >= holdMs;
 			failing = false;
@@ -334,15 +470,16 @@ export const PortWatcherLive = Layer.effectDiscard(
 			Effect.catchCause((cause) =>
 				Failure.isInterruptedOnly(cause)
 					? Effect.interrupt
-					: failing
-						? Effect.void
-						: Effect.logWarning("PortWatcher scan failed", cause).pipe(
-								Effect.andThen(
-									Effect.sync(() => {
-										failing = true;
-									}),
-								),
-							),
+					: Effect.gen(function* () {
+							// CONTRACT.md 2987-2988 ("auto-settle waits") is silent on a host with no
+							// working scanner (Linux until /proc): when every scan fails through the
+							// first hold, servers read as absent rather than holding auto-settle forever.
+							const now = yield* Clock.currentTimeMillis;
+							known ||= firstScanAt === undefined && now - startedAt >= holdMs;
+							if (failing) return;
+							failing = true;
+							yield* Effect.logWarning("PortWatcher scan failed", cause);
+						}),
 			),
 			Effect.andThen(
 				Effect.flatMap(Clock.currentTimeMillis, (now) =>

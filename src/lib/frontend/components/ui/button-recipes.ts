@@ -25,6 +25,7 @@ export type ButtonVariant =
 	| "danger"
 	| "danger-soft"
 	| "success-soft"
+	| "server-badge"
 	| "danger-outline"
 	| "accent-soft"
 	| "toolbar"
@@ -374,6 +375,12 @@ export const VARIANT_RECIPES: Record<ButtonVariant, VariantRecipe> = {
 		tone: TONE_CLASSES.success,
 		hoverFill: "hover:bg-success/15",
 	},
+	// A session row's live dev servers: a quiet green pill, never a button-shaped box.
+	"server-badge": {
+		chrome: "bg-success/13",
+		tone: TONE_CLASSES.success,
+		hoverFill: "hover:bg-success/20",
+	},
 	"danger-outline": {
 		chrome: "border border-border bg-transparent",
 		tone: TONE_CLASSES.error,
@@ -475,6 +482,7 @@ export type ButtonSize =
 	| "card-action"
 	| "phone-card-action"
 	| "command-chip"
+	| "server-badge"
 	| "text-action"
 	| "row-action"
 	| "transcript"
@@ -544,6 +552,8 @@ const SIZE_CLASSES: Record<
 	"phone-card-action":
 		"h-[28px] min-w-[44px] gap-[6px] rounded-full px-[12px] text-[13px]",
 	"command-chip": "h-[22px] rounded-full px-[8px] font-mono text-[11.5px]",
+	"server-badge":
+		"h-[18px] gap-[4px] rounded-full pl-[5px] pr-[6px] font-mono text-[11px] font-medium tabular-nums",
 	"capsule-segment":
 		"h-[24px] gap-[5px] rounded-full px-[10px] text-[12.5px] font-medium tabular-nums",
 	"phone-capsule-segment":

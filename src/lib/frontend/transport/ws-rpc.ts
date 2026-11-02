@@ -123,6 +123,7 @@ export {
 	StartInstance,
 	StopBackgroundTask,
 	StopInstance,
+	StopServer,
 	SubmitInput,
 	type SubmitInputResponse,
 	SubscribeAlerts,

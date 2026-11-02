@@ -1,5 +1,6 @@
 // Failure modes are recorded before these tests in
 // docs/plans/2026-10-16-shared-store-scope-failure-modes.md.
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +32,10 @@ import {
 	type OpenCodeInstanceEvent,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import { WorktreeServiceTag } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
@@ -52,7 +57,6 @@ import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/p
 import { resolveOrphanedClaudePermissions } from "../../../src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import {
 	AgentLivenessTag,
-	BackgroundLivenessTag,
 	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
@@ -940,7 +944,7 @@ describe("shared-store relay project scope", () => {
 					makeOpenCodeInstancesStub(),
 				),
 				Effect.provideService(WebSocketHandlerTag, makeMockWebSocketHandler()),
-				Effect.provideService(BackgroundLivenessTag, () => undefined),
+				Effect.provideServiceEffect(SessionActivityTag, makeSessionActivity),
 				Effect.provideService(AgentLivenessTag, () => Effect.succeed(false)),
 			),
 		);

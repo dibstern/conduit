@@ -1,11 +1,17 @@
 <!--
   The open session's live dev servers, as the daemon's PortWatcher last saw
   them. Open is a plain localhost link: right only when the browser runs on the
-  daemon's host, until the Preview Gate (32.33.9) replaces it.
+  daemon's host, until the Preview Gate (32.33.9) replaces it. Stop asks first,
+  then reads "Stopping…" until the next scan's server_gone removes the row.
 -->
 <script lang="ts">
 	import { clock } from "../../stores/clock.svelte.js";
-	import { showToast } from "../../stores/ui.svelte.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { sessionViewState } from "../../stores/session-view.svelte.js";
+	import { confirm, showToast } from "../../stores/ui.svelte.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
+	import type { SessionServer } from "../../../shared-types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { currentServers } from "../layout/session-views.js";
 	import Button from "../ui/Button.svelte";
@@ -23,6 +29,20 @@
 		return programs.find((program) => program && !program.startsWith("-") && !INTERPRETERS.has(program)) ?? programs[0] ?? command;
 	};
 
+	// Each server's Stop by `pid:startedAt:port`: in flight, or the failure it ended with.
+	const stops = $state<Record<string, { failure?: string }>>({});
+	async function stop(server: SessionServer, name: string, trigger: EventTarget | null) {
+		const sessionId = sessionState.currentId;
+		if (!sessionId || !(await confirm(`Stop ${name} on port ${server.port}?`, "Stop", () => (trigger instanceof HTMLElement ? trigger : null)))) return;
+		const key = `${server.pid}:${server.startedAt}:${server.port}`;
+		stops[key] = {};
+		try {
+			await rpc("StopServer", { sessionId, server: { pid: server.pid, startedAt: server.startedAt, port: server.port } });
+		} catch (error) {
+			stops[key] = { failure: failureLine(error, `Could not stop ${name}`) };
+		}
+	}
+
 	async function copyLink(link: string) {
 		if (await copyToClipboard(link)) showToast("Link copied");
 		else showToast("Failed to copy", { variant: "error" });
@@ -37,14 +57,20 @@
 			{#each servers as server (server.port)}
 				{@const name = nameOf(server.command)}
 				{@const link = `http://localhost:${server.port}`}
+				{@const stopState = stops[`${server.pid}:${server.startedAt}:${server.port}`]}
+				{@const stopping = stopState !== undefined && stopState.failure === undefined}
 				<li data-testid="session-server" class="flex flex-col gap-1 border-b border-border-subtle px-3 py-2.5 text-text">
-					<div class="flex min-w-0 items-center gap-2">
+					<!-- Phones give the actions their own row of thumb-sized buttons. -->
+					<div class="flex min-w-0 flex-wrap items-center gap-2">
 						<Icon name="globe" size={14} class="shrink-0 text-accent" />
 						<span data-testid="session-server-name" class="min-w-0 truncate font-medium">{name}</span>
 						<span data-testid="session-server-port" class="font-mono text-xs text-text-muted">:{server.port}</span>
 						<span class="flex-1"></span>
-						<Button href={link} target="_blank" rel="noopener noreferrer" variant="secondary" size="sm" icon="external-link" ariaLabel={`Open ${name} at ${link}`}>Open</Button>
-						<Button variant="secondary" size="sm" icon="copy" ariaLabel={`Copy link to ${name}`} onclick={() => copyLink(link)}>Copy link</Button>
+						<div class="flex gap-2 {sessionViewState.compact ? 'order-last basis-full *:min-h-[44px] *:flex-1' : ''}">
+							<Button href={link} target="_blank" rel="noopener noreferrer" variant="secondary" size="sm" icon="external-link" ariaLabel={`Open ${name} at ${link}`}>Open</Button>
+							<Button variant="secondary" size="sm" icon="copy" ariaLabel={`Copy link to ${name}`} onclick={() => copyLink(link)}>Copy link</Button>
+							<Button variant="secondary" size="sm" icon="square" iconSize={9} data-testid="session-server-stop" ariaLabel={`Stop ${name}`} loading={stopping} onclick={(event) => stop(server, name, event.currentTarget)}>{stopping ? "Stopping…" : "Stop"}</Button>
+						</div>
 					</div>
 					<code data-testid="session-server-command" title={server.command} class="min-w-0 truncate font-mono text-[11px] text-text-secondary">{server.command}</code>
 					<small class="flex min-w-0 items-center gap-1 text-[11px] text-text-muted">
@@ -54,6 +80,9 @@
 						<span aria-hidden="true">·</span>
 						<span data-testid="session-server-source" class="shrink-0">{server.source === "declared" ? "marked by the agent" : "detected"}</span>
 					</small>
+					{#if stopState?.failure}
+						<p data-testid="session-server-stop-error" role="alert" class="m-0 text-[11px] text-status-red">{stopState.failure}</p>
+					{/if}
 				</li>
 			{/each}
 		</ul>

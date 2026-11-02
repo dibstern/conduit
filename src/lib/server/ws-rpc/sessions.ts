@@ -25,6 +25,7 @@ import {
 import { autoSettleIdleWindowMs } from "../../daemon/config-persistence.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../domain/daemon/Services/daemon-config-ref.js";
+import { SessionActivityTag } from "../../domain/daemon/Services/session-activity.js";
 import { SessionGit } from "../../domain/daemon/Services/session-git.js";
 import { Usage } from "../../domain/daemon/Services/usage.js";
 import { WorktreeServiceTag } from "../../domain/daemon/Services/worktree-service.js";
@@ -40,11 +41,7 @@ import {
 } from "../../domain/relay/Services/draft-prewarm.js";
 import { GoalSummaryServiceTag } from "../../domain/relay/Services/goal-summary-service.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
-import {
-	BackgroundLivenessTag,
-	ConfigTag,
-	LoggerTag,
-} from "../../domain/relay/Services/services.js";
+import { ConfigTag, LoggerTag } from "../../domain/relay/Services/services.js";
 import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import {
@@ -124,12 +121,12 @@ const readAutoSettleOutlook = (sessionId: string) =>
 				message: `Unknown session: ${sessionId}`,
 				code: "unknown-session",
 			});
-		const backgroundOf = yield* BackgroundLivenessTag;
+		const { background } = yield* SessionActivityTag;
 		const config = yield* Ref.get(yield* DaemonConfigRefTag);
 		return getAutoSettleOutlook(
 			{
 				...facts,
-				hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+				hasLiveBackgroundWork: background.hasLiveWork(sessionId),
 			},
 			now,
 			autoSettleIdleWindowMs(config.autoSettleAfterDays),

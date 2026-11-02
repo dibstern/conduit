@@ -848,6 +848,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "TYPESAFE_API_KEY"
 					| "CONDUIT_OUTBOX_DRAIN_INTERVAL_MS"
 					| "CONDUIT_AUTO_SETTLE_SWEEP_INTERVAL_MS"
+					| "CONDUIT_PORT_WATCH_INTERVAL_MS"
+					| "CONDUIT_PORT_WATCH_HOLD_MS"
 					| "CONDUIT_STATUS_RECONCILIATION_INTERVAL_MS"
 					| "CONDUIT_MESSAGE_POLLER_INTERVAL_MS"
 					| "CONDUIT_QUOTA_READ_MAX_AGE_MS"
@@ -3163,6 +3165,23 @@ export class ProcessBrowser {
 		await this.run(
 			this.rpc.DeleteSession({
 				sessionId,
+				originId: this.originId,
+			}),
+		);
+	}
+
+	async stopServer(
+		sessionId: string,
+		server: { pid: number; startedAt: number; port: number },
+	): Promise<void> {
+		await this.run(this.rpc.StopServer({ sessionId, server }));
+	}
+
+	async setSettled(sessionId: string, settled: boolean): Promise<void> {
+		await this.run(
+			this.rpc.SetSessionSettled({
+				sessionId,
+				settled,
 				originId: this.originId,
 			}),
 		);

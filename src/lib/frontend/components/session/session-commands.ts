@@ -156,27 +156,43 @@ function refreshSearch(): void {
 	);
 }
 
+/** Settling, archiving or deleting a session stops its servers (8.7); the controls say how many. */
+function stoppedServers(session: SessionInfo) {
+	const count = session.servers?.length ?? 0;
+	return count === 0 ? undefined : `${count} server${count === 1 ? "" : "s"}`;
+}
+
+/** "Settle · stops 2 servers" while the session has servers. */
+function stoppingLabel(verb: string, session: SessionInfo) {
+	const servers = stoppedServers(session);
+	return servers ? `${verb} · stops ${servers}` : verb;
+}
+
 async function settle(session: SessionInfo, settled: boolean) {
 	const input = rpcInput(session);
 	if (!input) return;
 	const returnToList = sessionState.currentId === session.id;
+	const servers = stoppedServers(session);
 	try {
 		await rpc("SetSessionSettled", { ...input, settled });
 		refreshSearch();
 		if (settled && returnToList && sessionState.currentId === session.id)
 			backToSessions();
 		if (settled)
-			showToast(`Moved “${session.title || "New Session"}” to Settled`, {
-				duration: 5000,
-				action: {
-					label: "Undo",
-					run: () => {
-						void rpc("SetSessionSettled", { ...input, settled: false })
-							.then(refreshSearch)
-							.catch(toastFailure("Couldn't undo"));
+			showToast(
+				`Moved “${session.title || "New Session"}” to Settled${servers ? ` · Stopping ${servers}` : ""}`,
+				{
+					duration: 5000,
+					action: {
+						label: "Undo",
+						run: () => {
+							void rpc("SetSessionSettled", { ...input, settled: false })
+								.then(refreshSearch)
+								.catch(toastFailure("Couldn't undo"));
+						},
 					},
 				},
-			});
+			);
 	} catch (error) {
 		toastFailure("Couldn't settle session")(error);
 	}
@@ -212,8 +228,10 @@ async function archive(
 	const input = rpcInput(session);
 	if (!input) return false;
 	try {
+		const servers = stoppedServers(session);
 		await rpc("SetSessionArchived", { ...input, archived });
 		refreshSearch();
+		if (archived && servers) showToast(`Stopping ${servers}`);
 		return true;
 	} catch (error) {
 		toastFailure(
@@ -331,6 +349,8 @@ async function remove(
 		return false;
 	}
 	refreshSearch();
+	const servers = stoppedServers(session);
+	if (servers) showToast(`Stopping ${servers}`);
 	if (result.worktreeWarnings?.length)
 		showToast(`Session deleted. ${result.worktreeWarnings.join("; ")}`, {
 			variant: "warn",
@@ -383,7 +403,10 @@ export function getSettleCommand(
 	return {
 		testId:
 			session.settledAt != null ? "session-ctx-unsettle" : "session-ctx-settle",
-		label: session.settledAt != null ? "Un-settle" : "Settle",
+		label:
+			session.settledAt != null
+				? "Un-settle"
+				: stoppingLabel("Settle", session),
 		section: "triage",
 		icon: session.settledAt != null ? "undo" : "check",
 		keys: sessionCommandKeys.settle,
@@ -537,7 +560,10 @@ export function getSessionCommands(
 		});
 	items.push({
 		testId: "session-ctx-archive",
-		label: session.archivedAt != null ? "Unarchive" : "Archive",
+		label:
+			session.archivedAt != null
+				? "Unarchive"
+				: stoppingLabel("Archive", session),
 		section: "triage",
 		icon: "archive",
 		run: () => {
@@ -624,7 +650,7 @@ export function getSessionCommands(
 		},
 		{
 			testId: "session-ctx-delete",
-			label: "Delete",
+			label: stoppingLabel("Delete", session),
 			shortLabel: "Delete…",
 			section: "danger",
 			icon: "trash",

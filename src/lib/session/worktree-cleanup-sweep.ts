@@ -11,13 +11,13 @@ import type {
 	WorktreeCleanupReport,
 } from "../contracts/worktree.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import { SessionGit } from "../domain/daemon/Services/session-git.js";
 import { WorktreeServiceTag } from "../domain/daemon/Services/worktree-service.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
 import { publishAlert } from "../domain/relay/Services/alerts.js";
 import {
 	AgentLivenessTag,
-	BackgroundLivenessTag,
 	ConfigTag,
 	SessionRetriesTag,
 	WebSocketHandlerTag,
@@ -104,7 +104,7 @@ export const readSessionQuiescence = (now: number, sessionId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const { projectId } = yield* PersistenceProjectTag;
-		const backgroundOf = yield* BackgroundLivenessTag;
+		const { background } = yield* SessionActivityTag;
 		const retries = yield* Effect.serviceOption(SessionRetriesTag);
 		return {
 			facts: (yield* readPersistedAutoSettleFacts(
@@ -118,7 +118,7 @@ export const readSessionQuiescence = (now: number, sessionId: string) =>
 					WHERE project_key = ${projectId} AND session_id = ${sessionId} AND effect_type = 'send_turn'
 					AND status IN ('pending', 'running', 'retryable_failed')
 				) AS found`)[0]?.found === 1,
-			hasLiveBackgroundWork: backgroundOf(sessionId) !== undefined,
+			hasLiveBackgroundWork: background.hasLiveWork(sessionId),
 			isRetrying:
 				retries._tag === "Some" && retries.value(sessionId) !== undefined,
 		};

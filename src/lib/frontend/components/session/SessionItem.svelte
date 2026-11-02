@@ -79,6 +79,7 @@
 	import { getSessionActionState, getSwipeStage, LONG_PRESS_DELAY_MS, MOVEMENT_SLOP_PX } from "../../utils/swipe.js";
 	import { onDestroy } from "svelte";
 	import { dismiss } from "../../actions/use-dismiss.svelte.js";
+	import { openSessionView } from "../../stores/session-view.svelte.js";
 
 	let {
 		session,
@@ -253,6 +254,14 @@
 		if (!onswitchsession) return;
 		e.preventDefault();
 		if (!isRenaming) onswitchsession(session.id);
+	}
+
+	// The badge opens the session's Servers view, arriving there if it is not the open one.
+	function openServers(e: MouseEvent) {
+		e.preventDefault();
+		e.stopPropagation();
+		openSessionView(session.id, "servers");
+		onswitchsession?.(session.id);
 	}
 
 	function suppressGestureClick(e: MouseEvent) {
@@ -629,6 +638,17 @@
 					data-testid="session-woke-pill"
 					class="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 font-sans text-xs font-medium {wokeColour}"
 				>{wokeText}</span>
+			{/if}
+
+			<!-- Live dev servers: static, counted only when there are several, never a port. -->
+			{#if session.servers?.length && !selectMode}
+				{@const count = session.servers.length}
+				<Button variant="server-badge" size="server-badge" data-testid="session-server-badge"
+					ariaLabel={`${count} ${count === 1 ? "server" : "servers"} running. Open Servers`}
+					onclick={openServers}>
+					<span aria-hidden="true" class="grid size-[9px] shrink-0 place-items-center rounded-full border-[1.4px] border-current"><span class="size-[3px] rounded-full bg-current"></span></span>
+					{#if count >= 2}{count}{/if}
+				</Button>
 			{/if}
 
 			<!-- Desktop commands replace the time on hover and keyboard focus. -->
