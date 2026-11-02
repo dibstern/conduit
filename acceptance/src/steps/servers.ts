@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
@@ -20,7 +21,10 @@ const SERVERS = [
 	},
 ] as const;
 
-async function setServers(page: Page, count: number): Promise<void> {
+async function setServers(
+	page: Page,
+	servers: readonly (typeof SERVERS)[number][],
+): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
 	const id = new URL(page.url()).pathname.split("/")[2];
@@ -39,8 +43,8 @@ async function setServers(page: Page, count: number): Promise<void> {
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier servers.
 			servers:
-				count > 0
-					? SERVERS.slice(0, count).map(({ age, ...server }) => ({
+				servers.length > 0
+					? servers.map(({ age, ...server }) => ({
 							...server,
 							startedAt: now - age * 1000,
 							source: "detected",
@@ -52,6 +56,8 @@ async function setServers(page: Page, count: number): Promise<void> {
 }
 
 const railButton = (page: Page) => page.getByTestId("views-rail-servers");
+const serverRow = (page: Page, port: string | undefined) =>
+	page.getByTestId("session-server").filter({ hasText: `:${port}` });
 const menuItem = (page: Page, verb: string) =>
 	page.getByTestId(`session-ctx-${verb.toLowerCase()}`);
 
@@ -60,7 +66,7 @@ export const serversHandlers: StepHandler[] = [
 		name: "seed detected servers",
 		match: /^the session has (\d) detected servers$/,
 		run: async ({ world, match }) => {
-			await setServers(world.page, Number(match[1]));
+			await setServers(world.page, SERVERS.slice(0, Number(match[1])));
 			await expect(railButton(world.page)).toBeVisible();
 		},
 	},
@@ -68,7 +74,90 @@ export const serversHandlers: StepHandler[] = [
 		name: "every server exits",
 		match: /^the session's servers all exit$/,
 		run: async ({ world }) => {
-			await setServers(world.page, 0);
+			await setServers(world.page, []);
+		},
+	},
+	{
+		name: "one server exits",
+		match: /^the server on port (\d+) exits$/,
+		run: async ({ world, match }) => {
+			await setServers(
+				world.page,
+				SERVERS.filter((server) => String(server.port) !== match[1]),
+			);
+		},
+	},
+	{
+		name: "stop a server",
+		match: /^I stop the server on port (\d+)$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
+				StopServer: () => ({ ok: true }),
+			});
+			await serverRow(world.page, match[1])
+				.getByTestId("session-server-stop")
+				.click();
+		},
+	},
+	{
+		name: "assert the Stop confirm",
+		match: /^the confirm asks (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator("#confirm-modal-text")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "confirm the stop",
+		match: /^I confirm the stop$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("confirm-modal-action").click();
+			await expect(world.page.locator("#confirm-modal")).toBeHidden();
+		},
+	},
+	{
+		name: "assert the StopServer request",
+		match: /^the daemon is asked to stop pid (\d+) on port (\d+)$/,
+		run: async ({ world, match }) => {
+			const request = await requireRpcControl(world.page).waitForRequest(
+				(candidate) => candidate.tag === "StopServer",
+			);
+			expect(request.payload).toMatchObject({
+				server: { pid: Number(match[1]), port: Number(match[2]) },
+			});
+		},
+	},
+	{
+		name: "assert a server reads Stopping",
+		match: /^the server on port (\d+) reads Stopping…$/,
+		run: async ({ world, match }) => {
+			await expect(
+				serverRow(world.page, match[1]).getByTestId("session-server-stop"),
+			).toHaveText("Stopping…");
+		},
+	},
+	{
+		name: "fail the pending Stop",
+		match: /^the daemon will fail the Stop with (.+)$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
+				StopServer: () => {
+					throw new WsRpcError({ message: match[1] ?? "" });
+				},
+			});
+		},
+	},
+	{
+		name: "assert a failed Stop on the row",
+		match: /^the server on port (\d+) shows (.+) and offers Stop again$/,
+		run: async ({ world, match }) => {
+			const row = serverRow(world.page, match[1]);
+			await expect(row.getByTestId("session-server-stop-error")).toHaveText(
+				match[2] ?? "",
+			);
+			await expect(row.getByTestId("session-server-stop")).toHaveText("Stop");
+			await expect(row.getByTestId("session-server-stop")).toBeEnabled();
 		},
 	},
 	{
@@ -167,9 +256,7 @@ export const serversHandlers: StepHandler[] = [
 			await world.page
 				.context()
 				.grantPermissions(["clipboard-read", "clipboard-write"]);
-			await world.page
-				.getByTestId("session-server")
-				.filter({ hasText: `:${match[1]}` })
+			await serverRow(world.page, match[1])
 				.getByRole("button", { name: /^Copy link/ })
 				.click();
 		},

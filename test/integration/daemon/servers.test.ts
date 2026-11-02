@@ -6,6 +6,9 @@
 // Ended sessions: a settled session's server lives on, waits out the hold, survives a restart or a
 // later start, dies only by SIGKILL, takes its agent with it, or another daemon's marked server is
 // killed; a deleted session's server lives on or records a server_gone.
+// Stop: it kills the agent's shell along with a server started with & (one process group), misses
+// a server that ignores SIGTERM, kills a pid whose start time no longer matches, or is remembered
+// across a daemon crash so the server leaves the list or a second Stop does nothing.
 import { type ChildProcess, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -29,31 +32,32 @@ const agents: ChildProcess[] = [];
 
 // The fake agent is a shell marked with the session; the server is its background child. The
 // shell outlives the server, reporting the server's exit status, as an agent outlives a Stop.
-const startAgent = async (sessionId: string) => {
+const startAgent = async (sessionId: string, server = SERVER) => {
 	const agent = spawn(
 		"/bin/sh",
 		["-c", 'node -e "$SERVER" & wait $!; echo "{\\"exit\\":$?}"; sleep 60'],
 		{
-			env: { ...process.env, SERVER, CONDUIT_SESSION_ID: sessionId },
+			env: { ...process.env, SERVER: server, CONDUIT_SESSION_ID: sessionId },
 			stdio: ["ignore", "pipe", "inherit"],
 			detached: true,
 		},
 	);
 	agents.push(agent);
-	const lines = createInterface({ input: agent.stdout ?? process.stdin })[
-		Symbol.asyncIterator
-	]();
-	const { pid, port } = JSON.parse(String((await lines.next()).value)) as {
-		pid: number;
-		port: number;
-	};
-	const exited = lines
-		.next()
-		// An agent reaped by afterEach ends its output with no exit line.
-		.then(({ done, value }) =>
-			done ? undefined : (JSON.parse(value) as { exit: number }).exit,
-		);
-	return { agent, pid, port, exited };
+	const output = createInterface({ input: agent.stdout ?? process.stdin });
+	// Each output line is a JSON object. An agent reaped by afterEach ends with no exit line.
+	const lineWith = (key: string) =>
+		new Promise<Record<string, number> | undefined>((resolve) => {
+			output.on("line", (line) => {
+				const fields: Record<string, number> = JSON.parse(line);
+				if (key in fields) resolve(fields);
+			});
+			output.once("close", () => resolve(undefined));
+		});
+	const exited = lineWith("exit").then((line) => line?.["exit"]);
+	const termed = lineWith("term");
+	const { pid = 0, port = 0 } =
+		(await lineWith("port")) ?? expect.fail("the server never listened");
+	return { agent, pid, port, exited, termed };
 };
 const alive = (pid: number) => {
 	try {
@@ -291,4 +295,106 @@ it("deleting a session kills its server and records no server_gone for it", asyn
 	);
 	// Deletion keeps only the session.deleted event; nothing may follow it.
 	expect(types).toEqual(["session.deleted"]);
+});
+
+type Listed = { pid: number; startedAt: number; port: number };
+const listedOn =
+	(sessionId: string, port: number) => (frame: Record<string, unknown>) =>
+		frame["type"] === "session_row" && frame["id"] === sessionId
+			? ((frame["servers"] ?? []) as readonly Listed[]).find(
+					(server) => server.port === port,
+				)
+			: undefined;
+const keyOf = ({ pid, startedAt, port }: Listed) => ({ pid, startedAt, port });
+
+it("Stop kills a server started with & from a non-interactive shell and leaves the shell; a stale Stop kills nothing", async () => {
+	harness = ProcessHarness.create({ logLevel: "warn" });
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const browser = await harness.connect();
+	await browser.followSessions();
+	const sessionId = await browser.createSession("Stop");
+	const { agent, pid, port, exited } = await startAgent(sessionId);
+	const listed = listedOn(sessionId, port);
+	const server = keyOf(
+		listed(await browser.waitFor((frame) => listed(frame) !== undefined)) ??
+			expect.fail("no listed server"),
+	);
+	expect(server.pid).toBe(pid);
+
+	// The pid now names a process started at another time, as after pid reuse.
+	await browser.stopServer(sessionId, {
+		...server,
+		startedAt: server.startedAt - 1000,
+	});
+	expect(alive(pid)).toBe(true);
+
+	const cursor = browser.frames.length;
+	const stopping = performance.now();
+	await browser.stopServer(sessionId, server);
+	expect(await exited).toBe(143);
+	const stopMs = performance.now() - stopping;
+	expect(agent.pid !== undefined && alive(agent.pid)).toBe(true);
+	await browser.waitFor(
+		(frame) =>
+			frame["type"] === "session_row" &&
+			frame["id"] === sessionId &&
+			frame["servers"] === undefined,
+		cursor,
+	);
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/stop-server.json`,
+		JSON.stringify(
+			{ sessionId, server, stopMs, exit: 143, shellAlive: true },
+			null,
+			2,
+		),
+	);
+});
+
+it("a Stop cut short by a daemon crash is forgotten: the server stays listed, and Stop again kills it by SIGKILL", async () => {
+	harness = ProcessHarness.create({ logLevel: "warn" });
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const browser = await harness.connect();
+	await browser.followSessions();
+	const sessionId = await browser.createSession("Stubborn");
+	// The server ignores SIGTERM but says it got it, so the test sees the signal land.
+	const { pid, port, exited, termed } = await startAgent(
+		sessionId,
+		`process.on("SIGTERM", () => console.log(JSON.stringify({ term: 1 })));\n${SERVER}`,
+	);
+	const listed = listedOn(sessionId, port);
+	const server = keyOf(
+		listed(await browser.waitFor((frame) => listed(frame) !== undefined)) ??
+			expect.fail("no listed server"),
+	);
+
+	const cut = browser.stopServer(sessionId, server).then(
+		() => "stopped",
+		() => "cut short",
+	);
+	await termed;
+	await harness.kill();
+	expect(await cut).toBe("cut short");
+	expect(alive(pid)).toBe(true);
+
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const again = await harness.connect();
+	await again.followSessions();
+	const relisted = keyOf(
+		listed(await again.waitFor((frame) => listed(frame) !== undefined)) ??
+			expect.fail("no relisted server"),
+	);
+	expect(relisted).toEqual(server);
+	const stopping = performance.now();
+	await again.stopServer(sessionId, relisted);
+	expect(await exited).toBe(137);
+	const stopMs = performance.now() - stopping;
+	// The Stop returns only after its SIGKILL, five seconds after the ignored SIGTERM.
+	expect(stopMs).toBeGreaterThanOrEqual(5000);
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/stop-after-crash.json`,
+		JSON.stringify({ sessionId, server, stopMs, exit: 137 }, null, 2),
+	);
 });

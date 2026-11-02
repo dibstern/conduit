@@ -50,45 +50,59 @@ const PS_ROW =
 	/^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
 
 const PS_TREE =
-	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+
+export class ServerStopError extends Data.TaggedError("ServerStopError")<{
+	readonly message: string;
+	readonly cause?: unknown;
+}> {}
 
 /**
  * The one kill routine (8.7 Stop) for Stop and ended sessions: the server's process group, unless
  * its leader is conduit, a runner host, an agent CLI or a shell, then the server's process tree.
  * SIGTERM, then SIGKILL after 5s. Before each signal it re-reads the process table and sends
- * nothing once the pid no longer has the key's start time.
+ * nothing once the pid no longer has the key's start time. It fails when a signal is refused or
+ * the server is still running a second after SIGKILL.
  */
 export const killServer = (server: ServerKey) =>
 	Effect.gen(function* () {
 		const subprocess = yield* Subprocess;
+		// The process table while the key's pid still runs with its start time, else undefined.
+		const running = Effect.gen(function* () {
+			const { stdout } = yield* subprocess.run(
+				"ps",
+				["-axww", "-o", "pid=,ppid=,pgid=,stat=,lstart=,command="],
+				{
+					timeoutMs: 5000,
+					maxBuffer: 16 * 1024 * 1024,
+					env: { ...process.env, LC_ALL: "C" },
+				},
+			);
+			const procs = new Map<
+				number,
+				{ ppid: number; pgid: number; startedAt: number; command: string }
+			>();
+			for (const line of stdout.split("\n")) {
+				const row = PS_TREE.exec(line);
+				// An exited child its parent has not reaped yet is not running.
+				if (row && !row[4]?.startsWith("Z"))
+					procs.set(Number(row[1]), {
+						ppid: Number(row[2]),
+						pgid: Number(row[3]),
+						startedAt: Date.parse(row[5] ?? ""),
+						command: row[6] ?? "",
+					});
+			}
+			return procs.get(server.pid)?.startedAt === server.startedAt
+				? procs
+				: undefined;
+		});
 		const signal = (name: NodeJS.Signals) =>
 			Effect.gen(function* () {
-				const { stdout } = yield* subprocess.run(
-					"ps",
-					["-axww", "-o", "pid=,ppid=,pgid=,lstart=,command="],
-					{
-						timeoutMs: 5000,
-						maxBuffer: 16 * 1024 * 1024,
-						env: { ...process.env, LC_ALL: "C" },
-					},
-				);
-				const procs = new Map<
-					number,
-					{ ppid: number; pgid: number; startedAt: number; command: string }
-				>();
-				for (const line of stdout.split("\n")) {
-					const row = PS_TREE.exec(line);
-					if (row)
-						procs.set(Number(row[1]), {
-							ppid: Number(row[2]),
-							pgid: Number(row[3]),
-							startedAt: Date.parse(row[4] ?? ""),
-							command: row[5] ?? "",
-						});
-				}
-				const proc = procs.get(server.pid);
-				if (proc?.startedAt !== server.startedAt) return false;
-				const leader = procs.get(proc.pgid)?.command;
+				const procs = yield* running;
+				const pgid = procs?.get(server.pid)?.pgid;
+				if (procs === undefined || pgid === undefined) return false;
+				const leader = procs.get(pgid)?.command;
 				const ownGroup =
 					leader !== undefined &&
 					!/^-?(?:a|ba|c|da|k|tc|z)?sh$|^fish$/.test(
@@ -99,16 +113,34 @@ export const killServer = (server: ServerKey) =>
 				for (const pid of tree)
 					for (const [child, { ppid }] of procs)
 						if (ppid === pid && !tree.includes(child)) tree.push(child);
-				for (const target of ownGroup ? [-proc.pgid] : tree)
-					try {
-						process.kill(target, name);
-					} catch {
+				for (const target of ownGroup ? [-pgid] : tree)
+					yield* Effect.try({
+						try: () => process.kill(target, name),
+						catch: (cause) =>
+							new ServerStopError({
+								message: `Could not send ${name} to ${target}`,
+								cause,
+							}),
+					}).pipe(
 						// Exited since the table was read.
-					}
+						Effect.catchIf(
+							(error) =>
+								error.cause instanceof Error &&
+								"code" in error.cause &&
+								error.cause.code === "ESRCH",
+							() => Effect.void,
+						),
+					);
 				return true;
 			});
-		if (yield* signal("SIGTERM"))
-			yield* Effect.sleep(5000).pipe(Effect.andThen(signal("SIGKILL")));
+		if (!(yield* signal("SIGTERM"))) return;
+		yield* Effect.sleep(5000);
+		if (!(yield* signal("SIGKILL"))) return;
+		yield* Effect.sleep(1000);
+		if ((yield* running) !== undefined)
+			return yield* new ServerStopError({
+				message: `The server on port ${server.port} is still running after SIGKILL`,
+			});
 	});
 
 /** `lsof -F` output as [pid, names]; malformed lines fail the scan. */

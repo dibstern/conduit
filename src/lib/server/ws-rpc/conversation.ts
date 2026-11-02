@@ -11,6 +11,8 @@ import {
 	WsRpcError,
 } from "../../contracts/ws-rpc.js";
 import { AccountDirectory } from "../../domain/daemon/Services/account-directory.js";
+import { SessionActivityTag } from "../../domain/daemon/Services/session-activity.js";
+import { killServer } from "../../domain/persistence/Services/port-watcher.js";
 import { RateLimiterTag } from "../../domain/relay/Layers/rate-limiter-layer.js";
 import { InputDraftsTag } from "../../domain/relay/Services/input-drafts.js";
 import { RecapServiceTag } from "../../domain/relay/Services/recap-service.js";
@@ -78,6 +80,25 @@ export const conversationHandlers = {
 		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
 			Effect.as({ ok: true as const }),
 			Effect.catch(mapRpcFailure("StopBackgroundTask")),
+		),
+	StopServer: ({ sessionId, server }) =>
+		Effect.gen(function* () {
+			// Only a server the session lists, so a browser cannot signal an arbitrary pid.
+			const listed = (yield* SessionActivityTag).servers
+				.get(sessionId)
+				?.some(
+					({ pid, startedAt, port }) =>
+						pid === server.pid &&
+						startedAt === server.startedAt &&
+						port === server.port,
+				);
+			if (listed) yield* killServer(server);
+			return { ok: true as const };
+		}).pipe(
+			Effect.catchTag("ServerStopError", ({ message }) =>
+				Effect.fail(new WsRpcError({ message })),
+			),
+			Effect.catch(mapRpcFailure("StopServer")),
 		),
 	SwitchPermissionMode: (request) =>
 		Effect.gen(function* () {
@@ -333,6 +354,7 @@ export const conversationHandlers = {
 	| "GenerateRecap"
 	| "ExplainAsk"
 	| "StopBackgroundTask"
+	| "StopServer"
 	| "SwitchPermissionMode"
 	| "RespondPermission"
 	| "AnswerQuestion"

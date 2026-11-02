@@ -41,3 +41,25 @@ Examples:
   | count | settle                   | archive                   | delete                   | action  | toast                                                          |
   | 2     | Settle · stops 2 servers | Archive · stops 2 servers | Delete · stops 2 servers | settle  | Moved “Claude session” to Settled · Stopping 2 servers         |
   | 1     | Settle · stops 1 server  | Archive · stops 1 server  | Delete · stops 1 server  | archive | Stopping 1 server                                              |
+
+Scenario Outline: Stop asks first, reads Stopping… until the scan finds the server gone, and shows a failed Stop on the row
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the session has 2 detected servers
+  When I press ⌥5
+  And I stop the server on port <port>
+  Then the confirm asks <question>
+  When I confirm the stop
+  Then the daemon is asked to stop pid <pid> on port <port>
+  And the server on port <port> reads Stopping…
+  And the right-pane region visually matches <baseline> at <threshold> percent
+  When the server on port <port> exits
+  Then the Servers pane lists <remaining>
+  When I stop the server on port <other>
+  And the daemon will fail the Stop with <failure>
+  And I confirm the stop
+  Then the server on port <other> shows <failure> and offers Stop again
+
+Examples:
+  | port | question                 | pid  | baseline             | threshold | remaining              | other | failure                                                 |
+  | 5173 | Stop vite on port 5173?  | 4101 | servers-pane-stopping | 98        | next on 3000 for 1h 5m | 3000  | The server on port 3000 is still running after SIGKILL |

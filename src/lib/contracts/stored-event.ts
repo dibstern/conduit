@@ -350,7 +350,7 @@ export const EventMetadataSchema = Schema.Struct({
 const MessageRoleSchema = Schema.Literals(["user", "assistant"]);
 const SessionStatusSchema = Schema.Literals(["idle", "busy", "retry", "error"]);
 const PermissionDecisionSchema = Schema.Literals(["once", "always", "reject"]);
-const ServerKeySchema = Schema.Struct({
+export const ServerKeySchema = Schema.Struct({
 	pid: Schema.Number,
 	startedAt: Schema.Number,
 	port: Schema.Number,

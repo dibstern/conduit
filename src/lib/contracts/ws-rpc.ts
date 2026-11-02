@@ -88,6 +88,7 @@ import {
 import {
 	INPUT_DELIVERIES,
 	InputRequestSchema,
+	ServerKeySchema,
 	STEER_BLOCKERS,
 	TextSurfacedPayloadSchema,
 	ToolFileChangeSchema,
@@ -3134,6 +3135,16 @@ export const StopBackgroundTask = Rpc.make("StopBackgroundTask", {
 	error: WsRpcError,
 });
 
+/** Stops a server the session lists (8.7 Stop); the entry leaves only by the next scan's server_gone. */
+export const StopServer = Rpc.make("StopServer", {
+	payload: Schema.TaggedStruct("StopServer", {
+		sessionId: NonEmptyString,
+		server: ServerKeySchema,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const SetLogLevel = Rpc.make("SetLogLevel", {
 	payload: Schema.TaggedStruct("SetLogLevel", {
 		projectSlug: Schema.optional(NonEmptyString),
@@ -3642,6 +3653,7 @@ const wsRpcRequests = [
 	RemoveDraftAttachment,
 	CancelSession,
 	StopBackgroundTask,
+	StopServer,
 	SetLogLevel,
 ] as const;
 

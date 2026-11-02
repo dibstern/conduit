@@ -3170,6 +3170,13 @@ export class ProcessBrowser {
 		);
 	}
 
+	async stopServer(
+		sessionId: string,
+		server: { pid: number; startedAt: number; port: number },
+	): Promise<void> {
+		await this.run(this.rpc.StopServer({ sessionId, server }));
+	}
+
 	async setSettled(sessionId: string, settled: boolean): Promise<void> {
 		await this.run(
 			this.rpc.SetSessionSettled({
