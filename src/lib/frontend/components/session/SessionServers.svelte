@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
 	import { clock } from "../../stores/clock.svelte.js";
-	import { sessionState } from "../../stores/session.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { confirm, showToast } from "../../stores/ui.svelte.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
@@ -20,6 +20,8 @@
 
 	const { visible = true }: { pane?: boolean; onClose?: () => void; visible?: boolean } = $props();
 	const servers = $derived(currentServers());
+	// The background task each linked server writes to (8.7), by task id.
+	const tasks = $derived(new Map((findSession(sessionState.currentId ?? "")?.backgroundTasks ?? []).map((task) => [task.id, task.description])));
 	// Reading the clock ticks it every second, so a hidden pane leaves it alone.
 	const now = $derived(visible ? clock.now : 0);
 	// Past interpreters and flags to the program: `node .bin/vite --port 5173` reads vite.
@@ -59,6 +61,7 @@
 				{@const link = `http://localhost:${server.port}`}
 				{@const stopState = stops[`${server.pid}:${server.startedAt}:${server.port}`]}
 				{@const stopping = stopState !== undefined && stopState.failure === undefined}
+				{@const task = server.taskId === undefined ? undefined : tasks.get(server.taskId)}
 				<li data-testid="session-server" class="flex flex-col gap-1 border-b border-border-subtle px-3 py-2.5 text-text">
 					<!-- Phones give the actions their own row of thumb-sized buttons. -->
 					<div class="flex min-w-0 flex-wrap items-center gap-2">
@@ -79,6 +82,10 @@
 						<span data-testid="session-server-uptime" class="shrink-0">{taskAge({ firstSeenAt: server.startedAt }, now)}</span>
 						<span aria-hidden="true">·</span>
 						<span data-testid="session-server-source" class="shrink-0">{server.source === "declared" ? "marked by the agent" : "detected"}</span>
+						{#if task !== undefined}
+							<span aria-hidden="true">·</span>
+							<span data-testid="session-server-task" title={task} class="min-w-0 truncate">{task}</span>
+						{/if}
 					</small>
 					{#if stopState?.failure}
 						<p data-testid="session-server-stop-error" role="alert" class="m-0 text-[11px] text-status-red">{stopState.failure}</p>

@@ -76,6 +76,9 @@ jobs:
           test/integration/flows/multi-client.integration.ts
           test/integration/flows/claude-provider-instance.integration.ts
           test/integration/persistence/send-attempt-recovery.test.ts
+      # Servers on Linux: the /proc scanner under the core loop, ended sessions and Stop.
+      - name: Servers on /proc
+        run: pnpm test:integration test/integration/daemon/servers.test.ts
       - run: pnpm test:contract
         if: ${{ !cancelled() }}
 

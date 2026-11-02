@@ -505,9 +505,25 @@ function taskView(book: Book): TasksView {
 		return { tag: "none" };
 	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest)
 		return { tag: "unknown", label: runner.latest };
-	return runner.tasks.tasks.length === 0
-		? { tag: "none" }
-		: { tag: "live", label: runner.latest, tasks: runner.tasks.tasks };
+	if (runner.tasks.tasks.length === 0) return { tag: "none" };
+	// 8.2 (CONTRACT.md 2780-2782): a work task with a live linked server and no declared awaited
+	// covering it is serving; derived here so it falls back the moment server_gone lands.
+	const linked = [...book.servers.values()];
+	const serving = (task: Task) => {
+		const own = linked.filter(
+			(server) => server.taskKey && sameKey(server.taskKey, task.key),
+		);
+		return own.length > 0 && own.every((server) => server.role !== "awaited");
+	};
+	return {
+		tag: "live",
+		label: runner.latest,
+		tasks: runner.tasks.tasks.map((task) =>
+			task.class === "work" && serving(task)
+				? { ...task, class: "serving" }
+				: task,
+		),
+	};
 }
 /**
  * L5: a label's lost work is decided once, when its scope first ends: its live tasks, unknown
@@ -1881,7 +1897,7 @@ function unsolicited(
 			if (runner.retired || older)
 				return unchanged("older-label snapshot (L1.4)");
 			// 8.3: a snapshot replaces the set. 8.2 (CONTRACT.md 2778-2781) names the kind and class;
-			// gap: serving needs a linked server (8.7, not built), so none is serving yet.
+			// serving is derived from linked servers at view time (taskView).
 			runner.tasks = {
 				tag: "Known",
 				label,

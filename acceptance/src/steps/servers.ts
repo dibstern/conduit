@@ -24,6 +24,8 @@ const SERVERS = [
 async function setServers(
 	page: Page,
 	servers: readonly (typeof SERVERS)[number][],
+	// A background task that hosts the server on `port` (8.7).
+	hosted?: { readonly port: number; readonly task: string },
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
@@ -40,12 +42,23 @@ async function setServers(
 			status: "idle",
 			messageCount: 6,
 			...(row as object | undefined),
+			...(hosted && {
+				backgroundTasks: [
+					{
+						id: "task-1",
+						type: "local_bash",
+						description: hosted.task,
+						firstSeenAt: now,
+					},
+				],
+			}),
 			updatedAt: now,
 			// undefined drops out of the JSON snapshot, clearing earlier servers.
 			servers:
 				servers.length > 0
 					? servers.map(({ age, ...server }) => ({
 							...server,
+							...(server.port === hosted?.port && { taskId: "task-1" }),
 							startedAt: now - age * 1000,
 							source: "detected",
 							role: "serving",
@@ -83,6 +96,37 @@ export const serversHandlers: StepHandler[] = [
 					.or(sessionRow(world.page).getByTestId("session-server-badge"))
 					.first(),
 			).toBeAttached();
+		},
+	},
+	{
+		name: "seed a server a background task hosts",
+		match:
+			/^the session's background task (.+) hosts the server on port (\d+)$/,
+		run: async ({ world, match }) => {
+			await setServers(world.page, SERVERS, {
+				port: Number(match[2]),
+				task: match[1] ?? "",
+			});
+			await expect(railButton(world.page)).toBeAttached();
+		},
+	},
+	{
+		name: "assert a server names its task",
+		match: /^the server on port (\d+) names the task (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				serverRow(world.page, match[1]).getByTestId("session-server-task"),
+			).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "assert a server names no task",
+		match: /^the server on port (\d+) names no task$/,
+		run: async ({ world, match }) => {
+			await expect(serverRow(world.page, match[1])).toBeVisible();
+			await expect(
+				serverRow(world.page, match[1]).getByTestId("session-server-task"),
+			).toHaveCount(0);
 		},
 	},
 	{

@@ -159,6 +159,45 @@ describe("Session Activity", () => {
 			}),
 	);
 
+	// 8.7 failure modes: a task hosting a serving server still reads as working; a server not
+	// linked to the task, or one declared awaited, wrongly makes the task read calm.
+	it.effect(
+		"a task hosting a live serving server reads calm; an unlinked or awaited server does not (8.2, 8.7)",
+		() =>
+			Effect.gen(function* () {
+				const activity = yield* makeSessionActivity;
+				activity.background.record({
+					sessionId: "s",
+					kind: "snapshot",
+					tasks: [
+						{ id: "w1", type: "local_workflow", description: "Dev server" },
+						{ id: "b1", type: "local_bash", description: "Watch" },
+					],
+				});
+				const server = {
+					port: 3000,
+					pid: 600,
+					startedAt: 1,
+					command: "node server.js",
+					cwd: "/w",
+					source: "detected",
+					role: "serving",
+				} as const;
+				const work = () => activity.background.backgroundOf("s")?.work;
+				expect(work()).toBe("working");
+				activity.servers.set("s", [server]);
+				expect(work()).toBe("working");
+				activity.servers.set("s", [{ ...server, taskId: "w1" }]);
+				expect(work()).toBe("monitoring");
+				activity.servers.set("s", [
+					{ ...server, taskId: "w1", source: "declared", role: "awaited" },
+				]);
+				expect(work()).toBe("working");
+				activity.servers.delete("s");
+				expect(work()).toBe("working");
+			}),
+	);
+
 	it.effect(
 		"keeps separate daemon instances isolated without a project store",
 		() =>

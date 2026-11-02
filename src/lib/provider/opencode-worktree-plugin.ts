@@ -8,6 +8,14 @@ export default async function ConduitWorktreePlugin() {
 	const socketPath = process.env["CONDUIT_DAEMON_SOCKET"];
 	const instanceId = process.env["CONDUIT_OPENCODE_INSTANCE_ID"];
 	return {
+		// 8.7: every shell OpenCode runs carries its session's native id, so the PortWatcher can
+		// resolve a server started there through this instance's binding.
+		"shell.env": async (
+			input: { sessionID: string },
+			output: { env: Record<string, string> },
+		) => {
+			output.env["CONDUIT_OPENCODE_SESSION_ID"] = input.sessionID;
+		},
 		tool: {
 			conduit_use_worktree: {
 				description:

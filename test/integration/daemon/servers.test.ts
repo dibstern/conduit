@@ -9,12 +9,22 @@
 // Stop: it kills the agent's shell along with a server started with & (one process group), misses
 // a server that ignores SIGTERM, kills a pid whose start time no longer matches, or is remembered
 // across a daemon crash so the server leaves the list or a second Stop does nothing.
+// Task link: a server writing to a Claude background task's output file is not linked to the task,
+// the task does not read calm while it serves, or the task leaves with the server.
+// OpenCode: a real managed OpenCode's shell lacks its session's native id, or a server started there
+// is not attributed to the Conduit session bound to that native id.
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import Database from "better-sqlite3";
-import { afterEach, expect, it } from "vitest";
+import { Result as Either } from "effect";
+import { afterEach, expect, it, onTestFinished } from "vitest";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
 const HOLD_MS = 600;
 const ENVIRONMENT = {
@@ -397,4 +407,213 @@ it("a Stop cut short by a daemon crash is forgotten: the server stays listed, an
 		`${ARTIFACT_DIR}/stop-after-crash.json`,
 		JSON.stringify({ sessionId, server, stopMs, exit: 137 }, null, 2),
 	);
+});
+
+it("a server a Claude background task started is linked to that task, which reads calm while it serves and stays when the server exits", async () => {
+	harness = ProcessHarness.create({ logLevel: "warn", restartProof: true });
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const browser = await harness.connect();
+	await browser.followSessions();
+	const sessionId = await browser.createSession("Task server");
+	await browser.send(sessionId, "restart-background-work");
+	const taskId = "restart-background-task";
+	// Claude Code points a background task's stdout at <tmp>/<project>/<session>/tasks/<id>.output.
+	const output = join(
+		mkdtempSync(join(tmpdir(), "claude-task-")),
+		"tasks",
+		`${taskId}.output`,
+	);
+	mkdirSync(join(output, ".."));
+	// The shell echoes the server's first line once the server has written it to the task file.
+	const agent = spawn(
+		"/bin/sh",
+		[
+			"-c",
+			'node -e "$SERVER" > "$OUT" & until [ -s "$OUT" ]; do sleep 0.05; done; cat "$OUT"; wait; sleep 60',
+		],
+		{
+			env: {
+				...process.env,
+				SERVER,
+				OUT: output,
+				CONDUIT_SESSION_ID: sessionId,
+			},
+			stdio: ["ignore", "pipe", "inherit"],
+			detached: true,
+		},
+	);
+	agents.push(agent);
+	const [line] = await once(
+		createInterface({ input: agent.stdout ?? process.stdin }),
+		"line",
+	);
+	const { pid, port }: { pid: number; port: number } = JSON.parse(line);
+
+	const row = (frame: Record<string, unknown>) =>
+		frame["type"] === "session_row" && frame["id"] === sessionId
+			? (frame as {
+					servers?: readonly Record<string, unknown>[];
+					backgroundWork?: string;
+					backgroundTasks?: readonly { id: string }[];
+				})
+			: undefined;
+	const serving = await browser.waitFor(
+		(frame) => row(frame)?.servers?.some((s) => s["port"] === port) ?? false,
+	);
+	expect(row(serving)).toMatchObject({
+		servers: [{ port, pid, taskId, source: "detected", role: "serving" }],
+		backgroundWork: "monitoring",
+		backgroundTasks: [{ id: taskId }],
+	});
+
+	const cursor = browser.frames.length;
+	process.kill(pid, "SIGTERM");
+	const gone = await browser.waitFor(
+		(frame) => row(frame) !== undefined && row(frame)?.servers === undefined,
+		cursor,
+	);
+	expect(row(gone)).toMatchObject({
+		backgroundWork: "monitoring",
+		backgroundTasks: [{ id: taskId }],
+	});
+
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	const evidence = db
+		.prepare<[string], { type: string; data: string }>(
+			"SELECT type, data FROM events WHERE session_id = ? AND type LIKE 'evidence.server_%' ORDER BY sequence",
+		)
+		.all(sessionId)
+		.map((event) => ({ type: event.type, data: JSON.parse(event.data) }));
+	db.close();
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/claude-task-server.json`,
+		JSON.stringify(
+			{ sessionId, pid, port, output, pushed: [serving, gone], evidence },
+			null,
+			2,
+		),
+	);
+	expect(evidence.map((event) => event.type)).toEqual([
+		"evidence.server_seen",
+		"evidence.server_gone",
+	]);
+	expect(evidence[0]?.data).toMatchObject({
+		server: { pid, port },
+		taskKey: { taskId },
+	});
+});
+
+it("a server started in a real managed OpenCode shell carries the session's native id and reaches that session", async ({
+	skip,
+}) => {
+	let binary: string;
+	try {
+		binary = resolveRealOpenCode();
+	} catch {
+		return skip("No real OpenCode binary available");
+	}
+	harness = ProcessHarness.create({
+		logLevel: "warn",
+		managedOpenCode: true,
+		realOpenCode: binary,
+	});
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const browser = await harness.connect();
+	await browser.followSessions();
+	try {
+		await browser.startInstance("managed-test");
+	} catch (error) {
+		// A cold, isolated OpenCode config can outlast the daemon's /path probe.
+		expect(String(error)).toContain("Operation timed out");
+		await browser.startInstance("managed-test");
+	}
+	const sessionId = await browser.createSession(
+		"OpenCode server",
+		"managed-test",
+		"opencode",
+	);
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	const { native } = db
+		.prepare<[string], { native: string }>(
+			`SELECT COALESCE((SELECT provider_sid FROM session_providers WHERE session_id = session.id
+				AND status = 'active' ORDER BY activated_at DESC LIMIT 1), session.provider_sid, session.id)
+				AS native FROM sessions AS session WHERE id = ?`,
+		)
+		.get(sessionId) ?? { native: "" };
+	const instance = Either.getOrThrowWith(
+		loadDaemonConfigResult(harness.configDir),
+		(error) => error,
+	)?.instances?.find(({ id }) => id === "managed-test");
+	if (!instance?.port) throw new Error("Managed OpenCode did not start");
+
+	// The shell starts the server in the background and returns once it has written its port.
+	const script = join(harness.root, "server.js");
+	const out = join(harness.root, "server.json");
+	writeFileSync(script, SERVER);
+	const shell = await fetch(
+		`http://127.0.0.1:${instance.port}/session/${native}/shell?directory=${encodeURIComponent(harness.projectDir)}`,
+		{
+			method: "POST",
+			headers: {
+				Authorization: `Basic ${Buffer.from(`${instance.env?.["OPENCODE_SERVER_USERNAME"] ?? "opencode"}:${instance.env?.["OPENCODE_SERVER_PASSWORD"]}`).toString("base64")}`,
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({
+				agent: "build",
+				command: `env | grep '^CONDUIT_OPENCODE_' | sort; (node ${script} > ${out} 2>&1 < /dev/null &); until [ -s ${out} ]; do sleep 0.05; done; cat ${out}`,
+			}),
+			signal: AbortSignal.timeout(30_000),
+		},
+	);
+	const reply = await shell.text();
+	expect(shell.ok, reply).toBe(true);
+	const printed = [...reply.matchAll(/CONDUIT_OPENCODE_\w+=[^\s"\\]+/g)].map(
+		([line]) => line,
+	);
+	expect(printed).toEqual(
+		expect.arrayContaining([
+			"CONDUIT_OPENCODE_INSTANCE_ID=managed-test",
+			`CONDUIT_OPENCODE_SESSION_ID=${native}`,
+		]),
+	);
+	// The reply quotes the shell's output inside a JSON string, so its quotes come escaped.
+	const [, pid = 0, port = 0] = (
+		/pid\\?":(\d+),\\?"port\\?":(\d+)/.exec(reply) ?? []
+	).map(Number);
+	// OpenCode's shell has exited, so this server is no agent's child to reap.
+	onTestFinished(() => {
+		if (pid > 0 && alive(pid)) process.kill(pid, "SIGKILL");
+	});
+
+	const rowsOf = (frame: Record<string, unknown>) =>
+		frame["type"] === "session_row" && frame["id"] === sessionId
+			? ((frame["servers"] ?? []) as readonly Record<string, unknown>[])
+			: undefined;
+	const seen = await browser.waitFor(
+		(frame) =>
+			rowsOf(frame)?.some((server) => server["port"] === port) ?? false,
+	);
+	expect(rowsOf(seen)).toEqual([
+		expect.objectContaining({ port, pid, source: "detected", role: "serving" }),
+	]);
+	const evidence = db
+		.prepare<[string], { type: string; data: string }>(
+			"SELECT type, data FROM events WHERE session_id = ? AND type LIKE 'evidence.server_%' ORDER BY sequence",
+		)
+		.all(sessionId)
+		.map((event) => ({ type: event.type, data: JSON.parse(event.data) }));
+	db.close();
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/opencode-server.json`,
+		JSON.stringify(
+			{ sessionId, native, printed, pid, port, pushed: seen, evidence },
+			null,
+			2,
+		),
+	);
+	expect(evidence).toMatchObject([
+		{ type: "evidence.server_seen", data: { server: { pid, port } } },
+	]);
 });

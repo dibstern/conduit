@@ -101,3 +101,15 @@ Scenario Outline: On the phone, Servers is the second view card while servers ru
 Examples:
   | count | cards                               | sheet_baseline           | servers                                     | view_baseline      | threshold | cards_after                 |
   | 2     | Chat, Servers, Terminal, Diff, Files | phone-view-cards-servers | vite on 5173 for 6m, next on 3000 for 1h 5m | phone-servers-view | 98        | Chat, Terminal, Diff, Files |
+
+Scenario Outline: A server a background task hosts names that task in the Servers pane
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the session's background task <task> hosts the server on port <port>
+  When I press ⌥5
+  Then the server on port <port> names the task <task>
+  And the server on port <other> names no task
+
+Examples:
+  | task                 | port | other |
+  | Docs site dev server | 3000 | 5173  |

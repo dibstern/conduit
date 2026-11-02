@@ -2571,6 +2571,58 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		});
 	});
 
+	it("a task with a live linked server reads serving unless the server is declared awaited, and falls back when it goes (8.2, 8.7)", () => {
+		// Decider only: the oracle does not model servers (reference.ts server cases noop).
+		const d = new Driver("claude", "decider");
+		const server = (port: number, taskId: string) => ({
+			server: { pid: port, startedAt: 1, port },
+			command: "node server.js",
+			cwd: "/w",
+			taskKey: { taskId },
+		});
+		const seen = (
+			port: number,
+			taskId: string,
+			extra: { source: "detected" | "declared"; role?: "serving" | "awaited" },
+		) =>
+			d.step({
+				verb: "settle",
+				settlement: { kind: "server_seen", ...server(port, taskId), ...extra },
+			});
+		const classes = () => {
+			const tasks = d.view().tasks;
+			return tasks.tag === "live"
+				? tasks.tasks.map((task) => [task.key.taskId, task.class])
+				: tasks.tag;
+		};
+		snapshot(d, [subagent, monitor, shell]);
+		seen(3000, "t1", { source: "detected" });
+		seen(3001, "t3", { source: "detected" });
+		seen(3002, "t9", { source: "detected" });
+		expect(classes()).toEqual([
+			["t2", "work"],
+			["t3", "monitoring"],
+			["t1", "serving"],
+		]);
+		seen(3000, "t1", { source: "declared", role: "awaited" });
+		expect(classes()).toEqual([
+			["t2", "work"],
+			["t3", "monitoring"],
+			["t1", "work"],
+		]);
+		seen(3000, "t1", { source: "declared", role: "serving" });
+		expect(classes()).toContainEqual(["t1", "serving"]);
+		d.step({
+			verb: "settle",
+			settlement: { kind: "server_gone", server: server(3000, "t1").server },
+		});
+		expect(classes()).toEqual([
+			["t2", "work"],
+			["t3", "monitoring"],
+			["t1", "work"],
+		]);
+	});
+
 	it("tasks: none after a fresh launch and with no process, unknown on a reattach until its snapshot, and after a replacement only the new process's (8.3, 8.4)", () => {
 		agreed("claude", (d) => {
 			snapshot(d, []);

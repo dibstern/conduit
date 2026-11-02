@@ -1,6 +1,6 @@
 /**
  * The PortWatcher (CONTRACT.md 8.7, 2.1 rows 181-182): a main-side fiber that scans the user's
- * listening TCP ports, attributes each to the session whose CONDUIT_SESSION_ID is innermost in its
+ * listening TCP ports, attributes each to the session whose agent marker is innermost in its
  * process ancestry, and records `server_seen` once a port has held its ServerKey for the hold time
  * and `server_gone` when a ledger entry is missing from a successful scan. It compares each scan
  * against the ledger's Servers, read in the write that appends the evidence, never against a copy;
@@ -10,7 +10,8 @@
  * Gap (CONTRACT.md 2976): "One PortWatcher per daemon". Servers live in each project's own store,
  * so this runs once per project relay, each recording only its own store's sessions.
  */
-import { basename } from "node:path";
+import { readdir, readFile, readlink } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { Clock, Config, Data, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
@@ -21,6 +22,7 @@ import { canonicalEvent } from "../../../persistence/events.js";
 import type {
 	ServerKey,
 	Servers,
+	TaskKey,
 } from "../../../provider/run-ledger/run-ledger-model.js";
 import type { SessionServer } from "../../../shared-types.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
@@ -36,7 +38,16 @@ interface Scanned {
 	readonly server: ServerKey;
 	readonly command: string;
 	readonly cwd: string;
+	readonly taskKey?: TaskKey;
 }
+
+/**
+ * A Claude background task's stdout file (8.7): `.../tasks/<task id>.output`.
+ * Codex's link (CONTRACT.md 2988-2989, a unique command and cwd match in
+ * `thread/backgroundTerminals/list`) waits for that snapshot (CONTRACT.md 2791, 32.21);
+ * until then Codex servers are session-level.
+ */
+const TASK_OUTPUT = /\/tasks\/([^/]+)\.output$/;
 
 /** Each store's readiness (8.7): true once a successful scan and one hold have passed. */
 export const portWatcherKnown = new WeakMap<
@@ -45,12 +56,145 @@ export const portWatcherKnown = new WeakMap<
 >();
 
 const keyOf = (key: ServerKey) => `${key.pid}:${key.startedAt}:${key.port}`;
-const MARKER = /(?:^|\s)CONDUIT_SESSION_ID=(\S+)/g;
+// 8.7 markers: Claude's carries the Conduit id; Codex's thread id and OpenCode's session id (stamped
+// by the managed plugin's shell.env hook, beside the instance's own id) resolve through the binding.
+const MARKER =
+	/(?:^|\s)(CONDUIT_SESSION_ID|CODEX_THREAD_ID|CONDUIT_OPENCODE_SESSION_ID|CONDUIT_OPENCODE_INSTANCE_ID)=(\S+)/g;
+const AGENT_MARKERS = [
+	"CONDUIT_SESSION_ID",
+	"CODEX_THREAD_ID",
+	"CONDUIT_OPENCODE_SESSION_ID",
+] as const;
 const PS_ROW =
 	/^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
 
 const PS_TREE =
 	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
+
+/**
+ * Linux scans /proc (proc(5)); other hosts run lsof and ps. "" selects lsof and ps; tests point it at
+ * a fixture tree.
+ */
+const procRoot = Config.String("CONDUIT_PORT_WATCH_PROC_ROOT").pipe(
+	Config.withDefault(process.platform === "linux" ? "/proc" : ""),
+);
+/** /proc start times count USER_HZ ticks, 100 a second on every architecture (proc(5)). */
+const USER_HZ = 100;
+// Each root's boot time, read once: btime is derived from the clock and can shift a second
+// between reads, which would give a running process a new ServerKey.
+const bootTimes = new Map<string, number>();
+const isPid = (name: string) => /^\d+$/.test(name);
+/** A process's file, or undefined once it has exited or cannot be read (another user's). */
+const procFile = <A>(read: Promise<A>) =>
+	read.catch((error: NodeJS.ErrnoException) =>
+		error.code === "ENOENT" || error.code === "ESRCH" || error.code === "EACCES"
+			? undefined
+			: Promise.reject(error),
+	);
+const readProc = <A>(what: string, read: () => Promise<A>) =>
+	Effect.tryPromise({
+		try: read,
+		catch: (cause) =>
+			cause instanceof PortScanError
+				? cause
+				: new PortScanError({ reason: `/proc ${what}`, cause }),
+	});
+
+/**
+ * The process table from /proc: `stat` for the parent, group, state and start time (whole seconds,
+ * as ps's lstart), `cmdline` for the command. A process gone mid-read is left out.
+ */
+const procTable = (root: string) =>
+	readProc("process table", async () => {
+		const boot =
+			bootTimes.get(root) ??
+			Number(
+				/^btime (\d+)$/m.exec(await readFile(join(root, "stat"), "utf8"))?.[1],
+			);
+		if (!Number.isInteger(boot))
+			throw new PortScanError({ reason: "/proc stat has no btime" });
+		bootTimes.set(root, boot);
+		const procs = new Map<
+			number,
+			{
+				ppid: number;
+				pgid: number;
+				zombie: boolean;
+				startedAt: number;
+				command: string;
+			}
+		>();
+		// One process at a time: a table of thousands must not hold thousands of files open.
+		for (const name of (await readdir(root)).filter(isPid)) {
+			const stat = await procFile(readFile(join(root, name, "stat"), "utf8"));
+			const cmdline = await procFile(
+				readFile(join(root, name, "cmdline"), "utf8"),
+			);
+			if (stat === undefined) continue;
+			// The command name sits in parentheses and may hold either; fields resume after the last.
+			const close = stat.lastIndexOf(")");
+			const fields = stat.slice(close + 2).split(" ");
+			const ticks = Number(fields[19]);
+			if (close < 0 || !Number.isInteger(ticks))
+				throw new PortScanError({ reason: `/proc ${name}/stat malformed` });
+			procs.set(Number(name), {
+				ppid: Number(fields[1]),
+				pgid: Number(fields[2]),
+				zombie: fields[0] === "Z",
+				startedAt: (boot + Math.floor(ticks / USER_HZ)) * 1000,
+				// A kernel thread or zombie has no cmdline; ps shows its name.
+				command:
+					cmdline?.replace(/\0+$/, "").replaceAll("\0", " ") ||
+					stat.slice(stat.indexOf("(") + 1, close),
+			});
+		}
+		return procs;
+	});
+
+/**
+ * The user's listening TCP ports by pid, from /proc: `net/tcp` and `net/tcp6` rows in state LISTEN
+ * (0A) owned by `uid`, matched to the processes whose fds name the socket's inode. A socket no
+ * readable process holds is left out, as lsof leaves out what it cannot see.
+ */
+const procListening = (root: string, uid: number) =>
+	readProc("listening sockets", async () => {
+		const ports = new Map<string, number>();
+		for (const table of ["tcp", "tcp6"]) {
+			const text = await readFile(join(root, "net", table), "utf8").catch(
+				// A kernel without IPv6 has no tcp6.
+				(error: NodeJS.ErrnoException) =>
+					table === "tcp6" && error.code === "ENOENT"
+						? ""
+						: Promise.reject(error),
+			);
+			for (const line of text.split("\n").slice(1)) {
+				if (line.trim() === "") continue;
+				const row =
+					/^\s*\d+:\s+[\dA-F]+:([\dA-F]{4})\s+[\dA-F]+:[\dA-F]{4}\s+([\dA-F]{2})\s+\S+\s+\S+\s+\S+\s+(\d+)\s+\d+\s+(\d+)\s/.exec(
+						line,
+					);
+				if (!row)
+					throw new PortScanError({
+						reason: `/proc net/${table} line ${line}`,
+					});
+				if (row[2] === "0A" && Number(row[3]) === uid)
+					ports.set(row[4] ?? "", Number.parseInt(row[1] ?? "", 16));
+			}
+		}
+		const byPid = new Map<number, number[]>();
+		if (ports.size === 0) return byPid;
+		for (const name of (await readdir(root)).filter(isPid))
+			for (const fd of (await procFile(readdir(join(root, name, "fd")))) ??
+				[]) {
+				const link = await procFile(readlink(join(root, name, "fd", fd)));
+				const port = ports.get(
+					/^socket:\[(\d+)\]$/.exec(link ?? "")?.[1] ?? "",
+				);
+				if (port !== undefined)
+					byPid.set(Number(name), [...(byPid.get(Number(name)) ?? []), port]);
+			}
+		return byPid;
+	});
 
 export class ServerStopError extends Data.TaggedError("ServerStopError")<{
 	readonly message: string;
@@ -67,31 +211,45 @@ export class ServerStopError extends Data.TaggedError("ServerStopError")<{
 export const killServer = (server: ServerKey) =>
 	Effect.gen(function* () {
 		const subprocess = yield* Subprocess;
+		const root = yield* procRoot;
 		// The process table while the key's pid still runs with its start time, else undefined.
 		const running = Effect.gen(function* () {
-			const { stdout } = yield* subprocess.run(
-				"ps",
-				["-axww", "-o", "pid=,ppid=,pgid=,stat=,lstart=,command="],
-				{
-					timeoutMs: 5000,
-					maxBuffer: 16 * 1024 * 1024,
-					env: { ...process.env, LC_ALL: "C" },
-				},
-			);
 			const procs = new Map<
 				number,
 				{ ppid: number; pgid: number; startedAt: number; command: string }
 			>();
-			for (const line of stdout.split("\n")) {
-				const row = PS_TREE.exec(line);
-				// An exited child its parent has not reaped yet is not running.
-				if (row && !row[4]?.startsWith("Z"))
-					procs.set(Number(row[1]), {
-						ppid: Number(row[2]),
-						pgid: Number(row[3]),
-						startedAt: Date.parse(row[5] ?? ""),
-						command: row[6] ?? "",
-					});
+			if (root !== "") {
+				for (const [pid, proc] of yield* procTable(root).pipe(
+					Effect.mapError(
+						(error) =>
+							new ServerStopError({
+								message: error.reason,
+								cause: error.cause,
+							}),
+					),
+				))
+					if (!proc.zombie) procs.set(pid, proc);
+			} else {
+				const { stdout } = yield* subprocess.run(
+					"ps",
+					["-axww", "-o", "pid=,ppid=,pgid=,stat=,lstart=,command="],
+					{
+						timeoutMs: 5000,
+						maxBuffer: 16 * 1024 * 1024,
+						env: { ...process.env, LC_ALL: "C" },
+					},
+				);
+				for (const line of stdout.split("\n")) {
+					const row = PS_TREE.exec(line);
+					// An exited child its parent has not reaped yet is not running.
+					if (row && !row[4]?.startsWith("Z"))
+						procs.set(Number(row[1]), {
+							ppid: Number(row[2]),
+							pgid: Number(row[3]),
+							startedAt: Date.parse(row[5] ?? ""),
+							command: row[6] ?? "",
+						});
+				}
 			}
 			return procs.get(server.pid)?.startedAt === server.startedAt
 				? procs
@@ -143,19 +301,21 @@ export const killServer = (server: ServerKey) =>
 			});
 	});
 
-/** `lsof -F` output as [pid, names]; malformed lines fail the scan. */
+/** `lsof -F` output as [pid, [fd, name]]; malformed lines fail the scan. */
 const lsofFields = (stdout: string) =>
 	Effect.gen(function* () {
-		const byPid = new Map<number, string[]>();
-		let names: string[] | undefined;
+		const byPid = new Map<number, { fd: string; name: string }[]>();
+		let names: { fd: string; name: string }[] | undefined;
+		let fd = "";
 		for (const line of stdout.split("\n")) {
 			if (line === "") continue;
 			if (line[0] === "p" && /^p\d+$/.test(line)) {
 				names = [];
+				fd = "";
 				byPid.set(Number(line.slice(1)), names);
-			} else if (line[0] === "f" && names !== undefined) continue;
+			} else if (line[0] === "f" && names !== undefined) fd = line.slice(1);
 			else if (line[0] === "n" && names !== undefined)
-				names.push(line.slice(1));
+				names.push({ fd, name: line.slice(1) });
 			else return yield* new PortScanError({ reason: `lsof line ${line}` });
 		}
 		return byPid;
@@ -175,6 +335,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 			Config.withDefault(10_000),
 		);
 		const uid = process.getuid?.() ?? 0;
+		const root = yield* procRoot;
 		/** Exit 0 output; any other exit, stderr or spawn failure fails the scan. */
 		const run = (command: string, args: readonly string[], empty = false) =>
 			subprocess
@@ -205,55 +366,79 @@ export const PortWatcherLive = Layer.effectDiscard(
 				);
 
 		const scan = Effect.gen(function* () {
-			// lsof exits 1 with no output when nothing listens.
-			const listening = yield* lsofFields(
-				yield* run(
-					"lsof",
-					[
-						"-nP",
-						"-w",
-						"-a",
-						"-iTCP",
-						"-sTCP:LISTEN",
-						"-u",
-						String(uid),
-						"-F",
-						"pn",
-					],
-					true,
-				),
-			);
+			const listening: ReadonlyMap<number, readonly number[]> =
+				root !== ""
+					? yield* procListening(root, uid)
+					: yield* Effect.gen(function* () {
+							// lsof exits 1 with no output when nothing listens.
+							const byPid = yield* lsofFields(
+								yield* run(
+									"lsof",
+									[
+										"-nP",
+										"-w",
+										"-a",
+										"-iTCP",
+										"-sTCP:LISTEN",
+										"-u",
+										String(uid),
+										"-F",
+										"pn",
+									],
+									true,
+								),
+							);
+							const ports = new Map<number, number[]>();
+							for (const [pid, names] of byPid)
+								for (const { name } of names) {
+									const port = Number(/:(\d+)$/.exec(name)?.[1]);
+									if (!Number.isInteger(port) || port <= 0)
+										return yield* new PortScanError({
+											reason: `lsof name ${name}`,
+										});
+									ports.set(pid, [...(ports.get(pid) ?? []), port]);
+								}
+							return ports;
+						});
 			if (listening.size === 0) return [];
-			const procs = new Map<
+			const procs: ReadonlyMap<
 				number,
 				{ ppid: number; startedAt: number; command: string }
-			>();
-			for (const line of (yield* run("ps", [
-				"-axww",
-				"-o",
-				"pid=,ppid=,lstart=,command=",
-			])).split("\n")) {
-				if (line.trim() === "") continue;
-				const row = PS_ROW.exec(line);
-				const startedAt = row ? Date.parse(row[3] ?? "") : Number.NaN;
-				if (!row || Number.isNaN(startedAt))
-					return yield* new PortScanError({ reason: `ps line ${line}` });
-				procs.set(Number(row[1]), {
-					ppid: Number(row[2]),
-					startedAt,
-					command: row[4] ?? "",
-				});
-			}
+			> =
+				root !== ""
+					? yield* procTable(root)
+					: yield* Effect.gen(function* () {
+							const table = new Map<
+								number,
+								{ ppid: number; startedAt: number; command: string }
+							>();
+							for (const line of (yield* run("ps", [
+								"-axww",
+								"-o",
+								"pid=,ppid=,lstart=,command=",
+							])).split("\n")) {
+								if (line.trim() === "") continue;
+								const row = PS_ROW.exec(line);
+								const startedAt = row ? Date.parse(row[3] ?? "") : Number.NaN;
+								if (!row || Number.isNaN(startedAt))
+									return yield* new PortScanError({
+										reason: `ps line ${line}`,
+									});
+								table.set(Number(row[1]), {
+									ppid: Number(row[2]),
+									startedAt,
+									command: row[4] ?? "",
+								});
+							}
+							return table;
+						});
 			// 8.7: one entry per port, the earliest-started process; one process's IPv4 and IPv6
 			// listeners are one server. A pid gone since lsof listed it is not listening.
 			const servers = new Map<number, ServerKey>();
-			for (const [pid, names] of listening) {
+			for (const [pid, ports] of listening) {
 				const proc = procs.get(pid);
 				if (proc === undefined) continue;
-				for (const name of names) {
-					const port = Number(/:(\d+)$/.exec(name)?.[1]);
-					if (!Number.isInteger(port) || port <= 0)
-						return yield* new PortScanError({ reason: `lsof name ${name}` });
+				for (const port of ports) {
 					const held = servers.get(port);
 					if (
 						held === undefined ||
@@ -274,46 +459,127 @@ export const PortWatcherLive = Layer.effectDiscard(
 			const chainPids = new Set(
 				[...servers.values()].flatMap((server) => chainOf(server.pid)),
 			);
-			// A platform binary's environment is not visible to ps -E; an ancestor's is.
-			const markers = new Map<number, string>();
-			for (const line of (yield* run("ps", [
-				"-wwE",
-				"-p",
-				[...chainPids].join(","),
-				"-o",
-				"pid=,command=",
-			])).split("\n")) {
-				const pid = Number(/^\s*(\d+)\s/.exec(line)?.[1]);
-				const marker = [...line.matchAll(MARKER)].at(-1)?.[1];
-				if (marker !== undefined) markers.set(pid, marker);
+			// Each chain process's environment as text: /proc's environ, or ps -E's line, where a
+			// platform binary's environment is not visible but an ancestor's is.
+			const environments: ReadonlyMap<number, string> =
+				root !== ""
+					? yield* readProc("environ", async () => {
+							const texts = new Map<number, string>();
+							for (const pid of chainPids) {
+								const text = await procFile(
+									readFile(join(root, String(pid), "environ"), "utf8"),
+								);
+								if (text !== undefined)
+									texts.set(pid, text.replaceAll("\0", "\n"));
+							}
+							return texts;
+						})
+					: new Map(
+							(yield* run("ps", [
+								"-wwE",
+								"-p",
+								[...chainPids].join(","),
+								"-o",
+								"pid=,command=",
+							]))
+								.split("\n")
+								.map((line) => [Number(/^\s*(\d+)\s/.exec(line)?.[1]), line]),
+						);
+			const envs = new Map<number, ReadonlyMap<string, string>>();
+			for (const [pid, line] of environments) {
+				const env = new Map(
+					[...line.matchAll(MARKER)].map(([, name = "", value = ""]) => [
+						name,
+						value,
+					]),
+				);
+				if (AGENT_MARKERS.some((name) => env.has(name))) envs.set(pid, env);
 			}
-			const marked = [...servers.values()].flatMap((server) => {
-				const owner = chainOf(server.pid).find((pid) => markers.has(pid));
-				const sessionId = owner === undefined ? undefined : markers.get(owner);
-				return sessionId === undefined ? [] : [{ server, sessionId }];
-			});
+			// The innermost agent set the marker whose value holds for the fewest marked ancestors.
+			const resolve = (pid: number) => {
+				const chain = chainOf(pid).flatMap((at) => envs.get(at) ?? []);
+				const inner = chain[0];
+				if (inner === undefined) return Effect.void;
+				const reach = (name: string) => {
+					const changed = chain.findIndex(
+						(env) => env.get(name) !== inner.get(name),
+					);
+					return changed < 0 ? chain.length : changed;
+				};
+				const [name] = AGENT_MARKERS.filter((marker) => inner.has(marker)).sort(
+					(a, b) => reach(a) - reach(b),
+				);
+				const id = inner.get(name ?? "") ?? "";
+				if (name === "CONDUIT_SESSION_ID") return Effect.succeed(id);
+				const provider =
+					name === "CODEX_THREAD_ID"
+						? "codex"
+						: inner.get("CONDUIT_OPENCODE_INSTANCE_ID");
+				if (provider === undefined) return Effect.void;
+				// The binding's native id within its provider (as findOpenCodeSession reads it);
+				// none or several sessions here leave the server unattributed.
+				return sql<{ id: string }>`SELECT session.id FROM sessions AS session
+					LEFT JOIN session_providers AS binding ON binding.id = (
+						SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
+						ORDER BY activated_at DESC, id DESC LIMIT 1)
+					WHERE session.project_id = ${store.projectId}
+						AND COALESCE(binding.provider, session.provider) = ${provider}
+						AND COALESCE(binding.provider_sid, session.provider_sid, session.id) = ${id}
+					LIMIT 2`.pipe(
+					Effect.map((rows) => (rows.length === 1 ? rows[0]?.id : undefined)),
+					Effect.mapError(
+						(cause) => new PortScanError({ reason: "marker lookup", cause }),
+					),
+				);
+			};
+			const marked: { server: ServerKey; sessionId: string }[] = [];
+			for (const server of servers.values()) {
+				const sessionId = yield* resolve(server.pid);
+				if (sessionId !== undefined) marked.push({ server, sessionId });
+			}
 			if (marked.length === 0) return [];
-			const cwds = yield* lsofFields(
-				yield* run("lsof", [
-					"-nP",
-					"-w",
-					"-a",
-					"-d",
-					"cwd",
-					"-p",
-					[...new Set(marked.map(({ server }) => server.pid))].join(","),
-					"-F",
-					"pn",
-				]),
-			);
-			return marked.map(
-				({ server, sessionId }): Scanned => ({
+			const markedPids = [...new Set(marked.map(({ server }) => server.pid))];
+			const cwds: ReadonlyMap<number, readonly { fd: string; name: string }[]> =
+				root !== ""
+					? yield* readProc("cwd", async () => {
+							const files = new Map<number, { fd: string; name: string }[]>();
+							for (const pid of markedPids) {
+								const at = join(root, String(pid));
+								const cwd = await procFile(readlink(join(at, "cwd")));
+								const stdout = await procFile(readlink(join(at, "fd", "1")));
+								files.set(pid, [
+									...(cwd === undefined ? [] : [{ fd: "cwd", name: cwd }]),
+									...(stdout === undefined ? [] : [{ fd: "1", name: stdout }]),
+								]);
+							}
+							return files;
+						})
+					: yield* lsofFields(
+							yield* run("lsof", [
+								"-nP",
+								"-w",
+								"-a",
+								"-d",
+								"cwd,1",
+								"-p",
+								markedPids.join(","),
+								"-F",
+								"pn",
+							]),
+						);
+			return marked.map(({ server, sessionId }): Scanned => {
+				const fds = cwds.get(server.pid) ?? [];
+				const taskId = TASK_OUTPUT.exec(
+					fds.find(({ fd }) => fd === "1")?.name ?? "",
+				)?.[1];
+				return {
 					sessionId,
 					server,
 					command: procs.get(server.pid)?.command ?? "",
-					cwd: cwds.get(server.pid)?.[0] ?? "",
-				}),
-			);
+					cwd: fds.find(({ fd }) => fd === "cwd")?.name ?? "",
+					...(taskId === undefined ? {} : { taskKey: { taskId } }),
+				};
+			});
 		});
 
 		// Servers of ended sessions this watcher is killing, by key.
@@ -372,7 +638,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 										meta,
 									),
 								);
-						for (const { server, command, cwd } of mine) {
+						for (const { server, command, cwd, taskKey } of mine) {
 							const entry = servers?.get(server.port);
 							const since = held.get(server.port)?.since ?? now;
 							if (
@@ -383,7 +649,13 @@ export const PortWatcherLive = Layer.effectDiscard(
 									canonicalEvent(
 										"evidence.server_seen",
 										session.id,
-										{ server, command, cwd, source: "detected" },
+										{
+											server,
+											command,
+											cwd,
+											...(taskKey === undefined ? {} : { taskKey }),
+											source: "detected",
+										},
 										meta,
 									),
 								);
@@ -405,12 +677,20 @@ export const PortWatcherLive = Layer.effectDiscard(
 					// already sees it; a rolled-back write is corrected by the next scan.
 					const moved = [...read].flatMap(([sessionId, servers]) => {
 						const list = [...(servers?.values() ?? [])].map(
-							({ key, command, cwd, source, role }): SessionServer => ({
+							({
+								key,
+								command,
+								cwd,
+								taskKey,
+								source,
+								role,
+							}): SessionServer => ({
 								port: key.port,
 								pid: key.pid,
 								startedAt: key.startedAt,
 								command,
 								cwd,
+								...(taskKey === undefined ? {} : { taskId: taskKey.taskId }),
 								source,
 								role,
 							}),
@@ -472,7 +752,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 					? Effect.interrupt
 					: Effect.gen(function* () {
 							// CONTRACT.md 2987-2988 ("auto-settle waits") is silent on a host with no
-							// working scanner (Linux until /proc): when every scan fails through the
+							// working scanner (no lsof, or no readable /proc): when every scan fails through the
 							// first hold, servers read as absent rather than holding auto-settle forever.
 							const now = yield* Clock.currentTimeMillis;
 							known ||= firstScanAt === undefined && now - startedAt >= holdMs;
