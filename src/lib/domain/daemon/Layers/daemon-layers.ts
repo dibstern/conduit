@@ -150,6 +150,7 @@ import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
 import { OwnerScopesLive } from "./owner-scopes-layer.js";
 import { PinoLoggerLive } from "./pino-logger-layer.js";
 import { PortScannerLive, PortScannerTag } from "./port-scanner-layer.js";
+import { makePreviewGateLive } from "./preview-gate-layer.js";
 import { ProjectContextLive } from "./project-context-layer.js";
 import {
 	makeProjectShellEnvLive,
@@ -1000,6 +1001,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		WebSocketRoutingLive,
 		SessionPrefetchLive,
 		ServerBuildUpdateLive,
+		makePreviewGateLive(configDir),
 	).pipe(Layer.provideMerge(withWsRelayRouter));
 
 	return scopedFibers;

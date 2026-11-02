@@ -10,6 +10,7 @@ import {
 	Semaphore,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
 import {
@@ -53,6 +54,7 @@ import {
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
+import { portWatcherMark } from "../../persistence/Services/port-watcher.js";
 import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import {
@@ -1130,6 +1132,40 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 									)
 								: Effect.succeed({ projectSlug }),
 						),
+					),
+				),
+			// 8.7 Declared: each running project's watcher resolves the caller's pid as a scan does;
+			// the one whose store holds the caller's session records or refuses the mark.
+			MarkServer: (request) =>
+				Effect.gen(function* () {
+					if ((yield* RpcCaller).kind !== "cli")
+						return yield* new WsRpcError({
+							message: "Servers are marked from an agent's shell",
+						});
+					for (const project of yield* allProjects) {
+						const relay = yield* cache.peek(project.slug);
+						if (Option.isNone(relay) || !relay.value.rpcWsHandler.context)
+							continue;
+						const mark = portWatcherMark.get(
+							Context.get(
+								yield* relay.value.rpcWsHandler.context,
+								SqlClient.SqlClient,
+							),
+						);
+						const outcome = mark && (yield* mark(request));
+						if (outcome?.kind === "marked") return { ok: true as const };
+						if (outcome?.kind === "rejected")
+							return yield* new WsRpcError({ message: outcome.reason });
+					}
+					return yield* new WsRpcError({
+						message: "This shell is not inside a Conduit session",
+					});
+				}).pipe(
+					Effect.provide(context),
+					Effect.mapError((error) =>
+						error instanceof WsRpcError
+							? error
+							: new WsRpcError({ message: formatErrorDetail(error) }),
 					),
 				),
 			OpenCodeUseWorktree: (request) =>

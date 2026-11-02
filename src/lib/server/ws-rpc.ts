@@ -362,7 +362,9 @@ export type DaemonRpcHandlers = {
 			Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>
 		>,
 		Rpc.Error<Extract<RpcGroup.Rpcs<typeof WsRpcGroup>, { readonly _tag: K }>>,
-		K extends "SetPin" | "UpdateMessageSurfacing" ? RpcCaller : never
+		K extends "SetPin" | "UpdateMessageSurfacing" | "MarkServer"
+			? RpcCaller
+			: never
 	>;
 } & {
 	readonly SubscribeInstances: () => Stream.Stream<

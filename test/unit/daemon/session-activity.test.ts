@@ -198,6 +198,43 @@ describe("Session Activity", () => {
 			}),
 	);
 
+	// 8.7 failure modes: a session-level awaited server leaves the session idle or calm; a
+	// session-level serving server makes an idle session read busy.
+	it.effect(
+		"a session-level awaited server reads working; a serving one leaves the session as it was (8.7)",
+		() =>
+			Effect.gen(function* () {
+				const activity = yield* makeSessionActivity;
+				const server = {
+					port: 3000,
+					pid: 600,
+					startedAt: 1,
+					command: "node server.js",
+					cwd: "/w",
+					source: "declared",
+					role: "serving",
+				} as const;
+				const work = () => activity.background.backgroundOf("s")?.work;
+				activity.servers.set("s", [server]);
+				expect(activity.background.backgroundOf("s")).toBeUndefined();
+				activity.servers.set("s", [{ ...server, role: "awaited" }]);
+				expect(activity.background.backgroundOf("s")).toEqual({
+					work: "working",
+					tasks: [],
+				});
+				activity.background.record({
+					sessionId: "s",
+					kind: "snapshot",
+					tasks: [{ id: "m1", type: "local_bash", description: "Watch" }],
+				});
+				expect(work()).toBe("working");
+				activity.servers.set("s", [server]);
+				expect(work()).toBe("monitoring");
+				activity.servers.delete("s");
+				expect(work()).toBe("monitoring");
+			}),
+	);
+
 	it.effect(
 		"keeps separate daemon instances isolated without a project store",
 		() =>

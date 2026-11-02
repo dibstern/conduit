@@ -1461,6 +1461,9 @@ describe("T21: HELP_TEXT documents all parseArgs flags (and vice versa)", () => 
 	// When you add a new flag to parseArgs, add it here too — that's the
 	// entire point of this test.
 	const PARSED_FLAGS = [
+		// `server mark`'s role flags, parsed with the subcommand.
+		"--serving",
+		"--awaited",
 		"--foreground",
 		"--status",
 		"--stop",

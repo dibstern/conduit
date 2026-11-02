@@ -5,6 +5,7 @@ import type { Rpc } from "effect/rpc";
 import {
 	GetProjects,
 	GetStatus,
+	MarkServer,
 	RemoveProject,
 	SaveProject,
 	SetPin,
@@ -306,6 +307,36 @@ export async function handleList(ctx: CommandContext): Promise<void> {
 		stdout.write(`  ${label}\n    ${p.folders[0]}\n`);
 	}
 	return;
+}
+
+/** `conduit server mark` (8.7 Declared): this process's ancestry names the caller's session. */
+export async function handleServer(ctx: CommandContext): Promise<void> {
+	const { args, stdout, stderr, exit, checkDaemon, rpcSend } = ctx;
+	if (!args.serverMark) {
+		stderr.write("Usage: conduit server mark <port> --serving|--awaited\n");
+		exit(1);
+		return;
+	}
+	if (!(await checkDaemon())) {
+		stderr.write("Daemon is not running.\n");
+		exit(1);
+		return;
+	}
+	const { port, role } = args.serverMark;
+	try {
+		await rpcSend(
+			MarkServer.payloadSchema.make({
+				_tag: "MarkServer",
+				pid: process.pid,
+				port,
+				role,
+			}),
+		);
+		stdout.write(`Marked port ${port} as ${role}\n`);
+	} catch (err) {
+		stderr.write(`${formatErrorDetail(err)}\n`);
+		exit(1);
+	}
 }
 
 export async function handleTitle(ctx: CommandContext): Promise<void> {

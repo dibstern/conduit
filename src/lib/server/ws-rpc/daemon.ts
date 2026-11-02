@@ -30,6 +30,7 @@ export const daemonOnlyHandlers = {
 	LogoutCodex: (_request) => daemonRequired("LogoutCodex"),
 	GetInstanceStatus: (_request) => daemonRequired("GetInstanceStatus"),
 	OpenCodeUseWorktree: (_request) => daemonRequired("OpenCodeUseWorktree"),
+	MarkServer: (_request) => daemonRequired("MarkServer"),
 	ResolveSessionMode: (_request) => daemonRequired("ResolveSessionMode"),
 	SetTerminalKeys: (_request) => daemonRequired("SetTerminalKeys"),
 	GetTerminalKeys: (_request) => daemonRequired("GetTerminalKeys"),
@@ -65,6 +66,7 @@ export const daemonOnlyHandlers = {
 	| "LogoutCodex"
 	| "GetInstanceStatus"
 	| "OpenCodeUseWorktree"
+	| "MarkServer"
 	| "ResolveSessionMode"
 	| "SetTerminalKeys"
 	| "GetTerminalKeys"

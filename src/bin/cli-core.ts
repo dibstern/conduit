@@ -28,6 +28,7 @@ import {
 	handlePin,
 	handleRemove,
 	handleServe,
+	handleServer,
 	handleStatus,
 	handleStop,
 	handleTitle,
@@ -191,6 +192,8 @@ export async function run(argv: string[], options?: CLIOptions): Promise<void> {
 			return handleList(context);
 		case "title":
 			return handleTitle(context);
+		case "server":
+			return handleServer(context);
 		case "instance":
 			return handleInstance(context);
 		default:
