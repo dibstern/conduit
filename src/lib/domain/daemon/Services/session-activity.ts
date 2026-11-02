@@ -102,7 +102,17 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 							awaited.has(taskId) ? [] : [taskId],
 						),
 					);
-					return found && { ...found, work: classify(found.tasks, serving) };
+					// 8.7 Views: an awaited server is the session's work; a serving one only makes its
+					// task calm, so an idle session stays idle while it serves.
+					const awaits = (servers.get(sessionId) ?? []).some(
+						({ role }) => role === "awaited",
+					);
+					if (!found)
+						return awaits ? { work: "working", tasks: [] } : undefined;
+					return {
+						...found,
+						work: awaits ? "working" : classify(found.tasks, serving),
+					};
 				},
 			},
 			compactions: {

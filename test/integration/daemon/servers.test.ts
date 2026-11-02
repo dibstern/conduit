@@ -13,14 +13,21 @@
 // the task does not read calm while it serves, or the task leaves with the server.
 // OpenCode: a real managed OpenCode's shell lacks its session's native id, or a server started there
 // is not attributed to the Conduit session bound to that native id.
+// Mark: a port with nothing listening, another session's port, a caller outside any session or a
+// browser naming a session's pid is recorded; a mark waits out the hold; a later scan flips a declared role back to detected; a new
+// process on a declared port inherits the declaration; an unmarked declared server vanishes while
+// it listens; an awaited server leaves the row idle or a serving one makes it read working.
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
-import { Result as Either } from "effect";
+import { Effect, Result as Either } from "effect";
 import { afterEach, expect, it, onTestFinished } from "vitest";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -36,6 +43,9 @@ const ARTIFACT_DIR = "test/integration/daemon/artifacts";
 const SERVER = `const server = require("node:http").createServer((_, res) => res.end("ok"));
 server.listen(0, "127.0.0.1", () =>
 	console.log(JSON.stringify({ pid: process.pid, port: server.address().port })));`;
+
+const TSX = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
+const CLI = fileURLToPath(new URL("../../../src/bin/cli.ts", import.meta.url));
 
 let harness: ProcessHarness | undefined;
 const agents: ChildProcess[] = [];
@@ -615,5 +625,273 @@ it("a server started in a real managed OpenCode shell carries the session's nati
 	);
 	expect(evidence).toMatchObject([
 		{ type: "evidence.server_seen", data: { server: { pid, port } } },
+	]);
+});
+
+it("conduit server mark rejects a dead port, another session's port and a caller outside any session; a mark records at once and its role holds until a new process takes the port", async () => {
+	// A long hold: anything recorded before it passes came from a mark.
+	const hold = 10_000;
+	harness = ProcessHarness.create({ logLevel: "warn" });
+	await harness.restart({
+		serviceEnvironment: {
+			...ENVIRONMENT,
+			CONDUIT_PORT_WATCH_HOLD_MS: String(hold),
+		},
+	});
+	const configDir = harness.configDir;
+	const browser = await harness.connect();
+	await browser.followSessions();
+	const sessionId = await browser.createSession("Mark");
+	const otherId = await browser.createSession("Other");
+	// The CLI as an agent runs it: from the agent's shell, carrying the session's marker.
+	const mark = async (marker: string | undefined, ...args: string[]) => {
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			CONDUIT_CONFIG_DIR: configDir,
+		};
+		delete env["CONDUIT_SESSION_ID"];
+		delete env["CODEX_THREAD_ID"];
+		delete env["CONDUIT_OPENCODE_SESSION_ID"];
+		const cli = spawn(
+			process.execPath,
+			["--import", TSX, CLI, "server", "mark", ...args],
+			{
+				env:
+					marker === undefined ? env : { ...env, CONDUIT_SESSION_ID: marker },
+				stdio: ["ignore", "pipe", "pipe"],
+			},
+		);
+		let stdout = "";
+		let stderr = "";
+		cli.stdout.on("data", (chunk) => (stdout += chunk));
+		cli.stderr.on("data", (chunk) => (stderr += chunk));
+		const [code] = await once(cli, "exit");
+		return { code, stdout, stderr };
+	};
+	const row = (frame: Record<string, unknown>) =>
+		frame["type"] === "session_row" && frame["id"] === sessionId
+			? (frame as {
+					servers?: readonly Record<string, unknown>[];
+					attention?: string;
+				})
+			: undefined;
+	const evidence = () => {
+		const db = new Database(harness?.daemonStorePath() ?? "", {
+			readonly: true,
+		});
+		const rows = db
+			.prepare<
+				[string, string],
+				{ session_id: string; type: string; data: string }
+			>(
+				"SELECT session_id, type, data FROM events WHERE session_id IN (?, ?) AND type LIKE 'evidence.server_%' ORDER BY sequence",
+			)
+			.all(sessionId, otherId)
+			.map((event) => ({
+				session: event.session_id === sessionId ? "mark" : "other",
+				type: event.type,
+				data: JSON.parse(event.data),
+			}));
+		db.close();
+		return rows;
+	};
+
+	const first = await startAgent(sessionId);
+	const started = performance.now();
+	// The other session's own server, unmarked by the CLI: once it is detected, the hold has passed
+	// for the earlier first server too.
+	const control = await startAgent(otherId);
+	const free = await new Promise<number>((resolve) => {
+		const probe = createServer();
+		probe.listen(0, "127.0.0.1", () => {
+			const address = probe.address();
+			probe.close(() =>
+				resolve(typeof address === "object" && address ? address.port : 0),
+			);
+		});
+	});
+	const rejections = {
+		dead: await mark(sessionId, String(free), "--awaited"),
+		other: await mark(otherId, String(first.port), "--awaited"),
+		outside: await mark(undefined, String(first.port), "--awaited"),
+		// A browser naming the server's own pid, which resolves to the session, is still refused.
+		browser: await Effect.runPromise(
+			browser.rpc
+				.MarkServer({ pid: first.pid, port: first.port, role: "awaited" })
+				.pipe(
+					Effect.flip,
+					Effect.map(({ message }) => message),
+				),
+		),
+	};
+	expect(rejections.dead).toMatchObject({ code: 1 });
+	expect(rejections.dead.stderr).toContain(
+		`Nothing is listening on port ${free}`,
+	);
+	expect(rejections.other).toMatchObject({ code: 1 });
+	expect(rejections.other.stderr).toContain(
+		`Port ${first.port} belongs to another session`,
+	);
+	expect(rejections.outside).toMatchObject({ code: 1 });
+	expect(rejections.outside.stderr).toContain("not inside a Conduit session");
+	expect(rejections.browser).toContain("marked from an agent's shell");
+	expect(evidence()).toEqual([]);
+
+	// Awaited skips the hold and makes the row read working.
+	const awaited = await mark(sessionId, String(first.port), "--awaited");
+	expect(awaited).toMatchObject({ code: 0 });
+	expect(awaited.stdout).toContain(`Marked port ${first.port} as awaited`);
+	const working = await browser.waitFor(
+		(frame) =>
+			row(frame)?.servers?.some((s) => s["port"] === first.port) ?? false,
+	);
+	expect(performance.now() - started).toBeLessThan(hold);
+	expect(row(working)).toMatchObject({
+		servers: [
+			{ port: first.port, pid: first.pid, source: "declared", role: "awaited" },
+		],
+		attention: "working",
+	});
+
+	// Scans past the hold see the same ServerKey and leave the declaration alone.
+	await browser.waitFor(
+		(frame) =>
+			frame["type"] === "session_row" &&
+			frame["id"] === otherId &&
+			Array.isArray(frame["servers"]) &&
+			frame["servers"].length > 0,
+	);
+	expect(evidence().filter(({ session }) => session === "mark")).toEqual([
+		expect.objectContaining({
+			session: "mark",
+			type: "evidence.server_seen",
+			data: expect.objectContaining({ source: "declared", role: "awaited" }),
+		}),
+	]);
+
+	// Serving: a calm server, the row's status back to idle.
+	let cursor = browser.frames.length;
+	expect(await mark(sessionId, String(first.port), "--serving")).toMatchObject({
+		code: 0,
+	});
+	const calm = await browser.waitFor(
+		(frame) => row(frame)?.servers?.[0]?.["role"] === "serving",
+		cursor,
+	);
+	expect(row(calm)).toMatchObject({
+		servers: [{ port: first.port, source: "declared", role: "serving" }],
+		attention: "idle",
+	});
+
+	// A new process on the port starts detected, after its own hold.
+	cursor = browser.frames.length;
+	process.kill(first.pid, "SIGTERM");
+	await browser.waitFor(
+		(frame) => row(frame)?.servers === undefined && row(frame) !== undefined,
+		cursor,
+	);
+	const second = await startAgent(
+		sessionId,
+		SERVER.replace("listen(0,", `listen(${first.port},`),
+	);
+	const detected = await browser.waitFor(
+		(frame) =>
+			row(frame)?.servers?.some((s) => s["pid"] === second.pid) ?? false,
+		cursor,
+	);
+	expect(row(detected)?.servers).toEqual([
+		expect.objectContaining({
+			port: first.port,
+			source: "detected",
+			role: "serving",
+		}),
+	]);
+
+	// An unmarked server, orphaned so no session's marker is in its ancestry, can be declared and
+	// stays listed while it listens.
+	const unmarkedEnv: NodeJS.ProcessEnv = { ...process.env, SERVER };
+	delete unmarkedEnv["CONDUIT_SESSION_ID"];
+	delete unmarkedEnv["CODEX_THREAD_ID"];
+	delete unmarkedEnv["CONDUIT_OPENCODE_SESSION_ID"];
+	const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
+		env: unmarkedEnv,
+		stdio: ["ignore", "pipe", "inherit"],
+	});
+	const [line] = await Promise.all([
+		once(createInterface({ input: launcher.stdout }), "line"),
+		once(launcher, "exit"),
+	]);
+	const unmarked: { pid: number; port: number } = JSON.parse(String(line));
+	onTestFinished(() => {
+		if (alive(unmarked.pid)) process.kill(unmarked.pid, "SIGKILL");
+	});
+	cursor = browser.frames.length;
+	expect(
+		await mark(sessionId, String(unmarked.port), "--serving"),
+	).toMatchObject({ code: 0 });
+	await browser.waitFor(
+		(frame) =>
+			row(frame)?.servers?.some((s) => s["pid"] === unmarked.pid) ?? false,
+		cursor,
+	);
+	// A scan after the mark records the second server gone and keeps the unmarked one.
+	cursor = browser.frames.length;
+	process.kill(second.pid, "SIGTERM");
+	const kept = await browser.waitFor(
+		(frame) =>
+			row(frame) !== undefined &&
+			!(row(frame)?.servers ?? []).some((s) => s["pid"] === second.pid),
+		cursor,
+	);
+	expect(row(kept)?.servers).toEqual([
+		expect.objectContaining({
+			pid: unmarked.pid,
+			source: "declared",
+			role: "serving",
+		}),
+	]);
+	cursor = browser.frames.length;
+	process.kill(unmarked.pid, "SIGTERM");
+	const gone = await browser.waitFor(
+		(frame) => row(frame) !== undefined && row(frame)?.servers === undefined,
+		cursor,
+	);
+
+	const recorded = evidence();
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/server-mark.json`,
+		JSON.stringify(
+			{
+				sessionId,
+				otherId,
+				rejections,
+				first,
+				second: { pid: second.pid, port: second.port },
+				control: { pid: control.pid, port: control.port },
+				unmarked,
+				pushed: [working, calm, detected, kept, gone],
+				evidence: recorded,
+			},
+			null,
+			2,
+		),
+	);
+	expect(
+		recorded.map(({ session, type, data }) => [
+			session,
+			type,
+			data.server.pid,
+			data.source,
+		]),
+	).toEqual([
+		["mark", "evidence.server_seen", first.pid, "declared"],
+		["other", "evidence.server_seen", control.pid, "detected"],
+		["mark", "evidence.server_seen", first.pid, "declared"],
+		["mark", "evidence.server_gone", first.pid, undefined],
+		["mark", "evidence.server_seen", second.pid, "detected"],
+		["mark", "evidence.server_seen", unmarked.pid, "declared"],
+		["mark", "evidence.server_gone", second.pid, undefined],
+		["mark", "evidence.server_gone", unmarked.pid, undefined],
 	]);
 });

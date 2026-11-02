@@ -27,6 +27,7 @@ export interface ParsedArgs {
 		| "list"
 		| "title"
 		| "instance"
+		| "server"
 		| "service"
 		| "help";
 	cwd: string;
@@ -45,6 +46,8 @@ export interface ParsedArgs {
 	instanceManaged?: boolean;
 	instanceUrl?: string;
 	serviceAction?: string;
+	/** `server mark <port> --serving|--awaited`; absent when the arguments do not parse. */
+	serverMark?: { port: number; role: "serving" | "awaited" };
 	noHttps: boolean;
 	tailscaleServe?: boolean;
 	skipPerms: boolean;
@@ -242,6 +245,30 @@ export function parseArgs(argv: string[]): ParsedArgs {
 				break;
 			}
 
+			case "server": {
+				result.command = "server";
+				const [action, ...rest] = argv.slice(i + 1);
+				i = argv.length;
+				const ports = rest.filter((value) => /^\d+$/.test(value));
+				const roles = rest.filter(
+					(value) => value === "--serving" || value === "--awaited",
+				);
+				const port = Number(ports[0]);
+				if (
+					action === "mark" &&
+					rest.length === 2 &&
+					ports.length === 1 &&
+					roles.length === 1 &&
+					port > 0 &&
+					port < 65536
+				)
+					result.serverMark = {
+						port,
+						role: roles[0] === "--serving" ? "serving" : "awaited",
+					};
+				break;
+			}
+
 			case "--log-level": {
 				const val = argv[i + 1];
 				const valid = ["error", "warn", "info", "verbose", "debug"];
@@ -338,6 +365,8 @@ Commands:
   service uninstall     Stop and remove the user service
   service status        Show service state, PID and log paths
   doctor                Check registered projects' shell env and tools locally
+  server mark <port> --serving|--awaited
+                        From an agent's shell: declare a server the session runs
 
 Options:
   --status              Show server status

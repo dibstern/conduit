@@ -3145,6 +3145,20 @@ export const StopServer = Rpc.make("StopServer", {
 	error: WsRpcError,
 });
 
+/**
+ * `conduit server mark` (8.7 Declared): the CLI's own pid names the caller's session, resolved
+ * through its ancestry as a scan resolves a server's.
+ */
+export const MarkServer = Rpc.make("MarkServer", {
+	payload: Schema.TaggedStruct("MarkServer", {
+		pid: Schema.Int,
+		port: Schema.Int,
+		role: Schema.Literals(["serving", "awaited"]),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const SetLogLevel = Rpc.make("SetLogLevel", {
 	payload: Schema.TaggedStruct("SetLogLevel", {
 		projectSlug: Schema.optional(NonEmptyString),
@@ -3654,6 +3668,7 @@ const wsRpcRequests = [
 	CancelSession,
 	StopBackgroundTask,
 	StopServer,
+	MarkServer,
 	SetLogLevel,
 ] as const;
 
