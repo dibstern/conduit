@@ -17,6 +17,7 @@ import {
 	effectMigrationEntries,
 	makeEffectSqlMigrator,
 } from "../../../src/lib/persistence/effect/migrations.js";
+import { sendToken } from "../../../src/lib/provider/runner/runner-protocol.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const tables = [
@@ -64,13 +65,19 @@ function outbox(fixture: ProcessHarness, slug: string) {
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
 	try {
 		return db
-			.prepare(`SELECT command_id, effect_type, status, attempt_count
-			FROM provider_command_outbox WHERE project_key = ? ORDER BY request_sequence`)
+			.prepare(`SELECT command_id, effect_type, status, attempt_count,
+				(SELECT json_extract(data, '$.transmission') FROM events WHERE type = 'run.dispatched'
+					AND json_extract(data, '$.commandId') = command.command_id) AS dispatched,
+				(SELECT COUNT(*) FROM events WHERE type = 'run.dispatched'
+					AND json_extract(data, '$.commandId') = command.command_id) AS dispatches
+			FROM provider_command_outbox command WHERE project_key = ? ORDER BY request_sequence`)
 			.all(slug) as Array<{
 			command_id: string;
 			effect_type: string;
 			status: string;
 			attempt_count: number;
+			dispatched: number | null;
+			dispatches: number;
 		}>;
 	} finally {
 		db.close();
@@ -281,6 +288,18 @@ describe("Project provenance through the built daemon", () => {
 					{ type: "input.sent", project_id: slug, count: 2 },
 				]),
 			);
+			// A held send reaches the runner named by its Send Token alone, minted from
+			// its hold's run.dispatched (CONTRACT.md 3055-3060); deletion drops the events.
+			const sends = outbox(fixture, slug);
+			expect(sends.map(({ dispatches }) => dispatches)).toEqual([1, 1, 0]);
+			const runnerIds = new Map(
+				sends.map((command) => [
+					command.command_id,
+					command.dispatched === null
+						? command.command_id
+						: sendToken("hold", command.command_id, command.dispatched),
+				]),
+			);
 			await browser.deleteSession(sessionId);
 			// Ending the session on delete is an outbox command too.
 			await vi.waitFor(() => {
@@ -307,7 +326,8 @@ describe("Project provenance through the built daemon", () => {
 					fixture.marks.filter(
 						(mark) =>
 							mark.kind === "runner-command" &&
-							mark.commandId === command.command_id,
+							mark.commandId ===
+								(runnerIds.get(command.command_id) ?? command.command_id),
 					),
 				).toHaveLength(command.effect_type === "end_session" ? 0 : 1);
 			}

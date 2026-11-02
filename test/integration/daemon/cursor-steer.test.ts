@@ -808,7 +808,10 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		observations["identicalTextReceiptConsumedOnlyFirstSteer"] = true;
 	}, 240_000);
 
-	it("recovers a pending steer after its owned runner crashes and resumes it once", async () => {
+	// The steer call went out unacknowledged, so the steer possibly reached the agent: the
+	// crash that ends its Run places it as sent, never re-sent or requeued (CONTRACT.md 217,
+	// row 206; 970-972). The next send resumes the session once on a new runner.
+	it("places a pending steer as sent after its owned runner crashes, and the next send resumes once", async () => {
 		const { fixture, browser, id } = await start("pending-crash");
 		const inputId = randomUUID();
 		expect(
@@ -844,12 +847,20 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				const state = snapshot(fixture, id);
 				expect(state.inputs).toContainEqual({
 					input_id: inputId,
-					state: "queued",
+					state: "removed",
 				});
-				expect(state.turns.map((row) => row.state)).toEqual(["error"]);
+				// The steer's own turn ends indeterminate beside the turn it steered.
+				expect(state.turns.map((row) => row.state)).toEqual(["error", "error"]);
 			},
 			{ timeout: TIMEOUT },
 		);
+		const placed = oneMessage(fixture, id, inputId);
+		expect(
+			placed.messages.find((row) => row.input_id === inputId)?.steered,
+		).toBe(1);
+		expect(
+			placed.events.filter((event) => event.type === "input.requeued"),
+		).toEqual([]);
 		const basic = replay("missing-method");
 		const firstSend = basic.findIndex((row) => row.kind === "send.options");
 		const secondSend = basic.findIndex(
@@ -859,22 +870,39 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 			tracePath,
 			`${[...basic.slice(0, firstSend), ...basic.slice(secondSend)].map((row) => JSON.stringify(row)).join("\n")}\n`,
 		);
-		await browser.sendNow(id, inputId);
-		await turns(fixture, id, ["error", "completed"]);
+		const nextId = randomUUID();
+		expect(
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId: id,
+					originId: browser.originId,
+					inputId: nextId,
+					delivery: "queue",
+					text: TEXT,
+				}),
+			),
+		).toMatchObject({ ok: true });
+		await turns(fixture, id, ["error", "error", "completed"]);
 		oneMessage(fixture, id, inputId);
+		oneMessage(fixture, id, nextId);
 		// The outbox row completes after sendTurn returns, just behind the turn row.
 		await vi.waitFor(
 			() =>
 				expect(
 					snapshot(fixture, id)
-						.commands.filter((row) => row.command_id === inputId)
+						.commands.filter(
+							(row) => row.command_id === inputId || row.command_id === nextId,
+						)
 						.map((row) => row.status),
 				).toEqual(["failed", "completed"]),
 			{ timeout: TIMEOUT },
 		);
+		expect(
+			rows(capturePath).filter((row) => row.kind === "steer.call"),
+		).toHaveLength(1);
 		expect(fixture.runnerPids()).toHaveLength(2);
 		observations["killedOwnedRunnerPid"] = pid;
-		observations["recoveredOnceByInbox"] = true;
+		observations["placedOnceAndResumed"] = true;
 	}, 240_000);
 
 	it("starts a steer submitted after the previous turn ended as its own turn", async () => {

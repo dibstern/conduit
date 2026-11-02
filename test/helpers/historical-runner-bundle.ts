@@ -16,7 +16,9 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { ProcessHarness } from "./process-harness.js";
+import Database from "better-sqlite3";
+import { expect } from "vitest";
+import type { ProcessBrowser, ProcessHarness } from "./process-harness.js";
 
 export const PRE_RUNNER_SETTLED_ANSWERS_COMMIT =
 	"312a926114d1b0feb54713208c3a7a380b4fc98e";
@@ -93,6 +95,58 @@ historicalNet.Socket.prototype.write = function(chunk, ...args) {
 };\n`,
 	);
 	return () => rmSync(gate, { force: true });
+}
+
+/**
+ * Send once while `launchHistoricalRunners` selects the pinned runner and prove the refusal:
+ * runners from older builds are refused new work and their turns settled (CONTRACT.md
+ * 3051-3054, 3069-3070). The send never reaches the SDK and its turn ends in an error.
+ */
+export async function expectHistoricalRefusal(
+	harness: ProcessHarness,
+	browser: ProcessBrowser,
+	bundle: Extract<HistoricalRunnerBundle, { available: true }>,
+	sessionId: string,
+	prompt: string,
+) {
+	expect((await browser.send(sessionId, prompt)).chunks).toEqual([]);
+	const entry = join(bundle.dist, "src/bin/claude-session-runner.js");
+	expect(
+		readdirSync(harness.root).filter(
+			(name) =>
+				name.startsWith("runner-argv-") &&
+				(
+					JSON.parse(readFileSync(join(harness.root, name), "utf8")) as string[]
+				).includes(entry),
+		),
+	).not.toEqual([]);
+	expect(harness.logTail).toMatch(/protocol mismatch/i);
+	expect(
+		harness.marks.filter(
+			(mark) =>
+				(mark.kind === "runner-started" && mark.buildId === bundle.buildId) ||
+				(mark.kind === "enqueue" && mark.prompt === prompt),
+		),
+	).toEqual([]);
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		expect(
+			db
+				.prepare(
+					"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
+				)
+				.all(sessionId),
+		).toEqual([{ status: "failed" }]);
+		expect(
+			db
+				.prepare(
+					"SELECT type FROM events WHERE session_id = ? AND type IN ('turn.completed', 'turn.error', 'turn.interrupted')",
+				)
+				.all(sessionId),
+		).toEqual([{ type: "turn.error" }]);
+	} finally {
+		db.close();
+	}
 }
 
 /** Build unchanged historical sources with their own dependency installation. */
