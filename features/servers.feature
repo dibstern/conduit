@@ -25,3 +25,19 @@ Scenario Outline: The rail counts the servers and the pane lists each one with a
 Examples:
   | count | tooltip                | servers                                            | port | baseline             | threshold |
   | 2     | Servers · 2 running ⌥5 | vite on 5173 for 6m, next on 3000 for 1h 5m         | 5173 | servers-pane-desktop | 98        |
+
+Scenario Outline: Settle, Archive and Delete say how many servers they stop, and the toast says it is stopping them
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the session has <count> detected servers
+  When I open the session's menu in the list
+  Then the menu's Settle reads <settle>
+  And the menu's Archive reads <archive>
+  And the menu's Delete reads <delete>
+  When I <action> the session from its menu
+  Then a toast reads <toast>
+
+Examples:
+  | count | settle                   | archive                   | delete                   | action  | toast                                                          |
+  | 2     | Settle · stops 2 servers | Archive · stops 2 servers | Delete · stops 2 servers | settle  | Moved “Claude session” to Settled · Stopping 2 servers         |
+  | 1     | Settle · stops 1 server  | Archive · stops 1 server  | Delete · stops 1 server  | archive | Stopping 1 server                                              |

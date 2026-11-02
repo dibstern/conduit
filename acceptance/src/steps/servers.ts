@@ -52,6 +52,8 @@ async function setServers(page: Page, count: number): Promise<void> {
 }
 
 const railButton = (page: Page) => page.getByTestId("views-rail-servers");
+const menuItem = (page: Page, verb: string) =>
+	page.getByTestId(`session-ctx-${verb.toLowerCase()}`);
 
 export const serversHandlers: StepHandler[] = [
 	{
@@ -183,6 +185,52 @@ export const serversHandlers: StepHandler[] = [
 			await expect
 				.poll(() => world.page.evaluate(() => navigator.clipboard.readText()))
 				.toBe(match[1]);
+		},
+	},
+	{
+		name: "open the session's menu in the list",
+		match: /^I open the session's menu in the list$/,
+		run: async ({ world }) => {
+			const id = new URL(world.page.url()).pathname.split("/")[2];
+			await world.page
+				.locator(`#session-list [data-session-id="${id}"]`)
+				.click({ button: "right" });
+			await expect(menuItem(world.page, "Settle")).toBeVisible();
+		},
+	},
+	{
+		name: "assert a menu item's label",
+		match: /^the menu's (Settle|Archive|Delete) reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(menuItem(world.page, match[1] ?? "")).toContainText(
+				match[2] ?? "",
+			);
+		},
+	},
+	{
+		name: "settle or archive from the menu",
+		match: /^I (settle|archive) the session from its menu$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			rpc.setStubs({
+				SetSessionSettled: () => ({ ok: true }),
+				SetSessionArchived: () => ({ ok: true }),
+			});
+			await menuItem(world.page, match[1] ?? "").click();
+			await rpc.waitForRequest(
+				(request) =>
+					request.tag ===
+					(match[1] === "settle" ? "SetSessionSettled" : "SetSessionArchived"),
+			);
+		},
+	},
+	{
+		name: "assert a toast",
+		match: /^a toast reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("toast")).toContainText(
+				match[1] ?? "",
+			);
 		},
 	},
 	{
