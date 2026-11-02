@@ -74,9 +74,12 @@ export const requeueFailedSteers = <E>(
 				});
 				// Row 206 (CONTRACT.md 217) at any end of its Run (970-972): a steer the view reads possibly
 				// reached is placed, never re-sent. While its Run is active main's requeue stays (3.6, gap).
+				// A decline never reached the agent: `steerDeclined`'s requeue returns it (973), though a
+				// direct send's decline reaches the view as no outcome, so possibly reached (gap).
 				if (
 					ledger &&
 					place === "sent" &&
+					row.error_code !== "steer-declined" &&
 					!viewLedger(ledger.state).active?.inputs.some(
 						(input) => input.inputId === row.input_id,
 					)

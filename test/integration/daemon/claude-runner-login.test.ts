@@ -10,6 +10,7 @@ import Database from "better-sqlite3";
 import { expect, it, vi } from "vitest";
 import type { ProcessMark } from "../../helpers/fake-claude-process-sdk.js";
 import {
+	expectHistoricalRefusal,
 	historicalRunnerBundle,
 	launchHistoricalRunners,
 } from "../../helpers/historical-runner-bundle.js";
@@ -18,8 +19,8 @@ import {
 	responseChunks,
 } from "../../helpers/process-harness.js";
 
-// This revision actually compared captured shell values. The older default
-// historical fixture predates that comparison and cannot expose the regression.
+// The last runner before declared logins, which compared captured shell values;
+// it is now refused like every runner from an older build.
 const PRE_DECLARED_LOGIN_COMMIT = "5c2a14f12daedcd760ef7c00d875dddb2b80b46f";
 const currentDist = () => resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist");
 
@@ -162,8 +163,8 @@ async function recordEvidence(
 	}
 }
 
-// Strip only wire metadata after the first turn. Both generations retain the
-// real query and original capture; the daemon receives the incomplete snapshot.
+// Strip only wire metadata after the first turn. The runner retains the real
+// query and original capture; the daemon receives the incomplete snapshot.
 function omitReattachedLogin(harness: ProcessHarness) {
 	appendFileSync(
 		join(harness.root, "runner-identity-fixture.mjs"),
@@ -203,9 +204,11 @@ loginNet.Socket.prototype.write = function(chunk, ...args) {
 	);
 }
 
-// Failures: a legacy runner attempts a busy rebind, a send never reaches the
-// SDK, a retry duplicates intake, or the query/background task is replaced.
-it("delivers through a legacy runner's background work after shell recapture", async (context) => {
+// Failures: the pre-declared-login runner is not refused and settled (CONTRACT.md
+// 3051-3054, 3069-3070); then, on the current runner that replaces it, a busy
+// rebind is attempted, a send never reaches the SDK, a retry duplicates intake,
+// or the query/background task is replaced.
+it("refuses a pre-declared-login runner, then delivers through a current runner's background work after shell recapture", async (context) => {
 	const evidence: Record<string, unknown> = { passed: false };
 	let harness: ProcessHarness | undefined;
 	let sessionId: string | undefined;
@@ -216,12 +219,11 @@ it("delivers through a legacy runner's background work after shell recapture", a
 		if (!historical.available) return;
 		harness = ProcessHarness.create({
 			dist: currentDist(),
-			buildId: historical.buildId,
 			restartProof: true,
 			shellEnvProof: true,
 			logLevel: "info",
 		});
-		launchHistoricalRunners(harness, historical);
+		const useCurrentRunners = launchHistoricalRunners(harness, historical);
 		const fixture = harness;
 		const profile = join(harness.root, "home/.zprofile");
 		const captures = join(harness.root, "home/captures");
@@ -237,17 +239,27 @@ it("delivers through a legacy runner's background work after shell recapture", a
 			logFile: join(harness.root, "login-daemon.log"),
 		});
 		const browser = await harness.connect();
-		sessionId = await browser.createSession("Legacy volatile shell recapture");
+		await expectHistoricalRefusal(
+			harness,
+			browser,
+			historical,
+			await browser.createSession("Refused pre-declared-login runner"),
+			"pre-declared-login-refused",
+		);
+		useCurrentRunners();
+		sessionId = await browser.createSession("Current volatile shell recapture");
 		expect(
 			(await browser.send(sessionId, "login-background-work")).chunks.join(""),
 		).toBe(responseChunks("login-background-work").join(""));
 		const query = queryFor(harness, "login-background-work");
 		evidence["originalQuery"] = query;
-		expect(
-			harness.marks.find(
-				(mark) => mark.kind === "runner-started" && mark.pid === query.pid,
-			),
-		).toMatchObject({ buildId: historical.buildId, declaresLogin: false });
+		const started = harness.marks.find(
+			(mark) => mark.kind === "runner-started" && mark.pid === query.pid,
+		);
+		expect(started).toMatchObject({ declaresLogin: true });
+		expect(started?.kind === "runner-started" && started.buildId).not.toBe(
+			historical.buildId,
+		);
 		await vi.waitFor(
 			() => {
 				const snapshot = readMarks(fixture)
@@ -271,7 +283,7 @@ it("delivers through a legacy runner's background work after shell recapture", a
 		});
 		evidence["captures"] = { before, after: captureCount() };
 		const markCursor = harness.marks.length;
-		const prompt = "after-legacy-volatile-recapture";
+		const prompt = "after-current-volatile-recapture";
 		const reply = await browser.send(sessionId, prompt, 15_000);
 		evidence["reply"] = reply;
 		expect(reply.chunks.join("")).toBe(responseChunks(prompt).join(""));
@@ -298,115 +310,105 @@ it("delivers through a legacy runner's background work after shell recapture", a
 }, 300_000);
 
 // Failures: absent account metadata selects Wait/rebind, restart replaces the
-// idle runner, or a reply succeeds only after recreating its native query.
-it.for(["legacy", "current"] as const)(
-	"keeps an idle %s runner after restart with missing login metadata",
-	{ timeout: 300_000 },
-	async (generation, context) => {
-		const evidence: Record<string, unknown> = { passed: false, generation };
-		let harness: ProcessHarness | undefined;
-		let sessionId: string | undefined;
-		try {
-			const historical =
-				generation === "legacy" ? await historicalRunnerBundle() : undefined;
-			evidence["historical"] = historical;
-			if (historical && !historical.available) context.skip(historical.reason);
-			if (historical && !historical.available) return;
-			harness = ProcessHarness.create({
-				dist: currentDist(),
-				...(historical ? { buildId: historical.buildId } : {}),
-				restartProof: true,
-				logLevel: "info",
-			});
-			if (historical) launchHistoricalRunners(harness, historical);
-			omitReattachedLogin(harness);
-			await harness.restart({
-				startupTimeoutMs: 60_000,
-				runnerStartupTimeoutMs: 25_000,
-				logFile: join(harness.root, "login-daemon.log"),
-			});
-			let browser = await harness.connect();
-			const configDir = join(harness.root, "retained-account");
-			mkdirSync(configDir);
-			const account = await harness.requestRpc({
-				_tag: "AddInstance",
-				name: "Retained login",
-				driver: "claude",
-				configDir,
-				env: { ACCOUNT_OWNER: "retained-account" },
-			});
-			if (!account.addedInstanceId) throw new Error("Missing fixture account");
-			sessionId = await browser.createSession(
-				`Restart ${generation} login`,
-				account.addedInstanceId,
+// idle runner, or a reply succeeds only after recreating its native query. The
+// legacy generation is gone: runners from older builds are refused new work and
+// their turns settled (CONTRACT.md 3051-3054, 3069-3070), which the refusal tests
+// here and in claude-runner-historical.test.ts prove.
+it("keeps an idle current runner after restart with missing login metadata", async () => {
+	const evidence: Record<string, unknown> = { passed: false };
+	let harness: ProcessHarness | undefined;
+	let sessionId: string | undefined;
+	try {
+		harness = ProcessHarness.create({
+			dist: currentDist(),
+			restartProof: true,
+			logLevel: "info",
+		});
+		omitReattachedLogin(harness);
+		await harness.restart({
+			startupTimeoutMs: 60_000,
+			runnerStartupTimeoutMs: 25_000,
+			logFile: join(harness.root, "login-daemon.log"),
+		});
+		let browser = await harness.connect();
+		const configDir = join(harness.root, "retained-account");
+		mkdirSync(configDir);
+		const account = await harness.requestRpc({
+			_tag: "AddInstance",
+			name: "Retained login",
+			driver: "claude",
+			configDir,
+			env: { ACCOUNT_OWNER: "retained-account" },
+		});
+		if (!account.addedInstanceId) throw new Error("Missing fixture account");
+		sessionId = await browser.createSession(
+			"Restart current login",
+			account.addedInstanceId,
+		);
+		const initial = "before-current-login-restart";
+		await browser.preWarmSession(sessionId);
+		const warmQuery = readMarks(harness).find(
+			(mark) => mark.kind === "query" && mark.runnerSessionId === sessionId,
+		);
+		expect(warmQuery).toBeDefined();
+		await browser.send(sessionId, initial);
+		const query = queryFor(harness, initial);
+		expect(query).toEqual(warmQuery);
+		evidence["originalQuery"] = query;
+		const markCursor = harness.marks.length;
+		writeFileSync(join(harness.root, "omit-reattached-login"), "omit");
+		await harness.kill();
+		expect(harness.remainingRunnerPids()).toContain(query.pid);
+		await harness.restart({
+			startupTimeoutMs: 60_000,
+			runnerStartupTimeoutMs: 25_000,
+			logFile: join(harness.root, "login-daemon.log"),
+		});
+		browser = await harness.connect(sessionId);
+		const adopted = harness.marks
+			.slice(markCursor)
+			.find((mark) => mark.kind === "runner-started" && mark.pid === query.pid);
+		expect(adopted).toMatchObject({
+			declaresLogin: true,
+		});
+		const omissions = readFileSync(
+			join(harness.root, "login-snapshot-omissions.ndjson"),
+			"utf8",
+		)
+			.trim()
+			.split("\n")
+			.map(
+				(line) =>
+					JSON.parse(line) as { pid: number; type: string; after: string[] },
 			);
-			const initial = `before-${generation}-login-restart`;
-			await browser.preWarmSession(sessionId);
-			const warmQuery = readMarks(harness).find(
-				(mark) => mark.kind === "query" && mark.runnerSessionId === sessionId,
-			);
-			expect(warmQuery).toBeDefined();
-			await browser.send(sessionId, initial);
-			const query = queryFor(harness, initial);
-			expect(query).toEqual(warmQuery);
-			evidence["originalQuery"] = query;
-			const markCursor = harness.marks.length;
-			writeFileSync(join(harness.root, "omit-reattached-login"), "omit");
-			await harness.kill();
-			expect(harness.remainingRunnerPids()).toContain(query.pid);
-			await harness.restart({
-				startupTimeoutMs: 60_000,
-				runnerStartupTimeoutMs: 25_000,
-				logFile: join(harness.root, "login-daemon.log"),
-			});
-			browser = await harness.connect(sessionId);
-			const adopted = harness.marks
-				.slice(markCursor)
-				.find(
-					(mark) => mark.kind === "runner-started" && mark.pid === query.pid,
-				);
-			expect(adopted).toMatchObject({
-				declaresLogin: generation === "current",
-			});
-			const omissions = readFileSync(
-				join(harness.root, "login-snapshot-omissions.ndjson"),
-				"utf8",
-			)
-				.trim()
-				.split("\n")
-				.map(
-					(line) =>
-						JSON.parse(line) as { pid: number; type: string; after: string[] },
-				);
-			expect(omissions).toContainEqual(
-				expect.objectContaining({
-					pid: query.pid,
-					type: "hello",
-					quiescent: true,
-				}),
-			);
-			for (const omission of omissions) {
-				expect(omission.after).not.toContain("account");
-				expect(omission.after).not.toContain("instanceId");
-				expect(omission.after).not.toContain("shellEnv");
-			}
-			const prompt = `after-${generation}-login-restart`;
-			const reply = await browser.send(sessionId, prompt, 15_000);
-			evidence["reply"] = reply;
-			expect(reply.chunks.join("")).toBe(responseChunks(prompt).join(""));
-			await assertRetained(harness, sessionId, query, prompt, markCursor);
-			evidence["transcript"] = await browser.history(sessionId);
-			evidence["passed"] = true;
-		} catch (cause) {
-			evidence["error"] = cause instanceof Error ? cause.stack : String(cause);
-			throw cause;
-		} finally {
-			await recordEvidence(
-				harness,
-				sessionId,
-				evidence,
-				`test-results/u1y3i-4-${generation}-login-restart.json`,
-			);
+		expect(omissions).toContainEqual(
+			expect.objectContaining({
+				pid: query.pid,
+				type: "hello",
+				quiescent: true,
+			}),
+		);
+		for (const omission of omissions) {
+			expect(omission.after).not.toContain("account");
+			expect(omission.after).not.toContain("instanceId");
+			expect(omission.after).not.toContain("shellEnv");
 		}
-	},
-);
+		const prompt = "after-current-login-restart";
+		const reply = await browser.send(sessionId, prompt, 15_000);
+		evidence["reply"] = reply;
+		expect(reply.chunks.join("")).toBe(responseChunks(prompt).join(""));
+		await assertRetained(harness, sessionId, query, prompt, markCursor);
+		evidence["transcript"] = await browser.history(sessionId);
+		evidence["passed"] = true;
+	} catch (cause) {
+		evidence["error"] = cause instanceof Error ? cause.stack : String(cause);
+		throw cause;
+	} finally {
+		await recordEvidence(
+			harness,
+			sessionId,
+			evidence,
+			"test-results/u1y3i-4-current-login-restart.json",
+		);
+	}
+}, 300_000);

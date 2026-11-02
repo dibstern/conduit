@@ -490,7 +490,7 @@ describe("a send claimed before daemon SIGKILL", () => {
 	it.each([
 		"retry",
 		"restart",
-	])("settles an unechoed stranded steer and retries publication after %s", async (recovery) => {
+	])("places an unechoed stranded steer as sent and retries the placement after %s", async (recovery) => {
 		const fixture = ProcessHarness.create({
 			dist: resolve(process.env["CONDUIT_TEST_DIST"] ?? "dist"),
 			foregroundCli: true,
@@ -541,8 +541,10 @@ describe("a send claimed before daemon SIGKILL", () => {
 			db.prepare(
 				"UPDATE events SET data = json_set(data, '$.steer', json('true')) WHERE session_id = ? AND type = 'input.sent' AND json_extract(data, '$.inputId') = ?",
 			).run(sessionId, inputId);
+			// The steer reached OpenCode, so it possibly reached the agent: it is placed as
+			// sent at its Run's end and never re-sent (CONTRACT.md 217, row 206; 970-972).
 			db.exec(
-				"CREATE TRIGGER fail_requeue BEFORE INSERT ON events WHEN NEW.type = 'input.requeued' BEGIN SELECT RAISE(ABORT, 'injected requeue publication failure'); END",
+				`CREATE TRIGGER fail_placement BEFORE INSERT ON events WHEN NEW.type = 'message.created' AND json_extract(NEW.data, '$.inputId') = '${inputId}' BEGIN SELECT RAISE(ABORT, 'injected placement publication failure'); END`,
 			);
 		} finally {
 			db.close();
@@ -565,6 +567,18 @@ describe("a send claimed before daemon SIGKILL", () => {
 				},
 				{ timeout: 15_000 },
 			);
+			const blocked = new Database(fixture.daemonStorePath(), {
+				readonly: true,
+			});
+			try {
+				expect(
+					blocked
+						.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+						.get(inputId),
+				).toEqual({ state: "steering" });
+			} finally {
+				blocked.close();
+			}
 			if (recovery === "restart") {
 				await fixture.kill();
 				const foreign = new Database(fixture.daemonStorePath());
@@ -593,7 +607,7 @@ describe("a send claimed before daemon SIGKILL", () => {
 			}
 			const release = new Database(fixture.daemonStorePath());
 			try {
-				release.exec("DROP TRIGGER fail_requeue");
+				release.exec("DROP TRIGGER fail_placement");
 			} finally {
 				release.close();
 			}
@@ -607,14 +621,19 @@ describe("a send claimed before daemon SIGKILL", () => {
 							read
 								.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
 								.get(inputId),
-						).toEqual({ state: "queued" });
+						).toEqual({ state: "removed" });
+						expect(
+							read
+								.prepare("SELECT role, text FROM messages WHERE input_id = ?")
+								.all(inputId),
+						).toEqual([{ role: "user", text: "stranded steer" }]);
 						expect(
 							read
 								.prepare(
 									"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type = 'input.requeued'",
 								)
 								.get(sessionId),
-						).toEqual({ n: 1 });
+						).toEqual({ n: 0 });
 						if (recovery === "restart")
 							expect(
 								read
@@ -636,7 +655,7 @@ describe("a send claimed before daemon SIGKILL", () => {
 				},
 				{ timeout: 15_000 },
 			);
-			// A second recovery must neither re-send the paused steer nor undo it.
+			// A second recovery must neither re-send the placed steer nor place it again.
 			await fixture.kill();
 			await fixture.restart({ skipBrowserProbe: true });
 			expect(
@@ -647,6 +666,18 @@ describe("a send claimed before daemon SIGKILL", () => {
 			expect(
 				snapshot(fixture, sessionId, "stranded steer").providerPromptCount,
 			).toBe(1);
+			const placed = new Database(fixture.daemonStorePath(), {
+				readonly: true,
+			});
+			try {
+				expect(
+					placed
+						.prepare("SELECT COUNT(*) AS n FROM messages WHERE input_id = ?")
+						.get(inputId),
+				).toEqual({ n: 1 });
+			} finally {
+				placed.close();
+			}
 		} finally {
 			proof["after"] = snapshot(fixture, sessionId, "stranded steer");
 		}

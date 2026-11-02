@@ -158,7 +158,7 @@ describe("Claude pending steer recovery through the process seam", () => {
 		"live",
 		"adopted",
 		"offline",
-	] as const)("requeues a stranded steer with the server %s, pauses, and sends it exactly once", async (mode) => {
+	] as const)("recovers a stranded steer with the server %s, pauses, and sends it at most once", async (mode) => {
 		harness = ProcessHarness.create({
 			dist: "dist",
 			restartProof: true,
@@ -234,22 +234,6 @@ describe("Claude pending steer recovery through the process seam", () => {
 			await harness.restart();
 			browser = await harness.connect(sessionId);
 		}
-		await vi.waitFor(
-			() => {
-				const state = inbox(running, sessionId);
-				expect(state.session.status).toBe("idle");
-				expect(
-					state.commands.every((command) => command.status === "failed"),
-				).toBe(true);
-				expect(
-					state.inputs
-						.filter((input) => input.state === "queued")
-						.map((input) => input.input_id),
-				).toEqual([steerId, queuedId]);
-			},
-			{ timeout: 10_000 },
-		);
-		const after = inbox(harness, sessionId);
 		const details = () =>
 			browser.frames.flatMap(({ message }) => {
 				if (
@@ -268,11 +252,44 @@ describe("Claude pending steer recovery through the process seam", () => {
 						})
 					: [];
 			});
+		// Once its Run has ended, a steer that possibly reached the agent is placed as sent
+		// and never re-sent (CONTRACT.md 217, row 206; 970-972). Live, the runner failure
+		// arrives while the Run is active, and main's requeue still returns it to the front.
+		const live = mode === "live";
+		await vi.waitFor(
+			() => {
+				const state = inbox(running, sessionId);
+				expect(state.session.status).toBe("idle");
+				expect(
+					state.commands.every((command) => command.status === "failed"),
+				).toBe(true);
+				expect(
+					state.inputs.find((input) => input.input_id === steerId)?.state,
+				).toBe(live ? "queued" : "removed");
+				expect(
+					state.inputs
+						.filter((input) => input.state === "queued")
+						.map((input) => input.input_id),
+				).toEqual(live ? [steerId, queuedId] : [queuedId]);
+			},
+			{ timeout: 10_000 },
+		);
+		const after = inbox(harness, sessionId);
+		if (!live) {
+			expect(
+				after.messages.filter((message) => message.input_id === steerId),
+			).toHaveLength(1);
+			expect(
+				after.events.filter((event) => event.type === "input.requeued"),
+			).toEqual([]);
+		}
+		// The recovered input waits at the front of a queue the failure paused.
+		const resumed = live ? steerId : queuedId;
 		await vi.waitFor(() => {
 			expect(details()).toContainEqual(
 				expect.objectContaining({
 					_tag: "pendingInput",
-					input: expect.objectContaining({ inputId: steerId, state: "queued" }),
+					input: expect.objectContaining({ inputId: resumed, state: "queued" }),
 				}),
 			);
 			expect(
@@ -282,18 +299,19 @@ describe("Claude pending steer recovery through the process seam", () => {
 			).toMatchObject({ inbox: { paused: true } });
 		});
 		// Leave only the recovered input, so exactly one requested turn can run.
-		await Effect.runPromise(
-			browser.rpc["input.cancel"]({
-				sessionId,
-				inputId: queuedId,
-			}),
-		);
-		await browser.sendNow(sessionId, steerId);
+		if (live)
+			await Effect.runPromise(
+				browser.rpc["input.cancel"]({
+					sessionId,
+					inputId: queuedId,
+				}),
+			);
+		await browser.sendNow(sessionId, resumed);
 		const duplicate = await Effect.runPromise(
 			browser.rpc["input.sendNow"]({
 				sessionId,
 				originId: browser.originId,
-				inputId: steerId,
+				inputId: resumed,
 			}),
 		);
 		expect(duplicate).toMatchObject({ ok: false, reason: "already_started" });
@@ -301,26 +319,42 @@ describe("Claude pending steer recovery through the process seam", () => {
 			() => {
 				const state = inbox(running, sessionId);
 				expect(state.session.status).toBe("idle");
-				expect(state.turns.map((turn) => turn.state)).toEqual([
-					"error",
-					"completed",
-				]);
+				// Placed, the steer's own turn ends indeterminate beside the turn it steered.
+				expect(state.turns.map((turn) => turn.state)).toEqual(
+					live ? ["error", "completed"] : ["error", "error", "completed"],
+				);
 				expect(
 					state.messages.filter((message) => message.input_id === steerId),
 				).toHaveLength(1);
 				expect(
 					state.commands
 						.filter((command) => command.command_id === steerId)
-						.map((command) => command.status),
-				).toEqual(["failed", "completed"]);
+						.map((command) => [command.status, command.attempt_count]),
+				).toEqual(
+					live
+						? [
+								["failed", 1],
+								["completed", 2],
+							]
+						: [["failed", 1]],
+				);
 				expect(
 					state.commands
-						.filter((command) => command.command_id === steerId)
-						.map((command) => command.attempt_count),
-				).toEqual([1, 2]);
+						.filter((command) => command.command_id === resumed)
+						.at(-1)?.status,
+				).toBe("completed");
 			},
 			{ timeout: 15_000 },
 		);
+		// Placed, it reaches the next query only as handed-off history, never as a send.
+		if (!live)
+			expect(
+				running.marks.filter(
+					(mark) =>
+						mark.kind === "enqueue" &&
+						mark.prompt === "correction after runner death",
+				),
+			).toEqual([]);
 		const final = inbox(harness, sessionId);
 		const states = (state: ReturnType<typeof inbox>) =>
 			state.inputs
@@ -348,7 +382,8 @@ describe("Claude pending steer recovery through the process seam", () => {
 						final: final.turns.length,
 					},
 					invariants: {
-						queuedAtFront: true,
+						queuedAtFront: live,
+						placedAsSent: !live,
 						paused: true,
 						idleAfterFailure: true,
 						duplicateSendRejected: true,
