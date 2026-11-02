@@ -496,7 +496,7 @@ export const makeRunnerRunLifecycle = (
 							...released.map((input) =>
 								releasedEvent(input, providers.get(input.runId) ?? "conduit"),
 							),
-							...committed.lost,
+							...committed.evidence,
 						];
 						if (events.length > 0)
 							yield* project(yield* eventStore.appendBatch(events));
@@ -776,7 +776,7 @@ export const makeRunnerStopReconciler = (options: {
 								session: [...rows.values()].filter(
 									(cached) => cached.sessionId === target.sessionId,
 								),
-								lost: [],
+								evidence: [],
 							});
 				if (row?.role === "serving" && reason._tag === "CandidateAbandoned")
 					return Effect.succeed<StopCommit>({ _tag: "Ignored" });
@@ -816,7 +816,7 @@ export const makeRunnerStopReconciler = (options: {
 									: cached,
 						),
 					// Without a store there is no event log to record a loss in.
-					lost: [],
+					evidence: [],
 				});
 			});
 		};

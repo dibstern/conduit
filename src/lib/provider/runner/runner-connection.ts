@@ -9,7 +9,6 @@ import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
-	type RunnerHello,
 	type RunnerMessage,
 	RunnerSocket,
 	type RunnerWireCodec,
@@ -75,7 +74,7 @@ export const connectRunner = (options: {
 		sessionId: string,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>;
 	readonly onHello: (
-		hello: RunnerHello,
+		hello: Extract<RunnerMessage, { readonly type: "hello" }>,
 		connection: RunnerSocket,
 		replay?: Effect.Effect<void, SessionFailure>,
 	) => Effect.Effect<void, SessionFailure>;

@@ -28,7 +28,11 @@ import {
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import { makeClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
-import { makeCommitAndSignal } from "../../persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignal,
+	makeCommitAndSignal,
+} from "../../persistence/effect/commit-and-signal.js";
+import type { UnboundEventStoreEffect } from "../../persistence/effect/event-store-effect.js";
 import {
 	EventStoreEffectTag,
 	makeEventStoreEffect,
@@ -180,6 +184,14 @@ interface RunnerStarterOptions {
 		sessionId: string,
 	) => Effect.Effect<ProviderRuntimeIngestion | undefined>;
 	readonly wakeReactor: (sessionId: string) => Effect.Effect<void>;
+	/** The session's projecting write, so the arm folds a runner's start in it (D58). */
+	readonly sessionCommit: (sessionId: string) => Effect.Effect<
+		{
+			readonly commit: Pick<CommitAndSignal, "write">;
+			readonly store: Pick<UnboundEventStoreEffect, "appendBatch">;
+		},
+		SessionFailure
+	>;
 }
 
 /**
@@ -262,6 +274,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			failBoundSend,
 			ingestionForSession,
 			wakeReactor,
+			sessionCommit,
 		} = options;
 		const clock = yield* Clock.Clock;
 		const instanceScope = yield* Effect.scope;
@@ -1383,6 +1396,27 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								entry.lifecycle.candidate ? "starting" : "live",
 							);
 							Entry.identify(entry, hello);
+							// 6.1: a serving runner's live adoption reports its start before the
+							// hello's acks and replays reach the ledger; a recovered one reattached.
+							if (receipts && !identityOnly && !entry.lifecycle.candidate) {
+								const started = receipts.processStarted(
+									entry.runnerId,
+									hello.querySeq ?? 0,
+									entry.recoveringCommands === true,
+								);
+								const { commit, store } = yield* sessionCommit(sessionId);
+								yield* commit.write((project) =>
+									started.pipe(
+										Effect.flatMap((events) =>
+											events.length === 0
+												? Effect.void
+												: store
+														.appendBatch(events)
+														.pipe(Effect.flatMap(project)),
+										),
+									),
+								);
+							}
 							log.info(
 								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${hello.settlesAnswers === true ? "runner-settled" : "legacy answer-question/answer-permission"}`,
 							);
@@ -2312,6 +2346,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								yield* stops.requestStop(stops.retirementFor(old), {
 									_tag: "Superseded",
 									successor: replacement.runnerId,
+									successorQuerySeq: replacement.querySeq ?? 0,
 								});
 								committed = true;
 								yield* pauseSwap("after-commit", sessionId, old, replacement);

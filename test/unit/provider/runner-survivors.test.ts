@@ -3998,8 +3998,11 @@ const continuationFixture = (
 		f.connect.mockImplementation((connection) =>
 			Effect.gen(function* () {
 				connections.push(connection);
+				// A live runner's socket stays open: an unconnected one closes on its first write.
+				const raw = new Socket();
+				vi.spyOn(raw, "write").mockImplementation(() => true);
 				const socket = new RunnerSocket(
-					new Socket(),
+					raw,
 					() => {},
 					() => {},
 				);
