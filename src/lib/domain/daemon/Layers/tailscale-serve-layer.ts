@@ -123,6 +123,38 @@ export const isTailscaleServeAvailable = getTailscaleStatus.pipe(
 	Effect.orElseSucceed(() => false),
 );
 
+const readServeStatus = Effect.gen(function* () {
+	const cli = yield* TailscaleCliTag;
+	return yield* Schema.decodeUnknownEffect(
+		Schema.fromJsonString(ServeStatusSchema),
+	)(yield* cli.exec(["serve", "status", "--json"])).pipe(
+		Effect.mapError(
+			() =>
+				new TailscaleServeError({
+					message:
+						"Could not read Tailscale Serve status JSON. Update Tailscale.",
+				}),
+		),
+	);
+});
+
+/** The tailnet name and each port's '/' handler, or undefined while Serve cannot serve HTTPS. */
+export const serveRoots = Effect.gen(function* () {
+	const status = yield* getTailscaleStatus;
+	const dnsName = status.Self?.DNSName?.trim().replace(/\.$/, "");
+	if (
+		status.BackendState !== "Running" ||
+		!status.CertDomains?.length ||
+		!dnsName
+	)
+		return undefined;
+	const web = (yield* readServeStatus).Web;
+	return {
+		dnsName,
+		rootOf: (port: number) => web?.[`${dnsName}:${port}`]?.Handlers?.["/"],
+	};
+});
+
 const reconcile = (port: number, enabled: boolean, tlsEnabled: boolean) =>
 	Effect.gen(function* () {
 		const cli = yield* TailscaleCliTag;
@@ -145,17 +177,7 @@ const reconcile = (port: number, enabled: boolean, tlsEnabled: boolean) =>
 					"Tailscale Self.DNSName is empty. Enable MagicDNS on the tailnet admin DNS page.",
 			});
 		}
-		const serve = yield* Schema.decodeUnknownEffect(
-			Schema.fromJsonString(ServeStatusSchema),
-		)(yield* cli.exec(["serve", "status", "--json"])).pipe(
-			Effect.mapError(
-				() =>
-					new TailscaleServeError({
-						message:
-							"Could not read Tailscale Serve status JSON. Update Tailscale.",
-					}),
-			),
-		);
+		const serve = yield* readServeStatus;
 		const root = serve.Web?.[`${dnsName}:${port}`]?.Handlers?.["/"];
 		const httpProxy = `http://127.0.0.1:${port}`;
 		const httpsProxy = `https+insecure://127.0.0.1:${port}`;

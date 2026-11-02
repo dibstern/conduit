@@ -321,6 +321,69 @@ export const killServer = (server: ServerKey) =>
 			});
 	});
 
+/**
+ * The ServerKey listening on `port` now, or undefined: the user's earliest-started listener, as a
+ * scan names one entry per port (8.7). The Preview Gate reads it before each upstream connection.
+ */
+export const listenerOn = (port: number) =>
+	Effect.gen(function* () {
+		const subprocess = yield* Subprocess;
+		const root = yield* procRoot;
+		const uid = process.getuid?.() ?? 0;
+		const started = new Map<number, number>();
+		if (root !== "") {
+			const procs = yield* procTable(root);
+			for (const [pid, ports] of yield* procListening(root, uid)) {
+				const startedAt = procs.get(pid)?.startedAt;
+				if (ports.includes(port) && startedAt !== undefined)
+					started.set(pid, startedAt);
+			}
+		} else {
+			const options = {
+				timeoutMs: 5000,
+				maxBuffer: 1024 * 1024,
+				env: { ...process.env, LC_ALL: "C" },
+			};
+			// lsof exits 1 with no output when nothing listens.
+			const pids = (yield* subprocess.run(
+				"lsof",
+				[
+					"-nP",
+					"-w",
+					"-a",
+					`-iTCP:${port}`,
+					"-sTCP:LISTEN",
+					"-u",
+					String(uid),
+					"-F",
+					"p",
+				],
+				options,
+			)).stdout.match(/^p\d+$/gm);
+			if (pids === null) return undefined;
+			const { stdout } = yield* subprocess.run(
+				"ps",
+				[
+					"-ww",
+					"-p",
+					pids.map((pid) => pid.slice(1)).join(","),
+					"-o",
+					"pid=,ppid=,lstart=,command=",
+				],
+				options,
+			);
+			for (const line of stdout.split("\n")) {
+				const row = PS_ROW.exec(line);
+				if (row) started.set(Number(row[1]), Date.parse(row[3] ?? ""));
+			}
+		}
+		const [pid, startedAt] =
+			[...started].sort(([a, at], [b, bt]) => at - bt || a - b)[0] ?? [];
+		return pid === undefined || startedAt === undefined
+			? undefined
+			: ({ pid, startedAt, port } satisfies ServerKey);
+	});
+
 /** `lsof -F` output as [pid, [fd, name]]; malformed lines fail the scan. */
 const lsofFields = (stdout: string) =>
 	Effect.gen(function* () {

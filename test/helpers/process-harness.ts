@@ -854,6 +854,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_MESSAGE_POLLER_INTERVAL_MS"
 					| "CONDUIT_QUOTA_READ_MAX_AGE_MS"
 					| "CONDUIT_TAILSCALE_BIN"
+					| "CONDUIT_PREVIEW_GATE_LINGER_MS"
 					| "CONDUIT_BUILD_READY_PATH"
 					| "NODE_OPTIONS"
 					| "OPENCODE_PURE"

@@ -30,6 +30,12 @@ const allowedRuntimeBoundaries: readonly AllowedRuntimeBoundary[] = [
 			"standalone HTTP compatibility adapter from NodeHttpServer.makeHandler",
 	},
 	{
+		path: "src/lib/domain/daemon/Layers/preview-gate-layer.ts",
+		linePattern: /Effect\.runPromise\s*\(/,
+		reason:
+			"Preview Gate admits each proxied request from a node:http callback",
+	},
+	{
 		path: "src/lib/provider/claude/claude-permission-bridge.ts",
 		linePattern: /Effect\.runPromise(?:Exit)?(?:With)?\s*\(/,
 		reason: "Claude SDK canUseTool callback requires a Promise-shaped wait",
