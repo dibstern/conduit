@@ -676,6 +676,9 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								expect(active).toBeDefined();
 								await active?.complete();
 							});
+						// An OpenCode Stop is two native aborts: main's, and the cancel_request its ledger
+						// decision issues with a native_session probe (CONTRACT.md 337-338, 712; 2.1 row 216).
+						const nativeAborts = provider === "opencode" ? 2 : 1;
 						if (
 							![
 								"recover-unregistered-reservation",
@@ -970,7 +973,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 								commandId: "owner-stop",
 								sessionId,
 							});
-							yield* awaitCondition(() => stopRequests.length === 1);
+							yield* awaitCondition(() => stopRequests.length === nativeAborts);
 							// Closing the owner interrupts its abort worker, fence included.
 							yield* Scope.close(owner, Exit.void).pipe(
 								Effect.timeout("500 millis"),
@@ -1181,9 +1184,6 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 						expect(sent).toEqual(
 							provider === "claude" ? ["running", "selected"] : ["running"],
 						);
-						// An OpenCode Stop is two native aborts: main's, and the cancel_request its ledger
-						// decision issues with a native_session probe (CONTRACT.md 3.6 OpenCode, 2.1 row 216).
-						const nativeAborts = provider === "opencode" ? 2 : 1;
 						yield* awaitCondition(() => stopRequests.length === nativeAborts);
 						if (manual && provider === "opencode")
 							expect(firstRequest.pollUnsafe() === undefined).toBe(true);
