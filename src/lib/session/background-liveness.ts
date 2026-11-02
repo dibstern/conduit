@@ -38,11 +38,14 @@ const WATCH_TASK_TYPES = new Set([
 	"monitor_ws",
 ]);
 
-const classify = (tasks: readonly BackgroundTask[]): BackgroundWork => {
-	return tasks.every((task) => WATCH_TASK_TYPES.has(task.type))
+/** A task hosting a live serving server (`serving`, 8.2) reads calm like a watch task. */
+export const classify = (
+	tasks: readonly BackgroundTask[],
+	serving: ReadonlySet<string> = new Set(),
+): BackgroundWork =>
+	tasks.every((task) => WATCH_TASK_TYPES.has(task.type) || serving.has(task.id))
 		? "monitoring"
 		: "working";
-};
 
 export function makeSessionBackgroundLiveness(
 	onChange?: (sessionId: string) => void,

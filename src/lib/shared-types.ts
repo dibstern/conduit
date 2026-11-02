@@ -274,6 +274,8 @@ export const SessionServerSchema = Schema.Struct({
 	startedAt: Schema.Number,
 	command: Schema.String,
 	cwd: Schema.String,
+	/** The background task whose stdout the server writes to (8.7), when linked. */
+	taskId: Schema.optional(Schema.String),
 	source: Schema.Literals(["detected", "declared"]),
 	role: Schema.Literals(["serving", "awaited"]),
 });

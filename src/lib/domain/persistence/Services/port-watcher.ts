@@ -21,6 +21,7 @@ import { canonicalEvent } from "../../../persistence/events.js";
 import type {
 	ServerKey,
 	Servers,
+	TaskKey,
 } from "../../../provider/run-ledger/run-ledger-model.js";
 import type { SessionServer } from "../../../shared-types.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
@@ -36,7 +37,11 @@ interface Scanned {
 	readonly server: ServerKey;
 	readonly command: string;
 	readonly cwd: string;
+	readonly taskKey?: TaskKey;
 }
+
+/** A Claude background task's stdout file (8.7): `.../tasks/<task id>.output`. */
+const TASK_OUTPUT = /\/tasks\/([^/]+)\.output$/;
 
 /** Each store's readiness (8.7): true once a successful scan and one hold have passed. */
 export const portWatcherKnown = new WeakMap<
@@ -143,19 +148,21 @@ export const killServer = (server: ServerKey) =>
 			});
 	});
 
-/** `lsof -F` output as [pid, names]; malformed lines fail the scan. */
+/** `lsof -F` output as [pid, [fd, name]]; malformed lines fail the scan. */
 const lsofFields = (stdout: string) =>
 	Effect.gen(function* () {
-		const byPid = new Map<number, string[]>();
-		let names: string[] | undefined;
+		const byPid = new Map<number, { fd: string; name: string }[]>();
+		let names: { fd: string; name: string }[] | undefined;
+		let fd = "";
 		for (const line of stdout.split("\n")) {
 			if (line === "") continue;
 			if (line[0] === "p" && /^p\d+$/.test(line)) {
 				names = [];
+				fd = "";
 				byPid.set(Number(line.slice(1)), names);
-			} else if (line[0] === "f" && names !== undefined) continue;
+			} else if (line[0] === "f" && names !== undefined) fd = line.slice(1);
 			else if (line[0] === "n" && names !== undefined)
-				names.push(line.slice(1));
+				names.push({ fd, name: line.slice(1) });
 			else return yield* new PortScanError({ reason: `lsof line ${line}` });
 		}
 		return byPid;
@@ -250,7 +257,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 			for (const [pid, names] of listening) {
 				const proc = procs.get(pid);
 				if (proc === undefined) continue;
-				for (const name of names) {
+				for (const { name } of names) {
 					const port = Number(/:(\d+)$/.exec(name)?.[1]);
 					if (!Number.isInteger(port) || port <= 0)
 						return yield* new PortScanError({ reason: `lsof name ${name}` });
@@ -299,21 +306,26 @@ export const PortWatcherLive = Layer.effectDiscard(
 					"-w",
 					"-a",
 					"-d",
-					"cwd",
+					"cwd,1",
 					"-p",
 					[...new Set(marked.map(({ server }) => server.pid))].join(","),
 					"-F",
 					"pn",
 				]),
 			);
-			return marked.map(
-				({ server, sessionId }): Scanned => ({
+			return marked.map(({ server, sessionId }): Scanned => {
+				const fds = cwds.get(server.pid) ?? [];
+				const taskId = TASK_OUTPUT.exec(
+					fds.find(({ fd }) => fd === "1")?.name ?? "",
+				)?.[1];
+				return {
 					sessionId,
 					server,
 					command: procs.get(server.pid)?.command ?? "",
-					cwd: cwds.get(server.pid)?.[0] ?? "",
-				}),
-			);
+					cwd: fds.find(({ fd }) => fd === "cwd")?.name ?? "",
+					...(taskId === undefined ? {} : { taskKey: { taskId } }),
+				};
+			});
 		});
 
 		// Servers of ended sessions this watcher is killing, by key.
@@ -372,7 +384,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 										meta,
 									),
 								);
-						for (const { server, command, cwd } of mine) {
+						for (const { server, command, cwd, taskKey } of mine) {
 							const entry = servers?.get(server.port);
 							const since = held.get(server.port)?.since ?? now;
 							if (
@@ -383,7 +395,13 @@ export const PortWatcherLive = Layer.effectDiscard(
 									canonicalEvent(
 										"evidence.server_seen",
 										session.id,
-										{ server, command, cwd, source: "detected" },
+										{
+											server,
+											command,
+											cwd,
+											...(taskKey === undefined ? {} : { taskKey }),
+											source: "detected",
+										},
 										meta,
 									),
 								);
@@ -405,12 +423,20 @@ export const PortWatcherLive = Layer.effectDiscard(
 					// already sees it; a rolled-back write is corrected by the next scan.
 					const moved = [...read].flatMap(([sessionId, servers]) => {
 						const list = [...(servers?.values() ?? [])].map(
-							({ key, command, cwd, source, role }): SessionServer => ({
+							({
+								key,
+								command,
+								cwd,
+								taskKey,
+								source,
+								role,
+							}): SessionServer => ({
 								port: key.port,
 								pid: key.pid,
 								startedAt: key.startedAt,
 								command,
 								cwd,
+								...(taskKey === undefined ? {} : { taskId: taskKey.taskId }),
 								source,
 								role,
 							}),

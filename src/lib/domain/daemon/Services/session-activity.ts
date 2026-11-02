@@ -12,7 +12,10 @@ import type {
 	EventDelivery,
 	Interests,
 } from "../../../server/event-audiences.js";
-import { makeSessionBackgroundLiveness } from "../../../session/background-liveness.js";
+import {
+	classify,
+	makeSessionBackgroundLiveness,
+} from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
 import type { SessionServer } from "../../../shared-types.js";
@@ -82,6 +85,25 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				...background,
 				hasLiveWork: (sessionId) =>
 					background.hasLiveWork(sessionId) || servers.has(sessionId),
+				backgroundOf: (sessionId) => {
+					// 8.2: a task with a live linked server and no declared awaited covering it is serving.
+					const found = background.backgroundOf(sessionId);
+					const linked = (servers.get(sessionId) ?? []).flatMap(
+						({ taskId, role }) =>
+							taskId === undefined ? [] : [{ taskId, role }],
+					);
+					const awaited = new Set(
+						linked.flatMap(({ taskId, role }) =>
+							role === "awaited" ? [taskId] : [],
+						),
+					);
+					const serving = new Set(
+						linked.flatMap(({ taskId }) =>
+							awaited.has(taskId) ? [] : [taskId],
+						),
+					);
+					return found && { ...found, work: classify(found.tasks, serving) };
+				},
 			},
 			compactions: {
 				...compactions,

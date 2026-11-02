@@ -16,6 +16,8 @@
 //     never records server_gone for one that died while it was down;
 // 11. servers read as known before the first successful scan and one hold;
 // 12. a host whose every scan fails (no lsof) never reads as known, so auto-settle waits forever.
+// 13. a server whose stdout is a Claude task's output file is not linked to that task, or a server
+//     whose stdout is a terminal, another file, a `.output` file outside `tasks/`, or closed is.
 import { spawn } from "node:child_process";
 import {
 	chmodSync,
@@ -104,6 +106,8 @@ interface Proc {
 	readonly lstart: string;
 	readonly command: string;
 	readonly marker?: string;
+	/** What lsof names as fd 1, when it is open. */
+	readonly stdout?: string;
 }
 /**
  * The world: s1's agent (500) runs a shell (501) that runs a node server (600, its env not visible,
@@ -137,7 +141,12 @@ const showWorld = (fake: Fake, procs: readonly Proc[]) => {
 	);
 	fake.set(
 		"cwd.out",
-		procs.map((p) => `p${p.pid}\nfcwd\nn/work/${p.pid}\n`).join(""),
+		procs
+			.map(
+				(p) =>
+					`p${p.pid}\nfcwd\nn/work/${p.pid}\n${p.stdout === undefined ? "" : `f1\nn${p.stdout}\n`}`,
+			)
+			.join(""),
 	);
 };
 /** lsof -F pn output for [pid, ...names]. */
@@ -405,6 +414,58 @@ describe("PortWatcher", () => {
 							},
 						]);
 						expect(servers.map((server) => server.key)).toEqual([next]);
+					}),
+				),
+			),
+	);
+
+	it.live(
+		"13: a server writing to a Claude task's output file is linked to that task; any other stdout is session-level",
+		() =>
+			withDir((dir, fake) =>
+				open(join(dir, "events.db"), (commit) =>
+					Effect.gen(function* () {
+						yield* sessions(commit);
+						const tasks = "/private/tmp/claude-501/-w/s1/tasks";
+						const shellChild = (pid: number, command: string): Proc => ({
+							pid,
+							ppid: 501,
+							lstart: T.server,
+							command,
+						});
+						showWorld(fake, [
+							...world.filter((p) => p.pid !== 600),
+							{
+								...shellChild(600, "node server.js"),
+								stdout: `${tasks}/b1x2.output`,
+							},
+							{ ...shellChild(601, "a"), stdout: "/dev/ttys003" },
+							{ ...shellChild(602, "b"), stdout: "/w/log.output" },
+							shellChild(603, "c"),
+						]);
+						showListeners(fake, [
+							[600, "*:3000"],
+							[601, "*:3001"],
+							[602, "*:3002"],
+							[603, "*:3003"],
+						]);
+						yield* eventsUntil(4);
+						return yield* serversOf("s1");
+					}),
+				),
+			).pipe(
+				Effect.tap((servers) =>
+					Effect.sync(() => {
+						expect(
+							servers
+								.map(({ key, taskKey }) => [key.port, taskKey])
+								.sort(([a], [b]) => Number(a) - Number(b)),
+						).toEqual([
+							[3000, { taskId: "b1x2" }],
+							[3001, undefined],
+							[3002, undefined],
+							[3003, undefined],
+						]);
 					}),
 				),
 			),
