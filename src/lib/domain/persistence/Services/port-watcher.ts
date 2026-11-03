@@ -684,8 +684,10 @@ export const makePortWatcherLive = (
 						);
 						if (AGENT_MARKERS.some((name) => env.has(name))) envs.set(pid, env);
 					}
-					// A Codex thread's session in this project: the binding's native id, else an open
-					// session whose Codex identity holds the thread (any account; none or several: unattributed).
+					// A Codex thread's session in any project (they share this store, as a
+					// CONDUIT_SESSION_ID marker names its session in any project): the binding's native
+					// id, else an open session whose Codex identity holds the thread (any account; none or
+					// several: unattributed).
 					// A malformed identity file is no thread, never a failed scan.
 					const readThread = (sessionId: string) => {
 						try {
@@ -701,8 +703,7 @@ export const makePortWatcherLive = (
 					LEFT JOIN session_providers AS binding ON binding.id = (
 						SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
 						ORDER BY activated_at DESC, id DESC LIMIT 1)
-					WHERE session.project_id = ${store.projectId}
-						AND (COALESCE(binding.provider_sid, session.provider_sid) = ${thread}
+					WHERE (COALESCE(binding.provider_sid, session.provider_sid) = ${thread}
 							OR (COALESCE(binding.provider_sid, session.provider_sid) IS NULL
 								AND session.settled_at IS NULL AND session.archived_at IS NULL))`.pipe(
 							Effect.mapError(
@@ -735,16 +736,15 @@ export const makePortWatcherLive = (
 						if (name === "CODEX_THREAD_ID") return codexSession(id);
 						const provider = inner.get("CONDUIT_OPENCODE_INSTANCE_ID");
 						if (provider === undefined) return Effect.void;
-						// The binding's native id within its provider (as findOpenCodeSession reads it);
-						// none or several sessions here leave the server unattributed.
+						// The binding's native id within its provider (as findOpenCodeSession reads it), in
+						// any project; none or several sessions leave the server unattributed.
 						return sql<{
 							id: string;
 						}>`SELECT session.id FROM sessions AS session
 					LEFT JOIN session_providers AS binding ON binding.id = (
 						SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
 						ORDER BY activated_at DESC, id DESC LIMIT 1)
-					WHERE session.project_id = ${store.projectId}
-						AND COALESCE(binding.provider, session.provider) = ${provider}
+					WHERE COALESCE(binding.provider, session.provider) = ${provider}
 						AND COALESCE(binding.provider_sid, session.provider_sid, session.id) = ${id}
 					LIMIT 2`.pipe(
 							Effect.map((rows) =>
