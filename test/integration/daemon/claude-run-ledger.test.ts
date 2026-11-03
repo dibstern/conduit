@@ -13,9 +13,10 @@
 // 52. one wake reports two turn_endeds;
 // 53. a wake's label is not its runner's querySeq;
 // and the send's transcript changes, or its Run ends other than once.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import Database from "better-sqlite3";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -45,6 +46,16 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 					"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.reason.tag') AS reason FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
 				)
 				.all(sessionId) as { runId: string; reason: string }[],
+			facts: db
+				.prepare(
+					"SELECT event_sequence AS sequence, coalesce(json_extract(entry_json, '$.command.observation.kind'), json_extract(entry_json, '$.command.settlement.kind')) AS kind, json_extract(entry_json, '$.command.observation.runId') AS runId, json_extract(entry_json, '$.command.observation.runnerId') AS runnerId FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'fact' ORDER BY entry_seq",
+				)
+				.all(sessionId) as {
+				sequence: number;
+				kind: string | null;
+				runId: string | null;
+				runnerId: string | null;
+			}[],
 			runs: db
 				.prepare(
 					"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
@@ -275,6 +286,89 @@ describe("Claude on the Run Ledger", () => {
 			old,
 			replacement: replacement.runnerId,
 			evidence,
+			ends: ledger.ends,
+			runs: ledger.runs,
+		});
+	});
+	it("gives a send held through the swap commit authority on R's first evidence", async () => {
+		const { fixture, browser } = await start({ buildId: OLD_BUILD });
+		const sessionId = await browser.createSession("Claude ledger held swap");
+		await browser.send(sessionId, "claude-ledger-before-held-swap");
+		const old = runnerOf(read(fixture, sessionId));
+		await fixture.kill();
+		// Hold the swap right after its commit (6.9), before upgrade-activate.
+		const gate = join(
+			fixture.root,
+			"conduit-test-hold-runner-swap-after-commit",
+		);
+		writeFileSync(gate, "pause");
+		await fixture.restart({
+			buildId: NEW_BUILD,
+			serviceEnvironment: { CONDUIT_TEST_RUNNER_SWAP_PAUSE: "after-commit" },
+		});
+		const after = await fixture.connect(sessionId);
+		const paused = await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-swap-paused" && mark.sessionId === sessionId,
+		);
+		if (paused.kind !== "runner-swap-paused") throw new Error("no swap pause");
+		const prompt = "claude-ledger-held-through-swap";
+		const sent = after.send(sessionId, prompt);
+		// The send is admitted while the swap is held after its commit. Its Run row is the only
+		// witness: nothing reaches the browser or the runner until the permit is released.
+		// test-waits-allow polling: the held swap emits no event for an admitted send.
+		await vi.waitFor(() =>
+			expect(read(fixture, sessionId).runs).toHaveLength(2),
+		);
+		rmSync(gate);
+		expect((await sent).chunks.join("")).toBe(responseChunks(prompt).join(""));
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const replacement = paused.newRunnerId;
+		const heldRun = ledger.runs[1]?.id;
+		expect(processEvidence(ledger).slice(-2)).toEqual([
+			{
+				type: "evidence.process_lost",
+				runnerId: old,
+				label: null,
+				reattached: null,
+			},
+			{
+				type: "evidence.process_started",
+				runnerId: replacement,
+				label: `${replacement}:0`,
+				reattached: 0,
+			},
+		]);
+		const startedAt = ledger.events.find(
+			(event) =>
+				event.type === "evidence.process_started" &&
+				event.runnerId === replacement,
+		)?.sequence;
+		// Its first evidence, the hold naming R, is folded (a dropped one records no fact) after
+		// R's start, and its result then ends the Run completed.
+		const facts = ledger.facts.filter(
+			(fact) =>
+				fact.runId === heldRun &&
+				!["run_requested", "run_started"].includes(fact.kind ?? ""),
+		);
+		expect(facts[0]).toMatchObject({
+			kind: "run_dispatched",
+			runnerId: replacement,
+		});
+		expect(facts[0]?.sequence).toBeGreaterThan(
+			startedAt ?? Number.POSITIVE_INFINITY,
+		);
+		expect(ledger.ends.find((end) => end.runId === heldRun)?.reason).toBe(
+			"completed",
+		);
+		proofs.push({
+			case: "send-held-through-swap",
+			sessionId,
+			old,
+			replacement,
+			heldRun,
+			facts,
 			ends: ledger.ends,
 			runs: ledger.runs,
 		});
