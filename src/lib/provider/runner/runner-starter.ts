@@ -298,6 +298,29 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					)
 				: sends.closeRunner(runnerId);
 		const runnerLabel = `${driver.driverKind.charAt(0).toUpperCase()}${driver.driverKind.slice(1)} runner`;
+		// 6.1: a serving runner's start (row 215). A draft pre-warm's session is not stored at its
+		// hello, so its start waits, `unreported`, for its first send, ahead of that send's frames.
+		const reportStart = (entry: RunnerChild, unreported: boolean) =>
+			Effect.gen(function* () {
+				if (!receipts) return;
+				const started = receipts.processStarted(
+					entry.runnerId,
+					entry.querySeq ?? 0,
+					entry.recoveringCommands === true,
+					unreported,
+				);
+				if ((yield* started).length === 0) return;
+				const { commit, store } = yield* sessionCommit(entry.sessionId);
+				yield* commit.write((project) =>
+					started.pipe(
+						Effect.flatMap((events) =>
+							events.length === 0
+								? Effect.void
+								: store.appendBatch(events).pipe(Effect.flatMap(project)),
+						),
+					),
+				);
+			});
 		const startupTimeoutMs =
 			process.env["NODE_ENV"] === "test"
 				? Number(
@@ -1401,28 +1424,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							Entry.identify(entry, hello);
 							// 6.1: a serving runner's live adoption reports its start before the
 							// hello's acks and replays reach the ledger; a recovered one reattached.
-							if (receipts && !identityOnly && !entry.lifecycle.candidate) {
-								const started = receipts.processStarted(
-									entry.runnerId,
-									hello.querySeq ?? 0,
-									entry.recoveringCommands === true,
-								);
-								// A draft pre-warm's session is not stored yet, so it has no write.
-								if ((yield* started).length > 0) {
-									const { commit, store } = yield* sessionCommit(sessionId);
-									yield* commit.write((project) =>
-										started.pipe(
-											Effect.flatMap((events) =>
-												events.length === 0
-													? Effect.void
-													: store
-															.appendBatch(events)
-															.pipe(Effect.flatMap(project)),
-											),
-										),
-									);
-								}
-							}
+							if (!identityOnly && !entry.lifecycle.candidate)
+								yield* reportStart(entry, false);
 							log.info(
 								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${hello.settlesAnswers === true ? "runner-settled" : "legacy answer-question/answer-permission"}`,
 							);
@@ -3060,6 +3063,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			startStored,
 			turnEnds: Effect.map(PubSub.subscribe(turnEnds), Stream.fromSubscription),
 			retireSurvivor,
+			reportStart,
 			detachSession,
 			nativeSession,
 		};

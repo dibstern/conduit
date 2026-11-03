@@ -485,6 +485,7 @@ export const makeProcessSessionRunner = (
 			startStored,
 			turnEnds,
 			retireSurvivor,
+			reportStart,
 			detachSession,
 			nativeSession,
 		} = yield* makeRunnerStarter({
@@ -521,7 +522,7 @@ export const makeProcessSessionRunner = (
 			sql,
 			sends,
 			stops,
-			starter: { start, createEntry, upgrade, retireSurvivor },
+			starter: { start, createEntry, upgrade, retireSurvivor, reportStart },
 			emit,
 			failSendOnce,
 			failBoundSend,

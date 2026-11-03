@@ -72,7 +72,7 @@ interface RunnerDispatchOptions {
 	>;
 	readonly starter: Pick<
 		Effect.Success<ReturnType<typeof makeRunnerStarter>>,
-		"start" | "createEntry" | "upgrade" | "retireSurvivor"
+		"start" | "createEntry" | "upgrade" | "retireSurvivor" | "reportStart"
 	>;
 	readonly emit: (
 		output: SessionOutput,
@@ -102,7 +102,7 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 		sql,
 		sends,
 		stops,
-		starter: { start, createEntry, upgrade, retireSurvivor },
+		starter: { start, createEntry, upgrade, retireSurvivor, reportStart },
 		emit,
 		failSendOnce,
 		failBoundSend,
@@ -662,6 +662,13 @@ export const makeRunnerDispatch = (options: RunnerDispatchOptions) => {
 						Entry.canUseControlConnection(entry.lifecycle)))
 					? entry.connection
 					: yield* Deferred.await(entry.ready);
+			// 6.1: a draft pre-warm's start waits for its session, so a send reports it first.
+			if (command.type === "send-turn" && !entry.lifecycle.candidate)
+				yield* reportStart(entry, true).pipe(
+					Effect.mapError((cause) =>
+						runnerFailure("report runner start", cause),
+					),
+				);
 			if (
 				command.control &&
 				(stops.currentEntry(sessionId) !== entry ||

@@ -16,6 +16,9 @@
 // 81. the Queued Run behind that wake waits for the alarm instead of the wake's turn_ended;
 // 86. a wake's stream failure ends it without turn_ended, or before the translator's endTurn;
 // 87. that failed wake's work ends forced, by the alarm;
+// 94. a draft pre-warm's runner never reports its start once CreateSession stores its session,
+//     so the ledger refuses every labelled fact it sends;
+// 95. that runner reports its start twice, or after its first send's first frame;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -672,6 +675,57 @@ describe("Claude on the Run Ledger", () => {
 			sessionId,
 			turns,
 			wake: wake.map(({ type }) => type),
+			ends: ledger.ends,
+			runs: ledger.runs,
+		});
+	});
+	it("reports a draft pre-warm's start once CreateSession stores its session, before its first send", async () => {
+		const { fixture, browser } = await start();
+		const draftId = randomUUID();
+		await browser.preWarmDraft(draftId);
+		// test-waits-allow polling: a pre-warm returns before its runner's SDK initializes.
+		await vi.waitFor(
+			() =>
+				expect(
+					fixture.marks.filter((mark) => mark.kind === "initialization-ready"),
+				).toHaveLength(1),
+			{ timeout: 5000 },
+		);
+		const sessionId = await browser.createSession(
+			"Claude ledger draft",
+			undefined,
+			"claude",
+			{ draftId },
+		);
+		const prompt = "claude-ledger-draft-send";
+		const { chunks } = await browser.send(sessionId, prompt);
+		expect(chunks.join("")).toBe(responseChunks(prompt).join(""));
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const runnerId = runnerOf(ledger);
+		expect(processEvidence(ledger)).toEqual([
+			{
+				type: "evidence.process_started",
+				runnerId,
+				label: `${runnerId}:0`,
+				reattached: 0,
+			},
+		]);
+		// 6.1: main's claim may precede it; none of the runner's own frames may.
+		const started = ledger.events.find(
+			(event) => event.type === "evidence.process_started",
+		);
+		const firstFrame = ledger.events.find(
+			(event) =>
+				event.type === "message.created" || event.type === "run.started",
+		);
+		expect(started?.sequence).toBeLessThan(
+			firstFrame?.sequence ?? Number.POSITIVE_INFINITY,
+		);
+		proofs.push({
+			case: "draft-prewarm",
+			sessionId,
+			evidence: processEvidence(ledger),
 			ends: ledger.ends,
 			runs: ledger.runs,
 		});
