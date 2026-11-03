@@ -903,10 +903,13 @@ export const makePortWatcherLive = (
 					const [owned] =
 						caller === undefined
 							? []
-							: yield* sql<{ ended: number }>`SELECT (settled_at IS NOT NULL
+							: yield* sql<{
+									ended: number;
+									provider: string;
+								}>`SELECT (settled_at IS NOT NULL
 								OR archived_at IS NOT NULL
 								OR EXISTS (SELECT 1 FROM events WHERE session_id = sessions.id
-									AND type = 'session.deleted')) AS ended
+									AND type = 'session.deleted')) AS ended, provider
 								FROM sessions WHERE id = ${caller} AND project_id = ${store.projectId}`;
 					if (caller === undefined || owned === undefined)
 						return { kind: "unclaimed" } as const;
@@ -929,40 +932,45 @@ export const makePortWatcherLive = (
 					const now = yield* Clock.currentTimeMillis;
 					const outcome = yield* commit.write((project, stamp) =>
 						Effect.gen(function* () {
-							const read = new Map<string, Servers | undefined>();
-							for (const session of yield* sessionsWithServers([caller])) {
-								const servers = (yield* loadLedgerView(session.id))?.servers;
-								const entry = servers?.get(request.port);
-								// An unmarked server another session declared is that session's.
+							const entryOf = (sessionId: string) =>
+								loadLedgerView(sessionId).pipe(
+									Effect.map((view) => view?.servers?.get(request.port)),
+								);
+							// An unmarked server another session declared is that session's. Every owner
+							// is checked before the caller's write, which this transaction would commit.
+							for (const session of yield* sessionsWithServers([])) {
+								if (session.id === caller) continue;
+								const entry = yield* entryOf(session.id);
 								if (
-									session.id !== caller &&
 									entry !== undefined &&
 									keyOf(entry.key) === keyOf(target.server)
 								)
 									return { outcome: another, moved: [] };
-								if (session.id !== caller) continue;
-								// A repeated mark (a model's retry) is already recorded.
-								if (
-									entry?.source === "declared" &&
-									entry.role === request.role &&
-									keyOf(entry.key) === keyOf(target.server)
-								)
-									return { outcome: { kind: "marked" } as const, moved: [] };
-								yield* project(
-									yield* store.appendBatch([
-										canonicalEvent(
-											"evidence.server_seen",
-											caller,
-											{ ...target, source: "declared", role: request.role },
-											{ provider: session.provider, createdAt: now },
-										),
-									]),
-								);
-								read.set(caller, (yield* loadLedgerView(caller))?.servers);
 							}
+							const entry = yield* entryOf(caller);
+							// A repeated mark (a model's retry) is already recorded.
+							if (
+								entry?.source === "declared" &&
+								entry.role === request.role &&
+								keyOf(entry.key) === keyOf(target.server)
+							)
+								return { outcome: { kind: "marked" } as const, moved: [] };
+							yield* project(
+								yield* store.appendBatch([
+									canonicalEvent(
+										"evidence.server_seen",
+										caller,
+										{ ...target, source: "declared", role: request.role },
+										{ provider: owned.provider, createdAt: now },
+									),
+								]),
+							);
 							return {
 								outcome: { kind: "marked" } as const,
-								moved: yield* publish(read, stamp),
+								moved: yield* publish(
+									new Map([[caller, (yield* loadLedgerView(caller))?.servers]]),
+									stamp,
+								),
 							};
 						}),
 					);

@@ -16,7 +16,8 @@
 // Mark: a port with nothing listening, another session's port, a caller outside any session or a
 // browser naming a session's pid is recorded; a mark waits out the hold; a later scan flips a declared role back to detected; a new
 // process on a declared port inherits the declaration; an unmarked declared server vanishes while
-// it listens; an awaited server leaves the row idle or a serving one makes it read working.
+// it listens; an awaited server leaves the row idle or a serving one makes it read working; an
+// unmarked server one session declared is recorded for another that the store reads first.
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -783,6 +784,26 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		attention: "idle",
 	});
 
+	// A server orphaned through a shell that exits, so no session's marker is in its ancestry.
+	const unmarkedServer = async () => {
+		const env: NodeJS.ProcessEnv = { ...process.env, SERVER };
+		delete env["CONDUIT_SESSION_ID"];
+		delete env["CODEX_THREAD_ID"];
+		delete env["CONDUIT_OPENCODE_SESSION_ID"];
+		const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
+			env,
+			stdio: ["ignore", "pipe", "inherit"],
+		});
+		const [line] = await Promise.all([
+			once(createInterface({ input: launcher.stdout }), "line"),
+			once(launcher, "exit"),
+		]);
+		const server: { pid: number; port: number } = JSON.parse(String(line));
+		onTestFinished(() => {
+			if (alive(server.pid)) process.kill(server.pid, "SIGKILL");
+		});
+		return server;
+	};
 	// A new process on the port starts detected, after its own hold.
 	cursor = browser.frames.length;
 	process.kill(first.pid, "SIGTERM");
@@ -794,6 +815,36 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		sessionId,
 		SERVER.replace("listen(0,", `listen(${first.port},`),
 	);
+	// While its hold runs: an unmarked server one session declared is refused to the other, whichever
+	// of the two the store reads first.
+	const [caller, owner] = [sessionId, otherId].sort();
+	const label = (id: string | undefined) =>
+		id === sessionId ? "mark" : "other";
+	const contested = await unmarkedServer();
+	expect(await mark(owner, String(contested.port), "--serving")).toMatchObject({
+		code: 0,
+	});
+	const contestedRefusal = await mark(
+		caller,
+		String(contested.port),
+		"--serving",
+	);
+	expect(contestedRefusal).toMatchObject({ code: 1 });
+	expect(contestedRefusal.stderr).toContain(
+		`Port ${contested.port} belongs to another session`,
+	);
+	const contestedEvidence = evidence().filter(
+		({ data }) => data.server.pid === contested.pid,
+	);
+	process.kill(contested.pid, "SIGKILL");
+	expect(contestedEvidence).toEqual([
+		expect.objectContaining({
+			session: label(owner),
+			type: "evidence.server_seen",
+			data: expect.objectContaining({ source: "declared", role: "serving" }),
+		}),
+	]);
+
 	const detected = await browser.waitFor(
 		(frame) =>
 			row(frame)?.servers?.some((s) => s["pid"] === second.pid) ?? false,
@@ -807,24 +858,8 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		}),
 	]);
 
-	// An unmarked server, orphaned so no session's marker is in its ancestry, can be declared and
-	// stays listed while it listens.
-	const unmarkedEnv: NodeJS.ProcessEnv = { ...process.env, SERVER };
-	delete unmarkedEnv["CONDUIT_SESSION_ID"];
-	delete unmarkedEnv["CODEX_THREAD_ID"];
-	delete unmarkedEnv["CONDUIT_OPENCODE_SESSION_ID"];
-	const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
-		env: unmarkedEnv,
-		stdio: ["ignore", "pipe", "inherit"],
-	});
-	const [line] = await Promise.all([
-		once(createInterface({ input: launcher.stdout }), "line"),
-		once(launcher, "exit"),
-	]);
-	const unmarked: { pid: number; port: number } = JSON.parse(String(line));
-	onTestFinished(() => {
-		if (alive(unmarked.pid)) process.kill(unmarked.pid, "SIGKILL");
-	});
+	// An unmarked server can be declared and stays listed while it listens.
+	const unmarked = await unmarkedServer();
 	cursor = browser.frames.length;
 	expect(
 		await mark(sessionId, String(unmarked.port), "--serving"),
@@ -857,7 +892,9 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		cursor,
 	);
 
-	const recorded = evidence();
+	const recorded = evidence().filter(
+		({ data }) => data.server.pid !== contested.pid,
+	);
 	mkdirSync(ARTIFACT_DIR, { recursive: true });
 	writeFileSync(
 		`${ARTIFACT_DIR}/server-mark.json`,
@@ -870,6 +907,13 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 				second: { pid: second.pid, port: second.port },
 				control: { pid: control.pid, port: control.port },
 				unmarked,
+				contested: {
+					...contested,
+					owner: label(owner),
+					caller: label(caller),
+					refusal: contestedRefusal,
+					evidence: contestedEvidence,
+				},
 				pushed: [working, calm, detected, kept, gone],
 				evidence: recorded,
 			},
