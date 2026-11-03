@@ -59,7 +59,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
-	PortWatcherLive,
+	makePortWatcherLive,
 	portWatcherKnown,
 } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import {
@@ -292,7 +292,7 @@ const open = <A, E>(
 	Effect.scoped(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
-			yield* Layer.build(PortWatcherLive);
+			yield* Layer.build(makePortWatcherLive(() => undefined));
 			return yield* body(commit);
 		}),
 	).pipe(

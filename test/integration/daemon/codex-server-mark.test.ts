@@ -40,10 +40,10 @@ afterEach(async () => {
 	harness = undefined;
 });
 
-// A node server whose environment names `sessionId` as a Conduit agent's shell does, or no
-// session. Orphaned through a shell that exits, so its ancestry carries no marker of the
-// session this test may itself run inside.
-const listen = async (sessionId?: string) => {
+// A node server whose environment carries `markers` as an agent's shell does, or none. Orphaned
+// through a shell that exits, so its ancestry carries no marker of the session this test may
+// itself run inside.
+const listen = async (markers: NodeJS.ProcessEnv = {}) => {
 	const env: NodeJS.ProcessEnv = { ...process.env, SERVER };
 	for (const marker of [
 		"CONDUIT_SESSION_ID",
@@ -51,12 +51,11 @@ const listen = async (sessionId?: string) => {
 		"CONDUIT_OPENCODE_SESSION_ID",
 	])
 		delete env[marker];
-	if (sessionId) env["CONDUIT_SESSION_ID"] = sessionId;
 	const shell = spawn(
 		"/bin/sh",
 		["-c", `"${process.execPath}" -e "$SERVER" &`],
 		{
-			env,
+			env: { ...env, ...markers },
 			detached: true,
 			stdio: ["ignore", "pipe", "inherit"],
 		},
@@ -82,8 +81,9 @@ const freePort = () =>
 		});
 	});
 
-it("a Codex agent marks its server through the conduit_server_mark tool, refused for a dead port, another session's port or bad arguments", async () => {
-	const root = resolve("test-results/codex-server-mark");
+// A daemon replaying signed-in Codex, with a Codex session and a Claude session.
+const start = async (name: string, holdMs: number) => {
+	const root = resolve(`test-results/${name}`);
 	mkdirSync(root, { recursive: true });
 	const reportPath = join(root, "trace-report.jsonl");
 	const capturePath = join(root, "capture.jsonl");
@@ -105,7 +105,7 @@ it("a Codex agent marks its server through the conduit_server_mark tool, refused
 		runnerStartupTimeoutMs: TIMEOUT,
 		serviceEnvironment: {
 			CONDUIT_PORT_WATCH_INTERVAL_MS: "200",
-			CONDUIT_PORT_WATCH_HOLD_MS: String(HOLD_MS),
+			CONDUIT_PORT_WATCH_HOLD_MS: String(holdMs),
 			CONDUIT_CODEX_APP_SERVER_TRACE: tracePath,
 			CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
 			CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
@@ -129,9 +129,30 @@ it("a Codex agent marks its server through the conduit_server_mark tool, refused
 		permissionMode: "ask",
 	});
 	const otherId = await browser.createSession("Other");
+	return {
+		fixture,
+		browser,
+		sessionId,
+		otherId,
+		capturePath,
+		reportPath,
+		writeTrace,
+	};
+};
+
+it("a Codex agent marks its server through the conduit_server_mark tool, refused for a dead port, another session's port or bad arguments", async () => {
+	const {
+		fixture,
+		browser,
+		sessionId,
+		otherId,
+		capturePath,
+		reportPath,
+		writeTrace,
+	} = await start("codex-server-mark", HOLD_MS);
 
 	const own = await listen();
-	const other = await listen(otherId);
+	const other = await listen({ CONDUIT_SESSION_ID: otherId });
 	const dead = await freePort();
 
 	// The recorded call (real Codex 0.162.1 calling the tool conduit declared), replayed once per
@@ -255,5 +276,72 @@ it("a Codex agent marks its server through the conduit_server_mark tool, refused
 	writeFileSync(
 		ARTIFACT,
 		`${JSON.stringify({ ports: { own: own.port, other: other.port, dead }, replies, threadStartTools: threadStart?.["dynamicTools"], row, evidence, reports }, null, 2)}\n`,
+	);
+});
+
+// A Codex shell's server, carrying only Codex's own CODEX_THREAD_ID, belongs to the session whose
+// Codex thread that is: the scan attributes it after the hold, to no other session.
+it("a server started from a Codex shell is attributed to its session through the shell's thread id", async () => {
+	const { fixture, browser, sessionId, otherId, reportPath, writeTrace } =
+		await start("codex-shell-server", 400);
+	const recorded = fixtureRows("turn-server-mark");
+	writeTrace(recorded);
+	await browser.send(sessionId, "Start the dev server", TIMEOUT);
+	const thread = recorded
+		.map((row) => row.message?.result?.["thread"])
+		.find(
+			(value): value is { id: string } =>
+				typeof value === "object" &&
+				value !== null &&
+				"id" in value &&
+				typeof value.id === "string",
+		)?.id;
+	if (!thread) throw new Error("No recorded thread");
+
+	const shell = await listen({ CODEX_THREAD_ID: thread });
+	const row = await browser.waitFor(
+		(frame) =>
+			frame["type"] === "session_row" &&
+			frame["id"] === sessionId &&
+			Array.isArray(frame["servers"]) &&
+			frame["servers"].some(
+				(server: { port?: number }) => server.port === shell.port,
+			),
+	);
+	expect(row["servers"]).toEqual([
+		expect.objectContaining({ port: shell.port, pid: shell.pid }),
+	]);
+
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	const evidence = db
+		.prepare<[string, string], { session_id: string; data: string }>(
+			"SELECT session_id, data FROM events WHERE session_id IN (?, ?) AND type = 'evidence.server_seen' ORDER BY sequence",
+		)
+		.all(sessionId, otherId)
+		.map((event) => ({
+			session: event.session_id === sessionId ? "codex" : "other",
+			data: JSON.parse(event.data),
+		}));
+	db.close();
+	expect(evidence).toEqual([
+		{
+			session: "codex",
+			data: expect.objectContaining({
+				server: expect.objectContaining({ pid: shell.pid, port: shell.port }),
+			}),
+		},
+	]);
+
+	await fixture.dispose();
+	harness = undefined;
+	const reports = rows<AppServerTraceReport>(reportPath);
+	for (const report of reports) {
+		expect(report.consumed).toBe(report.total);
+		expect(report.mismatches).toEqual([]);
+	}
+	mkdirSync("test/integration/daemon/artifacts", { recursive: true });
+	writeFileSync(
+		"test/integration/daemon/artifacts/codex-shell-server.json",
+		`${JSON.stringify({ thread, shell, row, evidence, reports }, null, 2)}\n`,
 	);
 });
