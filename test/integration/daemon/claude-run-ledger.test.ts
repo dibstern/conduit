@@ -12,9 +12,11 @@
 // 51. a wake's turn_ended is missing at its first clear (its result);
 // 52. one wake reports two turn_endeds;
 // 53. a wake's label is not its runner's querySeq;
+// 80. a Stop over only a wake leaves the wake's end to the alarm (forced), or never reports it;
+// 81. the Queued Run behind that wake waits for the alarm instead of the wake's turn_ended;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -32,7 +34,7 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.label') AS label, json_extract(data, '$.reattached') AS reattached, json_extract(data, '$.wakeTask.taskId') AS wakeTask FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.label') AS label, json_extract(data, '$.reattached') AS reattached, json_extract(data, '$.wakeTask.taskId') AS wakeTask, created_at AS createdAt, json_extract(data, '$.stop.deadlineAt') AS deadlineAt FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				sequence: number;
@@ -41,12 +43,18 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 				label: string | null;
 				reattached: number | null;
 				wakeTask: string | null;
+				createdAt: number;
+				deadlineAt: number | null;
 			}[],
 			ends: db
 				.prepare(
-					"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.reason.tag') AS reason FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
+					"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.reason.tag') AS reason, json_extract(entry_json, '$.reason.forced') AS forced FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
 				)
-				.all(sessionId) as { runId: string; reason: string }[],
+				.all(sessionId) as {
+				runId: string;
+				reason: string;
+				forced: number | null;
+			}[],
 			facts: db
 				.prepare(
 					"SELECT event_sequence AS sequence, coalesce(json_extract(entry_json, '$.command.observation.kind'), json_extract(entry_json, '$.command.settlement.kind')) AS kind, json_extract(entry_json, '$.command.observation.runId') AS runId, json_extract(entry_json, '$.command.observation.runnerId') AS runnerId FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'fact' ORDER BY entry_seq",
@@ -525,6 +533,83 @@ describe("Claude on the Run Ledger", () => {
 			turns,
 			ends: ledger.ends,
 			runs: ledger.runs,
+		});
+	});
+
+	it("ends a wake stopped alone at its dispose, not forced, and launches the Queued Run", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["background-shell-turn", "pong-thinking-text-turn"],
+			},
+		});
+		const sessionId = await browser.createSession("Claude ledger wake stop");
+		// Hold the wake before its result (trace line 153), so it is still in flight.
+		const hold = join(fixture.root, "claude-replay-hold");
+		writeFileSync(hold, JSON.stringify({ turn: 1, message: 153, id: 1 }));
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		// test-waits-allow polling: the held replay line reports only through this file.
+		await vi.waitFor(() => expect(existsSync(`${hold}.reached`)).toBe(true), {
+			timeout: 10_000,
+		});
+		// A start waits for the wake's turn (8.3), so this send stays Queued.
+		const queued = browser.send(sessionId, "ping");
+		// test-waits-allow polling: the browser sees no frame when a Queued send is admitted.
+		await vi.waitFor(() =>
+			expect(
+				read(fixture, sessionId).events.filter(
+					(event) => event.type === "input.admitted",
+				),
+			).toHaveLength(2),
+		);
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		// The replayed pong trace answers the Queued send.
+		expect((await queued).chunks.join("")).toBe("pong");
+		const ledger = read(fixture, sessionId);
+		const turns = ledger.events.filter((event) =>
+			event.type.startsWith("evidence.turn_"),
+		);
+		expect(turns.map(({ type }) => type)).toEqual([
+			"evidence.turn_started",
+			"evidence.turn_ended",
+		]);
+		// The wake's work ends at the dispose's turn_ended, not by the alarm.
+		const wakeEnds = ledger.ends.filter(
+			(end) => !ledger.runs.some((run) => run.id === end.runId),
+		);
+		expect(wakeEnds).toEqual([
+			expect.objectContaining({ reason: "interrupted", forced: 0 }),
+		]);
+		// The Queued Run launches after the wake's turn_ended and completes.
+		const launched = ledger.facts.find(
+			(fact) =>
+				fact.kind === "run_dispatched" && fact.runId === ledger.runs[1]?.id,
+		);
+		expect(launched?.sequence).toBeGreaterThan(turns[1]?.sequence ?? 0);
+		expect(
+			ledger.ends.find((end) => end.runId === ledger.runs[1]?.id)?.reason,
+		).toBe("completed");
+		// Before the Stop's deadline: the alarm has nothing left to force (L6, trace W).
+		const stop = ledger.events.find(
+			(event) => event.type === "interrupt.requested",
+		);
+		const dispatched = ledger.events.filter(
+			(event) => event.type === "run.dispatched",
+		);
+		expect(dispatched).toHaveLength(2);
+		expect(dispatched[1]?.createdAt).toBeLessThan(
+			stop?.deadlineAt ?? Number.NEGATIVE_INFINITY,
+		);
+		proofs.push({
+			case: "wake-stopped-alone",
+			sessionId,
+			turns,
+			ends: ledger.ends,
+			runs: ledger.runs,
+			types: ledger.events.map((event) => event.type),
 		});
 	});
 });
