@@ -4613,7 +4613,8 @@ export class FakeProvider {
 				};
 		}
 		// H4: OpenCode, or a runner a mid-removal daemon death left alive (Q28), reports nothing for a
-		// removed project but the refusals of its sends.
+		// removed project but the refusals of its sends. A control's outcome, a sweep's included, is
+		// main's own write, not the runner's, so it still lands (CONTRACT.md 462-464, 1086-1089).
 		if (
 			(this.provider === "opencode" || this.survivor !== undefined) &&
 			this.gate === "removed" &&
@@ -4621,7 +4622,9 @@ export class FakeProvider {
 				!(
 					command.observation.tag === "Answer" &&
 					command.observation.kind === "effect_outcome" &&
-					this.gatedTokens.has(command.observation.token)
+					(this.gatedTokens.has(command.observation.token) ||
+						this.mainTransmissions.has(command.observation.token) ||
+						this.sweeps.has(command))
 				)) ||
 				(command.verb === "settle" &&
 					((command.settlement.kind === "process_lost" &&

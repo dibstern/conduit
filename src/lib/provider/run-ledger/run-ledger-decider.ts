@@ -1283,11 +1283,14 @@ function effectOutcome(
 			openRecovery(book, fact, send, tx);
 			return changed;
 	}
-	// 3.4: main claims a control's row again after a retryable outcome on its latest claim.
+	// 3.4: main claims a control's row again after a retryable outcome on its latest claim, unless
+	// a sweep's or a raced outcome already ended the row: Failed and Sent beat Retrying in the join
+	// (CONTRACT.md 465, 476, 560-561), so a late retryable revives nothing.
 	if (
 		tx.n !== undefined &&
 		tx === send.txs.at(-1) &&
-		outcome.tag === "retryable"
+		outcome.tag === "retryable" &&
+		tx.transport.tag === "Retrying"
 	)
 		transmit(book, send, undefined);
 	seal(tx);

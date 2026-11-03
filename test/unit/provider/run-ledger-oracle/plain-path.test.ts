@@ -1411,6 +1411,28 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a raced retryable after a sweep ended a control row joins its chains and revives nothing (3.4, 3.5)", () => {
+		// Long seed 82103201 (codex), failure mode 120: Failed beats Retrying in the transport join, so
+		// the row stays ended and main never claims it again (CONTRACT.md 465, 476, 560-561).
+		agreed("claude", (d) => {
+			lose(d, "r1");
+			end(d);
+			const issue = d.latest("end_session");
+			const answer = (
+				outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
+			) =>
+				observe(d, tokenOf(issue), {
+					kind: "effect_outcome",
+					outcome,
+					transmission: claimOf(issue),
+				});
+			answer({ tag: "permanent", code: "provider_process_gone" });
+			answer({ tag: "retryable", retryAt: d.now + 100, code: "late" });
+			expect(d.view().live).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(false);
+		});
+	});
+
 	it("an end_session for a Run goes to its execution's runner, even after a replacement started (L2 case 2)", () => {
 		agreed("claude", (d) => {
 			const a = running(d);
