@@ -378,11 +378,13 @@ describe("Worktree branch settlement through the built daemon", () => {
 				}),
 			{ timeout: 30_000 },
 		);
-		// Startup runs the periodic sweep and exercises the cold-project reader.
+		// Startup runs the periodic sweep and exercises the cold-project reader. Auto-settle waits
+		// out the port watcher's first scan and hold, so a later sweep settles the session.
 		await fixture.shutdown();
 		await fixture.restart({
 			startupTimeoutMs: 120_000,
 			runnerStartupTimeoutMs: 90_000,
+			serviceEnvironment: { CONDUIT_AUTO_SETTLE_SWEEP_INTERVAL_MS: "1000" },
 		});
 		await vi.waitFor(
 			async () => {
