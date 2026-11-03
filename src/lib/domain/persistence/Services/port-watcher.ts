@@ -50,12 +50,14 @@ interface Scanned {
  */
 const TASK_OUTPUT = /\/tasks\/([^/]+)\.output$/;
 
-/** A `conduit server mark` (8.7 Declared): the CLI's pid names the caller's session. */
-export interface MarkRequest {
-	readonly pid: number;
+/**
+ * A mark (8.7 Declared): `conduit server mark` names its caller by the CLI's pid; Codex's mark
+ * tool by the session of the runner that answered it.
+ */
+export type MarkRequest = {
 	readonly port: number;
 	readonly role: "serving" | "awaited";
-}
+} & ({ readonly pid: number } | { readonly sessionId: string });
 
 /** Not this store's caller, recorded, or refused with the reason the CLI prints. */
 export type MarkOutcome =
@@ -419,8 +421,15 @@ export const PortWatcherLive = Layer.effectDiscard(
 		);
 		const uid = process.getuid?.() ?? 0;
 		const root = yield* procRoot;
-		/** Exit 0 output; any other exit, stderr or spawn failure fails the scan. */
-		const run = (command: string, args: readonly string[], empty = false) =>
+		/**
+		 * Exit 0 output; any other exit, stderr or spawn failure fails the scan. `missing` lets exit 1
+		 * stand for "found nothing" (empty) or "found some" (partial: a listed pid exited meanwhile).
+		 */
+		const run = (
+			command: string,
+			args: readonly string[],
+			missing?: "empty" | "partial",
+		) =>
 			subprocess
 				.run(command, args, {
 					// Scans are every interval; a stuck tool fails its scan, never the next one.
@@ -438,7 +447,9 @@ export const PortWatcherLive = Layer.effectDiscard(
 					Effect.flatMap((result) =>
 						result.stderr === "" &&
 						(result.exitCode === 0 ||
-							(empty && result.exitCode === 1 && result.stdout === ""))
+							(result.exitCode === 1 &&
+								(missing === "partial" ||
+									(missing === "empty" && result.stdout === ""))))
 							? Effect.succeed(result.stdout)
 							: Effect.fail(
 									new PortScanError({
@@ -449,7 +460,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 				);
 
 		// A mark scans for its caller's session and its port's listener, marked or not.
-		const scan = (mark?: Pick<MarkRequest, "pid" | "port">) =>
+		const scan = (mark?: MarkRequest) =>
 			Effect.gen(function* () {
 				const listening: ReadonlyMap<number, readonly number[]> =
 					root !== ""
@@ -470,7 +481,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 											"-F",
 											"pn",
 										],
-										true,
+										"empty",
 									),
 								);
 								const ports = new Map<number, number[]>();
@@ -546,7 +557,7 @@ export const PortWatcherLive = Layer.effectDiscard(
 				const target = mark && servers.get(mark.port);
 				const chainPids = new Set([
 					...[...servers.values()].flatMap((server) => chainOf(server.pid)),
-					...(mark ? chainOf(mark.pid) : []),
+					...(mark && "pid" in mark ? chainOf(mark.pid) : []),
 				]);
 				// Each chain process's environment as text: /proc's environ, or ps -E's line, where a
 				// platform binary's environment is not visible but an ancestor's is.
@@ -626,7 +637,8 @@ export const PortWatcherLive = Layer.effectDiscard(
 					const sessionId = yield* resolve(server.pid);
 					if (sessionId !== undefined) marked.push({ server, sessionId });
 				}
-				const caller = mark && (yield* resolve(mark.pid));
+				const caller =
+					mark && ("pid" in mark ? yield* resolve(mark.pid) : mark.sessionId);
 				if (marked.length === 0 && target === undefined)
 					return { scanned: [], servers, caller };
 				const markedPids = [
@@ -656,17 +668,21 @@ export const PortWatcherLive = Layer.effectDiscard(
 								return files;
 							})
 						: yield* lsofFields(
-								yield* run("lsof", [
-									"-nP",
-									"-w",
-									"-a",
-									"-d",
-									"cwd,1",
-									"-p",
-									markedPids.join(","),
-									"-F",
-									"pn",
-								]),
+								yield* run(
+									"lsof",
+									[
+										"-nP",
+										"-w",
+										"-a",
+										"-d",
+										"cwd,1",
+										"-p",
+										markedPids.join(","),
+										"-F",
+										"pn",
+									],
+									"partial",
+								),
 							);
 				const describe = (server: ServerKey): Omit<Scanned, "sessionId"> => {
 					const fds = cwds.get(server.pid) ?? [];
@@ -778,15 +794,20 @@ export const PortWatcherLive = Layer.effectDiscard(
 		const mark = (request: MarkRequest) =>
 			Effect.gen(function* () {
 				const { scanned, caller, target } = yield* scan(request);
-				const owned =
+				const [owned] =
 					caller === undefined
 						? []
-						: yield* sql<{ id: string }>`SELECT id FROM sessions
-								WHERE id = ${caller} AND project_id = ${store.projectId}`;
-				if (caller === undefined || owned.length === 0)
+						: yield* sql<{ ended: number }>`SELECT (settled_at IS NOT NULL
+								OR archived_at IS NOT NULL
+								OR EXISTS (SELECT 1 FROM events WHERE session_id = sessions.id
+									AND type = 'session.deleted')) AS ended
+								FROM sessions WHERE id = ${caller} AND project_id = ${store.projectId}`;
+				if (caller === undefined || owned === undefined)
 					return { kind: "unclaimed" } as const;
 				const rejected = (reason: string) =>
 					({ kind: "rejected", reason }) as const;
+				// 8.7: an ended session has no servers; a mark would record one the next scan drops.
+				if (owned.ended) return rejected("This session has ended");
 				if (target === undefined)
 					return rejected(`Nothing is listening on port ${request.port}`);
 				const another = rejected(
@@ -814,6 +835,13 @@ export const PortWatcherLive = Layer.effectDiscard(
 							)
 								return { outcome: another, moved: [] };
 							if (session.id !== caller) continue;
+							// A repeated mark (a model's retry) is already recorded.
+							if (
+								entry?.source === "declared" &&
+								entry.role === request.role &&
+								keyOf(entry.key) === keyOf(target.server)
+							)
+								return { outcome: { kind: "marked" } as const, moved: [] };
 							yield* project(
 								yield* store.appendBatch([
 									canonicalEvent(

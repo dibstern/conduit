@@ -45,6 +45,7 @@ import {
 import { discoverRunners } from "../../../provider/runner/runner-registry.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { ProjectRelayConfig } from "../../../types.js";
+import { portWatcherMark } from "../../persistence/Services/port-watcher.js";
 import { InputDraftsTag } from "../../relay/Services/input-drafts.js";
 import { PendingInteractionServiceTag } from "../../relay/Services/pending-interaction-service.js";
 import { ProviderRuntimeIngestionTag } from "../../relay/Services/provider-runtime-ingestion-service.js";
@@ -444,6 +445,25 @@ export const makeProviderAdaptersLive = (
 						persistUserMessage,
 					},
 					{ read, state, sql },
+					// 8.7 Declared from Codex's mark tool, the runner's session the caller: the watcher
+					// whose store holds the session records or refuses it, as MarkServer does.
+					(sessionId, { port, role }) =>
+						Effect.gen(function* () {
+							for (const project of borrowed.values()) {
+								const mark = portWatcherMark.get(
+									Context.get(project.context, SqlClient.SqlClient),
+								);
+								const outcome =
+									mark && (yield* mark({ sessionId, port, role }));
+								if (outcome?.kind === "marked") return { ok: true } as const;
+								if (outcome?.kind === "rejected")
+									return { ok: false, reason: outcome.reason } as const;
+							}
+							return {
+								ok: false,
+								reason: "This session is not in an open project",
+							} as const;
+						}),
 				),
 			);
 			const configuredAccounts = yield* accounts.snapshot;
