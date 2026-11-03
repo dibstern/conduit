@@ -503,7 +503,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 			process.send?.(mark);
 		};
 		const pauseSwap = (
-			phase: "after-prepare" | "after-commit",
+			phase: "after-prepare" | "after-commit" | "before-activate",
 			sessionId: string,
 			old: RunnerChild,
 			replacement: RunnerChild,
@@ -2339,7 +2339,7 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 						);
 						if (!retired) return false;
 						yield* pauseSwap("after-prepare", sessionId, old, replacement);
-						return yield* lock.withPermits(1)(
+						const promoted = yield* lock.withPermits(1)(
 							Effect.gen(function* () {
 								if (
 									expectedActivity !== old.upgrade.activity ||
@@ -2356,9 +2356,10 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								});
 								committed = true;
 								yield* pauseSwap("after-commit", sessionId, old, replacement);
+								// Promote's memory part: R's grant live and the session routed to R
+								// before any dispatch takes the lock (6.9).
 								Entry.transition(replacement, { _tag: "Promote" });
 								Entry.touch(replacement);
-								replacement.connection?.write({ type: "upgrade-activate" });
 								yield* stops.adoptEntry(replacement, "live");
 								yield* observeProcess(sessionId, replacement).pipe(
 									Effect.catchCause((cause) =>
@@ -2368,10 +2369,16 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 										),
 									),
 								);
-								upgradeMark(sessionId, old, "switched", replacement);
 								return true;
 							}),
 						);
+						if (!promoted) return false;
+						// After the release (6.9): a send may reach R first, and any command
+						// but a shutdown activates a Candidate host.
+						yield* pauseSwap("before-activate", sessionId, old, replacement);
+						replacement.connection?.write({ type: "upgrade-activate" });
+						upgradeMark(sessionId, old, "switched", replacement);
+						return true;
 					}).pipe(
 						// The promote closes old's entry scope as any stop's post-commit
 						// step does, after upgrade-activate and the switched mark (6.9).

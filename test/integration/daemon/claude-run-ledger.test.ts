@@ -13,6 +13,7 @@
 // 52. one wake reports two turn_endeds;
 // 53. a wake's label is not its runner's querySeq;
 // and the send's transcript changes, or its Run ends other than once.
+import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -369,6 +370,111 @@ describe("Claude on the Run Ledger", () => {
 			replacement,
 			heldRun,
 			facts,
+			ends: ledger.ends,
+			runs: ledger.runs,
+		});
+	});
+	it("runs a send that reaches R before upgrade-activate as serving, with changed settings", async () => {
+		const { fixture, browser } = await start({ buildId: OLD_BUILD });
+		// Project instructions make a settings replay impossible, as in any real repository.
+		writeFileSync(join(fixture.projectDir, "CLAUDE.md"), "Project rules.\n");
+		const settings = join(fixture.root, "claude/settings.json");
+		writeFileSync(settings, JSON.stringify({ autoCompactEnabled: false }));
+		const sessionId = await browser.createSession("Claude ledger early send");
+		await browser.send(sessionId, "claude-ledger-before-early-send");
+		const old = runnerOf(read(fixture, sessionId));
+		await fixture.kill();
+		// Hold the swap after the lock's release, before upgrade-activate (6.9).
+		const gate = join(
+			fixture.root,
+			"conduit-test-hold-runner-swap-before-activate",
+		);
+		writeFileSync(gate, "pause");
+		await fixture.restart({
+			buildId: NEW_BUILD,
+			serviceEnvironment: { CONDUIT_TEST_RUNNER_SWAP_PAUSE: "before-activate" },
+		});
+		const after = await fixture.connect(sessionId);
+		const paused = await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-swap-paused" && mark.sessionId === sessionId,
+		);
+		if (paused.kind !== "runner-swap-paused") throw new Error("no swap pause");
+		// AI3: the database's serving row names R alone once the commit lands.
+		const serving = () =>
+			read(fixture, sessionId)
+				.runners.filter(
+					(runner) => runner.role === "serving" && runner.retiredAt === null,
+				)
+				.map((runner) => runner.runnerId);
+		expect(serving()).toEqual([paused.newRunnerId]);
+		// The user changes settings that cannot be replayed while R is still a Candidate.
+		writeFileSync(settings, JSON.stringify({ autoCompactEnabled: true }));
+		// A stopped send ends R's warm query, so the next send prepares a new one on R.
+		const stall = "stall-before-activate";
+		const stalled = after.send(sessionId, stall).catch(() => undefined);
+		await fixture.waitForMark(
+			(mark) => mark.kind === "enqueue" && mark.prompt === stall,
+		);
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		await stalled;
+		const prompt = "claude-ledger-before-activate";
+		// The whole send completes while upgrade-activate is still held.
+		expect((await after.send(sessionId, prompt)).chunks.join("")).toBe(
+			responseChunks(prompt).join(""),
+		);
+		const enqueued = fixture.marks.find(
+			(mark) => mark.kind === "enqueue" && mark.prompt === prompt,
+		);
+		const query = fixture.marks.find(
+			(mark) =>
+				mark.kind === "query" &&
+				enqueued?.kind === "enqueue" &&
+				mark.queryId === enqueued.queryId,
+		);
+		if (query?.kind !== "query") throw new Error("no query for the send");
+		// A new query on R that read the changed files natively, as a serving runner does.
+		expect(query.pid).toBe(paused.newPid);
+		expect(JSON.parse(query.effectiveSettingsJson)).toMatchObject({
+			autoCompactEnabled: true,
+		});
+		expect(
+			fixture.marks.some(
+				(mark) => mark.kind === "runner-upgrade" && mark.phase === "switched",
+			),
+		).toBe(false);
+		rmSync(gate);
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-upgrade" &&
+				mark.phase === "switched" &&
+				mark.sessionId === sessionId,
+		);
+		const ledger = read(fixture, sessionId);
+		expect(ledger.runs).toHaveLength(3);
+		// Each Run, the stopped one included, ends in the ledger exactly once.
+		expect(
+			ledger.ends
+				.map((end) => end.runId)
+				.filter((runId) => ledger.runs.some((run) => run.id === runId))
+				.sort(),
+		).toEqual(ledger.runs.map((run) => run.id).sort());
+		expect(serving()).toEqual([paused.newRunnerId]);
+		const early = ledger.runs[2]?.id;
+		const dispatched = ledger.facts.find(
+			(fact) => fact.runId === early && fact.kind === "run_dispatched",
+		);
+		expect(dispatched?.runnerId).toBe(paused.newRunnerId);
+		proofs.push({
+			case: "send-before-upgrade-activate",
+			sessionId,
+			old,
+			replacement: paused.newRunnerId,
+			dispatched,
 			ends: ledger.ends,
 			runs: ledger.runs,
 		});

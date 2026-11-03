@@ -132,7 +132,7 @@ for (const { name, mode } of [
 		mode: "role-reservation",
 	},
 	{
-		name: "activates a candidate without resetting its role on hello or cancel",
+		name: "activates a candidate on a command, not on hello or cancel",
 		mode: "role-candidate",
 	},
 	{
@@ -809,13 +809,10 @@ for (const { name, mode } of [
 						if (mode === "role-candidate") {
 							expect(callbacks.isCandidate()).toBe(true);
 							client.write({ type: "upgrade-cancel" });
-							yield* client.commandEffect("candidate-barrier", {
-								type: "apply-live-settings",
-								sessionId: "session-1",
-								settings: {},
-							});
+							yield* client.commandStatusEffect("candidate-barrier");
 							expect(callbacks.isCandidate()).toBe(true);
-							client.write({ type: "upgrade-activate" });
+							// Any command but a shutdown or the swap's pre-warm means the
+							// swap committed, so it activates the Candidate (CONTRACT 2507-2511).
 							yield* client.commandEffect("activation-barrier", {
 								type: "apply-live-settings",
 								sessionId: "session-1",

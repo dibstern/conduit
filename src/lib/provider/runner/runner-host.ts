@@ -51,7 +51,8 @@ export function decideRunnerRole(
 				readonly revision: string;
 				readonly quiescent: boolean;
 		  }
-		| { readonly _tag: "Cancel" | "Activate" | "Command" | "Hello" },
+		| { readonly _tag: "Command"; readonly activates: boolean }
+		| { readonly _tag: "Cancel" | "Activate" | "Hello" },
 ): RunnerRole {
 	switch (event._tag) {
 		case "Retire":
@@ -60,8 +61,13 @@ export function decideRunnerRole(
 				: role;
 		case "Activate":
 			return role._tag === "Candidate" ? { _tag: "Serving" } : role;
-		case "Cancel":
 		case "Command":
+			// Only the serving row's runner is held a send, so a command reaching
+			// a Candidate means its swap committed (CONTRACT 2507-2511).
+			if (role._tag === "Candidate")
+				return event.activates ? { _tag: "Serving" } : role;
+			return role._tag === "Reserved" ? { _tag: "Serving" } : role;
+		case "Cancel":
 		case "Hello":
 			return role._tag === "Reserved" ? { _tag: "Serving" } : role;
 	}
@@ -881,7 +887,13 @@ export const runSessionRunner = (
 						if (command.type === "end-session") exiting = true;
 						// Retirement is a reservation until the server commits its route.
 						// A command selected on the old route cancels it without waiting.
-						role = decideRunnerRole(role, { _tag: "Command" });
+						// The swap's own pre-warm reaches the Candidate before its commit, so
+						// only a shutdown and it leave the role (nearest reading of 2507-2511).
+						role = decideRunnerRole(role, {
+							_tag: "Command",
+							activates:
+								command.type !== "shutdown" && command.type !== "pre-warm",
+						});
 						// A send's frame id is its Send Token, unique per transmission (4.9, 4.11).
 						const token = message.commandId as SendToken;
 						const existing = commands.get(message.commandId);

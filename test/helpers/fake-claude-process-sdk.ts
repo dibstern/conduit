@@ -265,7 +265,7 @@ export type ProcessMark =
 	  }
 	| {
 			kind: "runner-swap-paused";
-			phase: "after-prepare" | "after-commit";
+			phase: "after-prepare" | "after-commit" | "before-activate";
 			sessionId: string;
 			oldRunnerId: string;
 			oldPid: number;
