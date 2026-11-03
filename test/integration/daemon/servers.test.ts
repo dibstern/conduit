@@ -18,7 +18,9 @@
 // process on a declared port inherits the declaration; an unmarked declared server vanishes while
 // it listens; an awaited server leaves the row idle or a serving one makes it read working; an
 // unmarked server one session declared is recorded for another that the store reads first; with
-// several projects loaded, a mark reaches only the last project's watcher, or none once one closes.
+// several projects loaded, a mark reaches only the last project's watcher, or none once one closes;
+// an unmarked server a session in one project declared, or a server its OpenCode shell started, is
+// recorded for a session in another.
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -115,6 +117,28 @@ const alive = (pid: number) => {
 	} catch {
 		return false;
 	}
+};
+
+// A server orphaned through a shell that exits, so its ancestry carries only `markers`: by
+// default no session's marker.
+const unmarkedServer = async (markers: NodeJS.ProcessEnv = {}) => {
+	const env: NodeJS.ProcessEnv = { ...process.env, SERVER };
+	delete env["CONDUIT_SESSION_ID"];
+	delete env["CODEX_THREAD_ID"];
+	delete env["CONDUIT_OPENCODE_SESSION_ID"];
+	const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
+		env: { ...env, ...markers },
+		stdio: ["ignore", "pipe", "inherit"],
+	});
+	const [line] = await Promise.all([
+		once(createInterface({ input: launcher.stdout }), "line"),
+		once(launcher, "exit"),
+	]);
+	const server: { pid: number; port: number } = JSON.parse(String(line));
+	onTestFinished(() => {
+		if (alive(server.pid)) process.kill(server.pid, "SIGKILL");
+	});
+	return server;
 };
 
 afterEach(async () => {
@@ -717,12 +741,14 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 			);
 		});
 	});
-	const rejections = {
-		dead: await mark(sessionId, String(free), "--awaited"),
-		other: await mark(otherId, String(first.port), "--awaited"),
-		outside: await mark(undefined, String(first.port), "--awaited"),
+	// Concurrent, so the awaited mark below lands well inside the hold on a loaded machine: each
+	// CLI run is a cold start, and none of these records anything.
+	const [dead, other, outside, browserRefusal] = await Promise.all([
+		mark(sessionId, String(free), "--awaited"),
+		mark(otherId, String(first.port), "--awaited"),
+		mark(undefined, String(first.port), "--awaited"),
 		// A browser naming the server's own pid, which resolves to the session, is still refused.
-		browser: await Effect.runPromise(
+		Effect.runPromise(
 			browser.rpc
 				.MarkServer({ pid: first.pid, port: first.port, role: "awaited" })
 				.pipe(
@@ -730,7 +756,8 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 					Effect.map(({ message }) => message),
 				),
 		),
-	};
+	]);
+	const rejections = { dead, other, outside, browser: browserRefusal };
 	expect(rejections.dead).toMatchObject({ code: 1 });
 	expect(rejections.dead.stderr).toContain(
 		`Nothing is listening on port ${free}`,
@@ -790,26 +817,6 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		attention: "idle",
 	});
 
-	// A server orphaned through a shell that exits, so no session's marker is in its ancestry.
-	const unmarkedServer = async () => {
-		const env: NodeJS.ProcessEnv = { ...process.env, SERVER };
-		delete env["CONDUIT_SESSION_ID"];
-		delete env["CODEX_THREAD_ID"];
-		delete env["CONDUIT_OPENCODE_SESSION_ID"];
-		const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
-			env,
-			stdio: ["ignore", "pipe", "inherit"],
-		});
-		const [line] = await Promise.all([
-			once(createInterface({ input: launcher.stdout }), "line"),
-			once(launcher, "exit"),
-		]);
-		const server: { pid: number; port: number } = JSON.parse(String(line));
-		onTestFinished(() => {
-			if (alive(server.pid)) process.kill(server.pid, "SIGKILL");
-		});
-		return server;
-	};
 	// A new process on the port starts detected, after its own hold.
 	cursor = browser.frames.length;
 	process.kill(first.pid, "SIGTERM");
@@ -946,9 +953,15 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 	]);
 });
 
-it("with two projects loaded, each project's session marks its server, and removing one project leaves the other's marks working", async () => {
+it("with two projects loaded, each project's session marks its server, an unmarked server one project's session declared or its OpenCode shell started is refused to the other's, and removing one project leaves the other's marks working", async () => {
 	harness = ProcessHarness.create({ logLevel: "warn" });
-	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	// A hold no test outlives: a marker-attributed server is never recorded by a scan here.
+	await harness.restart({
+		serviceEnvironment: {
+			...ENVIRONMENT,
+			CONDUIT_PORT_WATCH_HOLD_MS: "600000",
+		},
+	});
 	const configDir = harness.configDir;
 	const first = await harness.connect();
 	const { savedSlug } = await Effect.runPromise(
@@ -962,6 +975,41 @@ it("with two projects loaded, each project's session marks its server, and remov
 	const secondId = await second.createSession("Second");
 	const firstServer = await startAgent(firstId);
 	const secondServer = await startAgent(secondId);
+	const serverSeen = (pid: number) => {
+		const db = new Database(harness?.daemonStorePath() ?? "", {
+			readonly: true,
+		});
+		const rows = db
+			.prepare<[number], { session_id: string; data: string }>(
+				"SELECT session_id, data FROM events WHERE type = 'evidence.server_seen' AND json_extract(data, '$.server.pid') = ? ORDER BY sequence",
+			)
+			.all(pid)
+			.map(({ session_id, data }) => ({
+				session: session_id === firstId ? "first" : "second",
+				source: JSON.parse(data).source,
+			}));
+		db.close();
+		return rows;
+	};
+	// The first session's provider binding, as a managed OpenCode shell carries it.
+	const identity = (() => {
+		const db = new Database(harness?.daemonStorePath() ?? "", {
+			readonly: true,
+		});
+		const row = db
+			.prepare<[string], { provider: string; sid: string }>(
+				`SELECT COALESCE(binding.provider, session.provider) AS provider,
+					COALESCE(binding.provider_sid, session.provider_sid, session.id) AS sid
+				FROM sessions AS session
+				LEFT JOIN session_providers AS binding ON binding.id = (
+					SELECT id FROM session_providers WHERE session_id = session.id AND status = 'active'
+					ORDER BY activated_at DESC, id DESC LIMIT 1)
+				WHERE session.id = ?`,
+			)
+			.get(firstId);
+		db.close();
+		return row ?? expect.fail("the first session has no row");
+	})();
 	const marks = {
 		first: await cliMark(
 			configDir,
@@ -975,6 +1023,44 @@ it("with two projects loaded, each project's session marks its server, and remov
 			String(secondServer.port),
 			"--awaited",
 		),
+		// An unmarked server the first project's session declared is refused to the second's.
+		contested: await unmarkedServer().then(async (server) => ({
+			server,
+			owner: await cliMark(
+				configDir,
+				firstId,
+				String(server.port),
+				"--serving",
+			),
+			other: await cliMark(
+				configDir,
+				secondId,
+				String(server.port),
+				"--serving",
+			),
+			evidence: serverSeen(server.pid),
+		})),
+		// A server the first session's OpenCode shell started, still in its hold, is refused to the
+		// second project's session and declared by its own.
+		opencode: await unmarkedServer({
+			CONDUIT_OPENCODE_INSTANCE_ID: identity.provider,
+			CONDUIT_OPENCODE_SESSION_ID: identity.sid,
+		}).then(async (server) => ({
+			server,
+			other: await cliMark(
+				configDir,
+				secondId,
+				String(server.port),
+				"--serving",
+			),
+			owner: await cliMark(
+				configDir,
+				firstId,
+				String(server.port),
+				"--serving",
+			),
+			evidence: serverSeen(server.pid),
+		})),
 		removed: await Effect.runPromise(
 			first.rpc.RemoveProject({ slug: savedSlug }),
 		).then(() =>
@@ -984,7 +1070,7 @@ it("with two projects loaded, each project's session marks its server, and remov
 	mkdirSync(ARTIFACT_DIR, { recursive: true });
 	writeFileSync(
 		`${ARTIFACT_DIR}/server-mark-projects.json`,
-		JSON.stringify({ savedSlug, firstId, secondId, marks }, null, 2),
+		JSON.stringify({ savedSlug, firstId, secondId, identity, marks }, null, 2),
 	);
 	expect(marks).toEqual({
 		first: expect.objectContaining({
@@ -999,6 +1085,28 @@ it("with two projects loaded, each project's session marks its server, and remov
 				`Marked port ${secondServer.port} as awaited`,
 			),
 		}),
+		contested: {
+			server: marks.contested.server,
+			owner: expect.objectContaining({ code: 0 }),
+			other: expect.objectContaining({
+				code: 1,
+				stderr: expect.stringContaining(
+					`Port ${marks.contested.server.port} belongs to another session`,
+				),
+			}),
+			evidence: [{ session: "first", source: "declared" }],
+		},
+		opencode: {
+			server: marks.opencode.server,
+			other: expect.objectContaining({
+				code: 1,
+				stderr: expect.stringContaining(
+					`Port ${marks.opencode.server.port} belongs to another session`,
+				),
+			}),
+			owner: expect.objectContaining({ code: 0 }),
+			evidence: [{ session: "first", source: "declared" }],
+		},
 		removed: expect.objectContaining({
 			code: 0,
 			stdout: expect.stringContaining(
