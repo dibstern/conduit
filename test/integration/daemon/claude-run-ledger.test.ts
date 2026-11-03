@@ -21,6 +21,10 @@
 // 95. that runner reports its start twice, or after its first send's first frame;
 // 96. a wake whose result is an SDK error ends completed, its error never reaching its Run;
 // 97. that failed wake's result ends a user Run, or folds twice;
+// 90. a wake that took a merged steer reports no turn_ended, or two, once stopped;
+// 91. that wake's work ends forced, by the ledger stop deadline's alarm;
+// 92. the steer's Run ends twice or not at all;
+// 93. the Stop's interrupt fails the replay (an unrecorded interrupt) instead of ending the turn;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
 import {
@@ -804,6 +808,153 @@ describe("Claude on the Run Ledger", () => {
 			ends: ledger.ends,
 			runs: ledger.runs,
 			types: ledger.events.map((event) => event.type),
+		});
+	});
+	it("ends a wake that took a merged steer and is then stopped at its first clear, not forced", async () => {
+		// A test-made variant of background-shell-turn: command frames for the first input,
+		// the steer queued and started inside the wake (after line 89), and a recorded
+		// interrupt that names the steer, from stop-with-steer-pending's lines 28-30.
+		const traces = join(
+			import.meta.dirname,
+			"../../fixtures/claude-sdk-traces",
+		);
+		const shell = readFileSync(
+			join(traces, "background-shell-turn.jsonl"),
+			"utf8",
+		)
+			.split("\n")
+			.filter((line) => line.trim() !== "");
+		const stopped = readFileSync(
+			join(traces, "stop-with-steer-pending.jsonl"),
+			"utf8",
+		)
+			.split("\n")
+			.slice(27, 30);
+		const nativeSession = "cbaaf0cc-998e-4144-afef-e7bf0042615b";
+		const [first, steer] = [randomUUID(), randomUUID()];
+		const command = (commandId: string, state: string) =>
+			JSON.stringify({
+				type: "command_lifecycle",
+				command_uuid: commandId,
+				state,
+				uuid: randomUUID(),
+				session_id: nativeSession,
+			});
+		const result = JSON.stringify({
+			...JSON.parse(shell[83] ?? "{}"),
+			user_message_uuid: first,
+			user_message_uuids: [first],
+		});
+		const interrupt = stopped.map((line) =>
+			line
+				.replaceAll("f186b7cd-6f1a-468c-9871-349c497272d0", nativeSession)
+				.replaceAll("a565acb8-fa93-4d55-bafb-9b9417677be7", steer)
+				.replace(
+					"[Request interrupted by user for tool use]",
+					"[Request interrupted by user]",
+				),
+		);
+		const variant = [
+			...shell.slice(0, 6),
+			command(first, "queued"),
+			command(first, "started"),
+			...shell.slice(6, 83),
+			result,
+			command(first, "completed"),
+			...shell.slice(84, 89),
+			command(steer, "queued"),
+			command(steer, "started"),
+			...shell.slice(89, 141),
+			...interrupt,
+		];
+		const replay = { turns: ["background-shell-turn"] as const, tracesDir: "" };
+		harness = ProcessHarness.create({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+			claudeReplay: replay,
+		});
+		const fixture = harness;
+		replay.tracesDir = join(fixture.root, "traces");
+		mkdirSync(replay.tracesDir);
+		writeFileSync(
+			join(replay.tracesDir, "background-shell-turn.jsonl"),
+			variant.join("\n"),
+		);
+		await fixture.restart();
+		const browser = await fixture.connect();
+		await browser.setAutoSettle(null);
+		const sessionId = await browser.createSession(
+			"Claude ledger wake steer stop",
+		);
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		const types = () => read(fixture, sessionId).events.map(({ type }) => type);
+		// test-waits-allow polling: a wake has no send, so the browser awaits no frame for it.
+		await vi.waitFor(() => expect(types()).toContain("evidence.turn_started"), {
+			timeout: 10_000,
+		});
+		// The wake is in flight and the replay waits for the steer at its queued frame.
+		const steered = browser.send(
+			sessionId,
+			"and then stop",
+			undefined,
+			"steer",
+		);
+		// The replay then waits at its recorded interrupt for the Stop.
+		// test-waits-allow polling: the steer's start reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(types().filter((type) => type === "run.started")).toHaveLength(
+					2,
+				),
+			{ timeout: 10_000 },
+		);
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		await steered;
+		// test-waits-allow polling: the wake's end reaches only the store.
+		await vi.waitFor(() => expect(types()).toContain("evidence.turn_ended"), {
+			timeout: 10_000,
+		});
+		const ledger = read(fixture, sessionId);
+		const turns = ledger.events.filter((event) =>
+			event.type.startsWith("evidence.turn_"),
+		);
+		expect(turns.map(({ type }) => type)).toEqual([
+			"evidence.turn_started",
+			"evidence.turn_ended",
+		]);
+		// The steer's Run is active, so the Stop interrupts it as any Run (CONTRACT.md 983-984);
+		// 6486's "disposed" is read as that Stop, the wake still ending at its own first clear.
+		const stop = ledger.events.find(
+			(event) => event.type === "interrupt.requested",
+		);
+		expect(turns[1]?.sequence).toBeGreaterThan(
+			stop?.sequence ?? Number.POSITIVE_INFINITY,
+		);
+		// The recorded interrupt answered the Stop; the replay did not fail it.
+		expect(ledger.events.some((event) => event.type === "turn.error")).toBe(
+			false,
+		);
+		// The wake's work ends at its turn_ended, not forced by the ledger stop deadline's alarm.
+		const wakeEnds = ledger.ends.filter(
+			(end) => !ledger.runs.some((run) => run.id === end.runId),
+		);
+		expect(wakeEnds).toHaveLength(1);
+		expect(wakeEnds[0]?.forced).not.toBe(1);
+		// Each send's Run, the steer's included, ends exactly once.
+		expect(ledger.runs).toHaveLength(2);
+		for (const run of ledger.runs)
+			expect(ledger.ends.filter((end) => end.runId === run.id)).toHaveLength(1);
+		proofs.push({
+			case: "wake-steer-stopped",
+			sessionId,
+			turns,
+			ends: ledger.ends,
+			runs: ledger.runs,
+			types: ledger.events.map(({ type }) => type),
 		});
 	});
 });
