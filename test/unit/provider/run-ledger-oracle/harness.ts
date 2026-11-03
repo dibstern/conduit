@@ -343,7 +343,11 @@ export class TraceDriver {
 		) {
 			const retry = { ...held };
 			this.host.issued([retry]);
+			const before = this.wireBindings.length;
 			this.bound(retry);
+			// A gated retry binds no wire send, so the host numbered this transmission past binding
+			// order (a steer re-held as its Run's start keeps the steer's count, 4.11); stop, do not spin.
+			if (this.wireBindings.length === before) return;
 		}
 	}
 	get bindings(): readonly {
