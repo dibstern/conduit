@@ -19,9 +19,17 @@
 // 94. a draft pre-warm's runner never reports its start once CreateSession stores its session,
 //     so the ledger refuses every labelled fact it sends;
 // 95. that runner reports its start twice, or after its first send's first frame;
+// 96. a wake whose result is an SDK error ends completed, its error never reaching its Run;
+// 97. that failed wake's result ends a user Run, or folds twice;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -728,6 +736,74 @@ describe("Claude on the Run Ledger", () => {
 			evidence: processEvidence(ledger),
 			ends: ledger.ends,
 			runs: ledger.runs,
+		});
+	});
+	it("ends a wake whose result is an SDK error with that error, not completed", async () => {
+		// The wake's result (trace line 153) fails as the SDK wraps an upstream error.
+		const traces = join(
+			import.meta.dirname,
+			"../../fixtures/claude-sdk-traces",
+		);
+		const variant = readFileSync(
+			join(traces, "background-shell-turn.jsonl"),
+			"utf8",
+		)
+			.trimEnd()
+			.split("\n")
+			.map((line, index) =>
+				index === 152
+					? JSON.stringify({
+							...JSON.parse(line),
+							is_error: true,
+							result: "API Error: 529 overloaded",
+						})
+					: line,
+			);
+		const replay = {
+			turns: ["background-shell-turn"] as const,
+			tracesDir: "",
+		};
+		harness = ProcessHarness.create({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			restartProof: true,
+			claudeReplay: replay,
+		});
+		const fixture = harness;
+		replay.tracesDir = join(fixture.root, "traces");
+		mkdirSync(replay.tracesDir);
+		writeFileSync(
+			join(replay.tracesDir, "background-shell-turn.jsonl"),
+			variant.join("\n"),
+		);
+		await fixture.restart();
+		const browser = await fixture.connect();
+		await browser.setAutoSettle(null);
+		const sessionId = await browser.createSession("Claude ledger wake error");
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		// test-waits-allow polling: a wake has no send, so the browser awaits no frame for it.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.filter(
+						(event) => event.type === "evidence.turn_ended",
+					),
+				).toHaveLength(1),
+			{ timeout: 10_000 },
+		);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const wakeEnds = ledger.ends.filter(
+			(end) => !ledger.runs.some((run) => run.id === end.runId),
+		);
+		expect(wakeEnds).toEqual([
+			expect.objectContaining({ reason: "provider_error", forced: null }),
+		]);
+		proofs.push({
+			case: "wake-error-result",
+			sessionId,
+			ends: ledger.ends,
+			runs: ledger.runs,
+			types: ledger.events.map((event) => event.type),
 		});
 	});
 });
