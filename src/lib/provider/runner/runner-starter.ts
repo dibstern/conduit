@@ -267,11 +267,12 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 		const instanceScope = yield* Effect.scope;
 		// The entry scope's send finalizer (6.11). A run its runner still holds
 		// keeps its send until its release requeues it or Settle ends it (G6).
+		// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 		const closeSends = (runnerId: string) =>
 			sql
 				? sql<{
 						id: string;
-					}>`SELECT id FROM provider_runs WHERE runner_id = ${runnerId} AND held_transmission IS NOT NULL AND status IN ('pending', 'running')`.pipe(
+					}>`SELECT run.id FROM provider_runs run JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running')`.pipe(
 						Effect.flatMap((held) =>
 							sends.closeRunner(
 								runnerId,
@@ -1238,7 +1239,8 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									if (key) legacySendKeys.set(currentSendToken(row), key);
 								}
 							}
-							// A main-built runner's replay settles its held sends too (C 7.4).
+							// A main-built runner's replay settles its held sends too (C 7.4). A joined
+							// steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 							if (sql && !identityOnly) {
 								const held = yield* sql<{
 									run_id: string;
@@ -1250,8 +1252,9 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									command.attempt_count, run.held_transmission AS transmission
 									FROM provider_runs run JOIN provider_command_outbox command
 									ON command.run_id = run.id AND command.session_id = run.session_id
+									JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
 									WHERE run.session_id = ${sessionId} AND run.runner_id = ${entry.runnerId}
-									AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running')
+									AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running')
 									AND command.effect_type = 'send_turn'`;
 								for (const row of held)
 									recoveredSendRefs.set(

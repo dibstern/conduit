@@ -1246,6 +1246,67 @@ for (const transmission of ["unheld", "held"] as const)
 			),
 	);
 
+// A joined steer's own row reads `joined`, but its hold stays while its owner's Run is open,
+// so adoption settles its finished journal answer like any held send (CONTRACT 2021-2025, 4.9, 7.2).
+// How it could fail: recovery reads only pending or running rows, so the answer is skipped and the
+// steer stays held on the adopted runner forever; or the steer's outcome ends its owner's Run.
+for (const retryable of [true, false])
+	it.effect(
+		`adoption settles a joined steer's finished ${retryable ? "retryable" : "permanent"} failure and leaves its owner's Run open`,
+		() =>
+			runRetirement(
+				Effect.gen(function* () {
+					const f = yield* s7Fixture("claude");
+					yield* f.seed("head", 1, 1, "held");
+					yield* f.seed("steer", 2, 1, "held");
+					yield* f.sql`UPDATE provider_runs SET joined_into = 'run:head', status = 'joined' WHERE id = 'run:steer'`;
+					yield* f.hello((hello) => ({
+						...journalHello("head", undefined, undefined, "running")(hello),
+						sendAnswers: [
+							{ token: sendToken("hold", "head", 1), status: "running" },
+							{
+								token: sendToken("hold", "steer", 1),
+								status: "finished",
+								failure: {
+									operation: "send-turn",
+									code: "temporary",
+									message: "steer failed",
+									retryable,
+								},
+							},
+						],
+					}));
+					const sent: string[] = [];
+					f.replaySend.execute = (_id, command) =>
+						Effect.sync(() => {
+							sent.push(command.input.inputId);
+							return terminalResult("joined");
+						});
+					yield* f.recover;
+					yield* TestClock.adjust("2 seconds");
+					// The retryable steer is its own Run's next transmission; the permanent one fails.
+					expect(
+						yield* f.sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'steer'`,
+					).toEqual([
+						retryable
+							? { status: "running", error_code: null }
+							: { status: "failed", error_code: "temporary" },
+					]);
+					expect(sent).toEqual(retryable ? ["steer"] : []);
+					expect(
+						yield* f.sql`SELECT json_extract(data, '$.transmission') AS n FROM events
+							WHERE type = 'run.dispatched' AND json_extract(data, '$.runId') = 'run:steer' ORDER BY sequence`,
+					).toEqual(retryable ? [{ n: 1 }, { n: 2 }] : [{ n: 1 }]);
+					expect(
+						yield* f.sql`SELECT id, status FROM provider_runs WHERE id IN ('run:head', 'run:steer') ORDER BY id`,
+					).toEqual([
+						{ id: "run:head", status: "pending" },
+						{ id: "run:steer", status: "joined" },
+					]);
+				}),
+			),
+	);
+
 for (const refusal of [false, true])
 	it.effect(
 		`F73 restart after release prepares fresh mode once and ${refusal ? "fails a fresh refusal visibly" : "completes"}`,

@@ -462,6 +462,7 @@ export const makeRunnerRunLifecycle = (
 						const committed = yield* stop;
 						if (committed._tag !== "Requested")
 							return { stop: committed, released };
+						// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 						const held = yield* sql<{
 							session_id: string;
 							id: string;
@@ -475,7 +476,8 @@ export const makeRunnerRunLifecycle = (
 									AND json_extract(dispatched.data, '$.transmission') = run.held_transmission
 									ORDER BY dispatched.sequence DESC LIMIT 1) AS command_id
 							FROM provider_runs run LEFT JOIN sessions session ON session.id = run.session_id
-							WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running'))
+							JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
+							WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running'))
 							WHERE command_id IS NOT NULL`;
 						const providers = new Map<string, string>();
 						for (const row of held) {
@@ -820,6 +822,7 @@ export const makeRunnerStopReconciler = (options: {
 				});
 			});
 		};
+		// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 		const heldCommands = (
 			sql: SqlClient.SqlClient,
 			retirement: Pick<StopTarget, "runnerId" | "sessionId">,
@@ -834,7 +837,7 @@ export const makeRunnerStopReconciler = (options: {
 				run_id: string;
 				payload_json: string;
 				transmission: number;
-			}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running')`;
+			}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running')`;
 		/** Settle's journal read (7.3), typed Absent, Present or Unreadable. */
 		const readJournal = (
 			settlement: NonNullable<typeof options.settlement>,
