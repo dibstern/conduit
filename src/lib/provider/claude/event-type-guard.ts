@@ -254,14 +254,8 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Run Ledger evidence: the outbox writer of the effect's outcome",
 	},
-	"evidence.turn_started": {
-		produced: false,
-		reason: "Run Ledger evidence: a Claude wake's start, landed with 32.6",
-	},
-	"evidence.turn_ended": {
-		produced: false,
-		reason: "Run Ledger evidence: a Claude wake's end, landed with 32.6",
-	},
+	"evidence.turn_started": { produced: true },
+	"evidence.turn_ended": { produced: true },
 	"evidence.hold_exhausted": {
 		produced: false,
 		reason: "Run Ledger evidence: holdRun's cap, a runner write",

@@ -5,11 +5,11 @@ import { Deferred, Effect, Semaphore } from "effect";
 import { DEFAULT_AUTO_SETTLE_AFTER_DAYS } from "../../daemon/config-persistence.js";
 import { observeTurnTimelineFrame } from "../../domain/daemon/Services/turn-timeline.js";
 import * as Failure from "../../effect/failure-classification.js";
+import { isRecord } from "../../utils.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import { isLegacyRunner } from "./runner-legacy-classification.js";
 import {
 	RUNNER_PROTOCOL_VERSION,
-	type RunnerHello,
 	type RunnerMessage,
 	RunnerSocket,
 	type RunnerWireCodec,
@@ -75,7 +75,7 @@ export const connectRunner = (options: {
 		sessionId: string,
 	) => Effect.Effect<SessionOutputReply, SessionFailure>;
 	readonly onHello: (
-		hello: RunnerHello,
+		hello: Extract<RunnerMessage, { readonly type: "hello" }>,
 		connection: RunnerSocket,
 		replay?: Effect.Effect<void, SessionFailure>,
 	) => Effect.Effect<void, SessionFailure>;
@@ -471,8 +471,27 @@ export const connectRunner = (options: {
 												}
 											},
 										};
+										// 2.1 row 215: a wake's evidence is labelled by its runner and the
+										// querySeq the host stamped on its frame (6.1).
+										const output =
+											message.output.type === "event" &&
+											(message.output.event.type === "evidence.turn_started" ||
+												message.output.event.type === "evidence.turn_ended")
+												? {
+														...message.output,
+														event: {
+															...message.output.event,
+															data: {
+																...(isRecord(message.output.event.data)
+																	? message.output.event.data
+																	: {}),
+																label: `${options.runnerId}:${message.querySeq ?? 0}`,
+															},
+														},
+													}
+												: message.output;
 										const result = yield* options
-											.emit(message.output, options.sessionId)
+											.emit(output, options.sessionId)
 											.pipe(
 												Effect.provideService(
 													currentRunnerOutput,

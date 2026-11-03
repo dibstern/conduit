@@ -503,6 +503,7 @@ export const makeProcessSessionRunner = (
 			failBoundSend,
 			ingestionForSession,
 			wakeReactor,
+			sessionCommit,
 		});
 		// Starter's acknowledge loop is forked above, so shutdown runs while it is alive.
 		yield* Effect.addFinalizer(() =>

@@ -106,23 +106,28 @@ function comparable(
 		return ids.get(id) ?? id;
 	};
 	return JSON.parse(
-		JSON.stringify(events, (key, value: unknown) => {
-			if (
-				/^(createdAt|startedAt|completedAt|timestamp|duration|durationMs)$/.test(
-					key,
+		// A restart's reattach reports its runner's start (CONTRACT 6.1), which this
+		// parity leaves to test/integration/daemon/claude-run-ledger.test.ts.
+		JSON.stringify(
+			events.filter(({ type }) => type !== "evidence.process_started"),
+			(key, value: unknown) => {
+				if (
+					/^(createdAt|startedAt|completedAt|timestamp|duration|durationMs)$/.test(
+						key,
+					)
 				)
-			)
-				return "<clock>";
-			if (typeof value !== "string") return value;
-			// run.dispatched names its holder, a per-process runner id.
-			if (key === "runnerId") return alias(value);
-			return value
-				.replaceAll(root, "<root>")
-				.replace(
-					/ses_[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
-					alias,
-				);
-		}),
+					return "<clock>";
+				if (typeof value !== "string") return value;
+				// run.dispatched names its holder, a per-process runner id.
+				if (key === "runnerId") return alias(value);
+				return value
+					.replaceAll(root, "<root>")
+					.replace(
+						/ses_[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+						alias,
+					);
+			},
+		),
 	) as unknown;
 }
 

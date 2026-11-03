@@ -25,7 +25,12 @@ export type StopReason =
 	  }
 	// A restart's orphan ends the native session too, but no user asked (6.3).
 	| { readonly _tag: "EndSession"; readonly orphan?: true }
-	| { readonly _tag: "Superseded"; readonly successor: string };
+	| {
+			readonly _tag: "Superseded";
+			readonly successor: string;
+			/** The successor's hello querySeq, its process_started label (6.1). */
+			readonly successorQuerySeq?: number;
+	  };
 export interface RunnerRow {
 	readonly runnerId: string;
 	readonly sessionId: string;
@@ -184,10 +189,11 @@ export type StopCommit =
 			/** The session's rows as the committing transaction left them. */
 			readonly session: readonly RunnerRow[];
 			/**
-			 * The loss of each runner this commit first retired (6.5). Its caller
-			 * appends them in the same transaction, after any releases it makes.
+			 * The loss of each runner this commit first retired (6.5), then a swap's
+			 * successor start (6.9). Its caller appends them in the same transaction,
+			 * after any releases it makes.
 			 */
-			readonly lost: readonly CanonicalEvent[];
+			readonly evidence: readonly CanonicalEvent[];
 	  }
 	| { readonly _tag: "Ignored" };
 
@@ -446,6 +452,31 @@ export const makeRunnerReceiptStore = (
 					),
 				),
 			);
+		// 6.1: a serving runner's start, labelled with its hello's querySeq, for a
+		// live runner whose session has a project, as processLost reads its loss.
+		const processStarted = (
+			runnerId: string,
+			querySeq: number,
+			reattached: boolean,
+		) =>
+			sql<{
+				session_id: string;
+				provider: string;
+			}>`SELECT runner.session_id, session.provider
+				FROM claude_runner_cursors runner JOIN sessions session ON session.id = runner.session_id
+				WHERE runner.runner_id = ${runnerId} AND runner.retired_at IS NULL
+				AND COALESCE(session.project_id, '') <> ''`.pipe(
+				Effect.map((rows) =>
+					rows.map((row) =>
+						canonicalEvent(
+							"evidence.process_started",
+							row.session_id,
+							{ runnerId, label: `${runnerId}:${querySeq}`, reattached },
+							{ provider: row.provider },
+						),
+					),
+				),
+			);
 		const runners = (sessionId?: string) =>
 			sql<{
 				runner_id: string;
@@ -533,7 +564,7 @@ export const makeRunnerReceiptStore = (
 							record: existing,
 							candidates: [],
 							session: (yield* runners(target.sessionId)).rows,
-							lost: [],
+							evidence: [],
 						} satisfies StopCommit;
 					}
 					// An abandoned candidate that was promoted keeps serving.
@@ -596,14 +627,24 @@ export const makeRunnerReceiptStore = (
 					record: saved ? yield* decodeRetirement(saved) : record,
 					candidates,
 					session: (yield* runners(target.sessionId)).rows,
-					lost: yield* processLost([
-						target.runnerId,
-						...candidates.map((candidate) => candidate.runnerId),
-					]),
+					evidence: [
+						...(yield* processLost([
+							target.runnerId,
+							...candidates.map((candidate) => candidate.runnerId),
+						])),
+						...(reason._tag === "Superseded"
+							? yield* processStarted(
+									reason.successor,
+									reason.successorQuerySeq ?? 0,
+									false,
+								)
+							: []),
+					],
 				} satisfies StopCommit;
 			});
 		return {
 			read,
+			processStarted,
 			register: (
 				runnerId: string,
 				identity: RunnerCursorIdentity,
@@ -667,7 +708,7 @@ export const makeRunnerReceiptStore = (
 							),
 							Effect.tap((saved) =>
 								saved._tag === "Requested"
-									? appendUnprojected(sql, saved.lost)
+									? appendUnprojected(sql, saved.evidence)
 									: Effect.void,
 							),
 						),

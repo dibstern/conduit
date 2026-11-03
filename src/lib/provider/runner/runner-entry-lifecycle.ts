@@ -23,6 +23,8 @@ import type {
 /** Read-only outside this module, which is the only writer of every field. */
 export interface RunnerChild {
 	readonly recoveringCommands?: boolean;
+	/** The attached host's hello querySeq, its start's label (CONTRACT 6.1). */
+	readonly querySeq?: number;
 	readonly ownsPendingSend?: Effect.Success<typeof currentPendingSendOwner>;
 	readonly attachmentId?: string | undefined;
 	readonly registeredAt?: number;
@@ -387,10 +389,14 @@ export const connect = (
 };
 
 /** The attached runner's build, capabilities and newest reported state. */
-export const identify = (entry: RunnerChild, hello: RunnerHello) => {
+export const identify = (
+	entry: RunnerChild,
+	hello: RunnerHello & { readonly querySeq?: number },
+) => {
 	const writable: Writable<RunnerChild> = entry;
 	const upgrade: Writable<RunnerUpgrade> = entry.upgrade;
 	writable.buildId = hello.buildId;
+	writable.querySeq = hello.querySeq ?? 0;
 	writable.capabilities = {
 		stopsTasks: hello.stopsTasks === true,
 		rebindsAccount: hello.rebindsAccount === true,
