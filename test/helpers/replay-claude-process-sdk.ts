@@ -24,6 +24,8 @@ export { resolveSettings } from "./fake-claude-process-sdk.js";
 const isRunner = /claude-session-runner\.(js|ts)$/.test(process.argv[1] ?? "");
 let replayer: ClaudeTraceReplayer | undefined;
 let activeWorkspace: string | undefined;
+// A reached hold marked fail makes the stream throw in place of its held line.
+let failHeldLine = false;
 
 export const claudeSubagentSdk: ClaudeSubagentSdk = {
 	listSubagents: (...args) =>
@@ -89,6 +91,7 @@ export const claudeSdk: typeof fakeSdk = {
 						turn: number;
 						message: number;
 						id: number;
+						fail?: true;
 					};
 				} catch {
 					return undefined;
@@ -111,7 +114,8 @@ export const claudeSdk: typeof fakeSdk = {
 				},
 			});
 			replayer = played;
-			// Deleting or replacing the hold file releases whatever this runner holds.
+			// Deleting or replacing the hold file releases whatever this runner holds;
+			// a hold with `fail: true` releases at once and fails the stream there.
 			if (holdFile)
 				void (async () => {
 					for (;;) {
@@ -121,8 +125,10 @@ export const claudeSdk: typeof fakeSdk = {
 							`${holdFile}.reached`,
 							`${JSON.stringify({ pid: process.pid, hold, at: Date.now() })}\n`,
 						);
-						while (readHold()?.id === hold?.id && existsSync(holdFile))
-							await sleep(10);
+						if (hold?.fail) failHeldLine = true;
+						else
+							while (readHold()?.id === hold?.id && existsSync(holdFile))
+								await sleep(10);
 						played.release();
 					}
 				})();
@@ -173,6 +179,10 @@ export const claudeSdk: typeof fakeSdk = {
 		return Object.assign(query, {
 			next: async (...args: Parameters<typeof query.next>) => {
 				const next = await nextReplay(...args);
+				if (failHeldLine) {
+					failHeldLine = false;
+					throw new Error("Claude replay stream failed at its held line");
+				}
 				if (next.done) return next;
 				const message = next.value;
 				const release =

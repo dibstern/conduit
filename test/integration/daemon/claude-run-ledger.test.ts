@@ -14,6 +14,8 @@
 // 53. a wake's label is not its runner's querySeq;
 // 80. a Stop over only a wake leaves the wake's end to the alarm (forced), or never reports it;
 // 81. the Queued Run behind that wake waits for the alarm instead of the wake's turn_ended;
+// 86. a wake's stream failure ends it without turn_ended, or before the translator's endTurn;
+// 87. that failed wake's work ends forced, by the alarm;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -610,6 +612,68 @@ describe("Claude on the Run Ledger", () => {
 			ends: ledger.ends,
 			runs: ledger.runs,
 			types: ledger.events.map((event) => event.type),
+		});
+	});
+
+	it("ends a wake whose stream fails at the translator's endTurn", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["background-shell-turn", "pong-thinking-text-turn"],
+			},
+		});
+		const sessionId = await browser.createSession("Claude ledger wake failure");
+		// The wake's stream throws in place of its result (trace line 153).
+		const hold = join(fixture.root, "claude-replay-hold");
+		writeFileSync(
+			hold,
+			JSON.stringify({ turn: 1, message: 153, id: 1, fail: true }),
+		);
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		const ended = () =>
+			read(fixture, sessionId).events.filter(
+				(event) => event.type === "evidence.turn_ended",
+			);
+		// test-waits-allow polling: a wake has no send, so the browser awaits no frame for it.
+		await vi.waitFor(() => expect(ended()).toHaveLength(1), {
+			timeout: 10_000,
+		});
+		const ledger = read(fixture, sessionId);
+		const turns = ledger.events.filter((event) =>
+			event.type.startsWith("evidence.turn_"),
+		);
+		expect(turns.map(({ type }) => type)).toEqual([
+			"evidence.turn_started",
+			"evidence.turn_ended",
+		]);
+		// The stream threw in place of the result, so no turn completed; the translator's
+		// endTurn reports idle, and turn_ended follows it (E13). A run-less wake's turn.error
+		// is not stored (see the lane report).
+		const wake = ledger.events.filter(
+			(event) =>
+				event.sequence > (turns[0]?.sequence ?? 0) &&
+				event.sequence <= (turns[1]?.sequence ?? 0),
+		);
+		expect(wake.some((event) => event.type === "turn.completed")).toBe(false);
+		expect(wake.slice(-2).map(({ type }) => type)).toEqual([
+			"session.status",
+			"evidence.turn_ended",
+		]);
+		expect(
+			ledger.events.some((event) => event.type === "interrupt.requested"),
+		).toBe(false);
+		const wakeEnds = ledger.ends.filter(
+			(end) => !ledger.runs.some((run) => run.id === end.runId),
+		);
+		expect(wakeEnds).toHaveLength(1);
+		expect(wakeEnds[0]?.forced).not.toBe(1);
+		endsOnce(ledger);
+		proofs.push({
+			case: "wake-stream-failed",
+			sessionId,
+			turns,
+			wake: wake.map(({ type }) => type),
+			ends: ledger.ends,
+			runs: ledger.runs,
 		});
 	});
 });
