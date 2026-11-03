@@ -449,10 +449,10 @@ export const makeProviderAdaptersLive = (
 					// whose store holds the session records or refuses it, as MarkServer does.
 					(sessionId, { port, role }) =>
 						Effect.gen(function* () {
-							for (const project of borrowed.values()) {
-								const mark = portWatcherMark.get(
-									Context.get(project.context, SqlClient.SqlClient),
-								);
+							for (const [projectId, project] of borrowed) {
+								const mark = portWatcherMark
+									.get(Context.get(project.context, SqlClient.SqlClient))
+									?.get(projectId);
 								const outcome =
 									mark && (yield* mark({ sessionId, port, role }));
 								if (outcome?.kind === "marked") return { ok: true } as const;

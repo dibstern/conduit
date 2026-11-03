@@ -65,17 +65,40 @@ export type MarkOutcome =
 	| { readonly kind: "marked" }
 	| { readonly kind: "rejected"; readonly reason: string };
 
-/** Each store's mark (8.7 Declared), run through the watcher's own scan and write. */
+// A daemon's projects share one SqlClient, so each registry holds a watcher per project id.
+
+/** Each project's mark (8.7 Declared), run through the watcher's own scan and write. */
 export const portWatcherMark = new WeakMap<
 	SqlClient.SqlClient,
-	(request: MarkRequest) => Effect.Effect<MarkOutcome, unknown>
+	Map<string, (request: MarkRequest) => Effect.Effect<MarkOutcome, unknown>>
 >();
 
-/** Each store's readiness (8.7): true once a successful scan and one hold have passed. */
+/** Each project's readiness (8.7): true once a successful scan and one hold have passed. */
 export const portWatcherKnown = new WeakMap<
 	SqlClient.SqlClient,
-	() => boolean
+	Map<string, () => boolean>
 >();
+
+/** Holds `value` as the project's entry until the watcher's scope closes. */
+const registerWatcher = <T>(
+	registry: WeakMap<SqlClient.SqlClient, Map<string, T>>,
+	sql: SqlClient.SqlClient,
+	projectId: string,
+	value: T,
+) =>
+	Effect.acquireRelease(
+		Effect.sync(() =>
+			registry.set(
+				sql,
+				(registry.get(sql) ?? new Map<string, T>()).set(projectId, value),
+			),
+		),
+		() =>
+			Effect.sync(() => {
+				if (registry.get(sql)?.get(projectId) === value)
+					registry.get(sql)?.delete(projectId);
+			}),
+	);
 
 const keyOf = (key: ServerKey) => `${key.pid}:${key.startedAt}:${key.port}`;
 // 8.7 markers: Claude's carries the Conduit id; Codex's thread id and OpenCode's session id (stamped
@@ -825,9 +848,11 @@ export const makePortWatcherLive = (
 			// Warn once per run of failures: a host without lsof fails every scan.
 			let failing = false;
 			const published = new Set<string>();
-			portWatcherKnown.set(sql, () => known);
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => portWatcherKnown.delete(sql)),
+			yield* registerWatcher(
+				portWatcherKnown,
+				sql,
+				store.projectId,
+				() => known,
 			);
 
 			type Stamp = Parameters<Parameters<typeof commit.write>[0]>[1];
@@ -977,11 +1002,8 @@ export const makePortWatcherLive = (
 					for (const sessionId of outcome.moved) activity.changed(sessionId);
 					return outcome.outcome;
 				});
-			portWatcherMark.set(sql, (request) =>
+			yield* registerWatcher(portWatcherMark, sql, store.projectId, (request) =>
 				mark(request).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-			);
-			yield* Effect.addFinalizer(() =>
-				Effect.sync(() => portWatcherMark.delete(sql)),
 			);
 
 			const step = Effect.gen(function* () {

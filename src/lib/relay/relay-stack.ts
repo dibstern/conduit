@@ -574,7 +574,7 @@ export async function createProjectRelay(
 					// 8.7: until the first scan and one hold have passed, servers are unknown and
 					// auto-settle waits.
 					hasLiveBackgroundWork: (id) =>
-						portWatcherKnown.get(startup.sql)?.() === false ||
+						portWatcherKnown.get(startup.sql)?.get(config.slug)?.() === false ||
 						startup.activity.background.hasLiveWork(id),
 					setSettled: (id) =>
 						startup.sessionManagerService.setSessionSettled(id, {
