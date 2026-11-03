@@ -806,7 +806,7 @@ type HostEvent =
 /**
  * Independent host-fact checker over a generated packet log (6.9 H1, H2; 4.4 H3). It keeps its own
  * runner facts and never reads the fake. A redelivered process_started of an already started label
- * is a duplicate, not a new start. A held send is transmitted when it is issued to a serving runner
+ * is a duplicate, not a new start. A held send, or main's unheld start or steer, is transmitted when it is issued to a serving runner
  * or, if pending, at the next start; a later run_dispatched for it is a report of that transmission
  * and must name the same runner. A run_dispatched for any other token is a transmission now (a
  * rebind or a spawn) and must not name a retired runner.
@@ -842,7 +842,9 @@ function hostFacts(
 				hit("issued:start-pending");
 				pendingRuns.add(effect.runId);
 			}
-			if (event.held) transmitted.set(event.token, serving);
+			// Main's own unheld start or steer (D60) goes to the serving runner at issue, like a held one.
+			if (event.held || effect.kind === "start" || effect.kind === "steer")
+				transmitted.set(event.token, serving);
 			continue;
 		}
 		if (event.verb === "settle") {
