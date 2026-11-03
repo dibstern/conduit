@@ -820,6 +820,7 @@ export const makeRunnerStopReconciler = (options: {
 				});
 			});
 		};
+		// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 		const heldCommands = (
 			sql: SqlClient.SqlClient,
 			retirement: Pick<StopTarget, "runnerId" | "sessionId">,
@@ -834,7 +835,7 @@ export const makeRunnerStopReconciler = (options: {
 				run_id: string;
 				payload_json: string;
 				transmission: number;
-			}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running')`;
+			}>`SELECT command.request_sequence, command.project_key, command.session_id, command.command_id, command.attempt_count, command.provider_id, command.run_id, command.payload_json, run.held_transmission AS transmission FROM provider_command_outbox command JOIN provider_runs run ON run.id = command.run_id AND run.session_id = command.session_id JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id WHERE command.session_id = ${retirement.sessionId} AND command.effect_type = 'send_turn' AND run.runner_id = ${retirement.runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running')`;
 		/** Settle's journal read (7.3), typed Absent, Present or Unreadable. */
 		const readJournal = (
 			settlement: NonNullable<typeof options.settlement>,

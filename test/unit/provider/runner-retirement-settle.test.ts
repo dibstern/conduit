@@ -51,6 +51,7 @@ const settle = (
 	buildId: string,
 	reason: StopReason = { _tag: "Explicit" },
 	answer?: TurnResult,
+	steer = false,
 ) =>
 	Effect.gen(function* () {
 		const configDir = mkdtempSync(join(tmpdir(), "settle-config-"));
@@ -168,6 +169,26 @@ const settle = (
 				commandId: "send",
 			}),
 		).toMatchObject({ _tag: "Held", runner: runnerId });
+		// A steer joined into the held send's Run, held under its own run id (CONTRACT 2021-2025).
+		if (steer) {
+			yield* commit([
+				canonicalEvent(
+					"run.requested",
+					"session",
+					{ runId: "steer-run", inputId: "steer" },
+					{ provider: "claude", metadata: { runId: "steer-run" } },
+				),
+			]);
+			yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, attempt_count, requested_at, updated_at) VALUES (2, 'steer', 'project', 'session', 'claude', 'send_turn', '{"prompt":"steer"}', 'steer-run', 'running', 1, 1, 1)`;
+			yield* sql`UPDATE provider_runs SET status = 'joined', joined_into = 'run' WHERE id = 'steer-run'`;
+			expect(
+				yield* lifecycle.holdRun({
+					sessionId: "session",
+					runId: "steer-run",
+					commandId: "steer",
+				}),
+			).toMatchObject({ _tag: "Held", runner: runnerId, transmission: 1 });
+		}
 		const stopped = yield* Effect.exit(
 			reconciler.requestStop(
 				{
@@ -217,6 +238,13 @@ const settle = (
 				runId: "run",
 				commandId: "send",
 			}),
+			steerAgain: steer
+				? yield* lifecycle.holdRun({
+						sessionId: "session",
+						runId: "steer-run",
+						commandId: "steer",
+					})
+				: undefined,
 			send: yield* sql<{
 				status: string;
 				error_code: string | null;
@@ -362,5 +390,37 @@ it.effect.each(reasons)(
 			]);
 			expect(settled.again).toEqual({ _tag: "Ended" });
 			expect(settled.owner).toEqual([ownerEnd(reason)]);
+		}),
+);
+
+// A joined steer's own row reads `joined`, but its hold stays while its owner's Run is open, so
+// Settle reads its journal like any held send (CONTRACT 2021-2025, 7.3, 4.9 `absent`).
+// How it could fail: Settle reads only pending or running rows, so the steer is never released
+// and its hold names the gone runner, so it is Busy on every runner after; or it is released but
+// its owner's Run ends with it.
+it.effect(
+	"Settle releases a gone runner's held joined steer so the next runner holds it again",
+	() =>
+		Effect.gen(function* () {
+			const settled = yield* settle(
+				true,
+				runnerBuildId(),
+				{ _tag: "Explicit" },
+				undefined,
+				true,
+			);
+			expect(settled.released).toHaveLength(2);
+			expect(settled.released).toEqual(
+				expect.arrayContaining([
+					{ reason: "JournalAbsent", runId: "run" },
+					{ reason: "JournalAbsent", runId: "steer-run" },
+				]),
+			);
+			expect(settled.ended).toEqual([]);
+			expect(settled.again).toMatchObject({ _tag: "Held", transmission: 2 });
+			expect(settled.steerAgain).toMatchObject({
+				_tag: "Held",
+				transmission: 2,
+			});
 		}),
 );
