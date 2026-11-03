@@ -91,7 +91,9 @@ function state(fixture: ProcessHarness, sessionId: string) {
 						created_at: number;
 					}
 				>(
-					"SELECT event_id, sequence, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ? ORDER BY sequence",
+					// The source's transcript, not its runner's ledger evidence: a restart
+					// reattaches its runner, which reports a start (CONTRACT 6.1).
+					"SELECT event_id, sequence, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ? AND type NOT LIKE 'evidence.%' ORDER BY sequence",
 				)
 				.all(sessionId),
 			messages: db

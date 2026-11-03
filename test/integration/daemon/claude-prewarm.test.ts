@@ -815,7 +815,14 @@ describe("Claude session pre-warm through daemon RPC", () => {
 		expect(
 			harness.marks.filter((mark) => mark.kind === "system-init"),
 		).toHaveLength(0);
-		expect(durableCounts(harness, sessionId)).toEqual(before);
+		// The warm runner's start is its one durable fact (CONTRACT 2.1 row 215).
+		expect(durableCounts(harness, sessionId)).toEqual({
+			...before,
+			events: [
+				{ type: "evidence.process_started", count: 1 },
+				...before.events,
+			],
+		});
 		expect(
 			browser.frames
 				.slice(cursor)

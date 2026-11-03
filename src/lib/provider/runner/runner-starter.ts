@@ -1404,18 +1404,21 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									hello.querySeq ?? 0,
 									entry.recoveringCommands === true,
 								);
-								const { commit, store } = yield* sessionCommit(sessionId);
-								yield* commit.write((project) =>
-									started.pipe(
-										Effect.flatMap((events) =>
-											events.length === 0
-												? Effect.void
-												: store
-														.appendBatch(events)
-														.pipe(Effect.flatMap(project)),
+								// A draft pre-warm's session is not stored yet, so it has no write.
+								if ((yield* started).length > 0) {
+									const { commit, store } = yield* sessionCommit(sessionId);
+									yield* commit.write((project) =>
+										started.pipe(
+											Effect.flatMap((events) =>
+												events.length === 0
+													? Effect.void
+													: store
+															.appendBatch(events)
+															.pipe(Effect.flatMap(project)),
+											),
 										),
-									),
-								);
+									);
+								}
 							}
 							log.info(
 								`${runnerLabel} attached for session ${sessionId}: build ${hello.buildId}, answers ${hello.settlesAnswers === true ? "runner-settled" : "legacy answer-question/answer-permission"}`,

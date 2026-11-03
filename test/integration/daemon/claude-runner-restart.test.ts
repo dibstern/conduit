@@ -96,10 +96,14 @@ function comparable(
 	const ids = new Map<string, string>();
 	return JSON.parse(
 		JSON.stringify(
-			events.map(({ type, data }) => ({
-				type,
-				data: JSON.parse(data) as unknown,
-			})),
+			// A restart's reattach reports its runner's start (CONTRACT 6.1), which this
+			// parity leaves to test/integration/daemon/claude-run-ledger.test.ts.
+			events
+				.filter(({ type }) => type !== "evidence.process_started")
+				.map(({ type, data }) => ({
+					type,
+					data: JSON.parse(data) as unknown,
+				})),
 			(key, value: unknown) => {
 				if (
 					/^(createdAt|startedAt|completedAt|timestamp|durationMs)$/.test(key)

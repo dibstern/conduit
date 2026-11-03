@@ -19,7 +19,9 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 	try {
 		const events = db
 			.prepare(
-				"SELECT stream_version, type, data, metadata, provider FROM events WHERE session_id = ? ORDER BY sequence",
+				// A restart's reattach reports its runner's start (CONTRACT 6.1), which these
+				// transcript checks leave to test/integration/daemon/claude-run-ledger.test.ts.
+				"SELECT stream_version, type, data, metadata, provider FROM events WHERE session_id = ? AND type <> 'evidence.process_started' ORDER BY sequence",
 			)
 			.all(sessionId) as Array<{
 			stream_version: number;
