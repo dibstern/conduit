@@ -1433,6 +1433,31 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a repeated unsolicited event whose first arrival changed nothing is still a repeat (3.4, 3.1)", () => {
+		// Long seed 82103300 (claude), failure mode 122: a turn start that joined the outstanding
+		// wake execution recorded nothing, so the same (label, event id) after the Run ended opened
+		// another wake Run. Its identity is the pair; a repeat is Accepted with no events
+		// (CONTRACT.md 496-497).
+		agreed("claude", (d) => {
+			wake(d);
+			const repeat: LedgerCommand = {
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: "r1:1",
+					eventId: "again",
+					kind: "turn_started",
+				},
+			};
+			step(d, repeat);
+			stop(d, d.now + 100);
+			fire(d);
+			expect(d.view().active).toBeUndefined();
+			step(d, repeat);
+			expect(d.view().active).toBeUndefined();
+		});
+	});
+
 	it("an end_session for a Run goes to its execution's runner, even after a replacement started (L2 case 2)", () => {
 		agreed("claude", (d) => {
 			const a = running(d);

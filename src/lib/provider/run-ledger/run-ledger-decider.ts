@@ -2106,8 +2106,15 @@ function observe(
 	observation: Extract<LedgerCommand, { verb: "observe" }>["observation"],
 ): Outcome {
 	switch (observation.tag) {
-		case "Unsolicited":
-			return unsolicited(book, fact, step, observation);
+		case "Unsolicited": {
+			// 3.1, 3.4 (CONTRACT.md 290-291, 496-497): the (label, event id) pair is the identity, so its
+			// first arrival records even when it changes nothing else; a later repeat is then a repeat.
+			const known = book.seen.size;
+			const outcome = unsolicited(book, fact, step, observation);
+			return outcome.tag === "Noop" && book.seen.size !== known
+				? changed
+				: outcome;
+		}
 		case "Main": {
 			const key = `main\u0000${observation.eventId}`;
 			if (book.seen.has(key)) return noop("repeated main observation (D60)");

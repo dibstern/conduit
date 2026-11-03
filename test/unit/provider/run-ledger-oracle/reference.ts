@@ -2724,9 +2724,13 @@ function apply(world: World, command: LedgerCommand, step: Step): Outcome {
 					return mainEvent(world, observation);
 				case "Unsolicited": {
 					const raisedAt = world.snapshotEntry;
+					const known = world.seen.size;
 					const outcome = unsolicited(world, step, observation);
 					// L1, D44: accepted evidence on a newer querySeq raises its runner's label, so it records.
-					return outcome.tag === "Noop" && world.snapshotEntry !== raisedAt
+					// 3.1, 3.4 (CONTRACT.md 290-291, 496-497): so does a pair's first arrival, so a later
+					// repeat of it is a repeat.
+					return outcome.tag === "Noop" &&
+						(world.snapshotEntry !== raisedAt || world.seen.size !== known)
 						? { tag: "Changed", diagnostic: outcome.diagnostic }
 						: outcome;
 				}
