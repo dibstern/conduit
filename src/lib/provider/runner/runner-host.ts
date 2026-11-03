@@ -92,6 +92,7 @@ export interface RunnerLaunchCallbacks {
 		source: Pick<RunnerSourceDelivery, "sessionId" | "inputId" | "runId">,
 	) => (() => void) | undefined;
 	readonly readThread: RunnerSocket["threadReadEffect"];
+	readonly markServer: RunnerSocket["serverMarkEffect"];
 }
 
 export interface RunnerLaunch {
@@ -463,6 +464,10 @@ export const runSessionRunner = (
 				connection && attached && !connection.closed
 					? connection.threadReadEffect(input)
 					: Effect.fail(runnerFailure("read thread", "Runner is disconnected")),
+			markServer: (input) =>
+				connection && attached && !connection.closed
+					? connection.serverMarkEffect(input)
+					: Effect.fail(runnerFailure("mark server", "Runner is disconnected")),
 		});
 		const bindings = new Map<
 			string,

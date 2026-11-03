@@ -9,6 +9,10 @@ import type { ProviderStateEffect } from "../../persistence/effect/provider-stat
 import type { ReadQueryEffect } from "../../persistence/effect/read-query-effect.js";
 import { makeProcessSessionRunner } from "../runner/process-session-runner.js";
 import { connectRunner } from "../runner/runner-connection.js";
+import type {
+	ServerMarkInput,
+	ServerMarkResult,
+} from "../runner/runner-protocol.js";
 import {
 	makeRunnerProviderInstance,
 	type RunnerProviderInstance,
@@ -28,6 +32,11 @@ export const makeCodexProviderRuntime = (
 		readonly state: Omit<ProviderStateEffect, "projectId">;
 		readonly sql: SqlClient.SqlClient;
 	},
+	/** 8.7 Declared: the mark tool's call, answered for the runner's session. */
+	markServer: (
+		sessionId: string,
+		input: ServerMarkInput,
+	) => Effect.Effect<ServerMarkResult, unknown>,
 ): Effect.Effect<RunnerProviderInstance, never, Scope.Scope> =>
 	Effect.gen(function* () {
 		const { read } = persistence;
@@ -116,7 +125,7 @@ export const makeCodexProviderRuntime = (
 					driverKind: "codex",
 					legacyPrepareTurnEffect: driver.prepareTurnEffect,
 					coldUpgrade: true,
-					connect: connectRunner,
+					connect: (options) => connectRunner({ ...options, markServer }),
 					settingsDeferredCode: "codex_settings_deferred",
 					snapshotCommandSettings: () => ({}),
 					warmCommand: (sessionId, _state, snapshot) => ({

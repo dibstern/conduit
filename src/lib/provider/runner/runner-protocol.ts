@@ -41,6 +41,16 @@ export type ThreadReadResult =
 	  }
 	| { readonly code: string; readonly message: string };
 
+/** 8.7 Declared from a Codex tool call: its thread id is the marker a scan reads as CODEX_THREAD_ID. */
+export interface ServerMarkInput {
+	readonly port: number;
+	readonly role: "serving" | "awaited";
+}
+/** Recorded, or refused with the reason the agent reads. */
+export type ServerMarkResult =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly reason: string };
+
 export interface RunnerWireCodec {
 	readonly decode: (message: RunnerMessage) => RunnerMessage;
 	readonly encode: (
@@ -180,6 +190,12 @@ type RunnerReply =
 			readonly failure?: SessionFailure;
 	  }
 	| {
+			readonly type: "server-mark-reply";
+			readonly requestId: string;
+			readonly result: ServerMarkResult;
+			readonly failure?: SessionFailure;
+	  }
+	| {
 			readonly type: "upgrade-reply";
 			readonly requestId: string;
 			readonly result: boolean;
@@ -219,6 +235,11 @@ export type RunnerMessage = { readonly querySeq?: number } & (
 			readonly type: "thread-read";
 			readonly requestId: string;
 			readonly input: ThreadReadInput;
+	  }
+	| {
+			readonly type: "server-mark";
+			readonly requestId: string;
+			readonly input: ServerMarkInput;
 	  }
 	| { readonly type: "upgrade-state"; readonly state: RunnerUpgradeState }
 	| {
@@ -588,18 +609,21 @@ export class RunnerSocket {
 					message.type === "output-reply" ||
 					message.type === "upgrade-reply" ||
 					message.type === "command-status-reply" ||
-					message.type === "thread-read-reply"
+					message.type === "thread-read-reply" ||
+					message.type === "server-mark-reply"
 				) {
 					const key =
 						message.type === "command-status-reply"
 							? `command-status:${message.requestId}`
 							: message.type === "thread-read-reply"
 								? `thread-read:${message.requestId}`
-								: message.type === "upgrade-reply"
-									? `upgrade:${message.requestId}`
-									: message.type === "command-reply"
-										? `command:${message.commandId}`
-										: `output:${message.outputId}`;
+								: message.type === "server-mark-reply"
+									? `server-mark:${message.requestId}`
+									: message.type === "upgrade-reply"
+										? `upgrade:${message.requestId}`
+										: message.type === "command-reply"
+											? `command:${message.commandId}`
+											: `output:${message.outputId}`;
 					const reply = this.pending.get(key);
 					if (reply) {
 						// Only a legacy reply before acceptance proves non-delivery.
@@ -804,6 +828,17 @@ export class RunnerSocket {
 		const requestId = randomUUID();
 		return this.requestEffect(`thread-read:${requestId}`, {
 			type: "thread-read",
+			requestId,
+			input,
+		});
+	}
+
+	serverMarkEffect(
+		input: ServerMarkInput,
+	): Effect.Effect<ServerMarkResult, SessionFailure> {
+		const requestId = randomUUID();
+		return this.requestEffect(`server-mark:${requestId}`, {
+			type: "server-mark",
 			requestId,
 			input,
 		});

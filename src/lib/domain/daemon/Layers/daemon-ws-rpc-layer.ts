@@ -1146,12 +1146,14 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						const relay = yield* cache.peek(project.slug);
 						if (Option.isNone(relay) || !relay.value.rpcWsHandler.context)
 							continue;
-						const mark = portWatcherMark.get(
-							Context.get(
-								yield* relay.value.rpcWsHandler.context,
-								SqlClient.SqlClient,
-							),
-						);
+						const mark = portWatcherMark
+							.get(
+								Context.get(
+									yield* relay.value.rpcWsHandler.context,
+									SqlClient.SqlClient,
+								),
+							)
+							?.get(project.slug);
 						const outcome = mark && (yield* mark(request));
 						if (outcome?.kind === "marked") return { ok: true as const };
 						if (outcome?.kind === "rejected")
