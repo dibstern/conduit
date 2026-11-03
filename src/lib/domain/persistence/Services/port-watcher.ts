@@ -961,11 +961,16 @@ export const makePortWatcherLive = (
 								loadLedgerView(sessionId).pipe(
 									Effect.map((view) => view?.servers?.get(request.port)),
 								);
-							// An unmarked server another session declared is that session's. Every owner
-							// is checked before the caller's write, which this transaction would commit.
-							for (const session of yield* sessionsWithServers([])) {
-								if (session.id === caller) continue;
-								const entry = yield* entryOf(session.id);
+							// An unmarked server another session declared is that session's, in any project:
+							// the daemon's projects share this store. Every owner is checked before the
+							// caller's write, which this transaction would commit.
+							for (const { id } of yield* sql<{
+								id: string;
+							}>`SELECT l.session_id AS id FROM run_ledger_sessions l
+								WHERE l.state = 'Open' AND l.session_id != ${caller}
+									AND EXISTS (SELECT 1 FROM events e WHERE e.session_id = l.session_id
+										AND e.type = 'evidence.server_seen')`) {
+								const entry = yield* entryOf(id);
 								if (
 									entry !== undefined &&
 									keyOf(entry.key) === keyOf(target.server)

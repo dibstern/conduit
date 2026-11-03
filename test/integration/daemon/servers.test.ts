@@ -18,7 +18,8 @@
 // process on a declared port inherits the declaration; an unmarked declared server vanishes while
 // it listens; an awaited server leaves the row idle or a serving one makes it read working; an
 // unmarked server one session declared is recorded for another that the store reads first; with
-// several projects loaded, a mark reaches only the last project's watcher, or none once one closes.
+// several projects loaded, a mark reaches only the last project's watcher, or none once one closes;
+// an unmarked server a session in one project declared is recorded for a session in another.
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -115,6 +116,27 @@ const alive = (pid: number) => {
 	} catch {
 		return false;
 	}
+};
+
+// A server orphaned through a shell that exits, so no session's marker is in its ancestry.
+const unmarkedServer = async () => {
+	const env: NodeJS.ProcessEnv = { ...process.env, SERVER };
+	delete env["CONDUIT_SESSION_ID"];
+	delete env["CODEX_THREAD_ID"];
+	delete env["CONDUIT_OPENCODE_SESSION_ID"];
+	const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
+		env,
+		stdio: ["ignore", "pipe", "inherit"],
+	});
+	const [line] = await Promise.all([
+		once(createInterface({ input: launcher.stdout }), "line"),
+		once(launcher, "exit"),
+	]);
+	const server: { pid: number; port: number } = JSON.parse(String(line));
+	onTestFinished(() => {
+		if (alive(server.pid)) process.kill(server.pid, "SIGKILL");
+	});
+	return server;
 };
 
 afterEach(async () => {
@@ -717,12 +739,14 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 			);
 		});
 	});
-	const rejections = {
-		dead: await mark(sessionId, String(free), "--awaited"),
-		other: await mark(otherId, String(first.port), "--awaited"),
-		outside: await mark(undefined, String(first.port), "--awaited"),
+	// Concurrent, so the awaited mark below lands well inside the hold on a loaded machine: each
+	// CLI run is a cold start, and none of these records anything.
+	const [dead, other, outside, browserRefusal] = await Promise.all([
+		mark(sessionId, String(free), "--awaited"),
+		mark(otherId, String(first.port), "--awaited"),
+		mark(undefined, String(first.port), "--awaited"),
 		// A browser naming the server's own pid, which resolves to the session, is still refused.
-		browser: await Effect.runPromise(
+		Effect.runPromise(
 			browser.rpc
 				.MarkServer({ pid: first.pid, port: first.port, role: "awaited" })
 				.pipe(
@@ -730,7 +754,8 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 					Effect.map(({ message }) => message),
 				),
 		),
-	};
+	]);
+	const rejections = { dead, other, outside, browser: browserRefusal };
 	expect(rejections.dead).toMatchObject({ code: 1 });
 	expect(rejections.dead.stderr).toContain(
 		`Nothing is listening on port ${free}`,
@@ -790,26 +815,6 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		attention: "idle",
 	});
 
-	// A server orphaned through a shell that exits, so no session's marker is in its ancestry.
-	const unmarkedServer = async () => {
-		const env: NodeJS.ProcessEnv = { ...process.env, SERVER };
-		delete env["CONDUIT_SESSION_ID"];
-		delete env["CODEX_THREAD_ID"];
-		delete env["CONDUIT_OPENCODE_SESSION_ID"];
-		const launcher = spawn("/bin/sh", ["-c", 'node -e "$SERVER" &'], {
-			env,
-			stdio: ["ignore", "pipe", "inherit"],
-		});
-		const [line] = await Promise.all([
-			once(createInterface({ input: launcher.stdout }), "line"),
-			once(launcher, "exit"),
-		]);
-		const server: { pid: number; port: number } = JSON.parse(String(line));
-		onTestFinished(() => {
-			if (alive(server.pid)) process.kill(server.pid, "SIGKILL");
-		});
-		return server;
-	};
 	// A new process on the port starts detected, after its own hold.
 	cursor = browser.frames.length;
 	process.kill(first.pid, "SIGTERM");
@@ -946,7 +951,7 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 	]);
 });
 
-it("with two projects loaded, each project's session marks its server, and removing one project leaves the other's marks working", async () => {
+it("with two projects loaded, each project's session marks its server, an unmarked server one project's session declared is refused to the other's, and removing one project leaves the other's marks working", async () => {
 	harness = ProcessHarness.create({ logLevel: "warn" });
 	await harness.restart({ serviceEnvironment: ENVIRONMENT });
 	const configDir = harness.configDir;
@@ -975,6 +980,33 @@ it("with two projects loaded, each project's session marks its server, and remov
 			String(secondServer.port),
 			"--awaited",
 		),
+		// An unmarked server the first project's session declared is refused to the second's.
+		contested: await unmarkedServer().then(async (server) => ({
+			server,
+			owner: await cliMark(
+				configDir,
+				firstId,
+				String(server.port),
+				"--serving",
+			),
+			other: await cliMark(
+				configDir,
+				secondId,
+				String(server.port),
+				"--serving",
+			),
+			evidence: new Database(harness?.daemonStorePath() ?? "", {
+				readonly: true,
+			})
+				.prepare<[number], { session_id: string; data: string }>(
+					"SELECT session_id, data FROM events WHERE type = 'evidence.server_seen' AND json_extract(data, '$.server.pid') = ? ORDER BY sequence",
+				)
+				.all(server.pid)
+				.map(({ session_id, data }) => ({
+					session: session_id === firstId ? "first" : "second",
+					source: JSON.parse(data).source,
+				})),
+		})),
 		removed: await Effect.runPromise(
 			first.rpc.RemoveProject({ slug: savedSlug }),
 		).then(() =>
@@ -999,6 +1031,17 @@ it("with two projects loaded, each project's session marks its server, and remov
 				`Marked port ${secondServer.port} as awaited`,
 			),
 		}),
+		contested: {
+			server: marks.contested.server,
+			owner: expect.objectContaining({ code: 0 }),
+			other: expect.objectContaining({
+				code: 1,
+				stderr: expect.stringContaining(
+					`Port ${marks.contested.server.port} belongs to another session`,
+				),
+			}),
+			evidence: [{ session: "first", source: "declared" }],
+		},
 		removed: expect.objectContaining({
 			code: 0,
 			stdout: expect.stringContaining(
