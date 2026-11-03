@@ -1885,6 +1885,23 @@ body:has(dialog:modal) {
 	.md-content a:hover {
 		@apply underline;
 	}
+	/* A localhost link to one of the session's live servers. */
+	.md-content a[data-server-chip] {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 0 7px;
+		border: 1px solid var(--color-border-chip);
+		border-radius: 9999px;
+		background: var(--color-bg-alt);
+	}
+	.md-content a[data-server-chip]::before {
+		content: "";
+		width: 6px;
+		height: 6px;
+		border-radius: 9999px;
+		background: var(--color-success);
+	}
 
 	.md-content strong {
 		@apply font-semibold;

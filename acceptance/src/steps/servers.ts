@@ -1,7 +1,9 @@
 import { expect, type Page } from "@playwright/test";
 import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRpcControl } from "./shared.js";
+import { requireRelayControl, requireRpcControl } from "./shared.js";
 
 // Ages are against the frozen page clock, so uptimes read the same every run.
 const SERVERS = [
@@ -84,6 +86,11 @@ const viewCards = (page: Page) =>
 		.locator("[data-view-card]");
 const serverRow = (page: Page, port: string | undefined) =>
 	page.getByTestId("session-server").filter({ hasText: `:${port}` });
+// A chat link as written, chip or not: a chip keeps the written link in data-server-link.
+const chatLink = (page: Page, href: string | undefined) =>
+	page
+		.locator("#messages .msg-assistant a")
+		.and(page.locator(`[href="${href}"], [data-server-link="${href}"]`));
 const menuItem = (page: Page, verb: string) =>
 	page.getByTestId(`session-ctx-${verb.toLowerCase()}`);
 
@@ -134,6 +141,65 @@ export const serversHandlers: StepHandler[] = [
 			await expect(open).toHaveAttribute("href", match[2] ?? "");
 			await expect(open).toHaveAttribute("target", "_blank");
 			await expect(open).toHaveAttribute("rel", "noopener noreferrer");
+		},
+	},
+	{
+		name: "post localhost links in chat",
+		match: /^the agent posts links to (\S+), (\S+) and (\S+)$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			const messages: HistoryMessage[] = [
+				{
+					id: "links-user",
+					role: "user",
+					time: { created: PINNED_CLOCK_MS },
+					parts: [{ id: "links-user-text", type: "text", text: "Start it" }],
+				},
+				{
+					id: "links-assistant",
+					role: "assistant",
+					parentID: "links-user",
+					time: {
+						created: PINNED_CLOCK_MS + 1,
+						completed: PINNED_CLOCK_MS + 2,
+					},
+					parts: [
+						{
+							id: "links-assistant-text",
+							type: "text",
+							text: `The docs are at ${match[1]}, the API at ${match[2]} and the old build at ${match[3]}.`,
+						},
+					],
+				},
+			];
+			requireRelayControl(page).sendMessage({
+				type: "mock_transcript_snapshot",
+				sessionId: new URL(page.url()).pathname.split("/")[2],
+				history: { messages, hasMore: false },
+			});
+			await expect(chatLink(page, match[3])).toBeVisible();
+		},
+	},
+	{
+		name: "assert a live server chip",
+		match: /^the link to (\S+) is a live chip opening (\S+)$/,
+		run: async ({ world, match }) => {
+			const chip = world.page.locator(
+				`#messages .msg-assistant [data-server-link="${match[1]}"]`,
+			);
+			await expect(chip).toHaveAttribute("data-server-chip", "live");
+			await expect(chip).toHaveAttribute("href", match[2] ?? "");
+			await expect(chip).toHaveAttribute("target", "_blank");
+			await expect(chip).toHaveAttribute("rel", "noopener noreferrer");
+		},
+	},
+	{
+		name: "assert a plain chat link",
+		match: /^the link to (\S+) is a plain link$/,
+		run: async ({ world, match }) => {
+			const link = chatLink(world.page, match[1]);
+			await expect(link).toBeVisible();
+			await expect(link).not.toHaveAttribute("data-server-chip");
 		},
 	},
 	{

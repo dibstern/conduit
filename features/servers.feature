@@ -42,6 +42,24 @@ Examples:
   | gated | gate                                  | plain | baseline          | threshold |
   | 5173  | https://devbox.tail1234.ts.net:5173   | 3000  | servers-pane-gate | 98        |
 
+Scenario Outline: A localhost link in chat is a live chip while its port is one of the session's servers, opening through the Preview Gate when it serves the port, and plain once the server stops
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the session has 2 detected servers
+  And the Preview Gate serves port <gated> at <gate>
+  When the agent posts links to http://localhost:<gated>/docs, http://localhost:<plain>/ and http://localhost:<other>/
+  Then the link to http://localhost:<gated>/docs is a live chip opening <gate>/docs
+  And the link to http://localhost:<plain>/ is a live chip opening http://localhost:<plain>/
+  And the link to http://localhost:<other>/ is a plain link
+  And the last-assistant-message region visually matches <baseline> at <threshold> percent
+  When the session's servers all exit
+  Then the link to http://localhost:<gated>/docs is a plain link
+  And the link to http://localhost:<plain>/ is a plain link
+
+Examples:
+  | gated | gate                                | plain | other | baseline          | threshold |
+  | 5173  | https://devbox.tail1234.ts.net:5173 | 3000  | 8080  | server-link-chips | 98        |
+
 Scenario Outline: Settle, Archive and Delete say how many servers they stop, and the toast says it is stopping them
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness

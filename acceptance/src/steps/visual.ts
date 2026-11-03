@@ -7,6 +7,7 @@ import { currentVisualMode } from "../visualMode.js";
 const REGION_SELECTORS: Record<string, string> = {
 	composer: "#input-area",
 	"last-user-message": "#messages .msg-user >> nth=-1",
+	"last-assistant-message": "#messages .msg-assistant >> nth=-1",
 	"last-diagram": "#messages .msg-assistant >> nth=-1 >> [data-diagram]",
 	// Menus portal to <body>, so a sheet or popover is only inside the whole screen.
 	screen: "body",
