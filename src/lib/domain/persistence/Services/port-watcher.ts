@@ -174,13 +174,38 @@ const procTable = (root: string) =>
 	});
 
 /**
- * The user's listening TCP ports by pid, from /proc: `net/tcp` and `net/tcp6` rows in state LISTEN
+ * A /proc net/tcp{,6} local address (hex, each 32-bit word little-endian) as the address to
+ * connect to: a wildcard listener is reached on loopback, an IPv4-mapped one as IPv4.
+ */
+const procHost = (hex: string) => {
+	const bytes = (hex.match(/.{8}/g) ?? []).flatMap((word) =>
+		(word.match(/../g) ?? [])
+			.reverse()
+			.map((byte) => Number.parseInt(byte, 16)),
+	);
+	const ipv4 = (four: number[]) =>
+		four.every((byte) => byte === 0) ? "127.0.0.1" : four.join(".");
+	if (bytes.length === 4) return ipv4(bytes);
+	if (
+		bytes.slice(0, 10).every((byte) => byte === 0) &&
+		bytes[10] === 0xff &&
+		bytes[11] === 0xff
+	)
+		return ipv4(bytes.slice(12));
+	if (bytes.every((byte) => byte === 0)) return "::1";
+	return Array.from({ length: 8 }, (_, i) =>
+		(((bytes[2 * i] ?? 0) << 8) | (bytes[2 * i + 1] ?? 0)).toString(16),
+	).join(":");
+};
+
+/**
+ * The user's listening TCP sockets (port, and the address that reaches it) by pid, from /proc: `net/tcp` and `net/tcp6` rows in state LISTEN
  * (0A) owned by `uid`, matched to the processes whose fds name the socket's inode. A socket no
  * readable process holds is left out, as lsof leaves out what it cannot see.
  */
 const procListening = (root: string, uid: number) =>
 	readProc("listening sockets", async () => {
-		const ports = new Map<string, number>();
+		const ports = new Map<string, { port: number; host: string }>();
 		for (const table of ["tcp", "tcp6"]) {
 			const text = await readFile(join(root, "net", table), "utf8").catch(
 				// A kernel without IPv6 has no tcp6.
@@ -192,28 +217,31 @@ const procListening = (root: string, uid: number) =>
 			for (const line of text.split("\n").slice(1)) {
 				if (line.trim() === "") continue;
 				const row =
-					/^\s*\d+:\s+[\dA-F]+:([\dA-F]{4})\s+[\dA-F]+:[\dA-F]{4}\s+([\dA-F]{2})\s+\S+\s+\S+\s+\S+\s+(\d+)\s+\d+\s+(\d+)\s/.exec(
+					/^\s*\d+:\s+([\dA-F]+):([\dA-F]{4})\s+[\dA-F]+:[\dA-F]{4}\s+([\dA-F]{2})\s+\S+\s+\S+\s+\S+\s+(\d+)\s+\d+\s+(\d+)\s/.exec(
 						line,
 					);
 				if (!row)
 					throw new PortScanError({
 						reason: `/proc net/${table} line ${line}`,
 					});
-				if (row[2] === "0A" && Number(row[3]) === uid)
-					ports.set(row[4] ?? "", Number.parseInt(row[1] ?? "", 16));
+				if (row[3] === "0A" && Number(row[4]) === uid)
+					ports.set(row[5] ?? "", {
+						port: Number.parseInt(row[2] ?? "", 16),
+						host: procHost(row[1] ?? ""),
+					});
 			}
 		}
-		const byPid = new Map<number, number[]>();
+		const byPid = new Map<number, { port: number; host: string }[]>();
 		if (ports.size === 0) return byPid;
 		for (const name of (await readdir(root)).filter(isPid))
 			for (const fd of (await procFile(readdir(join(root, name, "fd")))) ??
 				[]) {
 				const link = await procFile(readlink(join(root, name, "fd", fd)));
-				const port = ports.get(
+				const socket = ports.get(
 					/^socket:\[(\d+)\]$/.exec(link ?? "")?.[1] ?? "",
 				);
-				if (port !== undefined)
-					byPid.set(Number(name), [...(byPid.get(Number(name)) ?? []), port]);
+				if (socket !== undefined)
+					byPid.set(Number(name), [...(byPid.get(Number(name)) ?? []), socket]);
 			}
 		return byPid;
 	});
@@ -324,8 +352,8 @@ export const killServer = (server: ServerKey) =>
 	});
 
 /**
- * The ServerKey listening on `port` now, or undefined: the user's earliest-started listener, as a
- * scan names one entry per port (8.7). The Preview Gate reads it before each upstream connection.
+ * The ServerKey listening on `port` now and the address that reaches it, or undefined: the user's
+ * earliest-started listener, as a scan names one entry per port (8.7). The Preview Gate reads it before each upstream connection.
  */
 export const listenerOn = (port: number) =>
 	Effect.gen(function* () {
@@ -333,12 +361,17 @@ export const listenerOn = (port: number) =>
 		const root = yield* procRoot;
 		const uid = process.getuid?.() ?? 0;
 		const started = new Map<number, number>();
+		// The address each pid listens on, so the gate reaches the listener it checked.
+		const hosts = new Map<number, string>();
 		if (root !== "") {
 			const procs = yield* procTable(root);
-			for (const [pid, ports] of yield* procListening(root, uid)) {
+			for (const [pid, sockets] of yield* procListening(root, uid)) {
 				const startedAt = procs.get(pid)?.startedAt;
-				if (ports.includes(port) && startedAt !== undefined)
+				const socket = sockets.find((socket) => socket.port === port);
+				if (socket !== undefined && startedAt !== undefined) {
 					started.set(pid, startedAt);
+					hosts.set(pid, socket.host);
+				}
 			}
 		} else {
 			const options = {
@@ -347,7 +380,7 @@ export const listenerOn = (port: number) =>
 				env: { ...process.env, LC_ALL: "C" },
 			};
 			// lsof exits 1 with no output when nothing listens.
-			const pids = (yield* subprocess.run(
+			const { stdout: listening } = yield* subprocess.run(
 				"lsof",
 				[
 					"-nP",
@@ -358,17 +391,33 @@ export const listenerOn = (port: number) =>
 					"-u",
 					String(uid),
 					"-F",
-					"p",
+					"ptn",
 				],
 				options,
-			)).stdout.match(/^p\d+$/gm);
-			if (pids === null) return undefined;
+			);
+			let pid = 0;
+			let type = "";
+			for (const line of listening.split("\n")) {
+				if (line[0] === "p") pid = Number(line.slice(1));
+				else if (line[0] === "t") type = line.slice(1);
+				else if (line[0] === "n" && !hosts.has(pid)) {
+					// n<host>:<port>, the host `*` (wildcard) or bracketed IPv6.
+					const host = line
+						.slice(1, line.lastIndexOf(":"))
+						.replace(/^\[|\]$/g, "");
+					hosts.set(
+						pid,
+						host !== "*" ? host : type === "IPv6" ? "::1" : "127.0.0.1",
+					);
+				}
+			}
+			if (hosts.size === 0) return undefined;
 			const { stdout } = yield* subprocess.run(
 				"ps",
 				[
 					"-ww",
 					"-p",
-					pids.map((pid) => pid.slice(1)).join(","),
+					[...hosts.keys()].join(","),
 					"-o",
 					"pid=,ppid=,lstart=,command=",
 				],
@@ -381,9 +430,10 @@ export const listenerOn = (port: number) =>
 		}
 		const [pid, startedAt] =
 			[...started].sort(([a, at], [b, bt]) => at - bt || a - b)[0] ?? [];
-		return pid === undefined || startedAt === undefined
+		const host = pid === undefined ? undefined : hosts.get(pid);
+		return pid === undefined || startedAt === undefined || host === undefined
 			? undefined
-			: ({ pid, startedAt, port } satisfies ServerKey);
+			: { server: { pid, startedAt, port } satisfies ServerKey, host };
 	});
 
 /** `lsof -F` output as [pid, [fd, name]]; malformed lines fail the scan. */
@@ -471,7 +521,11 @@ export const makePortWatcherLive = (
 				Effect.gen(function* () {
 					const listening: ReadonlyMap<number, readonly number[]> =
 						root !== ""
-							? yield* procListening(root, uid)
+							? new Map(
+									[...(yield* procListening(root, uid))].map(
+										([pid, sockets]) => [pid, sockets.map(({ port }) => port)],
+									),
+								)
 							: yield* Effect.gen(function* () {
 									// lsof exits 1 with no output when nothing listens.
 									const byPid = yield* lsofFields(
