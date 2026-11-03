@@ -31,6 +31,11 @@ export interface SessionActivity {
 	 * ledger's Servers (8.7); a reader's copy, never the PortWatcher's comparison basis.
 	 */
 	readonly servers: Map<string, readonly SessionServer[]>;
+	/**
+	 * Each server port the Preview Gate serves, to its https link; the gate is its one writer, and
+	 * the PortWatcher's publish copies it onto `servers`.
+	 */
+	readonly gateUrls: Map<number, string>;
 	readonly hintDismissals: Map<string, number>;
 	readonly viewers: Map<string, number>;
 	readonly connectionInterests: Map<EventDelivery, Interests>;
@@ -132,6 +137,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				},
 			},
 			servers,
+			gateUrls: new Map(),
 			hintDismissals,
 			viewers: new Map(),
 			connectionInterests,

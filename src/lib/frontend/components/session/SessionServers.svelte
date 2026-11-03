@@ -1,7 +1,8 @@
 <!--
   The open session's live dev servers, as the daemon's PortWatcher last saw
-  them. Open is a plain localhost link: right only when the browser runs on the
-  daemon's host, until the Preview Gate (32.33.9) replaces it. Stop asks first,
+  them. Open goes through the Preview Gate's link while the gate serves the port,
+  else it is a plain localhost link, right only when the browser runs on the
+  daemon's host. Stop asks first,
   then reads "Stopping…" until the next scan's server_gone removes the row.
 -->
 <script lang="ts">
@@ -58,7 +59,7 @@
 		<ul class="m-0 list-none p-0">
 			{#each servers as server (server.port)}
 				{@const name = nameOf(server.command)}
-				{@const link = `http://localhost:${server.port}`}
+				{@const link = server.gateUrl ?? `http://localhost:${server.port}`}
 				{@const stopState = stops[`${server.pid}:${server.startedAt}:${server.port}`]}
 				{@const stopping = stopState !== undefined && stopState.failure === undefined}
 				{@const task = server.taskId === undefined ? undefined : tasks.get(server.taskId)}

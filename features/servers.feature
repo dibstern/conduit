@@ -26,6 +26,22 @@ Examples:
   | count | tooltip                | servers                                            | port | baseline             | threshold |
   | 2     | Servers · 2 running ⌥5 | vite on 5173 for 6m, next on 3000 for 1h 5m         | 5173 | servers-pane-desktop | 98        |
 
+Scenario Outline: Open goes through the Preview Gate while it serves the port, and a server it does not serve keeps its localhost link
+  Given the conduit app is served with the connected mockup
+  And a session already exists on the Claude harness
+  And the session has 2 detected servers
+  And the Preview Gate serves port <gated> at <gate>
+  When I press ⌥5
+  Then the server on port <gated> opens <gate> in a new tab
+  And the server on port <plain> opens http://localhost:<plain> in a new tab
+  And the right-pane region visually matches <baseline> at <threshold> percent
+  When I copy the link of the server on port <gated>
+  Then a Link copied toast shows and the clipboard contains <gate>
+
+Examples:
+  | gated | gate                                  | plain | baseline          | threshold |
+  | 5173  | https://devbox.tail1234.ts.net:5173   | 3000  | servers-pane-gate | 98        |
+
 Scenario Outline: Settle, Archive and Delete say how many servers they stop, and the toast says it is stopping them
   Given the conduit app is served with the connected mockup
   And a session already exists on the Claude harness

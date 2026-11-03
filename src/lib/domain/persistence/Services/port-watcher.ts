@@ -721,16 +721,21 @@ export const PortWatcherLive = Layer.effectDiscard(
 					else published.delete(id);
 				const moved = [...read].flatMap(([sessionId, servers]) => {
 					const list = [...(servers?.values() ?? [])].map(
-						({ key, command, cwd, taskKey, source, role }): SessionServer => ({
-							port: key.port,
-							pid: key.pid,
-							startedAt: key.startedAt,
-							command,
-							cwd,
-							...(taskKey === undefined ? {} : { taskId: taskKey.taskId }),
-							source,
-							role,
-						}),
+						({ key, command, cwd, taskKey, source, role }): SessionServer => {
+							// The Preview Gate's link, while the gate serves the port.
+							const gateUrl = activity.gateUrls.get(key.port);
+							return {
+								port: key.port,
+								pid: key.pid,
+								startedAt: key.startedAt,
+								command,
+								cwd,
+								...(taskKey === undefined ? {} : { taskId: taskKey.taskId }),
+								source,
+								role,
+								...(gateUrl === undefined ? {} : { gateUrl }),
+							};
+						},
 					);
 					if (
 						JSON.stringify(activity.servers.get(sessionId) ?? []) ===

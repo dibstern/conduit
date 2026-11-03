@@ -297,6 +297,28 @@ it("the Preview Gate serves only Servers ports, behind conduit's login, to the l
 			),
 		),
 	).toEqual([]);
+	// The pane's Open: the session row names the gate's link for each port the gate serves, and
+	// none for the port whose '/' is someone else's.
+	const gateUrls = (frame: Record<string, unknown>) =>
+		frame["type"] === "session_row" && frame["id"] === sessionId
+			? Object.fromEntries(
+					(
+						(frame["servers"] ?? []) as readonly {
+							port: number;
+							gateUrl?: string;
+						}[]
+					).map(({ port, gateUrl }) => [port, gateUrl]),
+				)
+			: undefined;
+	const linked = await browser.waitFor((frame) => {
+		const urls = gateUrls(frame);
+		return urls?.[app.port] !== undefined && urls[doomed.port] !== undefined;
+	});
+	expect(gateUrls(linked)).toEqual({
+		[foreignPort]: undefined,
+		[app.port]: `https://${DNS}:${app.port}`,
+		[doomed.port]: `https://${DNS}:${doomed.port}`,
+	});
 
 	// L1: the server dies and another process takes its port before the next scan (no PIN yet,
 	// so the daemon and the gate are open).

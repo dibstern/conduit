@@ -26,6 +26,8 @@ async function setServers(
 	servers: readonly (typeof SERVERS)[number][],
 	// A background task that hosts the server on `port` (8.7).
 	hosted?: { readonly port: number; readonly task: string },
+	// The Preview Gate's link to the server on `port`, while the gate serves it.
+	gated?: { readonly port: number; readonly url: string },
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
@@ -59,6 +61,7 @@ async function setServers(
 					? servers.map(({ age, ...server }) => ({
 							...server,
 							...(server.port === hosted?.port && { taskId: "task-1" }),
+							...(server.port === gated?.port && { gateUrl: gated.url }),
 							startedAt: now - age * 1000,
 							source: "detected",
 							role: "serving",
@@ -108,6 +111,29 @@ export const serversHandlers: StepHandler[] = [
 				task: match[1] ?? "",
 			});
 			await expect(railButton(world.page)).toBeAttached();
+		},
+	},
+	{
+		name: "seed the Preview Gate serving a server",
+		match: /^the Preview Gate serves port (\d+) at (\S+)$/,
+		run: async ({ world, match }) => {
+			await setServers(world.page, SERVERS, undefined, {
+				port: Number(match[1]),
+				url: match[2] ?? "",
+			});
+			await expect(railButton(world.page)).toBeAttached();
+		},
+	},
+	{
+		name: "assert a server's Open link",
+		match: /^the server on port (\d+) opens (\S+) in a new tab$/,
+		run: async ({ world, match }) => {
+			const open = serverRow(world.page, match[1]).getByRole("link", {
+				name: /^Open /,
+			});
+			await expect(open).toHaveAttribute("href", match[2] ?? "");
+			await expect(open).toHaveAttribute("target", "_blank");
+			await expect(open).toHaveAttribute("rel", "noopener noreferrer");
 		},
 	},
 	{
@@ -323,7 +349,7 @@ export const serversHandlers: StepHandler[] = [
 	{
 		name: "assert the copied link",
 		match:
-			/^a Link copied toast shows and the clipboard contains (http:\/\/localhost:\d+)$/,
+			/^a Link copied toast shows and the clipboard contains (https?:\/\/\S+)$/,
 		run: async ({ world, match }) => {
 			await expect(
 				world.page.getByTestId("toast").filter({ hasText: "Link copied" }),

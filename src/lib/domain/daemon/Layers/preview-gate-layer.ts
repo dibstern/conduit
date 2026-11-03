@@ -258,6 +258,7 @@ export const makePreviewGateLive = (configDir: string) =>
 					: [];
 				// A gate closes before its handler goes, so a handler never outlives what it names.
 				for (const [port, gate] of remove) {
+					activity.gateUrls.delete(port);
 					yield* close(gate.server);
 					gates.delete(port);
 					stale = [...stale, { port, proxy: gate.proxy }];
@@ -296,6 +297,8 @@ export const makePreviewGateLive = (configDir: string) =>
 								),
 							),
 						);
+					// The PortWatcher's next publish carries it onto the session rows.
+					activity.gateUrls.set(port, `https://${roots.dnsName}:${port}`);
 				}
 				save();
 			});

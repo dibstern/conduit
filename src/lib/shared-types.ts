@@ -278,6 +278,8 @@ export const SessionServerSchema = Schema.Struct({
 	taskId: Schema.optional(Schema.String),
 	source: Schema.Literals(["detected", "declared"]),
 	role: Schema.Literals(["serving", "awaited"]),
+	/** The Preview Gate's https link to this port while the gate serves it; never in the ledger. */
+	gateUrl: Schema.optional(Schema.String),
 });
 export type SessionServer = typeof SessionServerSchema.Type;
 
