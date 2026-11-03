@@ -2081,3 +2081,5 @@ deadline step (codex 1, opencode 1), Claude steer started after its Run	pointer
 2026-11-02 row 21 (wt/82tn323 49c79269, 812a14ae): fake draws reach every	pointer
 start-deadline boxes by later redesign notes; wake labels	pointer
 Landed on the integration branch (via 83930e93). Audit: every box met	pointer
+released. Recovery and the dead-runner cleanup now check whether the turn	pointer
+answers at restart and release onto the next runner. The stop commit's held	pointer
