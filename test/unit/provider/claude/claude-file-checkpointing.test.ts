@@ -116,6 +116,7 @@ it.each([
 					queryStarted: () => {},
 					isReplacedQuery: () => false,
 					readThread: () => Effect.succeed({ items: [] }),
+					markServer: () => Effect.succeed({ ok: true }),
 				});
 				const runner = yield* launch.makeRunner(
 					{ workspaceRoot: input.workspaceRoot },

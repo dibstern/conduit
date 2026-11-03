@@ -2474,6 +2474,7 @@ export class ProcessBrowser {
 	private ptys: Fiber.Fiber<void, unknown> | undefined;
 	private approvals: Fiber.Fiber<void, unknown> | undefined;
 	private projectSettings: Fiber.Fiber<void, unknown> | undefined;
+	private instanceFeed: Fiber.Fiber<void, unknown> | undefined;
 	private sessions: Fiber.Fiber<void, unknown> | undefined;
 	private sessionsReady: Promise<void> | undefined;
 	private readonly details = new Map<string, Promise<void>>();
@@ -2797,6 +2798,15 @@ export class ProcessBrowser {
 
 	async instances() {
 		return this.run(this.rpc.GetInstances({}));
+	}
+
+	/** Follow the account list as Settings does; each update is an `instances` frame. */
+	followInstances(): void {
+		this.instanceFeed ??= this.watch(
+			this.rpc.SubscribeInstances({}),
+			(update) =>
+				Effect.sync(() => this.record({ type: "instances", ...update })),
+		);
 	}
 
 	async instanceStatus(instanceId: string) {
@@ -3262,6 +3272,8 @@ export class ProcessBrowser {
 			await Effect.runPromise(Fiber.interrupt(this.approvals));
 		if (this.projectSettings)
 			await Effect.runPromise(Fiber.interrupt(this.projectSettings));
+		if (this.instanceFeed)
+			await Effect.runPromise(Fiber.interrupt(this.instanceFeed));
 		if (this.sessions) await Effect.runPromise(Fiber.interrupt(this.sessions));
 		for (const fiber of this.detailFibers)
 			await Effect.runPromise(Fiber.interrupt(fiber));

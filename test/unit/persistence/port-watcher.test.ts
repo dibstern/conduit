@@ -59,7 +59,7 @@ import {
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
-	PortWatcherLive,
+	makePortWatcherLive,
 	portWatcherKnown,
 } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import {
@@ -292,7 +292,7 @@ const open = <A, E>(
 	Effect.scoped(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
-			yield* Layer.build(PortWatcherLive);
+			yield* Layer.build(makePortWatcherLive(() => undefined));
 			return yield* body(commit);
 		}),
 	).pipe(
@@ -786,7 +786,7 @@ describe.each(["lsof", "proc"] as const)("PortWatcher over %s", (mode) => {
 					return yield* open(file, () =>
 						Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
-							const known = portWatcherKnown.get(sql);
+							const known = portWatcherKnown.get(sql)?.get("test-project");
 							const before = known?.();
 							const events = yield* eventsUntil(3);
 							yield* until(() => known?.() === true);
@@ -828,7 +828,9 @@ describe.each(["lsof", "proc"] as const)("PortWatcher over %s", (mode) => {
 				fake.breakHost();
 				return open(join(dir, "events.db"), () =>
 					Effect.gen(function* () {
-						const known = portWatcherKnown.get(yield* SqlClient.SqlClient);
+						const known = portWatcherKnown
+							.get(yield* SqlClient.SqlClient)
+							?.get("test-project");
 						const before = known?.();
 						const started = Date.now();
 						yield* until(() => known?.() === true);

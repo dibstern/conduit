@@ -200,6 +200,7 @@ function replay(
 }
 
 describe("Public transmission-evidence permutations (seed 82_103_204)", () => {
+	// test-waits-allow timeout-override: replays every order of 100 generated fact sets: 1.5s alone, past 10s beside a loaded 2-worker unit run, so 60s.
 	it.each([
 		"one send",
 		"send and retry",
@@ -254,5 +255,5 @@ describe("Public transmission-evidence permutations (seed 82_103_204)", () => {
 				],
 			},
 		);
-	});
+	}, 60_000);
 });

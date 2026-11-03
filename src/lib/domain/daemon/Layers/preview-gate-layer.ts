@@ -88,8 +88,8 @@ export const makePreviewGateLive = (configDir: string) =>
 					.flat()
 					.find((server) => server.port === port);
 			/**
-			 * Whether the request may reach the server on `port`, and the page to show if not. Node's
-			 * request callbacks are the boundary, so this is the gate's one run into Effect.
+			 * The address of the listed listener the request may reach on `port`, or the page to show
+			 * if none. Node's request callbacks are the boundary, so this is the gate's one run into Effect.
 			 */
 			const admit = (port: number, headers: IncomingHttpHeaders) =>
 				Effect.runPromise(
@@ -108,9 +108,9 @@ export const makePreviewGateLive = (configDir: string) =>
 								Effect.orElseSucceed(() => undefined),
 							));
 						return live !== undefined &&
-							live.pid === entry?.pid &&
-							live.startedAt === entry.startedAt
-							? undefined
+							live.server.pid === entry?.pid &&
+							live.server.startedAt === entry.startedAt
+							? { host: live.host }
 							: ({ status: 503, page: STOPPED } as const);
 					}),
 				);
@@ -150,15 +150,15 @@ export const makePreviewGateLive = (configDir: string) =>
 							send(400, "");
 							return;
 						}
-						void admit(port, req.headers).then((refused) => {
-							if (refused) {
-								send(refused.status, refused.page);
+						void admit(port, req.headers).then((admitted) => {
+							if (!("host" in admitted)) {
+								send(admitted.status, admitted.page);
 								return;
 							}
 							// No agent: each request is a new upstream connection, checked above.
 							const upstream = request(
 								{
-									host: "127.0.0.1",
+									host: admitted.host,
 									port,
 									method: req.method,
 									path: req.url,
@@ -200,12 +200,12 @@ export const makePreviewGateLive = (configDir: string) =>
 							socket.end(refuse(400));
 							return;
 						}
-						void admit(port, req.headers).then((refused) => {
-							if (refused) {
-								socket.end(refuse(refused.status));
+						void admit(port, req.headers).then((admitted) => {
+							if (!("host" in admitted)) {
+								socket.end(refuse(admitted.status));
 								return;
 							}
-							const upstream = connect(port, "127.0.0.1", () => {
+							const upstream = connect(port, admitted.host, () => {
 								const lines = Object.entries(
 									upstreamHeaders(port, req.headers),
 								).flatMap(([name, value]) =>

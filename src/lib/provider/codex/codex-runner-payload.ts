@@ -19,6 +19,10 @@ import { isRecord } from "../../utils.js";
 import { EventSinkIngestionError } from "../event-sink-errors.js";
 import { makeInProcessSessionRunner } from "../runner/in-process-session-runner.js";
 import type { LiveSettings, RunnerPayload } from "../runner/runner-payload.js";
+import type {
+	ServerMarkInput,
+	ServerMarkResult,
+} from "../runner/runner-protocol.js";
 import { runnerPidAlive } from "../runner/runner-registry.js";
 import type { RunnerSinkBindings } from "../runner/runner-sink-bindings.js";
 import type {
@@ -58,6 +62,7 @@ import { invalidateCodexAuth } from "./codex-discovery.js";
 import { prepareCodexAccount } from "./codex-home.js";
 import { CodexInteractions } from "./codex-interactions.js";
 import { codexRuntimeEvent } from "./codex-item-mapper.js";
+import { answerServerMark, SERVER_MARK_TOOL } from "./codex-server-mark.js";
 import { codexSessionConfig } from "./codex-session-config.js";
 import {
 	readCodexSessionIdentity,
@@ -86,6 +91,10 @@ export interface CodexRunnerDeps {
 	readonly daemonConfigDir: string;
 	readonly environment?: () => Readonly<Record<string, string | undefined>>;
 	readonly onAbandonedRun?: (inputId: string) => void;
+	/** The daemon's PortWatcher, reached over the runner socket (8.7 Declared). */
+	readonly markServer?: (
+		input: ServerMarkInput,
+	) => Effect.Effect<ServerMarkResult, unknown>;
 }
 
 type ChildUpdate =
@@ -1281,6 +1290,12 @@ export class CodexRunnerPayload implements RunnerPayload {
 				const client = yield* connectAppServer(transport, {
 					clientInfo: { name: "conduit", title: "Conduit", version: "1.0.0" },
 					onServerRequest: (method, params, id) => {
+						if (method === "item/tool/call")
+							return answerServerMark(
+								params,
+								this.deps.markServer ??
+									(() => Effect.fail("No daemon to mark the server")),
+							);
 						const active = session.active;
 						const interaction: Effect.Effect<unknown, unknown> | undefined =
 							active?.interactions.request(method, params, id);
@@ -1381,7 +1396,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 					client
 						.request(
 							"thread/start",
-							{ cwd: session.cwd, model: input.model?.modelId },
+							{
+								cwd: session.cwd,
+								model: input.model?.modelId,
+								dynamicTools: [SERVER_MARK_TOOL],
+							},
 							ThreadStartResponseSchema,
 						)
 						.pipe(

@@ -208,6 +208,7 @@ export const ThreadSchema = Schema.Struct({
 export const ThreadStartParamsSchema = Schema.Struct({
 	model: Schema.optional(Schema.NullOr(Schema.String)),
 	cwd: Schema.optional(Schema.NullOr(Schema.String)),
+	dynamicTools: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
 });
 export const ThreadStartResponseSchema = Schema.Struct({
 	thread: ThreadSchema,
@@ -445,6 +446,20 @@ export const McpServerElicitationRequestParamsSchema = Schema.Struct({
 export const McpServerElicitationRequestResponseSchema = Schema.Struct({
 	action: Schema.Literals(["accept", "decline", "cancel"]),
 	content: Schema.optional(Schema.Unknown),
+});
+/** `item/tool/call`: Codex calling a tool conduit declared in thread/start's dynamicTools. */
+export const DynamicToolCallParamsSchema = Schema.Struct({
+	threadId: Schema.String,
+	turnId: Schema.String,
+	callId: Schema.String,
+	tool: Schema.String,
+	arguments: Schema.Unknown,
+});
+export const DynamicToolCallResponseSchema = Schema.Struct({
+	contentItems: Schema.Array(
+		Schema.Struct({ type: Schema.Literal("inputText"), text: Schema.String }),
+	),
+	success: Schema.Boolean,
 });
 
 export const ContextCompactionItemSchema = Schema.Struct({
@@ -795,6 +810,8 @@ export const CONSUMED_DEFINITIONS = {
 	McpServerElicitationRequestResponse: {
 		schemas: [McpServerElicitationRequestResponseSchema],
 	},
+	DynamicToolCallParams: { schemas: [DynamicToolCallParamsSchema] },
+	DynamicToolCallResponse: { schemas: [DynamicToolCallResponseSchema] },
 	ThreadGoal: { schemas: [ThreadGoalSchema] },
 	ThreadGoalStatus: { literals: KNOWN_GOAL_STATUSES },
 	ThreadGoalGetParams: { schemas: [ThreadGoalGetParamsSchema] },

@@ -16,6 +16,8 @@ import {
 	runnerBuildId,
 	runnerFailure,
 	runnerHelloFailure,
+	type ServerMarkInput,
+	type ServerMarkResult,
 	type ThreadReadInput,
 	type ThreadReadResult,
 } from "./runner-protocol.js";
@@ -50,6 +52,11 @@ export const connectRunner = (options: {
 		sessionId: string,
 		input: ThreadReadInput,
 	) => Effect.Effect<ThreadReadResult>;
+	/** 8.7 Declared from an agent's tool call: this runner's session is the caller. */
+	readonly markServer?: (
+		sessionId: string,
+		input: ServerMarkInput,
+	) => Effect.Effect<ServerMarkResult, unknown>;
 	readonly deps: {
 		readonly workspaceRoot: string;
 		readonly daemonConfigDir?: string;
@@ -369,6 +376,34 @@ export const connectRunner = (options: {
 											result,
 										}),
 								}),
+							),
+						);
+					} else if (message.type === "server-mark" && greeted) {
+						const unavailable: ServerMarkResult = {
+							ok: false,
+							reason: "Conduit could not mark the server",
+						};
+						options.runFork(
+							(
+								options.markServer?.(options.sessionId, message.input) ??
+								Effect.succeed(unavailable)
+							).pipe(
+								Effect.tapCause((cause) =>
+									Effect.logWarning(
+										`Server mark failed: ${Failure.renderCause(cause)}`,
+									),
+								),
+								Effect.matchCause({
+									onFailure: () => unavailable,
+									onSuccess: (result) => result,
+								}),
+								Effect.map((result) =>
+									connection.write({
+										type: "server-mark-reply",
+										requestId: message.requestId,
+										result,
+									}),
+								),
 							),
 						);
 					} else if (message.type === "output") {

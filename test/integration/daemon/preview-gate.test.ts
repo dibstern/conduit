@@ -65,7 +65,7 @@ server.on("upgrade", (req, socket) => {
 	socket.write("HTTP/1.1 101 Switching Protocols\\r\\nUpgrade: websocket\\r\\nConnection: Upgrade\\r\\n\\r\\n");
 	socket.pipe(socket);
 });
-server.listen(Number(process.env.PORT ?? 0), "127.0.0.1", () =>
+server.listen(Number(process.env.PORT ?? 0), process.env.HOST, () =>
 	console.log(JSON.stringify({ pid: process.pid, port: server.address().port })));`;
 
 let harness: ProcessHarness | undefined;
@@ -84,12 +84,14 @@ const startServer = async (
 	name: string,
 	sessionId: string | undefined,
 	port = 0,
+	host = "127.0.0.1",
 ) => {
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
 		ECHO,
 		NAME: name,
 		PORT: String(port),
+		HOST: host,
 	};
 	delete env["CONDUIT_SESSION_ID"];
 	delete env["CODEX_THREAD_ID"];
@@ -393,6 +395,25 @@ it("the Preview Gate serves only Servers ports, behind conduit's login, to the l
 	expect(await upgrade(gate)).toEqual({ status: 401 });
 	expect(await upgrade(gate, signedIn)).toEqual({ status: 101, echo: "ping" });
 
+	// L9: the gate reaches the listener it checked at that listener's address: an IPv6-only server
+	// is served, and an unrelated IPv4 server later bound to the same port is not.
+	const six = await startServer("six", sessionId, 0, "::1");
+	await serveSettles(() => proxyOf(six.port) !== undefined);
+	const sixGate = gateOf(six.port);
+	const sixOnly = await send(sixGate, "/", signedIn);
+	const squatter = await startServer("squatter", undefined, six.port);
+	const shared = await send(sixGate, "/", signedIn);
+	const sharedUpgrade = await upgrade(sixGate, signedIn);
+	expect({
+		sixOnly: [sixOnly.status, sixOnly.body.includes('"by":"six"')],
+		shared: [shared.status, shared.body.includes('"by":"six"')],
+		sharedUpgrade,
+	}).toEqual({
+		sixOnly: [200, true],
+		shared: [200, true],
+		sharedUpgrade: { status: 101, echo: "ping" },
+	});
+
 	mkdirSync(ARTIFACT_DIR, { recursive: true });
 	writeFileSync(
 		join(ARTIFACT_DIR, "preview-gate.json"),
@@ -402,6 +423,8 @@ it("the Preview Gate serves only Servers ports, behind conduit's login, to the l
 				doomed,
 				intruder,
 				outside,
+				six,
+				squatter,
 				foreignPort,
 				gate,
 				refused: refused.map(({ status }) => status),

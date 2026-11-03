@@ -19,6 +19,7 @@ export const makeCodexRunnerLaunch = (
 					daemonConfigDir: config.daemonConfigDir ?? DEFAULT_CONFIG_DIR,
 					environment: () => environment,
 					onAbandonedRun: (inputId) => callbacks.retireAfterCommand?.(inputId),
+					markServer: callbacks.markServer,
 				},
 				emit,
 				callbacks.turnStateChanged,

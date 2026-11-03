@@ -57,6 +57,7 @@ import type {
 	AppServerTraceRow,
 } from "../src/lib/provider/codex/app-server/trace.js";
 import { makeCodexSessionRunner } from "../src/lib/provider/codex/codex-runner-payload.js";
+import { SERVER_MARK_TOOL } from "../src/lib/provider/codex/codex-server-mark.js";
 import { codexSessionConfig } from "../src/lib/provider/codex/codex-session-config.js";
 import { writeCodexSessionIdentity } from "../src/lib/provider/codex/codex-session-store.js";
 import {
@@ -114,6 +115,7 @@ const scenarios = [
 	"turn-command",
 	"turn-file-change",
 	"turn-plan",
+	"turn-server-mark",
 	"turn-mcp-tool",
 	"turn-web-search",
 	"turn-image-view",
@@ -284,6 +286,13 @@ function approvalResponse(scenario: Scenario, method: string, params: unknown) {
 								: "accept",
 				};
 	if (method === "item/tool/requestUserInput") return questionAnswers;
+	if (method === "item/tool/call")
+		return {
+			contentItems: [
+				{ type: "inputText", text: "Marked port 4173 as serving" },
+			],
+			success: true,
+		};
 	if (method === "item/permissions/requestApproval")
 		return { permissions: params["permissions"], scope: "turn" };
 	assert(
@@ -618,6 +627,11 @@ function mockResponses(scenario: Scenario) {
 		return [mockToolEvents("apply_patch", patch), mockEvents()];
 	if (scenario === "turn-plan")
 		return [mockToolEvents("update_plan", { plan }), mockEvents()];
+	if (scenario === "turn-server-mark")
+		return [
+			mockToolEvents(SERVER_MARK_TOOL.name, { port: 4173, role: "serving" }),
+			mockEvents(),
+		];
 	return [
 		"two-turns",
 		"fork-seed",
@@ -785,9 +799,13 @@ async function startMockResponsesServer() {
 				? scenario
 				: "";
 			expectsToolOutput =
-				["turn-command", "turn-file-change", "turn-plan", "mode-full"].includes(
-					scenario,
-				) || scenario.startsWith("approval-");
+				[
+					"turn-command",
+					"turn-file-change",
+					"turn-plan",
+					"turn-server-mark",
+					"mode-full",
+				].includes(scenario) || scenario.startsWith("approval-");
 		},
 		assertConsumed: () => assert.equal(scenarioRequests, responses.length),
 		close: () =>
@@ -1474,7 +1492,13 @@ function driveScenario(
 							)
 					: yield* client.request(
 							"thread/start",
-							{ cwd: options.cwd, model: scenarioModel },
+							{
+								cwd: options.cwd,
+								model: scenarioModel,
+								...(scenario === "turn-server-mark"
+									? { dynamicTools: [SERVER_MARK_TOOL] }
+									: {}),
+							},
 							ThreadStartResponseSchema,
 						);
 				if (scenario === "compact-manual" || scenario === "compact-failed") {
@@ -4401,6 +4425,7 @@ async function record(root: string, selected: readonly Scenario[]) {
 			"turn-command",
 			"turn-file-change",
 			"turn-plan",
+			"turn-server-mark",
 			"approval-command-once",
 			"approval-command-always",
 			"approval-command-reject",

@@ -402,6 +402,7 @@ const clockChecked: LedgerImplementation<
 describe("Run Ledger arrival-order permutation gate (M9)", () => {
 	const traces = allTraces();
 
+	// test-waits-allow timeout-override: replays one provider's traces in every order: 3s alone, past 14s beside a loaded 2-worker unit run, so 60s.
 	it.each(
 		providers,
 	)("%s: every order of up to 6 independent settlements gives the same Run ends, inputs and stop", (provider) => {
@@ -421,7 +422,7 @@ describe("Run Ledger arrival-order permutation gate (M9)", () => {
 		expect(result.differences).toEqual([]);
 		// Failure 2: a gate that permuted nothing proves nothing.
 		expect(result.permuted).toBeGreaterThan(500);
-	});
+	}, 60_000);
 
 	// test-waits-allow timeout-override: replays every provider's traces in every order: 5s alone on a loaded host, 17 to 30s beside a 2-worker unit run, so 60s.
 	it("keeps each position's time, so a ledger that rejects a backwards clock passes (failure 5)", () => {
