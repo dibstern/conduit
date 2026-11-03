@@ -462,6 +462,7 @@ export const makeRunnerRunLifecycle = (
 						const committed = yield* stop;
 						if (committed._tag !== "Requested")
 							return { stop: committed, released };
+						// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 						const held = yield* sql<{
 							session_id: string;
 							id: string;
@@ -475,7 +476,8 @@ export const makeRunnerRunLifecycle = (
 									AND json_extract(dispatched.data, '$.transmission') = run.held_transmission
 									ORDER BY dispatched.sequence DESC LIMIT 1) AS command_id
 							FROM provider_runs run LEFT JOIN sessions session ON session.id = run.session_id
-							WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND run.status IN ('pending', 'running'))
+							JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id
+							WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running'))
 							WHERE command_id IS NOT NULL`;
 						const providers = new Map<string, string>();
 						for (const row of held) {

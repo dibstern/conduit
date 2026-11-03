@@ -5495,3 +5495,45 @@ it.effect(
 			}),
 		),
 );
+
+// A joined steer's own row reads `joined`, but its hold stays while its owner's Run is open
+// (CONTRACT 2021-2025), so the entry scope's send finalizer keeps its send like any held send
+// until its release requeues it or Settle ends it (6.11).
+// How it could fail: the finalizer reads only pending or running rows, so the stop commit closes
+// the held steer's send (its sink is released) while its owner's send stays open.
+it.effect(
+	"STOP-INTENT a stop keeps a held joined steer's send open with its owner's",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* stopIntentFixture;
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('first-run', 's', 'running', 1), ('steer-run', 's', 'running', 2)`;
+				yield* f.dispatch("first-run");
+				f.accept("first-run");
+				yield* f.dispatch("steer-run");
+				yield* f.sql`UPDATE provider_runs SET status = 'joined', joined_into = 'first-run' WHERE id = 'steer-run'`;
+				expect(
+					yield* f.sql`SELECT id, status, held_transmission FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "first-run", status: "running", held_transmission: 1 },
+					{ id: "steer-run", status: "joined", held_transmission: 1 },
+				]);
+				yield* f.stop.pipe(Effect.forkChild);
+				yield* TestClock.adjust("2 seconds");
+				expect(
+					yield* f.sql`SELECT retired_at IS NOT NULL AS retired FROM claude_runner_cursors WHERE runner_id = ${f.runner.runnerId}`,
+				).toEqual([{ retired: 1 }]);
+				expect(
+					yield* f.sql`SELECT id, status, runner_id IS NOT NULL AS held FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "first-run", status: "running", held: 1 },
+					{ id: "steer-run", status: "joined", held: 1 },
+				]);
+				expect(
+					f.output.mock.calls.flatMap(([output]) =>
+						output.type === "release-sink" ? [output.sinkId] : [],
+					),
+				).toEqual([]);
+			}),
+		),
+);

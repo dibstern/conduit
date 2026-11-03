@@ -267,11 +267,12 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 		const instanceScope = yield* Effect.scope;
 		// The entry scope's send finalizer (6.11). A run its runner still holds
 		// keeps its send until its release requeues it or Settle ends it (G6).
+		// A joined steer's hold is its own run's while its owner's Run is open (CONTRACT 2021-2025).
 		const closeSends = (runnerId: string) =>
 			sql
 				? sql<{
 						id: string;
-					}>`SELECT id FROM provider_runs WHERE runner_id = ${runnerId} AND held_transmission IS NOT NULL AND status IN ('pending', 'running')`.pipe(
+					}>`SELECT run.id FROM provider_runs run JOIN provider_runs owner ON owner.id = COALESCE(run.joined_into, run.id) AND owner.session_id = run.session_id WHERE run.runner_id = ${runnerId} AND run.held_transmission IS NOT NULL AND owner.status IN ('pending', 'running')`.pipe(
 						Effect.flatMap((held) =>
 							sends.closeRunner(
 								runnerId,

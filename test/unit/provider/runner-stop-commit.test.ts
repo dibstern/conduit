@@ -946,3 +946,71 @@ it.effect(
 			}),
 		),
 );
+
+// A joined steer's own row reads `joined`, but its hold stays while its owner's Run is open
+// (CONTRACT 2021-2025), so the stop's held read must carry its release like any held send (4.5).
+// How it could fail: the read takes only pending or running rows, so the unwritten steer is
+// not released NotSent and keeps a hold on the stopped runner until Settle reads its journal.
+it.effect(
+	"a stop releases an unwritten held joined steer NotSent with its owner's send",
+	() =>
+		run(
+			Effect.gen(function* () {
+				const f = yield* harness;
+				yield* f.reconciler.register(
+					"runner",
+					{ sessionId: "session", pid: 123, startTime: "started" },
+					"serving",
+				);
+				const commit = yield* makeCommitAndSignal;
+				yield* commit([
+					canonicalEvent(
+						"run.requested",
+						"session",
+						{ runId: "steer-run", inputId: "steer" },
+						{ provider: "claude", metadata: { runId: "steer-run" } },
+					),
+				]);
+				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at) VALUES (2, 'steer', 'project', 'session', 'claude', 'send_turn', '{}', 'steer-run', 'running', 1, 1)`;
+				yield* f.lifecycle.holdRun({
+					sessionId: "session",
+					runId: "run",
+					commandId: "send",
+				});
+				yield* f.sql`UPDATE provider_runs SET status = 'joined', joined_into = 'run' WHERE id = 'steer-run'`;
+				expect(
+					yield* f.lifecycle.holdRun({
+						sessionId: "session",
+						runId: "steer-run",
+						commandId: "steer",
+					}),
+				).toMatchObject({ _tag: "Held", runner: "runner", transmission: 1 });
+				f.evidence.releases.set("run", { reason: "NotSent" });
+				f.evidence.releases.set("steer-run", { reason: "NotSent" });
+				expect(
+					yield* f.reconciler.requestStop(target("runner", 123), {
+						_tag: "Explicit",
+					}),
+				).toBe("Requested");
+				expect(
+					yield* f.sql<{
+						run_id: string;
+						reason: string;
+					}>`SELECT json_extract(data, '$.runId') AS run_id, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released' ORDER BY run_id`,
+				).toEqual([
+					{ run_id: "run", reason: "NotSent" },
+					{ run_id: "steer-run", reason: "NotSent" },
+				]);
+				expect(
+					yield* f.sql<{
+						id: string;
+						status: string;
+						runner_id: string | null;
+					}>`SELECT id, status, runner_id FROM provider_runs ORDER BY id`,
+				).toEqual([
+					{ id: "run", status: "pending", runner_id: null },
+					{ id: "steer-run", status: "joined", runner_id: null },
+				]);
+			}),
+		),
+);
