@@ -2083,3 +2083,5 @@ start-deadline boxes by later redesign notes; wake labels	pointer
 Landed on the integration branch (via 83930e93). Audit: every box met	pointer
 released. Recovery and the dead-runner cleanup now check whether the turn	pointer
 answers at restart and release onto the next runner. The stop commit's held	pointer
+warm-up no longer counts. Stopping a wake that runs alone ends it at the	pointer
+Lane 32.6b (85e71258, 08c16063, 9808341c, f2c3d77b on wt/82tn32r3): boxes	pointer
