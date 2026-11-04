@@ -106,7 +106,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 			permissionMode: "ask",
 		});
 		writeTrace(fixtureRows(source));
-		return { fixture, browser, id: sessionId };
+		return { fixture, browser, id: sessionId, restartOptions };
 	}
 
 	/**
@@ -396,6 +396,111 @@ describe("Codex goals through the daemon and detached runner", () => {
 			expect(
 				events.filter(({ type }) => type === "turn.completed"),
 			).toHaveLength(1);
+		},
+		TIMEOUT * 2,
+	);
+
+	// 82tn.32.44 (lane-3244 audit.md 7): a Pause pending when the daemon restarts survives it.
+	it(
+		"rebuilds a pending Pause after a daemon restart: Pausing, one paused set, then Paused",
+		async () => {
+			const { fixture, browser, id, restartOptions } = await start(
+				"goal-pause-restart",
+				"goal-paused",
+			);
+			const pausedSets = () =>
+				requests().filter(
+					({ message }) =>
+						message?.method === "thread/goal/set" &&
+						message.params?.["status"] === "paused",
+				);
+			const pause = fixtureRows("goal-paused").find(
+				({ message }) =>
+					message?.method === "thread/goal/set" &&
+					message.params?.["status"] === "paused",
+			);
+			if (typeof pause?.["at"] !== "number")
+				throw new Error("Missing recorded Pause");
+			// Codex answers the Pause only after the daemon is back.
+			writeFileSync(gatePath, String(pause["at"]));
+			// The daemon dies under this send; the turn finishes on the restarted one.
+			const sending = goalSend(browser, id).catch(() => undefined);
+			// test-waits-allow polling: the app-server's requests are seen only in its capture file.
+			await vi.waitFor(
+				() =>
+					expect(
+						requests().filter(
+							({ message }) => message?.method === "thread/goal/set",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT },
+			);
+			const commandId = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId }),
+				),
+			).toEqual({ ok: true });
+			// test-waits-allow polling: the app-server's requests are seen only in its capture file.
+			await vi.waitFor(() => expect(pausedSets()).toHaveLength(1), {
+				timeout: TIMEOUT,
+			});
+			// test-waits-allow polling: the Pause's phase reaches the row with no browser frame.
+			const phaseBefore = await vi.waitFor(async () => {
+				const phase = await goalPhase(fixture, id);
+				expect(phase).toMatchObject({
+					tag: "Pending",
+					action: { kind: "pause" },
+				});
+				return phase;
+			}, 10_000);
+			await fixture.kill();
+			await sending;
+			await fixture.restart(restartOptions);
+			await fixture.connect(id);
+			// test-waits-allow polling: the rebuilt phase reaches the row with no browser frame.
+			const phaseAfterRestart = await vi.waitFor(async () => {
+				const phase = await goalPhase(fixture, id);
+				expect(phase).toEqual(phaseBefore);
+				return phase;
+			}, 10_000);
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			// test-waits-allow polling: the held turn's end reaches only the store after the restart.
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]),
+				{ timeout: TIMEOUT },
+			);
+			// test-waits-allow polling: the Pause's confirmation reaches the row with no browser frame.
+			await vi.waitFor(
+				async () => expect(await goalPhase(fixture, id)).toBeUndefined(),
+				10_000,
+			);
+			const changes = snapshot(fixture, id).events.filter(
+				({ type }) => type === "session.goal_changed",
+			);
+			expect(changes.at(-1)?.data).toMatchObject({
+				goal: expect.objectContaining({ condition: OBJECTIVE }),
+				pausedReason: "Paused",
+			});
+			expect(pausedSets()).toHaveLength(1);
+			writeFileSync(
+				"test-results/82tn-32-44-codex-pause-restart.json",
+				JSON.stringify(
+					{
+						ticket: "conduit-test-82tn.32.44",
+						sessionId: id,
+						commandId,
+						phaseBefore,
+						phaseAfterRestart,
+						pausedSets: pausedSets(),
+						lastGoalChange: changes.at(-1)?.data,
+						phaseAtEnd: null,
+					},
+					null,
+					2,
+				),
+			);
 		},
 		TIMEOUT * 2,
 	);
