@@ -649,7 +649,7 @@ describe("Codex turns through the real daemon and detached runner", () => {
 						tool: "Bash",
 						state: expect.objectContaining({
 							status: "running",
-							metadata: { output: "second line\n" },
+							metadata: { output: "second line\n", providerTaskId: "73120" },
 						}),
 					}),
 				);
@@ -1307,8 +1307,28 @@ describe("Codex turns through the real daemon and detached runner", () => {
 			await expectTurns(fixture, id);
 			const { events } = snapshot(fixture, id);
 			const running = events.filter(({ type }) => type === "tool.running");
-			expect(running).toHaveLength(1);
-			expect(running[0]?.data).toMatchObject({ metadata: { output: tail } });
+			// The first links the row to its terminal (82tn.45).
+			expect(running).toHaveLength(2);
+			expect(running[0]?.data).toMatchObject({
+				metadata: { providerTaskId: "73120" },
+			});
+			expect(running[1]?.data).toMatchObject({ metadata: { output: tail } });
+			if (ending === "settlement") {
+				// A command its turn leaves running is its Run's to end, tail kept (82tn.45).
+				const db = new Database(fixture.daemonStorePath(), { readonly: true });
+				try {
+					expect(
+						db
+							.prepare(
+								"SELECT p.status, p.ended_by AS endedBy, json_extract(p.metadata, '$.output') AS output FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ? AND p.type = 'tool'",
+							)
+							.get(id),
+					).toEqual({ status: "completed", endedBy: "run", output: tail });
+				} finally {
+					db.close();
+				}
+				return;
+			}
 			expect(events).toContainEqual(
 				expect.objectContaining({
 					type: "tool.completed",
@@ -1316,7 +1336,7 @@ describe("Codex turns through the real daemon and detached runner", () => {
 						result: tail,
 						metadata: expect.objectContaining({
 							output: tail,
-							exitCode: ending === "completion" ? 7 : null,
+							exitCode: 7,
 						}),
 					}),
 				}),

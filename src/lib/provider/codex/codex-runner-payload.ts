@@ -43,6 +43,7 @@ import {
 } from "./app-server/client.js";
 import {
 	decodeNotification,
+	type KnownNotification,
 	type RateLimitSnapshotSchema,
 	ThreadBackgroundTerminalsListResponseSchema,
 	ThreadBackgroundTerminalsTerminateResponseSchema,
@@ -64,7 +65,11 @@ import { AppServerExited } from "./app-server/transport.js";
 import { invalidateCodexAuth } from "./codex-discovery.js";
 import { prepareCodexAccount } from "./codex-home.js";
 import { CodexInteractions } from "./codex-interactions.js";
-import { codexRuntimeEvent } from "./codex-item-mapper.js";
+import {
+	type CodexItemState,
+	codexRuntimeEvent,
+	mapCodexItem,
+} from "./codex-item-mapper.js";
 import { answerServerMark, SERVER_MARK_TOOL } from "./codex-server-mark.js";
 import { codexSessionConfig } from "./codex-session-config.js";
 import {
@@ -158,7 +163,40 @@ interface CodexSession {
 		readonly lock: Semaphore.Semaphore;
 		sent?: string;
 		seen: ReadonlyMap<string, number>;
+		/** Rows settled turns left open for their terminals, by item id; they share their turn's state. */
+		readonly rows: Map<
+			string,
+			{ readonly turn: { items: CodexItemState }; readonly sink: EventSink }
+		>;
+		/** Terminal completions read before their turn settled, by item id. */
+		readonly finished: Map<string, TerminalCompletion>;
 	};
+}
+
+type TerminalCompletion = Extract<
+	KnownNotification,
+	{ readonly method: "item/completed" }
+>;
+
+/** Closes the row a settled turn left open for this terminal; the check and claim are synchronous. */
+function closeTerminalRow(
+	session: CodexSession,
+	completion: TerminalCompletion,
+) {
+	const row = session.terminals.rows.get(completion.params.item.id);
+	if (!row) return Effect.void;
+	session.terminals.rows.delete(completion.params.item.id);
+	const [items, events] = mapCodexItem(
+		{ ...row.turn.items, now: Date.now() },
+		completion,
+	);
+	row.turn.items = items;
+	// Fresh ids: a push reusing the settled turn's sequence ids was never acknowledged.
+	return Effect.forEach(
+		events,
+		(event) => row.sink.push({ ...event, eventId: createEventId() }),
+		{ discard: true },
+	);
 }
 
 function turnFailure(cause: unknown): { code: TurnErrorCode; message: string } {
@@ -352,7 +390,12 @@ export class CodexRunnerPayload implements RunnerPayload {
 						? { continuationInputId: identity.continuationInputId }
 						: {}),
 					rateLimits: new Map(),
-					terminals: { lock: yield* Semaphore.make(1), seen: new Map() },
+					terminals: {
+						lock: yield* Semaphore.make(1),
+						seen: new Map(),
+						rows: new Map(),
+						finished: new Map(),
+					},
 				};
 				this.sessions.set(input.sessionId, session);
 			}
@@ -595,6 +638,22 @@ export class CodexRunnerPayload implements RunnerPayload {
 									}
 								: event,
 						);
+					}
+					// 82tn.45: a row the turn left open for its terminal closes on the terminal's own
+					// completion, read before the turn settled or after it.
+					if (update.outcome) {
+						const turn = { items: update.state.items };
+						for (const part of turn.items.parts)
+							if (
+								part.kind === "tool" &&
+								!part.closed &&
+								part.metadata["providerTaskId"]
+							)
+								current.terminals.rows.set(part.itemId, { turn, sink });
+						const finished = [...current.terminals.finished.values()];
+						current.terminals.finished.clear();
+						for (const completion of finished)
+							yield* closeTerminalRow(current, completion);
 					}
 					return update.outcome;
 				});
@@ -1561,6 +1620,19 @@ export class CodexRunnerPayload implements RunnerPayload {
 							notification,
 							at: yield* Clock.currentTimeMillis,
 						});
+						if (
+							decoded._tag === "known" &&
+							decoded.method === "item/completed" &&
+							decoded.params.item.type === "commandExecution" &&
+							decoded.params.threadId === session.threadId
+						) {
+							if (session.terminals.rows.has(decoded.params.item.id))
+								yield* closeTerminalRow(session, decoded).pipe(
+									Effect.forkIn(scope),
+								);
+							else
+								session.terminals.finished.set(decoded.params.item.id, decoded);
+						}
 						// 8.2 (CONTRACT.md 2791-2793): re-read at turn completion and at a terminal
 						// command's start or finish, a late one included; it only updates the set.
 						if (
