@@ -697,6 +697,9 @@
 		"polling": 22,
 		"timeout-override": 9
 	},
+	"test/integration/daemon/cursor-run-ledger.test.ts": {
+		"polling": 3
+	},
 	"test/integration/daemon/cursor-runner-replay.test.ts": {
 		"polling": 9,
 		"real-wait": 1,

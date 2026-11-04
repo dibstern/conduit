@@ -1103,6 +1103,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 						else if (result.status === "interrupted")
 							yield* events.push("turn.interrupted", {
 								messageId: events.messageId,
+								// CONTRACT.md 3113-3117: the interrupt-timeout abandonment is not a native result
+								// (the native run may still act), so the wire marks it.
+								...(abandoned ? { code: "abandoned" } : {}),
 							});
 						else
 							yield* events.push("turn.error", {
