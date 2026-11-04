@@ -17,8 +17,19 @@
 // 242. its start reaches the store only when its end follows at once (held-gate variant);
 // 270. a send admitted while only a wake runs never starts, or starts no Run of its own,
 //      or starts before the wake ends (CONTRACT 992-995, 215).
+// Box 5, a daemon restart (CONTRACT 9 at 3141-3145: a daemon exit never ends a Codex session):
+// 240. a restart mid-turn ends the Codex runner, its app-server or its turn;
+// 241. the held Run ends twice across the restart, or never;
+// 274. the send reaches Codex twice (a second turn/start after the restart);
+// 275. the surviving runner reports no reattached start, or a loss;
+// 276. a wake running at the restart is lost, ends twice, or its output lands nowhere;
+// 277. a restart inside a goal's successor window ends the Run early, twice, or reads the
+//      successor as a wake;
+// 278. a send the daemon claimed but had not yet handed to the runner when it died never runs,
+//      or runs twice;
+// 279. output the runner sent before the restart is lost or lands twice.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -45,7 +56,7 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId'), json_extract(data, '$.requestedRunId')) AS runId, json_extract(data, '$.label') AS label, json_extract(data, '$.result.outcome') AS result, json_extract(data, '$.messageId') AS messageId FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId'), json_extract(data, '$.requestedRunId')) AS runId, json_extract(data, '$.label') AS label, json_extract(data, '$.result.outcome') AS result, json_extract(data, '$.messageId') AS messageId, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.reattached') AS reattached FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				sequence: number;
@@ -54,6 +65,8 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 				label: string | null;
 				result: string | null;
 				messageId: string | null;
+				runnerId: string | null;
+				reattached: number | null;
 			}[],
 			ends: db
 				.prepare(
@@ -161,9 +174,11 @@ describe("Codex on the Run Ledger", () => {
 		name: string,
 		trace: TraceRow[],
 		environment: Record<string, string> = {},
+		options: Parameters<typeof ProcessHarness.create>[0] = {},
 	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			...options,
 		});
 		harness = fixture;
 		tracePath = join(fixture.root, "codex-replay.jsonl");
@@ -175,17 +190,28 @@ describe("Codex on the Run Ledger", () => {
 		writeFileSync(reportPath, "");
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		writeTrace(signedInCodexDiscoveryTrace());
-		await fixture.restart({
-			startupTimeoutMs: TIMEOUT,
-			runnerStartupTimeoutMs: TIMEOUT,
-			serviceEnvironment: {
-				CONDUIT_CODEX_APP_SERVER_TRACE: tracePath,
-				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
-				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
-				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
-				...environment,
-			},
-		});
+		// A restarted daemon discovers again before its next send: keep discovery on its own trace.
+		const discoveryPath = join(fixture.root, "codex-discovery.jsonl");
+		const traceMap = join(fixture.root, "codex-trace-map.json");
+		writeFileSync(discoveryPath, readFileSync(tracePath, "utf8"));
+		writeFileSync(
+			traceMap,
+			JSON.stringify({ "*": { "codex-discovery": { trace: discoveryPath } } }),
+		);
+		const restart = () =>
+			fixture.restart({
+				startupTimeoutMs: TIMEOUT,
+				runnerStartupTimeoutMs: TIMEOUT,
+				serviceEnvironment: {
+					CONDUIT_CODEX_APP_SERVER_TRACE: tracePath,
+					CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
+					CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
+					CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
+					CONDUIT_TEST_CODEX_TRACE_MAP: traceMap,
+					...environment,
+				},
+			});
+		await restart();
 		const browser = await fixture.connect();
 		const account = await vi.waitFor(
 			async () => {
@@ -205,7 +231,7 @@ describe("Codex on the Run Ledger", () => {
 			permissionMode: "ask",
 		});
 		writeTrace(trace);
-		return { fixture, browser, sessionId };
+		return { fixture, browser, sessionId, restart };
 	};
 	const submit = async (
 		browser: ProcessBrowser,
@@ -605,5 +631,191 @@ describe("Codex on the Run Ledger", () => {
 		expect(captured("turn/start", "out")).toHaveLength(2);
 		expect(captured("turn/steer", "out")).toHaveLength(0);
 		prove("wake-send", ledger);
+	});
+
+	/** Each runner start, in order (F275). */
+	const processEvidence = (ledger: Ledger) =>
+		ledger.events
+			.filter(({ type }) => type.startsWith("evidence.process_"))
+			.map(({ type, runnerId, reattached }) => ({
+				type,
+				runnerId,
+				reattached,
+			}));
+	const reattachedOnce = (ledger: Ledger) => {
+		const [first] = processEvidence(ledger);
+		expect(processEvidence(ledger)).toEqual([
+			{
+				type: "evidence.process_started",
+				runnerId: first?.runnerId,
+				reattached: 0,
+			},
+			{
+				type: "evidence.process_started",
+				runnerId: first?.runnerId,
+				reattached: 1,
+			},
+		]);
+	};
+
+	it("keeps a Codex turn running through a daemon restart; its Run ends once on the same runner", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"restart-mid-turn",
+			fixtureRows("basic"),
+		);
+		const delta = fixtureRows("basic").find(
+			({ message }) => message?.method === "item/agentMessage/delta",
+		)?.["at"];
+		writeFileSync(gatePath, String(delta));
+		const inputId = randomUUID();
+		await submit(browser, sessionId, "Say hello", "queue", inputId);
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
+			{ timeout: TIMEOUT },
+		);
+		expect(read(fixture, sessionId).ends).toEqual([]);
+		await fixture.kill();
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await turns(fixture, sessionId, ["completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		reattachedOnce(ledger);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		// F279: output the runner sent before the restart lands once, not again on reattach.
+		expect(
+			ledger.events.filter(
+				({ type, messageId }) => type === "text.delta" && messageId !== inputId,
+			),
+		).toHaveLength(
+			fixtureRows("basic").filter(
+				({ message }) => message?.method === "item/agentMessage/delta",
+			).length,
+		);
+		prove("restart-mid-turn", ledger);
+	});
+
+	it("keeps a wake running through a daemon restart; it ends once at its own result", async () => {
+		const { fixture, sessionId, trace, restart } = await wake(
+			"restart-wake",
+			oneWake(fixtureRows("goal-chain")),
+		);
+		const [send] = read(fixture, sessionId).ends;
+		const wakeEnd = trace.filter(
+			({ message }) => message?.method === "turn/completed",
+		)[1]?.["at"];
+		writeFileSync(gatePath, String(Number(wakeEnd) - 1));
+		// test-waits-allow polling: the wake's start reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.map(({ type }) => type),
+				).toContain("evidence.turn_started"),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		await fixture.kill();
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		const ledger = read(fixture, sessionId);
+		const [started, ended] = wakeEvidence(ledger);
+		expect(ended?.result).toBe("completed");
+		expect(ledger.ends).toEqual([
+			send,
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		expect(ledger.ends[1]?.forced).not.toBe(1);
+		expect(
+			ledger.events.filter(
+				({ sequence, type, messageId }) =>
+					sequence > (started?.sequence ?? 0) &&
+					sequence < (ended?.sequence ?? 0) &&
+					type.startsWith("message.") &&
+					messageId,
+			),
+		).not.toEqual([]);
+		reattachedOnce(ledger);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		prove("restart-wake", ledger);
+	});
+
+	it("keeps a goal chain's Run open through a daemon restart inside its successor window", async () => {
+		const chain = fixtureRows("goal-chain");
+		const { fixture, browser, sessionId, restart } = await start(
+			"restart-successor",
+			chain,
+		);
+		const firstEnd = chain.find(
+			({ message }) => message?.method === "turn/completed",
+		)?.["at"];
+		writeFileSync(gatePath, String(firstEnd));
+		await submit(browser, sessionId, "$goal Say hello");
+		// test-waits-allow polling: the app-server's turn end reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/completed", "in")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		await fixture.kill();
+		expect(read(fixture, sessionId).ends).toEqual([]);
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await turns(fixture, sessionId, ["completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		expect(
+			ledger.events.filter(({ type }) => type.startsWith("evidence.turn_")),
+		).toEqual([]);
+		expect(captured("turn/started", "in").length).toBeGreaterThan(1);
+		reattachedOnce(ledger);
+		prove("restart-successor", ledger);
+	});
+
+	it("runs a send the daemon claimed but never handed to the runner once after a restart", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"restart-unheld",
+			fixtureRows("basic"),
+			{},
+			{ restartProof: true, holdRunnerOutput: "send-turn" },
+		);
+		await submit(browser, sessionId, "Say hello");
+		// test-waits-allow polling: the held hand-off is reported only in the runner's proof file.
+		await vi.waitFor(
+			() =>
+				expect(
+					rows<{ kind: string; type: string }>(
+						join(fixture.root, "sdk-proof.ndjson"),
+					),
+				).toContainEqual({ kind: "held-output", type: "send-turn" }),
+			{ timeout: TIMEOUT },
+		);
+		expect(captured("turn/start", "out")).toEqual([]);
+		await fixture.kill();
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		await turns(fixture, sessionId, ["completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.runs).toHaveLength(1);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		prove("restart-unheld", ledger, {
+			lost: processEvidence(ledger),
+		});
 	});
 });
