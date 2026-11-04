@@ -2536,6 +2536,7 @@ describe("generated D34 coverage", () => {
 		"Claude steer started after its Run completed", // 3.9 978-985
 		"Stop of a late steer's turn", // 3.9, L6
 		"steer send failure with inputs queued", // 3.9 D53
+		"next start after a Cursor abandonment, then retirement", // 3113-3117
 		// Round 2d: the native clock no longer pauses at not_sent, so neither its pause nor its resume at
 		// re-issue is a shape (8.5).
 	] as const)

@@ -3838,9 +3838,33 @@ export class FakeProvider {
 												outcome: "interrupted",
 												code: "stop_unconfirmed",
 											} as const)
-										: ({ outcome: "interrupted" } as const);
+										: // 3113-3117: a Cursor runner's interrupt-timeout abandonment of a turn still running
+											// is its Run's interrupted outcome, marked abandoned on the wire.
+											this.provider === "cursor" &&
+												native !== undefined &&
+												!native.ended &&
+												action.variant % 2 === 1
+											? ({ outcome: "interrupted", code: "abandoned" } as const)
+											: ({ outcome: "interrupted" } as const);
 					if (!terminal) continue;
 					this.mainRun = undefined;
+					// 3113-3117: after an abandonment main claims a next start, then the abandoned runner retires.
+					if (terminal.code === "abandoned" && native) {
+						const runner = runnerOf(native.label);
+						this.deferred.push(
+							() => ({
+								verb: "admit",
+								inputId: `input:queued-${this.serial++}`,
+								delivery: "queue",
+								request: { text: `text:${action.input}` },
+							}),
+							() =>
+								this.mainRun === undefined && this.mainInbox[0]
+									? this.main({ ...action, variant: 0 })
+									: undefined,
+							() => this.loss(runner, action.variant),
+						);
+					}
 					return emit({
 						tag: "Main",
 						eventId: `main:${this.serial++}`,
@@ -4204,6 +4228,16 @@ export class FakeProvider {
 				const control =
 					controls[action.variant % controls.length] ?? controls[0];
 				command = { verb: "control", control };
+				// 3113-3117: one Cursor stop in two is followed at once by main's move from its terminal, an
+				// abandonment when its runner's interrupt timed out on a running turn (case 2).
+				if (
+					control.kind === "stop" &&
+					this.provider === "cursor" &&
+					action.input % 2 === 1
+				)
+					this.deferred.push(() =>
+						this.mainRun ? this.main({ ...action, variant: 7 }) : undefined,
+					);
 				// Round 16 (CONTRACT.md 4071-4072): one stop in two of a started Run is followed at once by a wake's
 				// turn_started on the current label, which a held send of the active Run is bound to (8.3, L6).
 				// Cursor starts no unsolicited turn.
