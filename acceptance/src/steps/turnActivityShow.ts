@@ -328,7 +328,8 @@ export const turnActivityShowHandlers: StepHandler[] = [
 			await expect(toggle).toHaveAccessibleName("Expand turn");
 			await expect(toggle).toBeFocused();
 			for (const selector of [
-				".step-log",
+				// A collapsed turn keeps a log it has shown mounted, but hidden.
+				".step-log:visible",
 				'[data-testid="turn-show-bar"]',
 				".axis-notes",
 				'[data-testid="surfacing-msg-card"]',

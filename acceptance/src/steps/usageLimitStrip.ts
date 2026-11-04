@@ -306,7 +306,7 @@ export const usageLimitStripHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("cut-off-tag")).toHaveCount(1);
 			await expect(
 				card.locator(
-					'[data-testid="user-message-header"] > time ~ [data-testid="cut-off-tag"]',
+					'[data-testid="user-message-header"] > :has(time) ~ [data-testid="cut-off-tag"]',
 				),
 			).toHaveCount(1);
 		},

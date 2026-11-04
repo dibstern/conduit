@@ -1,5 +1,9 @@
 import type { Page } from "@playwright/test";
 import type {
+	SessionDetailWindow,
+	SessionDetailWindowRequest,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import type {
 	HistoryMessage,
 	HistoryMessagePart,
 } from "../../../src/lib/shared-types.js";
@@ -23,7 +27,8 @@ type DetailItem =
 			part: HistoryMessagePart;
 	  }
 	| { _tag: "pendingInput"; input: PendingInput }
-	| { _tag: "inbox"; inbox: Inbox };
+	| { _tag: "inbox"; inbox: Inbox }
+	| { _tag: "window"; window: SessionDetailWindow };
 type Inbox = { paused: boolean; steer: "no_steering" | "prompt_open" | null };
 type DetailEnvelope =
 	| { _tag: "snapshot"; rows: DetailItem[]; sequence: number; hasMore: boolean }
@@ -134,19 +139,50 @@ const nextTimestamp = (state: SessionProjection): number =>
 		MOCK_NOW_MS,
 	) + state.sequence;
 
-const snapshot = (state: SessionProjection): DetailEnvelope => {
+// Like the server, a window request reads one page of 50 at its anchor and
+// names the interval it holds; without one the snapshot is the latest page.
+const snapshot = (
+	state: SessionProjection,
+	request?: SessionDetailWindowRequest,
+): DetailEnvelope => {
 	const rows = sortedRows(state);
+	const at = request
+		? rows.findIndex((row) => row.id === request.anchorMessageId)
+		: rows.length;
+	if (at < 0) throw new Error(`No message ${request?.anchorMessageId}`);
+	const start =
+		request === undefined || request.direction === "before"
+			? Math.max(0, at - 50)
+			: at + (request.direction === "after" ? 1 : 0);
+	const end = Math.min(rows.length, start + 50);
+	const page = rows.slice(start, end);
+	const first = page[0]?.id;
+	const last = page.at(-1)?.id;
 	return {
 		_tag: "snapshot",
 		rows: [
-			...rows.slice(-50).flatMap(items),
+			...page.flatMap(items),
 			...[...state.pending.values()].map(
 				(input): DetailItem => ({ _tag: "pendingInput", input }),
 			),
 			{ _tag: "inbox", inbox: state.inbox },
+			...(request
+				? [
+						{
+							_tag: "window" as const,
+							window: {
+								kind: "historical" as const,
+								...(first && { firstMessageId: first }),
+								...(last && { lastMessageId: last }),
+								hasEarlier: start > 0,
+								hasLater: end < rows.length,
+							},
+						},
+					]
+				: []),
 		],
 		sequence: state.sequence,
-		hasMore: state.hasMore || rows.length > 50,
+		hasMore: (request === undefined && state.hasMore) || start > 0,
 	};
 };
 
@@ -520,8 +556,9 @@ export function projectLegacyRelayMessage(
 export function mockDetailSnapshot(
 	page: Page,
 	sessionId: string,
+	window?: SessionDetailWindowRequest,
 ): DetailEnvelope {
-	return snapshot(session(page, sessionId));
+	return snapshot(session(page, sessionId), window);
 }
 
 export function mockDetailPage(

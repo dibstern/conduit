@@ -128,6 +128,8 @@ export const cursorSteerHandlers: StepHandler[] = [
 									value: { tool: "Bash", command: "sleep 10" },
 								},
 								output: { _tag: "whole", text: "" },
+								// The server derives this from a Cursor tool's metadata.
+								presentation: { movedToBackground: true, exitCode: 0 },
 								metadata: {
 									cursorToolType: "shell",
 									movedToBackground: true,

@@ -114,3 +114,20 @@ Scenario Outline: On a phone back returns to the launching row, even once everyt
 Examples:
   | baseline                     | threshold |
   | task-drill-in-finished-phone | 98        |
+
+Scenario: Closing the drawer after its launching row folded away puts focus on the background tasks row
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the launching row clock advances by 0 seconds
+  And a session already exists on the Claude harness
+  And the session's live background tasks are the dev server, the flaky-test agent and that agent's nested shell
+  And the transcript has a turn that launched a task in every state
+  And the flaky-test agent's Child Session is part way through its work
+  Then the task drill-in clock matches its fixture time
+  When I open the turn's steps
+  And I open the "Fix the flaky test" launching row's task
+  Then the task drawer shows "Fix the flaky test" with its Child Session transcript
+  When the turn's steps fold while the task drawer has focus
+  Then the "Fix the flaky test" launching row has folded away
+  When I press Escape in the task drawer
+  Then the task drawer is closed and focus is back on the background tasks row
