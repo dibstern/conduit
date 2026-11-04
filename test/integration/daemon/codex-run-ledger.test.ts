@@ -8,6 +8,12 @@
 // 224. a Stop ends its Run other than interrupted, by the alarm, or twice;
 // 225. a Run's ledger end disagrees with main's run status;
 // 226. a goal chain ends its Run more than once, or a successor inside the window reads as a wake.
+// Box 2, a turn Codex starts while idle (successor after the window):
+// 230. it is dropped: no wake Run in the ledger;
+// 231. the wake Run never ends, or ends other than once at its own result;
+// 232. its output is lost or lands on no message;
+// 233. (open) Stop while it runs sends no turn/interrupt, or the alarm ends it;
+// 237. its evidence carries no runner-stamped label.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -36,13 +42,15 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId')) AS runId, json_extract(data, '$.label') AS label FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId')) AS runId, json_extract(data, '$.label') AS label, json_extract(data, '$.result.outcome') AS result, json_extract(data, '$.messageId') AS messageId FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				sequence: number;
 				type: string;
 				runId: string | null;
 				label: string | null;
+				result: string | null;
+				messageId: string | null;
 			}[],
 			ends: db
 				.prepare(
@@ -146,7 +154,11 @@ describe("Codex on the Run Ledger", () => {
 		);
 	});
 
-	const start = async (name: string, trace: TraceRow[]) => {
+	const start = async (
+		name: string,
+		trace: TraceRow[],
+		environment: Record<string, string> = {},
+	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
@@ -168,6 +180,7 @@ describe("Codex on the Run Ledger", () => {
 				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
+				...environment,
 			},
 		});
 		const browser = await fixture.connect();
@@ -327,5 +340,69 @@ describe("Codex on the Run Ledger", () => {
 		oneRunnerStartedFirst(ledger);
 		expect(captured("turn/started", "in").length).toBeGreaterThan(1);
 		prove("goal-chain", ledger);
+	});
+
+	/** A goal send whose successor misses the window, so Codex starts it while conduit is idle. */
+	const wake = async (name: string, fixture: string) => {
+		const trace = fixtureRows(fixture);
+		const firstEnd = trace.find(
+			({ message }) => message?.method === "turn/completed",
+		)?.["at"];
+		if (typeof firstEnd !== "number") throw new Error("Missing turn end");
+		const started = await start(name, trace, {
+			CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500",
+		});
+		writeFileSync(gatePath, String(firstEnd));
+		await submit(started.browser, started.sessionId, "$goal Say hello");
+		// test-waits-allow polling: the window closing reaches only the store's ledger.
+		await vi.waitFor(
+			() =>
+				expect(read(started.fixture, started.sessionId).ends).toHaveLength(1),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		return { ...started, trace };
+	};
+	const wakeEvidence = (ledger: Ledger) => {
+		const evidence = ledger.events.filter(({ type }) =>
+			type.startsWith("evidence.turn_"),
+		);
+		expect(evidence.map(({ type }) => type)).toEqual([
+			"evidence.turn_started",
+			"evidence.turn_ended",
+		]);
+		for (const { label } of evidence) expect(label).toMatch(/^.+:\d+$/);
+		expect(evidence[0]?.label).toBe(evidence[1]?.label);
+		return evidence;
+	};
+
+	it("reports a successor Codex starts while idle as a wake Run that ends once at its result", async () => {
+		const { fixture, sessionId } = await wake("wake", "goal-chain");
+		const [send] = read(fixture, sessionId).ends;
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		const ledger = read(fixture, sessionId);
+		const [started, ended] = wakeEvidence(ledger);
+		expect(ended?.result).toBe("completed");
+		expect(ledger.ends).toEqual([
+			send,
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		expect(ledger.ends[1]?.runId).not.toBe(send?.runId);
+		expect(ledger.ends[1]?.forced).not.toBe(1);
+		// F232: the wake's output lands on its own assistant message, between its evidence.
+		const output = ledger.events.filter(
+			({ sequence, type, messageId }) =>
+				sequence > (started?.sequence ?? 0) &&
+				sequence < (ended?.sequence ?? 0) &&
+				type.startsWith("message.") &&
+				messageId,
+		);
+		expect(output).not.toEqual([]);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		prove("wake", ledger);
 	});
 });
