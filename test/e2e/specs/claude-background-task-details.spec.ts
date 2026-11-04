@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
 import type { BackgroundTask } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
-import { expect, test } from "../helpers/replay-fixture.js";
+import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 const TRACE = "concurrent-background-work-turn";
@@ -291,21 +291,28 @@ function evidence(page: Page, testInfo: TestInfo) {
 }
 
 test.describe("Claude background task ages", () => {
-	test.use({ claudeReplay: { turns: [TRACE], holdAfterResult: true } });
+	test.use({
+		harnessOptions: {
+			claudeReplay: {
+				turns: [TRACE],
+				plan: { holdAfterResult: true },
+				subagentReads: true,
+			},
+		},
+	});
 	test("reload restores the original task timestamps and advancing ages", async ({
 		page,
-		relayUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
-		const sessionId = decodeURIComponent(harness.projectUrl.slice(3));
+		const sessionId = await (await harness.connect()).createSession();
 		const snapshots = observeTasks(page, sessionId);
 		const report = evidence(page, testInfo);
 		const app = new AppPage(page);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("no Claude replayer");
 		try {
-			await app.goto(relayUrl);
+			await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
@@ -358,29 +365,33 @@ test.describe("Claude background task ages", () => {
 for (const transcriptOnlySubagents of [false, true]) {
 	test.describe(`Claude task detail via ${transcriptOnlySubagents ? "transcript feeds" : "SDK frames"}`, () => {
 		test.use({
-			claudeReplay: {
-				turns: [TRACE],
-				tracesDir,
-				holdAfterResult: true,
-				holdBefore: { turn: 1, message: 104 + sparseFrames.length },
-				transcriptOnlySubagents,
+			harnessOptions: {
+				claudeReplay: {
+					turns: [TRACE],
+					tracesDir,
+					plan: {
+						holdAfterResult: true,
+						holdBefore: { turn: 1, message: 104 + sparseFrames.length },
+						transcriptOnlySubagents,
+					},
+					subagentReads: true,
+				},
 			},
 		});
 		test("retains usable commands and agent types through sparse observations, later turns and reload", async ({
 			page,
-			relayUrl,
 			harness,
 		}, testInfo) => {
 			test.setTimeout(120_000);
 			await page.setViewportSize({ width: 393, height: 852 });
-			const sessionId = decodeURIComponent(harness.projectUrl.slice(3));
+			const sessionId = await (await harness.connect()).createSession();
 			const snapshots = observeTasks(page, sessionId);
 			const report = evidence(page, testInfo);
 			const app = new AppPage(page);
 			const replayer = harness.claudeReplayer;
 			if (!replayer) throw new Error("no Claude replayer");
 			try {
-				await app.goto(relayUrl);
+				await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
 				await app.sendMessage("Launch the background work");
 				await replayer.held();
 				await expect.poll(() => snapshots.tasks.length).toBe(5);
@@ -496,35 +507,39 @@ for (const transcriptOnlySubagents of [false, true]) {
 
 test.describe("Claude ended stream task liveness", () => {
 	test.use({
-		claudeReplay: {
-			turns: [TRACE],
-			tracesDir: endedTracesDir,
-			holdAfterResult: true,
-			transcriptOnlySubagents: true,
-			endAfterTrace: true,
-			holdSubagentReadAfter: {
-				turn: 1,
-				// task_updated completes A before the following task_notification.
-				// Its completion schedules the sole final transcript read.
-				message: 113,
-				agentId: "ab898d312e2e126b5",
+		harnessOptions: {
+			claudeReplay: {
+				turns: [TRACE],
+				tracesDir: endedTracesDir,
+				plan: {
+					holdAfterResult: true,
+					transcriptOnlySubagents: true,
+					endAfterTrace: true,
+					holdSubagentReadAfter: {
+						turn: 1,
+						// task_updated completes A before the following task_notification.
+						// Its completion schedules the sole final transcript read.
+						message: 113,
+						agentId: "ab898d312e2e126b5",
+					},
+				},
+				subagentReads: true,
 			},
 		},
 	});
 	test("a delayed final transcript persists history without reviving ended tasks", async ({
 		page,
-		relayUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
-		const sessionId = decodeURIComponent(harness.projectUrl.slice(3));
+		const sessionId = await (await harness.connect()).createSession();
 		const snapshots = observeTasks(page, sessionId);
 		const report = evidence(page, testInfo);
 		const app = new AppPage(page);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("no Claude replayer");
 		try {
-			await app.goto(relayUrl);
+			await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
 			await app.sendMessage("Launch the background work");
 			await replayer.held();
 			await expect.poll(() => snapshots.tasks.length).toBe(4);
@@ -544,7 +559,9 @@ test.describe("Claude ended stream task liveness", () => {
 			if (!childId || !siblingId)
 				throw new Error("agents have no child sessions");
 			const siblingStatus = () => {
-				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+				const db = new DatabaseSync(harness.daemonStorePath(), {
+					readOnly: true,
+				});
 				try {
 					return db
 						.prepare("SELECT status FROM sessions WHERE id = ?")
@@ -557,7 +574,9 @@ test.describe("Claude ended stream task liveness", () => {
 			// Live polls may already have persisted agent A's prompt, which ends in
 			// "A done." too; only the final transcript carries the reply itself.
 			const finalHistoryCount = () => {
-				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+				const db = new DatabaseSync(harness.daemonStorePath(), {
+					readOnly: true,
+				});
 				try {
 					return Number(
 						db

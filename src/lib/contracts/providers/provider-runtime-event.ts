@@ -60,6 +60,8 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	// A Claude wake's start and end (CONTRACT 2.1 row 215); the daemon stamps their label.
 	"evidence.turn_started",
 	"evidence.turn_ended",
+	// A Claude runner's background task set (CONTRACT 8.2, 8.3); the daemon stamps its label.
+	"evidence.tasks_snapshot",
 ] as const;
 
 export const ProviderRuntimeEventTypeSchema = Schema.Literals([

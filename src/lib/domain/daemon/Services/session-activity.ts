@@ -8,22 +8,123 @@ import {
 	type Scope,
 	Stream,
 } from "effect";
+import type { EventPayloadMap } from "../../../contracts/stored-event.js";
+import type { LedgerView } from "../../../provider/run-ledger/run-ledger-model.js";
 import type {
 	EventDelivery,
 	Interests,
 } from "../../../server/event-audiences.js";
 import {
 	classify,
-	makeSessionBackgroundLiveness,
+	type SessionBackground,
 } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
-import type { SessionServer } from "../../../shared-types.js";
+import type { BackgroundTask, SessionServer } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
 
+type TaskDisplay = Pick<
+	BackgroundTask,
+	"detail" | "childSessionId" | "parentTaskId" | "ancestorTaskIds"
+> & { readonly firstSeenAt?: number | undefined };
+
+/**
+ * 8.1: each session's background tasks as the Run Ledger's arm last committed its tasks view, with
+ * the display its latest snapshot carried. A reader's copy: the ledger decides, this only shows.
+ */
+function makeLedgerTasks(changed: (sessionId: string) => void) {
+	const views = new Map<
+		string,
+		{
+			readonly view: LedgerView["tasks"];
+			readonly display: ReadonlyMap<string, TaskDisplay>;
+			readonly since: number;
+		}
+	>();
+	const taskIds = (view: LedgerView["tasks"] | undefined) =>
+		view?.tag === "live" ? view.tasks.map((task) => task.key.taskId) : [];
+	return {
+		/** The arm's committed view, and for a snapshot its tasks; true when what shows moved. */
+		publish(
+			sessionId: string,
+			view: LedgerView["tasks"],
+			snapshot?: {
+				readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
+				readonly at: number;
+			},
+		): boolean {
+			const previous = views.get(sessionId);
+			const display = snapshot
+				? new Map(
+						snapshot.tasks.map(
+							({
+								key,
+								taskType,
+								subagentType,
+								description,
+								ambient,
+								...display
+							}) => [
+								key.taskId,
+								{ ...display, firstSeenAt: display.firstSeenAt ?? snapshot.at },
+							],
+						),
+					)
+				: (previous?.display ?? new Map<string, TaskDisplay>());
+			const next = {
+				view,
+				display,
+				since:
+					previous &&
+					taskIds(previous.view).join("\u0000") === taskIds(view).join("\u0000")
+						? previous.since
+						: (snapshot?.at ?? Date.now()),
+			};
+			views.set(sessionId, next);
+			const moved =
+				JSON.stringify([previous?.view, [...(previous?.display ?? [])]]) !==
+				JSON.stringify([view, [...display]]);
+			if (moved) changed(sessionId);
+			return moved;
+		},
+		backgroundOf(sessionId: string): SessionBackground | undefined {
+			const entry = views.get(sessionId);
+			if (entry?.view.tag !== "live") return undefined;
+			const tasks = entry.view.tasks
+				.map((task) => {
+					const display = entry.display.get(task.key.taskId);
+					return {
+						...display,
+						id: task.key.taskId,
+						type: task.taskType,
+						kind: task.kind,
+						description: task.description,
+						firstSeenAt: display?.firstSeenAt ?? entry.since,
+					};
+				})
+				.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+			return { work: classify(tasks), tasks };
+		},
+		/** 8.3: tasks live or unknown may still act. */
+		hasLiveWork(sessionId: string): boolean {
+			return (views.get(sessionId)?.view.tag ?? "none") !== "none";
+		},
+		/** The live task ids and since when that set has held; undefined while unknown or unread. */
+		liveListOf(
+			sessionId: string,
+		):
+			| { readonly taskIds: ReadonlySet<string>; readonly since: number }
+			| undefined {
+			const entry = views.get(sessionId);
+			if (entry === undefined || entry.view.tag === "unknown") return undefined;
+			return { taskIds: new Set(taskIds(entry.view)), since: entry.since };
+		},
+	};
+}
+
 export interface SessionActivity {
-	readonly background: ReturnType<typeof makeSessionBackgroundLiveness>;
+	readonly background: ReturnType<typeof makeLedgerTasks>;
 	readonly compactions: ReturnType<typeof makeSessionCompactions>;
 	readonly retries: ReturnType<typeof makeSessionRetries>;
 	/**
@@ -81,7 +182,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				for (const sessionId of sessions) changed(sessionId);
 			}
 		})();
-		const background = makeSessionBackgroundLiveness(changed);
+		const background = makeLedgerTasks(changed);
 		const servers = new Map<string, readonly SessionServer[]>();
 		return {
 			// A live server is live work: it pauses auto-settle and holds archive, delete and the

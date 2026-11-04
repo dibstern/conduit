@@ -169,8 +169,10 @@ for (const transcriptOnlySubagents of [false, true]) {
 								db
 									.prepare(
 										// The id as a whole JSON string value, not inside free text
-										// such as a progress description.
-										"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND instr(data, '\"' || ? || '\"') > 0",
+										// such as a progress description. Evidence is not placement: the
+										// parent's task snapshot lists every live task of its query,
+										// nested ones too, as the SDK reports them.
+										"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type NOT LIKE 'evidence.%' AND instr(data, '\"' || ? || '\"') > 0",
 									)
 									.get(sessionId, id)?.["n"],
 							);

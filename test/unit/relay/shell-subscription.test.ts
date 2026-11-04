@@ -82,6 +82,7 @@ import {
 	type SessionInfo,
 	SessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -1641,7 +1642,7 @@ describe("subscribeShell", () => {
 
 				const attentionAfter = (types: string[]) =>
 					Effect.gen(function* () {
-						liveness.record({
+						publishLedgerTasks(liveness, {
 							sessionId: SID,
 							kind: "snapshot",
 							tasks: types.map((type, index) => ({

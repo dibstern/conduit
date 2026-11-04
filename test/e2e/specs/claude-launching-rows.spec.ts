@@ -19,7 +19,8 @@
 import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, test } from "../helpers/process-harness-fixture.js";
+import { gotoRelay } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -113,26 +114,34 @@ async function recordWhen(
 	return steps.record(step);
 }
 
+// Claude runs in its runner process, as in production: the ledger takes task
+// snapshots only from a labelled runner (CONTRACT 6.1, 8.2).
 test.describe("Claude launching rows", () => {
 	test.describe("finish", () => {
 		test.use({
-			claudeReplay: {
-				turns: [
-					"concurrent-background-work-turn",
-					"concurrent-background-work-after-restart-turn",
-				],
-				holdAfterResult: true,
-				// Both of agent A's nested shells are live; the first is about to end.
-				holdBefore: { turn: 1, message: 104 },
+			harnessOptions: {
+				claudeReplay: {
+					turns: [
+						"concurrent-background-work-turn",
+						"concurrent-background-work-after-restart-turn",
+					],
+					plan: {
+						holdAfterResult: true,
+						// Both of agent A's nested shells are live; the first is about to end.
+						holdBefore: { turn: 1, message: 104 },
+					},
+					subagentReads: true,
+				},
 			},
 		});
 
 		test("rows run, fold to their outcomes with real times, and survive a reload and a restart", async ({
 			page,
-			relayUrl,
 			harness,
 		}, testInfo) => {
 			test.setTimeout(120_000);
+			const sessionId = await (await harness.connect()).createSession();
+			const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			const replayer = harness.claudeReplayer;
@@ -229,8 +238,13 @@ test.describe("Claude launching rows", () => {
 					expect.soft(reloaded[id], `${id} after reload`).toEqual(finished[id]);
 
 				// An outcome outlives the restart that empties the live list.
+				await harness.terminate();
 				await harness.restart();
-				await gotoRelay(page, relayUrl);
+				// The restarted daemon listens on a new port.
+				await gotoRelay(
+					page,
+					`${harness.baseUrl}/s/${sessionId}?p=process-test`,
+				);
 				await app.sendMessage("Reply with only: ok, still here.");
 				await expect
 					.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -248,22 +262,27 @@ test.describe("Claude launching rows", () => {
 
 	test.describe("restart", () => {
 		test.use({
-			claudeReplay: {
-				turns: [
-					"concurrent-background-work-turn",
-					"concurrent-background-work-after-restart-turn",
-				],
-				// Agent A's nested shells are done; nothing the parent launched is.
-				holdBefore: { turn: 1, message: 112 },
+			harnessOptions: {
+				claudeReplay: {
+					turns: [
+						"concurrent-background-work-turn",
+						"concurrent-background-work-after-restart-turn",
+					],
+					// Agent A's nested shells are done; nothing the parent launched is.
+					plan: { holdBefore: { turn: 1, message: 112 } },
+					subagentReads: true,
+					turnsOutliveRunner: true,
+				},
 			},
 		});
 
 		test("rows with no outcome read No longer running after a restart", async ({
 			page,
-			relayUrl,
 			harness,
 		}, testInfo) => {
 			test.setTimeout(120_000);
+			const sessionId = await (await harness.connect()).createSession();
+			const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			const replayer = harness.claudeReplayer;
@@ -271,13 +290,15 @@ test.describe("Claude launching rows", () => {
 			const steps = recorder(page, testInfo);
 			const statusReport: { step: string; statuses: string[] }[] = [];
 			const childStatuses = () => {
-				const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+				const db = new DatabaseSync(harness.daemonStorePath(), {
+					readOnly: true,
+				});
 				try {
 					return db
 						.prepare(
 							"SELECT status FROM sessions WHERE parent_id = ? ORDER BY id",
 						)
-						.all(decodeURIComponent(harness.projectUrl.slice("/s/".length)))
+						.all(sessionId)
 						.map((row) => String(row["status"]));
 				} finally {
 					db.close();
@@ -303,8 +324,18 @@ test.describe("Claude launching rows", () => {
 				});
 
 				// (c) the restart cuts the held trace off: no task reports an outcome.
+				// The runner outlives a daemon restart, so the machine's restart ends
+				// it too.
+				for (const pid of harness.remainingRunnerPids())
+					expect(harness.signalOwnedRunner(pid, "SIGTERM")).toBe(true);
+				await expect.poll(() => harness.remainingRunnerPids()).toEqual([]);
+				await harness.terminate();
 				await harness.restart();
-				await gotoRelay(page, relayUrl);
+				// The restarted daemon listens on a new port.
+				await gotoRelay(
+					page,
+					`${harness.baseUrl}/s/${sessionId}?p=process-test`,
+				);
 				await app.sendMessage("Reply with only: ok, still here.");
 				await expect
 					.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -353,20 +384,26 @@ test.describe("Claude launching rows", () => {
 
 	test.describe("backgrounded mid-run", () => {
 		test.use({
-			claudeReplay: {
-				turns: ["foreground-agent-backgrounded-turn"],
-				// Before the task_updated that moves agent F to the background.
-				holdBefore: { turn: 1, message: 34 },
-				holdAfterResult: true,
+			harnessOptions: {
+				claudeReplay: {
+					turns: ["foreground-agent-backgrounded-turn"],
+					plan: {
+						// Before the task_updated that moves agent F to the background.
+						holdBefore: { turn: 1, message: 34 },
+						holdAfterResult: true,
+					},
+					subagentReads: true,
+				},
 			},
 		});
 
 		test("a foreground agent moved to the background becomes a launching row", async ({
 			page,
-			relayUrl,
 			harness,
 		}, testInfo) => {
 			test.setTimeout(120_000);
+			const sessionId = await (await harness.connect()).createSession();
+			const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 			const app = new AppPage(page);
 			const chat = new ChatPage(page);
 			const replayer = harness.claudeReplayer;

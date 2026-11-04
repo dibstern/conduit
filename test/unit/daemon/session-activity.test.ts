@@ -14,6 +14,7 @@ import {
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 
 describe("Session Activity", () => {
 	it.effect(
@@ -79,16 +80,16 @@ describe("Session Activity", () => {
 						},
 					],
 				};
-				activity.background.record(background);
-				activity.background.record(background);
+				publishLedgerTasks(activity.background, background);
+				publishLedgerTasks(activity.background, background);
 				expect(activity.background.backgroundOf("background")?.work).toBe(
 					"monitoring",
 				);
-				activity.background.record({
+				publishLedgerTasks(activity.background, {
 					sessionId: "background",
 					kind: "session-ended",
 				});
-				activity.background.record({
+				publishLedgerTasks(activity.background, {
 					sessionId: "background",
 					kind: "session-ended",
 				});
@@ -166,7 +167,7 @@ describe("Session Activity", () => {
 		() =>
 			Effect.gen(function* () {
 				const activity = yield* makeSessionActivity;
-				activity.background.record({
+				publishLedgerTasks(activity.background, {
 					sessionId: "s",
 					kind: "snapshot",
 					tasks: [
@@ -222,7 +223,7 @@ describe("Session Activity", () => {
 					work: "working",
 					tasks: [],
 				});
-				activity.background.record({
+				publishLedgerTasks(activity.background, {
 					sessionId: "s",
 					kind: "snapshot",
 					tasks: [{ id: "m1", type: "local_bash", description: "Watch" }],
@@ -241,7 +242,7 @@ describe("Session Activity", () => {
 			Effect.gen(function* () {
 				const first = yield* makeSessionActivity;
 				const second = yield* makeSessionActivity;
-				first.background.record({
+				publishLedgerTasks(first.background, {
 					sessionId: "same-session-id",
 					kind: "snapshot",
 					tasks: [{ id: "task", type: "local_bash", description: "Watching" }],

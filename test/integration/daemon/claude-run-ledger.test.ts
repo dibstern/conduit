@@ -669,10 +669,13 @@ describe("Claude on the Run Ledger", () => {
 				event.sequence <= (turns[1]?.sequence ?? 0),
 		);
 		expect(wake.some((event) => event.type === "turn.completed")).toBe(false);
-		expect(wake.slice(-2).map(({ type }) => type)).toEqual([
-			"session.status",
-			"evidence.turn_ended",
-		]);
+		// A task snapshot may land between them; it is no part of the wake's ending.
+		expect(
+			wake
+				.filter(({ type }) => type !== "evidence.tasks_snapshot")
+				.slice(-2)
+				.map(({ type }) => type),
+		).toEqual(["session.status", "evidence.turn_ended"]);
 		expect(
 			ledger.events.some((event) => event.type === "interrupt.requested"),
 		).toBe(false);

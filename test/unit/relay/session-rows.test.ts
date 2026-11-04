@@ -32,6 +32,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -290,7 +291,7 @@ describe("Session Rows read paths", () => {
 								path: "/workspace/hint",
 							}),
 						]);
-						activity.background.record({
+						publishLedgerTasks(activity.background, {
 							sessionId,
 							kind: "snapshot",
 							tasks: [

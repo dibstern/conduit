@@ -28,6 +28,7 @@ import {
 } from "../../../persistence/effect/provider-state-effect.js";
 import { makeReadQueryEffect } from "../../../persistence/effect/read-query-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
+import { ledgerTasksWakes } from "../../../persistence/effect/run-ledger-arm.js";
 import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.js";
 import type { ClaudeProviderInstanceDeps } from "../../../provider/claude/claude-provider-runtime.js";
 import { makeClaudeThreadRead } from "../../../provider/claude/claude-thread-read.js";
@@ -295,23 +296,38 @@ export const makeProviderAdaptersLive = (
 					),
 				);
 			const runBackground = Effect.runForkWith(Context.empty());
-			const onBackgroundTask: NonNullable<
-				Parameters<typeof ClaudeDriver.create>[0]["onBackgroundTask"]
-			> = (transition) => {
-				if (!activity.background.record(transition)) return;
+			// 8.1: SessionActivity reads the Run Ledger's tasks view, which the arm hands over after
+			// each commit that moves it.
+			const onLedgerTasks: Parameters<
+				NonNullable<ReturnType<typeof ledgerTasksWakes.get>>["add"]
+			>[0] = (sessionId, tasks, snapshot) => {
+				if (!activity.background.publish(sessionId, tasks, snapshot)) return;
 				runBackground(
-					projectContext(transition.sessionId).pipe(
+					projectContext(sessionId).pipe(
 						Effect.tap((project) =>
-							Effect.sync(() =>
-								project?.onBackgroundWorkChanged?.(transition.sessionId),
-							),
+							Effect.sync(() => project?.onBackgroundWorkChanged?.(sessionId)),
 						),
 						Effect.catch((cause) =>
 							Effect.logWarning("Could not announce background work", cause),
 						),
+						Effect.provideService(SqlClient.SqlClient, sql),
 					),
 				);
 			};
+			// The arm wakes per store: the daemon's, and each project's when it brings its own.
+			const listenedStores = new Set<SqlClient.SqlClient>();
+			const listenForTasks = (store: SqlClient.SqlClient) => {
+				listenedStores.add(store);
+				const wakes = ledgerTasksWakes.get(store) ?? new Set();
+				ledgerTasksWakes.set(store, wakes.add(onLedgerTasks));
+			};
+			listenForTasks(sql);
+			yield* Effect.addFinalizer(() =>
+				Effect.sync(() => {
+					for (const store of listenedStores)
+						ledgerTasksWakes.get(store)?.delete(onLedgerTasks);
+				}),
+			);
 			let testSdk = options.claudeSdk;
 			const testModule = process.env["CONDUIT_TEST_CLAUDE_QUERY_MODULE"];
 			if (process.env["NODE_ENV"] === "test" && process.send && testModule) {
@@ -347,7 +363,6 @@ export const makeProviderAdaptersLive = (
 					daemonConfigDir: configDir,
 					projectRootForSession,
 					recoveryForSession,
-					onBackgroundTask,
 					persistUserMessage,
 					readThread,
 					claudeSettingsOverrides: () =>
@@ -611,6 +626,7 @@ export const makeProviderAdaptersLive = (
 								...(onBackgroundWorkChanged ? { onBackgroundWorkChanged } : {}),
 							};
 							borrowed.set(projectId, project);
+							listenForTasks(Context.get(context, SqlClient.SqlClient));
 							yield* Effect.addFinalizer(() =>
 								projectBorrows.withPermits(1)(
 									Effect.gen(function* () {

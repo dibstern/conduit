@@ -252,6 +252,8 @@ export const BackgroundTaskSchema = Schema.Struct({
 	id: Schema.String,
 	/** SDK task_type, e.g. local_bash, local_agent, monitor_mcp. */
 	type: Schema.String,
+	/** The Run Ledger's kind (8.2): shell, subagent, workflow, or the task_type verbatim. */
+	kind: Schema.optional(Schema.String),
 	description: Schema.String,
 	/** The originating shell command, agent type or workflow name, when known. */
 	detail: Schema.optional(Schema.String),

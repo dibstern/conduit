@@ -13,6 +13,7 @@ import {
 	rmSync,
 	statSync,
 	symlinkSync,
+	watch,
 	writeFileSync,
 } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
@@ -75,7 +76,10 @@ import type {
 } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
-import type { ClaudeTraceName } from "../e2e/helpers/claude-trace-replayer.js";
+import type {
+	ClaudeReplayPlan,
+	ClaudeTraceName,
+} from "../e2e/helpers/claude-trace-replayer.js";
 import { loadOpenCodeRecording } from "../e2e/helpers/recorded-loader.js";
 import {
 	cleanupTestClaudeRunners,
@@ -264,6 +268,22 @@ export class ProcessHarness {
 			readonly usageLimitTurn?: number;
 			/** Pause result delivery until the test writes claude-replay-release. */
 			readonly holdBeforeResult?: boolean;
+			/**
+			 * The replayer's own holds, opened in reach order by claudeReplayer.release().
+			 * The runner plays them, so they read as they do in production's runner process.
+			 */
+			readonly plan?: Pick<
+				ClaudeReplayPlan,
+				| "holdAfterResult"
+				| "holdBefore"
+				| "transcriptOnlySubagents"
+				| "endAfterTrace"
+				| "holdSubagentReadAfter"
+			>;
+			/** Serve subagent transcript reads from the trace's captured reads. */
+			readonly subagentReads?: boolean;
+			/** A session's replacement runner plays on from the session's next turn. */
+			readonly turnsOutliveRunner?: boolean;
 			/** Enable relay diagnostics when a replay checks warning logs. */
 			readonly logLevel?: "warn" | "info";
 		},
@@ -1192,6 +1212,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 								...(this.claudeReplay.followWorkspaceDirectives
 									? { CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES: "1" }
 									: {}),
+								...(this.claudeReplay.turnsOutliveRunner
+									? { CONDUIT_TEST_CLAUDE_REPLAY_TURN_CHECKPOINT: "1" }
+									: {}),
 								...(this.claudeReplay.usageLimitTurn
 									? {
 											CONDUIT_TEST_CLAUDE_REPLAY_USAGE_LIMIT_TURN: String(
@@ -1214,6 +1237,16 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 												this.claudeReplay.enterPath,
 											),
 										}
+									: {}),
+								...(this.claudeReplay.plan
+									? {
+											CONDUIT_TEST_CLAUDE_REPLAY_PLAN: JSON.stringify(
+												this.claudeReplay.plan,
+											),
+										}
+									: {}),
+								...(this.claudeReplay.subagentReads
+									? { CONDUIT_TEST_CLAUDE_REPLAY_SUBAGENT_READS: "1" }
 									: {}),
 								...(this.claudeReplay.holdBeforeResult
 									? {
@@ -1564,6 +1597,36 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 
 	get baseUrl(): string {
 		return `http://127.0.0.1:${this.port}`;
+	}
+
+	/**
+	 * Opens the replay plan's holds, as the in-process replayer does: the runner
+	 * appends each hold it reaches to claude-replay-hold.reached and waits until
+	 * the test has released as many.
+	 */
+	get claudeReplayer(): { held(): Promise<void>; release(): void } | undefined {
+		if (!this.claudeReplay?.plan) return undefined;
+		const lines = (file: string) =>
+			existsSync(file)
+				? readFileSync(file, "utf8").split("\n").filter(Boolean).length
+				: 0;
+		const hold = join(this.root, "claude-replay-hold");
+		return {
+			// The runner appends each hold it reaches; the test's timeout bounds the wait.
+			held: () =>
+				new Promise<void>((resolve) => {
+					const check = () => {
+						if (lines(`${hold}.reached`) <= lines(`${hold}.released`)) return;
+						watcher.close();
+						resolve();
+					};
+					const watcher = watch(this.root, check).on("error", () =>
+						watcher.close(),
+					);
+					check();
+				}),
+			release: () => appendFileSync(`${hold}.released`, "release\n"),
+		};
 	}
 
 	opencodeRequestBodies(): readonly {

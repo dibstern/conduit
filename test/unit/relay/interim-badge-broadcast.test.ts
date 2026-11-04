@@ -14,6 +14,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -88,13 +89,21 @@ it("publishes task additions and removals from onChange without another event", 
 			description: "Review tests",
 			firstSeenAt: 200,
 		};
-		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [a] });
+		publishLedgerTasks(liveness, {
+			sessionId: "s1",
+			kind: "snapshot",
+			tasks: [a],
+		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(2);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "monitoring",
 			backgroundTasks: [{ ...a, firstSeenAt: 100 }],
 		});
-		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [b, a] });
+		publishLedgerTasks(liveness, {
+			sessionId: "s1",
+			kind: "snapshot",
+			tasks: [b, a],
+		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(3);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "monitoring",
@@ -103,7 +112,11 @@ it("publishes task additions and removals from onChange without another event", 
 				{ ...b, firstSeenAt: 200 },
 			],
 		});
-		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [b] });
+		publishLedgerTasks(liveness, {
+			sessionId: "s1",
+			kind: "snapshot",
+			tasks: [b],
+		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(4);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "monitoring",
@@ -123,9 +136,17 @@ it("publishes task additions and removals from onChange without another event", 
 				rows: [{ backgroundTasks: [{ ...b, firstSeenAt: 200 }] }],
 			},
 		});
-		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [{ ...b }] });
+		publishLedgerTasks(liveness, {
+			sessionId: "s1",
+			kind: "snapshot",
+			tasks: [{ ...b }],
+		});
 		expect(onChange).toHaveBeenCalledTimes(3);
-		liveness.record({ sessionId: "s1", kind: "snapshot", tasks: [] });
+		publishLedgerTasks(liveness, {
+			sessionId: "s1",
+			kind: "snapshot",
+			tasks: [],
+		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(5);
 		expect(rows.at(-1)).toMatchObject({ attention: "idle" });
 		expect(rows.at(-1)).not.toHaveProperty("backgroundTasks");
