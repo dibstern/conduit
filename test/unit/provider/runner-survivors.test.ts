@@ -65,7 +65,6 @@ import type {
 	SessionCommand,
 	SessionOutput,
 } from "../../../src/lib/provider/runner/session-runner.js";
-import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import { cleanupTestClaudeRunners } from "../../helpers/claude-runner-cleanup.js";
 import {
 	admitRunnerCommand,
@@ -451,67 +450,6 @@ const stopIntentFixture = Effect.gen(function* () {
 		exitOnSignal,
 	};
 });
-
-it.effect(
-	"a delayed retired background cleanup cannot clear a successor snapshot",
-	() =>
-		run(
-			Effect.gen(function* () {
-				const f = yield* stopIntentFixture;
-				const entered = yield* Deferred.make<void>();
-				const release = yield* Deferred.make<void>();
-				const background = makeSessionBackgroundLiveness(undefined, () => 1);
-				f.output.mockImplementation((output) =>
-					Effect.gen(function* () {
-						if (output.type === "background-task") {
-							if (output.transition.kind === "session-ended") {
-								yield* Deferred.succeed(entered, undefined);
-								yield* Deferred.await(release);
-							}
-							background.record(output.transition);
-						}
-						return {};
-					}),
-				);
-				f.exitOnSignal();
-				const stopping = yield* f.stop.pipe(Effect.forkChild);
-				yield* Effect.gen(function* () {
-					yield* Deferred.await(entered);
-					const warming = yield* f.manager
-						.executeEffect({ type: "pre-warm", sessionId: "s", input: f.input })
-						.pipe(Effect.forkChild);
-					yield* TestClock.adjust("2 seconds");
-					yield* Fiber.join(warming);
-					expect(f.connections).toHaveLength(2);
-					const successor = f.connections[1];
-					if (!successor) return yield* Effect.die("missing successor");
-					yield* successor.emit(
-						{
-							type: "background-task",
-							transition: {
-								sessionId: "s",
-								kind: "snapshot",
-								tasks: [
-									{
-										id: "successor",
-										type: "local_bash",
-										description: "New work",
-									},
-								],
-							},
-						},
-						"s",
-					);
-					yield* Deferred.succeed(release, undefined);
-					yield* TestClock.adjust("2 seconds");
-					yield* Fiber.join(stopping);
-					expect(
-						background.backgroundOf("s")?.tasks.map((task) => task.id),
-					).toEqual(["successor"]);
-				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
-			}),
-		),
-);
 
 // Exercise the swap through the same manager/process-table boundary as Stop.
 // Gates expose the prepare/commit race without duplicating its state machine.
@@ -3144,13 +3082,6 @@ it.effect(
 				expect(
 					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${active.runnerId} AND retired_at IS NOT NULL`,
 				).toEqual([]);
-				expect(
-					f.output.mock.calls.some(
-						([output]) =>
-							output.type === "background-task" &&
-							output.transition.kind === "session-ended",
-					),
-				).toBe(false);
 			}),
 		),
 );
@@ -3386,7 +3317,6 @@ for (const outcome of ["retired", "exited"] as const)
 						return yield* Effect.fail(runnerFailure("test", "No attachment"));
 					const entered = yield* Deferred.make<void>();
 					const release = yield* Deferred.make<void>();
-					const background = makeSessionBackgroundLiveness(undefined, () => 1);
 					const outputs: SessionOutput[] = [];
 					f.output.mockImplementation((output) =>
 						Effect.gen(function* () {
@@ -3399,23 +3329,8 @@ for (const outcome of ["retired", "exited"] as const)
 								return {};
 							}
 							outputs.push(output);
-							if (output.type === "background-task")
-								background.record(output.transition);
 							return {};
 						}),
-					);
-					yield* attachment.emit(
-						{
-							type: "background-task",
-							transition: {
-								sessionId: "s",
-								kind: "snapshot",
-								tasks: [
-									{ id: "old", type: "local_bash", description: "Old task" },
-								],
-							},
-						},
-						"s",
 					);
 					const blocked = yield* Effect.forkChild(
 						attachment.emit({ type: "release-sink", sinkId: "blocked" }, "s"),
@@ -3444,19 +3359,15 @@ for (const outcome of ["retired", "exited"] as const)
 							return yield* Effect.fail(
 								runnerFailure("test", "No replacement"),
 							);
-						yield* replacement.emit(
-							{
-								type: "background-task",
-								transition: {
-									sessionId: "s",
-									kind: "snapshot",
-									tasks: [
-										{ id: "new", type: "local_bash", description: "New task" },
-									],
-								},
-							},
-							"s",
-						);
+						// A session-wide output from the replacement is not held behind the old cleanup.
+						const usage: SessionOutput = {
+							type: "account-usage",
+							accountId: "account",
+							harness: "claude",
+							reading: { status: "available", planLabel: "new", windows: [] },
+						};
+						yield* replacement.emit(usage, "s");
+						expect(outputs).toContainEqual(usage);
 					}
 					if (outcome === "exited") {
 						expect(
@@ -3466,24 +3377,12 @@ for (const outcome of ["retired", "exited"] as const)
 									output.sinkId === "retained-sink",
 							),
 						).toHaveLength(1);
-						expect(background.backgroundOf("s")).toBeUndefined();
 					}
 					outputs.length = 0;
 					yield* Deferred.succeed(release, undefined);
 					yield* Fiber.join(blocked);
 					yield* TestClock.adjust(0);
 					if (outcome === "retired") {
-						expect(background.backgroundOf("s")).toEqual({
-							work: "monitoring",
-							tasks: [
-								{
-									id: "new",
-									type: "local_bash",
-									description: "New task",
-									firstSeenAt: 1,
-								},
-							],
-						});
 						expect(outputs).toEqual([]);
 						expect(
 							yield* f.manager.hasLiveProcessEffect(
@@ -3492,7 +3391,6 @@ for (const outcome of ["retired", "exited"] as const)
 							),
 						).toBe(true);
 					} else {
-						expect(background.backgroundOf("s")).toBeUndefined();
 						expect(outputs).toEqual([]);
 						expect(
 							yield* f.manager.hasLiveProcessEffect("s", old.runnerId),
@@ -4153,8 +4051,7 @@ it.effect(
 				const release = yield* Deferred.make<void>();
 				const original = f.output.getMockImplementation();
 				f.output.mockImplementation((output) =>
-					output.type === "background-task" &&
-					output.transition.kind === "session-ended"
+					output.type === "release-sink"
 						? Deferred.succeed(entered, undefined).pipe(
 								Effect.andThen(Deferred.await(release)),
 								Effect.as({}),

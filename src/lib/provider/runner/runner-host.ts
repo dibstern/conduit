@@ -366,9 +366,6 @@ export const runSessionRunner = (
 			query !== undefined && query !== currentQuery;
 		const querySeqs = new WeakMap<object, number>();
 		const spool = new RunnerSpool(`${socketPath}.spool`, () => querySeq);
-		let backgroundSnapshot:
-			| Extract<SessionOutput, { type: "background-task" }>
-			| undefined;
 		// 8.3: the last task snapshot, empty included, so an attaching server learns the set without
 		// another SDK message.
 		let tasksSnapshot:
@@ -479,7 +476,12 @@ export const runSessionRunner = (
 			queryStarted: (query) => {
 				if (query === currentQuery) return false;
 				const replaced = currentQuery !== undefined;
-				if (replaced) querySeq++;
+				// 8.3 (CONTRACT.md 2813-2814): a replaced query's task and idle caches no longer hold.
+				if (replaced) {
+					querySeq++;
+					tasksSnapshot = undefined;
+					idle?.queryReplaced();
+				}
 				currentQuery = query;
 				querySeqs.set(query, querySeq);
 				return replaced;
@@ -633,7 +635,6 @@ export const runSessionRunner = (
 															].includes(output.type))
 												)
 													return output.type === "event" ||
-														output.type === "background-task" ||
 														output.type === "account-usage"
 														? {}
 														: yield* Effect.fail(
@@ -653,13 +654,6 @@ export const runSessionRunner = (
 															? (querySeqs.get(origin) ?? querySeq)
 															: querySeq,
 													};
-												if (output.type === "background-task") {
-													backgroundSnapshot =
-														output.transition.kind === "snapshot" &&
-														output.transition.tasks.length > 0
-															? output
-															: undefined;
-												}
 												idle?.activity(output);
 												activeOutputs++;
 												reportUpgradeState();
@@ -846,24 +840,19 @@ export const runSessionRunner = (
 						if (firstAttachment)
 							runFork(
 								Effect.suspend(() =>
-									Effect.all([
-										backgroundSnapshot
-											? spool.emit(backgroundSnapshot)
-											: Effect.void,
-										tasksSnapshot
-											? spool.emit(
-													{
-														...tasksSnapshot.output,
-														event: {
-															...tasksSnapshot.output.event,
-															eventId: createEventId(),
-															createdAt: Date.now(),
-														},
+									tasksSnapshot
+										? spool.emit(
+												{
+													...tasksSnapshot.output,
+													event: {
+														...tasksSnapshot.output.event,
+														eventId: createEventId(),
+														createdAt: Date.now(),
 													},
-													tasksSnapshot.querySeq,
-												)
-											: Effect.void,
-									]),
+												},
+												tasksSnapshot.querySeq,
+											)
+										: Effect.void,
 								).pipe(Effect.orDie),
 							);
 						reportedQuiescent = undefined;

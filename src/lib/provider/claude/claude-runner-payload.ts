@@ -207,9 +207,6 @@ export interface ClaudeProviderInstanceDeps {
 		input: ClaudeThreadReadInput,
 	) => Effect.Effect<ClaudeThreadReadResult>;
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
-	readonly onBackgroundTask?: (
-		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
-	) => void;
 	readonly daemonConfigDir?: string;
 	readonly accounts?: Effect.Effect<AccountsState>;
 	readonly autoSettleAfterDays?: Effect.Effect<number | null | undefined>;
@@ -720,9 +717,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						}),
 					)
 					.pipe(Effect.ignore);
-			yield* this.emit({ type: "background-task", transition }).pipe(
-				Effect.orDie,
-			);
 		});
 	}
 

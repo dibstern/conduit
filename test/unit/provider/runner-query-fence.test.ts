@@ -357,14 +357,6 @@ it("drops a replaced query's output at capture and passes its evidence under its
 									providerItemId: "tool-1",
 								},
 							}).pipe(Effect.exit),
-							emitUnder(replaced, {
-								type: "background-task",
-								transition: {
-									sessionId: "session-1",
-									kind: "snapshot",
-									tasks: [{ id: "t", type: "local_bash", description: "late" }],
-								},
-							}),
 							emitUnder(replaced, { type: "release-sink", sinkId: "sink-1" }),
 						],
 						{ concurrency: "unbounded" },

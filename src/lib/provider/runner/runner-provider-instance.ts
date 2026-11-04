@@ -38,7 +38,6 @@ import {
 } from "../../persistence/effect/claude-event-persist-effect.js";
 import { guardCurrentWrite } from "../../persistence/effect/commit-and-signal.js";
 import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
-import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
@@ -194,7 +193,6 @@ export interface RunnerProviderInstanceDeps {
 	readonly recoveryForSession?: (
 		sessionId: string,
 	) => Effect.Effect<RunnerRecoveryDependencies | undefined>;
-	readonly onBackgroundTask?: (input: BackgroundTaskTransition) => void;
 	readonly ensureChildSession?: ClaudeEventPersistEffect["ensureClaudeSubagentSession"];
 	readonly readSubagentTranscript?: ClaudeEventPersistEffect["readClaudeSubagentTranscript"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
@@ -1558,12 +1556,6 @@ export class RunnerProviderInstance implements ProviderInstance {
 					output.harness,
 					output.reading,
 				) ?? Effect.void;
-				return;
-			}
-			if (output.type === "background-task") {
-				yield* guardCurrentWrite(() =>
-					this.deps.onBackgroundTask?.(output.transition),
-				);
 				return;
 			}
 			const currentSink = this.sinks.get(output.sinkId);

@@ -10,6 +10,7 @@ import {
 	makeClaudeSessionRunner,
 } from "../../../../src/lib/provider/claude/claude-provider-runtime.js";
 import { claudeLaunchConfigFromAccounts } from "../../../../src/lib/provider/claude/claude-runner-wire.js";
+import { claudeRuntimeEvent } from "../../../../src/lib/provider/claude/claude-runtime-event.js";
 import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/claude-sdk-env.js";
 import { claudeSubagentSessionId } from "../../../../src/lib/provider/claude/claude-subagent-materializer.js";
 import type {
@@ -77,6 +78,21 @@ it("rejects an account snapshot without a routable Claude default", () => {
 	);
 });
 
+/** The runner's task list as the payload sends it (8.2, 8.3). */
+const taskList = (taskTypes: readonly string[]): SessionOutput => ({
+	type: "event",
+	sinkId: "sink-1",
+	event: claudeRuntimeEvent("evidence.tasks_snapshot", "session-1", {
+		label: "",
+		tasks: taskTypes.map((taskType, index) => ({
+			key: { taskId: `task-${index}` },
+			taskType,
+			description: "Task",
+			ambient: false,
+		})),
+	}),
+});
+
 describe("Claude runner idle exit", () => {
 	it("excludes only the current send from rebind quiescence", () => {
 		let heldWork = false;
@@ -97,19 +113,9 @@ describe("Claude runner idle exit", () => {
 			idle.setTurnInFlight(true);
 			expect(idle.isQuiescent(1)).toBe(false);
 			idle.setTurnInFlight(false);
-			idle.activity({
-				type: "background-task",
-				transition: {
-					sessionId: "session-1",
-					kind: "snapshot",
-					tasks: [{ id: "task-1", type: "local_bash", description: "Task" }],
-				},
-			});
+			idle.activity(taskList(["local_bash"]));
 			expect(idle.isQuiescent(1)).toBe(false);
-			idle.activity({
-				type: "background-task",
-				transition: { sessionId: "session-1", kind: "snapshot", tasks: [] },
-			});
+			idle.activity(taskList([]));
 			heldWork = true;
 			expect(idle.isQuiescent(1)).toBe(false);
 			heldWork = false;
@@ -149,21 +155,11 @@ describe("Claude runner idle exit", () => {
 		const onIdle = vi.fn();
 		const idle = makeRunnerIdleExit(onIdle, 100);
 		try {
-			idle.activity({
-				type: "background-task",
-				transition: {
-					sessionId: "session-1",
-					kind: "snapshot",
-					tasks: [{ id: "task-1", type, description: "Task" }],
-				},
-			});
+			idle.activity(taskList([type]));
 			vi.advanceTimersByTime(300);
 			expect(onIdle).not.toHaveBeenCalled();
 			expect(idle.quiescent).toBe(false);
-			idle.activity({
-				type: "background-task",
-				transition: { sessionId: "session-1", kind: "snapshot", tasks: [] },
-			});
+			idle.activity(taskList([]));
 			expect(idle.quiescent).toBe(true);
 			vi.advanceTimersByTime(99);
 			expect(onIdle).not.toHaveBeenCalled();
@@ -181,10 +177,7 @@ describe("Claude runner idle exit", () => {
 		const idle = makeRunnerIdleExit(onIdle, 100);
 		try {
 			vi.advanceTimersByTime(99);
-			idle.activity({
-				type: "background-task",
-				transition: { sessionId: "session-1", kind: "snapshot", tasks: [] },
-			});
+			idle.activity(taskList([]));
 			vi.advanceTimersByTime(1);
 			expect(onIdle).toHaveBeenCalledOnce();
 		} finally {
@@ -426,7 +419,6 @@ describe("in-process Claude session runner", () => {
 
 	it("routes subagent persistence and background bookkeeping through JSON messages", async () => {
 		const outputs: SessionOutput[] = [];
-		const onBackgroundTask = vi.fn();
 		const ensureClaudeSubagentSession = vi.fn(() => Effect.void);
 		const childSessionId = claudeSubagentSessionId({
 			parentConduitSessionId: "session-1",
@@ -486,7 +478,6 @@ describe("in-process Claude session runner", () => {
 				getSubagentMessages: async () => [],
 			},
 			// Host callbacks must not be read, even if supplied as extra properties.
-			onBackgroundTask,
 			ensureClaudeSubagentSession,
 		};
 		await Effect.runPromise(
@@ -531,30 +522,30 @@ describe("in-process Claude session runner", () => {
 							);
 						}),
 					);
-					expect(outputs).toContainEqual({
-						type: "background-task",
-						transition: {
-							sessionId: "session-1",
-							kind: "snapshot",
-							tasks: [
-								{
-									id: "background-1",
-									type: "local_bash",
-									description: "Watch tests",
-									firstSeenAt: expect.any(Number),
-								},
-							],
-						},
+					const taskLists = () =>
+						outputs.flatMap((output) =>
+							output.type === "event" &&
+							output.event.type === "evidence.tasks_snapshot"
+								? [output.event.data]
+								: [],
+						);
+					expect(taskLists()).toContainEqual({
+						label: "",
+						tasks: [
+							{
+								key: { taskId: "background-1" },
+								taskType: "local_bash",
+								description: "Watch tests",
+								ambient: false,
+								firstSeenAt: expect.any(Number),
+							},
+						],
 					});
 					yield* runner.executeEffect({
 						type: "end-session",
 						sessionId: "session-1",
 					});
-					expect(outputs).toContainEqual({
-						type: "background-task",
-						transition: { sessionId: "session-1", kind: "session-ended" },
-					});
-					expect(onBackgroundTask).not.toHaveBeenCalled();
+					expect(taskLists().at(-1)).toEqual({ label: "", tasks: [] });
 					expect(ensureClaudeSubagentSession).not.toHaveBeenCalled();
 				}),
 			),

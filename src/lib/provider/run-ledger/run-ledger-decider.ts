@@ -27,6 +27,7 @@ import type {
 	TasksView,
 	Transport,
 } from "./run-ledger-model.js";
+import { ledgerTask } from "./run-ledger-model.js";
 import { nativePolicies } from "./run-ledger-policy-adapters.js";
 
 declare const stateBrand: unique symbol;
@@ -1920,17 +1921,7 @@ function unsolicited(
 			runner.tasks = {
 				tag: "Known",
 				label,
-				tasks: observation.tasks.map((task) => ({
-					...task,
-					kind:
-						{
-							local_bash: "shell",
-							local_agent: "subagent",
-							local_workflow: "workflow",
-						}[task.taskType] ?? task.taskType,
-					class:
-						task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
-				})),
+				tasks: observation.tasks.map(ledgerTask),
 			};
 			book.snapshotEntry++;
 			return changed;

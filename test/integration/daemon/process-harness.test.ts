@@ -415,7 +415,8 @@ describe("foreground daemon process harness", () => {
 						frames.some(
 							(frame) =>
 								frame.type === "output" &&
-								frame.output.type === "background-task",
+								frame.output.type === "event" &&
+								frame.output.event.type === "evidence.tasks_snapshot",
 						),
 					).toBe(true);
 				},
@@ -445,7 +446,9 @@ describe("foreground daemon process harness", () => {
 						.filter(Boolean)
 						.map((line) => JSON.parse(line) as RunnerMessage);
 					sequences = retained.flatMap((frame) =>
-						frame.type === "output" && frame.output.type === "background-task"
+						frame.type === "output" &&
+						frame.output.type === "event" &&
+						frame.output.event.type === "evidence.tasks_snapshot"
 							? [frame.sequence]
 							: [],
 					);
@@ -518,15 +521,22 @@ describe("foreground daemon process harness", () => {
 							.find(
 								(frame) =>
 									frame.type === "output" &&
-									frame.output.type === "background-task",
+									frame.output.type === "event" &&
+									frame.output.event.type === "evidence.tasks_snapshot",
 							),
 					).toMatchObject({
 						output: {
-							type: "background-task",
-							transition:
-								change === "end"
-									? { kind: "session-ended" }
-									: { kind: "snapshot", tasks },
+							type: "event",
+							event: {
+								type: "evidence.tasks_snapshot",
+								data: {
+									tasks: tasks.map(({ id, type, description }) => ({
+										key: { taskId: id },
+										taskType: type,
+										description,
+									})),
+								},
+							},
 						},
 					});
 				},

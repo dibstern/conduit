@@ -1,8 +1,11 @@
+import { Option, Schema } from "effect";
+import { TasksSnapshotPayloadSchema } from "../../contracts/stored-event.js";
 import {
 	DEFAULT_AUTO_SETTLE_AFTER_DAYS,
 	loadDaemonConfigResult,
 } from "../../daemon/config-persistence.js";
 import { DEFAULT_CONFIG_DIR } from "../../env.js";
+import { ledgerTask, type Task } from "../run-ledger/run-ledger-model.js";
 import type { SessionOutput } from "./session-runner.js";
 
 /** Reuse the daemon's inactivity setting without adding a runner-specific knob. */
@@ -17,15 +20,26 @@ export function makeRunnerIdleExit(
 	let lastActivityAt = Date.now();
 	let turns = 0;
 	let sdkTurnInFlight = false;
-	let backgroundWork = false;
+	// 8.3 (CONTRACT.md 2812-2814): the host's task certainty through the ledger's reducer. A fresh
+	// launch has none; a replaced query's tasks are unknown until its first snapshot.
+	let tasks:
+		| { readonly tag: "Unknown" }
+		| { readonly tag: "Known"; readonly tasks: readonly Task[] } = {
+		tag: "Known",
+		tasks: [],
+	};
+	// Unknown tasks may still act; monitoring (ambient or a monitor) is not activity.
+	const backgroundWork = () =>
+		tasks.tag === "Unknown" ||
+		tasks.tasks.some((task) => task.class === "work");
 	const isQuiescent = (ignoredTurns = 0) =>
 		turns <= ignoredTurns &&
 		!sdkTurnInFlight &&
-		!backgroundWork &&
+		!backgroundWork() &&
 		!hasHeldWork?.(ignoredTurns);
 	const timer = setInterval(
 		() => {
-			if (turns > 0 || sdkTurnInFlight || backgroundWork || hasHeldWork?.())
+			if (turns > 0 || sdkTurnInFlight || backgroundWork() || hasHeldWork?.())
 				return;
 			let days = autoSettleAfterDays;
 			// Only an older daemon can launch us without a snapshot. Keep that
@@ -77,23 +91,23 @@ export function makeRunnerIdleExit(
 			lastActivityAt = Date.now();
 		},
 		activity(output?: SessionOutput) {
-			// The task list's evidence copy is not activity; its background-task twin decides.
-			if (
+			const snapshot =
 				output?.type === "event" &&
 				output.event.type === "evidence.tasks_snapshot"
-			)
-				return;
-			if (output?.type === "background-task") {
-				const live =
-					output.transition.kind === "snapshot" &&
-					output.transition.tasks.some((task) => !task.ambient);
-				// Ambient tasks do not hold the runner open, and a list without work after
-				// one without work is not activity. CONTRACT.md 2812 asks for the ledger's
-				// reducer here; this keeps main's reading until the host shares it.
-				if (!backgroundWork && !live) return;
-				backgroundWork = live;
+					? Schema.decodeUnknownOption(TasksSnapshotPayloadSchema)(
+							output.event.data,
+						)
+					: Option.none();
+			if (Option.isSome(snapshot)) {
+				const held = backgroundWork();
+				tasks = { tag: "Known", tasks: snapshot.value.tasks.map(ledgerTask) };
+				// A list without work after one without work is not activity.
+				if (!held && !backgroundWork()) return;
 			}
 			lastActivityAt = Date.now();
+		},
+		queryReplaced() {
+			tasks = { tag: "Unknown" };
 		},
 		close() {
 			clearInterval(timer);

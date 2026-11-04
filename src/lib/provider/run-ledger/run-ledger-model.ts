@@ -560,6 +560,22 @@ export type Task = Extract<
 	readonly kind: string;
 	readonly class: "monitoring" | "serving" | "work";
 };
+/**
+ * 8.2 (CONTRACT.md 2778-2781): a snapshot task's kind and class, read alike by the decider and the
+ * runner host's idle check (8.3, 2812). Serving is derived from linked servers at view time.
+ */
+export const ledgerTask = (
+	task: Extract<Evidence, { readonly kind: "tasks_snapshot" }>["tasks"][number],
+): Task => ({
+	...task,
+	kind:
+		{
+			local_bash: "shell",
+			local_agent: "subagent",
+			local_workflow: "workflow",
+		}[task.taskType] ?? task.taskType,
+	class: task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
+});
 /** Per runner: its latest snapshot and that snapshot's label. */
 export type Tasks =
 	| { readonly tag: "Unknown"; readonly label: Label }
