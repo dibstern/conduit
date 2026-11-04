@@ -518,6 +518,26 @@ async function assertGoalDetails(
 // Timestamps, counts and the card's section labels sit in the quiet tier (text-dimmer),
 // below AA by design and held to 3:1 by theme-contrast.test.ts. color-contrast skips
 // only those; it and every other rule stay on for the rest of the popover.
+/**
+ * Vitest runs stories at 1200x900 unless a story names a viewport. Header sheets are
+ * placed against the viewport, so the phone sheet stories need the phone viewport the
+ * visual runner uses.
+ */
+const phoneViewport = {
+	parameters: {
+		viewport: {
+			options: {
+				phone: {
+					name: "Phone",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	globals: { viewport: { value: "phone", isRotated: false } },
+} as const;
+
 const quietTierA11y = {
 	a11y: {
 		test: "error",
@@ -1316,7 +1336,8 @@ export const PhoneIslandBadgeLight: Story = {
 
 export const PhoneGoalSheet: Story = {
 	args: { island: true, height: 852 },
-	parameters: quietTierA11y,
+	parameters: { ...quietTierA11y, ...phoneViewport.parameters },
+	globals: phoneViewport.globals,
 	tags: ["viewport-capture"],
 	beforeEach: () => setupGoal("checking"),
 	play: async ({ canvasElement }) => {
@@ -1407,7 +1428,7 @@ export const PhoneGoalSheet: Story = {
 
 export const PhoneGoalSheetLight: Story = {
 	...PhoneGoalSheet,
-	globals: { theme: "light" },
+	globals: { ...phoneViewport.globals, theme: "light" },
 };
 
 export const PhoneLongTitleLight: Story = {
@@ -1974,6 +1995,7 @@ export const DesktopBackgroundTasks: Story = {
 
 export const BackgroundTasks: Story = {
 	args: { island: true, height: 852 },
+	...phoneViewport,
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedSessions([
@@ -2189,7 +2211,11 @@ async function assertSideThreadRows(canvasElement: HTMLElement) {
 
 export const SideThreadsOpen: Story = {
 	tags: ["viewport-capture"],
-	parameters: { docs: { story: { inline: false } } },
+	parameters: {
+		docs: { story: { inline: false } },
+		...phoneViewport.parameters,
+	},
+	globals: phoneViewport.globals,
 	beforeEach: () => setupSideThreads(sideThreadRows),
 	play: async ({ canvasElement }) => {
 		await assertSideThreadRows(canvasElement);

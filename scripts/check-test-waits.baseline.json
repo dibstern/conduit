@@ -758,7 +758,7 @@
 		"timeout-override": 2
 	},
 	"test/integration/daemon/daemon-orchestration-engine.test.ts": {
-		"polling": 75,
+		"polling": 74,
 		"timeout-override": 18
 	},
 	"test/integration/daemon/daemon-overrides.test.ts": {

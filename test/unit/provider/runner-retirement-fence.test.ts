@@ -1017,7 +1017,7 @@ it.effect(
 
 const s7Fixture = (
 	driverKind: "claude" | "cursor" = "cursor",
-	isProjectReady?: ProviderSideEffectReactorOptions["isProjectReady"],
+	projectGate?: ProviderSideEffectReactorOptions["projectGate"],
 ) =>
 	Effect.gen(function* () {
 		let recovery: RunnerRecoveryDependencies | undefined;
@@ -1061,7 +1061,7 @@ const s7Fixture = (
 			registry: new ProviderRegistry([f.instance]),
 			ingestion,
 			write: commit.write,
-			...(isProjectReady ? { isProjectReady } : {}),
+			...(projectGate ? { projectGate } : {}),
 			persistUserMessage: (...args) => persist.persistUserMessage(...args),
 		});
 		const seed = (
@@ -2886,9 +2886,9 @@ it.effect(
 					deliveryFailed
 						? Deferred.succeed(entered, undefined).pipe(
 								Effect.andThen(Deferred.await(release)),
-								Effect.as(true),
+								Effect.as("served" as const),
 							)
-						: Effect.succeed(true),
+						: Effect.succeed("served" as const),
 				);
 				yield* f.seed("settling", 1, 0);
 				yield* f.sql`UPDATE provider_command_outbox SET status = 'pending'`;

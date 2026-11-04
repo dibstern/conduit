@@ -706,7 +706,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 															? driver.driverKind
 															: undefined),
 													sessionId,
-													false,
 													undefined,
 													true,
 												);
@@ -1266,7 +1265,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											? driver.driverKind
 											: undefined),
 									sessionId,
-									false,
 									undefined,
 									true,
 								);
@@ -3048,12 +3046,22 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 					() => stops.closing,
 					() => Effect.interrupt,
 				),
-				Effect.mapError((cause) => ({
-					...runnerFailure("start runner", cause),
-					...(toStoreFault(cause)._tag === "StoreUnavailable"
-						? { retryable: true }
-						: {}),
-				})),
+				// A spawn its project's removal cut short is not sent, so its next try
+				// meets the project gate (CONTRACT.md 1083-1085).
+				Effect.catch((cause) =>
+					deps.projectRootForSession(input.sessionId).pipe(
+						Effect.flatMap((root) =>
+							Effect.fail({
+								...runnerFailure("start runner", cause),
+								...(!root
+									? { code: "not_sent", retryable: true }
+									: toStoreFault(cause)._tag === "StoreUnavailable"
+										? { retryable: true }
+										: {}),
+							}),
+						),
+					),
+				),
 			);
 		return {
 			start,

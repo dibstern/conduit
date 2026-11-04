@@ -7,6 +7,7 @@ import {
 	Queue,
 	Schema,
 	Scope,
+	Semaphore,
 	Stream,
 } from "effect";
 import type {
@@ -43,6 +44,8 @@ import {
 import {
 	decodeNotification,
 	type RateLimitSnapshotSchema,
+	ThreadBackgroundTerminalsListResponseSchema,
+	ThreadBackgroundTerminalsTerminateResponseSchema,
 	ThreadCompactStartResponseSchema,
 	ThreadForkResponseSchema,
 	ThreadGoalClearResponseSchema,
@@ -150,6 +153,12 @@ interface CodexSession {
 	last?: { readonly input: SessionTurn; readonly sink: EventSink } | undefined;
 	/** The goal as the last turn left it; main's copy is the send's, not the wake's. */
 	goalState?: CodexTurnState["goalState"] | undefined;
+	/** Background terminals: one re-read at a time, the set last sent, when each was first listed. */
+	readonly terminals: {
+		readonly lock: Semaphore.Semaphore;
+		sent?: string;
+		seen: ReadonlyMap<string, number>;
+	};
 }
 
 function turnFailure(cause: unknown): { code: TurnErrorCode; message: string } {
@@ -343,6 +352,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 						? { continuationInputId: identity.continuationInputId }
 						: {}),
 					rateLimits: new Map(),
+					terminals: { lock: yield* Semaphore.make(1), seen: new Map() },
 				};
 				this.sessions.set(input.sessionId, session);
 			}
@@ -1150,6 +1160,49 @@ export class CodexRunnerPayload implements RunnerPayload {
 		return this.sessions.get(sessionId)?.subagents?.hasRunning ?? false;
 	}
 
+	/**
+	 * 8.4 (CONTRACT.md 2860-2867): Stop tasks terminates one background terminal, then re-reads the
+	 * set (8.2, 2792), so the terminal leaves only when a later list omits it (8.3, 2817). Gap
+	 * (2866): `terminated: false` is a failed stop; it fails once, and the reactor never retries it.
+	 */
+	stopTask(
+		sessionId: string,
+		taskId: string,
+	): Effect.Effect<void, SessionFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const session = this.sessions.get(sessionId);
+			const child = session?.child;
+			const threadId = session?.threadId;
+			if (!session || !child || child.dead || !threadId)
+				return yield* Effect.fail<SessionFailure>({
+					operation: "stop-task",
+					message: "Codex is not running this session in this runner",
+				});
+			const { terminated } = yield* child.client
+				.request(
+					"thread/backgroundTerminals/terminate",
+					{ threadId, processId: taskId },
+					ThreadBackgroundTerminalsTerminateResponseSchema,
+				)
+				.pipe(
+					Effect.ensuring(
+						this.refreshTerminals(sessionId, session, child.client),
+					),
+					Effect.mapError(
+						(cause): SessionFailure => ({
+							operation: "stop-task",
+							message: turnFailure(cause).message,
+						}),
+					),
+				);
+			if (!terminated)
+				return yield* Effect.fail<SessionFailure>({
+					operation: "stop-task",
+					message: `Codex did not stop background terminal ${taskId}`,
+				});
+		});
+	}
+
 	private steer(
 		session: CodexSession,
 		input: SessionTurn,
@@ -1504,6 +1557,21 @@ export class CodexRunnerPayload implements RunnerPayload {
 							notification,
 							at: yield* Clock.currentTimeMillis,
 						});
+						// 8.2 (CONTRACT.md 2791-2793): re-read at turn completion and at a terminal
+						// command's start or finish, a late one included; it only updates the set.
+						if (
+							decoded._tag === "known" &&
+							(decoded.method === "turn/completed" ||
+								((decoded.method === "item/started" ||
+									decoded.method === "item/completed") &&
+									decoded.params.item.type === "commandExecution")) &&
+							decoded.params.threadId === session.threadId
+						)
+							yield* this.refreshTerminals(
+								input.sessionId,
+								session,
+								client,
+							).pipe(Effect.forkIn(scope));
 					}),
 				).pipe(
 					Effect.catch((failure) =>
@@ -1672,12 +1740,87 @@ export class CodexRunnerPayload implements RunnerPayload {
 				session.forkSource = undefined;
 				session.controllerPid = process.pid;
 				session.child = child;
+				// 8.2 (CONTRACT.md 2792): re-read on reconnect. Gap: read as every new app-server
+				// connection; terminals of one that has gone are gone with it.
+				yield* this.refreshTerminals(input.sessionId, session, client).pipe(
+					Effect.forkIn(scope),
+				);
 				return child;
 			}).pipe(
 				Effect.provideService(Scope.Scope, scope),
 				Effect.onError(() => Scope.close(scope, Exit.void)),
 			);
 		});
+	}
+
+	/**
+	 * 8.2 (CONTRACT.md 2791-2793): the thread's background terminals are its task set. Gap (2791):
+	 * a re-read equal to the set last sent sends nothing; the first always sends, so a reattach has
+	 * a snapshot to replay (8.3, 2812-2815). A failed list leaves the set as it was.
+	 */
+	private refreshTerminals(
+		sessionId: string,
+		session: CodexSession,
+		client: AppServerClient,
+	) {
+		return session.terminals.lock
+			.withPermits(1)(
+				Effect.gen(function* () {
+					const threadId = session.threadId;
+					const sink = session.active?.sink ?? session.last?.sink;
+					if (!threadId || !sink) return;
+					const list = (cursor?: string) =>
+						client.request(
+							"thread/backgroundTerminals/list",
+							{ threadId, ...(cursor ? { cursor } : {}) },
+							ThreadBackgroundTerminalsListResponseSchema,
+						);
+					let page = yield* list();
+					const terminals = [...page.data];
+					while (page.nextCursor) {
+						page = yield* list(page.nextCursor);
+						terminals.push(...page.data);
+					}
+					const now = Date.now();
+					const seen = new Map(
+						terminals.map(({ processId }) => [
+							processId,
+							session.terminals.seen.get(processId) ?? now,
+						]),
+					);
+					session.terminals.seen = seen;
+					const tasks = terminals.map(({ processId, command }) => ({
+						key: { taskId: processId },
+						taskType: "local_bash",
+						description: command,
+						ambient: false,
+						firstSeenAt: seen.get(processId) ?? now,
+					}));
+					const sent = JSON.stringify(tasks);
+					if (sent === session.terminals.sent) return;
+					yield* sink.push({
+						eventId: createEventId(),
+						type: "evidence.tasks_snapshot",
+						providerId: "codex",
+						sessionId,
+						providerRefs: { providerSessionId: threadId },
+						rawSource: { kind: "codex.app-server.translator" },
+						createdAt: now,
+						data: { label: "", tasks },
+					});
+					session.terminals.sent = sent;
+				}),
+			)
+			.pipe(
+				Effect.catch((cause) =>
+					Effect.sync(() =>
+						log.warn("codex.terminals_list_failed", {
+							sessionId,
+							message: turnFailure(cause).message,
+						}),
+					),
+				),
+			);
 	}
 
 	private persistIdentity(
