@@ -8,6 +8,15 @@
 // 224. a Stop ends its Run other than interrupted, by the alarm, or twice;
 // 225. a Run's ledger end disagrees with main's run status;
 // 226. a goal chain ends its Run more than once, or a successor inside the window reads as a wake.
+// Box 2, a turn Codex starts while idle (successor after the window):
+// 230. it is dropped: no wake Run in the ledger;
+// 231. the wake Run never ends, or ends other than once at its own result;
+// 232. its output is lost or lands on no message;
+// 233. Stop while it runs sends no turn/interrupt, or the alarm ends it;
+// 237. its evidence carries no runner-stamped label;
+// 242. its start reaches the store only when its end follows at once (held-gate variant);
+// 270. a send admitted while only a wake runs never starts, or starts no Run of its own,
+//      or starts before the wake ends (CONTRACT 992-995, 215).
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -36,13 +45,15 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId')) AS runId, json_extract(data, '$.label') AS label FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId'), json_extract(data, '$.requestedRunId')) AS runId, json_extract(data, '$.label') AS label, json_extract(data, '$.result.outcome') AS result, json_extract(data, '$.messageId') AS messageId FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				sequence: number;
 				type: string;
 				runId: string | null;
 				label: string | null;
+				result: string | null;
+				messageId: string | null;
 			}[],
 			ends: db
 				.prepare(
@@ -146,7 +157,11 @@ describe("Codex on the Run Ledger", () => {
 		);
 	});
 
-	const start = async (name: string, trace: TraceRow[]) => {
+	const start = async (
+		name: string,
+		trace: TraceRow[],
+		environment: Record<string, string> = {},
+	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
@@ -168,6 +183,7 @@ describe("Codex on the Run Ledger", () => {
 				CONDUIT_CODEX_APP_SERVER_CAPTURE: capturePath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
+				...environment,
 			},
 		});
 		const browser = await fixture.connect();
@@ -327,5 +343,266 @@ describe("Codex on the Run Ledger", () => {
 		oneRunnerStartedFirst(ledger);
 		expect(captured("turn/started", "in").length).toBeGreaterThan(1);
 		prove("goal-chain", ledger);
+	});
+
+	/** The goal chain with its wake cut to one turn that completes the goal, so no window races its end. */
+	const oneWake = (chain: TraceRow[]) => {
+		const ends = chain.flatMap(({ message }, index) =>
+			message?.method === "turn/completed" ? [index] : [],
+		);
+		const wakeEnd = Number(ends[1]);
+		return [
+			...chain
+				.slice(0, wakeEnd + 1)
+				.map((row, index) =>
+					index > Number(ends[0]) &&
+					row.message?.method === "thread/goal/updated"
+						? JSON.parse(
+								JSON.stringify(row).replace(
+									'"status":"active"',
+									'"status":"complete"',
+								),
+							)
+						: row,
+				),
+			...chain.slice(chain.findIndex(({ dir }) => dir === "exit")),
+		] as TraceRow[];
+	};
+	/** A goal send whose successor misses the window, so Codex starts it while conduit is idle. */
+	const wake = async (name: string, trace: TraceRow[]) => {
+		const firstEnd = trace.find(
+			({ message }) => message?.method === "turn/completed",
+		)?.["at"];
+		if (typeof firstEnd !== "number") throw new Error("Missing turn end");
+		const started = await start(name, trace, {
+			CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500",
+		});
+		writeFileSync(gatePath, String(firstEnd));
+		await submit(started.browser, started.sessionId, "$goal Say hello");
+		// test-waits-allow polling: the window closing reaches only the store's ledger.
+		await vi.waitFor(
+			() =>
+				expect(read(started.fixture, started.sessionId).ends).toHaveLength(1),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		return { ...started, trace };
+	};
+	const wakeEvidence = (ledger: Ledger) => {
+		const evidence = ledger.events.filter(({ type }) =>
+			type.startsWith("evidence.turn_"),
+		);
+		expect(evidence.map(({ type }) => type)).toEqual([
+			"evidence.turn_started",
+			"evidence.turn_ended",
+		]);
+		for (const { label } of evidence) expect(label).toMatch(/^.+:\d+$/);
+		expect(evidence[0]?.label).toBe(evidence[1]?.label);
+		return evidence;
+	};
+
+	it.each([
+		["at once", false],
+		["after its start is stored", true],
+	])("reports a successor Codex starts while idle as a wake Run that ends once at its result (gate opens %s)", async (_, held) => {
+		const { fixture, sessionId, trace } = await wake(
+			held ? "wake-held" : "wake",
+			oneWake(fixtureRows("goal-chain")),
+		);
+		const [send] = read(fixture, sessionId).ends;
+		if (held) {
+			// F242: hold the wake before its end, so its start must reach the store on its own.
+			const wakeEnd = trace.filter(
+				({ message }) => message?.method === "turn/completed",
+			)[1]?.["at"];
+			if (typeof wakeEnd !== "number") throw new Error("Missing wake end");
+			writeFileSync(gatePath, String(wakeEnd - 1));
+			// test-waits-allow polling: the wake's start reaches only the store.
+			await vi.waitFor(
+				() =>
+					expect(
+						read(fixture, sessionId).events.map(({ type }) => type),
+					).toContain("evidence.turn_started"),
+				{ timeout: TIMEOUT, interval: 100 },
+			);
+			expect(read(fixture, sessionId).ends).toEqual([send]);
+		}
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		const ledger = read(fixture, sessionId);
+		const [started, ended] = wakeEvidence(ledger);
+		expect(ended?.result).toBe("completed");
+		expect(ledger.ends).toEqual([
+			send,
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		expect(ledger.ends[1]?.runId).not.toBe(send?.runId);
+		expect(ledger.ends[1]?.forced).not.toBe(1);
+		// F232: the wake's output lands on its own assistant message, between its evidence.
+		const output = ledger.events.filter(
+			({ sequence, type, messageId }) =>
+				sequence > (started?.sequence ?? 0) &&
+				sequence < (ended?.sequence ?? 0) &&
+				type.startsWith("message.") &&
+				messageId,
+		);
+		expect(output).not.toEqual([]);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		prove(held ? "wake-held" : "wake", ledger);
+	});
+
+	it("Stops a wake Run with turn/interrupt, not the alarm", async () => {
+		const { fixture, browser, sessionId, trace } = await wake(
+			"wake-stop",
+			fixtureRows("goal-stop"),
+		);
+		const pause = trace.find(
+			({ dir, message }) =>
+				dir === "out" &&
+				message?.method === "thread/goal/set" &&
+				message.params?.["status"] === "paused" &&
+				typeof message.params?.["objective"] !== "string",
+		)?.["at"];
+		if (typeof pause !== "number") throw new Error("Missing goal pause");
+		writeFileSync(gatePath, String(pause - 1));
+		// test-waits-allow polling: the wake's start reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.map(({ type }) => type),
+				).toContain("evidence.turn_started"),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		const stopping = Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		// The replay answers the pause and the interrupt only once conduit sends them.
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await stopping;
+		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		expect(captured("turn/interrupt", "out")).toHaveLength(1);
+		const ledger = read(fixture, sessionId);
+		expect(wakeEvidence(ledger)[1]?.result).toBe("interrupted");
+		expect(ledger.ends[1]).toEqual(
+			expect.objectContaining({ outcome: "interrupted" }),
+		);
+		expect(ledger.ends[1]?.forced).not.toBe(1);
+		prove("wake-stop", ledger);
+	});
+
+	it("runs a message sent while only a wake runs as its own Run after the wake (CONTRACT 992-995)", async () => {
+		// Gap (CONTRACT 992-995 against its 997 note "a Codex wake Run is not busy"): main's
+		// inbox reads a Codex wake as idle (session-inbox.ts 540-545), so the send is no steer.
+		// It waits at the start fence (CONTRACT 215) and opens its own turn once the wake ends.
+		const chain = oneWake(fixtureRows("goal-chain"));
+		const first = chain.findIndex(
+			({ message }) => message?.method === "turn/start",
+		);
+		const exit = chain.findIndex(({ dir }) => dir === "exit");
+		const at = Number(chain[exit - 1]?.["at"]) + 1;
+		const turnId = "wake-send-turn";
+		const sendTurn = chain
+			.slice(first)
+			.filter(
+				({ message }) =>
+					[
+						"turn/start",
+						"thread/goal/set",
+						"turn/started",
+						"item/started",
+						"item/completed",
+					].includes(String(message?.method)) ||
+					[4, 5].includes(Number(message?.id)),
+			)
+			.slice(0, 7);
+		// A send in a goal session re-arms the goal after its turn/start, as turn 1 does.
+		expect(sendTurn.map(({ message }) => message?.method ?? "result")).toEqual([
+			"turn/start",
+			"result",
+			"thread/goal/set",
+			"turn/started",
+			"result",
+			"item/started",
+			"item/completed",
+		]);
+		const completed = chain.find(
+			({ message }) => message?.method === "turn/completed",
+		);
+		// The send's turn is turn 1's rows, renamed so no id is shared with the goal's turns.
+		const renamed = (row: TraceRow | undefined) => ({
+			...row,
+			at,
+			message: JSON.parse(
+				JSON.stringify(row?.message)
+					.replaceAll("01a15f39-35ab-78e0-a2c4-5bbb92ceb680", turnId)
+					.replaceAll("01a15f39-35dc-7c31-ab4c-020b1f2b6415", "wake-send-user")
+					.replaceAll("msg_mock_1", "msg_wake_send")
+					.replaceAll('"Say hello"', JSON.stringify(STEER))
+					.replaceAll('"id":4,', '"id":900,')
+					.replaceAll('"id":5,', '"id":901,'),
+			),
+		});
+		// No exit row: the player's exit is not gated and races the runner's read of the send's rows.
+		const trace = [
+			...chain.slice(0, exit),
+			...sendTurn.map(renamed),
+			renamed(completed),
+		] as TraceRow[];
+		const wakeEnd = chain.filter(
+			({ message }) => message?.method === "turn/completed",
+		)[1]?.["at"];
+		const { fixture, browser, sessionId } = await wake("wake-send", trace);
+		writeFileSync(gatePath, String(Number(wakeEnd) - 1));
+		// test-waits-allow polling: the wake's start reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.map(({ type }) => type),
+				).toContain("evidence.turn_started"),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		await submit(browser, sessionId, STEER, "steer");
+		// test-waits-allow polling: the send's admission reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.filter(
+						({ type }) => type === "run.requested",
+					),
+				).toHaveLength(2),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: the wake's and the send's ends reach only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(3),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		const ledger = read(fixture, sessionId);
+		const [, wakeEnded] = wakeEvidence(ledger);
+		endsOnce(ledger);
+		expect(ledger.runs).toHaveLength(2);
+		const sendRun = ledger.runs[1]?.id;
+		const sendStarted = ledger.events.filter(
+			({ type, runId }) => type === "run.started" && runId === sendRun,
+		);
+		expect(sendStarted).toHaveLength(1);
+		expect(sendStarted[0]?.sequence).toBeGreaterThan(
+			Number(wakeEnded?.sequence),
+		);
+		expect(ledger.ends[2]).toEqual(
+			expect.objectContaining({ runId: sendRun, outcome: "completed" }),
+		);
+		expect(captured("turn/start", "out")).toHaveLength(2);
+		expect(captured("turn/steer", "out")).toHaveLength(0);
+		prove("wake-send", ledger);
 	});
 });

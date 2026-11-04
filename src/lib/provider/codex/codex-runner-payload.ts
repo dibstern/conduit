@@ -141,6 +141,10 @@ interface CodexSession {
 	readonly rateLimits: Map<string, typeof RateLimitSnapshotSchema.Type>;
 	subagents?: CodexSubagents;
 	tokenUsageTotal?: typeof TokenUsageBreakdownSchema.Type | undefined;
+	/** The last send and its sink: a turn Codex starts while idle runs on them. */
+	last?: { readonly input: SessionTurn; readonly sink: EventSink } | undefined;
+	/** The goal as the last turn left it; main's copy is the send's, not the wake's. */
+	goalState?: CodexTurnState["goalState"] | undefined;
 }
 
 function turnFailure(cause: unknown): { code: TurnErrorCode; message: string } {
@@ -233,6 +237,30 @@ export class CodexRunnerPayload implements RunnerPayload {
 		});
 	}
 
+	/** A turn Codex started while idle runs on the last send's input and sink. */
+	private wake(
+		last: { readonly input: SessionTurn; readonly sink: EventSink },
+		turnId: string,
+	): Effect.Effect<void> {
+		const { runId: _runId, ...input } = last.input;
+		return Effect.gen({ self: this }, function* () {
+			this.sinks.retainSink(last.sink);
+			const intake = yield* Deferred.make<TurnResult, SessionFailure>();
+			yield* this.runTurn(input, last.sink, () => true, intake, turnId);
+		}).pipe(
+			Effect.ignore,
+			Effect.ensuring(this.sinks.releaseSinkEffect(last.sink)),
+			Effect.ensuring(
+				Effect.sync(() => {
+					if (!this.sessions.get(input.sessionId)?.busy)
+						this.onTurnStateChanged?.(false);
+				}),
+			),
+			Effect.forkIn(this.scope),
+			Effect.asVoid,
+		);
+	}
+
 	hasActiveTurnsEffect(sessionId: string): Effect.Effect<boolean> {
 		return Effect.sync(() => this.sessions.get(sessionId)?.busy === true);
 	}
@@ -242,6 +270,8 @@ export class CodexRunnerPayload implements RunnerPayload {
 		sink: EventSink,
 		claim: () => boolean,
 		intake: Deferred.Deferred<TurnResult, SessionFailure>,
+		/** The native id of a turn Codex started while idle: a wake, with no Run of its own. */
+		wake?: string,
 	): Effect.Effect<TurnResult, SessionFailure> {
 		return Effect.gen({ self: this }, function* () {
 			const prepared = yield* prepareCodexAccount(
@@ -311,10 +341,12 @@ export class CodexRunnerPayload implements RunnerPayload {
 				};
 				this.sessions.set(input.sessionId, session);
 			}
-			if (session.busy) return yield* this.steer(session, input, sink, claim);
+			if (session.busy && !wake)
+				return yield* this.steer(session, input, sink, claim);
 			const current = session;
+			if (!wake) current.last = { input, sink };
 			// Keep the outcome durable until a different input supersedes it.
-			if (current.continuationInputId !== input.inputId) {
+			if (!wake && current.continuationInputId !== input.inputId) {
 				current.continuationKind =
 					current.forkSeedPending && current.resumeFallbackDigest
 						? "transcript-digest"
@@ -328,6 +360,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 			current.busy = true;
 			this.onTurnStateChanged?.(true);
 			const now = yield* Clock.currentTimeMillis;
+			const goalState = wake ? current.goalState : input.goalState;
 			const active: ActiveTurn = {
 				sink,
 				state: createCodexTurnState({
@@ -338,7 +371,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 					providerId: "codex",
 					threadId: current.threadId ?? input.sessionId,
 					now,
-					...(input.goalState ? { goalState: input.goalState } : {}),
+					...(goalState ? { goalState } : {}),
 					tokenUsageBaseline: current.tokenUsageTotal,
 				}),
 				runIds: new Set(input.runId ? [input.runId] : []),
@@ -430,6 +463,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 				Effect.gen({ self: this }, function* () {
 					if (accepted) return;
 					accepted = true;
+					if (wake) yield* push("evidence.turn_started", { label: "" });
 					if (input.runId)
 						yield* push("run.started", {
 							inputId: input.inputId,
@@ -459,7 +493,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 			const apply = (update: CodexTurnUpdate) =>
 				Effect.gen(function* () {
 					const continuationKind =
-						current.continuationInputId === input.inputId
+						!wake && current.continuationInputId === input.inputId
 							? current.continuationKind
 							: undefined;
 					active.state = update.state;
@@ -570,221 +604,251 @@ export class CodexRunnerPayload implements RunnerPayload {
 										},
 									});
 							});
-						if (!input.rewind) yield* admitInput();
-						if (!input.model)
-							return yield* apply(
-								failCodexTurn(
-									active.state,
-									"send_failed",
-									"Select a Codex model before sending",
-									Date.now(),
-								),
-							);
-						const facts = decodeTurnFacts(input.facts);
-						if (Option.isNone(facts) || facts.value._tag !== "Codex")
-							return yield* apply(
-								failCodexTurn(
-									active.state,
-									"turn_unprepared",
-									"Codex turn has no prepared turn facts",
-									Date.now(),
-								),
-							);
-						const child = yield* Effect.raceFirst(
-							Effect.gen({ self: this }, function* () {
-								const previousPid = current.controllerPid;
-								if (previousPid && previousPid !== process.pid) {
-									// Retirement is acknowledged before the old process exits.
-									// Match Cursor's bounded wait; never take a live controller.
-									yield* Effect.gen(function* () {
-										while (runnerPidAlive(previousPid))
-											yield* Effect.sleep("50 millis");
-									}).pipe(
-										Effect.timeoutOrElse({
-											duration: "5 seconds",
-											orElse: () =>
-												Effect.fail({
-													code: "agent_busy" as const,
-													message:
-														"Codex session is owned by another live runner",
-												}),
-										}),
-									);
-								}
-								return yield* this.open(current, input);
-							}),
-							Deferred.await(active.cancelled).pipe(Effect.as(undefined)),
-						);
-						if (!child || active.cancelRequested)
-							return yield* apply(interruptCodexTurn(active.state, Date.now()));
-						if (!current.threadId)
-							return yield* Effect.fail({
-								operation: "thread start",
-								message: "Codex did not return a thread identity",
-							});
-						active.state = {
-							...active.state,
-							items: { ...active.state.items, threadId: current.threadId },
-						};
-						if (input.rewind) {
-							const truncate = facts.value.truncate;
-							if (truncate._tag === "Before") {
-								yield* child.client
-									.request(
-										"thread/revert",
-										{
-											threadId: current.threadId,
-											beforeTurnId: truncate.turnId,
-										},
-										ThreadRevertResponseSchema,
-									)
-									.pipe(
-										Effect.mapError((cause) => ({
-											message: `Codex conversation rewind failed before turn ${truncate.turnId}: ${cause.message}`,
-										})),
-									);
-								current.tokenUsageTotal = undefined;
-								active.state = {
-									...active.state,
-									items: {
-										...active.state.items,
-										tokenUsageBaseline: undefined,
-									},
-								};
-							}
-							if (input.rewind.targetMessageId)
-								yield* push("message.removed", {
-									messageId: input.rewind.targetMessageId,
-								});
-						}
-						if (input.rewind) yield* admitInput();
-						if (!claim())
-							return {
-								status: "cancelled" as const,
-								tokens: { input: 0, output: 0 },
-							};
-						const compact = input.prompt.trim() === "/compact";
-						if (compact)
-							active.state = { ...active.state, manualCompaction: true };
-						const goalCommand = parseCodexGoalCommand(input.prompt);
-						if (goalCommand && !["set", "resume"].includes(goalCommand.type)) {
-							const facts = yield* this.goalCommand(current, goalCommand);
-							const decoded = facts ? decodeNotification(facts) : undefined;
-							if (decoded?._tag === "known") {
-								const outcome = yield* apply(
-									handleCodexTurnNotification(
+						let child: CodexChild;
+						if (wake) {
+							if (!current.child)
+								return yield* apply(
+									failCodexTurn(
 										active.state,
-										decoded,
-										yield* Clock.currentTimeMillis,
+										"provider_unavailable",
+										"Codex exited before its turn",
+										Date.now(),
 									),
 								);
-								if (outcome) return outcome;
-							}
-							return yield* apply(completeCodexTurn(active.state));
-						}
-						const activateGoal =
-							!compact &&
-							(goalCommand?.type === "set" ||
-								goalCommand?.type === "resume" ||
-								!!active.state.goalState.goal);
-						if (goalCommand?.type === "set") {
+							child = current.child;
+							active.submitted = true;
+							active.state = acceptCodexTurn(active.state, wake);
+						} else {
+							if (!input.rewind) yield* admitInput();
+							if (!input.model)
+								return yield* apply(
+									failCodexTurn(
+										active.state,
+										"send_failed",
+										"Select a Codex model before sending",
+										Date.now(),
+									),
+								);
+							const facts = decodeTurnFacts(input.facts);
+							if (Option.isNone(facts) || facts.value._tag !== "Codex")
+								return yield* apply(
+									failCodexTurn(
+										active.state,
+										"turn_unprepared",
+										"Codex turn has no prepared turn facts",
+										Date.now(),
+									),
+								);
+							const opened = yield* Effect.raceFirst(
+								Effect.gen({ self: this }, function* () {
+									const previousPid = current.controllerPid;
+									if (previousPid && previousPid !== process.pid) {
+										// Retirement is acknowledged before the old process exits.
+										// Match Cursor's bounded wait; never take a live controller.
+										yield* Effect.gen(function* () {
+											while (runnerPidAlive(previousPid))
+												yield* Effect.sleep("50 millis");
+										}).pipe(
+											Effect.timeoutOrElse({
+												duration: "5 seconds",
+												orElse: () =>
+													Effect.fail({
+														code: "agent_busy" as const,
+														message:
+															"Codex session is owned by another live runner",
+													}),
+											}),
+										);
+									}
+									return yield* this.open(current, input);
+								}),
+								Deferred.await(active.cancelled).pipe(Effect.as(undefined)),
+							);
+							if (!opened || active.cancelRequested)
+								return yield* apply(
+									interruptCodexTurn(active.state, Date.now()),
+								);
+							child = opened;
+							if (!current.threadId)
+								return yield* Effect.fail({
+									operation: "thread start",
+									message: "Codex did not return a thread identity",
+								});
 							active.state = {
 								...active.state,
-								goalActive: false,
-								goalActivationPending: true,
+								items: { ...active.state.items, threadId: current.threadId },
 							};
-							yield* child.client.request(
-								"thread/goal/set",
-								{
-									threadId: current.threadId,
-									objective: goalCommand.objective,
-									status: "paused",
-									origin: "user",
-								},
-								ThreadGoalSetResponseSchema,
-							);
-						} else if (activateGoal) {
-							active.state = { ...active.state, goalActivationPending: true };
-						}
-						const digest =
-							current.resumeFallbackDigest ?? facts.value.forkDigest;
-						const seed =
-							current.forkSeedPending &&
-							typeof digest === "string" &&
-							digest.length > 0
-								? digest
-								: undefined;
-						const { effort, skill } = facts.value;
-						// No yield between checking cancellation and submitting the turn.
-						if (active.cancelRequested)
-							return yield* apply(interruptCodexTurn(active.state, Date.now()));
-						active.submitted = true;
-						if (compact) {
-							yield* child.client.request(
-								"thread/compact/start",
-								{ threadId: current.threadId },
-								ThreadCompactStartResponseSchema,
-							);
-						} else {
-							const accepted = yield* child.client.request(
-								"turn/start",
-								{
-									threadId: current.threadId,
-									clientUserMessageId: input.inputId,
-									input: [
-										...(seed
-											? [{ type: "text", text: seed, text_elements: [] }]
-											: []),
-										{
-											type: "text",
-											text:
-												goalCommand?.type === "set"
-													? goalCommand.objective
-													: goalCommand?.type === "resume"
-														? "Continue."
-														: input.prompt,
-											text_elements: [],
+							if (input.rewind) {
+								const truncate = facts.value.truncate;
+								if (truncate._tag === "Before") {
+									yield* child.client
+										.request(
+											"thread/revert",
+											{
+												threadId: current.threadId,
+												beforeTurnId: truncate.turnId,
+											},
+											ThreadRevertResponseSchema,
+										)
+										.pipe(
+											Effect.mapError((cause) => ({
+												message: `Codex conversation rewind failed before turn ${truncate.turnId}: ${cause.message}`,
+											})),
+										);
+									current.tokenUsageTotal = undefined;
+									active.state = {
+										...active.state,
+										items: {
+											...active.state.items,
+											tokenUsageBaseline: undefined,
 										},
-										...(skill._tag === "Skill"
-											? [{ type: "skill", name: skill.name, path: skill.path }]
-											: []),
-										...(input.images ?? []).map(({ dataUrl }) => ({
-											type: "image",
-											url: dataUrl,
-										})),
-									],
-									cwd: current.cwd,
-									model: input.model.modelId,
-									...(effort !== undefined ? { effort } : {}),
-									summary: "detailed",
-									...codexSessionConfig({
-										permissionMode: input.permissionMode,
-										cwd: current.cwd,
-										modelId: input.model.modelId,
-										effort,
-									}),
-								},
-								TurnStartResponseSchema,
-							);
-							active.state = acceptCodexTurn(active.state, accepted.turn.id);
-							if (activateGoal && !active.cancelRequested)
+									};
+								}
+								if (input.rewind.targetMessageId)
+									yield* push("message.removed", {
+										messageId: input.rewind.targetMessageId,
+									});
+							}
+							if (input.rewind) yield* admitInput();
+							if (!claim())
+								return {
+									status: "cancelled" as const,
+									tokens: { input: 0, output: 0 },
+								};
+							const compact = input.prompt.trim() === "/compact";
+							if (compact)
+								active.state = { ...active.state, manualCompaction: true };
+							const goalCommand = parseCodexGoalCommand(input.prompt);
+							if (
+								goalCommand &&
+								!["set", "resume"].includes(goalCommand.type)
+							) {
+								const facts = yield* this.goalCommand(current, goalCommand);
+								const decoded = facts ? decodeNotification(facts) : undefined;
+								if (decoded?._tag === "known") {
+									const outcome = yield* apply(
+										handleCodexTurnNotification(
+											active.state,
+											decoded,
+											yield* Clock.currentTimeMillis,
+										),
+									);
+									if (outcome) return outcome;
+								}
+								return yield* apply(completeCodexTurn(active.state));
+							}
+							const activateGoal =
+								!compact &&
+								(goalCommand?.type === "set" ||
+									goalCommand?.type === "resume" ||
+									!!active.state.goalState.goal);
+							if (goalCommand?.type === "set") {
+								active.state = {
+									...active.state,
+									goalActive: false,
+									goalActivationPending: true,
+								};
 								yield* child.client.request(
 									"thread/goal/set",
 									{
 										threadId: current.threadId,
-										status: "active",
+										objective: goalCommand.objective,
+										status: "paused",
 										origin: "user",
 									},
 									ThreadGoalSetResponseSchema,
 								);
-							if (seed) {
-								current.forkSeedPending = false;
-								current.resumeFallbackDigest = undefined;
-								yield* this.persistIdentity(
-									input.sessionId,
-									current,
-									current.threadId,
+							} else if (activateGoal) {
+								active.state = { ...active.state, goalActivationPending: true };
+							}
+							const digest =
+								current.resumeFallbackDigest ?? facts.value.forkDigest;
+							const seed =
+								current.forkSeedPending &&
+								typeof digest === "string" &&
+								digest.length > 0
+									? digest
+									: undefined;
+							const { effort, skill } = facts.value;
+							// No yield between checking cancellation and submitting the turn.
+							if (active.cancelRequested)
+								return yield* apply(
+									interruptCodexTurn(active.state, Date.now()),
 								);
+							active.submitted = true;
+							if (compact) {
+								yield* child.client.request(
+									"thread/compact/start",
+									{ threadId: current.threadId },
+									ThreadCompactStartResponseSchema,
+								);
+							} else {
+								const accepted = yield* child.client.request(
+									"turn/start",
+									{
+										threadId: current.threadId,
+										clientUserMessageId: input.inputId,
+										input: [
+											...(seed
+												? [{ type: "text", text: seed, text_elements: [] }]
+												: []),
+											{
+												type: "text",
+												text:
+													goalCommand?.type === "set"
+														? goalCommand.objective
+														: goalCommand?.type === "resume"
+															? "Continue."
+															: input.prompt,
+												text_elements: [],
+											},
+											...(skill._tag === "Skill"
+												? [
+														{
+															type: "skill",
+															name: skill.name,
+															path: skill.path,
+														},
+													]
+												: []),
+											...(input.images ?? []).map(({ dataUrl }) => ({
+												type: "image",
+												url: dataUrl,
+											})),
+										],
+										cwd: current.cwd,
+										model: input.model.modelId,
+										...(effort !== undefined ? { effort } : {}),
+										summary: "detailed",
+										...codexSessionConfig({
+											permissionMode: input.permissionMode,
+											cwd: current.cwd,
+											modelId: input.model.modelId,
+											effort,
+										}),
+									},
+									TurnStartResponseSchema,
+								);
+								active.state = acceptCodexTurn(active.state, accepted.turn.id);
+								if (activateGoal && !active.cancelRequested)
+									yield* child.client.request(
+										"thread/goal/set",
+										{
+											threadId: current.threadId,
+											status: "active",
+											origin: "user",
+										},
+										ThreadGoalSetResponseSchema,
+									);
+								if (seed) {
+									current.forkSeedPending = false;
+									current.resumeFallbackDigest = undefined;
+									yield* this.persistIdentity(
+										input.sessionId,
+										current,
+										current.threadId,
+									);
+								}
 							}
 						}
 						while (!active.state.settled) {
@@ -893,6 +957,20 @@ export class CodexRunnerPayload implements RunnerPayload {
 							);
 						}),
 					);
+					// CONTRACT 841-844: a Codex Run ends at its result, so the wake end carries one.
+					if (wake && accepted)
+						yield* push("evidence.turn_ended", {
+							label: "",
+							result:
+								outcome && "error" in outcome && outcome.error
+									? { outcome: outcome.status, code: outcome.error.code }
+									: {
+											outcome:
+												outcome && outcome.status !== "cancelled"
+													? outcome.status
+													: "error",
+										},
+						});
 					if (current.active === active)
 						yield* push("session.status", {
 							sessionId: input.sessionId,
@@ -927,6 +1005,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 							current.busy = false;
 							current.active = undefined;
 						}
+						current.goalState = active.state.goalState;
 						yield* Deferred.succeed(active.started, undefined);
 					}),
 				),
@@ -942,7 +1021,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 			const session = this.sessions.get(sessionId);
 			if (!session) return;
 			const active = session.active;
-			if (runIds && !runIds.some((id) => active?.runIds.has(id))) return;
+			// An empty cohort names no send, so it reaches only a wake (no Runs of its own), as Claude's.
+			const wakeStop = runIds?.length === 0 && active?.runIds.size === 0;
+			if (runIds && !wakeStop && !runIds.some((id) => active?.runIds.has(id)))
+				return;
 			session.subagents?.beginInterrupt();
 			if (!active) {
 				yield* this.interruptChildren(session);
@@ -1369,6 +1451,17 @@ export class CodexRunnerPayload implements RunnerPayload {
 								reading: codexUsageReading({ rateLimits: snapshot }, true),
 							});
 							return;
+						}
+						// Claimed before the offer: a send arriving now steers into the wake.
+						if (
+							!session.busy &&
+							session.last &&
+							decoded._tag === "known" &&
+							decoded.method === "turn/started" &&
+							decoded.params.threadId === session.threadId
+						) {
+							session.busy = true;
+							yield* this.wake(session.last, decoded.params.turn.id);
 						}
 						yield* Queue.offer(updates, { notification });
 					}),
