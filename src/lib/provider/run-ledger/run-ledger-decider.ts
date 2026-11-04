@@ -91,7 +91,10 @@ interface Tx {
 		| "dropped"
 		| "forced"
 		| undefined;
-	/** D59: main's terminal ended its Run, but this OpenCode abort or cancel_request stays a fence member (3101-3106). */
+	/**
+	 * D59: main's terminal ended its Run, but this OpenCode abort or cancel_request (3101-3106), or
+	 * this start or steer of an abandoned run (3113-3117), stays a fence member.
+	 */
 	mainEnded?: boolean | undefined;
 	nativeMessageId?: string | undefined;
 	accounted: boolean;
@@ -1208,8 +1211,9 @@ function effectOutcome(
 	tx: Tx,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): Outcome {
-	// 3101-3106: the returned call of an abort its Run's terminal left open ends it.
-	if (tx.mainEnded) tx.ended ??= "main";
+	// 3101-3106: the returned call of an abort its Run's terminal left open ends it; an abandoned
+	// start or steer waits for retirement instead (3113-3117).
+	if (tx.mainEnded && !delivers(send)) tx.ended ??= "main";
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
@@ -2240,15 +2244,18 @@ function observe(
 					// whose call has not returned: session-wide, its delivery unknown, it stays a fence member until
 					// the call returns, a probe issued after it returns native_idle, or the stop's deadline step,
 					// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
-					// 3101-3106; a reading, reported as a gap).
+					// 3101-3106; a reading, reported as a gap). A runner's interrupt-timeout abandonment is its
+					// Run's outcome, not its work's end: its starts and steers stay members until retirement
+					// covers them (3113-3117).
 					for (const send of runSends(book, run))
 						for (const tx of send.txs)
 							if (
-								(send.effect.kind === "interrupt" ||
+								((send.effect.kind === "interrupt" ||
 									send.effect.kind === "cancel_request") &&
-								rules(book).fences(send.effect) &&
-								observation.code !== "stop_unconfirmed" &&
-								tx.transport.tag === "Issued"
+									rules(book).fences(send.effect) &&
+									observation.code !== "stop_unconfirmed" &&
+									tx.transport.tag === "Issued") ||
+								(observation.code === "abandoned" && delivers(send))
 							)
 								tx.mainEnded = true;
 							else tx.ended ??= "main";

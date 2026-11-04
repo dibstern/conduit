@@ -11,10 +11,11 @@
 // 147. the interrupt-timeout abandonment is unmarked on the wire, so it reads as a native result;
 // 148. the abandoned Run ends forced, completed, errored, or twice;
 // 149. the fence lets go at the abandonment: the next start is handed to a runner before the
-//      abandoned runner's process_lost (open: holding it needs a decider change, see 82tn.32.10);
+//      abandoned runner's process_lost;
 // 150. the fence never lets go: the next start waits forever after the runner retires;
 // 151. the mark leaks into a native-cancel Stop;
-// 152. the held next start is handed to the retiring runner, or delivered twice (open, as 149).
+// 152. the held next start is handed to the retiring runner, or delivered twice; or, unlaunched by
+//      that runner's retirement, it is never relaunched (CONTRACT.md 3.6, 3270-3274).
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -377,14 +378,24 @@ describe("Cursor on the Run Ledger", () => {
 			reason: "interrupted",
 			forced: 0,
 		});
+		// F149, F152: the next start is handed over once, to a new runner, after the abandoned
+		// runner's process_lost.
+		const lost = ledger.events.filter(
+			({ type }) => type === "evidence.process_lost",
+		);
+		const handed = ledger.events.filter(
+			({ type, runId }) => type === "run.dispatched" && runId === next?.id,
+		);
+		expect(lost).toHaveLength(1);
+		expect(handed).toHaveLength(1);
+		expect(handed[0]?.sequence).toBeGreaterThan(lost[0]?.sequence ?? 0);
+		expect(handed[0]?.runnerId).not.toBe(lost[0]?.runnerId);
 		// F150: the next start runs, and its Run ends once (endsOnce above).
 		expect(ledger.ends[1]).toMatchObject({
 			runId: next?.id,
 			reason: "completed",
 		});
 		expect(captured("send.options")).toHaveLength(2);
-		prove("abandoned", ledger, {
-			dispatched: ledger.events.filter(({ type }) => type === "run.dispatched"),
-		});
+		prove("abandoned", ledger, { lost, handed });
 	});
 });

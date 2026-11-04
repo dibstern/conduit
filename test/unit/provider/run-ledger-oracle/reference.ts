@@ -83,7 +83,10 @@ interface Tx {
 	absent: boolean;
 	sealed?: { readonly value: Value; readonly unconsumed: boolean } | undefined;
 	ended?: WorkEnd | undefined;
-	/** D59: main's terminal ended its Run, but this OpenCode abort or cancel_request stays a fence member (3101-3106). */
+	/**
+	 * D59: main's terminal ended its Run, but this OpenCode abort or cancel_request (3101-3106), or
+	 * this start or steer of an abandoned run (3113-3117), stays a fence member.
+	 */
 	mainEnded?: boolean | undefined;
 	/** L1 item 1, 3.4: its coverage, recorded whatever its tries got, so after its work ended too (3.8 reason 2.3). */
 	covered?: "process_lost" | "session_ended" | undefined;
@@ -1751,8 +1754,14 @@ function effectOutcome(
 	tx: Tx,
 	outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
 ): Outcome {
-	// 3101-3106: the returned call of an abort its Run's terminal left open ends it.
-	if (tx.mainEnded) endWork(tx, "main");
+	// 3101-3106: the returned call of an abort its Run's terminal left open ends it; an abandoned
+	// start or steer waits for retirement instead (3113-3117).
+	if (
+		tx.mainEnded &&
+		send.effect.kind !== "start" &&
+		send.effect.kind !== "steer"
+	)
+		endWork(tx, "main");
 	switch (outcome.tag) {
 		case "succeeded":
 			tx.transport = joinTransport(tx.transport, { tag: "Sent" });
@@ -2170,15 +2179,19 @@ function mainEvent(
 			// whose call has not returned: session-wide, its delivery unknown, it stays a fence member until
 			// the call returns, a probe issued after it returns native_idle, or the stop's deadline step,
 			// main's stop_unconfirmed terminal. The Run's end waits for none (CONTRACT.md 788-789, 797-799,
-			// 3101-3106; a reading, reported as a gap).
+			// 3101-3106; a reading, reported as a gap). A runner's interrupt-timeout abandonment is its
+			// Run's outcome, not its work's end: its starts and steers stay members until retirement
+			// covers them (3113-3117).
 			for (const send of runSends(world, run))
 				for (const tx of send.txs)
 					if (
-						world.provider === "opencode" &&
-						(send.effect.kind === "interrupt" ||
-							send.effect.kind === "cancel_request") &&
-						observation.code !== "stop_unconfirmed" &&
-						tx.transport.tag === "Issued"
+						(world.provider === "opencode" &&
+							(send.effect.kind === "interrupt" ||
+								send.effect.kind === "cancel_request") &&
+							observation.code !== "stop_unconfirmed" &&
+							tx.transport.tag === "Issued") ||
+						(observation.code === "abandoned" &&
+							(send.effect.kind === "start" || send.effect.kind === "steer"))
 					)
 						tx.mainEnded = true;
 					else endWork(tx, "main");
