@@ -480,6 +480,12 @@ const commandFor = (
 						state: event.data.state,
 					},
 				};
+			// 8.4: the browser's Stop tasks; decide reads the live tasks at this fold.
+			case "tasks.stop_requested":
+				return {
+					verb: "control",
+					control: { kind: "stop_tasks", tasks: event.data.tasks },
+				};
 			case "evidence.process_started":
 				return {
 					verb: "settle",
@@ -719,6 +725,7 @@ const HANDLES = [
 	"interrupt.requested",
 	"session.end_requested",
 	"native_command.requested",
+	"tasks.stop_requested",
 	"evidence.process_started",
 	"evidence.process_lost",
 	"evidence.alarm_fired",

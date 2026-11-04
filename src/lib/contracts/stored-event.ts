@@ -1140,6 +1140,20 @@ export const CanonicalEvents = {
 			goal: Schema.optionalKey(GoalActionSchema),
 		}),
 	),
+	/** The browser's Stop tasks (8.4): "all", or the live tasks it named, folded as stop_tasks. */
+	"tasks.stop_requested": live(
+		Schema.Struct({
+			tasks: Schema.Union([
+				Schema.Literal("all"),
+				Schema.Array(
+					Schema.Struct({
+						taskId: Schema.String,
+						runId: Schema.optionalKey(Schema.String),
+					}),
+				),
+			]),
+		}),
+	),
 	// Evidence events (CONTRACT.md 2.1 row 215, 3.9): a fact the Run Ledger's arm folds that has
 	// no main event, appended by its one observer in the write that observes it. Main's
 	// projectors ignore them.

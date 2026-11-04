@@ -587,16 +587,15 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 		await expectTasks(page, remaining);
 		await expectTasks(second, remaining);
 		const callsBeforeFinishedStop = requestedIds(harness);
-		await Effect.runPromise(
-			browser.rpc.StopBackgroundTask({
-				sessionId,
-				taskId: shell.task_id,
-			}),
+		// The ledger no longer lists it, so the stop is refused with its reason and nothing is sent.
+		const finished = await Effect.runPromise(
+			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks: [shell.task_id] })),
 		);
+		expect(finished.message).toBe("That background task is not running");
 		expect(requestedIds(harness)).toEqual(callsBeforeFinishedStop);
 		await expect(second.locator('[role="alert"]')).toHaveCount(0);
 		assertTurnUntouched(harness, queryId);
-		await steps.record("finished-id-no-op");
+		await steps.record("finished-id-refused");
 		release(harness, "task-stop-release-result");
 		await chat.waitForStreamingComplete();
 		assertTurnUntouched(harness, queryId);

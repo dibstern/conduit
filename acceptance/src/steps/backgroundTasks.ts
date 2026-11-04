@@ -1,5 +1,6 @@
-import { expect } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
 import { PROVIDER_SESSION_CAPABILITIES } from "../../../src/lib/contracts/provider-instance.js";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import {
 	mockInstances,
@@ -7,6 +8,16 @@ import {
 	setSessionRowStatus,
 	settleTransitions,
 } from "./shared.js";
+
+// The reason the server gives for refusing the page's next Stop tasks, if a scenario set one.
+const stopRefusals = new WeakMap<Page, string>();
+const stopTasksStub = (page: Page) => ({
+	StopTasks: () => {
+		const message = stopRefusals.get(page);
+		if (message !== undefined) throw new WsRpcError({ message });
+		return { ok: true as const };
+	},
+});
 
 // Oldest first, as the relay sends them. Ages are against the frozen clock.
 const TASKS = [
@@ -344,9 +355,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "stop tasks from composer toast",
 		match: /^I press Stop them in the turn-stopped toast$/,
 		run: async ({ world }) => {
-			requireRpcControl(world.page).setStubs({
-				StopBackgroundTask: () => ({ ok: true }),
-			});
+			requireRpcControl(world.page).setStubs(stopTasksStub(world.page));
 			await world.page
 				.getByTestId("toast")
 				.getByRole("button", { name: "Stop them", exact: true })
@@ -362,13 +371,13 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				.poll(() =>
 					rpc
 						.getRequests()
-						.filter((request) => request.tag === "StopBackgroundTask")
-						.map((request) => request.payload["taskId"]),
+						.filter((request) => request.tag === "StopTasks")
+						.flatMap((request) => request.payload["tasks"]),
 				)
 				.toEqual((match[1] ?? "").split(", "));
 			const stops = rpc
 				.getRequests()
-				.filter((request) => request.tag === "StopBackgroundTask");
+				.filter((request) => request.tag === "StopTasks");
 			for (const stop of stops)
 				expect(stop.payload["sessionId"]).toBe(sessionIdOf(world.page.url()));
 			expect(
@@ -764,9 +773,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "stop a named background task",
 		match: /^I stop the background task (.+)$/,
 		run: async ({ world, match }) => {
-			requireRpcControl(world.page).setStubs({
-				StopBackgroundTask: () => ({ ok: true }),
-			});
+			requireRpcControl(world.page).setStubs(stopTasksStub(world.page));
 			await world.page
 				.getByRole("button", {
 					name: `Stop background task ${match[1]}`,
@@ -794,12 +801,17 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "server refuses Stop tasks",
+		match: /^the server refuses Stop tasks because (.+)$/,
+		run: ({ world, match }) => {
+			stopRefusals.set(world.page, match[1] ?? "");
+		},
+	},
+	{
 		name: "press Stop all",
 		match: /^I press Stop all in the background tasks (pull-down|row)$/,
 		run: async ({ world, match }) => {
-			requireRpcControl(world.page).setStubs({
-				StopBackgroundTask: () => ({ ok: true }),
-			});
+			requireRpcControl(world.page).setStubs(stopTasksStub(world.page));
 			await world.page
 				.getByTestId(
 					match[1] === "row"
@@ -820,13 +832,13 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				.poll(() =>
 					rpc
 						.getRequests()
-						.filter((request) => request.tag === "StopBackgroundTask")
-						.map((request) => request.payload["taskId"]),
+						.filter((request) => request.tag === "StopTasks")
+						.flatMap((request) => request.payload["tasks"]),
 				)
 				.toEqual(ids);
 			for (const request of rpc
 				.getRequests()
-				.filter((request) => request.tag === "StopBackgroundTask"))
+				.filter((request) => request.tag === "StopTasks"))
 				expect(request.payload["sessionId"]).toBe(
 					sessionIdOf(world.page.url()),
 				);

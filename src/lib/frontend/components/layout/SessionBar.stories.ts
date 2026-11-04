@@ -2851,7 +2851,7 @@ export const DesktopTaskControls: Story = {
 		]);
 		stopDesktopTask.mockClear();
 		const restoreSocket = connectedSocket();
-		const restoreStop = replyRpc("StopBackgroundTask", stopDesktopTask);
+		const restoreStop = replyRpc("StopTasks", stopDesktopTask);
 		return () => {
 			restoreStop();
 			restoreSocket();
@@ -2869,26 +2869,24 @@ export const DesktopTaskControls: Story = {
 		);
 		await waitFor(() =>
 			expect(stopDesktopTask).toHaveBeenCalledWith({
-				_tag: "StopBackgroundTask",
+				_tag: "StopTasks",
 				sessionId: mockSession.id,
-				taskId: "t1",
+				tasks: ["t1"],
 			}),
 		);
 		// Requests leave both chips in place until the SDK confirms a stop.
 		await expect(canvas.getAllByTestId("background-task-chip")).toHaveLength(2);
 		stopDesktopTask.mockClear();
 		await userEvent.click(panel.getByTestId("background-tasks-stop-all"));
-		await waitFor(() => expect(stopDesktopTask).toHaveBeenCalledTimes(2));
-		await expect(stopDesktopTask).toHaveBeenNthCalledWith(1, {
-			_tag: "StopBackgroundTask",
-			sessionId: mockSession.id,
-			taskId: "t2",
-		});
-		await expect(stopDesktopTask).toHaveBeenNthCalledWith(2, {
-			_tag: "StopBackgroundTask",
-			sessionId: mockSession.id,
-			taskId: "t1",
-		});
+		// Stop all is one request; the server reads which tasks are live.
+		await waitFor(() =>
+			expect(stopDesktopTask).toHaveBeenCalledWith({
+				_tag: "StopTasks",
+				sessionId: mockSession.id,
+				tasks: "all",
+			}),
+		);
+		await expect(stopDesktopTask).toHaveBeenCalledTimes(1);
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() =>
 			expect(canvas.queryByTestId("background-tasks-panel")).toBeNull(),
