@@ -1,8 +1,16 @@
 import { expect, type Page } from "@playwright/test";
+import {
+	getProviderDriver,
+	PROVIDER_SESSION_CAPABILITIES,
+} from "../../../src/lib/contracts/provider-instance.js";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
 import type { GoalSummary } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
-import { requireRelayControl, requireRpcControl } from "./shared.js";
+import {
+	mockInstances,
+	requireRelayControl,
+	requireRpcControl,
+} from "./shared.js";
 
 const CONDITION = "All 38 scenarios pass";
 const STUCK_SUMMARY =
@@ -151,7 +159,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	{
 		name: "provide goal details through mocked RPC",
 		match:
-			/^goal details are available for an? (working|idle|paused|met|stuck) goal$/,
+			/^goal details are available for an? (working|idle|paused|met|stuck|blocked|usage-limited|budget-limited) goal$/,
 		run: async ({ world, match }) => {
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Goal details require an open session");
@@ -189,6 +197,20 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 							...(phase === "paused"
 								? { pausedReason: "Goal check interrupted" }
 								: {}),
+							// 8.6 Limited: Codex stopped the goal at a limit; the reason is Codex's.
+							...(phase === "blocked"
+								? { pausedReason: "Goal blocked", limit: "blocked" as const }
+								: phase === "usage-limited"
+									? {
+											pausedReason: "Goal usage limit",
+											limit: "usage" as const,
+										}
+									: phase === "budget-limited"
+										? {
+												pausedReason: "Goal budget reached",
+												limit: "budget" as const,
+											}
+										: {}),
 						};
 			const rpc = requireRpcControl(world.page);
 			let summary: GoalSummary | null =
@@ -504,6 +526,46 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "harness pauses its goal natively",
+		// 8.1 (pause: boolean): the trait, never the provider, gates Pause and a native Resume.
+		match: /^the harness pauses its goal natively$/,
+		run: async ({ world }) => {
+			const claude = getProviderDriver("claude");
+			if (!claude) throw new Error("No Claude driver traits");
+			requireRpcControl(world.page).setDaemonList("SubscribeInstances", {
+				instances: mockInstances.get(world.page) ?? [],
+				providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
+				providerTraits: { claude: { ...claude, nativeGoalPause: true } },
+			});
+		},
+	},
+	{
+		name: "assert native pause goal details actions",
+		match: /^goal details offer (Pause|Resume), Edit and Clear$/,
+		run: async ({ world, match }) => {
+			const offered = match[1]?.toLowerCase() ?? "";
+			for (const action of [offered, "edit", "clear"])
+				await expect(
+					world.page.getByTestId(`goal-details-${action}`),
+				).toBeVisible();
+			for (const action of ["pause", "resume", "new", "dismiss"].filter(
+				(action) => action !== offered,
+			))
+				await expect(
+					world.page.getByTestId(`goal-details-${action}`),
+				).toBeHidden();
+		},
+	},
+	{
+		name: "assert goal details status",
+		match: /^the goal details status reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.getByTestId("goal-details-status")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
 		name: "assert met goal details actions",
 		match: /^goal details offer Set a new goal and Dismiss$/,
 		run: async ({ world }) => {
@@ -574,7 +636,8 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	},
 	{
 		name: "press goal details action",
-		match: /^I press (Edit|Clear|Set a new goal|Dismiss) in goal details$/,
+		match:
+			/^I press (Pause|Resume|Edit|Clear|Set a new goal|Dismiss) in goal details$/,
 		run: async ({ world, match }) => {
 			const action =
 				match[1] === "Set a new goal" ? "new" : match[1]?.toLowerCase();

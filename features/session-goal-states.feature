@@ -143,3 +143,35 @@ Scenario Outline: A clear that could not be delivered shows the goal again with 
 Examples:
   | condition             | notice                   |
   | All 38 scenarios pass | Couldn't clear the goal  |
+
+Scenario Outline: A pause shows Pausing until it is confirmed, and an unconfirmed one offers Retry
+  Given the viewport is a phone
+  And the conduit app is served with the matching-model mockup
+  When Claude sets the goal <condition>
+  And the session reports the goal pause Sent
+  Then the session goal subtitle reads Pausing · <condition>
+  And the pending goal bar reads Pausing goal…
+  When the session reports the goal pause Unconfirmed
+  Then the pending goal bar reads Pause not confirmed and offers Retry
+  When I press Retry in the pending goal bar
+  Then the mock relay received 1 PauseGoal action with distinct command ids and no goal chat message
+
+Examples:
+  | condition             |
+  | All 38 scenarios pass |
+
+Scenario Outline: A pause or clear applied mid-turn shows a note with Stop that goes when the turn ends
+  Given the viewport is a phone
+  And the conduit app is served with the matching-model mockup
+  When Claude sets the goal <condition>
+  And Codex <change> the goal while its turn finishes
+  Then the goal note reads <note> and offers Stop
+  When I press Stop in the goal note
+  Then the mock relay received a stop and no further goal action
+  When Codex's turn ends
+  Then the goal note is not rendered
+
+Examples:
+  | condition             | change | note                                               |
+  | All 38 scenarios pass | pauses | Goal paused. Codex is finishing its current turn.  |
+  | All 38 scenarios pass | clears | Goal cleared. Codex is finishing its current turn. |
