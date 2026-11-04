@@ -2091,3 +2091,6 @@ question now returns at once: the Stop commits without waiting (provider-	pointe
 test: the Run ends at the stop's deadline step, ends once, and the next send	pointer
 send racing the deadline step's retirement.	pointer
 Lane 32.8c (wt/82tn32r3: 47d2e37c, c4364a1f, 7f9e4b0c, b2ab90bc). The Codex trace replay	pointer
+the Stop's acceptance has two owners: the stopping map holds only the	pointer
+Seam: provider-turn-service's Stop entry (stopping map, startStop,	pointer
+review round 6: 1 material finding (Sol gpt-6.1-sol xhigh on 68a2a168)	pointer
