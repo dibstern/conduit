@@ -76,16 +76,16 @@ Examples:
   | phone    | session-goal-details-phone   | 98        |
   | desktop  | session-goal-details-desktop | 98        |
 
-Scenario: A running goal check appends a running glyph to the returned history
+Scenario: An idle goal's history shows only the checks that returned, never a Checking row
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And the composer status clock is frozen
   And a session already exists on the Claude harness
-  And goal details are available for a checking goal
+  And goal details are available for an idle goal
   And the phone header controls own separate touch areas of at least 24 pixels, using 44 where space permits
   When I click the session goal subtitle
   And I toggle goal details History
-  Then the goal details history shows Checking now followed by three checks
+  Then the goal details history shows only the three returned checks
   And goal details offer Edit and Clear
 
 Scenario: A paused Claude goal offers neither Pause nor Resume

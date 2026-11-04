@@ -64,8 +64,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "goal check is running",
-		match: /^the goal check is running$/,
+		name: "goal idle before its next check result",
+		match: /^the goal is idle before its next check result$/,
 		run: async ({ world }) => {
 			const previous = goals.get(world.page);
 			if (!previous?.goal) throw new Error("No goal was set");
@@ -358,22 +358,25 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert session goal running glyph",
-		match: /^the session goal subtitle has a running glyph$/,
+		name: "assert session goal has no running glyph",
+		match: /^the session goal subtitle has no running glyph$/,
 		run: async ({ world }) => {
-			const glyph = world.page
-				.getByTestId("session-goal-subtitle")
-				.locator('[data-flow-glyph="running"]');
-			await expect(glyph).toBeVisible();
-			const packet = glyph.locator("[data-flow-packet]");
-			await expect(packet).toBeVisible();
-			const reducedMotion = await world.page.evaluate(
-				() => matchMedia("(prefers-reduced-motion: reduce)").matches,
-			);
-			await expect(packet).toHaveCSS(
-				"animation-name",
-				reducedMotion ? "none" : /flow/,
-			);
+			await expect(
+				world.page.getByTestId("session-goal-subtitle"),
+			).toBeVisible();
+			await expect(
+				world.page
+					.getByTestId("session-goal-subtitle")
+					.locator('[data-flow-glyph="running"]'),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert composer has no checking goal line",
+		match: /^the composer shows no checking goal line$/,
+		run: async ({ world }) => {
+			await expect(world.page.locator("#input")).toBeVisible();
+			await expect(world.page.getByText("Checking goal")).toHaveCount(0);
 		},
 	},
 	{

@@ -151,7 +151,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	{
 		name: "provide goal details through mocked RPC",
 		match:
-			/^goal details are available for a (working|checking|paused|met|stuck) goal$/,
+			/^goal details are available for an? (working|idle|paused|met|stuck) goal$/,
 		run: async ({ world, match }) => {
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			if (!sessionId) throw new Error("Goal details require an open session");
@@ -168,7 +168,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 				setAt,
 				tokensAtStart: 0,
 				lastReason:
-					phase === "checking"
+					phase === "idle"
 						? undefined
 						: phase === "stuck"
 							? STUCK_REASON
@@ -474,28 +474,18 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert checking goal details history",
-		match:
-			/^the goal details history shows Checking now followed by three checks$/,
+		name: "assert idle goal details history",
+		match: /^the goal details history shows only the three returned checks$/,
 		run: async ({ world }) => {
 			const checks = world.page
 				.getByTestId("goal-details-history")
 				.getByTestId("goal-details-check");
-			await expect(checks).toHaveText([
-				/Checking.*now/,
-				...checkText(world.page),
-			]);
-			const glyph = checks.first().locator('[data-flow-glyph="running"]');
-			await expect(glyph).toBeVisible();
-			const packet = glyph.locator("[data-flow-packet]");
-			await expect(packet).toBeVisible();
-			const reducedMotion = await world.page.evaluate(
-				() => matchMedia("(prefers-reduced-motion: reduce)").matches,
-			);
-			await expect(packet).toHaveCSS(
-				"animation-name",
-				reducedMotion ? "none" : /flow/,
-			);
+			await expect(checks).toHaveText(checkText(world.page));
+			await expect(
+				world.page
+					.getByTestId("goal-details-history")
+					.locator('[data-flow-glyph="running"]'),
+			).toHaveCount(0);
 		},
 	},
 	{

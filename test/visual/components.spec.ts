@@ -523,8 +523,6 @@ if (stories.length > 0) {
 		["layout-sessionbar--desktop-background-tasks", "mobile"],
 		["layout-sessionbar--desktop-banners", "mobile"],
 		["layout-sessionbar--desktop-banners-light", "mobile"],
-		["layout-sessionbar--desktop-goal-checking", "mobile"],
-		["layout-sessionbar--desktop-goal-checking-light", "mobile"],
 		["layout-sessionbar--desktop-goal-details", "mobile"],
 		["layout-sessionbar--desktop-goal-details-light", "mobile"],
 		["layout-sessionbar--desktop-goal-met", "mobile"],

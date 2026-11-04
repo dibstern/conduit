@@ -481,7 +481,7 @@
 	});
 	const sendButtonTitle = $derived(
 		isGoalCommand ? "Set goal"
-		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to ${composerDraft.text.trimStart().startsWith("/") ? "stop the turn and run it" : "steer"}`
+		: steer === "ready" ? `${sendButtonLabel} · ⌘/Ctrl+Enter or ⌘/Ctrl+click to steer`
 		: steer === "prompt_open" ? `${sendButtonLabel} · Answer the open prompt before steering`
 		: sendButtonLabel,
 	);
@@ -1252,11 +1252,6 @@
 			<div class="pb-1.5"><NewSessionContext bind:worktree={draftWorktree} bind:newWorktree={draftNewWorktree} bind:worktreeBase={draftWorktreeBase} bind:modeChosen={draftModeChosen} sessionModeDefault={draftSessionMode} focusComposer={() => textareaEl?.focus()} /></div>
 		{/if}
 
-		{#if goal.phase === "checking"}
-			<div data-testid="composer-checking-goal" class="flex items-center gap-[7px] px-[16px] pb-[9px] text-[12.5px] text-status-goal">
-				<ConduitMark size={13} variant="running" tone="goal" /><b class="font-semibold">Checking goal</b><span class="min-w-0 truncate text-text-muted">· {goalFacts?.goal?.condition}</span>
-			</div>
-		{/if}
 		{#if isGoalCommand}
 			<ComposerStrip tone="goal" data-testid="composer-goal-hint" class="flex items-center gap-[8px]">
 				<Icon name="target" size={16} class="shrink-0 text-status-goal" />

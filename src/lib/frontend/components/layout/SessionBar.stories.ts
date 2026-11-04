@@ -374,21 +374,6 @@ async function assertGoalSubtitle(
 	return subtitle;
 }
 
-export const GoalChecking: Story = {
-	beforeEach: () => setupGoal("checking"),
-	play: async ({ canvasElement }) => {
-		const subtitle = await assertGoalSubtitle(
-			canvasElement,
-			"Checking · All 38 scenarios pass",
-			"--color-status-goal",
-		);
-		const packet = subtitle.querySelector("[data-flow-packet]");
-		await expect(packet).toBeVisible();
-		if (!packet) throw new Error("Checking Flow packet is missing");
-		await expect(getComputedStyle(packet).animationName).toContain("flow");
-	},
-};
-
 export const GoalNotYet: Story = {
 	beforeEach: () => setupGoal("not_yet"),
 	play: async ({ canvasElement }) => {
@@ -435,10 +420,6 @@ export const GoalCleared: Story = {
 	},
 };
 
-export const GoalCheckingLight: Story = {
-	...GoalChecking,
-	globals: { theme: "light" },
-};
 export const GoalNotYetLight: Story = {
 	...GoalNotYet,
 	globals: { theme: "light" },
@@ -517,8 +498,7 @@ async function assertGoalDetails(
 	);
 	const checks = history.queryAllByTestId("goal-details-check");
 	const historyCount = Math.min(checkCount, phase === "Goal met" ? 4 : 3);
-	const completed =
-		phase === "Checking" || phase === "Goal met" ? checks.slice(1) : checks;
+	const completed = phase === "Goal met" ? checks.slice(1) : checks;
 	for (const [index, fixture] of goalCheckFixtures
 		.slice(0, historyCount)
 		.reverse()
@@ -573,21 +553,6 @@ export const GoalDetailsOpen: Story = {
 		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
-	},
-};
-
-export const GoalDetailsChecking: Story = {
-	...GoalDetailsOpen,
-	tags: ["viewport-capture"],
-	beforeEach: () => setupGoalDetails("checking"),
-	play: async ({ canvasElement }) => {
-		const { checks } = await assertGoalDetails(canvasElement, "Checking", 4);
-		await expect(checks[0]).toHaveTextContent("now");
-		await expect(checks[0]).toHaveTextContent("Checking");
-		const packet = checks[0]?.querySelector("[data-flow-packet]");
-		await expect(packet).toBeVisible();
-		if (!packet) throw new Error("Checking Flow packet is missing");
-		await expect(getComputedStyle(packet).animationName).toContain("flow");
 	},
 };
 
@@ -681,11 +646,6 @@ export const GoalSheetScrollable: Story = {
 			};
 		},
 	},
-};
-export const GoalDetailsCheckingLight: Story = {
-	...GoalDetailsChecking,
-	tags: ["viewport-capture"],
-	globals: { theme: "light" },
 };
 export const GoalDetailsPausedLight: Story = {
 	...GoalDetailsPaused,
@@ -2467,21 +2427,6 @@ export const DesktopGoalLongCondition: Story = {
 	},
 };
 
-export const DesktopGoalChecking: Story = {
-	...DesktopGoalPursuing,
-	beforeEach: () => {
-		sessionViewState.compact = false;
-		return setupGoal("checking");
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
-		).toBe("Checking · All 38 scenarios pass");
-		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
-	},
-};
-
 export const DesktopGoalMet: Story = {
 	...DesktopGoalPursuing,
 	beforeEach: () => {
@@ -2639,7 +2584,9 @@ export const DesktopGoalDetails: Story = {
 				"Sonnet 5 judges",
 			),
 		);
-		await expect(card).toHaveTextContent("Checking after turn 4");
+		await expect(
+			within(card).getByTestId("goal-details-foot"),
+		).toHaveTextContent("3 checks");
 		expect(card.getBoundingClientRect().width).toBeLessThan(450);
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() =>
@@ -2994,10 +2941,6 @@ export const DesktopGoalPursuingLight: Story = {
 	...DesktopGoalPursuing,
 	globals: { theme: "light" },
 };
-export const DesktopGoalCheckingLight: Story = {
-	...DesktopGoalChecking,
-	globals: { theme: "light" },
-};
 export const DesktopGoalDetailsLight: Story = {
 	...DesktopGoalDetails,
 	tags: ["viewport-capture"],
@@ -3021,7 +2964,6 @@ export const DesktopSnoozedMenuLight: Story = {
 
 type GoalSummaryState =
 	| "Pursuing"
-	| "Checking"
 	| "StuckSummarising"
 	| "StuckReady"
 	| "StuckStillCurrent"
@@ -3040,8 +2982,6 @@ const summaryCondition =
 const summaryCopy = {
 	pursuing:
 		"Tests pass and the branch is rebased on main. Still to do: merge to main, close the beads, then remove the two worktrees.",
-	checking:
-		"Merged to main at 03dc05f8. Still to do: close conduit-test-16c8 and its 8 children, then remove the two worktrees.",
 	stuck:
 		"Merged to main at 03dc05f8 and closed the beads. Blocked on cleanup: worktrees effect4 and mainbase remain because killing their processes (pids 99950, 11588) was denied. Stop them or allow the kill, and the goal can finish.",
 	met: "Merged to main at 03dc05f8, closed conduit-test-16c8 and its 8 children, and removed both worktrees once their processes were stopped.",
@@ -3072,39 +3012,33 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 	const count =
 		state === "NoChecksYet"
 			? 0
-			: state === "Checking"
-				? 4
-				: state === "StuckStillCurrent" || state === "PausedWhileStuck"
-					? 208
-					: state === "StuckUpdating"
-						? 199
-						: state === "SummaryFailed"
-							? 197
-							: met
-								? 211
-								: stuck || state === "SummariesOff"
-									? 196
-									: 3;
+			: state === "StuckStillCurrent" || state === "PausedWhileStuck"
+				? 208
+				: state === "StuckUpdating"
+					? 199
+					: state === "SummaryFailed"
+						? 197
+						: met
+							? 211
+							: stuck || state === "SummariesOff"
+								? 196
+								: 3;
 	const missing = state === "StuckSummarising" || state === "StuckReady";
 	const stale = state === "StuckUpdating" || state === "SummaryFailed";
 	const currentAt =
 		state === "Pursuing" || state === "NoChecksYet"
 			? 3
-			: state === "Checking"
-				? 6
-				: state === "Paused" || state === "PausedWhileStuck"
-					? 28
-					: met
-						? 46
-						: 26;
+			: state === "Paused" || state === "PausedWhileStuck"
+				? 28
+				: met
+					? 46
+					: 26;
 	const text =
 		state === "Pursuing" || state === "NoChecksYet" || state === "Paused"
 			? summaryCopy.pursuing
-			: state === "Checking"
-				? summaryCopy.checking
-				: met
-					? summaryCopy.met
-					: summaryCopy.stuck;
+			: met
+				? summaryCopy.met
+				: summaryCopy.stuck;
 
 	function publishChecks(next: GoalDetails) {
 		details = next;
@@ -3135,15 +3069,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 			docs: { story: { inline: false } },
 		},
 		beforeEach: () => {
-			const cleanup = setupGoal(
-				met
-					? "met"
-					: paused
-						? "paused"
-						: state === "Checking"
-							? "checking"
-							: "not_yet",
-			);
+			const cleanup = setupGoal(met ? "met" : paused ? "paused" : "not_yet");
 			read.mockClear();
 			generate.mockReset();
 			sessionViewState.compact = !desktop;
@@ -3156,7 +3082,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 			details = {
 				setAt: summarySetAt,
 				judgeModel: "Sonnet 5",
-				turnCount: state === "Checking" ? 5 : count + 1,
+				turnCount: count + 1,
 				metAt: met ? summaryAt(46) : null,
 				summaryEnabled: state !== "SummariesOff",
 				summary:
@@ -3183,15 +3109,13 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 				tokensSinceStart:
 					state === "Pursuing" || state === "Paused"
 						? 61_000
-						: state === "Checking"
-							? 84_000
-							: met
-								? 1_380_000
-								: count >= 208
-									? 1_310_000
-									: count
-										? 1_240_000
-										: 0,
+						: met
+							? 1_380_000
+							: count >= 208
+								? 1_310_000
+								: count
+									? 1_240_000
+									: 0,
 			};
 			if (
 				state === "StuckUpdating" ||
@@ -3243,7 +3167,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 								iterations: count,
 								setAt: summarySetAt,
 								tokensAtStart: 0,
-								...(state === "Checking" || state === "NoChecksYet"
+								...(state === "NoChecksYet"
 									? {}
 									: { lastReason: details.checks.at(-1)?.reason ?? undefined }),
 							},
@@ -3292,9 +3216,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 					? "Paused"
 					: stuck
 						? "Stuck"
-						: state === "Checking"
-							? "Checking"
-							: "Pursuing";
+						: "Pursuing";
 			await expect(
 				canvas.getByTestId("session-goal-subtitle"),
 			).toHaveTextContent(`${label} · ${summaryCondition}`);
@@ -3531,7 +3453,6 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 }
 
 export const PhoneGoalSummaryPursuing = goalSummaryStory("Pursuing");
-export const PhoneGoalSummaryChecking = goalSummaryStory("Checking");
 export const PhoneGoalSummaryStuckSummarising =
 	goalSummaryStory("StuckSummarising");
 export const PhoneGoalSummaryStuckReady = goalSummaryStory("StuckReady");
@@ -3550,7 +3471,6 @@ export const PhoneGoalSummarySummariesOff = goalSummaryStory("SummariesOff");
 export const PhoneGoalSummaryNoChecksYet = goalSummaryStory("NoChecksYet");
 
 export const DesktopGoalSummaryPursuing = goalSummaryStory("Pursuing", true);
-export const DesktopGoalSummaryChecking = goalSummaryStory("Checking", true);
 export const DesktopGoalSummaryStuckSummarising = goalSummaryStory(
 	"StuckSummarising",
 	true,
@@ -3589,10 +3509,6 @@ export const DesktopGoalSummaryNoChecksYet = goalSummaryStory(
 
 export const PhoneGoalSummaryPursuingLight: Story = {
 	...PhoneGoalSummaryPursuing,
-	globals: { theme: "light" },
-};
-export const PhoneGoalSummaryCheckingLight: Story = {
-	...PhoneGoalSummaryChecking,
 	globals: { theme: "light" },
 };
 export const PhoneGoalSummaryStuckSummarisingLight: Story = {
@@ -3642,10 +3558,6 @@ export const PhoneGoalSummaryNoChecksYetLight: Story = {
 
 export const DesktopGoalSummaryPursuingLight: Story = {
 	...DesktopGoalSummaryPursuing,
-	globals: { theme: "light" },
-};
-export const DesktopGoalSummaryCheckingLight: Story = {
-	...DesktopGoalSummaryChecking,
 	globals: { theme: "light" },
 };
 export const DesktopGoalSummaryStuckSummarisingLight: Story = {
