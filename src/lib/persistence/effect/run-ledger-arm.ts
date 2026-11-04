@@ -45,7 +45,12 @@ import type {
 	ProjectionContext,
 	ProjectionTouch,
 } from "./projectors-effect.js";
-import { runTerminalStatus } from "./projectors-effect.js";
+import {
+	mergeTouches,
+	runTerminalStatus,
+	stampMessage,
+} from "./projectors-effect.js";
+import { endRunToolRows } from "./tool-row-run.js";
 
 /**
  * settleMs is 3.7's settle window. probeMs and nativeCommandMs: the contract names no value
@@ -879,6 +884,10 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
 				const view = viewLedger(state);
 				const before = viewLedger(ledger.state);
+				// 82tn.45: the active Run main's tool projector stamps a new tool row with.
+				if (view.active?.runId !== before.active?.runId)
+					yield* sql`UPDATE run_ledger_sessions SET active_run_id = ${view.active?.runId ?? null}
+						WHERE session_id = ${event.sessionId}`;
 				if (
 					JSON.stringify(view.nativeCommands) !==
 					JSON.stringify(before.nativeCommands)
@@ -967,13 +976,30 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				const stamped = yield* sql<{ id: string }>`
 					UPDATE sessions SET version = ${ctx.version} WHERE id = ${event.sessionId}
 					RETURNING id`;
-				return stamped.length > 0
-					? {
-							stamped: stamped.map(({ id }) => id),
-							removed: [],
-							collections: ["sessions"],
-						}
-					: untouched;
+				const touch: ProjectionTouch =
+					stamped.length > 0
+						? {
+								stamped: stamped.map(({ id }) => id),
+								removed: [],
+								collections: ["sessions"],
+							}
+						: untouched;
+				// 82tn.45: the Run's terminal classification ends its open foreground tool rows.
+				const endedRun = before.active?.runId;
+				return endedRun && endedRun !== view.active?.runId
+					? mergeTouches([
+							touch,
+							yield* stampMessage(
+								yield* endRunToolRows(
+									endedRun,
+									view.tasks,
+									event.createdAt,
+									ctx,
+								),
+								ctx,
+							),
+						])
+					: touch;
 			}),
 	};
 }

@@ -169,13 +169,15 @@ export const inheritForkHistory = (
 			(id, message_id, type, text, tool_name, call_id, input, result,
 			 duration, status, sort_order, created_at, updated_at, metadata,
 			 rest_payload, version, result_event_seq, result_bytes, surfacing_ordinal,
-			 surfacing_probabilities, surfacing_set_version, surfacing_model)
+			 surfacing_probabilities, surfacing_set_version, surfacing_model,
+			 run_id, folder, started_at, ended_at, ended_by, parent_tool_id)
 			SELECT p.id || ${suffix}, p.message_id || ${suffix}, p.type, p.text,
 				p.tool_name, p.call_id || ${suffix}, p.input, p.result,
 				p.duration, p.status, p.sort_order, p.created_at, p.updated_at,
 				p.metadata, p.rest_payload, ${version}, p.result_event_seq, p.result_bytes,
 				p.surfacing_ordinal, p.surfacing_probabilities, p.surfacing_set_version,
-				p.surfacing_model
+				p.surfacing_model,
+				p.run_id, p.folder, p.started_at, p.ended_at, p.ended_by, p.parent_tool_id
 			FROM message_parts p JOIN retained m ON m.id = p.message_id
 			ORDER BY m.created_at, m.id, p.sort_order, p.id
 			ON CONFLICT (id) DO NOTHING`;

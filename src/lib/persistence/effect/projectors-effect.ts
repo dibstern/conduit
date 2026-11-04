@@ -28,6 +28,7 @@ import { inheritForkHistory } from "./inherit-fork-history.js";
 import { makeProviderStateEffect } from "./provider-state-effect.js";
 import { makeRunLedgerArm } from "./run-ledger-arm.js";
 import { rerootSession } from "./sidebar-projection.js";
+import { stampToolRow } from "./tool-row-run.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 	readonly projector: string;
@@ -1327,13 +1328,15 @@ export const makeMessageProjector = defineProjector(() => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				const inputJson = encodeJson(event.data.input);
-				yield* sql`
+				const inserted = yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at, version)
+					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at, version, started_at)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'tool', ${event.data.toolName}, ${event.data.callId}, ${inputJson}, 'started',
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt}, ${ctx.version})
-					ON CONFLICT (id) DO NOTHING`;
+						${event.createdAt}, ${event.createdAt}, ${ctx.version}, ${event.metadata.providerCreatedAt ?? event.createdAt})
+					ON CONFLICT (id) DO NOTHING RETURNING id`;
+				// 82tn.45: a new row takes its Run, folder and parent tool; a redelivery keeps them.
+				if (inserted.length > 0) yield* stampToolRow(event);
 
 				return ids(
 					yield* sql<{
@@ -1420,6 +1423,7 @@ export const makeMessageProjector = defineProjector(() => ({
 						result_event_seq = ${rows[0]?.result_bytes == null ? null : event.sequence},
 						result_bytes = ${rows[0]?.result_bytes ?? null},
 						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+						ended_at = ${event.metadata.providerCreatedAt ?? event.createdAt}, ended_by = NULL,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}
 						-- A completion without a result (the turn-end settle) only closes

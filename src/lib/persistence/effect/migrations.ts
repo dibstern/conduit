@@ -1678,6 +1678,34 @@ export const effectMigrationEntries = {
 				ON messages (session_id, ordinal, created_at, id);
 		`);
 	}),
+	// 82tn.45: a tool row's Run, folder, real times and parent tool. Older rows keep NULL: unknown.
+	"0092_tool_row_run": Effect.gen(function* () {
+		for (const column of [
+			"run_id TEXT",
+			"folder TEXT",
+			"started_at INTEGER",
+			"ended_at INTEGER",
+			"ended_by TEXT",
+			"parent_tool_id TEXT",
+		])
+			yield* runAddColumnMigrationIfMissing(
+				"message_parts",
+				column.split(" ")[0] ?? column,
+				`ALTER TABLE message_parts ADD COLUMN ${column}`,
+			);
+		// The ledger's active Run, which main's tool projector stamps a new row with.
+		yield* runAddColumnMigrationIfMissing(
+			"run_ledger_sessions",
+			"active_run_id",
+			"ALTER TABLE run_ledger_sessions ADD COLUMN active_run_id TEXT",
+		);
+		yield* executeSqlStatements(`
+			CREATE INDEX IF NOT EXISTS idx_message_parts_run
+				ON message_parts (run_id) WHERE run_id IS NOT NULL;
+			CREATE INDEX IF NOT EXISTS idx_message_parts_parent_tool
+				ON message_parts (parent_tool_id) WHERE parent_tool_id IS NOT NULL;
+		`);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
