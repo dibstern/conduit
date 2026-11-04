@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
 	existsSync,
 	mkdirSync,
@@ -120,6 +121,11 @@ export function createTraceCursorSdkPort(
 		readonly waitDelayMs?: number;
 		readonly cancelTerminalDelayMs?: number;
 		readonly cancelNeverSettles?: boolean;
+		/** Stands in for Cursor's agent shell: own session and group, a marker after a delay. */
+		readonly shellCommand?: {
+			readonly marker: string;
+			readonly delayS: number;
+		};
 	} = {},
 ): CursorSdkPort {
 	let contents: string | undefined;
@@ -417,6 +423,19 @@ export function createTraceCursorSdkPort(
 					activeRun,
 				});
 				await gate(playback.sendGate);
+				// Cursor starts each agent shell command detached (live check 2026-11-04, SDK 1.0.40).
+				if (playback.shellCommand && startIndex === 0)
+					spawn(
+						"/bin/sh",
+						[
+							"-c",
+							'echo $$ > "$1.pid"; sleep "$2"; : > "$1"',
+							"cursor-shell-stand-in",
+							playback.shellCommand.marker,
+							String(playback.shellCommand.delayS),
+						],
+						{ detached: true, stdio: "ignore" },
+					).unref();
 				const needsCancel =
 					object(terminal) && terminal["status"] === "cancelled";
 				const delayedCancel = needsCancel && startIndex === 0;
