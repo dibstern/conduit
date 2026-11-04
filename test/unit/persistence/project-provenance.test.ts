@@ -141,6 +141,7 @@ describe("Bound project provenance", () => {
 			"0088_provider_run_held_transmission",
 			"0089_runner_cursors",
 			"0090_run_ledger",
+			"0091_messages_ordinal",
 		]);
 	});
 

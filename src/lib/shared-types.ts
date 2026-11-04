@@ -613,6 +613,8 @@ export interface ModelExecution {
  */
 export interface HistoryMessage {
 	id: string;
+	/** Per-session write order from the store; sorts before time and id. */
+	ordinal?: number;
 	/** Canonical turns.id, including when the prompt is outside this page. */
 	turnId?: string;
 	role: "user" | "assistant";

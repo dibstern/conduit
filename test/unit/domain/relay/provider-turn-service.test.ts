@@ -219,6 +219,7 @@ const defaultInput = (
 
 const historyRow = (text: string) => ({
 	id: `message-${text}`,
+	ordinal: 1,
 	session_id: "session-1",
 	turn_id: "turn-1",
 	role: "user",

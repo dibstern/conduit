@@ -138,6 +138,7 @@ describe("session handler metadata", () => {
 	) => {
 		const projectedRows = Array.from({ length: count }, (_, index) => ({
 			id: `msg-projected-${index + 1}`,
+			ordinal: index + 1,
 			session_id: "session-1",
 			turn_id: "turn-1",
 			role: "assistant",

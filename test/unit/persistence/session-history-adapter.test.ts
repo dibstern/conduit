@@ -45,6 +45,7 @@ function makeMessageWithParts(
 ): MessageWithParts {
 	return {
 		id,
+		ordinal: 1,
 		session_id: "s1",
 		turn_id: null,
 		role: "user",

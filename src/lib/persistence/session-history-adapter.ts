@@ -467,9 +467,10 @@ export function messageRowsToHistory(
 		const snapshot = snapshotRowToHistory(row);
 		if (snapshot)
 			return row.completed_at == null
-				? snapshot
+				? { ...snapshot, ordinal: row.ordinal }
 				: {
 						...snapshot,
+						ordinal: row.ordinal,
 						time: {
 							created: row.created_at,
 							...snapshot.time,
@@ -482,6 +483,7 @@ export function messageRowsToHistory(
 
 		return {
 			id: row.id,
+			ordinal: row.ordinal,
 			role: row.role as "user" | "assistant",
 			...(row.turn_id == null ? {} : { turnId: row.turn_id }),
 			...(row.is_backfilled === 1 ? { isBackfilled: true } : {}),

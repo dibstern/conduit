@@ -779,7 +779,7 @@ describe("readForkSource", () => {
 	);
 
 	it.effect(
-		"uses current timestamp and id ordering for pending rewind visibility",
+		"uses write order for pending rewind visibility (conduit-test-lczrn.1)",
 		() =>
 			Effect.gen(function* () {
 				yield* seed([
@@ -803,10 +803,11 @@ describe("readForkSource", () => {
 				);
 				expect(hidden._tag).toBe("Failure");
 				const sql = yield* SqlClient.SqlClient;
+				// A later clock on the cut does not move "c" ahead of it.
 				yield* sql`UPDATE messages SET created_at = 20 WHERE id = 'b'`;
 				const moved = yield* readForkSource("parent", { sideThread: false });
-				expect(moved.retained.map(({ id }) => id)).toEqual(["a", "c"]);
-				expect(moved.historyMessageId).toBe("c");
+				expect(moved.retained.map(({ id }) => id)).toEqual(["a"]);
+				expect(moved.historyMessageId).toBe("a");
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 

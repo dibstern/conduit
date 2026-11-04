@@ -312,8 +312,16 @@ export const subscribeSessionDetail = (options: {
 								const last = page.messages.at(-1);
 								if (request && !bounds && first && last)
 									bounds = {
-										first: { id: first.id, createdAt: first.created_at },
-										last: { id: last.id, createdAt: last.created_at },
+										first: {
+											id: first.id,
+											ordinal: first.ordinal,
+											createdAt: first.created_at,
+										},
+										last: {
+											id: last.id,
+											ordinal: last.ordinal,
+											createdAt: last.created_at,
+										},
 									};
 								const window = page.window;
 								const heldRows = yield* held(page.version);

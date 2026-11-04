@@ -136,7 +136,7 @@ export const makeCodexRunnerDriver = (
 						id: string;
 						turnId: string;
 					}>`SELECT id, COALESCE(turn_id, id) AS turnId
-						FROM messages WHERE session_id = ${input.sessionId} ORDER BY created_at, id`;
+						FROM messages WHERE session_id = ${input.sessionId} ORDER BY ordinal, created_at, id`;
 					const kept = rewind.resumeSessionAt;
 					const keptIndex =
 						kept === null ? -1 : messages.findIndex(({ id }) => id === kept);
