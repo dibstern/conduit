@@ -605,6 +605,8 @@ function retryPending(book: Book, run: Run, send: Send): boolean {
 		send.exhausted ||
 		latest?.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		// 3.6 (CONTRACT.md 699-701): coverage withdraws a retry, though evidence ended the work first.
+		latest.covered !== undefined ||
 		latest.mainEnded ||
 		latest.resumeRejected ||
 		latest.stopOwn ||

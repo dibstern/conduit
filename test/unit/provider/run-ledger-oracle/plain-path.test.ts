@@ -1433,6 +1433,21 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("coverage withdraws a declined start's retry, so its runner's loss ends a Run whose query already ended (3.6, 3.8)", () => {
+		// Long seed 82103200 (opencode), failure mode 126: the query's end had already ended the start's
+		// work, so retirement's coverage left no mark the retry check read, and the Run waited on a
+		// retry nothing could send. Coverage withdraws a retry (CONTRACT.md 699-701), and a covered
+		// send that possibly reached ends its Run process lost (CONTRACT.md 845-847, 863-866).
+		agreed("opencode", (d) => {
+			const { token } = begin(d);
+			observe(d, token, { kind: "query_ended" });
+			observe(d, token, { kind: "input_declined", reason: "busy" });
+			expect(lose(d, "r1").ended).toMatchObject([
+				{ reason: { tag: "process_lost" } },
+			]);
+		});
+	});
+
 	it("a result naming no input answers no send that never started, a released one included (3.4)", () => {
 		// Long seed 82103201 (claude), failure mode 124: a released start's chains read past None, so a
 		// result naming none, with no wake, answered it and showed its input sent. It names only the
