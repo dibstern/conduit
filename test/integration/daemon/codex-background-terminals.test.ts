@@ -6,11 +6,14 @@
 // 2. no re-read at turn completion, so a terminal left running is never listed;
 // 3. no re-read at a terminal command's start or finish;
 // 4. no re-read after a stop, so a terminated terminal stays listed;
+// 6. a late command event after the turn ended reopens a Run, ends one, or shows an error;
 // 7. a terminal is dropped at its finish event, not when a later list omits it;
 // 8. Stop tasks for Codex takes a second path;
 // 9. a failed terminate is retried, drops the terminal, or shows nothing;
 // 10. terminated: false is read as success;
 // 11. a failed list clears the set or fails the turn;
+// 14. a late event for a process never listed crashes, errors, or adds a task;
+// 18. a snapshot sent while idle is dropped;
 // 19. terminate is sent the item id, not the process id;
 // 22. traces without list rows break once the runner lists;
 // 23. Stop is hidden for Codex, or the driver drops the stop as a no-op success.
@@ -450,6 +453,56 @@ describe("Codex background terminals", () => {
 			terminate: captured(TERMINATE).map((row) => row.message?.params),
 			outbox: ledger.outbox,
 			snapshots: ledger.snapshots,
+		});
+	});
+
+	it("lets late command events after the turn only update the set", async () => {
+		let held = 0;
+		const { fixture, browser, sessionId } = await start(
+			"late",
+			terminalTrace((turn) => {
+				held = turn.at - 1;
+				const other = { ...turn.item, id: "call_other", processId: "99999" };
+				return [
+					...listed(turn.at, 903, turn.threadId, []),
+					late(turn.at, turn, "completed", 0),
+					late(turn.at + 1, { ...turn, item: other }, "failed", -1),
+				];
+			}),
+		);
+		// The late events wait until the turn has ended (probe P6).
+		writeFileSync(gatePath, String(held));
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		const ended = await runEnded(fixture, sessionId);
+		const cursor = browser.frames.length;
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		const row = await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => tasks === undefined,
+			cursor,
+		);
+		// test-waits-allow polling: the runner's list calls reach only the app-server capture.
+		await vi.waitFor(() =>
+			expect(captured(LIST).length).toBeGreaterThanOrEqual(4),
+		);
+		const ledger = await runEnded(fixture, sessionId);
+		expect(ledger.ends).toEqual(ended.ends);
+		expect(ledger.runs).toEqual(ended.runs);
+		expect(ledger.snapshots.at(-1)).toEqual([]);
+		expect(ledger.errors).toEqual([]);
+		proofs.push({
+			case: "late",
+			row: row["backgroundTasks"] ?? null,
+			snapshots: ledger.snapshots,
+			runs: ledger.runs,
+			ends: ledger.ends,
+			listCalls: captured(LIST).length,
 		});
 	});
 });
