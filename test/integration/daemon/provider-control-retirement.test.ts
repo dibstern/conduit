@@ -395,8 +395,7 @@ describe("provider process control retirement", () => {
 	});
 
 	// Claimed intake can outlive its start projection. A claimed send is never
-	// refused (CONTRACT 3.11, 1053-1108), and the sweep never retires a runner:
-	// removal's own Stop ends the run by runner loss.
+	// refused (CONTRACT 3.11, 1053-1108): it ends by its runner's loss.
 	it.each([
 		"live",
 		"finished",
@@ -483,13 +482,20 @@ describe("provider process control retirement", () => {
 							: Effect.succeed("removed" as const),
 				});
 				yield* reactor.drain();
-				expect(ends).toBe(0);
+				// A runner still alive once removal finished survived it: the sweep
+				// retires it, unless its project returned or its owner is unverified.
+				const retired = owner === "live" || owner === "finished" ? 1 : 0;
+				expect(ends).toBe(retired);
 				expect(
 					yield* sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.completed', 'turn.interrupted', 'turn.cancelled')`,
-				).toEqual([]);
+				).toEqual(owner === "finished" ? [{ type: "turn.completed" }] : []);
 				const outcome =
 					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`;
-				expect(outcome).toEqual([{ status: "running", error_code: null }]);
+				expect(outcome).toEqual([
+					owner === "finished"
+						? { status: "completed", error_code: null }
+						: { status: "running", error_code: null },
+				]);
 				yield* new ProviderSideEffectReactor({
 					sql,
 					write: commit.write,
@@ -503,10 +509,15 @@ describe("provider process control retirement", () => {
 							? Effect.succeed("not_served" as const)
 							: Effect.succeed("removed" as const),
 				}).drain();
+				// Its runner gone and its run never started, the claimed send is refused.
 				expect(
 					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`,
-				).toEqual(outcome);
-				expect(ends).toBe(0);
+				).toEqual(
+					owner === "live"
+						? [{ status: "cancelled", error_code: "project_inactive" }]
+						: outcome,
+				);
+				expect(ends).toBe(retired);
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "project")),
 			),

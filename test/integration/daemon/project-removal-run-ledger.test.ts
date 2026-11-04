@@ -10,12 +10,14 @@
 // 22. a restart after the removal resumes or re-refuses the removed project's sends.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
+	responseChunks,
 } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 25_000;
@@ -162,6 +164,90 @@ describe("Removing a project on the Run Ledger", () => {
 			runnerPids: fixture.runnerPids(),
 			seen,
 			...ledger,
+		});
+	});
+
+	it.each([
+		1, 2, 3,
+	])("ends a removed project's running Run by its runner's loss, keeps its queued inputs waiting, and keeps another project's order (%i)", async () => {
+		const { fixture, browser } = await start();
+		const otherDir = join(fixture.root, "other");
+		mkdirSync(otherDir);
+		const { savedSlug } = await Effect.runPromise(
+			browser.rpc.SaveProject({ folders: [otherDir] }),
+		);
+		const other = await fixture.connect(undefined, undefined, savedSlug);
+		const otherSession = await other.createSession("Other project");
+		const sessionId = await browser.createSession("Removal mid-run");
+		const running = "stall-removal-mid-run";
+		const queued = ["removal-queued-1", "removal-queued-2"];
+		await submit(browser, sessionId, running);
+		await fixture.waitForMark(
+			(mark) => mark.kind === "enqueue" && mark.request === running,
+		);
+		const [removedRunner] = fixture.runnerPids();
+		for (const text of queued) await submit(browser, sessionId, text);
+		const removing = remove(browser);
+		const otherFirst = await other.send(otherSession, "other-first");
+		const otherSecond = await other.send(otherSession, "other-second");
+		await removing;
+		// The queued inputs never became sends: with no relay their inbox waits, as main's does,
+		// and behind the failed turn it is paused (CONTRACT.md 3.9, 3.11).
+		// test-waits-allow polling: the outcome reports through the store only.
+		await vi.waitFor(
+			() => {
+				const { sends, ends, runs, queue } = read(fixture, sessionId);
+				expect(sends).toEqual([
+					expect.objectContaining({ status: "failed", code: "runner_stopped" }),
+				]);
+				expect(runs).toEqual([expect.objectContaining({ status: "error" })]);
+				expect(ends).toEqual([
+					expect.objectContaining({
+						runId: sends[0]?.runId,
+						reason: "process_lost",
+					}),
+				]);
+				expect(queue).toEqual(
+					queued.map((text) => ({ text, state: "queued" })),
+				);
+			},
+			{ timeout: TIMEOUT, interval: 200 },
+		);
+		const removed = read(fixture, sessionId);
+		expect(fixture.remainingRunnerPids()).not.toContain(removedRunner);
+		// The running Run ended once, as its runner's loss, and the session shows idle.
+		expect(removed.types.at(-1)).toBe("session.status");
+		expect(enqueued(fixture).filter((text) => queued.includes(text))).toEqual(
+			[],
+		);
+		expect(
+			enqueued(fixture).filter((text) => text.startsWith("other-")),
+		).toEqual(["other-first", "other-second"]);
+		expect(otherFirst.chunks.join("")).toBe(
+			responseChunks("other-first").join(""),
+		);
+		expect(otherSecond.chunks.join("")).toBe(
+			responseChunks("other-second").join(""),
+		);
+		// A restart after the removal resumes and refuses nothing again.
+		await browser.close();
+		await other.close();
+		await fixture.terminate();
+		await fixture.restart();
+		const afterRestart = read(fixture, sessionId);
+		expect(afterRestart).toEqual(removed);
+		expect(enqueued(fixture).filter((text) => queued.includes(text))).toEqual(
+			[],
+		);
+		// The other project's runner may outlive the restart; the removed one may not.
+		expect(fixture.remainingRunnerPids()).not.toContain(removedRunner);
+		proofs.push({
+			case: "removal-mid-run",
+			sessionId,
+			otherSession,
+			otherReplies: [otherFirst.chunks.join(""), otherSecond.chunks.join("")],
+			...removed,
+			afterRestart: { ends: afterRestart.ends, sends: afterRestart.sends },
 		});
 	});
 });

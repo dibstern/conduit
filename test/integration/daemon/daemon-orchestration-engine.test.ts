@@ -645,27 +645,47 @@ describe("one daemon orchestration engine", () => {
 					).toBeGreaterThan(2),
 				{ timeout: 10_000 },
 			);
+			// A removed project's surviving runner is retired; its claimed send,
+			// left with no runner and no start, is then refused.
 			await vi.waitFor(
 				() =>
-					expect(outcomes(db, [id])[0]).toMatchObject({
-						status: "running",
-						receipt_status: "side_effect_requested",
-						terminal_receipt_count: 0,
-					}),
+					expect(outcomes(db, [id])[0]).toMatchObject(
+						projectState === "removed"
+							? {
+									status: "cancelled",
+									error_code: "project_inactive",
+									receipt_status: "side_effect_failed",
+									terminal_receipt_count: 1,
+								}
+							: {
+									status: "running",
+									receipt_status: "side_effect_requested",
+									terminal_receipt_count: 0,
+								},
+					),
 				{ timeout: 15_000 },
 			);
-			expect(terminals()).toEqual([]);
-			expect(() => process.kill(runner.pid, 0)).not.toThrow();
+			if (projectState === "removed")
+				// test-waits-allow polling: a runner's exit has no frame.
+				await vi.waitFor(
+					() => expect(() => process.kill(runner.pid, 0)).toThrow(),
+					{ timeout: 10_000 },
+				);
+			else expect(() => process.kill(runner.pid, 0)).not.toThrow();
 			const refused = outcomes(db, [id]);
 			await fixture.kill();
 			await restart();
 			expect(outcomes(db, [id])).toEqual(refused);
-			expect(terminals()).toEqual([]);
+			expect(terminals()).toEqual(
+				projectState === "removed"
+					? [{ type: "turn.error", code: "project_inactive" }]
+					: [],
+			);
 			evidence["afterSweepReplay"] = {
 				commands: refused,
 				terminals: terminals(),
 				runnerPid: runner.pid,
-				runnerRetired: false,
+				runnerRetired: projectState === "removed",
 			};
 			await fixture.kill();
 			writeFileSync(configPath, JSON.stringify(config));
@@ -676,13 +696,15 @@ describe("one daemon orchestration engine", () => {
 			await vi.waitFor(() => expect(terminals()).toHaveLength(1), {
 				timeout: 15_000,
 			});
-			expect(terminals()[0]?.type).toBe("turn.completed");
+			expect(terminals()[0]?.type).toBe(
+				projectState === "removed" ? "turn.error" : "turn.completed",
+			);
 			expect(outcomes(db, [id])[0]).toMatchObject({
 				claim_count: 1,
 				receipt_count: 1,
 				terminal_receipt_count: 1,
 			});
-			await completed(db, [id]);
+			if (projectState === "unavailable") await completed(db, [id]);
 			expect(
 				(await restored.history(sessionId))
 					.filter(({ role }) => role === "user")
@@ -892,8 +914,15 @@ describe("one daemon orchestration engine", () => {
 			await restart();
 			// H4 (CONTRACT 3.11, 1053-1108): a removed project refuses its unsent
 			// sends for good; an unavailable project is not served, so its sends
-			// wait unseen. A started run belongs to its provider's loss either way.
+			// wait unseen. A started run belongs to its provider's loss either way:
+			// a removed project's lost runner ends it, a waiting project's keeps it.
 			const removed = projectState === "removed";
+			const lost = {
+				status: "failed",
+				error_code: "runner_stopped",
+				receipt_status: "side_effect_failed",
+				terminal_receipt_count: 1,
+			};
 			const refusal = {
 				status: "cancelled",
 				error_code: "project_inactive",
@@ -904,8 +933,10 @@ describe("one daemon orchestration engine", () => {
 			await vi.waitFor(
 				() => {
 					expect(outcomes(db, [id])[0]).toMatchObject(
-						removed && !started
-							? refusal
+						removed
+							? started
+								? lost
+								: refusal
 							: {
 									status: "running",
 									receipt_status: "side_effect_requested",
@@ -925,10 +956,17 @@ describe("one daemon orchestration engine", () => {
 				{ timeout: 10_000 },
 			);
 			const terminals = terminalEvents();
-			expect(terminals).toHaveLength(removed ? (started ? 1 : 2) : 0);
+			expect(terminals).toHaveLength(removed ? 2 : 0);
 			expect(terminals.every(({ type }) => type === "turn.error")).toBe(true);
 			if (started)
-				expect(terminals.some(({ run_id }) => run_id === run?.id)).toBe(false);
+				expect(terminals.some(({ run_id }) => run_id === run?.id)).toBe(
+					removed,
+				);
+			evidence["runEnds"] = db
+				.prepare(
+					"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.reason') AS reason FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",
+				)
+				.all(sessionId);
 			if (removed)
 				expect(
 					db

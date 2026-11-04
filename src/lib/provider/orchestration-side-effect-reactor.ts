@@ -98,6 +98,7 @@ import {
 	terminalTurnResult,
 } from "./runner/send-settlement.js";
 import {
+	appendSendSettlement,
 	LegacySendKey,
 	settleDirectSend,
 	settleLegacySend,
@@ -3055,9 +3056,41 @@ export class ProviderSideEffectReactor {
 				const [payload] = yield* this.options.sql<{ driver: string }>`
 					SELECT COALESCE(json_extract(payload_json, '$.account.driver'), provider_id) AS driver
 					FROM provider_command_outbox WHERE request_sequence = ${row.request_sequence}`;
-				runnerAlive = yield* this.options.registry
-					.getInstance(payload?.driver ?? row.provider_id)
-					?.hasLiveProcessEffect?.(row.session_id) ?? Effect.succeed(undefined);
+				const instance = this.options.registry.getInstance(
+					payload?.driver ?? row.provider_id,
+				);
+				runnerAlive = yield* instance?.hasLiveProcessEffect?.(row.session_id) ??
+					Effect.succeed(undefined);
+				// Removed is read only once removal's Stops committed, so a runner still
+				// alive here survived it (a restart over a hand-edited config): retire it,
+				// and its loss, not this refusal, ends the run.
+				const owner =
+					runnerAlive && instance?.getControlProcessIdEffect
+						? yield* Effect.result(
+								instance.getControlProcessIdEffect(row.session_id),
+							)
+						: undefined;
+				// Quarantined ownership cannot authorize a stop; a re-added project keeps its runner.
+				if (
+					instance &&
+					owner?._tag === "Success" &&
+					owner.success &&
+					(yield* this.readProjectGate(row)) === "removed"
+				)
+					yield* instance
+						.endSessionEffect(row.session_id, undefined, {
+							commandId: `project-inactive:${row.command_id}:${row.attempt_count}`,
+							providerProcessId: owner.success,
+							projectRemoved: true,
+						})
+						.pipe(
+							Effect.catch((cause) =>
+								Effect.logWarning(
+									"Removed project runner retirement could not be confirmed",
+									cause,
+								),
+							),
+						);
 				if (runnerAlive !== false) return;
 			}
 			return yield* this.options
@@ -3075,8 +3108,37 @@ export class ProviderSideEffectReactor {
 									AND status = 'pending' AND started_at IS NULL AND joined_into IS NULL`)[0] ??
 									(row.status !== "running" ? { id: randomUUID() } : undefined))
 								: undefined;
+						const stampSession = stamp((version) =>
+							this.options.sql<{
+								id: string;
+							}>`UPDATE sessions SET version = ${version}
+					WHERE id = ${row.session_id} AND project_id = ${row.project_key} RETURNING id`.pipe(
+								Effect.map((rows) => rows.map(({ id }) => id)),
+							),
+						);
 						// A claimed send whose run started belongs to its provider's loss.
-						if (row.effect_type === "send_turn" && !unstarted) return;
+						if (row.effect_type === "send_turn" && !unstarted) {
+							// Removal's runner retirement has no settlement owner once its project
+							// is gone (3.11), so the run that loss ended settles here, as that loss.
+							const [open] =
+								runnerAlive === false
+									? yield* this.options.sql<{
+											id: string;
+										}>`SELECT id FROM provider_runs
+								WHERE id = ${row.run_id} AND session_id = ${row.session_id}
+									AND status IN ('pending', 'running')`
+									: [];
+							if (!open) return;
+							yield* appendSendSettlement(
+								{ sql: this.options.sql, project, stamp },
+								row,
+								{ _tag: "process_lost", reason: { _tag: "ProjectRemoved" } },
+								"permanent",
+								now,
+							);
+							yield* stampSession;
+							return;
+						}
 						const changed = yield* this.options
 							.sql<EndedOutboxRow>`UPDATE provider_command_outbox
 					SET status = 'cancelled', error_code = ${code},
@@ -3187,14 +3249,7 @@ export class ProviderSideEffectReactor {
 								]);
 							}
 						}
-						yield* stamp((version) =>
-							this.options.sql<{
-								id: string;
-							}>`UPDATE sessions SET version = ${version}
-					WHERE id = ${row.session_id} AND project_id = ${row.project_key} RETURNING id`.pipe(
-								Effect.map((rows) => rows.map(({ id }) => id)),
-							),
-						);
+						yield* stampSession;
 						this.acceptedControls.delete(row.command_id);
 					}),
 				)
