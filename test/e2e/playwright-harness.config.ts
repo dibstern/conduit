@@ -40,6 +40,8 @@ export default defineConfig({
 	projects: [
 		{
 			name: "desktop",
+			// The phone's run through the Preview Gate is the mobile project's alone.
+			testIgnore: ["**/harness-preview-gate-mobile.spec.ts"],
 			use: {
 				viewport: { width: 1440, height: 900 },
 				isMobile: false,
