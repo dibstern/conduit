@@ -144,6 +144,8 @@ interface NativeSend {
 	absentAt?: number | undefined;
 	/** OpenCode: its label's query ended before its delivery was confirmed (endQuery). */
 	queryEnded?: boolean;
+	/** A question named it: a runner call held it, so its journal keeps it (CONTRACT.md 1924), unconsumed. */
+	asked?: boolean;
 	/** A release shows the host never handed it over (3.5, 4.5); a rejected resume ranks as permanent. */
 	released: boolean;
 	transportRank: number;
@@ -1048,6 +1050,7 @@ export class FakeProvider {
 				!this.unbound.has(native.send.token) &&
 				!native.covered &&
 				!native.accepted &&
+				!native.asked &&
 				!native.deliveryConfirmed &&
 				!native.notConsumed &&
 				native.transportRank === 0,
@@ -1770,11 +1773,11 @@ export class FakeProvider {
 						native.unfinished = false;
 					}
 			// L6 (CONTRACT.md 795-797): OpenCode's stop_unconfirmed terminal is its Run's deadline step, which
-			// ends that Run's work, its aborts' included, whatever the provider still does.
+			// ends that Run's work, its aborts' included, whatever the provider still does. D59 (4106-4107):
+			// any interrupted terminal main writes without the runner's confirmation ends its Run's work as main.
 			if (
-				this.provider === "opencode" &&
 				observation.kind === "run_terminal" &&
-				observation.code === "stop_unconfirmed"
+				observation.outcome === "interrupted"
 			) {
 				const { runId } = observation;
 				for (const { send } of this.sends.values())
@@ -2116,7 +2119,20 @@ export class FakeProvider {
 			case "interaction_requested":
 				if (!native.covered) {
 					if (this.provider === "opencode") native.ended = false;
-					native.accepted = true;
+					// Nearest reading (CONTRACT.md 488, 534, 560-565): a question is its label's, no
+					// consumption step, so it does not prove the send was used.
+					if (observation.kind === "interaction_requested") native.asked = true;
+					else native.accepted = true;
+					// 4.5: a provider rejects a resume at query start, so a turn sign drops a release queued
+					// at run.dispatched.
+					const release = this.notifications.findIndex(
+						(n) =>
+							n.tag === "Answer" &&
+							n.token === native.send.token &&
+							n.kind === "run_released" &&
+							n.reason === "ResumeRejected",
+					);
+					if (release >= 0) this.notifications.splice(release, 1);
 					this.refreshQuery(native);
 					// The turn flag is the current query's; a replaced label's send keeps its own facts (3.3). An
 					// unlaunch's drop ended a dropped send's work, so its late start runs no turn (D50, CONTRACT.md
@@ -2854,8 +2870,10 @@ export class FakeProvider {
 						})
 					);
 				});
+			// 2821-2823, 795: an older wake's Run end clears the wake, which may close a deadline it alone held open.
 			const unblocked = (view: LedgerView): unknown =>
-				ownCover && view.active
+				(ownCover || (olderWakeEnd && after.active?.deadline === undefined)) &&
+				view.active
 					? { ...view.active, deadline: undefined }
 					: view.active;
 			if (!fenceRelease)
@@ -5251,7 +5269,9 @@ export class FakeProvider {
 				const releasing =
 					loss.verb === "observe" && loss.observation.kind === "run_released";
 				if (loss.verb !== "settle" && !releasing) return loss;
-				const present = held.filter((native) => native.accepted);
+				const present = held.filter(
+					(native) => native.accepted || native.asked,
+				);
 				if (present.length > 0 || releasing) this.q28 = "journal";
 				for (const { send } of present)
 					this.notifications.push(
