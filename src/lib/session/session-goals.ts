@@ -14,7 +14,11 @@ import {
 } from "../provider/goal-tracker.js";
 import type { NativeCommandView } from "../provider/run-ledger/run-ledger-model.js";
 
-const confirmedOf = (facts: SessionGoalChangedPayload): ConfirmedGoal =>
+/**
+ * A goal dropped with no end is Claude's active goal going away, which confirms nothing
+ * (CONTRACT.md 8.6, 2963: it is not an input); only the clear's reply or record ends it.
+ */
+const confirmedOf = (facts: SessionGoalChangedPayload): ConfirmedGoal | null =>
 	facts.goal
 		? {
 				tag: facts.pausedReason === undefined ? "Active" : "Paused",
@@ -22,7 +26,9 @@ const confirmedOf = (facts: SessionGoalChangedPayload): ConfirmedGoal =>
 			}
 		: facts.ended === "met" && facts.endedGoal
 			? { tag: "Met", condition: facts.endedGoal.condition }
-			: { tag: "Cleared" };
+			: facts.ended === undefined
+				? null
+				: { tag: "Cleared" };
 
 /**
  * Each session's goal tracker (CONTRACT.md 8.1): the action the browser asked for, the provider's
@@ -127,6 +133,7 @@ export function makeSessionGoals() {
 				if (event.type !== "session.goal_changed") continue;
 				const { replyTo } = event.data;
 				const status = confirmedOf(event.data);
+				if (status === null) continue;
 				if (
 					update(event.sessionId, (entry) => ({
 						...entry,

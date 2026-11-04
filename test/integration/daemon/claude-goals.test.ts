@@ -271,7 +271,12 @@ describe("Claude goals as native commands", () => {
 			order: { clear, prompt },
 		});
 	});
-	it("resends a clear first at the next launch when the process dies after sending it", async () => {
+	// goal-long-turn-unset: the SDK drops its active goal before Claude runs the clear, which is
+	// not a confirmation, so the clear is still resent (CONTRACT.md 8.6, 2963).
+	it.each([
+		"goal-long-turn",
+		"goal-long-turn-unset",
+	])("resends a clear first at the next launch when the process dies after sending it (%s)", async (turnPrompt) => {
 		const { fixture, browser } = await start();
 		const sessionId = await browser.createSession("Claude goal process death");
 		await browser.send(sessionId, "goal-rebind");
@@ -280,17 +285,21 @@ describe("Claude goals as native commands", () => {
 			const row = await sessionRow(fixture, sessionId);
 			expect(row?.goalState?.goal?.condition).toBe("After rebinding");
 		}, 10_000);
-		const turn = browser
-			.send(sessionId, "goal-long-turn")
-			.catch(() => undefined);
+		const turn = browser.send(sessionId, turnPrompt).catch(() => undefined);
 		await fixture.waitForMark(
-			(mark) => mark.kind === "enqueue" && mark.prompt === "goal-long-turn",
+			(mark) => mark.kind === "enqueue" && mark.prompt === turnPrompt,
 		);
 		const commandId = randomUUID();
 		await fixture.requestRpc({ _tag: "ClearGoal", sessionId, commandId });
 		await fixture.waitForMark(
 			(mark) => mark.kind === "input-queued" && mark.prompt === "/goal clear",
 		);
+		if (turnPrompt === "goal-long-turn-unset")
+			// test-waits-allow polling: the dropped active goal reaches the row with no browser frame.
+			await vi.waitFor(async () => {
+				const row = await sessionRow(fixture, sessionId);
+				expect(row?.goalState?.goal).toBeFalsy();
+			}, 10_000);
 		const runner = fixture.marks.find(
 			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
 		);
@@ -343,7 +352,7 @@ describe("Claude goals as native commands", () => {
 			expect(row?.goalState?.goal).toBeFalsy();
 		}, 10_000);
 		proofs.push({
-			case: "process-death-resends-clear-first",
+			case: `process-death-resends-clear-first (${turnPrompt})`,
 			sessionId,
 			deadCommand: commandId,
 			resent,
