@@ -379,14 +379,14 @@ message, are a view of the path from the root to the Head. A branch here is a
 path inside one session; a Fork is a new session.
 _Avoid_: deleting messages on rewind; transcript for the graph itself.
 
-**History Node** is one settled Run in any terminal state, with its Run Inputs,
+**History Node** is one Ended Run, whatever its outcome, with its Run Inputs,
 its assistant output and its parent node. There is one node per Run, not per
 turn, so a Run with a Steer is one node and a rewind to that Steer targets the
 Run's parent.
 _Avoid_: turn or message as the unit of history.
 
 **Head** is the History Node a session points at. The transcript shown is the
-path from the root to the Head, and the next Run settles as its child.
+path from the root to the Head, and the next Run's node becomes its child.
 _Avoid_: latest message, tip.
 
 **Head Move** is any change of a session's Head: rewind, undo,

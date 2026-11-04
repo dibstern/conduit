@@ -60,8 +60,8 @@ run-level and feed turn diffs. Tool calls carry no writes field.
 **A restore is refused when the folder is shared**, following t3code's
 `CheckpointRestoreSafety.ts:10`: another session ran in the folder after the
 target snapshot, or has a Run open there now. The refusal is typed and names
-that session. Sessions that never ran there do not count. The user can then move the conversation only, or branch into a
-worktree whose files match the target (conduit-test-82tn.54). No ambiguity
+that session. Sessions that never ran there do not count. The user can then
+move the conversation only, or branch into a worktree whose files match the target (conduit-test-82tn.54). No ambiguity
 threshold exists because nothing is attributed.
 
 **The Restore Plan lists the paths that change**, per folder, before anything
