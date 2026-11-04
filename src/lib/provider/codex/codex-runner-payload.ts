@@ -45,6 +45,7 @@ import {
 	decodeNotification,
 	type RateLimitSnapshotSchema,
 	ThreadBackgroundTerminalsListResponseSchema,
+	ThreadBackgroundTerminalsTerminateResponseSchema,
 	ThreadCompactStartResponseSchema,
 	ThreadForkResponseSchema,
 	ThreadGoalClearResponseSchema,
@@ -1157,6 +1158,49 @@ export class CodexRunnerPayload implements RunnerPayload {
 
 	hasPendingSubagentFinalizers(sessionId: string): boolean {
 		return this.sessions.get(sessionId)?.subagents?.hasRunning ?? false;
+	}
+
+	/**
+	 * 8.4 (CONTRACT.md 2860-2867): Stop tasks terminates one background terminal, then re-reads the
+	 * set (8.2, 2792), so the terminal leaves only when a later list omits it (8.3, 2817). Gap
+	 * (2866): `terminated: false` is a failed stop; it fails once, and the reactor never retries it.
+	 */
+	stopTask(
+		sessionId: string,
+		taskId: string,
+	): Effect.Effect<void, SessionFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const session = this.sessions.get(sessionId);
+			const child = session?.child;
+			const threadId = session?.threadId;
+			if (!session || !child || child.dead || !threadId)
+				return yield* Effect.fail<SessionFailure>({
+					operation: "stop-task",
+					message: "Codex is not running this session in this runner",
+				});
+			const { terminated } = yield* child.client
+				.request(
+					"thread/backgroundTerminals/terminate",
+					{ threadId, processId: taskId },
+					ThreadBackgroundTerminalsTerminateResponseSchema,
+				)
+				.pipe(
+					Effect.ensuring(
+						this.refreshTerminals(sessionId, session, child.client),
+					),
+					Effect.mapError(
+						(cause): SessionFailure => ({
+							operation: "stop-task",
+							message: turnFailure(cause).message,
+						}),
+					),
+				);
+			if (!terminated)
+				return yield* Effect.fail<SessionFailure>({
+					operation: "stop-task",
+					message: `Codex did not stop background terminal ${taskId}`,
+				});
+		});
 	}
 
 	private steer(

@@ -5,8 +5,15 @@
 // 1. no snapshot is ever sent, so the session reads "checking" and Stop tasks is refused;
 // 2. no re-read at turn completion, so a terminal left running is never listed;
 // 3. no re-read at a terminal command's start or finish;
+// 4. no re-read after a stop, so a terminated terminal stays listed;
+// 7. a terminal is dropped at its finish event, not when a later list omits it;
+// 8. Stop tasks for Codex takes a second path;
+// 9. a failed terminate is retried, drops the terminal, or shows nothing;
+// 10. terminated: false is read as success;
 // 11. a failed list clears the set or fails the turn;
-// 22. traces without list rows break once the runner lists.
+// 19. terminate is sent the item id, not the process id;
+// 22. traces without list rows break once the runner lists;
+// 23. Stop is hidden for Codex, or the driver drops the stop as a no-op success.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -28,6 +35,7 @@ import {
 
 const TIMEOUT = 60_000;
 const LIST = "thread/backgroundTerminals/list";
+const TERMINATE = "thread/backgroundTerminals/terminate";
 const PROCESS = "26952";
 const terminal = {
 	itemId: "call_fixture",
@@ -52,12 +60,55 @@ const listed = (at: number, id: number, threadId: string, data: unknown[]) => [
 	{ dir: "in", at, message: { id, result: { data, nextCursor: null } } },
 ];
 
+/** The recorded command's turn: what follows the turn names it, as a late Codex event does. */
+type Turn = {
+	readonly threadId: string;
+	readonly turnId: string;
+	readonly item: Record<string, unknown>;
+	readonly at: number;
+};
+
+/** A terminate request for the listed terminal and Codex's answer (probe P4, P5). */
+const terminate = (at: number, threadId: string, terminated: boolean) => [
+	{
+		dir: "out",
+		at,
+		message: {
+			jsonrpc: "2.0",
+			id: 902,
+			method: TERMINATE,
+			params: { threadId, processId: PROCESS },
+		},
+	},
+	{ dir: "in", at, message: { id: 902, result: { terminated } } },
+];
+
+/** The command's finish after its turn ended (probe P4: failed, exit -1, the old turnId). */
+const late = (
+	at: number,
+	{ threadId, turnId, item }: Turn,
+	status: string,
+	exitCode: number,
+) => ({
+	dir: "in",
+	at,
+	message: {
+		method: "item/completed",
+		params: {
+			item: { ...item, status, exitCode, aggregatedOutput: "", durationMs: 1 },
+			threadId,
+			turnId,
+			completedAtMs: at,
+		},
+	},
+});
+
 /**
  * turn-command with its command left running past the turn, as Codex reports one (probe P2): its
  * item starts with a process id and never completes inside the turn. No exit row: the app-server
  * stays up after the turn. `after` follows the turn's completion.
  */
-const terminalTrace = (after: (threadId: string) => TraceRow[] = () => []) => {
+const terminalTrace = (after: (turn: Turn) => TraceRow[] = () => []) => {
 	const trace = fixtureRows("turn-command").filter(
 		(row) =>
 			row.dir !== "exit" &&
@@ -77,27 +128,29 @@ const terminalTrace = (after: (threadId: string) => TraceRow[] = () => []) => {
 	const started = trace[index];
 	const params = started?.message?.params;
 	const threadId = params?.["threadId"];
-	if (!started || !params || typeof threadId !== "string")
+	const turnId = params?.["turnId"];
+	if (
+		!started ||
+		!params ||
+		typeof threadId !== "string" ||
+		typeof turnId !== "string"
+	)
 		throw new Error("Missing the recorded command");
-	started.message = {
-		...started.message,
-		params: {
-			...params,
-			item: {
-				...(params["item"] as Record<string, unknown>),
-				command: "/bin/zsh -c 'sleep 300'",
-				processId: PROCESS,
-				source: "unifiedExecStartup",
-				commandActions: [{ type: "unknown", command: "sleep 300" }],
-			},
-		},
+	const item = {
+		...(params["item"] as Record<string, unknown>),
+		command: "/bin/zsh -c 'sleep 300'",
+		processId: PROCESS,
+		source: "unifiedExecStartup",
+		commandActions: [{ type: "unknown", command: "sleep 300" }],
 	};
+	started.message = { ...started.message, params: { ...params, item } };
 	trace.splice(
 		index,
 		0,
 		...listed(Number(started["at"]), 901, threadId, [terminal]),
 	);
-	return [...trace, ...after(threadId)];
+	const at = Number(trace.at(-1)?.["at"]) + 1;
+	return [...trace, ...after({ threadId, turnId, item, at })];
 };
 
 const read = (harness: ProcessHarness, sessionId: string) => {
@@ -126,6 +179,11 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 					"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
 				)
 				.all(sessionId) as { id: string; status: string }[],
+			outbox: db
+				.prepare(
+					"SELECT status, json_extract(payload_json, '$.effect.key.taskId') AS taskId FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'stop_task' ORDER BY request_sequence",
+				)
+				.all(sessionId) as { status: string; taskId: string }[],
 		};
 	} finally {
 		db.close();
@@ -305,6 +363,93 @@ describe("Codex background terminals", () => {
 			snapshots: ledger.snapshots,
 			ends: ledger.ends,
 			listCalls: captured(LIST).length,
+		});
+	});
+
+	it("stops a listed terminal through Stop tasks, and drops it when the next list omits it", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"stopped",
+			terminalTrace((turn) => [
+				...terminate(turn.at, turn.threadId, true),
+				...listed(turn.at + 1, 903, turn.threadId, []),
+				late(turn.at + 2, turn, "failed", -1),
+			]),
+		);
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		await runEnded(fixture, sessionId);
+		const lists = captured(LIST).length;
+		const cursor = browser.frames.length;
+		expect(
+			await Effect.runPromise(
+				browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] }),
+			),
+		).toEqual({ ok: true });
+		const row = await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => tasks === undefined,
+			cursor,
+		);
+		// Re-read after the stop and at the late finish; the finish only updates the set (8.2).
+		// test-waits-allow polling: the runner's list calls reach only the app-server capture.
+		await vi.waitFor(() =>
+			expect(captured(LIST).length).toBeGreaterThanOrEqual(lists + 2),
+		);
+		const ledger = await runEnded(fixture, sessionId);
+		expect(captured(TERMINATE).map((row) => row.message?.params)).toEqual([
+			{ threadId: expect.any(String), processId: PROCESS },
+		]);
+		expect(ledger.outbox).toEqual([{ status: "completed", taskId: PROCESS }]);
+		expect(ledger.snapshots.at(-1)).toEqual([]);
+		expect(ledger.errors).toEqual([]);
+		proofs.push({
+			case: "stopped",
+			row: row["backgroundTasks"] ?? null,
+			terminate: captured(TERMINATE).map((row) => row.message?.params),
+			outbox: ledger.outbox,
+			snapshots: ledger.snapshots,
+			ends: ledger.ends,
+			listCalls: captured(LIST).length,
+		});
+	});
+
+	it("keeps a terminal Codex did not stop, shows why, and never retries", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"refused",
+			terminalTrace((turn) => terminate(turn.at, turn.threadId, false)),
+		);
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		await runEnded(fixture, sessionId);
+		const failure = await Effect.runPromise(
+			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] })),
+		);
+		expect(failure.message).toMatch(/could not stop/i);
+		// No retry on its own: one terminate, still one after the reactor has had time to act.
+		// test-waits-allow real-wait: no retry is an absence, which only elapsed time can show.
+		await new Promise((resolve) => setTimeout(resolve, 1_500));
+		const ledger = read(fixture, sessionId);
+		expect(captured(TERMINATE)).toHaveLength(1);
+		expect(ledger.outbox).toEqual([{ status: "failed", taskId: PROCESS }]);
+		expect(ledger.snapshots.at(-1)).toEqual([
+			expect.objectContaining({ key: { taskId: PROCESS } }),
+		]);
+		expect(ledger.errors).toEqual([]);
+		proofs.push({
+			case: "refused",
+			message: failure.message,
+			terminate: captured(TERMINATE).map((row) => row.message?.params),
+			outbox: ledger.outbox,
+			snapshots: ledger.snapshots,
 		});
 	});
 });
