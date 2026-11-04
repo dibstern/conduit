@@ -571,6 +571,85 @@ describe("Cursor on the Run Ledger", () => {
 		prove("killed", ledger, { lost, handed });
 	});
 
+	// Failure modes (32.8, lane audit F373-F378): F373 the Run stays running when the runner never
+	// answers the Stop; F374 the deadline step leaves the frozen runner alive; F375 the Run ends
+	// twice; F376 something before the deadline ends it, so the step never does; F377 the next send
+	// waits on the dead stop or goes to the frozen runner; F378 the next send is delivered twice or
+	// the stopped input is re-sent. The SDK-never-settles case ends at the runner's own abandonment
+	// (above); here the runner itself is frozen, so only the stop's deadline step can end the Run.
+	// test-waits-allow timeout-override: the Stop's 30 s deadline runs on the daemon's wall clock.
+	it("ends a Stopped Run its frozen runner never answers at the stop's deadline step, and runs the next send once on a new runner", async () => {
+		const gate = join(mkdtempSync(join(tmpdir(), "cursor-gate-")), "gate");
+		writeFileSync(gate, "hold");
+		const { fixture, browser, sessionId } = await start(
+			"stop-frozen",
+			"basic",
+			{
+				CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
+			},
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		await thinking(fixture, sessionId);
+		const frozen = runnerPid(fixture, sessionId);
+		expect(fixture.signalOwnedRunner(frozen, "SIGSTOP")).toBe(true);
+		const stoppedAt = Date.now();
+		await stop(browser, sessionId);
+		// test-waits-allow polling: the deadline step's retirement reaches only the store and the process table.
+		await vi.waitFor(
+			() => {
+				expect(read(fixture, sessionId).turns).not.toContain("running");
+				expect(fixture.remainingRunnerPids()).toEqual([]);
+			},
+			{ timeout: 60_000, interval: 200 },
+		);
+		const endedAfter = Date.now() - stoppedAt;
+		// F376: the commit lands after stoppedAt, so its deadline is at least 30 s later.
+		expect(endedAfter).toBeGreaterThanOrEqual(30_000);
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			expect(
+				db
+					.prepare(
+						"SELECT effect_type AS effect FROM provider_command_outbox WHERE session_id = ? AND command_id LIKE '%:retire'",
+					)
+					.all(sessionId),
+			).toEqual([{ effect: "end_session" }]);
+		} finally {
+			db.close();
+		}
+		rmSync(gate);
+		await submit(browser, sessionId, "Replay the captured basic turn again.");
+		// test-waits-allow polling: the next Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns.at(-1)).toBe("completed"),
+			{ timeout: TIMEOUT },
+		);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const [stopped, next] = ledger.runs;
+		expect(ledger.runs.map((run) => run.status)).toEqual([
+			"interrupted",
+			"completed",
+		]);
+		const lost = ledger.events.filter(
+			({ type }) => type === "evidence.process_lost",
+		);
+		const handed = ledger.events.filter(
+			({ type, runId }) => type === "run.dispatched" && runId === next?.id,
+		);
+		expect(lost).toHaveLength(1);
+		expect(handed).toHaveLength(1);
+		expect(handed[0]?.runnerId).not.toBe(lost[0]?.runnerId);
+		expect(handed[0]?.sequence).toBeGreaterThan(lost[0]?.sequence ?? 0);
+		expect(captured("send.options")).toHaveLength(2);
+		prove("stop-frozen", ledger, {
+			endedAfter,
+			stopped: ledger.ends.find(({ runId }) => runId === stopped?.id),
+			lost,
+			handed,
+		});
+	}, 120_000);
+
 	it("lands old's process_lost and R's process_started together when a new build swaps the runner", async () => {
 		const { fixture, browser, sessionId, restart } = await start(
 			"swap",
