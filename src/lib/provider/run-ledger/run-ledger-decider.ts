@@ -1966,6 +1966,7 @@ function unsolicited(
 			? unknownTasks(label, runner.tasks)
 			: { tag: "Known", label, tasks: [] };
 		book.snapshotEntry++;
+		openRetireGate(book);
 		raised = true;
 	}
 	const unchanged = (diagnostic?: string) =>
@@ -1986,6 +1987,7 @@ function unsolicited(
 				tasks: observation.tasks.map(ledgerTask),
 			};
 			book.snapshotEntry++;
+			openRetireGate(book);
 			return changed;
 		case "task_event":
 			// 8.3: a notification names the waking task.
@@ -2649,6 +2651,7 @@ function settle(
 			});
 			book.current = runnerId;
 			book.snapshotEntry++;
+			openRetireGate(book);
 			// L2: a pending send resolves, once, to the next process_started's runner; a
 			// run_dispatched naming a runner not yet started fixes its label here.
 			for (const send of book.sends)
@@ -2699,6 +2702,21 @@ const endSession = (book: Book, run: Run | undefined, commandId: string) =>
 		},
 		commandId,
 	);
+/**
+ * 8.4 (L3): tasks turning live or unknown under an interrupted Run open its retire gate. Gap
+ * (CONTRACT.md 2870): the gate guards the step past the deadline, so a task that starts after the
+ * Stop opens it at that snapshot, as the Stop would have; a confirmed gate may open again.
+ */
+function openRetireGate(book: Book) {
+	const run = activeRun(book);
+	if (
+		run?.phase === "Interrupting" &&
+		run.by !== "end" &&
+		taskView(book).tag !== "none"
+	)
+		book.confirm ??= { step: "retire", runId: run.runId };
+}
+
 /** 8.4 (L3): the end_session step waits on the confirm gate with tasks live or unknown. */
 function gateEndSession(book: Book, run: Run | undefined, commandId: string) {
 	if (taskView(book).tag === "none") endSession(book, run, commandId);

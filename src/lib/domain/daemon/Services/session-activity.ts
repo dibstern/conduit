@@ -41,10 +41,24 @@ export type SessionBackground = {
 	readonly stale?: readonly BackgroundTask[];
 	/** 8.3: the active Run is a wake, named by its waking task's description when known. */
 	readonly wakeRun?: { readonly task?: string };
+	/**
+	 * 8.4: a Stop past its deadline waits on the confirm gate. Its snapshot entry and tasks come
+	 * from one hand-over; no tasks means the background state is unknown.
+	 */
+	readonly stopConfirm?: {
+		readonly snapshotEntry: number;
+		readonly tasks?: readonly BackgroundTask[];
+	};
 };
 
-/** The arm's hand-over beyond tasks: the active Run (8.3) and the session's Servers (8.7). */
-export type LedgerActivity = Pick<LedgerView, "active" | "servers">;
+/**
+ * The arm's hand-over beyond tasks: the active Run (8.3), the session's Servers (8.7) and the
+ * pending confirm (8.4).
+ */
+export type LedgerActivity = Pick<
+	LedgerView,
+	"active" | "servers" | "pendingConfirm"
+>;
 
 type TaskDisplay = Pick<
 	BackgroundTask,
@@ -81,7 +95,17 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 	];
 	const taskIds = (view: LedgerView["tasks"] | undefined) =>
 		view?.tag === "live" ? view.tasks.map((task) => task.key.taskId) : [];
+	// Sessions whose Stop is past its deadline and waiting on the confirm gate (U2, row 213).
+	const held = new Set<string>();
 	return {
+		/** U2 holds a Stop past its deadline until the gate answers; the release lifts the ask. */
+		holdStop(sessionId: string): () => void {
+			held.add(sessionId);
+			changed(sessionId);
+			return () => {
+				if (held.delete(sessionId)) changed(sessionId);
+			};
+		},
 		/** The arm's committed view, and for a snapshot its tasks; true when what shows moved. */
 		publish(
 			sessionId: string,
@@ -140,6 +164,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 					entry?.ledger?.active?.origin,
 					wakeOf(entry?.ledger),
 					serversOf(entry?.ledger),
+					entry?.ledger?.pendingConfirm?.snapshotEntry,
 				]);
 			const moved = shown(previous) !== shown(next);
 			if (moved) changed(sessionId);
@@ -184,17 +209,31 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 						};
 					})
 					.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+			// 8.4: the ask shows only while U2 holds the Stop on a pending confirm.
+			const asking = held.has(sessionId)
+				? entry.ledger?.pendingConfirm?.snapshotEntry
+				: undefined;
 			// 8.3: unknown tasks are neither work nor monitoring; the last known list only shows greyed.
 			if (entry.view.tag === "unknown") {
 				const stale = shown(entry.view.stale ?? []);
+				const stopConfirm =
+					asking === undefined
+						? {}
+						: { stopConfirm: { snapshotEntry: asking } };
 				return stale.length > 0
-					? { tasks: [], checking: true, stale, ...wakeRun }
-					: { tasks: [], checking: true, ...wakeRun };
+					? { tasks: [], checking: true, stale, ...wakeRun, ...stopConfirm }
+					: { tasks: [], checking: true, ...wakeRun, ...stopConfirm };
 			}
+			const tasks = shown(entry.view.tasks);
+			const stopConfirm =
+				asking === undefined
+					? {}
+					: { stopConfirm: { snapshotEntry: asking, tasks } };
 			return {
 				work: work ?? "monitoring",
-				tasks: shown(entry.view.tasks),
+				tasks,
 				...wakeRun,
+				...stopConfirm,
 			};
 		},
 		/**

@@ -337,6 +337,9 @@ export const sessionRowsToSessionInfoList = (
 			...(background?.stale ? { staleTasks: background.stale } : {}),
 			...(background?.stale ? { staleTasks: background.stale } : {}),
 			...(background?.wakeRun ? { wakeRun: background.wakeRun } : {}),
+			...(background?.stopConfirm
+				? { stopConfirm: background.stopConfirm }
+				: {}),
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),
@@ -425,6 +428,7 @@ const sidebarItem = (
 		...(background?.work ? { backgroundWork: background.work } : {}),
 		...(background?.tasks.length ? { backgroundTasks: background.tasks } : {}),
 		...(background?.wakeRun ? { wakeRun: background.wakeRun } : {}),
+		...(background?.stopConfirm ? { stopConfirm: background.stopConfirm } : {}),
 		...(background?.checking ? { tasksChecking: true } : {}),
 		...deriveSessionSnooze(row.snooze),
 		attention: !quiet

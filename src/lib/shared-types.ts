@@ -269,6 +269,15 @@ export const BackgroundTaskSchema = Schema.Struct({
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
+/** 32.25's decided copy for a task: "pnpm test (shell)", or "(kind): description" with no command. */
+export const backgroundTaskText = ({
+	kind,
+	type,
+	description,
+	detail,
+}: Pick<BackgroundTask, "kind" | "type" | "description" | "detail">) =>
+	detail ? `${detail} (${kind ?? type})` : `(${kind ?? type}): ${description}`;
+
 /** A live server of the session's (8.7): the Run Ledger's entry for one port. */
 export const SessionServerSchema = Schema.Struct({
 	port: Schema.Number,
@@ -469,6 +478,16 @@ export const SessionInfoSchema = Schema.Struct({
 	/** The active Run is one the provider started by itself, named by its waking task (8.3). */
 	wakeRun: Schema.optional(
 		Schema.Struct({ task: Schema.optional(Schema.String) }),
+	),
+	/**
+	 * A Stop past its deadline asks before it ends background tasks (8.4): the snapshot entry the
+	 * confirm names and the tasks it would end; no tasks means the background state is unknown.
+	 */
+	stopConfirm: Schema.optional(
+		Schema.Struct({
+			snapshotEntry: Schema.Number,
+			tasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+		}),
 	),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */
 	servers: Schema.optional(Schema.Array(SessionServerSchema)),

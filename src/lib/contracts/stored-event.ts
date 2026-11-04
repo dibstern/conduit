@@ -1147,6 +1147,8 @@ export const CanonicalEvents = {
 			]),
 		}),
 	),
+	/** The browser's confirm of a stuck Stop's ask (8.4), naming the snapshot entry it showed. */
+	"escalation.confirmed": live(Schema.Struct({ snapshotEntry: Schema.Number })),
 	/**
 	 * A native command main issues (8.5, D60), named by its metadata commandId. `goal` is the goal
 	 * action it carries, which the goal tracker's pending id refers to (8.6).

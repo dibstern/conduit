@@ -131,3 +131,53 @@ export const stopTasks = (
 				});
 		}),
 	);
+
+/** A confirm the ledger would reject (8.4, D45); shown as is, and the browser asks again. */
+export class ConfirmEscalationRefused extends Data.TaggedError(
+	"ConfirmEscalationRefused",
+)<{ readonly message: string }> {}
+
+/**
+ * The browser's confirm of a stuck Stop's ask (CONTRACT.md 8.4, 2873-2877; D45, 2886-2890). It
+ * names the snapshot entry the ask showed; the check reads the ledger in the write that appends
+ * the confirm, so a newer snapshot rejects it and nothing is recorded. U2 sees the gate lift and
+ * ends the process.
+ */
+export const confirmEscalation = (sessionId: string, snapshotEntry: number) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const store = yield* EventStoreEffectTag;
+		const commit = yield* makeCommitAndSignal;
+		const now = yield* Clock.currentTimeMillis;
+		yield* commit.write((project) =>
+			Effect.gen(function* () {
+				const ledger = yield* loadLedger(sessionId);
+				const [session] = yield* sql<{ provider: string }>`
+					SELECT provider FROM sessions WHERE id = ${sessionId}`;
+				if (ledger === undefined || session === undefined)
+					return yield* new ConfirmEscalationRefused({
+						message: "This session no longer exists",
+					});
+				const pending = viewLedger(ledger.state).pendingConfirm;
+				if (pending === undefined)
+					return yield* new ConfirmEscalationRefused({
+						message: "Nothing is waiting for a confirm",
+					});
+				if (pending.snapshotEntry !== snapshotEntry)
+					return yield* new ConfirmEscalationRefused({
+						message:
+							"The background tasks changed; check the list and confirm again",
+					});
+				yield* project(
+					yield* store.appendBatch([
+						canonicalEvent(
+							"escalation.confirmed",
+							sessionId,
+							{ snapshotEntry },
+							{ provider: session.provider, createdAt: now },
+						),
+					]),
+				);
+			}),
+		);
+	});
