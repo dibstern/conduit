@@ -11,10 +11,10 @@
 // 147. the interrupt-timeout abandonment is unmarked on the wire, so it reads as a native result;
 // 148. the abandoned Run ends forced, completed, errored, or twice;
 // 149. the fence lets go at the abandonment: the next start is handed to a runner before the
-//      abandoned runner's process_lost;
+//      abandoned runner's process_lost (open: holding it needs a decider change, see 82tn.32.10);
 // 150. the fence never lets go: the next start waits forever after the runner retires;
 // 151. the mark leaks into a native-cancel Stop;
-// 152. the held next start is handed to the retiring runner, or delivered twice.
+// 152. the held next start is handed to the retiring runner, or delivered twice (open, as 149).
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -346,5 +346,45 @@ describe("Cursor on the Run Ledger", () => {
 		oneRunnerStartedFirst(ledger);
 		expect(captured("custom.result")).toHaveLength(1);
 		prove("answer", ledger);
+	});
+
+	it("marks an abandoned Run on the wire and ends it interrupted, not forced", async () => {
+		const { fixture, browser, sessionId } = await start("abandoned", "cancel", {
+			CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES: "1",
+		});
+		await submit(
+			browser,
+			sessionId,
+			"Call the human custom tool once, then say done.",
+		);
+		await thinking(fixture, sessionId);
+		await stop(browser, sessionId);
+		await turns(fixture, sessionId, ["interrupted"]);
+		await submit(browser, sessionId, "Say cancel followup.");
+		await turns(fixture, sessionId, ["interrupted", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const [abandoned, next] = ledger.runs;
+		// F147: the runner marks the abandonment terminal on the wire (CONTRACT.md 3117).
+		expect(
+			ledger.events
+				.filter(({ type }) => type === "turn.interrupted")
+				.map(({ runId, code }) => ({ runId, code })),
+		).toEqual([{ runId: abandoned?.id, code: "abandoned" }]);
+		// F148: its Run's outcome is interrupted, not forced (CONTRACT.md 3114-3116).
+		expect(ledger.ends[0]).toMatchObject({
+			runId: abandoned?.id,
+			reason: "interrupted",
+			forced: 0,
+		});
+		// F150: the next start runs, and its Run ends once (endsOnce above).
+		expect(ledger.ends[1]).toMatchObject({
+			runId: next?.id,
+			reason: "completed",
+		});
+		expect(captured("send.options")).toHaveLength(2);
+		prove("abandoned", ledger, {
+			dispatched: ledger.events.filter(({ type }) => type === "run.dispatched"),
+		});
 	});
 });
