@@ -1450,8 +1450,8 @@ describe("Claude on the Run Ledger", () => {
 			"conduit-test-refuse-answer",
 		);
 		writeFileSync(refuse, "refuse");
-		// Main's reply reports the first transmission's refusal; delivery goes on retrying.
-		await browser.answerApproval(asked, "allow").catch(() => undefined);
+		// The answer is kept and main retries its delivery, so the request succeeds (3.10, 10B).
+		await browser.answerApproval(asked, "allow");
 		// test-waits-allow polling: the reactor records the runner's refusal with no browser event.
 		const refused = await vi.waitFor(
 			() => {
@@ -1525,21 +1525,25 @@ describe("Claude on the Run Ledger", () => {
 		endsOnce(read(fixture, sessionId));
 	});
 
-	// Lane 32.9 audit 23: at the cap the delivery never ends and the interaction stays Pending.
-	it("ends a Claude answer refused through the cap and resolves its interaction", async () => {
+	// Lane 32.9 audit 23 and 35: at the cap the delivery ends, and the prompt reopens since the runner never took it.
+	// test-waits-allow timeout-override: main's 1, 2, 4 and 8 s retry backoff runs on the daemon's wall clock.
+	it("reopens a Claude answer refused through the cap, and delivers the new answer once", async () => {
 		const { fixture, browser } = await start();
 		const sessionId = await browser.createSession("Claude ledger refusal cap");
-		browser.send(sessionId, "approval-ledger-cap").catch(() => undefined);
+		const prompt = "approval-ledger-cap";
+		const pending = browser.send(sessionId, prompt).catch(() => undefined);
 		const asked = await browser.waitFor(
 			(message) => message["type"] === "permission_pending",
 		);
 		const runner = fixture.marks.find((mark) => mark.kind === "runner-started");
 		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
-		writeFileSync(
-			join(dirname(runner.socketPath), "conduit-test-refuse-answer"),
-			"refuse",
+		const refuse = join(
+			dirname(runner.socketPath),
+			"conduit-test-refuse-answer",
 		);
-		await browser.answerApproval(asked, "allow").catch(() => undefined);
+		writeFileSync(refuse, "refuse");
+		const cursor = browser.frames.length;
+		await browser.answerApproval(asked, "allow");
 		// test-waits-allow polling: main's retries back off 1s, 2s, 4s, 8s with no browser event.
 		const capped = await vi.waitFor(
 			() => {
@@ -1551,6 +1555,7 @@ describe("Claude on the Run Ledger", () => {
 		);
 		proofs.push({ case: "refused-answer-capped", sessionId, ...capped });
 		const [row] = capped.outbox;
+		const interactionId = capped.events[0]?.id;
 		expect(row?.attempts).toBe(5);
 		expect(capped.outcomes).toEqual([
 			...[1, 2, 3, 4].map((transmission) => ({
@@ -1560,16 +1565,57 @@ describe("Claude on the Run Ledger", () => {
 			})),
 			{ commandId: row?.commandId, transmission: 5, outcome: "permanent" },
 		]);
-		// 3.10 (10B): the cap ends delivery and settles the interaction; it is no longer Pending.
+		// 3.10: the runner never took the answer, so main reopens the prompt as a new request
+		// and the SDK's callback, still waiting, can be answered again.
+		const reopened = await browser.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" &&
+				message["requestId"] === asked["requestId"],
+			cursor,
+			10_000,
+		);
+		expect(interactionsOf(fixture, sessionId)).toEqual([
+			{ tag: "Pending", interactionId, kind: "permission" },
+		]);
+		rmSync(refuse);
+		await browser.answerApproval(reopened, "allow");
+		await browser.waitForTurnEnd(sessionId);
+		await pending;
+		// test-waits-allow polling: the reactor completes the outbox row after the runner's reply, with no browser event.
+		const answered = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual([
+					"failed",
+					"completed",
+				]);
+				expect(found.state).toBe("Quiescent");
+				return found;
+			},
+			{ timeout: 10_000, interval: 50 },
+		);
+		proofs.push({ case: "refused-answer-reopened", sessionId, ...answered });
 		expect(interactionsOf(fixture, sessionId)).toEqual([
 			{
 				tag: "Answered",
-				interactionId: capped.events[0]?.id,
+				interactionId,
 				kind: "permission",
 				delivery: "settled",
 			},
 		]);
-	});
+		expect(answered.answers).toEqual(
+			answered.outbox.map((sent) => ({
+				commandId: sent.commandId,
+				interactionId,
+			})),
+		);
+		expect(
+			sdkMarks(fixture).filter(
+				(mark) => mark["kind"] === "approval" && mark["prompt"] === prompt,
+			),
+		).toEqual([expect.objectContaining({ behavior: "allow" })]);
+		endsOnce(read(fixture, sessionId));
+	}, 60_000);
 });
 
 /** The session's interactions as the ledger's view reads them, rebuilt from its entries (3.10). */

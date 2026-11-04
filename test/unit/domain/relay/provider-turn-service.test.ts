@@ -3427,12 +3427,17 @@ describe("ProviderTurnService", () => {
 						]);
 					}
 					const service = yield* ProviderTurnServiceTag;
+					const lifts = yield* service.fenceLifts;
 					yield* service.prepareTurnSession({
 						clientId: "client-1",
 						commandId: "cmd-reply",
 						sessionId: "session-1",
 					});
 
+					// The reply commits the Stop without awaiting it (RL-081); its interrupt
+					// dispatches on the Stop's own fiber, which lifts the fence at its end.
+					expect(service.turnFences("session-1").stopping).toBe(interrupts);
+					if (interrupts) yield* Stream.runHead(lifts);
 					expect(
 						vi
 							.mocked(engine.dispatchEffect)

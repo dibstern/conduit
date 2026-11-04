@@ -881,9 +881,10 @@ export class ProviderSideEffectReactor {
 											cause: result.failure,
 										})
 								: undefined;
-						yield* this.recordControlOutcome(claimed, failure);
-						// The request can report a delivery error while the accepted answer
-						// remains owned by the outbox for a later retry.
+						const kept = yield* this.recordControlOutcome(claimed, failure);
+						// A refused answer that main keeps and retries is accepted, so its
+						// request succeeds (CONTRACT.md 1015-1018).
+						if (kept) return REACTOR_COMPLETED_RESULT;
 						if (failure) return yield* failure;
 						return yield* this.durableOutcome(claimed.command_id);
 					}),
@@ -2770,7 +2771,7 @@ export class ProviderSideEffectReactor {
 	private recordControlOutcome(
 		row: ProviderCommandOutboxRow,
 		failure?: ProviderInstanceFailure,
-	): Effect.Effect<void, ProviderCommandStoreFailure> {
+	): Effect.Effect<boolean, ProviderCommandStoreFailure> {
 		const retryable =
 			failure !== undefined &&
 			(row.effect_type === "resolve_permission" ||
@@ -2861,6 +2862,7 @@ export class ProviderSideEffectReactor {
 					if (!retryable) this.acceptedControls.delete(row.command_id);
 				}),
 			),
+			Effect.as(retryable),
 			Effect.mapError(storeFailure("controlOutcome")),
 		);
 	}

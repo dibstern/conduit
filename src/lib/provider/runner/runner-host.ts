@@ -1158,17 +1158,20 @@ export const runSessionRunner = (
 												Failure.squashCause(cause),
 											);
 											// A refused answer was not consumed: main retries it under the same commandId,
-											// so its next transmission runs again rather than replaying this refusal (3.10).
+											// so its next transmission runs again rather than replaying this refusal, and
+											// past the cap its status reads not_received so main reopens the prompt
+											// (CONTRACT.md 1019-1022).
 											if (
 												failure.retryable &&
 												(command.type === "resolve-permission" ||
 													command.type === "resolve-question")
 											)
 												commands.delete(message.commandId);
-											completedCommands.set(message.commandId, {
-												commandId: message.commandId,
-												failure,
-											});
+											else
+												completedCommands.set(message.commandId, {
+													commandId: message.commandId,
+													failure,
+												});
 											connection?.write({
 												type: "command-reply",
 												commandId: message.commandId,

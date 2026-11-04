@@ -1,8 +1,23 @@
-import { describe, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import Database from "better-sqlite3";
+import { Effect } from "effect";
+import { afterEach, describe, expect, it } from "vitest";
+import { STOP_ABORT_WAIT_MS } from "../../../src/lib/provider/orchestration-command-contracts.js";
+import { ProcessHarness } from "../../helpers/process-harness.js";
 
 // Cases and source evidence: docs/plans/2026-10-22-run-ledger-failure-catalogue.md.
 // Implement with the isolated process harness, recorded traces and per-case JSON artifacts.
 describe("Run Ledger e2e regressions", () => {
+	const harnesses: ProcessHarness[] = [];
+	afterEach(async () => {
+		for (const harness of harnesses.splice(0)) {
+			await harness.dispose();
+			harness.assertNoRunners();
+		}
+	});
+
 	it.todo("RL-005: Probe OpenCode in the native session directory");
 	it.todo(
 		"RL-009: Settle migrated legacy results including folded joined inputs",
@@ -27,7 +42,126 @@ describe("Run Ledger e2e regressions", () => {
 		"RL-065: Release the native-session fence when killing a runner fails",
 	);
 	it.todo("RL-078: Recover Stop deadlines independently of delivery receipts");
-	it.todo("RL-081: Bound question-replacement interruption");
+	// RL-081, how it could fail: 41. the replacement's submit waits on the interrupt that never answers;
+	// 42. A stays running past the Stop's deadline, or ends twice (at the deadline and at its runner's
+	// loss); 43. the replacement is dropped or runs before A ends; 44. the question stays Pending.
+	// test-waits-allow timeout-override: the Stop's 30 s interrupt deadline runs on the daemon's wall clock.
+	it("RL-081: Bound question-replacement interruption", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+		});
+		harnesses.push(harness);
+		// The SDK takes the interrupt and never acknowledges it.
+		writeFileSync(
+			join(harness.root, "claude", "conduit-test-hold-stop"),
+			"hold",
+		);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("RL-081");
+		const asking = browser
+			.send(sessionId, "question-hold-rl081")
+			.catch(() => undefined);
+		await browser.waitFor((message) => message["type"] === "question_pending");
+		const cursor = browser.frames.length;
+		const inputId = randomUUID();
+		const prompt = "after-question-rl081";
+		const submittedAt = Date.now();
+		const submitted = await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId,
+				delivery: "queue",
+				text: prompt,
+			}),
+		);
+		const submitMs = Date.now() - submittedAt;
+		await harness.waitForMark((mark) => mark.kind === "stop-held");
+		const done = await browser
+			.waitForTurnEnd(sessionId, cursor, 60_000, inputId)
+			.catch((error: unknown) => ({ error: String(error) }));
+		const doneMs = Date.now() - submittedAt;
+		await asking;
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
+		try {
+			const evidence = {
+				submitted,
+				submitMs,
+				doneMs,
+				done,
+				ends: db
+					.prepare(
+						"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.outcome') AS outcome, json_extract(entry_json, '$.reason.tag') AS reason, json_extract(entry_json, '$.reason.forced') AS forced FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
+					)
+					.all(sessionId),
+				questions: db
+					.prepare(
+						"SELECT type, json_extract(metadata, '$.runId') AS runId FROM events WHERE session_id = ? AND type IN ('question.asked', 'question.resolved') ORDER BY sequence",
+					)
+					.all(sessionId),
+				state: db
+					.prepare("SELECT state FROM run_ledger_sessions WHERE session_id = ?")
+					.get(sessionId),
+				outbox: db
+					.prepare(
+						"SELECT effect_type AS effect, status, error_code AS code FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+					)
+					.all(sessionId),
+				marks: harness.marks
+					.filter((mark) => mark.kind !== "runner-started")
+					.map((mark) => mark.kind),
+				history: (await browser.history(sessionId)).map((message) => ({
+					role: message.role,
+					text: message.text,
+				})),
+			};
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/run-ledger-rl-081.json",
+				`${JSON.stringify(evidence, null, "\t")}\n`,
+			);
+			// 41: the reply is admitted at once, not after the interrupt's deadline.
+			expect(submitted).toMatchObject({ ok: true, handedOff: false });
+			expect(submitMs).toBeLessThan(STOP_ABORT_WAIT_MS);
+			// 42, 43: A ends once, interrupted at the deadline, its runner is retired, then the
+			// replacement runs once on a fresh runner.
+			expect(done).toMatchObject({ lastTurnEndInputId: inputId });
+			expect(
+				evidence.ends.map((end) => (end as { outcome: string }).outcome),
+			).toEqual(["interrupted", "completed"]);
+			expect(evidence.outbox).toEqual([
+				{ effect: "send_turn", status: "failed", code: "interrupted" },
+				{
+					effect: "interrupt_turn",
+					status: "failed",
+					code: "provider_control_timeout",
+				},
+				{ effect: "end_session", status: "completed", code: null },
+				{ effect: "send_turn", status: "completed", code: null },
+			]);
+			const closed = evidence.marks.indexOf("query-closed");
+			expect(closed).toBeGreaterThan(evidence.marks.indexOf("stop-held"));
+			expect(evidence.marks.filter((kind) => kind === "enqueue")).toHaveLength(
+				2,
+			);
+			expect(evidence.marks.lastIndexOf("enqueue")).toBeGreaterThan(closed);
+			expect(evidence.history.slice(-2)).toEqual([
+				{ role: "user", text: prompt },
+				{
+					role: "assistant",
+					text: `Echo(${prompt}): stream(${prompt}) done(${prompt}).`,
+				},
+			]);
+			// 44: the question resolves and the session reads quiet.
+			expect(
+				evidence.questions.map((event) => (event as { type: string }).type),
+			).toEqual(["question.asked", "question.resolved"]);
+			expect(evidence.state).toEqual({ state: "Quiescent" });
+		} finally {
+			db.close();
+		}
+	}, 120_000);
 	it.todo("RL-085: Retain undelivered forced retirement across downtime");
 	it.todo("RL-087: Keep shared OpenCode abort fenced through execution");
 	it.todo(
