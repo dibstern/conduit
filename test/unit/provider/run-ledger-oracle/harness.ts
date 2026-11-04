@@ -726,6 +726,8 @@ export const generatedShapes = [
 	"Stop of a late steer's turn",
 	"runner failure with a steer possibly reached and an input queued",
 	"steer send failure with inputs queued",
+	// 3113-3117: a Cursor abandonment, then a next start, then the abandoned runner's retirement.
+	"next start after a Cursor abandonment, then retirement",
 ] as const;
 export type GeneratedShape = (typeof generatedShapes)[number];
 export class Coverage {
@@ -766,6 +768,8 @@ export class Coverage {
 	private heldWakeTurnAt = -1;
 	/** L6: the open stop's deadline step fired, until the next Stop commit or the session's end. */
 	private stopStepped = false;
+	/** 3113-3117: a Cursor abandonment's Run, and whether a next start was issued, until a retirement. */
+	private abandoned: { readonly runId: string; nextStart: boolean } | undefined;
 	/** Each steer main issued, by input, to the Run it steered (3.9). */
 	private readonly steerParents = new Map<string, string>();
 	/** Runs that ended completed, for a Claude steer its host starts later (3.9, REDESIGN-9). */
@@ -1068,8 +1072,26 @@ export class Coverage {
 						: outcome === "retryable" || outcome === "not_sent"
 							? outcome
 							: undefined;
+		if (
+			command.verb === "observe" &&
+			command.observation.tag === "Main" &&
+			command.observation.kind === "run_terminal" &&
+			command.observation.code === "abandoned"
+		)
+			this.abandoned = { runId: command.observation.runId, nextStart: false };
+		if (settlement?.kind === "process_lost") {
+			if (this.abandoned?.nextStart)
+				hit("next start after a Cursor abandonment, then retirement");
+			this.abandoned = undefined;
+		}
 		// D60, 3.6: main's relaunch is a new issue of the unlaunched Run's start, drawn after its unlaunch.
 		for (const { effect } of d.issued.slice(this.seenIssues)) {
+			if (
+				effect.kind === "start" &&
+				this.abandoned !== undefined &&
+				effect.runId !== this.abandoned.runId
+			)
+				this.abandoned.nextStart = true;
 			if (effect.kind === "start" && this.unlaunched.delete(effect.runId))
 				hit("relaunch after unlaunch");
 			if (effect.kind === "steer")

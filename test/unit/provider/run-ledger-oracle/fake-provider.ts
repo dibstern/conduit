@@ -420,7 +420,7 @@ export class FakeProvider {
 	/** Closes and end_sessions whose success was read: a duplicate success covers nothing (3.8, 3.2). */
 	private readonly destroyed = new Set<SendToken>();
 	/** Sends each end commit found, by its commandId: its success covers only those (3.4 535-537). */
-	private readonly endScopes = new Map<string, ReadonlySet<SendToken>>();
+	private readonly endScopes = new Map<string, ReadonlySet<string>>();
 	/** The removal macro's runner, whose process_lost precedes the gate (H4, 6.3). */
 	private removing:
 		| { readonly runner: string; readonly gate: ProjectGate }
@@ -1460,10 +1460,7 @@ export class FakeProvider {
 					x.fenced = false;
 			}
 	}
-	private retireLabel(
-		label: string,
-		issuedBefore?: ReadonlySet<SendToken>,
-	): void {
+	private retireLabel(label: string, issuedBefore?: ReadonlySet<string>): void {
 		this.wakeLabels.delete(label);
 		this.endExecutions(label);
 		for (const send of this.sends.values()) {
@@ -1471,7 +1468,11 @@ export class FakeProvider {
 			if (
 				send.label === label &&
 				!this.unbound.has(send.send.token) &&
-				(issuedBefore === undefined || issuedBefore.has(send.send.token))
+				(issuedBefore === undefined ||
+					issuedBefore.has(send.send.token) ||
+					issuedBefore.has(
+						this.mainTransmissions.get(send.send.token)?.issue.commandId ?? "",
+					))
 			) {
 				const binding = this.holdBindings.get(send.send.token);
 				// An unlaunched try's hold lives on in its relaunch (3.6).
@@ -1590,8 +1591,22 @@ export class FakeProvider {
 		}
 		// 3.4 (CONTRACT.md 535-537): an end_session success covers the sends issued before its issue,
 		// which is its end commit.
+		// A control row main has not claimed has no send yet, so the scope also names each live one's
+		// commandId; its later claims are of that issue (3.4). A start or steer relaunch is a new issue (3.6).
 		if (command.verb === "control" && command.control.kind === "end")
-			this.endScopes.set(command.control.commandId, new Set(this.sends.keys()));
+			this.endScopes.set(
+				command.control.commandId,
+				new Set([
+					...this.sends.keys(),
+					...before.live.flatMap((item) =>
+						item.tag === "Main" &&
+						item.effect.kind !== "start" &&
+						item.effect.kind !== "steer"
+							? [item.commandId]
+							: [],
+					),
+				]),
+			);
 		// L6, D58: a Stop, End or Run now is the projection of main's stop commit, which interrupts main's open run.
 		if (
 			command.verb === "control" &&
@@ -1723,6 +1738,23 @@ export class FakeProvider {
 						native.ended = true;
 						native.unfinished = false;
 					}
+			// L6 (CONTRACT.md 795-797): OpenCode's stop_unconfirmed terminal is its Run's deadline step, which
+			// ends that Run's work, its aborts' included, whatever the provider still does.
+			if (
+				this.provider === "opencode" &&
+				observation.kind === "run_terminal" &&
+				observation.code === "stop_unconfirmed"
+			) {
+				const { runId } = observation;
+				for (const { send } of this.sends.values())
+					if (
+						("runId" in send.effect && send.effect.runId === runId) ||
+						(send.effect.kind === "interrupt" &&
+							send.effect.runIds.includes(runId))
+					)
+						this.forcedSends.add(send.token);
+				if (this.turning) this.forcedTurn = true;
+			}
 			return;
 		}
 		if (this.older(observation) && !this.wakeEnd(observation)) return;
@@ -2169,12 +2201,16 @@ export class FakeProvider {
 					answered.ended = true;
 					answered.unfinished = false;
 				}
-				// Cursor wait() ends the native turn and its pending steers (9).
+				// Cursor wait() ends the native turn and settles every pending steer, a dispatched one its
+				// turn never acknowledged included (9, CONTRACT.md 3113).
 				if (this.provider === "cursor")
 					for (const send of this.sends.values())
 						if (
 							send.label === answerLabel &&
-							send.accepted &&
+							(send.accepted ||
+								(send.send.effect.kind === "steer" &&
+									this.dispatchRead.has(send.send.token) &&
+									!this.unlaunchedTries.has(send.send.token))) &&
 							(send.send.effect.kind === "start" ||
 								send.send.effect.kind === "steer")
 						) {
@@ -3545,16 +3581,35 @@ export class FakeProvider {
 			"accounting",
 		].includes(drawn.kind);
 		// A release is evidence the transmission was never received, so an accepted one is never released (1, 4.5).
+		// A provider declines only a send its turn cannot take (CONTRACT.md 1853-1857): it never declines one
+		// its turn took, and its turn never takes one it declined, the runner released (4.5) or whose
+		// transport failed undelivered (D48).
+		const notTaken =
+			native !== undefined &&
+			!native.accepted &&
+			!native.deliveryConfirmed &&
+			(native.notConsumed ||
+				native.transportRank === 1 ||
+				native.transportRank === 2);
+		// `started` and `activity` name the latest transmission delivered on the query (CONTRACT.md 501-502), so
+		// a send whose own turn ended draws no new turn; OpenCode's after-result activity is its own phase (3.8).
+		const turnOver =
+			native?.ended === true &&
+			this.provider !== "opencode" &&
+			["started", "activity", "interaction_requested"].includes(drawn.kind);
 		const evidence: QueryEvidence =
 			send !== undefined && received && this.unlaunchedTries.has(send.token)
 				? {
 						kind: "effect_outcome",
 						outcome: { tag: "not_sent", retryAt: now + 100 },
 					}
-				: drawn.kind === "run_released" &&
+				: (drawn.kind === "run_released" || drawn.kind === "input_declined") &&
 						(native?.accepted === true || native?.deliveryConfirmed === true)
 					? { kind: "accounting" }
-					: drawn;
+					: turnOver ||
+							(notTaken && (received || drawn.kind === "interaction_requested"))
+						? { kind: "accounting" }
+						: drawn;
 		return send?.effect.kind === "steer"
 			? { tag: "Answer", token: tokened(wire), ...evidence }
 			: { tag: "Answer", token: tokened(wire), ...evidence };
@@ -3581,12 +3636,12 @@ export class FakeProvider {
 		const dispatch = (
 			runId: string,
 			effect: Extract<RunEffect, { kind: "start" | "steer" }>,
-			commandId = `main-command:${this.serial++}`,
 		): IssuedEffect => {
-			// 3.13: a direct start or steer is Main under its input's id; its token is the runId (3.4).
+			// 3.4 (CONTRACT.md 429-431), 3.13: main's send commandId is its input's id, a relaunch's
+			// included; a direct start or steer's token is the runId.
 			const issue: IssuedEffect = {
 				tag: "Main",
-				commandId: direct ? effect.inputId : commandId,
+				commandId: effect.inputId,
 				effect,
 			};
 			if (direct)
@@ -3838,9 +3893,33 @@ export class FakeProvider {
 												outcome: "interrupted",
 												code: "stop_unconfirmed",
 											} as const)
-										: ({ outcome: "interrupted" } as const);
+										: // 3113-3117: a Cursor runner's interrupt-timeout abandonment of a turn still running
+											// is its Run's interrupted outcome, marked abandoned on the wire.
+											this.provider === "cursor" &&
+												native !== undefined &&
+												!native.ended &&
+												action.variant % 2 === 1
+											? ({ outcome: "interrupted", code: "abandoned" } as const)
+											: ({ outcome: "interrupted" } as const);
 					if (!terminal) continue;
 					this.mainRun = undefined;
+					// 3113-3117: after an abandonment main claims a next start, then the abandoned runner retires.
+					if (terminal.code === "abandoned" && native) {
+						const runner = runnerOf(native.label);
+						this.deferred.push(
+							() => ({
+								verb: "admit",
+								inputId: `input:queued-${this.serial++}`,
+								delivery: "queue",
+								request: { text: `text:${action.input}` },
+							}),
+							() =>
+								this.mainRun === undefined && this.mainInbox[0]
+									? this.main({ ...action, variant: 0 })
+									: undefined,
+							() => this.loss(runner, action.variant),
+						);
+					}
 					return emit({
 						tag: "Main",
 						eventId: `main:${this.serial++}`,
@@ -3872,11 +3951,7 @@ export class FakeProvider {
 							direct,
 						});
 					}
-					open.issue = dispatch(
-						open.runId,
-						open.issue.effect,
-						this.isHeld(open.issue) ? open.issue.commandId : undefined,
-					);
+					open.issue = dispatch(open.runId, open.issue.effect);
 					const held = this.bound(open.issue).token;
 					const dispatched = this.dispatchFirst((n) => n.token === held);
 					return dispatched
@@ -4208,6 +4283,16 @@ export class FakeProvider {
 				const control =
 					controls[action.variant % controls.length] ?? controls[0];
 				command = { verb: "control", control };
+				// 3113-3117: one Cursor stop in two is followed at once by main's move from its terminal, an
+				// abandonment when its runner's interrupt timed out on a running turn (case 2).
+				if (
+					control.kind === "stop" &&
+					this.provider === "cursor" &&
+					action.input % 2 === 1
+				)
+					this.deferred.push(() =>
+						this.mainRun ? this.main({ ...action, variant: 7 }) : undefined,
+					);
 				// Round 16 (CONTRACT.md 4071-4072): one stop in two of a started Run is followed at once by a wake's
 				// turn_started on the current label, which a held send of the active Run is bound to (8.3, L6).
 				// Cursor starts no unsolicited turn.

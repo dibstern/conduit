@@ -1463,6 +1463,108 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a steer's run.dispatched binds the steer, not its Run's start still unheld (3.4)", () => {
+		// Long seed 82103200 (claude), failure mode 130: the steer's hold bound the Run's first unbound
+		// send, its never-held start, so the ledger showed a start under the steer's commandId. commandId
+		// names the start or steer of the input whose id it is (CONTRACT.md 429-431).
+		agreed("claude", (d) => {
+			admit(d, "A");
+			const runId = `main-A-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+			admit(d, "B", "steer");
+			main(d, {
+				kind: "run_requested",
+				runId: `main-B-${d.next()}`,
+				inputId: "B",
+				direct: false,
+			});
+			observe(d, "hold-B-1" as SendToken, {
+				kind: "run_dispatched",
+				runId,
+				runnerId: "r1",
+				commandId: "B",
+				transmission: 1,
+			});
+			expect(
+				d
+					.view()
+					.live.flatMap((issue) =>
+						issue.tag === "Main" && issue.commandId === "B"
+							? [issue.effect.kind]
+							: [],
+					),
+			).toEqual(["steer"]);
+		});
+	});
+
+	it("a steer admitted before its Run launched joins it at its send, so with that steer held and unsealed a start's release leaves the Run launched and retirement ends it (3.9, 3.6 D50, D52)", () => {
+		// Long seed 82103300 (codex), failure mode 132: the steer's run.requested came after its Run
+		// launched but its admission before, so the ledger dropped it; the start's release then
+		// unlaunched a Run whose steer's hold had no seal, and retirement left it unended. A steer sent
+		// while a Run is active joins it (CONTRACT.md 984, a gap on when), and unlaunch waits until
+		// every start and steer of the execution is sealed (645-654, 845-846).
+		agreed("codex", (d) => {
+			admit(d, "A");
+			admit(d, "B", "steer");
+			const runId = `main-A-${d.next()}`;
+			for (const [inputId, mainRunId] of [
+				["A", runId],
+				["B", `main-B-${d.next()}`],
+			] as const)
+				main(d, {
+					kind: "run_requested",
+					runId: mainRunId,
+					inputId,
+					direct: false,
+				});
+			for (const inputId of ["A", "B"])
+				observe(d, `hold-${inputId}-1` as SendToken, {
+					kind: "run_dispatched",
+					runId,
+					runnerId: "r1",
+					commandId: inputId,
+					transmission: 1,
+				});
+			const a = { runId, token: "hold-A-1" as SendToken };
+			observe(d, a.token, {
+				kind: "run_released",
+				reason: { tag: "Refused", why: "exiting" },
+			});
+			expect(d.view().active).toMatchObject({ runId: a.runId });
+			expect(lose(d, "r1").ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+		});
+	});
+
+	it("a steer main sends into its unlaunched Run joins it, so retirement after the steer's hold ends that Run (3.9, 3.6 D50)", () => {
+		// Long seed 82103301 (claude), failure mode 132: a release unlaunched the Run, main still read
+		// it open and sent a steer into it, and the ledger dropped the steer's run.requested, so
+		// retirement left the Run the steer possibly reached unended (CONTRACT.md 984, 689-690).
+		agreed("claude", (d) => {
+			const a = begin(d);
+			observe(d, a.token, { kind: "run_released", reason: "NotSent" });
+			expect(d.view().active).toMatchObject({ tag: "Queued" });
+			admit(d, "B", "steer");
+			main(d, {
+				kind: "run_requested",
+				runId: `main-B-${d.next()}`,
+				inputId: "B",
+				direct: false,
+			});
+			observe(d, "hold-B-1" as SendToken, {
+				kind: "run_dispatched",
+				runId: a.runId,
+				runnerId: "r1",
+				commandId: "B",
+				transmission: 1,
+			});
+			expect(lose(d, "r1").ended).toMatchObject([
+				{ runId: a.runId, reason: { tag: "process_lost" } },
+			]);
+		});
+	});
+
 	it("a late start on a send an unlaunch dropped changes nothing, so its input stays queued (3.6 D50)", () => {
 		// Long seed 82103202 (codex), failure mode 127: a release returned the Run to Queued and
 		// dropped its send, then a late start on that send showed the input sent. The drop ends the

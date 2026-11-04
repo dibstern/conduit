@@ -1814,7 +1814,14 @@ function dispatched(
 			send.commandId = evidence.commandId;
 		}
 	} else {
-		send = heldSends.find((item) => item.commandId === undefined);
+		// CONTRACT.md 429-431: commandId names the start or steer of the input whose id it is. One
+		// naming no input (a fixed trace's opaque id) binds the Run's first unbound send.
+		const named = book.inputs.has(evidence.commandId);
+		send = heldSends.find(
+			(item) =>
+				item.commandId === undefined &&
+				(!named || item.effect.inputId === evidence.commandId),
+		);
 		if (send === undefined) return noop("unknown or never-issued token (3.4)");
 		send.commandId = evidence.commandId;
 	}
@@ -2132,8 +2139,19 @@ function observe(
 					if (input === undefined)
 						return noop("run.requested for an input never admitted");
 					input.reservation ??= observation.runId;
+					const active = activeInputRun(book);
+					// 3.9 GAP (CONTRACT.md 984, "a steer sent while it is active joins it"): a steer admitted
+					// before its Run launched joins it at its send, main's run.requested.
+					if (
+						input.runId === undefined &&
+						input.delivery === "steer" &&
+						(active?.phase === "Launched" || active?.phase === "Queued")
+					) {
+						active.inputs.push(observation.inputId);
+						input.runId = active.runId;
+					}
 					if (input.runId === undefined) {
-						if (activeInputRun(book) !== undefined)
+						if (active !== undefined)
 							return noop("run.requested while another Run is active");
 						// 3.4: the Run is reserved at main's run.requested, under main's runId.
 						book.runs.push({
