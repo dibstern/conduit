@@ -208,6 +208,21 @@ const resumedTrace = (data: unknown[]) => {
 	return { trace, held };
 };
 
+/** The first failed-stop notice in the session's timeline, once one is there (8.4, 2866). */
+const failedStopNotice = (browser: ProcessBrowser, sessionId: string) =>
+	// test-waits-allow polling: the notice is read back as history, which has no push to wait on.
+	vi.waitFor(async () => {
+		const [notice] = (await browser.history(sessionId)).flatMap((message) =>
+			(message.parts ?? []).flatMap((part) =>
+				part.type === "notice" && part.text?.startsWith("Could not stop")
+					? [part.text]
+					: [],
+			),
+		);
+		expect(notice).toBeDefined();
+		return notice ?? "";
+	});
+
 const read = (harness: ProcessHarness, sessionId: string) => {
 	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
@@ -503,10 +518,13 @@ describe("Codex background terminals", () => {
 			(tasks) => Array.isArray(tasks) && tasks.length === 1,
 		);
 		await runEnded(fixture, sessionId);
-		const failure = await Effect.runPromise(
-			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] })),
-		);
-		expect(failure.message).toMatch(/could not stop/i);
+		expect(
+			await Effect.runPromise(
+				browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] }),
+			),
+		).toEqual({ ok: true });
+		const failure = { message: await failedStopNotice(browser, sessionId) };
+		expect(failure.message).toMatch(/could not stop .*still running/i);
 		// No retry on its own: one terminate, still one after the reactor has had time to act.
 		// test-waits-allow real-wait: no retry is an absence, which only elapsed time can show.
 		await new Promise((resolve) => setTimeout(resolve, 1_500));
@@ -846,12 +864,15 @@ describe("Codex background terminals", () => {
 			expect(rows<TraceRow>(capturePath).at(-1)?.dir).toBe("exit"),
 		);
 		const asked = Date.now();
-		const failure = await Effect.runPromise(
-			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] })),
-		);
+		expect(
+			await Effect.runPromise(
+				browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] }),
+			),
+		).toEqual({ ok: true });
+		const failure = { message: await failedStopNotice(browser, sessionId) };
 		const elapsed = Date.now() - asked;
-		expect(failure.message).toMatch(/could not stop 1 background task/i);
-		// 8.4 (2866): a failed stop is a diagnostic at once, not after the handler's 10s wait.
+		expect(failure.message).toMatch(/could not stop .*still running/i);
+		// 8.4 (2866): a failed stop is a diagnostic at once.
 		expect(elapsed).toBeLessThan(5_000);
 		const ledger = read(fixture, sessionId);
 		expect(ledger.outbox).toEqual([{ status: "failed", taskId: PROCESS }]);

@@ -586,7 +586,7 @@
 {/snippet}
 
 {#snippet turnHeading()}
-			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0">
+			<div data-testid={live ? "turn-live-head" : undefined} class="flex items-center gap-[6px] min-w-0 {stuck && phone ? 'flex-wrap' : ''}">
 				<Tooltip interaction="passive" bind:open={headTooltip}>
 					{#snippet trigger({ props })}
 						{@const headPhrase = phone && surfacingActive ? plural(stats.skills, "skill") : phrase}
@@ -596,7 +596,7 @@
 							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<ConduitMark size={16} variant="running" />
 							{/if}
-							<span class="text-[14px] font-semibold text-text {stuck ? 'min-w-0 truncate' : ''}" title={stuck ? runText(runLabel) : undefined}>{live ? runText(runLabel) : "Worked"}</span>
+							<span class="text-[14px] font-semibold text-text {stuck ? 'min-w-0 truncate' : ''}" title={stuck ? runText(runLabel) : undefined}>{live ? (stuck && phone ? "Stopping" : runText(runLabel)) : "Worked"}</span>
 							{#if live && !turn.user}
 								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
@@ -613,7 +613,9 @@
 				</Tooltip>
 				{#if stuck && sessionId}
 					{@const stuckSession = sessionId}
-					<span class="flex shrink-0 gap-[6px]" data-testid="stuck-stop-actions">
+					<!-- A phone has no room beside the head: the whole label and the actions take their own lines. -->
+					{#if phone}<p class="order-last m-0 basis-full text-[13px] leading-[1.4] text-text">{runText(runLabel)}</p>{/if}
+					<span class="flex shrink-0 gap-[6px] {phone ? 'order-last basis-full flex-wrap' : ''}" data-testid="stuck-stop-actions">
 						<Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px]" onclick={() => confirmStuckStop(stuckSession)}>Stop now</Button>
 						{#if stuck.tasks}<Button variant="ghost" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] bg-chip" onclick={() => stopBackgroundTasks(stuckSession)}>Stop tasks first</Button>{/if}
 					</span>

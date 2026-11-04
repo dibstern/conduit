@@ -179,7 +179,7 @@ export function taskStopIds(
 /**
  * Stop tasks (CONTRACT.md 8.4): the selected task's live subtree, or "all", which the server reads
  * from its own latest snapshot. Rows leave only when the provider's next snapshot drops them; a
- * rejection or a refused stop shows the server's reason.
+ * rejection shows the server's reason, and a stop the provider fails arrives as a timeline notice.
  */
 export async function stopBackgroundTasks(
 	sessionId: string | null,
