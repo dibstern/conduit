@@ -1805,14 +1805,14 @@ export class FakeProvider {
 						native.unfinished = false;
 					}
 			// 3.9 (CONTRACT.md 978-980): a steer outlives its Run only at a completed end or a Stop; at main's
-			// error terminal its work ends with the Run's, as main (D59, 4106-4107).
+			// error terminal its work, and its starts', ends with the Run's, as main (D59, 4106-4107).
 			if (
 				observation.kind === "run_terminal" &&
 				observation.outcome === "error"
 			)
 				for (const { send } of this.sends.values())
 					if (
-						send.effect.kind === "steer" &&
+						(send.effect.kind === "steer" || send.effect.kind === "start") &&
 						send.effect.runId === observation.runId
 					)
 						this.forcedSends.add(send.token);
@@ -1942,6 +1942,16 @@ export class FakeProvider {
 					return;
 				this.turning = true;
 				this.turnFinished = false;
+				// L6 (CONTRACT.md 795-797): activity of executions a deadline already ended is ended work.
+				if (
+					!this.executions.some(
+						(x) =>
+							x.label === observation.label &&
+							x.live &&
+							!this.forcedExecutions.has(x),
+					)
+				)
+					this.forcedTurn = true;
 			} else if (observation.kind === "query_ended") {
 				if (!this.wakeLabels.has(observation.label)) return;
 				this.endQuery(observation.label);
@@ -2049,21 +2059,17 @@ export class FakeProvider {
 					!this.destroyed.has(native.send.token)
 				) {
 					this.destroyed.add(native.send.token);
-					// 3.4: a Run-less session end covers every send of the native session issued before it,
-					// so its runner's older labels too (a reattach bumps querySeq without retiring, L1).
+					// 3.4 (CONTRACT.md 536-541): a session end, Run-bound or not, covers every send of the native
+					// session issued before it, so its runner's older labels too (a reattach bumps querySeq without retiring, L1).
 					const scope = this.endScopes.get(
 						this.mainTransmissions.get(native.send.token)?.issue.commandId ??
 							"",
 					);
-					for (const label of effect.runId === null
-						? new Set(
-								[...this.sends.values()]
-									.map((send) => send.label)
-									.filter(
-										(label) => runnerOf(label) === runnerOf(native.label),
-									),
-							)
-						: [native.label])
+					for (const label of new Set(
+						[...this.sends.values()]
+							.map((send) => send.label)
+							.filter((label) => runnerOf(label) === runnerOf(native.label)),
+					))
 						this.retireLabel(label, scope);
 					// CONTRACT.md 536-541: nothing acts in an ended native session, so a wake's turn on an
 					// older label of the runner ends too, though no send names that label.
@@ -2350,8 +2356,11 @@ export class FakeProvider {
 				) {
 					native.accepted = true;
 					this.refreshQuery(native);
-					if (observation.answer === "running" && native.unfinished)
+					if (observation.answer === "running" && native.unfinished) {
 						this.turning = true;
+						// D59 (CONTRACT.md 4106-4107): a turn of a send whose Run main already ended is main's work, ended with it.
+						if (this.forcedSends.has(native.send.token)) this.forcedTurn = true;
+					}
 				} else if (observation.answer === "absent" && !native.accepted) {
 					// 4.9: no record, so no native work; only its run.released tells the ledger it never reached (D50).
 					native.ended = true;
