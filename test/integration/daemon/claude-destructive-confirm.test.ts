@@ -584,6 +584,104 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		};
 	});
 
+	// 2897: "end then continues to its end_session step", so the held refresh outlives its turn (D43).
+	it("keeps a held refresh, still asking, when its turn ends on its own", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		const cursor = browser.frames.length;
+		await Effect.runPromise(
+			browser.rpc.ReloadProviderSession({
+				sessionId,
+				commandId: crypto.randomUUID(),
+			}),
+		);
+		await row(browser, sessionId, cursor, (message) =>
+			Boolean(confirmOf(message)),
+		);
+		const endedFrom = browser.frames.length;
+		writeFileSync(join(fixture.root, "task-stop-release-result"), "release");
+		const idle = await row(
+			browser,
+			sessionId,
+			endedFrom,
+			(message) => message["status"] === "idle",
+		);
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const held = endRows(fixture, sessionId);
+		proof["turn ended: held"] = {
+			asked: confirmOf(idle) ?? null,
+			rows: held,
+			closed: closedQueries(fixture, queryId).length,
+		};
+		expect(
+			confirmOf(idle)
+				?.tasks?.map((task) => task.id)
+				.sort(),
+		).toEqual(allIds);
+		expect(held).toEqual([{ status: "held", errorCode: null }]);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		await confirmNewest(browser, sessionId, endedFrom);
+		// test-waits-allow polling: the fake SDK reports a closed query only through sdk-proof.ndjson.
+		await vi.waitFor(
+			() => expect(closedQueries(fixture, queryId)).toHaveLength(1),
+			{ timeout: 5_000 },
+		);
+		proof["turn ended: confirmed"] = endRows(fixture, sessionId);
+	});
+
+	// 2875-2899 keep the step in the gate, which the store rebuilds, so a restart keeps it held:
+	// recovery never claims a held row, and only a confirm after the restart releases it.
+	it("keeps a held refresh across a daemon restart until a confirm", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId } = await startTurn(fixture, browser);
+		const cursor = browser.frames.length;
+		await Effect.runPromise(
+			browser.rpc.ReloadProviderSession({
+				sessionId,
+				commandId: crypto.randomUUID(),
+			}),
+		);
+		await row(browser, sessionId, cursor, (message) =>
+			Boolean(confirmOf(message)),
+		);
+		await browser.close();
+		await fixture.kill();
+		await fixture.restart({
+			serviceEnvironment: {
+				CONDUIT_TEST_STOP_ABORT_WAIT_MS: String(STOP_WAIT_MS),
+			},
+		});
+		const after = await fixture.connect();
+		await after.followSessions();
+		await after.followSession(sessionId);
+		const reasked = confirmOf(
+			await row(after, sessionId, 0, (message) => {
+				const confirm = confirmOf(message);
+				return confirm?.tasks?.length === taskStopFixture.length;
+			}),
+		);
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const held = endRows(fixture, sessionId);
+		proof["restart refresh: held"] = { reasked, rows: held };
+		expect(reasked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		expect(held).toEqual([{ status: "held", errorCode: null }]);
+		expect(
+			read(fixture, sessionId).filter((event) => event.retire !== null),
+		).toEqual([]);
+		await confirmNewest(after, sessionId, 0);
+		// test-waits-allow polling: the released row's outcome reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(endRows(fixture, sessionId)).toEqual([
+					{ status: "completed", errorCode: null },
+				]),
+			{ timeout: 5_000 },
+		);
+		proof["restart refresh: confirmed"] = endRows(fixture, sessionId);
+	});
+
 	// Audit 2: a reattach that sends no snapshot. L1 (CONTRACT.md 351-353) makes a reattach at the same
 	// querySeq an older label that changes nothing, so the tasks stay the stored ones, not unknown.
 	it("still asks after a restart whose reattached runner sends no snapshot, with the tasks the store last saw", async () => {
