@@ -86,6 +86,12 @@ const goalCommand = (sessionId: string, commandId: string, goal: GoalAction) =>
 		return { ok: true as const };
 	});
 
+const refuseGoalPause = (_request: { readonly sessionId: string }) =>
+	Effect.succeed({
+		ok: false as const,
+		reason: "goal_pause_unsupported" as const,
+	});
+
 export const conversationHandlers = {
 	ExplainAsk: (request) =>
 		RecapServiceTag.pipe(
@@ -384,6 +390,9 @@ export const conversationHandlers = {
 		goalCommand(sessionId, commandId, { kind: "clear" }).pipe(
 			Effect.catch(mapRpcFailure("ClearGoal")),
 		),
+	// 8.6 Claude has no goal pause (pause: false), and no other adapter has goals yet.
+	PauseGoal: refuseGoalPause,
+	ResumeGoal: refuseGoalPause,
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "ListRecaps"
@@ -404,4 +413,6 @@ export const conversationHandlers = {
 	| "CancelSession"
 	| "SetGoal"
 	| "ClearGoal"
+	| "PauseGoal"
+	| "ResumeGoal"
 >;

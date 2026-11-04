@@ -3148,6 +3148,33 @@ export const ClearGoal = Rpc.make("ClearGoal", {
 	error: WsRpcError,
 });
 
+const GoalPauseResponseSchema = Schema.Union([
+	Schema.Struct({ ok: Schema.Literal(true) }),
+	Schema.Struct({
+		ok: Schema.Literal(false),
+		reason: Schema.Literal("goal_pause_unsupported"),
+	}),
+]);
+
+/** 8.1: defined for adapters with a goal pause; refused with a reason where there is none. */
+export const PauseGoal = Rpc.make("PauseGoal", {
+	payload: Schema.TaggedStruct("PauseGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: GoalPauseResponseSchema,
+	error: WsRpcError,
+});
+
+export const ResumeGoal = Rpc.make("ResumeGoal", {
+	payload: Schema.TaggedStruct("ResumeGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: GoalPauseResponseSchema,
+	error: WsRpcError,
+});
+
 export const StopBackgroundTask = Rpc.make("StopBackgroundTask", {
 	payload: Schema.TaggedStruct("StopBackgroundTask", {
 		sessionId: NonEmptyString,
@@ -3690,6 +3717,8 @@ const wsRpcRequests = [
 	CancelSession,
 	SetGoal,
 	ClearGoal,
+	PauseGoal,
+	ResumeGoal,
 	StopBackgroundTask,
 	StopServer,
 	MarkServer,

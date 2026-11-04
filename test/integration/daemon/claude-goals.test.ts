@@ -11,7 +11,8 @@
 //     the clear's reply as chat or ends that launch's Run with the clear's result;
 // 34. the row shows no phase while Claude queues the clear, or keeps it after the reply;
 // 37, 39, 40. the process dies after the clear is sent and the clear is never resent, is resent
-//     under the dead id, or goes after the next launch's prompt.
+//     under the dead id, or goes after the next launch's prompt;
+// 42. Pause or Resume reaches Claude, which has no goal pause, instead of being refused.
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
@@ -350,5 +351,29 @@ describe("Claude goals as native commands", () => {
 			runs: after.runs,
 			order: { clear, prompt },
 		});
+	});
+	it("refuses Pause and Resume for Claude, which has no goal pause, and sends nothing", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude goal pause");
+		await browser.send(sessionId, "goal-pause-seed");
+		const refusals = [
+			await fixture.requestRpc({
+				_tag: "PauseGoal",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+			await fixture.requestRpc({
+				_tag: "ResumeGoal",
+				sessionId,
+				commandId: randomUUID(),
+			}),
+		];
+		expect(refusals).toEqual([
+			{ ok: false, reason: "goal_pause_unsupported" },
+			{ ok: false, reason: "goal_pause_unsupported" },
+		]);
+		expect(read(fixture, sessionId).nativeCommands).toEqual([]);
+		expect(await goalPhase(fixture, sessionId)).toBeUndefined();
+		proofs.push({ case: "pause-refused", sessionId, refusals });
 	});
 });
