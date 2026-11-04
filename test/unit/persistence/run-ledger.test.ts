@@ -666,6 +666,77 @@ describe("Run Ledger ledger regressions the arm reaches", () => {
 		);
 
 	it.effect(
+		"a late outcome for an answer's old send leaves the prompt main reopened untouched",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([
+						...asked("q1"),
+						answer("q1", "a1", 1010),
+						outcome(
+							"a1",
+							1,
+							{ tag: "permanent", code: "provider_control_timeout" },
+							1011,
+						),
+						prompt("q1", 1012),
+					]);
+					const reopened = yield* prompts;
+					expect(reopened.interactions).toEqual([pending("q1")]);
+					// Lane 32.9 audit 39, 40: the old send's late outcomes neither settle nor refuse the new record.
+					yield* project([
+						outcome(
+							"a1",
+							1,
+							{ tag: "retryable", retryAt: 2000, code: "test_answer_refused" },
+							1013,
+						),
+						outcome("a1", 2, { tag: "succeeded" }, 1014),
+					]);
+					expect(yield* prompts).toEqual(reopened);
+					yield* project([answer("q1", "a2", 1015)]);
+					const answering = yield* prompts;
+					yield* project([
+						outcome(
+							"a1",
+							3,
+							{ tag: "permanent", code: "control_exhausted" },
+							1016,
+						),
+					]);
+					expect(yield* prompts).toEqual(answering);
+					yield* project([
+						outcome(
+							"a2",
+							1,
+							{ tag: "retryable", retryAt: 2000, code: "test_answer_refused" },
+							1017,
+						),
+					]);
+					expect((yield* prompts).interactions).toEqual([
+						{
+							...pending("q1"),
+							lastRefusal: {
+								attempt: { commandId: "a2", transmission: 1 },
+								code: "test_answer_refused",
+							},
+						},
+					]);
+					yield* project([
+						outcome("a2", 2, { tag: "succeeded" }, 1018),
+						confirmed("q1", 1019),
+					]);
+					const answered = yield* prompts;
+					expect(answered.interactions).toEqual([delivered("q1")]);
+					expect(answered.answers).toEqual([
+						{ commandId: "a1", interactionId: "q1" },
+						{ commandId: "a2", interactionId: "q1" },
+					]);
+				}),
+			),
+	);
+
+	it.effect(
 		"RL-077: a second outcome for the answer's same transmission changes nothing",
 		() =>
 			withStore(
