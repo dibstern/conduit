@@ -97,7 +97,8 @@ const makeChannel = (log: Logger | undefined) => {
 					for (const callback of callbacks.heartbeat) notify(callback);
 					break;
 				case "connected":
-					for (const callback of callbacks.connected) notify(callback);
+					for (const callback of callbacks.connected)
+						notify(() => callback(message.providerProcessId));
 					break;
 				case "disconnected":
 					for (const callback of callbacks.disconnected)

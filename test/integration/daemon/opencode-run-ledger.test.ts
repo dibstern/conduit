@@ -888,6 +888,39 @@ describe("OpenCode on the Run Ledger", () => {
 			]);
 		});
 
+		it("a crash of the real OpenCode mid-Run ends that Run as lost once, at the new process's start, while main leaves its run open", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			const before = await holdReal(fixture, browser, sessionId);
+			const [first] = started(before);
+			const heldRun = before.runs[0]?.id;
+			const [victim] = spawned(fixture) as { pid: number; childPid?: number }[];
+			if (!victim?.childPid) throw new Error("No real OpenCode");
+			process.kill(victim.childPid, "SIGKILL");
+			// The supervisor respawns it; the new process sends nothing for the held session.
+			await streaming(fixture, 1);
+			await until(
+				() =>
+					expect(read(fixture, sessionId).ends).toEqual([
+						{ runId: heldRun, reason: "process_lost" },
+					]),
+				20_000,
+			);
+
+			const after = read(fixture, sessionId);
+			const [, second] = started(after);
+			live("crash-restart", fixture, sessionId, { before, after });
+			expect(second?.runnerId).not.toBe(first?.runnerId);
+			expect(second).toMatchObject({
+				label: `${second?.runnerId}:0`,
+				reattached: 0,
+			});
+			expect(started(after)).toHaveLength(2);
+			// No conduit stop, so no loss event: the old id retires at the new id's start (L1), and
+			// main settles that nowhere and leaves its run open (CONTRACT.md 2.1, 9).
+			expect(lost(after)).toEqual([]);
+			expect(after.runs).toEqual([{ id: heldRun, status: "running" }]);
+		});
+
 		it("a conduit stop and start of the real instance mid-Run writes its loss once, and the next send runs under a new id", async () => {
 			const { fixture, browser, sessionId } = await startReal();
 			const before = await holdReal(fixture, browser, sessionId);

@@ -41,7 +41,8 @@ export interface OpenCodeEventContext {
 /** Callback signatures for each SSEStream broadcast event type. */
 export interface SSEStreamCallbacks {
 	event: (data: unknown, context?: OpenCodeEventContext) => void;
-	connected: () => void;
+	/** The id of the process now connected, when the instance reports one. */
+	connected: (providerProcessId?: string) => void;
 	disconnected: (error: Error | undefined) => void;
 	reconnecting: (info: { attempt: number; delay: number }) => void;
 	error: (error: Error) => void;
