@@ -413,32 +413,19 @@ describe("Codex turns through the real daemon and detached runner", () => {
 			const delta = basic.findIndex(
 				(row) => row.message?.method === "item/agentMessage/delta",
 			);
-			const terminal = basic.find(
-				(row) => row.message?.method === "turn/completed",
-			);
-			if (!terminal?.message?.params) throw new Error("Missing terminal");
-			const turn = terminal.message.params["turn"] as Record<string, unknown>;
-			terminal.message.params["turn"] = {
-				...turn,
-				status: "interrupted",
-				items: [],
-			};
+			// Codex declines a /compact steer and the decline returns it to the queue
+			// (CONTRACT.md 4.8, 1855-1856; 3.9, 973). Nothing interrupts the turn for
+			// it, since the busy-slash hold is deleted (8.1, 2740): the turn finishes
+			// past gate 1, then /compact runs as its own compaction.
 			writeTrace([
 				...basic.slice(0, delta + 1).map((row) => ({ ...row, at: 0 })),
-				{
-					dir: "out",
-					at: 0,
-					message: {
-						id: 99,
-						method: "turn/interrupt",
-						params: { threadId: started["threadId"], turnId: turn["id"] },
-					},
-				},
-				{ dir: "in", at: 0, message: { id: 99, result: {} } },
-				{ ...terminal, at: 0 },
+				...basic
+					.slice(delta + 1)
+					.filter(({ dir }) => dir !== "exit")
+					.map((row) => ({ ...row, at: 1 })),
 				...compact.slice(compactStart).map((row) => ({
 					...row,
-					at: 0,
+					at: 1,
 					...(row.message?.params?.["threadId"]
 						? {
 								message: {
@@ -468,6 +455,21 @@ describe("Codex turns through the real daemon and detached runner", () => {
 						text: "/compact",
 					}),
 				);
+				// Admitted as steering, the input reads queued again only once declined.
+				await browser.waitFor(
+					(message) => {
+						const item = message["item"] as
+							| { input?: { inputId?: string; state?: string } }
+							| undefined;
+						return (
+							message["type"] === "session_detail" &&
+							item?.input?.inputId === "compact-while-busy" &&
+							item.input.state === "queued"
+						);
+					},
+					0,
+					TIMEOUT,
+				);
 			} finally {
 				writeFileSync(gatePath, "1");
 				await sending;
@@ -475,7 +477,7 @@ describe("Codex turns through the real daemon and detached runner", () => {
 			await vi.waitFor(
 				() =>
 					expect(snapshot(fixture, id).turns).toEqual([
-						{ state: "interrupted" },
+						{ state: "completed" },
 						{ state: "completed" },
 					]),
 				{ timeout: TIMEOUT, interval: 100 },
