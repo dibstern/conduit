@@ -1325,81 +1325,96 @@ export class CodexRunnerPayload implements RunnerPayload {
 							: `Not a Codex goal command: ${text}`,
 					),
 				);
-			const result =
-				command.type === "clear"
-					? yield* child.client
-							.request(
-								"thread/goal/clear",
-								{ threadId, origin: "user" },
-								ThreadGoalClearResponseSchema,
-							)
-							.pipe(Effect.as({ goal: null }))
-					: command.type === "show"
-						? yield* child.client.request(
-								"thread/goal/get",
-								{ threadId },
-								ThreadGoalGetResponseSchema,
-							)
-						: yield* child.client.request(
-								"thread/goal/set",
-								{
-									threadId,
-									origin: "user",
-									status: command.type === "pause" ? "paused" : "active",
-									...(command.type === "set"
-										? { objective: command.objective }
-										: {}),
-								},
-								ThreadGoalSetResponseSchema,
-							);
-			const read = command.type === "show";
-			const answer = Effect.gen({ self: this }, function* () {
-				const previous = session.active?.state.goalState ??
-					session.goalState ?? { sessionId, goal: null };
-				// Notifications behind the reply may have applied first: a reply older than the newest
-				// notified goal answers the command and leaves the goal as it is (8.6 ordering).
-				const stale =
-					(result.goal?.updatedAt ?? Number.POSITIVE_INFINITY) <
-					(session.goalUpdatedAt ?? 0);
-				// A read with no goal changes nothing a Met or Cleared goal shows (8.6).
-				if (
-					!(read && !result.goal && previous.goal === null) &&
-					!(read && stale)
-				)
-					yield* this.pushGoal(
-						sessionId,
-						session,
-						stale
-							? undefined
-							: result.goal
-								? {
-										_tag: "known",
-										method: "thread/goal/updated",
-										params: { threadId, goal: result.goal },
-									}
-								: {
-										_tag: "known",
-										method: "thread/goal/cleared",
-										params: { threadId },
+			// The command is delivered once sent: an unanswered request leaves the action to the
+			// ledger's deadline (8.5, CONTRACT.md 2937), whose re-read settles it, not a failed send.
+			const deliver = Effect.gen({ self: this }, function* () {
+				const result =
+					command.type === "clear"
+						? yield* child.client
+								.request(
+									"thread/goal/clear",
+									{ threadId, origin: "user" },
+									ThreadGoalClearResponseSchema,
+								)
+								.pipe(Effect.as({ goal: null }))
+						: command.type === "show"
+							? yield* child.client.request(
+									"thread/goal/get",
+									{ threadId },
+									ThreadGoalGetResponseSchema,
+								)
+							: yield* child.client.request(
+									"thread/goal/set",
+									{
+										threadId,
+										origin: "user",
+										status: command.type === "pause" ? "paused" : "active",
+										...(command.type === "set"
+											? { objective: command.objective }
+											: {}),
 									},
-						read ? undefined : commandId,
-					);
-				// Codex answers each request, so its reply is the command's completion (8.5).
-				const sink = session.active?.sink ?? session.last?.sink;
-				if (sink)
-					yield* sink.push({
-						eventId: createEventId(),
-						type: "evidence.command_receipt",
-						providerId: "codex",
-						sessionId,
-						providerRefs: { providerSessionId: threadId },
-						rawSource: { kind: "codex.app-server.translator" },
-						createdAt: Date.now(),
-						data: { label: "", commandId, state: "completed" },
-					});
+									ThreadGoalSetResponseSchema,
+								);
+				const read = command.type === "show";
+				const answer = Effect.gen({ self: this }, function* () {
+					const previous = session.active?.state.goalState ??
+						session.goalState ?? { sessionId, goal: null };
+					// Notifications behind the reply may have applied first: a reply older than the newest
+					// notified goal answers the command and leaves the goal as it is (8.6 ordering).
+					const stale =
+						(result.goal?.updatedAt ?? Number.POSITIVE_INFINITY) <
+						(session.goalUpdatedAt ?? 0);
+					// A read with no goal changes nothing a Met or Cleared goal shows (8.6).
+					if (
+						!(read && !result.goal && previous.goal === null) &&
+						!(read && stale)
+					)
+						yield* this.pushGoal(
+							sessionId,
+							session,
+							stale
+								? undefined
+								: result.goal
+									? {
+											_tag: "known",
+											method: "thread/goal/updated",
+											params: { threadId, goal: result.goal },
+										}
+									: {
+											_tag: "known",
+											method: "thread/goal/cleared",
+											params: { threadId },
+										},
+							read ? undefined : commandId,
+						);
+					// Codex answers each request, so its reply is the command's completion (8.5).
+					const sink = session.active?.sink ?? session.last?.sink;
+					if (sink)
+						yield* sink.push({
+							eventId: createEventId(),
+							type: "evidence.command_receipt",
+							providerId: "codex",
+							sessionId,
+							providerRefs: { providerSessionId: threadId },
+							rawSource: { kind: "codex.app-server.translator" },
+							createdAt: Date.now(),
+							data: { label: "", commandId, state: "completed" },
+						});
+				});
+				// A turn's loop answers in order with its own events; with none, the answer goes now.
+				yield* loop ? Queue.offer(loop, { answer }) : answer;
 			});
-			// A turn's loop answers in order with its own events; with none, the answer goes now.
-			yield* loop ? Queue.offer(loop, { answer }) : answer;
+			yield* deliver.pipe(
+				Effect.catch((cause) =>
+					Effect.sync(() =>
+						log.warn("codex.native_command_failed", {
+							commandId,
+							message: turnFailure(cause).message,
+						}),
+					),
+				),
+				Effect.forkIn(this.scope),
+			);
 		}).pipe(
 			Effect.mapError(
 				(cause): SessionFailure => ({

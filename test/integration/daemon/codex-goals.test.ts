@@ -18,6 +18,13 @@ import {
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 90_000;
+const goalPhase = async (harness: ProcessHarness, sessionId: string) =>
+	(
+		await harness.requestRpc({
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+		})
+	).sessions.find((session) => session.id === sessionId)?.goalPhase;
 const OBJECTIVE = "Say hello";
 
 describe("Codex goals through the daemon and detached runner", () => {
@@ -39,7 +46,10 @@ describe("Codex goals through the daemon and detached runner", () => {
 	async function start(
 		name: string,
 		source = name,
-		successorTimeoutMs?: number,
+		{
+			successorTimeoutMs,
+			nativeCommandMs,
+		}: { successorTimeoutMs?: number; nativeCommandMs?: number } = {},
 	) {
 		artifactRoot = resolve(`test-results/codex-goals/${name}`);
 		mkdirSync(artifactRoot, { recursive: true });
@@ -66,6 +76,12 @@ describe("Codex goals through the daemon and detached runner", () => {
 					: {
 							CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS:
 								String(successorTimeoutMs),
+						}),
+				...(nativeCommandMs === undefined
+					? {}
+					: {
+							CONDUIT_TEST_RUN_LEDGER_NATIVE_COMMAND_MS:
+								String(nativeCommandMs),
 						}),
 			},
 		};
@@ -134,6 +150,66 @@ describe("Codex goals through the daemon and detached runner", () => {
 		start.method = "thread/resume";
 		start.params = { ...start.params, threadId, excludeTurns: true };
 		return resumed;
+	}
+
+	/**
+	 * goal-paused with Codex never answering the Pause: neither its reply nor its paused notification
+	 * comes. The deadline's re-read (thread/goal/get) then finds the goal at `read`; with `retry`, a
+	 * second Pause follows and Codex answers that one.
+	 */
+	function unansweredPause(read: string, retry = false) {
+		const trace = fixtureRows("goal-paused");
+		const pause = trace.find(
+			({ message }) =>
+				message?.method === "thread/goal/set" &&
+				message.params?.["status"] === "paused",
+		)?.message;
+		const answered = (row: TraceRow) =>
+			(row.dir === "in" && row.message?.id === pause?.id) ||
+			(row.message?.method === "thread/goal/updated" &&
+				(row.message.params?.["goal"] as { status?: string }).status ===
+					"paused");
+		const answers = trace.filter(answered);
+		const goal = answers[0]?.message?.result?.["goal"] as
+			| { threadId: string; updatedAt: number }
+			| undefined;
+		if (!pause || !goal) throw new Error("Missing recorded Pause");
+		const kept = trace.filter((row) => !answered(row));
+		const exit = kept.findIndex(({ dir }) => dir === "exit");
+		const again = (row: TraceRow): TraceRow => ({
+			...row,
+			at: 0,
+			message: {
+				...row.message,
+				...(row.message?.id === undefined ? {} : { id: 903 }),
+			},
+		});
+		return [
+			...kept.slice(0, exit),
+			{
+				dir: "out",
+				at: 0,
+				message: {
+					id: 902,
+					method: "thread/goal/get",
+					params: { threadId: goal.threadId },
+				},
+			},
+			{
+				dir: "in",
+				at: 0,
+				message: {
+					id: 902,
+					result: {
+						goal: { ...goal, status: read, updatedAt: goal.updatedAt + 1 },
+					},
+				},
+			},
+			...(retry
+				? [again({ dir: "out", at: 0, message: pause }), ...answers.map(again)]
+				: []),
+			...kept.slice(exit),
+		];
 	}
 
 	afterEach(async ({ task }) => {
@@ -290,7 +366,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 			const { fixture, browser, id } = await start(
 				"goal-successor-timeout",
 				"goal-successor-timeout",
-				successorTimeoutMs,
+				{ successorTimeoutMs },
 			);
 			const completion = fixtureRows("goal-successor-timeout").find(
 				({ message }) => message?.method === "turn/completed",
@@ -734,6 +810,131 @@ describe("Codex goals through the daemon and detached runner", () => {
 			expect(
 				snapshot(fixture, id).events.filter(
 					({ type }) => type === "turn.completed",
+				),
+			).toHaveLength(1);
+		},
+		TIMEOUT * 2,
+	);
+
+	it(
+		"reads Limited when an unanswered Pause's re-read finds the token budget reached",
+		async () => {
+			const { fixture, browser, id } = await start(
+				"goal-unconfirmed-limited",
+				"goal-paused",
+				{ nativeCommandMs: 3_000 },
+			);
+			writeTrace(unansweredPause("budgetLimited"));
+			const sending = goalSend(browser, id);
+			await vi.waitFor(
+				() =>
+					expect(
+						requests().filter(
+							({ message }) => message?.method === "thread/goal/set",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
+			await sending;
+			// test-waits-allow polling: the re-read's answer reaches only the store and the row.
+			await vi.waitFor(
+				async () => {
+					expect(
+						snapshot(fixture, id)
+							.events.filter(({ type }) => type === "session.goal_changed")
+							.at(-1)?.data,
+					).toMatchObject({
+						goal: expect.objectContaining({ condition: OBJECTIVE }),
+						pausedReason: "Goal reached its token budget",
+						limit: "budget",
+					});
+					expect(await goalPhase(fixture, id)).toBeUndefined();
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				requests().filter(
+					({ message }) => message?.method === "thread/goal/get",
+				),
+			).toHaveLength(1);
+			expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]);
+		},
+		TIMEOUT * 2,
+	);
+
+	it(
+		"shows Pause not confirmed when the re-read finds the goal still active, and Retry sends once",
+		async () => {
+			const { fixture, browser, id } = await start(
+				"goal-unconfirmed-retry",
+				"goal-paused",
+				{ nativeCommandMs: 3_000, successorTimeoutMs: 1_000 },
+			);
+			writeTrace(unansweredPause("active", true));
+			const sending = goalSend(browser, id);
+			await vi.waitFor(
+				() =>
+					expect(
+						requests().filter(
+							({ message }) => message?.method === "thread/goal/set",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
+			await sending;
+			// test-waits-allow polling: the deadline and its re-read reach only the row.
+			await vi.waitFor(
+				async () =>
+					expect(await goalPhase(fixture, id)).toEqual({
+						tag: "Pending",
+						action: { kind: "pause" },
+						send: "Unconfirmed",
+					}),
+				{ timeout: TIMEOUT },
+			);
+			const pauses = () =>
+				requests().filter(
+					({ message }) =>
+						message?.method === "thread/goal/set" &&
+						message.params?.["status"] === "paused",
+				);
+			expect(pauses()).toHaveLength(1);
+			const retry = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: retry }),
+				),
+			).toEqual({ ok: true });
+			// test-waits-allow polling: the retry's answer reaches only the store and the row.
+			await vi.waitFor(
+				async () => {
+					expect(snapshot(fixture, id).events).toContainEqual(
+						expect.objectContaining({
+							type: "session.goal_changed",
+							data: expect.objectContaining({
+								replyTo: retry,
+								pausedReason: "Paused",
+							}),
+						}),
+					);
+					expect(await goalPhase(fixture, id)).toBeUndefined();
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(pauses()).toHaveLength(2);
+			expect(
+				requests().filter(
+					({ message }) => message?.method === "thread/goal/get",
 				),
 			).toHaveLength(1);
 		},
