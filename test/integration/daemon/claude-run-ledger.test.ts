@@ -29,6 +29,8 @@
 //      Queued in the ledger (82tn.32.10; CONTRACT.md 3.6, 685-698);
 // 154. that start is handed to the dead runner, or delivered twice;
 // 155. its Run ends twice, or main's run never ends;
+// 320. the test releases the held wake before killing its runner, so the wake can end first and the
+//      runner take the send: that hand-over and its release then count as a second dispatch;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
 import {
@@ -660,9 +662,10 @@ describe("Claude on the Run Ledger", () => {
 				),
 			).toHaveLength(2),
 		);
+		// F320: kill before releasing the hold; a runner released first can end its wake and take the send.
 		const [dead] = fixture.runnerPids();
-		rmSync(hold, { force: true });
 		expect(dead && fixture.signalOwnedRunner(dead, "SIGKILL")).toBe(true);
+		rmSync(hold, { force: true });
 		// F153: the replacement runner answers the waiting send.
 		expect((await queued).chunks.join("")).toBe("pong");
 		const ledger = read(fixture, sessionId);
