@@ -77,6 +77,7 @@ import { terminalKeysHandlers } from "./steps/terminalKeys.js";
 import { terminalSettingsHandlers } from "./steps/terminalSettings.js";
 import { themeMenuHandlers } from "./steps/themeMenu.js";
 import { titleGenerationSettingsHandlers } from "./steps/titleGenerationSettings.js";
+import { toolRowsEndedByRunHandlers } from "./steps/toolRowsEndedByRun.js";
 import { transcriptFeedHandlers } from "./steps/transcriptFeed.js";
 import { turnActivityHandlers } from "./steps/turnActivity.js";
 import { turnActivityShowHandlers } from "./steps/turnActivityShow.js";
@@ -123,6 +124,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...backgroundTasksHandlers,
 	...stuckStopHandlers,
 	...launchingRowsHandlers,
+	...toolRowsEndedByRunHandlers,
 	...taskDrillInHandlers,
 	...terminalKeysHandlers,
 	...terminalSettingsHandlers,

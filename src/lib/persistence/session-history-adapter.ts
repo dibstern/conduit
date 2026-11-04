@@ -98,11 +98,13 @@ function snapshotRowToHistory(
 							...toolPresentation(
 								state && "metadata" in state ? state.metadata : undefined,
 							),
-							...("status" in state && state.status === "error"
-								? { outcome: "failed" as const }
-								: "status" in state && state.status === "completed"
-									? { outcome: "succeeded" as const }
-									: {}),
+							...(projected?.ended_by === "run"
+								? { outcome: "endedByRun" as const }
+								: "status" in state && state.status === "error"
+									? { outcome: "failed" as const }
+									: "status" in state && state.status === "completed"
+										? { outcome: "succeeded" as const }
+										: {}),
 							...(metadata === undefined ? {} : { metadata }),
 							...projectTool({
 								fileChanges: toolFileChanges(
@@ -412,7 +414,8 @@ function partRowToHistoryPart(
 			}),
 		};
 		if (status) stateObj["status"] = status;
-		if (status === "error") stateObj.outcome = "failed";
+		if (row.ended_by === "run") stateObj.outcome = "endedByRun";
+		else if (status === "error") stateObj.outcome = "failed";
 		else if (status === "completed") stateObj.outcome = "succeeded";
 		Object.assign(stateObj, toolPresentation(storedMetadata));
 		const metadata = browserMetadata(

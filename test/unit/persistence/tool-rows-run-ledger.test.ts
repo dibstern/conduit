@@ -27,11 +27,13 @@ import {
 } from "../../../src/lib/persistence/effect/live.js";
 import { effectMigrationEntries } from "../../../src/lib/persistence/effect/migrations.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
+import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 
 const withStore = <A, E>(
 	effect: Effect.Effect<A, E, PersistenceEffectContext>,
@@ -283,6 +285,26 @@ describe("Tool rows on the Run Ledger", () => {
 						ended_by: "run",
 					});
 					expect(fg?.version).toBeGreaterThan(before);
+					// 6: the browser reads it as ended by the run, on every transcript read.
+					const read = yield* ReadQueryEffectTag;
+					for (const messages of [
+						(yield* read.readSessionTranscriptPage("s1", {
+							limit: 50,
+							previewTools: true,
+						})).messages,
+						(yield* read.readSessionTranscript("s1")).messages,
+					]) {
+						const parts = messageRowsToHistory(messages, {
+							pageSize: 50,
+						}).messages.flatMap((message) => message.parts ?? []);
+						const outcome = (id: string) =>
+							parts.find((part) => part.id === id)?.state?.outcome;
+						expect([outcome("fg"), outcome("bg"), outcome("done")]).toEqual([
+							"endedByRun",
+							undefined,
+							"succeeded",
+						]);
+					}
 					// 3: the background row stays open past its Run's end.
 					expect(yield* row("bg")).toMatchObject({
 						status: "running",
