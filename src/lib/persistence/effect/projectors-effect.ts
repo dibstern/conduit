@@ -171,6 +171,13 @@ const owners = (rows: readonly OwnedRow[]): readonly string[] =>
 const ids = (rows: readonly { readonly id: string }[]): readonly string[] =>
 	rows.map((row) => row.id);
 
+// A message's place in its session's write order (conduit-test-lczrn.1), as
+// t3code numbers a thread's items. Set at first insert only: no upsert's SET
+// names it, so a rewritten message keeps its place and a replay in event order
+// numbers every row the same again.
+const nextOrdinal = (sql: SqlClient.SqlClient, sessionId: string) =>
+	sql`(SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE session_id = ${sessionId})`;
+
 // Stamping is unconditional. `version` is the read-model counter, not the event
 // sequence, so a replayed write is still a write: it takes the next counter
 // value and the row moves forward whatever it carried before. Under the old
@@ -355,6 +362,7 @@ const removeMessages = (
 
 interface RewindCut {
 	readonly id: string;
+	readonly ordinal: number;
 	readonly created_at: number;
 }
 
@@ -378,23 +386,21 @@ const restampRewind = (
 			);
 		}
 		const boundary = previousCut ?? cut;
-		// Either range starts at the earlier cut in SQLite's (created_at, id)
-		// ordering. Null means no pending cut, i.e. no hidden messages.
+		// Either range starts at the earlier cut in the transcript's
+		// (ordinal, created_at, id) order. Null means no pending cut, i.e. no
+		// hidden messages.
+		const from = (at: RewindCut) =>
+			sql`(ordinal, created_at, id) >= (${at.ordinal}, ${at.created_at}, ${at.id})`;
 		const affected =
 			previousCut && cut
-				? sql`(created_at, id) >= (${previousCut.created_at}, ${previousCut.id})
-					OR (created_at, id) >= (${cut.created_at}, ${cut.id})`
+				? sql`${from(previousCut)} OR ${from(cut)}`
 				: boundary
-					? sql`(created_at, id) >= (${boundary.created_at}, ${boundary.id})`
+					? from(boundary)
 					: sql.literal("0");
-		const visible = cut
-			? sql`(created_at, id) < (${cut.created_at}, ${cut.id})`
-			: sql.literal("1");
-		const restored = previousCut
-			? sql`(created_at, id) >= (${previousCut.created_at}, ${previousCut.id})`
-			: sql.literal("0");
+		const visible = cut ? sql`NOT ${from(cut)}` : sql.literal("1");
+		const restored = previousCut ? from(previousCut) : sql.literal("0");
 		const page = sql`SELECT id FROM messages WHERE session_id = ${sessionId}
-			AND ${visible} ORDER BY created_at DESC, id DESC LIMIT ${PAGE_MESSAGES}`;
+			AND ${visible} ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT ${PAGE_MESSAGES}`;
 		// Hidden messages need only headers for removals. Restored messages and
 		// the visible page before the new cut need their parts and headers whole.
 		yield* sql`UPDATE message_parts SET version = ${version} WHERE message_id IN (
@@ -815,8 +821,8 @@ export const makeMessageProjector = defineProjector(() => ({
 				const removed = yield* sql<{ id: string }>`SELECT m.id FROM messages m
 					JOIN messages cut ON cut.id = ${event.data.messageId} AND cut.session_id = m.session_id
 					WHERE m.session_id = ${event.sessionId}
-					AND (m.created_at, m.id) >= (cut.created_at, cut.id)
-					ORDER BY m.created_at, m.id`;
+					AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id)
+					ORDER BY m.ordinal, m.created_at, m.id`;
 				return yield* removeMessages(event.sessionId, ids(removed), ctx);
 			});
 		let replacesUserMessage = false;
@@ -833,8 +839,8 @@ export const makeMessageProjector = defineProjector(() => ({
 			if (isEventType(event, "session.setup_started")) {
 				const messageId = `setup-${event.sessionId}`;
 				yield* sql`INSERT INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
-					VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+					VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version}, ${nextOrdinal(sql, event.sessionId)})
 					ON CONFLICT (id) DO NOTHING`;
 				// Like other daemon notices, this uses the transcript's existing
 				// part storage. Typed metadata distinguishes it from agent text.
@@ -882,7 +888,7 @@ export const makeMessageProjector = defineProjector(() => ({
 				const cuts =
 					previousId === undefined || cutIds.length === 0
 						? []
-						: yield* sql<RewindCut>`SELECT id, created_at FROM messages
+						: yield* sql<RewindCut>`SELECT id, ordinal, created_at FROM messages
 							WHERE session_id = ${event.sessionId} AND id IN ${sql.in(cutIds)}`;
 				return yield* restampRewind(
 					event.sessionId,
@@ -993,19 +999,14 @@ export const makeMessageProjector = defineProjector(() => ({
 					)
 					.map((part) => part["text"])
 					.join("");
-				// A snapshot can change a stored message's ordering clock. Drive
-				// the cut lookup from this message's primary key, never scan sessions
-				// on ordinary writes or restamp siblings when the clock is unchanged.
+				// A snapshot may correct a message's clock, but not its write order,
+				// so a pending rewind's visible rows never change with it
+				// (conduit-test-lczrn.1).
 				const existing = yield* sql<{
 					is_backfilled: number;
 					role: string;
-					created_at: number;
 					rest_payload: string | null;
-					rewind_session_id: string | null;
-				}>`SELECT m.is_backfilled, m.role, m.created_at, m.rest_payload, s.id AS rewind_session_id
-					FROM messages m LEFT JOIN sessions s
-						ON s.id = m.session_id AND s.pending_rewind_message_id = m.id
-					WHERE m.id = ${message.id}`;
+				}>`SELECT is_backfilled, role, rest_payload FROM messages WHERE id = ${message.id}`;
 				replacesUserMessage =
 					existing.length > 0 &&
 					(existing[0]?.role === "user" || message.role === "user");
@@ -1021,7 +1022,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					(id, session_id, role, text, cost, tokens_in, tokens_out,
 					 tokens_cache_read, tokens_cache_write, context_window, context_tokens,
 					 is_streaming, is_backfilled, created_at, updated_at,
-					 rest_digest, rest_event_id, rest_payload, finish, error, is_inherited)
+					 rest_digest, rest_event_id, rest_payload, finish, error, is_inherited, ordinal)
 					VALUES (${message.id}, ${event.sessionId}, ${message.role}, ${text},
 					 ${message.cost ?? null}, ${message.tokens?.input ?? null},
 					 ${message.tokens?.output ?? null}, ${message.tokens?.cache?.read ?? null},
@@ -1034,7 +1035,8 @@ export const makeMessageProjector = defineProjector(() => ({
 					 ${event.metadata.inherited ? 1 : 0} OR EXISTS (
 						SELECT 1 FROM sessions s WHERE s.id = ${event.sessionId}
 						AND (${created}, ${message.id}) <= (s.fork_point_timestamp,
-							COALESCE(s.fork_point_message_id, s.fork_point_event, ''))))
+							COALESCE(s.fork_point_message_id, s.fork_point_event, ''))),
+					 ${nextOrdinal(sql, event.sessionId)})
 					ON CONFLICT (id) DO UPDATE SET
 					 role = excluded.role, text = excluded.text, cost = excluded.cost,
 					 tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out,
@@ -1129,17 +1131,7 @@ export const makeMessageProjector = defineProjector(() => ({
 							metadata = excluded.metadata, rest_payload = excluded.rest_payload, version = excluded.version
 						WHERE message_parts.message_id = excluded.message_id`;
 				}
-				const previous = existing[0];
-				const moved =
-					previous?.rewind_session_id && previous.created_at !== created
-						? yield* restampRewind(
-								previous.rewind_session_id,
-								{ id: message.id, created_at: previous.created_at },
-								{ id: message.id, created_at: created },
-								ctx.version,
-							)
-						: [];
-				return [...ids(written), ...moved];
+				return ids(written);
 			}
 
 			if (isEventType(event, "message.part.removed")) {
@@ -1192,7 +1184,7 @@ export const makeMessageProjector = defineProjector(() => ({
 				const steers = event.data.role === "user" && !isBackfilled;
 				const written = yield* sql<{ id: string }>`
 						INSERT INTO messages
-						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, is_inherited, steered)
+						(id, session_id, role, text, is_streaming, is_backfilled, created_at, updated_at, parent_id, input_id, is_inherited, steered, ordinal)
 						VALUES (${event.data.messageId}, ${event.data.sessionId}, ${event.data.role}, '', ${isStreaming}, ${isBackfilled}, ${created}, ${event.createdAt}, ${event.data.parentID ?? null}, ${event.data.inputId ?? null},
 							${event.metadata.inherited ? 1 : 0} OR EXISTS (
 								SELECT 1 FROM sessions s WHERE s.id = ${event.data.sessionId}
@@ -1205,7 +1197,8 @@ export const makeMessageProjector = defineProjector(() => ({
 								AND EXISTS (SELECT 1 FROM turns
 									WHERE session_id = ${event.data.sessionId}
 									AND state IN ('pending', 'running')
-									AND id != ${event.data.messageId}))
+									AND id != ${event.data.messageId}),
+							${nextOrdinal(sql, event.data.sessionId)})
 						ON CONFLICT (id) DO UPDATE SET
 							role = excluded.role,
 							created_at = CASE WHEN ${event.metadata.providerCreatedAt !== undefined ? 1 : 0}
@@ -1219,28 +1212,9 @@ export const makeMessageProjector = defineProjector(() => ({
 							OR (${event.metadata.providerCreatedAt !== undefined ? 1 : 0} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
 						RETURNING id`;
-				if (
-					!previousMessage ||
-					event.metadata.providerCreatedAt === undefined ||
-					previousMessage.created_at === created ||
-					written.length === 0
-				)
-					return ids(written);
-				const [rewind] = yield* sql<{ id: string }>`SELECT id FROM sessions
-					WHERE id = ${event.data.sessionId} AND pending_rewind_message_id = ${event.data.messageId}`;
-				if (!rewind) return ids(written);
-				return [
-					...ids(written),
-					...(yield* restampRewind(
-						rewind.id,
-						{
-							id: event.data.messageId,
-							created_at: previousMessage.created_at,
-						},
-						{ id: event.data.messageId, created_at: created },
-						ctx.version,
-					)),
-				];
+				// A corrected clock keeps the write order, so a pending rewind's
+				// visible rows stay put (conduit-test-lczrn.1).
+				return ids(written);
 			}
 
 			if (isEventType(event, "text.delta")) {
@@ -1259,8 +1233,8 @@ export const makeMessageProjector = defineProjector(() => ({
 				// Defensive: ensure the messages row exists
 				yield* sql`
 					INSERT OR IGNORE INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
+					(id, session_id, role, text, is_streaming, created_at, updated_at, ordinal)
+					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				yield* sql`
 					INSERT INTO message_parts (id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
@@ -1283,8 +1257,8 @@ export const makeMessageProjector = defineProjector(() => ({
 			if (isEventType(event, "thinking.start")) {
 				yield* sql`
 					INSERT OR IGNORE INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
+					(id, session_id, role, text, is_streaming, created_at, updated_at, ordinal)
+					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				yield* sql`
 					INSERT INTO message_parts (id, message_id, type, text, status, sort_order, created_at, updated_at, version)
@@ -1315,8 +1289,8 @@ export const makeMessageProjector = defineProjector(() => ({
 
 				yield* sql`
 					INSERT OR IGNORE INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
+					(id, session_id, role, text, is_streaming, created_at, updated_at, ordinal)
+					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				yield* sql`
 					INSERT INTO message_parts (id, message_id, type, text, sort_order, created_at, updated_at, version)
@@ -1349,8 +1323,8 @@ export const makeMessageProjector = defineProjector(() => ({
 			if (isEventType(event, "tool.started")) {
 				yield* sql`
 					INSERT OR IGNORE INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
+					(id, session_id, role, text, is_streaming, created_at, updated_at, ordinal)
+					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				const inputJson = encodeJson(event.data.input);
 				yield* sql`
@@ -1463,8 +1437,8 @@ export const makeMessageProjector = defineProjector(() => ({
 			if (isEventType(event, "file.attached")) {
 				yield* sql`
 					INSERT OR IGNORE INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at)
-					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt})`;
+					(id, session_id, role, text, is_streaming, created_at, updated_at, ordinal)
+					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				const metadata = encodeJson({
 					mime: event.data.mime,
@@ -1529,8 +1503,8 @@ export const makeMessageProjector = defineProjector(() => ({
 				}
 				const messageId = `turn-notice-${event.sequence}`;
 				yield* sql`INSERT INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
-					VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+					VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version}, ${nextOrdinal(sql, event.sessionId)})
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`INSERT INTO message_parts
 					(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
@@ -1548,8 +1522,8 @@ export const makeMessageProjector = defineProjector(() => ({
 				const errorMessageId = `turn-error-${event.sequence}`;
 				yield* sql`
 					INSERT INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
-					VALUES (${errorMessageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+					VALUES (${errorMessageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version}, ${nextOrdinal(sql, event.sessionId)})
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`
 					INSERT INTO message_parts
@@ -1581,7 +1555,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					is_streaming: number;
 				}>`SELECT id, role, is_streaming FROM messages
 					WHERE session_id = ${event.data.sessionId}
-					ORDER BY created_at DESC, id DESC LIMIT 1`;
+					ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
 				const metadata = encodeJson({
 					...(typeof event.data.preTokens === "number"
 						? { preTokens: event.data.preTokens }
@@ -1612,8 +1586,8 @@ export const makeMessageProjector = defineProjector(() => ({
 				const messageId = `compaction-${event.sequence}`;
 				yield* sql`
 					INSERT INTO messages
-					(id, session_id, role, text, is_streaming, created_at, updated_at, version)
-					VALUES (${messageId}, ${event.data.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
+					(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+					VALUES (${messageId}, ${event.data.sessionId}, 'assistant', '', 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version}, ${nextOrdinal(sql, event.data.sessionId)})
 					ON CONFLICT (id) DO NOTHING`;
 				yield* sql`
 					INSERT INTO message_parts
@@ -2074,7 +2048,7 @@ export const makeTurnProjector = defineProjector(() => ({
 						SELECT id, is_streaming FROM messages
 						WHERE session_id = ${event.sessionId} AND turn_id = ${turnId}
 						AND role = 'assistant'
-						ORDER BY created_at DESC, id DESC LIMIT 1`;
+						ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
 					// REST repairs display ownership; an owned run keeps its lifecycle and accounting.
 					const rows = yield* sql<{
 						id: string;
@@ -2102,7 +2076,7 @@ export const makeTurnProjector = defineProjector(() => ({
 					SET assistant_message_id = COALESCE((SELECT id FROM messages
 						WHERE session_id = ${event.sessionId} AND role = 'assistant'
 						AND (turn_id = turns.id OR id = ${event.data.messageId})
-						ORDER BY created_at DESC, id DESC LIMIT 1), ${event.data.messageId})
+						ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1), ${event.data.messageId})
 					WHERE id = ${event.data.parentID} AND session_id = ${event.sessionId} AND (${runId ?? null} IS NULL OR run_id = ${runId ?? null})
 					RETURNING id, session_id`;
 				if (written.length)

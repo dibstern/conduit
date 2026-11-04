@@ -1656,6 +1656,28 @@ export const effectMigrationEntries = {
 			ON provider_command_outbox (project_key, command_id)
 			WHERE effect_type IN ('probe', 'stop_task', 'cancel_request');
 	`),
+	// A session's messages read in write order, then created_at, then id
+	// (conduit-test-lczrn.1, after t3code's per-thread ordinal). The projector
+	// sets `ordinal` at first insert. Existing rows keep the order they show in
+	// today and break equal times by store order: rowid is the only record of
+	// it, and earlier REST snapshots inserted rows late with earlier times.
+	"0091_messages_ordinal": Effect.gen(function* () {
+		yield* runAddColumnMigrationIfMissing(
+			"messages",
+			"ordinal",
+			"ALTER TABLE messages ADD COLUMN ordinal INTEGER NOT NULL DEFAULT 0",
+		);
+		yield* executeSqlStatements(`
+			UPDATE messages SET ordinal = numbered.ordinal
+			FROM (SELECT rowid AS row, ROW_NUMBER() OVER (
+				PARTITION BY session_id ORDER BY created_at, rowid) AS ordinal
+				FROM messages) AS numbered
+			WHERE messages.rowid = numbered.row AND messages.ordinal = 0;
+			DROP INDEX IF EXISTS idx_messages_session_created;
+			CREATE INDEX IF NOT EXISTS idx_messages_session_order
+				ON messages (session_id, ordinal, created_at, id);
+		`);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

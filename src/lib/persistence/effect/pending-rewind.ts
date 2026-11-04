@@ -20,7 +20,7 @@ export const readPendingRewindCommit = (
 		)
 			return undefined;
 		const messages = yield* sql<{ id: string }>`SELECT id FROM messages
-			WHERE session_id = ${sessionId} ORDER BY created_at, id`;
+			WHERE session_id = ${sessionId} ORDER BY ordinal, created_at, id`;
 		const cut = messages.findIndex(
 			(message) => message.id === session.pending_rewind_message_id,
 		);

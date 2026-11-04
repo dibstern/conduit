@@ -47,6 +47,14 @@ export interface EffectProjectionHarness {
 	readonly sessionMessagesWithParts: (
 		sessionId: string,
 	) => Promise<MessageWithParts[]>;
+	/** One transcript page, as the browser pages it. */
+	readonly transcriptPage: (
+		sessionId: string,
+		options: { readonly limit: number; readonly before?: string },
+	) => Promise<{
+		readonly messages: MessageWithParts[];
+		readonly hasMore: boolean;
+	}>;
 	readonly dbPath: string;
 	readonly dispose: () => Promise<void>;
 }
@@ -120,6 +128,12 @@ export function makeEffectProjectionHarness(
 			runtime.runPromise(
 				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
 					readQuery.getSessionMessagesWithParts(sessionId),
+				),
+			),
+		transcriptPage: (sessionId, options) =>
+			runtime.runPromise(
+				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
+					readQuery.readSessionTranscriptPage(sessionId, options),
 				),
 			),
 		storedEvents: (sessionId) =>

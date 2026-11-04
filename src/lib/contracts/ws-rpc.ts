@@ -440,6 +440,7 @@ export const HistoryMessagePartSchema = Schema.Struct({
 
 export const HistoryMessageSchema = Schema.Struct({
 	id: Schema.String,
+	ordinal: Schema.optionalKey(Schema.Number),
 	turnId: Schema.optionalKey(Schema.String),
 	role: Schema.Literals(["user", "assistant"]),
 	isBackfilled: Schema.optional(Schema.Boolean),
@@ -499,6 +500,7 @@ export const SessionDetailWindowSchema = Schema.Struct({
 export type SessionDetailWindow = typeof SessionDetailWindowSchema.Type;
 export const SessionPromptSummarySchema = Schema.Struct({
 	id: NonEmptyString,
+	ordinal: Schema.optionalKey(Schema.Number),
 	createdAt: Schema.Number,
 	preview: Schema.String,
 	isInherited: Schema.Boolean,

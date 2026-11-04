@@ -425,6 +425,7 @@ export class TranscriptPageCursorNotFoundError extends Data.TaggedError(
 }> {}
 
 export interface TranscriptPosition {
+	readonly ordinal: number;
 	readonly createdAt: number;
 	readonly id: string;
 }
@@ -1028,15 +1029,14 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		);
 	};
 	// The provider may reconcile streamed timestamps while a rewind is pending.
-	// Visibility follows the transcript's current (created_at, id) ordering.
+	// Visibility follows the transcript's (ordinal, created_at, id) order.
 	const pendingRewindHides = (table: "messages" | "m" = "messages") => sql`
 		EXISTS (
 			SELECT 1 FROM sessions s JOIN messages cut
 				ON cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
 			WHERE s.id = ${sql.literal(`${table}.session_id`)}
-				AND (${sql.literal(`${table}.created_at`)} > cut.created_at
-					OR (${sql.literal(`${table}.created_at`)} = cut.created_at
-						AND ${sql.literal(`${table}.id`)} >= cut.id))
+				AND (${sql.literal(`${table}.ordinal, ${table}.created_at, ${table}.id`)})
+					>= (cut.ordinal, cut.created_at, cut.id)
 		)`;
 	const hintDismissals = Option.getOrUndefined(
 		yield* Effect.serviceOption(SessionWorkspaceHintStateTag),
@@ -1181,7 +1181,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				WHERE (mp.call_id IN ${sql.in(toolIds)}
 						OR (mp.call_id IS NULL AND mp.id IN ${sql.in(toolIds)}))
 					AND mp.type = 'tool' AND messages.session_id = ${sessionId}
-				ORDER BY messages.created_at, mp.sort_order`;
+				ORDER BY messages.ordinal, messages.created_at, messages.id, mp.sort_order`;
 			return rows.map((row) =>
 				toolDetail({
 					toolId: row.tool_id,
@@ -1662,14 +1662,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 				WHERE messages.session_id = ${sessionId}
 					AND NOT ${pendingRewindHides()}
-				ORDER BY messages.created_at ASC, messages.id ASC`;
+				ORDER BY messages.ordinal, messages.created_at, messages.id`;
 			if (messages.length === 0) return [];
 
 			const parts = yield* sql<MessagePartRow>`
 				WITH target_messages AS (
-					SELECT id FROM messages
-					WHERE session_id = ${sessionId}
-					ORDER BY created_at ASC, id ASC
+					SELECT id FROM messages WHERE session_id = ${sessionId}
 				)
 				SELECT mp.*, ${surfacingMark}, ${fullToolResult} AS result, NULL AS result_bytes
 				FROM message_parts mp
@@ -1699,7 +1697,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				SELECT id, role, created_at, CASE WHEN role = 'user' THEN text END AS text
 				FROM messages
 				WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()}
-				ORDER BY created_at ASC, id ASC`;
+				ORDER BY ordinal, created_at, id`;
 			if (messages.length === 0) return [];
 			const parts = yield* sql<SessionSkillMessage["parts"][number]>`
 				SELECT mp.id, mp.message_id, mp.type, mp.tool_name, mp.input,
@@ -1862,17 +1860,18 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				const ceiling = range?.through ?? AFTER_LAST_VERSION;
 				const rows = yield* sql<{
 					id: string;
+					ordinal: number;
 					created_at: number;
 					preview: string;
 					is_inherited: number;
 					version: number;
 				}>`
-				SELECT id, created_at, is_inherited, version,
+				SELECT id, ordinal, created_at, is_inherited, version,
 				substr(text, CASE WHEN instr(text, '<user-message>' || char(10)) > 0
 					THEN instr(text, '<user-message>' || char(10)) + length('<user-message>' || char(10)) ELSE 1 END, 960) AS preview
 				FROM messages WHERE session_id = ${sessionId} AND role = 'user'
 				AND version > ${floor} AND version <= ${ceiling} AND NOT ${pendingRewindHides()}
-				ORDER BY created_at, id`;
+				ORDER BY ordinal, created_at, id`;
 				const removed =
 					range === undefined
 						? []
@@ -1886,6 +1885,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						version: row.version,
 						item: {
 							id: row.id,
+							ordinal: row.ordinal,
 							createdAt: row.created_at,
 							isInherited: row.is_inherited === 1,
 							preview:
@@ -1916,8 +1916,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				earlier: number;
 				later: number;
 			}>`SELECT
-			EXISTS(SELECT 1 FROM messages WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()} AND (created_at,id) < (${first.created_at},${first.id})) AS earlier,
-			EXISTS(SELECT 1 FROM messages WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()} AND (created_at,id) > (${last.created_at},${last.id})) AS later`;
+			EXISTS(SELECT 1 FROM messages WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()} AND (ordinal,created_at,id) < (${first.ordinal},${first.created_at},${first.id})) AS earlier,
+			EXISTS(SELECT 1 FROM messages WHERE session_id = ${sessionId} AND NOT ${pendingRewindHides()} AND (ordinal,created_at,id) > (${last.ordinal},${last.created_at},${last.id})) AS later`;
 			return {
 				kind,
 				firstMessageId: first.id,
@@ -1948,13 +1948,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const inBounds =
 						bounds === undefined
 							? sql.literal("1")
-							: sql`(messages.created_at, messages.id) >= (${bounds.first.createdAt}, ${bounds.first.id}) AND (messages.created_at, messages.id) <= (${bounds.last.createdAt}, ${bounds.last.id})`;
+							: sql`(messages.ordinal, messages.created_at, messages.id) >= (${bounds.first.ordinal}, ${bounds.first.createdAt}, ${bounds.first.id}) AND (messages.ordinal, messages.created_at, messages.id) <= (${bounds.last.ordinal}, ${bounds.last.createdAt}, ${bounds.last.id})`;
 					const forward = options.forward !== undefined;
 					const cursorId = forward ? options.forward?.from : options.before;
 					const cursor =
 						cursorId !== undefined
-							? (yield* sql<{ created_at: number; id: string }>`
-									SELECT created_at, id FROM messages
+							? (yield* sql<{
+									ordinal: number;
+									created_at: number;
+									id: string;
+								}>`
+									SELECT ordinal, created_at, id FROM messages
 									WHERE session_id = ${sessionId} AND id = ${cursorId} AND NOT ${pendingRewindHides()} AND ${inBounds}`)[0]
 							: undefined;
 					if (cursorId !== undefined && !cursor) {
@@ -1970,8 +1974,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const [anchor] =
 						forward || cursor
 							? []
-							: yield* sql<{ created_at: number; id: string }>`
-								SELECT created_at, id FROM messages
+							: yield* sql<{ ordinal: number; created_at: number; id: string }>`
+								SELECT ordinal, created_at, id FROM messages
 								WHERE session_id = ${sessionId} AND role = 'user' AND NOT ${pendingRewindHides()} AND ${inBounds}
 								ORDER BY id IS (
 									SELECT id FROM turns
@@ -1980,7 +1984,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										WHERE session_id = ${sessionId}
 										AND state NOT IN ('pending', 'running'))
 									ORDER BY requested_at ASC, rowid ASC LIMIT 1
-								) DESC, created_at DESC, id DESC
+								) DESC, ordinal DESC, created_at DESC, id DESC
 								LIMIT 1`;
 					const rows = forward
 						? yield* sql<{ id: string; created_at: number }>`
@@ -1989,9 +1993,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								WHERE messages.session_id = ${sessionId}
 									AND NOT ${pendingRewindHides()} AND ${inBounds}
 									AND (${cursor?.id ?? null} IS NULL
-										OR messages.created_at > ${cursor?.created_at ?? null}
-										OR (messages.created_at = ${cursor?.created_at ?? null} AND messages.id ${sql.literal(options.forward?.exclusive ? ">" : ">=")} ${cursor?.id ?? null}))
-								ORDER BY messages.created_at ASC, messages.id ASC
+										OR (messages.ordinal, messages.created_at, messages.id) ${sql.literal(options.forward?.exclusive ? ">" : ">=")}
+											(${cursor?.ordinal ?? null}, ${cursor?.created_at ?? null}, ${cursor?.id ?? null}))
+								ORDER BY messages.ordinal, messages.created_at, messages.id
 								LIMIT ${options.limit + 1}`
 						: cursor
 							? yield* sql<{ id: string; created_at: number }>`
@@ -1999,23 +2003,23 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								FROM messages
 								WHERE messages.session_id = ${sessionId}
 									AND NOT ${pendingRewindHides()} AND ${inBounds}
-									AND (messages.created_at < ${cursor.created_at}
-										OR (messages.created_at = ${cursor.created_at} AND messages.id < ${cursor.id}))
-								ORDER BY messages.created_at DESC, messages.id DESC
+									AND (messages.ordinal, messages.created_at, messages.id)
+										< (${cursor.ordinal}, ${cursor.created_at}, ${cursor.id})
+								ORDER BY messages.ordinal DESC, messages.created_at DESC, messages.id DESC
 								LIMIT ${options.limit + 1}`
 							: yield* sql<{ id: string; created_at: number }>`
 								SELECT messages.id, messages.created_at
 								FROM messages
 								WHERE messages.session_id = ${sessionId}
 									AND NOT ${pendingRewindHides()} AND ${inBounds}
-								ORDER BY messages.created_at DESC, messages.id DESC
+								ORDER BY messages.ordinal DESC, messages.created_at DESC, messages.id DESC
 								LIMIT (
 									SELECT MAX(${options.limit}, COUNT(*)) + 1
 									FROM messages m
 									WHERE m.session_id = ${sessionId}
 										AND NOT ${pendingRewindHides("m")}
-										AND (m.created_at > ${anchor?.created_at ?? null}
-											OR (m.created_at = ${anchor?.created_at ?? null} AND m.id >= ${anchor?.id ?? null}))
+										AND (m.ordinal, m.created_at, m.id)
+											>= (${anchor?.ordinal ?? null}, ${anchor?.created_at ?? null}, ${anchor?.id ?? null})
 								)`;
 					const pageLimit =
 						forward || cursor
@@ -2086,7 +2090,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							LEFT JOIN turns ON turns.id = messages.turn_id
 							LEFT JOIN turns t ON t.id = messages.id AND messages.role = 'user'
 							WHERE messages.id IN ${sql.in(page.map((message) => message.id))}
-							ORDER BY messages.created_at ${sql.literal(forward ? "ASC" : "DESC")},
+							ORDER BY messages.ordinal ${sql.literal(forward ? "ASC" : "DESC")},
+								messages.created_at ${sql.literal(forward ? "ASC" : "DESC")},
 								messages.id ${sql.literal(forward ? "ASC" : "DESC")}`;
 						const parts =
 							page.length === 0
@@ -2462,8 +2467,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const from =
 						listing?.from === undefined
 							? undefined
-							: (yield* sql<{ created_at: number; id: string }>`
-									SELECT created_at, id FROM messages
+							: (yield* sql<{
+									ordinal: number;
+									created_at: number;
+									id: string;
+								}>`
+									SELECT ordinal, created_at, id FROM messages
 									WHERE session_id = ${sessionId} AND id = ${listing.from}`)[0];
 					// Ids and versions only: the page, from its first message on (the
 					// whole session without one), then whatever moved past the page's
@@ -2474,8 +2483,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const inPage =
 						from === undefined
 							? sql.literal("1")
-							: sql`m.created_at >= ${from.created_at}
-								AND (m.created_at > ${from.created_at} OR m.id >= ${from.id})`;
+							: sql`(m.ordinal, m.created_at, m.id) >= (${from.ordinal}, ${from.created_at}, ${from.id})`;
 					const listed =
 						listing === undefined ||
 						(listing.from !== undefined && !from) ||
@@ -2533,7 +2541,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						WHERE messages.session_id = ${sessionId}
 							AND NOT ${pendingRewindHides()}
 							AND messages.version > ${floor}
-						ORDER BY messages.created_at ASC, messages.id ASC`;
+						ORDER BY messages.ordinal, messages.created_at, messages.id`;
 
 					let parts: readonly MessagePartRow[] = [];
 					if (messages.length > 0) {
@@ -2783,7 +2791,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							AND NOT ${pendingRewindHides()}
 							AND messages.version <= ${ceiling}
 							AND mp.tool_name = 'TodoWrite' AND mp.status = 'completed'
-						ORDER BY messages.created_at DESC, messages.id DESC, mp.sort_order DESC
+						ORDER BY messages.ordinal DESC, messages.created_at DESC, messages.id DESC, mp.sort_order DESC
 						LIMIT 10`;
 					const items =
 						writes

@@ -132,9 +132,9 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 					AND NOT EXISTS (
 						SELECT 1 FROM messages cut
 						WHERE cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
-							AND (m.created_at > cut.created_at
-								OR (m.created_at = cut.created_at AND m.id >= cut.id))
+							AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id)
 					)
+				-- The fork point copies on (created_at, id), so it is picked in that order.
 				ORDER BY m.created_at, m.id`;
 			if (
 				at.messageId !== undefined &&

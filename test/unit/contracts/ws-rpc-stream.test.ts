@@ -82,6 +82,7 @@ const advancesFor = (member: Member): readonly ReadModelAdvance[] =>
 const messageRow = (id: string, version = 0): MessageWithParts => ({
 	id,
 	version: MessageVersion.make(version),
+	ordinal: 1,
 	session_id: "session-1",
 	turn_id: null,
 	role: "assistant",
@@ -101,6 +102,7 @@ const messageRow = (id: string, version = 0): MessageWithParts => ({
 
 const historyMessage = (id: string) => ({
 	id,
+	ordinal: 1,
 	role: "assistant",
 	time: { created: 1, completed: 1 },
 });
