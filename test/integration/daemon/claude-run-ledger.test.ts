@@ -1275,8 +1275,8 @@ describe("Claude on the Run Ledger", () => {
 			"conduit-test-refuse-answer",
 		);
 		writeFileSync(refuse, "refuse");
-		// Main's reply reports the first transmission's refusal; delivery goes on retrying.
-		await browser.answerApproval(asked, "allow").catch(() => undefined);
+		// The answer is kept and main retries its delivery, so the request succeeds (3.10, 10B).
+		await browser.answerApproval(asked, "allow");
 		// test-waits-allow polling: the reactor records the runner's refusal with no browser event.
 		const refused = await vi.waitFor(
 			() => {
