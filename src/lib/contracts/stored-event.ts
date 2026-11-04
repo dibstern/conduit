@@ -827,6 +827,8 @@ export const CanonicalEvents = {
 			sessionId: Schema.String.pipe(SessionRef(false)),
 			title: Schema.String,
 			provider: Schema.String,
+			/** The driver kind, when `provider` names an instance ("work-oc") rather than a kind. */
+			driver: Schema.optionalKey(Schema.String),
 			parentId: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkedFrom: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkPointEvent: Schema.optionalKey(Schema.String),
@@ -1129,17 +1131,6 @@ export const CanonicalEvents = {
 			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
-	/**
-	 * A native command main issues (8.5, D60), named by its metadata commandId. `goal` is the goal
-	 * action it carries, which the goal tracker's pending id refers to (8.6).
-	 */
-	"native_command.requested": live(
-		Schema.Struct({
-			providerProcessId: Schema.String,
-			text: Schema.String,
-			goal: Schema.optionalKey(GoalActionSchema),
-		}),
-	),
 	/** The browser's Stop tasks (8.4): "all", or the live tasks it named, folded as stop_tasks. */
 	"tasks.stop_requested": live(
 		Schema.Struct({
@@ -1152,6 +1143,17 @@ export const CanonicalEvents = {
 					}),
 				),
 			]),
+		}),
+	),
+	/**
+	 * A native command main issues (8.5, D60), named by its metadata commandId. `goal` is the goal
+	 * action it carries, which the goal tracker's pending id refers to (8.6).
+	 */
+	"native_command.requested": live(
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			text: Schema.String,
+			goal: Schema.optionalKey(GoalActionSchema),
 		}),
 	),
 	// Evidence events (CONTRACT.md 2.1 row 215, 3.9): a fact the Run Ledger's arm folds that has

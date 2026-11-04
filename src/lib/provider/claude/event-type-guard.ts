@@ -233,13 +233,13 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Committed by the provider control outbox",
 	},
-	"native_command.requested": {
-		produced: false,
-		reason: "Committed by the provider control outbox",
-	},
 	"tasks.stop_requested": {
 		produced: false,
 		reason: "Committed by the browser's Stop tasks action",
+	},
+	"native_command.requested": {
+		produced: false,
+		reason: "Committed by the provider control outbox",
 	},
 	"input.interrupt_requested": {
 		produced: false,

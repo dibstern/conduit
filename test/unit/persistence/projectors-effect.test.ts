@@ -3115,7 +3115,8 @@ describe("ProjectionRunnerEffect", () => {
 		expect(cold.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 3,
-			totalReplayed: 8,
+			// The ledger arm reads the session.created too (82tn.32.41).
+			totalReplayed: 9,
 		});
 		expect(cold.failures).toEqual([]);
 		expect(cold.durableFailures).toEqual([{ count: 0 }]);
@@ -3389,8 +3390,9 @@ describe("ProjectionRunnerEffect", () => {
 				expect(first).toMatchObject({
 					startCursor: 0,
 					endCursor: 501,
-					// The ledger arm also reads each session.status (CONTRACT.md 3.1).
-					totalReplayed: 1502,
+					// The ledger arm also reads each session.status (CONTRACT.md 3.1) and the
+					// session.created, which stores the session's driver (3.3, 82tn.32.41).
+					totalReplayed: 1503,
 				});
 				expect(firstSession).toEqual([
 					{ status: "busy", title: "Test Session" },

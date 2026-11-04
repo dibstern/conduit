@@ -1022,6 +1022,8 @@ export const runSessionRunner = (
 								commandId: message.commandId,
 								type: command.type,
 							});
+						// Set once the payload ran the command: an answer's later failure cannot unsend it.
+						let executed = false;
 						runFork(
 							Effect.gen(function* () {
 								if (existing) return yield* Deferred.await(existing);
@@ -1088,7 +1090,31 @@ export const runSessionRunner = (
 											});
 									}
 									launch.acceptCommand(command);
-									return yield* launch.executeEffect(payloadRunner, command);
+									const reply = yield* launch.executeEffect(
+										payloadRunner,
+										command,
+									);
+									executed = true;
+									// Test hook (82tn.32.39): a retryable failure reported after the SDK took the answer.
+									if (
+										process.env["NODE_ENV"] === "test" &&
+										(command.type === "resolve-permission" ||
+											command.type === "resolve-question") &&
+										existsSync(
+											join(
+												dirname(socketPath),
+												"conduit-test-refuse-answer-after-take",
+											),
+										)
+									)
+										return yield* Effect.fail({
+											operation: command.type,
+											code: "test_answer_refused_after_take",
+											retryable: true,
+											message:
+												"The test refused this answer after the SDK took it.",
+										});
+									return reply;
 								});
 								const exit = yield* Effect.exit(
 									command.type === "send-turn" && sendJournal
@@ -1149,14 +1175,20 @@ export const runSessionRunner = (
 											// A refused answer was not consumed: main retries it under the same commandId,
 											// so its next transmission runs again rather than replaying this refusal, and
 											// past the cap its status reads not_received so main reopens the prompt
-											// (CONTRACT.md 1019-1022).
+											// (CONTRACT.md 1019-1022). One that failed after the payload took the answer
+											// reads completed, never not_received, so main never reopens an answered
+											// prompt, and its retry finds nothing left to answer (82tn.32.39).
 											if (
 												failure.retryable &&
 												(command.type === "resolve-permission" ||
 													command.type === "resolve-question")
-											)
+											) {
 												commands.delete(message.commandId);
-											else
+												if (executed)
+													completedCommands.set(message.commandId, {
+														commandId: message.commandId,
+													});
+											} else
 												completedCommands.set(message.commandId, {
 													commandId: message.commandId,
 													failure,
