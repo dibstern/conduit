@@ -543,10 +543,6 @@ export interface ReadQueryEffect {
 		sessionId: string,
 	) => Effect.Effect<GoalDetails, ReadQueryEffectError | SqlError>;
 
-	readonly getAllSessionStatuses: (
-		scope: SessionScope,
-	) => Effect.Effect<Record<string, string>, ReadQueryEffectError | SqlError>;
-
 	readonly getAllSessionStatusesWithProviders: (
 		scope: SessionScope,
 	) => Effect.Effect<
@@ -1296,28 +1292,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						operation: "getAllSessionStatusesWithProviders",
 						cause,
 					}),
-			),
-		);
-
-	const getAllSessionStatuses = (
-		scope: SessionScope,
-	): Effect.Effect<Record<string, string>, ReadQueryEffectError | SqlError> =>
-		Effect.gen(function* () {
-			const rows = yield* sql<{ id: string; status: string }>`
-				SELECT id, status FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)}`;
-			const result: Record<string, string> = {};
-			for (const row of rows) {
-				result[row.id] = row.status;
-			}
-			return result;
-		}).pipe(
-			Effect.mapError((e) =>
-				e instanceof ReadQueryEffectError
-					? e
-					: new ReadQueryEffectError({
-							operation: "getAllSessionStatuses",
-							cause: e,
-						}),
 			),
 		);
 
@@ -2817,7 +2791,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getSessionFamilyRoot,
 		getGoalDetails,
-		getAllSessionStatuses,
 		getAllSessionStatusesWithProviders,
 		listSessions,
 		countSettledSessions,

@@ -87,7 +87,6 @@ const makeReadQuery = (
 	getSessionFamilyRoot: () => Effect.succeed(undefined),
 	getSession: vi.fn(() => Effect.succeed(makeSessionRow(provider, title))),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
-	getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 	getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: vi.fn(() => Effect.succeed([])),

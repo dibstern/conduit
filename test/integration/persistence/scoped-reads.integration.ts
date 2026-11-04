@@ -392,11 +392,6 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 						children,
 					],
 					[
-						"getAllSessionStatuses",
-						read.getAllSessionStatuses(scope).pipe(Effect.map(Object.keys)),
-						all,
-					],
-					[
 						"getAllSessionStatusesWithProviders",
 						read
 							.getAllSessionStatusesWithProviders(scope)

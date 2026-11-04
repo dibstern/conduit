@@ -77,7 +77,6 @@ const makeReadQuery = (
 	getSession: () => Effect.succeed(undefined),
 	getSessionFamilyRoot: () => Effect.succeed(undefined),
 	getGoalDetails: () => Effect.succeed({ checks: [], tokensSinceStart: null }),
-	getAllSessionStatuses: () => Effect.succeed({}),
 	getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 	getSessionsForReconciliation: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
