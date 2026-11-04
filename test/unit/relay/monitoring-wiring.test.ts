@@ -885,6 +885,7 @@ async function createEffectHarness(
 			initialize: unused,
 			getDefaultSessionId: unused,
 			getLastKnownSessionCount: unused,
+			holdSession: unused,
 			sessionExists: unused,
 			listSessions: unused,
 			establishOpenCodeSession: unused,

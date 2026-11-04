@@ -1056,7 +1056,7 @@ export function createProjectRelayLayers({
 						Effect.catch(() =>
 							Effect.all({
 								state: Ref.make(emptySessionManagerState()),
-								coordination: makeSessionManagerCoordination,
+								coordination: makeSessionManagerCoordination(),
 							}),
 						),
 						Effect.map(({ state, coordination }) =>

@@ -723,6 +723,7 @@ export function makeMockSessionManagerService(
 		decrementPendingQuestionCount: vi.fn(() => Effect.void),
 		setPendingQuestionCounts: vi.fn(() => Effect.void),
 		setForkEntry: vi.fn(() => Effect.void),
+		holdSession: vi.fn(() => Effect.succeed(true)),
 		refreshSessionLineage: vi.fn(() => Effect.void),
 		...overrides,
 	} as unknown as SessionManagerService;

@@ -165,7 +165,64 @@ const start = async (scenario: string) => {
 				lastKnownSessionCount: count,
 			})),
 		);
-	return { daemon, register, relay, stop, snapshot, seed };
+	const activity = async (target: ProjectRelay) =>
+		Object.fromEntries(
+			HashMap.toEntries(
+				(await Effect.runPromise(Ref.get(await stateOf(target)))).lastMessageAt,
+			),
+		);
+	const sessions = (
+		target: ProjectRelay,
+		...rows: ReadonlyArray<{ id: string; parentId?: string }>
+	) =>
+		target.effectRuntime.runtime.runPromise(
+			Effect.flatMap(makeCommitAndSignal, (commit) =>
+				commit(
+					rows.map(({ id, parentId }) =>
+						canonicalEvent("session.created", id, {
+							sessionId: id,
+							provider: "claude",
+							title: id,
+							...(parentId === undefined ? {} : { parentId }),
+						}),
+					),
+				),
+			),
+		);
+	const manager = <A, E>(
+		target: ProjectRelay,
+		use: (
+			service: Context.Service.Shape<typeof SessionManagerServiceTag>,
+		) => Effect.Effect<A, E>,
+	) =>
+		target.effectRuntime.runtime.runPromise(
+			Effect.flatMap(SessionManagerServiceTag, use),
+		);
+	/** "open" while the session's owner scope takes resources, else the close reason. */
+	const scopeOf = (sessionId: string) =>
+		daemon.runPromise(
+			Effect.flatMap(OwnerScopes, (owners) =>
+				owners.sessionScope(sessionId).pipe(
+					Effect.flatMap((scope) => scope.acquire(Effect.void)),
+					Effect.as("open"),
+					Effect.catchTag("OwnerScopeClosedError", (error) =>
+						Effect.succeed(error.reason),
+					),
+				),
+			),
+		);
+	return {
+		daemon,
+		register,
+		relay,
+		stop,
+		snapshot,
+		seed,
+		activity,
+		sessions,
+		manager,
+		scopeOf,
+	};
 };
 
 describe("daemon-owned session manager state", () => {
@@ -242,5 +299,67 @@ describe("daemon-owned session manager state", () => {
 		const results = await Promise.all([remove(first), remove(second)]);
 		evidence.observed = { results };
 		expect([...results].sort()).toEqual([false, true]);
+	});
+
+	it("keeps a deleted session's late activity and parent edge out of the manager state", async () => {
+		const daemon = await start("delete-fences-late-writes");
+		await daemon.register("alpha");
+		const alpha = await daemon.relay("alpha");
+		await daemon.sessions(alpha, { id: "root" }, { id: "late" });
+		await daemon.manager(alpha, (service) =>
+			service.recordMessageActivity("late", 1_000),
+		);
+		const deleted = await daemon.manager(alpha, (service) =>
+			service.deleteSession("late", { keepWorktrees: true }),
+		);
+		await daemon.manager(alpha, (service) =>
+			Effect.all([
+				service.recordMessageActivity("late", 2_000),
+				service.addToParentMap("late", "root"),
+			]),
+		);
+		const observed = {
+			deleted,
+			activity: await daemon.activity(alpha),
+			parents: (await daemon.snapshot(alpha)).parents,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({ deleted: true, activity: {}, parents: {} });
+	});
+
+	it("closes every session a delete removes and none a declined delete keeps", async () => {
+		const daemon = await start("delete-closes-lineage");
+		await daemon.register("alpha");
+		const alpha = await daemon.relay("alpha");
+		await daemon.sessions(
+			alpha,
+			{ id: "root" },
+			{ id: "child", parentId: "root" },
+			{ id: "kept" },
+		);
+		const declined = await daemon.manager(alpha, (service) =>
+			service.deleteSession("kept", {
+				keepWorktrees: true,
+				retentionVersions: new Map([["kept", -1]]),
+			}),
+		);
+		const removed = await daemon.manager(alpha, (service) =>
+			service.deleteSession("root", { keepWorktrees: true }),
+		);
+		const observed = {
+			declined,
+			removed,
+			scopes: {
+				root: await daemon.scopeOf("root"),
+				child: await daemon.scopeOf("child"),
+				kept: await daemon.scopeOf("kept"),
+			},
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			declined: false,
+			removed: true,
+			scopes: { root: "remove", child: "remove", kept: "open" },
+		});
 	});
 });

@@ -69,6 +69,11 @@ export interface SessionManagerCoordination {
 		string,
 		Deferred.Deferred<void, SessionManagerError>
 	>;
+	/**
+	 * Hold the session's manager state in its owner scope before writing it.
+	 * False once the session's scope closed (it was deleted): skip the write.
+	 */
+	readonly hold: (sessionId: string) => Effect.Effect<boolean>;
 }
 
 export class SessionManagerCoordinationTag extends Context.Service<
@@ -76,10 +81,30 @@ export class SessionManagerCoordinationTag extends Context.Service<
 	SessionManagerCoordination
 >()("SessionManagerCoordination") {}
 
-export const makeSessionManagerCoordination = Effect.map(
-	Semaphore.make(1),
-	(triageLock): SessionManagerCoordination => ({
-		triageLock,
-		inFlightDeletes: new Map(),
-	}),
-);
+/** Without a daemon owner every write lands, as in a standalone relay. */
+export const makeSessionManagerCoordination = (
+	hold: SessionManagerCoordination["hold"] = () => Effect.succeed(true),
+) =>
+	Effect.map(
+		Semaphore.make(1),
+		(triageLock): SessionManagerCoordination => ({
+			triageLock,
+			inFlightDeletes: new Map(),
+			hold,
+		}),
+	);
+
+/** Forget one session's activity, side-thread mark and parent edges. */
+export const forgetSession =
+	(sessionId: string) =>
+	(state: SessionManagerState): SessionManagerState => ({
+		...state,
+		cachedParentMap: HashMap.filter(
+			state.cachedParentMap,
+			(parent, child) => parent !== sessionId && child !== sessionId,
+		),
+		cachedSideThreadIds: new Set(
+			[...state.cachedSideThreadIds].filter((id) => id !== sessionId),
+		),
+		lastMessageAt: HashMap.remove(state.lastMessageAt, sessionId),
+	});

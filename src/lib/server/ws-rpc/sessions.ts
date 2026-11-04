@@ -1007,6 +1007,7 @@ export const sessionsHandlers = {
 				// Refresh now rather than on the next projection burst: the side
 				// thread's first turn must not read as activity on its parent.
 				const sessionManager = yield* SessionManagerServiceTag;
+				yield* sessionManager.holdSession(session.id);
 				yield* sessionManager.refreshSessionLineage();
 				return session.id;
 			}).pipe(sideThreadStarts.withPermits(1));

@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Ref, Semaphore } from "effect";
 import {
 	emptySessionManagerState,
+	forgetSession,
 	makeSessionManagerCoordination,
 	type SessionManagerCoordination,
 	type SessionManagerState,
@@ -46,9 +47,38 @@ export const SessionManagerOwnerLive = Layer.effect(
 						return yield* scope.acquire<ProjectSessionManager, never, never>(
 							Effect.acquireRelease(
 								Effect.gen(function* () {
+									const state = yield* Ref.make(emptySessionManagerState());
+									const held = new Set<string>();
+									const hold = (sessionId: string) =>
+										held.has(sessionId)
+											? Effect.succeed(true)
+											: owners.sessionScope(sessionId).pipe(
+													Effect.flatMap((scope) =>
+														scope.acquire<Set<string>, never, never>(
+															Effect.acquireRelease(
+																Effect.sync(() => held.add(sessionId)),
+																() =>
+																	Ref.update(
+																		state,
+																		forgetSession(sessionId),
+																	).pipe(
+																		Effect.andThen(
+																			Effect.sync(() => held.delete(sessionId)),
+																		),
+																	),
+															),
+														),
+													),
+													Effect.as(true),
+													Effect.catchTag("OwnerScopeClosedError", () =>
+														Effect.succeed(false),
+													),
+													// No row yet (or no provenance): write as a relay would.
+													Effect.catch(() => Effect.succeed(true)),
+												);
 									const created = {
-										state: yield* Ref.make(emptySessionManagerState()),
-										coordination: yield* makeSessionManagerCoordination,
+										state,
+										coordination: yield* makeSessionManagerCoordination(hold),
 									};
 									projects.set(projectId, created);
 									return created;

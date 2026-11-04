@@ -832,6 +832,12 @@ export interface SessionManagerService {
 	loadPreRenderedHistory(
 		sessionId: string,
 	): Effect.Effect<HistoryPage, SessionManagerError>;
+	/**
+	 * Open the session's owner scope and hold its manager state there. Create
+	 * does this itself; fork callers call it once the fork commits. False once
+	 * the session was deleted.
+	 */
+	holdSession(sessionId: string): Effect.Effect<boolean>;
 	recordMessageActivity(
 		sessionId: string,
 		timestamp?: number,
@@ -1015,9 +1021,9 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const coordination = yield* Effect.serviceOption(
 			SessionManagerCoordinationTag,
 		);
-		const { triageLock, inFlightDeletes } = Option.isSome(coordination)
+		const { triageLock, inFlightDeletes, hold } = Option.isSome(coordination)
 			? coordination.value
-			: yield* makeSessionManagerCoordination;
+			: yield* makeSessionManagerCoordination();
 		const { serviceListSessions, refreshSessionLineage } =
 			makeSessionListOperations({
 				api,
@@ -1182,6 +1188,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 			options?: CreateSessionOptions,
 		) => {
 			const create = serviceCreateSession(title, options).pipe(
+				// A new session's owner scope opens with it.
+				Effect.tap((session) => hold(session.id)),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
@@ -1529,13 +1537,18 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 					);
 				}).pipe(Effect.scoped),
+			holdSession: hold,
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
+					Effect.when(hold(sessionId)),
+					Effect.asVoid,
 				),
 			addToParentMap: (childId, parentId) =>
 				addToParentMap(childId, parentId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
+					Effect.when(hold(childId)),
+					Effect.asVoid,
 				),
 			getSessionParentMap: (options) =>
 				getSessionParentMap(options).pipe(
@@ -1543,6 +1556,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				),
 			setForkEntry: (sessionId, entry) =>
 				Effect.gen(function* () {
+					if (!(yield* hold(sessionId))) return;
 					yield* setForkEntry(sessionId, entry).pipe(
 						Effect.provideService(AccountDirectory, accounts),
 						Effect.provideService(SessionManagerStateTag, stateRef),
