@@ -3239,12 +3239,14 @@ describe("ClaudeEventTranslator", () => {
 		});
 	});
 
-	it("tracks live work from background_tasks_changed, ignoring ambient tasks", async () => {
-		const liveness = makeSessionBackgroundLiveness(undefined, () => 200);
+	// 8.1 (CONTRACT.md 2778-2781): ambient tasks stay in the live set, flagged, so the ledger
+	// reads them as monitoring; plan tasks are not background work.
+	it("forwards the live set from background_tasks_changed, keeping ambient tasks flagged", async () => {
+		const transitions: unknown[] = [];
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
 			onBackgroundTask: (input) => {
-				liveness.record(input);
+				transitions.push(input);
 			},
 		});
 		const snapshot = (
@@ -3286,24 +3288,26 @@ describe("ClaudeEventTranslator", () => {
 			description: "Plan mode",
 		};
 		await snapshot([bash, watcher, plan, planMode], 1);
-		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(true);
-		expect(liveness.backgroundOf(ctx.sessionId)).toEqual({
-			work: "monitoring",
-			tasks: [
-				{
-					id: "bash",
-					type: "local_bash",
-					description: "codex exec",
-					firstSeenAt: 100,
-				},
-			],
-		});
 		await snapshot([watcher, plan, planMode], 2);
-		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);
-		expect(liveness.backgroundOf(ctx.sessionId)).toBeUndefined();
-		await snapshot([bash], 3);
-		await snapshot([], 4);
-		expect(liveness.hasLiveWork(ctx.sessionId)).toBe(false);
+		await snapshot([], 3);
+		const bashTask = {
+			id: "bash",
+			type: "local_bash",
+			description: "codex exec",
+			firstSeenAt: 100,
+		};
+		const watchTask = {
+			id: "watch",
+			type: "local_bash",
+			description: "watch",
+			firstSeenAt: 100,
+			ambient: true,
+		};
+		expect(
+			transitions.map(
+				(transition) => (transition as { tasks?: unknown }).tasks,
+			),
+		).toEqual([[bashTask, watchTask], [watchTask], []]);
 		expect(sink.events).toHaveLength(0);
 	});
 

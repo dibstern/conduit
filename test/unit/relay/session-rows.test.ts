@@ -235,8 +235,9 @@ describe("Session Rows read paths", () => {
 	}
 
 	for (const [taskType, attention] of [
-		["local_bash", "monitoring"],
-		["workflow", "working"],
+		// 8.2 (CONTRACT.md 2778-2781): monitor tasks monitor; a shell is work.
+		["monitor", "monitoring"],
+		["local_bash", "working"],
 	] as const) {
 		it.effect(
 			`shares ${attention} activity and hint dismissals across all four readers`,

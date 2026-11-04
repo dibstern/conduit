@@ -416,6 +416,7 @@ export class ClaudeEventTranslator {
 		readonly type: string;
 		readonly description: string;
 		readonly firstSeenAt: number;
+		readonly ambient?: true;
 	}[] = [];
 	// Per-request usage of the LAST main-chain assistant message. The SDK's
 	// result.usage is cumulative across every API request in the turn (cache
@@ -886,20 +887,20 @@ export class ClaudeEventTranslator {
 				}
 
 				// The full live set, replacing the previous one. Ambient tasks
-				// (watchers, housekeeping) are not activity, per the SDK.
+				// (watchers, housekeeping) stay: the ledger reads them as monitoring
+				// and still counts them (8.1 deletes the ambient filter).
 				case "background_tasks_changed": {
 					const now = yield* Clock.currentTimeMillis;
 					this.backgroundTasks = message.tasks
 						.filter(
 							(task) =>
-								!task.ambient &&
-								task.task_type !== "plan" &&
-								task.task_type !== "plan_mode",
+								task.task_type !== "plan" && task.task_type !== "plan_mode",
 						)
 						.map((task) => ({
 							id: task.task_id,
 							type: task.task_type,
 							description: task.description,
+							...(task.ambient ? { ambient: true as const } : {}),
 							firstSeenAt:
 								this.backgroundTasks.find(({ id }) => id === task.task_id)
 									?.firstSeenAt ?? now,

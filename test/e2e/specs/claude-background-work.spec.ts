@@ -1,5 +1,5 @@
 // A Claude session whose turn has ended while a backgrounded shell still runs
-// reads as monitoring in the sidebar until the shell ends, and lists the shell
+// reads as working in the sidebar until the shell ends (a shell is work, CONTRACT.md 2778-2781), and lists the shell
 // in the session header's tasks row (with a dot on the composer), whose "Stop
 // all" ends the whole session. Bug: it read as done, because the shell's
 // liveness lives in memory and nothing re-sent the row.
@@ -46,7 +46,7 @@ processTest.describe("Claude background work", () => {
 	});
 
 	processTest(
-		"keeps the session monitoring until its background shell ends",
+		"keeps the session working until its background shell ends",
 		async ({ page, browser, harness }, testInfo) => {
 			const sessionId = await (await harness.connect()).createSession();
 			// Wake-up results complete messages after the run's one terminal.
@@ -127,8 +127,8 @@ processTest.describe("Claude background work", () => {
 				await expect(row).toHaveAttribute("aria-label", /Background shell/);
 				await expect(
 					row,
-					"the turn ended but the sidebar stopped saying monitoring while its background shell ran",
-				).toHaveAttribute("aria-label", /^Monitoring/);
+					"the turn ended but the sidebar stopped saying working while its background shell ran",
+				).toHaveAttribute("aria-label", /^Working/);
 				await expect(
 					page
 						.getByTestId("background-tasks-row")
@@ -198,7 +198,7 @@ processTest.describe("Claude background work", () => {
 
 	// Stop all stops the tasks, not the turn (conduit-test-va96.2). Recorded
 	// replay has no stopTask replies, so the stop, the row clearing and the
-	// sidebar leaving Monitoring are proven in harness-background-task-stop.spec.ts.
+	// sidebar leaving Working are proven in harness-background-task-stop.spec.ts.
 });
 
 processTest.describe("Claude wake-up turn inbox", () => {

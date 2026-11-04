@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { Effect, Stream } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
@@ -142,7 +143,8 @@ describe("foreground daemon process harness", () => {
 		const sessionId = await browser.createSession("Background restart proof");
 		await browser.send(sessionId, "restart-background-work");
 		const expected = {
-			backgroundWork: "monitoring",
+			// 8.2 (CONTRACT.md 2778-2781): a shell is work.
+			backgroundWork: "working",
 			backgroundTasks: [
 				{
 					id: "restart-background-task",
@@ -267,6 +269,26 @@ describe("foreground daemon process harness", () => {
 		};
 		const same = (expected: State) => (state: State) =>
 			JSON.stringify(state) === JSON.stringify(expected);
+		// The ledger's task lists for this session, in order, with the label each came under.
+		const taskLists = () => {
+			const db = new DatabaseSync(harness?.daemonStorePath() ?? "", {
+				readOnly: true,
+			});
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT json_extract(entry_json, '$.command.observation.label') AS label, json_array_length(json_extract(entry_json, '$.command.observation.tasks')) AS tasks FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.command.observation.kind') = 'tasks_snapshot' ORDER BY entry_seq",
+						)
+						.all(sessionId) as { label: string; tasks: number }[]
+				).map(({ label, tasks }) => ({ label, tasks }));
+			} finally {
+				db.close();
+			}
+		};
+		const querySeqOf = (label: string | undefined) =>
+			Number(label?.slice(label.lastIndexOf(":") + 1));
+		let lists: ReturnType<typeof taskLists> = [];
 		const restart = async (holdCatchUp: boolean) => {
 			await harness?.kill();
 			await harness?.restart(
@@ -298,17 +320,43 @@ describe("foreground daemon process harness", () => {
 			const ending = browser.frames.length;
 			writeFileSync(join(harness.root, "restart-background-change"), "end");
 			await settle("ended", same(none), ending);
+			// Failure modes (lane audit 193-196): 193. the new query keeps the ended query's
+			// certainty instead of starting Unknown under its own label; 194. the new query lists
+			// nothing, so the session reads as checking until a task starts; 195. the host replays
+			// the ended query's list under its old label, which the ledger ignores, so a reattach
+			// reads as checking for good; 196. the new query's list carries the replaced one's
+			// tasks. The SDK lists nothing when a CLI process starts (sdk.d.ts
+			// background_tasks_changed), so a new query's list is empty under its own label.
+			const sending = browser.frames.length;
 			await browser.send(sessionId, "second query");
-			states["second-query"] = rows(0).at(-1) ?? none;
+			// The row the turn ended on: the new query's empty list has settled it, not checking.
+			states["second-query"] = stateOf(
+				await browser.waitFor(
+					(message) =>
+						message["type"] === "session_row" &&
+						message["id"] === sessionId &&
+						message["status"] === "idle",
+					sending,
+					5000,
+				),
+			);
 			expect(states["second-query"]).toEqual(none);
-			// Reattached after its query was replaced: checking while the catch-up is held.
+			lists = taskLists();
+			const [ended, replaced] = lists.slice(-2);
+			expect(replaced?.tasks).toEqual(0);
+			expect(ended?.label).toMatch(/:\d+$/);
+			expect(querySeqOf(replaced?.label)).toBe(querySeqOf(ended?.label) + 1);
+			// Reattached after its query was replaced: the list is the new query's (L1, CONTRACT.md
+			// 350-353), so it shows while the catch-up is held and after it lands.
 			await restart(true);
-			await settle("replaced-query", same({ ...none, tasksChecking: true }));
+			await settle("replaced-query", same(none));
+			await restart(false);
+			await settle("replaced-caught-up", same(none));
 		} finally {
 			mkdirSync("test-results/process-harness", { recursive: true });
 			writeFileSync(
 				"test-results/process-harness/background-checking-state.json",
-				JSON.stringify({ sessionId, states }, null, 2),
+				JSON.stringify({ sessionId, states, taskLists: lists }, null, 2),
 			);
 		}
 	});
@@ -497,7 +545,7 @@ describe("foreground daemon process harness", () => {
 				async () => {
 					after = await sessionBackground(browser, sessionId);
 					expect(after).toEqual({
-						backgroundWork: change === "replace" ? "monitoring" : null,
+						backgroundWork: change === "replace" ? "working" : null,
 						backgroundTasks: tasks.map((task) => ({
 							...task,
 							kind: "subagent",

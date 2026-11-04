@@ -96,7 +96,7 @@ it("publishes task additions and removals from onChange without another event", 
 		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(2);
 		expect(rows.at(-1)).toMatchObject({
-			backgroundWork: "monitoring",
+			backgroundWork: "working",
 			backgroundTasks: [{ ...a, firstSeenAt: 100 }],
 		});
 		publishLedgerTasks(liveness, {
@@ -106,7 +106,7 @@ it("publishes task additions and removals from onChange without another event", 
 		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(3);
 		expect(rows.at(-1)).toMatchObject({
-			backgroundWork: "monitoring",
+			backgroundWork: "working",
 			backgroundTasks: [
 				{ ...a, firstSeenAt: 100 },
 				{ ...b, firstSeenAt: 200 },
@@ -119,7 +119,7 @@ it("publishes task additions and removals from onChange without another event", 
 		});
 		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(4);
 		expect(rows.at(-1)).toMatchObject({
-			backgroundWork: "monitoring",
+			backgroundWork: "working",
 			backgroundTasks: [{ ...b, firstSeenAt: 200 }],
 		});
 		const reconnected = await runtime.runPromise(

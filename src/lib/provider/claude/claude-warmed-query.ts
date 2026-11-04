@@ -44,6 +44,8 @@ export interface EmptyClaudeQuery<Q extends { close(): void }> {
 }
 
 export interface WarmedClaudeQuery extends EmptyClaudeQuery<Query> {
+	/** The query replaced an earlier one of this runner (CONTRACT 6.1). */
+	readonly replaced: boolean;
 	bindContext(context: ClaudeSessionContext): void;
 }
 
@@ -242,7 +244,7 @@ export const makeClaudeWarmedQueryOwner = (
 	prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>,
 	readGoalStatus?: ReadClaudeGoalStatus,
 	onNativeSessionId?: (sessionId: string, nativeSessionId: string) => void,
-	onQueryStarted?: (query: Query) => void,
+	onQueryStarted?: (query: Query) => boolean,
 ) =>
 	Effect.gen(function* () {
 		const initializing = yield* FiberMap.make<symbol, void>();
@@ -332,9 +334,9 @@ export const makeClaudeWarmedQueryOwner = (
 								prepareQuery ? () => prepareQuery(input) : undefined,
 							);
 							// A warm query is the session's current one from creation (CONTRACT 6.1).
-							onQueryStarted?.(empty.query);
 							const resource: WarmedClaudeQuery = {
 								...empty,
+								replaced: onQueryStarted?.(empty.query) ?? false,
 								bindContext: (ctx) => {
 									context = ctx;
 								},

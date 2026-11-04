@@ -116,7 +116,8 @@ export function taskKind(task: BackgroundTask): {
 	return (
 		KINDS[task.type] ?? {
 			icon: "zap",
-			label: task.type.replaceAll("_", " "),
+			// 8.2 (CONTRACT.md 2778-2779): a kind conduit does not know is its raw task_type.
+			label: task.kind ?? task.type,
 			hue: "var(--color-text-dimmer)",
 		}
 	);

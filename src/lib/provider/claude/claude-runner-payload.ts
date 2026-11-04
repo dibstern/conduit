@@ -273,7 +273,8 @@ export type ClaudeSessionRunnerDeps = Pick<
 	) => void;
 	readonly prepareQuery?: (input: ClaudePreWarmSessionInput) => Promise<void>;
 	/** Each SDK query this runner creates, as its output names it (CONTRACT 6.1). */
-	readonly onQueryStarted?: (query: Query) => void;
+	/** True when the query replaced an earlier one of this runner. */
+	readonly onQueryStarted?: (query: Query) => boolean;
 };
 
 export interface ClaudeProviderRuntimeState {
@@ -698,7 +699,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			const ctx =
 				ended ?? (yield* getSession(this.stateRef, transition.sessionId));
 			const tasks = transition.kind === "snapshot" ? transition.tasks : [];
-			if (ctx) ctx.liveBackgroundTaskCount = tasks.length;
+			// Ambient tasks hold neither the query nor the runner, as on main (runner-idle.ts).
+			if (ctx)
+				ctx.liveBackgroundTaskCount = tasks.filter(
+					(task) => !task.ambient,
+				).length;
 			// 8.2, 8.3: the ledger's task set, labelled by the daemon. A query's end clears its
 			// stream's tasks (CONTRACT.md 2825-2826), so it reports an empty set.
 			if (ctx?.eventSink)
@@ -706,10 +711,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					.push(
 						claudeRuntimeEvent("evidence.tasks_snapshot", ctx.sessionId, {
 							label: "",
-							tasks: tasks.map(({ id, type, ...display }) => ({
+							tasks: tasks.map(({ id, type, ambient, ...display }) => ({
 								key: { taskId: id },
 								taskType: type,
-								ambient: false,
+								ambient: ambient === true,
 								...display,
 							})),
 						}),
@@ -1411,7 +1416,8 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							new ClaudeBoundaryError({ operation: "Claude SDK", cause }),
 					}));
 				activeQuery = query;
-				this.deps.onQueryStarted?.(query);
+				const replaced =
+					warmed?.replaced ?? this.deps.onQueryStarted?.(query) ?? false;
 				if (launchInput.clearInheritedGoal)
 					yield* Effect.tryPromise({
 						try: () => query.initializationResult(),
@@ -1449,6 +1455,19 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						}),
 					)
 					.pipe(Effect.ignore);
+				// A replacing query is a new CLI process, which lists no background tasks at
+				// startup (sdk.d.ts background_tasks_changed), so its set starts empty under its
+				// own label. The host keeps it and replays it on attach, settling a reattach after
+				// a replaced query (CONTRACT.md 2805, 2810-2814). A first query is already empty.
+				if (replaced)
+					yield* input.eventSink
+						.push(
+							claudeRuntimeEvent("evidence.tasks_snapshot", sessionId, {
+								label: "",
+								tasks: [],
+							}),
+						)
+						.pipe(Effect.ignore);
 
 				const translator = makeClaudeTranslationService({
 					getSink: (ctx) => ctx.eventSink,

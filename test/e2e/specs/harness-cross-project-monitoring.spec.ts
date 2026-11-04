@@ -60,6 +60,7 @@ async function exercise(
 		owner: string;
 		version: number;
 		attention: unknown;
+		backgroundWork: unknown;
 	}[] = [];
 	let browseRefetchCount = 0;
 	let existingShell: (typeof shellRequests)[number] | undefined;
@@ -121,6 +122,8 @@ async function exercise(
 						owner: String(item.projectSlug),
 						version: Number(value.sequence),
 						attention: "attention" in item ? item.attention : undefined,
+						backgroundWork:
+							"backgroundWork" in item ? item.backgroundWork : undefined,
 					});
 				}
 			}
@@ -172,9 +175,10 @@ async function exercise(
 		expect(browseRefetchCount).toBe(0);
 
 		const result = await driverB.send(sessionB, "upgrade-background-work");
+		// 8.2 (CONTRACT.md 2778-2781): the live task is a shell, so it reads as work.
 		expect(result.done["status"]).toBe("idle");
 		// B's transition must use A's existing shell request, without a browse RPC.
-		await expect(row).toHaveAttribute("aria-label", /^Monitoring,/, {
+		await expect(row).toHaveAttribute("aria-label", /^Working,/, {
 			timeout: 5000,
 		});
 		expect(page.url()).toBe(projectAUrl);
@@ -184,7 +188,8 @@ async function exercise(
 					(upsert) =>
 						upsert.sessionId === sessionB &&
 						upsert.owner === slugB &&
-						upsert.attention === "monitoring" &&
+						upsert.attention === "working" &&
+						upsert.backgroundWork === "working" &&
 						upsert.socket === existingShell?.socket &&
 						upsert.requestId === existingShell?.requestId &&
 						upsert.version > 0,
@@ -207,8 +212,8 @@ async function exercise(
 			};
 			const before = await readB();
 			expect(before).toMatchObject({
-				attention: "monitoring",
-				backgroundWork: "monitoring",
+				attention: "working",
+				backgroundWork: "working",
 				status: "idle",
 			});
 			expect(before.backgroundTasks).toHaveLength(1);
@@ -230,16 +235,16 @@ async function exercise(
 					message["type"] === "session_row" && message["id"] === sessionB,
 			);
 			expect(shell).toMatchObject({
-				attention: "monitoring",
-				backgroundWork: "monitoring",
+				attention: "working",
+				backgroundWork: "working",
 				backgroundTasks: before.backgroundTasks,
 			});
 			expect(await readB()).toMatchObject({
-				attention: "monitoring",
-				backgroundWork: "monitoring",
+				attention: "working",
+				backgroundWork: "working",
 				backgroundTasks: before.backgroundTasks,
 			});
-			await expect(row).toHaveAttribute("aria-label", /^Monitoring,/);
+			await expect(row).toHaveAttribute("aria-label", /^Working,/);
 			expect(page.url()).toBe(projectAUrl);
 			await record();
 		}

@@ -14,10 +14,7 @@ import type {
 	EventDelivery,
 	Interests,
 } from "../../../server/event-audiences.js";
-import {
-	classify,
-	type SessionBackground,
-} from "../../../session/background-liveness.js";
+import type { SessionBackground } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
 import type { BackgroundTask, SessionServer } from "../../../shared-types.js";
@@ -88,7 +85,11 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			if (moved) changed(sessionId);
 			return moved;
 		},
-		backgroundOf(sessionId: string): SessionBackground | undefined {
+		/** `serving`: task ids whose linked server makes them calm (8.2). */
+		backgroundOf(
+			sessionId: string,
+			serving: ReadonlySet<string> = new Set(),
+		): SessionBackground | undefined {
 			const entry = views.get(sessionId);
 			if (entry?.view.tag === "unknown") return { tasks: [], checking: true };
 			if (entry?.view.tag !== "live") return undefined;
@@ -105,7 +106,12 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 					};
 				})
 				.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
-			return { work: classify(tasks), tasks };
+			// 8.2 (CONTRACT.md 2778-2781): the ledger's class decides; only work tasks
+			// not serving a server make the session work.
+			const working = entry.view.tasks.some(
+				(task) => task.class === "work" && !serving.has(task.key.taskId),
+			);
+			return { work: working ? "working" : "monitoring", tasks };
 		},
 		/** 8.3: tasks live or unknown may still act. */
 		hasLiveWork(sessionId: string): boolean {
@@ -194,7 +200,6 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 					background.hasLiveWork(sessionId) || servers.has(sessionId),
 				backgroundOf: (sessionId) => {
 					// 8.2: a task with a live linked server and no declared awaited covering it is serving.
-					const found = background.backgroundOf(sessionId);
 					const linked = (servers.get(sessionId) ?? []).flatMap(
 						({ taskId, role }) =>
 							taskId === undefined ? [] : [{ taskId, role }],
@@ -214,12 +219,11 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 					const awaits = (servers.get(sessionId) ?? []).some(
 						({ role }) => role === "awaited",
 					);
+					const found = background.backgroundOf(sessionId, serving);
 					if (!found)
 						return awaits ? { work: "working", tasks: [] } : undefined;
 					if (awaits) return { ...found, work: "working" };
-					return found.checking
-						? found
-						: { ...found, work: classify(found.tasks, serving) };
+					return found;
 				},
 			},
 			compactions: {

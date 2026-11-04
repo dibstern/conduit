@@ -489,7 +489,8 @@ test("Stop all works after the foreground result and leaves the same query usabl
 			taskStopFixture.map((task) => task.description),
 		);
 		await steps.record("foreground-ended-tasks-live");
-		await expect(sidebarRow).toHaveAttribute("aria-label", /^Monitoring/);
+		// 8.2 (CONTRACT.md 2778-2781): shells and subagents are work.
+		await expect(sidebarRow).toHaveAttribute("aria-label", /^Working/);
 		await page.getByTestId("background-tasks-stop-all").click();
 		await expect.poll(() => requestedIds(harness)).toHaveLength(4);
 		await expectTasks(
@@ -503,8 +504,8 @@ test("Stop all works after the foreground result and leaves the same query usabl
 		).toHaveCount(0);
 		await expect(
 			sidebarRow,
-			"Stop all left the sidebar row monitoring",
-		).not.toHaveAttribute("aria-label", /^Monitoring/);
+			"Stop all left the sidebar row working",
+		).not.toHaveAttribute("aria-label", /^Working/);
 		assertTurnUntouched(harness, queryId);
 		await steps.record("idle-tasks-confirmed-stopped");
 		release(harness, "task-stop-release-input");

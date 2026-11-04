@@ -536,8 +536,9 @@ it("a server a Claude background task started is linked to that task, which read
 		(frame) => row(frame) !== undefined && row(frame)?.servers === undefined,
 		cursor,
 	);
+	// 8.2 (CONTRACT.md 2778-2781): without its server the shell is work again.
 	expect(row(gone)).toMatchObject({
-		backgroundWork: "monitoring",
+		backgroundWork: "working",
 		backgroundTasks: [{ id: taskId }],
 	});
 

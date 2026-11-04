@@ -798,7 +798,7 @@ it("keeps a replaced query's workspace move and native id out of the Claude laun
 						...callbacks,
 						queryStarted: (query) => {
 							started.push(query);
-							callbacks.queryStarted(query);
+							return callbacks.queryStarted(query);
 						},
 					}).pipe(
 						Effect.orDie,

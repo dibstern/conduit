@@ -35,7 +35,11 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 				sequence: row.sequence,
 				...(JSON.parse(row.data) as {
 					label: string;
-					tasks: { key: { taskId: string }; taskType: string }[];
+					tasks: {
+						key: { taskId: string };
+						taskType: string;
+						ambient: boolean;
+					}[];
 				}),
 			})),
 			folded: (
@@ -143,5 +147,118 @@ describe("Claude background tasks reach the UI through the Run Ledger", () => {
 			sequence: ended.snapshots.at(-1)?.sequence,
 			taskIds: [],
 		});
+	});
+
+	// 8.2 (CONTRACT.md 2778-2781): any other task_type is its own kind, verbatim. How it could fail
+	// (lane audit 182-184): 182. the unknown task_type is dropped or renamed on its way to the row;
+	// 183. it shows but is not counted, so the session reads as idle; 184. the header names it
+	// differently from the row (features/session-background-tasks.feature).
+	it("shows a task of an unknown kind under its raw name and counts it as work", async () => {
+		harness = await ProcessHarness.start({});
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Unknown task kind");
+		const tasks = [
+			{
+				task_id: "future-task",
+				task_type: "future_task",
+				description: "Sync the remote index",
+			},
+		];
+		await browser.send(sessionId, `background-tasks:${JSON.stringify(tasks)}`);
+		const row = await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				Array.isArray(message["backgroundTasks"]),
+		);
+		proof["unknownKind"] = {
+			backgroundWork: row["backgroundWork"],
+			backgroundTasks: row["backgroundTasks"],
+			attention: row["attention"],
+		};
+		expect(row["backgroundTasks"]).toEqual([
+			expect.objectContaining({
+				id: "future-task",
+				type: "future_task",
+				kind: "future_task",
+			}),
+		]);
+		expect(row["backgroundWork"]).toBe("working");
+		expect(row["attention"]).toBe("working");
+	});
+
+	// 8.2 (CONTRACT.md 2779-2781): a task is monitoring if it is ambient or a monitor, otherwise
+	// work, so a shell is work. 8.1 deletes the ambient filter: ambient tasks still count. How it
+	// could fail (lane audit 185-188): 185. the translator drops ambient tasks, so the ledger never
+	// counts them; 186. the snapshot marks every task not ambient, so a watcher reads as work;
+	// 187. the reader classifies by its own list of task types, so a monitor reads as work;
+	// 188. ... and a shell reads as monitoring.
+	it("reads ambient and monitor tasks as monitoring and a shell as work", async () => {
+		harness = await ProcessHarness.start({});
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Task classes");
+		const rowAfter = async (tasks: readonly Record<string, unknown>[]) => {
+			const cursor = browser.frames.length;
+			await browser.send(
+				sessionId,
+				`background-tasks:${JSON.stringify(tasks)}`,
+			);
+			return browser.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["id"] === sessionId &&
+					Array.isArray(message["backgroundTasks"]) &&
+					message["backgroundTasks"].length === tasks.length,
+				cursor,
+			);
+		};
+		const watching = await rowAfter([
+			{
+				task_id: "ambient-watcher",
+				task_type: "local_bash",
+				description: "Watch the settings file",
+				ambient: true,
+			},
+			{
+				task_id: "build-monitor",
+				task_type: "monitor",
+				description: "Monitor the build",
+			},
+		]);
+		const stored = read(harness, sessionId).snapshots.at(-1);
+		proof["classes"] = {
+			watching: {
+				backgroundWork: watching["backgroundWork"],
+				backgroundTasks: watching["backgroundTasks"],
+				stored,
+			},
+		};
+		expect(stored?.tasks).toEqual([
+			expect.objectContaining({ taskType: "local_bash", ambient: true }),
+			expect.objectContaining({ taskType: "monitor", ambient: false }),
+		]);
+		expect(watching["backgroundTasks"]).toEqual([
+			expect.objectContaining({ id: "ambient-watcher", kind: "shell" }),
+			expect.objectContaining({ id: "build-monitor", kind: "monitor" }),
+		]);
+		expect(watching["backgroundWork"]).toBe("monitoring");
+		expect(watching["attention"]).toBe("monitoring");
+
+		const shell = await rowAfter([
+			{
+				task_id: "test-shell",
+				task_type: "local_bash",
+				description: "Run the tests",
+			},
+		]);
+		(proof["classes"] as Record<string, unknown>)["shell"] = {
+			backgroundWork: shell["backgroundWork"],
+			backgroundTasks: shell["backgroundTasks"],
+		};
+		expect(shell["backgroundTasks"]).toEqual([
+			expect.objectContaining({ id: "test-shell", kind: "shell" }),
+		]);
+		expect(shell["backgroundWork"]).toBe("working");
+		expect(shell["attention"]).toBe("working");
 	});
 });

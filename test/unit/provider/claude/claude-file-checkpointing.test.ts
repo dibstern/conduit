@@ -113,7 +113,7 @@ it.each([
 					isCandidate: () => false,
 					isBackgroundBusy: () => false,
 					turnStateChanged: () => {},
-					queryStarted: () => {},
+					queryStarted: () => false,
 					isReplacedQuery: () => false,
 					readThread: () => Effect.succeed({ items: [] }),
 					markServer: () => Effect.succeed({ ok: true }),
