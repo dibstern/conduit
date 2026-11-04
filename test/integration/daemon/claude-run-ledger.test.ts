@@ -798,8 +798,12 @@ describe("Claude on the Run Ledger", () => {
 				db.close();
 			}
 		};
+		// The goal fact lands after a full provider round trip, so it gets this file's store-read budget.
 		// test-waits-allow polling: the goal fact reaches the store with no browser frame.
-		await vi.waitFor(() => expect(goals()).toHaveLength(1));
+		await vi.waitFor(() => expect(goals()).toHaveLength(1), {
+			timeout: 10_000,
+			interval: 50,
+		});
 		await fixture.waitForMark(
 			(mark) => mark.kind === "enqueue" && mark.prompt === stall,
 		);
