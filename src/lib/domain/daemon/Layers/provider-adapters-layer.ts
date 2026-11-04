@@ -31,6 +31,7 @@ import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/re
 import {
 	ledgerNativeCommandsWakes,
 	ledgerTasksWakes,
+	loadLedgerView,
 } from "../../../persistence/effect/run-ledger-arm.js";
 import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.js";
 import type { ClaudeProviderInstanceDeps } from "../../../provider/claude/claude-provider-runtime.js";
@@ -338,6 +339,17 @@ export const makeProviderAdaptersLive = (
 				);
 			};
 			listenForTasks(sql);
+			// 8.7: a server outlives a restart and stays listed before any event touches its session;
+			// the arm's own first hand-over waits for the next event.
+			for (const { session_id } of yield* sql<{
+				session_id: string;
+			}>`SELECT session_id FROM run_ledger_sessions WHERE state = 'Open'`) {
+				const view = yield* loadLedgerView(session_id).pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				);
+				if (view?.servers?.size)
+					onLedgerTasks(session_id, view.tasks, undefined, view);
+			}
 			// A server's gate link moves its session's row too.
 			activity.onServersMoved.add(announce);
 			yield* Effect.addFinalizer(() =>
