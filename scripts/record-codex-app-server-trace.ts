@@ -4905,7 +4905,9 @@ async function replay(root: string, selected: readonly Scenario[]) {
 										return {};
 									}),
 							);
-							const intake = yield* runner.executeEffect({
+							// The runner host's path (codex-runner-launch.ts): a native child
+							// owns payload sinks, never the daemon's admitted send handle.
+							const intake = yield* runner.executeNativeEffect({
 								type: "send-turn",
 								sinkId: "replay-sink",
 								aborted: false,
@@ -4921,6 +4923,12 @@ async function replay(root: string, selected: readonly Scenario[]) {
 									extraFolders: [],
 									model: { providerId: "codex", modelId: model },
 									permissionMode: "ask",
+									// What the driver's prepare decides (codex-runner-driver.ts).
+									facts: {
+										_tag: "Codex",
+										skill: { _tag: "None" },
+										truncate: { _tag: "None" },
+									},
 								},
 							});
 							yield* Deferred.await(finished).pipe(
