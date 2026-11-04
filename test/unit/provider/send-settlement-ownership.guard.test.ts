@@ -88,7 +88,9 @@ describe("send settlement ownership", () => {
 	});
 
 	// The cap reports its own ledger evidence (CONTRACT 1521-1524); its turn.error is Settle's.
-	it("constructs only dispatch, release and the cap's evidence in the lifecycle gate", () => {
+	// A first hold after its runner's retirement unlaunched the start also requests that Run again
+	// (CONTRACT 674-679); no settlement is constructed here.
+	it("constructs only dispatch, release, the relaunch's request and the cap's evidence in the lifecycle gate", () => {
 		const file = join(root, "src/lib/provider/runner/runner-retirement.ts");
 		const source = ts.createSourceFile(
 			file,
@@ -112,6 +114,7 @@ describe("send settlement ownership", () => {
 			"evidence.hold_exhausted",
 			"run.dispatched",
 			"run.released",
+			"run.requested",
 		]);
 	});
 

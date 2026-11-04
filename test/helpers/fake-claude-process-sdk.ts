@@ -63,6 +63,14 @@ function injectedResetAt(configDir: string | undefined): number | undefined {
 }
 
 export type ProcessMark =
+	// The daemon's own send-continuation pause (process-session-runner.ts pauseSend).
+	| {
+			kind: "send-continuation-paused";
+			point: "before-hold" | "after-hold" | "after-release";
+			sessionId: string;
+			runId: string;
+			commandId: string;
+	  }
 	| {
 			kind: "startup-phase";
 			phase: "add-project-start" | "add-project-returned" | "ready-attempt";

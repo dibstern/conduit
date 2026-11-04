@@ -149,12 +149,14 @@ describe("Claude on the Run Ledger", () => {
 
 	const start = async (
 		options: Omit<Parameters<typeof ProcessHarness.start>[0], "dist"> = {},
+		boot?: Parameters<ProcessHarness["restart"]>[0],
 	) => {
-		harness = await ProcessHarness.start({
+		harness = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 			restartProof: true,
 			...options,
 		});
+		await harness.restart(boot);
 		const browser = await harness.connect();
 		await browser.setAutoSettle(null);
 		return { fixture: harness, browser };
@@ -692,6 +694,82 @@ describe("Claude on the Run Ledger", () => {
 			ends: ledger.ends,
 			runs: ledger.runs,
 			types: ledger.events.map(({ type }) => type),
+		});
+	});
+
+	it("ends a send's Run once on a new runner when its runner dies after the send launched, before its hold", async () => {
+		const { fixture, browser } = await start(
+			{
+				claudeReplay: {
+					turns: ["background-shell-turn", "pong-thinking-text-turn"],
+					followWorkspaceDirectives: true,
+				},
+			},
+			{
+				serviceEnvironment: {
+					CONDUIT_TEST_SEND_CONTINUATION_PAUSE: "before-hold",
+				},
+			},
+		);
+		const sessionId = await browser.createSession("Claude ledger hold loss");
+		const hold = join(fixture.root, "claude-replay-hold");
+		writeFileSync(hold, JSON.stringify({ turn: 1, message: 153, id: 1 }));
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		// test-waits-allow polling: the held replay line reports only through this file.
+		await vi.waitFor(() => expect(existsSync(`${hold}.reached`)).toBe(true), {
+			timeout: 10_000,
+		});
+		const queued = browser.send(sessionId, "ping");
+		// test-waits-allow polling: the browser sees no frame when a Queued send is admitted.
+		await vi.waitFor(() =>
+			expect(
+				read(fixture, sessionId).events.filter(
+					(event) => event.type === "input.admitted",
+				),
+			).toHaveLength(2),
+		);
+		// F321: the wake ends on its runner, main launches the send there and pauses before its hold.
+		const gate = join(
+			fixture.root,
+			"conduit-test-send-continuation-before-hold",
+		);
+		writeFileSync(gate, "hold");
+		rmSync(hold, { force: true });
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "send-continuation-paused" &&
+				mark["point"] === "before-hold",
+		);
+		const [dead] = fixture.runnerPids();
+		expect(dead && fixture.signalOwnedRunner(dead, "SIGKILL")).toBe(true);
+		// test-waits-allow polling: a runner's loss reaches the browser as no frame.
+		await vi.waitFor(() =>
+			expect(
+				read(fixture, sessionId).events.some(
+					(event) => event.type === "evidence.process_lost",
+				),
+			).toBe(true),
+		);
+		rmSync(gate, { force: true });
+		// F322: the send is answered once, by the new runner.
+		expect((await queued).chunks.join("")).toBe("pong");
+		const ledger = read(fixture, sessionId);
+		// The send's Run launched on the old runner before its loss, and main requested it again
+		// once after (CONTRACT 674-679).
+		const types = ledger.events.map(({ type }) => type);
+		const lost = types.indexOf("evidence.process_lost");
+		expect(types.indexOf("run.requested")).toBeLessThan(lost);
+		expect(
+			types.slice(lost).filter((type) => type === "run.requested"),
+		).toHaveLength(1);
+		// F321, F323: every Run main started ends once in the ledger, the relaunched send's included.
+		endsOnce(ledger);
+		proofs.push({
+			case: "hold-runner-lost",
+			sessionId,
+			ends: ledger.ends,
+			runs: ledger.runs,
+			types,
 		});
 	});
 
