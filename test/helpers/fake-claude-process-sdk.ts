@@ -2578,6 +2578,15 @@ function query(params: {
 				}
 				if (closed) return;
 			}
+			// The SDK's live set as the prompt gives it (JSON after the prefix); `[]` empties it.
+			if (request.startsWith("background-tasks:"))
+				yield {
+					type: "system",
+					subtype: "background_tasks_changed",
+					session_id: sessionId,
+					uuid: randomUUID(),
+					tasks: JSON.parse(request.slice("background-tasks:".length)),
+				} as unknown as SDKMessage;
 			if (request === "restart-background-work") {
 				yield {
 					type: "system",

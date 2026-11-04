@@ -144,4 +144,42 @@ describe("Claude background tasks reach the UI through the Run Ledger", () => {
 			taskIds: [],
 		});
 	});
+
+	// 8.2 (CONTRACT.md 2778-2781): any other task_type is its own kind, verbatim. How it could fail
+	// (lane audit 182-184): 182. the unknown task_type is dropped or renamed on its way to the row;
+	// 183. it shows but is not counted, so the session reads as idle; 184. the header names it
+	// differently from the row (features/session-background-tasks.feature).
+	it("shows a task of an unknown kind under its raw name and counts it as work", async () => {
+		harness = await ProcessHarness.start({});
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Unknown task kind");
+		const tasks = [
+			{
+				task_id: "future-task",
+				task_type: "future_task",
+				description: "Sync the remote index",
+			},
+		];
+		await browser.send(sessionId, `background-tasks:${JSON.stringify(tasks)}`);
+		const row = await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				Array.isArray(message["backgroundTasks"]),
+		);
+		proof["unknownKind"] = {
+			backgroundWork: row["backgroundWork"],
+			backgroundTasks: row["backgroundTasks"],
+			attention: row["attention"],
+		};
+		expect(row["backgroundTasks"]).toEqual([
+			expect.objectContaining({
+				id: "future-task",
+				type: "future_task",
+				kind: "future_task",
+			}),
+		]);
+		expect(row["backgroundWork"]).toBe("working");
+		expect(row["attention"]).toBe("working");
+	});
 });

@@ -186,6 +186,15 @@ Scenario: Stopping an agent requests its nested tasks before the agent
   Then the background tasks pull-down asks to stop n2, n1, a1 without cancelling the session
   And the composer shows no task dots
 
+Scenario: A task of a kind conduit does not know shows under its raw name and counts as a task
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has a live background task of the unknown kind future_task
+  When I click the background tasks row
+  Then the background tasks pull-down lists 1 background task of kind future_task
+
 Scenario: Unsupported providers show live tasks without stop controls
   Given the conduit app is served with the connected mockup
   And the viewport is a phone

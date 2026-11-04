@@ -391,6 +391,37 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "seed a task of a kind conduit does not know",
+		match: /^the session has a live background task of the unknown kind (\S+)$/,
+		run: async ({ world, match }) => {
+			await setLiveTasks(world.page, [
+				{
+					id: "u1",
+					type: match[1] ?? "",
+					description: "Sync the remote index",
+					age: 12,
+				},
+			]);
+		},
+	},
+	{
+		name: "assert the pull-down names each task's kind",
+		match:
+			/^the background tasks pull-down lists (\d+) background tasks? of kind (\S+)$/,
+		run: async ({ world, match }) => {
+			const count = Number(match[1]);
+			const panel = world.page.getByTestId("background-tasks-panel");
+			await expect(panel).toContainText(
+				`${count} background task${count === 1 ? "" : "s"}`,
+			);
+			await expect(
+				panel
+					.getByTestId("background-task")
+					.getByTestId("background-task-kind"),
+			).toHaveText(Array.from({ length: count }, () => match[2] ?? ""));
+		},
+	},
+	{
 		name: "seed launcher details",
 		match: /^the background task launcher details are available$/,
 		run: async ({ world }) => {
