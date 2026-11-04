@@ -26,7 +26,8 @@
 // 277. a restart inside a goal's successor window ends the Run early, twice, or reads the
 //      successor as a wake;
 // 278. a send the daemon claimed but had not yet handed to the runner when it died never runs,
-//      or runs twice.
+//      or runs twice;
+// 279. output the runner sent before the restart is lost or lands twice.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -666,7 +667,8 @@ describe("Codex on the Run Ledger", () => {
 			({ message }) => message?.method === "item/agentMessage/delta",
 		)?.["at"];
 		writeFileSync(gatePath, String(delta));
-		await submit(browser, sessionId, "Say hello");
+		const inputId = randomUUID();
+		await submit(browser, sessionId, "Say hello", "queue", inputId);
 		// test-waits-allow polling: the app-server's output reaches only its capture file.
 		await vi.waitFor(
 			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
@@ -685,6 +687,16 @@ describe("Codex on the Run Ledger", () => {
 		]);
 		reattachedOnce(ledger);
 		expect(captured("turn/start", "out")).toHaveLength(1);
+		// F279: output the runner sent before the restart lands once, not again on reattach.
+		expect(
+			ledger.events.filter(
+				({ type, messageId }) => type === "text.delta" && messageId !== inputId,
+			),
+		).toHaveLength(
+			fixtureRows("basic").filter(
+				({ message }) => message?.method === "item/agentMessage/delta",
+			).length,
+		);
 		prove("restart-mid-turn", ledger);
 	});
 
