@@ -532,10 +532,21 @@ export function translateCommand(
 		to.host.isHeld(held)
 	)
 		to.bindTransmission(binding.issue, observation.transmission);
+	// D60, 3.13: a direct send's token is main's runId, the same on both hosts, so a direct relaunch
+	// (numbered 1 again as a new claim) is named by its token, not by its issue's transmission count.
+	const issued = binding && from.issued[binding.issue];
+	const direct =
+		issued?.tag === "Main" &&
+		(issued.effect.kind === "start" || issued.effect.kind === "steer") &&
+		!from.host.isHeld(issued);
 	const target =
 		binding &&
 		to.bindings.find(
-			(item) => item.issue === binding.issue && item.n === binding.n,
+			(item) =>
+				item.issue === binding.issue &&
+				(direct
+					? item.send.token === binding.send.token
+					: item.n === binding.n),
 		);
 	if (!target) return command;
 	const commandId =
