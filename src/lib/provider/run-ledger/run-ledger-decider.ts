@@ -605,6 +605,8 @@ function retryPending(book: Book, run: Run, send: Send): boolean {
 		send.exhausted ||
 		latest?.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		// 3.6 (CONTRACT.md 699-701): coverage withdraws a retry, though evidence ended the work first.
+		latest.covered !== undefined ||
 		latest.mainEnded ||
 		latest.resumeRejected ||
 		latest.stopOwn ||
@@ -1283,11 +1285,14 @@ function effectOutcome(
 			openRecovery(book, fact, send, tx);
 			return changed;
 	}
-	// 3.4: main claims a control's row again after a retryable outcome on its latest claim.
+	// 3.4: main claims a control's row again after a retryable outcome on its latest claim, unless
+	// a sweep's or a raced outcome already ended the row: Failed and Sent beat Retrying in the join
+	// (CONTRACT.md 465, 476, 560-561), so a late retryable revives nothing.
 	if (
 		tx.n !== undefined &&
 		tx === send.txs.at(-1) &&
-		outcome.tag === "retryable"
+		outcome.tag === "retryable" &&
+		tx.transport.tag === "Retrying"
 	)
 		transmit(book, send, undefined);
 	seal(tx);
@@ -1971,16 +1976,17 @@ function unsolicited(
 		case "result": {
 			if (wake === undefined) {
 				// 3.4: a Claude result naming none, with no wake, answers each started send with no result.
-				const started = book.sends
-					.filter(delivers)
-					.filter((send) =>
-						send.txs.some(
-							(tx) =>
-								tx.label === label &&
-								tx.consumption.tag !== "None" &&
-								!tx.resulted,
-						),
-					);
+				const started = book.sends.filter(delivers).filter((send) =>
+					send.txs.some(
+						(tx) =>
+							tx.label === label &&
+							// started: consumption Observed or Accepted; a release or decline is no start
+							// (CONTRACT.md 501-505).
+							(tx.consumption.tag === "Observed" ||
+								tx.consumption.tag === "Accepted") &&
+							!tx.resulted,
+					),
+				);
 				if (
 					!nativePolicies[book.provider].capabilities.commandReceipts ||
 					started.length === 0
@@ -2103,8 +2109,15 @@ function observe(
 	observation: Extract<LedgerCommand, { verb: "observe" }>["observation"],
 ): Outcome {
 	switch (observation.tag) {
-		case "Unsolicited":
-			return unsolicited(book, fact, step, observation);
+		case "Unsolicited": {
+			// 3.1, 3.4 (CONTRACT.md 290-291, 496-497): the (label, event id) pair is the identity, so its
+			// first arrival records even when it changes nothing else; a later repeat is then a repeat.
+			const known = book.seen.size;
+			const outcome = unsolicited(book, fact, step, observation);
+			return outcome.tag === "Noop" && book.seen.size !== known
+				? changed
+				: outcome;
+		}
 		case "Main": {
 			const key = `main\u0000${observation.eventId}`;
 			if (book.seen.has(key)) return noop("repeated main observation (D60)");
@@ -3056,8 +3069,9 @@ export function evolve(
 function inputState(book: Book, run: Run, inputId: string): InputState {
 	const failed = book.inputs.get(inputId)?.failed;
 	if (failed !== undefined) return { tag: "Failed", reason: failed };
+	// 3.6 D50 (CONTRACT.md 671-672): a dropped send's late acceptance or start changes nothing.
 	const txs = deliverySends(book, run)
-		.filter((send) => send.effect.inputId === inputId)
+		.filter((send) => send.effect.inputId === inputId && !send.dropped)
 		.flatMap((send) => send.txs);
 	const accepted = txs.find((tx) => tx.consumption.tag === "Accepted");
 	if (accepted !== undefined)

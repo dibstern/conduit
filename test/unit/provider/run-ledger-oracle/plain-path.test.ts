@@ -1411,6 +1411,101 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a raced retryable after a sweep ended a control row joins its chains and revives nothing (3.4, 3.5)", () => {
+		// Long seed 82103201 (codex), failure mode 120: Failed beats Retrying in the transport join, so
+		// the row stays ended and main never claims it again (CONTRACT.md 465, 476, 560-561).
+		agreed("claude", (d) => {
+			lose(d, "r1");
+			end(d);
+			const issue = d.latest("end_session");
+			const answer = (
+				outcome: Extract<Evidence, { kind: "effect_outcome" }>["outcome"],
+			) =>
+				observe(d, tokenOf(issue), {
+					kind: "effect_outcome",
+					outcome,
+					transmission: claimOf(issue),
+				});
+			answer({ tag: "permanent", code: "provider_process_gone" });
+			answer({ tag: "retryable", retryAt: d.now + 100, code: "late" });
+			expect(d.view().live).toEqual([]);
+			expect(d.view().anythingMayAct).toBe(false);
+		});
+	});
+
+	it("coverage withdraws a declined start's retry, so its runner's loss ends a Run whose query already ended (3.6, 3.8)", () => {
+		// Long seed 82103200 (opencode), failure mode 126: the query's end had already ended the start's
+		// work, so retirement's coverage left no mark the retry check read, and the Run waited on a
+		// retry nothing could send. Coverage withdraws a retry (CONTRACT.md 699-701), and a covered
+		// send that possibly reached ends its Run process lost (CONTRACT.md 845-847, 863-866).
+		agreed("opencode", (d) => {
+			const { token } = begin(d);
+			observe(d, token, { kind: "query_ended" });
+			observe(d, token, { kind: "input_declined", reason: "busy" });
+			expect(lose(d, "r1").ended).toMatchObject([
+				{ reason: { tag: "process_lost" } },
+			]);
+		});
+	});
+
+	it("a result naming no input answers no send that never started, a released one included (3.4)", () => {
+		// Long seed 82103201 (claude), failure mode 124: a released start's chains read past None, so a
+		// result naming none, with no wake, answered it and showed its input sent. It names only the
+		// starts and steers that have started on that query (CONTRACT.md 501-505).
+		agreed("claude", (d) => {
+			const { token } = begin(d);
+			observe(d, token, { kind: "run_released", reason: "JournalAbsent" });
+			unsolicited(d, { kind: "result", outcome: "completed" });
+			expect(visibleInput(d, "A")).toEqual({
+				inputId: "A",
+				state: { tag: "Queued" },
+			});
+		});
+	});
+
+	it("a late start on a send an unlaunch dropped changes nothing, so its input stays queued (3.6 D50)", () => {
+		// Long seed 82103202 (codex), failure mode 127: a release returned the Run to Queued and
+		// dropped its send, then a late start on that send showed the input sent. The drop ends the
+		// send's work; a late acceptance or start on one changes nothing (CONTRACT.md 671-672).
+		agreed("codex", (d) => {
+			const { token } = begin(d);
+			observe(d, token, {
+				kind: "run_released",
+				reason: { tag: "Refused", why: "retiring" },
+			});
+			observe(d, token, { kind: "started" });
+			expect(visibleInput(d, "A")).toEqual({
+				inputId: "A",
+				state: { tag: "Queued" },
+			});
+		});
+	});
+
+	it("a repeated unsolicited event whose first arrival changed nothing is still a repeat (3.4, 3.1)", () => {
+		// Long seed 82103300 (claude), failure mode 122: a turn start that joined the outstanding
+		// wake execution recorded nothing, so the same (label, event id) after the Run ended opened
+		// another wake Run. Its identity is the pair; a repeat is Accepted with no events
+		// (CONTRACT.md 496-497).
+		agreed("claude", (d) => {
+			wake(d);
+			const repeat: LedgerCommand = {
+				verb: "observe",
+				observation: {
+					tag: "Unsolicited",
+					label: "r1:1",
+					eventId: "again",
+					kind: "turn_started",
+				},
+			};
+			step(d, repeat);
+			stop(d, d.now + 100);
+			fire(d);
+			expect(d.view().active).toBeUndefined();
+			step(d, repeat);
+			expect(d.view().active).toBeUndefined();
+		});
+	});
+
 	it("an end_session for a Run goes to its execution's runner, even after a replacement started (L2 case 2)", () => {
 		agreed("claude", (d) => {
 			const a = running(d);

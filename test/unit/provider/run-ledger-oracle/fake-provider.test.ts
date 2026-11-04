@@ -506,8 +506,9 @@ describe("fake provider round 3 alphabet", () => {
 				tasks: { tag: "unknown", label: fake.label },
 			},
 		});
+		// An odd input copies the confirm without the deferred query replacement.
 		fake.next(
-			{ ...action, operation: 6 },
+			{ ...action, operation: 6, input: 1 },
 			{ issued: [], view: pending(1), now: 0 },
 		);
 		started(fake, "host:2");

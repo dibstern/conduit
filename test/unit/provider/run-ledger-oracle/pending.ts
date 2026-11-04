@@ -10,7 +10,6 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 			[
 				"LI8, CONTRACT.md 978-997 (gap, 3.9: a steer main dispatches into an open Run mints its own run.requested; whether it joins that Run, so main's terminal for the open Run ends it, is undecided, 984. Wrong side undecided: the oracle lets the open Run's terminal end the steer's work, the fake keeps its native send unfinished)",
 				[
-					"claude oracle traces, seed 82103302",
 					"cursor oracle traces, seed 82103202",
 					"cursor oracle traces, seed 82103302",
 					"review trace R1-1",
@@ -34,12 +33,10 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 			[
 				"coverage, CONTRACT.md 3456-3477 (11.2: fc.check stops at the first failing trace, so the seeds pended above for the steer join (984) and GAP 5 cut generation short before these shapes. Wrong side: neither, the shapes wait on those two gaps)",
 				[
-					"confirm copied before a query replacement",
 					"not_sent start ended its Run",
 					"unheld_outcome after a reissue",
 					"unlaunch by retryable",
 					"joined Run's not_sent start retried in its execution",
-					"Stop of a late steer's turn",
 				].map((shape) => `generated traces reach ${shape}`),
 			],
 		] as const

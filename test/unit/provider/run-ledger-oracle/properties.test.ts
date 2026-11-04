@@ -322,6 +322,17 @@ class GenerationCommand implements fc.Command<{ now: number }, GenerationRun> {
 		}
 		real.fake.observe(packet.command, view);
 		real.issued.push(...real.fake.takeMainIssues().map(({ issue }) => issue));
+		// 8.5: with no decide here, a native command stands in for its send_native_command row.
+		if (command.verb === "control" && command.control.kind === "native_command")
+			real.issued.push({
+				tag: "Main",
+				commandId: command.control.commandId,
+				effect: {
+					kind: "send_native_command",
+					commandId: command.control.commandId,
+					text: command.control.text,
+				},
+			});
 		model.now = packet.now;
 	}
 	toString(): string {

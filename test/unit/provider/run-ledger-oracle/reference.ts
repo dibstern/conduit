@@ -507,6 +507,8 @@ function retryPending(world: World, run: Run, send: Send): boolean {
 		send.exhausted ||
 		latest.sealed === undefined ||
 		(latest.ended !== undefined && latest.ended !== "evidence") ||
+		// 3.6 (CONTRACT.md 699-701): coverage withdraws a retry, though evidence ended the work first.
+		latest.covered !== undefined ||
 		latest.mainEnded ||
 		latest.resumeRejected ||
 		latest.stopOwn ||
@@ -1330,7 +1332,10 @@ function unsolicited(
 						send.txs.some(
 							(tx) =>
 								tx.label === label &&
-								tx.consumption.tag !== "None" &&
+								// started: consumption Observed or Accepted; a release or decline is no start
+								// (CONTRACT.md 501-505).
+								(tx.consumption.tag === "Observed" ||
+									tx.consumption.tag === "Accepted") &&
 								!tx.resulted,
 						),
 				);
@@ -1825,11 +1830,14 @@ function effectOutcome(
 			openRecovery(world, step, send, tx);
 			return changed;
 	}
-	// 3.4: main claims a control's row again after a retryable outcome on its latest claim.
+	// 3.4: main claims a control's row again after a retryable outcome on its latest claim, unless
+	// a sweep's or a raced outcome already ended the row: Failed and Sent beat Retrying in the join
+	// (CONTRACT.md 465, 476, 560-561), so a late retryable revives nothing.
 	if (
 		tx.n !== undefined &&
 		tx === send.txs.at(-1) &&
-		outcome.tag === "retryable"
+		outcome.tag === "retryable" &&
+		tx.transport.tag === "Retrying"
 	)
 		transmit(world, send, undefined);
 	seal(tx);
@@ -2721,9 +2729,13 @@ function apply(world: World, command: LedgerCommand, step: Step): Outcome {
 					return mainEvent(world, observation);
 				case "Unsolicited": {
 					const raisedAt = world.snapshotEntry;
+					const known = world.seen.size;
 					const outcome = unsolicited(world, step, observation);
 					// L1, D44: accepted evidence on a newer querySeq raises its runner's label, so it records.
-					return outcome.tag === "Noop" && world.snapshotEntry !== raisedAt
+					// 3.1, 3.4 (CONTRACT.md 290-291, 496-497): so does a pair's first arrival, so a later
+					// repeat of it is a repeat.
+					return outcome.tag === "Noop" &&
+						(world.snapshotEntry !== raisedAt || world.seen.size !== known)
 						? { tag: "Changed", diagnostic: outcome.diagnostic }
 						: outcome;
 				}
@@ -2851,9 +2863,13 @@ function inputState(world: World, run: Run, inputId: string): InputState {
 	const input = world.inputs.get(inputId);
 	if (input?.failed !== undefined)
 		return { tag: "Failed", reason: input.failed };
+	// 3.6 D50 (CONTRACT.md 671-672): a dropped send's late acceptance or start changes nothing.
 	const txs = deliverySends(world, run)
 		.filter(
-			(send) => "inputId" in send.effect && send.effect.inputId === inputId,
+			(send) =>
+				"inputId" in send.effect &&
+				send.effect.inputId === inputId &&
+				!send.dropped,
 		)
 		.flatMap((send) => send.txs);
 	const accepted = txs.find((tx) => tx.consumption.tag === "Accepted");
