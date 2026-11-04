@@ -549,11 +549,12 @@ describe("Codex on the Run Ledger", () => {
 					.replaceAll('"id":5,', '"id":901,'),
 			),
 		});
-		// No exit row: the player's exit is not gated and races the runner's read of the send's rows.
+		// The app-server exits inside the send's goal successor window: the send's Run still completes.
 		const trace = [
 			...chain.slice(0, exit),
 			...sendTurn.map(renamed),
 			renamed(completed),
+			{ ...chain[exit], at },
 		] as TraceRow[];
 		const wakeEnd = chain.filter(
 			({ message }) => message?.method === "turn/completed",
