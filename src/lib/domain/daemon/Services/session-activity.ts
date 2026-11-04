@@ -82,9 +82,13 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 						: (snapshot?.at ?? Date.now()),
 			};
 			views.set(sessionId, next);
+			// A session not yet handed over shows no tasks, so a restart's first hand-over of none moves
+			// nothing and announces nothing.
 			const moved =
-				JSON.stringify([previous?.view, [...(previous?.display ?? [])]]) !==
-				JSON.stringify([view, [...display]]);
+				JSON.stringify([
+					previous?.view ?? { tag: "none" },
+					[...(previous?.display ?? [])],
+				]) !== JSON.stringify([view, [...display]]);
 			if (moved) changed(sessionId);
 			return moved;
 		},

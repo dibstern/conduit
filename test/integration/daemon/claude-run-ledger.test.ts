@@ -32,6 +32,8 @@
 // 320. the test releases the held wake before killing its runner, so the wake can end first and the
 //      runner take the send: that hand-over and its release then count as a second dispatch;
 // and the send's transcript changes, or its Run ends other than once.
+// 390. a restart's reattach report, which changes nothing, re-stamps the session row or its sidebar
+//      row (82tn.32.38), so every browser re-reads both.
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -247,6 +249,49 @@ describe("Claude on the Run Ledger", () => {
 			ends: ledger.ends,
 			runs: ledger.runs,
 		});
+	});
+
+	it("keeps the session and sidebar rows unstamped across a restart that changes nothing", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession(
+			"Claude ledger quiet restart",
+		);
+		await browser.send(sessionId, "claude-ledger-quiet-restart");
+		const rows = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return {
+					session: db
+						.prepare("SELECT version FROM sessions WHERE id = ?")
+						.get(sessionId),
+					sidebar: db
+						.prepare(
+							"SELECT version, row FROM session_sidebar WHERE session_id = (SELECT root_id FROM sessions WHERE id = ?)",
+						)
+						.get(sessionId),
+				};
+			} finally {
+				db.close();
+			}
+		};
+		await fixture.terminate();
+		const before = rows();
+		const cursor = fixture.marks.length;
+		await fixture.restart();
+		// The restart reports the surviving runner reattached (CONTRACT.md 2121-2125) and projects
+		// that report before the runner's attach mark; nothing a browser reads has changed.
+		await fixture.waitForMark(
+			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
+			cursor,
+		);
+		expect(
+			read(fixture, sessionId).events.some((event) => event.reattached === 1),
+		).toBe(true);
+		await fixture.connect(sessionId);
+		await fixture.terminate();
+		const after = rows();
+		expect(after).toEqual(before);
+		proofs.push({ case: "quiet restart", sessionId, before, after });
 	});
 
 	it("lands old's process_lost and R's process_started together in the swap commit", async () => {
