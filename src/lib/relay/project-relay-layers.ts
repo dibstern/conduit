@@ -161,7 +161,7 @@ import type { SessionManagerServiceTag } from "../domain/relay/Services/session-
 import { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	SessionSetupLive,
-	type SessionSetupTag,
+	SessionSetupTag,
 } from "../domain/relay/Services/session-setup.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
@@ -1092,10 +1092,17 @@ export function createProjectRelayLayers({
 		SessionStateProjectionNotifierLive,
 		baseLayers,
 	);
+	const sharedSetup = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionSetupTag,
+	);
 	const fullBaseLayers = Layer.provideMerge(
 		ProviderTurnServiceLive,
 		Layer.merge(
-			SessionSetupLive.pipe(
+			(Option.isSome(sharedSetup)
+				? Layer.sync(SessionSetupTag, () => sharedSetup.value)
+				: SessionSetupLive
+			).pipe(
 				Layer.provideMerge(
 					Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
 				),

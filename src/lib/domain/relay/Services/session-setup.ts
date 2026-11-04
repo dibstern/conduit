@@ -1,15 +1,32 @@
-import { Cause, Context, Deferred, Effect, Layer, Stream } from "effect";
+import {
+	Cause,
+	Context,
+	Deferred,
+	Effect,
+	Layer,
+	Option,
+	type Scope,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import type { SessionSetupFinishedPayloadSchema } from "../../../contracts/project-setup.js";
 import { readProjectFile } from "../../../daemon/project-file.js";
 import * as Failure from "../../../effect/failure-classification.js";
+import { createLogger } from "../../../logger.js";
+import { bindEventStoreEffect } from "../../../persistence/effect/bind-event-store-effect.js";
+import {
+	EventStoreEffectTag,
+	UnboundEventStoreEffectTag,
+} from "../../../persistence/effect/event-store-effect.js";
 import { ConfigSnapshotTag } from "../../daemon/Services/config-persistence-service.js";
+import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
+import { ProjectContext } from "../../daemon/Services/project-context.js";
 import {
 	allProjects,
 	ProjectRegistryTag,
 } from "../../daemon/Services/project-registry-service.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
-import { ConfigTag } from "./services.js";
+import { ConfigTag, LoggerTag } from "./services.js";
 import { applySessionCommand, SessionCommandError } from "./session-command.js";
 
 type SetupCommandError = Effect.Error<ReturnType<typeof applySessionCommand>>;
@@ -17,32 +34,47 @@ type SetupCommandError = Effect.Error<ReturnType<typeof applySessionCommand>>;
 export class SessionSetupTag extends Context.Service<
 	SessionSetupTag,
 	{
-		/** Register the gate during workspace initialization; setup runs in the relay scope. */
+		/** Register the gate during workspace initialization; setup runs in the session's owner scope. */
 		readonly start: (
 			sessionId: string,
 			directory: string,
 		) => Effect.Effect<void>;
 		readonly wait: (sessionId: string) => Effect.Effect<void>;
-		readonly recover: Effect.Effect<void, SetupCommandError>;
+		/** Once per project per process: a relay rebuild must not fail a live run. */
+		readonly recover: (
+			projectId: string,
+		) => Effect.Effect<void, SetupCommandError>;
 	}
 >()("SessionSetup") {}
 
-export const SessionSetupLive = Layer.effect(
-	SessionSetupTag,
+type SetupCommand = Parameters<typeof applySessionCommand>[0];
+
+const makeSessionSetup = (owner: {
+	readonly project: (sessionId: string) => Effect.Effect<
+		{
+			readonly projectId: string;
+			readonly mainFolder: string;
+			readonly env: Effect.Effect<Readonly<Record<string, string | undefined>>>;
+		},
+		unknown
+	>;
+	readonly commit: (
+		projectId: string,
+		command: SetupCommand,
+	) => Effect.Effect<void, SetupCommandError>;
+	/** Fork the run into its owner; false when the owner is already gone. */
+	readonly fork: (
+		sessionId: string,
+		run: Effect.Effect<void>,
+	) => Effect.Effect<boolean>;
+}) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
 		const registry = yield* Effect.serviceOption(ProjectRegistryTag);
 		const snapshot = yield* Effect.serviceOption(ConfigSnapshotTag);
 		const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
 		const sql = yield* SqlClient.SqlClient;
-		const scope = yield* Effect.scope;
-		const context =
-			yield* Effect.context<
-				Effect.Services<ReturnType<typeof applySessionCommand>>
-			>();
-		const commit = (command: Parameters<typeof applySessionCommand>[0]) =>
-			applySessionCommand(command).pipe(Effect.provide(context));
 		const gates = new Map<string, Deferred.Deferred<void>>();
+		const recovered = new Set<string>();
 
 		return {
 			start: (sessionId: string, directory: string) =>
@@ -50,6 +82,25 @@ export const SessionSetupLive = Layer.effect(
 					if (gates.has(sessionId)) return;
 					const gate = yield* Deferred.make<void>();
 					gates.set(sessionId, gate);
+					const resolved = yield* owner
+						.project(sessionId)
+						.pipe(
+							Effect.catchCause((cause) =>
+								Effect.logWarning("Setup has no project", cause).pipe(
+									Effect.as(undefined),
+								),
+							),
+						);
+					const release = Effect.andThen(
+						Deferred.succeed(gate, undefined),
+						Effect.sync(() => {
+							gates.delete(sessionId);
+						}),
+					);
+					if (!resolved) return yield* release;
+					const { projectId, mainFolder } = resolved;
+					const commit = (command: SetupCommand) =>
+						owner.commit(projectId, command);
 					let started = false;
 					let finished = false;
 					const finish = (
@@ -78,9 +129,9 @@ export const SessionSetupLive = Layer.effect(
 									? (yield* snapshot.value.build).projects
 									: [];
 						const setting = projects?.find(
-							(project) => project.slug === config.slug,
+							(project) => project.slug === projectId,
 						)?.setupScript;
-						const file = yield* readProjectFile(config.projectDir);
+						const file = yield* readProjectFile(mainFolder);
 						const daemonScript = setting?.trim() ? setting : undefined;
 						const fileScript =
 							file._tag === "parsed" && file.file.setupScript?.trim()
@@ -104,13 +155,7 @@ export const SessionSetupLive = Layer.effect(
 							});
 							return;
 						}
-						const prepareShellEnv = config.prepareShellEnv;
-						if (prepareShellEnv) {
-							yield* Effect.tryPromise(() =>
-								prepareShellEnv(config.projectDir),
-							);
-						}
-						const env = config.shellEnv?.(config.projectDir).env ?? process.env;
+						const env = yield* resolved.env;
 						yield* worktrees.value.runSetup(directory, script, env).pipe(
 							Stream.runForEach((update) =>
 								update._tag === "output"
@@ -151,16 +196,9 @@ export const SessionSetupLive = Layer.effect(
 								? Effect.void
 								: Effect.logError("Project setup failed", cause),
 						),
-						Effect.ensuring(Deferred.succeed(gate, undefined)),
-						Effect.ensuring(
-							Effect.sync(() => {
-								gates.delete(sessionId);
-							}),
-						),
+						Effect.ensuring(release),
 					);
-					yield* Effect.forkIn(Effect.interruptible(run), scope, {
-						uninterruptible: "inherit",
-					});
+					if (!(yield* owner.fork(sessionId, run))) yield* release;
 				}),
 			wait: (sessionId: string) =>
 				Effect.suspend(() => {
@@ -169,36 +207,144 @@ export const SessionSetupLive = Layer.effect(
 				}),
 			// The setup projector writes parts as setup-${sessionId}-part, so a
 			// primary-key range avoids parsing every part's metadata at startup.
-			recover: sql<{ session_id: string }>`SELECT m.session_id
+			recover: (projectId: string) =>
+				recovered.has(projectId)
+					? Effect.void
+					: sql<{ session_id: string }>`SELECT m.session_id
 				FROM messages m JOIN message_parts p ON p.message_id = m.id
 				JOIN sessions s ON s.id = m.session_id
-				WHERE s.project_id = ${config.slug}
+				WHERE s.project_id = ${projectId}
 					AND p.id >= 'setup-' AND p.id < 'setup.'
 					AND CASE WHEN json_valid(p.metadata)
 					THEN json_extract(p.metadata, '$.setup.status') END = 'running'`.pipe(
-				Effect.mapError(
-					(cause) =>
-						new SessionCommandError({
-							operation: "session.setup.recover",
-							cause,
-						}),
-				),
-				Effect.flatMap((rows) =>
-					Effect.forEach(
-						rows,
-						({ session_id }) =>
-							commit({
-								type: "session.setup_finished",
-								data: {
-									sessionId: session_id,
-									status: "failed",
-									message: "Setup interrupted by daemon restart.",
-								},
-							}),
-						{ discard: true },
-					),
-				),
-			),
+							Effect.mapError(
+								(cause) =>
+									new SessionCommandError({
+										operation: "session.setup.recover",
+										cause,
+									}),
+							),
+							Effect.flatMap((rows) =>
+								Effect.forEach(
+									rows,
+									({ session_id }) =>
+										owner.commit(projectId, {
+											type: "session.setup_finished",
+											data: {
+												sessionId: session_id,
+												status: "failed",
+												message: "Setup interrupted by daemon restart.",
+											},
+										}),
+									{ discard: true },
+								),
+							),
+							Effect.tap(() =>
+								Effect.sync(() => {
+									recovered.add(projectId);
+								}),
+							),
+						),
 		};
+	});
+
+/** The run outlives the request that started it, so it forks into a scope it does not own. */
+const forkInto =
+	(scope: Scope.Scope) => (_sessionId: string, run: Effect.Effect<void>) =>
+		Effect.forkIn(Effect.interruptible(run), scope, {
+			uninterruptible: "inherit",
+		}).pipe(Effect.as(true));
+
+/** Standalone relay (no daemon): its own project, its relay scope. */
+export const SessionSetupLive = Layer.effect(
+	SessionSetupTag,
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const context =
+			yield* Effect.context<
+				Effect.Services<ReturnType<typeof applySessionCommand>>
+			>();
+		return yield* makeSessionSetup({
+			project: () =>
+				Effect.succeed({
+					projectId: config.slug,
+					mainFolder: config.projectDir,
+					env: Effect.gen(function* () {
+						const prepare = config.prepareShellEnv;
+						if (prepare)
+							yield* Effect.promise(() => prepare(config.projectDir));
+						return config.shellEnv?.(config.projectDir).env ?? process.env;
+					}),
+				}),
+			commit: (_projectId, command) =>
+				applySessionCommand(command).pipe(Effect.provide(context)),
+			fork: forkInto(yield* Effect.scope),
+		});
+	}),
+);
+
+/**
+ * Daemon-owned setup: one instance for every project. A run lives in its
+ * session's owner scope, so deleting the session ends it and a relay rebuild
+ * does not.
+ */
+export const DaemonSessionSetupLive = Layer.effect(
+	SessionSetupTag,
+	Effect.gen(function* () {
+		const projects = yield* ProjectContext;
+		const owners = yield* Effect.serviceOption(OwnerScopes);
+		const store = yield* UnboundEventStoreEffectTag;
+		const context =
+			yield* Effect.context<
+				Exclude<
+					Effect.Services<ReturnType<typeof applySessionCommand>>,
+					EventStoreEffectTag | LoggerTag
+				>
+			>();
+		const log = createLogger("session-setup");
+		const daemonScope = yield* Effect.scope;
+		return yield* makeSessionSetup({
+			project: (sessionId) =>
+				Effect.map(projects.forSession(sessionId), (project) => ({
+					projectId: project.projectId,
+					mainFolder: project.mainFolder,
+					env: projects.forSession(sessionId, { prepareShellEnv: true }).pipe(
+						Effect.map(({ shellEnv }) => shellEnv),
+						Effect.orElseSucceed(() => project.shellEnv),
+					),
+				})),
+			commit: (projectId, command) =>
+				applySessionCommand(command).pipe(
+					Effect.provideService(
+						EventStoreEffectTag,
+						bindEventStoreEffect(store, projectId),
+					),
+					Effect.provideService(LoggerTag, log),
+					Effect.provide(context),
+				),
+			fork: (sessionId, run) =>
+				Option.isNone(owners)
+					? forkInto(daemonScope)(sessionId, run)
+					: owners.value.sessionScope(sessionId).pipe(
+							Effect.flatMap((scope) =>
+								scope.acquire<unknown, never, never>(
+									Effect.forkScoped(Effect.interruptible(run), {
+										uninterruptible: "inherit",
+									}),
+								),
+							),
+							Effect.as(true),
+							// Closed: the session is gone, so its setup never starts.
+							Effect.catchTag("OwnerScopeClosedError", () =>
+								Effect.succeed(false),
+							),
+							Effect.catch((error) =>
+								Effect.logWarning(
+									"Setup runs without a session owner",
+									error,
+								).pipe(Effect.andThen(forkInto(daemonScope)(sessionId, run))),
+							),
+						),
+		});
 	}),
 );

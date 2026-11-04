@@ -69,6 +69,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
+import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
@@ -670,6 +671,22 @@ export const deleteSession = (
 		});
 		const state = yield* Ref.get(stateRef);
 		yield* updateRelaySessionCountSnapshot(state.lastKnownSessionCount);
+		// After the committed delete and its provider cleanup: closing first would
+		// interrupt cleanup the session's own resources depend on.
+		const owners = yield* Effect.serviceOption(OwnerScopes);
+		if (Option.isSome(owners))
+			yield* Effect.forEach(
+				deleted,
+				(id) =>
+					owners.value
+						.close({ kind: "session", sessionId: id }, "remove")
+						.pipe(
+							Effect.catch((error) =>
+								Effect.logWarning(`Could not close session ${id}`, error),
+							),
+						),
+				{ discard: true },
+			);
 
 		if (cleanupFailures.length > 0) {
 			const reason = truncateProviderCleanupDiagnostic(

@@ -62,6 +62,7 @@ import {
 } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
+import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -936,8 +937,20 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withGitChanges));
+	const withSessionSetup = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return DaemonSessionSetupLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionWorkspace));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
-		Layer.provideMerge(withSessionWorkspace),
+		Layer.provideMerge(withSessionSetup),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(withOrchestration),
