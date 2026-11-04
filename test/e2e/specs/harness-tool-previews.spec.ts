@@ -164,14 +164,17 @@ const seed = (filename: string) =>
 			);
 			// Three turns, each a block of two finished tools with cut results.
 			// Every reply but the last is taller than a screen, so a block shows
-			// alone and the newest is the one on screen at the bottom.
+			// alone and the newest is the one on screen at the bottom. Each event
+			// is a millisecond after the last: the transcript orders messages by
+			// time, then id, so one shared time would put every reply first.
+			let tick = at;
 			const prefetchEvent = <T extends LiveEventType>(
 				type: T,
 				data: EventPayloadMap[T],
 			) =>
 				canonicalEvent(type, PREFETCH, data, {
 					provider: "claude",
-					createdAt: at,
+					createdAt: tick++,
 				});
 			yield* commit(
 				[
@@ -632,10 +635,9 @@ test("tools open as previews and expand to full detail", async ({
 	const liveUpdates = rpc.frames
 		.slice(liveFrom)
 		.filter(({ value }) => toolsIn(value).some(({ tool }) => tool === "Bash"));
-	// The finished turn folds its step log; open it after that, not before.
-	// The toggle reads collapsed while live too, so wait for the row to go.
-	await expect(toolRow(page, liveId)).toBeHidden();
-	const liveRow = await expandTool(page, toolRow(page, liveId));
+	// The reader opened this turn while it ran, so it stays open once it
+	// finishes (main 4ee235af), and the open row reads the settled tool.
+	const liveRow = runningRow;
 	await expect(liveRow.locator(".shell-output")).toContainText(endOf("result"));
 	// The settled tool's detail was asked for once more, then kept.
 	expect(rpc.detailRequests.slice(requestsBeforeLive)).toEqual([

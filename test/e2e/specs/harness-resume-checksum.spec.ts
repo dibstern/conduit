@@ -592,10 +592,15 @@ test("a resume is checked against the server, and the server wins", async ({
 		async () => {
 			for (const { live, kept } of files)
 				if (existsSync(live)) copyFileSync(live, kept);
-			await seed(store, [
-				...turns(SESSION, 6, "ahead", 1, () => "Ahead reply."),
-				renamed(6, "Resume check ahead"),
-			]);
+			// Two commits, so the tab runs more than one version ahead: the
+			// rollback's own restart takes one with no row, projecting the runner
+			// it reports reattached (CONTRACT.md 2121-2125), and a tab only one
+			// ahead would tie the server and resume by checksum instead.
+			await seed(
+				store,
+				turns(SESSION, 6, "ahead", 1, () => "Ahead reply."),
+			);
+			await seed(store, [renamed(6, "Resume check ahead")]);
 		},
 		async () => {
 			await expect(title).toHaveText("Resume check ahead");
