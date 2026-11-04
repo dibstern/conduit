@@ -1867,6 +1867,17 @@ function query(params: {
 						!taskTurnInterrupted
 					) {
 						releaseTaskStops();
+						// A task that starts while the turn is held, e.g. after its Stop (8.4).
+						if (consumeMarker("task-stop-late-task")) {
+							taskStopLive = [...taskStopLive, ...taskStopMonitorFixture];
+							outOfBand.push({
+								type: "system",
+								subtype: "background_tasks_changed",
+								session_id: sessionId,
+								uuid: randomUUID(),
+								tasks: taskStopLive,
+							});
+						}
 						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));
 					}

@@ -57,6 +57,7 @@ import {
 } from "./provider-turn-session.js";
 import type { ConfigTag, WebSocketHandlerTag } from "./services.js";
 import { LoggerTag, OrchestrationEngineTag } from "./services.js";
+import { announceBackgroundWork } from "./session-attention.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
@@ -261,7 +262,14 @@ const makeProviderTurnService = Effect.gen(function* () {
 				const activity = Option.getOrUndefined(
 					yield* Effect.serviceOption(SessionActivityTag),
 				);
+				// The hold is in memory; only the stamp makes the project's row re-read it.
+				const announce = announceBackgroundWork(input.sessionId).pipe(
+					Effect.catch((cause) =>
+						Effect.logWarning("Could not announce the held Stop", cause),
+					),
+				);
 				const release = activity?.background.holdStop(input.sessionId);
+				yield* announce;
 				const asked = Effect.gen(function* () {
 					if (!(yield* running)) return false;
 					const view = yield* loadLedgerView(input.sessionId).pipe(
@@ -279,7 +287,11 @@ const makeProviderTurnService = Effect.gen(function* () {
 				yield* Effect.repeat(asked, {
 					while: (still) => still,
 					schedule: Schedule.spaced("250 millis"),
-				}).pipe(Effect.ensuring(Effect.sync(() => release?.())));
+				}).pipe(
+					Effect.ensuring(
+						Effect.sync(() => release?.()).pipe(Effect.andThen(announce)),
+					),
+				);
 				if (!(yield* running)) return;
 				const [target] = yield* sql<{
 					provider_process_id: string | null;

@@ -8,6 +8,7 @@
 // 8. a task ending on its own while asked leaves U2 waiting;
 // 9. Stop pressed twice while asked opens a second wait or clears the ask;
 // 18. a confirm with nothing asked changes state;
+// 16. a task that starts after the Stop (no gate at the Stop) is closed, or held with no ask;
 // 19. the list shown and the snapshot entry come from different reads.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -316,5 +317,47 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 						message["stopConfirm"] !== undefined,
 				),
 		).toBe(false);
+	});
+
+	it("asks when a task starts after the Stop", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		const cursor = browser.frames.length;
+		await Effect.runPromise(browser.rpc.StopTasks({ sessionId, tasks: "all" }));
+		writeFileSync(join(fixture.root, "task-stop-confirm-all"), "release");
+		await row(
+			browser,
+			sessionId,
+			cursor,
+			(message) => message["backgroundTasks"] === undefined,
+		);
+		const stopped = stop(browser, sessionId);
+		// test-waits-allow real-wait: the Stop must be committed with no tasks before one starts.
+		await new Promise((resolve) => setTimeout(resolve, 500));
+		const askedFrom = browser.frames.length;
+		writeFileSync(join(fixture.root, "task-stop-late-task"), "start");
+		const asked = confirmOf(
+			await row(browser, sessionId, askedFrom, (message) =>
+				Boolean(confirmOf(message)),
+			),
+		);
+		proof["late task asked"] = asked;
+		expect(asked?.tasks?.map((task) => task.id)).toEqual(["task-stop-monitor"]);
+		// test-waits-allow real-wait: nothing destroying is an absence past the deadline.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		expect(
+			await Effect.runPromise(
+				browser.rpc.ConfirmEscalation({
+					sessionId,
+					snapshotEntry: asked?.snapshotEntry ?? 0,
+				}),
+			),
+		).toEqual({ ok: true });
+		await stopped;
+		// test-waits-allow polling: the fake SDK reports a closed query only through sdk-proof.ndjson.
+		await vi.waitFor(() =>
+			expect(closedQueries(fixture, queryId)).toHaveLength(1),
+		);
 	});
 });
