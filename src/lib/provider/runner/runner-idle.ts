@@ -77,12 +77,19 @@ export function makeRunnerIdleExit(
 			lastActivityAt = Date.now();
 		},
 		activity(output?: SessionOutput) {
+			// The task list's evidence copy is not activity; its background-task twin decides.
+			if (
+				output?.type === "event" &&
+				output.event.type === "evidence.tasks_snapshot"
+			)
+				return;
 			if (output?.type === "background-task") {
 				const live =
 					output.transition.kind === "snapshot" &&
-					output.transition.tasks.length > 0;
-				// An empty list after an empty list is not activity. Ambient tasks count:
-				// they are live tasks (CONTRACT.md 2778-2781).
+					output.transition.tasks.some((task) => !task.ambient);
+				// Ambient tasks do not hold the runner open, and a list without work after
+				// one without work is not activity. CONTRACT.md 2812 asks for the ledger's
+				// reducer here; this keeps main's reading until the host shares it.
 				if (!backgroundWork && !live) return;
 				backgroundWork = live;
 			}

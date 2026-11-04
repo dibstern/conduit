@@ -91,8 +91,8 @@ export interface RunnerLaunchCallbacks {
 	/** A rebind excludes the executing send's own command and admitted turn. */
 	readonly isBackgroundBusy: (ignoredCommands?: number) => boolean;
 	readonly turnStateChanged: (inFlight: boolean) => void;
-	/** Every native query start after the host's first is a replacement (CONTRACT 6.1). */
-	readonly queryStarted: (query: object) => void;
+	/** Every native query start after the host's first is a replacement (CONTRACT 6.1); true for one. */
+	readonly queryStarted: (query: object) => boolean;
 	/** True for a query the host has seen replaced; no query (Codex, Cursor) is never replaced (6.1). */
 	readonly isReplacedQuery: (query: object | undefined) => boolean;
 	/** Only the producer can finish this exact terminal delivery. */
@@ -477,10 +477,12 @@ export const runSessionRunner = (
 				if (!inFlight) retireWhenQuiescent();
 			},
 			queryStarted: (query) => {
-				if (query === currentQuery) return;
-				if (currentQuery) querySeq++;
+				if (query === currentQuery) return false;
+				const replaced = currentQuery !== undefined;
+				if (replaced) querySeq++;
 				currentQuery = query;
 				querySeqs.set(query, querySeq);
+				return replaced;
 			},
 			isReplacedQuery,
 			sourceDelivery: (source) => {
