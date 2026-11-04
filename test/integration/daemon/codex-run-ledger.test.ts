@@ -799,11 +799,13 @@ describe("Codex on the Run Ledger", () => {
 			sessionId: string | undefined;
 			endsBefore: number;
 		}[] = [];
+		let synchronized = false;
 		const alertFiber = Effect.runFork(
 			Stream.runForEach(
 				watcher.rpc.SubscribeAlerts({ projectSlug: "process-test" }),
 				(envelope) =>
 					Effect.sync(() => {
+						if (envelope._tag === "synchronized") synchronized = true;
 						if (envelope._tag !== "alert") return;
 						alerts.push({
 							kind: envelope.kind,
@@ -814,6 +816,12 @@ describe("Codex on the Run Ledger", () => {
 					}),
 			),
 		);
+		// The feed is live-only, so it must be open before the wake can end.
+		// test-waits-allow polling: the feed reports it is open only through its first envelope.
+		await vi.waitFor(() => expect(synchronized).toBe(true), {
+			timeout: TIMEOUT,
+			interval: 50,
+		});
 		await browser.close();
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		const done = () =>
