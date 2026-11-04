@@ -573,11 +573,13 @@ export class DifferentialTrace {
 		this.actual = new TraceDriver(provider, "decider", actual);
 	}
 	step(command: LedgerCommand, now = this.expected.now + 1): void {
-		const translated = translateCommand(command, this.expected, this.actual);
 		this.actual.host.mirrorRegistry(this.expected.host);
-		// D60: main is one host process, so both ledgers see the issues the expected fake drew.
+		// D60: main is one host process, so both ledgers see the issues the expected fake drew. Main's
+		// issue binds before the command translates, so a run.dispatched in the same packet names that
+		// binding rather than minting a retry of its own.
 		const mainIssues = this.expected.host.takeMainIssues();
 		this.actual.host.issued(mainIssues.map(({ issue }) => issue));
+		const translated = translateCommand(command, this.expected, this.actual);
 		const expected = this.expected.step(command, now, mainIssues);
 		const actual = this.actual.step(translated, now, mainIssues);
 		this.expectedNames.register(this.expected);

@@ -4968,6 +4968,12 @@ export class FakeProvider {
 					(this.gatedTokens.has(command.observation.token) ||
 						this.mainTransmissions.has(command.observation.token) ||
 						this.sweeps.has(command))
+				) &&
+				// A run.dispatched is the feeder's own write at transmission, made before removal (every
+				// refusal precedes any transmission, CONTRACT.md 1082; D59 4117-4118), so it still folds.
+				!(
+					command.observation.tag === "Answer" &&
+					command.observation.kind === "run_dispatched"
 				)) ||
 				(command.verb === "settle" &&
 					((command.settlement.kind === "process_lost" &&
