@@ -46,3 +46,13 @@ Scenario: Stop tasks first asks for every task without confirming, and waiting c
   Then the stuck Stop asked to stop all tasks without confirming
   When the stuck Stop's ask ends
   Then the panel choice turn head reads "Working"
+
+Scenario: On a phone the stuck Stop's whole label and both actions stay on screen
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the panel choice session has a live turn
+  When the Stop is stuck at snapshot entry 7 with a dev server and a vitest shell without its command
+  Then the stuck Stop's whole label and both actions are on screen
+  When I press Stop now on the stuck Stop
+  Then the confirm reads "Stopping now will end: pnpm dev (shell), (shell): Run vitest in watch mode. Continue?"
