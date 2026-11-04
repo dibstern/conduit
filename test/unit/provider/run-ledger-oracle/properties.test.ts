@@ -2469,6 +2469,7 @@ describe("generated D34 coverage", () => {
 		"native-token command_result", // 8.5, D21, D61
 		"native_resume_rejected", // 3.4, 3.7
 		"probe input_present without id", // 3.5
+		"OpenCode absent reading settled by the idle read after it", // 3128-3132
 		"query replacement", // 6.1, L1, D44
 		"confirm copied before a query replacement", // 8.4, D45
 		"turn joined to an input Run", // 8.3, D47

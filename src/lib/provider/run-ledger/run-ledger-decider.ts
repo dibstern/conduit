@@ -1360,6 +1360,8 @@ interface Answered {
 	readonly run: Run | undefined;
 	/** The send is its Run's current execution's and its work has not ended (hasAuthority). */
 	readonly live: boolean;
+	/** The fact's minting, for an answer that issues a follow-up probe (3128-3132). */
+	readonly step: Step;
 }
 
 type EvidenceClass =
@@ -1610,7 +1612,7 @@ const evidenceTable: EvidenceTable = {
 	probe_result: {
 		class: "probe",
 		produces: (send) => send.effect.kind === "probe",
-		merge(book, _fact, { send, tx }, { finding }) {
+		merge(book, fact, { send, tx, step }, { finding }) {
 			const pending = send.probe;
 			if (pending === undefined)
 				return rejected("probe_result for a non-probe (3.4)");
@@ -1658,15 +1660,19 @@ const evidenceTable: EvidenceTable = {
 					}
 					break;
 				case "input_absent":
-					if (subject !== undefined) {
-						// 9: input_absent ends probing; a later acceptance beats it.
-						subject.absent = true;
-						subject.consumption = joinConsumption(subject.consumption, {
-							tag: "NotConsumed",
-							why: "absent",
-						});
-						seal(subject);
-					}
+					if (subject === undefined) break;
+					// 9 (CONTRACT.md 3128-3132): the live check found OpenCode running a prompt whose request
+					// was lost, so its absent reading counts only once an idle read issued after it agrees.
+					if (runEnd(book) === "query_ended" && send.effect.kind === "probe")
+						probe(
+							book,
+							fact,
+							step,
+							send.effect.runId,
+							{ tag: "native_session" },
+							pending.subject,
+						);
+					else markAbsent(subject);
 					break;
 				case "native_idle": {
 					// 9: an idle probe covers the fence members issued before it its idle proof names.
@@ -1685,6 +1691,13 @@ const evidenceTable: EvidenceTable = {
 									item.ended = "evidence";
 					// 8.3, D26: and every wake execution.
 					for (const wake of book.wakes) wake.ended ??= "own";
+					// 3128-3132: the idle read after an OpenCode absent one settles it, unless the send was
+					// seen running since.
+					if (
+						subject !== undefined &&
+						consumptionRank[subject.consumption.tag] < 2
+					)
+						markAbsent(subject);
 					break;
 				}
 			}
@@ -1737,6 +1750,16 @@ const evidenceTable: EvidenceTable = {
 	},
 	turn_ended: { class: "background", produces: never, merge: unsolicitedOnly },
 };
+
+/** 9: input_absent ends probing and leaves the send unconsumed; a later acceptance beats it. */
+function markAbsent(tx: Tx): void {
+	tx.absent = true;
+	tx.consumption = joinConsumption(tx.consumption, {
+		tag: "NotConsumed",
+		why: "absent",
+	});
+	seal(tx);
+}
 
 /** 3.10: an interaction belongs to the label its evidence names; it is requested once. */
 function requestInteraction(
@@ -2016,7 +2039,7 @@ function unsolicited(
 						evidenceTable.result.merge(
 							book,
 							fact,
-							{ send, tx, run, live },
+							{ send, tx, run, live, step },
 							observation,
 						);
 						if (rules(book).workEnded(tx.answers)) tx.ended ??= "evidence";
@@ -2385,7 +2408,7 @@ function observe(
 			const outcome = merge(
 				book,
 				fact,
-				{ send, tx, run, live },
+				{ send, tx, run, live, step },
 				observation.kind,
 				observation,
 			);
