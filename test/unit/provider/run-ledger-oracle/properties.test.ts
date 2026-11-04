@@ -1499,12 +1499,8 @@ describe("fake provider scheduling and ground truth", () => {
 			},
 			emptyView(),
 		);
-		// Section 9 requires query end plus a covering idle proof, even for
-		// accepted inputs. Native work remains outstanding until that proof.
-		expect(fake.groundTruth().unfinished).toEqual([
-			accepted.token,
-			pending.token,
-		]);
+		// 9, D26: query end ends accepted work; an unconfirmed send may still run late (3128-3132).
+		expect(fake.groundTruth().unfinished).toEqual([pending.token]);
 		const [probe] = fake.issued([
 			{
 				tag: "Tokened",

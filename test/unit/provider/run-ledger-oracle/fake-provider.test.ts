@@ -734,7 +734,7 @@ describe("fake provider round 3 alphabet", () => {
 });
 
 describe("fake provider round 3 contract decisions", () => {
-	it("retains OpenCode accepted work after native result and query end until a covering idle probe (3.5/9/D6)", () => {
+	it("ends OpenCode accepted work at its query end, a covering idle probe not needed (9, D26)", () => {
 		const fake = new FakeProvider("opencode");
 		started(fake);
 		const [send] = fake.issued([
@@ -749,7 +749,7 @@ describe("fake provider round 3 contract decisions", () => {
 		answer(fake, send, { kind: "result", outcome: "completed" });
 		expect(fake.groundTruth().acceptedUnended).toEqual([send.token]);
 		answer(fake, send, { kind: "query_ended" });
-		expect(fake.groundTruth().acceptedUnended).toEqual([send.token]);
+		expect(fake.groundTruth().acceptedUnended).toEqual([]);
 		const [probe] = fake.issued([
 			{
 				tag: "Tokened",

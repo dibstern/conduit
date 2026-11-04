@@ -142,6 +142,8 @@ interface NativeSend {
 	 * may still run late, so only an idle read issued after that ends it (CONTRACT.md 3128-3132).
 	 */
 	absentAt?: number | undefined;
+	/** OpenCode: its label's query ended before its delivery was confirmed (endQuery). */
+	queryEnded?: boolean;
 	/** A release shows the host never handed it over (3.5, 4.5); a rejected resume ranks as permanent. */
 	released: boolean;
 	transportRank: number;
@@ -1495,19 +1497,29 @@ export class FakeProvider {
 	 * query_ended answering a Run's send, that Run's (its execution).
 	 */
 	private endQuery(label: string, runId?: string): void {
-		// OpenCode input work still needs covering idle proof after query end (9).
-		if (this.provider !== "opencode")
-			for (const native of this.sends.values()) {
-				const effect = native.send.effect;
-				if (
+		for (const native of this.sends.values()) {
+			const effect = native.send.effect;
+			// OpenCode's query end ends its label's delivered start and steer work; the covering probe is
+			// the usual next step, not a second condition (CONTRACT.md 3049, D26 3842). An unconfirmed
+			// one may still run late (655-662, 3128-3132), so only its own result ends it after. Never
+			// an abort or cancel_request (334-338).
+			const input =
+				this.provider === "opencode" &&
+				native.label === label &&
+				(effect.kind === "start" || effect.kind === "steer");
+			if (input && !native.accepted && !native.deliveryConfirmed)
+				native.queryEnded = true;
+			else if (
+				input ||
+				(this.provider !== "opencode" &&
 					effect.kind === "interrupt" &&
 					(native.label === label ||
-						(runId !== undefined && effect.runId === runId))
-				) {
-					native.ended = true;
-					native.unfinished = false;
-				}
+						(runId !== undefined && effect.runId === runId)))
+			) {
+				native.ended = true;
+				native.unfinished = false;
 			}
+		}
 		// OpenCode keeps the fence for a covering probe; Claude leaves at query_ended with or without
 		// a result (9, D25). An answer ends only its own Run's execution (D47).
 		this.endExecutions(label, "query_ended", runId);
@@ -1740,6 +1752,17 @@ export class FakeProvider {
 				for (const native of this.sends.values())
 					if (
 						native.send.effect.kind === "start" &&
+						native.send.effect.runId === observation.runId
+					) {
+						native.ended = true;
+						native.unfinished = false;
+					}
+			// D59 (CONTRACT.md 4106-4107): main's terminal ends its Run's work as main, its end_session
+			// included; a later send issues fresh, so none acts in the session it ends (540-543).
+			if (observation.kind === "run_terminal")
+				for (const native of this.sends.values())
+					if (
+						native.send.effect.kind === "end_session" &&
 						native.send.effect.runId === observation.runId
 					) {
 						native.ended = true;
@@ -2222,6 +2245,11 @@ export class FakeProvider {
 				if (answered && this.provider !== "opencode") {
 					answered.ended = true;
 					answered.unfinished = false;
+				}
+				// OpenCode: a result naming a send its query end already passed confirms it ran (3101-3102).
+				if (native.queryEnded) {
+					native.ended = true;
+					native.unfinished = false;
 				}
 				// Cursor wait() ends the native turn and settles every pending steer, a dispatched one its
 				// turn never acknowledged included (9, CONTRACT.md 3113).
@@ -3961,10 +3989,13 @@ export class FakeProvider {
 				case 3: {
 					// Main relaunches its open run's unlaunched start (3.6, D50): runner-held, a new issue of the
 					// same commandId whose transmission is its run.dispatched (4.8); direct, a fresh claim.
+					// A Run the ledger ended is not relaunched: holdRun returns Ended for a held one, and its
+					// dropped execution's sends resolve no further (4.3, CONTRACT.md 669-671).
 					const token = open && this.bound(open.issue).token;
 					if (
 						!open ||
 						token === undefined ||
+						this.terminals.has(open.runId) ||
 						!this.unlaunchedTries.has(token) ||
 						open.issue.effect.kind !== "start"
 					)
