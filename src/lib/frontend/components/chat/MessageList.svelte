@@ -53,7 +53,7 @@
 	import UserMessage from "./UserMessage.svelte";
 	import MessageNavigationRail from "./MessageNavigationRail.svelte";
 	import AssistantMessage from "./AssistantMessage.svelte";
-	import TurnActivity from "./TurnActivity.svelte";
+	import TurnActivity, { type RunLabel } from "./TurnActivity.svelte";
 	import { createTurnPanel } from "../../stores/turn-panel.svelte.js";
 	import { messageSurfacing, sessionJevEnabled } from "../../stores/message-surfacing.svelte.js";
 	import TurnOpening from "./TurnOpening.svelte";
@@ -408,6 +408,11 @@
 
 	// Fork context: detect if current session is a user fork
 	const activeSession = $derived(findSession(viewedSessionId ?? ""));
+	// 8.3: a Run the provider started by itself names its waking task on the live turn's head.
+	const wakeLabel = $derived.by((): RunLabel | undefined => {
+		const wake = activeSession?.wakeRun;
+		return wake && { kind: "woken", ...(wake.task ? { task: wake.task } : {}) };
+	});
 	const providerId = $derived(getInstanceById(activeSession?.accountId ?? "")?.driver);
 	const forkMessageId = $derived(activeSession?.forkPointMessageId ?? activeSession?.forkMessageId ?? (primary ? sessionState.currentFork?.forkMessageId : undefined));
 	const forkPointTimestamp = $derived(activeSession?.forkPointTimestamp ?? (primary ? sessionState.currentFork?.forkPointTimestamp : undefined));
@@ -614,7 +619,7 @@
 				get status() { return messageSurfacing.status; },
 				get categorySet() { return messageSurfacing.categorySet; },
 			})}
-			<TurnActivity {panel} {view} scrollRoot={messagesEl} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+			<TurnActivity {panel} {view} scrollRoot={messagesEl} runLabel={turn.id === latestTurnId ? wakeLabel : undefined} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 				onreposition={scrollCtrl.reposition}
 				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
