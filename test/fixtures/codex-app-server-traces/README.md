@@ -79,9 +79,10 @@ names. Capture and fixture files use mode 0600.
   accounting facts before each turn end and a final `complete` fact.
 - `goal-paused.jsonl` and `goal-cleared.jsonl` record user-origin
   `thread/goal/set` and `thread/goal/clear` during a native turn, including the
-  native notifications. `goal-stop.jsonl` records pausing during the second
-  native turn, then `turn/interrupt` targeting that successor. Conduit reports
-  `pausedReason: "Interrupted"` for Stop, matching Claude.
+  native notifications. `goal-interrupt.jsonl` records Stop during the second
+  native turn: `turn/interrupt` targeting that successor, with no goal request.
+  Codex answers with the goal still `active` and starts no continuation within
+  five seconds, so Stop leaves the goal as it is.
 - `goal-successor-timeout.jsonl` derives from `goal-chain` by ending after the
   first native `turn/completed`. Replay advances the lifecycle's clock to
   assert it stays open at 29,999 ms and closes at 30,000 ms. The daemon test

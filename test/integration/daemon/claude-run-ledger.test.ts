@@ -698,6 +698,57 @@ describe("Claude on the Run Ledger", () => {
 		});
 	});
 
+	it("leaves a running goal active when Stop interrupts its turn", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude ledger goal stop");
+		const stall = "stall-goal";
+		const stalled = browser.send(sessionId, stall).catch(() => undefined);
+		const goals = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT data FROM events WHERE session_id = ? AND type = 'session.goal_changed' ORDER BY sequence",
+					)
+					.all(sessionId)
+					.map((row) => JSON.parse((row as { data: string }).data) as object);
+			} finally {
+				db.close();
+			}
+		};
+		// test-waits-allow polling: the goal fact reaches the store with no browser frame.
+		await vi.waitFor(() => expect(goals()).toHaveLength(1));
+		await fixture.waitForMark(
+			(mark) => mark.kind === "enqueue" && mark.prompt === stall,
+		);
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		await stalled;
+		// test-waits-allow polling: the interrupted Run's end reaches the store with no browser frame.
+		const ledger = await vi.waitFor(() => {
+			const read_ = read(fixture, sessionId);
+			expect(read_.runs.map((run) => run.status)).toEqual(["interrupted"]);
+			expect(read_.ends.map((end) => end.runId)).toEqual(
+				read_.runs.map((run) => run.id),
+			);
+			return read_;
+		}, 10_000);
+		// Stop is not a goal action (CONTRACT.md 2057, 2970): the goal stays as it was.
+		expect(goals().at(-1)).toMatchObject({
+			goal: expect.objectContaining({ condition: "Finish the stalled goal" }),
+		});
+		expect(goals().at(-1)).not.toHaveProperty("pausedReason");
+		proofs.push({
+			case: "goal-stop",
+			sessionId,
+			goals: goals(),
+			ends: ledger.ends,
+		});
+	});
+
 	it("delivers a send waiting behind a wake once on a new runner when its runner dies", async () => {
 		const { fixture, browser } = await start({
 			claudeReplay: {

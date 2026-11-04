@@ -204,8 +204,6 @@ function handleNotification(
 								: {}),
 						};
 		}
-		if (state.interruptRequested && facts.goal && !active)
-			facts = { ...facts, pausedReason: "Interrupted" };
 		next = {
 			...next,
 			goalState: facts,
@@ -411,21 +409,12 @@ export function interruptCodexTurn(
 	now: number,
 ): CodexTurnUpdate {
 	if (state.settled) return { state, events: [] };
-	const goal = state.goalState.goal;
-	const facts = { ...state.goalState, pausedReason: "Interrupted" };
-	const [items, event] = goal
-		? codexRuntimeEvent({ ...state.items, now }, "session.goal_changed", facts)
-		: [state.items, undefined];
-	const update = settle(
-		{
-			...state,
-			items: { ...items, now },
-			goalActive: false,
-			...(goal ? { goalState: facts } : {}),
-		},
+	// Stop is not a goal action: Codex leaves the goal active on an interrupt, and so does
+	// conduit (CONTRACT.md 2057, 2970).
+	return settle(
+		{ ...state, items: { ...state.items, now }, goalActive: false },
 		"interrupted",
 	);
-	return { ...update, events: [...(event ? [event] : []), ...update.events] };
 }
 
 export function failCodexTurn(

@@ -95,7 +95,7 @@ const scenarios = [
 	"goal-paused",
 	"goal-cleared",
 	"goal-successor-timeout",
-	"goal-stop",
+	"goal-interrupt",
 	"basic",
 	"model-list",
 	"skills-list",
@@ -601,7 +601,8 @@ function mockResponses(scenario: Scenario) {
 			],
 		];
 	}
-	if (scenario === "goal-stop") return [mockEvents(), mockEvents()];
+	// goal-interrupt's driver waits for a continuation turn that Codex never starts.
+	if (scenario === "goal-interrupt") return [mockEvents(), mockEvents()];
 	if (scenario.startsWith("approval-command-") || scenario === "mode-full")
 		return [
 			mockToolEvents("exec_command", {
@@ -1248,7 +1249,9 @@ function driveScenario(
 				if (scenario === "goal-chain") {
 					yield* wait(turnEnd);
 					yield* wait(turnEnd);
-				} else if (scenario === "goal-stop") {
+				} else if (scenario === "goal-interrupt") {
+					// Stop without a goal action: does Codex leave the goal active, and does it
+					// self-start a continuation once the interrupted turn ends (CONTRACT.md 8.6)?
 					const successor = yield* wait(
 						(message) =>
 							message._tag === "known" && message.method === "turn/started",
@@ -1262,16 +1265,15 @@ function driveScenario(
 							message.method === "item/agentMessage/delta",
 					);
 					yield* client.request(
-						"thread/goal/set",
-						{ threadId, status: "paused", origin: "user" },
-						ThreadGoalSetResponseSchema,
-					);
-					yield* client.request(
 						"turn/interrupt",
 						{ threadId, turnId: successor.params.turn.id },
 						TurnInterruptResponseSchema,
 					);
 					yield* wait(turnEnd);
+					yield* wait(
+						(message) =>
+							message._tag === "known" && message.method === "turn/started",
+					).pipe(Effect.timeoutOption("5 seconds"));
 				}
 				yield* transport.close;
 				yield* Fiber.join(collector);
@@ -2434,7 +2436,7 @@ function assertTurnNotifications(
 		const starts = known.filter((message) => message.method === "turn/started");
 		assert.equal(
 			starts.length,
-			scenario === "goal-chain" ? 3 : scenario === "goal-stop" ? 2 : 1,
+			scenario === "goal-chain" ? 3 : scenario === "goal-interrupt" ? 2 : 1,
 		);
 		const first = starts[0];
 		assert(first?.method === "turn/started");
@@ -2459,7 +2461,8 @@ function assertTurnNotifications(
 			status: "active",
 			origin: "user",
 		});
-		if (scenario === "goal-stop") {
+		if (scenario === "goal-interrupt") {
+			assert.equal(setters.length, 2);
 			const successor = starts[1];
 			assert(successor?.method === "turn/started");
 			assert.deepEqual(
@@ -2483,12 +2486,7 @@ function assertTurnNotifications(
 		);
 		const events = [];
 		for (const notification of known) {
-			if (
-				scenario === "goal-stop" &&
-				notification.method === "thread/goal/updated" &&
-				notification.params.goal.status === "paused" &&
-				state.goalActive
-			)
+			if (scenario === "goal-interrupt" && notification === starts[1])
 				state = { ...state, interruptRequested: true };
 			const update = handleCodexTurnNotification(
 				state,
@@ -2528,7 +2526,7 @@ function assertTurnNotifications(
 		assert.equal(terminals.length, 1);
 		assert.equal(
 			terminals[0]?.type,
-			scenario === "goal-stop" ? "turn.interrupted" : "turn.completed",
+			scenario === "goal-interrupt" ? "turn.interrupted" : "turn.completed",
 		);
 		assert(events.some((event) => event.type === "session.goal_changed"));
 		if (scenario === "goal-chain") assert.equal(state.goalState.ended, "met");
@@ -2536,8 +2534,14 @@ function assertTurnNotifications(
 			assert.equal(state.goalState.ended, "cleared");
 		if (scenario === "goal-paused")
 			assert.equal(state.goalState.pausedReason, "Paused");
-		if (scenario === "goal-stop")
-			assert.equal(state.goalState.pausedReason, "Interrupted");
+		if (scenario === "goal-interrupt") {
+			// An interrupt leaves the goal active (8.6): conduit reports no pause for it.
+			const goals = known.filter(
+				(message) => message.method === "thread/goal/updated",
+			);
+			assert.equal(goals.at(-1)?.params.goal.status, "active");
+			assert.equal(state.goalState.pausedReason, undefined);
+		}
 		return;
 	}
 	if (scenario === "model-list" || scenario === "skills-list") {
@@ -4409,7 +4413,7 @@ async function record(root: string, selected: readonly Scenario[]) {
 			"goal-chain",
 			"goal-paused",
 			"goal-cleared",
-			"goal-stop",
+			"goal-interrupt",
 			"model-list",
 			"skills-list",
 			"turn-skill",
