@@ -1103,6 +1103,16 @@ export class FakeProvider {
 	}
 	/** process_lost, or another runner's start (L1 totality). A repeated loss covers nothing new (3.2). */
 	private loseRunner(runner: string): void {
+		// CONTRACT.md 488, 3.10: an interaction is its label's and resolves at its runner's retirement,
+		// a later loss fact included, so its answers' work ends even when raised after the first loss.
+		for (const answer of this.sends.values())
+			if (
+				answer.send.effect.kind === "deliver_answer" &&
+				runnerOf(answer.send.effect.label) === runner
+			) {
+				answer.ended = true;
+				answer.unfinished = false;
+			}
 		if (this.lostRunners.has(runner)) return;
 		for (const runId of this.runsOn(runner)) this.unlaunch(runId);
 		this.lostRunners.add(runner);
@@ -1954,6 +1964,13 @@ export class FakeProvider {
 					native.transportRank,
 					ranks[observation.outcome.tag],
 				);
+				// CONTRACT.md 536-541: a rejected resume ends the native session and covers the sends
+				// issued before it, so a raced success later revives nothing.
+				if (
+					observation.outcome.tag === "permanent" &&
+					observation.outcome.code === "native_resume_rejected"
+				)
+					native.covered = true;
 				this.refreshQuery(native);
 				if (
 					this.provider === "opencode" &&
@@ -2896,7 +2913,15 @@ export class FakeProvider {
 				);
 		}
 		checked.push("LI7");
-		this.issued(effects, this.label, aliveAtIssue);
+		// 5.1, CONTRACT.md 532-533: Stop commits main's interrupt row before it issues its cancel_request
+		// and probe, so an idle read of that probe covers the interrupt.
+		const interrupt = (issued: IssuedEffect) =>
+			issued.tag === "Main" && issued.effect.kind === "interrupt";
+		this.issued(
+			[...effects.filter(interrupt), ...effects.filter((e) => !interrupt(e))],
+			this.label,
+			aliveAtIssue,
+		);
 		// D59, 9: a Claude, Codex or Cursor interrupt is no member; its work ends once every Run it names
 		// has ended, and at once when it names none.
 		if (this.provider !== "opencode")
