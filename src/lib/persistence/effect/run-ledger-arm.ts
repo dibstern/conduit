@@ -86,6 +86,10 @@ export const ledgerAlarmWakes = new WeakMap<
 	Set<() => void>
 >();
 const alarmWakeKey = Symbol("run-ledger-alarm-wake");
+type TasksSnapshot = {
+	readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
+	readonly at: number;
+};
 /**
  * SessionActivity's wakes for a committed change of a session's tasks view (8.1 "a read-only
  * view"), with that view and, for a snapshot, its tasks with their display and its time.
@@ -96,12 +100,7 @@ export const ledgerTasksWakes = new WeakMap<
 		(
 			sessionId: string,
 			tasks: LedgerView["tasks"],
-			snapshot:
-				| {
-						readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
-						readonly at: number;
-				  }
-				| undefined,
+			snapshot: TasksSnapshot | undefined,
 		) => void
 	>
 >();
@@ -631,6 +630,9 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 	// A cache only: each touch checks its last entry against the store, so a rolled-back write
 	// or another writer's commit is reloaded, never read stale (3.12).
 	const cache = new Map<string, Ledger>();
+	// 8.1: the reader's copy lives in memory, so each session's view is handed over on its first
+	// touch in this process, not only when it moves; a restart then shows the tasks it knew.
+	const handedOver = new Set<string>();
 	let warmed = false;
 	const current = (sessionId: string) =>
 		Effect.gen(function* () {
@@ -675,8 +677,47 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					newId: () => `${event.sequence}.${minted++}`,
 					policy: RUN_LEDGER_POLICY,
 				});
-				if (decision.tag === "Rejected" || decision.events.length === 0)
+				const handOver = (
+					tasks: LedgerView["tasks"],
+					snapshot: TasksSnapshot | undefined,
+				) =>
+					queuePendingWrite(sql, `run-ledger-tasks:${event.sessionId}`, {
+						apply: Effect.void,
+						committed: () => {
+							const wakes = ledgerTasksWakes.get(sql);
+							if (!wakes?.size) return;
+							handedOver.add(event.sessionId);
+							for (const wake of wakes) wake(event.sessionId, tasks, snapshot);
+						},
+					});
+				// The display of a first hand-over's live tasks: its latest stored snapshot.
+				const storedSnapshot = (tasks: LedgerView["tasks"]) =>
+					tasks.tag !== "live"
+						? Effect.succeed(undefined)
+						: sql<{ data: string; created_at: number }>`
+								SELECT data, created_at FROM events WHERE session_id = ${event.sessionId}
+								AND type = 'evidence.tasks_snapshot' AND sequence <= ${event.sequence}
+								ORDER BY sequence DESC LIMIT 1`.pipe(
+								Effect.map(([row]) =>
+									row
+										? {
+												tasks: (
+													JSON.parse(
+														row.data,
+													) as EventPayloadMap["evidence.tasks_snapshot"]
+												).tasks,
+												at: row.created_at,
+											}
+										: undefined,
+								),
+							);
+				if (decision.tag === "Rejected" || decision.events.length === 0) {
+					if (!handedOver.has(event.sessionId)) {
+						const tasks = viewLedger(ledger.state).tasks;
+						handOver(tasks, yield* storedSnapshot(tasks));
+					}
 					return untouched;
+				}
 				const stamp = randomUUID();
 				for (const [index, entry] of decision.events.entries())
 					yield* sql`INSERT INTO run_ledger_entries
@@ -697,22 +738,15 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				if (row.alarmAt !== (ledger.row?.alarmAt ?? null))
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
 				const tasks = viewLedger(state).tasks;
-				const snapshot =
-					event.type === "evidence.tasks_snapshot"
-						? { tasks: event.data.tasks, at: event.createdAt }
-						: undefined;
-				if (
-					snapshot !== undefined ||
+				if (event.type === "evidence.tasks_snapshot")
+					handOver(tasks, { tasks: event.data.tasks, at: event.createdAt });
+				else if (!handedOver.has(event.sessionId))
+					handOver(tasks, yield* storedSnapshot(tasks));
+				else if (
 					JSON.stringify(tasks) !==
-						JSON.stringify(viewLedger(ledger.state).tasks)
+					JSON.stringify(viewLedger(ledger.state).tasks)
 				)
-					queuePendingWrite(sql, `run-ledger-tasks:${event.sessionId}`, {
-						apply: Effect.void,
-						committed: () => {
-							for (const wake of ledgerTasksWakes.get(sql) ?? [])
-								wake(event.sessionId, tasks, snapshot);
-						},
-					});
+					handOver(tasks, undefined);
 				cache.set(event.sessionId, {
 					provider: ledger.provider,
 					state,

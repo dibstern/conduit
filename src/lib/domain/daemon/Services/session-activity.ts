@@ -90,6 +90,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 		},
 		backgroundOf(sessionId: string): SessionBackground | undefined {
 			const entry = views.get(sessionId);
+			if (entry?.view.tag === "unknown") return { tasks: [], checking: true };
 			if (entry?.view.tag !== "live") return undefined;
 			const tasks = entry.view.tasks
 				.map((task) => {
@@ -215,10 +216,10 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 					);
 					if (!found)
 						return awaits ? { work: "working", tasks: [] } : undefined;
-					return {
-						...found,
-						work: awaits ? "working" : classify(found.tasks, serving),
-					};
+					if (awaits) return { ...found, work: "working" };
+					return found.checking
+						? found
+						: { ...found, work: classify(found.tasks, serving) };
 				},
 			},
 			compactions: {
