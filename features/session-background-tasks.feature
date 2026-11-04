@@ -55,7 +55,7 @@ Scenario: The toast count and stop action follow the live tasks
   When the SDK reports the vitest task stopped
   Then the turn-stopped toast says Turn stopped. 1 task still running
   When I press Stop them in the turn-stopped toast
-  Then the toast asks to stop b1 without another session cancellation
+  Then the toast asks to stop all without another session cancellation
   And the composer shows no task dots
   When the session's last background task ends
   Then the composer shows no task dots
@@ -147,7 +147,7 @@ Examples:
   | phone    | session-background-tasks-pulldown-phone   | 98        |
   | desktop  | session-background-tasks-pulldown-desktop | 98        |
 
-Scenario: Stop all requests each task and waits for the SDK without cancelling the session
+Scenario: Stop all asks for every live task and waits for the SDK without cancelling the session
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And the composer status clock is frozen
@@ -155,7 +155,7 @@ Scenario: Stop all requests each task and waits for the SDK without cancelling t
   And the session has 2 live background tasks
   When I click the background tasks row
   And I press Stop all in the background tasks pull-down
-  Then the background tasks pull-down asks to stop b2, b1 without cancelling the session
+  Then the background tasks pull-down asks to stop all without cancelling the session
   And the composer shows no task dots
   When the session's last background task ends
   Then the background tasks pull-down is closed

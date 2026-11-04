@@ -31,7 +31,7 @@ import {
 	getPermissionMode,
 	setPermissionMode,
 } from "../../domain/relay/Services/session-overrides-state.js";
-import { stopBackgroundTaskById } from "../../handlers/background-tasks.js";
+import { stopTasks } from "../../handlers/background-tasks.js";
 import {
 	handleAskUserResponse,
 	handlePermissionResponse,
@@ -76,10 +76,13 @@ export const conversationHandlers = {
 			Effect.flatMap((service) => service.generate(request)),
 			Effect.catch(mapRpcFailure("GenerateRecap")),
 		),
-	StopBackgroundTask: (request) =>
-		stopBackgroundTaskById(request.sessionId, request.taskId).pipe(
+	StopTasks: ({ sessionId, tasks }) =>
+		stopTasks(sessionId, tasks).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catch(mapRpcFailure("StopBackgroundTask")),
+			Effect.catchTag("StopTasksRefused", ({ message }) =>
+				Effect.fail(new WsRpcError({ message })),
+			),
+			Effect.catch(mapRpcFailure("StopTasks")),
 		),
 	StopServer: ({ sessionId, server }) =>
 		Effect.gen(function* () {
@@ -353,7 +356,7 @@ export const conversationHandlers = {
 	| "ListRecaps"
 	| "GenerateRecap"
 	| "ExplainAsk"
-	| "StopBackgroundTask"
+	| "StopTasks"
 	| "StopServer"
 	| "SwitchPermissionMode"
 	| "RespondPermission"

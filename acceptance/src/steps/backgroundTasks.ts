@@ -345,7 +345,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		match: /^I press Stop them in the turn-stopped toast$/,
 		run: async ({ world }) => {
 			requireRpcControl(world.page).setStubs({
-				StopBackgroundTask: () => ({ ok: true }),
+				StopTasks: () => ({ ok: true }),
 			});
 			await world.page
 				.getByTestId("toast")
@@ -362,13 +362,13 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				.poll(() =>
 					rpc
 						.getRequests()
-						.filter((request) => request.tag === "StopBackgroundTask")
-						.map((request) => request.payload["taskId"]),
+						.filter((request) => request.tag === "StopTasks")
+						.flatMap((request) => request.payload["tasks"]),
 				)
 				.toEqual((match[1] ?? "").split(", "));
 			const stops = rpc
 				.getRequests()
-				.filter((request) => request.tag === "StopBackgroundTask");
+				.filter((request) => request.tag === "StopTasks");
 			for (const stop of stops)
 				expect(stop.payload["sessionId"]).toBe(sessionIdOf(world.page.url()));
 			expect(
@@ -765,7 +765,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		match: /^I stop the background task (.+)$/,
 		run: async ({ world, match }) => {
 			requireRpcControl(world.page).setStubs({
-				StopBackgroundTask: () => ({ ok: true }),
+				StopTasks: () => ({ ok: true }),
 			});
 			await world.page
 				.getByRole("button", {
@@ -798,7 +798,7 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		match: /^I press Stop all in the background tasks (pull-down|row)$/,
 		run: async ({ world, match }) => {
 			requireRpcControl(world.page).setStubs({
-				StopBackgroundTask: () => ({ ok: true }),
+				StopTasks: () => ({ ok: true }),
 			});
 			await world.page
 				.getByTestId(
@@ -820,13 +820,13 @@ export const backgroundTasksHandlers: StepHandler[] = [
 				.poll(() =>
 					rpc
 						.getRequests()
-						.filter((request) => request.tag === "StopBackgroundTask")
-						.map((request) => request.payload["taskId"]),
+						.filter((request) => request.tag === "StopTasks")
+						.flatMap((request) => request.payload["tasks"]),
 				)
 				.toEqual(ids);
 			for (const request of rpc
 				.getRequests()
-				.filter((request) => request.tag === "StopBackgroundTask"))
+				.filter((request) => request.tag === "StopTasks"))
 				expect(request.payload["sessionId"]).toBe(
 					sessionIdOf(world.page.url()),
 				);

@@ -606,10 +606,10 @@ export function replayTrace(
 								}),
 							),
 						);
-					case "StopBackgroundTask":
-						return client.StopBackgroundTask({
+					case "StopTasks":
+						return client.StopTasks({
 							sessionId,
-							taskId: command.taskId,
+							tasks: [command.taskId],
 						});
 				}
 			};
