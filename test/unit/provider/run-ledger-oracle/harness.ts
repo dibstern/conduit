@@ -664,6 +664,7 @@ export const generatedShapes = [
 	"native-token command_result",
 	"native_resume_rejected",
 	"probe input_present without id",
+	"OpenCode absent reading settled by the idle read after it",
 	"query replacement",
 	"confirm copied before a query replacement",
 	"turn joined to an input Run",
@@ -743,6 +744,8 @@ export class Coverage {
 	private readonly ended = new Set<string>();
 	private readonly observed = new Set<string>();
 	private readonly unknownInputs = new Set<string>();
+	/** The idle probes decide issued after an OpenCode absent reading (CONTRACT.md 3128-3132). */
+	private readonly idleAfterAbsent = new Set<SendToken>();
 	private readonly accepted = new Map<
 		string,
 		{ readonly runId: string; readonly inputId: string }
@@ -974,6 +977,25 @@ export class Coverage {
 		const hit = (name: GeneratedShape) => {
 			this.shapes[name]++;
 		};
+		// CONTRACT.md 3128-3132: an OpenCode absent reading issues an idle probe; its idle read settles it.
+		if (command.verb === "observe" && result.tag === "Accepted") {
+			const e = command.observation;
+			if (e.kind === "probe_result" && e.finding.tag === "input_absent")
+				for (const issued of result.effects)
+					if (
+						issued.tag === "Tokened" &&
+						issued.effect.kind === "probe" &&
+						issued.effect.target.tag === "native_session"
+					)
+						this.idleAfterAbsent.add(issued.token);
+			if (
+				e.tag === "Answer" &&
+				e.kind === "probe_result" &&
+				e.finding.tag === "native_idle" &&
+				this.idleAfterAbsent.has(e.token)
+			)
+				hit("OpenCode absent reading settled by the idle read after it");
+		}
 		// D45: a confirm for an entry taken before a query replacement, whatever its verdict.
 		if (
 			command.verb === "control" &&

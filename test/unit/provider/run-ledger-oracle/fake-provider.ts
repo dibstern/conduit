@@ -137,6 +137,11 @@ interface NativeSend {
 	covered: boolean;
 	ended: boolean;
 	notConsumed: boolean;
+	/**
+	 * OpenCode: the send count when an input probe read it absent. A prompt whose request was lost
+	 * may still run late, so only an idle read issued after that ends it (CONTRACT.md 3128-3132).
+	 */
+	absentAt?: number | undefined;
 	/** A release shows the host never handed it over (3.5, 4.5); a rejected resume ranks as permanent. */
 	released: boolean;
 	transportRank: number;
@@ -223,6 +228,8 @@ const probe = (variant: number, input: number): Probe => {
  */
 export class FakeProvider {
 	private readonly delayed: LedgerCommand[] = [];
+	/** The lost-prompt walk's start or steer and its step count (lostStep). */
+	private lost: { readonly native: NativeSend; steps: number } | undefined;
 	private readonly delivered: LedgerCommand[] = [];
 	private readonly notifications: Observation[] = [];
 	/** Main's inbox (D58): admitted inputs main has not claimed, in admission order. */
@@ -2007,8 +2014,12 @@ export class FakeProvider {
 							observation.finding.tag === "input_absent" &&
 							!issued.accepted
 						) {
-							issued.notConsumed = true;
-							issued.unfinished = false;
+							if (this.provider === "opencode")
+								issued.absentAt ??= this.sends.size;
+							else {
+								issued.notConsumed = true;
+								issued.unfinished = false;
+							}
 						}
 					}
 				}
@@ -2031,8 +2042,19 @@ export class FakeProvider {
 								x.live = false;
 								x.fenced = false;
 							}
+				const idleAt = [...this.sends.values()].indexOf(native);
 				for (const issued of this.sends.values()) {
 					if (issued === native) break;
+					if (
+						issued.absentAt !== undefined &&
+						issued.absentAt <= idleAt &&
+						!issued.accepted &&
+						!issued.deliveryConfirmed
+					) {
+						// An idle read after the absent one: the lost prompt never ran (3128-3132).
+						issued.notConsumed = true;
+						issued.unfinished = false;
+					}
 					if (
 						issued.label === this.label &&
 						!(
@@ -3530,6 +3552,14 @@ export class FakeProvider {
 				kind: "effect_outcome",
 				outcome: { tag: "not_sent", retryAt: now + 100 },
 			};
+		// 9 (CONTRACT.md 3128-3132): the lost-prompt walk's start or steer lost its request.
+		if (send && this.lost?.steps === 0 && this.lost.native.send === send)
+			return {
+				tag: "Answer",
+				token: tokened(wire),
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			};
 		// decide's own effects (3.12), a probe, a cancel_request or a stop_task, answer their outcome.
 		if (send && send.effect.kind !== "start" && send.effect.kind !== "steer")
 			return {
@@ -4148,6 +4178,63 @@ export class FakeProvider {
 		);
 	}
 
+	/**
+	 * 9 (CONTRACT.md 3128-3132): an OpenCode lost-prompt walk, after its start or steer read
+	 * delivery_unknown. The alarm fires its recovery probe, which reads input_absent; the idle probe
+	 * issued after that reads native_idle. Six steps at most; a step it cannot take ends it.
+	 */
+	private lostStep(
+		action: TraceAction,
+		snapshot: ProviderSnapshot,
+	): TracePacket | undefined {
+		const walk = this.lost;
+		if (walk === undefined) return undefined;
+		const effect = walk.native.send.effect;
+		const sends = [...this.sends.values()];
+		const open = (native: NativeSend, tag: "input" | "native_session") =>
+			native.unfinished &&
+			native.send.effect.kind === "probe" &&
+			native.send.effect.target.tag === tag &&
+			(tag === "native_session" ||
+				("inputId" in effect &&
+					native.send.effect.target.tag === "input" &&
+					native.send.effect.target.inputId === effect.inputId));
+		const absentAt = walk.native.absentAt;
+		const answer =
+			absentAt === undefined
+				? sends
+						.slice(sends.indexOf(walk.native) + 1)
+						.find((native) => open(native, "input"))
+				: sends
+						.slice(absentAt)
+						.find((native) => open(native, "native_session"));
+		walk.steps++;
+		if (
+			walk.steps > 6 ||
+			(answer === undefined && snapshot.alarmAt === undefined)
+		) {
+			this.lost = undefined;
+			return undefined;
+		}
+		if (answer === undefined)
+			return {
+				command: { verb: "settle", settlement: { kind: "alarm_fired" } },
+				now: Math.max(snapshot.now, snapshot.alarmAt ?? snapshot.now),
+			};
+		if (absentAt !== undefined) this.lost = undefined;
+		return {
+			command: {
+				verb: "observe",
+				observation: this.observation(
+					answer.send,
+					snapshot,
+					{ ...action, variant: absentAt === undefined ? 17 : 18 },
+					snapshot.now,
+				),
+			},
+			now: snapshot.now,
+		};
+	}
 	next(action: TraceAction, snapshot: ProviderSnapshot): TracePacket {
 		this.q28 = undefined;
 		this.clock = snapshot.now;
@@ -4156,6 +4243,8 @@ export class FakeProvider {
 		if (committed) return { command: committed, now: snapshot.now };
 		const deferred = this.deferred.shift()?.(snapshot);
 		if (deferred) return { command: deferred, now: snapshot.now };
+		const walked = this.lostStep(action, snapshot);
+		if (walked) return walked;
 		if (
 			snapshot.view.pendingConfirm &&
 			!this.copiedConfirms.includes(snapshot.view.pendingConfirm.snapshotEntry)
@@ -4399,6 +4488,22 @@ export class FakeProvider {
 										transportRank === 0,
 								)?.send
 						: undefined;
+				// 9 (CONTRACT.md 3128-3132): direct, one input in four starts a lost-prompt walk (lostStep): an
+				// unanswered start or steer reads delivery_unknown.
+				const lost =
+					action.operation === 27 &&
+					this.provider === "opencode" &&
+					action.input % 4 === 2 &&
+					this.lost === undefined
+						? [...this.sends.values()]
+								.reverse()
+								.find(
+									({ send, transportRank }) =>
+										(send.effect.kind === "start" ||
+											send.effect.kind === "steer") &&
+										transportRank === 0,
+								)
+						: undefined;
 				const joinedStart =
 					target === undefined
 						? undefined
@@ -4410,17 +4515,22 @@ export class FakeProvider {
 										send.effect.runId === target,
 								)?.send;
 				const drawn =
-					retriedSteer !== undefined
-						? { ...action, selection: 0, variant: 13 }
-						: joinedStart === undefined
-							? action
-							: {
-									...action,
-									selection: 0,
-									variant: [2, 7, 8, 9, 10][action.variant % 5] ?? 7,
-								};
+					lost !== undefined
+						? { ...action, selection: 0, variant: 12 }
+						: retriedSteer !== undefined
+							? { ...action, selection: 0, variant: 13 }
+							: joinedStart === undefined
+								? action
+								: {
+										...action,
+										selection: 0,
+										variant: [2, 7, 8, 9, 10][action.variant % 5] ?? 7,
+									};
 				const selected =
-					retriedSteer ?? joinedStart ?? this.select(snapshot, drawn);
+					lost?.send ??
+					retriedSteer ??
+					joinedStart ??
+					this.select(snapshot, drawn);
 				const send = this.untransmitted(selected) ? undefined : selected;
 				// G2: run_dispatched on a transmitted no-hold send is produced; bound-only metadata never is.
 				if (
@@ -4435,8 +4545,15 @@ export class FakeProvider {
 					command = { verb: "settle", settlement: { kind: "alarm_fired" } };
 					break;
 				}
+				if (lost !== undefined) this.lost = { native: lost, steps: 0 };
 				const observation = this.observation(send, snapshot, drawn, now);
 				command = { verb: "observe", observation };
+				if (
+					this.lost?.steps === 0 &&
+					(observation.kind !== "effect_outcome" ||
+						observation.outcome.tag !== "delivery_unknown")
+				)
+					this.lost = undefined;
 				// 4.5, 3.4: run.dispatched is a stream event read in order, never a delayed answer.
 				if (action.operation === 5 && observation.kind !== "run_dispatched") {
 					this.delayed.push(command);

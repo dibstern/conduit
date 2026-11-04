@@ -1148,17 +1148,15 @@ describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance crit
 		});
 	});
 
-	it("an unknown delivery blocks the automatic resend until a probe's input_absent settles it (3.5, 4.8)", () => {
-		agreed("opencode", (d) => {
+	it.each([
+		"claude",
+		"codex",
+		"cursor",
+	] as const)("an unknown delivery blocks the automatic resend until a probe's input_absent settles it on %s (3.5, 4.8, 3128-3132)", (provider) => {
+		agreed(provider, (d) => {
 			const a = begin(d);
-			observe(d, a.token, {
-				kind: "effect_outcome",
-				outcome: { tag: "delivery_unknown" },
-			});
-			observe(d, a.token, {
-				kind: "effect_outcome",
-				outcome: { tag: "retryable", retryAt: d.now + 300 },
-			});
+			// 4.11: a runner-held start's unknown delivery is its hold's delivery_indeterminate.
+			observe(d, a.token, { kind: "delivery_indeterminate" });
 			const [probe] = fire(d).issued;
 			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
 			expect(visibleInput(d, "A")?.state).toMatchObject({
@@ -1170,6 +1168,109 @@ describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance crit
 			});
 			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
 			expect(d.view().live).toEqual([]);
+		});
+	});
+
+	// 82tn.32.35, CONTRACT.md 3128-3132: the live check found a lost OpenCode prompt_async running
+	// late, so OpenCode needs native_idle after input_absent before the send counts absent.
+	it("OpenCode: input_absent alone neither settles nor re-sends a lost prompt; the idle read after it does (3128-3132)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			const [probe] = fire(d).issued;
+			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
+			const absent = observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			});
+			const [idle] = absent.issued;
+			assert(idle?.tag === "Tokened", "the idle probe is decide's");
+			expect(idle.effect).toEqual({
+				kind: "probe",
+				runId: a.runId,
+				target: { tag: "native_session" },
+			});
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Delivered",
+				certainty: "unknown",
+			});
+			expect(transmissions(d, "A")).toHaveLength(1);
+			// 3.7: busy is no finding; the idle probe reads again at its deadline.
+			observe(d, idle.token, {
+				kind: "probe_result",
+				finding: { tag: "native_busy" },
+			});
+			expect(visibleInput(d, "A")?.state).toMatchObject({
+				certainty: "unknown",
+			});
+			const [again] = fire(d).issued;
+			assert(again?.tag === "Tokened", "the idle probe's next read");
+			observe(d, again.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(visibleInput(d, "A")?.state).toEqual({ tag: "Queued" });
+			expect(d.view().live).toEqual([]);
+		});
+	});
+
+	it("OpenCode: a late acceptance between input_absent and the idle read wins (3128-3132, 3.5)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			const [probe] = fire(d).issued;
+			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
+			const [idle] = observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			}).issued;
+			assert(idle?.tag === "Tokened", "the idle probe is decide's");
+			observe(d, a.token, { kind: "input_accepted" });
+			observe(d, idle.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(transmissions(d, "A")).toHaveLength(1);
+			expect(visibleInput(d, "A")?.state).not.toEqual({ tag: "Queued" });
+		});
+	});
+
+	it("OpenCode: an idle probe that reads busy to its cap leaves a lost prompt undecided, never re-sent (3128-3132, 3.7)", () => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			const [probe] = fire(d).issued;
+			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
+			let [read] = observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			}).issued;
+			let reads = 0;
+			while (read?.tag === "Tokened") {
+				reads += 1;
+				observe(d, read.token, {
+					kind: "probe_result",
+					finding: { tag: "native_busy" },
+				});
+				if (d.alarmAt === undefined) break;
+				[read] = fire(d).issued;
+			}
+			expect(reads).toBe(5);
+			expect(d.alarmAt).toBeUndefined();
+			expect(transmissions(d, "A")).toHaveLength(1);
+			expect(visibleInput(d, "A")?.state).toEqual({
+				tag: "Delivered",
+				certainty: "unknown",
+			});
 		});
 	});
 
@@ -2261,9 +2362,18 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 				target: { tag: "input", inputId: "B" },
 			});
 			expect(transmissions(d, "B")).toHaveLength(1);
-			observe(d, probe.token, {
+			const [idle] = observe(d, probe.token, {
 				kind: "probe_result",
 				finding: { tag: "input_absent" },
+			}).issued;
+			// 3128-3132: OpenCode's absent reading settles B only with the idle read after it.
+			assert(idle?.tag === "Tokened", "the idle probe is decide's");
+			expect(visibleInput(d, "B")?.state).toMatchObject({
+				certainty: "unknown",
+			});
+			observe(d, idle.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
 			});
 			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Queued" });
 		});
