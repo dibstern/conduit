@@ -521,7 +521,17 @@ describe("Claude on the Run Ledger", () => {
 		});
 		const sessionId = await browser.createSession("Claude ledger wake");
 		await browser.send(sessionId, "Run sleep 8 in the background");
-		// A start waits for the wake's turn (8.3), so the second send ends after the wake.
+		// A start waits for a wake its ledger has folded (8.3, CONTRACT.md 2832-2833); a send admitted
+		// before the wake's turn_started reaches main is dispatched at once, as it should be.
+		// test-waits-allow polling: the wake's turn_started reaches the browser as no frame of its own.
+		await vi.waitFor(() =>
+			expect(
+				read(fixture, sessionId).events.some(
+					(event) => event.type === "evidence.turn_started",
+				),
+			).toBe(true),
+		);
+		// So the second send ends after the wake.
 		await browser.send(sessionId, "ping");
 		const ledger = read(fixture, sessionId);
 		expect(ledger.runs).toHaveLength(2);
