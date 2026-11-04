@@ -36,7 +36,7 @@ export const readSessionCategoryCounts = (
 			WHERE m.session_id = ${sessionId} AND ${surfacingTextEligibility(sql)}
 			AND NOT EXISTS (
 				SELECT 1 FROM sessions s JOIN messages cut ON cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
-				WHERE s.id = m.session_id AND (m.created_at > cut.created_at OR (m.created_at = cut.created_at AND m.id >= cut.id)))`;
+				WHERE s.id = m.session_id AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id))`;
 		const verdicts = yield* Schema.decodeUnknownEffect(
 			Schema.Array(
 				Schema.Struct({
