@@ -1990,6 +1990,23 @@ export class FakeProvider {
 				if (claimed.send.effect.kind === "send_native_command")
 					this.commands.delete(claimed.send.effect.commandId);
 			}
+		// 3.4 (CONTRACT.md 474-476, 1135-1136): a permanent outcome written with no live claim names the latest
+		// claimed transmission and ends the row, so a retry opened after it is never claimed.
+		if (
+			observation.kind === "effect_outcome" &&
+			observation.outcome.tag === "permanent" &&
+			observation.transmission !== undefined
+		)
+			for (const [token, { name }] of this.mainTransmissions) {
+				const retry = this.sends.get(token);
+				if (
+					retry &&
+					name.commandId === observation.transmission.commandId &&
+					name.transmission > observation.transmission.transmission &&
+					!this.controlOutcomes.has(token)
+				)
+					retry.unfinished = false;
+			}
 		const native = this.sends.get(observation.token);
 		// The answered send's address owns the label (3.4, L2).
 		if (!native) return;
@@ -3974,6 +3991,19 @@ export class FakeProvider {
 				direct,
 			});
 		}
+		// D53 (3.9): a steer whose send failed permanently before a turn took it fails its input, so
+		// main never starts it.
+		for (const steer of this.mainSteers.filter((item) =>
+			[...this.sends.values()].some(
+				({ send, transportRank, accepted }) =>
+					send.effect.kind === "steer" &&
+					send.effect.inputId === item.inputId &&
+					send.effect.runId === item.parent &&
+					transportRank === 2 &&
+					!accepted,
+			),
+		))
+			this.mainSteers.splice(this.mainSteers.indexOf(steer), 1);
 		// Main makes the first move it can, starting at the chosen one; with none, time passes.
 		for (const offset of [0, 1, 2, 3, 4])
 			switch ((action.variant + offset) % 5) {
@@ -3982,7 +4012,14 @@ export class FakeProvider {
 					// input waits for the open run's terminal (3.9). Its run.requested is appended in the
 					// write that sends the input, after input.sent, never at admit (3.4).
 					const head = this.mainInbox[0];
-					if (!head || (open && head.delivery === "queue")) continue;
+					// 2.1 (CONTRACT.md 57, 262), 3.9 (978-982): a steer its parent's end left pending is a Run of
+					// its own, so main claims nothing until it starts as main's open Run (case 1).
+					if (
+						!head ||
+						(open && head.delivery === "queue") ||
+						(!open && this.mainSteers.length > 0)
+					)
+						continue;
 					this.mainInbox.shift();
 					const runId = `main-run:${this.serial++}`;
 					if (open) {
@@ -4112,6 +4149,14 @@ export class FakeProvider {
 						return first;
 					}
 					const steer = this.mainSteers.shift();
+					if (steer && !open)
+						this.mainRun = {
+							runId: steer.runId,
+							inputId: steer.inputId,
+							issue: steer.issue,
+							started: true,
+							stopped: false,
+						};
 					if (steer)
 						return emit({
 							tag: "Main",
