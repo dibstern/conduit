@@ -2088,3 +2088,6 @@ Lane 32.6b (85e71258, 08c16063, 9808341c, f2c3d77b on wt/82tn32r3): boxes	pointe
 Lane 3278: every steering box has code and a proving test per provider.	pointer
 Lane 329c (22e4b45d, e5090563, d4e8aaf0, 3d786af7, e6cdab6d on wt/82tn3225): a browser answer	pointer
 question now returns at once: the Stop commits without waiting (provider-	pointer
+test: the Run ends at the stop's deadline step, ends once, and the next send	pointer
+send racing the deadline step's retirement.	pointer
+Lane 32.8c (wt/82tn32r3: 47d2e37c, c4364a1f, 7f9e4b0c, b2ab90bc). The Codex trace replay	pointer
