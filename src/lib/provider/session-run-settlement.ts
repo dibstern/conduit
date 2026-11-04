@@ -31,7 +31,7 @@ export function settleToolChildRuns<A, E, R>(
 	publish: (events: readonly ProviderRuntimeEvent[]) => Effect.Effect<A, E, R>,
 ) {
 	return Effect.gen(function* () {
-		const runs = yield* sql<{ session_id: string; runId: string }>`
+		const tree = yield* sql<{ id: string }>`
 			WITH RECURSIVE children(id) AS (
 				SELECT ${parentSessionId}
 				UNION
@@ -41,9 +41,19 @@ export function settleToolChildRuns<A, E, R>(
 				WHERE message.is_inherited = 0 AND part.type = 'tool'
 					AND json_extract(part.metadata, '$.childSessionId') IS NOT NULL
 			)
+			SELECT id FROM children WHERE id != ${parentSessionId}`;
+		if (tree.length === 0) return;
+		const ids = tree.map(({ id }) => id);
+		const runs = yield* sql<{ session_id: string; runId: string }>`
 			SELECT run.session_id, run.id AS runId FROM provider_runs run
-			WHERE run.status IN ('pending', 'running') AND run.session_id != ${parentSessionId}
-				AND run.session_id IN (SELECT id FROM children)`;
+			WHERE run.status IN ('pending', 'running') AND run.session_id IN ${sql.in(ids)}`;
+		// A background agent's child has no run of its own, and its task died with the process
+		// (CONTRACT.md 223, 2.1 row 213; L5, 2907-2911), so it reads idle now rather than after
+		// the stranded-child sweep's grace (82tn.32.40).
+		const busy = yield* sql<{ id: string }>`
+			SELECT id FROM sessions s WHERE s.id IN ${sql.in(ids)} AND s.status IN ('busy', 'retry')
+				AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = s.id
+					AND run.status IN ('pending', 'running'))`;
 		const children = new Map<string, RunSettlementOwner[]>();
 		for (const run of runs) {
 			const owners = children.get(run.session_id) ?? [];
@@ -52,6 +62,8 @@ export function settleToolChildRuns<A, E, R>(
 		}
 		for (const [sessionId, owners] of children)
 			yield* settleSessionRuns(sql, sessionId, reason, publish, { owners });
+		for (const { id } of busy)
+			yield* settleSessionRuns(sql, id, reason, publish);
 	});
 }
 
