@@ -76,9 +76,11 @@
 	});
 
 	// Load again when the tool moves on, not each time the same state is re-sent.
+	// The browser can show a running tool as completed, so its result arriving
+	// is what marks it settled.
 	const loadKey = $derived(
 		cut
-			? `${session?.projectSlug}\0${session?.sessionId}\0${message.id}:${message.status}${hasPresentation ? `:${message.result === undefined}` : ""}`
+			? `${session?.projectSlug}\0${session?.sessionId}\0${message.id}:${message.status}:${message.result === undefined}`
 			: undefined,
 	);
 

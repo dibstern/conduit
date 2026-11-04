@@ -254,6 +254,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Run Ledger evidence: the outbox writer of the effect's outcome",
 	},
+	"evidence.probe_result": {
+		produced: false,
+		reason: "Run Ledger evidence: the outbox writer of a probe's outcome",
+	},
 	"evidence.turn_started": { produced: true },
 	"evidence.turn_ended": { produced: true },
 	"evidence.tasks_snapshot": { produced: true },

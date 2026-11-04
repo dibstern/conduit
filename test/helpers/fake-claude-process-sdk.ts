@@ -702,6 +702,10 @@ function query(params: {
 	let interruptibleTurn = false;
 	let interruptAwaitingDecision = false;
 	let closed = false;
+	let markClosed = () => {};
+	const queryClosed = new Promise<void>((done) => {
+		markClosed = done;
+	});
 	let promptIndex = 0;
 	let initializationFinished = false;
 	let rejectInitialization: (error: Error) => void = () => {};
@@ -2271,6 +2275,12 @@ function query(params: {
 						pid: process.pid,
 						response,
 					});
+				// RL-081: a held question turn keeps running after its question resolves, until its query closes.
+				if (request.startsWith("question-hold-") && proof) {
+					mark({ kind: "assistant-held", prompt, queryId });
+					await queryClosed;
+					return;
+				}
 			}
 			// A long Bash call. With a proof directory it stays running until the
 			// spec releases its result; without one it completes straight away.
@@ -2917,6 +2927,7 @@ function query(params: {
 		close: () => {
 			if (closed) return;
 			closed = true;
+			markClosed();
 			clearTimeout(initializationTimer);
 			if (!initializationFinished) {
 				initializationFinished = true;

@@ -17,6 +17,7 @@ import type {
 	EventPayloadMap,
 	InputRequest,
 } from "../../contracts/stored-event.js";
+import { inputIdFromOpenCodeMessageId } from "../../provider/opencode/opencode-input-message-id.js";
 import {
 	decide,
 	evolve,
@@ -52,7 +53,10 @@ import { runTerminalStatus } from "./projectors-effect.js";
  */
 export const RUN_LEDGER_POLICY: DecideContext["policy"] = {
 	settleMs: 7000,
-	probeMs: 30_000,
+	probeMs:
+		process.env["NODE_ENV"] === "test"
+			? Number(process.env["CONDUIT_TEST_RUN_LEDGER_PROBE_MS"] ?? 30_000)
+			: 30_000,
 	nativeCommandMs: 60_000,
 };
 
@@ -298,6 +302,34 @@ const commandFor = (
 						direct: getProviderDriver(provider)?.runsOpenCodeServer === true,
 					},
 				});
+			case "message.created": {
+				// 9 (CONTRACT.md 3032-3033, 3101-3102): OpenCode's echo of a prompt, its user message under
+				// the conduit id main gave it, is that input's acceptance (3.4, 506-507), which beats an
+				// earlier absent reading (564, 3128-3131). Conduit's own placement carries the bare input id.
+				const inputId =
+					event.data.role === "user" &&
+					getProviderDriver(provider)?.runsOpenCodeServer === true
+						? inputIdFromOpenCodeMessageId(event.data.messageId)
+						: undefined;
+				if (inputId === undefined) return undefined;
+				// 3.4: a direct start's token is its run.requested runId; the echo names no try, so the latest.
+				const [requested] = yield* sql<{ runId: string }>`
+					SELECT json_extract(data, '$.runId') AS runId FROM events
+					WHERE session_id = ${event.sessionId} AND type = 'run.requested'
+						AND json_extract(data, '$.inputId') = ${inputId}
+						AND sequence < ${event.sequence}
+					ORDER BY sequence DESC LIMIT 1`;
+				if (!requested) return undefined;
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Answer",
+						token: requested.runId as SendToken,
+						kind: "input_accepted",
+						nativeMessageId: event.data.messageId,
+					},
+				};
+			}
 			case "run.started":
 				return main({
 					verb: "observe",
@@ -462,6 +494,16 @@ const commandFor = (
 								},
 				};
 			}
+			case "evidence.probe_result":
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Answer",
+						token: event.data.token as SendToken,
+						kind: "probe_result",
+						finding: event.data.finding,
+					},
+				};
 			case "evidence.turn_started":
 				return {
 					verb: "observe",
@@ -629,6 +671,7 @@ const ledgerEffect = (effect: RunEffect) =>
 const HANDLES = [
 	"input.sent",
 	"run.requested",
+	"message.created",
 	"run.started",
 	"turn.completed",
 	"turn.error",
@@ -642,6 +685,7 @@ const HANDLES = [
 	"evidence.process_lost",
 	"evidence.alarm_fired",
 	"evidence.effect_outcome",
+	"evidence.probe_result",
 	"evidence.turn_started",
 	"evidence.turn_ended",
 	"evidence.tasks_snapshot",

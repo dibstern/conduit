@@ -1164,6 +1164,24 @@ export const CanonicalEvents = {
 			]),
 		}),
 	),
+	/**
+	 * What a probe read (3.4, 3.7), naming its token, in the write that ends its outbox row with
+	 * succeeded; the target is the issued probe's.
+	 */
+	"evidence.probe_result": live(
+		Schema.Struct({
+			token: Schema.String,
+			finding: Schema.Union([
+				Schema.Struct({
+					tag: Schema.Literal("input_present"),
+					nativeMessageId: Schema.optionalKey(Schema.String),
+				}),
+				Schema.Struct({ tag: Schema.Literal("input_absent") }),
+				Schema.Struct({ tag: Schema.Literal("native_idle") }),
+				Schema.Struct({ tag: Schema.Literal("native_busy") }),
+			]),
+		}),
+	),
 	"evidence.turn_started": live(
 		Schema.Struct({
 			label: Schema.String,

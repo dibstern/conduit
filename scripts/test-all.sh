@@ -82,6 +82,7 @@ run_group() {
       run "Integration tests"        pnpm test:integration
       wait_for_cleanup
       run "Contract tests"           pnpm test:contract
+      run "Codex trace replay"       pnpm codex:replay-traces
       ;;
     build)
       run "Build"            pnpm build

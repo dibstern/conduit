@@ -2826,7 +2826,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 1,
-			totalReplayed: 4,
+			totalReplayed: 5,
 		});
 		expect(result.durableFailures).toHaveLength(1);
 		const durableFailure = result.durableFailures[0];
@@ -3048,7 +3048,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(result.retryRecovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 1,
-			totalReplayed: 3,
+			totalReplayed: 4,
 		});
 		expect(result.durableFailuresAfterRetry).toEqual([
 			{ projector_name: "message", event_sequence: 1 },
@@ -3115,7 +3115,7 @@ describe("ProjectionRunnerEffect", () => {
 		expect(cold.recovery).toMatchObject({
 			startCursor: 0,
 			endCursor: 3,
-			totalReplayed: 7,
+			totalReplayed: 8,
 		});
 		expect(cold.failures).toEqual([]);
 		expect(cold.durableFailures).toEqual([{ count: 0 }]);

@@ -929,6 +929,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_HOLD_RUNNER_OUTPUT"
 					| "CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND"
 					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
+					| "CONDUIT_TEST_RUN_LEDGER_PROBE_MS"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>
@@ -3274,13 +3275,18 @@ export class ProcessBrowser {
 		);
 	}
 
-	/** The tray's Send now, and Resume on the oldest queued input. */
-	async sendNow(sessionId: string, inputId: string): Promise<void> {
+	/** The tray's Send now, and Resume on the oldest queued input; with `interrupt`, its Run now. */
+	async sendNow(
+		sessionId: string,
+		inputId: string,
+		interrupt = false,
+	): Promise<void> {
 		const result = await this.run(
 			this.rpc["input.sendNow"]({
 				sessionId,
 				originId: this.originId,
 				inputId,
+				...(interrupt ? { interrupt: true } : {}),
 			}),
 		);
 		if (!result.ok) throw new Error(`send now refused: ${result.reason}`);

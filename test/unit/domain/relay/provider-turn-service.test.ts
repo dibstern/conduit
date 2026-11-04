@@ -1795,13 +1795,18 @@ describe("ProviderTurnService", () => {
 			() => {
 				const issued = Deferred.makeUnsafe<void>();
 				const delivered = Deferred.makeUnsafe<void>();
+				const retireIssued = Deferred.makeUnsafe<void>();
+				const retired = Deferred.makeUnsafe<void>();
 				let deliver: (command: SendTurnCommand) => Effect.Effect<TurnResult> =
 					() => Effect.die("uninitialized delivery");
 				const dispatchEffect = vi.fn((command: OrchestrationCommand) =>
 					command.type === "send_turn"
 						? deliver(command)
 						: command.type === "end_session"
-							? confirmProcessLoss(command)
+							? Deferred.succeed(retireIssued, undefined).pipe(
+									Effect.andThen(Deferred.await(retired)),
+									Effect.andThen(confirmProcessLoss(command)),
+								)
 							: Deferred.succeed(issued, undefined).pipe(
 									Effect.andThen(Effect.never),
 								),
@@ -1876,6 +1881,20 @@ describe("ProviderTurnService", () => {
 					).toBe("accepted");
 					expect(dispatchEffect).toHaveBeenCalledTimes(1);
 					yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+					// The deadline step's retirement is in flight: the Stop's fence
+					// holds until it returns, so a message sent now is queued, never
+					// steered into the retiring runner (CONTRACT.md 5410, 2905).
+					yield* Deferred.await(retireIssued);
+					expect(service.turnFences("session-1").stopping).toBe(true);
+					yield* inbox.submit({
+						clientId: "browser",
+						sessionId: "session-1",
+						inputId: "steer-c",
+						delivery: "steer",
+						request: { text: "Charlie" },
+					});
+					expect(dispatchEffect).toHaveBeenCalledTimes(2);
+					yield* Deferred.succeed(retired, undefined);
 					yield* stopped;
 					expect(
 						yield* sql`SELECT status FROM provider_runs WHERE id = 'run-active-input'`,
@@ -1887,8 +1906,11 @@ describe("ProviderTurnService", () => {
 							.mock.calls.map(([command]) => command.type),
 					).toEqual(["interrupt_turn", "end_session", "send_turn"]);
 					expect(
-						yield* sql`SELECT input_id, state FROM pending_inputs`,
-					).toEqual([{ input_id: "queued-b", state: "removed" }]);
+						yield* sql`SELECT input_id, state FROM pending_inputs ORDER BY input_id`,
+					).toEqual([
+						{ input_id: "queued-b", state: "removed" },
+						{ input_id: "steer-c", state: "queued" },
+					]);
 					expect(
 						yield* sql`SELECT id, status FROM provider_runs ORDER BY id`,
 					).toEqual([
@@ -3427,12 +3449,17 @@ describe("ProviderTurnService", () => {
 						]);
 					}
 					const service = yield* ProviderTurnServiceTag;
+					const lifts = yield* service.fenceLifts;
 					yield* service.prepareTurnSession({
 						clientId: "client-1",
 						commandId: "cmd-reply",
 						sessionId: "session-1",
 					});
 
+					// The reply commits the Stop without awaiting it (RL-081); its interrupt
+					// dispatches on the Stop's own fiber, which lifts the fence at its end.
+					expect(service.turnFences("session-1").stopping).toBe(interrupts);
+					if (interrupts) yield* Stream.runHead(lifts);
 					expect(
 						vi
 							.mocked(engine.dispatchEffect)

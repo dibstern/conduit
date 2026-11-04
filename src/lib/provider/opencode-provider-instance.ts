@@ -798,6 +798,67 @@ export class OpenCodeProviderInstance implements ProviderInstance {
 		);
 	}
 
+	/**
+	 * CONTRACT.md 3089: idle is `native_idle` from `session.statuses` in the session's own
+	 * directory, an omission counting only once `session.get` confirms the identity; `retry` is
+	 * busy. An input is present when its conduit message id reads back; a 404 is absent only for a
+	 * confirmed session, as OpenCode answers a missing session the same way. Anything else fails,
+	 * which is no finding.
+	 */
+	readonly probeEffect: NonNullable<ProviderInstance["probeEffect"]> = (
+		sessionId,
+		target,
+		call,
+	) =>
+		this.resolveClientEffect(
+			sessionId,
+			call?.account,
+			call?.workspaceRoot,
+		).pipe(
+			Effect.flatMap((client) =>
+				Effect.tryPromise({
+					try: async () => {
+						const confirmed = async () => {
+							const session = await client.session.get(sessionId);
+							if (session.id !== sessionId || !session.directory)
+								throw this.providerFailure(
+									"probe",
+									`OpenCode session "${sessionId}" is not confirmed`,
+								);
+							return session.directory;
+						};
+						if (target.tag === "native_session") {
+							const status = (await client.session.statuses(await confirmed()))[
+								sessionId
+							];
+							return status === undefined || status.type === "idle"
+								? { tag: "native_idle" as const }
+								: { tag: "native_busy" as const };
+						}
+						const messageId = openCodeInputMessageId(target.inputId);
+						try {
+							await client.session.message(sessionId, messageId);
+							return {
+								tag: "input_present" as const,
+								nativeMessageId: messageId,
+							};
+						} catch (cause) {
+							if (
+								!(cause instanceof OpenCodeApiError) ||
+								cause.responseStatus !== 404
+							)
+								throw cause;
+							await confirmed();
+							return { tag: "input_absent" as const };
+						}
+					},
+					catch: (cause) => cause,
+				}),
+			),
+			Effect.mapError((cause) => this.providerFailure("probe", cause)),
+			Effect.scoped,
+		);
+
 	/** Appends the Side Thread rules for `mode`; callers gate on Side Threads. */
 	setPermissionModeEffect(
 		sessionId: string,

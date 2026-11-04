@@ -411,6 +411,16 @@ const server = createServer(async (request, response) => {
 	) {
 		// The turn finishes at once: busy, then idle.
 		const sessionID = path.split("/")[2];
+		// A lost prompt: the client's request dies unanswered while OpenCode keeps
+		// the prompt and runs it late (lane-live/opencode-dropped.json).
+		if (existsSync(join(configDir, "fake-opencode-drop-prompt"))) {
+			const { messageID } = JSON.parse(body || "{}");
+			updateState((state) => {
+				(state.lostPrompts ??= {})[messageID] = { sessionID, directory };
+			});
+			request.socket.destroy();
+			return;
+		}
 		response.writeHead(204).end();
 		// Crash tests control the remaining stream and idle through /test routes.
 		if (existsSync(join(configDir, "fake-opencode-hold-turn"))) {
@@ -477,6 +487,59 @@ const server = createServer(async (request, response) => {
 		request.method === "POST"
 	) {
 		response.end("true");
+	} else if (
+		/^\/session\/[^/]+\/message\/[^/]+$/.test(path) &&
+		request.method === "GET"
+	) {
+		// One message by id; OpenCode answers 404 when it has none, and also when
+		// the session is missing.
+		const [, , sessionID, , messageID] = path.split("/");
+		const historyFile = join(configDir, "fake-opencode-history.json");
+		const history = existsSync(historyFile)
+			? JSON.parse(readFileSync(historyFile, "utf8"))
+			: {};
+		const found = (history[sessionID] ?? []).find(
+			({ info }) => info?.id === messageID,
+		);
+		if (found) {
+			response.end(JSON.stringify(found));
+			return;
+		}
+		response.writeHead(404).end(
+			JSON.stringify({
+				name: "NotFoundError",
+				data: { message: `Message not found: ${messageID}` },
+			}),
+		);
+		// The live order: a read finds the lost prompt absent, then its work
+		// begins (user message, then busy) and runs until the test sets idle.
+		const lost = readState().lostPrompts?.[messageID];
+		if (!lost || lost.sessionID !== sessionID) return;
+		const message = {
+			info: {
+				id: messageID,
+				sessionID,
+				role: "user",
+				time: { created: Date.now() },
+			},
+			parts: [],
+		};
+		writeFileSync(
+			historyFile,
+			JSON.stringify({
+				...history,
+				[sessionID]: [...(history[sessionID] ?? []), message],
+			}),
+		);
+		updateState((state) => {
+			delete state.lostPrompts[messageID];
+			(state.statuses[lost.directory] ??= {})[sessionID] = { type: "busy" };
+		});
+		emitTyped(lost.directory, "message.updated", { info: message.info });
+		emitTyped(lost.directory, "session.status", {
+			sessionID,
+			status: { type: "busy" },
+		});
 	} else if (/^\/session\/[^/]+\/message$/.test(path)) {
 		const sessionID = path.split("/")[2];
 		if (request.method === "POST") {

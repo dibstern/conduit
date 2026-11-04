@@ -56,9 +56,11 @@ const SESSIONS = [
 		tools: 2,
 	},
 ];
-// Compat tools: the only rendered delta is "✦ Summarize" -> "✦ Summary".
+// Rendered deltas since the fixture: "✦ Summary" (1436b56a), message dates
+// (818f9273), strip steps read aloud (4081bdba) and the Log and Usage footer
+// (3a07b01e, c14985cf).
 const RENDERED_HISTORY_HASH =
-	"3069bd754aae87d05dc3f8afef4c9663e5b2ff65546ddfc7f6ad0fdbda5cee77";
+	"b549d24a14c3c275af7b000566c187f510e4797d49392a6498556edf92d28c76";
 /** The fixture's history rows; its other tables are recorded, not pinned. */
 const FIXTURE_ROWS = {
 	sessions: 3,
