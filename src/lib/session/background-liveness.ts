@@ -1,8 +1,11 @@
 import type { BackgroundTask, BackgroundWork } from "../shared-types.js";
 
 export type SessionBackground = {
-	readonly work: BackgroundWork;
+	/** Absent while checking: unknown tasks are neither work nor monitoring. */
+	readonly work?: BackgroundWork;
 	readonly tasks: readonly BackgroundTask[];
+	/** 8.3: a reattached runner's tasks, unknown until its catch-up snapshot. */
+	readonly checking?: true;
 };
 
 /**

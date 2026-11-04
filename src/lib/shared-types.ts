@@ -406,6 +406,8 @@ export const SessionInfoSchema = Schema.Struct({
 	backgroundWork: Schema.optional(BackgroundWorkSchema),
 	/** The live tasks behind backgroundWork, oldest first. */
 	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+	/** A reattached runner's tasks are unknown until its catch-up list arrives (8.3). */
+	tasksChecking: Schema.optional(Schema.Literal(true)),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */
 	servers: Schema.optional(Schema.Array(SessionServerSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */

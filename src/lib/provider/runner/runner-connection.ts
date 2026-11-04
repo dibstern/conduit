@@ -467,8 +467,11 @@ export const connectRunner = (options: {
 										const committed = yield* Deferred.make<void>();
 										if (
 											process.env["NODE_ENV"] === "test" &&
-											process.env["CONDUIT_TEST_HOLD_RUNNER_OUTPUT"] ===
-												message.output.type
+											(process.env["CONDUIT_TEST_HOLD_RUNNER_OUTPUT"] ===
+												message.output.type ||
+												(message.output.type === "event" &&
+													message.output.event.type ===
+														process.env["CONDUIT_TEST_HOLD_RUNNER_OUTPUT"]))
 										) {
 											const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
 											if (proof)

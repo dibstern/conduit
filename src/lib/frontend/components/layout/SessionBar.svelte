@@ -99,6 +99,8 @@
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let goalFocusHandedOff = false;
 	const backgroundTasks = $derived(session?.backgroundTasks ?? []);
+	// A reattached runner's tasks read as checking until its catch-up list (8.3).
+	const tasksShown = $derived(backgroundTasks.length > 0 || session?.tasksChecking === true);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
 	// The family push carries the whole tree; prefer the versioned row, as busySessionIds does.
 	const sideThreads = $derived.by(() => {
@@ -560,7 +562,11 @@
 {/snippet}
 
 {#snippet tasksRow(layout: "subtitle" | "swipe" | "strip")}
-	<BackgroundTasksRow tasks={backgroundTasks} {layout} onstopall={supportsTaskStop && layout === "strip" ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
+	{#if backgroundTasks.length > 0}
+		<BackgroundTasksRow tasks={backgroundTasks} {layout} onstopall={supportsTaskStop && layout === "strip" ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
+	{:else}
+		<span data-testid="background-tasks-checking" role="status" class="truncate text-[12px] leading-[16px] text-text-secondary">Checking tasks…</span>
+	{/if}
 {/snippet}
 
 <!-- One border for the session controls. -->
@@ -767,21 +773,21 @@
 			{/if}
 		{/if}
 	</div>
-	{#if !sessionViewState.compact && (goalShown || backgroundTasks.length > 0)}
+	{#if !sessionViewState.compact && (goalShown || tasksShown)}
 		<!-- Under the title line, so the pills get the full title column rather than the title's width. Beside pills the goal keeps at most 55% and they fill the rest; alone it takes the line. -->
 		<div class="flex min-w-0 items-center gap-[8px] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:max-w-[55%] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:shrink-0">
 			{#if goalShown}{@render goalLine()}{/if}
-			{#if backgroundTasks.length > 0}{@render tasksRow("subtitle")}{/if}
+			{#if tasksShown}{@render tasksRow("subtitle")}{/if}
 		</div>
 	{/if}
 	</div>
 	{/if}
 
 	{#if duoFolded}
-		{#if !chipsFolded && (goalShown || backgroundTasks.length > 0)}
+		{#if !chipsFolded && (goalShown || tasksShown)}
 			<div id="duo-chips" data-testid="duo-chips">
 				{#if goalShown}{@render goalSheet()}{/if}
-				{#if backgroundTasks.length > 0}{@render tasksRow("strip")}{/if}
+				{#if tasksShown}{@render tasksRow("strip")}{/if}
 			</div>
 		{/if}
 	{:else if sessionViewState.compact && !collapsed && goalShown}
@@ -820,7 +826,7 @@
 	{/if}
 
 	{@render overflowMenu()}
-	{#if sessionViewState.compact && backgroundTasks.length > 0 && !collapsed && !duoFolded}{@render tasksRow("swipe")}{/if}
+	{#if sessionViewState.compact && tasksShown && !collapsed && !duoFolded}{@render tasksRow("swipe")}{/if}
 
 	{#if goalDetails.open && detailsGoal && goalFacts && !sessionViewState.compact}
 		<Surface id="goal-details" data-testid="goal-details" variant="floating" radius="none" elevation="popover" role="region" aria-label="Goal details" class="z-[var(--z-popover)] whitespace-normal text-[12px] absolute top-full left-[20px] mt-[8px] max-h-[70dvh] w-[380px] max-w-[calc(100%-40px)] overflow-y-auto rounded-[16px] px-[16px] pt-[14px] pb-[12px]">

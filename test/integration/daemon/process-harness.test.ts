@@ -28,6 +28,7 @@ async function sessionBackground(browser: ProcessBrowser, sessionId: string) {
 	return {
 		backgroundWork: session?.backgroundWork ?? null,
 		backgroundTasks: session?.backgroundTasks ?? [],
+		tasksChecking: session?.tasksChecking ?? false,
 	};
 }
 
@@ -151,6 +152,7 @@ describe("foreground daemon process harness", () => {
 					firstSeenAt: expect.any(Number),
 				},
 			],
+			tasksChecking: false,
 		};
 		const states: Awaited<ReturnType<typeof sessionBackground>>[] = [];
 		try {
@@ -212,6 +214,104 @@ describe("foreground daemon process harness", () => {
 			);
 		}
 	}, 60_000);
+
+	// 8.3: a fresh launch has no tasks; a reattach is unknown until the catch-up snapshot. L1
+	// (CONTRACT.md 350-353): a reattach at the same querySeq changes nothing, so only one whose
+	// query was replaced reads as checking.
+	it("reads a reattached runner's tasks as checking until its catch-up list", async () => {
+		harness = await ProcessHarness.start({ restartProof: true });
+		let browser = await harness.connect();
+		const sessionId = await browser.createSession("Background checking proof");
+		type State = Awaited<ReturnType<typeof sessionBackground>>;
+		const states: Record<string, State> = {};
+		const none: State = {
+			backgroundWork: null,
+			backgroundTasks: [],
+			tasksChecking: false,
+		};
+		const stateOf = (row: Record<string, unknown>) =>
+			({
+				backgroundWork: row["backgroundWork"] ?? null,
+				backgroundTasks: row["backgroundTasks"] ?? [],
+				tasksChecking: row["tasksChecking"] ?? false,
+			}) as State;
+		const rows = (cursor: number) =>
+			browser.frames
+				.slice(cursor)
+				.flatMap(({ message }) =>
+					message["type"] === "session_row" && message["id"] === sessionId
+						? [stateOf(message)]
+						: [],
+				);
+		// The row as the sidebar feed carries it, waited for by frame rather than polled.
+		const settle = async (
+			name: string,
+			matches: (state: State) => boolean,
+			cursor = 0,
+		) => {
+			try {
+				states[name] = stateOf(
+					await browser.waitFor(
+						(message) =>
+							message["type"] === "session_row" &&
+							message["id"] === sessionId &&
+							matches(stateOf(message)),
+						cursor,
+						5000,
+					),
+				);
+			} catch (cause) {
+				states[name] = rows(cursor).at(-1) ?? none;
+				throw cause;
+			}
+		};
+		const same = (expected: State) => (state: State) =>
+			JSON.stringify(state) === JSON.stringify(expected);
+		const restart = async (holdCatchUp: boolean) => {
+			await harness?.kill();
+			await harness?.restart(
+				holdCatchUp
+					? {
+							serviceEnvironment: {
+								CONDUIT_TEST_HOLD_RUNNER_OUTPUT: "evidence.tasks_snapshot",
+							},
+						}
+					: {},
+			);
+			browser = (await harness?.connect(sessionId)) ?? browser;
+		};
+		try {
+			await settle("fresh", () => true);
+			expect(states["fresh"]).toEqual(none);
+			await browser.send(sessionId, "restart-background-work");
+			await settle("launched", (state) => state.backgroundTasks.length > 0);
+			expect(states["launched"]?.backgroundTasks).toMatchObject([
+				{ id: "restart-background-task", kind: "shell" },
+			]);
+			const launched = states["launched"] ?? none;
+			// The same query reattached: the stored list shows while its catch-up is held.
+			await restart(true);
+			await settle("same-query", same(launched));
+			await restart(false);
+			await settle("caught-up", same(launched));
+			// The query ends and the next send starts another in the same runner.
+			const ending = browser.frames.length;
+			writeFileSync(join(harness.root, "restart-background-change"), "end");
+			await settle("ended", same(none), ending);
+			await browser.send(sessionId, "second query");
+			states["second-query"] = rows(0).at(-1) ?? none;
+			expect(states["second-query"]).toEqual(none);
+			// Reattached after its query was replaced: checking while the catch-up is held.
+			await restart(true);
+			await settle("replaced-query", same({ ...none, tasksChecking: true }));
+		} finally {
+			mkdirSync("test-results/process-harness", { recursive: true });
+			writeFileSync(
+				"test-results/process-harness/background-checking-state.json",
+				JSON.stringify({ sessionId, states }, null, 2),
+			);
+		}
+	});
 
 	it("retains one background snapshot across replay retries on the same connection", async () => {
 		harness = await ProcessHarness.start({ restartProof: true });
@@ -403,6 +503,7 @@ describe("foreground daemon process harness", () => {
 							kind: "subagent",
 							firstSeenAt: expect.any(Number),
 						})),
+						tasksChecking: false,
 					});
 				},
 				{ timeout: 5000 },
