@@ -9,7 +9,8 @@
 // 6. a session on a named instance ("managed-test") reads as Claude's, so a crash unlaunches the
 //    held Run instead of ending it as lost.
 // 7. a lost prompt (its send comes back unknown, then it runs late) is read absent and re-sent, or
-//    its Run ends twice, or probing never ends because no probe records what it read (82tn.32.35).
+//    its Run ends twice, or probing never ends because no probe records what it read, or its echo
+//    is never read as received, so it ends as a failure though it ran (82tn.32.35).
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -496,13 +497,16 @@ describe("OpenCode on the Run Ledger", () => {
 		expect(after.probes.every(({ status }) => status === "completed")).toBe(
 			true,
 		);
-		// Never re-sent; one Run, ended once by its own work.
+		// Never re-sent; one Run, ended once by its own work, as main ends its run.
 		expect(prompts()).toEqual(sent);
-		expect(after.runs).toHaveLength(1);
-		// Gap: the input probe read the send absent, so it stays unconsumed and its unknown delivery
-		// folds as a failure even though the work ran (CONTRACT.md 881-883, 3128-3132).
+		expect(after.runs).toEqual([
+			{ id: after.runs[0]?.id, status: "completed" },
+		]);
+		// OpenCode's echo of the prompt is a later acceptance: it beats the absent reading, so the
+		// unknown delivery no longer folds as a failure and the Run ends as its work did (CONTRACT.md
+		// 564, 3101-3102, 3128-3131).
 		expect(after.ends).toEqual([
-			{ runId: after.runs[0]?.id, reason: "provider_error" },
+			{ runId: after.runs[0]?.id, reason: "completed" },
 		]);
 	});
 
