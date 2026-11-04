@@ -229,9 +229,11 @@ test.describe("Subagent navigation", () => {
 		// (aoqb.2); the link to the child session is on the subagent's row in
 		// the step log its head expands (5517789f).
 		// Wait for all three subagent turns before sampling the loaded transcript.
-		const subagentHeads = page.getByRole("button", {
-			name: /^Worked .*subagent/,
-		});
+		// Main names the head by its action, Expand or Collapse turn (c63a8c93,
+		// xdyjq.19), so the subagent count is read from its text.
+		const subagentHeads = page
+			.getByTestId("surfacing-minimise-toggle")
+			.filter({ hasText: /Worked[\s\S]*subagent/ });
 		await expect(subagentHeads).toHaveCount(3);
 		for (const head of await subagentHeads.all()) await head.click();
 		const subagentLink = page
