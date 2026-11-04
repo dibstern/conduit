@@ -106,7 +106,7 @@ export type ChatMessage = (
 	/** Canonical turn identity, separate from the rendered part's uuid. */
 	turnId?: string | undefined;
 	/** Persisted message ordering, independent of each activity's display time. */
-	messageOrder?: { createdAt: number; id: string };
+	messageOrder?: { ordinal?: number; createdAt: number; id: string };
 };
 
 export interface UserMessage {

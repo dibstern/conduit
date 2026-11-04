@@ -534,3 +534,41 @@ it("follows current transcript ordering around a pending rewind", async () => {
 		await runtime.dispose();
 	}
 });
+
+// Failure mode (conduit-test-lczrn.1): with equal times whose write order
+// differs from id order, "a later reply in the turn" compared time and id, so
+// the first-written message's unjudged part could not be marked and the last
+// one's could.
+it("finds a later reply in the turn by write order", async () => {
+	const runtime = ManagedRuntime.make(
+		makePersistenceEffectLayer(":memory:", "test-project"),
+	);
+	try {
+		await runtime.runPromise(
+			Effect.gen(function* () {
+				yield* seed;
+				const sql = yield* SqlClient.SqlClient;
+				// "m" is written before "final", at the same time; "final" sorts first by id.
+				yield* sql`UPDATE messages SET created_at = 1 WHERE id = 'final'`;
+				yield* sql`UPDATE messages SET ordinal = CASE id WHEN 'user' THEN 1 WHEN 'm' THEN 2 ELSE 3 END WHERE session_id = 's'`;
+				// Unjudged, and no later part in its own message.
+				yield* sql`UPDATE message_parts SET surfacing_ordinal = NULL WHERE id = 'p'`;
+				yield* sql`DELETE FROM message_parts WHERE id = 'tool-p'`;
+			}),
+		);
+		const mark = (partId: string) =>
+			runtime.runPromise(
+				sessionsHandlers.SetSurfacingMark(
+					SetSurfacingMark.payloadSchema.make({
+						sessionId: "s",
+						partId,
+						mark: { level: "key" },
+					}),
+				),
+			);
+		await mark("p");
+		await expect(mark("final-p")).rejects.toBeDefined();
+	} finally {
+		await runtime.dispose();
+	}
+});

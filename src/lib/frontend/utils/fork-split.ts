@@ -15,10 +15,12 @@ export interface ForkSplit {
 }
 
 /**
- * Split messages at the fork boundary using the fork-point timestamp.
+ * Split messages at the fork boundary.
  *
- * Compare the same (created_at, id) pair used to order persisted transcripts.
- * The boundary itself is inherited. Messages without createdAt are live.
+ * When the boundary row is loaded and carries its write order, compare write
+ * order, as the transcript sorts (conduit-test-lczrn.1). Otherwise compare the
+ * stored (created_at, id) point. The boundary itself is inherited. Messages
+ * without createdAt are live.
  *
  * Falls back to forkMessageId matching for sessions without forkPointTimestamp.
  */
@@ -36,23 +38,33 @@ export function splitAtForkPoint(
 	const boundaryId = sourceId(forkMessageId);
 	// Primary: timestamp-based split (reliable — each message self-identifies).
 	if (forkPointTimestamp != null) {
-		const inherited: ChatMessage[] = [];
-		const current: ChatMessage[] = [];
-		for (const msg of messages) {
-			const createdAt =
+		const orders = messages.map((msg) => ({
+			msg,
+			ordinal: msg.messageOrder?.ordinal,
+			createdAt:
 				msg.messageOrder?.createdAt ??
-				("createdAt" in msg ? msg.createdAt : undefined);
-			const messageId = sourceId(
+				("createdAt" in msg ? msg.createdAt : undefined),
+			messageId: sourceId(
 				msg.messageOrder?.id ??
 					("messageId" in msg ? msg.messageId : undefined),
-			);
+			),
+		}));
+		const boundaryOrdinal = orders.find(
+			({ messageId, ordinal }) =>
+				messageId === boundaryId && ordinal !== undefined,
+		)?.ordinal;
+		const inherited: ChatMessage[] = [];
+		const current: ChatMessage[] = [];
+		for (const { msg, ordinal, createdAt, messageId } of orders) {
 			if (
 				typeof createdAt === "number" &&
-				(createdAt < forkPointTimestamp ||
-					(createdAt === forkPointTimestamp &&
-						boundaryId !== undefined &&
-						typeof messageId === "string" &&
-						messageId <= boundaryId))
+				(boundaryOrdinal !== undefined && ordinal !== undefined
+					? ordinal <= boundaryOrdinal
+					: createdAt < forkPointTimestamp ||
+						(createdAt === forkPointTimestamp &&
+							boundaryId !== undefined &&
+							typeof messageId === "string" &&
+							messageId <= boundaryId))
 			) {
 				inherited.push(msg);
 			} else {

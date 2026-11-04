@@ -111,8 +111,8 @@ export const inheritForkHistory = (
 						ORDER BY (SELECT MAX(previous.completed_at) FROM retained previous
 							WHERE previous.turn_id = t.id AND previous.role = 'assistant'
 							AND previous.completed_at <= m.created_at
-							AND (previous.created_at, previous.id) < (m.created_at, m.id)) DESC,
-							m.created_at, m.id LIMIT 1)),
+							AND (previous.ordinal, previous.created_at, previous.id) < (m.ordinal, m.created_at, m.id)) DESC,
+							m.ordinal, m.created_at, m.id LIMIT 1)),
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.cost ELSE a.cost END,
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.tokens_in ELSE a.tokens_in END,
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.tokens_out ELSE a.tokens_out END,
@@ -120,7 +120,7 @@ export const inheritForkHistory = (
 				CASE WHEN t.whole AND t.state NOT IN ('pending', 'running') THEN t.completed_at
 					WHEN a.turn_id IS NULL THEN ${event.createdAt}
 					WHEN (SELECT m.is_streaming FROM retained m WHERE m.turn_id = t.id AND m.role = 'assistant'
-						ORDER BY m.created_at DESC, m.id DESC LIMIT 1) = 0 THEN a.completed_at
+						ORDER BY m.ordinal DESC, m.created_at DESC, m.id DESC LIMIT 1) = 0 THEN a.completed_at
 					ELSE ${event.createdAt} END,
 				CASE WHEN a.turn_id IS NOT NULL THEN CASE WHEN t.whole THEN t.requested_model
 					ELSE json_extract(resolution.data, '$.requestedModel') END END,
