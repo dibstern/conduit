@@ -103,6 +103,7 @@ import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 import { SessionGit } from "../Services/session-git.js";
+import { SessionManagerOwner } from "../Services/session-manager-owner.js";
 import { Subprocess } from "../Services/subprocess.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
@@ -235,6 +236,7 @@ export const RelayFactoryLive = (
 			const sessionWorkspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 			const sessionSetup = yield* Effect.serviceOption(SessionSetupTag);
 			const owners = yield* Effect.serviceOption(OwnerScopes);
+			const sessionManager = yield* Effect.serviceOption(SessionManagerOwner);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -630,6 +632,14 @@ export const RelayFactoryLive = (
 											Context.merge(
 												Option.isSome(sessionSetup)
 													? Context.make(SessionSetupTag, sessionSetup.value)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(sessionManager)
+													? Context.make(
+															SessionManagerOwner,
+															sessionManager.value,
+														)
 													: Context.empty(),
 											),
 											Context.merge(

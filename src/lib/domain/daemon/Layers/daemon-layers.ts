@@ -128,6 +128,7 @@ import {
 	SessionDirectory,
 } from "../Services/session-directory.js";
 import { SessionGit, SessionGitLive } from "../Services/session-git.js";
+import { SessionManagerOwnerLive } from "../Services/session-manager-owner.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
@@ -949,8 +950,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withSessionWorkspace));
-	const withOrchestration = DaemonOrchestrationLive.pipe(
+	const withSessionManager = SessionManagerOwnerLive.pipe(
 		Layer.provideMerge(withSessionSetup),
+	);
+	const withOrchestration = DaemonOrchestrationLive.pipe(
+		Layer.provideMerge(withSessionManager),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(withOrchestration),

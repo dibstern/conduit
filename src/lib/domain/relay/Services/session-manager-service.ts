@@ -9,7 +9,6 @@ import {
 	Option,
 	PubSub,
 	Ref,
-	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -105,7 +104,11 @@ import {
 	sessionExists,
 	updateRelaySessionCountSnapshot,
 } from "./session-manager-list.js";
-import { SessionManagerStateTag } from "./session-manager-state.js";
+import {
+	makeSessionManagerCoordination,
+	SessionManagerCoordinationTag,
+	SessionManagerStateTag,
+} from "./session-manager-state.js";
 import {
 	addToParentMap,
 	type ForkEntry,
@@ -1007,10 +1010,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const retentionScheduler = yield* Effect.serviceOption(
 			EventRetentionSchedulerTag,
 		);
-		const inFlightDeletes = new Map<
-			string,
-			Deferred.Deferred<void, SessionManagerError>
-		>();
+		// The daemon shares one per project, so a rebuilt or overlapping relay
+		// waits on the same triage lock and delete table.
+		const coordination = yield* Effect.serviceOption(
+			SessionManagerCoordinationTag,
+		);
+		const { triageLock, inFlightDeletes } = Option.isSome(coordination)
+			? coordination.value
+			: yield* makeSessionManagerCoordination;
 		const { serviceListSessions, refreshSessionLineage } =
 			makeSessionListOperations({
 				api,
@@ -1225,7 +1232,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				: provided;
 		};
 
-		const triageLock = yield* Semaphore.make(1);
 		const service: SessionManagerService = {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {

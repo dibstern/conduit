@@ -19,7 +19,11 @@ import {
 	type SessionEventBusTag,
 } from "../Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
-import { makeSessionManagerStateLive } from "../Services/session-manager-state.js";
+import {
+	makeSessionManagerStateLive,
+	type SessionManagerCoordinationTag,
+	type SessionManagerStateTag,
+} from "../Services/session-manager-state.js";
 import {
 	makeOverridesStateLive,
 	type OverridesStateTag,
@@ -50,6 +54,10 @@ export const makeRelayStateLive = (
 		readonly sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>;
 		/** Borrowing relays must leave session overrides and timers with the daemon. */
 		readonly overridesStateLayer?: Layer.Layer<OverridesStateTag>;
+		/** Daemon relays borrow the project's session manager state from the daemon. */
+		readonly sessionManagerStateLayer?: Layer.Layer<
+			SessionManagerStateTag | SessionManagerCoordinationTag
+		>;
 	} = {},
 ) => {
 	const sessionEventBusLayer =
@@ -57,7 +65,7 @@ export const makeRelayStateLive = (
 	const sessionManagerStateAndServiceLive = SessionManagerServiceLive.pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
-				makeSessionManagerStateLive(),
+				options.sessionManagerStateLayer ?? makeSessionManagerStateLive(),
 				DaemonEventBusLive,
 				sessionEventBusLayer,
 				RelayStatusSnapshotLive,

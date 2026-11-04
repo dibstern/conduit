@@ -6,7 +6,16 @@
 //   SessionManagerStateTag → Ref.Ref<SessionManagerState>
 //   makeSessionManagerStateLive(initial?) → Layer providing the Tag
 
-import { Context, HashMap, Layer, Ref } from "effect";
+import {
+	Context,
+	type Deferred,
+	Effect,
+	HashMap,
+	Layer,
+	Ref,
+	Semaphore,
+} from "effect";
+import type { SessionManagerError } from "./session-manager-error.js";
 
 /**
  * Immutable state snapshot for session management.
@@ -50,3 +59,27 @@ export const makeSessionManagerStateLive = (
 		SessionManagerStateTag,
 		Ref.make({ ...emptySessionManagerState(), ...initial }),
 	);
+
+/** Locks a project's session manager shares with every relay that serves it. */
+export interface SessionManagerCoordination {
+	/** Serializes this project's triage writes (archive, settle, delete sweeps). */
+	readonly triageLock: Semaphore.Semaphore;
+	/** One delete per session id at a time, whichever relay asked for it. */
+	readonly inFlightDeletes: Map<
+		string,
+		Deferred.Deferred<void, SessionManagerError>
+	>;
+}
+
+export class SessionManagerCoordinationTag extends Context.Service<
+	SessionManagerCoordinationTag,
+	SessionManagerCoordination
+>()("SessionManagerCoordination") {}
+
+export const makeSessionManagerCoordination = Effect.map(
+	Semaphore.make(1),
+	(triageLock): SessionManagerCoordination => ({
+		triageLock,
+		inFlightDeletes: new Map(),
+	}),
+);

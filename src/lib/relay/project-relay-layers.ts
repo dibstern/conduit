@@ -72,6 +72,7 @@ import {
 	SessionDirectory,
 	SessionDirectoryReadError,
 } from "../domain/daemon/Services/session-directory.js";
+import { SessionManagerOwner } from "../domain/daemon/Services/session-manager-owner.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
@@ -158,6 +159,12 @@ import {
 } from "../domain/relay/Services/session-event-bus.js";
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	emptySessionManagerState,
+	makeSessionManagerCoordination,
+	SessionManagerCoordinationTag,
+	SessionManagerStateTag,
+} from "../domain/relay/Services/session-manager-state.js";
 import { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	SessionSetupLive,
@@ -1035,9 +1042,31 @@ export function createProjectRelayLayers({
 		config.daemonConfigContext ?? Context.empty(),
 		OverridesStateTag,
 	);
+	const sharedSessionManager = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionManagerOwner,
+	);
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
+			...(Option.isSome(sharedSessionManager) && {
+				sessionManagerStateLayer: Layer.effectContext(
+					sharedSessionManager.value.project(config.slug).pipe(
+						// A relay for a project outside the registry keeps relay-local state.
+						Effect.catch(() =>
+							Effect.all({
+								state: Ref.make(emptySessionManagerState()),
+								coordination: makeSessionManagerCoordination,
+							}),
+						),
+						Effect.map(({ state, coordination }) =>
+							Context.make(SessionManagerStateTag, state).pipe(
+								Context.add(SessionManagerCoordinationTag, coordination),
+							),
+						),
+					),
+				),
+			}),
 			...(Option.isSome(sharedOverrides) && {
 				overridesStateLayer: Layer.succeedContext(
 					Context.make(OverridesStateTag, sharedOverrides.value),
