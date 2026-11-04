@@ -36,7 +36,7 @@ import {
 	captureClaudeLaunchLogin,
 	configuredClaudeConfigDir,
 } from "../claude/claude-sdk-env.js";
-import { sendPreparedClaudeTurn } from "../claude/prepare-turn.js";
+import { launchClaudeTurn } from "../claude/prepare-turn.js";
 import { resolveTurnImages } from "../resolve-turn-images.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type {
@@ -590,29 +590,21 @@ export const replayLegacyRunnerSend = (options: {
 				const shellEnv = call?.shellEnv ?? input.shellEnv ?? { ...process.env };
 				const read = yield* makeReadQueryEffect;
 				let primary: TurnResult | undefined;
-				const result = yield* sendPreparedClaudeTurn({
+				const result = yield* launchClaudeTurn({
 					sessionId: row.session_id,
 					instanceId,
 					commandId: row.command_id,
-					userText: input.prompt,
-					options: {
-						liveSession: yield* options.liveSession,
+					turn: input,
+					launch: {
 						configDir: launch.configDir,
 						folderSource: launch.folderSource,
-						agent: input.agent,
-						userMessageId: input.continuation?.cutOffMessageId ?? input.inputId,
-						continuation: input.continuation,
-						nativeResumeFallback: input.nativeResumeFallback,
-						rewind: input.rewind,
-						sessionForkSdk: deps.sessionForkSdk,
-						workspaceRoot: input.workspaceRoot,
-						modelContextWindow:
-							input.contextWindow === "1m" ? 1000000 : undefined,
 					},
-					send: (prepared, fallback) => {
+					liveSession: yield* options.liveSession,
+					sessionForkSdk: deps.sessionForkSdk,
+					send: (planned) => {
 						// A fresh fallback is the next transmission, never this claim's token
 						// (4.8): the claim ends as its primary's rejection, which requeues it.
-						if (fallback && !nativeResumeFallback)
+						if (planned.nativeResumeFallback && !nativeResumeFallback)
 							return Effect.succeed(primary);
 						return options
 							.send(currentSendToken(row), {
@@ -621,7 +613,7 @@ export const replayLegacyRunnerSend = (options: {
 									row.command_id,
 									input.inputId,
 									row.attempt_count,
-									fallback,
+									planned.nativeResumeFallback,
 								),
 								aborted: false,
 								autoSettleAfterDays,
@@ -641,19 +633,7 @@ export const replayLegacyRunnerSend = (options: {
 											}
 										: {}),
 									instanceId,
-									prompt: prepared.prompt,
-									text: input.prompt,
-									configDir: prepared.configDir,
-									resumeSessionId: prepared.resumeSessionId,
-									resumeSessionAt: prepared.resumeSessionAt,
-									forkSession: prepared.forkSession,
-									clearInheritedGoal: prepared.clearInheritedGoal,
-									startFreshNativeSession:
-										prepared.resumeSessionId === undefined ||
-										input.rewind !== undefined,
-									nativeResumeFallback: fallback,
-									nativeThread: prepared.nativeThread,
-									...(prepared.handoff ? { handoff: prepared.handoff } : {}),
+									...planned,
 								},
 							})
 							.pipe(
