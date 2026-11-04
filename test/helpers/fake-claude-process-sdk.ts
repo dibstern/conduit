@@ -308,7 +308,7 @@ export type ProcessMark =
 			effectiveSettingsJson: string;
 	  }
 	| {
-			kind: "stop-accept-paused";
+			kind: "stop-accept-paused" | "stop-refused";
 			commandId: string;
 			sessionId: string;
 	  }
@@ -497,12 +497,17 @@ export const resolveSettings: typeof import("@anthropic-ai/claude-agent-sdk").re
 		return resolved;
 	};
 
-// A test holds a Stop between its snapshot and acceptance with this gate file.
+// A test holds a Stop between its snapshot and acceptance with this gate file, or refuses it
+// while the refuse gate exists.
 export const beforeStopAcceptance = async (input: {
 	readonly commandId: string;
 	readonly sessionId: string;
 }): Promise<void> => {
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+	if (proof && existsSync(join(dirname(proof), "conduit-test-stop-refuse"))) {
+		mark({ kind: "stop-refused", ...input });
+		throw new Error(`test refused Stop ${input.commandId}`);
+	}
 	const gate = proof && join(dirname(proof), "conduit-test-stop-acceptance");
 	if (!gate || !existsSync(gate)) return;
 	mark({ kind: "stop-accept-paused", ...input });

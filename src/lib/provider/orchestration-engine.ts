@@ -278,11 +278,11 @@ export interface OrchestrationEngineOptions {
 		AccountDirectory["Service"],
 		"resolve" | "defaultFor"
 	>;
-	/** Process tests hold a Stop between its snapshot and its acceptance. */
+	/** Process tests hold a Stop between its snapshot and its acceptance, or refuse it. */
 	readonly beforeStopAcceptance?: (input: {
 		readonly commandId: string;
 		readonly sessionId: string;
-	}) => Effect.Effect<void>;
+	}) => Effect.Effect<void, ProviderInstanceFailure>;
 }
 
 interface DurableCommandRuntime {

@@ -39,6 +39,7 @@ import {
 	DraftAttachmentMissing,
 	type InputDraftKey,
 } from "../../../contracts/ws-rpc.js";
+import { formatErrorDetail } from "../../../errors.js";
 import {
 	ClaudeEventPersistEffectTag,
 	type ClaudeEventPersistFailure,
@@ -614,7 +615,15 @@ export const SessionInboxLive = Layer.effect(
 						commandId: `inbox-stop:${inputId}`,
 					}),
 				),
-				// The worker settles and reports the abort; the inbox only starts it.
+				// A refusal is this caller's to report; the worker reports a later failure.
+				// Run now's events already persisted, so a refusal must not fail the commit.
+				Effect.catch((error) =>
+					Effect.sync(() =>
+						log.warn(
+							`session=${sessionId} inbox Stop inbox-stop:${inputId} refused: ${formatErrorDetail(error)}`,
+						),
+					),
+				),
 				Effect.asVoid,
 			);
 
