@@ -161,6 +161,18 @@ Scenario: Stop all asks for every live task and waits for the SDK without cancel
   Then the background tasks pull-down is closed
   And the composer shows no task dots
 
+Scenario: Stop all shows why the server refused it
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has 2 live background tasks
+  And the server refuses Stop tasks because No background tasks are running
+  When I click the background tasks row
+  And I press Stop all in the background tasks pull-down
+  Then an error toast titled Failed to stop background tasks says No background tasks are running
+  And the background tasks pull-down asks to stop all without cancelling the session
+
 Scenario: Stopping one task leaves every other task until the SDK reports the change
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
