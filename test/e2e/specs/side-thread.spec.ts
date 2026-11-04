@@ -783,19 +783,21 @@ test.describe("Claude Side Threads", () => {
 			await app.sendMessage(`$side ${question}`);
 			await expect(page).not.toHaveURL(new RegExp(`/s/${parentId}(?:\\?|$)`));
 			await harness.claudeReplayer?.held();
-			const compacting = page.getByText("Compacting conversation…");
+			// A live compaction before the first step reads as a transcript rule
+			// (main b81875f7, c4275.2).
+			const compacting = page.getByTestId("turn-opening-compacting");
 			await expect(
 				chat.userMessages.filter({ hasText: question }),
 			).toBeVisible();
 			await expect(chat.stopBtn).toBeVisible();
-			await expect(compacting).toBeVisible();
+			await expect(compacting).toHaveText("Compacting context");
 
 			await page.reload();
 			await expect(
 				chat.userMessages.filter({ hasText: question }),
 			).toBeVisible();
 			await expect(chat.stopBtn).toBeVisible();
-			await expect(compacting).toBeVisible();
+			await expect(compacting).toHaveText("Compacting context");
 
 			harness.claudeReplayer?.release();
 			await expect(chat.assistantMessages.last()).toContainText(/alpha/i);

@@ -232,33 +232,28 @@ test.describe("Turn working clock", () => {
 			const sentB = Date.now();
 			await app.sendMessage("Load the skill");
 
-			// B waits in the tray and starts when A finishes; the turn head then times B.
+			// B waits in the tray and starts when A finishes. Main's quiet opening
+			// (f267b6ac, c4275.1) holds B's head back until its first step, so the
+			// handover is A settling, not the live clock dropping to B's.
 			const liveClock = async () =>
 				clockSeconds((await readClocks(page)).activity ?? "0s");
-			let lastA = await liveClock();
-			await expect
-				.poll(
-					async () => {
-						const now = await liveClock();
-						const dropped = now < lastA;
-						lastA = Math.max(lastA, now);
-						return dropped;
-					},
-					{ timeout: 45_000, intervals: [250] },
-				)
-				.toBe(true);
+			await expect(
+				page.locator(".turn-activity .turn-activity-toggle").first(),
+			).toContainText("Worked", { timeout: 45_000 });
 			const takeover = Date.now();
-			const firstB = await liveClock();
-			// Timed from its send, B would already read the time it sat queued.
 			const queuedSeconds = (takeover - sentB) / 1000;
 			expect(queuedSeconds).toBeGreaterThan(4);
-			expect(firstB).toBeLessThanOrEqual(queuedSeconds - 3);
 
 			// Stop during B, once it has logged a step.
 			await expect(page.locator(".turn-activity")).toHaveCount(2, {
 				timeout: 45_000,
 			});
 			await expectLoggedStep(page);
+			// Timed from its send, B would already read the time it sat queued.
+			const firstB = await liveClock();
+			expect(firstB).toBeLessThanOrEqual(
+				Math.ceil((Date.now() - takeover) / 1000) + 1,
+			);
 			await chat.stopBtn.click();
 			const stoppedAt = Date.now();
 			await chat.waitForStreamingComplete();
@@ -454,38 +449,37 @@ test.describe("Turn working clock", () => {
 				db.close();
 			}
 			if (!timing) throw new Error("Permission has no durable turn timing");
-			// Approvals and transcript headers arrive independently. Sample only
-			// after the clock reflects this permission's durable wait boundary.
-			await expect
-				.poll(
-					async () => {
-						const value = await liveClock();
-						return CLOCK.test(value) ? clockSeconds(value) : null;
-					},
-					{ timeout: 5_000 },
-				)
-				.toBe(Math.floor((timing.pausedAt - timing.startedAt) / 1000));
+			// Main's quiet opening (f267b6ac, c4275.1) keeps the turn head, and so
+			// the clock, back until the first step. This prompt comes before it,
+			// so the wait reads as the opening with no clock, live and after a
+			// reload, and the clock first shows once the step runs.
+			const pausedSeconds = Math.floor(
+				(timing.pausedAt - timing.startedAt) / 1000,
+			);
+			const opening = page.getByTestId("turn-opening");
+			const heads = page.locator(".turn-activity");
+			await expect(opening).toBeVisible();
+			await expect(heads).toHaveCount(0);
 			const waitStartedAt = Date.now();
-			const paused = await liveClock();
 			await page.waitForTimeout(3_000);
-			expect(await liveClock()).toBe(paused);
+			await expect(heads).toHaveCount(0);
 
-			// The open wait comes from the server, so a reload stays paused.
+			// The open wait comes from the server, so a reload still waits.
 			await gotoRelay(page, page.url());
 			await expect(page.locator("#connect-overlay")).toBeHidden({
 				timeout: 30_000,
 			});
 			await expect(allow).toBeVisible({ timeout: 30_000 });
-			await expect.poll(liveClock, { timeout: 5_000 }).toBe(paused);
+			await expect(opening).toBeVisible();
 			await page.waitForTimeout(1_500);
-			expect(await liveClock()).toBe(paused);
+			await expect(heads).toHaveCount(0);
 			await page.screenshot({ path: testInfo.outputPath("paused-clock.png") });
 
 			await allow.click();
 			const waitedMs = Date.now() - waitStartedAt;
 			await expect
-				.poll(async () => clockSeconds(await liveClock()), { timeout: 10_000 })
-				.toBeGreaterThan(clockSeconds(paused));
+				.poll(async () => CLOCK.test(await liveClock()), { timeout: 10_000 })
+				.toBe(true);
 
 			await chat.waitForStreamingComplete();
 			const wallSeconds = (Date.now() - sentAt) / 1000;
@@ -498,13 +492,11 @@ test.describe("Turn working clock", () => {
 			expect(workedSeconds(worked)).toBeLessThanOrEqual(
 				Math.ceil(wallSeconds - waitedMs / 1000) + 1,
 			);
-			expect(workedSeconds(worked)).toBeGreaterThanOrEqual(
-				clockSeconds(paused),
-			);
+			expect(workedSeconds(worked)).toBeGreaterThanOrEqual(pausedSeconds);
 			writeFileSync(
 				testInfo.outputPath("paused-readings.json"),
 				JSON.stringify(
-					{ paused, timing, waitedMs, wallSeconds, worked },
+					{ pausedSeconds, timing, waitedMs, wallSeconds, worked },
 					null,
 					2,
 				),

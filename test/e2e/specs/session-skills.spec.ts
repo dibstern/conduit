@@ -97,19 +97,25 @@ test.describe("Session skills chip", () => {
 		await page.keyboard.press("Escape");
 		await expect(rows).toHaveCount(0);
 
-		// Skill chapters now live in the step log rather than the turn head.
+		// Skills read only as events (main ce7be665, xdyjq.1): the turn head
+		// counts the Skill step and the step log names it.
 		const collapsed = page.locator(
 			'.turn-activity-toggle[aria-expanded="false"]',
 		);
 		while (await collapsed.count()) await collapsed.first().click();
 		const turns = page.locator(".turn-activity");
-		await expect(
-			turns.filter({ has: page.locator(".skills-toggle") }),
-		).toHaveCount(1);
-		// Collapsing the step log hides .skills-toggle, so pin the turn by position.
+		const skillSteps = page
+			.locator(".tool-item[data-part]")
+			.filter({ hasText: "changelog-style" });
+		await expect(turns.filter({ has: skillSteps })).toHaveCount(1);
+		// Collapsing the turn drops its step rows, so pin the turn by position.
 		const activity = turns.nth(
 			await turns.evaluateAll((nodes) =>
-				nodes.findIndex((node) => node.querySelector(".skills-toggle")),
+				nodes.findIndex((node) =>
+					[...node.querySelectorAll(".tool-item[data-part]")].some((row) =>
+						row.textContent?.includes("changelog-style"),
+					),
+				),
 			),
 		);
 		const activityToggle = activity.locator(".turn-activity-toggle");
@@ -126,14 +132,7 @@ test.describe("Session skills chip", () => {
 			`.tool-item[data-part=${JSON.stringify(part)}]`,
 		);
 
-		const skillsToggle = activity.locator(".skills-toggle");
-		await skillsToggle.click();
-		await expect(skillsToggle).toHaveAttribute("aria-expanded", "true");
-		const turnSkills = activity.getByRole("list", {
-			name: "Skills in this turn",
-		});
-		await expect(turnSkills).toBeVisible();
-		await expect(turnSkills).toContainText("changelog-style");
+		await expect(activityToggle).toContainText("· 1 skill");
 
 		const sessionId = decodeURIComponent(
 			harness.projectUrl.slice("/s/".length),
@@ -173,7 +172,6 @@ test.describe("Session skills chip", () => {
 			db.close();
 		}
 
-		await skillsToggle.click();
 		await activityToggle.click();
 		await expect(activityToggle).toHaveAttribute("aria-expanded", "false");
 		await expect(anchoredStep).toBeHidden();
