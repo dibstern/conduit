@@ -296,12 +296,13 @@ export const makeProviderAdaptersLive = (
 					),
 				);
 			const runBackground = Effect.runForkWith(Context.empty());
-			// 8.1: SessionActivity reads the Run Ledger's tasks view, which the arm hands over after
-			// each commit that moves it.
+			// 8.1, 8.3: SessionActivity reads the Run Ledger's tasks view and wake Run, which the arm
+			// hands over after each commit that moves them.
 			const onLedgerTasks: Parameters<
 				NonNullable<ReturnType<typeof ledgerTasksWakes.get>>["add"]
-			>[0] = (sessionId, tasks, snapshot) => {
-				if (!activity.background.publish(sessionId, tasks, snapshot)) return;
+			>[0] = (sessionId, tasks, snapshot, wake) => {
+				if (!activity.background.publish(sessionId, tasks, snapshot, wake))
+					return;
 				runBackground(
 					projectContext(sessionId).pipe(
 						Effect.tap((project) =>

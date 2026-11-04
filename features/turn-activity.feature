@@ -1181,6 +1181,15 @@ Scenario: A settled log pick survives collapse and suspends during each wake Run
   Then the Turn defaults to Full log with a three-step ticker
   And the messages region visually matches turn-panel-settled-pick-wake at 98 percent
 
+Scenario: A wake Run names its waking task on the live turn head
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a settled turn
+  When a wake Run woken by "sleep 8" starts in the panel choice turn
+  Then the panel choice turn head reads "Working · woken by sleep 8"
+  When the panel choice Run settles
+  Then the panel choice turn head reads "Worked"
+
 Scenario: A log picked while live returns to the saved stop on settle
   Given message surfacing is active at Most
   And the conduit app is served with the connected mockup
