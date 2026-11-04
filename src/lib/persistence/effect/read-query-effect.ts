@@ -150,7 +150,6 @@ export const sessionRowsToSessionInfoList = (
 	rows: readonly SessionRow[],
 	opts: {
 		readonly now?: number;
-		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
 		/** Contribution owners; the parent map still includes the whole family. */
 		readonly contributingSessionIds?: ReadonlySet<string> | undefined;
@@ -251,7 +250,6 @@ export const sessionRowsToSessionInfoList = (
 		const pendingPermissionCount =
 			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
 		const unread = row.unread === 1;
-		const status = opts.statuses?.[row.id]?.type ?? row.status;
 		const background = opts.backgroundOf?.(row.id);
 		const backgroundWork = background?.work;
 		const activity = opts.activityOf?.(row.id, {
@@ -273,10 +271,13 @@ export const sessionRowsToSessionInfoList = (
 		return {
 			id: row.id,
 			title: row.title,
+			// 8.1 (2734): busy while the view holds the session's own active Run, not its row's busy.
 			status:
-				status === "busy" || status === "retry" || status === "error"
-					? status
-					: "idle",
+				activity?.foreground === "working"
+					? "busy"
+					: row.status === "error"
+						? "error"
+						: "idle",
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 			...(row.last_user_message_at == null
@@ -422,6 +423,13 @@ const sidebarItem = (
 	);
 	return {
 		...session,
+		// 8.1 (2734): stored rows hold no busy (the projector reads no view); the view says it now.
+		status:
+			activity?.foreground === "working"
+				? "busy"
+				: session.status === "error"
+					? "error"
+					: "idle",
 		updatedAt: row.lastActivity,
 		...(running === "working" ? { processing: true } : {}),
 		...(activity ? { activity } : {}),
@@ -597,7 +605,6 @@ export interface ReadQueryEffect {
 			archivedOnly?: boolean;
 			orderColumn?: "updated_at" | "archived_at";
 			before?: { at: number; id: string };
-			statuses?: Readonly<Record<string, { type: string }>>;
 			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 			activityOf?: ActivityOf;
 			hintDismissals?: ReadonlyMap<string, number>;
@@ -1637,12 +1644,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				unreadSessionIds: new Set(
 					family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 				),
-				statuses: {
-					...Object.fromEntries(
-						family.map((row) => [row.id, { type: row.status }]),
-					),
-					...opts?.statuses,
-				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
 				hintDismissals: opts?.hintDismissals ?? hintDismissals,
@@ -2356,8 +2357,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						for (const member of family) {
 							if (
 								(member.side_thread === 1 && member.parent_id === viewed) ||
-								member.status === "busy" ||
-								member.status === "retry" ||
+								range.activityOf?.(member.id, noPrompts).foreground ===
+									"working" ||
 								pending.questions.has(member.id) ||
 								pending.permissions.has(member.id)
 							) {
@@ -2400,9 +2401,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						unreadSessionIds: new Set(
 							family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
-						),
-						statuses: Object.fromEntries(
-							family.map((row) => [row.id, { type: row.status }]),
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,

@@ -18,7 +18,10 @@ import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+} from "../../../src/lib/persistence/events.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
@@ -351,24 +354,52 @@ describe("Status poller → browser shell transitions", () => {
 		if (harness) await harness.stop();
 	}, 10_000);
 
-	it("publishes an idle shell row when a viewed session becomes idle", async () => {
+	it("publishes an idle shell row when a viewed session's Run ends", async () => {
 		const client = await harness.connectClient();
 		await client.waitForInitialState();
 		await client.viewSession("sess-B");
 		await client.subscribeShell();
+		const commit = (events: readonly CanonicalEvent[]) =>
+			harness.relay.effectRuntime.runtime.runPromise(
+				Effect.gen(function* () {
+					yield* (yield* makeCommitAndSignal)(events);
+				}),
+			);
+		const shellRow = (status: string) => (msg: Record<string, unknown>) =>
+			msg["_tag"] === "upsert" &&
+			(msg["item"] as { id?: string }).id === "sess-B" &&
+			(msg["item"] as { status?: string }).status === status;
 
-		publishStatus("sess-B", "busy");
-		await client.waitForTurnStart("sess-B", 3000);
+		// 8.1 (CONTRACT.md 2734): the row is busy while the ledger holds the session's Run (82tn.32.30).
+		const beforeRun = client.getReceived().length;
+		await commit(activeRunEvents("sess-B"));
+		await client.waitForAny(["shell"], {
+			timeout: 3000,
+			cursor: beforeRun,
+			predicate: shellRow("busy"),
+		});
+
 		const afterBusy = client.getReceived().length;
-
-		publishStatus("sess-B", "idle");
+		const meta = { provider: "opencode", metadata: { runId: "ledger-u1-run" } };
+		// 3.9 D59: OpenCode's idle status under the Run's id is its terminal.
+		await commit([
+			canonicalEvent(
+				"run.started",
+				"sess-B",
+				{ inputId: "ledger-u1", requestedRunId: "ledger-u1-run" },
+				meta,
+			),
+			canonicalEvent(
+				"session.status",
+				"sess-B",
+				{ sessionId: "sess-B", status: "idle" },
+				meta,
+			),
+		]);
 		await client.waitForAny(["shell"], {
 			timeout: 3000,
 			cursor: afterBusy,
-			predicate: (msg) =>
-				msg["_tag"] === "upsert" &&
-				(msg["item"] as { id?: string; status?: string }).id === "sess-B" &&
-				(msg["item"] as { status?: string }).status === "idle",
+			predicate: shellRow("idle"),
 		});
 
 		await client.close();

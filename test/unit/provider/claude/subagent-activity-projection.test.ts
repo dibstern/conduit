@@ -4,7 +4,7 @@ import { configuredClaudeConfigDir } from "../../../../src/lib/provider/claude/c
 // proves the right ProviderRuntimeEvents come out. This one carries a real
 // captured subagent turn all the way to the surface the user complained about:
 //   translator → domain mapper → event store → session projector
-//   → sessions.status → the session list read → SessionInfo.status
+//   → sessions.status (the list reads working from SessionActivity, 82tn.32.30)
 // Two failures live on this path and only this test sees both:
 //   1. reporting idle mid-turn (dot goes dark while the subagent works)
 //   2. never releasing busy (dot sticks on forever after the turn ends)
@@ -15,6 +15,7 @@ import { join } from "node:path";
 import * as SqliteNode from "@effect/sql-sqlite-node/SqliteClient";
 import { Effect, Layer } from "effect";
 import { Reactivity } from "effect/reactivity";
+import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -32,7 +33,6 @@ import {
 	ProjectorCursorEffectTag,
 } from "../../../../src/lib/persistence/effect/projector-cursor-effect.js";
 import { createAllEffectProjectors } from "../../../../src/lib/persistence/effect/projectors-effect.js";
-import { makeReadQueryEffect } from "../../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../../src/lib/persistence/events.js";
 import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import type {
@@ -141,14 +141,13 @@ function makeTestLayer() {
 	return Layer.mergeAll(base, eventStore, cursor, runner);
 }
 
-/** Exactly the session the sidebar subscription streams, read the same way. */
+/** The projector's row status for the session. */
 const readProcessing = Effect.gen(function* () {
-	const readQuery = yield* makeReadQueryEffect;
-	const { rows } = yield* readQuery.readSessionList({
-		projectIds: ["test-project"],
-	});
-	const session = rows.find(({ item }) => item.id === SESSION_ID)?.item;
-	return session?.status === "busy" || session?.status === "retry";
+	const sql = yield* SqlClient.SqlClient;
+	const [row] = yield* sql<{
+		status: string;
+	}>`SELECT status FROM sessions WHERE id = ${SESSION_ID}`;
+	return row?.status === "busy" || row?.status === "retry";
 });
 
 /** Replay the turn, sampling the sidebar's processing flag after every event. */

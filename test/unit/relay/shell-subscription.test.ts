@@ -82,7 +82,7 @@ import {
 	type SessionInfo,
 	SessionInfoSchema,
 } from "../../../src/lib/shared-types.js";
-import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
+import { publishLedgerTasks, publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -232,16 +232,6 @@ const forkSourceEvents = (
 		contextWindow: harness === "claude" ? "200k" : "",
 	}),
 ];
-const sessionStatus = (
-	sessionId: string,
-	status: "idle" | "busy",
-): CanonicalEvent =>
-	canonicalEvent(
-		"session.status",
-		sessionId,
-		{ sessionId, status },
-		{ provider: "claude", createdAt: at() },
-	);
 const messageCreated = (
 	sessionId: string,
 	messageId: string,
@@ -426,6 +416,8 @@ describe("subscribeShell", () => {
 							);
 						}),
 					);
+					// 82tn.32.30: busy, and so Stop, follow the view's active Run; these facts skip the arm.
+					publishRun((yield* SessionActivityTag).background, SID);
 					const q = yield* Queue.unbounded<Envelope<SessionInfo>>();
 					const stream =
 						kind === "root"
@@ -1203,10 +1195,7 @@ describe("subscribeShell", () => {
 				expect(snapshot.rows.map((row) => row.id)).toEqual([SID]);
 				expect(snapshot.sequence).toBe(yield* readModelVersion);
 
-				yield* commit([
-					sessionRenamed(SID, "Renamed"),
-					sessionStatus(SID, "busy"),
-				]);
+				yield* commit([sessionRenamed(SID, "Renamed")]);
 
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "upsert") throw new Error("expected upsert");
@@ -1214,7 +1203,6 @@ describe("subscribeShell", () => {
 				// every change the commit made to it.
 				expect(delta.item.id).toBe(SID);
 				expect(delta.item.title).toBe("Renamed");
-				expect(delta.item.status).toBe("busy");
 				// The stream carries the single session type (ni8.5 T-1), not the
 				// projection row: everything on the item is in the contract and
 				// nothing outside it rides along.
@@ -1237,7 +1225,7 @@ describe("subscribeShell", () => {
 
 			yield* commit([
 				sessionRenamed("shell-a", "A1"),
-				sessionStatus("shell-b", "busy"),
+				sessionRenamed("shell-b", "B1"),
 			]);
 
 			const version = yield* readModelVersion;
@@ -1484,10 +1472,10 @@ describe("subscribeShell", () => {
 				]);
 
 				// And live continues past the catch-up.
-				yield* commit([sessionStatus("shell-kept", "busy")]);
+				yield* commit([sessionRenamed("shell-kept", "Kept again")]);
 				const delta = yield* Queue.take(q);
 				if (delta._tag !== "upsert") throw new Error("expected upsert");
-				expect(delta.item.status).toBe("busy");
+				expect(delta.item.title).toBe("Kept again");
 				expect(delta.sequence).toBe(yield* readModelVersion);
 			}).pipe(
 				Effect.provide(

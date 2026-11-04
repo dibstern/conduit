@@ -16,11 +16,7 @@ import type {
 } from "../../../handlers/types.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
 import { fixupConfigFile } from "../../../instance/opencode-config-fixup.js";
-import type {
-	Message,
-	SessionDetail,
-	SessionStatus,
-} from "../../../instance/sdk-types.js";
+import type { Message, SessionDetail } from "../../../instance/sdk-types.js";
 import type { Logger } from "../../../logger.js";
 import { discoverOpenCodeCatalog } from "../../../provider/opencode-discovery.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
@@ -89,10 +85,7 @@ export type ConnectPtyUpstreamShape = (
  * on a structural interface, not the implementation.
  */
 export interface SessionManagerShape {
-	listSessions(options?: {
-		statuses?: Record<string, SessionStatus>;
-		roots?: boolean;
-	}): Promise<SessionInfo[]>;
+	listSessions(options?: { roots?: boolean }): Promise<SessionInfo[]>;
 	searchSessions(
 		query: string,
 		options?: { roots?: boolean },

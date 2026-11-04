@@ -62,19 +62,8 @@ it.effect(
 					{ metadata: { runId: "reservation" } },
 				),
 			]);
-			for (const rows of [
-				yield* read.listSessionInfos(scope),
-				(yield* read.readSessionList(scope)).rows.map(({ item }) => item),
-				(yield* read.readSessionList(scope, {
-					familyOf: "reserved",
-					viewed: "reserved",
-				})).rows.map(({ item }) => item),
-			]) {
-				// Working is the activity view's answer now (82tn.32.30), not this status.
-				expect(rows.find(({ id }) => id === "reserved")).toMatchObject({
-					status: "busy",
-				});
-			}
+			// The row's status; the list reads working from the activity view (82tn.32.30).
+			expect(yield* read.getSessionStatus("reserved")).toBe("busy");
 			expect(yield* sql`SELECT status, started_at FROM provider_runs`).toEqual([
 				{ status: "pending", started_at: null },
 			]);
@@ -126,9 +115,7 @@ it.effect(
 					inputId: "fresh-input",
 				}),
 			]);
-			expect((yield* read.listSessionInfos(scope))[0]).toMatchObject({
-				status: "busy",
-			});
+			expect(yield* read.getSessionStatus("reserved")).toBe("busy");
 			yield* commit([
 				canonicalEvent("run.requested", "reserved", {
 					runId: "waiting",
@@ -214,6 +201,64 @@ it.effect(
 				expect(root).toMatchObject({ status: "idle", attention: "idle" });
 				expect(root).not.toHaveProperty("processing");
 			}
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
+		),
+);
+
+it.effect(
+	"lists busy and widens a family window from the view, not the row's status",
+	() =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			const created = (sessionId: string, parentId?: string) =>
+				canonicalEvent("session.created", sessionId, {
+					sessionId,
+					provider: "claude",
+					title: sessionId,
+					...(parentId ? { parentId } : {}),
+				});
+			yield* commit([
+				created("root"),
+				created("stale", "root"),
+				created("live", "root"),
+				created("failed"),
+				// The row says busy, but no Run holds the session.
+				canonicalEvent("session.status", "stale", {
+					sessionId: "stale",
+					status: "busy",
+				}),
+				canonicalEvent("session.status", "failed", {
+					sessionId: "failed",
+					status: "error",
+				}),
+			]);
+			// Only "live" holds an active Run, as SessionActivity reads it (8.1).
+			const activityOf = activityFrom({ running: ["live"] });
+			const listed = yield* read.listSessionInfos(scope, { activityOf });
+			const window = (yield* read.readSessionList(scope, {
+				familyOf: "root",
+				viewed: "root",
+				activityOf,
+			})).rows.map(({ item }) => item);
+			for (const rows of [listed, window]) {
+				expect(rows.find(({ id }) => id === "live")).toMatchObject({
+					status: "busy",
+				});
+				expect(rows.find(({ id }) => id === "root")).toMatchObject({
+					status: "idle",
+				});
+			}
+			expect(listed.find(({ id }) => id === "stale")).toMatchObject({
+				status: "idle",
+			});
+			expect(listed.find(({ id }) => id === "failed")).toMatchObject({
+				status: "error",
+			});
+			expect(window.map(({ id }) => id).sort()).toEqual(["live", "root"]);
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
 				local: true,
@@ -627,8 +672,9 @@ describe("typed session row derivations", () => {
 					];
 					for (const list of lists) {
 						const parent = list.find((row) => row.id === "monitor");
+						// A retry is busy: the view knows a Run, not why it waits (`retrying` says why).
 						expect(parent).toMatchObject({
-							status,
+							status: status === "retry" ? "busy" : status,
 							attention,
 							backgroundTasks: tasks,
 						});
@@ -667,12 +713,6 @@ describe("typed session row derivations", () => {
 				const running = activityFrom({ running: ["priority"] });
 				expect(attention(unread, { activityOf: running })).toBe("working");
 				expect(attention({ ...unread, status: "busy" })).toBe("done-unread");
-				expect(
-					attention(
-						{ ...unread, status: "idle" },
-						{ statuses: { priority: { type: "busy" } } },
-					),
-				).toBe("done-unread");
 				expect(
 					attention(
 						{ ...unread, last_turn_error_at: 5 },
@@ -839,14 +879,12 @@ describe("typed session row derivations", () => {
 				expect(side).toMatchObject({ attention: "working", processing: true });
 				const unread = sessionRowsToSessionInfoList(rows, {
 					...options,
-					statuses: {},
 					backgroundOf: () => undefined,
 					activityOf: activityFrom({}),
 				}).find((row) => row.id === "side");
 				expect(unread?.attention).toBe("done-unread");
 				const monitoring = sessionRowsToSessionInfoList(rootRows, {
 					...options,
-					statuses: {},
 					backgroundOf: () => ({ work: "monitoring", tasks: [] }),
 					activityOf: activityFrom({
 						background: {
@@ -888,7 +926,6 @@ describe("typed session row derivations", () => {
 						["agent", "inner"],
 					]),
 					sideThreadIds: new Set(["outer", "inner"]),
-					statuses: { agent: { type: "busy" } },
 					activityOf: activityFrom({ running: ["agent"] }),
 					unreadSessionIds: new Set(["agent"]),
 				};
@@ -915,7 +952,6 @@ describe("typed session row derivations", () => {
 				);
 				const unread = sessionRowsToSessionInfoList(rows, {
 					...options,
-					statuses: {},
 					activityOf: activityFrom({}),
 				});
 				expect(unread.find((row) => row.id === "inner")?.attention).toBe(
