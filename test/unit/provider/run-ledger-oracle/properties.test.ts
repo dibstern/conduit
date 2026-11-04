@@ -60,6 +60,9 @@ const fixedSeeds: readonly [number, ...number[]] =
 			]
 		: [seedBase, ...Array.from({ length: 7 }, (_, i) => seedBase + i + 1)];
 const runs = count("RUN_LEDGER_TRACE_RUNS", 100);
+// A seed takes about 2.5 s alone at 100 runs, so the 10 s default fails it under the pre-commit
+// hook's parallel build and typecheck; a long-seed run scales the bound with its run count.
+const seedTimeout = 30_000 * Math.max(1, runs / 100);
 const maxCommands = count("RUN_LEDGER_TRACE_COMMANDS", 80);
 const oracleCoverage = new Coverage();
 const emptyView = (): LedgerView => ({
@@ -2129,9 +2132,7 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				);
 				assert.equal(result.failed, false, String(result.errorInstance));
 			},
-			// A seed takes about 2.5 s alone, so the 10 s default fails it under the pre-commit hook's
-			// parallel build and typecheck.
-			30_000,
+			seedTimeout,
 		);
 		// The differential also checks the oracle against the fake, so a seed pended for their
 		// convergence stays pended here.
@@ -2208,7 +2209,7 @@ describe.each(providers)("%s model-based public traces", (provider) => {
 				);
 				assert.equal(result.failed, false, String(result.errorInstance));
 			},
-			30_000,
+			seedTimeout,
 		);
 	}
 	it("LI2 joins commute across send outcomes and receipt orders", ({
