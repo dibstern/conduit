@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import {
 	mkdirSync,
@@ -63,11 +63,13 @@ function start(commit: string, fail = false) {
 					lines.on("line", (text) => text === wanted && resolve()),
 				);
 	lines.on("line", (text) => seen.push(text));
-	return { process: runner, seen, line };
+	// Listen from the spawn: under load the failing child exits before the test awaits it.
+	// "close" waits for its stdout too, so its last line is already seen.
+	return { exited: once(runner, "close"), process: runner, seen, line };
 }
 
-const result = async (built: { process: ChildProcess; seen: string[] }) => {
-	await once(built.process, "exit");
+const result = async (built: { exited: Promise<unknown>; seen: string[] }) => {
+	await built.exited;
 	return JSON.parse(built.seen.at(-1) ?? "null") as {
 		available: boolean;
 		cacheDir?: string;
