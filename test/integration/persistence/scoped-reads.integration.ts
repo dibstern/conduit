@@ -26,6 +26,7 @@ import {
 	makeSessionEventBusLive,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
+import { strandedChildren } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { ToolContentServiceLive } from "../../../src/lib/domain/relay/Services/tool-content-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -439,10 +440,10 @@ describe("Scope-filtered reads over one store-wide version space", () => {
 						roots,
 					],
 					[
-						"getStrandedChildren",
-						read
-							.getStrandedChildren(scope)
-							.pipe(Effect.map((rows) => rows.map((row) => row.id))),
+						"strandedChildren",
+						strandedChildren(scope).pipe(
+							Effect.map((rows) => rows.map((row) => row.id)),
+						),
 						children,
 					],
 					[

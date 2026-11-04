@@ -80,7 +80,6 @@ const makeReadQuery = (
 	getAllSessionStatuses: () => Effect.succeed({}),
 	getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 	getSessionsForReconciliation: () => Effect.succeed([]),
-	getStrandedChildren: () => Effect.succeed([]),
 	listSessions: () => Effect.succeed([]),
 	listSessionInfos: () => Effect.succeed([]),
 	countSettledSessions: () => Effect.succeed(0),

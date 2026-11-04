@@ -13,6 +13,7 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+import { strandedChildren } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -1486,7 +1487,7 @@ describe("ReadQueryEffect session families", () => {
 	);
 });
 
-describe("ReadQueryEffect.getStrandedChildren", () => {
+describe("the status poller's stranded children", () => {
 	it.effect(
 		"finds busy task children of idle parents with their task and runtime owner",
 		() =>
@@ -1543,8 +1544,7 @@ describe("ReadQueryEffect.getStrandedChildren", () => {
 				});
 				yield* link("root", "claude-subagent-done", "t-done");
 
-				const readQuery = yield* makeReadQueryEffect;
-				const rows = yield* readQuery.getStrandedChildren(scope);
+				const rows = yield* strandedChildren(scope);
 				expect([...rows].sort((a, b) => a.id.localeCompare(b.id))).toEqual([
 					{ id: "claude-subagent-bg", task_id: "t-bg", owner_id: "root" },
 					{
@@ -1581,9 +1581,9 @@ describe("ReadQueryEffect idle corrections", () => {
 				}
 				const readQuery = yield* makeReadQueryEffect;
 				// 8.3 (2849): the status poller's idle corrections ask whether anything may act.
-				expect(
-					(yield* readQuery.getStrandedChildren(scope)).map(({ id }) => id),
-				).toEqual(["quiet-child"]);
+				expect((yield* strandedChildren(scope)).map(({ id }) => id)).toEqual([
+					"quiet-child",
+				]);
 				expect(
 					(yield* readQuery.getSessionsForReconciliation(scope, [])).map(
 						({ id }) => id,

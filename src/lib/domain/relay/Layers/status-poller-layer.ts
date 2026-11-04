@@ -41,6 +41,7 @@ import {
 	poll,
 	type ReconciliationDeps,
 	type SessionStatusPollerService,
+	strandedChildren,
 } from "../Services/session-status-poller.js";
 
 type StatusPollerChangedCallback = Parameters<
@@ -92,7 +93,9 @@ export const StatusPollerLive: Layer.Layer<
 					[],
 				),
 			getStrandedChildren: () =>
-				readQuery.getStrandedChildren({ projectIds: [eventStore.projectId] }),
+				strandedChildren({ projectIds: [eventStore.projectId] }).pipe(
+					Effect.provideService(SqlClient.SqlClient, sql),
+				),
 			liveListOf: (sessionId) =>
 				Option.isSome(liveTaskList) ? liveTaskList.value(sessionId) : undefined,
 			getSessionsAwaitingUser: () =>

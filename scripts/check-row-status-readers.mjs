@@ -2,8 +2,8 @@
 // 82tn.32.30: what a session is doing is one read-only view (CONTRACT.md 8.1, SessionActivity).
 // Only the projectors, which write the row's status, and the view may read a busy or retry
 // status. Everything else reads the session's activity. A reader listed below is either a
-// provider-event reader (it reads what a provider reported, not the row) or an existing row
-// reader still to move onto the view; an entry that no longer matches must be removed.
+// provider-event reader (it reads what a provider reported, not the row), a view reader, or a
+// row writer that reads the row only to correct it; an entry that no longer matches must be removed.
 import { readdirSync, readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
@@ -34,8 +34,6 @@ const allowed = {
 	"src/lib/domain/relay/Services/session-status-poller.ts": "writer",
 	// A dead runner's busy children with no run of their own are settled idle (82tn.32.40).
 	"src/lib/provider/session-run-settlement.ts": "writer",
-	// Row readers still to move onto the view (82tn.32.30 remaining; the writers go in 32.13).
-	"src/lib/persistence/effect/read-query-effect.ts": "to move",
 };
 
 const matched = new Set();

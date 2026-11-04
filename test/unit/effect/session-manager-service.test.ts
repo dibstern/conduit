@@ -181,7 +181,6 @@ function makeReadQueryEffect(
 		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 		getSessionsForReconciliation: () => Effect.succeed([]),
-		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
