@@ -455,9 +455,12 @@ describe("OpenCode pending rewind through the relay", () => {
 				]);
 				expect.soft((yield* writes())[0]).toEqual({ messages: 1, parts: 1 });
 				let floor = (yield* reads.readSessionTranscript(sessionId)).version;
-				for (const [createdAt, visibleIds, maxMessages] of [
-					[196, messageIds.filter((id) => id < "m0196" && id !== cutId), 60],
-					[185, messageIds.slice(0, 186), 70],
+				// The cut is bounded by write order first (conduit-test-lczrn.1), so a corrected
+				// clock on the cut moves no row across it.
+				const visibleIds = messageIds.slice(0, 190);
+				for (const [createdAt, maxMessages] of [
+					[196, 60],
+					[185, 70],
 				] as const) {
 					yield* commit([
 						canonicalEvent(
@@ -488,12 +491,8 @@ describe("OpenCode pending rewind through the relay", () => {
 						after: floor,
 						through: (yield* reads.readSessionTranscript(sessionId)).version,
 					});
-					expect(delta.messages.slice(-50).map(({ id }) => id)).toEqual(
-						visibleIds.slice(-50),
-					);
-					expect(delta.messages.every(({ parts }) => parts.length === 1)).toBe(
-						true,
-					);
+					// Only the hidden cut changed, so the visible delta is empty.
+					expect(delta.messages).toEqual([]);
 					floor = delta.version;
 				}
 				yield* commit([canonicalEvent("session.rewind_undone", sessionId, {})]);
@@ -567,9 +566,8 @@ describe("OpenCode pending rewind through the relay", () => {
 						forkPointEvent: forkPoint,
 						forkPointTimestamp: 0,
 					}),
-					// Provider clocks and ids determine the range even when receipt
-					// order runs backwards.
-					...[...messageIds].reverse().map((id) => snapshot(id)),
+					// The range follows write order (conduit-test-lczrn.1), here the history's own order.
+					...messageIds.map((id) => snapshot(id)),
 				]);
 				yield* commit([
 					canonicalEvent("session.rewound", sessionId, { messageId: target }),
