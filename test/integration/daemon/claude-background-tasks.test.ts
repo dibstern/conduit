@@ -9,7 +9,7 @@
 // 166. the task's kind is not the ledger's (local_bash is a shell);
 // 167. the session row is not re-sent when the ledger's tasks change.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -147,6 +147,119 @@ describe("Claude background tasks reach the UI through the Run Ledger", () => {
 			sequence: ended.snapshots.at(-1)?.sequence,
 			taskIds: [],
 		});
+	});
+
+	// 82tn.45: a background Bash's row outlives its Run. How it could fail (lane audit 45-3, 45-6,
+	// 45-12, 45-15): the Run's end closes the row; it closes as failed or as ended by the run; its
+	// shell's launch receipt reads as its end; it carries no run id or folder; it never closes once
+	// the ledger reports the task finished.
+	it("keeps a background Bash row open past its Run's end until the ledger reports the task finished", async () => {
+		const fixture = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			claudeReplay: {
+				turns: ["background-shell-ends-between-turns"],
+				plan: { holdAfterResult: true },
+			},
+		});
+		harness = fixture;
+		const browser = await fixture.connect();
+		await browser.followSessions();
+		const sessionId = await browser.createSession("Background Bash row");
+		await browser.followSession(sessionId);
+		const rows = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return {
+					tools: db
+						.prepare(
+							"SELECT p.tool_name AS tool, p.status, p.run_id AS runId, p.folder, p.started_at AS startedAt, p.ended_at AS endedAt, p.ended_by AS endedBy, json_extract(p.metadata, '$.providerTaskId') AS taskId FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ? AND p.type = 'tool' ORDER BY p.created_at",
+						)
+						.all(sessionId) as {
+						tool: string;
+						status: string;
+						runId: string | null;
+						folder: string | null;
+						startedAt: number | null;
+						endedAt: number | null;
+						endedBy: string | null;
+						taskId: string | null;
+					}[],
+					ends: db
+						.prepare(
+							"SELECT json_extract(entry_json, '$.runId') AS runId FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",
+						)
+						.all(sessionId) as { runId: string }[],
+					tasks: read(fixture, sessionId).folded.at(-1)?.taskIds ?? [],
+				};
+			} finally {
+				db.close();
+			}
+		};
+		const row = (
+			cursor: number,
+			ready: (message: Record<string, unknown>) => boolean,
+		) =>
+			browser.waitFor(
+				(message) =>
+					message["type"] === "session_row" &&
+					message["id"] === sessionId &&
+					ready(message),
+				cursor,
+			);
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		await fixture.claudeReplayer?.held();
+		// The Run ended at its result; the shell it started is still live.
+		await row(
+			0,
+			(message) =>
+				message["status"] === "idle" &&
+				Array.isArray(message["backgroundTasks"]),
+		);
+		const runEnded = rows();
+		proof["runEnded"] = runEnded;
+		const [bash] = runEnded.tools;
+		expect(runEnded.tools).toHaveLength(1);
+		expect(runEnded.ends).toEqual([{ runId: bash?.runId }]);
+		expect(runEnded.tasks).toEqual(["bxtrbpf91"]);
+		expect(bash).toMatchObject({
+			tool: "Bash",
+			taskId: "bxtrbpf91",
+			endedAt: null,
+			endedBy: null,
+		});
+		expect([fixture.projectDir, realpathSync(fixture.projectDir)]).toContain(
+			bash?.folder,
+		);
+		expect(bash?.startedAt).toEqual(expect.any(Number));
+
+		const cursor = browser.frames.length;
+		fixture.claudeReplayer?.release();
+		// The ledger's task end and the row's outcome are separate events; wait for both.
+		await Promise.all([
+			row(cursor, (message) => message["backgroundTasks"] === undefined),
+			browser.waitFor(
+				(message) =>
+					message["type"] === "transcript_message" &&
+					message["sessionId"] === sessionId &&
+					JSON.stringify(message["parts"]).includes('"outcome":"completed"'),
+				cursor,
+			),
+		]);
+		const finished = rows();
+		proof["taskFinished"] = finished;
+		expect(finished.tasks).toEqual([]);
+		expect(finished.ends).toEqual(runEnded.ends);
+		expect(finished.tools).toEqual([
+			{
+				...bash,
+				status: "completed",
+				endedAt: expect.any(Number),
+				endedBy: null,
+			},
+		]);
+		expect(finished.tools[0]?.endedAt).toBeGreaterThanOrEqual(
+			bash?.startedAt ?? Infinity,
+		);
 	});
 
 	// 8.2 (CONTRACT.md 2778-2781): any other task_type is its own kind, verbatim. How it could fail

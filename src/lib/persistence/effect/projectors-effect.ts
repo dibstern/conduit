@@ -1372,6 +1372,11 @@ export const makeMessageProjector = defineProjector(() => ({
 						result_event_seq = CASE WHEN ${resumed ? 1 : 0} THEN NULL ELSE result_event_seq END,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
+						-- 82tn.45: a backgrounded row left open by its launch receipt ends with its outcome.
+						ended_at = CASE WHEN ${resumed ? 1 : 0} THEN NULL
+							WHEN ended_at IS NULL AND status IN ('completed', 'error')
+								AND json_extract(${metadata}, '$.outcome') IS NOT NULL
+							THEN ${event.metadata.providerCreatedAt ?? event.createdAt} ELSE ended_at END,
 						updated_at = ${event.createdAt},
 						version = ${ctx.version}
 					WHERE id = ${event.data.partId}`;
@@ -1423,7 +1428,12 @@ export const makeMessageProjector = defineProjector(() => ({
 						result_event_seq = ${rows[0]?.result_bytes == null ? null : event.sequence},
 						result_bytes = ${rows[0]?.result_bytes ?? null},
 						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
-						ended_at = ${event.metadata.providerCreatedAt ?? event.createdAt}, ended_by = NULL,
+						-- 82tn.45: a backgrounded task's launch receipt is not its end; its outcome is.
+						ended_at = CASE WHEN json_valid(${metadata})
+							AND json_extract(${metadata}, '$.backgrounded') = 1
+							AND json_extract(${metadata}, '$.outcome') IS NULL
+							THEN NULL ELSE ${event.metadata.providerCreatedAt ?? event.createdAt} END,
+						ended_by = NULL,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}
 						-- A completion without a result (the turn-end settle) only closes
