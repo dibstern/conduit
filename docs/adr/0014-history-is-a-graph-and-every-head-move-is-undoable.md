@@ -22,7 +22,7 @@ so a rewind there cannot be undone either.
 
 **History is a graph per session.** The History Graph is a projection of
 canonical events ([ADR-0004](0004-session-mutations-are-canonical-events.md)).
-It holds one History Node per settled Run in any terminal state, with the Run's
+It holds one History Node per Ended Run, whatever its outcome, with the Run's
 Run Inputs, its assistant output and its parent node. A Run with a Steer is one
 node. A rewind to that Steer targets the Run's parent and restores the Run's
 inputs as a draft. A session has one Head.
@@ -41,7 +41,7 @@ regenerate and branch switch. Preview writes nothing and returns a proposal.
 Commit revalidates and moves. A move is journalled as `head_move_started` then
 `head_moved`, and startup rolls an interrupted move forward. Edit-and-resend
 and regenerate are a move followed by a Run Ledger admit keyed by the move id,
-so the new Run settles as a sibling node. Admission for a Head Move reads Run
+so the new Run's node is a sibling of the old one. Admission for a Head Move reads Run
 Ledger state (conduit-test-82tn.49).
 
 **Every Head Move is undoable.** Nothing is removed. The Head Log lists every
