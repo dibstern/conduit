@@ -9,7 +9,8 @@
 // 9. Stop pressed twice while asked opens a second wait or clears the ask;
 // 18. a confirm with nothing asked changes state;
 // 16. a task that starts after the Stop (no gate at the Stop) is closed, or held with no ask;
-// 19. the list shown and the snapshot entry come from different reads.
+// 19. the list shown and the snapshot entry come from different reads;
+// 13, 14. a confirmed close leaves no timeline entry, or a close with no tasks leaves one.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -56,6 +57,15 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		db.close();
 	}
 };
+
+const lostNotices = async (browser: BrowserClient, sessionId: string) =>
+	(await browser.history(sessionId)).flatMap((message) =>
+		(message.parts ?? []).flatMap((part) =>
+			part.type === "notice" && part.text?.startsWith("Background work")
+				? [part.text]
+				: [],
+		),
+	);
 
 type StopConfirm = {
 	readonly snapshotEntry: number;
@@ -257,6 +267,15 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 				message["stopConfirm"] === undefined && message["status"] === "idle",
 		);
 		expect(confirmOf(cleared)).toBeUndefined();
+		// 8.4 L5: the tasks the confirm ended are a timeline entry.
+		// test-waits-allow polling: the notice is read back as history, which has no push to wait on.
+		const lost = await vi.waitFor(async () => {
+			const found = await lostNotices(browser, sessionId);
+			expect(found).toHaveLength(1);
+			return found;
+		});
+		proof["confirmed: lost work"] = lost;
+		expect(lost[0]).toMatch(/^Background work ended: .*\(shell\)/);
 	});
 
 	it("closes on its own when the tasks end while asked", async () => {
@@ -317,6 +336,11 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 						message["stopConfirm"] !== undefined,
 				),
 		).toBe(false);
+		// 8.4 L5 (r2-2): no tasks, no lost-work entry, once the next process has started.
+		await browser.send(sessionId, "after the close");
+		const lost = await lostNotices(browser, sessionId);
+		proof["no tasks: lost work"] = lost;
+		expect(lost).toEqual([]);
 	});
 
 	it("asks when a task starts after the Stop", async () => {

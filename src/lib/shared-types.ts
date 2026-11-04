@@ -269,6 +269,15 @@ export const BackgroundTaskSchema = Schema.Struct({
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
+/** 32.25's decided copy for a task: "pnpm test (shell)", or "(kind): description" with no command. */
+export const backgroundTaskText = ({
+	kind,
+	type,
+	description,
+	detail,
+}: Pick<BackgroundTask, "kind" | "type" | "description" | "detail">) =>
+	detail ? `${detail} (${kind ?? type})` : `(${kind ?? type}): ${description}`;
+
 /** A live server of the session's (8.7): the Run Ledger's entry for one port. */
 export const SessionServerSchema = Schema.Struct({
 	port: Schema.Number,

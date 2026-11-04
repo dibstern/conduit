@@ -38,6 +38,7 @@ import type {
 } from "../../provider/run-ledger/run-ledger-model.js";
 import { sendToken } from "../../provider/runner/runner-protocol.js";
 import { harnessForModelProvider } from "../../provider/turn-settings.js";
+import { backgroundTaskText } from "../../shared-types.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
@@ -45,7 +46,7 @@ import type {
 	ProjectionContext,
 	ProjectionTouch,
 } from "./projectors-effect.js";
-import { runTerminalStatus } from "./projectors-effect.js";
+import { runTerminalStatus, stampMessage } from "./projectors-effect.js";
 
 /**
  * settleMs is 3.7's settle window. probeMs and nativeCommandMs: the contract names no value
@@ -908,6 +909,61 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 								wake(event.sessionId, view.nativeCommands);
 						},
 					});
+				// 8.4 L5 (CONTRACT.md 2907-2913): each label's lost work, decided once, is a timeline notice
+				// at the fact that decided it, so it replays after a reload. The names come from that
+				// label's latest stored snapshot, which carries each task's command.
+				const noticeIds: string[] = [];
+				for (const [index, lost] of view.lostWork
+					.slice(before.lostWork.length)
+					.entries()) {
+					const [stored] =
+						lost.tag === "known"
+							? yield* sql<{ data: string }>`
+									SELECT data FROM events WHERE session_id = ${event.sessionId}
+									AND type = 'evidence.tasks_snapshot' AND sequence <= ${event.sequence}
+									AND json_extract(data, '$.label') = ${lost.label}
+									ORDER BY sequence DESC LIMIT 1`
+							: [];
+					const details = new Map(
+						(stored
+							? (
+									JSON.parse(
+										stored.data,
+									) as EventPayloadMap["evidence.tasks_snapshot"]
+								).tasks
+							: []
+						).map((task) => [task.key.taskId, task.detail]),
+					);
+					const text =
+						lost.tag === "known"
+							? `Background work ended: ${lost.tasks
+									.map((task) => {
+										const detail = details.get(task.key.taskId);
+										return backgroundTaskText({
+											kind: task.kind,
+											type: task.taskType,
+											description: task.description,
+											...(detail ? { detail } : {}),
+										});
+									})
+									.join(", ")}`
+							: "Background work may have been lost";
+					const messageId = `lost-work-${event.sequence}-${index}`;
+					yield* sql`INSERT INTO messages
+						(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+						VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt},
+							${event.createdAt}, ${ctx.version},
+							(SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE session_id = ${event.sessionId}))
+						ON CONFLICT (id) DO NOTHING`;
+					yield* sql`INSERT INTO message_parts
+						(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
+						VALUES (${`${messageId}-part`}, ${messageId}, 'text', ${text},
+							${JSON.stringify({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt},
+							${ctx.version})
+						ON CONFLICT (id) DO NOTHING`;
+					noticeIds.push(messageId);
+				}
+				const noticed = yield* stampMessage(noticeIds, ctx);
 				if (event.type === "evidence.tasks_snapshot")
 					handOver(view, { tasks: event.data.tasks, at: event.createdAt });
 				else if (!handedOver.has(event.sessionId))
@@ -993,13 +1049,17 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				const stamped = yield* sql<{ id: string }>`
 					UPDATE sessions SET version = ${ctx.version} WHERE id = ${event.sessionId}
 					RETURNING id`;
-				return stamped.length > 0
-					? {
-							stamped: stamped.map(({ id }) => id),
-							removed: [],
-							collections: ["sessions"],
-						}
-					: untouched;
+				return {
+					stamped: [...noticed.stamped, ...stamped.map(({ id }) => id)],
+					removed: noticed.removed,
+					collections: [
+						...new Set([
+							...noticed.collections,
+							...(stamped.length > 0 ? (["sessions"] as const) : []),
+						]),
+					],
+					...(noticed.sidebar ? { sidebar: noticed.sidebar } : {}),
+				};
 			}),
 	};
 }
