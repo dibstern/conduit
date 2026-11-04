@@ -81,7 +81,8 @@ export function makeRunnerIdleExit(
 				const live =
 					output.transition.kind === "snapshot" &&
 					output.transition.tasks.length > 0;
-				// Ambient-only SDK snapshots are not session activity.
+				// An empty list after an empty list is not activity. Ambient tasks count:
+				// they are live tasks (CONTRACT.md 2778-2781).
 				if (!backgroundWork && !live) return;
 				backgroundWork = live;
 			}

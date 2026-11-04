@@ -706,10 +706,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					.push(
 						claudeRuntimeEvent("evidence.tasks_snapshot", ctx.sessionId, {
 							label: "",
-							tasks: tasks.map(({ id, type, ...display }) => ({
+							tasks: tasks.map(({ id, type, ambient, ...display }) => ({
 								key: { taskId: id },
 								taskType: type,
-								ambient: false,
+								ambient: ambient === true,
 								...display,
 							})),
 						}),

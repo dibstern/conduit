@@ -82,8 +82,9 @@ describe("Session Activity", () => {
 				};
 				publishLedgerTasks(activity.background, background);
 				publishLedgerTasks(activity.background, background);
+				// 8.2 (CONTRACT.md 2778-2781): a shell is work.
 				expect(activity.background.backgroundOf("background")?.work).toBe(
-					"monitoring",
+					"working",
 				);
 				publishLedgerTasks(activity.background, {
 					sessionId: "background",
@@ -172,7 +173,7 @@ describe("Session Activity", () => {
 					kind: "snapshot",
 					tasks: [
 						{ id: "w1", type: "local_workflow", description: "Dev server" },
-						{ id: "b1", type: "local_bash", description: "Watch" },
+						{ id: "b1", type: "monitor", description: "Watch" },
 					],
 				});
 				const server = {
@@ -226,7 +227,7 @@ describe("Session Activity", () => {
 				publishLedgerTasks(activity.background, {
 					sessionId: "s",
 					kind: "snapshot",
-					tasks: [{ id: "m1", type: "local_bash", description: "Watch" }],
+					tasks: [{ id: "m1", type: "monitor", description: "Watch" }],
 				});
 				expect(work()).toBe("working");
 				activity.servers.set("s", [server]);

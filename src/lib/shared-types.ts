@@ -247,7 +247,7 @@ export const SessionAttentionSchema = Schema.Literals([
 export const BackgroundWorkSchema = Schema.Literals(["working", "monitoring"]);
 export type BackgroundWork = typeof BackgroundWorkSchema.Type;
 
-/** A live, non-ambient Claude background task (shell, agent, monitor, ...). */
+/** A live Claude background task (shell, agent, monitor, ...). */
 export const BackgroundTaskSchema = Schema.Struct({
 	id: Schema.String,
 	/** SDK task_type, e.g. local_bash, local_agent, monitor_mcp. */

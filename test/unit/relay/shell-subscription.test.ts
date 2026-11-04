@@ -1660,7 +1660,9 @@ describe("subscribeShell", () => {
 						return delta.item.attention;
 					});
 				expect(yield* attentionAfter(["local_workflow"])).toBe("working");
-				expect(yield* attentionAfter(["local_bash"])).toBe("monitoring");
+				expect(yield* attentionAfter(["monitor"])).toBe("monitoring");
+				// 8.2 (CONTRACT.md 2778-2781): a shell is work.
+				expect(yield* attentionAfter(["local_bash"])).toBe("working");
 				expect(yield* attentionAfter([])).toBe("idle");
 				expect(yield* Queue.size(q)).toBe(0);
 			}).pipe(Effect.provide(makeShellTestLayer(), { local: true }));

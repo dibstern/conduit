@@ -22,6 +22,8 @@ export type BackgroundTaskTransition =
 			// predate it.
 			readonly tasks: readonly (Omit<BackgroundTask, "firstSeenAt"> & {
 				readonly firstSeenAt?: number;
+				/** The SDK's: not activity, but still a live task (8.2). */
+				readonly ambient?: true;
 			})[];
 	  }
 	| {

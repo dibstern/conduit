@@ -142,7 +142,8 @@ describe("foreground daemon process harness", () => {
 		const sessionId = await browser.createSession("Background restart proof");
 		await browser.send(sessionId, "restart-background-work");
 		const expected = {
-			backgroundWork: "monitoring",
+			// 8.2 (CONTRACT.md 2778-2781): a shell is work.
+			backgroundWork: "working",
 			backgroundTasks: [
 				{
 					id: "restart-background-task",
@@ -497,7 +498,7 @@ describe("foreground daemon process harness", () => {
 				async () => {
 					after = await sessionBackground(browser, sessionId);
 					expect(after).toEqual({
-						backgroundWork: change === "replace" ? "monitoring" : null,
+						backgroundWork: change === "replace" ? "working" : null,
 						backgroundTasks: tasks.map((task) => ({
 							...task,
 							kind: "subagent",
