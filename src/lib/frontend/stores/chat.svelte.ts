@@ -12,6 +12,7 @@ import type {
 	ChatMessage,
 	HistoryMessage,
 	HistoryMessagePart,
+	SessionInfo,
 	SystemMessage,
 	SystemMessageVariant,
 	ToolMessage,
@@ -21,12 +22,11 @@ import { generateUuid } from "../utils/format.js";
 import { isSubagentToolName } from "../utils/subagent-tools.js";
 import { discoveryState } from "./discovery.svelte.js";
 import { getCurrentRoute } from "./router.svelte.js";
-import { findSession, isBusy, sessionState } from "./session.svelte.js";
+import { findSession, sessionState } from "./session.svelte.js";
 import { refreshSessionSkills } from "./session-skills.svelte.js";
 
 // Tier 1 — Activity. Unbounded. Small scalars + small Sets, << 1 KB per session.
 export type SessionActivity = {
-	phase: ChatPhase;
 	turnGeneration: number;
 	endedGeneration: number;
 	terminalTurnIds: ReadonlySet<string>;
@@ -89,7 +89,6 @@ export type SessionChatState = SessionActivity & SessionMessages;
 
 export function createEmptySessionActivity(): SessionActivity {
 	return {
-		phase: "idle",
 		turnGeneration: 0,
 		endedGeneration: -1,
 		terminalTurnIds: new Set(),
@@ -192,8 +191,12 @@ export function currentChat(): SessionChatState {
 	return _currentChat;
 }
 
+/** The row's foreground, as SessionActivity answers it (CONTRACT.md 8.1): a Run, input or wake,
+ *  reads processing; background tasks alone never do. */
 export function getSessionPhase(id: string): ChatPhase {
-	return sessionActivity.get(id)?.phase ?? "idle";
+	return findSession(id)?.activity?.foreground === "working"
+		? "processing"
+		: "idle";
 }
 
 export function getOrCreateSessionActivity(id: string): SessionActivity {
@@ -201,8 +204,6 @@ export function getOrCreateSessionActivity(id: string): SessionActivity {
 	const existing = sessionActivity.get(id);
 	if (existing) return existing;
 	const activity: SessionActivity = $state(createEmptySessionActivity());
-	// A slot opened mid-turn starts processing; the row then ends it.
-	if (isBusy(findSession(id))) phaseToProcessing(activity);
 	sessionActivity.set(id, activity);
 	return activity;
 }
@@ -298,10 +299,8 @@ export function findMessage<T extends ChatMessage["type"]>(
 	return undefined;
 }
 
-/** Valid chat pipeline phases. Single source of truth — the derived
- *  flags (isProcessing, isStreaming, isReplaying) derive from this value.
- *  Impossible boolean combinations are unrepresentable. */
-export type ChatPhase = "idle" | "processing" | "streaming";
+/** Whether the session's foreground Run is working, read from its row's activity. */
+export type ChatPhase = "idle" | "processing";
 
 export type LoadLifecycle = "empty" | "loading" | "ready";
 
@@ -309,11 +308,7 @@ export type LoadLifecycle = "empty" | "loading" | "ready";
 type ChatMirror = Readonly<
 	Pick<
 		SessionChatState,
-		| "messages"
-		| "currentAssistantText"
-		| "phase"
-		| "loadLifecycle"
-		| "currentMessageId"
+		"messages" | "currentAssistantText" | "loadLifecycle" | "currentMessageId"
 	>
 >;
 
@@ -331,9 +326,6 @@ export const chatState: ChatMirror = Object.freeze({
 	},
 	get currentAssistantText() {
 		return currentChat().currentAssistantText;
-	},
-	get phase() {
-		return currentChat().phase;
 	},
 	get loadLifecycle() {
 		return currentChat().loadLifecycle;
@@ -354,29 +346,21 @@ export function isLlmActive(
 	phase: ChatPhase,
 	loadLifecycle: LoadLifecycle,
 ): boolean {
-	return (
-		loadLifecycle !== "loading" &&
-		(phase === "processing" || phase === "streaming")
-	);
+	return loadLifecycle !== "loading" && phase === "processing";
 }
 
 const _isProcessing = $derived(
-	isLlmActive(_currentChat.phase, _currentChat.loadLifecycle),
-);
-const _isStreaming = $derived(
-	_currentChat.loadLifecycle !== "loading" &&
-		_currentChat.phase === "streaming",
+	isLlmActive(
+		getSessionPhase(sessionState.currentId ?? ""),
+		_currentChat.loadLifecycle,
+	),
 );
 const _isReplaying = $derived(_currentChat.loadLifecycle === "loading");
 const _isLoading = $derived(_currentChat.loadLifecycle === "loading");
 
-/** LLM is active (processing or streaming). */
+/** The current session's foreground Run is working. */
 export function isProcessing(): boolean {
 	return _isProcessing;
-}
-/** Receiving deltas (assistant message being built). */
-export function isStreaming(): boolean {
-	return _isStreaming;
 }
 /** Event replay in progress. */
 export function isReplaying(): boolean {
@@ -385,31 +369,6 @@ export function isReplaying(): boolean {
 /** Session data is being loaded into the chat store. */
 export function isLoading(): boolean {
 	return _isLoading;
-}
-
-// Enforce valid combinations of processing/streaming/replaying.
-// All production code MUST use these instead of setting booleans directly.
-// Tests may still set booleans directly for arbitrary state setup.
-
-/** Session is idle — no LLM activity, no streaming. */
-export function phaseToIdle(activity: SessionActivity): void {
-	activity.phase = "idle";
-}
-
-/** LLM is active, awaiting first delta. */
-export function phaseToProcessing(activity: SessionActivity): void {
-	if (activity.phase === "idle") {
-		activity.turnGeneration++;
-	}
-	activity.phase = "processing";
-}
-
-/** Receiving deltas — assistant message being built. */
-export function phaseToStreaming(activity: SessionActivity): void {
-	if (activity.phase === "idle") {
-		activity.turnGeneration++;
-	}
-	activity.phase = "streaming";
 }
 
 /** Pagination state for history loading (shared between HistoryLoader and dispatch). */
@@ -554,8 +513,8 @@ export function setMessages(
 /** Detect a turn boundary when a new messageId is seen.
  *
  *  Called from `dispatchChatEvent` for every event that carries a
- *  messageId.  When the id changes, the previous turn is finalized
- *  (if streaming) and the new messageId is recorded.
+ *  messageId.  When the id changes, a new turn generation starts and the
+ *  new messageId is recorded.
  *
  *  No-op when the messageId is the same as the current one. */
 // seenMessageIds: per-session only (activity.seenMessageIds). Module-level set removed in Task 6.
@@ -589,16 +548,6 @@ export function advanceTurnIfNewMessage(
 
 	activity.seenMessageIds.add(messageId);
 	activity.turnGeneration++;
-
-	// Finalize any in-progress assistant streaming from the previous turn.
-	if (activity.phase === "streaming") {
-		const finalizedId = flushAndFinalizeAssistant(activity, messages);
-		if (finalizedId) {
-			activity.doneMessageIds.add(finalizedId);
-		}
-		phaseToProcessing(activity);
-	}
-
 	activity.currentMessageId = messageId;
 }
 
@@ -760,44 +709,48 @@ export function applyTerminalTurn(
 	// look like the first message in a fresh session.
 	// Only clearMessages (session switch) should reset it.
 
-	// Request scroll before phaseToIdle so the content-change effect scrolls
-	// for the finalized assistant message. Without this, phaseToIdle sets
-	// phase to "idle" synchronously, so when the batched effect fires,
-	// isProcessing() is false and the guard skips the scroll.
+	// The row already reads idle, so isProcessing() is false when the batched
+	// content-change effect fires; request the scroll for the finalized message.
 	requestScrollOnNextContent();
-	phaseToIdle(activity);
 	return true;
 }
 
-/** Busy starts a server turn; idle ends it. A reported turn end also
- *  finalizes messages when the browser never saw the turn start. */
-export function followSessionBusy(
+type TurnRow = Pick<SessionInfo, "activity" | "lastTurnEndVersion">;
+
+/** Follows the row's foreground Run (CONTRACT.md 8.1): its start opens a turn generation, and its
+ *  end, or a newer reported turn end, finalizes the transcript. Idempotent, so the shell and family
+ *  feeds may both report one row. */
+export function followSessionTurn(
 	id: string,
-	busy: boolean,
-	turnEndVersion?: number,
+	next: TurnRow | undefined,
+	previous: TurnRow | undefined,
 ): void {
 	const activity = sessionActivity.get(id);
 	if (!activity) return;
-	if (busy) {
-		if (activity.phase === "idle") phaseToProcessing(activity);
+	if (next?.activity?.foreground === "working") {
+		if (activity.endedGeneration === activity.turnGeneration)
+			activity.turnGeneration++;
 		return;
 	}
+	const turnEndVersion = next?.lastTurnEndVersion;
+	if (
+		previous?.activity?.foreground !== "working" &&
+		(turnEndVersion ?? 0) <= (previous?.lastTurnEndVersion ?? 0)
+	)
+		return;
 	const messages = sessionMessages.get(id);
-	if (activity.phase !== "idle" || turnEndVersion !== undefined) {
-		// Parent cancellation can idle a child without advancing its last end.
-		// That transition completes the new generation even if we saw this key.
-		const turnId =
-			turnEndVersion === undefined ? undefined : `row:${turnEndVersion}`;
-		if (messages)
-			applyTerminalTurn(
-				activity,
-				messages,
-				turnId === undefined || activity.terminalTurnIds.has(turnId)
-					? undefined
-					: { turnId },
-			);
-		else phaseToIdle(activity);
-	}
+	// Parent cancellation can idle a child without advancing its last end.
+	// That end completes the new generation even if this key was seen.
+	const turnId =
+		turnEndVersion === undefined ? undefined : `row:${turnEndVersion}`;
+	if (messages)
+		applyTerminalTurn(
+			activity,
+			messages,
+			turnId === undefined || activity.terminalTurnIds.has(turnId)
+				? undefined
+				: { turnId },
+		);
 	activity.currentMessageId = null;
 	if (messages) messages.currentAssistantText = "";
 	refreshSessionSkills(id);
@@ -806,9 +759,8 @@ export function followSessionBusy(
 
 // One-shot flag consumed by the MessageList content-change $effect.
 // Used when content is added that MUST trigger auto-scroll even though the
-// session phase has already transitioned to idle (e.g. error messages call
-// phaseToIdle synchronously, so by the time the batched effect fires,
-// isProcessing() is false and the normal guard would skip the scroll).
+// session already reads idle (e.g. an error message after the turn ended,
+// when isProcessing() is false and the normal guard would skip the scroll).
 let _scrollRequestPending = false;
 
 /** Request that the next content-change effect triggers auto-scroll.
@@ -946,7 +898,6 @@ export function clearMessages(): void {
 	if (currentId) {
 		const activity = sessionActivity.get(currentId);
 		if (activity) {
-			activity.phase = "idle";
 			activity.turnGeneration = 0;
 			activity.endedGeneration = -1;
 			activity.terminalTurnIds = new Set();

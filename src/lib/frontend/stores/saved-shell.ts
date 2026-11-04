@@ -66,7 +66,7 @@ const transact = <T>(
 		)
 		.catch(() => undefined);
 
-/** Read in time or open cold. Drop invalid records, and remove runtime liveness. */
+/** Read in time or open cold. Drop invalid records. */
 export const openSavedShell = (
 	project: string,
 ): Promise<SavedShell | undefined> =>
@@ -80,28 +80,9 @@ export const openSavedShell = (
 					store.delete(project);
 					return;
 				}
-				done({
-					...record,
-					rows: record.rows.map((row) => ({
-						...row,
-						status:
-							row.status === "busy" || row.status === "retry"
-								? "idle"
-								: row.status,
-						processing: false,
-						compacting: undefined,
-						retrying: undefined,
-						backgroundWork: undefined,
-						backgroundTasks: undefined,
-						staleTasks: undefined,
-						attention:
-							row.attention === "working" || row.attention === "monitoring"
-								? row.unread
-									? "done-unread"
-									: "idle"
-								: row.attention,
-					})),
-				});
+				// The saved rows are the last answer the server sent, activity included; the
+				// live snapshot replaces them.
+				done(record);
 			};
 		}),
 		new Promise<undefined>((resolve) => setTimeout(resolve, READ_WAIT_MS)),

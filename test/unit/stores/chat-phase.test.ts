@@ -5,21 +5,21 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
 	applyTerminalTurn,
-	chatState,
 	clearMessages,
-	followSessionBusy,
 	getOrCreateSessionSlot,
 	isLoading,
 	isProcessing,
 	isReplaying,
-	isStreaming,
-	phaseToProcessing,
-	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
+import { applySessionUpsert } from "./session-fixtures.js";
 
 beforeEach(() => {
 	openSessionForSetup("phase-test", "project-a");
+	setSessionWorkingForSetup("phase-test", false);
 	clearMessages();
 });
 
@@ -34,30 +34,35 @@ describe("chat phase and transcript lifecycle", () => {
 		expect(isReplaying()).toBe(false);
 	});
 
-	it("keeps processing and streaming phase scoped to the active session", () => {
-		const { activity, messages } = getOrCreateSessionSlot("phase-test");
+	it("the active session's row activity, not its status, makes it processing", () => {
+		const { messages } = getOrCreateSessionSlot("phase-test");
 		messages.loadLifecycle = "ready";
-		phaseToProcessing(activity);
+		applySessionUpsert({
+			id: "phase-test",
+			title: "phase-test",
+			status: "busy",
+		});
+		expect(isProcessing()).toBe(false);
+		setSessionWorkingForSetup("other", true);
+		expect(isProcessing()).toBe(false);
+		setSessionWorkingForSetup("phase-test", true);
 		expect(isProcessing()).toBe(true);
-		phaseToStreaming(activity);
-		expect(isStreaming()).toBe(true);
-		expect(chatState.phase).toBe("streaming");
 	});
 
 	it("the row going idle ends the visible turn", () => {
 		const { activity, messages } = getOrCreateSessionSlot("phase-test");
 		messages.loadLifecycle = "ready";
-		phaseToProcessing(activity);
-		followSessionBusy("phase-test", false);
-		expect(activity.phase).toBe("idle");
-		expect(chatState.phase).toBe("idle");
+		setSessionWorkingForSetup("phase-test", true);
+		expect(activity.endedGeneration).not.toBe(activity.turnGeneration);
+		setSessionWorkingForSetup("phase-test", false);
+		expect(isProcessing()).toBe(false);
 		expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	});
 
 	it("terminal state is idempotent after a status transition", () => {
 		const { activity, messages } = getOrCreateSessionSlot("phase-test");
 		messages.loadLifecycle = "ready";
-		phaseToProcessing(activity);
+		setSessionWorkingForSetup("phase-test", true);
 		applyTerminalTurn(activity, messages);
 		applyTerminalTurn(activity, messages);
 		expect(activity.endedGeneration).toBe(activity.turnGeneration);

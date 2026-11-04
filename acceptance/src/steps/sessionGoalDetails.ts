@@ -1,6 +1,7 @@
 import { expect, type Page } from "@playwright/test";
 import type { SessionGoalChangedPayload } from "../../../src/lib/contracts/stored-event.js";
 import type { GoalSummary } from "../../../src/lib/contracts/ws-rpc.js";
+import { rowActivity } from "../../../test/e2e/helpers/rpc-mock.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
 
@@ -245,6 +246,7 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 					id: sessionId,
 					title: "Stabilise visual suite",
 					status: phase === "working" ? "busy" : "idle",
+					activity: rowActivity(phase === "working"),
 					updatedAt: now,
 					messageCount: 6,
 					goalState: facts,

@@ -76,6 +76,7 @@ export const mockSessionProcessing: SessionInfo = {
 	updatedAt: Date.parse("2026-02-25T08:05:00Z"),
 	messageCount: 3,
 	status: "busy",
+	activity: { foreground: "working", background: "none", label: "working" },
 	processing: true,
 	// The row's word comes from the server's tier, never from `processing`, so
 	// the story has to say which tier this is to render as "Working".
@@ -168,6 +169,7 @@ export const mockSubagentSession: SessionInfo = {
 	updatedAt: "2026-02-25T09:04:00Z",
 	messageCount: 4,
 	status: "busy",
+	activity: { foreground: "working", background: "none", label: "working" },
 	processing: true,
 	parentID: mockSession.id,
 };
@@ -207,6 +209,7 @@ export const mockSessions: SessionInfo[] = [
 		updatedAt: Date.parse("2026-02-23T15:20:00Z"),
 		messageCount: 22,
 		status: "busy",
+		activity: { foreground: "working", background: "none", label: "working" },
 	},
 ];
 

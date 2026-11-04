@@ -53,13 +53,16 @@ function makeMessages(overrides?: Partial<SessionMessages>): SessionMessages {
 describe("composeChatState Proxy", () => {
 	describe("get trap", () => {
 		it("routes activity keys to the activity tier", () => {
-			const activity = makeActivity({ phase: "streaming", turnGeneration: 42 });
+			const activity = makeActivity({
+				currentMessageId: "msg-1",
+				turnGeneration: 42,
+			});
 			const messages = makeMessages();
 			const state = composeChatState(activity, messages);
 
-			expect(state.phase).toBe("streaming");
+			expect(state.currentMessageId).toBe("msg-1");
 			expect(state.turnGeneration).toBe(42);
-			expect(state.currentMessageId).toBeNull();
+			expect(state.currentPartId).toBeNull();
 		});
 
 		it("routes messages keys to the messages tier", () => {
@@ -88,7 +91,7 @@ describe("composeChatState Proxy", () => {
 			const state = composeChatState(makeActivity(), makeMessages());
 			expect(() => {
 				// biome-ignore lint/suspicious/noExplicitAny: intentional write for test
-				(state as any).phase = "processing";
+				(state as any).currentMessageId = "msg-1";
 			}).toThrow("read-only");
 		});
 
@@ -106,7 +109,7 @@ describe("composeChatState Proxy", () => {
 	describe("has trap (in operator)", () => {
 		it("returns true for activity keys", () => {
 			const state = composeChatState(makeActivity(), makeMessages());
-			expect("phase" in state).toBe(true);
+			expect("currentMessageId" in state).toBe(true);
 			expect("turnGeneration" in state).toBe(true);
 			expect("doneMessageIds" in state).toBe(true);
 			expect("seenMessageIds" in state).toBe(true);
@@ -157,14 +160,17 @@ describe("composeChatState Proxy", () => {
 		});
 
 		it("Object.entries iterates all fields", () => {
-			const activity = makeActivity({ phase: "processing", turnGeneration: 5 });
+			const activity = makeActivity({
+				currentMessageId: "msg-1",
+				turnGeneration: 5,
+			});
 			const messages = makeMessages({ contextPercent: 50 });
 			const state = composeChatState(activity, messages);
 
 			const entries = Object.entries(state);
 			const entryMap = new Map(entries);
 
-			expect(entryMap.get("phase")).toBe("processing");
+			expect(entryMap.get("currentMessageId")).toBe("msg-1");
 			expect(entryMap.get("turnGeneration")).toBe(5);
 			expect(entryMap.get("contextPercent")).toBe(50);
 		});
@@ -172,11 +178,11 @@ describe("composeChatState Proxy", () => {
 
 	describe("getOwnPropertyDescriptor trap", () => {
 		it("returns descriptor for activity keys", () => {
-			const activity = makeActivity({ phase: "streaming" });
+			const activity = makeActivity({ currentMessageId: "msg-1" });
 			const state = composeChatState(activity, makeMessages());
-			const desc = Object.getOwnPropertyDescriptor(state, "phase");
+			const desc = Object.getOwnPropertyDescriptor(state, "currentMessageId");
 			expect(desc).toBeDefined();
-			expect(desc?.value).toBe("streaming");
+			expect(desc?.value).toBe("msg-1");
 			expect(desc?.writable).toBe(false);
 			expect(desc?.enumerable).toBe(true);
 			expect(desc?.configurable).toBe(true);
@@ -205,12 +211,12 @@ describe("composeChatState Proxy", () => {
 
 	describe("spread / destructure", () => {
 		it("spread produces a plain object with all keys", () => {
-			const activity = makeActivity({ phase: "processing" });
+			const activity = makeActivity({ currentMessageId: "msg-1" });
 			const messages = makeMessages({ contextPercent: 33 });
 			const state = composeChatState(activity, messages);
 
 			const spread = { ...state };
-			expect(spread.phase).toBe("processing");
+			expect(spread.currentMessageId).toBe("msg-1");
 			expect(spread.contextPercent).toBe(33);
 			expect(spread.messages).toEqual([]);
 		});

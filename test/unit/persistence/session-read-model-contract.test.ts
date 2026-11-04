@@ -10,6 +10,7 @@ import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
+import { activityFrom } from "../../helpers/ledger-tasks.js";
 import {
 	makeSessionCreatedEvent,
 	makeSessionStatusEvent,
@@ -17,8 +18,13 @@ import {
 
 const scope = { projectIds: ["test-project"] } as const;
 
-const readModelAfter = (events: readonly CanonicalEvent[]) =>
+/** `running`: the sessions SessionActivity reads a Run for; row status is not activity (82tn.32.30). */
+const readModelAfter = (
+	events: readonly CanonicalEvent[],
+	running: readonly string[] = [],
+) =>
 	Effect.gen(function* () {
+		const activityOf = activityFrom({ running });
 		const store = yield* EventStoreEffectTag;
 		const runner = yield* ProjectionRunnerEffectTag;
 		const readQuery = yield* ReadQueryEffectTag;
@@ -27,7 +33,7 @@ const readModelAfter = (events: readonly CanonicalEvent[]) =>
 			yield* runner.projectEvent(yield* store.append(event));
 		}
 
-		const shell = yield* readQuery.readSessionList(scope);
+		const shell = yield* readQuery.readSessionList(scope, { activityOf });
 		// Resolve the anchor as SubscribeSessionFamily does, including deleted
 		// anchors so a missing shell row cannot hide surviving family members.
 		const anchors = new Set(
@@ -41,7 +47,7 @@ const readModelAfter = (events: readonly CanonicalEvent[]) =>
 		);
 		const families = yield* Effect.forEach(anchors, (id) =>
 			readQuery
-				.readSessionList(scope, { familyOf: id })
+				.readSessionList(scope, { familyOf: id, activityOf })
 				.pipe(Effect.map((family) => ({ id, rows: family.rows }))),
 		);
 		return {
@@ -171,13 +177,16 @@ describe("session read-model contract", () => {
 	it.effect("rolls a busy subagent up only to its owner's sidebar row", () =>
 		Effect.gen(function* () {
 			expect(
-				yield* readModelAfter([
-					source,
-					unrelated,
-					subagent,
-					nested,
-					makeSessionStatusEvent("nested", "busy"),
-				]),
+				yield* readModelAfter(
+					[
+						source,
+						unrelated,
+						subagent,
+						nested,
+						makeSessionStatusEvent("nested", "busy"),
+					],
+					["nested"],
+				),
 			).toStrictEqual({
 				roots: ["source", "unrelated"],
 				families: {
@@ -348,17 +357,20 @@ describe("session read-model contract", () => {
 	it.effect("rolls a Fork's busy subagent up to the Fork, not its Source", () =>
 		Effect.gen(function* () {
 			expect(
-				yield* readModelAfter([
-					source,
-					forkOf("fork", "source"),
-					canonicalEvent("session.created", "fork-subagent", {
-						sessionId: "fork-subagent",
-						title: "Fork subagent",
-						provider: "opencode",
-						parentId: "fork",
-					}),
-					makeSessionStatusEvent("fork-subagent", "busy"),
-				]),
+				yield* readModelAfter(
+					[
+						source,
+						forkOf("fork", "source"),
+						canonicalEvent("session.created", "fork-subagent", {
+							sessionId: "fork-subagent",
+							title: "Fork subagent",
+							provider: "opencode",
+							parentId: "fork",
+						}),
+						makeSessionStatusEvent("fork-subagent", "busy"),
+					],
+					["fork-subagent"],
+				),
 			).toStrictEqual({
 				roots: ["fork", "source"],
 				families: { fork: ["fork", "fork-subagent"], source: ["source"] },
@@ -660,27 +672,30 @@ describe("session read-model contract", () => {
 			() =>
 				Effect.gen(function* () {
 					expect(
-						yield* readModelAfter([
-							source,
-							legacyForkOf("fork", "source"),
-							legacyForkOf("fork-of-fork", "fork"),
-							canonicalEvent("session.created", "fork-side-thread", {
-								sessionId: "fork-side-thread",
-								title: "fork-side-thread",
-								provider: "claude",
-								parentId: "fork",
-								forkPointEvent: "fork-boundary",
-								forkPointTimestamp: 1_000,
-								sideThread: true,
-							}),
-							canonicalEvent("session.created", "fork-subagent", {
-								sessionId: "fork-subagent",
-								title: "Fork subagent",
-								provider: "claude",
-								parentId: "fork",
-							}),
-							makeSessionStatusEvent("fork-subagent", "busy"),
-						]),
+						yield* readModelAfter(
+							[
+								source,
+								legacyForkOf("fork", "source"),
+								legacyForkOf("fork-of-fork", "fork"),
+								canonicalEvent("session.created", "fork-side-thread", {
+									sessionId: "fork-side-thread",
+									title: "fork-side-thread",
+									provider: "claude",
+									parentId: "fork",
+									forkPointEvent: "fork-boundary",
+									forkPointTimestamp: 1_000,
+									sideThread: true,
+								}),
+								canonicalEvent("session.created", "fork-subagent", {
+									sessionId: "fork-subagent",
+									title: "Fork subagent",
+									provider: "claude",
+									parentId: "fork",
+								}),
+								makeSessionStatusEvent("fork-subagent", "busy"),
+							],
+							["fork-subagent"],
+						),
 					).toStrictEqual({
 						roots: ["fork", "fork-of-fork", "source"],
 						families: {

@@ -6,7 +6,7 @@ import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { initMessages } from "../fixtures/mockup-state.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, rowActivity } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 // Failures must keep the action, reveal only a server-supplied reason, and
@@ -187,6 +187,7 @@ for (const ending of [
 			accountId: "stop-account",
 			title: "Stop follow-up",
 			status: "busy",
+			activity: rowActivity(true),
 			updatedAt: Date.now(),
 			backgroundTasks: tasks,
 		};

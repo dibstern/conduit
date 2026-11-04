@@ -46,7 +46,7 @@ vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
 import { SessionInfoSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import {
-	followSessionBusy,
+	followSessionTurn,
 	getOrCreateSessionSlot,
 	sessionActivity,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -61,7 +61,10 @@ import {
 	getFilteredSessions,
 	sessionState,
 } from "../../../src/lib/frontend/stores/session.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	WORKING_ACTIVITY,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import type { SessionInfo } from "../../../src/lib/frontend/types.js";
 
 const decodeSessionInfo = Schema.decodeUnknownSync(SessionInfoSchema);
@@ -395,7 +398,8 @@ describe("deleting the session being viewed", () => {
 			expect(sessionActivity.has("ses_doomed")).toBe(false);
 
 			// An event that was already in flight when it went.
-			followSessionBusy("ses_doomed", false);
+			// A working row's end would finalize the turn.
+			followSessionTurn("ses_doomed", {}, { activity: WORKING_ACTIVITY });
 			await vi.advanceTimersByTimeAsync(200);
 
 			expect(sessionActivity.has("ses_doomed")).toBe(false);

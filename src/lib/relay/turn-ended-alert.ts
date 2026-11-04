@@ -9,9 +9,18 @@ export function turnEndedAlert(
 		readonly data: unknown;
 	},
 ): Extract<RelayMessage, { type: "done" }> | undefined {
-	const status = runTerminalStatus(event, event.provider);
-	if (!status) return undefined;
 	const data: Record<string, unknown> = isRecord(event.data) ? event.data : {};
+	// A wake's end is a turn end too: its result's outcome, or completed when it has none.
+	const outcome = isRecord(data["result"])
+		? data["result"]["outcome"]
+		: undefined;
+	const status =
+		event.type === "evidence.turn_ended"
+			? outcome === "error" || outcome === "interrupted"
+				? outcome
+				: "completed"
+			: runTerminalStatus(event, event.provider);
+	if (!status) return undefined;
 	const error =
 		status === "error" ? String(data["error"] ?? "Provider error") : undefined;
 	const originId = data["messageId"] || event.eventId;

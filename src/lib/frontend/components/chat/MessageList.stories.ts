@@ -3,8 +3,6 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
-	phaseToIdle,
-	phaseToProcessing,
 	resetChatState,
 } from "../../stores/chat.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
@@ -21,7 +19,10 @@ import {
 	mockToolRunning,
 	mockUserMessage,
 } from "../../stories/mocks.js";
-import { openSessionForSetup } from "../../stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../stories/session-setup.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import type { ChatMessage } from "../../types.js";
@@ -52,12 +53,11 @@ function seed(messages: ChatMessage[], processing = false) {
 		sequence: ++sequence,
 	});
 	openSessionForSetup(testId, "conduit");
-	const activity = getOrCreateSessionActivity(testId);
+	getOrCreateSessionActivity(testId);
 	const chat = getOrCreateSessionMessages(testId);
 	chat.messages = [...messages];
 	chat.loadLifecycle = "ready";
-	if (processing) phaseToProcessing(activity);
-	else phaseToIdle(activity);
+	setSessionWorkingForSetup(testId, processing, "conduit");
 }
 
 const meta = {

@@ -5,7 +5,7 @@
  * Tests that call handlers directly use this helper to create a test slot.
  *
  * The helpers register the created objects into the sessionActivity/sessionMessages
- * maps so that `currentChat()` and derived getters (isProcessing, isStreaming, etc.)
+ * maps so that `currentChat()` and derived getters (currentChat(), isLoading, etc.)
  * reflect handler mutations. Tests must call `openSessionForSetup` with the test
  * session ID (default: "test-session") before calling these.
  *
@@ -35,7 +35,6 @@ const TEST_SESSION_ID = "test-session";
 export function testActivity(sessionId?: string): SessionActivity {
 	const id = sessionId ?? sessionState.currentId ?? TEST_SESSION_ID;
 	const a: SessionActivity = {
-		phase: "idle",
 		turnGeneration: 0,
 		endedGeneration: -1,
 		terminalTurnIds: new Set(),

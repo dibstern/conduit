@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-// Mutates getOrCreateSessionActivity(id).phase; asserts a $derived(currentChat().phase)
-// observer re-runs. Validates that SvelteMap + $state proxy reactivity propagates
+// Mutates getOrCreateSessionActivity(id) fields; asserts currentChat() reads them. Validates that SvelteMap + $state proxy reactivity propagates
 // through the composeChatState Proxy.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -43,7 +42,11 @@ import {
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
+import { applySessionUpsert } from "./session-fixtures.js";
 
 const TEST_ID = "test-reactivity-session";
 
@@ -58,7 +61,6 @@ beforeEach(() => {
 describe("two-tier reactivity", () => {
 	it("getOrCreateSessionActivity creates a new activity slot", () => {
 		const activity = getOrCreateSessionActivity(TEST_ID);
-		expect(activity.phase).toBe("idle");
 		expect(activity.turnGeneration).toBe(0);
 		expect(activity.currentMessageId).toBeNull();
 	});
@@ -82,28 +84,26 @@ describe("two-tier reactivity", () => {
 		expect(m1).toBe(m2);
 	});
 
-	it("mutating activity.phase is observable via the slot", () => {
+	it("mutating activity.turnGeneration is observable via the slot", () => {
 		const activity = getOrCreateSessionActivity(TEST_ID);
-		expect(activity.phase).toBe("idle");
+		expect(activity.turnGeneration).toBe(0);
 
-		activity.phase = "processing";
-		expect(activity.phase).toBe("processing");
-
-		activity.phase = "streaming";
-		expect(activity.phase).toBe("streaming");
+		activity.turnGeneration = 1;
+		expect(getOrCreateSessionActivity(TEST_ID).turnGeneration).toBe(1);
 	});
 
 	it("currentChat() returns EMPTY_STATE when currentId is null", () => {
 		openSessionForSetup(null);
 		const chat = currentChat();
-		expect(chat.phase).toBe("idle");
+		expect(chat.turnGeneration).toBe(0);
 		expect(chat.messages).toEqual([]);
 	});
 
 	it("currentChat() returns EMPTY_STATE when activity slot does not exist", () => {
 		openSessionForSetup("nonexistent", "project-a");
 		const chat = currentChat();
-		expect(chat.phase).toBe("idle");
+		expect(chat.turnGeneration).toBe(0);
+		expect(chat.messages).toEqual([]);
 	});
 
 	it("currentChat() reads from the correct activity slot", () => {
@@ -111,15 +111,19 @@ describe("two-tier reactivity", () => {
 		getOrCreateSessionMessages(TEST_ID);
 		openSessionForSetup(TEST_ID, "project-a");
 
-		activity.phase = "streaming";
+		activity.turnGeneration = 7;
 		const chat = currentChat();
-		expect(chat.phase).toBe("streaming");
+		expect(chat.turnGeneration).toBe(7);
 	});
 
-	it("getSessionPhase returns the phase for a known session", () => {
-		const activity = getOrCreateSessionActivity(TEST_ID);
-		activity.phase = "processing";
+	it("getSessionPhase reads the row's activity, not its status", () => {
+		getOrCreateSessionActivity(TEST_ID);
+		applySessionUpsert({ id: TEST_ID, title: TEST_ID, status: "busy" });
+		expect(getSessionPhase(TEST_ID)).toBe("idle");
+		setSessionWorkingForSetup(TEST_ID, true);
 		expect(getSessionPhase(TEST_ID)).toBe("processing");
+		setSessionWorkingForSetup(TEST_ID, false);
+		expect(getSessionPhase(TEST_ID)).toBe("idle");
 	});
 
 	it("getSessionPhase returns 'idle' for unknown session", () => {

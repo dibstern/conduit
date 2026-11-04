@@ -68,7 +68,8 @@ export type GoalView = {
 
 export function goalView(
 	facts: SessionGoalChangedPayload | undefined,
-	sessionStatus: SessionInfo["status"],
+	/** The session's foreground Run is working (SessionActivity, CONTRACT.md 8.1). */
+	working: boolean,
 ): GoalView {
 	const goal = facts?.goal;
 	if (!goal) {
@@ -116,12 +117,8 @@ export function goalView(
 		};
 	}
 	const checks = `${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`;
-	// Nothing observes a goal check, so session status never makes a starting or checking phase.
-	if (
-		goal.lastReason &&
-		sessionStatus !== "busy" &&
-		sessionStatus !== "retry"
-	) {
+	// Nothing observes a goal check, so the session's activity never makes a starting or checking phase.
+	if (goal.lastReason && !working) {
 		return {
 			phase: "not_yet",
 			subtitle: `${goal.condition} · ${checks}`,

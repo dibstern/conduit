@@ -1,4 +1,5 @@
 import { expect } from "@playwright/test";
+import { rowActivity } from "../../../test/e2e/helpers/rpc-mock.js";
 import {
 	chooseSettingsOption,
 	closeSettings,
@@ -175,6 +176,7 @@ export const composerContextWarningHandlers: StepHandler[] = [
 				...row,
 				id: sessionId,
 				status: state === "started" ? "busy" : "idle",
+				activity: rowActivity(state === "started"),
 				...(state === "started" ? { compacting: "Compacting…" } : {}),
 			});
 			if (state === "started") return;

@@ -83,10 +83,14 @@ export const makePreviewGateLive = (configDir: string) =>
 					]),
 				);
 
-			const entryOf = (port: number) =>
-				[...activity.servers.values()]
-					.flat()
-					.find((server) => server.port === port);
+			const entryOf = (port: number) => {
+				const sessionId = activity.background.ports().get(port);
+				return sessionId === undefined
+					? undefined
+					: activity.background
+							.serversOf(sessionId, activity.gateUrls)
+							.find((server) => server.port === port);
+			};
 			/**
 			 * The address of the listed listener the request may reach on `port`, or the page to show
 			 * if none. Node's request callbacks are the boundary, so this is the gate's one run into Effect.
@@ -237,9 +241,7 @@ export const makePreviewGateLive = (configDir: string) =>
 				const config = yield* Ref.get(configRef);
 				const now = yield* Clock.currentTimeMillis;
 				const enabled = config.tailscaleServeEnabled === true;
-				const listed = new Set(
-					[...activity.servers.values()].flat().map(({ port }) => port),
-				);
+				const listed = new Set(activity.background.ports().keys());
 				for (const port of conflicts)
 					if (!listed.has(port)) conflicts.delete(port);
 				for (const [port, gate] of gates)

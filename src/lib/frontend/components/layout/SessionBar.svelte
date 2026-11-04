@@ -91,10 +91,7 @@
 	const parent = $derived(getParentSessionContext());
 	const isSideThread = $derived(session?.sideThread === true && parent.id !== null);
 	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
-	const goal = $derived(goalView(
-		goalFacts,
-		isProcessing() ? "busy" : session?.status ?? "idle",
-	));
+	const goal = $derived(goalView(goalFacts, isProcessing()));
 	const detailsGoal = $derived(goalFacts?.goal ?? goalFacts?.endedGoal);
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let goalFocusHandedOff = false;
@@ -103,7 +100,7 @@
 	// A reattached runner's tasks read as checking until its catch-up list (8.3).
 	const tasksShown = $derived(backgroundTasks.length > 0 || session?.tasksChecking === true);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
-	// The family push carries the whole tree; prefer the versioned row, as busySessionIds does.
+	// The family push carries the whole tree; prefer the versioned shell row.
 	const sideThreads = $derived.by(() => {
 		const rows = new Map(sessionState.familySessions.map((row) => [row.id, row]));
 		for (const row of sessionState.sessions.values()) rows.set(row.id, row);

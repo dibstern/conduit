@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 // The client's processing phase follows the session's shell row (ni8.35):
-// the row's status is the only server signal for "a turn is running", so
-// a busy row starts the turn and the row going idle ends it, in every tab.
+// the row's foreground activity is the server signal for "a turn is running",
+// so a working row starts the turn and the row leaving working ends it, in
+// every tab. Its status alone does not.
 import { Effect, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -10,6 +11,7 @@ import type {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import {
 	getOrCreateSessionSlot,
+	getSessionPhase,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -31,7 +33,10 @@ import {
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { usageState } from "../../../src/lib/frontend/stores/usage.svelte.js";
 import { _resetRateLimit } from "../../../src/lib/frontend/stores/ws-send.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	WORKING_ACTIVITY,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import {
 	makeWsRpcClientsLayer,
 	type WsRpcClients,
@@ -52,12 +57,14 @@ vi.mock("../../../src/lib/frontend/transport/runtime.js", () => ({
 		runtime.runPromise(effect),
 }));
 
+/** A busy or retrying row is working, as the server reports it. */
 const row = (status: SessionInfo["status"]): SessionInfo => ({
 	projectSlug: "project-a",
 	accountId: null,
 	id: "s",
 	title: "s",
 	status,
+	...(status === "idle" ? {} : { activity: WORKING_ACTIVITY }),
 });
 const upsert = (status: SessionInfo["status"]) =>
 	applySessionChange({ _tag: "upsert", item: row(status) });
@@ -75,17 +82,17 @@ beforeEach(() => {
 	openSessionForSetup("s", "project-a");
 });
 
-it("a busy row starts the turn and the row going idle ends it once", () => {
+it("a working row starts the turn and the row going idle ends it once", () => {
 	snapshot("idle");
 	getOrCreateSessionSlot("s");
 	upsert("busy");
-	expect(activity().phase).toBe("processing");
+	expect(getSessionPhase("s")).toBe("processing");
 	activity().currentMessageId = "m1";
 	expect(activity().endedGeneration).not.toBe(activity().turnGeneration);
 
 	upsert("idle");
 
-	expect(activity().phase).toBe("idle");
+	expect(getSessionPhase("s")).toBe("idle");
 	expect(activity().endedGeneration).toBe(activity().turnGeneration);
 	expect(activity().currentMessageId).toBeNull();
 	// An interrupted subagent may become idle without a new turn-end version.
@@ -101,41 +108,58 @@ it("a busy row starts the turn and the row going idle ends it once", () => {
 		_tag: "upsert",
 		item: { ...row("idle"), lastTurnEndVersion: 2 },
 	});
-	expect(activity().phase).toBe("idle");
+	expect(getSessionPhase("s")).toBe("idle");
+	expect(activity().endedGeneration).toBe(activity().turnGeneration);
+});
+
+it("a busy status without working activity does not start the turn", () => {
+	snapshot("idle");
+	const { activity: slot } = getOrCreateSessionSlot("s");
+	const generation = slot.turnGeneration;
+	applySessionChange({
+		_tag: "upsert",
+		item: { ...row("idle"), status: "busy" },
+	});
+	expect(getSessionPhase("s")).toBe("idle");
+	expect(slot.turnGeneration).toBe(generation);
 });
 
 it("a retrying row keeps the turn running", () => {
 	snapshot("busy");
 	getOrCreateSessionSlot("s");
 	upsert("retry");
-	expect(activity().phase).toBe("processing");
+	expect(getSessionPhase("s")).toBe("processing");
 });
 
-it("a stale busy write after the turn ended does not restart it", () => {
-	snapshot("busy");
+it("a repeated working row does not open a second turn", () => {
+	snapshot("idle");
 	const { activity: slot } = getOrCreateSessionSlot("s");
-	expect(slot.phase).toBe("processing");
-	slot.phase = "idle"; // `done` ended the turn first
+	upsert("busy");
 	const generation = slot.turnGeneration;
 
 	upsert("busy");
 
-	expect(slot.phase).toBe("idle");
+	expect(getSessionPhase("s")).toBe("processing");
 	expect(slot.turnGeneration).toBe(generation);
+	expect(slot.endedGeneration).not.toBe(generation);
 });
 
-it("a slot opened on a busy session starts processing", () => {
+it("a slot opened on a working session starts processing", () => {
 	snapshot("busy");
-	expect(getOrCreateSessionSlot("s").activity.phase).toBe("processing");
+	const { activity: slot } = getOrCreateSessionSlot("s");
+	expect(getSessionPhase("s")).toBe("processing");
+	expect(slot.endedGeneration).not.toBe(slot.turnGeneration);
 });
 
 it("a snapshot aligns the phase in both directions", () => {
 	snapshot("idle");
 	const { activity: slot } = getOrCreateSessionSlot("s");
 	snapshot("busy");
-	expect(slot.phase).toBe("processing");
+	expect(getSessionPhase("s")).toBe("processing");
+	expect(slot.endedGeneration).not.toBe(slot.turnGeneration);
 	snapshot("idle");
-	expect(slot.phase).toBe("idle");
+	expect(getSessionPhase("s")).toBe("idle");
+	expect(slot.endedGeneration).toBe(slot.turnGeneration);
 });
 
 it("a child session, which has no shell row, starts from its family row", () => {
@@ -150,6 +174,7 @@ it("a child session, which has no shell row, starts from its family row", () => 
 				id: "root",
 				title: "Root",
 				status: "busy",
+				activity: WORKING_ACTIVITY,
 			},
 			{
 				projectSlug: "project-a",
@@ -157,11 +182,13 @@ it("a child session, which has no shell row, starts from its family row", () => 
 				id: "child",
 				title: "Child",
 				status: "busy",
+				activity: WORKING_ACTIVITY,
 				parentID: "root",
 			},
 		],
 	});
-	expect(slot.phase).toBe("processing");
+	expect(getSessionPhase("child")).toBe("processing");
+	expect(slot.endedGeneration).not.toBe(slot.turnGeneration);
 });
 
 it("a row end finalizes an assistant whose turn started and ended between updates once", () => {
@@ -498,7 +525,7 @@ describe("turn control sends over the browser RPC wire", () => {
 			},
 		});
 		expect(control.turn().working).toBe(false);
-		expect(activity().phase).toBe("processing");
+		expect(getSessionPhase("s")).toBe("processing");
 		expect(messages.transcript.pending).toMatchObject([
 			{ inputId: "b", state: "steering" },
 		]);

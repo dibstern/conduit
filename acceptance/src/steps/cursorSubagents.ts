@@ -1,5 +1,6 @@
 import { expect, type Page } from "@playwright/test";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import { rowActivity } from "../../../test/e2e/helpers/rpc-mock.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRelayControl, requireRpcControl } from "./shared.js";
@@ -55,6 +56,7 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 					title: "Inspect the routing implementation",
 					accountId: "cursor-work",
 					status: "busy",
+					activity: rowActivity(true),
 				},
 				{
 					id: childId,
@@ -62,6 +64,7 @@ export const cursorSubagentsHandlers: StepHandler[] = [
 					title: description,
 					accountId: "cursor-work",
 					status: "busy",
+					activity: rowActivity(true),
 					messageCount: 1,
 					updatedAt: PINNED_CLOCK_MS,
 				},

@@ -20,6 +20,7 @@ import {
 	canonicalEvent,
 	type SessionStatusValue,
 } from "../../../persistence/events.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
 import {
@@ -63,6 +64,7 @@ export const StatusPollerLive: Layer.Layer<
 	| PollerPubSubTag
 	| PollerStateTag
 	| RelayStatusSnapshotTag
+	| SessionActivityTag
 	| SessionManagerStateTag
 	| PendingInteractionServiceTag
 	| ReadQueryEffectTag
@@ -84,6 +86,7 @@ export const StatusPollerLive: Layer.Layer<
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
 		const liveTaskList = yield* Effect.serviceOption(LiveTaskListTag);
+		const activity = yield* SessionActivityTag;
 		// The corrective event is the poller's only write, and it moves the read
 		// model, so it goes through the seam that projects and announces together.
 		const commitAndSignal = yield* makeCommitAndSignal.pipe(
@@ -182,12 +185,17 @@ export const StatusPollerLive: Layer.Layer<
 				: Effect.sync(() =>
 						statusLog.warn(`${prefix}: ${Failure.renderCause(cause)}`),
 					);
+		// 8.1: the project is processing while any session's activity has a turn or work running.
 		const updateStatusSnapshot = Effect.gen(function* () {
-			const statuses = yield* pollerState(getCurrentStatuses);
+			const sessions = yield* Ref.get(sessionProviders);
 			yield* statusSnapshot.setIsProcessing(
-				Object.values(statuses).some(
-					(status) => status.type === "busy" || status.type === "retry",
-				),
+				[...sessions.keys()].some((sessionId) => {
+					const { foreground, background } = activity.background.activityOf(
+						sessionId,
+						{ approvals: 0, questions: 0 },
+					);
+					return foreground === "working" || background === "work";
+				}),
 			);
 		});
 		const runPoll = poll(pollDeps).pipe(
