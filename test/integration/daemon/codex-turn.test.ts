@@ -439,6 +439,7 @@ describe("Codex turns through the real daemon and detached runner", () => {
 						: {}),
 				})),
 			]);
+			await browser.followSessions();
 			const sending = browser.send(id, "Say hello", TIMEOUT);
 			try {
 				await browser.waitFor(
@@ -503,12 +504,22 @@ describe("Codex turns through the real daemon and detached runner", () => {
 				.filter((message) =>
 					JSON.stringify(message).includes("steer-declined"),
 				);
+			// Nor does its session row ever read as an error.
+			const attention = browser.frames
+				.map(({ message }) => message)
+				.filter(
+					(message) =>
+						message["type"] === "session_row" && message["id"] === id,
+				)
+				.map((message) => message["attention"]);
 			writeFileSync(
 				resolve("test-results/82tn-32-46-codex-declined-compact.json"),
-				`${JSON.stringify({ errorParts, liveErrors }, (_, value) => (typeof value === "bigint" ? String(value) : value), 2)}\n`,
+				`${JSON.stringify({ errorParts, liveErrors, attention }, (_, value) => (typeof value === "bigint" ? String(value) : value), 2)}\n`,
 			);
 			expect(errorParts).toEqual([]);
 			expect(liveErrors).toEqual([]);
+			expect(attention).not.toHaveLength(0);
+			expect(attention).not.toContain("error");
 		},
 		TIMEOUT * 2,
 	);
