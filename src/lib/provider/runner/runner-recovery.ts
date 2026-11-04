@@ -84,7 +84,6 @@ export const runningRunnerCommands = (
 	driverKind: string,
 	driverForAccount: (accountId: string) => string | undefined,
 	sessionId?: string,
-	includeInactive = false,
 	ownerSend?: { readonly runId: string; readonly commandId: string },
 	includeHeld = false,
 ) =>
@@ -124,9 +123,7 @@ export const runningRunnerCommands = (
 		WHERE ${scope} AND ${owner}
 			AND (outbox.status = 'running' OR (${includeHeld ? 1 : 0}
 				AND run.status IN ('pending', 'running') AND run.runner_id IS NOT NULL
-				AND run.held_transmission IS NOT NULL) OR (${includeInactive ? 1 : 0}
-				AND outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
-				AND run.status IN ('pending', 'running')))
+				AND run.held_transmission IS NOT NULL))
 			AND outbox.effect_type = 'send_turn'
 		ORDER BY outbox.request_sequence`;
 		const commands = rows.filter(
@@ -203,10 +200,6 @@ export const settleUnclaimedRunnerCommands = <E>(
 			sql,
 			driverKind,
 			driverForAccount,
-			undefined,
-			// Removal ends the command without inventing a turn terminal. Once
-			// the project returns, confirmed runner loss must still settle its run.
-			true,
 		)) {
 			if (sessionIds && !sessionIds.has(row.session_id)) continue;
 			if (claimedSessions.has(row.session_id)) continue;

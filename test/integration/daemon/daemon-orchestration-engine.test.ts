@@ -484,7 +484,8 @@ describe("one daemon orchestration engine", () => {
 					errors: 0,
 				})),
 			);
-			evidence["unclaimedRetries"] = reservations();
+			const waiting = reservations();
+			evidence["unclaimedRetries"] = waiting;
 			if (projectState === "removed") {
 				const configPath = join(fixture.configDir, "daemon.json");
 				const config = JSON.parse(
@@ -511,22 +512,23 @@ describe("one daemon orchestration engine", () => {
 			await fixture.restart({
 				serviceEnvironment: { CONDUIT_OUTBOX_DRAIN_INTERVAL_MS: "30" },
 			});
+			// H4 (3.11): a removed project refuses for good; a project whose store
+			// is unavailable is not served, so its sends wait unseen.
 			await vi.waitFor(
 				() =>
 					expect(reservations()).toEqual(
-						["opencode", "claude", "cursor"].map((driver) => ({
-							provider_id: driver,
-							status: projectState === "removed" ? "cancelled" : "failed",
-							attempt_count: 1,
-							run_status: "error",
-							started_at: null,
-							receipt_status: "side_effect_failed",
-							errors: 1,
-							error_code:
-								projectState === "removed"
-									? "project_inactive"
-									: "project_unavailable",
-						})),
+						projectState === "removed"
+							? ["opencode", "claude", "cursor"].map((driver) => ({
+									provider_id: driver,
+									status: "cancelled",
+									attempt_count: 1,
+									run_status: "error",
+									started_at: null,
+									receipt_status: "side_effect_failed",
+									errors: 1,
+									error_code: "project_inactive",
+								}))
+							: waiting,
 					),
 				{ timeout: 5000 },
 			);
@@ -552,6 +554,8 @@ describe("one daemon orchestration engine", () => {
 
 	// Placement is durable before run.started, but the surviving runner already
 	// owns intake. Projection lag must not authorize a synthetic turn terminal.
+	// A claimed send is never refused (CONTRACT 3.11, 1053-1108), so a removed
+	// project's claimed send waits like an unavailable one's.
 	it.each([
 		"removed",
 		"unavailable",
@@ -641,6 +645,8 @@ describe("one daemon orchestration engine", () => {
 					).toBeGreaterThan(2),
 				{ timeout: 10_000 },
 			);
+			// A removed project's surviving runner is retired; its claimed send,
+			// left with no runner and no start, is then refused.
 			await vi.waitFor(
 				() =>
 					expect(outcomes(db, [id])[0]).toMatchObject(
@@ -659,8 +665,8 @@ describe("one daemon orchestration engine", () => {
 					),
 				{ timeout: 15_000 },
 			);
-			expect(terminals()).toEqual([]);
 			if (projectState === "removed")
+				// test-waits-allow polling: a runner's exit has no frame.
 				await vi.waitFor(
 					() => expect(() => process.kill(runner.pid, 0)).toThrow(),
 					{ timeout: 10_000 },
@@ -670,7 +676,11 @@ describe("one daemon orchestration engine", () => {
 			await fixture.kill();
 			await restart();
 			expect(outcomes(db, [id])).toEqual(refused);
-			expect(terminals()).toEqual([]);
+			expect(terminals()).toEqual(
+				projectState === "removed"
+					? [{ type: "turn.error", code: "project_inactive" }]
+					: [],
+			);
 			evidence["afterSweepReplay"] = {
 				commands: refused,
 				terminals: terminals(),
@@ -902,48 +912,67 @@ describe("one daemon orchestration engine", () => {
 					serviceEnvironment: { CONDUIT_OUTBOX_DRAIN_INTERVAL_MS: "30" },
 				});
 			await restart();
-			const code =
-				projectState === "removed" ? "project_inactive" : "project_unavailable";
-			const status = projectState === "removed" ? "cancelled" : "failed";
-			const retainedForRecovery = started && projectState === "unavailable";
+			// H4 (CONTRACT 3.11, 1053-1108): a removed project refuses its unsent
+			// sends for good; an unavailable project is not served, so its sends
+			// wait unseen. A started run belongs to its provider's loss either way:
+			// a removed project's lost runner ends it, a waiting project's keeps it.
+			const removed = projectState === "removed";
+			const lost = {
+				status: "failed",
+				error_code: "runner_stopped",
+				receipt_status: "side_effect_failed",
+				terminal_receipt_count: 1,
+			};
+			const refusal = {
+				status: "cancelled",
+				error_code: "project_inactive",
+				receipt_status: "side_effect_failed",
+				receipt_error_code: "project_inactive",
+				terminal_receipt_count: 1,
+			};
 			await vi.waitFor(
 				() => {
 					expect(outcomes(db, [id])[0]).toMatchObject(
-						retainedForRecovery
-							? {
+						removed
+							? started
+								? lost
+								: refusal
+							: {
 									status: "running",
 									receipt_status: "side_effect_requested",
 									terminal_receipt_count: 0,
-								}
-							: {
-									status,
-									error_code: code,
-									receipt_status: "side_effect_failed",
-									receipt_error_code: code,
-									terminal_receipt_count: 1,
 								},
 					);
-					expect(outcomes(db, [laterId])[0]).toMatchObject({
-						status,
-						error_code: code,
-						receipt_status: "side_effect_failed",
-						terminal_receipt_count: 1,
-					});
+					expect(outcomes(db, [laterId])[0]).toMatchObject(
+						removed
+							? refusal
+							: {
+									status: "pending",
+									receipt_status: "side_effect_requested",
+									terminal_receipt_count: 0,
+								},
+					);
 				},
 				{ timeout: 10_000 },
 			);
-			// The started run belongs to provider recovery. Only unstarted inputs
-			// receive a failed prompt and turn.error from the project sweep.
 			const terminals = terminalEvents();
-			expect(terminals).toHaveLength(started ? 1 : 2);
+			expect(terminals).toHaveLength(removed ? 2 : 0);
 			expect(terminals.every(({ type }) => type === "turn.error")).toBe(true);
 			if (started)
-				expect(terminals.some(({ run_id }) => run_id === run?.id)).toBe(false);
-			expect(
-				db
-					.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
-					.get(laterId),
-			).toEqual({ state: "removed" });
+				expect(terminals.some(({ run_id }) => run_id === run?.id)).toBe(
+					removed,
+				);
+			evidence["runEnds"] = db
+				.prepare(
+					"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.reason') AS reason FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",
+				)
+				.all(sessionId);
+			if (removed)
+				expect(
+					db
+						.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
+						.get(laterId),
+				).toEqual({ state: "removed" });
 			const refused = outcomes(db, [id, laterId]);
 			const sweepCount = observations(fixture).filter(
 				({ kind }) => kind === "outbox-drain",
@@ -969,6 +998,15 @@ describe("one daemon orchestration engine", () => {
 			if (projectState === "unavailable") unlinkSync(legacy);
 			await restart();
 			const repaired = await fixture.connect(sessionId, undefined, "project-b");
+			// The waiting sends settle once the project is served again.
+			await vi.waitFor(
+				() =>
+					expect(outcomes(db, [id, laterId])).toMatchObject([
+						{ terminal_receipt_count: 1 },
+						{ terminal_receipt_count: 1 },
+					]),
+				{ timeout: 20_000 },
+			);
 			const history = await repaired.history(sessionId);
 			expect(
 				history.filter(({ role }) => role === "user").map(({ text }) => text),
@@ -983,7 +1021,7 @@ describe("one daemon orchestration engine", () => {
 			});
 			expect(outcomes(db, [laterId])[0]).toMatchObject({
 				terminal_receipt_count: 1,
-				claim_count: 0,
+				claim_count: removed ? 0 : 1,
 				receipt_count: 1,
 			});
 			evidence["afterProjectRecovery"] = outcomes(db, [id, laterId]);
@@ -1375,15 +1413,24 @@ describe("one daemon orchestration engine", () => {
 					claim_count: 0,
 				});
 				if (replacement === "failure") {
-					await vi.waitFor(
-						() =>
-							expect(outcomes(db, [id])[0]).toMatchObject({
-								status: "failed",
-								error_code: "project_unavailable",
-								attempt_count: 0,
-							}),
-						{ timeout: 10_000 },
+					// A relay load error is not served (CONTRACT 3.11, 1053-1108): the
+					// send waits unseen instead of failing.
+					const later = observations(fixture).filter(
+						({ kind }) => kind === "outbox-drain",
+					).length;
+					await vi.waitFor(() =>
+						expect(
+							observations(fixture).filter(
+								({ kind }) => kind === "outbox-drain",
+							).length,
+						).toBeGreaterThan(later + 2),
 					);
+					expect(outcomes(db, [id])[0]).toMatchObject({
+						status: "pending",
+						error_code: null,
+						attempt_count: 0,
+						terminal_receipt_count: 0,
+					});
 				} else {
 					await completed(db, [id], 45_000);
 					expect(
@@ -2432,7 +2479,7 @@ Date.now = () => now() + (existsSync(new URL('./advance-clock', import.meta.url)
 	it.each([
 		false,
 		true,
-	])("preserves the failed prompt in a typed durable refusal for an unavailable project (rollback=%s)", async (blockWrite) => {
+	])("keeps an unavailable project's commands waiting unseen until it is served (blocked writes=%s)", async (blockWrite) => {
 		const fixture = prepare();
 		await fixture.restart();
 		const a = await fixture.connect();
@@ -2486,82 +2533,54 @@ Date.now = () => now() + (existsSync(new URL('./advance-clock', import.meta.url)
 				projects.find(({ slug }) => slug === "project-b")?.unavailableReason,
 			).toEqual(expect.any(String));
 			await completed(db, [availableId]);
+			// H4 (CONTRACT 3.11, 1053-1108): an unavailable project is not served.
+			// Its send and control wait unseen, then run once it is served again.
+			const sweeps = observations(fixture).filter(
+				({ kind }) => kind === "outbox-drain",
+			).length;
 			await vi.waitFor(() =>
-				expect(outcomes(db, [controlId])[0]).toMatchObject({
-					status: "failed",
-					error_code: "project_unavailable",
-					claim_count: 0,
-					terminal_receipt_count: 1,
-				}),
+				expect(
+					observations(fixture).filter(({ kind }) => kind === "outbox-drain")
+						.length,
+				).toBeGreaterThan(sweeps + 2),
 			);
-			evidence["unavailableControl"] = outcomes(db, [controlId]);
-			if (blockWrite) {
-				const sweeps = observations(fixture).filter(
-					({ kind }) => kind === "outbox-drain",
-				).length;
-				await vi.waitFor(() =>
-					expect(
-						observations(fixture).filter(({ kind }) => kind === "outbox-drain")
-							.length,
-					).toBeGreaterThan(sweeps + 2),
-				);
-				expect(outcomes(db, [unavailableId])[0]).toMatchObject({
+			expect(outcomes(db, [controlId, unavailableId])).toMatchObject([
+				{ status: "pending", claim_count: 0, terminal_receipt_count: 0 },
+				{
 					status: "pending",
 					attempt_count: 0,
 					terminal_receipt_count: 0,
 					receipt_status: "side_effect_requested",
-				});
-				expect(
-					db
-						.prepare("SELECT id FROM messages WHERE session_id = ?")
-						.all(sessionB),
-				).toEqual([]);
-				evidence["atomicRollback"] = outcomes(db, [unavailableId]);
-				db.exec("DROP TRIGGER fail_refusal_text");
-			}
-			await vi.waitFor(
-				() =>
-					expect(outcomes(db, [unavailableId])[0]).toMatchObject({
-						status: "failed",
-						error_code: "project_unavailable",
-						receipt_count: 1,
-						receipt_status: "side_effect_failed",
-						receipt_error_code: "project_unavailable",
-						terminal_receipt_count: 1,
-					}),
-				{ timeout: 20_000 },
-			);
-			const receipt = db
-				.prepare("SELECT error FROM command_receipts WHERE command_id = ?")
-				.get(unavailableId) as { error: string };
-			expect(JSON.parse(receipt.error)).toMatchObject({
-				_tag: "ProviderInstanceFailure",
-				code: "project_unavailable",
-			});
+				},
+			]);
+			expect(
+				db
+					.prepare("SELECT id FROM messages WHERE session_id = ?")
+					.all(sessionB),
+			).toEqual([]);
 			evidence = {
 				...evidence,
 				projects,
-				commands: outcomes(db, ids),
-				refusal: JSON.parse(receipt.error),
+				waiting: outcomes(db, [controlId, ...ids]),
 			};
+			if (blockWrite) db.exec("DROP TRIGGER fail_refusal_text");
 			await fixture.kill();
 			unlinkSync(join(legacy, "events.db"));
-			await fixture.restart();
+			await fixture.restart({
+				serviceEnvironment: { CONDUIT_OUTBOX_DRAIN_INTERVAL_MS: "30" },
+			});
 			const repaired = await fixture.connect(sessionB, undefined, "project-b");
-			const history = await repaired.history(sessionB);
+			await completed(db, [unavailableId]);
+			await vi.waitFor(() =>
+				expect(outcomes(db, [controlId])[0]).toMatchObject({
+					terminal_receipt_count: 1,
+				}),
+			);
 			expect(
-				history.filter(({ role }) => role === "user").map(({ text }) => text),
+				(await repaired.history(sessionB))
+					.filter(({ role }) => role === "user")
+					.map(({ text }) => text),
 			).toEqual(["Unavailable pending command"]);
-			expect(
-				db
-					.prepare("SELECT state FROM turns WHERE session_id = ?")
-					.all(sessionB),
-			).toEqual([{ state: "error" }]);
-			expect(
-				db
-					.prepare("SELECT state FROM pending_inputs WHERE input_id = ?")
-					.get(unavailableId),
-			).toEqual({ state: "removed" });
 			for (let retry = 0; retry < 2; retry++) {
 				await Effect.runPromise(
 					repaired.rpc["input.submit"]({
@@ -2580,7 +2599,7 @@ Date.now = () => now() + (existsSync(new URL('./advance-clock', import.meta.url)
 			).toHaveLength(1);
 			expect(outcomes(db, [unavailableId])[0]).toMatchObject({
 				terminal_receipt_count: 1,
-				claim_count: 0,
+				claim_count: 1,
 			});
 			evidence["repairedHistory"] = await repaired.history(sessionB);
 			evidence["retryOutcome"] = outcomes(db, [unavailableId]);

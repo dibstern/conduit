@@ -83,6 +83,7 @@ import {
 	type ProviderCommandInteractionSinkFactory,
 	type ProviderCommandStoreFailure,
 	ProviderSideEffectReactor,
+	type ProviderSideEffectReactorOptions,
 } from "./orchestration-side-effect-reactor.js";
 import type { ProviderRegistry } from "./provider-registry.js";
 import {
@@ -245,10 +246,7 @@ export interface DurableCommandStoreOptions {
 	readonly write: CommitAndSignal["write"];
 	readonly persistUserMessage?: ClaudeEventPersistEffect["persistUserMessage"];
 	readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
-	readonly isProjectReady?: (
-		projectId: string,
-		sessionId: string,
-	) => Effect.Effect<boolean, ProviderInstanceFailure>;
+	readonly projectGate?: ProviderSideEffectReactorOptions["projectGate"];
 	readonly recoverDetachedSession?: (sessionId: string) => Effect.Effect<void>;
 	readonly makeInteractions?: (
 		sessionId: string,
@@ -418,9 +416,7 @@ export class OrchestrationEngine {
 					registry: this.registry,
 					ingestion: durable.ingestion,
 					write: durable.write,
-					...(durable.isProjectReady
-						? { isProjectReady: durable.isProjectReady }
-						: {}),
+					...(durable.projectGate ? { projectGate: durable.projectGate } : {}),
 					...(durable.recoverDetachedSession
 						? { recoverDetachedSession: durable.recoverDetachedSession }
 						: {}),

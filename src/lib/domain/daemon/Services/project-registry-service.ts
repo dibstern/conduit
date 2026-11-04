@@ -74,6 +74,7 @@ import {
 	type FolderIssue,
 	isPermissionDenied,
 } from "../../../project-folders.js";
+import type { ProjectGate } from "../../../provider/orchestration-side-effect-reactor.js";
 import { stopRegisteredRunners } from "../../../provider/runner/runner-retirement.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import type { StoredProject } from "../../../types.js";
@@ -276,6 +277,34 @@ export class ProjectSaveLockTag extends Context.Service<
 	ProjectSaveLockTag,
 	Semaphore.Semaphore
 >()("ProjectSaveLock") {}
+
+/**
+ * The one project gate (H4, CONTRACT 3.11) every executor reads before it
+ * transmits. Registration imports, and removal stops every runner, under the
+ * save lock, so removed is answered only once neither runs.
+ */
+export const makeProjectGate = (hasServices: (projectId: string) => boolean) =>
+	Effect.gen(function* () {
+		const projects = yield* ProjectRegistryTag;
+		const lock = yield* ProjectSaveLockTag;
+		const unavailable = yield* DaemonStoreAvailability;
+		return (projectId: string): Effect.Effect<ProjectGate> =>
+			Effect.gen(function* () {
+				const entry = HashMap.get(yield* Ref.get(projects), projectId);
+				if (Option.isSome(entry))
+					return entry.value._tag !== "Error" &&
+						!unavailable.has(projectId) &&
+						hasServices(projectId)
+						? "served"
+						: "not_served";
+				const settled = yield* lock.withPermitsIfAvailable(1)(
+					Ref.get(projects),
+				);
+				return Option.isSome(settled) && !HashMap.has(settled.value, projectId)
+					? "removed"
+					: "not_served";
+			});
+	});
 
 /** Get a project entry by slug. Returns Option. */
 export const getEntry = (slug: string) =>

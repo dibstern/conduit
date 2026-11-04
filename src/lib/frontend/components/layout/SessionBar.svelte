@@ -544,8 +544,7 @@
 {#snippet goalLine(props: Record<string, unknown> = {})}
 	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" data-goal-phase={goal.phase} aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
 		<Icon name={goalIcon} size={12} class="shrink-0" />
-		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}
-		{#if !duoFolded}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
+		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}{#if !duoFolded}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 		{:else if (goal.phase === "pursuing" || goal.phase === "not_yet") && detailsGoal}<small class="shrink-0">{detailsGoal.iterations} {detailsGoal.iterations === 1 ? "check" : "checks"}</small>{/if}
 	</Button>
 {/snippet}

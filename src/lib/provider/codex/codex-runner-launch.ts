@@ -12,6 +12,8 @@ export const makeCodexRunnerLaunch = (
 	let resumeSessionId: string | undefined;
 	let environment: Readonly<Record<string, string | undefined>> = process.env;
 	return Effect.succeed({
+		// Stop tasks terminates a background terminal (82tn.32.28).
+		capabilities: { stopsTasks: true },
 		makeRunner: (config, emit) =>
 			makeCodexSessionRunner(
 				{

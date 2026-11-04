@@ -58,7 +58,9 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 		| "secret_answer_unavailable"
 		| "runner_detached"
 		| "project_inactive"
-		| "project_unavailable";
+		| "project_unavailable"
+		/** A send its project's removal cut short before any byte (3.11). */
+		| "not_sent";
 }> {
 	/** Classify the native adapter failure; unknown errors must not hold controls. */
 	get retryable(): boolean {

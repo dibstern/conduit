@@ -30,6 +30,7 @@ export const makeCodexRunnerDriver = (
 	configDir = DEFAULT_CONFIG_DIR,
 ): RunnerDriverPieces => ({
 	driverKind: "codex",
+	stopTask: true, // Stop tasks terminates a background terminal (82tn.32.28).
 	discoverEffect: (directory, account, options, call) =>
 		discoverCodexEffect(
 			call?.account ?? account,

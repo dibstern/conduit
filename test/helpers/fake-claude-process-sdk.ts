@@ -1058,7 +1058,7 @@ function query(params: {
 			interruptibleTurn =
 				request.startsWith("stall-") ||
 				request === "terminal-replay-interrupt" ||
-				request === "goal-long-turn";
+				request.startsWith("goal-long-turn");
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1929,7 +1929,7 @@ function query(params: {
 					mark({ kind: "assistant-held", prompt, queryId });
 				// A control receipt is separate from the native result that ends
 				// these interrupted turns.
-				if (request === "goal-long-turn") {
+				if (request.startsWith("goal-long-turn")) {
 					// The CLI takes an input that arrives mid-turn and queues it behind the turn
 					// (CONTRACT.md 8.6: "queued by Claude"); it runs once the turn's result is out.
 					queuedInput = inputs.next();
@@ -1957,6 +1957,14 @@ function query(params: {
 							uuid: randomUUID(),
 							session_id: sessionId,
 						} as unknown as SDKMessage;
+						// goal-long-turn-unset: the SDK drops its active goal while the clear waits.
+						if (request === "goal-long-turn-unset" && text === "/goal clear")
+							yield {
+								type: "active_goal",
+								uuid: randomUUID(),
+								session_id: sessionId,
+								value: null,
+							};
 					}
 				}
 				while (!taskTurnInterrupted && !closed)

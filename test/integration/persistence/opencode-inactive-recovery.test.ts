@@ -19,7 +19,6 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { inboxRunStatusQuery } from "../../../src/lib/persistence/inbox-run-status-query.js";
-import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { openCodeInputMessageId } from "../../../src/lib/provider/opencode/opencode-input-message-id.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
@@ -34,8 +33,9 @@ afterAll(() => {
 	);
 });
 
-// A crash before intake leaves no turn or echo. Removal must not invent provider
-// truth, while reattachment must settle the reservation without resending it.
+// A crash before intake leaves no turn or echo. A claimed send is never refused
+// (CONTRACT 3.11, 1053-1108): removal leaves it running, and reattachment settles
+// the reservation from provider truth without resending it.
 it.each([
 	"stopped",
 	"idle",
@@ -90,15 +90,7 @@ it.each([
 					registry: new ProviderRegistry(),
 					write: commit.write,
 					ingestion,
-					isProjectReady: () =>
-						Effect.fail(
-							new ProviderInstanceFailure({
-								providerId: "conduit",
-								operation: "executeCommand",
-								code: "project_inactive",
-								cause: "removed",
-							}),
-						),
+					projectGate: () => Effect.succeed("removed" as const),
 				});
 				for (let sweep = 0; sweep < 3; sweep++) yield* reactor.drain();
 				const removed = {
@@ -109,20 +101,12 @@ it.each([
 					inbox: yield* inboxRunStatusQuery(sql, "session"),
 				};
 				expect(removed.commands).toEqual([
-					{
-						status: "cancelled",
-						error_code: "project_inactive",
-						attempt_count: 1,
-					},
+					{ status: "running", error_code: null, attempt_count: 1 },
 				]);
 				expect(removed.runs).toEqual([{ status: "pending", started_at: null }]);
 				expect(removed.owned).toBe(false);
 				expect(removed.inbox).toMatchObject([{ status: "pending" }]);
 				expect(yield* sql`SELECT id FROM messages`).toEqual([]);
-				// The runner-backed path keeps its existing default eligibility.
-				expect(
-					yield* runningRunnerCommands(sql, "opencode", () => "opencode"),
-				).toEqual([]);
 				if (scenario === "never-return") {
 					evidence.push({ scenario, removed, providerProbes: 0 });
 					return;
@@ -162,8 +146,6 @@ it.each([
 					sql,
 					"opencode",
 					() => "opencode",
-					undefined,
-					true,
 				);
 				expect(commands).toHaveLength(1);
 				let providerProbes = 0;
@@ -229,11 +211,11 @@ it.each([
 					{ count: scenario === "new-attempt" ? 1 : 0 },
 				]);
 				expect(result.commands).toEqual([
-					{
-						status: scenario === "new-attempt" ? "running" : "cancelled",
-						error_code: "project_inactive",
-						attempt_count: scenario === "new-attempt" ? 2 : 1,
-					},
+					scenario === "new-attempt"
+						? { status: "running", error_code: null, attempt_count: 2 }
+						: scenario === "completed"
+							? { status: "completed", error_code: null, attempt_count: 1 }
+							: { status: "failed", error_code: "orphaned", attempt_count: 1 },
 				]);
 				expect(result.terminals.length).toBe(
 					scenario === "new-attempt" ? 0 : scenario === "completed" ? 0 : 1,
@@ -246,7 +228,8 @@ it.each([
 	}
 });
 
-it("keeps cancelled Claude sends out of the default runner candidate snapshot", async () => {
+// A removed project's refusal is final (CONTRACT 3.11): no runner candidate reads it as live.
+it("keeps refused sends out of every runner candidate snapshot", async () => {
 	const runtime = ManagedRuntime.make(
 		makePersistenceEffectLayer(":memory:", "project"),
 	);
@@ -277,24 +260,13 @@ it("keeps cancelled Claude sends out of the default runner candidate snapshot", 
 					sql,
 					"opencode",
 					driverForAccount,
-					undefined,
-					true,
-				);
-				const explicitInactive = yield* runningRunnerCommands(
-					sql,
-					"claude",
-					driverForAccount,
-					undefined,
-					true,
 				);
 				expect(defaults).toEqual([]);
 				expect(openCode).toEqual([]);
-				expect(explicitInactive).toHaveLength(1);
 				evidence.push({
 					scenario: "claude-candidate-selection",
 					defaultCandidates: defaults.length,
 					openCodeCandidates: openCode.length,
-					explicitInactiveCandidates: explicitInactive.length,
 				});
 			}),
 		);

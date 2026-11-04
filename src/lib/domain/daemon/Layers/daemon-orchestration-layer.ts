@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { channel } from "node:diagnostics_channel";
-import { Context, Effect, HashMap, Layer, Option, Ref, Schedule } from "effect";
+import { Context, Effect, Layer, Option, Ref, Schedule } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
@@ -43,10 +43,7 @@ import {
 	DaemonStoreAvailability,
 	onProjectUnavailable,
 } from "../Services/daemon-store-availability.js";
-import {
-	ProjectRegistryTag,
-	ProjectSaveLockTag,
-} from "../Services/project-registry-service.js";
+import { makeProjectGate } from "../Services/project-registry-service.js";
 import {
 	type ProviderAdapterProjectContext,
 	ProviderAdapters,
@@ -72,40 +69,9 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const accounts = yield* AccountDirectory;
 		const configRef = yield* DaemonConfigRefTag;
 		const sessionWorkspace = yield* SessionWorkspaceTag;
-		const projects = yield* ProjectRegistryTag;
-		const projectSaveLock = yield* ProjectSaveLockTag;
-		const unavailable = yield* DaemonStoreAvailability;
-		const isProjectReady = (projectId: string) =>
-			Effect.gen(function* () {
-				// EndSession retains its admitted project after session.deleted.
-				const entry = HashMap.get(yield* Ref.get(projects), projectId);
-				if (Option.isNone(entry)) {
-					// Import commits before SaveProject publishes registration. A
-					// busy save lock leaves that owner's new rows pending meanwhile.
-					const settled = yield* projectSaveLock.withPermitsIfAvailable(1)(
-						Ref.get(projects),
-					);
-					if (Option.isNone(settled) || HashMap.has(settled.value, projectId))
-						return false;
-				}
-				const registered = Option.isSome(entry);
-				if (
-					!registered ||
-					unavailable.has(projectId) ||
-					entry.value._tag === "Error"
-				)
-					return yield* Effect.fail(
-						new ProviderInstanceFailure({
-							providerId: "conduit",
-							operation: "executeCommand",
-							code: registered ? "project_unavailable" : "project_inactive",
-							cause: registered
-								? `Project ${projectId} is unavailable`
-								: `Project ${projectId} is no longer registered`,
-						}),
-					);
-				return Option.isSome(adapters.projectContext(projectId));
-			});
+		const projectGate = yield* makeProjectGate((projectId) =>
+			Option.isSome(adapters.projectContext(projectId)),
+		);
 		const projectOfSession = (sessionId: string) =>
 			directory.projectOf(sessionId).pipe(
 				Effect.flatMap((owner) =>
@@ -143,9 +109,17 @@ export const DaemonOrchestrationLive = Layer.effect(
 				const projectId = yield* projectOfSession(sessionId);
 				const context = adapters.projectContext(projectId);
 				if (Option.isNone(context)) {
-					yield* isProjectReady(projectId);
-					// A relay can detach after the command's readiness check. Keep
-					// the existing claim while waiting for current services, before intake.
+					if ((yield* projectGate(projectId)) === "removed")
+						return yield* Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "conduit",
+								operation: "executeCommand",
+								code: "project_inactive",
+								cause: `Project ${projectId} is no longer registered`,
+							}),
+						);
+					// A project not served (H4) keeps the existing claim while waiting
+					// for current services, before intake.
 					return yield* Effect.sleep("30 millis").pipe(
 						Effect.andThen(projectServices(sessionId)),
 					);
@@ -259,7 +233,7 @@ export const DaemonOrchestrationLive = Layer.effect(
 				generateId: () => `disp_${randomUUID()}`,
 				ingestion,
 				write,
-				isProjectReady,
+				projectGate,
 				recoverDetachedSession: adapters.recoverDetachedSession,
 				makeInteractions: (sessionId, driver) =>
 					projectServices(sessionId).pipe(
@@ -279,7 +253,10 @@ export const DaemonOrchestrationLive = Layer.effect(
 			),
 			DraftPreWarmTag,
 		);
-		yield* onProjectUnavailable(unavailable, drafts.discardProject);
+		yield* onProjectUnavailable(
+			yield* DaemonStoreAvailability,
+			drafts.discardProject,
+		);
 		let started = false;
 		return {
 			engine,
