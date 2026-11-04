@@ -2114,6 +2114,14 @@ export class ProviderSideEffectReactor {
 				const deliver = Effect.gen({ self: this }, function* () {
 					switch (payload.type) {
 						case "interrupt_turn": {
+							// A Stop that captured only a retained steer sends nothing, as main's Stop entry
+							// (provider-turn-service.ts 214). Its row waits behind the steer's send, and an
+							// empty interrupt there would close the idle query the steer answered on.
+							if (
+								payload.stop?.owners.length === 0 &&
+								payload.stop.retainedSteers
+							)
+								break;
 							const driver = getProviderDriver(
 								account?.driver ?? instance.providerId,
 							);

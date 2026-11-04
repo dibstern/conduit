@@ -2085,3 +2085,4 @@ released. Recovery and the dead-runner cleanup now check whether the turn	pointe
 answers at restart and release onto the next runner. The stop commit's held	pointer
 warm-up no longer counts. Stopping a wake that runs alone ends it at the	pointer
 Lane 32.6b (85e71258, 08c16063, 9808341c, f2c3d77b on wt/82tn32r3): boxes	pointer
+Lane 3278: every steering box has code and a proving test per provider.	pointer

@@ -185,10 +185,10 @@ type Timed = (name: string, click: () => Promise<number>) => Promise<number>;
 async function measure(
 	page: Page,
 	turn: Locator,
+	toggle: Locator,
 	hiddenRows: number,
 	timed: Timed,
 ) {
-	const toggle = turn.locator(".turn-activity-toggle");
 	const click = () => clickToPaint(toggle);
 	const toggleTo = async (name: string, shown: boolean) => {
 		const ms = await timed(name, click);
@@ -222,8 +222,7 @@ async function measure(
 }
 
 /** Hiding and showing the log keeps its row elements, and a row's own open state. */
-async function expectRowsKept(turn: Locator) {
-	const toggle = turn.locator(".turn-activity-toggle");
+async function expectRowsKept(turn: Locator, toggle: Locator) {
 	const rows = turn.locator("[data-log-part]");
 	const firstRowToggle = rows.first().locator("[aria-expanded]").first();
 	const toggleTo = async (shown: boolean) => {
@@ -333,21 +332,35 @@ test.describe("Step log toggle performance", () => {
 			profiling
 				? profiled(page, prefix, (file) => testInfo.outputPath(file))
 				: (_name, click) => click();
-		const settledTimes = await measure(page, settled, 0, timed("settled"));
+		const settledToggle = settled.locator(".turn-activity-toggle");
+		const settledTimes = await measure(
+			page,
+			settled,
+			settledToggle,
+			0,
+			timed("settled"),
+		);
 
-		// A live turn with no reply yet shows its newest steps as a ticker.
+		// A live turn starts folded (main 4ee235af, xdyjq.16), so its strip is
+		// what counts every step in. Opened, it shows its newest steps as a
+		// ticker, and the earlier-steps control hides and shows the rest
+		// (main aa4ed830, xdyjq.9): that control is the live log's toggle.
 		wsMock.sendMessage({ type: "user_message", text: "Audit them again" });
 		wsMock.sendMessage({ type: "status", status: "processing" });
 		for (const event of turnEvents("live", STEPS)) wsMock.sendMessage(event);
 		const live = page.locator(
 			'#messages .turn-activity:has([data-testid="turn-live-head"])',
 		);
-		await expect(live.locator("[data-log-part]").last()).toContainText(
-			`${STEPS - 1}`,
-		);
-		await live.locator(".turn-activity-toggle").scrollIntoViewIfNeeded();
+		await expect(
+			live.getByRole("slider", {
+				name: `Activity timeline — ${STEPS} steps`,
+			}),
+		).toBeVisible();
+		await live.locator(".turn-activity-toggle").click();
+		const liveToggle = live.getByRole("button", { name: /earlier steps?$/ });
+		await liveToggle.scrollIntoViewIfNeeded();
 		await settle(page);
-		const liveTimes = await measure(page, live, 3, timed("live"));
+		const liveTimes = await measure(page, live, liveToggle, 3, timed("live"));
 
 		const result = {
 			steps: STEPS,
@@ -363,8 +376,8 @@ test.describe("Step log toggle performance", () => {
 		);
 
 		// Checked after timing both turns, so an open row doesn't skew the numbers.
-		await expectRowsKept(settled);
-		await expectRowsKept(live);
+		await expectRowsKept(settled, settledToggle);
+		await expectRowsKept(live, liveToggle);
 
 		if (
 			process.env["STEP_LOG_PERF_ASSERT"] === "1" &&

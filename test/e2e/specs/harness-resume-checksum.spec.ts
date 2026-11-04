@@ -16,8 +16,8 @@
 // - a catch-up over the page budget is sent as deltas;
 // - a tab ahead of a server whose store went back keeps rows the server no
 //   longer has;
-// - a restart re-stamps every session for git that did not move, so the read
-//   model counter advances with nothing to show (conduit-test-y7eo.16);
+// - a restart re-stamps every session for git that did not move, so read
+//   model rows advance with nothing to show (conduit-test-y7eo.16);
 // - a branch switch or dirty file made while the daemon is down is never
 //   stamped, because the server remembers the git it last published, so the
 //   open tab keeps the old branch until a reload;
@@ -214,6 +214,33 @@ test("a resume is checked against the server, and the server wins", async ({
 			db.close();
 		}
 	};
+	// Whether any read model row was stamped above `version`. The counter alone
+	// is not the fact: a restart reports the runner it adopts live again
+	// (CONTRACT.md 2121-2125, "true on every `recover()` adoption after a daemon
+	// restart"), and projecting that report moves the counter with no row.
+	const stampedSince = (version: number) => {
+		const db = new DatabaseSync(store, { readOnly: true });
+		try {
+			return [
+				"sessions",
+				"messages",
+				"message_parts",
+				"pending_approvals",
+				"pending_inputs",
+				"message_tombstones",
+				"message_part_tombstones",
+				"session_sidebar",
+				"session_sidebar_horizon",
+			].some(
+				(table) =>
+					db
+						.prepare(`SELECT 1 FROM ${table} WHERE version > ? LIMIT 1`)
+						.get(version) !== undefined,
+			);
+		} finally {
+			db.close();
+		}
+	};
 	// Git in the project folder, without the runner's or the user's settings.
 	const git = (...args: string[]) =>
 		execFileSync(
@@ -402,7 +429,7 @@ test("a resume is checked against the server, and the server wins", async ({
 		return {
 			name,
 			reads,
-			counterMoved: counter() !== counterAtStop,
+			rowsStamped: stampedSince(counterAtStop),
 			frames: frames.length,
 			bytes: frames.reduce(
 				(total, { text }) => total + Buffer.byteLength(text),
@@ -756,12 +783,12 @@ test("a resume is checked against the server, and the server wins", async ({
 	// the open tab as a change; git that did not move stamps nothing.
 	for (const moved of [gitInit, gitAway])
 		expect(moved, moved.name).toMatchObject({
-			counterMoved: true,
+			rowsStamped: true,
 			mismatches: 0,
 			snapshots: { shell: 0, detail: 0 },
 		});
 	expect(gitUnchanged).toMatchObject({
-		counterMoved: false,
+		rowsStamped: false,
 		mismatches: 0,
 		snapshots: { shell: 0, detail: 0 },
 		checkedSyncs: 2,
