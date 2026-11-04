@@ -46,6 +46,7 @@ import {
 	type ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 const TIMEOUT = 60_000;
 const STEER = "Use the steered instruction";
@@ -326,6 +327,17 @@ describe("Codex on the Run Ledger", () => {
 		endsOnce(ledger);
 		oneRunnerStartedFirst(ledger);
 		prove("send", ledger);
+	});
+
+	it("stamps every tool row with its Run's id and the project folder (82tn.45)", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"tool-rows",
+			fixtureRows("turn-command"),
+		);
+		await submit(browser, sessionId, "Run the command");
+		await turns(fixture, sessionId, ["completed"]);
+		endsOnce(read(fixture, sessionId));
+		proveToolRowsOnLedger("codex", fixture);
 	});
 
 	it("ends a delivered steer's Run once, on the one turn/start", async () => {

@@ -57,6 +57,7 @@ import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 const OLD_BUILD = "82tn-32-6-before";
 const NEW_BUILD = "82tn-32-6-after";
@@ -236,6 +237,16 @@ describe("Claude on the Run Ledger", () => {
 			ends: ledger.ends,
 			runs: ledger.runs,
 		});
+	});
+
+	it("stamps every tool row of a recorded subagent turn, the subagent's too, with its Run's id and the project folder (82tn.45)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: { turns: ["subagent-task-turn"] },
+		});
+		const sessionId = await browser.createSession("Claude tool rows");
+		await browser.send(sessionId, "Ask a subagent to summarise package.json");
+		endsOnce(read(fixture, sessionId));
+		proveToolRowsOnLedger("claude", fixture);
 	});
 
 	it("reports reattached true when a daemon restart recovers the surviving runner", async () => {

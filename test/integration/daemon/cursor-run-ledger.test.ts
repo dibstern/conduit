@@ -55,6 +55,7 @@ import {
 	type ProcessBrowser,
 	ProcessHarness,
 } from "../../helpers/process-harness.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 interface TraceRow {
 	kind?: string;
@@ -349,6 +350,17 @@ describe("Cursor on the Run Ledger", () => {
 		endsOnce(ledger);
 		oneRunnerStartedFirst(ledger);
 		prove("send", ledger);
+	});
+
+	it("stamps every tool row, a subagent's too, with its Run's id and the project folder (82tn.45)", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"tool-rows",
+			"subagent-foreground-default-fixed",
+		);
+		await submit(browser, sessionId, "Replay the captured subagent turn.");
+		await turns(fixture, sessionId, ["completed"]);
+		endsOnce(read(fixture, sessionId));
+		proveToolRowsOnLedger("cursor", fixture);
 	});
 
 	it("ends a delivered steer's Run once, in the one native send", async () => {
