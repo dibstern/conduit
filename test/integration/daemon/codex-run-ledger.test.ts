@@ -566,6 +566,86 @@ describe("Codex on the Run Ledger", () => {
 		prove("stop-silent", ledger, { lost: processEvidence(ledger) });
 	}, 120_000);
 
+	// Failure modes (32.8): F379 Run now steers or starts a second turn without interrupting;
+	// F380 the active Run ends twice or not interrupted; F381 the queued input launches twice
+	// or never; F382 it launches before the active Run ends; F383 Run now retires the runner;
+	// F384 the queued input stays in the tray.
+	it("ends the active Run interrupted on Run now and launches the queued input once, on the same runner", async () => {
+		// two-turns with stop-queued's derivation on its first turn (README): the schema's
+		// turn/interrupt and its answer after turn/started, and the first terminal interrupted.
+		const recorded = fixtureRows("two-turns");
+		const started = recorded.findIndex(
+			(row) => row.message?.method === "turn/started",
+		);
+		const ended = recorded.findIndex(
+			(row) => row.message?.method === "turn/completed",
+		);
+		const stopQueued = fixtureRows("stop-queued");
+		const interrupt = stopQueued.findIndex(
+			(row) => row.message?.method === "turn/interrupt",
+		);
+		const terminal = structuredClone(recorded[ended]);
+		const turn = terminal?.message?.params?.["turn"] as Record<string, unknown>;
+		turn["status"] = "interrupted";
+		const { fixture, browser, sessionId } = await start("run-now", [
+			...recorded.slice(0, started + 1),
+			...stopQueued.slice(interrupt, interrupt + 2),
+			...(terminal ? [terminal] : []),
+			...recorded.slice(ended + 1),
+		]);
+		await submit(browser, sessionId, "Say hello");
+		await turns(fixture, sessionId, ["running"]);
+		const queued = randomUUID();
+		await submit(browser, sessionId, "Say hello again", "queue", queued);
+		const tray = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT state FROM pending_inputs WHERE session_id = ? AND input_id = ?",
+					)
+					.all(sessionId, queued) as { state: string }[];
+			} finally {
+				db.close();
+			}
+		};
+		// test-waits-allow polling: the queued input's tray state reaches only the store.
+		await vi.waitFor(() => expect(tray()).toEqual([{ state: "queued" }]), {
+			timeout: TIMEOUT,
+		});
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		await browser.sendNow(sessionId, queued, true);
+		await turns(fixture, sessionId, ["interrupted", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		oneRunnerStartedFirst(ledger);
+		expect(ledger.runs.map((run) => run.status)).toEqual([
+			"interrupted",
+			"completed",
+		]);
+		expect(ledger.ends[0]?.forced).not.toBe(1);
+		expect(captured("turn/interrupt", "out")).toHaveLength(1);
+		expect(captured("turn/steer", "out")).toEqual([]);
+		const starts = captured("turn/start", "out");
+		expect(starts).toHaveLength(2);
+		expect(JSON.stringify(starts[1]?.message?.params)).toContain(
+			"Say hello again",
+		);
+		// The queued input launched only after the interrupted terminal reached the runner.
+		const order = rows<TraceRow>(capturePath).map(
+			({ dir, message }) =>
+				`${dir}:${message?.method ?? ""}:${String(
+					(message?.params?.["turn"] as { status?: string } | undefined)
+						?.status ?? "",
+				)}`,
+		);
+		expect(order.indexOf("in:turn/completed:interrupted")).toBeLessThan(
+			order.lastIndexOf("out:turn/start:"),
+		);
+		expect(tray()).toEqual([{ state: "removed" }]);
+		prove("run-now", ledger);
+	});
+
 	it("ends a goal chain's Run once; its in-window successors are no wake (row 215)", async () => {
 		const { fixture, browser, sessionId } = await start(
 			"goal-chain",
