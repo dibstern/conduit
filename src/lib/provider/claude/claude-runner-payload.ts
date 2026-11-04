@@ -2530,8 +2530,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 
 	/**
 	 * `started` places a held input's message before any of its output;
-	 * `cancelled` before `started` resolves the input cancelled. `queued` and
-	 * `completed` carry nothing a result does not.
+	 * `cancelled` before `started` resolves the input cancelled. After `started`
+	 * it finds no intake (`started` took it) and ends nothing: the input's own
+	 * result ends its Run (CONTRACT.md 3101-3102). `queued` and `completed`
+	 * carry nothing a result does not.
 	 */
 	private handleCommandLifecycleEffect(
 		ctx: ClaudeSessionContext,
@@ -3147,7 +3149,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		});
 	}
 
-	/** Issues the interrupt to this query; the result awaits its acknowledgement. */
+	/**
+	 * Issues the interrupt to this query; the result awaits its acknowledgement.
+	 * The receipt's `still_queued` is not read: those inputs keep their intakes,
+	 * and only a result naming them ends them (CONTRACT.md 3107-3108).
+	 */
 	private interruptQueryEffect(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<
