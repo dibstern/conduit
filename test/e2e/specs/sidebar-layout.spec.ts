@@ -921,6 +921,7 @@ test.describe("Sidebar Layout — Mobile", () => {
 		await messages.evaluate((element) => {
 			element.scrollTop = Math.max(0, element.scrollTop - 400);
 		});
+		await expect(page.locator("#messages #scroll-btn")).toBeVisible();
 		await messages.evaluate((element) => {
 			element.scrollTop = element.scrollHeight;
 		});

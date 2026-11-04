@@ -307,11 +307,14 @@ function setKeyboardOpen(open: boolean): void {
 const raisesKeyboard = (target: EventTarget | null) =>
 	target instanceof Element && target.matches(":read-write");
 // A blur names the field that takes focus next, so moving between fields never
-// flickers the keyboard closed.
+// flickers the keyboard closed. An effect that calls focus() dispatches this
+// inside its own run, so it reads untracked or that effect re-runs on its flip.
 const followFocus = (event: FocusEvent) =>
-	setKeyboardOpen(
-		raisesKeyboard(
-			event.type === "focusin" ? event.target : event.relatedTarget,
+	untrack(() =>
+		setKeyboardOpen(
+			raisesKeyboard(
+				event.type === "focusin" ? event.target : event.relatedTarget,
+			),
 		),
 	);
 
