@@ -38,16 +38,15 @@ const backgroundOf = (
 	return "none";
 };
 
-const labelOf = (
-	view: Omit<SessionActivityView, "label" | "goal">,
-): SessionActivityLabel =>
-	view.needsYou
-		? "needs-you"
-		: view.foreground === "working" || view.background === "work"
-			? "working"
-			: view.background === "none"
-				? "idle"
-				: "background";
+/** What runs, without the prompts. */
+const runningOf = (
+	view: Pick<SessionActivityView, "foreground" | "background">,
+): Exclude<SessionActivityLabel, "needs-you"> =>
+	view.foreground === "working" || view.background === "work"
+		? "working"
+		: view.background === "none"
+			? "idle"
+			: "background";
 
 export const deriveSessionActivity = (
 	facts: SessionActivityFacts,
@@ -65,7 +64,7 @@ export const deriveSessionActivity = (
 	};
 	return {
 		...parts,
-		label: labelOf(parts),
+		label: parts.needsYou ? "needs-you" : runningOf(parts),
 		...(facts.goal ? { goal: facts.goal } : {}),
 	};
 };
@@ -77,9 +76,16 @@ const rank: Record<SessionActivityLabel, number> = {
 	"needs-you": 3,
 };
 
+/** A session's activity as the sessions feed reads it, for the prompts its row shows. */
+export type ActivityOf = (
+	sessionId: string,
+	prompts: SessionActivityFacts["prompts"],
+) => SessionActivityView;
+
 /**
- * One roll-up for a root and its members (children and side threads). A live background agent is
- * a task of its root, so its own turn reads as the root's background, never its foreground.
+ * One roll-up for a root and its members (children and side threads). Prompts roll up as counts,
+ * so needs-you never hides what runs. A live background agent is a task of its root, so its own
+ * turn reads as the root's background, never its foreground.
  */
 export const rollUpActivity = (
 	own: SessionActivityView,
@@ -87,11 +93,10 @@ export const rollUpActivity = (
 		readonly activity: SessionActivityView;
 		readonly backgroundChild?: boolean;
 	}[],
-): SessionActivityLabel =>
-	members
-		.map(({ activity, backgroundChild }) =>
-			backgroundChild && activity.label === "working"
-				? "background"
-				: activity.label,
-		)
-		.reduce((top, label) => (rank[label] > rank[top] ? label : top), own.label);
+): Exclude<SessionActivityLabel, "needs-you"> =>
+	[{ activity: own }, ...members]
+		.map(({ activity, backgroundChild }: (typeof members)[number]) => {
+			const label = runningOf(activity);
+			return backgroundChild && label === "working" ? "background" : label;
+		})
+		.reduce((top, label) => (rank[label] > rank[top] ? label : top), "idle");

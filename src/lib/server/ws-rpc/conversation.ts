@@ -119,9 +119,10 @@ export const conversationHandlers = {
 	StopServer: ({ sessionId, server }) =>
 		Effect.gen(function* () {
 			// Only a server the session lists, so a browser cannot signal an arbitrary pid.
-			const listed = (yield* SessionActivityTag).servers
-				.get(sessionId)
-				?.some(
+			const activity = yield* SessionActivityTag;
+			const listed = activity.background
+				.serversOf(sessionId, activity.gateUrls)
+				.some(
 					({ pid, startedAt, port }) =>
 						pid === server.pid &&
 						startedAt === server.startedAt &&

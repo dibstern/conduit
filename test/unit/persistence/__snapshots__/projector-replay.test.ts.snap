@@ -225,7 +225,7 @@ exports[`preserves every read model from the recorded Claude event log 1`] = `
     {
       "last_activity": 1789525211224,
       "project_id": "test-project",
-      "row": "{"version":1,"lastActivity":1789525211224,"members":["ses_c2d8cd521bc14f9f8f7700096bbf1d23"],"snooze":{"snoozed_at":null,"snoozed_until":null,"woken_at":null,"woken_reason":null},"session":{"id":"ses_c2d8cd521bc14f9f8f7700096bbf1d23","title":"Recorded turn","status":"busy","createdAt":1789508753984,"messageCount":0,"processing":true,"limitRecovery":null,"resumes":[],"attention":"working"}}",
+      "row": "{"version":1,"lastActivity":1789525211224,"members":["ses_c2d8cd521bc14f9f8f7700096bbf1d23"],"snooze":{"snoozed_at":null,"snoozed_until":null,"woken_at":null,"woken_reason":null},"session":{"id":"ses_c2d8cd521bc14f9f8f7700096bbf1d23","title":"Recorded turn","status":"busy","createdAt":1789508753984,"messageCount":0,"limitRecovery":null,"resumes":[],"attention":"idle"}}",
       "session_id": "ses_c2d8cd521bc14f9f8f7700096bbf1d23",
       "version": 1,
     },

@@ -427,6 +427,8 @@ export const SessionInfoSchema = Schema.Struct({
 	lastUserMessageAt: Schema.optional(Schema.Number),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
+	/** 8.1: what the session is doing, the one answer every surface reads (82tn.32.30). */
+	activity: Schema.optional(SessionActivityViewSchema),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
 	/** Present only while a goal action is pending or its send failed. */
 	goalPhase: Schema.optional(GoalPhaseSchema),

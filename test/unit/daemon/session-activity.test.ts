@@ -161,79 +161,83 @@ describe("Session Activity", () => {
 			}),
 	);
 
-	// 8.7 failure modes: a task hosting a serving server still reads as working; a server not
-	// linked to the task, or one declared awaited, wrongly makes the task read calm.
+	// 8.7 failure modes, now read from the Run Ledger's hand-over (82tn.32.30 deletes the interim
+	// copy): a session-level awaited server leaves the session idle or calm; a serving one makes an
+	// idle session read busy; a task the ledger classes serving reads working; the row's server list
+	// or the Preview Gate's ports drift from the ledger; a gate link moves no row.
 	it.effect(
-		"a task hosting a live serving server reads calm; an unlinked or awaited server does not (8.2, 8.7)",
-		() =>
-			Effect.gen(function* () {
-				const activity = yield* makeSessionActivity;
-				publishLedgerTasks(activity.background, {
-					sessionId: "s",
-					kind: "snapshot",
-					tasks: [
-						{ id: "w1", type: "local_workflow", description: "Dev server" },
-						{ id: "b1", type: "monitor", description: "Watch" },
-					],
-				});
-				const server = {
-					port: 3000,
-					pid: 600,
-					startedAt: 1,
-					command: "node server.js",
-					cwd: "/w",
-					source: "detected",
-					role: "serving",
-				} as const;
-				const work = () => activity.background.backgroundOf("s")?.work;
-				expect(work()).toBe("working");
-				activity.servers.set("s", [server]);
-				expect(work()).toBe("working");
-				activity.servers.set("s", [{ ...server, taskId: "w1" }]);
-				expect(work()).toBe("monitoring");
-				activity.servers.set("s", [
-					{ ...server, taskId: "w1", source: "declared", role: "awaited" },
-				]);
-				expect(work()).toBe("working");
-				activity.servers.delete("s");
-				expect(work()).toBe("working");
-			}),
-	);
-
-	// 8.7 failure modes: a session-level awaited server leaves the session idle or calm; a
-	// session-level serving server makes an idle session read busy.
-	it.effect(
-		"a session-level awaited server reads working; a serving one leaves the session as it was (8.7)",
+		"reads Servers and their roles from the ledger's hand-over, with the gate's link (8.7)",
 		() =>
 			Effect.gen(function* () {
 				const activity = yield* makeSessionActivity;
 				const server = {
-					port: 3000,
-					pid: 600,
-					startedAt: 1,
+					key: { port: 3000, pid: 600, startedAt: 1 },
 					command: "node server.js",
 					cwd: "/w",
 					source: "declared",
 					role: "serving",
 				} as const;
-				const work = () => activity.background.backgroundOf("s")?.work;
-				activity.servers.set("s", [server]);
-				expect(activity.background.backgroundOf("s")).toBeUndefined();
-				activity.servers.set("s", [{ ...server, role: "awaited" }]);
-				expect(activity.background.backgroundOf("s")).toEqual({
-					work: "working",
-					tasks: [],
+				const none = { tag: "none" } as const;
+				const hand = (
+					tasks: Parameters<typeof activity.background.publish>[1],
+					...servers: (typeof server | Record<string, unknown>)[]
+				) =>
+					activity.background.publish("s", tasks, undefined, {
+						servers: new Map(
+							servers.map((entry) => [3000, { ...server, ...entry }]),
+						),
+					});
+				const read = () => ({
+					background: activity.background.backgroundOf("s"),
+					label: activity.background.activityOf("s", {
+						approvals: 0,
+						questions: 0,
+					}).label,
 				});
-				publishLedgerTasks(activity.background, {
-					sessionId: "s",
-					kind: "snapshot",
-					tasks: [{ id: "m1", type: "monitor", description: "Watch" }],
+				hand(none, server);
+				expect(read()).toEqual({ background: undefined, label: "background" });
+				hand(none, { role: "awaited" });
+				expect(read()).toEqual({
+					background: { work: "working", tasks: [] },
+					label: "working",
 				});
-				expect(work()).toBe("working");
-				activity.servers.set("s", [server]);
-				expect(work()).toBe("monitoring");
-				activity.servers.delete("s");
-				expect(work()).toBe("monitoring");
+				const serving = {
+					tag: "live",
+					label: "s-runner:1",
+					tasks: [
+						{
+							key: { taskId: "w1" },
+							taskType: "local_workflow",
+							description: "Dev server",
+							ambient: false,
+							kind: "workflow",
+							class: "serving",
+						},
+					],
+				} as const;
+				hand(serving, { taskKey: { taskId: "w1" } });
+				expect(read()).toMatchObject({
+					background: { work: "monitoring" },
+					label: "background",
+				});
+				hand(serving, { taskKey: { taskId: "w1" }, role: "awaited" });
+				expect(read()).toMatchObject({
+					background: { work: "working" },
+					label: "working",
+				});
+				const moved: string[] = [];
+				activity.onServersMoved.add((id) => moved.push(id));
+				activity.gateUrls.set(3000, "https://box.ts.net:3000");
+				expect(activity.background.ports()).toEqual(new Map([[3000, "s"]]));
+				expect(
+					activity.background.serversOf("s", activity.gateUrls),
+				).toMatchObject([
+					{ port: 3000, taskId: "w1", gateUrl: "https://box.ts.net:3000" },
+				]);
+				expect(moved).toEqual(["s"]);
+				hand(none);
+				expect(read()).toEqual({ background: undefined, label: "idle" });
+				expect(activity.background.ports().size).toBe(0);
 			}),
 	);
 

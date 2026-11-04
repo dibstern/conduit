@@ -39,6 +39,7 @@ import {
 import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
+import { publishRun } from "../../helpers/ledger-tasks.js";
 import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
 
@@ -600,6 +601,10 @@ describe("listDaemonSessions", () => {
 		]);
 
 		return Effect.gen(function* () {
+			// What runs comes from the ledger's hand-over, never row status (82tn.32.30).
+			const activity = yield* SessionActivityTag;
+			for (const id of ["grandchild-a", "child-c"])
+				publishRun(activity.background, id);
 			const first = yield* listDaemonSessions({ roots: true, limit: 1 });
 			expect(first.sessions).toEqual([
 				expect.objectContaining({
@@ -788,6 +793,7 @@ describe("listDaemonSessions", () => {
 						messageCount: 0,
 						projectSlug: "project-a",
 						attention: "idle",
+						activity: { foreground: "idle", background: "none", label: "idle" },
 						limitRecovery: null,
 						resumes: [],
 						canRenameBranch: false,
@@ -802,6 +808,7 @@ describe("listDaemonSessions", () => {
 						messageCount: 0,
 						projectSlug: "project-b",
 						attention: "idle",
+						activity: { foreground: "idle", background: "none", label: "idle" },
 						limitRecovery: null,
 						resumes: [],
 						canRenameBranch: false,

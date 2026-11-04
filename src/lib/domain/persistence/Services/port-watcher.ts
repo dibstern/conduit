@@ -6,7 +6,7 @@
  * `conduit server mark` runs the same scan and records `server_seen{declared}` at once. It compares each scan
  * against the ledger's Servers, read in the write that appends the evidence, never against a copy;
  * its own state is the hold candidates and first-scan readiness, in memory. A failed scan records
- * nothing. After each write it hands SessionActivity the Servers that write left.
+ * nothing. SessionActivity reads the Servers each write leaves from the Run Ledger's hand-over.
  *
  * Gap (CONTRACT.md 2976): "One PortWatcher per daemon". Servers live in each project's own store,
  * so this runs once per project relay, each recording only its own store's sessions.
@@ -22,11 +22,8 @@ import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type {
 	ServerKey,
-	Servers,
 	TaskKey,
 } from "../../../provider/run-ledger/run-ledger-model.js";
-import type { SessionServer } from "../../../shared-types.js";
-import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { Subprocess } from "../../daemon/Services/subprocess.js";
 
 class PortScanError extends Data.TaggedError("PortScanError")<{
@@ -492,7 +489,6 @@ export const makePortWatcherLive = (
 			const store = yield* EventStoreEffectTag;
 			const commit = yield* makeCommitAndSignal;
 			const subprocess = yield* Subprocess;
-			const activity = yield* SessionActivityTag;
 			const intervalMs = yield* Config.Int(
 				"CONDUIT_PORT_WATCH_INTERVAL_MS",
 			).pipe(Config.withDefault(2000));
@@ -847,7 +843,6 @@ export const makePortWatcherLive = (
 			const startedAt = yield* Clock.currentTimeMillis;
 			// Warn once per run of failures: a host without lsof fails every scan.
 			let failing = false;
-			const published = new Set<string>();
 			yield* registerWatcher(
 				portWatcherKnown,
 				sql,
@@ -855,59 +850,6 @@ export const makePortWatcherLive = (
 				() => known,
 			);
 
-			type Stamp = Parameters<Parameters<typeof commit.write>[0]>[1];
-			// Readers see the Servers a write left. The copy moves before COMMIT, so a reader woken by
-			// the write's advance already sees it; a rolled-back write is corrected by the next scan.
-			const publish = (
-				read: ReadonlyMap<string, Servers | undefined>,
-				stamp: Stamp,
-			) =>
-				Effect.gen(function* () {
-					for (const [id, servers] of read)
-						if (servers?.size) published.add(id);
-						else published.delete(id);
-					const moved = [...read].flatMap(([sessionId, servers]) => {
-						const list = [...(servers?.values() ?? [])].map(
-							({ key, command, cwd, taskKey, source, role }): SessionServer => {
-								// The Preview Gate's link, while the gate serves the port.
-								const gateUrl = activity.gateUrls.get(key.port);
-								return {
-									port: key.port,
-									pid: key.pid,
-									startedAt: key.startedAt,
-									command,
-									cwd,
-									...(taskKey === undefined ? {} : { taskId: taskKey.taskId }),
-									source,
-									role,
-									...(gateUrl === undefined ? {} : { gateUrl }),
-								};
-							},
-						);
-						if (
-							JSON.stringify(activity.servers.get(sessionId) ?? []) ===
-							JSON.stringify(list)
-						)
-							return [];
-						if (list.length === 0) activity.servers.delete(sessionId);
-						else activity.servers.set(sessionId, list);
-						return [sessionId];
-					});
-					// The sidebar applies servers at read time, so its row's version moves for the
-					// shell feed to re-read it.
-					if (moved.length > 0)
-						yield* stamp((version) =>
-							sql<{
-								session_id: string;
-							}>`UPDATE session_sidebar SET version = ${version}
-							WHERE row IS NOT NULL AND session_id IN (SELECT COALESCE(root_id, id) FROM sessions
-								WHERE id IN (SELECT value FROM json_each(${JSON.stringify(moved)})))
-							RETURNING session_id`.pipe(
-								Effect.map((rows) => rows.map(({ session_id }) => session_id)),
-							),
-						);
-					return moved;
-				});
 			// A live server keeps its row Open (8.3) and was recorded by a server_seen, so those rows
 			// and the scan's markers name every session a scan or mark can change.
 			const sessionsWithServers = (ids: readonly string[]) =>
@@ -955,7 +897,7 @@ export const makePortWatcherLive = (
 					)
 						return another;
 					const now = yield* Clock.currentTimeMillis;
-					const outcome = yield* commit.write((project, stamp) =>
+					return yield* commit.write((project) =>
 						Effect.gen(function* () {
 							const entryOf = (sessionId: string) =>
 								loadLedgerView(sessionId).pipe(
@@ -975,7 +917,7 @@ export const makePortWatcherLive = (
 									entry !== undefined &&
 									keyOf(entry.key) === keyOf(target.server)
 								)
-									return { outcome: another, moved: [] };
+									return another;
 							}
 							const entry = yield* entryOf(caller);
 							// A repeated mark (a model's retry) is already recorded.
@@ -984,7 +926,7 @@ export const makePortWatcherLive = (
 								entry.role === request.role &&
 								keyOf(entry.key) === keyOf(target.server)
 							)
-								return { outcome: { kind: "marked" } as const, moved: [] };
+								return { kind: "marked" } as const;
 							yield* project(
 								yield* store.appendBatch([
 									canonicalEvent(
@@ -995,17 +937,9 @@ export const makePortWatcherLive = (
 									),
 								]),
 							);
-							return {
-								outcome: { kind: "marked" } as const,
-								moved: yield* publish(
-									new Map([[caller, (yield* loadLedgerView(caller))?.servers]]),
-									stamp,
-								),
-							};
+							return { kind: "marked" } as const;
 						}),
 					);
-					for (const sessionId of outcome.moved) activity.changed(sessionId);
-					return outcome.outcome;
 				});
 			yield* registerWatcher(portWatcherMark, sql, store.projectId, (request) =>
 				mark(request).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
@@ -1022,15 +956,13 @@ export const makePortWatcherLive = (
 					if (held.get(server.port)?.key !== key)
 						held.set(server.port, { key, since: now });
 				}
-				const moved = yield* commit.write((project, stamp) =>
+				yield* commit.write((project) =>
 					Effect.gen(function* () {
-						const read = new Map<string, Servers | undefined>();
 						const events = [];
 						for (const session of yield* sessionsWithServers(
 							scanned.map((entry) => entry.sessionId),
 						)) {
 							const servers = (yield* loadLedgerView(session.id))?.servers;
-							read.set(session.id, servers);
 							const mine = scanned.filter(
 								(entry) => entry.sessionId === session.id,
 							);
@@ -1074,17 +1006,8 @@ export const makePortWatcherLive = (
 						}
 						if (events.length > 0)
 							yield* project(yield* store.appendBatch(events));
-						for (const sessionId of new Set(
-							events.map((event) => event.sessionId),
-						))
-							read.set(sessionId, (yield* loadLedgerView(sessionId))?.servers);
-						// A session no longer read has none.
-						for (const sessionId of published)
-							if (!read.has(sessionId)) read.set(sessionId, undefined);
-						return yield* publish(read, stamp);
 					}),
 				);
-				for (const sessionId of moved) activity.changed(sessionId);
 				// 8.7: ended sessions have no servers. Only this store's sessions count, so a marker
 				// this daemon cannot resolve is never read as ended; the hold does not apply.
 				const ended = yield* sql<{ id: string }>`

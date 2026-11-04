@@ -33,9 +33,14 @@ import {
 	claudeWorkspaceMismatch,
 	decodeClaudeWorktreeState,
 } from "../../session/claude-worktree-state.js";
+import {
+	type ActivityOf,
+	rollUpActivity,
+} from "../../session/session-activity-view.js";
 import type { SessionSkillMessage } from "../../session/session-skills.js";
 import {
 	GoalStuckSchema,
+	type SessionActivityView,
 	type SessionAttention,
 	type SessionInfo,
 	SessionPermissionModeSchema,
@@ -138,6 +143,9 @@ export const pendingApprovalCountsByType = (
 	return { questions, permissions };
 };
 
+/** Prompts roll up as counts, so a member's activity is read without them. */
+const noPrompts = { approvals: 0, questions: 0 } as const;
+
 export const sessionRowsToSessionInfoList = (
 	rows: readonly SessionRow[],
 	opts: {
@@ -155,13 +163,17 @@ export const sessionRowsToSessionInfoList = (
 		readonly backgroundOf?: (
 			sessionId: string,
 		) => SessionBackground | undefined;
+		/** 8.1: absent where only stored state is read (the sidebar projector), so nothing runs. */
+		readonly activityOf?: ActivityOf;
 	} = {},
 ): Array<SessionProjection & { readonly updatedAt: number }> => {
 	const subtree = new Map<
 		string,
 		{
-			processing: boolean;
-			monitoring: boolean;
+			members: {
+				activity: SessionActivityView;
+				backgroundChild: boolean;
+			}[];
 			unread: boolean;
 			questions: number;
 			permissions: number;
@@ -173,8 +185,7 @@ export const sessionRowsToSessionInfoList = (
 	]);
 	const stateFor = (id: string) => {
 		const state = subtree.get(id) ?? {
-			processing: false,
-			monitoring: false,
+			members: [],
 			unread: false,
 			questions: 0,
 			permissions: 0,
@@ -183,8 +194,10 @@ export const sessionRowsToSessionInfoList = (
 		return state;
 	};
 	if (opts.parentMap) {
-		const rowStatuses = new Map(rows.map((row) => [row.id, row.status]));
-		const members = new Set([...rowStatuses.keys(), ...opts.parentMap.keys()]);
+		const members = new Set([
+			...rows.map((row) => row.id),
+			...opts.parentMap.keys(),
+		]);
 		const backgroundChildren = new Set(
 			[...new Set([...members, ...opts.parentMap.values()])]
 				.filter((id) => opts.contributingSessionIds?.has(id) ?? true)
@@ -219,17 +232,14 @@ export const sessionRowsToSessionInfoList = (
 				state.questions += opts.pendingQuestionCounts?.get(id) ?? 0;
 				state.permissions += opts.pendingPermissionCounts?.get(id) ?? 0;
 			}
-			const activity = stateFor(activityRoot ?? root);
-			const status = opts.statuses?.[id]?.type ?? rowStatuses.get(id);
-			const work = opts.backgroundOf?.(id)?.work;
-			// A live background agent keeps its own busy status; its owner
-			// monitors that work rather than inheriting a foreground turn.
-			activity.processing ||=
-				(!backgroundChildren.has(id) &&
-					(status === "busy" || status === "retry")) ||
-				work === "working";
-			activity.monitoring ||= work === "monitoring";
-			activity.unread ||= opts.unreadSessionIds?.has(id) === true;
+			const rolled = stateFor(activityRoot ?? root);
+			const activity = opts.activityOf?.(id, noPrompts);
+			if (activity)
+				rolled.members.push({
+					activity,
+					backgroundChild: backgroundChildren.has(id),
+				});
+			rolled.unread ||= opts.unreadSessionIds?.has(id) === true;
 		}
 	}
 	return rows.map((row) => {
@@ -244,12 +254,15 @@ export const sessionRowsToSessionInfoList = (
 		const status = opts.statuses?.[row.id]?.type ?? row.status;
 		const background = opts.backgroundOf?.(row.id);
 		const backgroundWork = background?.work;
-		const processing =
-			state?.processing ||
-			status === "busy" ||
-			status === "retry" ||
-			backgroundWork === "working";
-		const monitoring = state?.monitoring || backgroundWork === "monitoring";
+		const activity = opts.activityOf?.(row.id, {
+			approvals: pendingPermissionCount ?? 0,
+			questions: pendingQuestionCount ?? 0,
+		});
+		const running = activity
+			? rollUpActivity(activity, state?.members ?? [])
+			: "idle";
+		const processing = running === "working";
+		const monitoring = running === "background";
 		let attention: SessionAttention = "idle";
 		if ((pendingPermissionCount ?? 0) > 0) attention = "needs-approval";
 		else if ((pendingQuestionCount ?? 0) > 0) attention = "needs-reply";
@@ -315,6 +328,7 @@ export const sessionRowsToSessionInfoList = (
 				? { forkPointMessageId: row.fork_point_message_id }
 				: {}),
 			...(processing ? { processing: true } : {}),
+			...(activity ? { activity } : {}),
 			...(backgroundWork ? { backgroundWork } : {}),
 			...(background?.tasks.length
 				? { backgroundTasks: background.tasks }
@@ -372,9 +386,8 @@ const decodeSidebarRow = Schema.decodeUnknownSync(
 const sidebarItem = (
 	row: SidebarRow,
 	backgroundOf?: (sessionId: string) => SessionBackground | undefined,
-	busyMembers?: ReadonlySet<string>,
+	activityOf?: ActivityOf,
 ): SessionProjection => {
-	const work = new Set(row.members.map((id) => backgroundOf?.(id)?.work));
 	const background = backgroundOf?.(row.session.id);
 	const backgroundChildren = new Set(
 		row.members.flatMap(
@@ -384,33 +397,45 @@ const sidebarItem = (
 				) ?? [],
 		),
 	);
-	const { processing: storedProcessing, ...session } = row.session;
-	const processing =
-		backgroundChildren.size > 0 && busyMembers !== undefined
-			? row.members.some(
-					(id) => busyMembers.has(id) && !backgroundChildren.has(id),
+	const activity = activityOf?.(row.session.id, {
+		approvals: row.session.pendingPermissionCount ?? 0,
+		questions: row.session.pendingQuestionCount ?? 0,
+	});
+	const running =
+		activity && activityOf
+			? rollUpActivity(
+					activity,
+					row.members.map((id) => ({
+						activity: activityOf(id, noPrompts),
+						backgroundChild: backgroundChildren.has(id),
+					})),
 				)
-			: storedProcessing === true;
-	const quiet =
-		row.session.attention === "idle" ||
-		row.session.attention === "done-unread" ||
-		(row.session.attention === "working" && !processing);
+			: "idle";
+	const { processing: _stored, ...session } = row.session;
+	// A row stored before 82tn.32.30 may still say working or monitoring; only the view says so now.
+	const stored = row.session.attention ?? "idle";
+	const quiet = ["idle", "done-unread", "working", "monitoring"].includes(
+		stored,
+	);
 	return {
 		...session,
 		updatedAt: row.lastActivity,
-		...(processing || work.has("working") ? { processing: true } : {}),
+		...(running === "working" ? { processing: true } : {}),
+		...(activity ? { activity } : {}),
 		...(background?.work ? { backgroundWork: background.work } : {}),
 		...(background?.tasks.length ? { backgroundTasks: background.tasks } : {}),
 		...(background?.wakeRun ? { wakeRun: background.wakeRun } : {}),
 		...(background?.checking ? { tasksChecking: true } : {}),
 		...deriveSessionSnooze(row.snooze),
 		attention: !quiet
-			? row.session.attention
-			: work.has("working")
+			? stored
+			: running === "working"
 				? "working"
-				: work.has("monitoring")
+				: running === "background"
 					? "monitoring"
-					: row.session.attention,
+					: stored === "done-unread"
+						? "done-unread"
+						: "idle",
 	};
 };
 
@@ -570,6 +595,7 @@ export interface ReadQueryEffect {
 			before?: { at: number; id: string };
 			statuses?: Readonly<Record<string, { type: string }>>;
 			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
+			activityOf?: ActivityOf;
 			hintDismissals?: ReadonlyMap<string, number>;
 		},
 	) => Effect.Effect<
@@ -711,6 +737,8 @@ export interface ReadQueryEffect {
 			readonly backgroundOf?: (
 				sessionId: string,
 			) => SessionBackground | undefined;
+			/** 8.1: what each session is doing; see session-activity-view. */
+			readonly activityOf?: ActivityOf;
 			/** Also list every sidebar row, for a resume checksum. */
 			readonly listing?: boolean;
 		},
@@ -1611,6 +1639,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				...(opts?.backgroundOf && {
 					backgroundOf: opts.backgroundOf,
 				}),
+				...(opts?.activityOf && { activityOf: opts.activityOf }),
 			});
 		});
 
@@ -2152,6 +2181,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			readonly backgroundOf?: (
 				sessionId: string,
 			) => SessionBackground | undefined;
+			readonly activityOf?: ActivityOf;
 			readonly listing?: boolean;
 		},
 	): Effect.Effect<
@@ -2211,33 +2241,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							range?.listing === true &&
 							floor <= version &&
 							floor >= (removedSince ?? floor);
-						const sidebars = stored.flatMap(({ row }) =>
-							row === null ? [] : [decodeSidebarRow(row)],
-						);
-						// Stored rows aggregate busy children without live task ownership.
-						// Read projected statuses once for families with background agents
-						// so a foreground sibling still outranks monitoring.
-						const members = [
-							...new Set(
-								sidebars.flatMap((row) =>
-									row.members.some((id) =>
-										range
-											?.backgroundOf?.(id)
-											?.tasks.some((task) => task.childSessionId),
-									)
-										? row.members
-										: [],
-								),
-							),
-						];
-						const busyMembers =
-							members.length === 0
-								? undefined
-								: new Set(
-										(yield* sql<{ id: string }>`
-								SELECT id FROM sessions WHERE id IN ${sql.in(members)}
-								AND status IN ('busy', 'retry')`).map(({ id }) => id),
-									);
 						return {
 							rows: stored.flatMap(({ row, workspace_hint_sequence }) => {
 								if (row === null) return [];
@@ -2245,7 +2248,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								return [
 									{
 										item: {
-											...sidebarItem(sidebar, range?.backgroundOf, busyMembers),
+											...sidebarItem(
+												sidebar,
+												range?.backgroundOf,
+												range?.activityOf,
+											),
 											workspaceHint:
 												(range?.hintDismissals ?? hintDismissals)?.get(
 													sidebar.session.id,
@@ -2393,6 +2400,7 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						...(range?.backgroundOf && {
 							backgroundOf: range.backgroundOf,
 						}),
+						...(range?.activityOf && { activityOf: range.activityOf }),
 					});
 					return {
 						rows: rows.flatMap((row, index) => {

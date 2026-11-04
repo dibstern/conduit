@@ -200,7 +200,14 @@ describe("rollUpActivity", () => {
 			[{ activity: working, backgroundChild: true }],
 			"background",
 		],
-		["own needs-you wins", asking, [{ activity: working }], "needs-you"],
+		// Prompts roll up as counts, so a prompt never hides a member's working turn.
+		[
+			"a prompt rolls up as what runs",
+			asking,
+			[{ activity: working }],
+			"working",
+		],
+		["a prompt alone rolls up idle", asking, [], "idle"],
 		["a calm child", idle, [{ activity: calm }], "background"],
 		["own working over a calm child", working, [{ activity: calm }], "working"],
 	] as const)("%s", (_name, own, members, label) => {
