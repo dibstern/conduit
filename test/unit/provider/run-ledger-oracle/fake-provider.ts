@@ -246,6 +246,8 @@ export class FakeProvider {
 		readonly runId: string;
 		readonly parent: string;
 	}[] = [];
+	/** Each input main last sent as a steer, to the Run it sent it into (3.9); every host reads main's issues. */
+	private readonly steerParents = new Map<string, string>();
 	/** Direct steers a retryable outcome answered (3.6, CONTRACT.md 692-698): main tries each again into its open parent. */
 	private readonly steerRetries: {
 		readonly token: SendToken;
@@ -321,6 +323,8 @@ export class FakeProvider {
 	/** Execution labels of each wake Run in join order (8.3, D28). */
 	private readonly wakeExecutions = new Map<string, string[]>();
 	private readonly wakeLabels = new Set<string>();
+	/** 3.9 (CONTRACT.md 978-982): steers' own Runs that main's run.started started after their Run ended. */
+	private readonly hostStarted = new Set<string>();
 	private readonly executions: WakeExecution[] = [];
 	/** Sends the provider refused at delivery, with the refusal code (D34). */
 	private readonly refusedCommands = new Map<string, string>();
@@ -332,7 +336,11 @@ export class FakeProvider {
 	private readonly requestedCommands = new Set<string>();
 	private readonly commands = new Map<
 		string,
-		{ readonly text: string; state: "queued" | "started" | "completed" }
+		{
+			readonly text: string;
+			readonly label: string;
+			state: "queued" | "started" | "completed";
+		}
 	>();
 	private taskState: "unknown" | readonly TaskDescription[] = [];
 	private taskVersion = 0;
@@ -380,7 +388,9 @@ export class FakeProvider {
 	/** The rest of a runner's stop commit, emitted before any other fact (4.5). */
 	private readonly commit: LedgerCommand[] = [];
 	/** stopRace's later steps, each drawn from the host its predecessor left; one per packet. */
-	private readonly deferred: (() => LedgerCommand | undefined)[] = [];
+	private readonly deferred: ((
+		snapshot: ProviderSnapshot,
+	) => LedgerCommand | undefined)[] = [];
 	/** The time of the packet being drawn: a stop commit's retiredAt (6.5). */
 	private clock = 0;
 	/** Gated holds: a phantom send with no transmission (4.4, 4.8). */
@@ -800,12 +810,22 @@ export class FakeProvider {
 	}
 	/** Older label (3.4, L1): its runner retired, or a querySeq below the latest. A send's own label is never older, so an Answer never is. */
 	private older(observation: Observation): boolean {
-		if (observation.tag !== "Unsolicited") return false;
+		if (observation.tag !== "Unsolicited" || this.ownReceipt(observation))
+			return false;
 		const runner = runnerOf(observation.label);
 		return (
 			this.dead(runner) ||
 			querySeqOf(observation.label) <
 				(this.latestQuerySeq.get(runner) ?? -Infinity)
+		);
+	}
+	/** 8.5, LI7 (CONTRACT.md 2924, 3435-3436): a native command is a session send, so its receipts under the label it was delivered on are its own, never older for it. */
+	private ownReceipt(observation: Observation): boolean {
+		return (
+			observation.tag === "Unsolicited" &&
+			(observation.kind === "command_lifecycle" ||
+				observation.kind === "command_result") &&
+			this.commands.get(observation.commandId)?.label === observation.label
 		);
 	}
 	private seenLabel(label: string): void {
@@ -897,6 +917,7 @@ export class FakeProvider {
 	reached(runId: string): boolean {
 		return (
 			this.wakeExecutions.has(runId) ||
+			this.hostStarted.has(runId) ||
 			[...this.sends.values()].some(
 				({ send, accepted, deliveryConfirmed, released, transportRank }) =>
 					(send.effect.kind === "start" || send.effect.kind === "steer") &&
@@ -928,8 +949,22 @@ export class FakeProvider {
 		);
 	}
 	/** D50: a not-yet-delivered Run unlaunches on a trigger; its execution is dropped and its hold lives on in the relaunch. */
-	private unlaunch(runId: string): boolean {
+	private unlaunch(runId: string, sealedOnly = false): boolean {
 		if (this.terminals.has(runId) || this.reached(runId)) return false;
+		// D52, 3.8 (CONTRACT.md 645-654, 845): a release or outcome unlaunches only once every start and
+		// steer of the execution is sealed; a hold whose run.dispatched is unread has no transmission yet.
+		if (
+			sealedOnly &&
+			[...this.sends.values()].some(
+				({ send }) =>
+					(send.effect.kind === "start" || send.effect.kind === "steer") &&
+					send.effect.runId === runId &&
+					!this.unlaunchedTries.has(send.token) &&
+					this.holdBindings.has(send.token) &&
+					!this.dispatchRead.has(send.token),
+			)
+		)
+			return false;
 		for (const { send } of this.sends.values())
 			if (
 				(send.effect.kind === "start" || send.effect.kind === "steer") &&
@@ -1126,6 +1161,11 @@ export class FakeProvider {
 		aliveAtIssue = this.alive,
 	): readonly Send[] {
 		const alive = aliveAtIssue;
+		for (const { tag, effect } of effects)
+			if (tag === "Main" && effect.kind === "steer")
+				this.steerParents.set(effect.inputId, effect.runId);
+			else if (tag === "Main" && effect.kind === "start")
+				this.steerParents.delete(effect.inputId);
 		return effects.map((effect) => {
 			const send = this.bound(effect);
 			// A swept row never reaches the executor: nothing transmits it (3.4).
@@ -1250,6 +1290,7 @@ export class FakeProvider {
 					const queued = this.provider === "claude" && this.turning;
 					this.commands.set(send.effect.commandId, {
 						text: send.effect.text,
+						label,
 						state: queued ? "queued" : "started",
 					});
 					if (queued) {
@@ -1659,6 +1700,14 @@ export class FakeProvider {
 		const observation = command.observation;
 		// D60: main's run events are this host's own acts, already applied when main wrote them.
 		if (observation.tag === "Main") {
+			// 3.9 (CONTRACT.md 978-982): a steer its Run's end left pending is a Run of its own, and its
+			// host's run.started starts it, so it has reached (D50), whether main names the ended Run or the
+			// steer's own (REDESIGN-9's late steer).
+			if (
+				observation.kind === "run_started" &&
+				this.terminals.has(this.steerParents.get(observation.inputId) ?? "")
+			)
+				this.hostStarted.add(observation.requestedRunId);
 			// 3.8 GAP 5, 9: OpenCode's turn.error ends the turn and its query in one write, so main's error
 			// terminal is the native turn's end whichever of the pair folds first.
 			if (
@@ -1709,7 +1758,8 @@ export class FakeProvider {
 				this.turnFinished = false;
 			}
 			const own = observation.label === this.label;
-			// Every wake execution label keeps its own Run-end evidence (D28).
+			// Every wake execution label keeps its own Run-end evidence (D28), and a native command its
+			// receipts (8.5).
 			if (
 				!own &&
 				!(
@@ -1717,7 +1767,8 @@ export class FakeProvider {
 					(observation.kind === "result" ||
 						observation.kind === "activity" ||
 						observation.kind === "query_ended")
-				)
+				) &&
+				!this.ownReceipt(observation)
 			)
 				return;
 			if (observation.kind === "tasks_snapshot" && this.supportsTasks()) {
@@ -1855,7 +1906,7 @@ export class FakeProvider {
 						observation.outcome.tag === "not_sent") &&
 					!this.unlaunchedTries.has(observation.token)
 				)
-					this.unlaunch(effect.runId);
+					this.unlaunch(effect.runId, true);
 				return;
 			}
 			// A permanent outcome means the provider never received the command (3.4, D34).
@@ -1989,8 +2040,13 @@ export class FakeProvider {
 					if (this.provider === "opencode") native.ended = false;
 					native.accepted = true;
 					this.refreshQuery(native);
-					// The turn flag is the current query's; a replaced label's send keeps its own facts (3.3).
-					if (native.label === this.label) {
+					// The turn flag is the current query's; a replaced label's send keeps its own facts (3.3). An
+					// unlaunch's drop ended a dropped send's work, so its late start runs no turn (D50, CONTRACT.md
+					// 670-672).
+					if (
+						native.label === this.label &&
+						!this.unlaunchedTries.has(native.send.token)
+					) {
 						this.turning = true;
 						this.turnFinished = false;
 					}
@@ -2003,6 +2059,20 @@ export class FakeProvider {
 			case "run_released":
 				if (observation.reason === "ResumeRejected") {
 					native.transportRank = Math.max(native.transportRank, 2);
+					// L6, 3.9: main's next move after a rejected resume of the open run's start is its error terminal.
+					if (effect.kind === "start")
+						this.deferred.push(() =>
+							this.mainRun?.runId === effect.runId
+								? this.main({
+										operation: 28,
+										selection: 0,
+										index: 0,
+										variant: 2,
+										input: 0,
+										advance: 0,
+									})
+								: undefined,
+						);
 				} else {
 					native.notConsumed = true;
 					native.released = true;
@@ -2010,7 +2080,7 @@ export class FakeProvider {
 				this.refreshQuery(native);
 				// D50: a release that leaves the Run never reached unlaunches it; a dropped execution's try no longer moves it.
 				if (!this.unlaunchedTries.has(observation.token))
-					this.unlaunch(effect.runId);
+					this.unlaunch(effect.runId, true);
 				break;
 			case "delivery_indeterminate":
 				native.transportRank = Math.max(native.transportRank, 3);
@@ -3593,6 +3663,14 @@ export class FakeProvider {
 								}),
 								() => this.steerFailed(head.inputId, action.input % 2 === 1),
 							);
+						// REDESIGN-9 (CONTRACT.md 4081-4082, 3.9 978-985): in the other draws in two, main's next move
+						// is the steer's run.started, so its Run's result can come first (case 1's late steer).
+						else if (this.provider === "claude" && action.input % 2 === 0)
+							this.deferred.push(() =>
+								this.mainSteers[0]?.inputId === head.inputId
+									? this.main({ ...action, variant: 1 })
+									: undefined,
+							);
 					} else
 						this.mainRun = {
 							runId,
@@ -4001,13 +4079,34 @@ export class FakeProvider {
 		// A stop commit's facts fold in one transaction: nothing interleaves them (4.5).
 		const committed = this.commit.shift();
 		if (committed) return { command: committed, now: snapshot.now };
-		const deferred = this.deferred.shift()?.();
+		const deferred = this.deferred.shift()?.(snapshot);
 		if (deferred) return { command: deferred, now: snapshot.now };
 		if (
 			snapshot.view.pendingConfirm &&
 			!this.copiedConfirms.includes(snapshot.view.pendingConfirm.snapshotEntry)
-		)
-			this.copiedConfirms.push(snapshot.view.pendingConfirm.snapshotEntry);
+		) {
+			const entry = snapshot.view.pendingConfirm.snapshotEntry;
+			this.copiedConfirms.push(entry);
+			// 8.4 D45, 6.1: one copy in two, the host replaces its query while the confirm is pending and
+			// the copied confirm follows; OpenCode never replaces a query.
+			if (this.provider !== "opencode" && action.input % 2 === 0)
+				this.deferred.push(
+					() => {
+						const serving = this.serving();
+						const latest =
+							serving === undefined
+								? undefined
+								: this.latestQuerySeq.get(serving);
+						return latest !== undefined && latest >= 0
+							? this.replaceQuery(action, `${serving}:${latest + 1}`)
+							: undefined;
+					},
+					() => ({
+						verb: "control",
+						control: { kind: "confirm_escalation", snapshotEntry: entry },
+					}),
+				);
+		}
 		let now = snapshot.now + action.advance;
 		const inputId = `input:${action.input}`;
 		let command: LedgerCommand;
@@ -4057,7 +4156,18 @@ export class FakeProvider {
 			case 0:
 			case 1:
 				// D58: main's handoff; a steer delivery is main's send into an open run (3.9). OpenCode's
-				// composer never offers one (CONTRACT.md 4431-4432, 5901).
+				// composer never offers one (CONTRACT.md 4431-4432, 5901). Main claims a Claude steer into its
+				// open run as its next move, so steers into a running turn are common (3.9 978-985).
+				if (
+					action.operation === 1 &&
+					this.provider === "claude" &&
+					this.mainRun !== undefined
+				)
+					this.deferred.push(() =>
+						this.mainRun !== undefined && this.mainInbox[0]?.inputId === inputId
+							? this.main({ ...action, variant: 0 })
+							: undefined,
+					);
 				command = {
 					verb: "admit",
 					inputId,
@@ -4701,6 +4811,27 @@ export class FakeProvider {
 							? "not_served"
 							: "served",
 				);
+				// 3.4, 3.12: one removal in two, main sweeps its open rows, then a native command's fresh row
+				// meets main's gate, and the refusal sweep ends it at n 0.
+				if (this.gate === "removed" && action.input % 2 === 0) {
+					const sweep = (next: ProviderSnapshot) =>
+						this.gate === "removed"
+							? this.projectMacro({ ...action, variant: 5 }, next)
+							: undefined;
+					const commandId = `command:refused:${this.serial++}`;
+					this.deferred.push(sweep, sweep, () =>
+						this.gate === "removed"
+							? {
+									verb: "control",
+									control: {
+										kind: "native_command",
+										commandId,
+										text: "/goal clear",
+									},
+								}
+							: undefined,
+					);
+				}
 				return alarm;
 			case 3:
 				if (this.gate === "served") this.setGate("not_served");
