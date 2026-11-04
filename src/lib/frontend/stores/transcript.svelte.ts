@@ -1275,7 +1275,10 @@ function transcriptView(primary: boolean): TranscriptView {
 			return primary ? placedSessionId() : currentSessionId;
 		},
 		get chat() {
-			if (primary) return sessionMessages.get(placedSessionId() ?? "") ?? empty;
+			// The main chat shows a page drawn from its saved record before the
+			// server places it; only requests wait for placement.
+			if (primary)
+				return sessionMessages.get(sessionState.currentId ?? "") ?? empty;
 			// Private windows read session notices and terminal state without
 			// becoming another writer of the session's activity or messages.
 			const owned = currentSlot?.messages ?? empty;

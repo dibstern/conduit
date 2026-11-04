@@ -24,7 +24,7 @@
 	const earlierIndex = $derived(steps[earlierCount]?.index ?? 0);
 	let logEl: HTMLDivElement | undefined = $state();
 	$effect(() => { if (pending?.target.kind === "step") choice = "all"; });
-	// Keep shown rows mounted when leaving Full log so row details survive.
+	// Keep shown rows mounted when the log is hidden or the turn collapses, so row details survive.
 	let logMounted = $state(false);
 	$effect(() => { if (mode === "shown" && rowMode === "all") logMounted = true; });
 	const visibleEntries = $derived(logMounted || rowMode === "all" ? entries : entries.filter((entry) => entry.index >= earlierIndex));
@@ -45,8 +45,8 @@
 	}
 </script>
 
-{#if mode !== "collapsed" && (logMounted || mode === "shown")}
-	<div bind:this={logEl} class={className} use:enableTouchActive role="region" aria-label={`Turn log, ${stepCount} ${stepCount === 1 ? "step" : "steps"}`} hidden={mode === "hidden"} data-testid={phase !== "settled" ? "turn-live-activity" : undefined}>
+{#if logMounted || mode === "shown"}
+	<div bind:this={logEl} class={className} use:enableTouchActive role="region" aria-label={`Turn log, ${stepCount} ${stepCount === 1 ? "step" : "steps"}`} hidden={mode !== "shown"} data-testid={phase !== "settled" ? "turn-live-activity" : undefined}>
 		{#if phase !== "settled" && earlierCount > 0}
 			<Button variant="ghost" size="content" tone="secondary" hoverFill="none" align="start" touchTarget
 				class="px-[6px] py-[7px] text-[12px]" aria-expanded={rowMode === "all"} onclick={toggleEarlier}>{rowMode === "ticker" ? `+ ${plural(earlierCount, "earlier step")}` : "Hide earlier steps"}</Button>

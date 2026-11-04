@@ -195,23 +195,24 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 			.filter({ hasText: "Turn stopped." });
 		await expect(toast).toContainText("Turn stopped. 4 tasks still running");
 		await expect(page.getByRole("alert")).toHaveCount(0);
-		for (const client of [page, second]) {
-			await expect(
-				client.getByRole("button", { name: /^4 background tasks(:|$)/ }),
-			).toBeVisible();
+		const expectTaskList = async (client: typeof page) => {
 			await client
 				.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
 				.click();
 			await expect(
 				client.getByTestId("background-task-description"),
 			).toHaveText(taskStopFixture.map((task) => task.description));
-		}
+		};
+		for (const client of [page, second])
+			await expect(
+				client.getByRole("button", { name: /^4 background tasks(:|$)/ }),
+			).toBeVisible();
+		// On a phone the toast hangs over the header's task pills, so the stopping
+		// client opens its list once Stop them has closed the toast.
+		await expectTaskList(second);
 		await expect(
 			second.getByTestId("toast").filter({ hasText: "Turn stopped." }),
 		).toHaveCount(0);
-		await page
-			.getByRole("button", { name: /^\d+ background tasks?(:|$)/ })
-			.click();
 		const screenshot = testInfo.outputPath("turn-only-stop-toast.png");
 		await page.screenshot({ path: screenshot, animations: "disabled" });
 		await testInfo.attach("turn-only-stop-toast.png", {
@@ -237,6 +238,7 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 		await expect(
 			page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 		).toBeVisible();
+		await expectTaskList(page);
 		expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 		expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 		writeFileSync(join(harness.root, "task-stop-confirm-all"), "release");
