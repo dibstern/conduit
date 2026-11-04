@@ -2086,3 +2086,5 @@ answers at restart and release onto the next runner. The stop commit's held	poin
 warm-up no longer counts. Stopping a wake that runs alone ends it at the	pointer
 Lane 32.6b (85e71258, 08c16063, 9808341c, f2c3d77b on wt/82tn32r3): boxes	pointer
 Lane 3278: every steering box has code and a proving test per provider.	pointer
+Lane 329c (22e4b45d, e5090563, d4e8aaf0, 3d786af7, e6cdab6d on wt/82tn3225): a browser answer	pointer
+question now returns at once: the Stop commits without waiting (provider-	pointer
