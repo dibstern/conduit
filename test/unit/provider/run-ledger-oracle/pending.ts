@@ -9,16 +9,11 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 		[
 			[
 				"LI8, CONTRACT.md 978-997 (gap, 3.9: a steer main dispatches into an open Run mints its own run.requested; whether it joins that Run, so main's terminal for the open Run ends it, is undecided, 984. Wrong side undecided: the oracle lets the open Run's terminal end the steer's work, the fake keeps its native send unfinished)",
-				[
-					"cursor oracle traces, seed 82103202",
-					"cursor oracle traces, seed 82103302",
-					"review trace R1-1",
-				],
+				["review trace R1-1"],
 			],
 			[
 				"LI8, CONTRACT.md 871-876 against 3086-3089 (gap, GAP 5 against section 9: when OpenCode work ends. GAP 5 ends a main-run Run once main's terminal folds; section 9 keeps the native fence until a covering idle probe. Wrong side undecided: the oracle hides an unfinished native send, the fake keeps it)",
 				[
-					"opencode oracle traces, seed 82103301",
 					"review trace R1-2",
 					"review trace R1-3",
 					"review trace R1-4",
@@ -27,7 +22,7 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 				],
 			],
 			[
-				"coverage, CONTRACT.md 3456-3477 (11.2: fc.check stops at the first failing trace, so the seeds pended above for the steer join (984) and GAP 5 cut generation short before these shapes. Wrong side: neither, the shapes wait on those two gaps)",
+				"coverage, CONTRACT.md 3456-3477 (11.2: the generator has not reached these shapes at default runs since the oracle port; no seed is pended any more, so no gap holds them. Wrong side: the generator, reach work open on 82tn.32.2.9.2)",
 				[
 					"not_sent start ended its Run",
 					"unheld_outcome after a reissue",
