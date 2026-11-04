@@ -220,7 +220,7 @@ export const PROVIDER_DRIVERS = {
 			supportsMultiFolder: false, // The captured thread/start contract consumes one cwd.
 			supportsWorktree: false, // Worktree support needs a captured Codex contract.
 			supportsNewWorktree: false, // The first slice does not launch worktrees.
-			supportsTaskStop: false, // The first slice only interrupts whole turns.
+			supportsTaskStop: true, // thread/backgroundTerminals/terminate stops one background terminal.
 		},
 		runsOpenCodeServer: false, // Codex owns an app-server child in its detached runner.
 		usageHarness: "codex", // account/rateLimits supplies main and model-specific allowances.
