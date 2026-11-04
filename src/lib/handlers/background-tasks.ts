@@ -73,8 +73,8 @@ export const stopTasks = (
 						return yield* new StopTasksRefused({
 							message:
 								tasks.length === 1
-									? "That background task has already finished"
-									: "Those background tasks have already finished",
+									? "That background task is not running"
+									: "Those background tasks are not running",
 						});
 					const [before] = yield* sql<{ last: number }>`
 						SELECT COALESCE(MAX(request_sequence), 0) AS last FROM provider_command_outbox`;

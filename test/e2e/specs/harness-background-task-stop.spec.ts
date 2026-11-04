@@ -591,7 +591,7 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 		const finished = await Effect.runPromise(
 			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks: [shell.task_id] })),
 		);
-		expect(finished.message).toBe("That background task has already finished");
+		expect(finished.message).toBe("That background task is not running");
 		expect(requestedIds(harness)).toEqual(callsBeforeFinishedStop);
 		await expect(second.locator('[role="alert"]')).toHaveCount(0);
 		assertTurnUntouched(harness, queryId);

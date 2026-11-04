@@ -241,3 +241,137 @@ describe("Stop tasks through the Run Ledger", () => {
 		turnUntouched(harness, queryId);
 	});
 });
+
+// Box 2: a Stop tasks with nothing to stop is refused with its reason and records nothing. How it
+// could fail (lane 3224 audit): 5. no tasks is accepted silently or refused without a reason;
+// 6. a provider with none fails generically or calls a missing method; 7. named ids that are not
+// live are sent to stopTask, or refused without a reason; 18. the reason names contract ids.
+describe("Stop tasks refuses what it cannot stop, with its reason", () => {
+	let harness: ProcessHarness | undefined;
+	const proof: Record<string, unknown> = {};
+
+	afterEach(async ({ task }) => {
+		try {
+			await harness?.dispose();
+			harness?.assertNoRunners();
+		} finally {
+			proof[`${task.name} outcome`] =
+				task.result?.state === "pass" ? "passed" : "failed";
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/82tn-32-24-stop-tasks-refused.json",
+				`${JSON.stringify(proof, null, 2)}\n`,
+			);
+			harness = undefined;
+		}
+	});
+
+	/** The refusal's message, after checking it appended no request and issued no stop. */
+	const refused = async (
+		fixture: ProcessHarness,
+		browser: BrowserClient,
+		sessionId: string,
+		tasks: "all" | readonly [string, ...string[]],
+	) => {
+		const before = read(fixture, sessionId);
+		const { message } = await Effect.runPromise(
+			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks })),
+		);
+		const after = read(fixture, sessionId);
+		expect(after.outbox).toEqual(before.outbox);
+		expect(
+			after.events.filter((event) => event.type === "tasks.stop_requested"),
+		).toEqual(
+			before.events.filter((event) => event.type === "tasks.stop_requested"),
+		);
+		return message;
+	};
+
+	it("refuses no tasks and ids that are not running, and stops only the live ones it names", async () => {
+		const fixture = await ProcessHarness.start({ restartProof: true });
+		harness = fixture;
+		const browser = await fixture.connect();
+		await browser.followSessions();
+
+		const idle = await browser.createSession("No tasks");
+		const fresh = await refused(fixture, browser, idle, "all");
+		proof["no tasks"] = { message: fresh };
+		expect(fresh).toBe("No background tasks are running");
+
+		const { sessionId, turn, queryId } = await startTurn(fixture, browser);
+		const [shell] = taskStopFixture;
+		const missing = {
+			one: await refused(fixture, browser, sessionId, ["no-such-task"]),
+			several: await refused(fixture, browser, sessionId, [
+				"no-such-task",
+				"another-missing-task",
+			]),
+		};
+		proof["ids not running"] = missing;
+		expect(missing).toEqual({
+			one: "That background task is not running",
+			several: "Those background tasks are not running",
+		});
+		expect(stopMarks(fixture, "requested")).toEqual([]);
+
+		// A live id among unknown ones is stopped; the unknown ones are left out.
+		expect(
+			await Effect.runPromise(
+				browser.rpc.StopTasks({
+					sessionId,
+					tasks: [shell.task_id, "no-such-task"],
+				}),
+			),
+		).toEqual({ ok: true });
+		const mixed = read(fixture, sessionId);
+		proof["live among unknown"] = {
+			outbox: mixed.outbox,
+			requested: stopMarks(fixture, "requested"),
+		};
+		expect(mixed.outbox.map((row) => row.taskId)).toEqual([shell.task_id]);
+		expect(stopMarks(fixture, "requested")).toEqual([shell.task_id]);
+
+		// Once a snapshot drops it, the shell is no longer a task to stop.
+		const cursor = browser.frames.length;
+		writeFileSync(join(fixture.root, "task-stop-confirm-all"), "release");
+		await rowTasks(
+			browser,
+			sessionId,
+			cursor,
+		)((tasks) => Array.isArray(tasks) && tasks.length === 3);
+		const finished = await refused(fixture, browser, sessionId, [
+			shell.task_id,
+		]);
+		proof["after a snapshot drops it"] = { message: finished };
+		expect(finished).toBe("That background task is not running");
+
+		writeFileSync(join(fixture.root, "task-stop-release-result"), "release");
+		await turn;
+		turnUntouched(fixture, queryId);
+		expect(stopMarks(fixture, "requested")).toEqual([shell.task_id]);
+	});
+
+	it("refuses a provider that has no background tasks", async () => {
+		const fixture = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			foregroundCli: true,
+			autoStartOpenCode: true,
+		});
+		harness = fixture;
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"OpenCode",
+			"opencode",
+			"opencode",
+		);
+		const none = {
+			all: await refused(fixture, browser, sessionId, "all"),
+			named: await refused(fixture, browser, sessionId, ["any-task"]),
+		};
+		proof["provider has none"] = none;
+		expect(none).toEqual({
+			all: "This session's provider has no background tasks",
+			named: "This session's provider has no background tasks",
+		});
+	});
+});
