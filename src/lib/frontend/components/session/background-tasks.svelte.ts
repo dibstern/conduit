@@ -1,5 +1,8 @@
 import { tick } from "svelte";
-import type { BackgroundTask } from "../../../shared-types.js";
+import {
+	type BackgroundTask,
+	backgroundTaskText,
+} from "../../../shared-types.js";
 import { reveal } from "../../stores/reveal.svelte.js";
 import { selection } from "../../stores/selection.svelte.js";
 import {
@@ -8,6 +11,7 @@ import {
 	sessionState,
 } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
+import { confirm } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 
@@ -198,6 +202,54 @@ export async function stopBackgroundTasks(
 				? "Failed to stop background task"
 				: "Failed to stop background tasks",
 		)(error);
+	}
+}
+
+/** Resolves true once the session's ask names another snapshot entry (or ends), false after `ms`. */
+const askMoved = (sessionId: string, entry: number, ms: number) =>
+	new Promise<boolean>((resolve) => {
+		const stop = $effect.root(() => {
+			$effect(() => {
+				if (findSession(sessionId)?.stopConfirm?.snapshotEntry === entry)
+					return;
+				settle(true);
+			});
+		});
+		const timer = setTimeout(() => settle(false), ms);
+		function settle(moved: boolean) {
+			clearTimeout(timer);
+			queueMicrotask(stop);
+			resolve(moved);
+		}
+	});
+
+/**
+ * Confirm a stuck Stop (CONTRACT.md 8.4, 2873-2877): ask with the tasks closing would end, then
+ * send the snapshot entry the ask showed. A newer snapshot refuses it (D45, 2886-2890), so the
+ * ask comes again with the current list; cancelling leaves the Stop waiting.
+ */
+export async function confirmStuckStop(sessionId: string): Promise<void> {
+	for (;;) {
+		const ask = findSession(sessionId)?.stopConfirm;
+		if (!ask) return;
+		const tasks = ask.tasks?.map((task) =>
+			backgroundTaskText({ ...task, kind: taskKind(task).label }),
+		);
+		const text = tasks
+			? `Stopping now will end: ${tasks.join(", ")}. Continue?`
+			: "Background state unknown. Stopping now may end background work. Continue?";
+		if (!(await confirm(text, "Stop now"))) return;
+		try {
+			await rpc("ConfirmEscalation", {
+				sessionId,
+				snapshotEntry: ask.snapshotEntry,
+			});
+			return;
+		} catch (error) {
+			// The refusal can reach the page before the row naming the newer snapshot.
+			if (!(await askMoved(sessionId, ask.snapshotEntry, 2_000)))
+				return toastFailure("Failed to stop")(error);
+		}
 	}
 }
 

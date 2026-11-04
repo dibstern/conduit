@@ -1881,6 +1881,17 @@ function query(params: {
 						!taskTurnInterrupted
 					) {
 						releaseTaskStops();
+						// A task that starts while the turn is held, e.g. after its Stop (8.4).
+						if (consumeMarker("task-stop-late-task")) {
+							taskStopLive = [...taskStopLive, ...taskStopMonitorFixture];
+							outOfBand.push({
+								type: "system",
+								subtype: "background_tasks_changed",
+								session_id: sessionId,
+								uuid: randomUUID(),
+								tasks: taskStopLive,
+							});
+						}
 						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));
 					}
@@ -3047,7 +3058,11 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding || interruptibleTurn) {
+			// A "deaf" held turn acknowledges the interrupt and keeps running, as a stuck Stop (8.4).
+			if (
+				(taskStopHolding && !taskStopHeldRequest?.includes("deaf")) ||
+				interruptibleTurn
+			) {
 				taskTurnInterrupted = true;
 				interruptTurn?.();
 			}

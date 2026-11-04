@@ -3188,6 +3188,16 @@ export const StopTasks = Rpc.make("StopTasks", {
 	error: WsRpcError,
 });
 
+/** Confirms a stuck Stop's ask (8.4, D45): rejected when a newer snapshot replaced the entry it names. */
+export const ConfirmEscalation = Rpc.make("ConfirmEscalation", {
+	payload: Schema.TaggedStruct("ConfirmEscalation", {
+		sessionId: NonEmptyString,
+		snapshotEntry: Schema.Number,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 /** Stops a server the session lists (8.7 Stop); the entry leaves only by the next scan's server_gone. */
 export const StopServer = Rpc.make("StopServer", {
 	payload: Schema.TaggedStruct("StopServer", {
@@ -3720,6 +3730,7 @@ const wsRpcRequests = [
 	RemoveDraftAttachment,
 	CancelSession,
 	StopTasks,
+	ConfirmEscalation,
 	SetGoal,
 	ClearGoal,
 	PauseGoal,

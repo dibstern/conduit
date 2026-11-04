@@ -38,6 +38,7 @@ import type {
 } from "../../provider/run-ledger/run-ledger-model.js";
 import { sendToken } from "../../provider/runner/runner-protocol.js";
 import { harnessForModelProvider } from "../../provider/turn-settings.js";
+import { backgroundTaskText } from "../../shared-types.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
@@ -114,9 +115,10 @@ const wakeRunOf = (view: LedgerView): WakeRun | undefined =>
 			? { task: view.active.wakeTask }
 			: {};
 /**
- * SessionActivity's wakes for a committed change of a session's tasks view or wake Run (8.1 "a
- * read-only view"), with that view, the wake Run and, for a snapshot, its tasks with their display
- * and its time.
+ * SessionActivity's wakes for a committed change of a session's tasks view, wake Run or pending
+ * confirm (8.1 "a read-only view"), with that view, the wake Run, the confirm's snapshot entry
+ * (8.4: callers copy it, never compute it) and, for a snapshot, its tasks with their display and
+ * its time.
  */
 export const ledgerTasksWakes = new WeakMap<
 	SqlClient.SqlClient,
@@ -126,6 +128,7 @@ export const ledgerTasksWakes = new WeakMap<
 			tasks: LedgerView["tasks"],
 			snapshot: TasksSnapshot | undefined,
 			wake: WakeRun | undefined,
+			confirm: number | undefined,
 		) => void
 	>
 >();
@@ -470,6 +473,15 @@ const commandFor = (
 					verb: "control",
 					control: { kind: "stop_tasks", tasks: event.data.tasks },
 				};
+			// 8.4, D45: the browser's confirm; decide rejects one older than the latest snapshot.
+			case "escalation.confirmed":
+				return {
+					verb: "control",
+					control: {
+						kind: "confirm_escalation",
+						snapshotEntry: event.data.snapshotEntry,
+					},
+				};
 			case "native_command.requested": {
 				const commandId = event.metadata.commandId;
 				if (commandId === undefined) return undefined;
@@ -731,6 +743,7 @@ const HANDLES = [
 	"interrupt.requested",
 	"session.end_requested",
 	"tasks.stop_requested",
+	"escalation.confirmed",
 	"native_command.requested",
 	"evidence.process_started",
 	"evidence.process_lost",
@@ -832,7 +845,13 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							if (!wakes?.size) return;
 							handedOver.add(event.sessionId);
 							for (const wake of wakes)
-								wake(event.sessionId, view.tasks, snapshot, wakeRunOf(view));
+								wake(
+									event.sessionId,
+									view.tasks,
+									snapshot,
+									wakeRunOf(view),
+									view.pendingConfirm?.snapshotEntry,
+								);
 						},
 					});
 				// The display of a first hand-over's live tasks: its latest stored snapshot.
@@ -899,13 +918,76 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 								wake(event.sessionId, view.nativeCommands);
 						},
 					});
+				// 8.4 L5 (CONTRACT.md 2907-2913): each label's lost work, decided once, is a timeline notice
+				// at the fact that decided it, so it replays after a reload. The names come from that
+				// label's latest stored snapshot, which carries each task's command.
+				const noticeIds: string[] = [];
+				for (const [index, lost] of view.lostWork
+					.slice(before.lostWork.length)
+					.entries()) {
+					const [stored] =
+						lost.tag === "known"
+							? yield* sql<{ data: string }>`
+									SELECT data FROM events WHERE session_id = ${event.sessionId}
+									AND type = 'evidence.tasks_snapshot' AND sequence <= ${event.sequence}
+									AND json_extract(data, '$.label') = ${lost.label}
+									ORDER BY sequence DESC LIMIT 1`
+							: [];
+					const details = new Map(
+						(stored
+							? (
+									JSON.parse(
+										stored.data,
+									) as EventPayloadMap["evidence.tasks_snapshot"]
+								).tasks
+							: []
+						).map((task) => [task.key.taskId, task.detail]),
+					);
+					const text =
+						lost.tag === "known"
+							? `Background work ended: ${lost.tasks
+									.map((task) => {
+										const detail = details.get(task.key.taskId);
+										return backgroundTaskText({
+											kind: task.kind,
+											type: task.taskType,
+											description: task.description,
+											...(detail ? { detail } : {}),
+										});
+									})
+									.join(", ")}`
+							: "Background work may have been lost";
+					const messageId = `lost-work-${event.sequence}-${index}`;
+					yield* sql`INSERT INTO messages
+						(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+						VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt},
+							${event.createdAt}, ${ctx.version},
+							(SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE session_id = ${event.sessionId}))
+						ON CONFLICT (id) DO NOTHING`;
+					yield* sql`INSERT INTO message_parts
+						(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
+						VALUES (${`${messageId}-part`}, ${messageId}, 'text', ${text},
+							${JSON.stringify({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt},
+							${ctx.version})
+						ON CONFLICT (id) DO NOTHING`;
+					noticeIds.push(messageId);
+				}
+				const noticed = yield* stampMessage(noticeIds, ctx);
 				if (event.type === "evidence.tasks_snapshot")
 					handOver(view, { tasks: event.data.tasks, at: event.createdAt });
 				else if (!handedOver.has(event.sessionId))
 					handOver(view, yield* storedSnapshot(view.tasks));
 				else if (
-					JSON.stringify([view.tasks, wakeRunOf(view)]) !==
-					JSON.stringify([before.tasks, wakeRunOf(before)])
+					JSON.stringify([
+						view.tasks,
+						wakeRunOf(view),
+						view.pendingConfirm?.snapshotEntry,
+					]) !==
+					JSON.stringify([
+						before.tasks,
+						wakeRunOf(before),
+						before.pendingConfirm?.snapshotEntry,
+					])
 				)
 					handOver(view, undefined);
 				cache.set(event.sessionId, {
@@ -976,14 +1058,17 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				const stamped = yield* sql<{ id: string }>`
 					UPDATE sessions SET version = ${ctx.version} WHERE id = ${event.sessionId}
 					RETURNING id`;
-				const touch: ProjectionTouch =
-					stamped.length > 0
-						? {
-								stamped: stamped.map(({ id }) => id),
-								removed: [],
-								collections: ["sessions"],
-							}
-						: untouched;
+				const touch: ProjectionTouch = {
+					stamped: [...noticed.stamped, ...stamped.map(({ id }) => id)],
+					removed: noticed.removed,
+					collections: [
+						...new Set([
+							...noticed.collections,
+							...(stamped.length > 0 ? (["sessions"] as const) : []),
+						]),
+					],
+					...(noticed.sidebar ? { sidebar: noticed.sidebar } : {}),
+				};
 				// 82tn.45: the Run's terminal classification ends its open foreground tool rows.
 				const endedRun = before.active?.runId;
 				return endedRun && endedRun !== view.active?.runId

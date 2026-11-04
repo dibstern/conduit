@@ -6,7 +6,10 @@ import {
 } from "../contracts/stored-event.js";
 import { ProviderPermissionUpdateSchema } from "../shared-types.js";
 
-export const STOP_ABORT_WAIT_MS = 30_000;
+export const STOP_ABORT_WAIT_MS =
+	process.env["NODE_ENV"] === "test"
+		? Number(process.env["CONDUIT_TEST_STOP_ABORT_WAIT_MS"] ?? 30_000)
+		: 30_000;
 
 export const DURABLE_COMMAND_RECEIPT_STATUSES = [
 	"accepted",

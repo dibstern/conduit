@@ -39,6 +39,14 @@ export type SessionBackground = {
 	readonly stale?: readonly BackgroundTask[];
 	/** 8.3: the active Run is a wake, named by its waking task's description when known. */
 	readonly wakeRun?: { readonly task?: string };
+	/**
+	 * 8.4: a Stop past its deadline waits on the confirm gate. Its snapshot entry and tasks come
+	 * from one hand-over; no tasks means the background state is unknown.
+	 */
+	readonly stopConfirm?: {
+		readonly snapshotEntry: number;
+		readonly tasks?: readonly BackgroundTask[];
+	};
 };
 
 type TaskDisplay = Pick<
@@ -58,6 +66,8 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			readonly display: ReadonlyMap<string, TaskDisplay>;
 			readonly since: number;
 			readonly wake: WakeRun | undefined;
+			/** 8.4: the pending confirm's snapshot entry, as the arm handed it over. */
+			readonly confirm: number | undefined;
 			/**
 			 * Each task's description by id, kept past its last listing: Claude's empty snapshot lands
 			 * before the notification that wakes it (8.3).
@@ -67,7 +77,17 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 	>();
 	const taskIds = (view: LedgerView["tasks"] | undefined) =>
 		view?.tag === "live" ? view.tasks.map((task) => task.key.taskId) : [];
+	// Sessions whose Stop is past its deadline and waiting on the confirm gate (U2, row 213).
+	const held = new Set<string>();
 	return {
+		/** U2 holds a Stop past its deadline until the gate answers; the release lifts the ask. */
+		holdStop(sessionId: string): () => void {
+			held.add(sessionId);
+			changed(sessionId);
+			return () => {
+				if (held.delete(sessionId)) changed(sessionId);
+			};
+		},
 		/** The arm's committed view, and for a snapshot its tasks; true when what shows moved. */
 		publish(
 			sessionId: string,
@@ -77,6 +97,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 				readonly at: number;
 			},
 			wake?: WakeRun,
+			confirm?: number,
 		): boolean {
 			const previous = views.get(sessionId);
 			const listed = [
@@ -109,6 +130,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 						? previous.since
 						: (snapshot?.at ?? Date.now()),
 				wake,
+				confirm,
 				named: new Map([
 					...(previous?.named ?? []),
 					...listed.flatMap(({ key, description }) =>
@@ -124,7 +146,8 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 					previous?.view ?? { tag: "none" },
 					[...(previous?.display ?? [])],
 					previous?.wake,
-				]) !== JSON.stringify([view, [...display], wake]);
+					previous?.confirm,
+				]) !== JSON.stringify([view, [...display], wake, confirm]);
 			if (moved) changed(sessionId);
 			return moved;
 		},
@@ -156,20 +179,38 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 						};
 					})
 					.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+			// 8.4: the ask shows only while U2 holds the Stop on a pending confirm.
+			const asking =
+				held.has(sessionId) && entry.confirm !== undefined
+					? entry.confirm
+					: undefined;
 			// 8.3: unknown tasks are neither work nor monitoring; the last known list only shows greyed.
 			if (entry.view.tag === "unknown") {
 				const stale = shown(entry.view.stale ?? []);
+				const stopConfirm =
+					asking === undefined
+						? {}
+						: { stopConfirm: { snapshotEntry: asking } };
 				return stale.length > 0
-					? { tasks: [], checking: true, stale, ...wakeRun }
-					: { tasks: [], checking: true, ...wakeRun };
+					? { tasks: [], checking: true, stale, ...wakeRun, ...stopConfirm }
+					: { tasks: [], checking: true, ...wakeRun, ...stopConfirm };
 			}
 			const tasks = shown(entry.view.tasks);
+			const stopConfirm =
+				asking === undefined
+					? {}
+					: { stopConfirm: { snapshotEntry: asking, tasks } };
 			// 8.2 (CONTRACT.md 2778-2781): the ledger's class decides; only work tasks
 			// not serving a server make the session work.
 			const working = entry.view.tasks.some(
 				(task) => task.class === "work" && !serving.has(task.key.taskId),
 			);
-			return { work: working ? "working" : "monitoring", tasks, ...wakeRun };
+			return {
+				work: working ? "working" : "monitoring",
+				tasks,
+				...wakeRun,
+				...stopConfirm,
+			};
 		},
 		/** 8.3: tasks live or unknown may still act. */
 		hasLiveWork(sessionId: string): boolean {

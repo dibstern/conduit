@@ -64,6 +64,7 @@ import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
 import { settingsSurfacingHandlers } from "./steps/settingsSurfacing.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
+import { stuckStopHandlers } from "./steps/stuckStop.js";
 import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
 import { surfacingMinimiseHandlers } from "./steps/surfacingMinimise.js";
@@ -120,6 +121,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionDiffHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
+	...stuckStopHandlers,
 	...launchingRowsHandlers,
 	...taskDrillInHandlers,
 	...terminalKeysHandlers,

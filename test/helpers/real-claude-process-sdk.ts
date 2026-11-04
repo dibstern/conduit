@@ -1,35 +1,25 @@
-import { appendFileSync } from "node:fs";
-import { join } from "node:path";
-import { query, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { defaultClaudeSessionForkSdk } from "../../src/lib/provider/claude/claude-session-fork.js";
 import type { ProjectRelayConfig } from "../../src/lib/types.js";
 import { claudeSdk as fakeClaudeSdk } from "./fake-claude-process-sdk.js";
 
-// The SDK trace capture keeps only Claude's output; live tests also need what was sent
-// (each input's priority), so a capture dir also gets every streamed input in inputs.jsonl.
-const captureDir = process.env["CONDUIT_CLAUDE_SDK_CAPTURE"];
+type Query = ReturnType<typeof query>;
 
-async function* teeInputs(
-	prompt: AsyncIterable<SDKUserMessage>,
-	file: string,
-): AsyncGenerator<SDKUserMessage> {
-	for await (const message of prompt) {
-		appendFileSync(file, `${JSON.stringify(message)}\n`);
-		yield message;
-	}
-}
+/** The real query with its interrupt acknowledged but never sent, as a Claude that ignores Stop (8.4). */
+const deafQuery = (params: Parameters<typeof query>[0]): Query =>
+	new Proxy(query(params), {
+		get: (target, key) => {
+			if (key === "interrupt") return () => Promise.resolve();
+			const value: unknown = Reflect.get(target, key, target);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
 
 export const claudeSdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
-	query: captureDir
-		? ({ prompt, options }) =>
-				query({
-					prompt:
-						typeof prompt === "string"
-							? prompt
-							: teeInputs(prompt, join(captureDir, "inputs.jsonl")),
-					...(options === undefined ? {} : { options }),
-				})
-		: query,
+	query:
+		process.env["CONDUIT_TEST_REAL_CLAUDE_DEAF_INTERRUPT"] === "1"
+			? deafQuery
+			: query,
 	titleQuery: fakeClaudeSdk.titleQuery,
 	fork: defaultClaudeSessionForkSdk,
 };

@@ -303,8 +303,10 @@ export const makeProviderAdaptersLive = (
 			// hands over after each commit that moves them.
 			const onLedgerTasks: Parameters<
 				NonNullable<ReturnType<typeof ledgerTasksWakes.get>>["add"]
-			>[0] = (sessionId, tasks, snapshot, wake) => {
-				if (activity.background.publish(sessionId, tasks, snapshot, wake))
+			>[0] = (sessionId, tasks, snapshot, wake, confirm) => {
+				if (
+					activity.background.publish(sessionId, tasks, snapshot, wake, confirm)
+				)
 					announce(sessionId);
 			};
 			// 8.5: the goal tracker reads each goal action's send from the same hand-over.

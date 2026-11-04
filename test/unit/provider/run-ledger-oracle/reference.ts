@@ -1112,6 +1112,7 @@ function noteLabel(world: World, label: Label): "older" | "current" {
 			? unknownTasks(label, runner.tasks)
 			: { tag: "Known", label, tasks: [] };
 		world.snapshotEntry++;
+		openRetireGate(world);
 	}
 	return "current";
 }
@@ -1237,6 +1238,21 @@ function activeInputRun(world: World) {
 		(run) => run.phase !== "Ended" && run.origin === "input",
 	);
 }
+/**
+ * 8.4 (L3): tasks turning live or unknown under an interrupted Run open its retire gate. Gap
+ * (CONTRACT.md 2870): the gate guards the step past the deadline, so a task that starts after the
+ * Stop opens it at that snapshot, as the Stop would have; a confirmed gate may open again.
+ */
+function openRetireGate(world: World) {
+	const run = activeRun(world);
+	if (
+		run?.phase === "Interrupting" &&
+		run.by !== "end" &&
+		taskView(world).tag !== "none"
+	)
+		world.confirm ??= { step: "retire", runId: run.runId };
+}
+
 function activeRun(world: World) {
 	return (
 		activeInputRun(world) ??
@@ -1306,6 +1322,7 @@ function unsolicited(
 				})),
 			};
 			world.snapshotEntry++;
+			openRetireGate(world);
 			return changed;
 		}
 		case "task_event":
@@ -2763,6 +2780,7 @@ function settle(
 			});
 			world.current = runnerId;
 			world.snapshotEntry++;
+			openRetireGate(world);
 			// L2: a pending send resolves, once, to the next process_started's runner; a run_dispatched
 			// naming a runner not yet started fixes the label of that runner's process_started.
 			for (const send of world.sends)

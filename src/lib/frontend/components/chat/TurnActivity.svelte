@@ -2,10 +2,12 @@
      Usage holds the bill and notable events; running tasks stay in the footer.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script module lang="ts">
+	import type { BackgroundTask } from "../../../shared-types.js";
+	/** A stuck Stop waits for a confirm (8.4) and names the tasks closing would end; no tasks means unknown. */
 	export type RunLabel =
 		| { kind: "working" }
 		| { kind: "woken"; task?: string }
-		| { kind: "stopping"; stuck?: boolean };
+		| { kind: "stopping"; stuck?: { readonly tasks?: readonly BackgroundTask[] } };
 </script>
 
 <script lang="ts">
@@ -38,7 +40,8 @@
 	import { primaryTranscript, type TranscriptView } from "../../stores/transcript.svelte.js";
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
-	import type { BackgroundTask } from "../../../shared-types.js";
+	import { backgroundTaskText } from "../../../shared-types.js";
+	import { confirmStuckStop, stopBackgroundTasks, taskKind } from "../session/background-tasks.svelte.js";
 	import type { ModelExecution } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -147,11 +150,17 @@
 	const phrase = $derived(countsPhrase(stats));
 	const logEntries = $derived(entries ?? segment.activity.map((part, index): TurnLogEntry => ({ kind: "step", uuid: part.uuid, index, part })));
 	const live = $derived(panel.phase !== "settled");
+	const stuck = $derived(live && runLabel.kind === "stopping" ? runLabel.stuck : undefined);
 	function runText(label: RunLabel): string {
 		switch (label.kind) {
 			case "working": return "Working";
 			case "woken": return label.task ? `Working · woken by ${label.task}` : "Working · woken";
-			case "stopping": return label.stuck ? "Still stopping" : "Stopping";
+			case "stopping": {
+				if (!label.stuck) return "Stopping";
+				const tasks = label.stuck.tasks;
+				if (!tasks) return "Stop is stuck. Background state unknown";
+				return `Stop is stuck. Closing will end ${plural(tasks.length, "task")}: ${tasks.map((task) => backgroundTaskText({ ...task, kind: taskKind(task).label })).join(", ")}`;
+			}
 			default: return assertNever(label);
 		}
 	}
@@ -587,7 +596,7 @@
 							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<ConduitMark size={16} variant="running" />
 							{/if}
-							<span class="text-[14px] font-semibold text-text">{live ? runText(runLabel) : "Worked"}</span>
+							<span class="text-[14px] font-semibold text-text {stuck ? 'min-w-0 truncate' : ''}" title={stuck ? runText(runLabel) : undefined}>{live ? runText(runLabel) : "Worked"}</span>
 							{#if live && !turn.user}
 								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
@@ -602,6 +611,13 @@
 						{#if stats.compactions > 0}<span>Context compacted{stats.compactions > 1 ? ` ×${stats.compactions}` : ""}</span>{/if}
 					</div>
 				</Tooltip>
+				{#if stuck && sessionId}
+					{@const stuckSession = sessionId}
+					<span class="flex shrink-0 gap-[6px]" data-testid="stuck-stop-actions">
+						<Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px]" onclick={() => confirmStuckStop(stuckSession)}>Stop now</Button>
+						{#if stuck.tasks}<Button variant="ghost" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] bg-chip" onclick={() => stopBackgroundTasks(stuckSession)}>Stop tasks first</Button>{/if}
+					</span>
+				{/if}
 				{#if surfacingActive || summaryEnabled}
 					<div class="surface-head-chips" data-surfacing-region="head-chips">
 						{#if surfacingActive && surface.openAsk}<Button variant="ghost" size="content" tone="inherit" hoverFill="none" touchTarget class="shrink-0" data-testid="surfacing-ask-chip" onclick={() => revealMessage(surface.openAsk)}><Badge variant="ask" size="session" shape="pill">? #{surface.openAsk.surfacingOrdinal}</Badge></Button>{/if}
