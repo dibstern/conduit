@@ -82,6 +82,7 @@ import type {
 	EventPayloadMap,
 	LiveEventType,
 } from "../../../src/lib/contracts/stored-event.js";
+import type { SessionBackground } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
 	announceBackgroundWork,
 	markSeen,
@@ -97,7 +98,6 @@ import {
 	rerootSession,
 } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import type { SessionBackground } from "../../../src/lib/session/background-liveness.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { seedSessionLoadFixture } from "../../fixtures/session-load.js";
 

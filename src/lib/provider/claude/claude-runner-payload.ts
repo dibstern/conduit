@@ -46,7 +46,6 @@ import type { ClaudeOneShotQueryFactory } from "../../domain/daemon/Services/cla
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
 import type { ClaudeEventPersistEffect } from "../../persistence/effect/claude-event-persist-effect.js";
-import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import {
 	type ClaudeAdapterError,
@@ -83,7 +82,10 @@ import type {
 } from "../types.js";
 import { claudeApiModelId } from "./claude-api-model-id.js";
 import type { ClaudeCapabilitiesService } from "./claude-capabilities-service.js";
-import { isInterruptedResult } from "./claude-event-translator.js";
+import {
+	type BackgroundTaskTransition,
+	isInterruptedResult,
+} from "./claude-event-translator.js";
 import { makeClaudeForkQuery } from "./claude-fork-query.js";
 import {
 	ClaudeGoalTracker,

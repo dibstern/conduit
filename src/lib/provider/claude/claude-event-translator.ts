@@ -33,6 +33,7 @@ import { createLogger, type Logger } from "../../logger.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import type { CanonicalToolInput } from "../../persistence/events.js";
 import { createEventId } from "../../persistence/events.js";
+import type { BackgroundTask } from "../../shared-types.js";
 import { isRecord } from "../../utils.js";
 import type { EventSinkError } from "../event-sink-errors.js";
 import { providerRefsFromRuntimeData } from "../provider-runtime-refs.js";
@@ -384,11 +385,34 @@ function taskCompletionResult(
 	return null;
 }
 
+/**
+ * Claude's background task list as the translator hands it on. Driven by the SDK's level
+ * signal (`background_tasks_changed`, the full live set) rather than start/finish pairs, so a
+ * missed finish can't leave a task live.
+ */
+export type BackgroundTaskTransition =
+	| {
+			readonly sessionId: string;
+			readonly kind: "snapshot";
+			// firstSeenAt is stamped by the runner; absent from runners that
+			// predate it.
+			readonly tasks: readonly (Omit<BackgroundTask, "firstSeenAt"> & {
+				readonly firstSeenAt?: number;
+				/** The SDK's: not activity, but still a live task (8.2). */
+				readonly ambient?: true;
+			})[];
+	  }
+	| {
+			// The query ended: its stream's tasks end with it.
+			readonly sessionId: string;
+			readonly kind: "session-ended";
+	  };
+
 export interface ClaudeEventTranslatorDeps {
 	readonly getSink: (ctx: ClaudeSessionContext) => EventSink | undefined;
 	readonly readGoalStatus?: ReadClaudeGoalStatus;
 	readonly onBackgroundTask?: (
-		input: import("../../session/background-liveness.js").BackgroundTaskTransition,
+		input: BackgroundTaskTransition,
 	) => void | Effect.Effect<void>;
 	readonly logger?: Logger;
 }

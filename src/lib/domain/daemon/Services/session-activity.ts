@@ -14,12 +14,23 @@ import type {
 	EventDelivery,
 	Interests,
 } from "../../../server/event-audiences.js";
-import type { SessionBackground } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
-import type { BackgroundTask, SessionServer } from "../../../shared-types.js";
+import type {
+	BackgroundTask,
+	BackgroundWork,
+	SessionServer,
+} from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
+
+export type SessionBackground = {
+	/** Absent while checking: unknown tasks are neither work nor monitoring. */
+	readonly work?: BackgroundWork;
+	readonly tasks: readonly BackgroundTask[];
+	/** 8.3: a reattached runner's tasks, unknown until its catch-up snapshot. */
+	readonly checking?: true;
+};
 
 type TaskDisplay = Pick<
 	BackgroundTask,
