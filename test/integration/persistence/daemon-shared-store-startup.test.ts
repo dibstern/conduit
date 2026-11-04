@@ -1056,6 +1056,16 @@ describe("daemon shared-store startup", () => {
 				expect(
 					await runtime.runPromise(countRunningProjectSessions(projects[0])),
 				).toBe(0);
+				// Auto-settle pauses on the ledger row too: alpha's busy row settles, beta's Open row waits.
+				expect(
+					await Promise.all(
+						projects.map((own) =>
+							runtime.runPromise(
+								hasColdAutoSettleCandidate(own, 1_000_000, 1000),
+							),
+						),
+					),
+				).toEqual([true, false]);
 				await runtime.runPromise(
 					Effect.flatMap(SqlClient.SqlClient, (sql) =>
 						sql`UPDATE sessions SET status = 'idle'`.pipe(

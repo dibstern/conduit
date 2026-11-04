@@ -55,6 +55,13 @@ export const readPersistedAutoSettleFacts = (
 			WHERE status = 'pending' AND session_id IN (${placeholders})`,
 			ids,
 		);
+		// 8.3 (2849): liveness asks the ledger; a store with no live relay reads its row (3.12).
+		const open = yield* sql.unsafe<{ session_id: string }>(
+			`SELECT session_id FROM run_ledger_sessions
+			WHERE state = 'Open' AND session_id IN (${placeholders})`,
+			ids,
+		);
+		const openIds = new Set(open.map((item) => item.session_id));
 		const turnBySession = new Map<string, AutoSettleTurn>();
 		for (const turn of turns) {
 			if (!turnBySession.has(turn.session_id))
@@ -109,6 +116,7 @@ export const readPersistedAutoSettleFacts = (
 					latestTurn: turnBySession.get(row.id) ?? null,
 					latestUserMessageAt: userBySession.get(row.id) ?? null,
 					hasPendingApproval: pendingIds.has(row.id),
+					mayAct: openIds.has(row.id),
 					hasLiveBackgroundWork: false,
 					hasViewer: false,
 					isSnoozed: deriveSessionSnooze(row, now).snoozedAt !== undefined,
