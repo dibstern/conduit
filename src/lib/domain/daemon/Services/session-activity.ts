@@ -210,10 +210,13 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 						};
 					})
 					.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
-			// 8.4: the ask shows only while U2 holds the Stop on a pending confirm.
-			const asking = held.has(sessionId)
-				? entry.ledger?.pendingConfirm?.snapshotEntry
-				: undefined;
+			// 8.4: the ask shows while U2 holds the Stop on a pending confirm, or while the gate holds
+			// an end_session step, which waits with no turn (CONTRACT.md 2875-2899).
+			const pending = entry.ledger?.pendingConfirm;
+			const asking =
+				held.has(sessionId) || pending?.step === "end_session"
+					? pending?.snapshotEntry
+					: undefined;
 			// 8.3: unknown tasks are neither work nor monitoring; the last known list only shows greyed.
 			if (entry.view.tag === "unknown") {
 				const stale = shown(entry.view.stale ?? []);

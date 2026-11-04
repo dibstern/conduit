@@ -252,6 +252,8 @@ export type Control =
 			readonly kind: "end";
 			readonly commandId: string;
 			readonly deadlineAt: number | null;
+			/** 8.4: the snapshot entry the user confirmed this step at, re-asked only once it changed. */
+			readonly confirmed?: number;
 	  }
 	/** The interrupt main's `interruptForInput` asks for (5.1, D58); deadlineAt as stop's (L6). */
 	| {

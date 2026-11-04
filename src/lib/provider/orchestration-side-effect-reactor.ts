@@ -478,11 +478,19 @@ export class ProviderSideEffectReactor {
 				);
 				// 2.1 row 202 (CONTRACT.md 215, 714-717): the commit that releases a fence claims the
 				// held starts, each through its session lane, and stops at the first control.
+				// 8.4: the commit that issues a held end_session step runs its row (CONTRACT.md 2875-2899).
 				const heldStarts = this.nextPendingRequests().pipe(
 					Effect.flatMap((heads) =>
 						Effect.forEach(
-							heads.filter((head) => head.effect_type === "send_turn"),
-							(head) => this.drainSessionLane(head, makeInteractions, true),
+							heads.filter(
+								(head) =>
+									head.effect_type === "send_turn" ||
+									head.effect_type === "end_session",
+							),
+							(head) =>
+								head.effect_type === "end_session"
+									? Effect.asVoid(this.runBackgroundRow(head, makeInteractions))
+									: this.drainSessionLane(head, makeInteractions, true),
 							{ concurrency: "unbounded", discard: true },
 						),
 					),

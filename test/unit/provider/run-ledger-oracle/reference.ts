@@ -640,7 +640,12 @@ function endRun(
 	run.retryAt = undefined;
 	run.exec.settle = undefined;
 	step.ended.push({ runId: run.runId, ...ended });
-	if (world.confirm?.runId === run.runId) world.confirm = undefined;
+	// D43; an end's end_session step outlives its Run (8.4 2897).
+	if (
+		world.confirm?.runId === run.runId &&
+		world.confirm.step !== "end_session"
+	)
+		world.confirm = undefined;
 }
 
 /** The first specific permanent code, or the cap (3.8 reason 2.2, 4.3). */
@@ -1034,13 +1039,15 @@ function foldEndSession(
 	);
 }
 
-/** 8.4: the end_session step is confirm-gated with tasks live or unknown. */
+/** 8.4: the end_session step is confirm-gated with tasks live or unknown, unless confirmed at the latest snapshot. */
 function gateEndSession(
 	world: World,
 	runId: string | null,
 	commandId: string,
+	confirmed?: number,
 ): void {
-	if (taskView(world).tag === "none") foldEndSession(world, runId, commandId);
+	if (taskView(world).tag === "none" || confirmed === world.snapshotEntry)
+		foldEndSession(world, runId, commandId);
 	else
 		world.confirm = {
 			step: "end_session",
@@ -2333,6 +2340,7 @@ function commit(
 	by: InterruptBy,
 	deadlineAt: number | null,
 	commandId: string,
+	confirmed?: number,
 ): void {
 	const run = activeRun(world);
 	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
@@ -2385,7 +2393,8 @@ function commit(
 		}
 	}
 	// 8.4 (CONTRACT.md 2893-2895): an end commits its Stop as the end_session row itself.
-	if (by === "end") gateEndSession(world, run?.runId ?? null, commandId);
+	if (by === "end")
+		gateEndSession(world, run?.runId ?? null, commandId, confirmed);
 	else if (
 		run !== undefined &&
 		run.phase === "Interrupting" &&
@@ -2553,8 +2562,21 @@ function control(
 			// null) or one with no Run joins no deadline, and no Run issues end_session{runId: null}.
 			const run = activeRun(world);
 			if (run === undefined || command.deadlineAt === null)
-				gateEndSession(world, run?.runId ?? null, command.commandId);
-			else commit(world, step, "end", command.deadlineAt, command.commandId);
+				gateEndSession(
+					world,
+					run?.runId ?? null,
+					command.commandId,
+					command.confirmed,
+				);
+			else
+				commit(
+					world,
+					step,
+					"end",
+					command.deadlineAt,
+					command.commandId,
+					command.confirmed,
+				);
 			return changed;
 		}
 		case "answer": {

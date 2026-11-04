@@ -150,6 +150,7 @@ export const ProviderControlPayloadSchema = Schema.Union([
 		targetProviderId: Schema.optionalKey(Schema.String),
 		account: Schema.optionalKey(AccountSchema),
 		unbind: Schema.optionalKey(Schema.Boolean),
+		confirmed: Schema.optionalKey(Schema.Number),
 	}),
 	Schema.Struct({
 		...controlTarget,

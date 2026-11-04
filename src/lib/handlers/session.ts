@@ -418,7 +418,9 @@ export const deleteSessionForClient = ({
 				),
 			);
 
-			const didDelete = yield* sessionManagerService.deleteSession(id);
+			const didDelete = yield* confirm === undefined
+				? sessionManagerService.deleteSession(id)
+				: sessionManagerService.deleteSession(id, { confirmed: confirm });
 			if (!didDelete) return [];
 
 			log.info(`client=${clientId} Deleted: ${id}`);

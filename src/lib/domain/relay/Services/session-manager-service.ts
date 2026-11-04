@@ -338,6 +338,7 @@ const createLocalSession = (
 export const deleteSession = (
 	sessionId: string,
 	beforeWrite?: Effect.Effect<boolean, SqlError>,
+	confirmed?: number,
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -504,6 +505,7 @@ export const deleteSession = (
 								targetProviderId: capturedInstanceId,
 								...(capturedCall ? { call: capturedCall } : {}),
 								...(account ? { account } : {}),
+								...(confirmed === undefined ? {} : { confirmed }),
 								unbind: true,
 							}),
 						),
@@ -761,6 +763,8 @@ export interface SessionManagerService {
 		options?: {
 			readonly keepWorktrees?: boolean;
 			readonly retentionVersions?: ReadonlyMap<string, number>;
+			/** 8.4: the snapshot entry the user confirmed the delete at. */
+			readonly confirmed?: number;
 		},
 	): Effect.Effect<boolean, SessionManagerError>;
 	deleteArchivedSessions(
@@ -1301,7 +1305,11 @@ export const SessionManagerServiceLive: Layer.Layer<
 												)
 											);
 										});
-							const deleted = yield* deleteSession(sessionId, beforeWrite).pipe(
+							const deleted = yield* deleteSession(
+								sessionId,
+								beforeWrite,
+								options?.confirmed,
+							).pipe(
 								Effect.provideService(AccountDirectory, accounts),
 								Effect.provideService(OpenCodeAPITag, api),
 								Effect.provideService(OrchestrationEngineTag, engine),

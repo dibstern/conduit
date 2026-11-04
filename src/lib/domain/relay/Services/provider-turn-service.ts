@@ -293,6 +293,16 @@ const makeProviderTurnService = Effect.gen(function* () {
 					),
 				);
 				if (!(yield* running)) return;
+				// 8.4 (2880): the retire carries the snapshot entry the user confirmed, so the gate
+				// does not ask for it again unless the tasks changed since.
+				const [confirm] = yield* sql<{ entry: number }>`
+					SELECT json_extract(data, '$.snapshotEntry') AS entry FROM events
+					WHERE session_id = ${input.sessionId} AND type = 'escalation.confirmed'
+						AND sequence > (
+							SELECT COALESCE(MAX(sequence), 0) FROM events
+							WHERE session_id = ${input.sessionId} AND type = 'interrupt.requested'
+						)
+					ORDER BY sequence DESC LIMIT 1`;
 				const [target] = yield* sql<{
 					provider_process_id: string | null;
 					provider_id: string;
@@ -311,6 +321,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 					stop: snapshot,
 					retireProcess: true,
 					retireRunIds: snapshot.owners.map(({ runId }) => runId),
+					...(confirm === undefined ? {} : { confirmed: confirm.entry }),
 					commandId: `${input.commandId}:retire`,
 					sessionId: input.sessionId,
 					targetProviderId: target.provider_id,
