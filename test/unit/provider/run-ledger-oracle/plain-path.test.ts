@@ -1241,6 +1241,49 @@ describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance crit
 		});
 	});
 
+	// 82tn.32.35: OpenCode's echo of a lost prompt is its acceptance (CONTRACT.md 3032-3033,
+	// 3101-3102), in either order with the absent reading (564), so the unknown delivery no longer
+	// folds as a failure and the Run ends as main's terminal says (3.5 598-600, 5C 881-883).
+	it.each([
+		["after", "completed"],
+		["before", "completed"],
+		["never", "provider_error"],
+	] as const)("OpenCode: a lost prompt whose echo comes %s the absent reading ends %s at main's terminal (3128-3131, 3.5, 5C)", (order, reason) => {
+		agreed("opencode", (d) => {
+			const a = begin(d);
+			observe(d, a.token, {
+				kind: "effect_outcome",
+				outcome: { tag: "delivery_unknown" },
+			});
+			const [probe] = fire(d).issued;
+			assert(probe?.tag === "Tokened", "the recovery probe is decide's");
+			if (order === "before") observe(d, a.token, { kind: "input_accepted" });
+			const [idle] = observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "input_absent" },
+			}).issued;
+			assert(idle?.tag === "Tokened", "the idle probe is decide's");
+			if (order === "after") observe(d, a.token, { kind: "input_accepted" });
+			observe(d, idle.token, {
+				kind: "probe_result",
+				finding: { tag: "native_busy" },
+			});
+			expect(
+				main(d, { kind: "run_terminal", runId: a.runId, outcome: "completed" })
+					.ended,
+			).toMatchObject([
+				{
+					runId: a.runId,
+					reason:
+						reason === "completed"
+							? { tag: "completed" }
+							: { tag: "provider_error", code: "delivery_indeterminate" },
+				},
+			]);
+			expect(transmissions(d, "A")).toHaveLength(1);
+		});
+	});
+
 	it("OpenCode: an idle probe that reads busy to its cap leaves a lost prompt undecided, never re-sent (3128-3132, 3.7)", () => {
 		agreed("opencode", (d) => {
 			const a = begin(d);
