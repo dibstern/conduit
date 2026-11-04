@@ -444,6 +444,8 @@ describe("Codex background terminals", () => {
 		await runEnded(fixture, sessionId);
 		const lists = captured(LIST).length;
 		const cursor = browser.frames.length;
+		// Also fails if the Codex runner launch stops declaring it can stop tasks: the dispatcher
+		// then refuses every stop (lane 3245 audit 13, proved by removing the declaration).
 		expect(
 			await Effect.runPromise(
 				browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] }),
@@ -748,6 +750,55 @@ describe("Codex background terminals", () => {
 			snapshotsAfterFailure: kept.snapshots,
 			snapshots: ledger.snapshots,
 			ends: ledger.ends,
+		});
+	});
+
+	it("fails a stop at once when the app-server has exited, keeps the terminal, and opens nothing", async () => {
+		let held = 0;
+		const { fixture, browser, sessionId } = await start(
+			"dead-stop",
+			terminalTrace((turn) => {
+				held = turn.at - 1;
+				return [exit(turn.at)];
+			}),
+		);
+		writeFileSync(gatePath, String(held));
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		await runEnded(fixture, sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: the app-server's exit reaches only its capture.
+		await vi.waitFor(() =>
+			expect(rows<TraceRow>(capturePath).at(-1)?.dir).toBe("exit"),
+		);
+		const asked = Date.now();
+		const failure = await Effect.runPromise(
+			Effect.flip(browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] })),
+		);
+		const elapsed = Date.now() - asked;
+		expect(failure.message).toMatch(/could not stop 1 background task/i);
+		// 8.4 (2866): a failed stop is a diagnostic at once, not after the handler's 10s wait.
+		expect(elapsed).toBeLessThan(5_000);
+		const ledger = read(fixture, sessionId);
+		expect(ledger.outbox).toEqual([{ status: "failed", taskId: PROCESS }]);
+		// No terminate to the dead transport, and no new app-server opened for the stop.
+		expect(captured(TERMINATE)).toEqual([]);
+		expect(rows<TraceRow>(capturePath).at(-1)?.dir).toBe("exit");
+		// 8.3 (2817): no later list omitted the terminal, so it stays listed.
+		expect(ledger.snapshots).toEqual([
+			[expect.objectContaining({ key: { taskId: PROCESS } })],
+		]);
+		expect(ledger.errors).toEqual([]);
+		followUps.push({
+			case: "dead stop",
+			message: failure.message,
+			elapsedMs: elapsed,
+			outbox: ledger.outbox,
+			snapshots: ledger.snapshots,
 		});
 	});
 });
