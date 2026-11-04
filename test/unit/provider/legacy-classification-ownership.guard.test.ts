@@ -29,6 +29,14 @@ describe("legacy classification ownership", () => {
 		for (const file of sources(join(root, "src"))) {
 			const name = relative(root, file);
 			const source = readFileSync(file, "utf8");
+			// Every check below needs one of these names in the text; parsing all of src
+			// otherwise passes the 10 s limit under load.
+			if (
+				![...classifiers, "sendJournalAnswers", "commandId"].some((word) =>
+					source.includes(word),
+				)
+			)
+				continue;
 			const parsed = ts.createSourceFile(
 				name,
 				source,
