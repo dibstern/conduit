@@ -184,6 +184,29 @@ export const taskDrillInHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "fold the turn's steps behind the drawer",
+		match: /^the turn's steps fold while the task drawer has focus$/,
+		run: async ({ world }) => {
+			// With Jev on a turn folds its steps by itself when it settles. A
+			// dispatched click folds them the same way without moving focus.
+			await world.page
+				.locator("#messages .turn-activity-toggle")
+				.first()
+				.dispatchEvent("click");
+		},
+	},
+	{
+		name: "assert a launching row folded away",
+		match: /^the "(.+)" launching row has folded away$/,
+		run: async ({ world, match }) => {
+			// A folded turn log keeps its rows mounted but hidden.
+			const link = rowOf(world.page, match[1] ?? "").locator(".subagent-link");
+			await expect(link).toHaveCount(1);
+			await expect(link).toBeHidden();
+			await expect(drawer(world.page)).toBeFocused();
+		},
+	},
+	{
 		name: "open a launching row's task",
 		match: /^I open the "(.+)" launching row's task$/,
 		run: async ({ world, match }) => {
