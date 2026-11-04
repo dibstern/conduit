@@ -13,7 +13,8 @@
 // 231. the wake Run never ends, or ends other than once at its own result;
 // 232. its output is lost or lands on no message;
 // 233. (open) Stop while it runs sends no turn/interrupt, or the alarm ends it;
-// 237. its evidence carries no runner-stamped label.
+// 237. its evidence carries no runner-stamped label;
+// 242. its start reaches the store only when its end follows at once (held-gate variant).
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -375,9 +376,32 @@ describe("Codex on the Run Ledger", () => {
 		return evidence;
 	};
 
-	it("reports a successor Codex starts while idle as a wake Run that ends once at its result", async () => {
-		const { fixture, sessionId } = await wake("wake", "goal-chain");
+	it.each([
+		["at once", false],
+		["after its start is stored", true],
+	])("reports a successor Codex starts while idle as a wake Run that ends once at its result (gate opens %s)", async (_, held) => {
+		const { fixture, sessionId, trace } = await wake(
+			held ? "wake-held" : "wake",
+			"goal-chain",
+		);
 		const [send] = read(fixture, sessionId).ends;
+		if (held) {
+			// F242: hold the wake before its end, so its start must reach the store on its own.
+			const wakeEnd = trace.filter(
+				({ message }) => message?.method === "turn/completed",
+			)[1]?.["at"];
+			if (typeof wakeEnd !== "number") throw new Error("Missing wake end");
+			writeFileSync(gatePath, String(wakeEnd - 1));
+			// test-waits-allow polling: the wake's start reaches only the store.
+			await vi.waitFor(
+				() =>
+					expect(
+						read(fixture, sessionId).events.map(({ type }) => type),
+					).toContain("evidence.turn_started"),
+				{ timeout: TIMEOUT, interval: 100 },
+			);
+			expect(read(fixture, sessionId).ends).toEqual([send]);
+		}
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.
 		await vi.waitFor(
@@ -403,6 +427,6 @@ describe("Codex on the Run Ledger", () => {
 		);
 		expect(output).not.toEqual([]);
 		expect(captured("turn/start", "out")).toHaveLength(1);
-		prove("wake", ledger);
+		prove(held ? "wake-held" : "wake", ledger);
 	});
 });
