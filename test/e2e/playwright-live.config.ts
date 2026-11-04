@@ -6,7 +6,11 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
 	testDir: "./specs",
-	testMatch: ["live-smoke.spec.ts", "live-surfacing.spec.ts"],
+	testMatch: [
+		"live-smoke.spec.ts",
+		"live-surfacing.spec.ts",
+		"live-provider-checks.spec.ts",
+	],
 	fullyParallel: false,
 	forbidOnly: !!process.env["CI"],
 	retries: 0,

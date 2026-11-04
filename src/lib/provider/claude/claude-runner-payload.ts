@@ -2433,7 +2433,16 @@ class ClaudeRunnerPayload implements RunnerPayload {
 						);
 						if (endsCurrentRun)
 							this.deps.onTurnStateChanged?.(ctx.sessionId, false);
-						yield* this.endWakeEffect(ctx);
+						// 8.3: a wake ended by its result carries that result's outcome, as the
+						// translator reads it (interrupted, error, else completed).
+						yield* this.endWakeEffect(
+							ctx,
+							isInterruptedResult(message, ctx.interruptRequested)
+								? { outcome: "interrupted" }
+								: message.subtype !== "success" || message.is_error
+									? { outcome: "error", code: "provider_error" }
+									: { outcome: "completed" },
+						);
 						yield* settleUnacceptedResultEffect(
 							this.stateRef,
 							ctx,
@@ -2814,11 +2823,15 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	}
 
 	/** 2.1 row 215: a wake's turn_ended, at the first clear of the turnInFlight its turn_started set. */
-	private endWakeEffect(ctx: ClaudeSessionContext): Effect.Effect<void> {
+	private endWakeEffect(
+		ctx: ClaudeSessionContext,
+		result?: ProviderRuntimeEventPayloadMap["evidence.turn_ended"]["result"],
+	): Effect.Effect<void> {
 		if (!ctx.wakeTurn || ctx.turnInFlight) return Effect.void;
 		ctx.wakeTurn = false;
 		return this.pushWakeEvidenceEffect(ctx, "evidence.turn_ended", {
 			label: "",
+			...(result ? { result } : {}),
 		});
 	}
 

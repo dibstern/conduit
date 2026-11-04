@@ -454,10 +454,13 @@ export const makeRunnerReceiptStore = (
 			);
 		// 6.1: a serving runner's start, labelled with its hello's querySeq, for a
 		// live runner whose session has a project, as processLost reads its loss.
+		// `unreported` keeps only a runner with no start yet: a draft pre-warm's, whose
+		// hello came before CreateSession stored its session.
 		const processStarted = (
 			runnerId: string,
 			querySeq: number,
 			reattached: boolean,
+			unreported = false,
 		) =>
 			sql<{
 				session_id: string;
@@ -465,7 +468,10 @@ export const makeRunnerReceiptStore = (
 			}>`SELECT runner.session_id, session.provider
 				FROM claude_runner_cursors runner JOIN sessions session ON session.id = runner.session_id
 				WHERE runner.runner_id = ${runnerId} AND runner.retired_at IS NULL
-				AND COALESCE(session.project_id, '') <> ''`.pipe(
+				AND COALESCE(session.project_id, '') <> ''
+				AND (${unreported ? 0 : 1} OR NOT EXISTS (SELECT 1 FROM events event
+					WHERE event.session_id = runner.session_id AND event.type = 'evidence.process_started'
+					AND json_extract(event.data, '$.runnerId') = runner.runner_id))`.pipe(
 				Effect.map((rows) =>
 					rows.map((row) =>
 						canonicalEvent(

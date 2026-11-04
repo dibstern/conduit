@@ -86,7 +86,11 @@ import type {
 import type { ProviderRegistry } from "./provider-registry.js";
 import { toEventSinkError } from "./relay-event-sink.js";
 import { resolveTurnImages } from "./resolve-turn-images.js";
-import { fenceHolds, inputPlacement } from "./run-ledger/run-ledger-decider.js";
+import {
+	fenceHolds,
+	inputPlacement,
+	viewLedger,
+} from "./run-ledger/run-ledger-decider.js";
 import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
 import {
 	classify,
@@ -1721,6 +1725,7 @@ export class ProviderSideEffectReactor {
 			.write((project, stamp) =>
 				Effect.gen({ self: this }, function* () {
 					let exhausted = false;
+					let relaunch = false;
 					if (row.effect_type === "send_turn") {
 						const ledger = yield* loadLedger(row.session_id).pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
@@ -1729,9 +1734,23 @@ export class ProviderSideEffectReactor {
 						const input =
 							ledger && inputPlacement(ledger.state, row.command_id, claim);
 						// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits with no clock while some
-						// label has work; the commit that releases the fence wakes the drain.
-						if (ledger && input?.start && fenceHolds(ledger.state, claim))
+						// label has work; the commit that releases the fence wakes the drain. A steer is sent
+						// as a steer even as its own Run's start, so a wake takes it (CONTRACT.md 992-995).
+						if (
+							ledger &&
+							input?.start &&
+							!input.steer &&
+							fenceHolds(ledger.state, claim)
+						)
 							return undefined;
+						// CONTRACT.md 3.6, 692-698 (F40, 3270-3274): its runner's retirement unlaunched this start
+						// before main first claimed it, so main requests its Run again. The same runId: the relaunch
+						// is the same Run (674-675) and main appends no terminal for an unlaunch (680).
+						const active = ledger && viewLedger(ledger.state).active;
+						relaunch =
+							row.attempt_count === 0 &&
+							active?.tag === "Queued" &&
+							active.inputs.some(({ inputId }) => inputId === row.command_id);
 						// 2.1 row 212 (CONTRACT.md 1873-1876): 5 transmissions per direct send; a runner-held
 						// one is holdRun's to cap. The view folds a retry's run.requested on an ended Run only
 						// from 32.2.6 (CONTRACT.md 3583), so main's own claims are the floor (gap, reported).
@@ -1766,7 +1785,7 @@ export class ProviderSideEffectReactor {
 					AND (status = 'pending' OR (status = 'retryable_failed' AND next_attempt_at <= ${updatedAt}))
 				RETURNING request_sequence, command_id, project_key, session_id, provider_id,
 					effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at`;
-					if (claimed?.run_id === runId) {
+					if (claimed?.run_id && (claimed.run_id === runId || relaunch)) {
 						const store = yield* makeEventStoreEffect.pipe(
 							Effect.provideService(SqlClient.SqlClient, this.options.sql),
 							Effect.provideService(PersistenceProjectTag, {
@@ -1778,11 +1797,11 @@ export class ProviderSideEffectReactor {
 								canonicalEvent(
 									"run.requested",
 									claimed.session_id,
-									{ runId, inputId: claimed.command_id },
+									{ runId: claimed.run_id, inputId: claimed.command_id },
 									{
 										provider: claimed.provider_id,
 										createdAt: updatedAt,
-										metadata: { runId },
+										metadata: { runId: claimed.run_id },
 									},
 								),
 							]),
