@@ -2863,9 +2863,13 @@ function inputState(world: World, run: Run, inputId: string): InputState {
 	const input = world.inputs.get(inputId);
 	if (input?.failed !== undefined)
 		return { tag: "Failed", reason: input.failed };
+	// 3.6 D50 (CONTRACT.md 671-672): a dropped send's late acceptance or start changes nothing.
 	const txs = deliverySends(world, run)
 		.filter(
-			(send) => "inputId" in send.effect && send.effect.inputId === inputId,
+			(send) =>
+				"inputId" in send.effect &&
+				send.effect.inputId === inputId &&
+				!send.dropped,
 		)
 		.flatMap((send) => send.txs);
 	const accepted = txs.find((tx) => tx.consumption.tag === "Accepted");

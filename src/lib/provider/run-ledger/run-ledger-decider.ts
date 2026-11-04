@@ -3069,8 +3069,9 @@ export function evolve(
 function inputState(book: Book, run: Run, inputId: string): InputState {
 	const failed = book.inputs.get(inputId)?.failed;
 	if (failed !== undefined) return { tag: "Failed", reason: failed };
+	// 3.6 D50 (CONTRACT.md 671-672): a dropped send's late acceptance or start changes nothing.
 	const txs = deliverySends(book, run)
-		.filter((send) => send.effect.inputId === inputId)
+		.filter((send) => send.effect.inputId === inputId && !send.dropped)
 		.flatMap((send) => send.txs);
 	const accepted = txs.find((tx) => tx.consumption.tag === "Accepted");
 	if (accepted !== undefined)

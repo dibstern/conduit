@@ -1463,6 +1463,24 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a late start on a send an unlaunch dropped changes nothing, so its input stays queued (3.6 D50)", () => {
+		// Long seed 82103202 (codex), failure mode 127: a release returned the Run to Queued and
+		// dropped its send, then a late start on that send showed the input sent. The drop ends the
+		// send's work; a late acceptance or start on one changes nothing (CONTRACT.md 671-672).
+		agreed("codex", (d) => {
+			const { token } = begin(d);
+			observe(d, token, {
+				kind: "run_released",
+				reason: { tag: "Refused", why: "retiring" },
+			});
+			observe(d, token, { kind: "started" });
+			expect(visibleInput(d, "A")).toEqual({
+				inputId: "A",
+				state: { tag: "Queued" },
+			});
+		});
+	});
+
 	it("a repeated unsolicited event whose first arrival changed nothing is still a repeat (3.4, 3.1)", () => {
 		// Long seed 82103300 (claude), failure mode 122: a turn start that joined the outstanding
 		// wake execution recorded nothing, so the same (label, event id) after the Run ended opened
