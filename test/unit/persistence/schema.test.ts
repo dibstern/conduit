@@ -55,6 +55,7 @@ describe("Schema Migration", () => {
 					[89, "runner_cursors"],
 					[90, "run_ledger"],
 					[91, "messages_ordinal"],
+					[92, "tool_row_run"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -130,6 +131,7 @@ describe("Schema Migration", () => {
 					[89, "runner_cursors"],
 					[90, "run_ledger"],
 					[91, "messages_ordinal"],
+					[92, "tool_row_run"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -349,7 +351,17 @@ describe("Schema Migration", () => {
 					unique: false,
 				},
 				{
+					name: "idx_message_parts_parent_tool",
+					table: "message_parts",
+					unique: false,
+				},
+				{
 					name: "idx_message_parts_result_event_seq",
+					table: "message_parts",
+					unique: false,
+				},
+				{
+					name: "idx_message_parts_run",
 					table: "message_parts",
 					unique: false,
 				},
