@@ -19,19 +19,12 @@
 import { writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import type { Page, TestInfo } from "@playwright/test";
-import type { ClaudeReplayPlan } from "../helpers/claude-trace-replayer.js";
-import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
+import { expect, test } from "../helpers/process-harness-fixture.js";
+import { gotoRelay } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
 const AGENT_A_TASK = "ab898d312e2e126b5";
-
-const replay: ClaudeReplayPlan = {
-	turns: ["concurrent-background-work-turn"],
-	holdAfterResult: true,
-	// Both of agent A's nested shells are live; the first is about to end.
-	holdBefore: { turn: 1, message: 104 },
-};
 
 /** The live-task count sits in each turn's step-log footer: open the logs. */
 async function openStepLogs(page: Page) {
@@ -53,7 +46,7 @@ async function readSurfaces(page: Page, sessionId: string) {
 			text.replace(/\s+/g, " ").trim(),
 		),
 		breathing: await turn
-			.locator('[aria-label^="Activity timeline"] .animate-pulse')
+			.locator('[aria-label^="Activity timeline"] .live-segment')
 			.count(),
 		sidebar: await page
 			.locator(`#session-list [data-session-id="${sessionId}"]`)
@@ -125,23 +118,40 @@ function recorder(
 	};
 }
 
+// Claude runs in its runner process, as in production: the ledger takes task
+// snapshots only from a labelled runner (CONTRACT 6.1, 8.2).
 test.describe("Claude running tasks", () => {
-	test.use({ claudeReplay: replay });
+	test.use({
+		harnessOptions: {
+			claudeReplay: {
+				turns: ["concurrent-background-work-turn"],
+				plan: {
+					holdAfterResult: true,
+					// Both of agent A's nested shells are live; the first is about to end.
+					holdBefore: { turn: 1, message: 104 },
+				},
+				subagentReads: true,
+			},
+		},
+	});
 
 	test("the step log counts its live tasks and the session monitors its agents until they finish", async ({
 		page,
-		relayUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
-		const sessionId = decodeURIComponent(
-			harness.projectUrl.slice("/s/".length),
-		);
+		const sessionId = await (await harness.connect()).createSession();
+		const relayUrl = `${harness.baseUrl}/s/${sessionId}?p=process-test`;
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const replayer = harness.claudeReplayer;
 		if (!replayer) throw new Error("no Claude replayer");
-		const steps = recorder(page, testInfo, sessionId, harness.eventsDbPath);
+		const steps = recorder(
+			page,
+			testInfo,
+			sessionId,
+			harness.daemonStorePath(),
+		);
 		const pill = page.locator(".turn-running");
 		const tasksRow = page.getByRole("button", {
 			name: /^\d+ background tasks?(:|$)/,
@@ -200,7 +210,9 @@ test.describe("Claude running tasks", () => {
 			await tasksRow.click();
 
 			// Agent A's Child Session reads the root's list: its own launches.
-			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
+			const db = new DatabaseSync(harness.daemonStorePath(), {
+				readOnly: true,
+			});
 			const childId = (() => {
 				try {
 					return String(
@@ -216,7 +228,7 @@ test.describe("Claude running tasks", () => {
 			})();
 			await gotoRelay(
 				page,
-				`${harness.relayBaseUrl}/s/${encodeURIComponent(childId)}`,
+				`${harness.baseUrl}/s/${encodeURIComponent(childId)}?p=process-test`,
 			);
 			await expect(page.getByTestId("parent-session-status")).toHaveText(
 				"Monitoring",

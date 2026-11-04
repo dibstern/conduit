@@ -83,8 +83,12 @@ export class ChatPage {
 		return this.assistantMessages.count();
 	}
 
-	/** Wait for at least one tool block to appear */
+	/**
+	 * Wait for at least one tool block to appear. A turn with Jev off starts
+	 * collapsed, live or settled, so its steps render only once it is opened.
+	 */
 	async waitForToolBlock(timeout = 60_000): Promise<Locator> {
+		await this.expandTurnActivity(timeout);
 		const tool = this.toolBlocks.first();
 		await tool.waitFor({ state: "visible", timeout });
 		return tool;

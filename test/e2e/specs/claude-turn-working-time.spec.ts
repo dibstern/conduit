@@ -244,11 +244,24 @@ test.describe("Claude turn working time", () => {
 			await chat.waitForStreamingComplete();
 			const wallMs = performance.now() - sentAt;
 			const final = stamps();
-			// A turn with tools bills in its step log, so open it first.
-			await chat.expandTurnActivity();
-			const meta = page.locator(".turn-meta").last();
+			// A turn with tools bills in its Usage tab (conduit-test-xdyjq.5), so
+			// open the turn and then that tab.
+			const openUsage = async () => {
+				await chat.expandTurnActivity();
+				await page
+					.getByRole("tab", { name: "Usage", exact: true })
+					.last()
+					.click();
+				const usage = page.getByRole("region", { name: "Turn usage" }).last();
+				await expect(usage).toBeVisible();
+				return usage;
+			};
+			const usage = await openUsage();
+			const tokens = usage
+				.locator("div", { has: page.getByRole("heading", { name: "Tokens" }) })
+				.locator("p");
+			const context = usage.getByTestId("quota-meter-caption");
 			const duration = page.locator(".turn-duration").last();
-			await expect(meta).toBeVisible();
 			await expect(duration).toBeVisible();
 			const shownDuration = (await duration.innerText()).trim();
 			const units = [...shownDuration.matchAll(/(\d+)(ms|m|s)/g)];
@@ -261,23 +274,13 @@ test.describe("Claude turn working time", () => {
 						(match[2] === "m" ? 60_000 : match[2] === "s" ? 1_000 : 1),
 				0,
 			);
-			const shownTokens = {
-				input: await meta
-					.getByTitle("Fresh input tokens", { exact: true })
-					.innerText(),
-				output: await meta
-					.getByTitle("Output tokens", { exact: true })
-					.innerText(),
-			};
+			const shownTokens = await tokens.innerText();
 			const storedTokens = final.segments.reduce(
 				(sum, segment) => ({
 					input: sum.input + (segment.tokens.input ?? 0),
 					output: sum.output + (segment.tokens.output ?? 0),
 				}),
 				{ input: 0, output: 0 },
-			);
-			const context = meta.locator(
-				'[title$="tokens in context when this turn finished"]',
 			);
 			report["final"] = {
 				...final,
@@ -287,7 +290,6 @@ test.describe("Claude turn working time", () => {
 				shownTokens,
 				storedTokens,
 				shownContext: await context.innerText(),
-				contextTitle: await context.getAttribute("title"),
 			};
 			expect(final.segments).toHaveLength(results.length);
 			expect(final.segments.map((segment) => segment.eventType)).toEqual([
@@ -307,19 +309,14 @@ test.describe("Claude turn working time", () => {
 			expect(firstGap.to - firstGap.from).toBeGreaterThanOrEqual(heldMs);
 			expect(shownMs).toBeLessThan(wallMs - heldMs + TOLERANCE_MS);
 			expect(Math.abs(shownMs - final.workingMs)).toBeLessThan(TOLERANCE_MS);
-			expect(shownTokens).toEqual({
-				input: `${storedTokens.input} in`,
-				output: `${storedTokens.output} out`,
-			});
-			await expect(context).toContainText(`${contextPct}%`);
-			await expect(context).toHaveAttribute(
-				"title",
-				`${Math.round(contextUsed / 1_000)}k of ${(last.contextWindow / 1_000_000).toFixed(1)}M tokens in context when this turn finished`,
+			expect(shownTokens).toBe(
+				`${storedTokens.input} in · ${storedTokens.output} out`,
 			);
-			expect(shownTokens).toEqual({
-				input: `${sdkTokens.input} in`,
-				output: `${sdkTokens.output} out`,
-			});
+			const shownContext = `${contextPct}% · ${Math.round(contextUsed / 1_000)}k / ${(last.contextWindow / 1_000_000).toFixed(1)}M`;
+			await expect(context).toHaveText(shownContext);
+			expect(shownTokens).toBe(
+				`${sdkTokens.input} in · ${sdkTokens.output} out`,
+			);
 			expect(final.segments.map((segment) => segment.contextTokens)).toEqual(
 				results.map(
 					(result) =>
@@ -331,22 +328,14 @@ test.describe("Claude turn working time", () => {
 			const composerContext = page.getByTestId("composer-word-context-usage");
 			await expect(composerContext).toHaveText(`${contextPct}%`);
 			await page.reload();
-			await chat.expandTurnActivity();
-			await expect(
-				meta.getByTitle("Fresh input tokens", { exact: true }),
-			).toHaveText(`${sdkTokens.input} in`);
-			await expect(
-				meta.getByTitle("Output tokens", { exact: true }),
-			).toHaveText(`${sdkTokens.output} out`);
-			await expect(context).toContainText(`${contextPct}%`);
+			await openUsage();
+			await expect(tokens).toHaveText(
+				`${sdkTokens.input} in · ${sdkTokens.output} out`,
+			);
+			await expect(context).toHaveText(shownContext);
 			await expect(composerContext).toHaveText(`${contextPct}%`);
 			report["reloaded"] = {
-				input: await meta
-					.getByTitle("Fresh input tokens", { exact: true })
-					.innerText(),
-				output: await meta
-					.getByTitle("Output tokens", { exact: true })
-					.innerText(),
+				tokens: await tokens.innerText(),
 				context: await context.innerText(),
 				composerContext: await composerContext.innerText(),
 			};
