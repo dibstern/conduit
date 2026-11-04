@@ -6,7 +6,10 @@
 // 15. the clear's zero-turn result ends the foreground Run, or starts a wake Run;
 // 16. the clear waits in the inbox behind the busy turn instead of reaching Claude at once;
 // 22. an idle clear does not complete at once;
-// 23. Stop during Clearing leaves the clear queued.
+// 23. Stop during Clearing leaves the clear queued;
+// 29-31. with no live process the clear fails, or the next launch sends the prompt first, renders
+//     the clear's reply as chat or ends that launch's Run with the clear's result;
+// 34. the row shows no phase while Claude queues the clear, or keeps it after the reply.
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
@@ -53,6 +56,14 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		db.close();
 	}
 };
+
+const goalPhase = async (harness: ProcessHarness, sessionId: string) =>
+	(
+		await harness.requestRpc({
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+		})
+	).sessions.find((session) => session.id === sessionId)?.goalPhase;
 
 describe("Claude goals as native commands", () => {
 	let harness: ProcessHarness | undefined;
@@ -131,6 +142,16 @@ describe("Claude goals as native commands", () => {
 			expect(ledger.nativeCommands).toEqual([{ commandId, tag: "Queued" }]);
 			return ledger;
 		}, 10_000);
+		// test-waits-allow polling: the row follows the arm's hand-over, which sends no frame here.
+		const phaseWhileQueued = await vi.waitFor(async () => {
+			const phase = await goalPhase(fixture, sessionId);
+			expect(phase).toEqual({
+				tag: "Pending",
+				action: { kind: "clear" },
+				send: "Queued",
+			});
+			return phase;
+		}, 10_000);
 		// 8.6: the clear never interrupts the turn, and never goes with priority "now".
 		expect(queued).not.toMatchObject({ priority: "now" });
 		expect(whileQueued.runs.map(({ status }) => status)).toEqual(["running"]);
@@ -160,8 +181,14 @@ describe("Claude goals as native commands", () => {
 		expect(interrupted).toBeGreaterThanOrEqual(0);
 		expect(ran).toBeGreaterThan(interrupted);
 		expect(after.events).not.toContain("evidence.turn_started");
+		// test-waits-allow polling: the reply's confirmation reaches the row with no browser frame.
+		await vi.waitFor(
+			async () => expect(await goalPhase(fixture, sessionId)).toBeUndefined(),
+			10_000,
+		);
 		proofs.push({
 			case: "mid-turn-clear-then-stop",
+			phaseWhileQueued,
 			sessionId,
 			queued,
 			nativeCommands: {
@@ -170,6 +197,66 @@ describe("Claude goals as native commands", () => {
 			},
 			runs: { whileQueued: whileQueued.runs, after: after.runs },
 			order: { interrupted, ran },
+		});
+	});
+
+	it("sends a clear made with no live process first at the next launch", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude goal cold clear");
+		const commandId = randomUUID();
+		await fixture.requestRpc({ _tag: "ClearGoal", sessionId, commandId });
+		// test-waits-allow polling: the kept clear's phase reaches the row with no browser frame.
+		const phaseBefore = await vi.waitFor(async () => {
+			const phase = await goalPhase(fixture, sessionId);
+			expect(phase).toEqual({
+				tag: "Pending",
+				action: { kind: "clear" },
+				send: "Sent",
+			});
+			return phase;
+		}, 10_000);
+		// Not failed for want of a process (lane brief; CONTRACT.md 8.5).
+		expect(read(fixture, sessionId).nativeCommands).toEqual([
+			expect.objectContaining({ commandId, tag: "Sent" }),
+		]);
+		await browser.send(sessionId, "goal-after-cold-clear");
+		// test-waits-allow polling: the clear's result reaches the store with no browser frame.
+		const after = await vi.waitFor(() => {
+			const ledger = read(fixture, sessionId);
+			expect(ledger.nativeCommands).toEqual([{ commandId, tag: "Completed" }]);
+			expect(ledger.runs.map(({ status }) => status)).toEqual(["completed"]);
+			return ledger;
+		}, 10_000);
+		const clear = fixture.marks.findIndex(
+			(mark) => mark.kind === "enqueue" && mark.prompt === "/goal clear",
+		);
+		const prompt = fixture.marks.findIndex(
+			(mark) =>
+				mark.kind === "enqueue" && mark.prompt === "goal-after-cold-clear",
+		);
+		expect(clear).toBeGreaterThanOrEqual(0);
+		expect(prompt).toBeGreaterThan(clear);
+		expect(fixture.marks[clear]).not.toMatchObject({ priority: "now" });
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		const replyAsChat = db
+			.prepare(
+				"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND (type LIKE 'message.%' OR type LIKE 'text.%') AND data LIKE '%Goal cleared%'",
+			)
+			.get(sessionId) as { n: number };
+		db.close();
+		expect(replyAsChat.n).toBe(0);
+		// test-waits-allow polling: the reply's confirmation reaches the row with no browser frame.
+		await vi.waitFor(
+			async () => expect(await goalPhase(fixture, sessionId)).toBeUndefined(),
+			10_000,
+		);
+		proofs.push({
+			case: "cold-clear-first-at-next-launch",
+			sessionId,
+			phaseBefore,
+			nativeCommands: after.nativeCommands,
+			runs: after.runs,
+			order: { clear, prompt },
 		});
 	});
 });

@@ -1056,6 +1056,8 @@ export const CanonicalEvents = {
 			endedGoal: Schema.optional(SessionGoalSchema),
 			endedAt: Schema.optional(Schema.Number),
 			pausedReason: Schema.optional(Schema.String),
+			/** The goal action (its native command id) this reply answers (8.6). */
+			replyTo: Schema.optional(Schema.String),
 		}),
 	),
 	"session.handoff_delivered": live(

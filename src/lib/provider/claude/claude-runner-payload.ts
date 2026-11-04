@@ -357,6 +357,17 @@ export const makeClaudeSessionRunner = (
 		return Object.assign(runner, { stateRef });
 	});
 
+/** 8.5: a native command is its own SDK input. Claude queues it behind a running turn (8.6), so
+ *  it never goes with priority "now". Command ids are browser-minted UUIDs; receipts and the
+ *  result name it. */
+const nativeCommandMessage = (commandId: string, text: string) => ({
+	type: "user" as const,
+	message: { role: "user" as const, content: text },
+	parent_tool_use_id: null,
+	uuid: commandId as UUID,
+	priority: "next" as const,
+});
+
 function sessionFailure(operation: string, cause: unknown): SessionFailure {
 	const failure =
 		cause instanceof ProviderInstanceFailure ||
@@ -397,6 +408,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 	>();
 	private readonly endingOwnership = new WeakSet<ClaudeSessionContext>();
 	private readonly controllers = new Map<string, ClaudeSessionController>();
+	/** Native commands a launch sends before its prompt (8.5): its query's first inputs. */
+	private readonly launchFirst = new Map<
+		string,
+		NonNullable<SessionTurn["nativeFirst"]>
+	>();
 	private readonly turnSettings = new WeakMap<
 		EventSink,
 		Settings | undefined
@@ -513,17 +529,34 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		);
 	}
 	sendTurn(
-		input: SessionTurn,
+		{ nativeFirst = [], ...input }: SessionTurn,
 		sink: EventSink,
 		signal: AbortSignal,
 	): Effect.Effect<TurnResult, SessionFailure> {
-		return Effect.suspend(() =>
-			this.sendTurnEffect({
-				...normalizeClaudeSessionTurn(input),
-				eventSink: sink,
-				abortSignal: signal,
-			}),
-		).pipe(Effect.mapError((cause) => sessionFailure("send-turn", cause)));
+		// A live query takes them now; otherwise the launch this send makes takes them first.
+		const kept: (typeof nativeFirst)[number][] = [];
+		return Effect.forEach(
+			nativeFirst,
+			(command) =>
+				this.sendNativeCommand(
+					input.sessionId,
+					command.commandId,
+					command.text,
+				).pipe(Effect.catch(() => Effect.sync(() => kept.push(command)))),
+			{ discard: true },
+		).pipe(
+			Effect.andThen(
+				Effect.suspend(() => {
+					if (kept.length > 0) this.launchFirst.set(input.sessionId, kept);
+					return this.sendTurnEffect({
+						...normalizeClaudeSessionTurn(input),
+						eventSink: sink,
+						abortSignal: signal,
+					});
+				}),
+			),
+			Effect.mapError((cause) => sessionFailure("send-turn", cause)),
+		);
 	}
 	interrupt(
 		sessionId: string,
@@ -608,8 +641,6 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			});
 		}).pipe(Effect.mapError((cause) => sessionFailure("stop-task", cause)));
 	}
-	/** 8.5: a native command is its own SDK input. Claude queues it behind a running
-	 *  turn (8.6), so it never goes with priority "now". */
 	sendNativeCommand(
 		sessionId: string,
 		commandId: string,
@@ -626,14 +657,7 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				);
 			(ctx.nativeCommandIds ??= new Set()).add(commandId);
 			yield* ctx.promptQueue
-				.enqueue({
-					type: "user",
-					message: { role: "user", content: text },
-					parent_tool_use_id: null,
-					// Command ids are browser-minted UUIDs; receipts and the result name it.
-					uuid: commandId as UUID,
-					priority: "next",
-				})
+				.enqueue(nativeCommandMessage(commandId, text))
 				.pipe(
 					Effect.tapError(() =>
 						Effect.sync(() => ctx.nativeCommandIds?.delete(commandId)),
@@ -1376,7 +1400,16 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					subagentRunIds: new Map(),
 				};
 				this.controllers.set(sessionId, controller);
+				const first = this.launchFirst.get(sessionId) ?? [];
+				this.launchFirst.delete(sessionId);
 				const context = {
+					...(first.length > 0
+						? {
+								nativeCommandIds: new Set(
+									first.map(({ commandId }) => commandId),
+								),
+							}
+						: {}),
 					...controller,
 					controller,
 					sessionId,
@@ -1422,8 +1455,13 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				};
 
 				// A warmed query's queue may already be closed under us.
-				const admitPrompt = queue
-					.enqueue(userMessage, input.abortSignal)
+				const admitPrompt = Effect.forEach(
+					first,
+					({ commandId, text }) =>
+						queue.enqueue(nativeCommandMessage(commandId, text)),
+					{ discard: true },
+				)
+					.pipe(Effect.andThen(queue.enqueue(userMessage, input.abortSignal)))
 					.pipe(
 						Effect.mapError(
 							(cause) => new ClaudeRuntimeError({ message: cause.message }),
@@ -2917,22 +2955,32 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				);
 				return true;
 			}
+			// A local command's synthetic reply, held until its result names the input it answers.
+			// Inside a turn only the CLI's local_command_run marks it; between turns any synthetic
+			// reply does (an unknown command's has no marker).
 			if (
 				message.type === "assistant" &&
 				message.parent_tool_use_id == null &&
 				message.message.model === "<synthetic>" &&
-				!ctx.turnInFlight
+				("local_command_run" in message || !ctx.turnInFlight)
 			) {
-				yield* translator.observeGoal(ctx, message);
+				ctx.nativeReply = message;
 				return true;
 			}
 			if (message.type !== "result") return false;
-			const answered = message.user_message_uuids ?? [
-				message.user_message_uuid,
-			];
-			if (!answered.every((id) => id !== undefined && ids.has(id)))
+			const reply = ctx.nativeReply;
+			ctx.nativeReply = undefined;
+			const answered = (
+				message.user_message_uuids ?? [message.user_message_uuid]
+			).filter((id) => id !== undefined);
+			if (answered.length === 0 || !answered.every((id) => ids.has(id))) {
+				// A /goal typed in chat: its reply still moves the goal, but answers no action.
+				if (reply) yield* translator.observeGoal(ctx, reply);
 				return false;
-			for (const id of answered.filter((id) => id !== undefined)) {
+			}
+			// 8.6: the reply confirms the action whose input UUID its result names.
+			if (reply) yield* translator.observeGoal(ctx, reply, answered.at(-1));
+			for (const id of answered) {
 				ids.delete(id);
 				yield* this.pushCommandReceiptEffect(ctx, id, "completed");
 			}

@@ -51,6 +51,7 @@ import {
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import { turnEndedAlert } from "../../../relay/turn-ended-alert.js";
 import type { makeSessionCompactions } from "../../../session/session-compactions.js";
+import type { makeSessionGoals } from "../../../session/session-goals.js";
 import type { makeSessionRetries } from "../../../session/session-retries.js";
 import { QuestionApprovalSchema } from "../../../shared-types.js";
 import type { RelayMessage } from "../../../types.js";
@@ -158,6 +159,7 @@ export interface ProviderRuntimeIngestionLiveOptions {
 		"observe"
 	>;
 	readonly retries?: Pick<ReturnType<typeof makeSessionRetries>, "observe">;
+	readonly goals?: Pick<ReturnType<typeof makeSessionGoals>, "observe">;
 	/** Sees each live commit's accepted events, after COMMIT; it never blocks. */
 	readonly surfacing?: {
 		readonly observe: (
@@ -818,13 +820,14 @@ export const makeProviderRuntimeIngestionLive = (
 									options.surfacing.observe(domainEvents),
 								);
 
-							// A compaction in progress and a retry live in memory, not the
-							// log (C1). Stamp their rows so the shell re-reads them.
+							// A compaction in progress, a retry and a goal phase live in memory,
+							// not the log (C1). Stamp their rows so the shell re-reads them.
 							const transientSessions = yield* guardCurrentWrite(
 								() =>
 									new Set([
 										...(options.compactions?.observe(domainEvents) ?? []),
 										...(options.retries?.observe(domainEvents) ?? []),
+										...(options.goals?.observe(domainEvents) ?? []),
 									]),
 							);
 							yield* Effect.forEach(

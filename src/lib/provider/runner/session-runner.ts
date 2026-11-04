@@ -43,6 +43,11 @@ export type SessionTurn = Omit<
 > & {
 	/** Prepare's decisions; Cursor and Codex payloads refuse a turn without them. */
 	readonly facts?: TurnFacts;
+	/** Native commands made while no process was live, sent before the prompt (8.5). */
+	readonly nativeFirst?: readonly {
+		readonly commandId: string;
+		readonly text: string;
+	}[];
 };
 
 /** The outbox keeps refs until replay crosses the provider boundary. */

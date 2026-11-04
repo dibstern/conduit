@@ -607,17 +607,22 @@ export class ClaudeEventTranslator {
 	observeGoal(
 		ctx: ClaudeSessionContext,
 		message: SDKMessage,
+		replyTo?: string,
 	): Effect.Effect<void, EventSinkError> {
 		return this.collectWrites(() =>
-			Effect.suspend(() =>
-				this.pushGoalChange(
+			Effect.suspend(() => {
+				const tracker = (ctx.goalTracker ??= new ClaudeGoalTracker(
+					ctx.sessionId,
+				));
+				const change = tracker.observe(message, ctx.cumulativeTokens ?? 0);
+				// A reply confirms its action even when the goal does not move ("No goal set").
+				return this.pushGoalChange(
 					ctx,
-					(ctx.goalTracker ??= new ClaudeGoalTracker(ctx.sessionId)).observe(
-						message,
-						ctx.cumulativeTokens ?? 0,
-					),
-				),
-			),
+					replyTo === undefined
+						? change
+						: { ...(change ?? tracker.facts), replyTo },
+				);
+			}),
 		);
 	}
 

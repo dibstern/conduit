@@ -90,6 +90,11 @@ export const ledgerAlarmWakes = new WeakMap<
 	Set<() => void>
 >();
 const alarmWakeKey = Symbol("run-ledger-alarm-wake");
+/** SessionActivity's wakes for a committed change of a session's native command view (8.5). */
+export const ledgerNativeCommandsWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<(sessionId: string, commands: LedgerView["nativeCommands"]) => void>
+>();
 type TasksSnapshot = {
 	readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
 	readonly at: number;
@@ -843,6 +848,18 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							alarm_at = excluded.alarm_at`;
 				if (row.alarmAt !== (ledger.row?.alarmAt ?? null))
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
+				const commands = viewLedger(state).nativeCommands;
+				if (
+					JSON.stringify(commands) !==
+					JSON.stringify(viewLedger(ledger.state).nativeCommands)
+				)
+					queuePendingWrite(sql, `run-ledger-commands:${event.sessionId}`, {
+						apply: Effect.void,
+						committed: () => {
+							for (const wake of ledgerNativeCommandsWakes.get(sql) ?? [])
+								wake(event.sessionId, commands);
+						},
+					});
 				const tasks = viewLedger(state).tasks;
 				if (event.type === "evidence.tasks_snapshot")
 					handOver(tasks, { tasks: event.data.tasks, at: event.createdAt });

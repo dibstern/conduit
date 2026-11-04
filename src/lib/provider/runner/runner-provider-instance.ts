@@ -275,6 +275,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 		{ readonly sink: EventSink; readonly send: SendScope }
 	>();
 	private readonly sinkSessions = new Map<string, string>();
+	/** Native commands made while no process was live: the next launch's first sends (8.5). */
+	private readonly firstSends = new Map<
+		string,
+		{ readonly commandId: string; readonly text: string }[]
+	>();
 	private detachingInteractions = false;
 	private recoveryForSession: RunnerProviderInstanceDeps["recoveryForSession"];
 	private recoveredSink:
@@ -1195,12 +1200,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 				),
 				() => FiberMap.remove(this.abortFibers, abortKey),
 			);
+			const nativeFirst = this.firstSends.get(sessionId);
+			this.firstSends.delete(sessionId);
 			return yield* this.commandEffect(
 				{
 					type: "send-turn",
 					sinkId,
 					aborted: abortSignal.aborted,
 					...prepared,
+					...(nativeFirst ? { input: { ...prepared.input, nativeFirst } } : {}),
 				},
 				scope,
 			);
@@ -1385,15 +1393,26 @@ export class RunnerProviderInstance implements ProviderInstance {
 		text: string,
 		call?: ProviderCall,
 	): Effect.Effect<void, ProviderInstanceFailure> {
-		return this.driver.nativeCommands
-			? this.commandEffect({
-					type: "native-command",
-					sessionId,
-					commandId,
-					text,
-					...(call ? { call } : {}),
-				})
-			: Effect.fail(nativeCommandUnsupported(this.providerId));
+		if (!this.driver.nativeCommands)
+			return Effect.fail(nativeCommandUnsupported(this.providerId));
+		return Effect.gen({ self: this }, function* () {
+			// 8.5 (CONTRACT.md 2922) names no delivery without a live process; the nearest reading
+			// keeps it for the next launch, which sends it before its prompt.
+			if ((yield* this.getControlProcessIdEffect(sessionId)) === undefined) {
+				this.firstSends.set(sessionId, [
+					...(this.firstSends.get(sessionId) ?? []),
+					{ commandId, text },
+				]);
+				return;
+			}
+			yield* this.commandEffect({
+				type: "native-command",
+				sessionId,
+				commandId,
+				text,
+				...(call ? { call } : {}),
+			});
+		});
 	}
 	stopTaskEffect(
 		sessionId: string,

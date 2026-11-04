@@ -2054,7 +2054,12 @@ export class ProviderSideEffectReactor {
 						: {}),
 				};
 				const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
-				if (instance.getControlProcessIdEffect) {
+				// A native command addresses the session, not a process: with none live it is the
+				// next launch's first send (lane 82tn.32.26's reading of CONTRACT.md 8.5, 2922).
+				if (
+					instance.getControlProcessIdEffect &&
+					payload.type !== "native_command"
+				) {
 					const currentProcessId = yield* instance.getControlProcessIdEffect(
 						row.session_id,
 					);
