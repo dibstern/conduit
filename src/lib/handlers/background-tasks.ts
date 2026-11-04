@@ -4,7 +4,10 @@ import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js"
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { loadLedger } from "../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../persistence/events.js";
-import { viewLedger } from "../provider/run-ledger/run-ledger-decider.js";
+import {
+	stopTaskKeys,
+	viewLedger,
+} from "../provider/run-ledger/run-ledger-decider.js";
 import { nativePolicies } from "../provider/run-ledger/run-ledger-policy-adapters.js";
 
 /** A Stop tasks the ledger would reject; shown as is. */
@@ -15,8 +18,8 @@ export class StopTasksRefused extends Data.TaggedError("StopTasksRefused")<{
 /**
  * Stop tasks (CONTRACT.md 8.4, 2860-2867): one stop_task per task through the Run Ledger, never
  * touching a turn. The decision reads the ledger in the write that appends the request, so "all"
- * is the live tasks then. A rejection appends nothing; its reason mirrors decide's (2864) in words
- * a person reads. The reply is the decision: a task leaves only when a later snapshot drops it, and
+ * is the live tasks then. A rejection appends nothing; its reason is decide's own (`stopTaskKeys`,
+ * 2864) in words a person reads. The reply is the decision: a task leaves only when a later snapshot drops it, and
  * a stop that fails, however late, is a timeline notice (the arm's, 2866).
  */
 export const stopTasks = (
@@ -41,28 +44,27 @@ export const stopTasks = (
 					return yield* new StopTasksRefused({
 						message: "This session's provider has no background tasks",
 					});
+				// The browser names task ids; decide's own reading says what that issues or why not.
 				const view = viewLedger(ledger.state).tasks;
-				if (view.tag === "unknown")
-					return yield* new StopTasksRefused({
-						message:
-							"Background tasks are still being checked; try again in a moment",
-					});
-				if (view.tag === "none")
-					return yield* new StopTasksRefused({
-						message: "No background tasks are running",
-					});
-				const keys =
-					tasks === "all"
-						? view.tasks.map((task) => task.key)
+				const keys = stopTaskKeys(
+					view,
+					tasks === "all" || view.tag !== "live"
+						? "all"
 						: view.tasks
-								.filter((task) => tasks.includes(task.key.taskId))
-								.map((task) => task.key);
-				if (keys.length === 0)
+								.map((task) => task.key)
+								.filter((key) => tasks.includes(key.taskId)),
+				);
+				if (typeof keys === "string")
 					return yield* new StopTasksRefused({
-						message:
-							tasks.length === 1
-								? "That background task is not running"
-								: "Those background tasks are not running",
+						message: {
+							unknown:
+								"Background tasks are still being checked; try again in a moment",
+							none: "No background tasks are running",
+							not_live:
+								tasks.length === 1
+									? "That background task is not running"
+									: "Those background tasks are not running",
+						}[keys],
 					});
 				yield* project(
 					yield* store.appendBatch([
