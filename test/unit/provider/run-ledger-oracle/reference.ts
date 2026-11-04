@@ -2011,10 +2011,13 @@ function dispatched(
 		}
 	} else {
 		// CONTRACT.md 429-431: commandId names the start or steer of the input whose id it is.
-		// One naming no input (a fixed trace's opaque id) binds the Run's first unbound send.
+		// One naming no input (a fixed trace's opaque id) binds the Run's first unbound send. 3.6
+		// (CONTRACT.md 671-678): of its current execution, so main's relaunch binds its own issue,
+		// not the one the unlaunch dropped.
 		const named = world.inputs.has(observation.commandId);
 		send = held.find(
 			(item) =>
+				item.exec === run.exec.n &&
 				item.commandId === undefined &&
 				(!named ||
 					("inputId" in item.effect &&
