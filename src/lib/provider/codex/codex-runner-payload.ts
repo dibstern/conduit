@@ -108,6 +108,10 @@ interface CodexChild {
 	readonly client: AppServerClient;
 	readonly updates: Queue.Queue<ChildUpdate>;
 	dead: boolean;
+	/** A row the last loop read after its successor window: the next reader's first. */
+	carried?: ChildUpdate | undefined;
+	/** Native turn starts queued while busy that no loop has read yet, oldest first. */
+	readonly unclaimed: string[];
 }
 
 interface ActiveTurn {
@@ -855,7 +859,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 						while (!active.state.settled) {
 							const deadline = active.state.successorDeadline;
 							// F271: what has arrived is read before the deadline is judged.
-							const queued = yield* Queue.poll(child.updates);
+							const carried = child.carried;
+							child.carried = undefined;
+							const queued = carried
+								? Option.some(carried)
+								: yield* Queue.poll(child.updates);
 							if (Option.isNone(queued) && deadline !== undefined) {
 								const expired = expireCodexGoalSuccessor(
 									active.state,
@@ -903,6 +911,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 								return deadline === undefined
 									? yield* Effect.fail(update.failure)
 									: yield* apply(completeCodexTurn(active.state));
+							// A row that arrived after the window is not this turn's: the turn
+							// ends, the row waits for the next reader (CONTRACT 3119).
+							if (deadline !== undefined && update.at >= deadline) {
+								child.carried = update;
+								return yield* apply(
+									expireCodexGoalSuccessor(active.state, update.at),
+								);
+							}
 							const decoded = decodeNotification(update.notification);
 							if (decoded._tag === "malformed") {
 								log.warn("codex.decode_failed", {
@@ -923,6 +939,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 								});
 								continue;
 							}
+							const unread =
+								decoded.method === "turn/started"
+									? child.unclaimed.indexOf(decoded.params.turn.id)
+									: -1;
+							if (unread >= 0) child.unclaimed.splice(unread, 1);
 							if (decoded.method === "serverRequest/resolved") {
 								if (decoded.params.threadId === current.threadId)
 									yield* active.interactions.resolve(decoded.params.requestId);
@@ -1005,14 +1026,25 @@ export class CodexRunnerPayload implements RunnerPayload {
 					}),
 				),
 				Effect.ensuring(
-					Effect.gen(function* () {
+					Effect.gen({ self: this }, function* () {
 						yield* active.interactions.interrupt();
 						if (current.active === active) {
 							current.busy = false;
 							current.active = undefined;
 						}
+						// The wake below starts from this goal.
 						current.goalState = active.state.goalState;
 						yield* Deferred.succeed(active.started, undefined);
+						// A turn start that arrived while this loop held the session and that
+						// it never read is a wake (F243). A dead child still holds its rows and
+						// then its failure: the producer offers the failure last.
+						const child = current.child;
+						const turnId = child?.unclaimed[0];
+						if (child && turnId && current.last && !current.busy) {
+							child.unclaimed.shift();
+							current.busy = true;
+							yield* this.wake(current.last, turnId);
+						}
 					}),
 				),
 			);
@@ -1424,7 +1456,13 @@ export class CodexRunnerPayload implements RunnerPayload {
 					},
 				});
 				const updates = yield* Queue.unbounded<ChildUpdate>();
-				const child: CodexChild = { scope, client, updates, dead: false };
+				const child: CodexChild = {
+					scope,
+					client,
+					updates,
+					dead: false,
+					unclaimed: [],
+				};
 				yield* Effect.addFinalizer(() =>
 					Queue.offer(updates, {
 						failure: new AppServerExited({
@@ -1471,7 +1509,12 @@ export class CodexRunnerPayload implements RunnerPayload {
 						) {
 							session.busy = true;
 							yield* this.wake(session.last, decoded.params.turn.id);
-						}
+						} else if (
+							decoded._tag === "known" &&
+							decoded.method === "turn/started" &&
+							decoded.params.threadId === session.threadId
+						)
+							child.unclaimed.push(decoded.params.turn.id);
 						yield* Queue.offer(updates, {
 							notification,
 							at: yield* Clock.currentTimeMillis,

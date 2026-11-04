@@ -1,7 +1,8 @@
 // Failure modes: process exit hides a native missing-thread error; a session
 // retains the previous account's home after an account switch; a goal
 // successor that arrived inside its window is dropped when read after it; an
-// app-server exit inside the successor window fails a turn that completed.
+// app-server exit inside the successor window fails a turn that completed; a
+// successor that arrived after its window is lost when its loop reads it.
 import {
 	existsSync,
 	mkdtempSync,
@@ -350,6 +351,154 @@ describe("Codex runner preparation", () => {
 				expect(events.filter(({ type }) => type === "text.delta")).toHaveLength(
 					6,
 				);
+			}),
+	);
+
+	it.effect(
+		"a successor that arrived after the window runs as a wake when read late",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-late-"))),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const source = fileURLToPath(
+					new URL(
+						"../../../fixtures/codex-app-server-traces/goal-chain.jsonl",
+						import.meta.url,
+					),
+				);
+				const rows = readFileSync(source, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line));
+				const completed = rows.findIndex(
+					({ message }) => message?.method === "turn/completed",
+				);
+				const successor = rows.findIndex(
+					({ message }, index) =>
+						index > completed && message?.method === "turn/started",
+				);
+				const successorCompleted = rows.findIndex(
+					({ message }, index) =>
+						index > successor && message?.method === "turn/completed",
+				);
+				// The successor's start is the first row after the window, so the loop
+				// reads it before anything else that arrived late; the chain ends with
+				// it, so only that start can wake the session.
+				const kept = [
+					...rows.slice(0, completed + 1),
+					...rows.slice(successor, successorCompleted + 1),
+					rows.at(-1),
+				];
+				const usageRows = kept.filter(
+					({ message }) => message?.method === "account/rateLimits/updated",
+				).length;
+				const trace = join(root, "goal-chain.jsonl");
+				writeFileSync(
+					trace,
+					`${kept.map((row) => JSON.stringify(row)).join("\n")}\n`,
+				);
+				// The player passes rows up to the gate; the rest arrive after the window.
+				const gate = join(root, "gate");
+				writeFileSync(gate, String(rows[completed].at));
+				yield* Effect.acquireRelease(
+					Effect.sync(() => {
+						process.env["CONDUIT_CODEX_APP_SERVER_TRACE_GATE"] = gate;
+					}),
+					() =>
+						Effect.sync(() => {
+							delete process.env["CONDUIT_CODEX_APP_SERVER_TRACE_GATE"];
+						}),
+				);
+				const held = yield* Deferred.make<void>();
+				const queued = yield* Deferred.make<void>();
+				let usage = 0;
+				const release = yield* Deferred.make<void>();
+				const ended = yield* Deferred.make<ProviderRuntimeEvent>();
+				// A wake's events reach no closed send, so the runner's busy reports
+				// show it: the send's turn, the wake taking over, the wake's end.
+				const busy: boolean[] = [];
+				let woke = () => {};
+				const wakeEnded = new Promise<void>((resolve) => {
+					woke = resolve;
+				});
+				const events: ProviderRuntimeEvent[] = [];
+				const runner = yield* makeCodexSessionRunner(
+					{
+						workspaceRoot: root,
+						daemonConfigDir: root,
+						environment: () => ({
+							CODEX_HOME: root,
+							NODE_ENV: "test",
+							CONDUIT_CODEX_APP_SERVER_TRACE: trace,
+						}),
+					},
+					(output) =>
+						Effect.gen(function* () {
+							if (output.type === "account-usage" && ++usage === usageRows)
+								yield* Deferred.succeed(queued, undefined);
+							if (output.type !== "event") return {};
+							events.push(output.event);
+							if (
+								output.event.type === "session.goal_changed" &&
+								events.filter(({ type }) => type === "session.goal_changed")
+									.length === 3
+							) {
+								yield* Deferred.succeed(held, undefined);
+								yield* Deferred.await(release);
+							}
+							if (
+								["turn.interrupted", "turn.completed", "turn.error"].includes(
+									output.event.type,
+								)
+							)
+								yield* Deferred.succeed(ended, output.event);
+							return {};
+						}),
+					(inFlight) => {
+						busy.push(inFlight);
+						if (busy.length === 3) woke();
+					},
+				);
+				const admission = yield* makeRunnerAdmission(runner, "codex");
+				yield* admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: "input",
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId: "input",
+						runId: "run",
+						prompt: "$goal Say hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "codex", modelId: "gpt-6.1-sol" },
+						facts: {
+							_tag: "Codex",
+							skill: { _tag: "None" },
+							truncate: { _tag: "None" },
+						},
+					},
+				});
+				yield* Deferred.await(held);
+				yield* TestClock.adjust("31 seconds");
+				writeFileSync(gate, String(Number.MAX_SAFE_INTEGER));
+				yield* TestClock.adjust("1 second");
+				yield* Deferred.await(queued);
+				yield* Deferred.succeed(release, undefined);
+				// The send's Run ends at its own turn; the late successor is a wake (CONTRACT 3119).
+				expect(yield* Deferred.await(ended)).toMatchObject({
+					type: "turn.completed",
+					runId: "run",
+				});
+				yield* Effect.promise(() => wakeEnded);
+				expect(busy).toEqual([true, true, false]);
 			}),
 	);
 
