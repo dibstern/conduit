@@ -520,6 +520,14 @@ it("follows current transcript ordering around a pending rewind", async () => {
 						"finding"
 					],
 				).toBe(1);
+				// Equal times: the prompt written first hides "m" written after it,
+				// though "m" sorts first by id (conduit-test-lczrn.1).
+				yield* sql`UPDATE messages SET ordinal = CASE id WHEN 'user' THEN 1 WHEN 'm' THEN 2 ELSE 3 END WHERE session_id = 's'`;
+				expect(
+					(yield* readSessionCategoryCounts("s", DEFAULT_CATEGORY_SET))[
+						"finding"
+					],
+				).toBe(0);
 			}),
 		);
 	} finally {

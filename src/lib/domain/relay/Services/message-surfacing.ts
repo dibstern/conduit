@@ -34,8 +34,8 @@ export const makeMessageSurfacing = Effect.gen(function* () {
 				judged: number;
 			}>`SELECT COALESCE(mp.text, '') AS text,
 				COALESCE(u.text, (SELECT text FROM messages WHERE session_id = m.session_id
-					AND role = 'user' AND created_at <= m.created_at
-					ORDER BY created_at DESC LIMIT 1), '') AS request,
+					AND role = 'user' AND (ordinal, created_at, id) <= (m.ordinal, m.created_at, m.id)
+					ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1), '') AS request,
 				(mp.surfacing_ordinal IS NOT NULL OR EXISTS (SELECT 1 FROM events WHERE event_id = ${eventId})) AS judged
 				FROM message_parts mp JOIN messages m ON m.id = mp.message_id
 				LEFT JOIN turns t ON t.id = m.turn_id AND t.session_id = m.session_id
@@ -51,7 +51,7 @@ export const makeMessageSurfacing = Effect.gen(function* () {
 				WHERE m.session_id = target.session_id AND m.role = 'assistant'
 				AND mp.type = 'text'
 				AND (m.turn_id = target.turn_id OR (target.turn_id IS NULL AND m.id = target.id))
-				ORDER BY m.created_at, mp.sort_order, mp.created_at, mp.id`;
+				ORDER BY m.ordinal, m.created_at, m.id, mp.sort_order, mp.created_at, mp.id`;
 			const ordinal = order.findIndex(({ id }) => id === part.partId) + 1;
 			const set = yield* categories.current();
 			const probabilities = yield* judge(

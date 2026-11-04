@@ -740,6 +740,40 @@ describe("RecapService persisted versions", () => {
 		},
 	);
 	it.effect(
+		"reads a turn's messages in write order (conduit-test-lczrn.1)",
+		() => {
+			const fixture = layer();
+			return Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				// Two replies at one time, written z then a: id order is reversed.
+				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('session-1', 'test-project', 'claude', 'Test', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, requested_at) VALUES ('user-1', 'session-1', 'completed', 'user-1', 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, turn_id, role, text, created_at, updated_at, ordinal) VALUES
+					('user-1', 'session-1', 'user-1', 'user', 'Fix the issue', 1, 1, 1),
+					('assistant-z', 'session-1', 'user-1', 'assistant', '', 2, 2, 2),
+					('assistant-a', 'session-1', 'user-1', 'assistant', '', 2, 2, 3)`;
+				yield* sql`INSERT INTO message_parts (id, message_id, type, text, tool_name, sort_order, created_at, updated_at) VALUES
+					('z-step', 'assistant-z', 'text', 'Step from z', NULL, 5, 2, 2),
+					('z-tool', 'assistant-z', 'tool', '', 'Read', 6, 2, 2),
+					('a-step', 'assistant-a', 'text', 'Step from a', NULL, 1, 2, 2),
+					('a-tool', 'assistant-a', 'tool', '', 'Read', 2, 2, 2),
+					('a-reply', 'assistant-a', 'text', 'Reply from a', NULL, 3, 2, 2)`;
+				const service = yield* RecapServiceTag;
+				yield* service.generate({ ...target, scope: "whole" });
+				const prompt = fixture.query.mock.calls[0]?.[0].prompt ?? "";
+				const sent = JSON.parse(prompt.slice(prompt.indexOf("\n") + 1)) as {
+					messages: { text: string }[];
+					finalReply?: string;
+				};
+				expect(sent.messages.map(({ text }) => text)).toEqual([
+					"Step from z",
+					"Step from a",
+				]);
+				expect(sent.finalReply).toBe("Reply from a");
+			}).pipe(Effect.provide(fixture.live));
+		},
+	);
+	it.effect(
 		"deletes recaps with their session and rejects another project's session",
 		() => {
 			const fixture = layer();
