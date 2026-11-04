@@ -100,6 +100,8 @@ const sessionIdOf = (url: string): string => {
 export async function setLiveTasks(
 	page: import("@playwright/test").Page,
 	tasks: readonly LiveTask[],
+	// A reattached runner's tasks before its catch-up list (CONTRACT.md 8.3): no list, no work.
+	checking = false,
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
@@ -124,6 +126,7 @@ export async function setLiveTasks(
 			backgroundWork: tasks.length > 0 ? "working" : undefined,
 			// The server rolls working background work into attention.
 			attention: tasks.length > 0 ? "working" : undefined,
+			tasksChecking: checking ? true : undefined,
 			backgroundTasks:
 				tasks.length > 0
 					? tasks.map(
@@ -405,6 +408,62 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "seed a task of a known kind",
+		match: /^the session has a live background task of the known kind (\S+)$/,
+		run: async ({ world, match }) => {
+			await setLiveTasks(world.page, [
+				{
+					id: "k1",
+					type: match[1] ?? "",
+					description: "pnpm test --watch",
+					age: 12,
+				},
+			]);
+		},
+	},
+	{
+		name: "seed tasks being checked",
+		match: /^the session's background tasks are being checked$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, [], true);
+		},
+	},
+	{
+		name: "settle checked tasks as none",
+		match: /^the session's catch-up list arrives with no tasks$/,
+		run: async ({ world }) => {
+			await setLiveTasks(world.page, []);
+		},
+	},
+	{
+		name: "assert the checking state",
+		match: /^the background tasks row (says|no longer says) Checking tasks…$/,
+		run: async ({ world, match }) => {
+			const checking = world.page.getByTestId("background-tasks-checking");
+			if (match[1] === "says") {
+				await expect(checking).toHaveText("Checking tasks…");
+				await expect(
+					world.page.getByTestId("background-task-chip"),
+				).toHaveCount(0);
+			} else {
+				await expect(checking).toHaveCount(0);
+				await expect(
+					world.page.getByTestId("background-tasks-row"),
+				).toBeVisible();
+			}
+		},
+	},
+	{
+		name: "assert the sidebar row's activity word",
+		match: /^the sidebar row for the session reads (Working|Monitoring)$/,
+		run: async ({ world, match }) => {
+			const id = sessionIdOf(world.page.url());
+			await expect(
+				world.page.locator(`#session-list [data-session-id="${id}"]`),
+			).toHaveAttribute("aria-label", new RegExp(`^${match[1]},`));
+		},
+	},
+	{
 		name: "assert the pull-down names each task's kind",
 		match:
 			/^the background tasks pull-down lists (\d+) background tasks? of kind (\S+)$/,
@@ -640,6 +699,9 @@ export const backgroundTasksHandlers: StepHandler[] = [
 			await expect(world.page.getByTestId("background-tasks-row")).toHaveCount(
 				0,
 			);
+			await expect(
+				world.page.getByTestId("background-tasks-checking"),
+			).toHaveCount(0);
 		},
 	},
 	{

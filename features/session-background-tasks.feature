@@ -186,6 +186,36 @@ Scenario: Stopping an agent requests its nested tasks before the agent
   Then the background tasks pull-down asks to stop n2, n1, a1 without cancelling the session
   And the composer shows no task dots
 
+Scenario: A reattached session reads its tasks as being checked until its list arrives
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session's background tasks are being checked
+  Then the background tasks row says Checking tasks…
+  And the composer shows no task dots
+  When the session's catch-up list arrives with no tasks
+  Then the background tasks row is gone
+
+Scenario: A reattached session's checking state gives way to the tasks its list names
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session's background tasks are being checked
+  When the session has 1 live background task
+  Then the background tasks row no longer says Checking tasks…
+
+Scenario: A live background shell keeps the session reading as Working
+  Given the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has a live background task of the known kind local_bash
+  Then the sidebar row for the session reads Working
+  When I click the background tasks row
+  Then the background tasks pull-down lists 1 background task of kind shell
+
 Scenario: A task of a kind conduit does not know shows under its raw name and counts as a task
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
