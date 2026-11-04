@@ -410,6 +410,10 @@ export const SessionInfoSchema = Schema.Struct({
 	tasksChecking: Schema.optional(Schema.Literal(true)),
 	/** While checking, the last known tasks, shown greyed: never live, never stoppable. */
 	staleTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+	/** The active Run is one the provider started by itself, named by its waking task (8.3). */
+	wakeRun: Schema.optional(
+		Schema.Struct({ task: Schema.optional(Schema.String) }),
+	),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */
 	servers: Schema.optional(Schema.Array(SessionServerSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */

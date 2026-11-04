@@ -40,6 +40,7 @@ export const SidebarRowSchema = Schema.Struct({
 			"backgroundWork",
 			"backgroundTasks",
 			"staleTasks",
+			"wakeRun",
 			"servers",
 			"compacting",
 			"retrying",
