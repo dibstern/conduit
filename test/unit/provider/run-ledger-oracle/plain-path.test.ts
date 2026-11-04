@@ -82,10 +82,15 @@ const publicStep = (decision: Decision<unknown>, view: LedgerView) =>
  * The oracle and the real decider fed one trace in lockstep. Each step also checks LI4 (the view is
  * its entries' replay) and that decide mutates nothing, through the harness driver.
  */
-function lockstep(provider: ProviderKind) {
+function lockstep(provider: ProviderKind, invariants = true) {
 	assert(referenceImplementation, "the oracle is available");
-	const expected = driver(referenceImplementation, provider, "reference");
-	const actual = driver(decider, provider, "reference");
+	const expected = driver(
+		referenceImplementation,
+		provider,
+		"reference",
+		invariants,
+	);
+	const actual = driver(decider, provider, "reference", invariants);
 	return (
 		command: LedgerCommand,
 		now: number,
@@ -843,7 +848,9 @@ describe("[32.2.5] plain Run path differential", () => {
 								),
 							];
 						});
-						const step = lockstep(provider);
+						// Per-step purity and LI4 refolds are proven at volume by properties.test.ts's traces; here
+						// they made each trace quadratic in its length.
+						const step = lockstep(provider, false);
 						let now = 100;
 						step(
 							{
@@ -971,8 +978,8 @@ describe("[32.2.5] plain Run path differential", () => {
 					"interrupted",
 				]),
 			);
-			// A generated trace takes 4 to 7 s alone, so the 10 s default fails it under the
-			// pre-commit hook's parallel build and typecheck.
+			// The 300 traces take about 1 s alone (4 to 7 s with per-step refolds); the pre-commit
+			// hook's parallel build and typecheck slow them five to tenfold, past the 10 s default.
 		}, 30_000);
 
 	it("a run.dispatched after its Run ended, by a native terminal or a Stop before the claim, binds no live start (H3, 12A)", () => {
