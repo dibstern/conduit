@@ -739,33 +739,13 @@ describe("Codex goals through the daemon and detached runner", () => {
 		TIMEOUT * 2,
 	);
 
-	it.each(["normal", "pause-error"])(
-		"Stop pauses the goal and interrupts its executing successor (%s)",
-		async (pauseResult) => {
+	it(
+		"Stop interrupts the executing successor and leaves the goal active",
+		async () => {
 			const { fixture, browser, id } = await start(
-				`goal-stop-${pauseResult}`,
-				"goal-stop",
+				"goal-interrupt",
+				"goal-interrupt",
 			);
-			if (pauseResult === "pause-error") {
-				const trace = fixtureRows("goal-stop");
-				const request = [...trace]
-					.reverse()
-					.find(
-						({ message }) => message?.method === "thread/goal/set",
-					)?.message;
-				if (!request || request.id === undefined)
-					throw new Error("Missing goal pause");
-				const response = trace.find(
-					({ dir, message }) =>
-						dir === "in" && message?.id === request.id && message?.result,
-				);
-				if (!response) throw new Error("Missing goal pause response");
-				response.message = {
-					id: request.id,
-					error: { code: -32603, message: "Fixture goal pause failure" },
-				};
-				writeTrace(trace);
-			}
 			await browser.followSession(id);
 			await Effect.runPromise(
 				browser.rpc["input.submit"]({
@@ -795,11 +775,16 @@ describe("Codex goals through the daemon and detached runner", () => {
 					]),
 				{ timeout: TIMEOUT },
 			);
-			const trace = fixtureRows("goal-stop");
-			const nativeStarts = trace.filter(
+			const successor = fixtureRows("goal-interrupt").filter(
 				({ message }) => message?.method === "turn/started",
-			);
-			const successor = nativeStarts[1]?.message?.params?.["turn"];
+			)[1]?.message?.params?.["turn"];
+			// Stop is not a goal action (CONTRACT.md 2057, 2970): the only goal setters are the
+			// /goal command's own, and the goal stays active.
+			expect(
+				requests()
+					.filter(({ message }) => message?.method === "thread/goal/set")
+					.map(({ message }) => message?.params?.["status"]),
+			).toEqual(["paused", "active"]);
 			expect(
 				requests().find(({ message }) => message?.method === "turn/interrupt")
 					?.message?.params?.["turnId"],
@@ -808,12 +793,13 @@ describe("Codex goals through the daemon and detached runner", () => {
 			expect(
 				events.filter(({ type }) => type === "turn.interrupted"),
 			).toHaveLength(1);
-			expect(events).toContainEqual(
-				expect.objectContaining({
-					type: "session.goal_changed",
-					data: expect.objectContaining({ pausedReason: "Interrupted" }),
-				}),
-			);
+			const goal = events
+				.filter(({ type }) => type === "session.goal_changed")
+				.at(-1)?.data;
+			expect(goal).toMatchObject({
+				goal: expect.objectContaining({ condition: OBJECTIVE }),
+			});
+			expect(goal).not.toHaveProperty("pausedReason");
 		},
 		TIMEOUT * 2,
 	);

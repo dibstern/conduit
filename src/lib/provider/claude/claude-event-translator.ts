@@ -1874,8 +1874,9 @@ export class ClaudeEventTranslator {
 				yield* this.pushGoalChange(ctx, ctx.goalTracker?.resume());
 			}
 			yield* this.settleGoal(ctx);
+			// Stop is not a goal action: an interrupted turn leaves the goal as it was
+			// (CONTRACT.md 2057, 2970).
 			if (isInterruptedResult(result, ctx.interruptRequested)) {
-				yield* this.pushGoalChange(ctx, ctx.goalTracker?.pause("Interrupted"));
 				yield* this.pushResult(
 					ctx,
 					makeProviderRuntimeEvent("turn.interrupted", ctx.sessionId, {

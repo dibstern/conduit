@@ -1083,22 +1083,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 				return;
 			}
 			active.interruptSent = true;
-			if (active.state.goalState.goal || active.state.goalActivationPending)
-				yield* child.client
-					.request(
-						"thread/goal/set",
-						{ threadId, status: "paused", origin: "user" },
-						ThreadGoalSetResponseSchema,
-					)
-					.pipe(
-						Effect.catch((cause) =>
-							Effect.sync(() =>
-								log.warn("codex.goal_pause_failed", {
-									message: turnFailure(cause).message,
-								}),
-							),
-						),
-					);
+			// Stop is not a goal action: an interrupt leaves the goal active (CONTRACT.md 2057).
 			const turnId = active.state.executingTurnId;
 			if (!turnId) {
 				yield* this.interruptChildren(session, children, active.sink, child);

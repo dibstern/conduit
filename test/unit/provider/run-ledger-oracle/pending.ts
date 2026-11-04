@@ -8,7 +8,7 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 	...(
 		[
 			[
-				"LI8, CONTRACT.md 978-997 (gap, 3.9: a steer main dispatches into an open Run mints its own run.requested; whether it joins that Run, so main's terminal for the open Run ends it, is undecided, 984. Wrong side undecided: the oracle lets the open Run's terminal end the steer's work, the fake keeps its native send unfinished)",
+				"R1-1's own alarm check (review-traces.ts 126, \"the outstanding obligation has an alarm\"), from CONTRACT.md 978-997 (gap, 3.9: a steer main dispatches into an open Run mints its own run.requested; whether it joins that Run, so main's terminal for the open Run ends it, is undecided, 984). The oracle lets the open Run's terminal end the steer's work, so the Run now commit finds no outstanding obligation to put an alarm on; the fake keeps its native send unfinished. Wrong side undecided",
 				["review trace R1-1"],
 			],
 			[

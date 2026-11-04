@@ -673,17 +673,14 @@ describe("Codex on the Run Ledger", () => {
 	it("Stops a wake Run with turn/interrupt, not the alarm", async () => {
 		const { fixture, browser, sessionId, trace } = await wake(
 			"wake-stop",
-			fixtureRows("goal-stop"),
+			fixtureRows("goal-interrupt"),
 		);
-		const pause = trace.find(
+		const interrupt = trace.find(
 			({ dir, message }) =>
-				dir === "out" &&
-				message?.method === "thread/goal/set" &&
-				message.params?.["status"] === "paused" &&
-				typeof message.params?.["objective"] !== "string",
+				dir === "out" && message?.method === "turn/interrupt",
 		)?.["at"];
-		if (typeof pause !== "number") throw new Error("Missing goal pause");
-		writeFileSync(gatePath, String(pause - 1));
+		if (typeof interrupt !== "number") throw new Error("Missing interrupt");
+		writeFileSync(gatePath, String(interrupt - 1));
 		// test-waits-allow polling: the wake's start reaches only the store.
 		await vi.waitFor(
 			() =>
@@ -695,7 +692,7 @@ describe("Codex on the Run Ledger", () => {
 		const stopping = Effect.runPromise(
 			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
 		);
-		// The replay answers the pause and the interrupt only once conduit sends them.
+		// The replay answers the interrupt only once conduit sends it.
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		await stopping;
 		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.

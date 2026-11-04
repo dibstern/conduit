@@ -1378,6 +1378,19 @@ function query(params: {
 					},
 				};
 			}
+			// A goal turn that streams until Stop interrupts it (stall- prefix).
+			if (request === "stall-goal")
+				yield {
+					type: "active_goal",
+					uuid: randomUUID(),
+					session_id: sessionId,
+					value: {
+						condition: "Finish the stalled goal",
+						iterations: 0,
+						set_at: Date.now(),
+						tokens_at_start: 0,
+					},
+				};
 			if (request === "thread-read-omitted-history") {
 				const [{ Client }, { InMemoryTransport }, { CallToolResultSchema }] =
 					await Promise.all([
