@@ -3274,13 +3274,18 @@ export class ProcessBrowser {
 		);
 	}
 
-	/** The tray's Send now, and Resume on the oldest queued input. */
-	async sendNow(sessionId: string, inputId: string): Promise<void> {
+	/** The tray's Send now, and Resume on the oldest queued input; with `interrupt`, its Run now. */
+	async sendNow(
+		sessionId: string,
+		inputId: string,
+		interrupt = false,
+	): Promise<void> {
 		const result = await this.run(
 			this.rpc["input.sendNow"]({
 				sessionId,
 				originId: this.originId,
 				inputId,
+				...(interrupt ? { interrupt: true } : {}),
 			}),
 		);
 		if (!result.ok) throw new Error(`send now refused: ${result.reason}`);
