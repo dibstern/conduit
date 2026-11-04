@@ -790,6 +790,8 @@ export const CanonicalEvents = {
 			inputId: Schema.String,
 			delivery: Schema.Literals([...INPUT_DELIVERIES]),
 			request: InputRequestSchema,
+			/** A usage-limit continuation's hidden send: admitted for its Run, never a queued input. */
+			continuation: Schema.optionalKey(Schema.Literal(true)),
 		}),
 	),
 	"input.sent": live(

@@ -2453,6 +2453,8 @@ export const makeInputProjector = defineProjector(() => ({
 			const sql = yield* SqlClient.SqlClient;
 
 			if (isEventType(event, "input.admitted")) {
+				// A continuation is no inbox input: no tray row, so nothing can re-queue it as one.
+				if (event.data.continuation) return [];
 				const { request } = event.data;
 				const images = request.images ? encodeJson(request.images) : null;
 				return owners(

@@ -4,6 +4,9 @@
 // 24. after a usage-limit failover the session stays busy or unusable, or the reason is hidden;
 // 25. after a vanished native session the session stays busy, or the reason is hidden;
 // 26. a usage limit ends the native session, so the continuation starts fresh.
+// The continuation's own Run on the ledger (82tn.32.43; lane 3243 audit 1-4, 6, 7):
+// 1. it is never admitted; 2. admitted but never ended; 3. ended twice; 4. the cut-off Run's end
+// changes; 6, 7. its admission shows as a queued input, or a Stop could re-queue it as one.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -41,6 +44,18 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 					"SELECT json_extract(entry_json, '$.kind') AS kind, json_extract(entry_json, '$.runId') AS runId FROM run_ledger_entries WHERE session_id = ? ORDER BY entry_seq",
 				)
 				.all(sessionId) as { kind: string; runId: string | null }[],
+			admitted: db
+				.prepare(
+					"SELECT json_extract(entry_json, '$.command.inputId') FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.command.verb') = 'admit' ORDER BY entry_seq",
+				)
+				.pluck()
+				.all(sessionId) as string[],
+			pending: db
+				.prepare(
+					"SELECT input_id FROM pending_inputs WHERE session_id = ? ORDER BY rowid",
+				)
+				.pluck()
+				.all(sessionId) as string[],
 			commands: db
 				.prepare(
 					"SELECT status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn' ORDER BY request_sequence",
@@ -77,6 +92,19 @@ describe("Session-wide failures on the Run Ledger", () => {
 		writeFileSync(
 			"test-results/82tn-32-12-session-wide-failure.json",
 			`${JSON.stringify({ ticket: "conduit-test-82tn.32.12", proofs }, null, 2)}\n`,
+		);
+		writeFileSync(
+			"test-results/82tn-32-43-failover-continuation.json",
+			`${JSON.stringify(
+				{
+					ticket: "conduit-test-82tn.32.43",
+					proofs: proofs.filter(
+						({ case: name }) => name === "usage-limit-failover",
+					),
+				},
+				null,
+				2,
+			)}\n`,
 		);
 	});
 
@@ -234,13 +262,23 @@ describe("Session-wide failures on the Run Ledger", () => {
 			{ timeout: TIMEOUT, interval: 200 },
 		);
 		const settled = read(fixture, sessionId);
-		// The cut-off Run ends by its result (CONTRACT.md 3.4). The continuation's Run reaches
-		// the ledger as no admission (a gap at base 6f3904fc too), so only the cut-off one ends.
-		expect(settled.ends[0]).toEqual({
-			runId: settled.runs[0]?.id,
-			outcome: "completed",
-			reason: JSON.stringify({ tag: "completed" }),
-		});
+		const [cutOffInput, continuedInput] = settled.events
+			.filter(({ type }) => type === "input.sent")
+			.map(({ data }) => data["inputId"]);
+		// Each Run is admitted at its handoff and ends once by its result (CONTRACT.md 3.4, 3.9):
+		// the cut-off one, and the continuation's on the same native session.
+		expect(settled.admitted).toEqual([cutOffInput, continuedInput]);
+		expect(settled.ends).toEqual(
+			settled.runs.map(({ id }) => ({
+				runId: id,
+				outcome: "completed",
+				reason: JSON.stringify({ tag: "completed" }),
+			})),
+		);
+		expect(settled.runs).toHaveLength(2);
+		// The continuation is no inbox input: it never shows in the queued tray, so nothing can
+		// re-queue it as an empty message.
+		expect(settled.pending).toEqual([cutOffInput]);
 		// A usage limit ends no native session: the continuation resumes it.
 		expect(settled.events.filter(({ type }) => type === "turn.error")).toEqual(
 			[],
@@ -253,6 +291,9 @@ describe("Session-wide failures on the Run Ledger", () => {
 			sessionId,
 			limitedAccount,
 			continuedOn: failoverAccount,
+			continuedInput,
+			admitted: settled.admitted,
+			pendingInputs: settled.pending,
 			entries: settled.entries,
 			runs: settled.runs,
 			shownReason: shown.map(({ data }) => data),

@@ -833,3 +833,84 @@ export const sendPreparedClaudeTurn = <
 		);
 		return yield* send(fresh, true);
 	});
+
+/** A planned Claude turn's send fields. */
+export type ClaudeLaunchFields = Pick<
+	SendTurnInput,
+	| "prompt"
+	| "text"
+	| "resumeSessionId"
+	| "resumeSessionAt"
+	| "forkSession"
+	| "clearInheritedGoal"
+	| "nativeThread"
+	| "handoff"
+> & {
+	readonly configDir: ClaudeConfigDir;
+	readonly startFreshNativeSession: boolean;
+	readonly nativeResumeFallback: boolean;
+};
+
+/**
+ * The Turn Launcher's Claude step: first delivery and recovery plan a stored
+ * turn alike and differ only in how they send the planned fields.
+ */
+export const launchClaudeTurn = <
+	A extends TurnResult | undefined,
+	E,
+	R,
+>(input: {
+	readonly sessionId: string;
+	readonly instanceId: string;
+	readonly commandId: string;
+	readonly turn: Pick<
+		SendTurnInput,
+		| "prompt"
+		| "inputId"
+		| "agent"
+		| "continuation"
+		| "nativeResumeFallback"
+		| "rewind"
+		| "workspaceRoot"
+		| "contextWindow"
+	>;
+	readonly launch: ClaudeLaunchConfig;
+	readonly liveSession: ProviderNativeSession | undefined;
+	readonly sessionForkSdk: ClaudeSessionForkSdk | undefined;
+	readonly send: (planned: ClaudeLaunchFields) => Effect.Effect<A, E, R>;
+}) => {
+	const { turn } = input;
+	return sendPreparedClaudeTurn({
+		sessionId: input.sessionId,
+		instanceId: input.instanceId,
+		commandId: input.commandId,
+		userText: turn.prompt,
+		options: {
+			liveSession: input.liveSession,
+			...input.launch,
+			agent: turn.agent,
+			userMessageId: turn.continuation?.cutOffMessageId ?? turn.inputId,
+			continuation: turn.continuation,
+			nativeResumeFallback: turn.nativeResumeFallback,
+			rewind: turn.rewind,
+			sessionForkSdk: input.sessionForkSdk,
+			workspaceRoot: turn.workspaceRoot,
+			modelContextWindow: turn.contextWindow === "1m" ? 1000000 : undefined,
+		},
+		send: (prepared, nativeResumeFallback) =>
+			input.send({
+				prompt: prepared.prompt,
+				text: turn.prompt,
+				configDir: prepared.configDir,
+				resumeSessionId: prepared.resumeSessionId,
+				resumeSessionAt: prepared.resumeSessionAt,
+				forkSession: prepared.forkSession,
+				clearInheritedGoal: prepared.clearInheritedGoal,
+				startFreshNativeSession:
+					prepared.resumeSessionId === undefined || turn.rewind !== undefined,
+				nativeResumeFallback,
+				nativeThread: prepared.nativeThread,
+				...(prepared.handoff ? { handoff: prepared.handoff } : {}),
+			}),
+	});
+};

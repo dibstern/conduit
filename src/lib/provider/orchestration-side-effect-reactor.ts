@@ -67,8 +67,8 @@ import { normalizeClaudeLaunchInput } from "./claude/claude-runner-wire.js";
 import type { ClaudeLaunchConfig } from "./claude/claude-sdk-env.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
 import {
-	type PreparedTurn,
-	sendPreparedClaudeTurn,
+	type ClaudeLaunchFields,
+	launchClaudeTurn,
 } from "./claude/prepare-turn.js";
 import {
 	nativeCommandUnsupported,
@@ -2397,10 +2397,7 @@ export class ProviderSideEffectReactor {
 					inputId: payload.inputId,
 				};
 				mark(turnKey, "reactor-start");
-				const send = (
-					prepared: PreparedTurn | undefined,
-					nativeResumeFallback: boolean,
-				) =>
+				const send = (planned: ClaudeLaunchFields | undefined) =>
 					Effect.gen({ self: this }, function* () {
 						mark(turnKey, "history-ready");
 						const input = yield* resolveTurnImages(
@@ -2426,28 +2423,12 @@ export class ProviderSideEffectReactor {
 							awaitIntake: this.awaitIntake(row),
 							commandAttempt: row.attempt_count,
 							account:
-								account?.driver === "claude" && prepared && !payload.account
-									? { ...account, folder: prepared.configDir }
+								account?.driver === "claude" && planned && !payload.account
+									? { ...account, folder: planned.configDir }
 									: account,
 							instanceId,
 							history: payload.history ?? [],
-							...(getProviderDriver(driver)?.supportsNativeResume
-								? {
-										prompt: prepared?.prompt ?? payload.prompt,
-										text: payload.prompt,
-										configDir: prepared?.configDir,
-										resumeSessionId: prepared?.resumeSessionId,
-										resumeSessionAt: prepared?.resumeSessionAt,
-										forkSession: prepared?.forkSession,
-										clearInheritedGoal: prepared?.clearInheritedGoal,
-										startFreshNativeSession:
-											prepared?.resumeSessionId === undefined ||
-											payload.rewind !== undefined,
-										nativeResumeFallback,
-										nativeThread: prepared?.nativeThread,
-										...(prepared?.handoff ? { handoff: prepared.handoff } : {}),
-									}
-								: {}),
+							...planned,
 							eventSink: this.makeReactorEventSink(
 								interactionSink,
 								currentInteractions,
@@ -2509,27 +2490,19 @@ export class ProviderSideEffectReactor {
 									),
 								catch: storeFailure("decodeClaudeLaunch"),
 							});
-							return yield* sendPreparedClaudeTurn({
+							return yield* launchClaudeTurn({
 								sessionId: payload.sessionId,
 								instanceId,
 								commandId: row.command_id,
-								userText: payload.prompt,
-								options: {
-									liveSession: yield* instance.getNativeSessionEffect?.(
-										payload.sessionId,
-									) ?? Effect.succeed(undefined),
-									...launch,
-									agent: payload.agent,
-									userMessageId:
-										payload.continuation?.cutOffMessageId ?? payload.inputId,
-									continuation: payload.continuation,
-									nativeResumeFallback: payload.nativeResumeFallback,
-									rewind: payload.rewind,
-									sessionForkSdk: this.options.claudeSessionForkSdk,
-									workspaceRoot: payload.workspaceRoot,
-									modelContextWindow:
-										payload.contextWindow === "1m" ? 1000000 : undefined,
+								turn: payload,
+								launch: {
+									configDir: launch.configDir,
+									folderSource: launch.folderSource,
 								},
+								liveSession: yield* instance.getNativeSessionEffect?.(
+									payload.sessionId,
+								) ?? Effect.succeed(undefined),
+								sessionForkSdk: this.options.claudeSessionForkSdk,
 								send,
 							}).pipe(
 								Effect.provideService(ProviderStateEffectTag, state),
@@ -2543,7 +2516,7 @@ export class ProviderSideEffectReactor {
 									: storeFailure("prepareTurn")(cause),
 							),
 						)
-					: yield* send(undefined, false);
+					: yield* send(undefined);
 				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {
