@@ -8,6 +8,8 @@
 // 5. a daemon restart that reuses the process reports a new id, or no reattach, or ends the Run;
 // 6. a session on a named instance ("managed-test") reads as Claude's, so a crash unlaunches the
 //    held Run instead of ending it as lost.
+// 7. a lost prompt (its send comes back unknown, then it runs late) is read absent and re-sent, or
+//    its Run ends twice, or probing never ends because no probe records what it read (82tn.32.35).
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -45,13 +47,22 @@ describe("OpenCode on the Run Ledger", () => {
 		);
 	});
 
-	const start = async (id = instanceId) => {
-		harness = await ProcessHarness.start({
+	const start = async (id = instanceId, probeMs?: number) => {
+		harness = ProcessHarness.create({
 			managedOpenCode: true,
 			managedOpenCodeId: id,
 			autoStartOpenCode: true,
 			managedOpenCodeStopGraceMs: 100,
 		});
+		await harness.restart(
+			probeMs === undefined
+				? {}
+				: {
+						serviceEnvironment: {
+							CONDUIT_TEST_RUN_LEDGER_PROBE_MS: String(probeMs),
+						},
+					},
+		);
 		return harness;
 	};
 	const spawned = (fixture: ProcessHarness) => {
@@ -103,6 +114,44 @@ describe("OpenCode on the Run Ledger", () => {
 		}
 	};
 	type Ledger = ReturnType<typeof read>;
+	/** What each probe read, its target taken from the probe row its token names (3.4). */
+	const probing = (fixture: ProcessHarness, sessionId: string) => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			return {
+				findings: db
+					.prepare(
+						"SELECT json_extract(o.payload_json, '$.effect.target.tag') AS target, json_extract(e.data, '$.finding.tag') AS finding, e.created_at AS at FROM events e JOIN provider_command_outbox o ON json_extract(o.payload_json, '$.token') = json_extract(e.data, '$.token') WHERE e.session_id = ? AND e.type = 'evidence.probe_result' ORDER BY e.sequence",
+					)
+					.all(sessionId) as { target: string; finding: string; at: number }[],
+				probes: db
+					.prepare(
+						"SELECT json_extract(payload_json, '$.effect.target.tag') AS target, status FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'probe' ORDER BY request_sequence",
+					)
+					.all(sessionId) as { target: string; status: string }[],
+				unknown: (
+					db
+						.prepare(
+							"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type = 'evidence.delivery_indeterminate'",
+						)
+						.get(sessionId) as { n: number }
+				).n,
+				alarmAt: (
+					db
+						.prepare(
+							"SELECT alarm_at FROM run_ledger_sessions WHERE session_id = ?",
+						)
+						.get(sessionId) as { alarm_at: number | null } | undefined
+				)?.alarm_at,
+			};
+		} finally {
+			db.close();
+		}
+	};
+	/** The daemon's ledger lives in another process's store, with no event to await. */
+	const until = (check: () => void) =>
+		// test-waits-allow polling: the ledger's writes land in the daemon's store, another process.
+		vi.waitFor(check, { timeout: 8_000, interval: 100 });
 	/** Submits a turn the fake holds busy, and confirms its user message so main runs it. */
 	const hold = async (
 		fixture: ProcessHarness,
@@ -364,6 +413,96 @@ describe("OpenCode on the Run Ledger", () => {
 		expect(after.ends).toEqual([
 			{ runId: sentRun, reason: "completed" },
 			{ runId: heldRun, reason: "completed" },
+		]);
+	});
+
+	it("a prompt whose send comes back unknown and then runs late keeps its Run live while the work runs, probes until an idle read after the work, and ends it once", async () => {
+		const fixture = await start(instanceId, 500);
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Lost prompt",
+			instanceId,
+			"opencode",
+		);
+		const promptPath = `/session/${sessionId}/prompt_async`;
+		const prompts = () =>
+			fixture
+				.opencodeRequestBodies()
+				.filter(({ path }) => path === promptPath)
+				.map(
+					({ body }) => (JSON.parse(body) as { messageID?: string }).messageID,
+				);
+		const drop = join(fixture.configDir, "fake-opencode-drop-prompt");
+		writeFileSync(drop, "drop");
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: randomUUID(),
+				delivery: "queue",
+				text: "lost",
+			}),
+		);
+		// Every try of the request died unanswered: the send comes back unknown.
+		await until(() => expect(probing(fixture, sessionId).unknown).toBe(1));
+		unlinkSync(drop);
+		const sent = prompts();
+		expect(new Set(sent).size).toBe(1);
+
+		// The input probe reads the prompt absent, its work then begins (as live), and the idle probe
+		// that follows reads it busy.
+		await until(() =>
+			expect(probing(fixture, sessionId).findings).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						target: "native_session",
+						finding: "native_busy",
+					}),
+				]),
+			),
+		);
+		// The Run stays live while the late work runs.
+		const during = read(fixture, sessionId);
+		expect(during.ends).toEqual([]);
+		const workEndedAt = Date.now();
+		await idle(fixture, sessionId);
+		await until(() => {
+			const now = probing(fixture, sessionId);
+			expect(now.findings.at(-1)?.finding).toBe("native_idle");
+			// Nothing is left to probe or to wake for.
+			expect(now.alarmAt ?? null).toBeNull();
+			expect(read(fixture, sessionId).ends).toHaveLength(1);
+		});
+
+		const after = {
+			...read(fixture, sessionId),
+			...probing(fixture, sessionId),
+		};
+		proofs.push({
+			scenario: "lost-prompt-late-work",
+			during,
+			after,
+			sent: prompts(),
+		});
+		expect(
+			after.findings.map(({ target, finding }) => `${target}:${finding}`),
+		).toEqual([
+			"input:input_absent",
+			...after.findings.slice(1, -1).map(() => "native_session:native_busy"),
+			"native_session:native_idle",
+		]);
+		// The idle read that ends probing came after the work.
+		expect(after.findings.at(-1)?.at).toBeGreaterThanOrEqual(workEndedAt);
+		expect(after.probes.every(({ status }) => status === "completed")).toBe(
+			true,
+		);
+		// Never re-sent; one Run, ended once by its own work.
+		expect(prompts()).toEqual(sent);
+		expect(after.runs).toHaveLength(1);
+		// Gap: the input probe read the send absent, so it stays unconsumed and its unknown delivery
+		// folds as a failure even though the work ran (CONTRACT.md 881-883, 3128-3132).
+		expect(after.ends).toEqual([
+			{ runId: after.runs[0]?.id, reason: "provider_error" },
 		]);
 	});
 

@@ -91,6 +91,7 @@ import {
 	inputPlacement,
 	viewLedger,
 } from "./run-ledger/run-ledger-decider.js";
+import type { Evidence } from "./run-ledger/run-ledger-model.js";
 import { RunnerProviderInstance } from "./runner/runner-provider-instance.js";
 import {
 	classify,
@@ -113,6 +114,8 @@ import type {
 	SendTurnInput,
 	TurnResult,
 } from "./types.js";
+
+type ProbeFinding = Extract<Evidence, { kind: "probe_result" }>["finding"];
 
 /**
  * Synthesized completion result for effects that produce no provider
@@ -1585,7 +1588,16 @@ export class ProviderSideEffectReactor {
 						token: Schema.String,
 						deadlineAt: Schema.optionalKey(Schema.Number),
 						effect: Schema.Union([
-							Schema.Struct({ kind: Schema.Literal("probe") }),
+							Schema.Struct({
+								kind: Schema.Literal("probe"),
+								target: Schema.Union([
+									Schema.Struct({
+										tag: Schema.Literal("input"),
+										inputId: Schema.String,
+									}),
+									Schema.Struct({ tag: Schema.Literal("native_session") }),
+								]),
+							}),
 							Schema.Struct({ kind: Schema.Literal("cancel_request") }),
 							Schema.Struct({
 								kind: Schema.Literal("stop_task"),
@@ -1599,51 +1611,56 @@ export class ProviderSideEffectReactor {
 			const deadlineAt = Option.isSome(payload)
 				? payload.value.deadlineAt
 				: undefined;
-			const called = Option.isNone(payload)
-				? Effect.succeed("unparsed" as const)
-				: Effect.gen({ self: this }, function* () {
-						const account = this.options.accountDirectory
-							? yield* this.options.accountDirectory
-									.resolve({ _tag: "Id", id: claimed.provider_id })
-									.pipe(
-										Effect.catchTag("AccountUnroutable", () =>
-											Effect.succeed(undefined),
-										),
-									)
-							: undefined;
-						const instance = yield* this.options.registry.getInstanceEffect(
-							account?.driver ?? claimed.provider_id,
+			const called = Effect.gen({ self: this }, function* () {
+				if (Option.isNone(payload)) return "unparsed" as const;
+				const account = this.options.accountDirectory
+					? yield* this.options.accountDirectory
+							.resolve({ _tag: "Id", id: claimed.provider_id })
+							.pipe(
+								Effect.catchTag("AccountUnroutable", () =>
+									Effect.succeed(undefined),
+								),
+							)
+					: undefined;
+				const instance = yield* this.options.registry.getInstanceEffect(
+					account?.driver ?? claimed.provider_id,
+				);
+				const call = yield* this.options.resolveSessionCallContext?.(
+					claimed.session_id,
+					account,
+				) ?? Effect.succeed(undefined);
+				const effect = payload.value.effect;
+				// 3.4, 3.7: a probe records what its provider read (OpenCode, CONTRACT.md 3089).
+				// Gap: no other provider API reports native idle or busy, so its probe reads the
+				// native session and records no finding; an absent method never calls the provider.
+				const request:
+					| Effect.Effect<ProbeFinding | undefined, ProviderInstanceFailure>
+					| undefined =
+					effect.kind === "cancel_request"
+						? instance
+								.interruptTurnEffect(claimed.session_id, undefined, call)
+								.pipe(Effect.as(undefined))
+						: effect.kind === "stop_task"
+							? instance
+									.stopTaskEffect?.(claimed.session_id, effect.key.taskId, call)
+									.pipe(Effect.as(undefined))
+							: (instance.probeEffect?.(
+									claimed.session_id,
+									effect.target,
+									call,
+								) ??
+								instance
+									.getNativeSessionEffect?.(claimed.session_id)
+									.pipe(Effect.as(undefined)));
+				if (!request) return "not_sent" as const;
+				const sent = request.pipe(Effect.map((finding) => ({ finding })));
+				return deadlineAt === undefined
+					? yield* sent
+					: yield* sent.pipe(
+							Effect.timeoutOption(Math.max(0, deadlineAt - startedAt)),
+							Effect.map(Option.getOrElse(() => "timed_out" as const)),
 						);
-						const call = yield* this.options.resolveSessionCallContext?.(
-							claimed.session_id,
-							account,
-						) ?? Effect.succeed(undefined);
-						const effect = payload.value.effect;
-						// Gap (3.4, 3.7): no provider API reports native idle or busy, so a probe reads the
-						// native session and records no finding; an absent method never calls the provider.
-						const request =
-							effect.kind === "cancel_request"
-								? instance.interruptTurnEffect(
-										claimed.session_id,
-										undefined,
-										call,
-									)
-								: effect.kind === "stop_task"
-									? instance.stopTaskEffect?.(
-											claimed.session_id,
-											effect.key.taskId,
-											call,
-										)
-									: instance.getNativeSessionEffect?.(claimed.session_id);
-						if (!request) return "not_sent" as const;
-						return deadlineAt === undefined
-							? yield* request.pipe(Effect.as("sent" as const))
-							: yield* request.pipe(
-									Effect.as("sent" as const),
-									Effect.timeoutOption(Math.max(0, deadlineAt - startedAt)),
-									Effect.map(Option.getOrElse(() => "timed_out" as const)),
-								);
-					});
+			});
 			const result = yield* Effect.result(called);
 			const now = yield* this.currentTimeMillis();
 			const outcome:
@@ -1672,7 +1689,7 @@ export class ProviderSideEffectReactor {
 											providerFailureCode(result.failure))
 										: result.failure._tag,
 							}
-					: result.success === "sent"
+					: typeof result.success === "object"
 						? { tag: "succeeded" }
 						: result.success === "timed_out"
 							? { tag: "retryable", retryAt: deadlineAt ?? now }
@@ -1682,6 +1699,10 @@ export class ProviderSideEffectReactor {
 										tag: "permanent",
 										code: "provider_command_payload_parse_failed",
 									};
+			const finding =
+				result._tag === "Success" && typeof result.success === "object"
+					? result.success.finding
+					: undefined;
 			yield* this.options
 				.write((project) =>
 					Effect.gen({ self: this }, function* () {
@@ -1704,6 +1725,17 @@ export class ProviderSideEffectReactor {
 								},
 								{ provider: claimed.provider_id, createdAt: now },
 							),
+							// 3.4: the finding names the probe's token, in the write that ends its row.
+							...(finding === undefined
+								? []
+								: [
+										canonicalEvent(
+											"evidence.probe_result",
+											claimed.session_id,
+											{ token: payload.value.token, finding },
+											{ provider: claimed.provider_id, createdAt: now },
+										),
+									]),
 						]);
 					}),
 				)

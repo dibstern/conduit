@@ -52,7 +52,10 @@ import { runTerminalStatus } from "./projectors-effect.js";
  */
 export const RUN_LEDGER_POLICY: DecideContext["policy"] = {
 	settleMs: 7000,
-	probeMs: 30_000,
+	probeMs:
+		process.env["NODE_ENV"] === "test"
+			? Number(process.env["CONDUIT_TEST_RUN_LEDGER_PROBE_MS"] ?? 30_000)
+			: 30_000,
 	nativeCommandMs: 60_000,
 };
 
@@ -462,6 +465,16 @@ const commandFor = (
 								},
 				};
 			}
+			case "evidence.probe_result":
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Answer",
+						token: event.data.token as SendToken,
+						kind: "probe_result",
+						finding: event.data.finding,
+					},
+				};
 			case "evidence.turn_started":
 				return {
 					verb: "observe",
@@ -642,6 +655,7 @@ const HANDLES = [
 	"evidence.process_lost",
 	"evidence.alarm_fired",
 	"evidence.effect_outcome",
+	"evidence.probe_result",
 	"evidence.turn_started",
 	"evidence.turn_ended",
 	"evidence.tasks_snapshot",

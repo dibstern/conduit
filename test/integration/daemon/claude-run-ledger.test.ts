@@ -138,12 +138,31 @@ const endsOnce = (ledger: Ledger) => {
 	).toEqual(ids.sort());
 };
 
+// 82tn.32.35: only an OpenCode probe records what it read; this provider's probes record nothing.
+const probeFindings = (fixture: ProcessHarness | undefined) => {
+	if (!fixture) return 0;
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		return (
+			db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM events WHERE type = 'evidence.probe_result'",
+				)
+				.get() as { n: number }
+		).n;
+	} finally {
+		db.close();
+	}
+};
+
 describe("Claude on the Run Ledger", () => {
 	let harness: ProcessHarness | undefined;
 	const proofs: Record<string, unknown>[] = [];
 	afterEach(async () => {
+		const findings = probeFindings(harness);
 		await harness?.dispose();
 		harness = undefined;
+		expect(findings).toBe(0);
 	});
 	afterAll(() => {
 		mkdirSync("test-results", { recursive: true });
