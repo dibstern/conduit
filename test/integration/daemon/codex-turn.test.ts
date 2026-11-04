@@ -493,6 +493,22 @@ describe("Codex turns through the real daemon and detached runner", () => {
 					({ message }) => message?.method === "thread/compact/start",
 				),
 			).toHaveLength(1);
+			// A decline is not an error: the input just stays queued, so neither the
+			// live stream nor the history shows an error row (82tn.32.46).
+			const errorParts = (await browser.history(id))
+				.flatMap(({ parts }) => parts ?? [])
+				.filter(({ type }) => type === "error");
+			const liveErrors = browser.frames
+				.map(({ message }) => message)
+				.filter((message) =>
+					JSON.stringify(message).includes("steer-declined"),
+				);
+			writeFileSync(
+				resolve("test-results/82tn-32-46-codex-declined-compact.json"),
+				`${JSON.stringify({ errorParts, liveErrors }, (_, value) => (typeof value === "bigint" ? String(value) : value), 2)}\n`,
+			);
+			expect(errorParts).toEqual([]);
+			expect(liveErrors).toEqual([]);
 		},
 		TIMEOUT * 2,
 	);

@@ -600,6 +600,12 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		expect(
 			rows(capturePath).filter((row) => row.kind === "steer.call"),
 		).toHaveLength(kind === "images" || kind === "missing-method" ? 0 : 1);
+		// A decline is not an error: the chat shows no error row (82tn.32.46).
+		expect(
+			(await browser.history(id))
+				.flatMap(({ parts }) => parts ?? [])
+				.filter(({ type }) => type === "error"),
+		).toEqual([]);
 		observations["requeuedAheadOfExistingInput"] = true;
 	}, 240_000);
 
@@ -687,6 +693,12 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		expect(
 			rows(capturePath).filter((row) => row.kind === "steer.call"),
 		).toHaveLength(1);
+		// A real steer failure, not a decline, still shows its error row (82tn.32.46).
+		expect(
+			(await browser.history(id))
+				.flatMap(({ parts }) => parts ?? [])
+				.filter(({ type }) => type === "error"),
+		).toEqual([expect.objectContaining({ code: "network_error" })]);
 		observations["errorAttributedToLatestDeliveredSteer"] = true;
 		observations["acceptedInputsShareOneTerminalError"] = true;
 	}, 240_000);

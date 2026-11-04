@@ -1515,6 +1515,10 @@ export const makeMessageProjector = defineProjector(() => ({
 			}
 
 			if (isEventType(event, "turn.error")) {
+				// A declined steer is not an error: `steerDeclined` returns it to the queue (CONTRACT.md
+				// 973, 1855-1856), so the transcript shows nothing; the contract is silent on showing it
+				// (gap). The event still ends its Run (982-983).
+				if (event.data.code === "steer-declined") return [];
 				// The error is the turn's last word, so it replays like any
 				// content: a synthetic message after the turn's own, keyed on the
 				// event sequence. A part on the turn's message would be lost when

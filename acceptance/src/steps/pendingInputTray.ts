@@ -223,17 +223,28 @@ export const pendingInputTrayHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert steering row",
-		match: /^pending-input row ([0-9]+) is Steering (.+)$/,
+		name: "assert steering or queued row",
+		match: /^pending-input row ([0-9]+) is (Steering|Queued) (.+)$/,
 		run: async ({ world, match }) => {
 			const row = rows(world.page).nth(Number(match[1]) - 1);
 			await expect(row.getByTestId("pending-input-text")).toHaveText(
-				match[2] ?? "",
+				match[3] ?? "",
 			);
 			await expect(row.getByTestId("pending-input-state")).toHaveText(
-				"Steering",
+				match[2] ?? "",
 			);
-			await expect(row.getByTestId("pending-input-steer")).toHaveCount(0);
+			await expect(row.getByTestId("pending-input-steer")).toHaveCount(
+				match[2] === "Steering" ? 0 : 1,
+			);
+		},
+	},
+	{
+		name: "assert no transcript error notice",
+		match: /^the transcript shows no error notice$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.locator("#messages").getByTestId("system-error-notice"),
+			).toHaveCount(0);
 		},
 	},
 	{
