@@ -259,6 +259,12 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 					"SELECT status, json_extract(payload_json, '$.effect.key.taskId') AS taskId FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'stop_task' ORDER BY request_sequence",
 				)
 				.all(sessionId) as { status: string; taskId: string }[],
+			// The recorded command's tool row (82tn.45).
+			command: db
+				.prepare(
+					"SELECT p.status, p.run_id AS runId, p.ended_by AS endedBy, json_extract(p.metadata, '$.providerTaskId') AS taskId FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ? AND p.call_id = 'call_fixture'",
+				)
+				.get(sessionId),
 		};
 	} finally {
 		db.close();
@@ -273,6 +279,7 @@ describe("Codex background terminals", () => {
 	let tracePath = "";
 	const proofs: Record<string, unknown>[] = [];
 	const followUps: Record<string, unknown>[] = [];
+	const toolRows: Record<string, unknown>[] = [];
 
 	const writeTrace = (trace: TraceRow[]) =>
 		writeFileSync(
@@ -308,6 +315,10 @@ describe("Codex background terminals", () => {
 		writeFileSync(
 			"test-results/82tn-32-45-codex-terminals.json",
 			`${JSON.stringify({ ticket: "conduit-test-82tn.32.45", proofs: followUps }, null, 2)}\n`,
+		);
+		writeFileSync(
+			"test-results/82tn-45-codex-terminals.json",
+			`${JSON.stringify({ ticket: "conduit-test-82tn.45", proofs: toolRows }, null, 2)}\n`,
 		);
 	});
 
@@ -713,6 +724,65 @@ describe("Codex background terminals", () => {
 			row: row["backgroundTasks"],
 			snapshots: ledger.snapshots,
 			listCalls: captured(LIST).map((row) => row.message?.params ?? null),
+		});
+	});
+
+	it("keeps a terminal's row open past its Run's end, linked by its process id, until its own finish (82tn.45)", async () => {
+		let held = 0;
+		const { fixture, browser, sessionId } = await start(
+			"tool-row",
+			terminalTrace((turn) => {
+				held = turn.at - 1;
+				return [
+					...listed(turn.at, 903, turn.threadId, []),
+					late(turn.at, turn, "completed", 0),
+				];
+			}),
+		);
+		writeFileSync(gatePath, String(held));
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		const ended = await runEnded(fixture, sessionId);
+		// The Run has ended while Codex still lists the terminal: its row is background work.
+		expect(ended.command).toEqual({
+			status: "running",
+			runId: ended.ends[0]?.runId,
+			endedBy: null,
+			taskId: PROCESS,
+		});
+		const cursor = browser.frames.length;
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				Array.isArray(message["parts"]) &&
+				message["parts"].some(
+					(part: { callID?: string; state?: { status?: string } }) =>
+						part.callID === "call_fixture" &&
+						part.state?.status === "completed",
+				),
+			cursor,
+		);
+		const finished = read(fixture, sessionId);
+		expect(finished.command).toEqual({
+			status: "completed",
+			runId: ended.ends[0]?.runId,
+			endedBy: null,
+			taskId: PROCESS,
+		});
+		expect(finished.ends).toEqual(ended.ends);
+		expect(finished.errors).toEqual([]);
+		toolRows.push({
+			case: "terminal row outlives its Run",
+			atRunEnd: ended.command,
+			finished: finished.command,
+			ends: finished.ends,
+			snapshots: finished.snapshots,
 		});
 	});
 

@@ -107,7 +107,12 @@ export const refreshSidebar = (
 						WHERE session_id = ${rootId}`;
 				continue;
 			}
-			if (hasRunOwnership && row.session.status !== "idle") {
+			// The stored row's session status holds no busy (8.1, 2734: the view says it at read
+			// time), so the projected row's own status gates the retained-steer read.
+			if (
+				hasRunOwnership &&
+				top.find((root) => root.id === rootId)?.status !== "idle"
+			) {
 				const stop = yield* sessionRunOwnersQuery(sql, rootId, {
 					confirmedStop: true,
 					excludeRetainedSteers: true,
@@ -256,9 +261,6 @@ export const sidebarRows = (
 		sideThreadIds,
 		unreadSessionIds: new Set(
 			family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
-		),
-		statuses: Object.fromEntries(
-			family.map((row) => [row.id, { type: row.status }]),
 		),
 		pendingQuestionCounts: pending.questions,
 		pendingPermissionCounts: pending.permissions,

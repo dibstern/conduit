@@ -1,10 +1,7 @@
-import { type Context, Effect, HashMap, type Option, Ref } from "effect";
+import { type Context, Effect, HashMap, Ref } from "effect";
 import { SqlClient } from "effect/sql";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
-import type {
-	SessionDetail,
-	SessionStatus,
-} from "../../../instance/sdk-types.js";
+import type { SessionDetail } from "../../../instance/sdk-types.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -24,7 +21,6 @@ import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
 } from "./relay-status-snapshot.js";
-import type { StatusPollerShape } from "./services.js";
 import { SessionManagerError } from "./session-manager-error.js";
 import type {
 	ListSessionsOptions,
@@ -99,9 +95,6 @@ export const listSessions = (
 			rows.list({
 				...(options?.roots !== undefined ? { roots: options.roots } : {}),
 				...(options?.limit !== undefined ? { limit: options.limit } : {}),
-				...(options?.statuses !== undefined
-					? { statuses: options.statuses }
-					: {}),
 			}),
 			readQuery.getSessionLineage({ projectIds: [scope.slug] }),
 		]).pipe(
@@ -149,7 +142,6 @@ export const makeSessionListOperations = ({
 	readQuery,
 	sql,
 	accounts,
-	statusPollerOption,
 	activity,
 	snapshot,
 	projectFolders,
@@ -160,31 +152,17 @@ export const makeSessionListOperations = ({
 	readQuery: ReadQueryEffect;
 	sql: SqlClient.SqlClient;
 	accounts: Context.Service.Shape<typeof AccountDirectory>;
-	statusPollerOption: Option.Option<StatusPollerShape>;
 	activity: SessionActivity;
 	snapshot: RelayStatusSnapshotService;
 	projectFolders: readonly [string, ...string[]];
 	projectSlug: string;
 }) => {
-	const currentStatuses = (
-		explicit?: Record<string, SessionStatus> | undefined,
-	): Effect.Effect<Record<string, SessionStatus> | undefined> => {
-		if (explicit !== undefined) return Effect.succeed(explicit);
-		return statusPollerOption._tag === "Some"
-			? statusPollerOption.value.getCurrentStatuses()
-			: Effect.succeed(undefined);
-	};
 	const serviceListSessions = (options?: ListSessionsOptions) =>
 		Effect.gen(function* () {
-			const statuses = yield* currentStatuses(options?.statuses);
-			const base = listSessions(
-				projectSlug,
-				{
-					...options,
-					statuses,
-				},
-				{ slug: projectSlug, folders: projectFolders },
-			).pipe(
+			const base = listSessions(projectSlug, options, {
+				slug: projectSlug,
+				folders: projectFolders,
+			}).pipe(
 				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(SessionManagerStateTag, stateRef),
 				Effect.provideService(SqlClient.SqlClient, sql),

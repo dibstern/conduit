@@ -13,6 +13,7 @@ import {
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { restoreClaudeQuestionsFromStore } from "../../../src/lib/domain/relay/Services/restore-claude-questions.js";
+import { strandedChildren } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -62,19 +63,8 @@ it.effect(
 					{ metadata: { runId: "reservation" } },
 				),
 			]);
-			for (const rows of [
-				yield* read.listSessionInfos(scope),
-				(yield* read.readSessionList(scope)).rows.map(({ item }) => item),
-				(yield* read.readSessionList(scope, {
-					familyOf: "reserved",
-					viewed: "reserved",
-				})).rows.map(({ item }) => item),
-			]) {
-				// Working is the activity view's answer now (82tn.32.30), not this status.
-				expect(rows.find(({ id }) => id === "reserved")).toMatchObject({
-					status: "busy",
-				});
-			}
+			// The row's status; the list reads working from the activity view (82tn.32.30).
+			expect(yield* read.getSessionStatus("reserved")).toBe("busy");
 			expect(yield* sql`SELECT status, started_at FROM provider_runs`).toEqual([
 				{ status: "pending", started_at: null },
 			]);
@@ -126,9 +116,7 @@ it.effect(
 					inputId: "fresh-input",
 				}),
 			]);
-			expect((yield* read.listSessionInfos(scope))[0]).toMatchObject({
-				status: "busy",
-			});
+			expect(yield* read.getSessionStatus("reserved")).toBe("busy");
 			yield* commit([
 				canonicalEvent("run.requested", "reserved", {
 					runId: "waiting",
@@ -214,6 +202,64 @@ it.effect(
 				expect(root).toMatchObject({ status: "idle", attention: "idle" });
 				expect(root).not.toHaveProperty("processing");
 			}
+		}).pipe(
+			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
+				local: true,
+			}),
+		),
+);
+
+it.effect(
+	"lists busy and widens a family window from the view, not the row's status",
+	() =>
+		Effect.gen(function* () {
+			const commit = yield* makeCommitAndSignal;
+			const read = yield* ReadQueryEffectTag;
+			const created = (sessionId: string, parentId?: string) =>
+				canonicalEvent("session.created", sessionId, {
+					sessionId,
+					provider: "claude",
+					title: sessionId,
+					...(parentId ? { parentId } : {}),
+				});
+			yield* commit([
+				created("root"),
+				created("stale", "root"),
+				created("live", "root"),
+				created("failed"),
+				// The row says busy, but no Run holds the session.
+				canonicalEvent("session.status", "stale", {
+					sessionId: "stale",
+					status: "busy",
+				}),
+				canonicalEvent("session.status", "failed", {
+					sessionId: "failed",
+					status: "error",
+				}),
+			]);
+			// Only "live" holds an active Run, as SessionActivity reads it (8.1).
+			const activityOf = activityFrom({ running: ["live"] });
+			const listed = yield* read.listSessionInfos(scope, { activityOf });
+			const window = (yield* read.readSessionList(scope, {
+				familyOf: "root",
+				viewed: "root",
+				activityOf,
+			})).rows.map(({ item }) => item);
+			for (const rows of [listed, window]) {
+				expect(rows.find(({ id }) => id === "live")).toMatchObject({
+					status: "busy",
+				});
+				expect(rows.find(({ id }) => id === "root")).toMatchObject({
+					status: "idle",
+				});
+			}
+			expect(listed.find(({ id }) => id === "stale")).toMatchObject({
+				status: "idle",
+			});
+			expect(listed.find(({ id }) => id === "failed")).toMatchObject({
+				status: "error",
+			});
+			expect(window.map(({ id }) => id).sort()).toEqual(["live", "root"]);
 		}).pipe(
 			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project"), {
 				local: true,
@@ -627,8 +673,9 @@ describe("typed session row derivations", () => {
 					];
 					for (const list of lists) {
 						const parent = list.find((row) => row.id === "monitor");
+						// A retry is busy: the view knows a Run, not why it waits (`retrying` says why).
 						expect(parent).toMatchObject({
-							status,
+							status: status === "retry" ? "busy" : status,
 							attention,
 							backgroundTasks: tasks,
 						});
@@ -667,12 +714,6 @@ describe("typed session row derivations", () => {
 				const running = activityFrom({ running: ["priority"] });
 				expect(attention(unread, { activityOf: running })).toBe("working");
 				expect(attention({ ...unread, status: "busy" })).toBe("done-unread");
-				expect(
-					attention(
-						{ ...unread, status: "idle" },
-						{ statuses: { priority: { type: "busy" } } },
-					),
-				).toBe("done-unread");
 				expect(
 					attention(
 						{ ...unread, last_turn_error_at: 5 },
@@ -839,14 +880,12 @@ describe("typed session row derivations", () => {
 				expect(side).toMatchObject({ attention: "working", processing: true });
 				const unread = sessionRowsToSessionInfoList(rows, {
 					...options,
-					statuses: {},
 					backgroundOf: () => undefined,
 					activityOf: activityFrom({}),
 				}).find((row) => row.id === "side");
 				expect(unread?.attention).toBe("done-unread");
 				const monitoring = sessionRowsToSessionInfoList(rootRows, {
 					...options,
-					statuses: {},
 					backgroundOf: () => ({ work: "monitoring", tasks: [] }),
 					activityOf: activityFrom({
 						background: {
@@ -888,7 +927,6 @@ describe("typed session row derivations", () => {
 						["agent", "inner"],
 					]),
 					sideThreadIds: new Set(["outer", "inner"]),
-					statuses: { agent: { type: "busy" } },
 					activityOf: activityFrom({ running: ["agent"] }),
 					unreadSessionIds: new Set(["agent"]),
 				};
@@ -915,7 +953,6 @@ describe("typed session row derivations", () => {
 				);
 				const unread = sessionRowsToSessionInfoList(rows, {
 					...options,
-					statuses: {},
 					activityOf: activityFrom({}),
 				});
 				expect(unread.find((row) => row.id === "inner")?.attention).toBe(
@@ -1327,7 +1364,7 @@ describe("ReadQueryEffect session lookups", () => {
 			);
 		},
 	);
-	it.effect("reads one session's status and the status of every session", () =>
+	it.effect("reads one session's status", () =>
 		Effect.gen(function* () {
 			yield* makeEffectSqlMigrator();
 			yield* seedSession("s1", { status: "idle" });
@@ -1336,38 +1373,27 @@ describe("ReadQueryEffect session lookups", () => {
 
 			expect(yield* readQuery.getSessionStatus("s2")).toBe("busy");
 			expect(yield* readQuery.getSessionStatus("nonexistent")).toBeUndefined();
-			expect(yield* readQuery.getAllSessionStatuses(scope)).toEqual({
-				s1: "idle",
-				s2: "busy",
-			});
 		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
-	it.effect(
-		"reads all providers alongside statuses without changing status consumers",
-		() =>
-			Effect.gen(function* () {
-				yield* makeEffectSqlMigrator();
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+	it.effect("reads every session's status alongside its provider", () =>
+		Effect.gen(function* () {
+			yield* makeEffectSqlMigrator();
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
 				VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1),
 					('claude-1', 'claude', 'Claude', 'busy', 2, 2),
 					('unknown-1', 'unknown', 'Unknown', 'idle', 3, 3)`;
-				yield* sql`UPDATE sessions SET project_id = 'test-project' WHERE project_id IS NULL`;
-				const readQuery = yield* makeReadQueryEffect;
-				expect(
-					yield* readQuery.getAllSessionStatusesWithProviders(scope),
-				).toEqual([
-					{ id: "opencode-1", status: "busy", provider: "opencode" },
-					{ id: "claude-1", status: "busy", provider: "claude" },
-					{ id: "unknown-1", status: "idle", provider: "unknown" },
-				]);
-				expect(yield* readQuery.getAllSessionStatuses(scope)).toEqual({
-					"opencode-1": "busy",
-					"claude-1": "busy",
-					"unknown-1": "idle",
-				});
-			}).pipe(Effect.provide(testLayer, { local: true })),
+			yield* sql`UPDATE sessions SET project_id = 'test-project' WHERE project_id IS NULL`;
+			const readQuery = yield* makeReadQueryEffect;
+			expect(
+				yield* readQuery.getAllSessionStatusesWithProviders(scope),
+			).toEqual([
+				{ id: "opencode-1", status: "busy", provider: "opencode" },
+				{ id: "claude-1", status: "busy", provider: "claude" },
+				{ id: "unknown-1", status: "idle", provider: "unknown" },
+			]);
+		}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
 	it.effect("lists nothing for an empty store", () =>
@@ -1450,7 +1476,7 @@ describe("ReadQueryEffect session families", () => {
 	);
 });
 
-describe("ReadQueryEffect.getStrandedChildren", () => {
+describe("the status poller's stranded children", () => {
 	it.effect(
 		"finds busy task children of idle parents with their task and runtime owner",
 		() =>
@@ -1507,8 +1533,7 @@ describe("ReadQueryEffect.getStrandedChildren", () => {
 				});
 				yield* link("root", "claude-subagent-done", "t-done");
 
-				const readQuery = yield* makeReadQueryEffect;
-				const rows = yield* readQuery.getStrandedChildren(scope);
+				const rows = yield* strandedChildren(scope);
 				expect([...rows].sort((a, b) => a.id.localeCompare(b.id))).toEqual([
 					{ id: "claude-subagent-bg", task_id: "t-bg", owner_id: "root" },
 					{
@@ -1545,9 +1570,9 @@ describe("ReadQueryEffect idle corrections", () => {
 				}
 				const readQuery = yield* makeReadQueryEffect;
 				// 8.3 (2849): the status poller's idle corrections ask whether anything may act.
-				expect(
-					(yield* readQuery.getStrandedChildren(scope)).map(({ id }) => id),
-				).toEqual(["quiet-child"]);
+				expect((yield* strandedChildren(scope)).map(({ id }) => id)).toEqual([
+					"quiet-child",
+				]);
 				expect(
 					(yield* readQuery.getSessionsForReconciliation(scope, [])).map(
 						({ id }) => id,

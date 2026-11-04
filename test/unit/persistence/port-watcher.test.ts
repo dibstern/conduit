@@ -39,6 +39,9 @@
 //     process's own fds) differs from the hand-made tree, so a Linux host sees no server, or not
 //     its start time, cwd or task. test/fixtures/proc-linux-recorded is a /proc tree recorded from
 //     a Linux container by its record.sh.
+// 24. a Linux host asked for lsof and ps scanning /proc instead (Effect's Config reads an empty
+//     value as unset, so "" fell back to the /proc default), so every lsof test there watches the
+//     live /proc and sees none of its fake servers.
 import { spawn } from "node:child_process";
 import {
 	appendFileSync,
@@ -277,7 +280,7 @@ const showListeners = (fake: Fake, listeners: Listeners) => {
 	fake.show({ listeners });
 };
 
-/** The watcher's timing, and its scanner: "" for lsof and ps, a /proc root, or the host default. */
+/** The watcher's timing, and its scanner: "lsof" for lsof and ps, a /proc root, or the host default (24). */
 const config = (intervalMs: number, holdMs: number, procRoot: string) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
@@ -285,7 +288,10 @@ const config = (intervalMs: number, holdMs: number, procRoot: string) =>
 			CONDUIT_PORT_WATCH_HOLD_MS: String(holdMs),
 			...(scanner === "host"
 				? {}
-				: { CONDUIT_PORT_WATCH_PROC_ROOT: scanner === "proc" ? procRoot : "" }),
+				: {
+						CONDUIT_PORT_WATCH_PROC_ROOT:
+							scanner === "proc" ? procRoot : "lsof",
+					}),
 		}),
 	);
 

@@ -657,7 +657,7 @@ export interface HistoryMessagePart {
 	 */
 	state?: {
 		status?: ToolStatus;
-		outcome?: "succeeded" | "failed";
+		outcome?: "succeeded" | "failed" | "endedByRun";
 		fileChanges?: readonly ToolFileChange[];
 		fileChangesBytes?: Utf8Bytes;
 		presentation?: ToolPresentation;

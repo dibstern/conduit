@@ -153,6 +153,8 @@ export interface MessagePartRow {
 	rest_payload?: string | null;
 	/** Set when stored or read as a preview: the whole output's UTF-8 size. */
 	result_bytes?: number | null;
+	/** 'run' when its Run ended it, not its own completion (82tn.45). */
+	ended_by?: string | null;
 }
 
 export interface MessageWithParts extends MessageRow {

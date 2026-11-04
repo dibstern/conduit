@@ -132,7 +132,6 @@ const makeLayer = (options: {
 					getSession: () => Effect.succeed(undefined),
 					getGoalDetails: () =>
 						Effect.succeed({ checks: [], tokensSinceStart: null }),
-					getAllSessionStatuses: () => Effect.succeed({}),
 					getAllSessionStatusesWithProviders: () => Effect.succeed([]),
 					listSessions: () => Effect.succeed([]),
 					listPendingClaudeQuestionTools: () => Effect.succeed([]),
@@ -141,7 +140,6 @@ const makeLayer = (options: {
 					listSessionGitRefreshTargets: () => Effect.succeed([]),
 					getSessionSkillMessages: () => Effect.succeed([]),
 					getSessionsForReconciliation: () => Effect.succeed([]),
-					getStrandedChildren: () => Effect.succeed([]),
 					getSessionLineage: () => Effect.succeed({ rows: [], count: 0 }),
 					countPendingApprovalsBySession: () => Effect.succeed([]),
 					readPendingApprovals: () => Effect.succeed({ rows: [], version: 0 }),
