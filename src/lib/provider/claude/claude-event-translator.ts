@@ -603,6 +603,29 @@ export class ClaudeEventTranslator {
 			: Effect.void;
 	}
 
+	/** A native command's reply (8.5) moves the goal only: no chat, no turn. */
+	observeGoal(
+		ctx: ClaudeSessionContext,
+		message: SDKMessage,
+		replyTo?: string,
+	): Effect.Effect<void, EventSinkError> {
+		return this.collectWrites(() =>
+			Effect.suspend(() => {
+				const tracker = (ctx.goalTracker ??= new ClaudeGoalTracker(
+					ctx.sessionId,
+				));
+				const change = tracker.observe(message, ctx.cumulativeTokens ?? 0);
+				// A reply confirms its action even when the goal does not move ("No goal set").
+				return this.pushGoalChange(
+					ctx,
+					replyTo === undefined
+						? change
+						: { ...(change ?? tracker.facts), replyTo },
+				);
+			}),
+		);
+	}
+
 	private settleGoal(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<void, EventSinkError> {

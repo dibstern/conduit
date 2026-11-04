@@ -53,12 +53,14 @@ import {
 	CommandFingerprintMismatch,
 	CommandIdGenerationFailed,
 	MissingCommandId,
+	nativeCommandUnsupported,
 	type OrchestrationError,
 	ProviderInstanceFailure,
 	ProviderNotRegistered,
 	SessionProviderNotBound,
 	StaleCommandRejected,
 } from "./errors.js";
+import type { GoalAction } from "./goal-tracker.js";
 import { DurableCommandCommitRepository } from "./orchestration-command-commit.js";
 import {
 	DURABLE_COMMAND_FINGERPRINT_VERSION,
@@ -190,8 +192,19 @@ export interface EndSessionCommand {
 	readonly unbind?: boolean;
 }
 
+/** A native command (8.5): a session send main issues, never a chat message or an inbox input. */
+export interface NativeCommandCommand {
+	readonly type: "native_command";
+	readonly commandId: string;
+	readonly sessionId: string;
+	readonly providerProcessId?: string;
+	readonly text: string;
+	readonly goal?: GoalAction;
+}
+
 export type OrchestrationCommand =
 	| SendTurnCommand
+	| NativeCommandCommand
 	| InterruptTurnCommand
 	| ResolvePermissionCommand
 	| ResolveQuestionCommand
@@ -1137,6 +1150,8 @@ export class OrchestrationEngine {
 			switch (command.type) {
 				case "send_turn":
 					return yield* this.handleSendTurnEffect(command, durable);
+				case "native_command":
+					return yield* this.handleNativeCommandEffect(command);
 				case "interrupt_turn":
 					return yield* this.handleInterruptTurnEffect(command);
 				case "resolve_permission":
@@ -1180,6 +1195,7 @@ export class OrchestrationEngine {
 	private resolveControlProcessEffect(
 		command:
 			| InterruptTurnCommand
+			| NativeCommandCommand
 			| ResolvePermissionCommand
 			| ResolveQuestionCommand
 			| EndSessionCommand,
@@ -1245,6 +1261,7 @@ export class OrchestrationEngine {
 	private handleDurableControlEffect(
 		command:
 			| InterruptTurnCommand
+			| NativeCommandCommand
 			| ResolvePermissionCommand
 			| ResolveQuestionCommand
 			| EndSessionCommand,
@@ -1842,6 +1859,32 @@ export class OrchestrationEngine {
 				Effect.tapError(() => restorePreviousBinding),
 			);
 			return result;
+		});
+	}
+
+	/** A native command without the durable store: delivered at once, never held (8.5). */
+	private handleNativeCommandEffect(
+		command: NativeCommandCommand,
+	): Effect.Effect<void, OrchestrationError> {
+		return Effect.gen({ self: this }, function* () {
+			const providerId = yield* this.requireProviderForSessionEffect(
+				command.sessionId,
+			);
+			const call = yield* this.resolveSessionCallContextEffect(
+				command.sessionId,
+			);
+			const instance = yield* this.getProviderInstanceEffect(
+				providerId,
+				call?.account,
+			);
+			if (!instance.sendNativeCommandEffect)
+				return yield* nativeCommandUnsupported(providerId);
+			yield* instance.sendNativeCommandEffect(
+				command.sessionId,
+				command.commandId,
+				command.text,
+				call,
+			);
 		});
 	}
 

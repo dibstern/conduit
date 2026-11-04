@@ -30,7 +30,6 @@ export const sessionPresentationHandlers: StepHandler[] = [
 				...small,
 				"background-tasks-toggle",
 				"background-tasks-row-stop-all",
-				"goal-details-pause",
 				"goal-details-resume",
 				"goal-details-edit",
 				"goal-details-clear",

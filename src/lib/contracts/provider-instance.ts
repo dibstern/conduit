@@ -69,6 +69,8 @@ export interface ProviderDriverTraits {
 	readonly usesLocalSessions: boolean;
 	/** provider-turn-service.test.ts pins goal state passed to the native runner. */
 	readonly supportsGoalState: boolean;
+	/** claude-goals.test.ts pins goal actions as native commands (CONTRACT.md 8.6); false keeps the composer's chat path. */
+	readonly nativeGoalActions: boolean;
 	/** enter-worktree-turn / exit-worktree-keep-turn pin tool-directed workspace moves. */
 	readonly worktreeMoves: "tool-directive" | "server-declaration";
 	/** OpenCode message snapshots pin native parentID lineage. */
@@ -117,6 +119,7 @@ export const PROVIDER_DRIVERS = {
 		streamsSessionLifecycle: true,
 		usesLocalSessions: true,
 		supportsGoalState: true,
+		nativeGoalActions: true,
 		worktreeMoves: "tool-directive",
 		emitsMessageParentIds: false,
 		// steer-during-tool-folds.jsonl and claude-steer-recovery.test.ts pin native delivery and requeue.
@@ -156,6 +159,7 @@ export const PROVIDER_DRIVERS = {
 		streamsSessionLifecycle: false,
 		usesLocalSessions: false,
 		supportsGoalState: false,
+		nativeGoalActions: false,
 		worktreeMoves: "server-declaration",
 		emitsMessageParentIds: true,
 		// Classic prompt_async injects a busy prompt at the next model step
@@ -194,6 +198,7 @@ export const PROVIDER_DRIVERS = {
 		streamsSessionLifecycle: true, // Runner lifecycle must never be polled through OpenCode.
 		usesLocalSessions: true, // Conduit owns sessions before a runner exists.
 		supportsGoalState: false, // Goals need a captured Cursor runtime contract.
+		nativeGoalActions: false,
 		worktreeMoves: "tool-directive", // Never declare workspace moves through OpenCode.
 		emitsMessageParentIds: false, // No native message-lineage contract is established.
 		// steer.jsonl pins native text delivery; cursor-steer.test.ts pins missing
@@ -231,6 +236,7 @@ export const PROVIDER_DRIVERS = {
 		streamsSessionLifecycle: true, // turn/completed supplies terminal events through the runner.
 		usesLocalSessions: true, // The daemon creates sessions before thread/start.
 		supportsGoalState: true, // Native thread goals hold one conduit turn across successors.
+		nativeGoalActions: false, // The composer sends /goal text until 82tn.32.27.
 		worktreeMoves: "tool-directive", // Codex never declares workspace moves through OpenCode.
 		emitsMessageParentIds: false, // The first slice consumes no native message lineage.
 		// steer.jsonl and steer-race.jsonl pin echoed delivery and inbox requeue.
@@ -266,6 +272,7 @@ export const BrowserDriverTraitsSchema = Schema.Struct({
 		"provider-qualified",
 	]),
 	supportsGoalState: Schema.Boolean,
+	nativeGoalActions: Schema.Boolean,
 	permissionModes: Schema.Array(
 		Schema.Literals(["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"]),
 	),

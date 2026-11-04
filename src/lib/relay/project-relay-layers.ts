@@ -780,6 +780,7 @@ export function createProjectRelayLayers({
 				},
 				compactions: (yield* SessionActivityTag).compactions,
 				retries: (yield* SessionActivityTag).retries,
+				goals: (yield* SessionActivityTag).goals,
 				surfacing: yield* makeMessageSurfacing,
 			});
 		}),

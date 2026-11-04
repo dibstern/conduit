@@ -98,8 +98,6 @@ export interface InboxView {
 	readonly known: boolean;
 	/** The session's provider can take an input mid-turn. */
 	readonly providerSteers: boolean;
-	/** Native Codex goal controls can run without interrupting the held turn. */
-	readonly nativeGoalCommands?: boolean;
 	/** A permission or question prompt waits on the user. */
 	readonly promptOpen: boolean;
 	/** The request of the latest handoff, which the running turn runs on. */
@@ -212,14 +210,7 @@ const steer = (
 ): InboxDecision => {
 	const reason = steerBlocker(view, input.request);
 	if (reason) return { _tag: "Rejected", reason };
-	if (
-		input.request.text.trimStart().startsWith("/") &&
-		!(
-			view.nativeGoalCommands &&
-			/^\/goal(?:\s|$)/.test(input.request.text.trim())
-		)
-	)
-		return interruptForInput(sessionId, input, events);
+	// CONTRACT.md 8.1 (2740): no busy-slash hold; a slash steers like any text.
 	return {
 		_tag: "Accepted",
 		events: [
@@ -566,8 +557,6 @@ export const SessionInboxLive = Layer.effect(
 					scheduled: facts?.scheduled === 1,
 					known,
 					providerSteers: providerSteers(Option.getOrUndefined(account)),
-					nativeGoalCommands:
-						Option.getOrUndefined(account)?.driver === "codex",
 					promptOpen: (facts?.open_prompts ?? 0) > 0,
 					running,
 				} satisfies InboxView;

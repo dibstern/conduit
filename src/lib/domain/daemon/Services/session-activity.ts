@@ -19,6 +19,7 @@ import type {
 	Interests,
 } from "../../../server/event-audiences.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
+import { makeSessionGoals } from "../../../session/session-goals.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
 import type {
 	BackgroundTask,
@@ -232,6 +233,8 @@ export interface SessionActivity {
 	readonly background: ReturnType<typeof makeLedgerTasks>;
 	readonly compactions: ReturnType<typeof makeSessionCompactions>;
 	readonly retries: ReturnType<typeof makeSessionRetries>;
+	/** 8.1: each session's goal tracker, whose phase rides its row. */
+	readonly goals: ReturnType<typeof makeSessionGoals>;
 	/**
 	 * Each session's live servers as the PortWatcher last read them from the Run Ledger, the
 	 * ledger's Servers (8.7); a reader's copy, never the PortWatcher's comparison basis.
@@ -264,6 +267,14 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 		};
 		const compactions = makeSessionCompactions();
 		const retries = makeSessionRetries();
+		const goals = makeSessionGoals();
+		const announce =
+			<A extends unknown[]>(move: (sessionId: string, ...rest: A) => boolean) =>
+			(sessionId: string, ...rest: A): boolean => {
+				const moved = move(sessionId, ...rest);
+				if (moved) changed(sessionId);
+				return moved;
+			};
 		const connectionInterests = new Map<EventDelivery, Interests>();
 		// Existing hint consumers mutate a Map. Keep that interface while ensuring
 		// dismissals and resets notify readers just like the other activity state.
@@ -336,6 +347,18 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				...retries,
 				observe: (events) => {
 					const moved = retries.observe(events);
+					for (const sessionId of moved) changed(sessionId);
+					return moved;
+				},
+			},
+			goals: {
+				phaseOf: goals.phaseOf,
+				request: announce(goals.request),
+				drop: announce(goals.drop),
+				sends: announce(goals.sends),
+				takeResends: goals.takeResends,
+				observe: (events) => {
+					const moved = goals.observe(events);
 					for (const sessionId of moved) changed(sessionId);
 					return moved;
 				},

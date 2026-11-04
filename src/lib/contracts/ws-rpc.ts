@@ -3128,6 +3128,53 @@ export const CancelSession = Rpc.make("CancelSession", {
 	error: WsRpcError,
 });
 
+/** 8.6: a goal action is a native command, never a chat message; CancelSession stays Stop. */
+export const SetGoal = Rpc.make("SetGoal", {
+	payload: Schema.TaggedStruct("SetGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+		condition: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const ClearGoal = Rpc.make("ClearGoal", {
+	payload: Schema.TaggedStruct("ClearGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+const GoalPauseResponseSchema = Schema.Union([
+	Schema.Struct({ ok: Schema.Literal(true) }),
+	Schema.Struct({
+		ok: Schema.Literal(false),
+		reason: Schema.Literal("goal_pause_unsupported"),
+	}),
+]);
+
+/** 8.1: defined for adapters with a goal pause; refused with a reason where there is none. */
+export const PauseGoal = Rpc.make("PauseGoal", {
+	payload: Schema.TaggedStruct("PauseGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: GoalPauseResponseSchema,
+	error: WsRpcError,
+});
+
+export const ResumeGoal = Rpc.make("ResumeGoal", {
+	payload: Schema.TaggedStruct("ResumeGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: GoalPauseResponseSchema,
+	error: WsRpcError,
+});
+
 /** Stops background tasks without touching a turn (8.4): "all" is the ledger's live tasks at decision time. */
 export const StopTasks = Rpc.make("StopTasks", {
 	payload: Schema.TaggedStruct("StopTasks", {
@@ -3684,6 +3731,10 @@ const wsRpcRequests = [
 	CancelSession,
 	StopTasks,
 	ConfirmEscalation,
+	SetGoal,
+	ClearGoal,
+	PauseGoal,
+	ResumeGoal,
 	StopServer,
 	MarkServer,
 	SetLogLevel,

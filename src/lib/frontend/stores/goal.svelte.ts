@@ -10,7 +10,7 @@ export const goalDetails = $state({ open: false });
 
 export type GoalComposerAction = {
 	sessionId: string;
-	action: "pause" | "resume" | "edit" | "clear" | "new";
+	action: "resume" | "edit" | "clear" | "new";
 	condition?: string;
 };
 
@@ -59,19 +59,11 @@ export function hydrateSessionGoal(session: SessionInfo): void {
 }
 
 export type GoalView = {
-	phase:
-		| "starting"
-		| "pursuing"
-		| "checking"
-		| "not_yet"
-		| "paused"
-		| "met"
-		| "cleared"
-		| null;
+	phase: "pursuing" | "not_yet" | "paused" | "met" | "cleared" | null;
 	subtitle: string;
 	tone: "violet" | "amber" | "success" | null;
 	border: "solid" | "dashed" | "none";
-	icon: "target" | "spinner" | "pause" | "check";
+	icon: "target" | "pause" | "check";
 };
 
 export function goalView(
@@ -123,39 +115,26 @@ export function goalView(
 			icon: "pause",
 		};
 	}
-	if (sessionStatus === "busy" || sessionStatus === "retry") {
-		if (goal.iterations === 0) {
-			return {
-				phase: "starting",
-				subtitle: "Goal set · starting",
-				tone: "violet",
-				border: "solid",
-				icon: "target",
-			};
-		}
-		const checks = `${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`;
-		return {
-			phase: "pursuing",
-			subtitle: `${goal.condition} · ${checks}`,
-			tone: "violet",
-			border: "solid",
-			icon: "target",
-		};
-	}
-	if (goal.lastReason) {
+	const checks = `${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`;
+	// Nothing observes a goal check, so session status never makes a starting or checking phase.
+	if (
+		goal.lastReason &&
+		sessionStatus !== "busy" &&
+		sessionStatus !== "retry"
+	) {
 		return {
 			phase: "not_yet",
-			subtitle: `${goal.condition} · ${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`,
+			subtitle: `${goal.condition} · ${checks}`,
 			tone: "amber",
 			border: "solid",
 			icon: "target",
 		};
 	}
 	return {
-		phase: "checking",
-		subtitle: `Checking goal · check ${goal.iterations + 1}`,
+		phase: "pursuing",
+		subtitle: `${goal.condition} · ${checks}`,
 		tone: "violet",
 		border: "solid",
-		icon: "spinner",
+		icon: "target",
 	};
 }

@@ -11,12 +11,12 @@ Scenario Outline: Set goal inserts the command and shows teal send controls on a
   And the composer region visually matches <baseline> at <threshold> percent
   When I type <goal> into the composer
   And I send the composer message
-  Then the mock relay replays the sent message for the selected session
+  Then the mock relay received 1 SetGoal action for <condition> with distinct command ids and no goal chat message
   And the composer shows normal send controls
 
 Examples:
-  | goal                                        | baseline                | threshold |
-  | $goal Make every acceptance scenario pass   | composer-set-goal-phone | 98        |
+  | goal                                        | condition                             | baseline                | threshold |
+  | $goal Make every acceptance scenario pass   | Make every acceptance scenario pass   | composer-set-goal-phone | 98        |
 
 Scenario Outline: Typing a goal prefix enables teal send and editing the prefix reverts it
   Given the conduit app is served with the connected mockup

@@ -1,6 +1,9 @@
 import { Schema } from "effect";
 import { AccountSchema } from "../contracts/account.js";
-import { ProviderStopSnapshotSchema } from "../contracts/stored-event.js";
+import {
+	GoalActionSchema,
+	ProviderStopSnapshotSchema,
+} from "../contracts/stored-event.js";
 import { ProviderPermissionUpdateSchema } from "../shared-types.js";
 
 export const STOP_ABORT_WAIT_MS =
@@ -147,6 +150,12 @@ export const ProviderControlPayloadSchema = Schema.Union([
 		targetProviderId: Schema.optionalKey(Schema.String),
 		account: Schema.optionalKey(AccountSchema),
 		unbind: Schema.optionalKey(Schema.Boolean),
+	}),
+	Schema.Struct({
+		...controlTarget,
+		type: Schema.Literal("native_command"),
+		text: Schema.String,
+		goal: Schema.optionalKey(GoalActionSchema),
 	}),
 ]);
 export type ProviderControlPayload = typeof ProviderControlPayloadSchema.Type;

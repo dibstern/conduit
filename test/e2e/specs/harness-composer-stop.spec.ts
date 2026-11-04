@@ -333,36 +333,13 @@ test("queued tray stays Paused until Resume and the next message uses the same q
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 });
 
-test("stop and run: a slash command interrupts a never-ending turn from the composer", async ({
-	page,
-	harness,
-}) => {
-	const { app, chat, queryId } = await start(page, harness);
-	await app.input.fill("/goal clear");
-	await app.input.press("ControlOrMeta+Enter");
-	await expect
-		.poll(() => queryMarks(harness, queryId, "query-interrupted").length)
-		.toBe(1);
-	await expect
-		.poll(() =>
-			marks(harness)
-				.filter((mark) => mark["kind"] === "enqueue")
-				.map((mark) => mark["request"]),
-		)
-		.toEqual(["task-stop-foreground-turn-only", "/goal clear"]);
-	await expect(app.input).toHaveValue("");
-	await expect(page.getByTestId("composer-steer-refused")).toHaveCount(0);
-	await expect(chat.stopBtn).toBeHidden();
-	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
-});
-
 test("stop and run: Run now sends the command ahead of the queued message and drains both", async ({
 	page,
 	harness,
 	isMobile,
 }) => {
 	const { app, chat, queryId } = await start(page, harness);
-	for (const text of ["after-command", "/goal clear"]) {
+	for (const text of ["after-command", "/compact"]) {
 		await app.input.fill(text);
 		// Mobile Enter inserts a newline; its Send button uses the same queue delivery.
 		if (isMobile) await app.sendBtn.click();
@@ -372,11 +349,11 @@ test("stop and run: Run now sends the command ahead of the queued message and dr
 	}
 	await expect(page.getByTestId("pending-input-text")).toHaveText([
 		"after-command",
-		"/goal clear",
+		"/compact",
 	]);
 	const command = page
 		.getByTestId("pending-input-row")
-		.filter({ hasText: "/goal clear" });
+		.filter({ hasText: "/compact" });
 	await expect(command.getByTestId("pending-input-steer")).toHaveCount(0);
 	await expect(command.getByTestId("pending-input-run-now")).toHaveText(
 		"Run now",
@@ -391,11 +368,7 @@ test("stop and run: Run now sends the command ahead of the queued message and dr
 				.filter((mark) => mark["kind"] === "enqueue")
 				.map((mark) => mark["request"]),
 		)
-		.toEqual([
-			"task-stop-foreground-turn-only",
-			"/goal clear",
-			"after-command",
-		]);
+		.toEqual(["task-stop-foreground-turn-only", "/compact", "after-command"]);
 	await expect
 		.poll(() => chat.getLastAssistantText())
 		.toBe(responseChunks("after-command").join(""));
@@ -413,12 +386,12 @@ test("stop and run: an open question still refuses the command without interrupt
 	await app.goto(`${harness.baseUrl}/s/${sessionId}`);
 	await app.sendMessage("question-stop-and-run");
 	await expect(page.locator(".question-card")).toBeVisible();
-	await app.input.fill("/goal clear");
+	await app.input.fill("/compact");
 	await app.input.press("ControlOrMeta+Enter");
 	await expect(page.getByTestId("composer-steer-refused")).toContainText(
 		"Answer the open prompt first.",
 	);
-	await expect(app.input).toHaveValue("/goal clear");
+	await expect(app.input).toHaveValue("/compact");
 	await expect(page.locator(".question-card")).toBeVisible();
 	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
 	expect(
@@ -429,45 +402,6 @@ test("stop and run: an open question still refuses the command without interrupt
 	expect(
 		marks(harness).filter((mark) => mark["kind"] === "query-interrupted"),
 	).toEqual([]);
-});
-
-test("stop and run: an interrupt failure keeps the command queued and first when the turn ends", async ({
-	page,
-	harness,
-}) => {
-	const { app, chat, queryId } = await start(
-		page,
-		harness,
-		"correction-reject-monitor",
-	);
-	await app.sendMessage("after-command");
-	await app.input.fill("/goal clear");
-	await expect(app.sendBtn).toBeEnabled({ timeout: 2_000 });
-	await app.input.press("ControlOrMeta+Enter");
-	await expect
-		.poll(() => queryMarks(harness, queryId, "query-interrupt-rejected").length)
-		.toBe(1);
-	await expect(app.input).toHaveValue("");
-	await expect(page.getByTestId("composer-steer-refused")).toHaveCount(0);
-	await expect(chat.stopBtn).toBeVisible();
-	await expect(page.getByTestId("pending-input-text")).toHaveText([
-		"after-command",
-		"/goal clear",
-	]);
-	writeFileSync(join(harness.root, "task-stop-release-result"), "release");
-	await expect
-		.poll(() =>
-			marks(harness)
-				.filter((mark) => mark["kind"] === "enqueue")
-				.map((mark) => mark["request"]),
-		)
-		.toEqual([
-			"task-stop-foreground-correction-reject-monitor",
-			"/goal clear",
-			"after-command",
-		]);
-	await expect(chat.stopBtn).toBeHidden();
-	await expect(page.getByTestId("pending-input-tray")).toHaveCount(0);
 });
 
 test("a Monitor counts as live work and the toast disappears on session navigation", async ({

@@ -283,13 +283,14 @@
 			label: session.snoozedUntil == null ? "Until something happens" : `Until ${formatSnoozeTime(session.snoozedUntil, sessionState.now)}`,
 			run: () => { stateMenuOpen = true; },
 		};
-		if (goal.phase === "checking") return undefined;
 		if (goalFacts?.goal && goal.phase !== "paused") return { ...getPinCommand(session), emphasis: "primary" };
 		if (woke) return undefined;
 		return getPrimaryCommand(session, sessionState.now);
 	});
 	const goalButtonTone = $derived(goal.phase === "met" ? "goal-met" : stuck || (!sessionViewState.compact && goal.phase === "paused") ? "goal-paused" : "goal");
-	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : goal.phase === "checking" ? "Checking" : "Pursuing");
+	// 8.1: Clearing is derived from the pending clear, never stored.
+	const clearing = $derived(session?.goalPhase?.tag === "Pending" && session.goalPhase.action.kind === "clear");
+	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : clearing ? "Clearing" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : "Pursuing");
 	const goalIcon = $derived(goal.phase === "met" ? "circle-check" : goal.phase === "paused" ? "pause" : stuck ? "circle-alert" : "target");
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
@@ -473,7 +474,7 @@
 {#snippet goalContent()}
 	{#if detailsGoal && goalFacts}
 		<div class={sessionViewState.compact ? "pt-[2px]" : ""}>
-			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session">{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" />{:else}<Icon name={goalIcon} size={12} />{/if}{desktopGoalLabel}</Badge>
+			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session"><Icon name={goalIcon} size={12} />{desktopGoalLabel}</Badge>
 			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[10px] mb-[4px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
 			<p data-testid="goal-details-meta" class="m-0 font-mono text-[10.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)}{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}{#if details?.tokensSinceStart != null}<span data-testid="goal-details-tokens">{" · "}{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</p>
 		</div>
@@ -506,16 +507,13 @@
 		{#if detailsFailed}<p role="status" class="mt-[8px] mb-0 text-error">{detailsFailed}</p>{/if}
 		<div class="mt-[10px] flex items-center justify-between gap-[8px] text-[12px] text-text-dimmer">
 			<span data-testid="goal-details-foot" class="inline-flex items-center gap-[5px]">
-				{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" /><span class="text-status-goal">Checking{details?.turnCount != null ? ` after turn ${details.turnCount}` : ""}</span>
-				{:else}{detailsGoal.iterations} checks · {#if goal.phase === "paused"}paused {goalClock(latestCheck?.at ?? detailsGoal.setAt)}{:else if goal.phase === "met"}met {goalClock(details?.metAt ?? goalFacts.endedAt ?? detailsGoal.setAt)}{:else}{goalDuration(sessionState.now - (details?.setAt ?? detailsGoal.setAt), true)}{/if}{/if}
+				{detailsGoal.iterations} checks · {#if goal.phase === "paused"}paused {goalClock(latestCheck?.at ?? detailsGoal.setAt)}{:else if goal.phase === "met"}met {goalClock(details?.metAt ?? goalFacts.endedAt ?? detailsGoal.setAt)}{:else}{goalDuration(sessionState.now - (details?.setAt ?? detailsGoal.setAt), true)}{/if}
 			</span>
 			<Button variant="ghost" size="content" tone="accent" touchTarget={sessionViewState.compact ? "always" : true} aria-expanded={historyOpen} aria-controls="goal-details-history" data-testid="goal-details-history-toggle" onclick={() => { historyOpen = !historyOpen; }}>History {historyOpen ? "⌄" : "›"}</Button>
 		</div>
 		{#if historyOpen}
 		<ol id="goal-details-history" data-testid="goal-details-history" class="mt-[10px] mb-0 flex list-none flex-col gap-[5px] p-0">
-			{#if goal.phase === "checking"}
-				<li data-testid="goal-details-check" class="desktop-goal-check"><span class="mt-[2px]"><ConduitMark size={13} variant="running" tone="goal" /></span><span><b>Checking</b>{details?.turnCount != null ? ` · after turn ${details.turnCount}` : ""}</span><time class="text-text-dimmer">now</time></li>
-			{:else if goalFacts.ended === "met"}
+			{#if goalFacts.ended === "met"}
 				<li data-testid="goal-details-check" class="desktop-goal-check"><Icon name="circle-check" size={13} class="text-success" /><span><b>Met</b>{detailsGoal.lastReason ? ` · ${detailsGoal.lastReason}` : ""}</span><time class="text-text-dimmer">{goalFacts.endedAt == null ? "" : goalClock(goalFacts.endedAt)}</time></li>
 			{/if}
 			{#each [...(details?.checks ?? [])].reverse() as check (check.iteration)}
@@ -525,14 +523,14 @@
 			<li role="status" class="goal-details-check"><span class="col-span-full text-text-muted">Loading checks…</span></li>
 		{:else if detailsFailed}
 			<li role="status" class="goal-details-check"><span class="col-span-full text-status-red">{detailsFailed}</span></li>
-		{:else if !details?.checks.length && goal.phase !== "checking" && goal.phase !== "met"}
+		{:else if !details?.checks.length && goal.phase !== "met"}
 			<li class="goal-details-check"><span class="col-span-full">No checks yet. The first runs when the agent finishes a turn.</span></li>
 		{/if}
 		</ol>
 		{/if}
 	<div class="flex gap-[8px] mt-[16px] pb-[4px]">
 		{#if goalFacts.goal}
-			<Button variant={stuck || goal.phase === "paused" ? "primary" : "chip"} size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
+			{#if goal.phase === "paused" && !discoveryState.currentTraits?.nativeGoalActions}<Button variant="primary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon="play" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-resume" onclick={() => runGoalAction("resume")}>Resume</Button>{/if}
 			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
 			<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
 		{:else if goalFacts.ended === "met"}
@@ -545,7 +543,7 @@
 
 {#snippet goalLine(props: Record<string, unknown> = {})}
 	<Button variant="ghost" size={sessionViewState.compact ? "phone-subtitle" : "subtitle"} touchTarget={sessionViewState.compact ? "always" : false} layout="block" align="start" tone={goalButtonTone} hoverFill="none" bind:element={goalSubtitleEl} data-testid="session-goal-subtitle" data-goal-phase={goal.phase} aria-expanded={goalDetails.open} aria-controls="goal-details" title={goal.phase === "paused" ? `${goal.subtitle} · ${goalFacts?.pausedReason}` : goal.subtitle} class={sessionViewState.compact ? "" : "mt-[1px]"} onclick={() => { tasksPanel.open = false; sideThreadsPanel.open = false; goalDetails.open = !goalDetails.open; }} {...props}>
-		{#if goal.phase === "checking"}<ConduitMark size={12} variant="running" tone="goal" />{:else}<Icon name={goalIcon} size={12} class="shrink-0" />{/if}
+		<Icon name={goalIcon} size={12} class="shrink-0" />
 		<b class="shrink-0 font-medium">{desktopGoalLabel}</b>{" "}
 		{#if !duoFolded}<span class="min-w-0 truncate text-text-secondary">· {detailsGoal?.condition}</span>
 		{:else if (goal.phase === "pursuing" || goal.phase === "not_yet") && detailsGoal}<small class="shrink-0">{detailsGoal.iterations} {detailsGoal.iterations === 1 ? "check" : "checks"}</small>{/if}

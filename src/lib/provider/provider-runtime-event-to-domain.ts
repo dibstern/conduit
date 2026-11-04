@@ -515,6 +515,7 @@ export function translateProviderRuntimeEventToDomain(
 			if (sessionId !== event.sessionId) return { events: [], state };
 			const parentId = stringField(data["parentId"]);
 			const forkedFrom = stringField(data["forkedFrom"]);
+			const driver = stringField(data["driver"]);
 			const providerSessionId =
 				stringField(data["providerSessionId"]) ??
 				event.providerRefs.providerSessionId;
@@ -522,6 +523,7 @@ export function translateProviderRuntimeEventToDomain(
 				sessionId,
 				title: stringField(data["title"]) ?? "Untitled",
 				provider: stringField(data["provider"]) ?? event.providerId,
+				...(driver != null ? { driver } : {}),
 				...(parentId != null ? { parentId } : {}),
 				...(forkedFrom != null ? { forkedFrom } : {}),
 				...(providerSessionId != null ? { providerSessionId } : {}),
@@ -638,6 +640,24 @@ export function translateProviderRuntimeEventToDomain(
 				outcome === "interrupted"
 					? { result: { outcome, ...(code ? { code } : {}) } }
 					: {}),
+			});
+		}
+
+		case "evidence.command_receipt": {
+			const commandId = stringField(data["commandId"]);
+			const receipt = data["state"];
+			if (
+				!commandId ||
+				(receipt !== "queued" &&
+					receipt !== "started" &&
+					receipt !== "completed" &&
+					receipt !== "cancelled")
+			)
+				throw new TypeError("Invalid native command receipt");
+			return singleEvent(event, state, "evidence.command_receipt", {
+				label: stringField(data["label"]) ?? "",
+				commandId,
+				state: receipt,
 			});
 		}
 

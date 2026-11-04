@@ -525,6 +525,12 @@ type SnapshotMessage = {
 	readonly [key: string]: unknown;
 };
 
+/** A goal action a native command carries (8.6). */
+export const GoalActionSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("set"), condition: Schema.String }),
+	Schema.Struct({ kind: Schema.Literals(["clear", "pause", "resume"]) }),
+]);
+
 function live<S extends Schema.Top>(payload: S) {
 	return { status: "live", payload } as const;
 }
@@ -821,6 +827,8 @@ export const CanonicalEvents = {
 			sessionId: Schema.String.pipe(SessionRef(false)),
 			title: Schema.String,
 			provider: Schema.String,
+			/** The driver kind, when `provider` names an instance ("work-oc") rather than a kind. */
+			driver: Schema.optionalKey(Schema.String),
 			parentId: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkedFrom: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkPointEvent: Schema.optionalKey(Schema.String),
@@ -1050,6 +1058,8 @@ export const CanonicalEvents = {
 			endedGoal: Schema.optional(SessionGoalSchema),
 			endedAt: Schema.optional(Schema.Number),
 			pausedReason: Schema.optional(Schema.String),
+			/** The goal action (its native command id) this reply answers (8.6). */
+			replyTo: Schema.optional(Schema.String),
 		}),
 	),
 	"session.handoff_delivered": live(
@@ -1137,6 +1147,17 @@ export const CanonicalEvents = {
 	),
 	/** The browser's confirm of a stuck Stop's ask (8.4), naming the snapshot entry it showed. */
 	"escalation.confirmed": live(Schema.Struct({ snapshotEntry: Schema.Number })),
+	/**
+	 * A native command main issues (8.5, D60), named by its metadata commandId. `goal` is the goal
+	 * action it carries, which the goal tracker's pending id refers to (8.6).
+	 */
+	"native_command.requested": live(
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			text: Schema.String,
+			goal: Schema.optionalKey(GoalActionSchema),
+		}),
+	),
 	// Evidence events (CONTRACT.md 2.1 row 215, 3.9): a fact the Run Ledger's arm folds that has
 	// no main event, appended by its one observer in the write that observes it. Main's
 	// projectors ignore them.
@@ -1222,6 +1243,17 @@ export const CanonicalEvents = {
 					code: Schema.optionalKey(Schema.String),
 				}),
 			),
+		}),
+	),
+	/**
+	 * A Claude receipt for a native command (8.5, D61), by its commandId: a command_lifecycle
+	 * state, or `completed` from the zero-turn result that answers it. The daemon stamps its label.
+	 */
+	"evidence.command_receipt": live(
+		Schema.Struct({
+			label: Schema.String,
+			commandId: Schema.String,
+			state: Schema.Literals(["queued", "started", "completed", "cancelled"]),
 		}),
 	),
 	/**
