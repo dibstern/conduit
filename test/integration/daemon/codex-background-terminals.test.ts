@@ -685,4 +685,69 @@ describe("Codex background terminals", () => {
 			listCalls: captured(LIST).map((row) => row.message?.params ?? null),
 		});
 	});
+
+	it("keeps the set when a list fails, shows nothing new, and recovers at the next list", async () => {
+		let held = 0;
+		const trace = terminalTrace((turn) => {
+			held = turn.at - 1;
+			return [
+				...listed(held, 903, turn.threadId, "error"),
+				...listed(turn.at, 904, turn.threadId, []),
+				late(turn.at, turn, "completed", 0),
+			];
+		});
+		const started = Number(
+			trace.find((row) => row.message?.method === LIST)?.["at"],
+		);
+		const { fixture, browser, sessionId } = await start("list-fails", trace);
+		// The list at turn completion fails; one at the command's start may fail too, by timing.
+		const failed = () => {
+			const all = rows<TraceRow>(capturePath);
+			const done = all.findIndex(
+				(row) => row.message?.method === "turn/completed",
+			);
+			return done < 0
+				? []
+				: all
+						.slice(done)
+						.filter((row) => row.dir === "in" && row.message?.error);
+		};
+		// The turn's first lists name the terminal; the list at turn completion then fails.
+		writeFileSync(gatePath, String(started));
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		writeFileSync(gatePath, String(held));
+		const ended = await runEnded(fixture, sessionId);
+		// test-waits-allow polling: the failed list's reply reaches only the app-server capture.
+		await vi.waitFor(() => expect(failed()).toHaveLength(1));
+		// Gap (2817): no outcome is named for a failed list; the set stays as last sent.
+		const kept = read(fixture, sessionId);
+		expect(kept.snapshots).toEqual([
+			[expect.objectContaining({ key: { taskId: PROCESS } })],
+		]);
+		expect(ended.ends.map(({ outcome }) => outcome)).toEqual(["completed"]);
+		expect(kept.errors).toEqual([]);
+		// The command's late finish prompts the next list, which drops the terminal.
+		const cursor = browser.frames.length;
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await rowTasks(browser, sessionId, (tasks) => tasks === undefined, cursor);
+		const ledger = await runEnded(fixture, sessionId);
+		expect(ledger.ends).toEqual(ended.ends);
+		expect(ledger.snapshots).toEqual([
+			[expect.objectContaining({ key: { taskId: PROCESS } })],
+			[],
+		]);
+		expect(ledger.errors).toEqual([]);
+		followUps.push({
+			case: "list fails",
+			failedReplies: failed().map((row) => row.message?.error),
+			snapshotsAfterFailure: kept.snapshots,
+			snapshots: ledger.snapshots,
+			ends: ledger.ends,
+		});
+	});
 });

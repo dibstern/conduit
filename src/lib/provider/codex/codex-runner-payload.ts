@@ -1756,7 +1756,8 @@ export class CodexRunnerPayload implements RunnerPayload {
 	/**
 	 * 8.2 (CONTRACT.md 2791-2793): the thread's background terminals are its task set. Gap (2791):
 	 * a re-read equal to the set last sent sends nothing; the first always sends, so a reattach has
-	 * a snapshot to replay (8.3, 2812-2815). A failed list leaves the set as it was.
+	 * a snapshot to replay (8.3, 2812-2815). Gap (2817): a failed list sends nothing, so the set
+	 * stays as last sent until the next re-read.
 	 */
 	private refreshTerminals(
 		sessionId: string,
