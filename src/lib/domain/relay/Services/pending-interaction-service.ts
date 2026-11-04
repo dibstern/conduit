@@ -9,6 +9,7 @@ import {
 	Ref,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import { ENV } from "../../../env.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
@@ -22,8 +23,6 @@ import type {
 	ProviderPermissionUpdate,
 	ProviderPermissionUpdateDestination,
 } from "../../../types.js";
-
-const DEFAULT_PERMISSION_TIMEOUT_MS = 5 * 60_000;
 
 const DECISION_MAP: Record<FrontendDecision, OpenCodeDecision> = {
 	allow: "once",
@@ -226,8 +225,7 @@ export const makePendingInteractionServiceLive = (
 			};
 			const permissions = yield* Ref.make(new Map<string, PermissionState>());
 			const questions = yield* Ref.make(new Map<string, QuestionState>());
-			const timeoutMs =
-				options.permissionTimeoutMs ?? DEFAULT_PERMISSION_TIMEOUT_MS;
+			const timeoutMs = options.permissionTimeoutMs ?? ENV.permissionTimeoutMs;
 
 			const toPendingPermission = (
 				state: PermissionState,

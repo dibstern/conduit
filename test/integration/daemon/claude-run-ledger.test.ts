@@ -1181,6 +1181,76 @@ describe("Claude on the Run Ledger", () => {
 		).toEqual([expect.objectContaining({ behavior: "allow" })]);
 		endsOnce(read(fixture, sessionId));
 	});
+
+	// Lane 32.9 audit 12-16: a rebuilt permission never times out; the timeout's answer folds or
+	// reaches the SDK twice, as allow, or never; a later user answer wins over it.
+	it("answers a Claude permission timed out after a daemon restart once, rejected, and refuses a later answer", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude ledger timeout");
+		const prompt = "approval-ledger-timeout";
+		const pending = browser.send(sessionId, prompt).catch(() => undefined);
+		const asked = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+		);
+		await fixture.kill();
+		await pending;
+		// Only the restarted daemon times permissions out, at its first check (3.10: main's timeout).
+		await fixture.restart({
+			serviceEnvironment: {
+				CONDUIT_PERMISSION_TIMEOUT_MS: "1",
+				CONDUIT_PERMISSION_TIMEOUT_CHECK_MS: "100",
+			},
+		});
+		const after = await fixture.connect(sessionId);
+		await after.view(sessionId);
+		await after.waitForTurnEnd(sessionId);
+		// test-waits-allow polling: the reactor completes the outbox row after the runner's reply, with no browser event.
+		const answer = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual(["completed"]);
+				expect(found.state).toBe("Quiescent");
+				return found;
+			},
+			{ timeout: 10_000, interval: 50 },
+		);
+		// First answer wins (3.10): the user's answer after the timeout changes nothing.
+		await after
+			.answerApproval({ requestId: asked["requestId"] }, "allow")
+			.catch(() => undefined);
+		// Another restart neither re-enqueues nor re-folds the timeout's answer.
+		await fixture.kill();
+		await fixture.restart();
+		await (await fixture.connect(sessionId)).view(sessionId);
+		const settled = answers(fixture, sessionId);
+		proofs.push({ case: "timeout-across-restart", sessionId, ...settled });
+		expect(settled).toEqual(answer);
+		const [resolved] = answer.events.filter(
+			(event) => event.type === "permission.resolved",
+		);
+		const commandId = `legacy-answer:${resolved?.eventId}`;
+		expect(answer.events.map(({ type, source }) => [type, source])).toEqual([
+			["permission.asked", null],
+			["permission.resolved", "permission-timeout"],
+			["evidence.interaction_resolved", null],
+		]);
+		expect(answer.outbox).toEqual([
+			{ commandId, status: "completed", attempts: 1 },
+		]);
+		const interactionId = resolved?.id;
+		expect(answer.answers).toEqual([{ commandId, interactionId }]);
+		expect(answer.outcomes).toEqual([
+			{ commandId, transmission: 1, outcome: "succeeded" },
+		]);
+		expect(answer.resolved).toEqual([{ interactionId }]);
+		// The rejection reached the SDK once.
+		expect(
+			sdkMarks(fixture).filter(
+				(mark) => mark["kind"] === "approval" && mark["prompt"] === prompt,
+			),
+		).toEqual([expect.objectContaining({ behavior: "deny" })]);
+		endsOnce(read(fixture, sessionId));
+	});
 });
 
 const sdkMarks = (harness: ProcessHarness) =>
@@ -1207,10 +1277,11 @@ const answers = (harness: ProcessHarness, sessionId: string) => {
 			)?.state,
 			events: db
 				.prepare(
-					"SELECT type, json_extract(data, '$.id') AS id, json_extract(metadata, '$.commandId') AS commandId, json_extract(metadata, '$.source') AS source FROM events WHERE session_id = ? AND type IN ('permission.asked', 'permission.resolved', 'evidence.interaction_resolved') ORDER BY sequence",
+					"SELECT type, event_id AS eventId, json_extract(data, '$.id') AS id, json_extract(metadata, '$.commandId') AS commandId, json_extract(metadata, '$.source') AS source FROM events WHERE session_id = ? AND type IN ('permission.asked', 'permission.resolved', 'evidence.interaction_resolved') ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				type: string;
+				eventId: string;
 				id: string;
 				commandId: string | null;
 				source: string | null;
