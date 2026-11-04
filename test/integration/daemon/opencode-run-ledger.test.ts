@@ -13,12 +13,16 @@
 //    is never read as received, so it ends as a failure though it ran (82tn.32.35).
 // 8. a process that dies while the daemon is down leaves its held Run open after the daemon starts,
 //    ends it as completed though the work died, or ends it again when the next process starts.
+// 9. a session OpenCode made itself on a named instance, with no model pick when the ledger first
+//    reads it, is stored as Claude's, so its send is no direct start and a crash ends nothing
+//    (82tn.32.41).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	rmSync,
@@ -39,6 +43,7 @@ import {
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 // The default managed instance: its sessions' provider names the OpenCode driver.
 const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
@@ -303,6 +308,109 @@ describe("OpenCode on the Run Ledger", () => {
 		]);
 	});
 
+	it("on a named instance, a session OpenCode made itself, with no model pick, keeps OpenCode's rules: a crash mid-Run ends its Run as lost (82tn.32.41)", async () => {
+		const id = AccountIdSchema.make("managed-test");
+		const fixture = await start(id);
+		const browser = await fixture.connect();
+		const sessionId = `ses_native_${randomUUID().replaceAll("-", "")}`;
+		// A conduit session starts the instance and its stream.
+		await browser.createSession("Warm", id, "opencode");
+		await streaming(fixture, 0);
+		// A session conduit never created, as OpenCode's own TUI makes one: the fake knows it, and
+		// its first event seeds it in conduit with no model pick.
+		const [store] = readdirSync(fixture.configDir).filter((name) =>
+			name.endsWith("-sessions.json"),
+		);
+		if (!store) throw new Error("No fake OpenCode session store");
+		const storePath = join(fixture.configDir, store);
+		writeFileSync(
+			storePath,
+			JSON.stringify([
+				...(JSON.parse(readFileSync(storePath, "utf8")) as unknown[]),
+				{
+					id: sessionId,
+					slug: "native-session",
+					version: "1.18.34",
+					projectID: "global",
+					directory: realpathSync(fixture.projectDir),
+					title: "Native session",
+					time: { created: Date.now(), updated: Date.now() },
+				},
+			]),
+		);
+		await fixture.setOpenCodeStatus(
+			fixture.projectDir,
+			sessionId,
+			{ type: "busy" },
+			id,
+		);
+		await idle(fixture, sessionId, id);
+		await until(() =>
+			expect(started(read(fixture, sessionId))).toHaveLength(1),
+		);
+		const driver = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT s.model_provider AS pick, l.provider AS ledger FROM sessions s LEFT JOIN run_ledger_sessions l ON l.session_id = s.id WHERE s.id = ?",
+					)
+					.get(sessionId) as { pick: string | null; ledger: string | null };
+			} finally {
+				db.close();
+			}
+		};
+		const created = driver();
+		expect(created.pick).toBeNull();
+		// A send needs a pick; the user makes one after the ledger first read the session.
+		await Effect.runPromise(
+			browser.rpc.SwitchModel({
+				sessionId,
+				originId: browser.originId,
+				providerId: "fake",
+				modelId: "fake-model",
+			}),
+		);
+
+		const before = await hold(fixture, browser, sessionId, id);
+		const heldRun = before.runs[0]?.id;
+		const [victim] = spawned(fixture);
+		if (!victim) throw new Error("No fake OpenCode");
+		process.kill(victim.pid, "SIGKILL");
+		await streaming(fixture, 1);
+		await idle(fixture, sessionId, id);
+		await until(
+			() => expect(started(read(fixture, sessionId))).toHaveLength(2),
+			15_000,
+		);
+		await until(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(1),
+			15_000,
+		);
+
+		const after = read(fixture, sessionId);
+		writeFileSync(
+			"test-results/82tn-32-41-native-session-driver.json",
+			JSON.stringify(
+				{
+					ticket: "conduit-test-82tn.32.41",
+					scenario: "native-session-on-named-instance-crash",
+					instance: id,
+					created,
+					stored: driver(),
+					before,
+					after,
+				},
+				null,
+				2,
+			),
+		);
+		// Stored when the session was made, before any pick, and kept.
+		expect(created.ledger).toBe("opencode");
+		expect(driver()).toEqual({ pick: "fake", ledger: "opencode" });
+		expect(after.ends).toEqual([{ runId: heldRun, reason: "process_lost" }]);
+	});
+
 	it("a conduit Stop of the instance mid-Run writes its loss once, and the next send runs under a new id", async () => {
 		const fixture = await start();
 		const browser = await fixture.connect();
@@ -337,6 +445,66 @@ describe("OpenCode on the Run Ledger", () => {
 			{ runId: heldRun, reason: "process_lost" },
 			{ runId: nextRun, reason: "completed" },
 		]);
+	});
+
+	it("stamps every tool row of a recorded OpenCode turn with its Run's id and the project folder (82tn.45)", async () => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Tool rows",
+			instanceId,
+			"opencode",
+		);
+		await browser.followSessions();
+		const held = await hold(fixture, browser, sessionId);
+		// The recorded session's assistant turn, a bash tool call in it, replayed into the held Run.
+		const recorded = "ses_ef595184dffetwQFDMZsHDkJzm";
+		const payloads = readFileSync(
+			"test/fixtures/opencode-wire/global-stream-1.18.34.jsonl",
+			"utf8",
+		)
+			.split("\n")
+			.filter((line) => line.includes(recorded))
+			.map(
+				(line) =>
+					(
+						JSON.parse(line.replaceAll(recorded, sessionId)) as {
+							payload: {
+								type: string;
+								properties?: {
+									info?: { id: string; role: string };
+									part?: { messageID: string };
+									messageID?: string;
+								};
+							};
+						}
+					).payload,
+			);
+		const users = new Set(
+			payloads.flatMap(({ properties }) =>
+				properties?.info?.role === "user" ? [properties.info.id] : [],
+			),
+		);
+		for (const payload of payloads.filter(
+			({ type, properties }) =>
+				(type === "message.updated" &&
+					properties?.info?.role === "assistant") ||
+				((type === "message.part.updated" || type === "message.part.delta") &&
+					!users.has(
+						properties?.part?.messageID ?? properties?.messageID ?? "",
+					)),
+		))
+			await fixture.emitOpenCodeEvent(
+				{ directory: realpathSync(fixture.projectDir), payload },
+				instanceId,
+			);
+		const cursor = browser.frames.length;
+		await idle(fixture, sessionId);
+		await browser.waitForTurnEnd(sessionId, cursor);
+		expect(read(fixture, sessionId).ends).toEqual([
+			{ runId: held.runs[0]?.id, reason: "completed" },
+		]);
+		proveToolRowsOnLedger("opencode", fixture);
 	});
 
 	it("a send, a refused steer and a Stop go through the ledger under the instance's id", async () => {

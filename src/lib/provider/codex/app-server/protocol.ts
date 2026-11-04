@@ -250,6 +250,28 @@ export const ThreadUnarchiveParamsSchema = Schema.Struct({
 export const ThreadUnarchiveResponseSchema = Schema.Struct({
 	thread: ThreadSchema,
 });
+// Experimental: a thread's commands still running, which outlive their turn.
+export const ThreadBackgroundTerminalSchema = Schema.Struct({
+	itemId: Schema.String,
+	processId: Schema.String,
+	command: Schema.String,
+	cwd: Schema.String,
+});
+export const ThreadBackgroundTerminalsListParamsSchema = Schema.Struct({
+	threadId: Schema.String,
+	cursor: Schema.optional(Schema.NullOr(Schema.String)),
+});
+export const ThreadBackgroundTerminalsListResponseSchema = Schema.Struct({
+	data: Schema.Array(ThreadBackgroundTerminalSchema),
+	nextCursor: Schema.NullOr(Schema.String),
+});
+export const ThreadBackgroundTerminalsTerminateParamsSchema = Schema.Struct({
+	threadId: Schema.String,
+	processId: Schema.String,
+});
+export const ThreadBackgroundTerminalsTerminateResponseSchema = Schema.Struct({
+	terminated: Schema.Boolean,
+});
 export const ThreadCompactStartParamsSchema = Schema.Struct({
 	threadId: Schema.String,
 });
@@ -799,6 +821,19 @@ export interface ConsumedDefinition {
 
 /** The drift check reads actual struct fields; consumed field lists live once. */
 export const CONSUMED_DEFINITIONS = {
+	ThreadBackgroundTerminal: { schemas: [ThreadBackgroundTerminalSchema] },
+	ThreadBackgroundTerminalsListParams: {
+		schemas: [ThreadBackgroundTerminalsListParamsSchema],
+	},
+	ThreadBackgroundTerminalsListResponse: {
+		schemas: [ThreadBackgroundTerminalsListResponseSchema],
+	},
+	ThreadBackgroundTerminalsTerminateParams: {
+		schemas: [ThreadBackgroundTerminalsTerminateParamsSchema],
+	},
+	ThreadBackgroundTerminalsTerminateResponse: {
+		schemas: [ThreadBackgroundTerminalsTerminateResponseSchema],
+	},
 	ThreadCompactStartParams: { schemas: [ThreadCompactStartParamsSchema] },
 	ThreadCompactStartResponse: { schemas: [ThreadCompactStartResponseSchema] },
 	ContextCompactedNotification: {

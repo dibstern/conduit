@@ -824,7 +824,8 @@ export function createClaudeTraceReplayer(
 			readMcpResource: unsupported("readMcpResource"),
 			setMcpServers: unsupported("setMcpServers"),
 			streamInput: unsupported("streamInput"),
-			stopTask: unsupported("stopTask"),
+			// A recording holds no stop: the call is accepted, and the trace's own lists say when a task ends.
+			stopTask: async () => {},
 			backgroundTasks: unsupported("backgroundTasks"),
 		});
 	};

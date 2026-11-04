@@ -512,6 +512,23 @@ const activeWakeRun = (book: Book) =>
 const activeRun = (book: Book) => activeInputRun(book) ?? activeWakeRun(book);
 const sameKey = (a: TaskKey, b: TaskKey) =>
 	a.taskId === b.taskId && a.runId === b.runId;
+/**
+ * 8.4 (2862-2864): the keys a Stop tasks issues, or why it issues none. "all" means the live
+ * tasks; unknown or none issues nothing. The browser handler refuses by this same reading.
+ */
+export function stopTaskKeys(
+	tasks: TasksView,
+	named: "all" | readonly TaskKey[],
+): readonly TaskKey[] | "unknown" | "none" | "not_live" {
+	if (tasks.tag !== "live") return tasks.tag;
+	const keys =
+		named === "all"
+			? tasks.tasks.map((task) => task.key)
+			: named.filter((key) =>
+					tasks.tasks.some((task) => sameKey(task.key, key)),
+				);
+	return keys.length > 0 ? keys : "not_live";
+}
 /** 8.4: the current runner's tasks; a pending address has none. */
 function taskView(book: Book): TasksView {
 	const runner =
@@ -1967,6 +1984,7 @@ function unsolicited(
 			? unknownTasks(label, runner.tasks)
 			: { tag: "Known", label, tasks: [] };
 		book.snapshotEntry++;
+		openRetireGate(book);
 		raised = true;
 	}
 	const unchanged = (diagnostic?: string) =>
@@ -1987,6 +2005,7 @@ function unsolicited(
 				tasks: observation.tasks.map(ledgerTask),
 			};
 			book.snapshotEntry++;
+			openRetireGate(book);
 			return changed;
 		case "task_event":
 			// 8.3: a notification names the waking task.
@@ -2650,6 +2669,7 @@ function settle(
 			});
 			book.current = runnerId;
 			book.snapshotEntry++;
+			openRetireGate(book);
 			// L2: a pending send resolves, once, to the next process_started's runner; a
 			// run_dispatched naming a runner not yet started fixes its label here.
 			for (const send of book.sends)
@@ -2700,6 +2720,21 @@ const endSession = (book: Book, run: Run | undefined, commandId: string) =>
 		},
 		commandId,
 	);
+/**
+ * 8.4 (L3): tasks turning live or unknown under an interrupted Run open its retire gate. Gap
+ * (CONTRACT.md 2870): the gate guards the step past the deadline, so a task that starts after the
+ * Stop opens it at that snapshot, as the Stop would have; a confirmed gate may open again.
+ */
+function openRetireGate(book: Book) {
+	const run = activeRun(book);
+	if (
+		run?.phase === "Interrupting" &&
+		run.by !== "end" &&
+		taskView(book).tag !== "none"
+	)
+		book.confirm ??= { step: "retire", runId: run.runId };
+}
+
 /** 8.4 (L3): the end_session step waits on the confirm gate with tasks live or unknown. */
 function gateEndSession(book: Book, run: Run | undefined, commandId: string) {
 	if (taskView(book).tag === "none") endSession(book, run, commandId);
@@ -2886,17 +2921,10 @@ function control(
 			return changed;
 		}
 		case "stop_tasks": {
-			// 8.4: "all" means the live tasks; unknown or none issues nothing.
-			const tasks = taskView(book);
-			if (tasks.tag !== "live")
-				return rejected(`stop_tasks with tasks ${tasks.tag} (8.4)`);
-			const keys =
-				command.tasks === "all"
-					? tasks.tasks.map((task) => task.key)
-					: command.tasks.filter((key) =>
-							tasks.tasks.some((task) => sameKey(task.key, key)),
-						);
-			if (keys.length === 0) return rejected("no live task named (8.4)");
+			const keys = stopTaskKeys(taskView(book), command.tasks);
+			if (keys === "not_live") return rejected("no live task named (8.4)");
+			if (typeof keys === "string")
+				return rejected(`stop_tasks with tasks ${keys} (8.4)`);
 			for (const key of keys)
 				issueTokened(book, step, { kind: "stop_task", key });
 			return changed;

@@ -272,9 +272,9 @@
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
 	// - Only auto-scroll when the reader was parked at the very bottom, the
-	//   session is actively producing content (processing or streaming), or an
-	//   explicit scroll request was made (e.g. error messages set this before
-	//   phaseToIdle kills the isProcessing guard). On inactive sessions, a
+	//   session is actively producing content (processing), or an explicit
+	//   scroll request was made (e.g. error messages set this before the row's
+	//   activity goes idle and drops the isProcessing guard). On inactive sessions, a
 	//   reader sitting just above the bottom must NOT be snapped down by
 	//   background events (another tab's message, permission state).
 	// NOTE: processing and consumeScrollRequest() are checked via
@@ -408,8 +408,11 @@
 
 	// Fork context: detect if current session is a user fork
 	const activeSession = $derived(findSession(viewedSessionId ?? ""));
-	// 8.3: a Run the provider started by itself names its waking task on the live turn's head.
-	const wakeLabel = $derived.by((): RunLabel | undefined => {
+	// 8.4: a stuck Stop names the tasks closing would end; 8.3: a Run the provider started by
+	// itself names its waking task on the live turn's head.
+	const headLabel = $derived.by((): RunLabel | undefined => {
+		const ask = activeSession?.stopConfirm;
+		if (ask) return { kind: "stopping", stuck: ask.tasks ? { tasks: ask.tasks } : {} };
 		const wake = activeSession?.wakeRun;
 		return wake && { kind: "woken", ...(wake.task ? { task: wake.task } : {}) };
 	});
@@ -619,7 +622,7 @@
 				get status() { return messageSurfacing.status; },
 				get categorySet() { return messageSurfacing.categorySet; },
 			})}
-			<TurnActivity {panel} {view} scrollRoot={messagesEl} runLabel={turn.id === latestTurnId ? wakeLabel : undefined} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
+			<TurnActivity {panel} {view} scrollRoot={messagesEl} runLabel={turn.id === latestTurnId ? headLabel : undefined} latestTurn={turn.id === latestTurnId} newestSettledTurn={turn.id === newestEndedTurnId} {turn} {segment} final={true} entries={log.entries} renderResume={resumeDivider} {liveTasks} {taskListedAt} {taskNow} sessionId={viewedSessionId ?? undefined} {providerId}
 				onreposition={scrollCtrl.reposition}
 				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}

@@ -69,6 +69,36 @@ Examples:
   | wide  |
   | phone |
 
+Scenario Outline: a declined Cursor steer reads as queued, with no error row
+  Given the conduit app is served with the connected mockup
+  And a Cursor account is available with its live models
+  And the harness logo is viewed in the <tier> tier
+  And the Cursor turn relay is ready
+  When I start a new session
+  And I open the model picker
+  And I view Harness choices in the picker
+  And I select the Cursor Harness tab in the picker
+  And I view Model choices in the picker
+  And I select model Composer 2.5 in the picker
+  And I close the model picker
+  And I type Keep working into the composer
+  And I send the composer message
+  Then the relay creates a Cursor session with model composer-2.5
+  When the Cursor relay starts the sent turn
+  And I type Use the staging database into the composer
+  And I steer the composer message with the keyboard
+  Then the relay is asked to steer Use the staging database
+  When the Cursor relay holds the steer Use the staging database
+  Then pending-input row 1 is Steering Use the staging database
+  When the Cursor relay declines the steer Use the staging database
+  Then pending-input row 1 is Queued Use the staging database
+  And the transcript shows no error notice
+
+Examples:
+  | tier  |
+  | wide  |
+  | phone |
+
 Scenario Outline: a Cursor shell handed off during steering says it moved to the background
   Given the conduit app is served with the connected mockup
   And a Cursor account is available with its live models

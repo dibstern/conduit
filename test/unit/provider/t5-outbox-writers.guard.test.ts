@@ -169,8 +169,7 @@ describe("T5-writers", () => {
 				"src/lib/provider/orchestration-side-effect-reactor.ts#writeFailure: any -> failed,retryable_failed",
 				"src/lib/provider/orchestration-side-effect-reactor.ts#recordControlOutcome: running,pending,retryable_failed -> completed,failed,retryable_failed,cancelled",
 				"src/lib/provider/orchestration-side-effect-reactor.ts#prepareRecovery: running -> pending",
-				"src/lib/provider/orchestration-side-effect-reactor.ts#refuseProjectCommand: pending,running,retryable_failed -> failed,cancelled",
-				"src/lib/provider/orchestration-side-effect-reactor.ts#drain: pending,running,retryable_failed -> cancelled",
+				"src/lib/provider/orchestration-side-effect-reactor.ts#refuseProjectCommand: pending,running,retryable_failed -> cancelled",
 				// Pending-prompt retirement's cancelControls body.
 				"src/lib/persistence/effect/retire-pending-prompts.ts#retirePendingPrompts(argument 1): pending,running,retryable_failed -> cancelled",
 				"src/lib/provider/runner/send-settlement-outbox.ts#settleDirectSend: running -> completed,failed,retryable_failed",

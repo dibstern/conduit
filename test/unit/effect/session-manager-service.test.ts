@@ -3033,6 +3033,7 @@ describe("SessionManagerService", () => {
 				{
 					roots: true,
 					backgroundOf: activity.background.backgroundOf,
+					activityOf: expect.any(Function),
 					hintDismissals: activity.hintDismissals,
 				},
 			);
@@ -3164,10 +3165,11 @@ describe("SessionManagerService", () => {
 			const service = yield* SessionManagerServiceTag;
 			const sessions = yield* service.listSessions();
 
+			// The poller's status shows as status only: what runs is SessionActivity's (82tn.32.30).
 			expect(sessions).toMatchObject([
 				{
 					id: "session-1",
-					attention: "working",
+					attention: "idle",
 					title: "Session 1",
 					updatedAt: 1,
 					status: "busy",

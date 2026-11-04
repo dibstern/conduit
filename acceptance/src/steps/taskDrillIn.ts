@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { rowActivity } from "../../../test/e2e/helpers/rpc-mock.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { type LiveTask, setLiveTasks } from "./backgroundTasks.js";
@@ -87,6 +88,7 @@ export const taskDrillInHandlers: StepHandler[] = [
 				parentID: parent,
 				title: "Fix the flaky test",
 				status: "busy",
+				activity: rowActivity(true),
 				messageCount: 2,
 				updatedAt: PINNED_CLOCK_MS,
 			});

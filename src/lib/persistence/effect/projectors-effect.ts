@@ -28,6 +28,7 @@ import { inheritForkHistory } from "./inherit-fork-history.js";
 import { makeProviderStateEffect } from "./provider-state-effect.js";
 import { makeRunLedgerArm } from "./run-ledger-arm.js";
 import { rerootSession } from "./sidebar-projection.js";
+import { stampToolRow } from "./tool-row-run.js";
 
 export class ProjectionError extends Data.TaggedError("ProjectionError")<{
 	readonly projector: string;
@@ -1327,13 +1328,15 @@ export const makeMessageProjector = defineProjector(() => ({
 					VALUES (${event.data.messageId}, ${event.sessionId}, 'assistant', '', 1, ${event.createdAt}, ${event.createdAt}, ${nextOrdinal(sql, event.sessionId)})`;
 
 				const inputJson = encodeJson(event.data.input);
-				yield* sql`
+				const inserted = yield* sql`
 					INSERT INTO message_parts
-					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at, version)
+					(id, message_id, type, tool_name, call_id, input, status, sort_order, created_at, updated_at, version, started_at)
 					VALUES (${event.data.partId}, ${event.data.messageId}, 'tool', ${event.data.toolName}, ${event.data.callId}, ${inputJson}, 'started',
 						COALESCE((SELECT MAX(sort_order) + 1 FROM message_parts WHERE message_id = ${event.data.messageId}), 0),
-						${event.createdAt}, ${event.createdAt}, ${ctx.version})
-					ON CONFLICT (id) DO NOTHING`;
+						${event.createdAt}, ${event.createdAt}, ${ctx.version}, ${event.metadata.providerCreatedAt ?? event.createdAt})
+					ON CONFLICT (id) DO NOTHING RETURNING id`;
+				// 82tn.45: a new row takes its Run, folder and parent tool; a redelivery keeps them.
+				if (inserted.length > 0) yield* stampToolRow(event);
 
 				return ids(
 					yield* sql<{
@@ -1369,6 +1372,11 @@ export const makeMessageProjector = defineProjector(() => ({
 						result_event_seq = CASE WHEN ${resumed ? 1 : 0} THEN NULL ELSE result_event_seq END,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input),
 						metadata = ${metadata},
+						-- 82tn.45: a backgrounded row left open by its launch receipt ends with its outcome.
+						ended_at = CASE WHEN ${resumed ? 1 : 0} THEN NULL
+							WHEN ended_at IS NULL AND status IN ('completed', 'error')
+								AND json_extract(${metadata}, '$.outcome') IS NOT NULL
+							THEN ${event.metadata.providerCreatedAt ?? event.createdAt} ELSE ended_at END,
 						updated_at = ${event.createdAt},
 						version = ${ctx.version}
 					WHERE id = ${event.data.partId}`;
@@ -1420,6 +1428,12 @@ export const makeMessageProjector = defineProjector(() => ({
 						result_event_seq = ${rows[0]?.result_bytes == null ? null : event.sequence},
 						result_bytes = ${rows[0]?.result_bytes ?? null},
 						duration = ${event.data.duration}, status = ${toolStatus}, metadata = ${metadata}, updated_at = ${event.createdAt}, version = ${ctx.version},
+						-- 82tn.45: a backgrounded task's launch receipt is not its end; its outcome is.
+						ended_at = CASE WHEN json_valid(${metadata})
+							AND json_extract(${metadata}, '$.backgrounded') = 1
+							AND json_extract(${metadata}, '$.outcome') IS NULL
+							THEN NULL ELSE ${event.metadata.providerCreatedAt ?? event.createdAt} END,
+						ended_by = NULL,
 						input = COALESCE(${event.data.input === undefined ? null : encodeJson(event.data.input)}, input)
 					WHERE id = ${event.data.partId}
 						-- A completion without a result (the turn-end settle) only closes
@@ -1515,6 +1529,10 @@ export const makeMessageProjector = defineProjector(() => ({
 			}
 
 			if (isEventType(event, "turn.error")) {
+				// A declined steer is not an error: `steerDeclined` returns it to the queue (CONTRACT.md
+				// 973, 1855-1856), so the transcript shows nothing; the contract is silent on showing it
+				// (gap). The event still ends its Run (982-983).
+				if (event.data.code === "steer-declined") return [];
 				// The error is the turn's last word, so it replays like any
 				// content: a synthetic message after the turn's own, keyed on the
 				// event sequence. A part on the turn's message would be lost when
@@ -2453,6 +2471,8 @@ export const makeInputProjector = defineProjector(() => ({
 			const sql = yield* SqlClient.SqlClient;
 
 			if (isEventType(event, "input.admitted")) {
+				// A continuation is no inbox input: no tray row, so nothing can re-queue it as one.
+				if (event.data.continuation) return [];
 				const { request } = event.data;
 				const images = request.images ? encodeJson(request.images) : null;
 				return owners(

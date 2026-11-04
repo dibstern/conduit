@@ -39,7 +39,10 @@ import {
 import { guardCurrentWrite } from "../../persistence/effect/commit-and-signal.js";
 import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
-import { ProviderInstanceFailure } from "../errors.js";
+import {
+	nativeCommandUnsupported,
+	ProviderInstanceFailure,
+} from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { ProviderRegistry } from "../provider-registry.js";
 import type { RelayEventSinkDeps } from "../relay-event-sink.js";
@@ -152,6 +155,8 @@ export interface RunnerDriverPieces {
 		ProviderInstanceFailure
 	>;
 	readonly stopTask?: boolean;
+	/** The provider takes native commands (8.5) as session sends. */
+	readonly nativeCommands?: boolean;
 	readonly nativeSession?: boolean;
 }
 
@@ -270,6 +275,11 @@ export class RunnerProviderInstance implements ProviderInstance {
 		{ readonly sink: EventSink; readonly send: SendScope }
 	>();
 	private readonly sinkSessions = new Map<string, string>();
+	/** Native commands made while no process was live: the next launch's first sends (8.5). */
+	private readonly firstSends = new Map<
+		string,
+		{ readonly commandId: string; readonly text: string }[]
+	>();
 	private detachingInteractions = false;
 	private recoveryForSession: RunnerProviderInstanceDeps["recoveryForSession"];
 	private recoveredSink:
@@ -785,6 +795,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					: new ProviderInstanceFailure({
 							providerId: this.providerId,
 							operation: cause.operation,
+							...(cause.code === "not_sent" ? { code: "not_sent" } : {}),
 							cause,
 						}),
 			),
@@ -1190,12 +1201,15 @@ export class RunnerProviderInstance implements ProviderInstance {
 				),
 				() => FiberMap.remove(this.abortFibers, abortKey),
 			);
+			const nativeFirst = this.firstSends.get(sessionId);
+			this.firstSends.delete(sessionId);
 			return yield* this.commandEffect(
 				{
 					type: "send-turn",
 					sinkId,
 					aborted: abortSignal.aborted,
 					...prepared,
+					...(nativeFirst ? { input: { ...prepared.input, nativeFirst } } : {}),
 				},
 				scope,
 			);
@@ -1373,6 +1387,33 @@ export class RunnerProviderInstance implements ProviderInstance {
 				}),
 			),
 		);
+	}
+	sendNativeCommandEffect(
+		sessionId: string,
+		commandId: string,
+		text: string,
+		call?: ProviderCall,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		if (!this.driver.nativeCommands)
+			return Effect.fail(nativeCommandUnsupported(this.providerId));
+		return Effect.gen({ self: this }, function* () {
+			// 8.5 (CONTRACT.md 2922) names no delivery without a live process; the nearest reading
+			// keeps it for the next launch, which sends it before its prompt.
+			if ((yield* this.getControlProcessIdEffect(sessionId)) === undefined) {
+				this.firstSends.set(sessionId, [
+					...(this.firstSends.get(sessionId) ?? []),
+					{ commandId, text },
+				]);
+				return;
+			}
+			yield* this.commandEffect({
+				type: "native-command",
+				sessionId,
+				commandId,
+				text,
+				...(call ? { call } : {}),
+			});
+		});
 	}
 	stopTaskEffect(
 		sessionId: string,

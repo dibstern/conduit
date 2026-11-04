@@ -22,6 +22,7 @@ export type {
 } from "./contracts/session-workspace.js";
 
 import {
+	GoalActionSchema,
 	SessionGoalChangedPayloadSchema,
 	type ToolFileChange,
 } from "./contracts/stored-event.js";
@@ -268,6 +269,15 @@ export const BackgroundTaskSchema = Schema.Struct({
 });
 export type BackgroundTask = typeof BackgroundTaskSchema.Type;
 
+/** 32.25's decided copy for a task: "pnpm test (shell)", or "(kind): description" with no command. */
+export const backgroundTaskText = ({
+	kind,
+	type,
+	description,
+	detail,
+}: Pick<BackgroundTask, "kind" | "type" | "description" | "detail">) =>
+	detail ? `${detail} (${kind ?? type})` : `(${kind ?? type}): ${description}`;
+
 /** A live server of the session's (8.7): the Run Ledger's entry for one port. */
 export const SessionServerSchema = Schema.Struct({
 	port: Schema.Number,
@@ -359,6 +369,57 @@ export const GoalStuckSchema = Schema.Struct({
 });
 export type GoalStuck = typeof GoalStuckSchema.Type;
 
+/** The goal tracker's derived phase (8.1, 8.5): a pending action and its send, or a failed one. */
+export const GoalPhaseSchema = Schema.Union([
+	Schema.Struct({
+		tag: Schema.Literal("Confirmed"),
+		status: Schema.Union([
+			Schema.Struct({
+				tag: Schema.Literals(["Active", "Paused", "Limited", "Met"]),
+				condition: Schema.String,
+			}),
+			Schema.Struct({ tag: Schema.Literal("Cleared") }),
+		]),
+		failed: Schema.optional(
+			Schema.Struct({ action: GoalActionSchema, code: Schema.String }),
+		),
+	}),
+	Schema.Struct({
+		tag: Schema.Literal("Pending"),
+		action: GoalActionSchema,
+		send: Schema.Literals(["Sent", "Queued", "Unconfirmed"]),
+	}),
+]);
+
+/** What the session's background is doing (8.2, 8.7): work reads working; the rest are calm. */
+export const SessionBackgroundActivitySchema = Schema.Literals([
+	"none",
+	"work",
+	"monitoring",
+	"serving",
+	"unknown",
+]);
+export type SessionBackgroundActivity =
+	typeof SessionBackgroundActivitySchema.Type;
+export const SessionActivityLabelSchema = Schema.Literals([
+	"idle",
+	"working",
+	"background",
+	"needs-you",
+]);
+export type SessionActivityLabel = typeof SessionActivityLabelSchema.Type;
+
+/** The one answer to what a session is doing (82tn.32.30, 8.1); every surface reads only this. */
+export const SessionActivityViewSchema = Schema.Struct({
+	/** A Run of the ledger's, input or wake, from Queued until it ends. */
+	foreground: Schema.Literals(["idle", "working"]),
+	background: SessionBackgroundActivitySchema,
+	needsYou: Schema.optional(Schema.Literals(["approval", "reply"])),
+	label: SessionActivityLabelSchema,
+	goal: Schema.optional(GoalPhaseSchema),
+});
+export type SessionActivityView = typeof SessionActivityViewSchema.Type;
+
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -375,7 +436,11 @@ export const SessionInfoSchema = Schema.Struct({
 	lastUserMessageAt: Schema.optional(Schema.Number),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
+	/** 8.1: what the session is doing, the one answer every surface reads (82tn.32.30). */
+	activity: Schema.optional(SessionActivityViewSchema),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	/** Present only while a goal action is pending or its send failed. */
+	goalPhase: Schema.optional(GoalPhaseSchema),
 	/** The current goal's stuck run, derived by code from its checks; absent when the latest checks are not repeating one blocker, and for met or cleared goals. */
 	goalStuck: Schema.optional(GoalStuckSchema),
 	limitRecovery: Schema.optional(Schema.NullOr(LimitRecoverySchema)),
@@ -413,6 +478,16 @@ export const SessionInfoSchema = Schema.Struct({
 	/** The active Run is one the provider started by itself, named by its waking task (8.3). */
 	wakeRun: Schema.optional(
 		Schema.Struct({ task: Schema.optional(Schema.String) }),
+	),
+	/**
+	 * A Stop past its deadline asks before it ends background tasks (8.4): the snapshot entry the
+	 * confirm names and the tasks it would end; no tasks means the background state is unknown.
+	 */
+	stopConfirm: Schema.optional(
+		Schema.Struct({
+			snapshotEntry: Schema.Number,
+			tasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+		}),
 	),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */
 	servers: Schema.optional(Schema.Array(SessionServerSchema)),

@@ -31,7 +31,10 @@ import {
 	getPermissionMode,
 	setPermissionMode,
 } from "../../domain/relay/Services/session-overrides-state.js";
-import { stopTasks } from "../../handlers/background-tasks.js";
+import {
+	confirmEscalation,
+	stopTasks,
+} from "../../handlers/background-tasks.js";
 import {
 	handleAskUserResponse,
 	handlePermissionResponse,
@@ -44,6 +47,10 @@ import {
 	syncInputDraft,
 } from "../../handlers/prompt.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
+import {
+	type GoalAction,
+	goalCommandText,
+} from "../../provider/goal-tracker.js";
 import { ProviderRegistryTag } from "../../provider/provider-registry.js";
 import type { PermissionId } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
@@ -59,6 +66,34 @@ const inboxCommand = <E>(
 				: { ok: false as const, reason: outcome },
 		),
 	);
+
+/** The tracker holds the action as pending from before dispatch; a refused dispatch drops it (8.6). */
+const goalCommand = (sessionId: string, commandId: string, goal: GoalAction) =>
+	Effect.gen(function* () {
+		const { goals } = yield* SessionActivityTag;
+		const engine = yield* OrchestrationEngineTag;
+		goals.request(sessionId, commandId, goal);
+		yield* engine
+			.dispatchEffect({
+				type: "native_command",
+				sessionId,
+				commandId,
+				text: goalCommandText(goal),
+				goal,
+			})
+			.pipe(
+				Effect.tapError(() =>
+					Effect.sync(() => goals.drop(sessionId, commandId)),
+				),
+			);
+		return { ok: true as const };
+	});
+
+const refuseGoalPause = (_request: { readonly sessionId: string }) =>
+	Effect.succeed({
+		ok: false as const,
+		reason: "goal_pause_unsupported" as const,
+	});
 
 export const conversationHandlers = {
 	ExplainAsk: (request) =>
@@ -84,12 +119,21 @@ export const conversationHandlers = {
 			),
 			Effect.catch(mapRpcFailure("StopTasks")),
 		),
+	ConfirmEscalation: ({ sessionId, snapshotEntry }) =>
+		confirmEscalation(sessionId, snapshotEntry).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchTag("ConfirmEscalationRefused", ({ message }) =>
+				Effect.fail(new WsRpcError({ message })),
+			),
+			Effect.catch(mapRpcFailure("ConfirmEscalation")),
+		),
 	StopServer: ({ sessionId, server }) =>
 		Effect.gen(function* () {
 			// Only a server the session lists, so a browser cannot signal an arbitrary pid.
-			const listed = (yield* SessionActivityTag).servers
-				.get(sessionId)
-				?.some(
+			const activity = yield* SessionActivityTag;
+			const listed = activity.background
+				.serversOf(sessionId, activity.gateUrls)
+				.some(
 					({ pid, startedAt, port }) =>
 						pid === server.pid &&
 						startedAt === server.startedAt &&
@@ -351,12 +395,26 @@ export const conversationHandlers = {
 			Effect.as({ ok: true as const }),
 			Effect.catch(mapRpcFailure("CancelSession")),
 		),
+	// 8.6 Claude: a goal action is a native command, delivered at once and never with priority
+	// "now", which would abandon the turn and make it a Stop.
+	SetGoal: ({ sessionId, commandId, condition }) =>
+		goalCommand(sessionId, commandId, { kind: "set", condition }).pipe(
+			Effect.catch(mapRpcFailure("SetGoal")),
+		),
+	ClearGoal: ({ sessionId, commandId }) =>
+		goalCommand(sessionId, commandId, { kind: "clear" }).pipe(
+			Effect.catch(mapRpcFailure("ClearGoal")),
+		),
+	// 8.6 Claude has no goal pause (pause: false), and no other adapter has goals yet.
+	PauseGoal: refuseGoalPause,
+	ResumeGoal: refuseGoalPause,
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "ListRecaps"
 	| "GenerateRecap"
 	| "ExplainAsk"
 	| "StopTasks"
+	| "ConfirmEscalation"
 	| "StopServer"
 	| "SwitchPermissionMode"
 	| "RespondPermission"
@@ -369,4 +427,8 @@ export const conversationHandlers = {
 	| "AddDraftAttachment"
 	| "RemoveDraftAttachment"
 	| "CancelSession"
+	| "SetGoal"
+	| "ClearGoal"
+	| "PauseGoal"
+	| "ResumeGoal"
 >;

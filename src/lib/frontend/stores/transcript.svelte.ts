@@ -30,6 +30,7 @@ import {
 	createEmptySessionMessages,
 	getOrCreateSessionActivity,
 	getOrCreateSessionSlot,
+	getSessionPhase,
 	historyState,
 	localSends,
 	type PendingInput,
@@ -1291,7 +1292,8 @@ function transcriptView(primary: boolean): TranscriptView {
 			const shared = sessionMessages.get(currentSessionId ?? "");
 			const activity = currentSlot?.activity;
 			const ended =
-				activity?.phase === "idle" &&
+				activity !== undefined &&
+				getSessionPhase(currentSessionId ?? "") === "idle" &&
 				activity.endedGeneration === activity.turnGeneration;
 			const existing = new Map(
 				shared?.messages.map((message) => [message.uuid, message]),

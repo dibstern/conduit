@@ -185,10 +185,13 @@ describe("legacy Fork migration", () => {
 				const messages = yield* sql`SELECT * FROM messages ORDER BY id`;
 				const parts = yield* sql`SELECT * FROM message_parts ORDER BY id`;
 				const history = yield* sql`SELECT * FROM events ORDER BY sequence`;
-				expect(
-					(yield* sidebar).find(({ session_id }) => session_id === "source")
-						?.session,
-				).toMatchObject({ processing: true, attention: "working" });
+				// A stored row never carries what runs: SessionActivity adds it at
+				// read time (82tn.32.30), so the busy, unread legacy Fork shows as unread.
+				const seeded = (yield* sidebar).find(
+					({ session_id }) => session_id === "source",
+				)?.session;
+				expect(seeded).toMatchObject({ attention: "done-unread" });
+				expect(seeded).not.toHaveProperty("processing");
 				expect(
 					yield* sql`SELECT unread FROM sessions WHERE id = 'fork'`,
 				).toEqual([{ unread: 1 }]);
@@ -266,7 +269,7 @@ describe("legacy Fork migration", () => {
 				expect(
 					(yield* sidebar).find(({ session_id }) => session_id === "fork")
 						?.session,
-				).toMatchObject({ status: "busy", processing: true, unread: true });
+				).toMatchObject({ status: "busy", unread: true });
 				expect(
 					yield* sql`SELECT session_id, version FROM session_sidebar WHERE session_id IN ('fork', 'source') ORDER BY session_id`,
 				).toEqual([

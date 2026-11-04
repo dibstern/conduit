@@ -29,14 +29,15 @@ export const SidebarRowSchema = Schema.Struct({
 	onlyRetainedSteers: Schema.optionalKey(Schema.Boolean),
 	/**
 	 * The root's summary with its family rolled up, without what is applied at
-	 * read time: background work and snooze state. Its attention and
-	 * processing are what the stored state alone gives.
+	 * read time: activity, background work and snooze state. Its attention is
+	 * what the stored state alone gives: prompts, an error, or unread.
 	 */
 	session: SessionInfoSchema.mapFields(
 		Struct.omit([
 			"accountId",
 			"projectSlug",
 			"updatedAt",
+			"activity",
 			"backgroundWork",
 			"backgroundTasks",
 			"staleTasks",

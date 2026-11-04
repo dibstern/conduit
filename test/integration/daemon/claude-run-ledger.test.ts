@@ -34,6 +34,8 @@
 // and the send's transcript changes, or its Run ends other than once.
 // 390. a restart's reattach report, which changes nothing, re-stamps the session row or its sidebar
 //      row (82tn.32.38), so every browser re-reads both.
+// 391. a retryable answer failure after the SDK took the answer reads as never received, so at
+//      main's cap an answered prompt reopens; or its retry gives the SDK the answer twice (82tn.32.39).
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -55,6 +57,7 @@ import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 const OLD_BUILD = "82tn-32-6-before";
 const NEW_BUILD = "82tn-32-6-after";
@@ -233,6 +236,55 @@ describe("Claude on the Run Ledger", () => {
 			evidence: processEvidence(ledger),
 			ends: ledger.ends,
 			runs: ledger.runs,
+		});
+	});
+
+	it("stamps every tool row of a recorded subagent turn, the subagent's too, with its Run's id and the project folder (82tn.45)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: { turns: ["subagent-task-turn"] },
+		});
+		const sessionId = await browser.createSession("Claude tool rows");
+		await browser.send(sessionId, "Ask a subagent to summarise package.json");
+		endsOnce(read(fixture, sessionId));
+		proveToolRowsOnLedger("claude", fixture);
+	});
+
+	// 82tn.45: the subagent's terminal event (its task_notification, line 39 of the trace) ends the
+	// subagent, never the parent's Run. How it could fail: the parent's Run ends there, as completed
+	// or ended by the run; the parent session reads idle while its own turn still runs.
+	it("leaves the parent's Run running past its subagent's terminal event, on a recorded turn (82tn.45)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["subagent-task-turn"],
+				plan: { holdBefore: { turn: 1, message: 40 } },
+			},
+		});
+		const sessionId = await browser.createSession("Claude subagent end");
+		await browser.followSession(sessionId);
+		const sent = browser.send(
+			sessionId,
+			"Ask a subagent to summarise package.json",
+		);
+		await fixture.claudeReplayer?.held();
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				JSON.stringify(message["parts"]).includes('"outcome":"completed"'),
+		);
+		const held = read(fixture, sessionId);
+		expect(held.ends).toEqual([]);
+		expect(held.runs).toEqual([{ id: expect.any(String), status: "running" }]);
+		fixture.claudeReplayer?.release();
+		await sent;
+		const after = read(fixture, sessionId);
+		expect(after.ends).toEqual([
+			{ runId: held.runs[0]?.id, reason: "completed", forced: null },
+		]);
+		proofs.push({
+			case: "82tn.45 subagent terminal event",
+			atSubagentEnd: { ends: held.ends, runs: held.runs },
+			after: { ends: after.ends, runs: after.runs },
 		});
 	});
 
@@ -1616,6 +1668,128 @@ describe("Claude on the Run Ledger", () => {
 				(mark) => mark["kind"] === "approval" && mark["prompt"] === prompt,
 			),
 		).toEqual([expect.objectContaining({ behavior: "allow" })]);
+		endsOnce(read(fixture, sessionId));
+	}, 60_000);
+
+	// 82tn.32.39 (lane bugs3 audit 1-6): a retryable failure reported after the SDK took the answer
+	// (a test hook; no product path raises one) retries, or at the cap reopens an answered prompt.
+	const refusedAfterTake = async (title: string, prompt: string) => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession(title);
+		const pending = browser.send(sessionId, prompt).catch(() => undefined);
+		const asked = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+		);
+		const runner = fixture.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
+		const refuse = join(
+			dirname(runner.socketPath),
+			"conduit-test-refuse-answer-after-take",
+		);
+		writeFileSync(refuse, "refuse");
+		const cursor = browser.frames.length;
+		await browser.answerApproval(asked, "allow");
+		// The SDK took the answer, so the turn runs to its end.
+		await browser.waitForTurnEnd(sessionId);
+		await pending;
+		const reopened = () =>
+			browser
+				.waitFor(
+					(message) =>
+						message["type"] === "permission_pending" &&
+						message["requestId"] === asked["requestId"],
+					cursor,
+					// test-waits-allow timeout-override: proves an absence after main's last retry read.
+					3_000,
+				)
+				.then(
+					() => true,
+					() => false,
+				);
+		return { fixture, sessionId, prompt, refuse, reopened };
+	};
+	const takenOnce = (fixture: ProcessHarness, prompt: string) =>
+		expect(
+			sdkMarks(fixture).filter(
+				(mark) => mark["kind"] === "approval" && mark["prompt"] === prompt,
+			),
+		).toEqual([expect.objectContaining({ behavior: "allow" })]);
+	const evidence = (name: string, proof: Record<string, unknown>) => {
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			`test-results/82tn-32-39-${name}.json`,
+			JSON.stringify({ ticket: "conduit-test-82tn.32.39", ...proof }, null, 2),
+		);
+	};
+
+	it("settles a Claude answer whose one retryable failure came after the SDK took it, with no second take (82tn.32.39)", async () => {
+		const { fixture, sessionId, prompt, refuse, reopened } =
+			await refusedAfterTake(
+				"Claude answer refused after take",
+				"approval-after-take",
+			);
+		// test-waits-allow polling: the reactor records the runner's refusal with no browser event.
+		await vi.waitFor(
+			() =>
+				expect(answers(fixture, sessionId).outcomes).toEqual([
+					expect.objectContaining({ transmission: 1, outcome: "retryable" }),
+				]),
+			{ timeout: 10_000, interval: 50 },
+		);
+		rmSync(refuse);
+		// test-waits-allow polling: main's retry backs off 1s with no browser event.
+		const answer = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual(["completed"]);
+				expect(found.state).toBe("Quiescent");
+				return found;
+			},
+			{ timeout: 10_000, interval: 50 },
+		);
+		const interactions = interactionsOf(fixture, sessionId);
+		const again = await reopened();
+		evidence("one-retry", {
+			sessionId,
+			...answer,
+			interactions,
+			reopened: again,
+		});
+		expect(again).toBe(false);
+		expect(answer.outcomes).toEqual([
+			expect.objectContaining({ transmission: 1, outcome: "retryable" }),
+			expect.objectContaining({ transmission: 2, outcome: "succeeded" }),
+		]);
+		expect(interactions).toEqual([
+			expect.objectContaining({ tag: "Answered", delivery: "settled" }),
+		]);
+		takenOnce(fixture, prompt);
+		endsOnce(read(fixture, sessionId));
+	});
+
+	// test-waits-allow timeout-override: main's 1, 2, 4 and 8 s retry backoff runs on the daemon's wall clock.
+	it("never reopens a Claude prompt whose answer the SDK took, though every delivery reports a retryable failure (82tn.32.39)", async () => {
+		const { fixture, sessionId, prompt, reopened } = await refusedAfterTake(
+			"Claude answer refused after take cap",
+			"approval-after-take-cap",
+		);
+		// test-waits-allow polling: main's retries back off 1s, 2s, 4s, 8s with no browser event.
+		const capped = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual(["failed"]);
+				return found;
+			},
+			{ timeout: 25_000, interval: 100 },
+		);
+		const again = await reopened();
+		const interactions = interactionsOf(fixture, sessionId);
+		evidence("cap", { sessionId, ...capped, interactions, reopened: again });
+		expect(again).toBe(false);
+		expect(interactions).not.toEqual([
+			expect.objectContaining({ tag: "Pending" }),
+		]);
+		takenOnce(fixture, prompt);
 		endsOnce(read(fixture, sessionId));
 	}, 60_000);
 });

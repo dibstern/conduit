@@ -768,7 +768,11 @@ export const sessionHandlers = {
 			? []
 			: [wakeSession(event.sessionId, event.createdAt, "turn")],
 	"turn.error": (event) => [
-		wakeSession(event.sessionId, event.createdAt, "error"),
+		// A declined steer only returns to the queue (CONTRACT.md 973), so it wakes
+		// nothing; the turn it waited on wakes the session when it ends.
+		...(event.data.code === "steer-declined"
+			? []
+			: [wakeSession(event.sessionId, event.createdAt, "error")]),
 		settleOpenSubagents(event.sessionId, event.createdAt, event.metadata.runId),
 	],
 	"turn.interrupted": (event) => [

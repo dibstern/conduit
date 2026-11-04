@@ -16,6 +16,12 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { publishProviderRelayMessage } from "../../../src/lib/relay/relay-stack.js";
 import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
 
+const idleActivity = {
+	foreground: "idle",
+	background: "none",
+	label: "idle",
+} as const;
+
 it("pushes canonical terminal alerts, preserves replay identity, and suppresses subagent completion", async () => {
 	const sendToAll = vi.fn(async () => ({
 		delivered: ["device"],
@@ -36,6 +42,7 @@ it("pushes canonical terminal alerts, preserves replay identity, and suppresses 
 				pushManager: { sendToAll },
 				log: createSilentLogger(),
 				slug: "project",
+				activityOf: () => idleActivity,
 			};
 			for (const [sessionId, messageId] of [
 				["s1", "m1"],

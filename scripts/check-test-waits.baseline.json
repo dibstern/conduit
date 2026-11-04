@@ -15,7 +15,7 @@
 		"real-wait": 1
 	},
 	"acceptance/src/steps/sessionPresentation.ts": {
-		"real-wait": 2
+		"real-wait": 1
 	},
 	"acceptance/src/steps/sessionSheetSnooze.ts": {
 		"real-wait": 2
@@ -165,7 +165,7 @@
 		"timeout-override": 3
 	},
 	"test/e2e/specs/claude-replay.spec.ts": {
-		"timeout-override": 19
+		"timeout-override": 18
 	},
 	"test/e2e/specs/claude-running-tasks.spec.ts": {
 		"timeout-override": 1
@@ -522,7 +522,7 @@
 		"timeout-override": 1
 	},
 	"test/integration/daemon/claude-run-ownership-browser-regressions.test.ts": {
-		"polling": 10,
+		"polling": 9,
 		"timeout-override": 5
 	},
 	"test/integration/daemon/claude-runner-at-most-once.test.ts": {
@@ -758,7 +758,7 @@
 		"timeout-override": 2
 	},
 	"test/integration/daemon/daemon-orchestration-engine.test.ts": {
-		"polling": 75,
+		"polling": 74,
 		"timeout-override": 18
 	},
 	"test/integration/daemon/daemon-overrides.test.ts": {
@@ -1593,7 +1593,7 @@
 		"real-wait": 3
 	},
 	"test/unit/relay/status-poller-broadcast.test.ts": {
-		"polling": 4,
+		"polling": 3,
 		"timeout-override": 2
 	},
 	"test/unit/server/pty-storm.test.ts": {

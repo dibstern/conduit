@@ -241,20 +241,21 @@ describe("subscription RPC handlers", () => {
 						title: "Renamed fork",
 					}),
 				});
-				const busyVersion = yield* commit(
+				// A stored row never moves on status: what runs is SessionActivity's (82tn.32.30).
+				const againVersion = yield* commit(
 					canonicalEvent(
-						"session.status",
+						"session.renamed",
 						"fork-1",
-						{ sessionId: "fork-1", status: "busy" },
+						{ sessionId: "fork-1", title: "Renamed again" },
 						{ provider: "opencode", createdAt: 3 },
 					),
 				);
 				expect(yield* Queue.take(envelopes)).toMatchObject({
 					_tag: "upsert",
-					sequence: busyVersion,
+					sequence: againVersion,
 					item: expect.objectContaining({
 						id: "fork-1",
-						attention: "working",
+						title: "Renamed again",
 					}),
 				});
 				// The shell catches up on resume: the family that moved past the
@@ -266,7 +267,7 @@ describe("subscription RPC handlers", () => {
 					{ _tag: "projects" },
 					{
 						_tag: "upsert",
-						sequence: busyVersion,
+						sequence: againVersion,
 						item: expect.objectContaining({ id: "fork-1" }),
 					},
 					{ _tag: "synchronized" },

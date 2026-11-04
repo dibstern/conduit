@@ -8,9 +8,9 @@
 
 import type { Stream } from "effect";
 import {
-	followSessionBusy,
 	followSessionCompaction,
 	followSessionRetry,
+	followSessionTurn,
 } from "../stores/chat.svelte.js";
 import {
 	followSessionModelSettings,
@@ -49,16 +49,6 @@ export type ShellEnvelope = Stream.Success<
 >;
 
 const identify = (session: SessionInfo): string => session.id;
-
-export const isBusy = (row: Pick<SessionInfo, "status"> | undefined): boolean =>
-	row?.status === "busy" || row?.status === "retry";
-
-/** The server reports a newer turn end, including a first sighting after it ended. */
-export const turnEnded = (
-	previous: Pick<SessionInfo, "lastTurnEndVersion"> | undefined,
-	next: Pick<SessionInfo, "lastTurnEndVersion">,
-): boolean =>
-	(next.lastTurnEndVersion ?? 0) > (previous?.lastTurnEndVersion ?? 0);
 
 // `$state.raw`, not `$state`: the applier replaces the state whole and never
 // mutates it, so a deep proxy would cost work to track writes that cannot
@@ -155,15 +145,8 @@ export function applySessionChange(change: ShellEnvelope): void {
 		applyTurnRow(change.item);
 		hydrateSessionGoal(change.item);
 		followViewedSession(change.item);
-		// Transitions start/end the phase; a turn-end version also catches a
-		// turn that started and ended between row updates.
 		const previous = applied.rows.get(change.item.id);
-		const busy = isBusy(change.item);
-		if (
-			busy !== isBusy(previous) ||
-			(!busy && turnEnded(previous, change.item))
-		)
-			followSessionBusy(change.item.id, busy, change.item.lastTurnEndVersion);
+		followSessionTurn(change.item.id, change.item, previous);
 		if (change.item.compacting !== applied.rows.get(change.item.id)?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
 		if (change.item.retrying !== applied.rows.get(change.item.id)?.retrying)
@@ -186,8 +169,7 @@ export function applySessionChange(change: ShellEnvelope): void {
 			applyTurnRow(row);
 			hydrateSessionGoal(row);
 			followViewedSession(row);
-			// A snapshot (cold start, resume) is absolute.
-			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
+			followSessionTurn(row.id, row, applied.rows.get(row.id));
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
 			followSessionResumes(row, applied.rows.get(row.id));

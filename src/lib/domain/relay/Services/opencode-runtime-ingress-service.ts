@@ -1102,9 +1102,7 @@ export class EffectOpenCodeRuntimeIngress
 								WHERE outbox.project_key = ${this.projectId} AND outbox.command_id = ${command.command_id}
 								AND outbox.request_sequence = ${command.request_sequence}
 								AND outbox.status = ${command.status} AND outbox.attempt_count = ${command.attempt_count}
-								AND (outbox.status = 'running' OR (outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'
-									AND EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = outbox.run_id
-										AND run.session_id = outbox.session_id AND run.status IN ('pending', 'running'))))`;
+								AND outbox.status = 'running'`;
 							if (!claim) {
 								pending.delete(command);
 								return;
@@ -1168,7 +1166,7 @@ export class EffectOpenCodeRuntimeIngress
 										WHERE outbox.project_key = ${this.projectId} AND outbox.command_id = ${command.command_id}
 										AND outbox.request_sequence = ${command.request_sequence}
 										AND outbox.status = ${command.status} AND outbox.attempt_count = ${command.attempt_count}
-										AND (outbox.status = 'running' OR (outbox.status = 'cancelled' AND outbox.error_code = 'project_inactive'))
+										AND outbox.status = 'running'
 										AND sessions.provider = ${instanceId}
 										AND (SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn') = ${claim.latest_sequence}
 										AND (SELECT MAX(request_sequence) FROM provider_command_outbox WHERE session_id = ${sessionId} AND effect_type = 'send_turn' AND status NOT IN ('completed', 'failed')) = ${claim.latest_active_sequence}
@@ -1338,9 +1336,7 @@ export class EffectOpenCodeRuntimeIngress
 										.sql`SELECT 1 FROM provider_command_outbox WHERE project_key = ${this.projectId}
 										AND command_id = ${command.command_id} AND request_sequence = ${command.request_sequence}
 										AND attempt_count = ${command.attempt_count}
-										AND (status IN ('completed', 'failed') OR (status = 'cancelled' AND error_code = 'project_inactive'
-											AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.id = ${claim.run_id}
-												AND run.session_id = ${sessionId} AND run.status IN ('pending', 'running'))))`;
+										AND status IN ('completed', 'failed')`;
 									if (!terminal.length) return;
 									pending.delete(command);
 								}),

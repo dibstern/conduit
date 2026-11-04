@@ -86,7 +86,9 @@ describe("turn-ended alert", () => {
 				CanonicalEvents[type].status === "live" &&
 				type !== "turn.completed" &&
 				type !== "turn.error" &&
-				type !== "turn.interrupted",
+				type !== "turn.interrupted" &&
+				// A wake's end: it has no Run, so this is its turn end (82tn.32.30).
+				type !== "evidence.turn_ended",
 		),
 	)("does not alert for %s", (type) => {
 		// Terminal-looking data must not alert unless the event type ends a turn.

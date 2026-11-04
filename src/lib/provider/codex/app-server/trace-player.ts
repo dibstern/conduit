@@ -73,6 +73,8 @@ function row(value: unknown): value is AppServerTraceRow {
 	);
 }
 
+const LIST = "thread/backgroundTerminals/list";
+
 function describe(message: unknown): string {
 	if (!object(message)) return JSON.stringify(message) ?? String(message);
 	if (typeof message["method"] === "string") return message["method"];
@@ -120,6 +122,22 @@ export function createTraceAppServerTransport(
 		// Tests advance a logical timestamp to inspect a turn before more frames
 		// arrive. Ordinary fixture replay remains immediate.
 		const gatePath = process.env["CONDUIT_CODEX_APP_SERVER_TRACE_GATE"];
+		const gate = () =>
+			gatePath
+				? Number(readFileSync(gatePath, "utf8"))
+				: Number.POSITIVE_INFINITY;
+		// The runner re-reads background terminals whenever their state may change, so a list call
+		// has no fixed place in a trace. A recorded list (request and reply) marks the set from that
+		// point on for its cursor; every list call gets the latest marked reply for its cursor that
+		// the gate has reached (a page or Codex's error), an empty page before any, and its reply
+		// skips the gated frames.
+		const listed: {
+			readonly at: number;
+			readonly cursor: unknown;
+			readonly reply: Record<string, unknown>;
+		}[] = [];
+		const scope = yield* Effect.scope;
+		const replies = yield* Queue.unbounded<unknown>();
 		let cursor = 0;
 		let exitValue: AppServerExit | undefined;
 		let closed = false;
@@ -133,14 +151,44 @@ export function createTraceAppServerTransport(
 		const emitFollowing = Effect.gen(function* () {
 			while (cursor < trace.rows.length) {
 				const next = trace.rows[cursor];
+				if (
+					next?.dir === "out" &&
+					object(next.message) &&
+					next.message["method"] === LIST
+				) {
+					const reply = trace.rows[cursor + 1];
+					const params = next.message["params"];
+					listed.push({
+						at: next.at,
+						cursor: (object(params) ? params["cursor"] : undefined) ?? null,
+						reply:
+							reply?.dir === "in" &&
+							object(reply.message) &&
+							"error" in reply.message
+								? { error: reply.message["error"] }
+								: {
+										result:
+											reply?.dir === "in" && object(reply.message)
+												? reply.message["result"]
+												: undefined,
+									},
+					});
+					cursor += 2;
+					continue;
+				}
 				if (!next || next.dir === "out") return;
 				cursor += 1;
 				if (next.dir === "exit") {
-					yield* finish({
-						code: next.code,
-						signal: next.signal,
-						stderrTail: "",
-					});
+					// The exit waits for the gate like any frame, so a test can keep the app-server up
+					// past its last frame (lane 3245: it exits only after the runner has listed).
+					yield* Effect.gen(function* () {
+						while (next.at > gate()) yield* Effect.sleep("10 millis");
+						yield* finish({
+							code: next.code,
+							signal: next.signal,
+							stderrTail: "",
+						});
+					}).pipe(Effect.forkIn(scope));
 					return;
 				}
 				let message = next.message;
@@ -213,6 +261,19 @@ export function createTraceAppServerTransport(
 				outbound.withPermits(1)(
 					Effect.gen(function* () {
 						if (exitValue) return yield* new AppServerExited(exitValue);
+						if (object(message) && message["method"] === LIST) {
+							const reached = gate();
+							const params = message["params"];
+							const page =
+								(object(params) ? params["cursor"] : undefined) ?? null;
+							yield* Queue.offer(replies, {
+								id: message["id"],
+								...(listed
+									.filter(({ at, cursor }) => at <= reached && cursor === page)
+									.at(-1)?.reply ?? { result: { data: [], nextCursor: null } }),
+							});
+							return;
+						}
 						const expected = trace.rows[cursor];
 						const expectedMessage =
 							expected?.dir === "out" ? expected.message : undefined;
@@ -224,7 +285,9 @@ export function createTraceAppServerTransport(
 								? ["threadId", "lastTurnId"]
 								: method === "thread/revert"
 									? ["threadId", "beforeTurnId"]
-									: [];
+									: method === "thread/backgroundTerminals/terminate"
+										? ["threadId", "processId"]
+										: [];
 						const expectedParams = object(expectedMessage)
 							? expectedMessage["params"]
 							: undefined;
@@ -304,18 +367,19 @@ export function createTraceAppServerTransport(
 						yield* emitFollowing;
 					}),
 				),
-			messages: Stream.fromQueue(queue).pipe(
-				Stream.mapEffect((row) =>
-					Effect.gen(function* () {
-						while (
-							gatePath &&
-							row.at > Number(readFileSync(gatePath, "utf8"))
-						) {
-							yield* Effect.sleep("10 millis");
-						}
-						return row.message;
-					}),
+			messages: Stream.merge(
+				Stream.fromQueue(queue).pipe(
+					Stream.mapEffect((row) =>
+						Effect.gen(function* () {
+							while (row.at > gate()) {
+								yield* Effect.sleep("10 millis");
+							}
+							return row.message;
+						}),
+					),
 				),
+				Stream.fromQueue(replies),
+				{ haltStrategy: "left" },
 			),
 			exit: Deferred.await(exited),
 			close,

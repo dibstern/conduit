@@ -137,9 +137,13 @@ export class ClaudeGoalTracker {
 		private readonly sessionId: string,
 		initialState?: SessionGoalChangedPayload,
 	) {
-		this.state = initialState
-			? { ...initialState, sessionId }
-			: { sessionId, goal: null };
+		// A stored reply's correlation is that reply's alone.
+		const { replyTo: _replyTo, ...stored } = initialState ?? { goal: null };
+		this.state = { ...stored, sessionId };
+	}
+
+	get facts(): SessionGoalChangedPayload {
+		return this.state;
 	}
 
 	get goal(): SessionGoalChangedPayload["goal"] {

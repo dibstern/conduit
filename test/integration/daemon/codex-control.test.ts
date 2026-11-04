@@ -105,8 +105,14 @@ describe("Codex control through the daemon and detached runner", () => {
 	}
 
 	const captured = () => rows<TraceRow>(capturePath);
+	// Background-terminal re-reads have no fixed place in a turn (82tn.32.28).
 	const requests = () =>
-		captured().filter((row) => row.dir === "out" && row.message?.method);
+		captured().filter(
+			(row) =>
+				row.dir === "out" &&
+				row.message?.method &&
+				row.message.method !== "thread/backgroundTerminals/list",
+		);
 
 	async function states(
 		fixture: ProcessHarness,

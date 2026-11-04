@@ -3,10 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
 import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
 import type { GoalDetails, GoalSummary } from "../../../contracts/ws-rpc.js";
-import {
-	getOrCreateSessionActivity,
-	phaseToIdle,
-} from "../../stores/chat.svelte.js";
+import { getOrCreateSessionActivity } from "../../stores/chat.svelte.js";
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
@@ -40,7 +37,10 @@ import { dimThemeColor, setThemeMode } from "../../stores/theme.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
-import { openSessionForSetup } from "../../stories/session-setup.js";
+import {
+	openSessionForSetup,
+	WORKING_ACTIVITY,
+} from "../../stories/session-setup.js";
 import {
 	connectedSocket,
 	connectingSocket,
@@ -318,7 +318,7 @@ function setupGoal(
 		},
 		mockSession.id,
 	);
-	phaseToIdle(getOrCreateSessionActivity(mockSession.id));
+	getOrCreateSessionActivity(mockSession.id);
 	goalStorySetAt = Math.max(
 		goalStorySetAt + 1,
 		Date.now() - 41 * 60_000 - 30_000,
@@ -374,21 +374,6 @@ async function assertGoalSubtitle(
 	return subtitle;
 }
 
-export const GoalChecking: Story = {
-	beforeEach: () => setupGoal("checking"),
-	play: async ({ canvasElement }) => {
-		const subtitle = await assertGoalSubtitle(
-			canvasElement,
-			"Checking · All 38 scenarios pass",
-			"--color-status-goal",
-		);
-		const packet = subtitle.querySelector("[data-flow-packet]");
-		await expect(packet).toBeVisible();
-		if (!packet) throw new Error("Checking Flow packet is missing");
-		await expect(getComputedStyle(packet).animationName).toContain("flow");
-	},
-};
-
 export const GoalNotYet: Story = {
 	beforeEach: () => setupGoal("not_yet"),
 	play: async ({ canvasElement }) => {
@@ -435,10 +420,6 @@ export const GoalCleared: Story = {
 	},
 };
 
-export const GoalCheckingLight: Story = {
-	...GoalChecking,
-	globals: { theme: "light" },
-};
 export const GoalNotYetLight: Story = {
 	...GoalNotYet,
 	globals: { theme: "light" },
@@ -473,7 +454,9 @@ function setupGoalDetails(
 				: {}),
 	};
 	if (state === "starting") {
-		seedSessions([{ ...mockSession, status: "busy" }]);
+		seedSessions([
+			{ ...mockSession, status: "busy", activity: WORKING_ACTIVITY },
+		]);
 	}
 	handleGoalChanged({
 		...facts,
@@ -517,8 +500,7 @@ async function assertGoalDetails(
 	);
 	const checks = history.queryAllByTestId("goal-details-check");
 	const historyCount = Math.min(checkCount, phase === "Goal met" ? 4 : 3);
-	const completed =
-		phase === "Checking" || phase === "Goal met" ? checks.slice(1) : checks;
+	const completed = phase === "Goal met" ? checks.slice(1) : checks;
 	for (const [index, fixture] of goalCheckFixtures
 		.slice(0, historyCount)
 		.reverse()
@@ -538,6 +520,26 @@ async function assertGoalDetails(
 // Timestamps, counts and the card's section labels sit in the quiet tier (text-dimmer),
 // below AA by design and held to 3:1 by theme-contrast.test.ts. color-contrast skips
 // only those; it and every other rule stay on for the rest of the popover.
+/**
+ * Vitest runs stories at 1200x900 unless a story names a viewport. Header sheets are
+ * placed against the viewport, so the phone sheet stories need the phone viewport the
+ * visual runner uses.
+ */
+const phoneViewport = {
+	parameters: {
+		viewport: {
+			options: {
+				phone: {
+					name: "Phone",
+					styles: { width: "393px", height: "852px" },
+					type: "mobile",
+				},
+			},
+		},
+	},
+	globals: { viewport: { value: "phone", isRotated: false } },
+} as const;
+
 const quietTierA11y = {
 	a11y: {
 		test: "error",
@@ -569,24 +571,10 @@ export const GoalDetailsOpen: Story = {
 			await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
 				`Set ${fixtureClock(setAt)} · Sonnet 5 judges · 1.24M tokens`,
 			);
-		await expect(panel.getByTestId("goal-details-pause")).toBeVisible();
+		// CONTRACT.md 8.6: Claude has no goal pause.
+		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
-	},
-};
-
-export const GoalDetailsChecking: Story = {
-	...GoalDetailsOpen,
-	tags: ["viewport-capture"],
-	beforeEach: () => setupGoalDetails("checking"),
-	play: async ({ canvasElement }) => {
-		const { checks } = await assertGoalDetails(canvasElement, "Checking", 4);
-		await expect(checks[0]).toHaveTextContent("now");
-		await expect(checks[0]).toHaveTextContent("Checking");
-		const packet = checks[0]?.querySelector("[data-flow-packet]");
-		await expect(packet).toBeVisible();
-		if (!packet) throw new Error("Checking Flow packet is missing");
-		await expect(getComputedStyle(packet).animationName).toContain("flow");
 	},
 };
 
@@ -596,7 +584,7 @@ export const GoalDetailsPaused: Story = {
 	beforeEach: () => setupGoalDetails("paused"),
 	play: async ({ canvasElement }) => {
 		const { panel } = await assertGoalDetails(canvasElement, "Paused", 3);
-		await expect(panel.getByTestId("goal-details-resume")).toBeVisible();
+		await expect(panel.queryByTestId("goal-details-resume")).toBeNull();
 		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
@@ -680,11 +668,6 @@ export const GoalSheetScrollable: Story = {
 			};
 		},
 	},
-};
-export const GoalDetailsCheckingLight: Story = {
-	...GoalDetailsChecking,
-	tags: ["viewport-capture"],
-	globals: { theme: "light" },
 };
 export const GoalDetailsPausedLight: Story = {
 	...GoalDetailsPaused,
@@ -1355,7 +1338,8 @@ export const PhoneIslandBadgeLight: Story = {
 
 export const PhoneGoalSheet: Story = {
 	args: { island: true, height: 852 },
-	parameters: quietTierA11y,
+	parameters: { ...quietTierA11y, ...phoneViewport.parameters },
+	globals: phoneViewport.globals,
 	tags: ["viewport-capture"],
 	beforeEach: () => setupGoal("checking"),
 	play: async ({ canvasElement }) => {
@@ -1374,8 +1358,6 @@ export const PhoneGoalSheet: Story = {
 		await expect(
 			canvas.getByTestId("goal-details-history-toggle"),
 		).toHaveFocus();
-		await userEvent.tab();
-		await expect(canvas.getByTestId("goal-details-pause")).toHaveFocus();
 		await userEvent.tab();
 		await expect(canvas.getByTestId("goal-details-edit")).toHaveFocus();
 		await userEvent.tab();
@@ -1419,11 +1401,7 @@ export const PhoneGoalSheet: Story = {
 			getComputedStyle(sheet.querySelector("[data-sheet-chrome]") ?? sheet)
 				.borderBottomLeftRadius,
 		).toBe("22px");
-		for (const id of [
-			"goal-details-pause",
-			"goal-details-edit",
-			"goal-details-clear",
-		]) {
+		for (const id of ["goal-details-edit", "goal-details-clear"]) {
 			expectTouchTarget(canvas.getByTestId(id));
 		}
 		await userEvent.keyboard("{Escape}");
@@ -1452,7 +1430,7 @@ export const PhoneGoalSheet: Story = {
 
 export const PhoneGoalSheetLight: Story = {
 	...PhoneGoalSheet,
-	globals: { theme: "light" },
+	globals: { ...phoneViewport.globals, theme: "light" },
 };
 
 export const PhoneLongTitleLight: Story = {
@@ -2019,6 +1997,7 @@ export const DesktopBackgroundTasks: Story = {
 
 export const BackgroundTasks: Story = {
 	args: { island: true, height: 852 },
+	...phoneViewport,
 	tags: ["viewport-capture"],
 	beforeEach: () => {
 		seedSessions([
@@ -2234,7 +2213,11 @@ async function assertSideThreadRows(canvasElement: HTMLElement) {
 
 export const SideThreadsOpen: Story = {
 	tags: ["viewport-capture"],
-	parameters: { docs: { story: { inline: false } } },
+	parameters: {
+		docs: { story: { inline: false } },
+		...phoneViewport.parameters,
+	},
+	globals: phoneViewport.globals,
 	beforeEach: () => setupSideThreads(sideThreadRows),
 	play: async ({ canvasElement }) => {
 		await assertSideThreadRows(canvasElement);
@@ -2472,21 +2455,6 @@ export const DesktopGoalLongCondition: Story = {
 	},
 };
 
-export const DesktopGoalChecking: Story = {
-	...DesktopGoalPursuing,
-	beforeEach: () => {
-		sessionViewState.compact = false;
-		return setupGoal("checking");
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByTestId("session-goal-subtitle").textContent?.trim(),
-		).toBe("Checking · All 38 scenarios pass");
-		expect(canvas.queryByTestId("session-bar-settle")).toBeNull();
-	},
-};
-
 export const DesktopGoalMet: Story = {
 	...DesktopGoalPursuing,
 	beforeEach: () => {
@@ -2644,7 +2612,9 @@ export const DesktopGoalDetails: Story = {
 				"Sonnet 5 judges",
 			),
 		);
-		await expect(card).toHaveTextContent("Checking after turn 4");
+		await expect(
+			within(card).getByTestId("goal-details-foot"),
+		).toHaveTextContent("3 checks");
 		expect(card.getBoundingClientRect().width).toBeLessThan(450);
 		await userEvent.keyboard("{Escape}");
 		await waitFor(() =>
@@ -2997,10 +2967,6 @@ export const DesktopGoalPursuingLight: Story = {
 	...DesktopGoalPursuing,
 	globals: { theme: "light" },
 };
-export const DesktopGoalCheckingLight: Story = {
-	...DesktopGoalChecking,
-	globals: { theme: "light" },
-};
 export const DesktopGoalDetailsLight: Story = {
 	...DesktopGoalDetails,
 	tags: ["viewport-capture"],
@@ -3024,7 +2990,6 @@ export const DesktopSnoozedMenuLight: Story = {
 
 type GoalSummaryState =
 	| "Pursuing"
-	| "Checking"
 	| "StuckSummarising"
 	| "StuckReady"
 	| "StuckStillCurrent"
@@ -3043,8 +3008,6 @@ const summaryCondition =
 const summaryCopy = {
 	pursuing:
 		"Tests pass and the branch is rebased on main. Still to do: merge to main, close the beads, then remove the two worktrees.",
-	checking:
-		"Merged to main at 03dc05f8. Still to do: close conduit-test-16c8 and its 8 children, then remove the two worktrees.",
 	stuck:
 		"Merged to main at 03dc05f8 and closed the beads. Blocked on cleanup: worktrees effect4 and mainbase remain because killing their processes (pids 99950, 11588) was denied. Stop them or allow the kill, and the goal can finish.",
 	met: "Merged to main at 03dc05f8, closed conduit-test-16c8 and its 8 children, and removed both worktrees once their processes were stopped.",
@@ -3075,39 +3038,33 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 	const count =
 		state === "NoChecksYet"
 			? 0
-			: state === "Checking"
-				? 4
-				: state === "StuckStillCurrent" || state === "PausedWhileStuck"
-					? 208
-					: state === "StuckUpdating"
-						? 199
-						: state === "SummaryFailed"
-							? 197
-							: met
-								? 211
-								: stuck || state === "SummariesOff"
-									? 196
-									: 3;
+			: state === "StuckStillCurrent" || state === "PausedWhileStuck"
+				? 208
+				: state === "StuckUpdating"
+					? 199
+					: state === "SummaryFailed"
+						? 197
+						: met
+							? 211
+							: stuck || state === "SummariesOff"
+								? 196
+								: 3;
 	const missing = state === "StuckSummarising" || state === "StuckReady";
 	const stale = state === "StuckUpdating" || state === "SummaryFailed";
 	const currentAt =
 		state === "Pursuing" || state === "NoChecksYet"
 			? 3
-			: state === "Checking"
-				? 6
-				: state === "Paused" || state === "PausedWhileStuck"
-					? 28
-					: met
-						? 46
-						: 26;
+			: state === "Paused" || state === "PausedWhileStuck"
+				? 28
+				: met
+					? 46
+					: 26;
 	const text =
 		state === "Pursuing" || state === "NoChecksYet" || state === "Paused"
 			? summaryCopy.pursuing
-			: state === "Checking"
-				? summaryCopy.checking
-				: met
-					? summaryCopy.met
-					: summaryCopy.stuck;
+			: met
+				? summaryCopy.met
+				: summaryCopy.stuck;
 
 	function publishChecks(next: GoalDetails) {
 		details = next;
@@ -3138,15 +3095,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 			docs: { story: { inline: false } },
 		},
 		beforeEach: () => {
-			const cleanup = setupGoal(
-				met
-					? "met"
-					: paused
-						? "paused"
-						: state === "Checking"
-							? "checking"
-							: "not_yet",
-			);
+			const cleanup = setupGoal(met ? "met" : paused ? "paused" : "not_yet");
 			read.mockClear();
 			generate.mockReset();
 			sessionViewState.compact = !desktop;
@@ -3159,7 +3108,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 			details = {
 				setAt: summarySetAt,
 				judgeModel: "Sonnet 5",
-				turnCount: state === "Checking" ? 5 : count + 1,
+				turnCount: count + 1,
 				metAt: met ? summaryAt(46) : null,
 				summaryEnabled: state !== "SummariesOff",
 				summary:
@@ -3186,15 +3135,13 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 				tokensSinceStart:
 					state === "Pursuing" || state === "Paused"
 						? 61_000
-						: state === "Checking"
-							? 84_000
-							: met
-								? 1_380_000
-								: count >= 208
-									? 1_310_000
-									: count
-										? 1_240_000
-										: 0,
+						: met
+							? 1_380_000
+							: count >= 208
+								? 1_310_000
+								: count
+									? 1_240_000
+									: 0,
 			};
 			if (
 				state === "StuckUpdating" ||
@@ -3246,7 +3193,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 								iterations: count,
 								setAt: summarySetAt,
 								tokensAtStart: 0,
-								...(state === "Checking" || state === "NoChecksYet"
+								...(state === "NoChecksYet"
 									? {}
 									: { lastReason: details.checks.at(-1)?.reason ?? undefined }),
 							},
@@ -3259,8 +3206,9 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 				{
 					...mockSession,
 					title: "Finish 16c8 and tidy up",
-					status:
-						state === "Pursuing" || state === "NoChecksYet" ? "busy" : "idle",
+					...(state === "Pursuing" || state === "NoChecksYet"
+						? { status: "busy", activity: WORKING_ACTIVITY }
+						: { status: "idle" }),
 					...(stuck
 						? {
 								goalStuck: {
@@ -3295,9 +3243,7 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 					? "Paused"
 					: stuck
 						? "Stuck"
-						: state === "Checking"
-							? "Checking"
-							: "Pursuing";
+						: "Pursuing";
 			await expect(
 				canvas.getByTestId("session-goal-subtitle"),
 			).toHaveTextContent(`${label} · ${summaryCondition}`);
@@ -3534,7 +3480,6 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 }
 
 export const PhoneGoalSummaryPursuing = goalSummaryStory("Pursuing");
-export const PhoneGoalSummaryChecking = goalSummaryStory("Checking");
 export const PhoneGoalSummaryStuckSummarising =
 	goalSummaryStory("StuckSummarising");
 export const PhoneGoalSummaryStuckReady = goalSummaryStory("StuckReady");
@@ -3553,7 +3498,6 @@ export const PhoneGoalSummarySummariesOff = goalSummaryStory("SummariesOff");
 export const PhoneGoalSummaryNoChecksYet = goalSummaryStory("NoChecksYet");
 
 export const DesktopGoalSummaryPursuing = goalSummaryStory("Pursuing", true);
-export const DesktopGoalSummaryChecking = goalSummaryStory("Checking", true);
 export const DesktopGoalSummaryStuckSummarising = goalSummaryStory(
 	"StuckSummarising",
 	true,
@@ -3592,10 +3536,6 @@ export const DesktopGoalSummaryNoChecksYet = goalSummaryStory(
 
 export const PhoneGoalSummaryPursuingLight: Story = {
 	...PhoneGoalSummaryPursuing,
-	globals: { theme: "light" },
-};
-export const PhoneGoalSummaryCheckingLight: Story = {
-	...PhoneGoalSummaryChecking,
 	globals: { theme: "light" },
 };
 export const PhoneGoalSummaryStuckSummarisingLight: Story = {
@@ -3645,10 +3585,6 @@ export const PhoneGoalSummaryNoChecksYetLight: Story = {
 
 export const DesktopGoalSummaryPursuingLight: Story = {
 	...DesktopGoalSummaryPursuing,
-	globals: { theme: "light" },
-};
-export const DesktopGoalSummaryCheckingLight: Story = {
-	...DesktopGoalSummaryChecking,
 	globals: { theme: "light" },
 };
 export const DesktopGoalSummaryStuckSummarisingLight: Story = {

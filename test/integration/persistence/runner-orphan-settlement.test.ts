@@ -144,17 +144,10 @@ it.each([
 						registry,
 						write: commit.write,
 						ingestion,
-						isProjectReady: () =>
+						projectGate: () =>
 							phase === "removed"
-								? Effect.fail(
-										new ProviderInstanceFailure({
-											providerId: "conduit",
-											operation: "executeCommand",
-											code: "project_inactive",
-											cause: "removed",
-										}),
-									)
-								: Effect.succeed(phase === "ready"),
+								? Effect.succeed("removed" as const)
+								: Effect.succeed(phase === "ready" ? "served" : "not_served"),
 					});
 					const sweep = yield* Effect.forkChild(reactor.drain());
 					yield* Deferred.await(entered);

@@ -9,6 +9,7 @@ import {
 	type MockCatalog,
 	type MockModelState,
 	type RpcMockControl,
+	rowActivity,
 	sendMockDaemonList,
 	sendMockModelState,
 	sendMockProjectSetting,
@@ -308,7 +309,10 @@ export class WsMockControl {
 			if (rowSessionId)
 				sendMockShellRowPatch(this.page, rowSessionId, () =>
 					msg.type === "status"
-						? { status: msg["status"] === "processing" ? "busy" : "idle" }
+						? {
+								status: msg["status"] === "processing" ? "busy" : "idle",
+								activity: rowActivity(msg["status"] === "processing"),
+							}
 						: { goalState },
 				);
 			return;
@@ -318,6 +322,7 @@ export class WsMockControl {
 		if (msg.type === "done" && rowSessionId)
 			sendMockShellRowPatch(this.page, rowSessionId, (row) => ({
 				status: "idle",
+				activity: rowActivity(false),
 				lastTurnEndVersion:
 					(typeof row["lastTurnEndVersion"] === "number"
 						? row["lastTurnEndVersion"]

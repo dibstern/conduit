@@ -38,6 +38,7 @@ import type {
 } from "../../provider/run-ledger/run-ledger-model.js";
 import { sendToken } from "../../provider/runner/runner-protocol.js";
 import { harnessForModelProvider } from "../../provider/turn-settings.js";
+import { backgroundTaskText } from "../../shared-types.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
@@ -45,7 +46,12 @@ import type {
 	ProjectionContext,
 	ProjectionTouch,
 } from "./projectors-effect.js";
-import { runTerminalStatus } from "./projectors-effect.js";
+import {
+	mergeTouches,
+	runTerminalStatus,
+	stampMessage,
+} from "./projectors-effect.js";
+import { endRunToolRows } from "./tool-row-run.js";
 
 /**
  * settleMs is 3.7's settle window. probeMs and nativeCommandMs: the contract names no value
@@ -91,22 +97,32 @@ export const ledgerAlarmWakes = new WeakMap<
 	Set<() => void>
 >();
 const alarmWakeKey = Symbol("run-ledger-alarm-wake");
+/** SessionActivity's wakes for a committed change of a session's native command view (8.5). */
+export const ledgerNativeCommandsWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<(sessionId: string, commands: LedgerView["nativeCommands"]) => void>
+>();
 type TasksSnapshot = {
 	readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
 	readonly at: number;
 };
-/** 8.3: the active Run when Claude started it by itself, with its waking task when known. */
-export type WakeRun = { readonly task?: TaskKey };
-const wakeRunOf = (view: LedgerView): WakeRun | undefined =>
-	view.active?.origin !== "wake"
-		? undefined
-		: view.active.wakeTask
-			? { task: view.active.wakeTask }
-			: {};
 /**
- * SessionActivity's wakes for a committed change of a session's tasks view or wake Run (8.1 "a
- * read-only view"), with that view, the wake Run and, for a snapshot, its tasks with their display
- * and its time.
+ * What SessionActivity reads beyond tasks (8.1): the active Run, input or wake, Servers and the
+ * pending confirm's snapshot entry (8.4).
+ */
+const activityOf = (view: LedgerView) =>
+	JSON.stringify([
+		view.tasks,
+		view.active?.origin,
+		view.active?.origin === "wake" ? view.active.wakeTask : undefined,
+		[...(view.servers?.values() ?? [])],
+		view.pendingConfirm?.snapshotEntry,
+	]);
+/**
+ * SessionActivity's wakes for a committed change of a session's tasks view, active Run, Servers or
+ * pending confirm (8.1 "a read-only view"), with that view (8.4: callers copy the confirm's snapshot
+ * entry, never compute it) and, for a snapshot, its tasks with their display and
+ * its time.
  */
 export const ledgerTasksWakes = new WeakMap<
 	SqlClient.SqlClient,
@@ -115,7 +131,7 @@ export const ledgerTasksWakes = new WeakMap<
 			sessionId: string,
 			tasks: LedgerView["tasks"],
 			snapshot: TasksSnapshot | undefined,
-			wake: WakeRun | undefined,
+			ledger: Pick<LedgerView, "active" | "servers" | "pendingConfirm">,
 		) => void
 	>
 >();
@@ -460,6 +476,36 @@ const commandFor = (
 					verb: "control",
 					control: { kind: "stop_tasks", tasks: event.data.tasks },
 				};
+			// 8.4, D45: the browser's confirm; decide rejects one older than the latest snapshot.
+			case "escalation.confirmed":
+				return {
+					verb: "control",
+					control: {
+						kind: "confirm_escalation",
+						snapshotEntry: event.data.snapshotEntry,
+					},
+				};
+			case "native_command.requested": {
+				const commandId = event.metadata.commandId;
+				if (commandId === undefined) return undefined;
+				return {
+					verb: "control",
+					control: { kind: "native_command", commandId, text: event.data.text },
+				};
+			}
+			case "evidence.command_receipt":
+				// D61: a native command's receipts are unsolicited, by its commandId.
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: event.data.label,
+						eventId: event.eventId,
+						kind: "command_lifecycle",
+						commandId: event.data.commandId,
+						state: event.data.state,
+					},
+				};
 			case "evidence.process_started":
 				return {
 					verb: "settle",
@@ -686,6 +732,7 @@ const ledgerEffect = (effect: RunEffect) =>
 		: undefined;
 
 const HANDLES = [
+	"session.created",
 	"input.sent",
 	"run.requested",
 	"message.created",
@@ -699,6 +746,8 @@ const HANDLES = [
 	"interrupt.requested",
 	"session.end_requested",
 	"tasks.stop_requested",
+	"escalation.confirmed",
+	"native_command.requested",
 	"evidence.process_started",
 	"evidence.process_lost",
 	"evidence.alarm_fired",
@@ -706,6 +755,7 @@ const HANDLES = [
 	"evidence.probe_result",
 	"evidence.turn_started",
 	"evidence.turn_ended",
+	"evidence.command_receipt",
 	"evidence.tasks_snapshot",
 	"evidence.interaction_resolved",
 	"evidence.delivery_indeterminate",
@@ -759,46 +809,32 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 		project: (event: StoredEvent, ctx: ProjectionContext) =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				if (!warmed) {
-					// 3.12 Load: rebuild only sessions with open work; others load on first touch.
-					warmed = true;
-					for (const { session_id } of yield* sql<{
-						session_id: string;
-					}>`SELECT session_id FROM run_ledger_sessions WHERE state = 'Open'`)
-						yield* current(session_id);
-				}
-				const ledger = yield* current(event.sessionId);
-				if (!ledger || event.sequence <= ledger.eventSequence) return untouched;
-				const command = yield* commandFor(event, ledger.provider);
-				if (!command) return untouched;
-				let minted = 0;
-				const decision = decide(ledger.state, command, {
-					now: event.createdAt,
-					// 3.4: ids from the folded event's sequence, so a replay mints the same ones.
-					newId: () => `${event.sequence}.${minted++}`,
-					policy: RUN_LEDGER_POLICY,
-				});
 				const handOver = (
+					sessionId: string,
 					view: LedgerView,
 					snapshot: TasksSnapshot | undefined,
 				) =>
-					queuePendingWrite(sql, `run-ledger-tasks:${event.sessionId}`, {
+					queuePendingWrite(sql, `run-ledger-tasks:${sessionId}`, {
 						apply: Effect.void,
 						committed: () => {
 							const wakes = ledgerTasksWakes.get(sql);
 							if (!wakes?.size) return;
-							handedOver.add(event.sessionId);
+							handedOver.add(sessionId);
 							for (const wake of wakes)
-								wake(event.sessionId, view.tasks, snapshot, wakeRunOf(view));
+								wake(sessionId, view.tasks, snapshot, view);
 						},
 					});
 				// The display of a first hand-over's live tasks: its latest stored snapshot.
-				const storedSnapshot = (tasks: LedgerView["tasks"]) =>
+				const storedSnapshot = (
+					sessionId: string,
+					tasks: LedgerView["tasks"],
+					upTo = Number.MAX_SAFE_INTEGER,
+				) =>
 					tasks.tag !== "live"
 						? Effect.succeed(undefined)
 						: sql<{ data: string; created_at: number }>`
-								SELECT data, created_at FROM events WHERE session_id = ${event.sessionId}
-								AND type = 'evidence.tasks_snapshot' AND sequence <= ${event.sequence}
+								SELECT data, created_at FROM events WHERE session_id = ${sessionId}
+								AND type = 'evidence.tasks_snapshot' AND sequence <= ${upTo}
 								ORDER BY sequence DESC LIMIT 1`.pipe(
 								Effect.map(([row]) =>
 									row
@@ -813,10 +849,56 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 										: undefined,
 								),
 							);
+				if (!warmed) {
+					// 3.12 Load: rebuild only sessions with open work; others load on first touch.
+					warmed = true;
+					for (const { session_id } of yield* sql<{
+						session_id: string;
+					}>`SELECT session_id FROM run_ledger_sessions WHERE state = 'Open'`) {
+						const warm = yield* current(session_id);
+						// 8.1: the reader learns a restarted session's open work now, not at its next event.
+						if (warm && session_id !== event.sessionId) {
+							const view = viewLedger(warm.state);
+							handOver(
+								session_id,
+								view,
+								yield* storedSnapshot(session_id, view.tasks),
+							);
+						}
+					}
+				}
+				// 3.3 (CONTRACT.md 312): the Session's provider, stored when the session is created so
+				// no first load infers it (gap: the contract names no time for it, reported).
+				if (event.type === "session.created") {
+					if (isKnownDriverKind(event.data.driver))
+						yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state, alarm_at)
+							VALUES (${event.sessionId}, ${event.data.driver}, 'Quiescent', NULL)
+							ON CONFLICT (session_id) DO NOTHING`;
+					return untouched;
+				}
+				const ledger = yield* current(event.sessionId);
+				if (!ledger || event.sequence <= ledger.eventSequence) return untouched;
+				const command = yield* commandFor(event, ledger.provider);
+				if (!command) return untouched;
+				let minted = 0;
+				const decision = decide(ledger.state, command, {
+					now: event.createdAt,
+					// 3.4: ids from the folded event's sequence, so a replay mints the same ones.
+					newId: () => `${event.sequence}.${minted++}`,
+					policy: RUN_LEDGER_POLICY,
+				});
 				if (decision.tag === "Rejected" || decision.events.length === 0) {
 					if (!handedOver.has(event.sessionId)) {
 						const view = viewLedger(ledger.state);
-						handOver(view, yield* storedSnapshot(view.tasks));
+						handOver(
+							event.sessionId,
+							view,
+							yield* storedSnapshot(
+								event.sessionId,
+								view.tasks,
+								event.sequence,
+							),
+						);
 					}
 					return untouched;
 				}
@@ -841,15 +923,134 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
 				const view = viewLedger(state);
 				const before = viewLedger(ledger.state);
-				if (event.type === "evidence.tasks_snapshot")
-					handOver(view, { tasks: event.data.tasks, at: event.createdAt });
-				else if (!handedOver.has(event.sessionId))
-					handOver(view, yield* storedSnapshot(view.tasks));
-				else if (
-					JSON.stringify([view.tasks, wakeRunOf(view)]) !==
-					JSON.stringify([before.tasks, wakeRunOf(before)])
+				// 82tn.45: the active Run main's tool projector stamps a new tool row with.
+				if (view.active?.runId !== before.active?.runId)
+					yield* sql`UPDATE run_ledger_sessions SET active_run_id = ${view.active?.runId ?? null}
+						WHERE session_id = ${event.sessionId}`;
+				if (
+					JSON.stringify(view.nativeCommands) !==
+					JSON.stringify(before.nativeCommands)
 				)
-					handOver(view, undefined);
+					queuePendingWrite(sql, `run-ledger-commands:${event.sessionId}`, {
+						apply: Effect.void,
+						committed: () => {
+							for (const wake of ledgerNativeCommandsWakes.get(sql) ?? [])
+								wake(event.sessionId, view.nativeCommands);
+						},
+					});
+				// 8.4 L5 (CONTRACT.md 2907-2913): each label's lost work, decided once, is a timeline notice
+				// at the fact that decided it, so it replays after a reload. The names come from that
+				// label's latest stored snapshot, which carries each task's command.
+				const notes: { readonly id: string; readonly text: string }[] = [];
+				for (const [index, lost] of view.lostWork
+					.slice(before.lostWork.length)
+					.entries()) {
+					const [stored] =
+						lost.tag === "known"
+							? yield* sql<{ data: string }>`
+									SELECT data FROM events WHERE session_id = ${event.sessionId}
+									AND type = 'evidence.tasks_snapshot' AND sequence <= ${event.sequence}
+									AND json_extract(data, '$.label') = ${lost.label}
+									ORDER BY sequence DESC LIMIT 1`
+							: [];
+					const details = new Map(
+						(stored
+							? (
+									JSON.parse(
+										stored.data,
+									) as EventPayloadMap["evidence.tasks_snapshot"]
+								).tasks
+							: []
+						).map((task) => [task.key.taskId, task.detail]),
+					);
+					const text =
+						lost.tag === "known"
+							? `Background work ended: ${lost.tasks
+									.map((task) => {
+										const detail = details.get(task.key.taskId);
+										return backgroundTaskText({
+											kind: task.kind,
+											type: task.taskType,
+											description: task.description,
+											...(detail ? { detail } : {}),
+										});
+									})
+									.join(", ")}`
+							: "Background work may have been lost";
+					notes.push({ id: `lost-work-${event.sequence}-${index}`, text });
+				}
+				// 8.4 (CONTRACT.md 2866): a failed stop is a diagnostic. It is a timeline notice whenever it
+				// lands, so one after the browser stopped waiting is still shown; a stop whose task has
+				// already left failed at nothing, so it shows nothing.
+				const [failedStop] =
+					event.type === "evidence.effect_outcome" &&
+					(event.data.outcome.tag === "permanent" ||
+						event.data.outcome.tag === "not_sent") &&
+					view.tasks.tag === "live"
+						? yield* sql<{ key: string }>`
+								SELECT json_extract(payload_json, '$.effect.key') AS key FROM provider_command_outbox
+								WHERE command_id = ${event.data.commandId} AND effect_type = 'stop_task'`
+						: [];
+				const stopKey = failedStop
+					? (JSON.parse(failedStop.key) as TaskKey)
+					: undefined;
+				const stillLive =
+					stopKey && view.tasks.tag === "live"
+						? view.tasks.tasks.find(
+								(task) =>
+									task.key.taskId === stopKey.taskId &&
+									task.key.runId === stopKey.runId,
+							)
+						: undefined;
+				if (stillLive) {
+					const detail = (yield* storedSnapshot(
+						event.sessionId,
+						view.tasks,
+						event.sequence,
+					))?.tasks.find(
+						(task) => task.key.taskId === stillLive.key.taskId,
+					)?.detail;
+					notes.push({
+						id: `stop-failed-${event.sequence}`,
+						text: `Could not stop ${backgroundTaskText({
+							kind: stillLive.kind,
+							type: stillLive.taskType,
+							description: stillLive.description,
+							...(detail ? { detail } : {}),
+						})}; it is still running`,
+					});
+				}
+				for (const { id: messageId, text } of notes) {
+					yield* sql`INSERT INTO messages
+						(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
+						VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt},
+							${event.createdAt}, ${ctx.version},
+							(SELECT COALESCE(MAX(ordinal), 0) + 1 FROM messages WHERE session_id = ${event.sessionId}))
+						ON CONFLICT (id) DO NOTHING`;
+					yield* sql`INSERT INTO message_parts
+						(id, message_id, type, text, metadata, sort_order, created_at, updated_at, version)
+						VALUES (${`${messageId}-part`}, ${messageId}, 'text', ${text},
+							${JSON.stringify({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt},
+							${ctx.version})
+						ON CONFLICT (id) DO NOTHING`;
+				}
+				const noticed = yield* stampMessage(
+					notes.map(({ id }) => id),
+					ctx,
+				);
+				if (event.type === "evidence.tasks_snapshot")
+					handOver(event.sessionId, view, {
+						tasks: event.data.tasks,
+						at: event.createdAt,
+					});
+				else if (!handedOver.has(event.sessionId))
+					handOver(
+						event.sessionId,
+						view,
+						yield* storedSnapshot(event.sessionId, view.tasks, event.sequence),
+					);
+				else if (activityOf(view) !== activityOf(before))
+					handOver(event.sessionId, view, undefined);
 				cache.set(event.sessionId, {
 					provider: ledger.provider,
 					state,
@@ -918,13 +1119,33 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				const stamped = yield* sql<{ id: string }>`
 					UPDATE sessions SET version = ${ctx.version} WHERE id = ${event.sessionId}
 					RETURNING id`;
-				return stamped.length > 0
-					? {
-							stamped: stamped.map(({ id }) => id),
-							removed: [],
-							collections: ["sessions"],
-						}
-					: untouched;
+				const touch: ProjectionTouch = {
+					stamped: [...noticed.stamped, ...stamped.map(({ id }) => id)],
+					removed: noticed.removed,
+					collections: [
+						...new Set([
+							...noticed.collections,
+							...(stamped.length > 0 ? (["sessions"] as const) : []),
+						]),
+					],
+					...(noticed.sidebar ? { sidebar: noticed.sidebar } : {}),
+				};
+				// 82tn.45: the Run's terminal classification ends its open foreground tool rows.
+				const endedRun = before.active?.runId;
+				return endedRun && endedRun !== view.active?.runId
+					? mergeTouches([
+							touch,
+							yield* stampMessage(
+								yield* endRunToolRows(
+									endedRun,
+									view.tasks,
+									event.createdAt,
+									ctx,
+								),
+								ctx,
+							),
+						])
+					: touch;
 			}),
 	};
 }

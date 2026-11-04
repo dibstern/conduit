@@ -2,6 +2,7 @@ import type { CategorySet } from "../../contracts/category-set.js";
 import type { MessageSurfacingStatus } from "../../contracts/message-surfacing.js";
 import {
 	getOrCreateSessionActivity,
+	getSessionPhase,
 	SessionMessages,
 	sessionActivity,
 	sessionMessages,
@@ -18,7 +19,10 @@ import {
 } from "../stores/turn-minimisation.svelte.js";
 import type { ChatMessage } from "../types.js";
 import type { Turn } from "../utils/turns.js";
-import { openSessionForSetup } from "./session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "./session-setup.js";
 
 /** Standalone panels still resolve pin, step and citation anchors from a transcript. */
 export function setupTurnStory({
@@ -63,9 +67,7 @@ export function setupTurnStory({
 	chat.messages = messages;
 	sessionMessages.set(sessionId, chat);
 	sessionActivity.delete(sessionId);
-	getOrCreateSessionActivity(sessionId).phase = turn.live
-		? "processing"
-		: "idle";
+	getOrCreateSessionActivity(sessionId);
 	setSessionSurfaceLevel(sessionId, null);
 	setTurnMinimised(sessionId, turn.id, null);
 	if (surfacing) {
@@ -73,7 +75,10 @@ export function setupTurnStory({
 		messageSurfacing.categorySet = surfacing.categorySet;
 	}
 	openSessionForSetup(sessionId);
+	const previouslyWorking = getSessionPhase(sessionId) === "processing";
+	setSessionWorkingForSetup(sessionId, turn.live);
 	return () => {
+		setSessionWorkingForSetup(sessionId, previouslyWorking);
 		replaceRoute(previousRoute);
 		if (previousMessages) sessionMessages.set(sessionId, previousMessages);
 		else sessionMessages.delete(sessionId);

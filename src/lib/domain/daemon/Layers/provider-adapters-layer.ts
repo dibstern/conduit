@@ -28,7 +28,10 @@ import {
 } from "../../../persistence/effect/provider-state-effect.js";
 import { makeReadQueryEffect } from "../../../persistence/effect/read-query-effect.js";
 import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
-import { ledgerTasksWakes } from "../../../persistence/effect/run-ledger-arm.js";
+import {
+	ledgerNativeCommandsWakes,
+	ledgerTasksWakes,
+} from "../../../persistence/effect/run-ledger-arm.js";
 import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.js";
 import type { ClaudeProviderInstanceDeps } from "../../../provider/claude/claude-provider-runtime.js";
 import { makeClaudeThreadRead } from "../../../provider/claude/claude-thread-read.js";
@@ -296,13 +299,21 @@ export const makeProviderAdaptersLive = (
 					),
 				);
 			const runBackground = Effect.runForkWith(Context.empty());
-			// 8.1, 8.3: SessionActivity reads the Run Ledger's tasks view and wake Run, which the arm
-			// hands over after each commit that moves them.
+			// 8.1, 8.3: SessionActivity reads the Run Ledger's tasks view, active Run and Servers, which
+			// the arm hands over after each commit that moves them.
 			const onLedgerTasks: Parameters<
 				NonNullable<ReturnType<typeof ledgerTasksWakes.get>>["add"]
-			>[0] = (sessionId, tasks, snapshot, wake) => {
-				if (!activity.background.publish(sessionId, tasks, snapshot, wake))
-					return;
+			>[0] = (sessionId, tasks, snapshot, ledger) => {
+				if (activity.background.publish(sessionId, tasks, snapshot, ledger))
+					announce(sessionId);
+			};
+			// 8.5: the goal tracker reads each goal action's send from the same hand-over.
+			const onLedgerNativeCommands: Parameters<
+				NonNullable<ReturnType<typeof ledgerNativeCommandsWakes.get>>["add"]
+			>[0] = (sessionId, commands) => {
+				if (activity.goals.sends(sessionId, commands)) announce(sessionId);
+			};
+			const announce = (sessionId: string) =>
 				runBackground(
 					projectContext(sessionId).pipe(
 						Effect.tap((project) =>
@@ -314,19 +325,30 @@ export const makeProviderAdaptersLive = (
 						Effect.provideService(SqlClient.SqlClient, sql),
 					),
 				);
-			};
 			// The arm wakes per store: the daemon's, and each project's when it brings its own.
 			const listenedStores = new Set<SqlClient.SqlClient>();
 			const listenForTasks = (store: SqlClient.SqlClient) => {
 				listenedStores.add(store);
 				const wakes = ledgerTasksWakes.get(store) ?? new Set();
 				ledgerTasksWakes.set(store, wakes.add(onLedgerTasks));
+				const commandWakes = ledgerNativeCommandsWakes.get(store) ?? new Set();
+				ledgerNativeCommandsWakes.set(
+					store,
+					commandWakes.add(onLedgerNativeCommands),
+				);
 			};
 			listenForTasks(sql);
+			// A server's gate link moves its session's row too.
+			activity.onServersMoved.add(announce);
 			yield* Effect.addFinalizer(() =>
 				Effect.sync(() => {
-					for (const store of listenedStores)
+					activity.onServersMoved.delete(announce);
+					for (const store of listenedStores) {
 						ledgerTasksWakes.get(store)?.delete(onLedgerTasks);
+						ledgerNativeCommandsWakes
+							.get(store)
+							?.delete(onLedgerNativeCommands);
+					}
 				}),
 			);
 			let testSdk = options.claudeSdk;

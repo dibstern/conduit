@@ -739,19 +739,39 @@ export const makeContinuation = Effect.gen(function* () {
 										"Continuation admission requires the session inbox",
 									),
 								);
+							const request = {
+								text: "",
+								...(model ? { model } : {}),
+								...(agent ? { agent } : {}),
+								variant,
+								contextWindow,
+							};
+							const inputId = randomUUID();
 							yield* inbox.value.withSession(
 								sessionId,
 								turns.sendTurn({
 									account,
 									clientId: "continuation",
-									commandId: randomUUID(),
+									commandId: inputId,
 									sessionId,
-									text: "",
+									...request,
 									continuation: { cutOffMessageId: continued.cutOffMessageId },
-									...(model ? { model } : {}),
-									...(agent ? { agent } : {}),
-									variant,
-									contextWindow,
+									// CONTRACT.md 3.9 (D58): the ledger admits a Run at main's handoff, so the
+									// admission commits with this send's input.sent as the inbox's does.
+									events: [
+										canonicalEvent(
+											"input.admitted",
+											sessionId,
+											{
+												sessionId,
+												inputId,
+												delivery: "queue",
+												request,
+												continuation: true,
+											},
+											{ provider: account.driver },
+										),
+									],
 								}),
 							);
 						}).pipe(Effect.scoped),

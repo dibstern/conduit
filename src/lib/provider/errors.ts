@@ -53,11 +53,14 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 		| "provider_process_gone"
 		| "provider_process_unavailable"
 		| "provider_control_timeout"
+		| "native_command_unsupported"
 		| "secret_answer_expired"
 		| "secret_answer_unavailable"
 		| "runner_detached"
 		| "project_inactive"
-		| "project_unavailable";
+		| "project_unavailable"
+		/** A send its project's removal cut short before any byte (3.11). */
+		| "not_sent";
 }> {
 	/** Classify the native adapter failure; unknown errors must not hold controls. */
 	get retryable(): boolean {
@@ -77,6 +80,15 @@ export class ProviderInstanceFailure extends Data.TaggedError(
 		return `Provider instance ${this.operation} failed for provider ${this.providerId}: ${inner}`;
 	}
 }
+
+/** A native command to a provider that has none (8.5): a refusal, which fails the command. */
+export const nativeCommandUnsupported = (providerId: string) =>
+	new ProviderInstanceFailure({
+		providerId,
+		operation: "native_command",
+		code: "native_command_unsupported",
+		cause: new Error("This provider has no native commands"),
+	});
 
 function isTransientProviderError(cause: unknown): boolean {
 	if (cause instanceof ProviderInstanceFailure) return cause.retryable;

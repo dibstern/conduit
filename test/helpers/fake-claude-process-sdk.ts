@@ -173,6 +173,8 @@ export type ProcessMark =
 			kind: "enqueue";
 			prompt: string;
 			request: string;
+			/** The SDK input's priority, absent when the sender set none. */
+			priority?: string;
 			at: string;
 			queryId: string;
 			promptIndex: number;
@@ -183,6 +185,8 @@ export type ProcessMark =
 			};
 	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
+	/** An input that reached the CLI mid-turn and was queued behind the turn. */
+	| { kind: "input-queued"; prompt: string; priority?: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
 	| {
 			kind: "prompt-answer";
@@ -704,6 +708,8 @@ function query(params: {
 	let taskStopHolding = false;
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
+	/** Wakes goal-long-turn when Stop interrupts it before a mid-turn input arrives. */
+	let interruptTurn: (() => void) | undefined;
 	let interruptibleTurn = false;
 	let interruptAwaitingDecision = false;
 	let closed = false;
@@ -1008,8 +1014,11 @@ function query(params: {
 			return;
 		}
 		const inputs = params.prompt[Symbol.asyncIterator]();
+		// goal-long-turn reads inputs during its turn, as the CLI does; one it took waits here.
+		let queuedInput: Promise<IteratorResult<SDKUserMessage>> | undefined;
 		while (!closed) {
-			const nextInput = inputs.next();
+			const nextInput = queuedInput ?? inputs.next();
+			queuedInput = undefined;
 			if (taskStopLive.length > 0) {
 				let ready = false;
 				void nextInput.then(
@@ -1047,7 +1056,9 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			interruptibleTurn =
-				request.startsWith("stall-") || request === "terminal-replay-interrupt";
+				request.startsWith("stall-") ||
+				request === "terminal-replay-interrupt" ||
+				request.startsWith("goal-long-turn");
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1114,6 +1125,7 @@ function query(params: {
 				kind: "enqueue",
 				prompt,
 				request,
+				...(input.priority === undefined ? {} : { priority: input.priority }),
 				at,
 				queryId,
 				promptIndex: ++promptIndex,
@@ -1355,6 +1367,8 @@ function query(params: {
 					modelUsage: {},
 					permission_denials: [],
 					...(!unknown && !modelReply ? { local_command: "goal" } : {}),
+					// The CLI names the input a zero-turn result answers (CONTRACT.md 8.2).
+					user_message_uuid: userUuid,
 				} as unknown as SDKMessage;
 				continue;
 			}
@@ -1867,6 +1881,43 @@ function query(params: {
 						!taskTurnInterrupted
 					) {
 						releaseTaskStops();
+						// A task that ends on its own while the turn is held.
+						for (const task of taskStopLive.filter((entry) =>
+							consumeMarker(`task-stop-end-${entry.task_id}`),
+						)) {
+							taskStopLive = taskStopLive.filter((entry) => entry !== task);
+							outOfBand.push(
+								{
+									type: "system",
+									subtype: "background_tasks_changed",
+									session_id: sessionId,
+									uuid: randomUUID(),
+									tasks: taskStopLive,
+								},
+								{
+									type: "system",
+									subtype: "task_notification",
+									session_id: sessionId,
+									uuid: randomUUID(),
+									task_id: task.task_id,
+									tool_use_id: task.tool_use_id,
+									status: "completed",
+									output_file: join(dirname(proof), `${task.task_id}.output`),
+									summary: `${task.description} completed`,
+								},
+							);
+						}
+						// A task that starts while the turn is held, e.g. after its Stop (8.4).
+						if (consumeMarker("task-stop-late-task")) {
+							taskStopLive = [...taskStopLive, ...taskStopMonitorFixture];
+							outOfBand.push({
+								type: "system",
+								subtype: "background_tasks_changed",
+								session_id: sessionId,
+								uuid: randomUUID(),
+								tasks: taskStopLive,
+							});
+						}
 						yield* outOfBand.splice(0);
 						await new Promise<void>((done) => setTimeout(done, 20));
 					}
@@ -1915,6 +1966,44 @@ function query(params: {
 					mark({ kind: "assistant-held", prompt, queryId });
 				// A control receipt is separate from the native result that ends
 				// these interrupted turns.
+				if (request.startsWith("goal-long-turn")) {
+					// The CLI takes an input that arrives mid-turn and queues it behind the turn
+					// (CONTRACT.md 8.6: "queued by Claude"); it runs once the turn's result is out.
+					queuedInput = inputs.next();
+					const arrived = await Promise.race([
+						queuedInput,
+						new Promise<undefined>((done) => {
+							interruptTurn = () => done(undefined);
+						}),
+					]);
+					interruptTurn = undefined;
+					if (arrived && !arrived.done && arrived.value.uuid) {
+						const text = arrived.value.message.content;
+						mark({
+							kind: "input-queued",
+							prompt: typeof text === "string" ? text : "",
+							...(arrived.value.priority === undefined
+								? {}
+								: { priority: arrived.value.priority }),
+							at: process.hrtime.bigint().toString(),
+						});
+						yield {
+							type: "command_lifecycle",
+							state: "queued",
+							command_uuid: arrived.value.uuid,
+							uuid: randomUUID(),
+							session_id: sessionId,
+						} as unknown as SDKMessage;
+						// goal-long-turn-unset: the SDK drops its active goal while the clear waits.
+						if (request === "goal-long-turn-unset" && text === "/goal clear")
+							yield {
+								type: "active_goal",
+								uuid: randomUUID(),
+								session_id: sessionId,
+								value: null,
+							};
+					}
+				}
 				while (!taskTurnInterrupted && !closed)
 					await new Promise<void>((done) => setTimeout(done, 20));
 				if (closed) return;
@@ -2995,7 +3084,14 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding || interruptibleTurn) taskTurnInterrupted = true;
+			// A "deaf" held turn acknowledges the interrupt and keeps running, as a stuck Stop (8.4).
+			if (
+				(taskStopHolding && !taskStopHeldRequest?.includes("deaf")) ||
+				interruptibleTurn
+			) {
+				taskTurnInterrupted = true;
+				interruptTurn?.();
+			}
 			mark({
 				kind: "query-interrupted",
 				queryId,
@@ -3028,16 +3124,16 @@ function query(params: {
 				queryId,
 				at: process.hrtime.bigint().toString(),
 			});
-			if (!taskStopLive.some((task) => task.task_id === taskId)) {
-				mark({
-					kind: "task-stop",
-					phase: "already-finished",
-					taskId,
-					queryId,
-					at: process.hrtime.bigint().toString(),
-				});
-				return;
+			// A stop still in flight: the SDK has not answered it yet.
+			while (
+				proof &&
+				existsSync(join(dirname(proof), "task-stop-hold")) &&
+				!closed
+			) {
+				// test-waits-allow real-wait: the hold is the test process's file.
+				await new Promise<void>((done) => setTimeout(done, 20));
 			}
+			// Checked first, so a rejection can also answer a task that has already ended.
 			if (
 				proof &&
 				existsSync(join(dirname(proof), `task-stop-fail-${taskId}`))
@@ -3050,6 +3146,16 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 				throw new Error("Synthetic task stop failure");
+			}
+			if (!taskStopLive.some((task) => task.task_id === taskId)) {
+				mark({
+					kind: "task-stop",
+					phase: "already-finished",
+					taskId,
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				return;
 			}
 			pendingTaskStops.add(taskId);
 		},

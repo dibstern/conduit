@@ -4,8 +4,6 @@ import InputArea from "../../../src/lib/frontend/components/input/InputArea.svel
 import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
-	phaseToIdle,
-	phaseToProcessing,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { applyGetCommandsResponse } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { fileTreeState } from "../../../src/lib/frontend/stores/file-tree.svelte.js";
@@ -13,7 +11,10 @@ import {
 	applyApprovalEnvelope,
 	clearAll,
 } from "../../../src/lib/frontend/stores/permissions.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import { seedRootSessions } from "../stores/session-fixtures.js";
 
 const testSessionId = "input-area-mention-menus-test";
@@ -40,9 +41,8 @@ describe("InputArea detached listboxes", () => {
 			{ id: testSessionId, title: "Session", projectSlug: "test" },
 		]);
 		openSessionForSetup(testSessionId, "test");
-		phaseToIdle(getOrCreateSessionActivity(testSessionId));
+		getOrCreateSessionActivity(testSessionId);
 		clearAll();
-		getOrCreateSessionActivity(testSessionId).phase = "idle";
 		getOrCreateSessionMessages(testSessionId).contextPercent = 0;
 		applyGetCommandsResponse({
 			projectSlug: "test",
@@ -64,7 +64,7 @@ describe("InputArea detached listboxes", () => {
 
 	afterEach(() => {
 		cleanup();
-		phaseToIdle(getOrCreateSessionActivity(testSessionId));
+		setSessionWorkingForSetup(testSessionId, false);
 		openSessionForSetup(null);
 		applyGetCommandsResponse({ projectSlug: "test", commands: [] });
 		clearAll();
@@ -75,7 +75,7 @@ describe("InputArea detached listboxes", () => {
 	});
 
 	it("labels the send button Reply only for a question in the current session", async () => {
-		phaseToProcessing(getOrCreateSessionActivity(testSessionId));
+		setSessionWorkingForSetup(testSessionId, true);
 		applyApprovalEnvelope({
 			_tag: "upsert",
 			sequence: 1,

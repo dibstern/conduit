@@ -22,7 +22,7 @@ const cannotHoldRefs = {
 	message_part_read_state: "session_id part_id",
 	message_part_tombstones: "session_id message_id part_id",
 	message_parts:
-		"id message_id type text tool_name call_id input result status surfacing_probabilities surfacing_model",
+		"id message_id type text tool_name call_id input result status surfacing_probabilities surfacing_model run_id folder ended_by parent_tool_id",
 	message_tombstones: "session_id message_id",
 	messages:
 		"id session_id turn_id role text rest_digest rest_event_id parent_id finish error input_id",
@@ -46,7 +46,7 @@ const cannotHoldRefs = {
 	provider_state: "session_id key value",
 	// The arm folds admit's request without its images (run-ledger-arm.ts).
 	run_ledger_entries: "session_id stamp entry_json",
-	run_ledger_sessions: "session_id provider state",
+	run_ledger_sessions: "session_id provider state active_run_id",
 	sent_alerts: "session_id alert_key anchor state claim_id",
 	session_git_published: "directory git workspace_missing",
 	session_goal_checks: "event_id session_id condition reason judge_model",

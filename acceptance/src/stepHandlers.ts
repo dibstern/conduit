@@ -51,6 +51,7 @@ import { providerInstancesHandlers } from "./steps/providerInstances.js";
 import { providerSettingsHandlers } from "./steps/providerSettings.js";
 import { rightPaneHandlers } from "./steps/rightPane.js";
 import { serversHandlers } from "./steps/servers.js";
+import { sessionActivityHandlers } from "./steps/sessionActivity.js";
 import { sessionAutoSettleHandlers } from "./steps/sessionAutoSettle.js";
 import { sessionDiffHandlers } from "./steps/sessionDiff.js";
 import { sessionGoalHandlers } from "./steps/sessionGoal.js";
@@ -64,6 +65,7 @@ import { sessionSkillsHandlers } from "./steps/sessionSkills.js";
 import { settingsGeneralHandlers } from "./steps/settingsGeneral.js";
 import { settingsSurfacingHandlers } from "./steps/settingsSurfacing.js";
 import { sideThreadsHandlers } from "./steps/sideThreads.js";
+import { stuckStopHandlers } from "./steps/stuckStop.js";
 import { surfacingCardHandlers } from "./steps/surfacingCard.js";
 import { surfacingMarksHandlers } from "./steps/surfacingMarks.js";
 import { surfacingMinimiseHandlers } from "./steps/surfacingMinimise.js";
@@ -120,6 +122,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionDiffHandlers,
 	...sessionModeDefaultHandlers,
 	...backgroundTasksHandlers,
+	...stuckStopHandlers,
 	...launchingRowsHandlers,
 	...taskDrillInHandlers,
 	...terminalKeysHandlers,
@@ -178,6 +181,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
+	...sessionActivityHandlers,
 	...composerPickerHandlers,
 	...composerAccountsHandlers,
 	...composerWordsHandlers,

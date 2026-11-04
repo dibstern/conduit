@@ -25,7 +25,7 @@ export interface SessionRowsScope {
 
 type SessionListOptions = Omit<
 	NonNullable<Parameters<ReadQueryEffect["listSessionInfos"]>[1]>,
-	"backgroundOf" | "hintDismissals"
+	"backgroundOf" | "activityOf" | "hintDismissals"
 >;
 
 /** The common read path for full lists and versioned sidebar/family windows. */
@@ -47,6 +47,16 @@ export const makeSessionRows = (
 		};
 		const overlay = {
 			backgroundOf: activity.background.backgroundOf,
+			// 8.1: what a session is doing, the one answer every row and roll-up reads.
+			activityOf: (
+				sessionId: string,
+				prompts: { readonly approvals: number; readonly questions: number },
+			) =>
+				activity.background.activityOf(
+					sessionId,
+					prompts,
+					activity.goals.phaseOf(sessionId),
+				),
 			hintDismissals: activity.hintDismissals,
 		};
 		const readOwned = <T>(
@@ -127,7 +137,11 @@ export const makeSessionRows = (
 									});
 						const compacting = activity.compactions.compactingOf(session.id);
 						const retrying = activity.retries.retryingOf(session.id);
-						const servers = activity.servers.get(session.id);
+						const servers = activity.background.serversOf(
+							session.id,
+							activity.gateUrls,
+						);
+						const goalPhase = activity.goals.phaseOf(session.id);
 						const git = yield* (
 							sessionGit._tag === "Some"
 								? sessionGit.value.read(session.id)
@@ -166,7 +180,8 @@ export const makeSessionRows = (
 									}),
 							...(compacting === undefined ? {} : { compacting }),
 							...(retrying === undefined ? {} : { retrying }),
-							...(servers === undefined ? {} : { servers }),
+							...(servers.length === 0 ? {} : { servers }),
+							...(goalPhase === undefined ? {} : { goalPhase }),
 						};
 					}),
 				);
@@ -211,7 +226,7 @@ export const makeSessionRows = (
 			read: (
 				range?: Omit<
 					NonNullable<Parameters<ReadQueryEffect["readSessionList"]>[1]>,
-					"backgroundOf" | "hintDismissals"
+					"backgroundOf" | "activityOf" | "hintDismissals"
 				>,
 			): Effect.Effect<
 				Omit<

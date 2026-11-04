@@ -1,9 +1,15 @@
 import { Schema } from "effect";
 import { AccountSchema } from "../contracts/account.js";
-import { ProviderStopSnapshotSchema } from "../contracts/stored-event.js";
+import {
+	GoalActionSchema,
+	ProviderStopSnapshotSchema,
+} from "../contracts/stored-event.js";
 import { ProviderPermissionUpdateSchema } from "../shared-types.js";
 
-export const STOP_ABORT_WAIT_MS = 30_000;
+export const STOP_ABORT_WAIT_MS =
+	process.env["NODE_ENV"] === "test"
+		? Number(process.env["CONDUIT_TEST_STOP_ABORT_WAIT_MS"] ?? 30_000)
+		: 30_000;
 
 export const DURABLE_COMMAND_RECEIPT_STATUSES = [
 	"accepted",
@@ -144,6 +150,12 @@ export const ProviderControlPayloadSchema = Schema.Union([
 		targetProviderId: Schema.optionalKey(Schema.String),
 		account: Schema.optionalKey(AccountSchema),
 		unbind: Schema.optionalKey(Schema.Boolean),
+	}),
+	Schema.Struct({
+		...controlTarget,
+		type: Schema.Literal("native_command"),
+		text: Schema.String,
+		goal: Schema.optionalKey(GoalActionSchema),
 	}),
 ]);
 export type ProviderControlPayload = typeof ProviderControlPayloadSchema.Type;

@@ -690,6 +690,7 @@ export function createProjectRelayLayers({
 			const sql = yield* SqlClient.SqlClient;
 			const log = yield* LoggerTag;
 			const workspace = yield* SessionWorkspaceTag;
+			const activity = yield* SessionActivityTag;
 			return makeProviderRuntimeIngestionLive({
 				pendingInteractions: yield* PendingInteractionServiceTag,
 				usage: yield* Usage,
@@ -772,14 +773,20 @@ export function createProjectRelayLayers({
 							...(config.pushManager
 								? { pushManager: config.pushManager }
 								: {}),
+							activityOf: (sessionId) =>
+								activity.background.activityOf(sessionId, {
+									approvals: 0,
+									questions: 0,
+								}),
 						}).pipe(
 							Effect.provideService(SqlClient.SqlClient, sql),
 							Effect.provideService(AlertLedgerTag, ledger),
 							Effect.provideService(AlertsTag, alerts),
 						),
 				},
-				compactions: (yield* SessionActivityTag).compactions,
-				retries: (yield* SessionActivityTag).retries,
+				compactions: activity.compactions,
+				retries: activity.retries,
+				goals: activity.goals,
 				surfacing: yield* makeMessageSurfacing,
 			});
 		}),

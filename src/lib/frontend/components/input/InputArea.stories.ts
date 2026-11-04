@@ -8,8 +8,6 @@ import {
 	advanceTurnIfNewMessage,
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
-	phaseToIdle,
-	phaseToProcessing,
 } from "../../stores/chat.svelte.js";
 import {
 	composerPreferences,
@@ -41,7 +39,10 @@ import { turn as readTurn } from "../../stores/turn.svelte.js";
 import { usageState } from "../../stores/usage.svelte.js";
 import { _resetRateLimit } from "../../stores/ws-send.svelte.js";
 import { mockClaudeAccount, mockOpenCodeAccount } from "../../stories/mocks.js";
-import { openSessionForSetup } from "../../stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../stories/session-setup.js";
 import { connectedSocket, replyRpc } from "../../stories/sockets.js";
 import { connectionState } from "../../transport/connection-status.svelte.js";
 import { runTransportEffect } from "../../transport/runtime.js";
@@ -181,7 +182,7 @@ const meta = {
 		setComposerPreferences({ controls: "icons", contextWarning: 80 });
 		seedSessionAccount(mockOpenCodeAccount);
 		openSessionForSetup(testId, "conduit");
-		phaseToIdle(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, false);
 		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();
 		fileTreeState.entries = fileEntries;
@@ -920,7 +921,7 @@ function startTurn() {
 			turnTiming: { startedAt: Date.now(), waits: [] },
 		},
 	];
-	phaseToProcessing(getOrCreateSessionActivity(testId));
+	setSessionWorkingForSetup(testId, true);
 	return () => {
 		chat.messages = [];
 	};
@@ -1065,7 +1066,7 @@ function setupGoal(
 				};
 	handleGoalChanged(facts);
 	const endTurn = state === "not_yet" ? startTurn() : undefined;
-	if (!endTurn) phaseToIdle(getOrCreateSessionActivity(testId));
+	if (!endTurn) setSessionWorkingForSetup(testId, false);
 	return () => {
 		endTurn?.();
 		if (previous) handleGoalChanged(previous);
@@ -1076,29 +1077,6 @@ function setupGoal(
 		);
 	};
 }
-
-export const GoalChecking: Story = {
-	beforeEach: () => setupGoal("checking"),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByTestId("composer-checking-goal"),
-		).toHaveTextContent("Checking goal");
-		await expect(
-			canvas
-				.getByTestId("composer-checking-goal")
-				.querySelector('[data-flow-glyph="running"]'),
-		).toBeVisible();
-		await expect(
-			canvas.queryByTestId("composer-status-elapsed"),
-		).not.toBeInTheDocument();
-		// The line above names the check; the box keeps its goal outline.
-		await expect(canvasElement.querySelector("#input-row")).toHaveAttribute(
-			"data-goal",
-			"solid",
-		);
-	},
-};
 
 export const GoalNotYetWorking: Story = {
 	beforeEach: () => setupGoal("not_yet"),
@@ -1180,10 +1158,6 @@ export const GoalCleared: Story = {
 	},
 };
 
-export const GoalCheckingLight: Story = {
-	...GoalChecking,
-	globals: { theme: "light" },
-};
 export const GoalNotYetWorkingLight: Story = {
 	...GoalNotYetWorking,
 	globals: { theme: "light" },
@@ -1424,13 +1398,20 @@ function narrowComposer(
 	width: number,
 	mode: "reply" | "goal" | "limited" = "reply",
 ): Story {
+	// A Claude goal draft is a browser goal action, not a chat send (82tn.32.26).
+	const goalSets: unknown[] = [];
 	return {
 		tags: ["autodocs"],
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
 			// Each story owns its sends and the client limiter's queued callbacks.
 			_resetRateLimit();
+			goalSets.length = 0;
 			const cleanup = setupWords(canvasElement, false);
+			const restoreSetGoal = replyRpc("SetGoal", (payload) => {
+				goalSets.push(payload);
+				return { ok: true };
+			});
 			const restoreDraftSync = replyRpc("SyncInputDraft", () => ({ ok: true }));
 			const restoreSubmit = replyRpc("input.submit", () => ({
 				ok: true,
@@ -1502,12 +1483,13 @@ function narrowComposer(
 			return () => {
 				_resetRateLimit();
 				restoreSubmit();
+				restoreSetGoal();
 				restoreDraftSync();
 				Date.now = realNow;
 				chat.messages = previousMessages;
 				usageState.readings = readings;
 				usageState.limits = limits;
-				phaseToIdle(getOrCreateSessionActivity(testId));
+				setSessionWorkingForSetup(testId, false);
 				cleanup();
 			};
 		},
@@ -1587,7 +1569,11 @@ function narrowComposer(
 				async () => {
 					await userEvent.click(send);
 					await waitFor(() => expect(textarea).toHaveValue(""));
-					if (mode !== "limited") {
+					if (mode === "goal") {
+						expect(goalSets).toEqual([
+							expect.objectContaining({ condition: "Verify send visibility" }),
+						]);
+					} else if (mode !== "limited") {
 						await waitFor(() => expect(readTurn().working).toBe(true));
 					}
 					composer.dataset["sendVisibilityProof"] = JSON.stringify({
@@ -1598,7 +1584,7 @@ function narrowComposer(
 					});
 				},
 			);
-			phaseToIdle(getOrCreateSessionActivity(testId));
+			setSessionWorkingForSetup(testId, false);
 			await userEvent.type(textarea, draft);
 		},
 	};
@@ -1964,7 +1950,7 @@ export const FinalIconsDesktop: Story = {
 				}
 				canvasElement.style.maxWidth = "320px";
 				await userEvent.type(input, "Keep the footer visible");
-				phaseToProcessing(getOrCreateSessionActivity(testId));
+				setSessionWorkingForSetup(testId, true);
 				const stop = await canvas.findByRole("button", {
 					name: "Stop generating",
 				});
@@ -2043,7 +2029,7 @@ export const FinalIconsDesktop: Story = {
 					).toBeNull();
 					expect(getComputedStyle(input).pointerEvents).not.toBe("none");
 				});
-				phaseToIdle(getOrCreateSessionActivity(testId));
+				setSessionWorkingForSetup(testId, false);
 				canvasElement.style.maxWidth = maxWidth;
 				await userEvent.clear(input);
 				await userEvent.type(input, "/goal Keep the footer visible");
@@ -2054,7 +2040,7 @@ export const FinalIconsDesktop: Story = {
 					canvasElement.querySelector('[data-slot="send"]')?.contains(goal),
 				).toBe(true);
 			} finally {
-				phaseToIdle(getOrCreateSessionActivity(testId));
+				setSessionWorkingForSetup(testId, false);
 				canvasElement.style.maxWidth = maxWidth;
 				await userEvent.clear(input);
 			}
@@ -2422,7 +2408,7 @@ function setupComposerStage(
 	const endTurn = stage === "working" ? startTurn() : undefined;
 	return () => {
 		endTurn?.();
-		phaseToIdle(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, false);
 		chat.messages = previousMessages;
 		chat.transcript = previousTranscript;
 		chat.contextPercent = previousContext;
@@ -2682,20 +2668,20 @@ export const RunningAfterChange: Story = {
 		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
 		openSessionForSetup(testId);
 		await canvas.findByTestId("composer-next-turn-note");
-		phaseToIdle(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, false);
 		await waitFor(() =>
 			expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull(),
 		);
-		phaseToProcessing(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, true);
 		await canvas.findByRole("button", { name: "Stop generating" });
 		await expect(canvas.queryByTestId("composer-next-turn-note")).toBeNull();
 		chooseVariant("high");
 		await canvas.findByTestId("composer-next-turn-note");
 		openSessionForSetup(null);
 		await tick();
-		phaseToIdle(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, false);
 		await tick();
-		phaseToProcessing(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, true);
 		await tick();
 		openSessionForSetup(testId);
 		await tick();
@@ -2823,7 +2809,7 @@ export const FinalIconsPhoneActions320: Story = {
 		await Limited.play?.(context);
 		const { canvasElement } = context;
 		const canvas = within(canvasElement);
-		phaseToProcessing(getOrCreateSessionActivity(testId));
+		setSessionWorkingForSetup(testId, true);
 		const input = canvas.getByRole<HTMLTextAreaElement>("textbox", {
 			name: "Message",
 		});
@@ -2996,7 +2982,7 @@ export const FinalIconsPhonePriorityIdle: Story = {
 			...usageState.limits,
 			autoSwitch: state === "switch",
 		};
-		if (state !== "idle") phaseToProcessing(getOrCreateSessionActivity(testId));
+		if (state !== "idle") setSessionWorkingForSetup(testId, true);
 		return cleanup;
 	},
 	play: async ({ canvasElement, parameters }) => {
