@@ -413,6 +413,8 @@ test.describe("Claude launching rows", () => {
 				await app.goto(relayUrl);
 				await app.sendMessage("Run agent F in the foreground");
 				await replayer.held();
+				// The live turn starts collapsed; its steps render once it is open.
+				await chat.expandTurnActivity();
 				// (b) a foreground agent is an ordinary step.
 				await expect(
 					page.locator(`.tool-item[data-tool-id="${AGENT_F}"]`),
@@ -423,8 +425,9 @@ test.describe("Claude launching rows", () => {
 					[AGENT_F]: { state: null, meta: "" },
 				});
 				// An ordinary step is labelled by its verb and subject alone: no
-				// launch status, time or nested count.
-				expect.soft(foreground[AGENT_F]?.label).toBe("Delegating agent F");
+				// launch status, time or nested count. A running row's verb is
+				// "Running" (conduit-test-xdyjq.6).
+				expect.soft(foreground[AGENT_F]?.label).toBe("Running agent F");
 
 				replayer.release();
 				await replayer.held();
