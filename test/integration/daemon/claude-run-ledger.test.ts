@@ -249,6 +249,45 @@ describe("Claude on the Run Ledger", () => {
 		proveToolRowsOnLedger("claude", fixture);
 	});
 
+	// 82tn.45: the subagent's terminal event (its task_notification, line 39 of the trace) ends the
+	// subagent, never the parent's Run. How it could fail: the parent's Run ends there, as completed
+	// or ended by the run; the parent session reads idle while its own turn still runs.
+	it("leaves the parent's Run running past its subagent's terminal event, on a recorded turn (82tn.45)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["subagent-task-turn"],
+				plan: { holdBefore: { turn: 1, message: 40 } },
+			},
+		});
+		const sessionId = await browser.createSession("Claude subagent end");
+		await browser.followSession(sessionId);
+		const sent = browser.send(
+			sessionId,
+			"Ask a subagent to summarise package.json",
+		);
+		await fixture.claudeReplayer?.held();
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				JSON.stringify(message["parts"]).includes('"outcome":"completed"'),
+		);
+		const held = read(fixture, sessionId);
+		expect(held.ends).toEqual([]);
+		expect(held.runs).toEqual([{ id: expect.any(String), status: "running" }]);
+		fixture.claudeReplayer?.release();
+		await sent;
+		const after = read(fixture, sessionId);
+		expect(after.ends).toEqual([
+			{ runId: held.runs[0]?.id, reason: "completed", forced: null },
+		]);
+		proofs.push({
+			case: "82tn.45 subagent terminal event",
+			atSubagentEnd: { ends: held.ends, runs: held.runs },
+			after: { ends: after.ends, runs: after.runs },
+		});
+	});
+
 	it("reports reattached true when a daemon restart recovers the surviving runner", async () => {
 		const { fixture, browser } = await start();
 		const sessionId = await browser.createSession("Claude ledger reattach");

@@ -409,6 +409,51 @@ describe("Cursor on the Run Ledger", () => {
 		prove("stop", ledger);
 	});
 
+	// 82tn.45: a tool the Stop leaves running (the trace cancels inside its call). How it could fail:
+	// the row stays running after its Run ends; it reads as failed; it ends under another Run.
+	it("shows a tool still running when its Run is Stopped as ended by the run, not failed (82tn.45)", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"tool-run-end",
+			"cancel",
+		);
+		await browser.followSession(sessionId);
+		await submit(
+			browser,
+			sessionId,
+			"Call the human custom tool once, then say done.",
+		);
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				JSON.stringify(message["parts"]).includes('"type":"tool"'),
+		);
+		await stop(browser, sessionId);
+		await turns(fixture, sessionId, ["interrupted"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		const tools = db
+			.prepare(
+				"SELECT p.tool_name AS tool, p.status, p.run_id AS runId, p.ended_at AS endedAt, p.ended_by AS endedBy FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ? AND p.type = 'tool'",
+			)
+			.all(sessionId);
+		db.close();
+		writeFileSync(
+			resolve("test-results/82tn-45-ended-by-run.json"),
+			`${JSON.stringify({ tools, ends: ledger.ends }, null, 2)}\n`,
+		);
+		expect(tools).toEqual([
+			{
+				tool: "mcp__custom-user-tools__human",
+				status: "completed",
+				runId: ledger.ends[0]?.runId,
+				endedAt: expect.any(Number),
+				endedBy: "run",
+			},
+		]);
+	});
+
 	it("ends an answered question's Run once, the answer reaching the SDK once", async () => {
 		const { fixture, browser, sessionId } = await start(
 			"answer",
