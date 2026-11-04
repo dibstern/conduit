@@ -130,6 +130,95 @@ const settled = Effect.gen(function* () {
 });
 const quiescent = [{ state: "Quiescent", alarm_at: null }];
 
+/** Run r1 dispatched on Claude runner R1, which raised a permission prompt for each id. */
+const asked = (...ids: readonly string[]) => [
+	...turn("claude"),
+	canonicalEvent(
+		"evidence.process_started",
+		"s1",
+		{ runnerId: "R1", label: "R1:1", reattached: false },
+		at("claude", 1005),
+	),
+	canonicalEvent(
+		"run.dispatched",
+		"s1",
+		{ runId: "r1", runnerId: "R1", commandId: "c1", transmission: 1 },
+		at("claude", 1006),
+	),
+	...ids.map((id) => prompt(id, 1007)),
+];
+const prompt = (id: string, createdAt: number) =>
+	canonicalEvent(
+		"permission.asked",
+		"s1",
+		{
+			id,
+			sessionId: "s1",
+			toolName: "Bash",
+			input: {},
+			providerProcessId: "R1",
+		},
+		at("claude", createdAt),
+	);
+/** Main's answer to prompt id, committed under commandId (3.10). */
+const answer = (id: string, commandId: string, createdAt: number) =>
+	canonicalEvent(
+		"permission.resolved",
+		"s1",
+		{ id, decision: "once", providerProcessId: "R1" },
+		at("claude", createdAt, { commandId }),
+	);
+/** The outcome main appends as it ends an answer's outbox row (3.4, 3.12). */
+const outcome = (
+	commandId: string,
+	transmission: number,
+	result:
+		| { tag: "succeeded" }
+		| { tag: "retryable"; retryAt: number; code: string }
+		| { tag: "permanent"; code: string },
+	createdAt: number,
+) =>
+	canonicalEvent(
+		"evidence.effect_outcome",
+		"s1",
+		{ commandId, transmission, outcome: result },
+		at("claude", createdAt),
+	);
+/** The runner's own resolution, main's ledger-only confirmation of a delivered answer (3.10). */
+const confirmed = (id: string, createdAt: number) =>
+	canonicalEvent(
+		"evidence.interaction_resolved",
+		"s1",
+		{ id, providerProcessId: "R1" },
+		at("claude", createdAt),
+	);
+/** s1's interactions, the answers the ledger folded, its row and its Run's ends. */
+const prompts = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	return {
+		interactions: (yield* loadLedgerView("s1"))?.interactions,
+		answers: (yield* sql<{ commandId: string; interactionId: string }>`
+			SELECT json_extract(entry_json, '$.command.control.commandId') AS commandId,
+				json_extract(entry_json, '$.command.control.interactionId') AS interactionId
+			FROM run_ledger_entries WHERE session_id = 's1'
+				AND json_extract(entry_json, '$.command.control.kind') = 'answer'
+			ORDER BY entry_seq`).map((row) => ({ ...row })),
+		row: yield* sql`SELECT state FROM run_ledger_sessions WHERE session_id = 's1'`,
+		ends: (yield* settled).ends,
+	};
+});
+const pending = (interactionId: string) => ({
+	tag: "Pending",
+	interactionId,
+	kind: "permission",
+});
+const delivered = (interactionId: string) => ({
+	tag: "Answered",
+	interactionId,
+	kind: "permission",
+	delivery: "settled",
+});
+
 describe("Run Ledger ledger regressions the arm reaches", () => {
 	it.effect(
 		"RL-006: an OpenCode turn.error then a late idle for the same Run end it once",
@@ -420,6 +509,237 @@ describe("Run Ledger ledger regressions the arm reaches", () => {
 				}),
 			),
 	);
+
+	it.effect(
+		"RL-064: a runner's loss ends its Run and retires its Pending prompt in the same commit",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project(asked("q1"));
+					expect((yield* prompts).interactions).toEqual([pending("q1")]);
+					yield* project([
+						canonicalEvent(
+							"evidence.process_lost",
+							"s1",
+							{ runnerId: "R1", retiredAt: 1010 },
+							at("claude", 1010),
+						),
+					]);
+					const lost = yield* prompts;
+					expect(lost.ends).toMatchObject([
+						{ outcome: "error", reason: { tag: "process_lost" } },
+					]);
+					expect(lost.interactions).toEqual([]);
+					expect(lost.row).toEqual([{ state: "Quiescent" }]);
+				}),
+			),
+	);
+
+	it.effect(
+		"RL-068: main's timed-out rejection folds once as an answer under its outbox row's id, across a recovery",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					const timeout = canonicalEvent(
+						"permission.resolved",
+						"s1",
+						{ id: "q1", decision: "reject", providerProcessId: "R1" },
+						at("claude", 1010, { source: "permission-timeout" }),
+					);
+					yield* project([...asked("q1"), timeout]);
+					const commandId = `legacy-answer:${timeout.eventId}`;
+					const timedOut = yield* prompts;
+					expect(timedOut.answers).toEqual([
+						{ commandId, interactionId: "q1" },
+					]);
+					expect(timedOut.interactions).toMatchObject([
+						{ tag: "Answered", interactionId: "q1" },
+					]);
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					expect(yield* prompts).toEqual(timedOut);
+					yield* project([
+						outcome(commandId, 1, { tag: "succeeded" }, 1011),
+						confirmed("q1", 1012),
+					]);
+					expect((yield* prompts).interactions).toEqual([delivered("q1")]);
+				}),
+			),
+	);
+
+	it.effect(
+		"RL-070: a retryable answer outcome keeps the answer and the prompt Pending, and a second browser answer adds nothing",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([
+						...asked("q1"),
+						answer("q1", "a1", 1010),
+						outcome(
+							"a1",
+							1,
+							{ tag: "retryable", retryAt: 2010, code: "ECONNRESET" },
+							1011,
+						),
+						answer("q1", "a2", 1012),
+					]);
+					const refused = yield* prompts;
+					expect(refused.interactions).toEqual([
+						{
+							...pending("q1"),
+							lastRefusal: {
+								attempt: { commandId: "a1", transmission: 1 },
+								code: "ECONNRESET",
+							},
+						},
+					]);
+					expect(refused.answers).toEqual([
+						{ commandId: "a1", interactionId: "q1" },
+					]);
+					yield* project([
+						outcome("a1", 2, { tag: "succeeded" }, 2011),
+						confirmed("q1", 2012),
+					]);
+					const answered = yield* prompts;
+					expect(answered.interactions).toEqual([delivered("q1")]);
+					expect(answered.answers).toEqual(refused.answers);
+				}),
+			),
+	);
+
+	it.effect(
+		"RL-071: an answer that cannot reach its live runner ends alone; the runner's Run and other prompt stay",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([
+						...asked("q1", "q2"),
+						answer("q1", "a1", 1010),
+						outcome(
+							"a1",
+							1,
+							{ tag: "permanent", code: "provider_process_unavailable" },
+							1011,
+						),
+					]);
+					const undeliverable = yield* prompts;
+					expect(undeliverable.interactions).toEqual([
+						delivered("q1"),
+						pending("q2"),
+					]);
+					expect(undeliverable.ends).toEqual([]);
+					expect((yield* loadLedgerView("s1"))?.active?.runId).toBe("r1");
+				}),
+			),
+	);
+
+	for (const [id, code] of [
+		["RL-073", "provider_control_timeout"],
+		["RL-086", "secret_answer_expired"],
+	] as const)
+		it.effect(
+			`${id}: a prompt main reopens after its answer failed for good (${code}) is Pending and answerable again`,
+			() =>
+				withStore(
+					Effect.gen(function* () {
+						yield* project([
+							...asked("q1"),
+							answer("q1", "a1", 1010),
+							outcome("a1", 1, { tag: "permanent", code }, 1011),
+						]);
+						expect((yield* prompts).interactions).toEqual([delivered("q1")]);
+						// readFailedControlPrompt re-asks the same prompt where it finds the answer unconsumed.
+						yield* project([prompt("q1", 1012)]);
+						expect((yield* prompts).interactions).toEqual([pending("q1")]);
+						yield* project([
+							answer("q1", "a2", 1013),
+							outcome("a2", 1, { tag: "succeeded" }, 1014),
+							confirmed("q1", 1015),
+						]);
+						const answered = yield* prompts;
+						expect(answered.answers).toEqual([
+							{ commandId: "a1", interactionId: "q1" },
+							{ commandId: "a2", interactionId: "q1" },
+						]);
+						expect(answered.interactions).toEqual([delivered("q1")]);
+					}),
+				),
+		);
+
+	it.effect(
+		"RL-077: a second outcome for the answer's same transmission changes nothing",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([
+						...asked("q1"),
+						answer("q1", "a1", 1010),
+						outcome("a1", 1, { tag: "succeeded" }, 1011),
+						confirmed("q1", 1012),
+					]);
+					const first = yield* prompts;
+					expect(first.interactions).toEqual([delivered("q1")]);
+					yield* project([
+						outcome(
+							"a1",
+							1,
+							{ tag: "permanent", code: "control_exhausted" },
+							1012,
+						),
+					]);
+					expect(yield* prompts).toEqual(first);
+				}),
+			),
+	);
+
+	it.effect(
+		"RL-088: a consumed answer whose reply timed out stays the only answer: a second one adds no delivery",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([
+						...asked("q1"),
+						answer("q1", "a1", 1010),
+						outcome(
+							"a1",
+							1,
+							{ tag: "permanent", code: "provider_control_timeout" },
+							1011,
+						),
+					]);
+					const timedOut = yield* prompts;
+					// Main found it consumed and reopens nothing; the late answer is refused.
+					yield* project([answer("q1", "a2", 1012)]);
+					expect(yield* prompts).toEqual(timedOut);
+					expect(timedOut.answers).toEqual([
+						{ commandId: "a1", interactionId: "q1" },
+					]);
+				}),
+			),
+	);
+
+	it.effect(
+		"RL-115: an answer whose outcome never came stays in delivery across a recovery, then settles once",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([...asked("q1"), answer("q1", "a1", 1010)]);
+					const claimed = yield* prompts;
+					expect(claimed.interactions).toMatchObject([
+						{ tag: "Answered", interactionId: "q1" },
+					]);
+					expect(claimed.interactions).not.toEqual([delivered("q1")]);
+					yield* (yield* ProjectionRunnerEffectTag).recover();
+					expect(yield* prompts).toEqual(claimed);
+					yield* project([
+						outcome("a1", 2, { tag: "succeeded" }, 1011),
+						confirmed("q1", 1012),
+					]);
+					const answered = yield* prompts;
+					expect(answered.interactions).toEqual([delivered("q1")]);
+					expect(answered.answers).toEqual(claimed.answers);
+				}),
+			),
+	);
 });
 
 // Cases and source evidence: docs/plans/2026-10-22-run-ledger-failure-catalogue.md.
@@ -462,35 +782,19 @@ describe("Run Ledger ledger regressions", () => {
 	it.todo("RL-062: Retain admitted handoff data during live-command recovery");
 	it.todo("RL-063: main's ownership select through the view (25scs)");
 	it.todo(
-		"RL-064: Resolve durable questions when refusing an incompatible runner",
-	);
-	it.todo(
 		"RL-066: Detach duplicate control waiters without cancelling shared work",
 	);
 	it.todo(
 		"RL-067: Retain ordinary Stop pause after the pending steer finishes",
 	);
-	it.todo("RL-068: Persist permission-timeout rejection delivery atomically");
 	it.todo(
 		"RL-069: Cancel inactive-project effects without blocking shared OpenCode",
-	);
-	it.todo("RL-070: Recover transiently failed permission and question answers");
-	it.todo(
-		"RL-071: Keep unrelated interactions owned by a quarantined live runner",
-	);
-	it.todo(
-		"RL-073: Preserve deferred answer reconciliation after delivery exhaustion",
 	);
 	it.todo(
 		"RL-074: Publish newly admitted controls only when execution ownership is durable",
 	);
 	it.todo("RL-076: Respect the persisted effect budget across a crash");
-	it.todo("RL-077: Do not exhaust a still-executing recovered answer");
 	it.todo("RL-084: Preserve immutable legacy Stop payload on replay");
-	it.todo("RL-086: Recover an answer that expires before native delivery");
-	it.todo(
-		"RL-088: Probe runner answer consumption before reopening a timed-out prompt",
-	);
 	it.todo("RL-093: Recover controls imported after initial startup");
 	it.todo("RL-094: Preserve refused unplaced user input durably");
 	it.todo("RL-095: Settle claimed unaccepted work for inactive projects");
@@ -513,7 +817,6 @@ describe("Run Ledger ledger regressions", () => {
 	);
 	it.todo("RL-104: Honor explicit input ownership on late bare SDK results");
 	it.todo("RL-113: canStop from the view and the sidebar delta (25scs)");
-	it.todo("RL-115: Recover a targeted answer interrupted after claim");
 	it.todo(
 		"RL-116: Attribute out-of-order cumulative accounting without miscounting",
 	);
