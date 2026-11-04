@@ -2119,6 +2119,17 @@ function mainEvent(
 			if (input === undefined)
 				return noop("run.requested for an input never admitted");
 			input.reservation ??= observation.runId;
+			// D53 (CONTRACT.md 965-967, 984): a steer joined at admit whose Run ended before main sent it
+			// never joined; main's writer places it, so this run.requested reserves its own Run.
+			const joined = findRun(world, input.runId);
+			if (
+				joined?.phase === "Ended" &&
+				!deliverySends(world, joined).some(
+					(send) =>
+						"inputId" in send.effect && send.effect.inputId === input.inputId,
+				)
+			)
+				input.runId = undefined;
 			const active = activeInputRun(world);
 			// 3.9 GAP (CONTRACT.md 984, "a steer sent while it is active joins it"): a steer admitted
 			// before its Run launched joins it at its send, main's run.requested.

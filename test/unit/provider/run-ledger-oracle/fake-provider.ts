@@ -3262,21 +3262,34 @@ export class FakeProvider {
 		);
 		if (!steer) return undefined;
 		const claimed = this.mainTransmissions.get(steer.send.token);
+		// 4.11 (CONTRACT.md 1979-1987, 527): a runner-held send has no effect_outcome; its hold facts are
+		// a NotSent release, retried by 3.6 (696), or the runner's failed reply.
 		const failed: LedgerCommand = {
 			verb: "observe",
-			observation: {
-				tag: "Answer",
-				token: steer.send.token,
-				kind: "effect_outcome",
-				outcome: retryable
-					? {
-							tag: "retryable",
-							retryAt: this.clock + 100,
-							code: "TraceSteerFailure",
-						}
-					: { tag: "permanent", code: "TraceSteerFailure" },
-				...(claimed ? { transmission: claimed.name } : {}),
-			},
+			observation: this.holdBindings.has(steer.send.token)
+				? {
+						tag: "Answer",
+						token: steer.send.token,
+						...(retryable
+							? { kind: "run_released", reason: "NotSent" }
+							: {
+									kind: "runner_reply",
+									outcome: { tag: "failed", code: "TraceSteerFailure" },
+								}),
+					}
+				: {
+						tag: "Answer",
+						token: steer.send.token,
+						kind: "effect_outcome",
+						outcome: retryable
+							? {
+									tag: "retryable",
+									retryAt: this.clock + 100,
+									code: "TraceSteerFailure",
+								}
+							: { tag: "permanent", code: "TraceSteerFailure" },
+						...(claimed ? { transmission: claimed.name } : {}),
+					},
 		};
 		// 4.5, 4.11: a held steer's runner reply follows its run.dispatched, read first while pending.
 		const dispatched = this.dispatchFirst((n) => n.token === steer.send.token);
