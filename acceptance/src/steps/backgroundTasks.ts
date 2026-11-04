@@ -612,6 +612,8 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		match: /^I click the background tasks row$/,
 		run: async ({ world }) => {
 			const row = world.page.getByTestId("background-tasks-row");
+			// The seed steps don't all wait for the row; count its toggle only once it renders.
+			await expect(row).toBeVisible();
 			const toggle = (await row.getByTestId("background-tasks-toggle").count())
 				? row.getByTestId("background-tasks-toggle")
 				: row;
