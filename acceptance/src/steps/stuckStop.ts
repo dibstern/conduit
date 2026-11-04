@@ -1,5 +1,8 @@
 import { expect, type Page } from "@playwright/test";
-import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
+import {
+	DeleteNeedsConfirm,
+	WsRpcError,
+} from "../../../src/lib/contracts/ws-rpc.js";
 import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl, setSessionRowStatus } from "./shared.js";
@@ -92,15 +95,69 @@ export const stuckStopHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "a delete needs a confirm while tasks run",
+		match:
+			/^the panel choice session's background is (a dev server and a vitest shell without its command|being checked), and deleting it needs a confirm of snapshot entry (\d+)$/,
+		run: ({ world, match }) => {
+			const entry = Number(match[2]);
+			setSessionRowStatus(
+				world.page,
+				SESSION,
+				"busy",
+				match[1] === "being checked"
+					? { tasksChecking: true }
+					: { backgroundTasks: [DEV, VITEST] },
+			);
+			requireRpcControl(world.page).setStubs({
+				// The server refuses with the latest entry until the delete carries it (8.4).
+				DeleteSession: ({ confirm }) => {
+					if (confirm === entry) return { ok: true };
+					throw new DeleteNeedsConfirm({ snapshotEntry: entry });
+				},
+			});
+		},
+	},
+	{
+		name: "delete the panel choice session",
+		match: /^I delete the panel choice session$/,
+		run: async ({ world }) => {
+			await world.page
+				.locator(`#session-list [data-session-id="${SESSION}"]`)
+				.click({ button: "right" });
+			await world.page.getByTestId("session-ctx-delete").click();
+			await expect(dialog(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "assert the deletes sent",
+		match: /^the panel choice session's deletes carried confirms ([\w, ]+)$/,
+		run: async ({ world, match }) => {
+			const sent = () =>
+				requireRpcControl(world.page)
+					.getRequests()
+					.filter((request) => request.tag === "DeleteSession")
+					.map((request) => {
+						expect(request.payload["sessionId"]).toBe(SESSION);
+						return String(request.payload["confirm"] ?? "none");
+					});
+			await expect.poll(sent).toEqual((match[1] ?? "").split(", "));
+		},
+	},
+	{
 		name: "answer the confirm",
-		match: /^I (accept|cancel) the confirm$/,
+		match: /^I (accept|cancel) the (confirm|delete)$/,
 		run: async ({ world, match }) => {
 			const modal = dialog(world.page);
 			await expect(modal).toBeVisible();
 			const text = await modal.locator("#confirm-modal-text").textContent();
 			await modal
 				.getByRole("button", {
-					name: match[1] === "accept" ? "Stop now" : "Cancel",
+					name:
+						match[1] === "cancel"
+							? "Cancel"
+							: match[2] === "delete"
+								? "Delete"
+								: "Stop now",
 					exact: true,
 				})
 				.click();

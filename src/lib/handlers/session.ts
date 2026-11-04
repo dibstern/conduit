@@ -4,6 +4,7 @@ import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
 import { getProviderDriver } from "../contracts/provider-instance.js";
 import { WorkspaceMoveError } from "../contracts/session-workspace.js";
+import { DeleteNeedsConfirm } from "../contracts/ws-rpc.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import {
 	DaemonEvent,
@@ -33,7 +34,9 @@ import {
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import * as Failure from "../effect/failure-classification.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { loadLedger } from "../persistence/effect/run-ledger-arm.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
+import { closeConfirm } from "../provider/run-ledger/run-ledger-decider.js";
 import {
 	PickRequired,
 	resolveTurnSettings,
@@ -379,12 +382,23 @@ export const deleteSessionForClient = ({
 	clientId,
 	sessionId,
 	removeWorktrees,
+	confirm,
 }: {
 	readonly clientId: string;
 	readonly sessionId: string;
 	readonly removeWorktrees?: boolean;
+	/** The snapshot entry the delete ask showed. */
+	readonly confirm?: number;
 }) =>
 	Effect.gen(function* () {
+		// 8.4 (2870-2899): a delete ends the session's background work, so with tasks live or unknown
+		// it needs a confirm of the latest snapshot. The row goes away, so the browser asks before it
+		// sends rather than the gate holding the step; the refusal carries the entry to confirm.
+		const ledger = yield* loadLedger(sessionId);
+		const snapshotEntry =
+			ledger === undefined ? undefined : closeConfirm(ledger.state, confirm);
+		if (snapshotEntry !== undefined)
+			return yield* new DeleteNeedsConfirm({ snapshotEntry });
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const deletion = Effect.gen(function* () {
 			const sessionManagerService = yield* SessionManagerServiceTag;

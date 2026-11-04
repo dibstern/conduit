@@ -18,6 +18,13 @@ import {
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 90_000;
+const goalPhase = async (harness: ProcessHarness, sessionId: string) =>
+	(
+		await harness.requestRpc({
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+		})
+	).sessions.find((session) => session.id === sessionId)?.goalPhase;
 const OBJECTIVE = "Say hello";
 
 describe("Codex goals through the daemon and detached runner", () => {
@@ -39,7 +46,10 @@ describe("Codex goals through the daemon and detached runner", () => {
 	async function start(
 		name: string,
 		source = name,
-		successorTimeoutMs?: number,
+		{
+			successorTimeoutMs,
+			nativeCommandMs,
+		}: { successorTimeoutMs?: number; nativeCommandMs?: number } = {},
 	) {
 		artifactRoot = resolve(`test-results/codex-goals/${name}`);
 		mkdirSync(artifactRoot, { recursive: true });
@@ -67,6 +77,12 @@ describe("Codex goals through the daemon and detached runner", () => {
 							CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS:
 								String(successorTimeoutMs),
 						}),
+				...(nativeCommandMs === undefined
+					? {}
+					: {
+							CONDUIT_TEST_RUN_LEDGER_NATIVE_COMMAND_MS:
+								String(nativeCommandMs),
+						}),
 			},
 		};
 		await harness.restart(restartOptions);
@@ -90,7 +106,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 			permissionMode: "ask",
 		});
 		writeTrace(fixtureRows(source));
-		return { fixture, browser, id: sessionId };
+		return { fixture, browser, id: sessionId, restartOptions };
 	}
 
 	/**
@@ -134,6 +150,66 @@ describe("Codex goals through the daemon and detached runner", () => {
 		start.method = "thread/resume";
 		start.params = { ...start.params, threadId, excludeTurns: true };
 		return resumed;
+	}
+
+	/**
+	 * goal-paused with Codex never answering the Pause: neither its reply nor its paused notification
+	 * comes. The deadline's re-read (thread/goal/get) then finds the goal at `read`; with `retry`, a
+	 * second Pause follows and Codex answers that one.
+	 */
+	function unansweredPause(read: string, retry = false) {
+		const trace = fixtureRows("goal-paused");
+		const pause = trace.find(
+			({ message }) =>
+				message?.method === "thread/goal/set" &&
+				message.params?.["status"] === "paused",
+		)?.message;
+		const answered = (row: TraceRow) =>
+			(row.dir === "in" && row.message?.id === pause?.id) ||
+			(row.message?.method === "thread/goal/updated" &&
+				(row.message.params?.["goal"] as { status?: string }).status ===
+					"paused");
+		const answers = trace.filter(answered);
+		const goal = answers[0]?.message?.result?.["goal"] as
+			| { threadId: string; updatedAt: number }
+			| undefined;
+		if (!pause || !goal) throw new Error("Missing recorded Pause");
+		const kept = trace.filter((row) => !answered(row));
+		const exit = kept.findIndex(({ dir }) => dir === "exit");
+		const again = (row: TraceRow): TraceRow => ({
+			...row,
+			at: 0,
+			message: {
+				...row.message,
+				...(row.message?.id === undefined ? {} : { id: 903 }),
+			},
+		});
+		return [
+			...kept.slice(0, exit),
+			{
+				dir: "out",
+				at: 0,
+				message: {
+					id: 902,
+					method: "thread/goal/get",
+					params: { threadId: goal.threadId },
+				},
+			},
+			{
+				dir: "in",
+				at: 0,
+				message: {
+					id: 902,
+					result: {
+						goal: { ...goal, status: read, updatedAt: goal.updatedAt + 1 },
+					},
+				},
+			},
+			...(retry
+				? [again({ dir: "out", at: 0, message: pause }), ...answers.map(again)]
+				: []),
+			...kept.slice(exit),
+		];
 	}
 
 	afterEach(async ({ task }) => {
@@ -290,7 +366,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 			const { fixture, browser, id } = await start(
 				"goal-successor-timeout",
 				"goal-successor-timeout",
-				successorTimeoutMs,
+				{ successorTimeoutMs },
 			);
 			const completion = fixtureRows("goal-successor-timeout").find(
 				({ message }) => message?.method === "turn/completed",
@@ -320,6 +396,111 @@ describe("Codex goals through the daemon and detached runner", () => {
 			expect(
 				events.filter(({ type }) => type === "turn.completed"),
 			).toHaveLength(1);
+		},
+		TIMEOUT * 2,
+	);
+
+	// 82tn.32.44 (lane-3244 audit.md 7): a Pause pending when the daemon restarts survives it.
+	it(
+		"rebuilds a pending Pause after a daemon restart: Pausing, one paused set, then Paused",
+		async () => {
+			const { fixture, browser, id, restartOptions } = await start(
+				"goal-pause-restart",
+				"goal-paused",
+			);
+			const pausedSets = () =>
+				requests().filter(
+					({ message }) =>
+						message?.method === "thread/goal/set" &&
+						message.params?.["status"] === "paused",
+				);
+			const pause = fixtureRows("goal-paused").find(
+				({ message }) =>
+					message?.method === "thread/goal/set" &&
+					message.params?.["status"] === "paused",
+			);
+			if (typeof pause?.["at"] !== "number")
+				throw new Error("Missing recorded Pause");
+			// Codex answers the Pause only after the daemon is back.
+			writeFileSync(gatePath, String(pause["at"]));
+			// The daemon dies under this send; the turn finishes on the restarted one.
+			const sending = goalSend(browser, id).catch(() => undefined);
+			// test-waits-allow polling: the app-server's requests are seen only in its capture file.
+			await vi.waitFor(
+				() =>
+					expect(
+						requests().filter(
+							({ message }) => message?.method === "thread/goal/set",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT },
+			);
+			const commandId = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId }),
+				),
+			).toEqual({ ok: true });
+			// test-waits-allow polling: the app-server's requests are seen only in its capture file.
+			await vi.waitFor(() => expect(pausedSets()).toHaveLength(1), {
+				timeout: TIMEOUT,
+			});
+			// test-waits-allow polling: the Pause's phase reaches the row with no browser frame.
+			const phaseBefore = await vi.waitFor(async () => {
+				const phase = await goalPhase(fixture, id);
+				expect(phase).toMatchObject({
+					tag: "Pending",
+					action: { kind: "pause" },
+				});
+				return phase;
+			}, 10_000);
+			await fixture.kill();
+			await sending;
+			await fixture.restart(restartOptions);
+			await fixture.connect(id);
+			// test-waits-allow polling: the rebuilt phase reaches the row with no browser frame.
+			const phaseAfterRestart = await vi.waitFor(async () => {
+				const phase = await goalPhase(fixture, id);
+				expect(phase).toEqual(phaseBefore);
+				return phase;
+			}, 10_000);
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			// test-waits-allow polling: the held turn's end reaches only the store after the restart.
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]),
+				{ timeout: TIMEOUT },
+			);
+			// test-waits-allow polling: the Pause's confirmation reaches the row with no browser frame.
+			await vi.waitFor(
+				async () => expect(await goalPhase(fixture, id)).toBeUndefined(),
+				10_000,
+			);
+			const changes = snapshot(fixture, id).events.filter(
+				({ type }) => type === "session.goal_changed",
+			);
+			expect(changes.at(-1)?.data).toMatchObject({
+				goal: expect.objectContaining({ condition: OBJECTIVE }),
+				pausedReason: "Paused",
+			});
+			expect(pausedSets()).toHaveLength(1);
+			writeFileSync(
+				"test-results/82tn-32-44-codex-pause-restart.json",
+				JSON.stringify(
+					{
+						ticket: "conduit-test-82tn.32.44",
+						sessionId: id,
+						commandId,
+						phaseBefore,
+						phaseAfterRestart,
+						pausedSets: pausedSets(),
+						lastGoalChange: changes.at(-1)?.data,
+						phaseAtEnd: null,
+					},
+					null,
+					2,
+				),
+			);
 		},
 		TIMEOUT * 2,
 	);
@@ -736,6 +917,238 @@ describe("Codex goals through the daemon and detached runner", () => {
 					({ type }) => type === "turn.completed",
 				),
 			).toHaveLength(1);
+		},
+		TIMEOUT * 2,
+	);
+
+	it(
+		"reads Limited when an unanswered Pause's re-read finds the token budget reached",
+		async () => {
+			const { fixture, browser, id } = await start(
+				"goal-unconfirmed-limited",
+				"goal-paused",
+				{ nativeCommandMs: 3_000 },
+			);
+			writeTrace(unansweredPause("budgetLimited"));
+			const sending = goalSend(browser, id);
+			await vi.waitFor(
+				() =>
+					expect(
+						requests().filter(
+							({ message }) => message?.method === "thread/goal/set",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
+			await sending;
+			// test-waits-allow polling: the re-read's answer reaches only the store and the row.
+			await vi.waitFor(
+				async () => {
+					expect(
+						snapshot(fixture, id)
+							.events.filter(({ type }) => type === "session.goal_changed")
+							.at(-1)?.data,
+					).toMatchObject({
+						goal: expect.objectContaining({ condition: OBJECTIVE }),
+						pausedReason: "Goal reached its token budget",
+						limit: "budget",
+					});
+					expect(await goalPhase(fixture, id)).toBeUndefined();
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				requests().filter(
+					({ message }) => message?.method === "thread/goal/get",
+				),
+			).toHaveLength(1);
+			expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]);
+		},
+		TIMEOUT * 2,
+	);
+
+	it(
+		"shows Pause not confirmed when the re-read finds the goal still active, and Retry sends once",
+		async () => {
+			const { fixture, browser, id } = await start(
+				"goal-unconfirmed-retry",
+				"goal-paused",
+				{ nativeCommandMs: 3_000, successorTimeoutMs: 1_000 },
+			);
+			writeTrace(unansweredPause("active", true));
+			const sending = goalSend(browser, id);
+			await vi.waitFor(
+				() =>
+					expect(
+						requests().filter(
+							({ message }) => message?.method === "thread/goal/set",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
+			await sending;
+			// test-waits-allow polling: the deadline and its re-read reach only the row.
+			await vi.waitFor(
+				async () =>
+					expect(await goalPhase(fixture, id)).toEqual({
+						tag: "Pending",
+						action: { kind: "pause" },
+						send: "Unconfirmed",
+					}),
+				{ timeout: TIMEOUT },
+			);
+			const pauses = () =>
+				requests().filter(
+					({ message }) =>
+						message?.method === "thread/goal/set" &&
+						message.params?.["status"] === "paused",
+				);
+			expect(pauses()).toHaveLength(1);
+			const retry = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: retry }),
+				),
+			).toEqual({ ok: true });
+			// test-waits-allow polling: the retry's answer reaches only the store and the row.
+			await vi.waitFor(
+				async () => {
+					expect(snapshot(fixture, id).events).toContainEqual(
+						expect.objectContaining({
+							type: "session.goal_changed",
+							data: expect.objectContaining({
+								replyTo: retry,
+								pausedReason: "Paused",
+							}),
+						}),
+					);
+					expect(await goalPhase(fixture, id)).toBeUndefined();
+				},
+				{ timeout: TIMEOUT },
+			);
+			expect(pauses()).toHaveLength(2);
+			expect(
+				requests().filter(
+					({ message }) => message?.method === "thread/goal/get",
+				),
+			).toHaveLength(1);
+		},
+		TIMEOUT * 2,
+	);
+
+	// Audit 10: Codex starts the successor before the Pause lands. A wake Run needs no active Run
+	// (CONTRACT.md 960, 8.3), so the successor stays in the held Run, shows, and ends it once.
+	it(
+		"a successor that starts before the Pause lands shows in the held Run, which ends once",
+		async () => {
+			const { fixture, browser, id } = await start("goal-race", "goal-chain");
+			const trace = fixtureRows("goal-chain");
+			const [, successor] = trace.flatMap((row, index) =>
+				row.message?.method === "turn/started" ? [index] : [],
+			);
+			const notified = trace.findIndex(
+				(row, index) =>
+					index > (successor ?? 0) &&
+					row.message?.method === "thread/goal/updated",
+			);
+			const end = trace.findIndex(
+				(row, index) =>
+					index > notified && row.message?.method === "turn/completed",
+			);
+			const params = trace[notified]?.message?.params;
+			const goal = { ...(params?.["goal"] as object), status: "paused" };
+			const threadId = params?.["threadId"];
+			if (successor === undefined || notified < 0 || end < 0 || !threadId)
+				throw new Error("Missing recorded successor");
+			writeTrace([
+				...trace.slice(0, successor + 1),
+				{
+					dir: "out",
+					at: 0,
+					message: {
+						id: 5,
+						method: "thread/goal/set",
+						params: { threadId, status: "paused", origin: "user" },
+					},
+				},
+				{ dir: "in", at: 0, message: { id: 5, result: { goal } } },
+				{
+					dir: "in",
+					at: 0,
+					message: {
+						method: "thread/goal/updated",
+						params: { threadId, turnId: null, goal },
+					},
+				},
+				...trace.slice(successor + 1, notified),
+				...trace.slice(notified + 1, end + 1),
+				...trace.filter(({ dir }) => dir === "exit"),
+			]);
+			const sending = goalSend(browser, id);
+			await vi.waitFor(
+				() =>
+					expect(
+						rows<TraceRow>(capturePath).filter(
+							({ message }) => message?.method === "turn/started",
+						),
+					).toHaveLength(2),
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
+			const reply = await sending;
+			expect(reply.chunks.join("")).toBe(
+				"Hello from the mock model.".repeat(2),
+			);
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]),
+				{ timeout: TIMEOUT },
+			);
+			const { events } = snapshot(fixture, id);
+			expect(
+				events.filter(({ type }) =>
+					/^turn\.(completed|interrupted|error)$/.test(type),
+				),
+			).toHaveLength(1);
+			expect(events).toContainEqual(
+				expect.objectContaining({
+					type: "session.goal_changed",
+					data: expect.objectContaining({
+						pausedReason: "Paused",
+						turnFinishing: true,
+					}),
+				}),
+			);
+			// Audit 33: once the turn has ended, the goal no longer says Codex is finishing it.
+			const goalChanges = events.filter(
+				({ type }) => type === "session.goal_changed",
+			);
+			expect(goalChanges.at(-1)?.data).not.toHaveProperty("turnFinishing");
+			expect(await goalPhase(fixture, id)).toBeUndefined();
+			expect(
+				requests().filter(({ message }) => message?.method === "turn/start"),
+			).toHaveLength(1);
+			// The goal-stuck check counts continuations, not the reply and notification each change has:
+			// the first native turn's, and none for the successor the Pause ended.
+			const { checks } = await Effect.runPromise(
+				browser.rpc.GetGoalDetails({ sessionId: id }),
+			);
+			expect(goalChanges.length).toBeGreaterThan(checks.length);
+			expect(checks.map(({ iteration }) => iteration)).toEqual([1]);
 		},
 		TIMEOUT * 2,
 	);

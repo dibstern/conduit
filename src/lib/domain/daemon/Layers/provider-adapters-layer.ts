@@ -9,11 +9,13 @@ import {
 	Layer,
 	Option,
 	Ref,
+	Schema,
 	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/account.js";
 import { PROVIDER_DRIVERS } from "../../../contracts/provider-instance.js";
+import { GoalActionSchema } from "../../../contracts/stored-event.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type ClaudeEventPersistEffect,
@@ -31,6 +33,7 @@ import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/re
 import {
 	ledgerNativeCommandsWakes,
 	ledgerTasksWakes,
+	loadLedgerView,
 } from "../../../persistence/effect/run-ledger-arm.js";
 import { ClaudeDriver } from "../../../provider/claude/claude-provider-instance.js";
 import type { ClaudeProviderInstanceDeps } from "../../../provider/claude/claude-provider-runtime.js";
@@ -325,9 +328,64 @@ export const makeProviderAdaptersLive = (
 						Effect.provideService(SqlClient.SqlClient, sql),
 					),
 				);
+			// Gap, CONTRACT.md 184 names the tracker the owner of the pending action id but not how it
+			// outlives a restart. Nearest reading: rebuild each session's pending action from its latest
+			// goal command the Run Ledger has not finished, and that command's send (8.5, 8.6).
+			const rebuildGoals = (store: SqlClient.SqlClient) =>
+				Effect.gen(function* () {
+					const latest = yield* store<{
+						readonly session_id: string;
+						readonly command_id: string;
+						readonly goal: string;
+						readonly provider: string;
+					}>`SELECT latest.session_id, latest.command_id, latest.goal, sessions.provider
+						FROM (
+							SELECT session_id, json_extract(metadata, '$.commandId') AS command_id,
+								json_extract(data, '$.goal') AS goal, MAX(sequence)
+							FROM events WHERE type = 'native_command.requested'
+								AND json_extract(data, '$.goal') IS NOT NULL
+							GROUP BY session_id
+						) latest JOIN sessions ON sessions.id = latest.session_id`;
+					for (const { session_id, command_id, goal, provider } of latest) {
+						const commands = (yield* loadLedgerView(session_id).pipe(
+							Effect.provideService(SqlClient.SqlClient, store),
+						))?.nativeCommands;
+						const tag = commands?.find(
+							({ commandId }) => commandId === command_id,
+						)?.tag;
+						if (
+							commands === undefined ||
+							tag === undefined ||
+							tag === "Completed" ||
+							tag === "Cancelled" ||
+							tag === "Failed" ||
+							activity.goals.phaseOf(session_id) !== undefined
+						)
+							continue;
+						const { driver } = yield* accounts.resolve({
+							_tag: "Id",
+							id: provider,
+						});
+						activity.goals.request(
+							session_id,
+							command_id,
+							Schema.decodeUnknownSync(Schema.fromJsonString(GoalActionSchema))(
+								goal,
+							),
+							PROVIDER_DRIVERS[driver].nativeGoalPause,
+						);
+						activity.goals.sends(session_id, commands);
+						announce(session_id);
+					}
+				}).pipe(
+					Effect.catch((cause) =>
+						Effect.logWarning("Could not rebuild pending goal actions", cause),
+					),
+				);
 			// The arm wakes per store: the daemon's, and each project's when it brings its own.
 			const listenedStores = new Set<SqlClient.SqlClient>();
 			const listenForTasks = (store: SqlClient.SqlClient) => {
+				if (!listenedStores.has(store)) runBackground(rebuildGoals(store));
 				listenedStores.add(store);
 				const wakes = ledgerTasksWakes.get(store) ?? new Set();
 				ledgerTasksWakes.set(store, wakes.add(onLedgerTasks));

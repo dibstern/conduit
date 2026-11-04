@@ -27,7 +27,6 @@
 	import { projectState } from "../../stores/project.svelte.js";
 	import { draftList } from "../../stores/draft-list.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import {
 		dismissToast,
@@ -46,6 +45,7 @@
 	import SessionListRows from "./SessionListRows.svelte";
 	import SessionListBulkBar from "./SessionListBulkBar.svelte";
 	import { runBulkChange, runBulkSnooze } from "./session-list-bulk-actions.js";
+	import { deleteAsking } from "./background-tasks.svelte.js";
 	import { confirmSessionDeletion } from "./session-deletion.js";
 	import { getProjectAccent, getProjectLabel, projectDisplayName } from "./session-list-project.js";
 	import { buildProjectTree } from "../../stores/project-tree.svelte.js";
@@ -492,9 +492,9 @@
 			// The list is cross-project, so each row deletes in its own project.
 			resetSelectMode();
 			const results = await Promise.allSettled(
-				targets.map((target) => rpc("DeleteSession", target)),
+				targets.map(deleteAsking),
 			);
-			const warnings = results.flatMap((result) => result.status === "fulfilled" ? result.value.worktreeWarnings ?? [] : []);
+			const warnings = results.flatMap((result) => result.status === "fulfilled" ? result.value?.worktreeWarnings ?? [] : []);
 			if (warnings.length > 0) showToast(`Sessions deleted. ${warnings.join("; ")}`, { variant: "warn" });
 			void refreshListedSessions();
 			const failed = results.filter((r) => r.status === "rejected").length;
