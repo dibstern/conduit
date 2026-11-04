@@ -780,14 +780,21 @@ describe("Claude durable interaction resolution", () => {
 					});
 					const conduitId = asked?.data.id;
 					expect(conduitId).not.toBe("request-1");
-					expect(events.at(-1)).toMatchObject({
-						type: "permission.resolved",
-						data: {
-							id: conduitId,
-							providerRequestId: "request-1",
-							decision: "reject",
+					// main's timeout resolves it once; the waiter's own resolution is ledger evidence only.
+					expect(events.slice(-2)).toMatchObject([
+						{
+							type: "permission.resolved",
+							data: {
+								id: conduitId,
+								providerRequestId: "request-1",
+								decision: "reject",
+							},
 						},
-					});
+						{
+							type: "evidence.interaction_resolved",
+							data: { id: conduitId },
+						},
+					]);
 					expect(
 						yield* f.readQuery.countPendingApprovalsBySession({
 							projectIds: ["test-project"],

@@ -257,6 +257,11 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"evidence.turn_started": { produced: true },
 	"evidence.turn_ended": { produced: true },
 	"evidence.tasks_snapshot": { produced: true },
+	"evidence.interaction_resolved": {
+		produced: false,
+		reason:
+			"Run Ledger evidence: ingestion's record of an answered prompt's runner resolution",
+	},
 	"evidence.hold_exhausted": {
 		produced: false,
 		reason: "Run Ledger evidence: holdRun's cap, a runner write",

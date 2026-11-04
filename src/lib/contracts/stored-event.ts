@@ -1218,6 +1218,13 @@ export const CanonicalEvents = {
 			),
 		}),
 	),
+	/**
+	 * A runner's own resolution of an interaction main's answer already resolved (3.10, D61): the
+	 * answer's delivery confirmation, ledger evidence only, never a second resolution for the UI.
+	 */
+	"evidence.interaction_resolved": live(
+		Schema.Struct({ id: Schema.String, providerProcessId: Schema.String }),
+	),
 	/** holdRun's cap (4.3): the held send under commandId spent its five transmissions. */
 	"evidence.hold_exhausted": live(Schema.Struct({ commandId: Schema.String })),
 	/**

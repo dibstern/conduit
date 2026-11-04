@@ -23,7 +23,11 @@ import type {
 	ProjectionRunnerError,
 } from "../../../persistence/effect/projection-runner-effect.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
-import { type CanonicalEvent, EventId } from "../../../persistence/events.js";
+import {
+	type CanonicalEvent,
+	canonicalEvent,
+	EventId,
+} from "../../../persistence/events.js";
 import { SESSION_SUBTREE_SQL } from "../../../persistence/projectors/session-handlers.js";
 import {
 	emptyProviderRuntimeDomainMapperState,
@@ -247,6 +251,9 @@ export const makeProviderRuntimeIngestionLive = (
 									event.type.startsWith("question.");
 								let redelivered = false;
 								let reconcileLegacyPrompt = false;
+								let confirmation:
+									| { id: string; providerProcessId: string }
+									| undefined;
 								if (promptEvent) {
 									const data = isRecord(event.data) ? event.data : {};
 									const providerRequestId = requestId(event, data);
@@ -307,6 +314,19 @@ export const makeProviderRuntimeIngestionLive = (
 											(event.type.endsWith(".asked") &&
 												!reconcileLegacyPrompt) ||
 											stored.status === "resolved";
+										// 3.10, D61 (CONTRACT.md 1032-1033, 4764-4767): a Claude runner's own
+										// resolution of a prompt main's answer resolved confirms that answer's
+										// delivery; it is the ledger's evidence, never a second resolution.
+										if (
+											event.providerId === "claude" &&
+											processId &&
+											event.type.endsWith(".resolved") &&
+											stored.status === "resolved"
+										)
+											confirmation = {
+												id: stored.id,
+												providerProcessId: processId,
+											};
 									}
 								}
 								if (context && event.type === "tool.completed") {
@@ -362,6 +382,18 @@ export const makeProviderRuntimeIngestionLive = (
 									)
 										promptIds.push(domain.data.id);
 								}
+								if (confirmation)
+									domainEvents.push(
+										canonicalEvent(
+											"evidence.interaction_resolved",
+											event.sessionId,
+											confirmation,
+											{
+												eventId: event.eventId as EventId,
+												provider: event.providerId,
+											},
+										),
+									);
 								if (!redelivered)
 									domainEvents.push(
 										...result.events.map((domain) =>
