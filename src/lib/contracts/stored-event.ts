@@ -821,6 +821,8 @@ export const CanonicalEvents = {
 			sessionId: Schema.String.pipe(SessionRef(false)),
 			title: Schema.String,
 			provider: Schema.String,
+			/** The driver kind, when `provider` names an instance ("work-oc") rather than a kind. */
+			driver: Schema.optionalKey(Schema.String),
 			parentId: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkedFrom: Schema.optionalKey(Schema.String).pipe(SessionRef(true)),
 			forkPointEvent: Schema.optionalKey(Schema.String),

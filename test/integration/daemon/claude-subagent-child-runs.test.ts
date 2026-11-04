@@ -332,6 +332,85 @@ describe("durable Claude subagent child runs through the daemon", () => {
 		});
 	}
 
+	// 82tn.32.40 (lane bugs3 audit .40 1-6): a runner killed outright leaves its background agents'
+	// child sessions busy until the stranded-child sweep's 60 s grace runs out.
+	it("ends a killed runner's background agents' child sessions without waiting out the stranded-child grace (82tn.32.40)", async () => {
+		proof = { case: "background-children-runner-killed" };
+		const fixture = ProcessHarness.create({
+			claudeReplay: {
+				turns: [
+					"concurrent-background-work-turn",
+					"concurrent-background-work-after-restart-turn",
+				],
+				// Agent A's nested shells are done; nothing the parent launched is.
+				plan: { holdBefore: { turn: 1, message: 112 } },
+				subagentReads: true,
+				turnsOutliveRunner: true,
+			},
+		});
+		harness = fixture;
+		await fixture.restart();
+		const browser = await fixture.connect();
+		const parent = await browser.createSession(
+			"Background agents, runner killed",
+		);
+		const pending = browser
+			.send(parent, "Launch the background work")
+			.catch(() => undefined);
+		await fixture.claudeReplayer?.held();
+		await browser.waitForTurnEnd(parent);
+		await pending;
+		const statuses = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT status FROM sessions WHERE parent_id = ? ORDER BY id",
+						)
+						.all(parent) as { status: string }[]
+				).map((row) => row.status);
+			} finally {
+				db.close();
+			}
+		};
+		// test-waits-allow polling: the children's status comes from the replayed trace, with no browser event.
+		await vi.waitFor(() => expect(statuses()).toEqual(["busy", "busy"]), {
+			timeout: 30_000,
+		});
+		const [pid] = fixture.remainingRunnerPids();
+		if (pid === undefined) throw new Error("Missing runner");
+		const killedAt = Date.now();
+		expect(fixture.signalOwnedRunner(pid, "SIGKILL")).toBe(true);
+		// test-waits-allow polling: the runner's exit has no browser event.
+		await vi.waitFor(() => expect(fixture.remainingRunnerPids()).toEqual([]), {
+			timeout: 5_000,
+		});
+		const seen: { atMs: number; statuses: string[] }[] = [];
+		// test-waits-allow polling: the sweep polls every 7 s; 20 s sits well under its 60 s grace.
+		await vi
+			.waitFor(
+				() => {
+					seen.push({ atMs: Date.now() - killedAt, statuses: statuses() });
+					expect(seen.at(-1)?.statuses).toEqual(["idle", "idle"]);
+				},
+				{ timeout: 20_000, interval: 500 },
+			)
+			.finally(() => {
+				proof["children"] = seen.filter(
+					(entry, index) =>
+						index === 0 ||
+						index === seen.length - 1 ||
+						entry.statuses.join() !== seen[index - 1]?.statuses.join(),
+				);
+				mkdirSync("test-results", { recursive: true });
+				writeFileSync(
+					"test-results/82tn-32-40-killed-runner-children.json",
+					`${JSON.stringify({ ticket: "conduit-test-82tn.32.40", ...proof }, null, 2)}\n`,
+				);
+			});
+	});
+
 	it("recovers an undelivered child terminal after the parent command completed and its runner died offline", async () => {
 		proof = { case: "completed-parent-with-undelivered-child-terminal" };
 		const fixture = await ProcessHarness.start({

@@ -967,6 +967,7 @@ export function opencodeSessionCreatedRuntimeEvent(
 			sessionId,
 			title: "Untitled",
 			provider: providerInstanceId,
+			driver: "opencode",
 			...(parentId === undefined ? {} : { parentId }),
 		},
 		metadata: {

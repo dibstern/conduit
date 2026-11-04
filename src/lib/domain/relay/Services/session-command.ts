@@ -555,6 +555,7 @@ export const createOpenCodeSession = (
 						sessionId: session.id,
 						title: normalizeSessionTitle(session.title),
 						provider,
+						driver: "opencode",
 						providerSessionId: session.id,
 						...(permissionMode === undefined ? {} : { permissionMode }),
 					},
@@ -713,6 +714,7 @@ export const forkOpenCodeSession = (
 							sessionId: session.id,
 							title,
 							provider: account.id,
+							driver: "opencode",
 							...forkPlacement(parentSessionId, Boolean(side)),
 							...(side
 								? {
