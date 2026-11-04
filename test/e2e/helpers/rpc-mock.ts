@@ -26,6 +26,8 @@ import {
 	InputDraftKeySchema,
 	type ProjectSetting,
 	SessionDetailItemSchema,
+	type SessionDetailWindowRequest,
+	SessionDetailWindowRequestSchema,
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
@@ -303,7 +305,10 @@ export class RpcMockControl {
 	 *  stall after the snapshot, hold with no frames, or fail the stream. */
 	detailFeed: "synchronize" | "stall" | "hold" | "fail" = "synchronize";
 
-	initialDetailFrames(sessionId: string): readonly unknown[] {
+	initialDetailFrames(
+		sessionId: string,
+		window?: SessionDetailWindowRequest,
+	): readonly unknown[] {
 		if (this.detailFeed === "hold" || this.detailFeed === "fail") return [];
 		const frames = [
 			this.detailRows.has(sessionId)
@@ -313,7 +318,7 @@ export class RpcMockControl {
 						sequence: this.detailSequences.get(sessionId) ?? 0,
 						hasMore: false,
 					}
-				: mockDetailSnapshot(this.page, sessionId),
+				: mockDetailSnapshot(this.page, sessionId, window),
 			{ _tag: "synchronized" },
 		];
 		return this.detailFeed === "stall" ? frames.slice(0, 1) : frames;
@@ -1017,7 +1022,14 @@ function initialStream(
 		case "SubscribeShell":
 			return control.initialShellFrames();
 		case "SubscribeSessionDetail":
-			return control.initialDetailFrames(String(payload["sessionId"] ?? ""));
+			return control.initialDetailFrames(
+				String(payload["sessionId"] ?? ""),
+				payload["window"] === undefined
+					? undefined
+					: Schema.decodeUnknownSync(SessionDetailWindowRequestSchema)(
+							payload["window"],
+						),
+			);
 		case "SubscribeSessionPromptIndex":
 			return control.initialPromptIndexFrames(
 				String(payload["sessionId"] ?? ""),

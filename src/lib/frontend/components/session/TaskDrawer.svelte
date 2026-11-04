@@ -44,8 +44,11 @@
 
 	function close() {
 		taskDrawer.task = null;
-		const target = opener?.isConnected ? opener : document.querySelector<HTMLElement>("[data-testid='background-tasks-toggle'], button[data-testid='background-tasks-row']") ?? document.getElementById("messages");
-		target?.focus({ preventScroll: true });
+		opener?.focus({ preventScroll: true });
+		// A removed opener, or one a folded turn log hides, cannot take focus.
+		if (opener && document.activeElement === opener) return;
+		const fallback = document.querySelector<HTMLElement>("[data-testid='background-tasks-toggle'], button[data-testid='background-tasks-row']") ?? document.getElementById("messages");
+		fallback?.focus({ preventScroll: true });
 	}
 
 	function handleKeydown(event: KeyboardEvent) {
