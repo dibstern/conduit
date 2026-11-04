@@ -27,16 +27,11 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 				],
 			],
 			[
-				"coverage, CONTRACT.md 978-997 and 4084 (gap, 3.9: OpenCode never steers (4431-4432, 5901), so a steer's send failure is runner-held, and its input shows Failed in the open Run only if the steer joins that Run, undecided at 984. Wrong side undecided: the oracle keeps a held steer's input out of the open Run until it starts)",
-				["generated traces reach steer send failure with inputs queued"],
-			],
-			[
 				"coverage, CONTRACT.md 3456-3477 (11.2: fc.check stops at the first failing trace, so the seeds pended above for the steer join (984) and GAP 5 cut generation short before these shapes. Wrong side: neither, the shapes wait on those two gaps)",
 				[
 					"not_sent start ended its Run",
 					"unheld_outcome after a reissue",
 					"unlaunch by retryable",
-					"joined Run's not_sent start retried in its execution",
 				].map((shape) => `generated traces reach ${shape}`),
 			],
 		] as const

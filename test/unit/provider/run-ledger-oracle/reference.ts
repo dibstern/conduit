@@ -2078,8 +2078,19 @@ function mainEvent(
 			if (input === undefined)
 				return noop("run.requested for an input never admitted");
 			input.reservation ??= observation.runId;
+			const active = activeInputRun(world);
+			// 3.9 GAP (CONTRACT.md 984, "a steer sent while it is active joins it"): a steer admitted
+			// before its Run launched joins it at its send, main's run.requested.
+			if (
+				input.runId === undefined &&
+				input.delivery === "steer" &&
+				(active?.phase === "Launched" || active?.phase === "Queued")
+			) {
+				active.inputs.push(input.inputId);
+				input.runId = active.runId;
+			}
 			if (input.runId === undefined) {
-				if (activeInputRun(world) !== undefined)
+				if (active !== undefined)
 					return noop("run.requested while another Run is active");
 				// 3.4: the Run is reserved at main's run.requested, under main's runId.
 				reserve(world, observation.runId, input.inputId);
