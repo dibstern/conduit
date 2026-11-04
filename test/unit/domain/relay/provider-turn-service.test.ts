@@ -2,7 +2,16 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Clock, Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect";
+import {
+	Clock,
+	Deferred,
+	Effect,
+	Exit,
+	Fiber,
+	Layer,
+	Ref,
+	Stream,
+} from "effect";
 import { SqlClient, Statement } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { afterEach, expect, vi } from "vitest";
@@ -3519,6 +3528,104 @@ describe("ProviderTurnService", () => {
 			},
 		);
 	}
+
+	// RL-081: a reply that replaces a live question commits the Stop without waiting on it. A Stop
+	// main does not accept must still fail the reply before admission; a later failure is reported.
+	const questionReply = (
+		inject: (engine: OrchestrationEngine) => void,
+		check: (reply: {
+			readonly prepared: Exit.Exit<string, unknown>;
+		}) => Effect.Effect<void>,
+	) => {
+		const engine = makeEngine({ providerId: "claude" });
+		const { layer: dependencies, log } = serviceLayer({
+			engine,
+			readQuery: {
+				...makeReadQuery(() => Effect.succeed([])),
+				getSession: () => Effect.succeed(undefined),
+			},
+		});
+		return {
+			engine,
+			log,
+			run: Effect.gen(function* () {
+				yield* (yield* PendingInteractionServiceTag).recordQuestionRequest({
+					requestId: "question-0",
+					sessionId: "session-1",
+					questions: [],
+				});
+				inject(yield* OrchestrationEngineTag);
+				const service = yield* ProviderTurnServiceTag;
+				const prepared = yield* Effect.exit(
+					service.prepareTurnSession({
+						clientId: "client-1",
+						commandId: "cmd-reply",
+						sessionId: "session-1",
+					}),
+				);
+				yield* check({ prepared });
+			}).pipe(
+				Effect.provide(
+					PassThroughSessionInbox.pipe(Layer.provideMerge(dependencies)),
+				),
+			),
+		};
+	};
+
+	it.effect(
+		"fails a question reply before admission when main does not accept its Stop",
+		() => {
+			const { engine, run } = questionReply(
+				(accepting) => {
+					accepting.acceptStopEffect = () =>
+						Effect.fail(
+							new ProviderInstanceFailure({
+								providerId: "claude",
+								operation: "acceptStop",
+								cause: "refused",
+							}),
+						);
+				},
+				({ prepared }) =>
+					Effect.sync(() => expect(Exit.isFailure(prepared)).toBe(true)),
+			);
+			return run.pipe(
+				Effect.tap(() =>
+					Effect.sync(() =>
+						expect(
+							vi
+								.mocked(engine.dispatchEffect)
+								.mock.calls.some(([call]) => call.type === "interrupt_turn"),
+						).toBe(false),
+					),
+				),
+			);
+		},
+	);
+
+	it.effect(
+		"admits a question reply at once and reports its Stop's later failure",
+		() => {
+			const warned = Deferred.makeUnsafe<void>();
+			const { log, run } = questionReply(
+				(stopping) => {
+					stopping.executeAcceptedStopEffect = () =>
+						Effect.die(new Error("runner refused the interrupt"));
+				},
+				({ prepared }) =>
+					Effect.gen(function* () {
+						expect(Exit.isSuccess(prepared)).toBe(true);
+						// The Stop fails on its own fiber after admission; the reply's watcher reports it.
+						yield* Deferred.await(warned);
+					}),
+			);
+			vi.mocked(log.warn).mockImplementation((message) => {
+				if (String(message).includes("Stop for a question reply failed"))
+					Deferred.doneUnsafe(warned, Effect.void);
+			});
+			return run;
+		},
+	);
 
 	it.effect(
 		"completes a disposed question using its projected tool identity",

@@ -731,6 +731,16 @@ export const generatedShapes = [
 	"steer send failure with inputs queued",
 	// 3113-3117: a Cursor abandonment, then a next start, then the abandoned runner's retirement.
 	"next start after a Cursor abandonment, then retirement",
+	// 3.10 (CONTRACT.md 999-1050): each answer path.
+	"prompt asked",
+	"answer submitted",
+	"timeout answer",
+	"answer after the first answer won",
+	"refused answer retrying",
+	"answer refused for good",
+	"answer refused through the retry cap",
+	"prompt reopened after its answer failed for good",
+	"late outcome for a reopened prompt's old answer",
 ] as const;
 export type GeneratedShape = (typeof generatedShapes)[number];
 export class Coverage {
@@ -748,6 +758,11 @@ export class Coverage {
 	private readonly unknownInputs = new Set<string>();
 	/** The idle probes decide issued after an OpenCode absent reading (CONTRACT.md 3128-3132). */
 	private readonly idleAfterAbsent = new Set<SendToken>();
+	/** 3.10: answer commandIds by interaction, and their refusals, failures and reopens. */
+	private readonly answerCommands = new Map<string, string>();
+	private readonly refusedAnswers = new Set<string>();
+	private readonly failedPrompts = new Set<string>();
+	private readonly staleAnswers = new Set<string>();
 	private readonly accepted = new Map<
 		string,
 		{ readonly runId: string; readonly inputId: string }
@@ -1006,6 +1021,7 @@ export class Coverage {
 		)
 			hit("confirm copied before a query replacement");
 		this.recordGate(command, before, after, result, d);
+		this.recordAnswers(command, before, after, result);
 		if (result.tag !== "Accepted") return;
 		for (const issue of d.issued) d.bound(issue);
 		const runOf = (token: SendToken) => {
@@ -1393,6 +1409,84 @@ export class Coverage {
 			e.finding.nativeMessageId === undefined
 		)
 			hit("probe input_present without id");
+	}
+	/** 3.10 (CONTRACT.md 999-1050): asked, answered (by the user or main's timeout, first wins),
+	 *  refused while retrying, failed for good (at once or through main's cap), reopened, and a
+	 *  late outcome for the reopened prompt's old send. */
+	private recordAnswers(
+		command: LedgerCommand,
+		before: LedgerView,
+		after: LedgerView,
+		result: StepResult,
+	): void {
+		const hit = (name: GeneratedShape) => {
+			this.shapes[name]++;
+		};
+		const find = (view: LedgerView, interactionId: string) =>
+			view.interactions.find((item) => item.interactionId === interactionId);
+		if (command.verb === "control" && command.control.kind === "answer") {
+			const { commandId, interactionId } = command.control;
+			const prior = find(before, interactionId);
+			if (prior?.tag === "Answered") hit("answer after the first answer won");
+			if (
+				prior?.tag === "Pending" &&
+				find(after, interactionId)?.tag === "Answered"
+			) {
+				this.answerCommands.set(commandId, interactionId);
+				// legacy-control-outbox.ts names main's timeout answer after its event.
+				hit(
+					commandId.startsWith("legacy-answer:")
+						? "timeout answer"
+						: "answer submitted",
+				);
+			}
+			return;
+		}
+		if (command.verb !== "observe" || result.tag !== "Accepted") return;
+		const e = command.observation;
+		// A resolved interaction reads Answered and settled until main reopens it.
+		const settled = (view: LedgerView, interactionId: string) => {
+			const item = find(view, interactionId);
+			return item?.tag === "Answered" && item.delivery === "settled";
+		};
+		if (
+			e.kind === "interaction_requested" &&
+			find(before, e.interactionId)?.tag !== "Pending" &&
+			find(after, e.interactionId)?.tag === "Pending"
+		) {
+			if (!this.failedPrompts.delete(e.interactionId)) hit("prompt asked");
+			else {
+				hit("prompt reopened after its answer failed for good");
+				for (const [commandId, interactionId] of this.answerCommands)
+					if (interactionId === e.interactionId)
+						this.staleAnswers.add(commandId);
+			}
+		}
+		if (e.kind !== "effect_outcome" || e.transmission === undefined) return;
+		const { commandId } = e.transmission;
+		const interactionId = this.answerCommands.get(commandId);
+		if (interactionId === undefined) return;
+		if (this.staleAnswers.has(commandId))
+			hit("late outcome for a reopened prompt's old answer");
+		else if (e.outcome.tag === "retryable") {
+			const view = find(after, interactionId);
+			if (view?.tag === "Pending" && view.lastRefusal !== undefined) {
+				hit("refused answer retrying");
+				this.refusedAnswers.add(commandId);
+			}
+		} else if (
+			e.outcome.tag === "permanent" &&
+			find(before, interactionId) !== undefined &&
+			!settled(before, interactionId) &&
+			settled(after, interactionId)
+		) {
+			hit(
+				this.refusedAnswers.has(commandId)
+					? "answer refused through the retry cap"
+					: "answer refused for good",
+			);
+			this.failedPrompts.add(interactionId);
+		}
 	}
 	/** H4 and 4.4: a gate answer, by send kind; 3.6 unlaunch and its Otherwise branch. */
 	private recordGate(
