@@ -656,7 +656,8 @@ export const turnStickyHandlers: StepHandler[] = [
 		run: async ({ world }) => {
 			const page = world.page;
 			await expect(panel(page)).toHaveAttribute("data-minimised", "true");
-			await expect(panel(page).locator(".step-log")).toHaveCount(0);
+			// A collapsed turn keeps a log it has shown mounted, but hidden.
+			await expect(panel(page).locator(".step-log:visible")).toHaveCount(0);
 			await expect(
 				panel(page).getByRole("button", { name: "Expand turn", exact: true }),
 			).toBeInViewport({ ratio: 1 });

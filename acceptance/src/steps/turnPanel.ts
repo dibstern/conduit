@@ -203,7 +203,8 @@ export const turnPanelHandlers: StepHandler[] = [
 				scope.locator('[aria-label^="Activity timeline"]'),
 			).toBeVisible();
 			for (const selector of [
-				".step-log",
+				// A collapsed turn keeps a log it has shown mounted, but hidden.
+				".step-log:visible",
 				'[data-testid="turn-show-bar"]',
 				'[data-testid="surfacing-msg-card"]',
 			])
