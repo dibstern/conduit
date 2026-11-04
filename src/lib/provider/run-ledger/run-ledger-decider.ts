@@ -529,6 +529,20 @@ export function stopTaskKeys(
 				);
 	return keys.length > 0 ? keys : "not_live";
 }
+/**
+ * 8.4 (2870-2899): the snapshot entry a destructive step the browser sends itself (a delete) must
+ * confirm, or undefined when it may go: tasks none, or `confirmed` is the latest snapshot. The
+ * gate's own reads (taskView, confirm_escalation's match); the handler refuses by this reading.
+ */
+export function closeConfirm(
+	state: SessionLedgerState,
+	confirmed: number | undefined,
+): number | undefined {
+	const book = bookOf(state);
+	return taskView(book).tag === "none" || confirmed === book.snapshotEntry
+		? undefined
+		: book.snapshotEntry;
+}
 /** 8.4: the current runner's tasks; a pending address has none. */
 function taskView(book: Book): TasksView {
 	const runner =

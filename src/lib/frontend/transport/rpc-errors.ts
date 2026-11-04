@@ -15,6 +15,7 @@ export const copy: {
 		| null;
 } = {
 	DraftAlreadySent: (error) => error.message,
+	DeleteNeedsConfirm: (error) => error.message,
 	DraftAttachmentMissing: (error) => error.message,
 	DraftAttachmentRejected: (error) => error.message,
 	WorkspaceMoveError: (error) =>

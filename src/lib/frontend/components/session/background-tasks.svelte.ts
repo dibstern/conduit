@@ -1,4 +1,6 @@
+import { Schema } from "effect";
 import { tick } from "svelte";
+import { DeleteNeedsConfirm } from "../../../contracts/ws-rpc.js";
 import {
 	type BackgroundTask,
 	backgroundTaskText,
@@ -223,6 +225,55 @@ const askMoved = (sessionId: string, entry: number, ms: number) =>
 		}
 	});
 
+/** 8.4: the ask before a step ends background tasks; no list means the state is unknown. */
+const endAsk = (
+	step: "Stopping now" | "Deleting",
+	tasks: readonly BackgroundTask[] | undefined,
+) =>
+	tasks
+		? `${step} will end: ${tasks.map((task) => backgroundTaskText({ ...task, kind: taskKind(task).label })).join(", ")}. Continue?`
+		: `Background state unknown. ${step} may end background work. Continue?`;
+
+/** One delete ask at a time: a second confirm() replaces the open dialog, which then never settles. */
+let deleteAsks: Promise<boolean> = Promise.resolve(true);
+
+/**
+ * Delete a session (CONTRACT.md 8.4, 2870-2899). The row goes away, so the ask comes before the
+ * step is sent: while tasks are live or unknown the server refuses with the latest snapshot entry,
+ * the same ask shows the row's tasks, and the resend carries that entry. A newer snapshot refuses
+ * again with its own entry, so the ask comes again. Resolves undefined when the ask is dismissed;
+ * nothing is sent then (the gate itself has no cancel).
+ */
+export async function deleteAsking(
+	target: Omit<Parameters<typeof rpc<"DeleteSession">>[1], "_tag">,
+): Promise<Awaited<ReturnType<typeof rpc<"DeleteSession">>> | undefined> {
+	for (let entry: number | undefined; ; ) {
+		try {
+			return await rpc(
+				"DeleteSession",
+				entry === undefined ? target : { ...target, confirm: entry },
+			);
+		} catch (error) {
+			if (!Schema.is(DeleteNeedsConfirm)(error)) throw error;
+			const ask = deleteAsks.then(() => {
+				const row = findSession(target.sessionId);
+				return confirm(
+					endAsk(
+						"Deleting",
+						row?.tasksChecking || !row?.backgroundTasks?.length
+							? undefined
+							: row.backgroundTasks,
+					),
+					"Delete",
+				);
+			});
+			deleteAsks = ask;
+			if (!(await ask)) return undefined;
+			entry = error.snapshotEntry;
+		}
+	}
+}
+
 /**
  * Confirm a stuck Stop (CONTRACT.md 8.4, 2873-2877): ask with the tasks closing would end, then
  * send the snapshot entry the ask showed. A newer snapshot refuses it (D45, 2886-2890), so the
@@ -232,13 +283,7 @@ export async function confirmStuckStop(sessionId: string): Promise<void> {
 	for (;;) {
 		const ask = findSession(sessionId)?.stopConfirm;
 		if (!ask) return;
-		const tasks = ask.tasks?.map((task) =>
-			backgroundTaskText({ ...task, kind: taskKind(task).label }),
-		);
-		const text = tasks
-			? `Stopping now will end: ${tasks.join(", ")}. Continue?`
-			: "Background state unknown. Stopping now may end background work. Continue?";
-		if (!(await confirm(text, "Stop now"))) return;
+		if (!(await confirm(endAsk("Stopping now", ask.tasks), "Stop now"))) return;
 		try {
 			await rpc("ConfirmEscalation", {
 				sessionId,

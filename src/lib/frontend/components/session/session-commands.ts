@@ -20,6 +20,7 @@ import { formatSnoozeTime } from "../../utils/format.js";
 import { backToSessions, toggleSessionRead } from "../../utils/session-read.js";
 import { getSnoozePresets } from "../../utils/snooze.js";
 import { getSessionActionState } from "../../utils/swipe.js";
+import { deleteAsking } from "./background-tasks.svelte.js";
 import { confirmSessionDeletion } from "./session-deletion.js";
 
 export type SessionCommandHost = {
@@ -341,13 +342,14 @@ async function remove(
 	}
 	const target = targets?.[0];
 	if (!target) return false;
-	let result: Awaited<ReturnType<typeof rpc<"DeleteSession">>>;
+	let result: Awaited<ReturnType<typeof deleteAsking>>;
 	try {
-		result = await rpc("DeleteSession", target);
+		result = await deleteAsking(target);
 	} catch (error) {
 		toastFailure(`Couldn't delete "${title}"`, "warn")(error);
 		return false;
 	}
+	if (!result) return false;
 	refreshSearch();
 	const servers = stoppedServers(session);
 	if (servers) showToast(`Stopping ${servers}`);

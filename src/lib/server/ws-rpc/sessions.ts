@@ -18,6 +18,7 @@ import {
 	WorktreeRecoveryError,
 } from "../../contracts/worktree.js";
 import {
+	DeleteNeedsConfirm,
 	DraftAlreadySent,
 	DraftAttachmentMissing,
 	WsRpcError,
@@ -916,6 +917,7 @@ export const sessionsHandlers = {
 			...(request.removeWorktrees === undefined
 				? {}
 				: { removeWorktrees: request.removeWorktrees }),
+			...(request.confirm === undefined ? {} : { confirm: request.confirm }),
 		}).pipe(
 			Effect.map((worktreeWarnings) => ({
 				ok: true as const,
@@ -923,9 +925,11 @@ export const sessionsHandlers = {
 			})),
 			Effect.catch((error) =>
 				Effect.fail(
-					new WsRpcError({
-						message: `DeleteSession failed: ${String(error)}`,
-					}),
+					error instanceof DeleteNeedsConfirm
+						? error
+						: new WsRpcError({
+								message: `DeleteSession failed: ${String(error)}`,
+							}),
 				),
 			),
 		),

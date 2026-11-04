@@ -1186,6 +1186,19 @@ export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 	),
 }) {}
 
+/**
+ * 8.4 (L3): a delete would end background tasks live or unknown, so it waits for a confirm of
+ * the latest snapshot; resend with `confirm: snapshotEntry` after asking. Nothing was deleted.
+ */
+export class DeleteNeedsConfirm extends Schema.TaggedError<DeleteNeedsConfirm>()(
+	"DeleteNeedsConfirm",
+	{ snapshotEntry: Schema.Number },
+) {
+	override get message() {
+		return "Deleting this session would end its background work";
+	}
+}
+
 export class DraftAlreadySent extends Schema.TaggedError<DraftAlreadySent>()(
 	"DraftAlreadySent",
 	{ draftId: Schema.String },
@@ -2883,12 +2896,14 @@ export const DeleteSession = Rpc.make("DeleteSession", {
 		sessionId: NonEmptyString,
 		originId: Schema.optional(NonEmptyString),
 		removeWorktrees: Schema.optional(Schema.Boolean),
+		/** 8.4 (L3): the snapshot entry the delete ask showed, copied from DeleteNeedsConfirm. */
+		confirm: Schema.optional(Schema.Number),
 	}),
 	success: Schema.Struct({
 		ok: Schema.Literal(true),
 		worktreeWarnings: Schema.optional(Schema.Array(Schema.String)),
 	}),
-	error: WsRpcError,
+	error: Schema.Union([WsRpcError, DeleteNeedsConfirm]),
 });
 
 export const ForkSession = Rpc.make("ForkSession", {
