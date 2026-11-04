@@ -801,4 +801,46 @@ describe("Codex background terminals", () => {
 			snapshots: ledger.snapshots,
 		});
 	});
+
+	it("counts a stop as done when Codex finds the terminal already gone and the next list omits it", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"already-gone",
+			terminalTrace((turn) => [
+				...terminate(turn.at, turn.threadId, false),
+				...listed(turn.at + 1, 903, turn.threadId, []),
+			]),
+		);
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		await runEnded(fixture, sessionId);
+		const cursor = browser.frames.length;
+		// The reply comes from the runner's own post-stop list, not from whether that list's
+		// snapshot reached the ledger before the handler looked (G8, 2866).
+		expect(
+			await Effect.runPromise(
+				browser.rpc.StopTasks({ sessionId, tasks: [PROCESS] }),
+			),
+		).toEqual({ ok: true });
+		const row = await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => tasks === undefined,
+			cursor,
+		);
+		const ledger = read(fixture, sessionId);
+		expect(captured(TERMINATE)).toHaveLength(1);
+		expect(ledger.outbox).toEqual([{ status: "completed", taskId: PROCESS }]);
+		expect(ledger.snapshots.at(-1)).toEqual([]);
+		expect(ledger.errors).toEqual([]);
+		followUps.push({
+			case: "already gone",
+			row: row["backgroundTasks"] ?? null,
+			outbox: ledger.outbox,
+			snapshots: ledger.snapshots,
+		});
+	});
 });

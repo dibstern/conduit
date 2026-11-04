@@ -1163,7 +1163,9 @@ export class CodexRunnerPayload implements RunnerPayload {
 	/**
 	 * 8.4 (CONTRACT.md 2860-2867): Stop tasks terminates one background terminal, then re-reads the
 	 * set (8.2, 2792), so the terminal leaves only when a later list omits it (8.3, 2817). Gap
-	 * (2866): `terminated: false` is a failed stop; it fails once, and the reactor never retries it.
+	 * (2866): `terminated: false` is a failed stop while that list still names the terminal; it
+	 * fails once, and the reactor never retries it. When the list omits it, the terminal has ended
+	 * and the stop is done, so the reply never races that list's snapshot to the ledger.
 	 */
 	stopTask(
 		sessionId: string,
@@ -1178,24 +1180,26 @@ export class CodexRunnerPayload implements RunnerPayload {
 					operation: "stop-task",
 					message: "Codex is not running this session in this runner",
 				});
-			const { terminated } = yield* child.client
-				.request(
+			const answer = yield* Effect.result(
+				child.client.request(
 					"thread/backgroundTerminals/terminate",
 					{ threadId, processId: taskId },
 					ThreadBackgroundTerminalsTerminateResponseSchema,
-				)
-				.pipe(
-					Effect.ensuring(
-						this.refreshTerminals(sessionId, session, child.client),
-					),
-					Effect.mapError(
-						(cause): SessionFailure => ({
-							operation: "stop-task",
-							message: turnFailure(cause).message,
-						}),
-					),
-				);
-			if (!terminated)
+				),
+			);
+			const listed = yield* this.refreshTerminals(
+				sessionId,
+				session,
+				child.client,
+			);
+			if (listed && !listed.some(({ processId }) => processId === taskId))
+				return;
+			if (answer._tag === "Failure")
+				return yield* Effect.fail<SessionFailure>({
+					operation: "stop-task",
+					message: turnFailure(answer.failure).message,
+				});
+			if (!answer.success.terminated)
 				return yield* Effect.fail<SessionFailure>({
 					operation: "stop-task",
 					message: `Codex did not stop background terminal ${taskId}`,
@@ -1757,7 +1761,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 	 * 8.2 (CONTRACT.md 2791-2793): the thread's background terminals are its task set. Gap (2791):
 	 * a re-read equal to the set last sent sends nothing; the first always sends, so a reattach has
 	 * a snapshot to replay (8.3, 2812-2815). Gap (2817): a failed list sends nothing, so the set
-	 * stays as last sent until the next re-read.
+	 * stays as last sent until the next re-read. Returns the listed terminals, if any were read.
 	 */
 	private refreshTerminals(
 		sessionId: string,
@@ -1769,7 +1773,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 				Effect.gen(function* () {
 					const threadId = session.threadId;
 					const sink = session.active?.sink ?? session.last?.sink;
-					if (!threadId || !sink) return;
+					if (!threadId || !sink) return undefined;
 					const list = (cursor?: string) =>
 						client.request(
 							"thread/backgroundTerminals/list",
@@ -1798,7 +1802,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 						firstSeenAt: seen.get(processId) ?? now,
 					}));
 					const sent = JSON.stringify(tasks);
-					if (sent === session.terminals.sent) return;
+					if (sent === session.terminals.sent) return terminals;
 					yield* sink.push({
 						eventId: createEventId(),
 						type: "evidence.tasks_snapshot",
@@ -1810,16 +1814,18 @@ export class CodexRunnerPayload implements RunnerPayload {
 						data: { label: "", tasks },
 					});
 					session.terminals.sent = sent;
+					return terminals;
 				}),
 			)
 			.pipe(
 				Effect.catch((cause) =>
-					Effect.sync(() =>
+					Effect.sync(() => {
 						log.warn("codex.terminals_list_failed", {
 							sessionId,
 							message: turnFailure(cause).message,
-						}),
-					),
+						});
+						return undefined;
+					}),
 				),
 			);
 	}
