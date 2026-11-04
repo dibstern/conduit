@@ -328,8 +328,9 @@ export const makeProviderAdaptersLive = (
 						Effect.provideService(SqlClient.SqlClient, sql),
 					),
 				);
-			// The tracker is in memory (8.1), so a restart rebuilds each session's pending action from
-			// its latest goal command the Run Ledger has not finished, and that command's send (8.5, 8.6).
+			// Gap, CONTRACT.md 184 names the tracker the owner of the pending action id but not how it
+			// outlives a restart. Nearest reading: rebuild each session's pending action from its latest
+			// goal command the Run Ledger has not finished, and that command's send (8.5, 8.6).
 			const rebuildGoals = (store: SqlClient.SqlClient) =>
 				Effect.gen(function* () {
 					const latest = yield* store<{
