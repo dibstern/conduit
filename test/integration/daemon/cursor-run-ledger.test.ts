@@ -16,6 +16,19 @@
 // 151. the mark leaks into a native-cancel Stop;
 // 152. the held next start is handed to the retiring runner, or delivered twice; or, unlaunched by
 //      that runner's retirement, it is never relaunched (CONTRACT.md 3.6, 3270-3274).
+// A Cursor runner's start on reattach and swap, and its loss ending its Runs (CONTRACT.md 6.1, 6.4
+// 2330-2332, 6.5 2390-2395, 6.9; lane audit F260-F267):
+// 260. a restart that recovers the surviving runner reports no start, one not reattached, a loss,
+//      or a second runner;
+// 261. the reattach's label is not the runner's hello querySeq;
+// 262. a runner killed mid-send leaves its Run open in the ledger, or ends it twice;
+// 263. that Run ends other than process_lost, or before the runner's process_lost is folded;
+// 264. the killed runner's process_lost is missing, or appended twice;
+// 265. the in-flight input is sent again (a blind resend), or the follow-up does not run once on a
+//      new runner;
+// 266. a swap to a new build misses R's process_started, or lands it before old's process_lost
+//      or in another write;
+// 267. a Run ends twice across the swap, or the send after it runs on old.
 // Retiring a Cursor runner ends its agent's shell commands (82tn.32.10.1; lane audit F240-F253).
 // Cursor starts each shell command detached, in its own session and group, so the runner's group
 // kill misses it; the stand-in here starts the same way:
@@ -30,6 +43,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	rmSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,7 +94,7 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId')) AS runId, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.code') AS code FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, coalesce(json_extract(data, '$.runId'), json_extract(metadata, '$.runId')) AS runId, json_extract(data, '$.runnerId') AS runnerId, json_extract(data, '$.code') AS code, json_extract(data, '$.label') AS label, json_extract(data, '$.reattached') AS reattached FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as {
 				sequence: number;
@@ -88,12 +102,15 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 				runId: string | null;
 				runnerId: string | null;
 				code: string | null;
+				label: string | null;
+				reattached: number | null;
 			}[],
 			ends: db
 				.prepare(
-					"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.outcome') AS outcome, json_extract(entry_json, '$.reason.tag') AS reason, json_extract(entry_json, '$.reason.forced') AS forced FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
+					"SELECT event_sequence AS sequence, json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.outcome') AS outcome, json_extract(entry_json, '$.reason.tag') AS reason, json_extract(entry_json, '$.reason.forced') AS forced FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
 				)
 				.all(sessionId) as {
+				sequence: number;
 				runId: string;
 				outcome: string;
 				reason: string;
@@ -104,6 +121,11 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 					"SELECT id, status FROM provider_runs WHERE session_id = ? ORDER BY rowid",
 				)
 				.all(sessionId) as { id: string; status: string }[],
+			runners: db
+				.prepare(
+					"SELECT runner_id AS runnerId, retired_at AS retiredAt FROM claude_runner_cursors WHERE session_id = ? ORDER BY rowid",
+				)
+				.all(sessionId) as { runnerId: string; retiredAt: number | null }[],
 			turns: (
 				db
 					.prepare(
@@ -189,9 +211,11 @@ describe("Cursor on the Run Ledger", () => {
 		name: string,
 		source: string,
 		environment: Record<string, string> = {},
+		buildId?: string,
 	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			...(buildId ? { buildId } : {}),
 		});
 		harness = fixture;
 		const tracePath = join(fixture.root, "cursor-replay.jsonl");
@@ -218,16 +242,19 @@ describe("Cursor on the Run Ledger", () => {
 			tracePath,
 			`${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
 		);
-		await fixture.restart({
-			startupTimeoutMs: TIMEOUT,
-			runnerStartupTimeoutMs: TIMEOUT,
-			serviceEnvironment: {
-				CONDUIT_CURSOR_SDK_TRACE: tracePath,
-				CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
-				CONDUIT_TEST_CURSOR_DELTA_DELAY_MS: "2",
-				...environment,
-			},
-		});
+		const restart = (nextBuildId?: string) =>
+			fixture.restart({
+				startupTimeoutMs: TIMEOUT,
+				runnerStartupTimeoutMs: TIMEOUT,
+				...(nextBuildId ? { buildId: nextBuildId } : {}),
+				serviceEnvironment: {
+					CONDUIT_CURSOR_SDK_TRACE: tracePath,
+					CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
+					CONDUIT_TEST_CURSOR_DELTA_DELAY_MS: "2",
+					...environment,
+				},
+			});
+		await restart();
 		const added = await fixture.requestRpc({
 			_tag: "AddInstance",
 			name: "Cursor ledger replay",
@@ -241,7 +268,7 @@ describe("Cursor on the Run Ledger", () => {
 			"cursor",
 			{ modelId: "composer-2.5", contextWindow: "", permissionMode: "ask" },
 		);
-		return { fixture, browser, sessionId };
+		return { fixture, browser, sessionId, restart };
 	};
 	const submit = (
 		browser: ProcessBrowser,
@@ -435,6 +462,196 @@ describe("Cursor on the Run Ledger", () => {
 		});
 		expect(captured("send.options")).toHaveLength(2);
 		prove("abandoned", ledger, { lost, handed });
+	});
+
+	const processEvidence = (ledger: Ledger) =>
+		ledger.events
+			.filter(({ type }) => type.startsWith("evidence.process_"))
+			.map(({ type, runnerId, label, reattached }) => ({
+				type,
+				runnerId,
+				label,
+				reattached,
+			}));
+	const runnerPid = (fixture: ProcessHarness, sessionId: string) => {
+		const mark = fixture.marks.find(
+			(candidate) =>
+				candidate.kind === "runner-started" &&
+				candidate.sessionId === sessionId,
+		);
+		if (mark?.kind !== "runner-started") throw new Error("no runner hello");
+		return mark.pid;
+	};
+
+	it("reports reattached true when a daemon restart recovers the surviving runner", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"reattach",
+			"basic",
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		await turns(fixture, sessionId, ["completed"]);
+		const [runner] = read(fixture, sessionId).runners;
+		if (!runner) throw new Error("no runner row");
+		await fixture.kill();
+		await restart();
+		await submit(
+			await fixture.connect(sessionId),
+			sessionId,
+			"Replay the captured basic turn again.",
+		);
+		await turns(fixture, sessionId, ["completed", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		// F260, F261: one runner served both sends; a fresh start, then the reattach, same label.
+		const { runnerId } = runner;
+		expect(ledger.runners.map((row) => row.runnerId)).toEqual([runnerId]);
+		expect(processEvidence(ledger)).toEqual([
+			{
+				type: "evidence.process_started",
+				runnerId,
+				label: `${runnerId}:0`,
+				reattached: 0,
+			},
+			{
+				type: "evidence.process_started",
+				runnerId,
+				label: `${runnerId}:0`,
+				reattached: 1,
+			},
+		]);
+		prove("reattach", ledger);
+	});
+
+	it("ends a killed runner's Run process_lost at its loss, and runs the next send once on a new runner", async () => {
+		const gate = join(mkdtempSync(join(tmpdir(), "cursor-gate-")), "gate");
+		writeFileSync(gate, "hold");
+		const { fixture, browser, sessionId } = await start("killed", "basic", {
+			CONDUIT_TEST_CURSOR_STREAM_GATE: gate,
+		});
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		await thinking(fixture, sessionId);
+		expect(captured("send.options")).toHaveLength(1);
+		const [killed] = read(fixture, sessionId).runs;
+		const killedRunner = read(fixture, sessionId).events.find(
+			({ type, runId }) => type === "run.dispatched" && runId === killed?.id,
+		)?.runnerId;
+		expect(
+			fixture.signalOwnedRunner(runnerPid(fixture, sessionId), "SIGKILL"),
+		).toBe(true);
+		await turns(fixture, sessionId, ["error"]);
+		rmSync(gate);
+		await submit(browser, sessionId, "Replay the captured basic turn again.");
+		await turns(fixture, sessionId, ["error", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const lost = ledger.events.filter(
+			({ type }) => type === "evidence.process_lost",
+		);
+		// F264: one loss, the killed runner's.
+		expect(killedRunner).toEqual(expect.any(String));
+		expect(lost.map(({ runnerId }) => runnerId)).toEqual([killedRunner]);
+		// F262, F263: the killed send's Run ends once, process_lost, folded from that loss
+		// (CONTRACT.md 6.4 2330-2332, 6.5 2390-2395).
+		expect(ledger.ends.filter(({ runId }) => runId === killed?.id)).toEqual([
+			expect.objectContaining({
+				runId: killed?.id,
+				reason: "process_lost",
+				sequence: lost[0]?.sequence,
+			}),
+		]);
+		// F265: no blind resend; the follow-up goes once to a new runner after the loss.
+		const next = ledger.runs.at(-1);
+		const handed = ledger.events.filter(
+			({ type, runId }) => type === "run.dispatched" && runId === next?.id,
+		);
+		expect(handed).toHaveLength(1);
+		expect(handed[0]?.runnerId).not.toBe(lost[0]?.runnerId);
+		expect(handed[0]?.sequence).toBeGreaterThan(lost[0]?.sequence ?? 0);
+		expect(captured("send.options")).toHaveLength(2);
+		prove("killed", ledger, { lost, handed });
+	});
+
+	it("lands old's process_lost and R's process_started together when a new build swaps the runner", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"swap",
+			"basic",
+			{},
+			"82tn-32-10-before",
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		await turns(fixture, sessionId, ["completed"]);
+		const [old] = read(fixture, sessionId).runners;
+		if (!old) throw new Error("no runner row");
+		const oldPid = runnerPid(fixture, sessionId);
+		await fixture.kill();
+		await restart("82tn-32-10-after");
+		// The idle old runner swaps on the new build's restart, before any send.
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "runner-upgrade" &&
+				mark.phase === "switched" &&
+				mark.oldPid === oldPid,
+		);
+		await submit(
+			await fixture.connect(sessionId),
+			sessionId,
+			"Replay the captured basic turn again.",
+		);
+		await turns(fixture, sessionId, ["completed", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		const replacement = ledger.runners.find(
+			(runner) => runner.runnerId !== old.runnerId && runner.retiredAt === null,
+		);
+		if (!replacement) throw new Error("no serving replacement");
+		// F266: the restart reattaches old, then the swap commit retires it and starts R.
+		expect(processEvidence(ledger)).toEqual([
+			{
+				type: "evidence.process_started",
+				runnerId: old.runnerId,
+				label: `${old.runnerId}:0`,
+				reattached: 0,
+			},
+			{
+				type: "evidence.process_started",
+				runnerId: old.runnerId,
+				label: `${old.runnerId}:0`,
+				reattached: 1,
+			},
+			{
+				type: "evidence.process_lost",
+				runnerId: old.runnerId,
+				label: null,
+				reattached: null,
+			},
+			{
+				type: "evidence.process_started",
+				runnerId: replacement.runnerId,
+				label: `${replacement.runnerId}:0`,
+				reattached: 0,
+			},
+		]);
+		// One write: R's start directly follows old's loss in the session's stream (6.9).
+		const lost = ledger.events.findIndex(
+			({ type }) => type === "evidence.process_lost",
+		);
+		expect(ledger.events[lost + 1]).toMatchObject({
+			type: "evidence.process_started",
+			runnerId: replacement.runnerId,
+		});
+		// F267: the send after the swap ran on R.
+		const next = ledger.runs.at(-1);
+		expect(
+			ledger.events
+				.filter(
+					({ type, runId }) => type === "run.dispatched" && runId === next?.id,
+				)
+				.map(({ runnerId }) => runnerId),
+		).toEqual([replacement.runnerId]);
+		prove("swap", ledger, {
+			old: old.runnerId,
+			replacement: replacement.runnerId,
+		});
 	});
 
 	const shellStandIn = async (marker: string) => {
