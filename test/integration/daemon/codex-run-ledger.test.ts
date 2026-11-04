@@ -485,6 +485,68 @@ describe("Codex on the Run Ledger", () => {
 		prove("stop", ledger);
 	});
 
+	// Failure modes (32.8): F300 the Run stays running when turn/interrupt is never answered;
+	// F301 it ends twice, at the deadline step and again at its runner's loss; F302 the runner
+	// outlives the deadline step; F303 the next send waits on the dead stop or its old runner;
+	// F304 the next send re-sends the stopped input or starts a new thread.
+	// test-waits-allow timeout-override: the Stop's 30 s interrupt deadline runs on the daemon's wall clock.
+	it("ends a Stopped Run its app-server never acknowledges at the deadline, and the next send resumes once", async () => {
+		// The app-server takes turn/interrupt and never answers it, nor ends the turn.
+		const silent = fixtureRows("stop-queued");
+		const interrupt = silent.findIndex(
+			(row) => row.message?.method === "turn/interrupt",
+		);
+		const { fixture, browser, sessionId } = await start(
+			"stop-silent",
+			silent.slice(0, interrupt + 1),
+		);
+		await submit(browser, sessionId, "Say hello");
+		await turns(fixture, sessionId, ["running"]);
+		const { threadId } = JSON.parse(
+			readFileSync(
+				join(fixture.configDir, "codex", "stores", sessionId, "session.json"),
+				"utf8",
+			),
+		) as { threadId: string };
+		writeTrace(resumeTrace(fixtureRows("basic"), threadId));
+		await Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		// test-waits-allow polling: the deadline step's retirement reaches only the store and the process table.
+		await vi.waitFor(
+			() => {
+				expect(read(fixture, sessionId).turns).not.toContain("running");
+				expect(fixture.remainingRunnerPids()).toEqual([]);
+			},
+			{ timeout: TIMEOUT, interval: 200 },
+		);
+		expect(captured("turn/interrupt", "out")).toHaveLength(1);
+		await submit(browser, sessionId, "Say hello again");
+		// test-waits-allow polling: the next Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns.at(-1)).toBe("completed"),
+			{ timeout: TIMEOUT },
+		);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.runs.map((run) => run.status)).toEqual([
+			"interrupted",
+			"completed",
+		]);
+		// The new runner's app-server writes its own capture: one turn/start, of the new message.
+		const starts = captured("turn/start", "out");
+		expect(starts).toHaveLength(1);
+		expect(JSON.stringify(starts[0]?.message?.params)).toContain(
+			"Say hello again",
+		);
+		expect(processEvidence(ledger).map(({ type }) => type)).toEqual([
+			"evidence.process_started",
+			"evidence.process_lost",
+			"evidence.process_started",
+		]);
+		prove("stop-silent", ledger, { lost: processEvidence(ledger) });
+	}, 120_000);
+
 	it("ends a goal chain's Run once; its in-window successors are no wake (row 215)", async () => {
 		const { fixture, browser, sessionId } = await start(
 			"goal-chain",
