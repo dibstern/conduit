@@ -8,7 +8,6 @@ import {
 	Layer,
 	Option,
 	PubSub,
-	type Result,
 	Schedule,
 	type Scope,
 	Stream,
@@ -19,6 +18,7 @@ import type { Account } from "../../../contracts/account.js";
 import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
 import * as Failure from "../../../effect/failure-classification.js";
+import { formatErrorDetail } from "../../../errors.js";
 import type {
 	ClaudeEventPersistEffectTag,
 	ClaudeEventPersistFailure,
@@ -116,7 +116,6 @@ export { STOP_ABORT_WAIT_MS };
 
 type StopFailure =
 	| Effect.Error<ReturnType<typeof interruptTurn>>
-	| Effect.Error<ReturnType<typeof prepareStop>>
 	| ProviderRuntimeIngestionError
 	| SqlError;
 
@@ -156,13 +155,15 @@ export interface ProviderTurnService {
 		Effect.Error<ReturnType<typeof sendTurn>>,
 		OverridesStateTag
 	>;
-	/** Install the session's Stop fence and fork its abort, or join the Stop in
-	 *  flight. Call under the inbox session permit: that orders the Stop against
-	 *  every handoff, and its admission cut-off excludes later ones from the
-	 *  abort. Every caller awaits the same stopped turn's end or interrupt failure. */
+	/** Commit the session's Stop and install its fence, or join the Stop in
+	 *  flight. Fails when main does not accept it. The returned effect awaits the
+	 *  abort's end. Call under the inbox session permit. */
 	readonly beginStop: (
 		input: ProviderTurnServiceInterruptInput,
-	) => Effect.Effect<Effect.Effect<void, StopFailure>>;
+	) => Effect.Effect<
+		Effect.Effect<void, StopFailure>,
+		Effect.Error<ReturnType<typeof prepareStop>>
+	>;
 }
 
 export class ProviderTurnServiceTag extends Context.Service<
@@ -293,24 +294,36 @@ const makeProviderTurnService = Effect.gen(function* () {
 				{ owners: snapshot.owners, errorCode: "stop_unconfirmed" },
 			);
 		});
+	/** Install the fence of a Stop main accepted and fork its abort. The worker
+	 *  alone removes the entry, and reports a later failure once. */
 	const startStop = (
 		input: ProviderTurnServiceInterruptInput,
-		cutoff: Result.Result<
-			Effect.Success<ReturnType<typeof prepareStop>>,
-			Effect.Error<ReturnType<typeof prepareStop>>
-		>,
+		snapshot: Effect.Success<ReturnType<typeof prepareStop>>,
 		recovered = false,
 	) =>
 		Effect.gen(function* () {
 			const done = yield* Deferred.make<void, StopFailure>();
 			stopping.set(input.sessionId, done);
-			yield* Effect.fromResult(cutoff).pipe(
-				Effect.flatMap((snapshot) => abort(input, snapshot, recovered)),
+			yield* abort(input, snapshot, recovered).pipe(
 				Effect.onExit((exit) =>
 					Effect.sync(() => stopping.delete(input.sessionId)).pipe(
 						Effect.andThen(Deferred.done(done, exit)),
 						Effect.andThen(
-							Exit.hasInterrupts(exit) ? Effect.void : lift(input.sessionId),
+							Exit.isSuccess(exit)
+								? lift(input.sessionId)
+								: Failure.isInterrupted(exit.cause)
+									? Effect.void
+									: lift(input.sessionId).pipe(
+											Effect.andThen(
+												Effect.flatMap(LoggerTag, (log) =>
+													Effect.sync(() =>
+														log.warn(
+															`session=${input.sessionId} Stop ${input.commandId} failed: ${Failure.renderCause(exit.cause)}`,
+														),
+													),
+												),
+											),
+										),
 						),
 					),
 				),
@@ -320,17 +333,16 @@ const makeProviderTurnService = Effect.gen(function* () {
 			);
 			return Deferred.await(done);
 		});
-	/** Accept a Stop, or join the session's running one. `cutoff` is absent on a join. */
-	const acceptStop = (input: ProviderTurnServiceInterruptInput) =>
+	const beginStop: ProviderTurnService["beginStop"] = (input) =>
 		Effect.uninterruptible(
-			Effect.gen(function* () {
+			Effect.suspend(() => {
 				const existing = stopping.get(input.sessionId);
-				if (existing) return { stopped: Deferred.await(existing) };
-				const cutoff = yield* prepareStop(input).pipe(
-					Effect.provide(providedContext),
-					Effect.result,
-				);
-				return { cutoff, stopped: yield* startStop(input, cutoff) };
+				return existing
+					? Effect.succeed(Deferred.await(existing))
+					: prepareStop(input).pipe(
+							Effect.provide(providedContext),
+							Effect.flatMap((snapshot) => startStop(input, snapshot)),
+						);
 			}),
 		);
 	const service: ProviderTurnService = {
@@ -362,32 +374,11 @@ const makeProviderTurnService = Effect.gen(function* () {
 				const switching = accountSwitches.get(input.sessionId);
 				if (switching) yield* Deferred.await(switching);
 				const inbox = yield* SessionInboxTag;
+				// Only acceptance is awaited (RL-081); the worker reports a later failure.
 				return yield* prepareTurnSession(input, (stopInput) =>
-					inbox.withSession(stopInput.sessionId, acceptStop(stopInput)).pipe(
-						Effect.flatMap(({ cutoff, stopped }) =>
-							// A Stop main did not accept fails the reply before admission; the
-							// waiter then settles at once. An accepted Stop is not waited on
-							// (RL-081), but its later failure is reported, not dropped.
-							cutoff?._tag === "Failure"
-								? stopped
-								: stopped.pipe(
-										Effect.catchCause((cause) =>
-											Failure.isInterruptedOnly(cause)
-												? Effect.void
-												: Effect.flatMap(LoggerTag, (log) =>
-														Effect.sync(() =>
-															log.warn(
-																`session=${stopInput.sessionId} Stop for a question reply failed: ${Failure.renderCause(cause)}`,
-															),
-														),
-													),
-										),
-										Effect.provide(providedContext),
-										Effect.forkIn(scope),
-									),
-						),
-						Effect.asVoid,
-					),
+					inbox
+						.withSession(stopInput.sessionId, beginStop(stopInput))
+						.pipe(Effect.asVoid),
 				);
 			}).pipe(Effect.provide(providedContext)),
 		sendTurn: (input) =>
@@ -399,8 +390,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 				),
 				Effect.provide(providedContext),
 			),
-		beginStop: (input) =>
-			Effect.map(acceptStop(input), ({ stopped }) => stopped),
+		beginStop,
 	};
 	// Completed delivery receipts still own a deadline until their captured runs
 	// end. Restore the fences before the inbox can admit another foreground turn.
@@ -426,11 +416,18 @@ const makeProviderTurnService = Effect.gen(function* () {
 			sessionId: row.session_id,
 			clientId: "stop-recovery",
 		};
-		const cutoff = yield* prepareStop(input).pipe(
+		const accepted = yield* prepareStop(input).pipe(
 			Effect.provide(providedContext),
 			Effect.result,
 		);
-		yield* startStop(input, cutoff, true);
+		// A refused row installs nothing, so a later row of the session is tried.
+		if (accepted._tag === "Failure") {
+			(yield* LoggerTag).warn(
+				`session=${input.sessionId} recovered Stop ${input.commandId} refused: ${formatErrorDetail(accepted.failure)}`,
+			);
+			continue;
+		}
+		yield* startStop(input, accepted.success, true);
 	}
 	return service;
 });

@@ -65,8 +65,8 @@ export const GoalStuckStopReactorLive = Layer.effectDiscard(
 				if (tracker.count < GOAL_STUCK_STOP_AFTER) return;
 				tracker.count = 0;
 				const commandId = `goal-stuck:${event.eventId}`;
-				// The outer effect installs the fence and forks the abort. Its result
-				// waits for turn end, which must not block this event subscription.
+				// Fails when main refuses the Stop; the inner effect waits for turn
+				// end, which must not block this event subscription.
 				yield* inbox.withSession(
 					sessionId,
 					turns.beginStop({ clientId: "goal-stuck", commandId, sessionId }),

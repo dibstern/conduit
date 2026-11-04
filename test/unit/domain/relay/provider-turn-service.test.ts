@@ -9,7 +9,10 @@ import {
 	Exit,
 	Fiber,
 	Layer,
+	Option,
 	Ref,
+	Scope,
+	Semaphore,
 	Stream,
 } from "effect";
 import { SqlClient, Statement } from "effect/sql";
@@ -3615,17 +3618,172 @@ describe("ProviderTurnService", () => {
 				({ prepared }) =>
 					Effect.gen(function* () {
 						expect(Exit.isSuccess(prepared)).toBe(true);
-						// The Stop fails on its own fiber after admission; the reply's watcher reports it.
+						// The Stop fails on its own fiber after admission; its worker reports it.
 						yield* Deferred.await(warned);
 					}),
 			);
 			vi.mocked(log.warn).mockImplementation((message) => {
-				if (String(message).includes("Stop for a question reply failed"))
+				if (
+					String(message).includes(
+						"Stop cmd-reply:interrupt-for-question failed",
+					)
+				)
 					Deferred.doneUnsafe(warned, Effect.void);
 			});
 			return run;
 		},
 	);
+
+	const refusedStop = () =>
+		vi.fn(() =>
+			Effect.fail(
+				new ProviderInstanceFailure({
+					providerId: "claude",
+					operation: "acceptStop",
+					cause: "refused",
+				}),
+			),
+		);
+	const warnsNaming = (log: { warn: unknown }, text: string) =>
+		vi
+			.mocked(log.warn as (...args: unknown[]) => void)
+			.mock.calls.filter(([message]) => String(message).includes(text));
+
+	it.effect("fails both question replies when main refuses their Stop", () => {
+		const engine = makeEngine({ providerId: "claude" });
+		const { layer: dependencies } = serviceLayer({
+			engine,
+			readQuery: {
+				...makeReadQuery(() => Effect.succeed([])),
+				getSession: () => Effect.succeed(undefined),
+			},
+		});
+		// One permit per session, as the real inbox holds; PassThroughSessionInbox has none.
+		const onePermitInbox = Layer.effect(
+			SessionInboxTag,
+			Effect.gen(function* () {
+				const inbox = yield* SessionInboxTag;
+				const permit = yield* Semaphore.make(1);
+				return {
+					...inbox,
+					withSession: <A, E, R>(
+						_sessionId: string,
+						effect: Effect.Effect<A, E, R>,
+					) => permit.withPermits(1)(effect),
+				};
+			}),
+		).pipe(Layer.provide(PassThroughSessionInbox));
+		return Effect.gen(function* () {
+			yield* (yield* PendingInteractionServiceTag).recordQuestionRequest({
+				requestId: "question-0",
+				sessionId: "session-1",
+				questions: [],
+			});
+			const acceptStop = refusedStop();
+			(yield* OrchestrationEngineTag).acceptStopEffect = acceptStop;
+			const service = yield* ProviderTurnServiceTag;
+			const reply = (commandId: string) =>
+				Effect.exit(
+					service.prepareTurnSession({
+						clientId: "client-1",
+						commandId,
+						sessionId: "session-1",
+					}),
+				);
+			const replies = yield* Effect.all(
+				[reply("cmd-reply-1"), reply("cmd-reply-2")],
+				{ concurrency: "unbounded" },
+			);
+			expect(replies.map((exit) => exit._tag)).toEqual(["Failure", "Failure"]);
+			// A refused Stop leaves nothing to join, so the second reply commits its own.
+			expect(acceptStop).toHaveBeenCalledTimes(2);
+			expect(
+				vi
+					.mocked(engine.dispatchEffect)
+					.mock.calls.some(([call]) => call.type === "interrupt_turn"),
+			).toBe(false);
+		}).pipe(
+			Effect.provide(onePermitInbox.pipe(Layer.provideMerge(dependencies))),
+		);
+	});
+
+	it.effect("a refused Stop raises no fence and publishes no lift", () => {
+		const { layer } = serviceLayer({
+			engine: makeEngine({ providerId: "claude" }),
+		});
+		return Effect.gen(function* () {
+			(yield* OrchestrationEngineTag).acceptStopEffect = refusedStop();
+			const service = yield* ProviderTurnServiceTag;
+			const lifts = yield* service.fenceLifts;
+			const begun = yield* Effect.exit(
+				service.beginStop({
+					clientId: "client-1",
+					commandId: "cmd-refused",
+					sessionId: "session-1",
+				}),
+			);
+			expect(service.turnFences("session-1").stopping).toBe(false);
+			// A marker lift: if the refused Stop lifted, its lift would come first.
+			yield* Effect.scoped(
+				service.holdUserTurnsForAccountSwitch("session-marker"),
+			);
+			expect(yield* Stream.runHead(lifts)).toEqual(
+				Option.some("session-marker"),
+			);
+			expect(begun._tag).toBe("Failure");
+		}).pipe(Effect.provide(layer));
+	});
+
+	it.effect(
+		"logs an accepted Stop's later failure once when nobody awaits it",
+		() => {
+			const { layer, log } = serviceLayer({
+				engine: makeEngine({ providerId: "claude" }),
+			});
+			return Effect.gen(function* () {
+				// A defect, so interruptTurn's own warning for a typed failure does not fire.
+				(yield* OrchestrationEngineTag).executeAcceptedStopEffect = () =>
+					Effect.die(new Error("runner refused the interrupt"));
+				const service = yield* ProviderTurnServiceTag;
+				const lifts = yield* service.fenceLifts;
+				// The inner effect is dropped: no caller awaits the abort's end.
+				yield* service.beginStop({
+					clientId: "client-1",
+					commandId: "cmd-unawaited",
+					sessionId: "session-1",
+				});
+				yield* Stream.runHead(lifts);
+				yield* Effect.yieldNow;
+				expect(warnsNaming(log, "cmd-unawaited")).toHaveLength(1);
+			}).pipe(Effect.provide(layer));
+		},
+	);
+
+	it.effect("an interrupted Stop logs nothing", () => {
+		const { layer, log } = serviceLayer({
+			engine: makeEngine({ providerId: "claude" }),
+		});
+		const delivering = Deferred.makeUnsafe<void>();
+		return Effect.gen(function* () {
+			const scope = yield* Scope.make();
+			const context = yield* Layer.buildWithScope(layer, scope);
+			yield* Effect.gen(function* () {
+				(yield* OrchestrationEngineTag).executeAcceptedStopEffect = () =>
+					Deferred.succeed(delivering, undefined).pipe(
+						Effect.andThen(Effect.never),
+					);
+				const service = yield* ProviderTurnServiceTag;
+				yield* service.beginStop({
+					clientId: "client-1",
+					commandId: "cmd-interrupted",
+					sessionId: "session-1",
+				});
+				yield* Deferred.await(delivering);
+			}).pipe(Effect.provide(context));
+			yield* Scope.close(scope, Exit.void);
+			expect(warnsNaming(log, "cmd-interrupted")).toHaveLength(0);
+		});
+	});
 
 	it.effect(
 		"completes a disposed question using its projected tool identity",

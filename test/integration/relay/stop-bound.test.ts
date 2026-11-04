@@ -34,6 +34,7 @@ import {
 import {
 	ConfigTag,
 	LoggerTag,
+	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import {
@@ -46,6 +47,7 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { inboxRunStatusQuery } from "../../../src/lib/persistence/inbox-run-status-query.js";
+import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
@@ -484,6 +486,71 @@ describe("Stop bound through SQLite ingestion and durable dispatch", () => {
 					]);
 				}).pipe(Effect.provide(stopLayer(api, scratch)));
 			}),
+	);
+
+	it.effect("logs a refused inbox Stop once and does not fail the commit", () =>
+		Effect.gen(function* () {
+			const scratch = yield* scratchDirectory;
+			const api = makeMockOpenCodeAPI({
+				promptProcessId: "opencode:refused-stop",
+			});
+			const originalStarted = Deferred.makeUnsafe<void>();
+			api.session.prompt = vi.fn(() => {
+				Deferred.doneUnsafe(originalStarted, Effect.void);
+				return new Promise<void>(() => {});
+			});
+			const refused = vi.fn(() =>
+				Effect.fail(
+					new ProviderInstanceFailure({
+						providerId: "opencode",
+						operation: "acceptStop",
+						cause: "refused",
+					}),
+				),
+			);
+			yield* Effect.gen(function* () {
+				vi.spyOn(
+					yield* OrchestrationEngineTag,
+					"acceptStopEffect",
+				).mockImplementation(refused);
+				const inbox = yield* SessionInboxTag;
+				const log = yield* LoggerTag;
+				yield* inbox.start;
+				yield* inbox.submit({
+					clientId: "client-1",
+					sessionId: "session-1",
+					inputId: "original",
+					delivery: "queue",
+					request: { text: "original" },
+				});
+				yield* Deferred.await(originalStarted);
+				yield* inbox.submit({
+					clientId: "client-1",
+					sessionId: "session-1",
+					inputId: "replacement",
+					delivery: "queue",
+					request: { text: "replacement" },
+				});
+				// Run now: the reservation commits, then its Stop is refused.
+				expect(
+					yield* inbox.sendNow({
+						clientId: "client-1",
+						sessionId: "session-1",
+						inputId: "replacement",
+						interrupt: true,
+					}),
+				).toBe("accepted");
+				yield* flushDispatch;
+				expect(refused).toHaveBeenCalledOnce();
+				expect(
+					vi
+						.mocked(log.warn)
+						.mock.calls.filter(([message]) =>
+							String(message).includes("inbox-stop:replacement"),
+						),
+				).toHaveLength(1);
+			}).pipe(Effect.provide(stopLayer(api, scratch)));
+		}),
 	);
 
 	it.effect(
