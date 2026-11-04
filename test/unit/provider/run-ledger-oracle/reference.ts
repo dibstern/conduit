@@ -1144,8 +1144,21 @@ function requestInteraction(
 	label: Label,
 	evidence: Extract<Evidence, { kind: "interaction_requested" }>,
 ): Outcome {
-	if (interactionOf(world, evidence.interactionId) !== undefined)
-		return noop("interaction already requested");
+	const asked = interactionOf(world, evidence.interactionId);
+	// 3.10 (CONTRACT.md 1019-1022): main re-asks, under the same id, a prompt whose answer failed
+	// for good unconsumed; it is a new request (Pending, answerable again), so it replaces the old one.
+	if (
+		asked?.resolved === true &&
+		asked.deliveries.some((index) =>
+			world.sends[index]?.txs.some((tx) => tx.permanent !== undefined),
+		) &&
+		!asked.deliveries.some((index) => {
+			const send = world.sends[index];
+			return send?.txs.some((tx) => mayStillAct(world, send, tx)) ?? false;
+		})
+	)
+		world.interactions.splice(world.interactions.indexOf(asked), 1);
+	else if (asked !== undefined) return noop("interaction already requested");
 	world.interactions.push({
 		interactionId: evidence.interactionId,
 		kind: evidence.interactionKind,

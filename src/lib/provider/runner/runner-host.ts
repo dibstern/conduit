@@ -1049,6 +1049,20 @@ export const runSessionRunner = (
 									return yield* Effect.die("Runner is not initialized");
 								const payloadRunner = runner;
 								const execution = Effect.gen(function* () {
+									if (
+										process.env["NODE_ENV"] === "test" &&
+										(command.type === "resolve-permission" ||
+											command.type === "resolve-question") &&
+										existsSync(
+											join(dirname(socketPath), "conduit-test-refuse-answer"),
+										)
+									)
+										return yield* Effect.fail({
+											operation: command.type,
+											code: "test_answer_refused",
+											retryable: true,
+											message: "The test refused this answer.",
+										});
 									const invalidated = sourceDeliveryInvalidated;
 									if (
 										command.type === "send-turn" &&
@@ -1139,20 +1153,26 @@ export const runSessionRunner = (
 												while (existsSync(gate))
 													yield* Effect.sleep("20 millis");
 											}
+											const failure = runnerFailure(
+												command.type,
+												Failure.squashCause(cause),
+											);
+											// A refused answer was not consumed: main retries it under the same commandId,
+											// so its next transmission runs again rather than replaying this refusal (3.10).
+											if (
+												failure.retryable &&
+												(command.type === "resolve-permission" ||
+													command.type === "resolve-question")
+											)
+												commands.delete(message.commandId);
 											completedCommands.set(message.commandId, {
 												commandId: message.commandId,
-												failure: runnerFailure(
-													command.type,
-													Failure.squashCause(cause),
-												),
+												failure,
 											});
 											connection?.write({
 												type: "command-reply",
 												commandId: message.commandId,
-												failure: runnerFailure(
-													command.type,
-													Failure.squashCause(cause),
-												),
+												failure,
 											});
 											if (
 												command.type === "end-session" ||

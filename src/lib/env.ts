@@ -171,6 +171,20 @@ export const ENV = {
 		1,
 		2_147_483_647,
 	),
+	/** Permission prompts expire after this; tests shorten it (3.10: main's timeout). */
+	permissionTimeoutMs: parseBoundedInteger(
+		process.env["CONDUIT_PERMISSION_TIMEOUT_MS"],
+		5 * 60_000,
+		1,
+		2_147_483_647,
+	),
+	/** How often expired permission prompts are rejected; tests shorten it. */
+	permissionTimeoutCheckMs: parseBoundedInteger(
+		process.env["CONDUIT_PERMISSION_TIMEOUT_CHECK_MS"],
+		30_000,
+		1,
+		2_147_483_647,
+	),
 	/** Daemon-internal setup deadline; integration fixtures use a short timeout. */
 	worktreeSetupTimeoutMs: parseBoundedInteger(
 		process.env["CONDUIT_WORKTREE_SETUP_TIMEOUT_MS"],
