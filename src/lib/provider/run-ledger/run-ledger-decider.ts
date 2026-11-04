@@ -280,6 +280,8 @@ interface Book {
 	readonly seen: Set<string>;
 	/** The seq of the last session end or rejected resume (3.4). */
 	freshSince: number;
+	/** 3.4: the latest session end covers the sends issued before this seq. */
+	coveredBefore: number;
 	/** L1: a runner retired before it started has no label. */
 	readonly runners: Map<
 		string,
@@ -1031,6 +1033,13 @@ function transmit(
 		tx.covered ??= "process_lost";
 		tx.ended ??= "process_lost";
 	}
+	// 3.4 (CONTRACT.md 538-541): a send issued before a session end transmits into the ended
+	// native session, where nothing acts, so its later transmission is covered at once.
+	if (send.seq < book.coveredBefore) {
+		seal(tx);
+		tx.covered ??= "session_ended";
+		tx.ended ??= "session_ended";
+	}
 	if (token !== undefined)
 		book.tokens.set(token, {
 			send: book.sends.indexOf(send),
@@ -1312,6 +1321,7 @@ function effectOutcome(
 function sessionEnd(book: Book, before: number): boolean {
 	let moved = book.freshSince !== book.seq;
 	book.freshSince = book.seq;
+	book.coveredBefore = Math.max(book.coveredBefore, before);
 	for (const send of book.sends)
 		for (const tx of send.txs)
 			if (
@@ -3034,6 +3044,7 @@ export function initialSessionLedgerState(
 		mainRuns: new Map(),
 		seen: new Set(),
 		freshSince: -1,
+		coveredBefore: -1,
 		runners: new Map(),
 		current: null,
 		retirements: new Set(),

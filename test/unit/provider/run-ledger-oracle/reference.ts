@@ -247,6 +247,8 @@ interface World {
 	readonly seen: Set<string>;
 	/** The seq of the last session end or rejected resume (3.4). */
 	freshSince: number;
+	/** 3.4: the latest session end covers the sends issued before this seq. */
+	coveredBefore: number;
 	readonly runners: Map<string, Runner>;
 	current: string | null;
 	readonly retirements: Set<string>;
@@ -915,6 +917,13 @@ function transmit(
 		tx.covered ??= "process_lost";
 		endWork(tx, "process_lost");
 	}
+	// 3.4 (CONTRACT.md 538-541): a send issued before a session end transmits into the ended
+	// native session, where nothing acts, so its later transmission is covered at once.
+	if (send.seq < world.coveredBefore) {
+		seal(tx);
+		tx.covered ??= "session_ended";
+		endWork(tx, "session_ended");
+	}
 	if (token !== undefined)
 		world.tokens.set(token, {
 			send: world.sends.indexOf(send),
@@ -1033,6 +1042,7 @@ function sessionEnd(
 	cause: "session_ended",
 ): void {
 	world.freshSince = world.seq;
+	world.coveredBefore = Math.max(world.coveredBefore, before);
 	for (const send of world.sends)
 		for (const tx of send.txs)
 			if (tx.seq < before) {
@@ -2845,6 +2855,7 @@ function emptyWorld(
 		mainRuns: new Map(),
 		seen: new Set(),
 		freshSince: -1,
+		coveredBefore: -1,
 		runners: new Map(),
 		current: null,
 		retirements: new Set(),
