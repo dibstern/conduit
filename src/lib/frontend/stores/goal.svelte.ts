@@ -10,7 +10,7 @@ export const goalDetails = $state({ open: false });
 
 export type GoalComposerAction = {
 	sessionId: string;
-	action: "resume" | "edit" | "clear" | "new";
+	action: "pause" | "resume" | "edit" | "clear" | "new";
 	condition?: string;
 };
 
@@ -66,6 +66,13 @@ export type GoalView = {
 	icon: "target" | "pause" | "check";
 };
 
+/** 8.6 Limited: Codex stopped the goal at a limit; a Resume sends it active again. */
+export const GOAL_LIMITED = {
+	blocked: "Goal blocked",
+	usage: "Goal hit a usage limit",
+	budget: "Goal reached its token budget",
+} as const;
+
 export function goalView(
 	facts: SessionGoalChangedPayload | undefined,
 	/** The session's foreground Run is working (SessionActivity, CONTRACT.md 8.1). */
@@ -110,7 +117,7 @@ export function goalView(
 	if (facts?.pausedReason) {
 		return {
 			phase: "paused",
-			subtitle: `Goal paused · ${goal.condition}`,
+			subtitle: `${facts.limit ? GOAL_LIMITED[facts.limit] : "Goal paused"} · ${goal.condition}`,
 			tone: "violet",
 			border: "dashed",
 			icon: "pause",

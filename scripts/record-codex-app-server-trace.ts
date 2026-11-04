@@ -1193,16 +1193,6 @@ function driveScenario(
 				);
 				const threadId = thread.thread.id;
 				yield* client.request(
-					"thread/goal/set",
-					{
-						threadId,
-						objective: "Say hello",
-						status: "paused",
-						origin: "user",
-					},
-					ThreadGoalSetResponseSchema,
-				);
-				yield* client.request(
 					"turn/start",
 					{
 						threadId,
@@ -1219,9 +1209,16 @@ function driveScenario(
 					},
 					TurnStartResponseSchema,
 				);
+				// The runner sends a goal set once its turn is accepted, so the goal cannot start a
+				// turn of its own beside it (82tn.32.27).
 				yield* client.request(
 					"thread/goal/set",
-					{ threadId, status: "active", origin: "user" },
+					{
+						threadId,
+						objective: "Say hello",
+						status: "active",
+						origin: "user",
+					},
 					ThreadGoalSetResponseSchema,
 				);
 				const turnEnd = (message: DecodedNotification) =>
@@ -2453,16 +2450,11 @@ function assertTurnNotifications(
 		assert.deepEqual(setters[0]?.["params"], {
 			threadId: first.params.threadId,
 			objective: "Say hello",
-			status: "paused",
-			origin: "user",
-		});
-		assert.deepEqual(setters[1]?.["params"], {
-			threadId: first.params.threadId,
 			status: "active",
 			origin: "user",
 		});
 		if (scenario === "goal-interrupt") {
-			assert.equal(setters.length, 2);
+			assert.equal(setters.length, 1);
 			const successor = starts[1];
 			assert(successor?.method === "turn/started");
 			assert.deepEqual(

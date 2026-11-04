@@ -31,6 +31,7 @@ export const makeCodexRunnerDriver = (
 ): RunnerDriverPieces => ({
 	driverKind: "codex",
 	stopTask: true, // Stop tasks terminates a background terminal (82tn.32.28).
+	nativeCommands: true, // Goal actions go as native goal requests (82tn.32.27).
 	discoverEffect: (directory, account, options, call) =>
 		discoverCodexEffect(
 			call?.account ?? account,
