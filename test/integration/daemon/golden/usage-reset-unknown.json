@@ -35,6 +35,19 @@
 		},
 		{
 			"sessionId": "s1",
+			"type": "input.admitted",
+			"payload": {
+				"delivery": "queue",
+				"request": {
+					"text": "",
+					"variant": "",
+					"contextWindow": ""
+				},
+				"continuation": true
+			}
+		},
+		{
+			"sessionId": "s1",
 			"type": "session.status",
 			"payload": {
 				"status": "busy"

@@ -185,8 +185,10 @@ const fixture = Effect.gen(function* () {
 							sessionId,
 							type: event.type,
 							payload: Object.fromEntries(
+								// The continuation's admission (CONTRACT.md 3.9, D58) carries a fresh random inputId.
 								Object.entries(event.data).filter(
-									([key]) => !["sessionId", "messageId", "at"].includes(key),
+									([key]) =>
+										!["sessionId", "messageId", "at", "inputId"].includes(key),
 								),
 							),
 						});
