@@ -98,7 +98,8 @@ export interface CodexRunnerDeps {
 }
 
 type ChildUpdate =
-	| { readonly notification: AppServerNotification }
+	// `at` is when the runner received it: the successor deadline judges arrival, not reading.
+	| { readonly notification: AppServerNotification; readonly at: number }
 	| { readonly interrupted: ActiveTurn }
 	| { readonly failure: unknown };
 
@@ -853,25 +854,29 @@ export class CodexRunnerPayload implements RunnerPayload {
 						}
 						while (!active.state.settled) {
 							const deadline = active.state.successorDeadline;
-							if (deadline !== undefined) {
+							// F271: what has arrived is read before the deadline is judged.
+							const queued = yield* Queue.poll(child.updates);
+							if (Option.isNone(queued) && deadline !== undefined) {
 								const expired = expireCodexGoalSuccessor(
 									active.state,
 									yield* Clock.currentTimeMillis,
 								);
 								if (expired.outcome) return yield* apply(expired);
 							}
-							const update = yield* deadline === undefined
-								? Queue.take(child.updates)
-								: Queue.take(child.updates).pipe(
-										Effect.timeoutOrElse({
-											duration: Math.max(
-												0,
-												deadline - (yield* Clock.currentTimeMillis),
-											),
-											orElse: () =>
-												Effect.succeed({ goalTimeout: true } as const),
-										}),
-									);
+							const update = Option.isSome(queued)
+								? queued.value
+								: deadline === undefined
+									? yield* Queue.take(child.updates)
+									: yield* Queue.take(child.updates).pipe(
+											Effect.timeoutOrElse({
+												duration: Math.max(
+													0,
+													deadline - (yield* Clock.currentTimeMillis),
+												),
+												orElse: () =>
+													Effect.succeed({ goalTimeout: true } as const),
+											}),
+										);
 							if ("goalTimeout" in update) {
 								const outcome = yield* apply(
 									expireCodexGoalSuccessor(
@@ -927,11 +932,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 							)
 								yield* acceptInput();
 							const result = yield* apply(
-								handleCodexTurnNotification(
-									active.state,
-									decoded,
-									yield* Clock.currentTimeMillis,
-								),
+								handleCodexTurnNotification(active.state, decoded, update.at),
 							);
 							if (
 								decoded.method === "item/started" ||
@@ -1228,7 +1229,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 						),
 					);
 					if (command.type === "show" && facts && session.child)
-						yield* Queue.offer(session.child.updates, { notification: facts });
+						yield* Queue.offer(session.child.updates, {
+							notification: facts,
+							at: yield* Clock.currentTimeMillis,
+						});
 					return yield* acceptSteer();
 				}
 				if (
@@ -1463,7 +1467,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 							session.busy = true;
 							yield* this.wake(session.last, decoded.params.turn.id);
 						}
-						yield* Queue.offer(updates, { notification });
+						yield* Queue.offer(updates, {
+							notification,
+							at: yield* Clock.currentTimeMillis,
+						});
 					}),
 				).pipe(
 					Effect.catch((failure) =>

@@ -1,11 +1,19 @@
 // Failure modes: process exit hides a native missing-thread error; a session
-// retains the previous account's home after an account switch.
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+// retains the previous account's home after an account switch; a goal
+// successor that arrived inside its window is dropped when read after it.
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "@effect/vitest";
 import { Deferred, Effect } from "effect";
+import { TestClock } from "effect/testing";
 import { expect } from "vitest";
 import { AccountIdSchema } from "../../../../src/lib/contracts/account.js";
 import type { ProviderRuntimeEvent } from "../../../../src/lib/contracts/providers/provider-runtime-event.js";
@@ -216,6 +224,131 @@ describe("Codex runner preparation", () => {
 					type: "turn.interrupted",
 					runId: "run-new",
 				});
+			}),
+	);
+
+	// F271 (lane audit F271a-c): a goal successor that reached the runner inside
+	// the window is the chain's, however late the turn loop reads it. The loop is
+	// held in its sink on a goal update that follows the first turn/completed
+	// while the successor arrives, then the clock passes the deadline.
+	it.effect(
+		"a successor that arrived inside the window joins the chain when read after it",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() =>
+						mkdtempSync(join(tmpdir(), "codex-runner-successor-")),
+					),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const lines = readFileSync(
+					fileURLToPath(
+						new URL(
+							"../../../fixtures/codex-app-server-traces/goal-chain.jsonl",
+							import.meta.url,
+						),
+					),
+					"utf8",
+				)
+					.trim()
+					.split("\n");
+				const method = (line: string | undefined): unknown =>
+					line ? JSON.parse(line).message?.method : undefined;
+				const completed = lines.findIndex(
+					(line) => method(line) === "turn/completed",
+				);
+				const update = lines
+					.slice(0, completed)
+					.map(method)
+					.lastIndexOf("thread/goal/updated");
+				const trace = join(root, "goal-chain.jsonl");
+				writeFileSync(
+					trace,
+					`${[
+						...lines.slice(0, update),
+						...lines.slice(update + 1, completed + 1),
+						lines[update],
+						...lines.slice(completed + 1),
+					].join("\n")}\n`,
+				);
+				const held = yield* Deferred.make<void>();
+				const queued = yield* Deferred.make<void>();
+				let usage = 0;
+				const release = yield* Deferred.make<void>();
+				const ended = yield* Deferred.make<ProviderRuntimeEvent>();
+				const events: ProviderRuntimeEvent[] = [];
+				const runner = yield* makeCodexSessionRunner(
+					{
+						workspaceRoot: root,
+						daemonConfigDir: root,
+						environment: () => ({
+							CODEX_HOME: root,
+							NODE_ENV: "test",
+							CONDUIT_CODEX_APP_SERVER_TRACE: trace,
+						}),
+					},
+					(output) =>
+						Effect.gen(function* () {
+							// The reader reports usage as rows arrive: the trace's fourth
+							// usage row follows every goal turn's turn/started.
+							if (output.type === "account-usage" && ++usage === 4)
+								yield* Deferred.succeed(queued, undefined);
+							if (output.type !== "event") return {};
+							events.push(output.event);
+							if (
+								output.event.type === "session.goal_changed" &&
+								events.filter(({ type }) => type === "session.goal_changed")
+									.length === 3
+							) {
+								yield* Deferred.succeed(held, undefined);
+								yield* Deferred.await(release);
+							}
+							if (
+								["turn.interrupted", "turn.completed", "turn.error"].includes(
+									output.event.type,
+								)
+							)
+								yield* Deferred.succeed(ended, output.event);
+							return {};
+						}),
+				);
+				const admission = yield* makeRunnerAdmission(runner, "codex");
+				yield* admitRunnerCommand(admission, runner, {
+					type: "send-turn",
+					sinkId: "input",
+					aborted: false,
+					input: {
+						sessionId: "session",
+						inputId: "input",
+						runId: "run",
+						prompt: "$goal Say hello",
+						history: [],
+						providerState: {},
+						workspaceRoot: root,
+						extraFolders: [],
+						configDir: configuredClaudeConfigDir(root),
+						folderSource: "account",
+						model: { providerId: "codex", modelId: "gpt-6.1-sol" },
+						facts: {
+							_tag: "Codex",
+							skill: { _tag: "None" },
+							truncate: { _tag: "None" },
+						},
+					},
+				});
+				yield* Deferred.await(held);
+				yield* Deferred.await(queued);
+				yield* TestClock.adjust("31 seconds");
+				yield* Deferred.succeed(release, undefined);
+				expect(yield* Deferred.await(ended)).toMatchObject({
+					type: "turn.completed",
+					runId: "run",
+				});
+				// All three goal turns reach the one Run: each turn's text, once.
+				expect(events.filter(({ type }) => type === "text.delta")).toHaveLength(
+					6,
+				);
 			}),
 	);
 
