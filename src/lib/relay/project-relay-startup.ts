@@ -341,10 +341,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			sql,
 			"opencode",
 			(id) => accounts.accounts.find((account) => account.id === id)?.driver,
-			undefined,
-			// Removal cannot prove whether an OpenCode send reached the provider.
-			// Reattachment settles retained reservations from provider truth.
-			true,
 		);
 		const readOpenCodeStatuses = (instanceId: string, sessionId: string) =>
 			Effect.gen(function* () {

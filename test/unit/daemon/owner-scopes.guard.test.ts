@@ -91,10 +91,11 @@ function sources(directory: string): string[] {
 }
 
 describe("Owner Scope source boundary", () => {
-	it("OS23 reserves exactly one Run Ledger seam before scope closure", () => {
+	// A removed project's running Runs end by their runner's loss when its
+	// scope closes, so scope closure settles no Run itself (CONTRACT.md 3.11).
+	it("OS23 closes an owner's scope without settling Runs itself", () => {
 		const source = readFileSync(`${root}/Layers/owner-scopes-layer.ts`, "utf8");
-		expect(source.match(/82tn\.32\.12/g)).toHaveLength(1);
-		expect(source).toMatch(/82tn\.32\.12[^\n]*projectInactive/);
+		expect(source).not.toMatch(/82tn\.32\.12|projectInactive/);
 		expect(source).not.toMatch(/import[^;]*run-ledger/);
 	});
 

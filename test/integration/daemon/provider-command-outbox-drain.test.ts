@@ -31,7 +31,6 @@ import {
 	makeUnboundEventStoreEffect,
 } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
@@ -44,7 +43,10 @@ import {
 	type SendTurnCommand,
 } from "../../../src/lib/provider/orchestration-engine.js";
 import { CommandReadModelRepository } from "../../../src/lib/provider/orchestration-read-model.js";
-import type { ProviderCommandStoreFailure } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
+import type {
+	ProjectGate,
+	ProviderCommandStoreFailure,
+} from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import type {
 	ProviderInstance,
@@ -103,7 +105,9 @@ describe("durable control outbox scheduling", () => {
 		projectId = "control-project",
 		sessionId = "control-session",
 		wrapWrite?: (write: CommitAndSignal["write"]) => CommitAndSignal["write"],
-		options: Pick<OrchestrationEngineOptions, "accountDirectory"> = {},
+		options: Pick<OrchestrationEngineOptions, "accountDirectory"> & {
+			readonly projectGate?: (projectId: string) => Effect.Effect<ProjectGate>;
+		} = {},
 	) {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -120,10 +124,12 @@ describe("durable control outbox scheduling", () => {
 				sql,
 				projectId,
 			).bootstrap();
+			const { projectGate, ...engineOptions } = options;
 			const result = new OrchestrationEngine({
-				...options,
+				...engineOptions,
 				registry: new ProviderRegistry([instance]),
 				durableCommands: {
+					...(projectGate ? { projectGate } : {}),
 					sql,
 					ingestion,
 					snapshot,
@@ -655,15 +661,7 @@ describe("durable control outbox scheduling", () => {
 						).bootstrap(),
 						now: () => 1000,
 						generateId: () => "unused",
-						isProjectReady: () =>
-							Effect.fail(
-								new ProviderInstanceFailure({
-									providerId: driver,
-									operation: "executeCommand",
-									code: "project_unavailable",
-									cause: "unavailable",
-								}),
-							),
+						projectGate: () => Effect.succeed("removed" as const),
 					},
 				});
 				const drained = yield* orchestration
@@ -677,7 +675,7 @@ describe("durable control outbox scheduling", () => {
 				WHERE command.request_sequence = 2`;
 				expect(rows).toEqual([
 					{
-						status: claimed ? "running" : "failed",
+						status: claimed ? "running" : "cancelled",
 						attempt_count: claimed ? 2 : 1,
 						run_status: claimed ? "pending" : "error",
 						started_at: null,
@@ -729,18 +727,11 @@ describe("durable control outbox scheduling", () => {
 						).bootstrap(),
 						now: () => 1000,
 						generateId: () => "unused",
-						isProjectReady: () => {
+						projectGate: () => {
 							checks++;
 							return ready || checks % 2 === 1
-								? Effect.succeed(true)
-								: Effect.fail(
-										new ProviderInstanceFailure({
-											providerId: "opencode",
-											operation: "executeCommand",
-											code: "project_unavailable",
-											cause: "readiness changed",
-										}),
-									);
+								? Effect.succeed("served" as const)
+								: Effect.succeed("removed" as const);
 						},
 					},
 				});
@@ -2159,7 +2150,22 @@ describe("durable control outbox scheduling", () => {
 					...provider(() => Effect.die("No turn expected")),
 					getControlProcessIdEffect: () => Effect.succeed("shared-process"),
 				};
-				const orchestration = yield* engine(instance);
+				const projectGate = (projectId: string) =>
+					Ref.get(registered).pipe(
+						Effect.map((projects) =>
+							projects.includes(projectId)
+								? ("served" as const)
+								: ("removed" as const),
+						),
+					);
+				const orchestration = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					{ projectGate },
+				);
 				for (const [sequence, commandId, projectId, sessionId, state] of [
 					[1, "inactive-head", "removed-project", "retained-session", status],
 					[2, "active-stop", "control-project", "control-session", "pending"],
@@ -2167,9 +2173,7 @@ describe("durable control outbox scheduling", () => {
 					yield* sql`INSERT INTO command_receipts (command_id, command_type, project_key, session_id, status, fingerprint_hash, fingerprint_version, created_at, updated_at) VALUES (${commandId}, 'interrupt_turn', ${projectId}, ${sessionId}, 'side_effect_requested', 'fixture', 2, 1, 1)`;
 					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, provider_process_id, status, requested_at, updated_at) VALUES (${sequence}, ${commandId}, ${projectId}, ${sessionId}, 'opencode', 'interrupt_turn', ${JSON.stringify({ type: "interrupt_turn", sessionId, providerProcessId: "shared-process" })}, 'shared-process', ${state}, 1, 1)`;
 				}
-				const drain = orchestration
-					.drainSideEffects()
-					.pipe(Effect.provideService(SessionRollupProjects, registered));
+				const drain = orchestration.drainSideEffects();
 				yield* drain;
 				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
 				yield* Ref.set(registered, ["control-project"]);
@@ -2189,10 +2193,15 @@ describe("durable control outbox scheduling", () => {
 				).toEqual([
 					{ status: "side_effect_failed", error_code: "project_inactive" },
 				]);
-				const restarted = yield* engine(instance);
-				yield* restarted
-					.drainSideEffects()
-					.pipe(Effect.provideService(SessionRollupProjects, registered));
+				const restarted = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					{ projectGate },
+				);
+				yield* restarted.drainSideEffects();
 				expect(instance.interruptTurnEffect).toHaveBeenCalledTimes(1);
 			}).pipe(Effect.provide(fixture())),
 		);
@@ -2380,28 +2389,34 @@ describe("durable control outbox scheduling", () => {
 		);
 	});
 
-	it("cancels controls when no projects remain registered and retains pending sends", async () => {
+	// H4 (CONTRACT 3.11, 1053-1108): a removed project's unsent sends are refused for good, like its controls.
+	it("cancels controls and unsent sends when no projects remain registered", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const registered = yield* Ref.make<readonly string[]>([]);
 				const instance = provider(() => Effect.die("No turn expected"));
-				const orchestration = yield* engine(instance);
+				const orchestration = yield* engine(
+					instance,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					{ projectGate: () => Effect.succeed("removed" as const) },
+				);
+				yield* sql`INSERT INTO sessions (id, project_id, provider, created_at, updated_at) VALUES ('retained-session', 'removed-project', 'opencode', 1, 1)`;
 				for (const [sequence, commandId, effectType] of [
 					[1, "removed-stop", "interrupt_turn"],
 					[2, "retained-send", "send_turn"],
 				] as const) {
 					yield* sql`INSERT INTO command_receipts (command_id, command_type, project_key, session_id, status, fingerprint_hash, fingerprint_version, created_at, updated_at) VALUES (${commandId}, ${effectType}, 'removed-project', 'retained-session', 'side_effect_requested', 'fixture', 2, 1, 1)`;
-					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, provider_process_id, status, requested_at, updated_at) VALUES (${sequence}, ${commandId}, 'removed-project', 'retained-session', 'opencode', ${effectType}, '{}', 'shared-process', 'pending', 1, 1)`;
+					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, provider_process_id, status, requested_at, updated_at) VALUES (${sequence}, ${commandId}, 'removed-project', 'retained-session', 'opencode', ${effectType}, ${effectType === "send_turn" ? JSON.stringify({ sessionId: "retained-session", inputId: commandId, prompt: "Retained", workspaceRoot: "/tmp", extraFolders: [], providerState: {} }) : "{}"}, 'shared-process', 'pending', 1, 1)`;
 				}
-				yield* orchestration
-					.drainSideEffects()
-					.pipe(Effect.provideService(SessionRollupProjects, registered));
+				yield* orchestration.drainSideEffects();
 				expect(
 					yield* sql`SELECT command_id, status FROM provider_command_outbox ORDER BY request_sequence`,
 				).toEqual([
 					{ command_id: "removed-stop", status: "cancelled" },
-					{ command_id: "retained-send", status: "pending" },
+					{ command_id: "retained-send", status: "cancelled" },
 				]);
 				expect(instance.interruptTurnEffect).not.toHaveBeenCalled();
 			}).pipe(Effect.provide(fixture())),

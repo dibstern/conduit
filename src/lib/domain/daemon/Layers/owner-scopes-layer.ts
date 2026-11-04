@@ -64,7 +64,6 @@ export const OwnerScopesLive = Layer.effect(
 				if (entry.started)
 					return Deferred.await(entry.closed).pipe(Effect.flatten);
 				entry.started = true;
-				// 82tn.32.12: settle runs with projectInactive here, before scope closure.
 				return entry.gate
 					.withPermits(1)(Scope.close(entry.scope, Exit.succeed(entry.reason)))
 					.pipe(

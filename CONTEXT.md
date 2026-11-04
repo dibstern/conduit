@@ -34,8 +34,10 @@ its Project Provenance. Resources are acquired through its checked `acquire`
 operation using `acquireRelease`. Closing unwinds sequential scopes in reverse
 registration order. Finalizers read `detach` or `remove` from the close Exit:
 detach releases server attachments while detached runners, the PTY host and
-OpenCode keep running; remove stops the owner's work. Browser reconnects do not
-create or close these lifetimes.
+OpenCode keep running; remove stops the owner's runners, while managed OpenCode
+keeps running until the daemon stops. Once removal finishes, the project's
+unsent sends and controls are refused for good; a send already transmitted ends
+by its runner's loss. Browser reconnects do not create or close these lifetimes.
 Project lookups verify current registration. After close completes, a registered
 project can open a new owner generation; retained handles stay closed forever.
 

@@ -1312,6 +1312,14 @@ export const runSessionRunner = (
 				removeRunnerDiscovery(socketPath);
 			}),
 		);
+		// Holds a spawn in flight before it is discoverable, so a test can remove its project then.
+		if (
+			process.env["NODE_ENV"] === "test" &&
+			process.env["CONDUIT_TEST_RUNNER_LISTEN_DELAY_MS"]
+		)
+			yield* Effect.sleep(
+				Number(process.env["CONDUIT_TEST_RUNNER_LISTEN_DELAY_MS"]),
+			);
 		yield* Effect.tryPromise(
 			() =>
 				new Promise<void>((done, fail) => {

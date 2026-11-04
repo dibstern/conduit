@@ -366,15 +366,7 @@ describe("provider process control retirement", () => {
 						ingestBatch: () =>
 							Effect.die(new Error("Refusal must bypass ingestion")),
 					},
-					isProjectReady: () =>
-						Effect.fail(
-							new ProviderInstanceFailure({
-								providerId: "claude",
-								operation: "executeCommand",
-								code: "project_unavailable",
-								cause: new Error("Project is unavailable"),
-							}),
-						),
+					projectGate: () => Effect.succeed("removed" as const),
 				});
 				expect(yield* reactor.runOnce()).toBe(1);
 				expect(yield* reactor.runOnce()).toBe(0);
@@ -387,13 +379,13 @@ describe("provider process control retirement", () => {
 				expect(
 					yield* sql`SELECT status, error_code FROM command_receipts ORDER BY command_id`,
 				).toEqual([
-					{ status: "side_effect_failed", error_code: "project_unavailable" },
+					{ status: "side_effect_failed", error_code: "project_inactive" },
 					{ status: "side_effect_requested", error_code: null },
 				]);
 				expect(
 					yield* sql`SELECT status, error_code FROM provider_command_outbox ORDER BY command_id`,
 				).toEqual([
-					{ status: "failed", error_code: "project_unavailable" },
+					{ status: "cancelled", error_code: "project_inactive" },
 					{ status: "running", error_code: null },
 				]);
 			}).pipe(
@@ -402,14 +394,14 @@ describe("provider process control retirement", () => {
 		);
 	});
 
-	// Claimed intake can outlive its start projection. Removal, native completion,
-	// registration and unverifiable ownership can all race the refusal sweep.
+	// Claimed intake can outlive its start projection. A claimed send is never
+	// refused (CONTRACT 3.11, 1053-1108): it ends by its runner's loss.
 	it.each([
 		"live",
 		"finished",
 		"readded",
 		"quarantined",
-	] as const)("sweeps claimed intake with %s runner ownership without synthetic terminals", async (owner) => {
+	] as const)("leaves claimed intake with %s runner ownership to runner loss", async (owner) => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
@@ -484,32 +476,26 @@ describe("provider process control retirement", () => {
 						ingest: () => Effect.die("unused"),
 						ingestBatch: () => Effect.die("unused"),
 					},
-					isProjectReady: () =>
+					projectGate: () =>
 						registered
-							? Effect.succeed(false)
-							: Effect.fail(
-									new ProviderInstanceFailure({
-										providerId: "claude",
-										operation: "executeCommand",
-										code: "project_inactive",
-										cause: "Removed project",
-									}),
-								),
+							? Effect.succeed("not_served" as const)
+							: Effect.succeed("removed" as const),
 				});
 				yield* reactor.drain();
-				expect(ends).toBe(owner === "live" || owner === "finished" ? 1 : 0);
+				// A runner still alive once removal finished survived it: the sweep
+				// retires it, unless its project returned or its owner is unverified.
+				const retired = owner === "live" || owner === "finished" ? 1 : 0;
+				expect(ends).toBe(retired);
 				expect(
 					yield* sql`SELECT type FROM events WHERE type IN ('turn.error', 'turn.completed', 'turn.interrupted', 'turn.cancelled')`,
 				).toEqual(owner === "finished" ? [{ type: "turn.completed" }] : []);
 				const outcome =
 					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`;
-				expect(outcome).toEqual(
-					owner === "readded"
-						? [{ status: "running", error_code: null }]
-						: owner === "finished"
-							? [{ status: "completed", error_code: null }]
-							: [{ status: "cancelled", error_code: "project_inactive" }],
-				);
+				expect(outcome).toEqual([
+					owner === "finished"
+						? { status: "completed", error_code: null }
+						: { status: "running", error_code: null },
+				]);
 				yield* new ProviderSideEffectReactor({
 					sql,
 					write: commit.write,
@@ -518,22 +504,20 @@ describe("provider process control retirement", () => {
 						ingest: () => Effect.die("unused"),
 						ingestBatch: () => Effect.die("unused"),
 					},
-					isProjectReady: () =>
+					projectGate: () =>
 						registered
-							? Effect.succeed(false)
-							: Effect.fail(
-									new ProviderInstanceFailure({
-										providerId: "claude",
-										operation: "executeCommand",
-										code: "project_inactive",
-										cause: "Removed project",
-									}),
-								),
+							? Effect.succeed("not_served" as const)
+							: Effect.succeed("removed" as const),
 				}).drain();
+				// Its runner gone and its run never started, the claimed send is refused.
 				expect(
 					yield* sql`SELECT status, error_code FROM provider_command_outbox WHERE command_id = 'send'`,
-				).toEqual(outcome);
-				expect(ends).toBe(owner === "live" || owner === "finished" ? 1 : 0);
+				).toEqual(
+					owner === "live"
+						? [{ status: "cancelled", error_code: "project_inactive" }]
+						: outcome,
+				);
+				expect(ends).toBe(retired);
 			}).pipe(
 				Effect.provide(makePersistenceEffectLayer(":memory:", "project")),
 			),

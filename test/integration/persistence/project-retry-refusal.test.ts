@@ -13,7 +13,6 @@ import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { DurableCommandCommitRepository } from "../../../src/lib/provider/orchestration-command-commit.js";
 import { decideDurableSendTurnCommand } from "../../../src/lib/provider/orchestration-decider.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
@@ -34,7 +33,8 @@ afterAll(() => {
 // Refusal must be durable once, without resending or rewriting the prior terminal.
 it.each(
 	(["opencode", "claude", "cursor"] as const).flatMap((provider) =>
-		(["project_inactive", "project_unavailable"] as const).flatMap((code) =>
+		// H4 (3.11): only a removed project refuses; one not served writes nothing.
+		(["project_inactive"] as const).flatMap((code) =>
 			[false, true].map((started) => ({ provider, code, started })),
 		),
 	),
@@ -157,15 +157,7 @@ it.each(
 							ingestion,
 							registry: new ProviderRegistry(),
 							persistUserMessage: persist.persistUserMessage,
-							isProjectReady: () =>
-								Effect.fail(
-									new ProviderInstanceFailure({
-										providerId: "conduit",
-										operation: "executeCommand",
-										code,
-										cause: code,
-									}),
-								),
+							projectGate: () => Effect.succeed("removed" as const),
 						});
 						for (let sweep = 0; sweep < 3; sweep++) yield* reactor.drain();
 						const snapshot = {
@@ -187,7 +179,7 @@ it.each(
 						snapshots.push(snapshot);
 						expect(snapshot.commands).toEqual([
 							{
-								status: code === "project_inactive" ? "cancelled" : "failed",
+								status: "cancelled",
 								error_code: code,
 								attempt_count: 1,
 								next_attempt_at: null,
