@@ -22,6 +22,7 @@ import {
 	type SessionPermissionModeValue,
 	type SessionStatusValue,
 	SessionUsageLimitedPayloadSchema,
+	TasksSnapshotPayloadSchema,
 	ToolFileChangeSchema,
 	type TurnCompletedPayload,
 	type TurnErrorPayload,
@@ -638,6 +639,20 @@ export function translateProviderRuntimeEventToDomain(
 					? { result: { outcome, ...(code ? { code } : {}) } }
 					: {}),
 			});
+		}
+
+		case "evidence.tasks_snapshot": {
+			const decoded = Schema.decodeUnknownResult(TasksSnapshotPayloadSchema)(
+				event.data,
+			);
+			if (Result.isFailure(decoded))
+				throw new TypeError("Invalid background task snapshot");
+			return singleEvent(
+				event,
+				state,
+				"evidence.tasks_snapshot",
+				decoded.success,
+			);
 		}
 
 		default: {

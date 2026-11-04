@@ -15,8 +15,7 @@
 
 import { writeFileSync } from "node:fs";
 import type { Page, TestInfo } from "@playwright/test";
-import type { ClaudeReplayPlan } from "../helpers/claude-trace-replayer.js";
-import { expect, test } from "../helpers/replay-fixture.js";
+import { expect, test } from "../helpers/process-harness-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
@@ -26,12 +25,17 @@ const AGENT_A_TOOL = "toolu_01U3biseGLup5XHSnDHKQqtC";
  * prompt quotes them too, so look for them only in its replies. */
 const AGENT_A_REPLY = "A done.";
 
-const replay: ClaudeReplayPlan = {
+// Claude runs in its runner process, as in production: the ledger takes task
+// snapshots only from a labelled runner (CONTRACT 6.1, 8.2).
+const replay = {
 	turns: ["concurrent-background-work-turn"],
-	holdAfterResult: true,
-	// Both of agent A's nested shells are live; agent A has not replied yet.
-	holdBefore: { turn: 1, message: 104 },
-};
+	plan: {
+		holdAfterResult: true,
+		// Both of agent A's nested shells are live; agent A has not replied yet.
+		holdBefore: { turn: 1, message: 104 },
+	},
+	subagentReads: true,
+} as const;
 
 /** What the page says about the task list, the drawer and the open session. */
 async function readState(page: Page) {
@@ -115,14 +119,14 @@ async function unfoldSteps(page: Page) {
 }
 
 test.describe("Claude task drill-in", () => {
-	test.use({ claudeReplay: replay });
+	test.use({ harnessOptions: { claudeReplay: replay } });
 
 	test("on desktop a task opens in a live drawer and closing it leaves the parent unchanged", async ({
 		page,
-		relayUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
+		const sessionId = await (await harness.connect()).createSession();
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
 		const replayer = harness.claudeReplayer;
@@ -139,7 +143,7 @@ test.describe("Claude task drill-in", () => {
 			.locator(".msg-assistant")
 			.filter({ hasText: AGENT_A_REPLY });
 		try {
-			await app.goto(relayUrl);
+			await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
 			await app.sendMessage("Launch the background work");
 			await expect
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -257,7 +261,18 @@ test.describe("Claude task drill-in", () => {
 			const live = await steps.record("drawer-live");
 			expect(live.url).toBe(before.url);
 
-			// The close button returns focus to the launching row.
+			// The close button returns focus to the launching row. The trace plays
+			// on to the parent's last turn, which folds the earlier steps and so
+			// hides the row; close once that turn has landed and the row shows again.
+			await expect(
+				page
+					.locator("#messages .msg-assistant")
+					.filter({ hasText: "The top-level 40-second shell finished." }),
+			).toHaveCount(1, { timeout: 60_000 });
+			await chat.waitForStreamingComplete();
+			await unfoldSteps(page);
+			await expect(launchButton).toBeVisible();
+			await expect(drawer).toBeVisible();
 			await page.getByTestId("task-drawer-close").click();
 			await expect(drawer).toHaveCount(0);
 			await expect(launchButton).toBeFocused();
@@ -269,10 +284,10 @@ test.describe("Claude task drill-in", () => {
 
 	test("on a phone a task opens full screen and back returns to where it was opened", async ({
 		page,
-		relayUrl,
 		harness,
 	}, testInfo) => {
 		test.setTimeout(120_000);
+		const sessionId = await (await harness.connect()).createSession();
 		await page.setViewportSize({ width: 393, height: 852 });
 		const app = new AppPage(page);
 		const chat = new ChatPage(page);
@@ -287,7 +302,7 @@ test.describe("Claude task drill-in", () => {
 			`.tool-item[data-tool-id="${AGENT_A_TOOL}"]`,
 		);
 		try {
-			await app.goto(relayUrl);
+			await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
 			await app.sendMessage("Launch the background work");
 			await expect
 				.poll(() => chat.getLastAssistantText(), { timeout: 30_000 })
@@ -302,13 +317,13 @@ test.describe("Claude task drill-in", () => {
 			// reopens the pull-down.
 			await tasksRow.click();
 			await panel.getByRole("button", { name: "Open agent A" }).click();
-			await expect(page).not.toHaveURL(new RegExp(`${parent}$`));
+			await expect(page).not.toHaveURL(new RegExp(`${parent}(\\?|$)`));
 			await expect(chat.subagentBackBtn).toBeVisible();
 			await expect(page.getByTestId("task-drawer")).toHaveCount(0);
 			const child = await steps.record("child-from-pulldown");
 			expect(child.url).not.toBe(parent);
 			await chat.subagentBackBtn.click();
-			await expect(page).toHaveURL(new RegExp(`${parent}$`));
+			await expect(page).toHaveURL(new RegExp(`${parent}(\\?|$)`));
 			await expect(panel).toBeVisible();
 			await expect(tasksRow).toHaveAttribute("aria-expanded", "true");
 			await steps.record("back-to-pulldown");
@@ -327,7 +342,7 @@ test.describe("Claude task drill-in", () => {
 			expect(new URL(page.url()).pathname).toBe(child.url);
 			await steps.record("child-from-launching-row");
 			await chat.subagentBackBtn.click();
-			await expect(page).toHaveURL(new RegExp(`${parent}$`));
+			await expect(page).toHaveURL(new RegExp(`${parent}(\\?|$)`));
 			await expect(launchRow).toBeInViewport();
 			await expect(panel).toBeHidden();
 			await steps.record("back-to-launching-row");
@@ -336,7 +351,7 @@ test.describe("Claude task drill-in", () => {
 			await expect(chat.subagentBackBtn).toBeVisible();
 			expect(new URL(page.url()).pathname).toBe(child.url);
 			await chat.subagentBackBtn.click();
-			await expect(page).toHaveURL(new RegExp(`${parent}$`));
+			await expect(page).toHaveURL(new RegExp(`${parent}(\\?|$)`));
 			await expect(launchRow).toBeInViewport();
 			await steps.record("back-from-primary-launching-row");
 		} finally {

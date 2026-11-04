@@ -22,6 +22,7 @@ import {
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { createRelayHarness } from "../helpers/relay-harness.js";
 
@@ -296,7 +297,7 @@ it.each([
 										),
 									);
 							} else if (change === "background work") {
-								activity.background.record({
+								publishLedgerTasks(activity.background, {
 									sessionId: id,
 									kind: "snapshot",
 									tasks: [

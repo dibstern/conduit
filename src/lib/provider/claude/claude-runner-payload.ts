@@ -689,14 +689,32 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		).pipe(Effect.asVoid);
 	}
 
+	/** `ended`: the context of a query that has just ended, already gone from the session map. */
 	private recordBackgroundTaskEffect(
 		transition: BackgroundTaskTransition,
+		ended?: ClaudeSessionContext,
 	): Effect.Effect<void> {
 		return Effect.gen({ self: this }, function* () {
-			const ctx = yield* getSession(this.stateRef, transition.sessionId);
-			if (ctx)
-				ctx.liveBackgroundTaskCount =
-					transition.kind === "snapshot" ? transition.tasks.length : 0;
+			const ctx =
+				ended ?? (yield* getSession(this.stateRef, transition.sessionId));
+			const tasks = transition.kind === "snapshot" ? transition.tasks : [];
+			if (ctx) ctx.liveBackgroundTaskCount = tasks.length;
+			// 8.2, 8.3: the ledger's task set, labelled by the daemon. A query's end clears its
+			// stream's tasks (CONTRACT.md 2825-2826), so it reports an empty set.
+			if (ctx?.eventSink)
+				yield* ctx.eventSink
+					.push(
+						claudeRuntimeEvent("evidence.tasks_snapshot", ctx.sessionId, {
+							label: "",
+							tasks: tasks.map(({ id, type, ...display }) => ({
+								key: { taskId: id },
+								taskType: type,
+								ambient: false,
+								...display,
+							})),
+						}),
+					)
+					.pipe(Effect.ignore);
 			yield* this.emit({ type: "background-task", transition }).pipe(
 				Effect.orDie,
 			);
@@ -803,10 +821,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 			const ctx = yield* getSession(this.stateRef, sessionId);
 			if (ctx) this.invalidateSourceDelivery(ctx);
 			yield* removeSession(this.stateRef, sessionId);
-			yield* this.recordBackgroundTaskEffect({
-				sessionId,
-				kind: "session-ended",
-			});
+			yield* this.recordBackgroundTaskEffect(
+				{ sessionId, kind: "session-ended" },
+				ctx,
+			);
 			yield* this.sinks.releaseSinkEffect(ctx?.eventSink);
 		});
 	}
@@ -2792,10 +2810,10 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					const current = yield* getSession(this.stateRef, ctx.sessionId);
 					if (current === undefined || current === ctx) {
 						ctx.turnInFlight = false;
-						yield* this.recordBackgroundTaskEffect({
-							sessionId: ctx.sessionId,
-							kind: "session-ended",
-						});
+						yield* this.recordBackgroundTaskEffect(
+							{ sessionId: ctx.sessionId, kind: "session-ended" },
+							ctx,
+						);
 					}
 					yield* this.endMessageOwnershipEffect(ctx);
 					const active = yield* getSession(this.stateRef, ctx.sessionId);

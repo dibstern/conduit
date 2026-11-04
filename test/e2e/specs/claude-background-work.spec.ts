@@ -25,168 +25,176 @@ import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
-test.describe("Claude background work", () => {
-	test.use({
-		claudeReplay: { turns: ["background-shell-turn"], holdAfterResult: true },
+// Claude runs in its runner process, as in production: the ledger takes task
+// snapshots only from a labelled runner (CONTRACT 6.1, 8.2).
+processTest.describe("Claude background work", () => {
+	processTest.use({
+		harnessOptions: {
+			claudeReplay: {
+				turns: ["background-shell-turn"],
+				plan: { holdAfterResult: true },
+			},
+		},
 	});
 
-	test.beforeEach(({ page }) => {
+	processTest.beforeEach(({ page }) => {
 		const viewport = page.viewportSize();
-		test.skip(
+		processTest.skip(
 			!viewport || viewport.width < 1440,
 			"The sidebar is checked on desktop only",
 		);
 	});
 
-	test("keeps the session monitoring until its background shell ends", async ({
-		page,
-		browser,
-		relayUrl,
-		harness,
-	}, testInfo) => {
-		const sessionId = decodeURIComponent(
-			harness.projectUrl.slice("/s/".length),
-		);
-		// Wake-up results complete messages after the run's one terminal.
-		const stored = () => {
-			const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
-			try {
-				const row = db
-					.prepare(
-						`SELECT status,
+	processTest(
+		"keeps the session monitoring until its background shell ends",
+		async ({ page, browser, harness }, testInfo) => {
+			const sessionId = await (await harness.connect()).createSession();
+			// Wake-up results complete messages after the run's one terminal.
+			const stored = () => {
+				const db = new DatabaseSync(harness.daemonStorePath(), {
+					readOnly: true,
+				});
+				try {
+					const row = db
+						.prepare(
+							`SELECT status,
 						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type IN ('turn.completed', 'message.completed')) AS completedSegments,
 						 (SELECT COUNT(*) FROM events WHERE session_id = s.id AND type = 'turn.completed') AS terminals
 						 FROM sessions s WHERE id = ?`,
-					)
-					.get(sessionId);
-				return {
-					status: row?.["status"],
-					completedSegments: Number(row?.["completedSegments"]),
-					terminals: Number(row?.["terminals"]),
-					runs: db
-						.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
-						.all(sessionId)
-						.map((run) => run["status"]),
-				};
+						)
+						.get(sessionId);
+					return {
+						status: row?.["status"],
+						completedSegments: Number(row?.["completedSegments"]),
+						terminals: Number(row?.["terminals"]),
+						runs: db
+							.prepare("SELECT status FROM provider_runs WHERE session_id = ?")
+							.all(sessionId)
+							.map((run) => run["status"]),
+					};
+				} finally {
+					db.close();
+				}
+			};
+			const report: {
+				step: string;
+				label: string | null;
+				stored: ReturnType<typeof stored>;
+			}[] = [];
+			const record = async (step: string) => {
+				report.push({
+					step,
+					label: await row.getAttribute("aria-label"),
+					stored: stored(),
+				});
+				const path = testInfo.outputPath(`${step}.png`);
+				await sidebar.screenshot({ path, animations: "disabled" });
+				await testInfo.attach(`${step}.png`, {
+					path,
+					contentType: "image/png",
+				});
+			};
+
+			const sidebar = await (
+				await browser.newContext({ viewport: page.viewportSize() })
+			).newPage();
+			const row = sidebar.locator(
+				`#session-list [data-session-id="${sessionId}"]`,
+			);
+
+			try {
+				const app = new AppPage(page);
+				await app.goto(`${harness.baseUrl}/s/${sessionId}?p=process-test`);
+				await gotoRelay(sidebar, `${harness.baseUrl}/?p=process-test`);
+				await expect(row).not.toHaveClass(/(?:^|\s)active(?:\s|$)/);
+				await app.sendMessage("Run sleep 8 in the background");
+
+				// The idle status is written just after the turn end, not with it.
+				// Wait for both, or the row is read while still busy from the turn.
+				await expect.poll(stored).toEqual({
+					status: "idle",
+					completedSegments: 1,
+					terminals: 1,
+					runs: ["completed"],
+				});
+				// The sidebar stream is ordered, so once the second window shows a
+				// rename made after that, it has had the idle status too.
+				await page.getByTestId("session-bar-overflow").click();
+				await page.getByTestId("session-ctx-rename").click();
+				const name = page.getByRole("textbox", { name: "Session name" });
+				await name.fill("Background shell");
+				await name.press("Enter");
+				await expect(row).toHaveAttribute("aria-label", /Background shell/);
+				await expect(
+					row,
+					"the turn ended but the sidebar stopped saying monitoring while its background shell ran",
+				).toHaveAttribute("aria-label", /^Monitoring/);
+				await expect(
+					page
+						.getByTestId("background-tasks-row")
+						.getByTestId("background-task-chip"),
+					"the pill names the task; its command shows on hover",
+				).toHaveAttribute("title", /sleep 8/);
+				const tasksButton = page.getByRole("button", {
+					name: /^1 background task(:|$)/,
+				});
+				const age = page
+					.getByTestId("background-tasks-panel")
+					.getByTestId("background-task-age");
+				await tasksButton.click();
+				// Ages count from when the relay first saw the task, so a reload
+				// must not restart them.
+				const seconds = async () =>
+					Number.parseInt((await age.textContent()) ?? "", 10);
+				await expect.poll(seconds).toBeGreaterThanOrEqual(2);
+				const before = await seconds();
+				await page.reload();
+				await tasksButton.click();
+				await expect(age).toBeVisible();
+				expect(
+					await seconds(),
+					"reloading the page restarted the background task's age",
+				).toBeGreaterThanOrEqual(before);
+				await tasksButton.click();
+				await record("turn-ended-shell-running");
+				const composer = testInfo.outputPath("composer-monitoring.png");
+				await page.locator("#input-area").screenshot({
+					path: composer,
+					animations: "disabled",
+				});
+				await testInfo.attach("composer-monitoring.png", {
+					path: composer,
+					contentType: "image/png",
+				});
+
+				// The shell ending wakes the SDK into a turn of its own. Read the row
+				// once that has settled too, not in the gap before it starts.
+				harness.claudeReplayer?.release();
+				await expect.poll(stored).toEqual({
+					status: "idle",
+					completedSegments: 2,
+					terminals: 1,
+					runs: ["completed"],
+				});
+				await expect(
+					row,
+					"the background shell ended but the sidebar still says working",
+				).toHaveAttribute("aria-label", /^Done, unread/);
+				await expect(page.getByTestId("background-tasks-row")).toBeHidden();
+				await expect(
+					page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
+				).toHaveCount(0);
+				await record("shell-ended");
 			} finally {
-				db.close();
+				const path = testInfo.outputPath("background-work-report.json");
+				writeFileSync(path, JSON.stringify({ sessionId, report }, null, 2));
+				await testInfo.attach("background-work-report.json", {
+					path,
+					contentType: "application/json",
+				});
 			}
-		};
-		const report: {
-			step: string;
-			label: string | null;
-			stored: ReturnType<typeof stored>;
-		}[] = [];
-		const record = async (step: string) => {
-			report.push({
-				step,
-				label: await row.getAttribute("aria-label"),
-				stored: stored(),
-			});
-			const path = testInfo.outputPath(`${step}.png`);
-			await sidebar.screenshot({ path, animations: "disabled" });
-			await testInfo.attach(`${step}.png`, { path, contentType: "image/png" });
-		};
-
-		const sidebar = await (
-			await browser.newContext({ viewport: page.viewportSize() })
-		).newPage();
-		const row = sidebar.locator(
-			`#session-list [data-session-id="${sessionId}"]`,
-		);
-
-		try {
-			const app = new AppPage(page);
-			await app.goto(relayUrl);
-			await gotoRelay(sidebar, `${harness.relayBaseUrl}/p/e2e-replay/`);
-			await expect(row).not.toHaveClass(/(?:^|\s)active(?:\s|$)/);
-			await app.sendMessage("Run sleep 8 in the background");
-
-			// The idle status is written just after the turn end, not with it.
-			// Wait for both, or the row is read while still busy from the turn.
-			await expect.poll(stored).toEqual({
-				status: "idle",
-				completedSegments: 1,
-				terminals: 1,
-				runs: ["completed"],
-			});
-			// The sidebar stream is ordered, so once the second window shows a
-			// rename made after that, it has had the idle status too.
-			await page.getByTestId("session-bar-overflow").click();
-			await page.getByTestId("session-ctx-rename").click();
-			const name = page.getByRole("textbox", { name: "Session name" });
-			await name.fill("Background shell");
-			await name.press("Enter");
-			await expect(row).toHaveAttribute("aria-label", /Background shell/);
-			await expect(
-				row,
-				"the turn ended but the sidebar stopped saying monitoring while its background shell ran",
-			).toHaveAttribute("aria-label", /^Monitoring/);
-			await expect(
-				page
-					.getByTestId("background-tasks-row")
-					.getByTestId("background-task-chip"),
-				"the pill names the task; its command shows on hover",
-			).toHaveAttribute("title", /sleep 8/);
-			const tasksButton = page.getByRole("button", {
-				name: /^1 background task(:|$)/,
-			});
-			const age = page
-				.getByTestId("background-tasks-panel")
-				.getByTestId("background-task-age");
-			await tasksButton.click();
-			// Ages count from when the relay first saw the task, so a reload
-			// must not restart them.
-			const seconds = async () =>
-				Number.parseInt((await age.textContent()) ?? "", 10);
-			await expect.poll(seconds).toBeGreaterThanOrEqual(2);
-			const before = await seconds();
-			await page.reload();
-			await tasksButton.click();
-			await expect(age).toBeVisible();
-			expect(
-				await seconds(),
-				"reloading the page restarted the background task's age",
-			).toBeGreaterThanOrEqual(before);
-			await tasksButton.click();
-			await record("turn-ended-shell-running");
-			const composer = testInfo.outputPath("composer-monitoring.png");
-			await page.locator("#input-area").screenshot({
-				path: composer,
-				animations: "disabled",
-			});
-			await testInfo.attach("composer-monitoring.png", {
-				path: composer,
-				contentType: "image/png",
-			});
-
-			// The shell ending wakes the SDK into a turn of its own. Read the row
-			// once that has settled too, not in the gap before it starts.
-			harness.claudeReplayer?.release();
-			await expect.poll(stored).toEqual({
-				status: "idle",
-				completedSegments: 2,
-				terminals: 1,
-				runs: ["completed"],
-			});
-			await expect(
-				row,
-				"the background shell ended but the sidebar still says working",
-			).toHaveAttribute("aria-label", /^Done, unread/);
-			await expect(page.getByTestId("background-tasks-row")).toBeHidden();
-			await expect(
-				page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
-			).toHaveCount(0);
-			await record("shell-ended");
-		} finally {
-			const path = testInfo.outputPath("background-work-report.json");
-			writeFileSync(path, JSON.stringify({ sessionId, report }, null, 2));
-			await testInfo.attach("background-work-report.json", {
-				path,
-				contentType: "application/json",
-			});
-		}
-	});
+		},
+	);
 
 	// Stop all stops the tasks, not the turn (conduit-test-va96.2). Recorded
 	// replay has no stopTask replies, so the stop, the row clearing and the

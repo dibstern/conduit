@@ -13,7 +13,10 @@ import {
 	getProviderDriver,
 	isKnownDriverKind,
 } from "../../contracts/provider-instance.js";
-import type { InputRequest } from "../../contracts/stored-event.js";
+import type {
+	EventPayloadMap,
+	InputRequest,
+} from "../../contracts/stored-event.js";
 import {
 	decide,
 	evolve,
@@ -83,6 +86,25 @@ export const ledgerAlarmWakes = new WeakMap<
 	Set<() => void>
 >();
 const alarmWakeKey = Symbol("run-ledger-alarm-wake");
+/**
+ * SessionActivity's wakes for a committed change of a session's tasks view (8.1 "a read-only
+ * view"), with that view and, for a snapshot, its tasks with their display and its time.
+ */
+export const ledgerTasksWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<
+		(
+			sessionId: string,
+			tasks: LedgerView["tasks"],
+			snapshot:
+				| {
+						readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
+						readonly at: number;
+				  }
+				| undefined,
+		) => void
+	>
+>();
 /** Calls each registered wake after the commit that lands this write, never on a rollback. */
 const wakeAfterCommit = (
 	sql: SqlClient.SqlClient,
@@ -452,6 +474,26 @@ const commandFor = (
 						...(event.data.wakeTask ? { wakeTask: event.data.wakeTask } : {}),
 					},
 				};
+			case "evidence.tasks_snapshot":
+				// 8.2: the decider folds only the snapshot's 8.2 fields; the rest is display.
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: event.data.label,
+						eventId: event.eventId,
+						kind: "tasks_snapshot",
+						tasks: event.data.tasks.map(
+							({ key, taskType, subagentType, description, ambient }) => ({
+								key,
+								taskType,
+								...(subagentType === undefined ? {} : { subagentType }),
+								description,
+								ambient,
+							}),
+						),
+					},
+				};
 			case "evidence.turn_ended": {
 				// 8.3 (CONTRACT.md 2823-2828): a Claude wake ended by its result, which main stores no
 				// event for, folds that result, its outcome with it; with none it ends at turn_ended.
@@ -565,6 +607,7 @@ const HANDLES = [
 	"evidence.effect_outcome",
 	"evidence.turn_started",
 	"evidence.turn_ended",
+	"evidence.tasks_snapshot",
 	"evidence.delivery_indeterminate",
 	"evidence.hold_exhausted",
 	"evidence.server_seen",
@@ -653,6 +696,23 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							alarm_at = excluded.alarm_at`;
 				if (row.alarmAt !== (ledger.row?.alarmAt ?? null))
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
+				const tasks = viewLedger(state).tasks;
+				const snapshot =
+					event.type === "evidence.tasks_snapshot"
+						? { tasks: event.data.tasks, at: event.createdAt }
+						: undefined;
+				if (
+					snapshot !== undefined ||
+					JSON.stringify(tasks) !==
+						JSON.stringify(viewLedger(ledger.state).tasks)
+				)
+					queuePendingWrite(sql, `run-ledger-tasks:${event.sessionId}`, {
+						apply: Effect.void,
+						committed: () => {
+							for (const wake of ledgerTasksWakes.get(sql) ?? [])
+								wake(event.sessionId, tasks, snapshot);
+						},
+					});
 				cache.set(event.sessionId, {
 					provider: ledger.provider,
 					state,

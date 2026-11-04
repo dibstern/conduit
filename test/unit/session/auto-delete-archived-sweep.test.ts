@@ -57,6 +57,7 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -225,7 +226,7 @@ describe("archived tree retention", () => {
 					const bus = yield* DaemonEventBusTag;
 					const changes = yield* PubSub.subscribe(bus);
 					const activity = yield* SessionActivityTag;
-					activity.background.record({
+					publishLedgerTasks(activity.background, {
 						sessionId: "background-agent",
 						kind: "snapshot",
 						tasks: [

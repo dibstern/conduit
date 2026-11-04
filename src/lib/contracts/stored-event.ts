@@ -1190,6 +1190,34 @@ export const CanonicalEvents = {
 			),
 		}),
 	),
+	/**
+	 * A runner's background task set (8.2, 8.3), replacing its last. The ledger folds the 8.2
+	 * fields; detail onward are only the task list's display.
+	 */
+	"evidence.tasks_snapshot": live(
+		Schema.Struct({
+			label: Schema.String,
+			tasks: Schema.Array(
+				Schema.Struct({
+					key: Schema.Struct({
+						taskId: Schema.String,
+						runId: Schema.optionalKey(Schema.String),
+					}),
+					taskType: Schema.String,
+					subagentType: Schema.optionalKey(Schema.String),
+					description: Schema.String,
+					ambient: Schema.Boolean,
+					detail: Schema.optional(Schema.String),
+					firstSeenAt: Schema.optional(Schema.Number),
+					childSessionId: Schema.optional(Schema.String).pipe(
+						SessionRef(false),
+					),
+					parentTaskId: Schema.optional(Schema.String),
+					ancestorTaskIds: Schema.optional(Schema.Array(Schema.String)),
+				}),
+			),
+		}),
+	),
 	/** holdRun's cap (4.3): the held send under commandId spent its five transmissions. */
 	"evidence.hold_exhausted": live(Schema.Struct({ commandId: Schema.String })),
 	/**
@@ -1288,6 +1316,8 @@ export const SessionHandoffDeliveredPayloadSchema =
 	CanonicalEvents["session.handoff_delivered"].payload;
 export const SessionUsageLimitedPayloadSchema =
 	CanonicalEvents["session.usage_limited"].payload;
+export const TasksSnapshotPayloadSchema =
+	CanonicalEvents["evidence.tasks_snapshot"].payload;
 
 function eventEnvelope<T extends CanonicalEventType, S extends Schema.Top>(
 	type: T,

@@ -8,6 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { decodeClaudeSDKMessage } from "../../src/lib/contracts/providers/claude-agent-sdk.js";
 import type { ClaudeSubagentSdk } from "../../src/lib/provider/claude/claude-subagent-materializer.js";
 import {
+	type ClaudeReplayPlan,
 	type ClaudeTraceName,
 	type ClaudeTraceReplayer,
 	createClaudeTraceReplayer,
@@ -68,9 +69,13 @@ export const claudeSdk: typeof fakeSdk = {
 		if (!isRunner) return fakeSdk.query(params);
 		const workspaceMoves =
 			process.env["CONDUIT_TEST_CLAUDE_REPLAY_WORKSPACE_MOVES"] === "1";
+		// A session's replacement runner plays on from the session's next turn.
+		const checkpointed =
+			workspaceMoves ||
+			process.env["CONDUIT_TEST_CLAUDE_REPLAY_TURN_CHECKPOINT"] === "1";
 		const checkpoint = `${file}.${process.argv[3]}.workspace-replay`;
 		const saved: { nextTurn: number; activeWorkspace?: string } =
-			workspaceMoves && existsSync(checkpoint)
+			checkpointed && existsSync(checkpoint)
 				? JSON.parse(readFileSync(checkpoint, "utf8"))
 				: { nextTurn: 0 };
 		let nextTurn = saved.nextTurn;
@@ -100,7 +105,21 @@ export const claudeSdk: typeof fakeSdk = {
 			// The hold the replayer last matched against, so a replacement cannot strand it.
 			let lastHold: ReturnType<typeof readHold>;
 			const tracesDir = process.env["CONDUIT_TEST_CLAUDE_REPLAY_TRACES_DIR"];
+			const plan: Partial<ClaudeReplayPlan> = JSON.parse(
+				process.env["CONDUIT_TEST_CLAUDE_REPLAY_PLAN"] ?? "{}",
+			);
+			// A plan hold opens once the test has released as many holds as this runner reached.
+			const released = () => {
+				try {
+					return readFileSync(`${holdFile}.released`, "utf8")
+						.split("\n")
+						.filter(Boolean).length;
+				} catch {
+					return 0;
+				}
+			};
 			const played = createClaudeTraceReplayer({
+				...plan,
 				...(tracesDir ? { tracesDir } : {}),
 				turns: (JSON.parse(turns) as readonly ClaudeTraceName[]).slice(
 					nextTurn,
@@ -110,7 +129,7 @@ export const claudeSdk: typeof fakeSdk = {
 				),
 				get holdBefore() {
 					lastHold = readHold();
-					return lastHold ?? [];
+					return lastHold ?? plan.holdBefore ?? [];
 				},
 			});
 			replayer = played;
@@ -118,7 +137,7 @@ export const claudeSdk: typeof fakeSdk = {
 			// a hold with `fail: true` releases at once and fails the stream there.
 			if (holdFile)
 				void (async () => {
-					for (;;) {
+					for (let reached = 1; ; reached += 1) {
 						await played.held();
 						const hold = lastHold;
 						appendFileSync(
@@ -127,7 +146,11 @@ export const claudeSdk: typeof fakeSdk = {
 						);
 						if (hold?.fail) failHeldLine = true;
 						else
-							while (readHold()?.id === hold?.id && existsSync(holdFile))
+							while (
+								hold
+									? readHold()?.id === hold.id && existsSync(holdFile)
+									: released() < reached
+							)
 								await sleep(10);
 						played.release();
 					}
@@ -168,7 +191,7 @@ export const claudeSdk: typeof fakeSdk = {
 								) as string)
 							: undefined;
 					nextTurn += 1;
-					if (workspaceMoves) save();
+					if (checkpointed) save();
 					yield message;
 				}
 			})(),

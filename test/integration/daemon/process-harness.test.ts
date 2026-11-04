@@ -146,6 +146,7 @@ describe("foreground daemon process harness", () => {
 				{
 					id: "restart-background-task",
 					type: "local_bash",
+					kind: "shell",
 					description: "Background restart proof",
 					firstSeenAt: expect.any(Number),
 				},
@@ -399,6 +400,7 @@ describe("foreground daemon process harness", () => {
 						backgroundWork: change === "replace" ? "monitoring" : null,
 						backgroundTasks: tasks.map((task) => ({
 							...task,
+							kind: "subagent",
 							firstSeenAt: expect.any(Number),
 						})),
 					});

@@ -506,12 +506,13 @@ export const connectRunner = (options: {
 												}
 											},
 										};
-										// 2.1 row 215: a wake's evidence is labelled by its runner and the
-										// querySeq the host stamped on its frame (6.1).
+										// 2.1 row 215, 8.2: a wake's evidence and a task snapshot are labelled by
+										// their runner and the querySeq the host stamped on their frame (6.1).
 										const output =
 											message.output.type === "event" &&
 											(message.output.event.type === "evidence.turn_started" ||
-												message.output.event.type === "evidence.turn_ended")
+												message.output.event.type === "evidence.turn_ended" ||
+												message.output.event.type === "evidence.tasks_snapshot")
 												? {
 														...message.output,
 														event: {

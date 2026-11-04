@@ -11,6 +11,7 @@ import type { Writable } from "node:stream";
 import { Deferred, Effect, FiberSet, Scope } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
+import { createEventId } from "../../persistence/events.js";
 import type { SendToken } from "../run-ledger/run-ledger-model.js";
 import type { TurnResult } from "../types.js";
 import { makeRunnerIdleExit } from "./runner-idle.js";
@@ -368,6 +369,14 @@ export const runSessionRunner = (
 		let backgroundSnapshot:
 			| Extract<SessionOutput, { type: "background-task" }>
 			| undefined;
+		// 8.3: the last task snapshot, empty included, so an attaching server learns the set without
+		// another SDK message.
+		let tasksSnapshot:
+			| {
+					readonly output: Extract<SessionOutput, { type: "event" }>;
+					readonly querySeq: number;
+			  }
+			| undefined;
 		let activeCommands = 0;
 		let activeOutputs = 0;
 		let revision = 0;
@@ -631,6 +640,17 @@ export const runSessionRunner = (
 																	"The query that produced this output was replaced",
 																),
 															);
+												if (
+													output.type === "event" &&
+													output.event.type === "evidence.tasks_snapshot"
+												)
+													// Under its own querySeq: a replaced query's set is not the new one's (6.1).
+													tasksSnapshot = {
+														output,
+														querySeq: origin
+															? (querySeqs.get(origin) ?? querySeq)
+															: querySeq,
+													};
 												if (output.type === "background-task") {
 													backgroundSnapshot =
 														output.transition.kind === "snapshot" &&
@@ -824,9 +844,24 @@ export const runSessionRunner = (
 						if (firstAttachment)
 							runFork(
 								Effect.suspend(() =>
-									backgroundSnapshot
-										? spool.emit(backgroundSnapshot)
-										: Effect.void,
+									Effect.all([
+										backgroundSnapshot
+											? spool.emit(backgroundSnapshot)
+											: Effect.void,
+										tasksSnapshot
+											? spool.emit(
+													{
+														...tasksSnapshot.output,
+														event: {
+															...tasksSnapshot.output.event,
+															eventId: createEventId(),
+															createdAt: Date.now(),
+														},
+													},
+													tasksSnapshot.querySeq,
+												)
+											: Effect.void,
+									]),
 								).pipe(Effect.orDie),
 							);
 						reportedQuiescent = undefined;
