@@ -1247,6 +1247,8 @@ export async function mockWsRpc(
 			key: { source: "none", rejected: false },
 		}),
 		GetCategorySet: () => DEFAULT_CATEGORY_SET,
+		SetGoal: () => ({ ok: true }),
+		ClearGoal: () => ({ ok: true }),
 		ListRecaps: () => [],
 		// A session with no unstaged changes, until a step seeds some.
 		SessionDiffList: () => ({ revision: "clean", folders: [] }),

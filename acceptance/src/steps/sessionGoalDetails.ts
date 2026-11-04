@@ -80,9 +80,9 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 		match: /^I tab forwards and backwards through the goal sheet actions$/,
 		run: async ({ world }) => {
 			const sheet = world.page.getByTestId("goal-details");
-			const active = await sheet.getByTestId("goal-details-pause").count();
+			const active = await sheet.getByTestId("goal-details-edit").count();
 			const actions = active
-				? ["history-toggle", "pause", "edit", "clear"]
+				? ["history-toggle", "edit", "clear"]
 				: ["history-toggle", "new", "dismiss"];
 			await sheet.getByTestId(`goal-details-${actions[0]}`).focus();
 			for (const action of [...actions.slice(1), actions[0]]) {
@@ -500,20 +500,14 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	},
 	{
 		name: "assert active goal details actions",
-		match: /^goal details offer (Pause|Resume), Edit and Clear$/,
-		run: async ({ world, match }) => {
-			const pause = match[1] === "Pause";
-			await expect(
-				world.page.getByTestId(`goal-details-${pause ? "pause" : "resume"}`),
-			).toBeVisible();
-			await expect(
-				world.page.getByTestId(`goal-details-${pause ? "resume" : "pause"}`),
-			).toBeHidden();
+		// 8.6: Claude has no goal pause, so neither Pause nor Resume is offered.
+		match: /^goal details offer Edit and Clear$/,
+		run: async ({ world }) => {
 			for (const action of ["edit", "clear"])
 				await expect(
 					world.page.getByTestId(`goal-details-${action}`),
 				).toBeVisible();
-			for (const action of ["new", "dismiss"])
+			for (const action of ["pause", "resume", "new", "dismiss"])
 				await expect(
 					world.page.getByTestId(`goal-details-${action}`),
 				).toBeHidden();
@@ -590,40 +584,11 @@ export const sessionGoalDetailsHandlers: StepHandler[] = [
 	},
 	{
 		name: "press goal details action",
-		match:
-			/^I press (Pause|Resume|Edit|Clear|Set a new goal|Dismiss) in goal details$/,
+		match: /^I press (Edit|Clear|Set a new goal|Dismiss) in goal details$/,
 		run: async ({ world, match }) => {
 			const action =
 				match[1] === "Set a new goal" ? "new" : match[1]?.toLowerCase();
 			await world.page.getByTestId(`goal-details-${action}`).click();
-		},
-	},
-	{
-		name: "assert goal details interrupts current session",
-		match: /^the goal details action interrupts the current session$/,
-		run: async ({ world }) => {
-			const rpc = requireRpcControl(world.page);
-			const request = await rpc.waitForRequest(
-				(candidate) => candidate.tag === "CancelSession",
-			);
-			expect(request.payload["sessionId"]).toBe(
-				new URL(world.page.url()).pathname.split("/")[2],
-			);
-		},
-	},
-	{
-		name: "assert exact goal details command through composer",
-		match:
-			/^the goal details action sends exactly (Continue\.|\/goal clear) for the current session$/,
-		run: async ({ world, match }) => {
-			const rpc = requireRpcControl(world.page);
-			const request = await rpc.waitForRequest(
-				(candidate) => candidate.tag === "input.submit",
-			);
-			expect(request.payload["text"]).toBe(match[1]);
-			expect(request.payload["sessionId"]).toBe(
-				new URL(world.page.url()).pathname.split("/")[2],
-			);
 		},
 	},
 	{

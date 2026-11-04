@@ -569,7 +569,8 @@ export const GoalDetailsOpen: Story = {
 			await expect(panel.getByTestId("goal-details-meta")).toHaveTextContent(
 				`Set ${fixtureClock(setAt)} · Sonnet 5 judges · 1.24M tokens`,
 			);
-		await expect(panel.getByTestId("goal-details-pause")).toBeVisible();
+		// CONTRACT.md 8.6: Claude has no goal pause.
+		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
 	},
@@ -596,7 +597,7 @@ export const GoalDetailsPaused: Story = {
 	beforeEach: () => setupGoalDetails("paused"),
 	play: async ({ canvasElement }) => {
 		const { panel } = await assertGoalDetails(canvasElement, "Paused", 3);
-		await expect(panel.getByTestId("goal-details-resume")).toBeVisible();
+		await expect(panel.queryByTestId("goal-details-resume")).toBeNull();
 		await expect(panel.queryByTestId("goal-details-pause")).toBeNull();
 		await expect(panel.getByTestId("goal-details-edit")).toBeVisible();
 		await expect(panel.getByTestId("goal-details-clear")).toBeVisible();
@@ -1375,8 +1376,6 @@ export const PhoneGoalSheet: Story = {
 			canvas.getByTestId("goal-details-history-toggle"),
 		).toHaveFocus();
 		await userEvent.tab();
-		await expect(canvas.getByTestId("goal-details-pause")).toHaveFocus();
-		await userEvent.tab();
 		await expect(canvas.getByTestId("goal-details-edit")).toHaveFocus();
 		await userEvent.tab();
 		await expect(canvas.getByTestId("goal-details-clear")).toHaveFocus();
@@ -1419,11 +1418,7 @@ export const PhoneGoalSheet: Story = {
 			getComputedStyle(sheet.querySelector("[data-sheet-chrome]") ?? sheet)
 				.borderBottomLeftRadius,
 		).toBe("22px");
-		for (const id of [
-			"goal-details-pause",
-			"goal-details-edit",
-			"goal-details-clear",
-		]) {
+		for (const id of ["goal-details-edit", "goal-details-clear"]) {
 			expectTouchTarget(canvas.getByTestId(id));
 		}
 		await userEvent.keyboard("{Escape}");

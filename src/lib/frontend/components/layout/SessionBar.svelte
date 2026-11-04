@@ -289,7 +289,9 @@
 		return getPrimaryCommand(session, sessionState.now);
 	});
 	const goalButtonTone = $derived(goal.phase === "met" ? "goal-met" : stuck || (!sessionViewState.compact && goal.phase === "paused") ? "goal-paused" : "goal");
-	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : goal.phase === "checking" ? "Checking" : "Pursuing");
+	// 8.1: Clearing is derived from the pending clear, never stored.
+	const clearing = $derived(session?.goalPhase?.tag === "Pending" && session.goalPhase.action.kind === "clear");
+	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : clearing ? "Clearing" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : goal.phase === "checking" ? "Checking" : "Pursuing");
 	const goalIcon = $derived(goal.phase === "met" ? "circle-check" : goal.phase === "paused" ? "pause" : stuck ? "circle-alert" : "target");
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
@@ -532,7 +534,7 @@
 		{/if}
 	<div class="flex gap-[8px] mt-[16px] pb-[4px]">
 		{#if goalFacts.goal}
-			<Button variant={stuck || goal.phase === "paused" ? "primary" : "chip"} size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon={goal.phase === "paused" ? "play" : "pause"} iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid={goal.phase === "paused" ? "goal-details-resume" : "goal-details-pause"} onclick={() => runGoalAction(goal.phase === "paused" ? "resume" : "pause")}>{goal.phase === "paused" ? "Resume" : "Pause"}</Button>
+			{#if goal.phase === "paused" && !discoveryState.currentTraits?.nativeGoalActions}<Button variant="primary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon="play" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-resume" onclick={() => runGoalAction("resume")}>Resume</Button>{/if}
 			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
 			<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
 		{:else if goalFacts.ended === "met"}

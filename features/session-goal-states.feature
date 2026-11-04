@@ -91,10 +91,54 @@ Scenario Outline: A recently cleared goal can be sent again with Undo
   And the layout region visually matches <baseline> at <threshold> percent
   When I type Keep this draft into the composer
   And I click Undo for the cleared goal
-  Then the mock relay received the goal message /goal <condition> for the current session
+  Then the mock relay received 1 SetGoal action for <condition> with distinct command ids and no goal chat message
   And the cleared goal bar is not rendered
   And the composer draft still reads Keep this draft
 
 Examples:
   | condition             | baseline                   | threshold |
   | All 38 scenarios pass | session-goal-cleared-phone | 98        |
+
+Scenario Outline: A clear shows Clearing, then the turn Claude queued it behind, and Stop never clears
+  Given the viewport is a phone
+  And the conduit app is served with the matching-model mockup
+  When Claude sets the goal <condition>
+  And the session reports the goal clear Sent
+  Then the session goal subtitle reads Clearing · <condition>
+  And the pending goal bar reads Clearing goal…
+  When the session reports the goal clear Queued
+  Then the pending goal bar reads <queued> and offers Stop
+  When I press Stop in the pending goal bar
+  Then the mock relay received a stop and no further goal action
+  When Claude confirms the goal clear
+  Then the pending goal bar is not rendered
+  And no session goal subtitle or transcript notice is rendered
+
+Examples:
+  | condition             | queued                                       |
+  | All 38 scenarios pass | Clearing after this turn (queued by Claude)  |
+
+Scenario Outline: A clear Claude has not confirmed offers Retry under a new command
+  Given the viewport is a phone
+  And the conduit app is served with the matching-model mockup
+  When Claude sets the goal <condition>
+  And the session reports the goal clear Unconfirmed
+  Then the pending goal bar reads Clear not confirmed and offers Retry
+  When I press Retry in the pending goal bar
+  Then the mock relay received 1 ClearGoal action with distinct command ids and no goal chat message
+
+Examples:
+  | condition             |
+  | All 38 scenarios pass |
+
+Scenario Outline: A clear that could not be delivered shows the goal again with a notice
+  Given the viewport is a phone
+  And the conduit app is served with the matching-model mockup
+  When Claude sets the goal <condition>
+  And the session reports the goal clear failed
+  Then the session goal subtitle reads Pursuing · <condition>
+  And the pending goal bar reads <notice> and offers Retry
+
+Examples:
+  | condition             | notice                   |
+  | All 38 scenarios pass | Couldn't clear the goal  |

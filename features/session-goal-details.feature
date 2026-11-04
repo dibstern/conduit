@@ -62,7 +62,7 @@ Scenario Outline: The goal subtitle opens details and both dismissal paths work
   When I toggle goal details History
   Then the goal details history shows all three checks in layout order
   When I toggle goal details History
-  Then goal details offer Pause, Edit and Clear
+  Then goal details offer Edit and Clear
   And the layout region visually matches <baseline> at <threshold> percent
   When I click the goal details scrim
   Then goal details are closed
@@ -86,28 +86,16 @@ Scenario: A running goal check appends a running glyph to the returned history
   When I click the session goal subtitle
   And I toggle goal details History
   Then the goal details history shows Checking now followed by three checks
-  And goal details offer Pause, Edit and Clear
+  And goal details offer Edit and Clear
 
-Scenario: Pause interrupts the current session through the stop RPC
-  Given the conduit app is served with the connected mockup
-  And the viewport is a phone
-  And the composer status clock is frozen
-  And a session already exists on the Claude harness
-  And goal details are available for a working goal
-  When I click the session goal subtitle
-  And I press Pause in goal details
-  Then the goal details action interrupts the current session
-
-Scenario: Resume sends Continue through the composer
+Scenario: A paused Claude goal offers neither Pause nor Resume
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And the composer status clock is frozen
   And a session already exists on the Claude harness
   And goal details are available for a paused goal
   When I click the session goal subtitle
-  Then goal details offer Resume, Edit and Clear
-  When I press Resume in goal details
-  Then the goal details action sends exactly Continue. for the current session
+  Then goal details offer Edit and Clear
 
 Scenario: Edit closes details and puts the existing condition in the composer
   Given the conduit app is served with the connected mockup
@@ -120,7 +108,7 @@ Scenario: Edit closes details and puts the existing condition in the composer
   Then goal details are closed
   And the composer is ready to edit the goal with its cursor at the end
 
-Scenario: Clear sends the goal command for the current session
+Scenario: Clear sends a clear action, never a chat message, for the current session
   Given the conduit app is served with the connected mockup
   And the viewport is a phone
   And the composer status clock is frozen
@@ -128,7 +116,7 @@ Scenario: Clear sends the goal command for the current session
   And goal details are available for a working goal
   When I click the session goal subtitle
   And I press Clear in goal details
-  Then the goal details action sends exactly /goal clear for the current session
+  Then the mock relay received 1 ClearGoal action with distinct command ids and no goal chat message
 
 Scenario Outline: A met goal offers a new goal and dismissal
   Given the conduit app is served with the connected mockup

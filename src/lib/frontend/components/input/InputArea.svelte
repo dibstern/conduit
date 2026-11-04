@@ -165,6 +165,15 @@
 	let composing = $state(false);
 	const currentSession = $derived(findSession(sessionState.currentId ?? ""));
 	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
+	const nativeGoals = $derived(discoveryState.currentTraits?.nativeGoalActions === true);
+	const goalPhase = $derived(nativeGoals ? currentSession?.goalPhase : undefined);
+	/** The pending or failed action, when it is one the composer can send again. */
+	const goalPhaseAction = $derived.by(() => {
+		const action = goalPhase?.tag === "Pending" ? goalPhase.action : goalPhase?.failed?.action;
+		return action?.kind === "set" ? action : action?.kind === "clear" ? { kind: "clear" as const } : undefined;
+	});
+	let dismissedGoalFailure = $state<string | null>(null);
+	const goalFailureKey = $derived(goalPhase?.tag === "Confirmed" ? `${sessionState.currentId}:${JSON.stringify(goalPhase.failed)}` : null);
 	const goal = $derived(goalView(
 		goalFacts,
 		isProcessing() ? "busy" : currentSession?.status ?? "idle",
@@ -814,6 +823,13 @@
 		}
 		let text = textOverride ?? composerDraft.text.trim();
 		if (!text && (textOverride !== undefined || draftAttachments.length === 0)) return false;
+		// A draft has no session to address a goal action to, so its /goal goes as its first message.
+		const goalCondition = nativeGoals && sessionState.currentId && textOverride === undefined && draftAttachments.length === 0 ? text.match(/^[/$]goal\s+([\s\S]+)$/)?.[1]?.trim() : undefined;
+		if (goalCondition && sessionState.currentId) {
+			const sent = await sendGoalAction(sessionState.currentId, goalCondition === "clear" ? { kind: "clear" } : { kind: "set", condition: goalCondition });
+			if (sent) clearComposer();
+			return sent;
+		}
 		if (textOverride === undefined) {
 			const match = text.match(/^\$(\S+)(?:\s+([\s\S]*))?$/);
 			const command = conduitCommands.find((command) =>
@@ -928,11 +944,24 @@
 		cursorPos = 0;
 	}
 
+	/** 8.6: a native goal action is a browser action, never a chat message; each attempt has its own id. */
+	async function sendGoalAction(sessionId: string, action: { kind: "set"; condition: string } | { kind: "clear" }): Promise<boolean> {
+		const commandId = crypto.randomUUID();
+		try {
+			await (action.kind === "set" ? rpc("SetGoal", { sessionId, commandId, condition: action.condition }) : rpc("ClearGoal", { sessionId, commandId }));
+			return true;
+		} catch (error) {
+			toastFailure(action.kind === "set" ? "Couldn't set the goal" : "Couldn't clear the goal")(error);
+			return false;
+		}
+	}
+
 	async function undoGoalClear() {
 		const facts = goalFacts;
 		const key = clearKey;
 		if (facts?.ended !== "cleared" || !facts.endedGoal || facts.sessionId !== sessionState.currentId) return;
-		if (await sendMessage(`/goal ${facts.endedGoal.condition}`)) undoneClearKey = key;
+		const sent = nativeGoals ? await sendGoalAction(facts.sessionId, { kind: "set", condition: facts.endedGoal.condition }) : await sendMessage(`/goal ${facts.endedGoal.condition}`);
+		if (sent) undoneClearKey = key;
 	}
 
 	// A send from idle starts a turn, and Stop then takes Send's slot, so a repeat tap on
@@ -991,9 +1020,9 @@
 			const { action, sessionId, condition } = event.detail;
 			if (!discoveryState.currentTraits?.supportsGoalState || sessionId !== sessionState.currentId) return;
 			switch (action) {
-				case "pause": if (sessionState.currentId) void stop(sessionState.currentId); break;
-				case "resume": void sendMessage("Continue."); break;
-				case "clear": void sendMessage("/goal clear", "steer"); break;
+				// Codex keeps its chat path until it has native goal actions (82tn.32.27).
+				case "resume": if (!nativeGoals) void sendMessage("Continue."); break;
+				case "clear": void (nativeGoals ? sendGoalAction(sessionId, { kind: "clear" }) : sendMessage("/goal clear", "steer")); break;
 				case "edit": handleAttachSetGoal(condition); break;
 				case "new": handleAttachSetGoal(); break;
 			}
@@ -1234,6 +1263,29 @@
 				<div class="min-w-0 flex-1">{composerPresentation?.label ?? "The agent"} keeps working until this is true, and checks after each turn.
 					<small class="block text-[12px] text-text-muted">{#if goalFacts?.goal?.judgeModel}{getModelDisplayName(goalFacts.goal.judgeModel)} judges · {/if}Esc to cancel</small>
 				</div>
+			</ComposerStrip>
+		{/if}
+
+		{#if goalPhase?.tag === "Pending" && goalPhaseAction && sessionState.currentId}
+			{@const sessionId = sessionState.currentId}
+			{@const clearing = goalPhaseAction.kind === "clear"}
+			<ComposerStrip tone="goal" data-testid="composer-goal-pending" data-send={goalPhase.send} class="flex items-center gap-[8px]">
+				{#if goalPhase.send === "Sent"}<ConduitMark size={13} variant="running" tone="goal" />{:else}<Icon name="target" size={16} class="shrink-0 text-status-goal" />{/if}
+				<span data-testid="composer-goal-pending-text" class="min-w-0 flex-1">{goalPhase.send === "Sent" ? (clearing ? "Clearing goal…" : "Setting goal…") : goalPhase.send === "Queued" ? `${clearing ? "Clearing" : "Setting the goal"} after this turn (queued by Claude)` : clearing ? "Clear not confirmed" : "Goal not confirmed"}</span>
+				{#if goalPhase.send === "Queued"}
+					<!-- 8.6: Stop ends the turn and Claude then runs the clear; Stop itself never clears. -->
+					<Button variant="secondary" size="composer-chip" onclick={() => void stop(sessionId)}>Stop</Button>
+				{:else if goalPhase.send === "Unconfirmed"}
+					<Button variant="secondary" size="composer-chip" onclick={() => void sendGoalAction(sessionId, goalPhaseAction)}>Retry</Button>
+				{/if}
+			</ComposerStrip>
+		{:else if goalPhase?.tag === "Confirmed" && goalPhaseAction && sessionState.currentId && goalFailureKey !== dismissedGoalFailure}
+			{@const sessionId = sessionState.currentId}
+			<ComposerStrip tone="risk" data-testid="composer-goal-pending" class="flex items-center gap-[8px]">
+				<Icon name="circle-alert" size={16} class="shrink-0 text-error" />
+				<span data-testid="composer-goal-pending-text" class="min-w-0 flex-1">{goalPhaseAction.kind === "clear" ? "Couldn't clear the goal" : "Couldn't set the goal"}</span>
+				<Button variant="secondary" size="composer-chip" onclick={() => void sendGoalAction(sessionId, goalPhaseAction)}>Retry</Button>
+				<Button variant="ghost" size="composer-icon" iconOnly icon="x" iconSize={14} ariaLabel="Dismiss" onclick={() => { dismissedGoalFailure = goalFailureKey; }} />
 			</ComposerStrip>
 		{/if}
 

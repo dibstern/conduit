@@ -10,7 +10,7 @@ export const goalDetails = $state({ open: false });
 
 export type GoalComposerAction = {
 	sessionId: string;
-	action: "pause" | "resume" | "edit" | "clear" | "new";
+	action: "resume" | "edit" | "clear" | "new";
 	condition?: string;
 };
 
