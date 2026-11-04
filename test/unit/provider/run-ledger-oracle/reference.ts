@@ -247,6 +247,8 @@ interface World {
 	readonly seen: Set<string>;
 	/** The seq of the last session end or rejected resume (3.4). */
 	freshSince: number;
+	/** 3.4: the latest session end covers the sends issued before this seq. */
+	coveredBefore: number;
 	readonly runners: Map<string, Runner>;
 	current: string | null;
 	readonly retirements: Set<string>;
@@ -915,6 +917,13 @@ function transmit(
 		tx.covered ??= "process_lost";
 		endWork(tx, "process_lost");
 	}
+	// 3.4 (CONTRACT.md 538-541): a send issued before a session end transmits into the ended
+	// native session, where nothing acts, so its later transmission is covered at once.
+	if (send.seq < world.coveredBefore) {
+		seal(tx);
+		tx.covered ??= "session_ended";
+		endWork(tx, "session_ended");
+	}
 	if (token !== undefined)
 		world.tokens.set(token, {
 			send: world.sends.indexOf(send),
@@ -1033,6 +1042,7 @@ function sessionEnd(
 	cause: "session_ended",
 ): void {
 	world.freshSince = world.seq;
+	world.coveredBefore = Math.max(world.coveredBefore, before);
 	for (const send of world.sends)
 		for (const tx of send.txs)
 			if (tx.seq < before) {
@@ -2121,6 +2131,17 @@ function mainEvent(
 			if (input === undefined)
 				return noop("run.requested for an input never admitted");
 			input.reservation ??= observation.runId;
+			// D53 (CONTRACT.md 965-967, 984): a steer joined at admit whose Run ended before main sent it
+			// never joined; main's writer places it, so this run.requested reserves its own Run.
+			const joined = findRun(world, input.runId);
+			if (
+				joined?.phase === "Ended" &&
+				!deliverySends(world, joined).some(
+					(send) =>
+						"inputId" in send.effect && send.effect.inputId === input.inputId,
+				)
+			)
+				input.runId = undefined;
 			const active = activeInputRun(world);
 			// 3.9 GAP (CONTRACT.md 984, "a steer sent while it is active joins it"): a steer admitted
 			// before its Run launched joins it at its send, main's run.requested.
@@ -2834,6 +2855,7 @@ function emptyWorld(
 		mainRuns: new Map(),
 		seen: new Set(),
 		freshSince: -1,
+		coveredBefore: -1,
 		runners: new Map(),
 		current: null,
 		retirements: new Set(),
