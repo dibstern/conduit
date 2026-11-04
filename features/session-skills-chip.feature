@@ -84,7 +84,7 @@ Scenario: An agent skill row reveals the latest tied run across older pages
   Then turn 3 is absent from the first transcript page
   When I open the skills chip
   And I tap the skill row "paged-skill"
-  Then two older transcript pages were requested
+  Then one transcript window was read from turn 3, not every older page
   And the Skill step in turn 3 is focused in its expanded activity panel and in the viewport
   And the skills toggle for turn 3 stays closed
   When I collapse the activity panel for turn 3
@@ -92,7 +92,7 @@ Scenario: An agent skill row reveals the latest tied run across older pages
   And I tap the skill row "paged-skill"
   Then the Skill step in turn 3 is focused in its expanded activity panel and in the viewport
   And the skills toggle for turn 3 stays closed
-  And two older transcript pages were requested
+  And one transcript window was read from turn 3, not every older page
 
 Scenario: A user skill row brings its prompt into view
   Given the viewport is a phone
@@ -124,7 +124,7 @@ Scenario Outline: Holding a phone skill offers every run without jumping on rele
   And no older transcript pages were requested
   And the screen region visually matches <baseline> at <threshold> percent
   When I select the skill action "Jump to turn 1"
-  Then two older transcript pages were requested
+  Then one transcript window was read from turn 1, not every older page
   And the Skill step in turn 1 is focused in its expanded activity panel and in the viewport
   And the skills toggle for turn 1 stays closed
   And the skills menu is closed

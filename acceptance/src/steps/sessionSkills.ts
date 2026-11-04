@@ -15,10 +15,21 @@ const FIVE_MINUTES = 5 * 60_000;
 const SKILL_TOOL_ID = "tool-skill-live";
 const navigationScrollTops = new WeakMap<Page, number>();
 
+// Found by its own steps: a window read at an agent's skill run starts at
+// that reply, so the turn's prompt may not be loaded above it.
 const activityPanel = (page: Page, turn: string) =>
 	page.locator(
-		`#messages .msg-container:has([data-uuid="msg-skill-nav-user-${turn}/user"]) + .turn-activity`,
+		`#messages .turn-activity:has([data-part^="msg-skill-nav-agent-${turn}/"])`,
 	);
+
+// The window a detail subscription asked for, if it asked for one.
+const windowRead = (request: {
+	tag: string;
+	payload: Record<string, unknown>;
+}): unknown[] =>
+	request.tag === "SubscribeSessionDetail" && request.payload["window"]
+		? [request.payload["window"]]
+		: [];
 
 // e.g. "release-notes by you in turn 1; changelog-style by agent in turn 2, loading"
 const parseLoads = (text: string) =>
@@ -249,6 +260,9 @@ export const sessionSkillsHandlers: StepHandler[] = [
 					.getRequests()
 					.filter((request) => request.tag === "LoadMoreHistory"),
 			).toHaveLength(0);
+			expect(
+				requireRpcControl(world.page).getRequests().flatMap(windowRead),
+			).toHaveLength(0);
 		},
 	},
 	{
@@ -314,23 +328,24 @@ export const sessionSkillsHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "skill navigation paged older history twice",
-		match: /^two older transcript pages were requested$/,
-		run: async ({ world }) => {
+		name: "skill navigation read one window at its turn",
+		match:
+			/^one transcript window was read from turn ([0-9]+), not every older page$/,
+		run: async ({ world, match }) => {
+			// docs/plans/2026-10-29-full-message-navigation.md: a jump outside the
+			// window reads a bounded page at the target, never every intervening page.
+			const requests = () => requireRpcControl(world.page).getRequests();
 			await expect
-				.poll(() =>
-					requireRpcControl(world.page)
-						.getRequests()
-						.filter((request) => request.tag === "LoadMoreHistory")
-						.map((request) => ({
-							sessionId: request.payload["sessionId"],
-							before: request.payload["before"],
-						})),
-				)
+				.poll(() => requests().flatMap(windowRead))
 				.toEqual([
-					{ sessionId: "sess-mockup-001", before: "msg-skill-nav-user-40" },
-					{ sessionId: "sess-mockup-001", before: "msg-skill-nav-user-15" },
+					{
+						anchorMessageId: `msg-skill-nav-agent-${match[1]}`,
+						direction: "from",
+					},
 				]);
+			expect(
+				requests().filter((request) => request.tag === "LoadMoreHistory"),
+			).toHaveLength(0);
 		},
 	},
 	{
