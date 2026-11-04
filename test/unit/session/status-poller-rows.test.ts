@@ -19,7 +19,9 @@ import {
 	makePollerPubSubLive,
 	makePollerStateLive,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
+import { activeRunEvents, publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -56,14 +58,22 @@ const insertParentAndBusyChild = Effect.gen(function* () {
 
 // The poller only runs when OpenCode is reachable. After a restart without it,
 // a Claude turn still running in its runner must not read as idle to browsers.
-it("a poller that never started reads busy from the event store", async () => {
+// 82tn.32.30: busy is the ledger's active Run in the store, never the row's status.
+it("a poller that never started reads busy from the store's ledger, not the row's status", async () => {
 	await Effect.runPromise(
 		Effect.scoped(
 			Effect.gen(function* () {
-				yield* insertParentAndBusyChild;
+				const sql = yield* SqlClient.SqlClient;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
+					VALUES ('parent', 'opencode', 'Parent', 'idle', 1, 1, 'test-project'),
+						('stale', 'opencode', 'Stale', 'busy', 3, 3, 'test-project')`;
+				yield* sql`INSERT INTO sessions (id, provider, title, status, parent_id, created_at, updated_at, project_id)
+					VALUES ('child', 'opencode', 'Child', 'idle', 'parent', 2, 2, 'test-project')`;
+				yield* (yield* makeCommitAndSignal)(activeRunEvents("child"));
 				const poller = yield* StatusPollerTag;
 				expect(yield* poller.isProcessing("child")).toBe(true);
 				expect(yield* poller.isProcessing("parent")).toBe(true);
+				expect(yield* poller.isProcessing("stale")).toBe(false);
 			}),
 		).pipe(Effect.provide(pollerLayer(makeMockOpenCodeAPI()))),
 	);
@@ -81,10 +91,12 @@ it("keeps Claude status observation and exposes ownership separately", async () 
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
 					VALUES ('opencode-1', 'opencode', 'OpenCode', 'busy', 1, 1, 'test-project'),
 						('claude-1', 'claude', 'Claude', 'busy', 2, 2, 'test-project')`;
+				// 82tn.32.30: the row's busy is not read; the ledger's active Run, as the view holds it, is.
+				publishRun((yield* SessionActivityTag).background, "claude-1");
 				const poller = yield* StatusPollerTag;
 				yield* poller.start();
 				expect(yield* poller.getCurrentStatuses()).toEqual({
-					"opencode-1": { type: "busy" },
+					"opencode-1": { type: "idle" },
 					"claude-1": { type: "busy" },
 				});
 				expect(yield* poller.getSessionProviders()).toEqual(
@@ -108,6 +120,8 @@ it("the poller returns source statuses without parent or message-activity augmen
 		Effect.scoped(
 			Effect.gen(function* () {
 				yield* insertParentAndBusyChild;
+				const { background } = yield* SessionActivityTag;
+				publishRun(background, "child");
 				const poller = yield* StatusPollerTag;
 				yield* poller.markMessageActivity("content-only");
 				yield* poller.start();
@@ -124,10 +138,7 @@ it("the poller returns source statuses without parent or message-activity augmen
 				const processing = yield* poller.isProcessing("parent");
 				expect(processing).toBe(true);
 				yield* poller.stop();
-				vi.spyOn(api.session, "statuses").mockResolvedValue({
-					parent: { type: "idle" },
-					child: { type: "idle" },
-				});
+				background.publish("child", { tag: "none" }, undefined, {});
 				yield* poller.start();
 				const finished = yield* poller.isProcessing("parent");
 				expect(finished).toBe(false);

@@ -47,6 +47,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -184,8 +185,10 @@ const fixture = Effect.gen(function* () {
 							sessionId,
 							type: event.type,
 							payload: Object.fromEntries(
+								// The continuation's admission (CONTRACT.md 3.9, D58) carries a fresh random inputId.
 								Object.entries(event.data).filter(
-									([key]) => !["sessionId", "messageId", "at"].includes(key),
+									([key]) =>
+										!["sessionId", "messageId", "at", "inputId"].includes(key),
 								),
 							),
 						});
@@ -326,12 +329,7 @@ it.effect("keeps the sign-in refusal for a signed-out account", () =>
 it.effect("keeps the busy refusal without sending or changing recovery", () =>
 	withFixture((value) =>
 		Effect.gen(function* () {
-			yield* value.commit([
-				canonicalEvent("session.status", "s1", {
-					sessionId: "s1",
-					status: "busy",
-				}),
-			]);
+			yield* value.commit(activeRunEvents("s1"));
 			const before = yield* value.store.readAllBySession("s1");
 			expect(yield* value.continue.pipe(Effect.result)).toMatchObject({
 				_tag: "Failure",

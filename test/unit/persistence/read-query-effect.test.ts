@@ -35,6 +35,7 @@ import type { SessionRow } from "../../../src/lib/persistence/read-model-types.j
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
+import { readPersistedAutoArchiveFacts } from "../../../src/lib/session/auto-archive-sweep.js";
 import { activityFrom } from "../../helpers/ledger-tasks.js";
 
 const scope = { projectIds: ["test-project"] } as const;
@@ -1516,6 +1517,70 @@ describe("ReadQueryEffect.getStrandedChildren", () => {
 						owner_id: "root",
 					},
 				]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+});
+
+describe("ReadQueryEffect idle corrections", () => {
+	it.effect(
+		"never offer to correct a session the ledger says may still act (82tn.32.30)",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("root", { status: "idle" });
+				for (const [child, state] of [
+					["quiet-child", "Quiescent"],
+					["open-child", "Open"],
+				] as const) {
+					yield* seedSession(child, { status: "busy", parentId: "root" });
+					yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+						VALUES (${`m-${child}`}, 'root', 'assistant', '', 1, 1)`;
+					yield* sql`INSERT INTO message_parts
+						(id, message_id, type, tool_name, sort_order, created_at, updated_at, metadata)
+						VALUES (${`p-${child}`}, ${`m-${child}`}, 'tool', 'Bash', 0, 1, 1,
+							${JSON.stringify({ childSessionId: child, providerTaskId: `t-${child}` })})`;
+					yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state)
+						VALUES (${child}, 'claude', ${state})`;
+				}
+				const readQuery = yield* makeReadQueryEffect;
+				// 8.3 (2849): the status poller's idle corrections ask whether anything may act.
+				expect(
+					(yield* readQuery.getStrandedChildren(scope)).map(({ id }) => id),
+				).toEqual(["quiet-child"]);
+				expect(
+					(yield* readQuery.getSessionsForReconciliation(scope, [])).map(
+						({ id }) => id,
+					),
+				).toEqual(["quiet-child"]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+});
+
+describe("auto-archive facts", () => {
+	it.effect(
+		"a family the ledger says may act has pending work; a stale busy row does not (82tn.32.30)",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				for (const [root, child, status, state] of [
+					["open-root", "open-child", "idle", "Open"],
+					["stale-root", "stale-child", "busy", "Quiescent"],
+				] as const) {
+					yield* seedSession(root);
+					yield* seedSession(child, { status, parentId: root });
+					yield* sql`UPDATE sessions SET root_id = ${root}, settled_at = 1 WHERE id IN (${root}, ${child})`;
+					yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state)
+						VALUES (${child}, 'claude', ${state})`;
+				}
+				// 8.3 (2849): archive asks whether anything in the family may act.
+				const facts = yield* readPersistedAutoArchiveFacts("test-project", 2);
+				expect(
+					Object.fromEntries(
+						[...facts].map(([id, fact]) => [id, fact.hasPendingWork]),
+					),
+				).toEqual({ "open-root": true, "stale-root": false });
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

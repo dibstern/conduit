@@ -471,6 +471,7 @@ export function translateCommand(
 	command: LedgerCommand,
 	from: TraceDriver,
 	to: TraceDriver,
+	mainIssues: readonly IssuedEffect[] = [],
 ): LedgerCommand {
 	if (
 		command.verb === "settle" &&
@@ -515,8 +516,10 @@ export function translateCommand(
 	if (command.verb !== "observe" || command.observation.tag !== "Answer")
 		return command;
 	const observation = command.observation;
-	for (const send of from.issued) from.bound(send);
-	for (const send of to.issued) to.bound(send);
+	// D60: main's issues drawn with this packet bind first, so a run.dispatched naming a relaunch's
+	// hold after a gated try translates (3.4, 3.6).
+	for (const send of [...from.issued, ...mainIssues]) from.bound(send);
+	for (const send of [...to.issued, ...mainIssues]) to.bound(send);
 	const binding = from.bindings.find(
 		(item) => item.send.token === observation.token,
 	);
@@ -579,7 +582,12 @@ export class DifferentialTrace {
 		// binding rather than minting a retry of its own.
 		const mainIssues = this.expected.host.takeMainIssues();
 		this.actual.host.issued(mainIssues.map(({ issue }) => issue));
-		const translated = translateCommand(command, this.expected, this.actual);
+		const translated = translateCommand(
+			command,
+			this.expected,
+			this.actual,
+			mainIssues.map(({ issue }) => issue),
+		);
 		const expected = this.expected.step(command, now, mainIssues);
 		const actual = this.actual.step(translated, now, mainIssues);
 		this.expectedNames.register(this.expected);

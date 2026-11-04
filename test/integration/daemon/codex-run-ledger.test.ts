@@ -32,7 +32,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Fiber, Stream } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
 import {
@@ -791,6 +791,84 @@ describe("Codex on the Run Ledger", () => {
 		expect(output).not.toEqual([]);
 		expect(captured("turn/start", "out")).toHaveLength(1);
 		prove(held ? "wake-held" : "wake", ledger);
+	});
+
+	// 82tn.32.30 mode 37: a Codex wake (a turn Codex starts by itself) ends with zero or two dones.
+	// With no tab viewing the session, every done reaches the project's alerts.
+	it("sends one done alert for a Codex wake, at its end", async () => {
+		const chain = oneWake(fixtureRows("goal-chain"));
+		const { fixture, browser, sessionId } = await wake("wake-done", chain);
+		const wakeEnd = chain.filter(
+			({ message }) => message?.method === "turn/completed",
+		)[1]?.["at"];
+		if (typeof wakeEnd !== "number") throw new Error("Missing wake end");
+		writeFileSync(gatePath, String(wakeEnd - 1));
+		// test-waits-allow polling: the wake's start reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.map(({ type }) => type),
+				).toContain("evidence.turn_started"),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		// Follows the sidebar only, so it never views the session.
+		const watcher = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const alerts: {
+			kind: string;
+			sessionId: string | undefined;
+			endsBefore: number;
+		}[] = [];
+		let synchronized = false;
+		const alertFiber = Effect.runFork(
+			Stream.runForEach(
+				watcher.rpc.SubscribeAlerts({ projectSlug: "process-test" }),
+				(envelope) =>
+					Effect.sync(() => {
+						if (envelope._tag === "synchronized") synchronized = true;
+						if (envelope._tag !== "alert") return;
+						alerts.push({
+							kind: envelope.kind,
+							sessionId: envelope.sessionId,
+							// How many Runs the store had ended when this alert arrived.
+							endsBefore: read(fixture, sessionId).ends.length,
+						});
+					}),
+			),
+		);
+		// The feed is live-only, so it must be open before the wake can end.
+		// test-waits-allow polling: the feed reports it is open only through its first envelope.
+		await vi.waitFor(() => expect(synchronized).toBe(true), {
+			timeout: TIMEOUT,
+			interval: 50,
+		});
+		await browser.close();
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		const done = () =>
+			alerts.filter(
+				(alert) => alert.kind === "done" && alert.sessionId === sessionId,
+			);
+		// test-waits-allow polling: the wake's done reaches the alerts feed after the wake ends.
+		await vi
+			.waitFor(() => expect(done()).not.toEqual([]), {
+				timeout: TIMEOUT,
+				interval: 100,
+			})
+			.catch(() => {});
+		const ledger = read(fixture, sessionId);
+		await Effect.runPromise(Fiber.interrupt(alertFiber));
+		mkdirSync("test-results", { recursive: true });
+		writeFileSync(
+			"test-results/82tn-32-30-codex-wake-done.json",
+			`${JSON.stringify({ ticket: "conduit-test-82tn.32.30", sessionId, alerts, ends: ledger.ends, evidence: ledger.events.filter(({ type }) => type.startsWith("evidence.")) }, null, 2)}\n`,
+		);
+		expect(wakeEvidence(ledger)[1]?.result).toBe("completed");
+		expect(ledger.ends).toHaveLength(2);
+		expect(done()).toEqual([{ kind: "done", sessionId, endsBefore: 2 }]);
 	});
 
 	it("Stops a wake Run with turn/interrupt, not the alarm", async () => {

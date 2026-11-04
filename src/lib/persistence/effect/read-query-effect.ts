@@ -1335,6 +1335,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				-- drops an unowned idle for it, so the session would re-qualify forever.
 				AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = sessions.id
 					AND run.status IN ('pending', 'running'))
+				-- 8.3 (2849): an idle correction asks whether anything may act (3.12: the Open row).
+				AND NOT EXISTS (SELECT 1 FROM run_ledger_sessions ledger
+					WHERE ledger.session_id = sessions.id AND ledger.state = 'Open')
 			ORDER BY updated_at DESC, id DESC`.pipe(
 			Effect.mapError(
 				(cause) =>
@@ -1368,6 +1371,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					-- A child resumed directly runs its own turn, outside the task list.
 					AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = c.id
 						AND run.status IN ('pending', 'running'))
+					-- 8.3 (2849): an idle correction asks whether anything may act (3.12: the Open row).
+					AND NOT EXISTS (SELECT 1 FROM run_ledger_sessions ledger
+						WHERE ledger.session_id = c.id AND ledger.state = 'Open')
 			),
 			owned AS (
 				SELECT id, task_id, owner_id FROM stranded

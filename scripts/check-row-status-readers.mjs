@@ -24,23 +24,18 @@ const allowed = {
 	"src/lib/relay/sse-wiring.ts": "event",
 	"src/lib/persistence/effect/inherit-fork-history.ts": "event",
 	"src/lib/domain/daemon/Layers/opencode-instances-reconcile.ts": "event",
+	// View readers: the status poller publishes each session's status from SessionActivity (busy
+	// while the ledger holds its active Run), so these read the view's status, not a row's.
+	"src/lib/session-busy.ts": "view",
+	"src/lib/relay/monitoring-reducer.ts": "view",
+	"src/lib/session/session-info-list.ts": "view",
+	// Row writers (32.13) read the row only to correct it. The poller's stale-busy pass does so only
+	// when the ledger says nothing may act (8.3).
+	"src/lib/domain/relay/Services/session-status-poller.ts": "writer",
+	// A dead runner's busy children with no run of their own are settled idle (82tn.32.40).
+	"src/lib/provider/session-run-settlement.ts": "writer",
 	// Row readers still to move onto the view (82tn.32.30 remaining; the writers go in 32.13).
-	"src/lib/session-busy.ts": "to move",
-	"src/lib/relay/monitoring-reducer.ts": "to move",
-	"src/lib/domain/relay/Services/session-status-poller.ts": "to move",
-	"src/lib/domain/daemon/Services/daemon-session-reader.ts": "to move",
-	"src/lib/domain/relay/Services/session-rewind.ts": "to move",
-	"src/lib/domain/relay/Services/continuation.ts": "to move",
-	"src/lib/session/auto-settle-policy.ts": "to move",
-	"src/lib/session/auto-archive-policy.ts": "to move",
-	"src/lib/session/auto-archive-sweep.ts": "to move",
-	"src/lib/session/auto-delete-archived-sweep.ts": "to move",
-	"src/lib/session/worktree-cleanup-rules.ts": "to move",
-	"src/lib/session/session-status-effect.ts": "to move",
-	"src/lib/session/session-info-list.ts": "to move",
-	"src/lib/provider/session-run-settlement.ts": "to move",
 	"src/lib/persistence/effect/read-query-effect.ts": "to move",
-	"src/lib/domain/daemon/Layers/session-git-layer.ts": "to move",
 };
 
 const matched = new Set();

@@ -14,6 +14,7 @@ import type {
 	TaskKey,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
+import { mainGateRefusal, openCodeLateTurn, pendingCases } from "./pending.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
 export interface TraceAction {
@@ -149,6 +150,8 @@ interface NativeSend {
 	/** A release shows the host never handed it over (3.5, 4.5); a rejected resume ranks as permanent. */
 	released: boolean;
 	transportRank: number;
+	/** D52 (CONTRACT.md 645-656): a decline sealed it possibly reached; a later outcome changes no reach. */
+	sealedPossibly?: boolean;
 }
 
 const at = <T>(items: readonly T[], index: number): T | undefined =>
@@ -256,6 +259,7 @@ export class FakeProvider {
 		readonly inputId: string;
 		readonly runId: string;
 		readonly parent: string;
+		readonly issue: IssuedEffect;
 	}[] = [];
 	/** Each input main last sent as a steer, to the Run it sent it into (3.9); every host reads main's issues. */
 	private readonly steerParents = new Map<string, string>();
@@ -323,6 +327,8 @@ export class FakeProvider {
 	/** Holds whose run.dispatched the ledger has read (D50: until then an undispatched issue, never reached). */
 	private readonly dispatchRead = new Set<SendToken>();
 	private readonly retiredHolds = new Set<string>();
+	/** Runs whose own direct start main's gate refused at removal: D50 leaves them unchecked (pending.ts). */
+	private readonly mainGateRefused = new Set<string>();
 	private readonly terminals = new Map<string, RunEnded>();
 	private readonly seenEvents = new Set<string>();
 	private readonly processFacts = new Set<string>();
@@ -931,7 +937,14 @@ export class FakeProvider {
 			this.wakeExecutions.has(runId) ||
 			this.hostStarted.has(runId) ||
 			[...this.sends.values()].some(
-				({ send, accepted, deliveryConfirmed, released, transportRank }) =>
+				({
+					send,
+					accepted,
+					deliveryConfirmed,
+					released,
+					transportRank,
+					sealedPossibly,
+				}) =>
 					(send.effect.kind === "start" || send.effect.kind === "steer") &&
 					send.effect.runId === runId &&
 					!this.unlaunchedTries.has(send.token) &&
@@ -940,6 +953,7 @@ export class FakeProvider {
 						this.dispatchRead.has(send.token)) &&
 					(accepted ||
 						deliveryConfirmed ||
+						sealedPossibly === true ||
 						(!released && transportRank !== 1 && transportRank !== 2)),
 			) ||
 			// A hold dispatched to a runner not yet started may have reached (3.6).
@@ -1103,6 +1117,16 @@ export class FakeProvider {
 	}
 	/** process_lost, or another runner's start (L1 totality). A repeated loss covers nothing new (3.2). */
 	private loseRunner(runner: string): void {
+		// CONTRACT.md 488, 3.10: an interaction is its label's and resolves at its runner's retirement,
+		// a later loss fact included, so its answers' work ends even when raised after the first loss.
+		for (const answer of this.sends.values())
+			if (
+				answer.send.effect.kind === "deliver_answer" &&
+				runnerOf(answer.send.effect.label) === runner
+			) {
+				answer.ended = true;
+				answer.unfinished = false;
+			}
 		if (this.lostRunners.has(runner)) return;
 		for (const runId of this.runsOn(runner)) this.unlaunch(runId);
 		this.lostRunners.add(runner);
@@ -1227,6 +1251,13 @@ export class FakeProvider {
 					this.gate !== "served" &&
 					(gateAddress === undefined || !this.dead(runnerOf(gateAddress)))
 				) {
+					if (
+						effect.tag === "Main" &&
+						this.gate === "removed" &&
+						(send.effect.kind === "start" || send.effect.kind === "steer") &&
+						pendingCases.has(mainGateRefusal)
+					)
+						this.mainGateRefused.add(send.effect.runId);
 					this.gateSend(send, gateAddress);
 					return send;
 				}
@@ -1760,6 +1791,7 @@ export class FakeProvider {
 					) {
 						native.ended = true;
 						native.unfinished = false;
+						if (native.label === this.label) this.turning = false;
 					}
 			// D59 (CONTRACT.md 4106-4107): main's terminal ends its Run's work as main, its end_session
 			// included; a later send issues fresh, so none acts in the session it ends (540-543).
@@ -1772,6 +1804,18 @@ export class FakeProvider {
 						native.ended = true;
 						native.unfinished = false;
 					}
+			// 3.9 (CONTRACT.md 978-980): a steer outlives its Run only at a completed end or a Stop; at main's
+			// error terminal its work, and its starts', ends with the Run's, as main (D59, 4106-4107).
+			if (
+				observation.kind === "run_terminal" &&
+				observation.outcome === "error"
+			)
+				for (const { send } of this.sends.values())
+					if (
+						(send.effect.kind === "steer" || send.effect.kind === "start") &&
+						send.effect.runId === observation.runId
+					)
+						this.forcedSends.add(send.token);
 			// L6 (CONTRACT.md 795-797): OpenCode's stop_unconfirmed terminal is its Run's deadline step, which
 			// ends that Run's work, its aborts' included, whatever the provider still does. D59 (4106-4107):
 			// any interrupted terminal main writes without the runner's confirmation ends its Run's work as main.
@@ -1898,6 +1942,16 @@ export class FakeProvider {
 					return;
 				this.turning = true;
 				this.turnFinished = false;
+				// L6 (CONTRACT.md 795-797): activity of executions a deadline already ended is ended work.
+				if (
+					!this.executions.some(
+						(x) =>
+							x.label === observation.label &&
+							x.live &&
+							!this.forcedExecutions.has(x),
+					)
+				)
+					this.forcedTurn = true;
 			} else if (observation.kind === "query_ended") {
 				if (!this.wakeLabels.has(observation.label)) return;
 				this.endQuery(observation.label);
@@ -1954,6 +2008,13 @@ export class FakeProvider {
 					native.transportRank,
 					ranks[observation.outcome.tag],
 				);
+				// CONTRACT.md 536-541: a rejected resume ends the native session and covers the sends
+				// issued before it, so a raced success later revives nothing.
+				if (
+					observation.outcome.tag === "permanent" &&
+					observation.outcome.code === "native_resume_rejected"
+				)
+					native.covered = true;
 				this.refreshQuery(native);
 				if (
 					this.provider === "opencode" &&
@@ -1998,22 +2059,23 @@ export class FakeProvider {
 					!this.destroyed.has(native.send.token)
 				) {
 					this.destroyed.add(native.send.token);
-					// 3.4: a Run-less session end covers every send of the native session issued before it,
-					// so its runner's older labels too (a reattach bumps querySeq without retiring, L1).
+					// 3.4 (CONTRACT.md 536-541): a session end, Run-bound or not, covers every send of the native
+					// session issued before it, so its runner's older labels too (a reattach bumps querySeq without retiring, L1).
 					const scope = this.endScopes.get(
 						this.mainTransmissions.get(native.send.token)?.issue.commandId ??
 							"",
 					);
-					for (const label of effect.runId === null
-						? new Set(
-								[...this.sends.values()]
-									.map((send) => send.label)
-									.filter(
-										(label) => runnerOf(label) === runnerOf(native.label),
-									),
-							)
-						: [native.label])
+					for (const label of new Set(
+						[...this.sends.values()]
+							.map((send) => send.label)
+							.filter((label) => runnerOf(label) === runnerOf(native.label)),
+					))
 						this.retireLabel(label, scope);
+					// CONTRACT.md 536-541: nothing acts in an ended native session, so a wake's turn on an
+					// older label of the runner ends too, though no send names that label.
+					for (const x of this.executions)
+						if (runnerOf(x.label) === runnerOf(native.label))
+							this.endExecutions(x.label);
 					// Tasks change only by task evidence, a start or a loss: L5 at a later scope end reads
 					// the label's latest snapshot, and a destruction that went to pending recorded nothing.
 					if (native.label === this.label) this.turning = false;
@@ -2134,6 +2196,13 @@ export class FakeProvider {
 					);
 					if (release >= 0) this.notifications.splice(release, 1);
 					this.refreshQuery(native);
+					// Pended (pending.ts openCodeLateTurn): OpenCode's late turn of a Run main already ended.
+					if (
+						this.provider === "opencode" &&
+						this.terminals.has(effect.runId) &&
+						pendingCases.has(openCodeLateTurn)
+					)
+						this.forcedSends.add(native.send.token);
 					// The turn flag is the current query's; a replaced label's send keeps its own facts (3.3). An
 					// unlaunch's drop ended a dropped send's work, so its late start runs no turn (D50, CONTRACT.md
 					// 670-672).
@@ -2143,29 +2212,63 @@ export class FakeProvider {
 					) {
 						this.turning = true;
 						this.turnFinished = false;
+						// D59 (CONTRACT.md 4106-4107): a send whose Run main already ended as main starts a
+						// turn that is main's work, ended with it.
+						if (this.forcedSends.has(native.send.token)) this.forcedTurn = true;
 					}
 				}
 				break;
 			case "input_declined":
 				native.notConsumed = true;
+				native.sealedPossibly ??=
+					!native.released &&
+					native.transportRank !== 1 &&
+					native.transportRank !== 2;
 				this.refreshQuery(native);
 				break;
 			case "run_released":
 				if (observation.reason === "ResumeRejected") {
 					native.transportRank = Math.max(native.transportRank, 2);
-					// L6, 3.9: main's next move after a rejected resume of the open run's start is its error terminal.
+					// 4.5 (CONTRACT.md 1692-1696): main's next move after a rejected resume of the open run's start
+					// is a new start of the same commandId, its relaunch (3.6), never an error terminal. In one
+					// draw in two the relaunch's runner then fails it (4.11), so main's error terminal follows.
 					if (effect.kind === "start")
-						this.deferred.push(() =>
-							this.mainRun?.runId === effect.runId
-								? this.main({
-										operation: 28,
-										selection: 0,
-										index: 0,
-										variant: 2,
-										input: 0,
-										advance: 0,
-									})
-								: undefined,
+						this.deferred.push(
+							() =>
+								this.mainRun?.runId === effect.runId
+									? this.main({
+											operation: 28,
+											selection: 0,
+											index: 0,
+											variant: 3,
+											input: 0,
+											advance: 0,
+										})
+									: undefined,
+							...(this.serial % 2 === 0
+								? [
+										(): LedgerCommand | undefined => {
+											const relaunch = this.nativeStart(effect.runId);
+											return relaunch &&
+												relaunch.send.token !== native.send.token &&
+												this.dispatchRead.has(relaunch.send.token) &&
+												!relaunch.ended
+												? {
+														verb: "observe",
+														observation: {
+															tag: "Answer",
+															token: relaunch.send.token,
+															kind: "runner_reply",
+															outcome: {
+																tag: "failed",
+																code: "TraceRunnerFailure",
+															},
+														},
+													}
+												: undefined;
+										},
+									]
+								: []),
 						);
 				} else {
 					native.notConsumed = true;
@@ -2177,6 +2280,8 @@ export class FakeProvider {
 					this.unlaunch(effect.runId, true);
 				break;
 			case "delivery_indeterminate":
+				// D50 (CONTRACT.md 669-671): a dropped execution's send resolves no further; the drop ended its work.
+				if (this.unlaunchedTries.has(observation.token)) break;
 				native.transportRank = Math.max(native.transportRank, 3);
 				this.refreshQuery(native);
 				break;
@@ -2209,6 +2314,20 @@ export class FakeProvider {
 				native.ended = true;
 				native.unfinished = false;
 				this.refreshQuery(native);
+				// L6, 3.9: main's next move after a failed reply on the open run's start is its error terminal.
+				if (observation.outcome.tag !== "succeeded" && effect.kind === "start")
+					this.deferred.push(() =>
+						this.mainRun?.runId === effect.runId
+							? this.main({
+									operation: 28,
+									selection: 0,
+									index: 0,
+									variant: 2,
+									input: 0,
+									advance: 0,
+								})
+							: undefined,
+					);
 				// 4.11, 9: read as `result`, a Codex or Cursor reply ends its Run's execution, every
 				// start and steer of it (a Cursor `wait()` settles every pending steer).
 				if (
@@ -2237,8 +2356,11 @@ export class FakeProvider {
 				) {
 					native.accepted = true;
 					this.refreshQuery(native);
-					if (observation.answer === "running" && native.unfinished)
+					if (observation.answer === "running" && native.unfinished) {
 						this.turning = true;
+						// D59 (CONTRACT.md 4106-4107): a turn of a send whose Run main already ended is main's work, ended with it.
+						if (this.forcedSends.has(native.send.token)) this.forcedTurn = true;
+					}
 				} else if (observation.answer === "absent" && !native.accepted) {
 					// 4.9: no record, so no native work; only its run.released tells the ledger it never reached (D50).
 					native.ended = true;
@@ -2428,7 +2550,8 @@ export class FakeProvider {
 					))) &&
 			before.active !== undefined &&
 			before.active.tag !== "Interrupting" &&
-			(before.active.tag === "Queued" || !this.reached(before.active.runId))
+			(before.active.tag === "Queued" || !this.reached(before.active.runId)) &&
+			!this.mainGateRefused.has(before.active.runId)
 				? before.active.runId
 				: undefined;
 		const truth = this.groundTruth();
@@ -2532,7 +2655,9 @@ export class FakeProvider {
 		if (this.retirement) {
 			const { unlaunched, reached } = this.retirement;
 			this.retirement = undefined;
-			for (const runId of unlaunched)
+			for (const runId of unlaunched.filter(
+				(runId) => !this.mainGateRefused.has(runId),
+			))
 				assert(
 					!ended.some(
 						(t) => t.runId === runId && t.reason.tag === "process_lost",
@@ -2896,7 +3021,15 @@ export class FakeProvider {
 				);
 		}
 		checked.push("LI7");
-		this.issued(effects, this.label, aliveAtIssue);
+		// 5.1, CONTRACT.md 532-533: Stop commits main's interrupt row before it issues its cancel_request
+		// and probe, so an idle read of that probe covers the interrupt.
+		const interrupt = (issued: IssuedEffect) =>
+			issued.tag === "Main" && issued.effect.kind === "interrupt";
+		this.issued(
+			[...effects.filter(interrupt), ...effects.filter((e) => !interrupt(e))],
+			this.label,
+			aliveAtIssue,
+		);
 		// D59, 9: a Claude, Codex or Cursor interrupt is no member; its work ends once every Run it names
 		// has ended, and at once when it names none.
 		if (this.provider !== "opencode")
@@ -3756,8 +3889,12 @@ export class FakeProvider {
 						kind: "effect_outcome",
 						outcome: { tag: "not_sent", retryAt: now + 100 },
 					}
-				: (drawn.kind === "run_released" || drawn.kind === "input_declined") &&
-						(native?.accepted === true || native?.deliveryConfirmed === true)
+				: // CONTRACT.md 1850-1856: a release or decline says no turn took the input, so neither
+					// follows the turn it carried raising a question.
+					(drawn.kind === "run_released" || drawn.kind === "input_declined") &&
+						(native?.accepted === true ||
+							native?.deliveryConfirmed === true ||
+							native?.asked === true)
 					? { kind: "accounting" }
 					: turnOver ||
 							(notTaken && (received || drawn.kind === "interaction_requested"))
@@ -3849,7 +3986,7 @@ export class FakeProvider {
 					this.mainInbox.shift();
 					const runId = `main-run:${this.serial++}`;
 					if (open) {
-						dispatch(runId, {
+						const issue = dispatch(runId, {
 							kind: "steer",
 							runId: open.runId,
 							inputId: head.inputId,
@@ -3858,6 +3995,7 @@ export class FakeProvider {
 							inputId: head.inputId,
 							runId,
 							parent: open.runId,
+							issue,
 						});
 						// Round 17 (CONTRACT.md 4083): one steer in three is followed by main's admit of another
 						// input, then by its send's failure: permanent (3.9 D53) or, every other time, retryable (3.6).
@@ -3924,7 +4062,15 @@ export class FakeProvider {
 						!this.stopped(open)
 					) {
 						this.mainSteers.shift();
-						this.mainRun = undefined;
+						// 2.1 (CONTRACT.md 57, 262): the steer's own Run is main's one open Run, so a queued input
+						// waits for its terminal; its steer send is its execution (3.9).
+						this.mainRun = {
+							runId: late.runId,
+							inputId: late.inputId,
+							issue: late.issue,
+							started: true,
+							stopped: false,
+						};
 						const ended: LedgerCommand = {
 							verb: "observe",
 							observation: {
@@ -3992,7 +4138,11 @@ export class FakeProvider {
 					// Main's terminal follows native truth: a clean end completes, a permanent failure
 					// errors, and OpenCode's stop with no confirming evidence is interrupted (L6, 3.9).
 					if (!open) continue;
-					const native = this.nativeStart(open.runId);
+					const native =
+						this.nativeStart(open.runId) ??
+						(open.issue.effect.kind === "steer"
+							? this.sends.get(this.bound(open.issue).token)
+							: undefined);
 					const stopped = this.stopped(open);
 					// OpenCode's turn.error ends the turn and its query in one write: main's error terminal and the
 					// start's query_ended fold back to back, in either order, and the Run ends once (3.4, 3.8 GAP 5).
@@ -4030,7 +4180,9 @@ export class FakeProvider {
 					// OpenCode's result leaves its send open: a covering idle after an accepted, unstopped turn
 					// is its session.idle, which main writes as turn.completed (3.5, D26, 4.11).
 					const terminal =
-						native?.transportRank === 2
+						native?.transportRank === 2 &&
+						// 4.5 (CONTRACT.md 1692-1696): a rejected resume unlaunched the try; main relaunches it.
+						!this.unlaunchedTries.has(native.send.token)
 							? ({ outcome: "error", code: "TracePermanent" } as const)
 							: (native?.ended === true ||
 										(direct &&

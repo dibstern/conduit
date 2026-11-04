@@ -16,6 +16,7 @@ import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-sign
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import {
 	canonicalEvent,
 	type SessionStatusValue,
@@ -45,16 +46,6 @@ import {
 type StatusPollerChangedCallback = Parameters<
 	SessionStatusPollerService["on"]
 >[1];
-
-const toStatusRecord = (
-	raw: Readonly<Record<string, string>>,
-): Record<string, SessionStatus> => {
-	const result: Record<string, SessionStatus> = {};
-	for (const [id, status] of Object.entries(raw)) {
-		result[id] = { type: status } as SessionStatus;
-	}
-	return result;
-};
 
 export const StatusPollerLive: Layer.Layer<
 	StatusPollerTag,
@@ -145,10 +136,15 @@ export const StatusPollerLive: Layer.Layer<
 		const sessionProviders = yield* Ref.make<ReadonlyMap<string, string>>(
 			new Map(),
 		);
-		const readProjectedStatuses = (): Effect.Effect<
-			Record<string, SessionStatus>,
-			unknown
-		> =>
+		// 8.1 (2734): a session is busy while the ledger holds its active Run; the row's status is not
+		// read. An error row keeps its error, which no reader counts as busy.
+		const readProjectedStatuses = (
+			working: (sessionId: string) => boolean = (sessionId) =>
+				activity.background.activityOf(sessionId, {
+					approvals: 0,
+					questions: 0,
+				}).foreground === "working",
+		): Effect.Effect<Record<string, SessionStatus>, unknown> =>
 			Effect.gen(function* () {
 				const rows = yield* readQuery.getAllSessionStatusesWithProviders({
 					projectIds: [eventStore.projectId],
@@ -157,10 +153,30 @@ export const StatusPollerLive: Layer.Layer<
 					sessionProviders,
 					new Map(rows.map((row) => [row.id, row.provider])),
 				);
-				return toStatusRecord(
-					Object.fromEntries(rows.map((row) => [row.id, row.status])),
+				return Object.fromEntries(
+					rows.map((row): [string, SessionStatus] => [
+						row.id,
+						{
+							type: working(row.id)
+								? "busy"
+								: row.status === "error"
+									? "error"
+									: "idle",
+						} as SessionStatus,
+					]),
 				);
 			});
+		// The view fills as the arm folds after a restart, so before the first poll the store's ledger
+		// answers (3.12: only an Open session can hold a Run).
+		const readStoredStatuses = Effect.gen(function* () {
+			const active = new Set<string>();
+			for (const { session_id } of yield* sql<{
+				session_id: string;
+			}>`SELECT session_id FROM run_ledger_sessions WHERE state = 'Open'`)
+				if ((yield* loadLedgerView(session_id))?.active !== undefined)
+					active.add(session_id);
+			return yield* readProjectedStatuses((sessionId) => active.has(sessionId));
+		}).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 		const pollerState = <A, E, R>(
 			effect: Effect.Effect<A, E, R | PollerStateTag>,
 		) => effect.pipe(Effect.provideService(PollerStateTag, stateRef));
@@ -302,7 +318,7 @@ export const StatusPollerLive: Layer.Layer<
 					// first poll. A Claude turn that outlived a restart would read as
 					// idle to every reconnecting browser, so a cold cache defers to
 					// the event store.
-					const statuses = yield* readProjectedStatuses().pipe(
+					const statuses = yield* readStoredStatuses.pipe(
 						Effect.orElseSucceed(() => ({})),
 					);
 					return isBusyIn(
