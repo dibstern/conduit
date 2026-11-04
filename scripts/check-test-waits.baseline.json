@@ -618,8 +618,8 @@
 		"timeout-override": 7
 	},
 	"test/integration/daemon/codex-goals.test.ts": {
-		"polling": 16,
-		"timeout-override": 11
+		"polling": 18,
+		"timeout-override": 12
 	},
 	"test/integration/daemon/codex-interactions.test.ts": {
 		"polling": 13,

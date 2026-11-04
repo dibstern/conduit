@@ -1401,8 +1401,11 @@ export class CodexRunnerPayload implements RunnerPayload {
 							data: { label: "", commandId, state: "completed" },
 						});
 				});
-				// A turn's loop answers in order with its own events; with none, the answer goes now.
-				yield* loop ? Queue.offer(loop, { answer }) : answer;
+				// A turn's loop answers in order with its own events, as a goal notification does while
+				// the session is busy: its state lags the wire, so an answer now would undo the turn's
+				// later goal state (lane-3227 audit 33). With no turn running, the answer goes now.
+				const queue = loop ?? (session.busy ? child.updates : undefined);
+				yield* queue ? Queue.offer(queue, { answer }) : answer;
 			});
 			yield* deliver.pipe(
 				Effect.catch((cause) =>

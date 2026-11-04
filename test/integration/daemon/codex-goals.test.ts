@@ -941,6 +941,113 @@ describe("Codex goals through the daemon and detached runner", () => {
 		TIMEOUT * 2,
 	);
 
+	// Audit 10: Codex starts the successor before the Pause lands. A wake Run needs no active Run
+	// (CONTRACT.md 960, 8.3), so the successor stays in the held Run, shows, and ends it once.
+	it(
+		"a successor that starts before the Pause lands shows in the held Run, which ends once",
+		async () => {
+			const { fixture, browser, id } = await start("goal-race", "goal-chain");
+			const trace = fixtureRows("goal-chain");
+			const [, successor] = trace.flatMap((row, index) =>
+				row.message?.method === "turn/started" ? [index] : [],
+			);
+			const notified = trace.findIndex(
+				(row, index) =>
+					index > (successor ?? 0) &&
+					row.message?.method === "thread/goal/updated",
+			);
+			const end = trace.findIndex(
+				(row, index) =>
+					index > notified && row.message?.method === "turn/completed",
+			);
+			const params = trace[notified]?.message?.params;
+			const goal = { ...(params?.["goal"] as object), status: "paused" };
+			const threadId = params?.["threadId"];
+			if (successor === undefined || notified < 0 || end < 0 || !threadId)
+				throw new Error("Missing recorded successor");
+			writeTrace([
+				...trace.slice(0, successor + 1),
+				{
+					dir: "out",
+					at: 0,
+					message: {
+						id: 5,
+						method: "thread/goal/set",
+						params: { threadId, status: "paused", origin: "user" },
+					},
+				},
+				{ dir: "in", at: 0, message: { id: 5, result: { goal } } },
+				{
+					dir: "in",
+					at: 0,
+					message: {
+						method: "thread/goal/updated",
+						params: { threadId, turnId: null, goal },
+					},
+				},
+				...trace.slice(successor + 1, notified),
+				...trace.slice(notified + 1, end + 1),
+				...trace.filter(({ dir }) => dir === "exit"),
+			]);
+			const sending = goalSend(browser, id);
+			await vi.waitFor(
+				() =>
+					expect(
+						rows<TraceRow>(capturePath).filter(
+							({ message }) => message?.method === "turn/started",
+						),
+					).toHaveLength(2),
+				{ timeout: TIMEOUT },
+			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
+			const reply = await sending;
+			expect(reply.chunks.join("")).toBe(
+				"Hello from the mock model.".repeat(2),
+			);
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]),
+				{ timeout: TIMEOUT },
+			);
+			const { events } = snapshot(fixture, id);
+			expect(
+				events.filter(({ type }) =>
+					/^turn\.(completed|interrupted|error)$/.test(type),
+				),
+			).toHaveLength(1);
+			expect(events).toContainEqual(
+				expect.objectContaining({
+					type: "session.goal_changed",
+					data: expect.objectContaining({
+						pausedReason: "Paused",
+						turnFinishing: true,
+					}),
+				}),
+			);
+			// Audit 33: once the turn has ended, the goal no longer says Codex is finishing it.
+			const goalChanges = events.filter(
+				({ type }) => type === "session.goal_changed",
+			);
+			expect(goalChanges.at(-1)?.data).not.toHaveProperty("turnFinishing");
+			expect(await goalPhase(fixture, id)).toBeUndefined();
+			expect(
+				requests().filter(({ message }) => message?.method === "turn/start"),
+			).toHaveLength(1);
+			// The goal-stuck check counts continuations, not the reply and notification each change has:
+			// the first native turn's, and none for the successor the Pause ended.
+			const { checks } = await Effect.runPromise(
+				browser.rpc.GetGoalDetails({ sessionId: id }),
+			);
+			expect(goalChanges.length).toBeGreaterThan(checks.length);
+			expect(checks.map(({ iteration }) => iteration)).toEqual([1]);
+		},
+		TIMEOUT * 2,
+	);
+
 	it(
 		"Stop interrupts the executing successor and leaves the goal active",
 		async () => {
