@@ -3,7 +3,7 @@
 // successor gap holding the conduit turn forever. Every replay must be consumed.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
@@ -153,13 +153,21 @@ describe("Codex goals through the daemon and detached runner", () => {
 				expect(report.unconsumed).toEqual([]);
 			}
 			expect(fixture.remainingRunnerPids()).toEqual([]);
+			const evidence = JSON.stringify(
+				{
+					result: task.result?.state,
+					reports,
+					process: fixture.proof(),
+					state,
+				},
+				null,
+				2,
+			);
+			writeFileSync(join(artifactRoot, "evidence.json"), evidence);
+			// The lane's per-box proof (82tn.32.27), named for the test's trace case.
 			writeFileSync(
-				join(artifactRoot, "evidence.json"),
-				JSON.stringify(
-					{ result: task.result?.state, reports, process: fixture.proof() },
-					null,
-					2,
-				),
+				resolve(`test-results/82tn-32-27-${basename(artifactRoot)}.json`),
+				evidence,
 			);
 		} finally {
 			writeFileSync(
