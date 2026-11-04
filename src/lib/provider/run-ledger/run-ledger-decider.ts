@@ -1275,10 +1275,12 @@ function effectOutcome(
 					command.deadline = undefined;
 				}
 			}
-			// 3.10: a permanent refusal ends the answer's delivery, which resolves its interaction.
+			// 3.10: a permanent refusal ends the answer's delivery, which resolves its interaction; a
+			// reopened prompt's old send is not among its deliveries (CONTRACT.md 1019-1022).
 			if (send.effect.kind === "deliver_answer") {
 				const interaction = interactionOf(book, send.effect.interactionId);
-				if (interaction !== undefined) interaction.resolved = true;
+				if (interaction?.deliveries.includes(book.sends.indexOf(send)))
+					interaction.resolved = true;
 			}
 			break;
 		}

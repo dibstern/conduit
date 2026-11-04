@@ -1840,9 +1840,11 @@ function effectOutcome(
 				}
 			}
 			if (send.effect.kind === "deliver_answer") {
-				// 3.10 (amends 10B): a permanent refusal ends the delivery, which resolves the interaction.
+				// 3.10 (amends 10B): a permanent refusal ends the delivery, which resolves the interaction;
+				// a reopened prompt's old send is not among its deliveries (CONTRACT.md 1019-1022).
 				const interaction = interactionOf(world, send.effect.interactionId);
-				if (interaction !== undefined) resolveInteraction(interaction);
+				if (interaction?.deliveries.includes(world.sends.indexOf(send)))
+					resolveInteraction(interaction);
 			}
 			break;
 		}

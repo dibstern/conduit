@@ -2476,6 +2476,44 @@ describe("[32.2.8] core answers, steers, OpenCode and Cursor: the bead's accepta
 		});
 	});
 
+	it("a late outcome for a replaced prompt's old send leaves the new one Pending (3.10)", () => {
+		agreed("claude", (d) => {
+			const a = running(d);
+			const first = ask(d, a.token, "q1");
+			const failed = {
+				kind: "effect_outcome",
+				outcome: { tag: "permanent", code: "provider_control_timeout" },
+				transmission: claimOf(first),
+			} as const;
+			observe(d, tokenOf(first), failed);
+			// CONTRACT.md 1019-1022: main re-asks the unconsumed prompt as a new request.
+			observe(d, a.token, {
+				kind: "interaction_requested",
+				interactionId: "q1",
+				interactionKind: "question",
+			});
+			const reopened = [
+				{ tag: "Pending", interactionId: "q1", kind: "question" },
+			];
+			expect(d.view().interactions).toEqual(reopened);
+			observe(d, tokenOf(first), failed);
+			expect(d.view().interactions).toEqual(reopened);
+			step(d, {
+				verb: "control",
+				control: {
+					kind: "answer",
+					commandId: "answer-again",
+					interactionId: "q1",
+					answer: "yes",
+				},
+			});
+			expect(d.latest("deliver_answer")).toMatchObject({
+				tag: "Main",
+				commandId: "answer-again",
+			});
+		});
+	});
+
 	it.each([
 		["its runner's retirement", (d: Driver) => lose(d, "r1")],
 		["a Stop's commit", (d: Driver) => stop(d)],

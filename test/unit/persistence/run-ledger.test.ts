@@ -692,6 +692,12 @@ describe("Run Ledger ledger regressions the arm reaches", () => {
 							1013,
 						),
 						outcome("a1", 2, { tag: "succeeded" }, 1014),
+						outcome(
+							"a1",
+							1,
+							{ tag: "permanent", code: "provider_control_timeout" },
+							1014,
+						),
 					]);
 					expect(yield* prompts).toEqual(reopened);
 					yield* project([answer("q1", "a2", 1015)]);
