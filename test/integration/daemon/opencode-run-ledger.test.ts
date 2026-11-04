@@ -11,6 +11,8 @@
 // 7. a lost prompt (its send comes back unknown, then it runs late) is read absent and re-sent, or
 //    its Run ends twice, or probing never ends because no probe records what it read, or its echo
 //    is never read as received, so it ends as a failure though it ran (82tn.32.35).
+// 8. a process that dies while the daemon is down leaves its held Run open after the daemon starts,
+//    ends it as completed though the work died, or ends it again when the next process starts.
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -541,5 +543,59 @@ describe("OpenCode on the Run Ledger", () => {
 		expect(started(after)).toEqual([first, { ...first, reattached: 1 }]);
 		expect(lost(after)).toEqual([]);
 		expect(after.ends).toEqual([{ runId: heldRun, reason: "completed" }]);
+	});
+
+	it("a process that dies while the daemon is down ends its held Run once, as main's restart recovery ends it, and the next send runs under a new id", async () => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Process dies while the daemon is down",
+			instanceId,
+			"opencode",
+		);
+		const before = await hold(fixture, browser, sessionId);
+		const [first] = started(before);
+		const heldRun = before.runs[0]?.id;
+
+		await fixture.terminate();
+		const [victim] = spawned(fixture);
+		if (!victim) throw new Error("No fake OpenCode");
+		process.kill(victim.pid, "SIGKILL");
+		await fixture.restart();
+		// Startup re-adopts only a live process, so main's recovery ends the orphaned run, and the
+		// ledger folds that one terminal (CONTRACT.md 2.1 D59: a Run with an open main run ends as
+		// main), with no new process yet to retire the old id.
+		await until(() =>
+			expect(read(fixture, sessionId).ends).toEqual([
+				{ runId: heldRun, reason: "provider_error" },
+			]),
+		);
+		const recovered = read(fixture, sessionId);
+		// The next send starts a new process; its start retires the old id with the Run already ended.
+		await (await fixture.connect()).send(sessionId, "after the daemon restart");
+
+		const after = read(fixture, sessionId);
+		const [, second] = started(after);
+		const nextRun = after.runs.at(-1)?.id;
+		proofs.push({
+			scenario: "death-while-daemon-down",
+			before,
+			recovered,
+			after,
+		});
+		expect(spawned(fixture)).toHaveLength(2);
+		expect(recovered.runs).toEqual([{ id: heldRun, status: "error" }]);
+		expect(second).toMatchObject({
+			label: `${second?.runnerId}:0`,
+			reattached: 0,
+		});
+		expect(second?.runnerId).not.toBe(first?.runnerId);
+		expect(started(after)).toHaveLength(2);
+		// Conduit stopped nothing, so no loss is written (CONTRACT.md 2.1 row 215, 9).
+		expect(lost(after)).toEqual([]);
+		expect(after.ends).toEqual([
+			{ runId: heldRun, reason: "provider_error" },
+			{ runId: nextRun, reason: "completed" },
+		]);
 	});
 });
