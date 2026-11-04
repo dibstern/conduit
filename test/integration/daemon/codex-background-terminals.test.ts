@@ -86,7 +86,11 @@ const terminate = (at: number, threadId: string, terminated: boolean) => [
 	{ dir: "in", at, message: { id: 902, result: { terminated } } },
 ];
 
-/** The command's finish after its turn ended (probe P4: failed, exit -1, the old turnId). */
+/**
+ * The command's finish after its turn ended (probe P4: failed, the old turnId). A terminated
+ * `/bin/zsh -c` command reports exit 137, as the live E2E saw; a bare process reports -1
+ * (lane 3245 Q3). The runner reads neither: a finish only prompts a re-read.
+ */
 const late = (
 	at: number,
 	{ threadId, turnId, item }: Turn,
@@ -375,7 +379,7 @@ describe("Codex background terminals", () => {
 			terminalTrace((turn) => [
 				...terminate(turn.at, turn.threadId, true),
 				...listed(turn.at + 1, 903, turn.threadId, []),
-				late(turn.at + 2, turn, "failed", -1),
+				late(turn.at + 2, turn, "failed", 137),
 			]),
 		);
 		await submit(browser, sessionId);
@@ -466,7 +470,7 @@ describe("Codex background terminals", () => {
 				return [
 					...listed(turn.at, 903, turn.threadId, []),
 					late(turn.at, turn, "completed", 0),
-					late(turn.at + 1, { ...turn, item: other }, "failed", -1),
+					late(turn.at + 1, { ...turn, item: other }, "failed", 137),
 				];
 			}),
 		);
