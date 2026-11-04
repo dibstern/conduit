@@ -289,6 +289,18 @@ describe("Codex on the Run Ledger", () => {
 		);
 		expect(result.ok).toBe(true);
 	};
+	/** Sets the goal (it goes to Codex first at the next launch), then sends its prompt. */
+	const goalSubmit = async (browser: ProcessBrowser, sessionId: string) => {
+		const set = await Effect.runPromise(
+			browser.rpc.SetGoal({
+				sessionId,
+				commandId: randomUUID(),
+				condition: "Say hello",
+			}),
+		);
+		expect(set).toEqual({ ok: true });
+		await submit(browser, sessionId, "Say hello");
+	};
 	const turns = (
 		fixture: ProcessHarness,
 		sessionId: string,
@@ -651,7 +663,7 @@ describe("Codex on the Run Ledger", () => {
 			"goal-chain",
 			fixtureRows("goal-chain"),
 		);
-		await browser.send(sessionId, "$goal Say hello", TIMEOUT);
+		await goalSubmit(browser, sessionId);
 		await turns(fixture, sessionId, ["completed"]);
 		const ledger = read(fixture, sessionId);
 		endsOnce(ledger);
@@ -693,7 +705,7 @@ describe("Codex on the Run Ledger", () => {
 			CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500",
 		});
 		writeFileSync(gatePath, String(firstEnd));
-		await submit(started.browser, started.sessionId, "$goal Say hello");
+		await goalSubmit(started.browser, started.sessionId);
 		// test-waits-allow polling: the window closing reaches only the store's ledger.
 		await vi.waitFor(
 			() =>
@@ -820,48 +832,52 @@ describe("Codex on the Run Ledger", () => {
 		const exit = chain.findIndex(({ dir }) => dir === "exit");
 		const at = Number(chain[exit - 1]?.["at"]) + 1;
 		const turnId = "wake-send-turn";
+		const turnStart = chain[first]?.message;
 		const sendTurn = chain
 			.slice(first)
 			.filter(
 				({ message }) =>
 					[
 						"turn/start",
-						"thread/goal/set",
 						"turn/started",
 						"item/started",
 						"item/completed",
 					].includes(String(message?.method)) ||
-					[4, 5].includes(Number(message?.id)),
+					(message?.id === turnStart?.id && !message?.method),
 			)
-			.slice(0, 7);
-		// A send in a goal session re-arms the goal after its turn/start, as turn 1 does.
+			.slice(0, 5);
+		// A send in a goal session is a plain turn: no goal request goes with it.
 		expect(sendTurn.map(({ message }) => message?.method ?? "result")).toEqual([
 			"turn/start",
 			"result",
-			"thread/goal/set",
 			"turn/started",
-			"result",
 			"item/started",
 			"item/completed",
 		]);
 		const completed = chain.find(
 			({ message }) => message?.method === "turn/completed",
 		);
+		const turn1 = (
+			sendTurn[2]?.message?.params?.["turn"] as { id: string } | undefined
+		)?.id;
+		const user1 = (
+			sendTurn[3]?.message?.params?.["item"] as { id: string } | undefined
+		)?.id;
+		if (!turn1 || !user1) throw new Error("Missing turn 1 ids");
 		// The send's turn is turn 1's rows, renamed so no id is shared with the goal's turns.
 		const renamed = (row: TraceRow | undefined) => ({
 			...row,
 			at,
 			message: JSON.parse(
 				JSON.stringify(row?.message)
-					.replaceAll("01a15f39-35ab-78e0-a2c4-5bbb92ceb680", turnId)
-					.replaceAll("01a15f39-35dc-7c31-ab4c-020b1f2b6415", "wake-send-user")
+					.replaceAll(turn1, turnId)
+					.replaceAll(user1, "wake-send-user")
 					.replaceAll("msg_mock_1", "msg_wake_send")
 					.replaceAll('"Say hello"', JSON.stringify(STEER))
-					.replaceAll('"id":4,', '"id":900,')
-					.replaceAll('"id":5,', '"id":901,'),
+					.replaceAll(`"id":${String(turnStart?.id)},`, '"id":900,'),
 			),
 		});
-		// The app-server exits inside the send's goal successor window: the send's Run still completes.
+		// The app-server exits after the send's turn ends: the send's Run still completes.
 		const trace = [
 			...chain.slice(0, exit),
 			...sendTurn.map(renamed),
@@ -1045,7 +1061,7 @@ describe("Codex on the Run Ledger", () => {
 			({ message }) => message?.method === "turn/completed",
 		)?.["at"];
 		writeFileSync(gatePath, String(firstEnd));
-		await submit(browser, sessionId, "$goal Say hello");
+		await goalSubmit(browser, sessionId);
 		// test-waits-allow polling: the app-server's turn end reaches only its capture file.
 		await vi.waitFor(
 			() => expect(captured("turn/completed", "in")).toHaveLength(1),

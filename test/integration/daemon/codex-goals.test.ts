@@ -4,7 +4,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppServerTraceReport } from "../../../src/lib/provider/codex/app-server/trace-player.js";
@@ -94,6 +93,27 @@ describe("Codex goals through the daemon and detached runner", () => {
 		return { fixture, browser, id: sessionId };
 	}
 
+	/**
+	 * Sets the goal and sends the prompt that launches Codex: with no live thread the set is held
+	 * for the launch, and goes as thread/goal/set once its turn/start is accepted (82tn.32.27).
+	 */
+	async function goalSend(
+		browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
+		id: string,
+		timeout = TIMEOUT,
+	) {
+		expect(
+			await Effect.runPromise(
+				browser.rpc.SetGoal({
+					sessionId: id,
+					commandId: randomUUID(),
+					condition: OBJECTIVE,
+				}),
+			),
+		).toEqual({ ok: true });
+		return browser.send(id, OBJECTIVE, timeout);
+	}
+
 	function requests() {
 		return rows<TraceRow>(capturePath).filter(({ dir }) => dir === "out");
 	}
@@ -155,7 +175,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 		"chains three native turns into one conduit terminal and serves goal details",
 		async () => {
 			const { fixture, browser, id } = await start("goal-chain");
-			const reply = await browser.send(id, `$goal ${OBJECTIVE}`, TIMEOUT);
+			const reply = await goalSend(browser, id);
 			expect(reply.chunks.join("")).toBe(
 				"Hello from the mock model.".repeat(3),
 			);
@@ -198,10 +218,10 @@ describe("Codex goals through the daemon and detached runner", () => {
 	);
 
 	it.each(["paused", "cleared"] as const)(
-		"a goal %s notification closes the held turn",
+		"a goal %s mid-turn by its action closes the held turn",
 		async (ending) => {
 			const { fixture, browser, id } = await start(`goal-${ending}`);
-			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			const sending = goalSend(browser, id);
 			await vi.waitFor(
 				() =>
 					expect(snapshot(fixture, id).events).toContainEqual(
@@ -214,22 +234,18 @@ describe("Codex goals through the daemon and detached runner", () => {
 					),
 				{ timeout: TIMEOUT },
 			);
-			await Effect.runPromise(
-				browser.rpc["input.submit"]({
-					sessionId: id,
-					originId: browser.originId,
-					inputId: randomUUID(),
-					delivery: "steer",
-					text: `/goal ${ending === "paused" ? "pause" : "clear"}`,
-				}),
-			);
+			const action = { sessionId: id, commandId: randomUUID() };
+			expect(
+				await Effect.runPromise(
+					ending === "paused"
+						? browser.rpc.PauseGoal(action)
+						: browser.rpc.ClearGoal(action),
+				),
+			).toEqual({ ok: true });
 			await sending;
 			await vi.waitFor(
 				() =>
-					expect(snapshot(fixture, id).turns).toEqual([
-						{ state: "completed" },
-						{ state: "completed" },
-					]),
+					expect(snapshot(fixture, id).turns).toEqual([{ state: "completed" }]),
 				{ timeout: TIMEOUT },
 			);
 			const { events } = snapshot(fixture, id);
@@ -274,7 +290,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 			if (typeof completion?.["at"] !== "number")
 				throw new Error("Missing native completion timestamp");
 			writeFileSync(gatePath, String(completion["at"] - 1));
-			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			const sending = goalSend(browser, id);
 			await vi.waitFor(
 				() =>
 					expect(
@@ -301,51 +317,38 @@ describe("Codex goals through the daemon and detached runner", () => {
 	);
 
 	it(
-		"seeds a restarted runner with the dispatched paused goal and resumes on Continue",
+		"keeps a paused goal across a Codex restart; Resume sends status active only",
 		async () => {
 			const { fixture, browser, id } = await start(
 				"goal-restart",
 				"goal-paused",
 			);
-			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			const sending = goalSend(browser, id);
 			await vi.waitFor(
 				() =>
 					expect(
 						requests().filter(
 							({ message }) => message?.method === "thread/goal/set",
 						),
-					).toHaveLength(2),
+					).toHaveLength(1),
 				{ timeout: TIMEOUT },
 			);
-			const pauseInputId = randomUUID();
-			await Effect.runPromise(
-				browser.rpc["input.submit"]({
-					sessionId: id,
-					originId: browser.originId,
-					inputId: pauseInputId,
-					delivery: "steer",
-					text: "/goal pause",
-				}),
-			);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
 			await sending;
-			// A terminal can precede the control command's durable acknowledgement.
+			// test-waits-allow polling: Codex's paused goal reaches only the store.
 			await vi.waitFor(
-				() => {
-					const db = new Database(fixture.daemonStorePath(), {
-						readonly: true,
-					});
-					try {
-						expect(
-							db
-								.prepare(
-									"SELECT status FROM provider_command_outbox WHERE session_id = ? AND command_id = ?",
-								)
-								.get(id, pauseInputId),
-						).toEqual({ status: "completed" });
-					} finally {
-						db.close();
-					}
-				},
+				() =>
+					expect(
+						snapshot(fixture, id).events.filter(
+							({ type, data }) =>
+								type === "session.goal_changed" &&
+								(data as { pausedReason?: string }).pausedReason === "Paused",
+						).length,
+					).toBeGreaterThan(0),
 				{ timeout: TIMEOUT },
 			);
 			const identity = JSON.parse(
@@ -356,38 +359,35 @@ describe("Codex goals through the daemon and detached runner", () => {
 			) as { threadId: string };
 			for (const pid of fixture.remainingRunnerPids())
 				process.kill(pid, "SIGKILL");
+			// test-waits-allow polling: the runners' exit is seen only as their pids.
 			await vi.waitFor(
 				() => expect(fixture.remainingRunnerPids()).toEqual([]),
 				{ timeout: TIMEOUT },
 			);
-			const trace = resumeTrace(fixtureRows("goal-chain"), identity.threadId);
-			const setAt = trace.findIndex(
-				({ message }) => message?.method === "thread/goal/set",
-			);
-			const turnAt = trace.findIndex(
-				({ message }) => message?.method === "turn/start",
-			);
-			// The persisted native goal exists already. No new objective is sent.
-			writeTrace([...trace.slice(0, setAt), ...trace.slice(turnAt)]);
+			// Codex keeps the paused goal on its thread; thread/resume brings it back, and Resume
+			// sets it active with no objective. With no live thread, it goes once the next launch
+			// is accepted (8.5).
+			writeTrace(resumeTrace(fixtureRows("goal-chain"), identity.threadId));
+			expect(
+				await Effect.runPromise(
+					browser.rpc.ResumeGoal({ sessionId: id, commandId: randomUUID() }),
+				),
+			).toEqual({ ok: true });
 			const reply = await browser.send(id, "Continue.", TIMEOUT);
 			expect(reply.chunks.join("")).toBe(
 				"Hello from the mock model.".repeat(3),
 			);
+			// The restarted app-server's capture starts at its own launch.
 			expect(
-				requests().filter(
-					({ message }) => message?.method === "thread/goal/set",
-				),
-			).toHaveLength(1);
-			expect(
-				requests().find(({ message }) => message?.method === "thread/goal/set")
-					?.message?.params,
-			).toMatchObject({
-				threadId: identity.threadId,
-				status: "active",
-				origin: "user",
-			});
+				requests().some(({ message }) => message?.method === "thread/resume"),
+			).toBe(true);
+			const sets = requests().filter(
+				({ message }) => message?.method === "thread/goal/set",
+			);
+			expect(sets.map(({ message }) => message?.params)).toEqual([
+				{ threadId: identity.threadId, status: "active", origin: "user" },
+			]);
 			expect(snapshot(fixture, id).turns).toEqual([
-				{ state: "completed" },
 				{ state: "completed" },
 				{ state: "completed" },
 			]);
@@ -460,7 +460,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 				},
 			);
 			writeTrace(trace);
-			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			const sending = goalSend(browser, id);
 			await vi.waitFor(
 				() =>
 					expect(
@@ -547,7 +547,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 			) as TraceRow[];
 			writeTrace([...gated, ...tail.map((row) => ({ ...row, at: 1 }))]);
 			writeFileSync(gatePath, "0");
-			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			const sending = goalSend(browser, id);
 			try {
 				await vi.waitFor(
 					() =>
@@ -610,30 +610,19 @@ describe("Codex goals through the daemon and detached runner", () => {
 	);
 
 	it(
-		"reads and clears an idle native goal without starting a model turn",
+		"clears an idle native goal without starting a model turn",
 		async () => {
 			const { fixture, browser, id } = await start(
 				"goal-idle-controls",
 				"goal-chain",
 			);
 			const trace = fixtureRows("goal-chain");
-			const setAt = trace.findIndex(
-				({ message }) => message?.method === "thread/goal/set",
-			);
-			const goal = trace.find(
-				({ message }) =>
-					message?.method === "thread/goal/updated" &&
-					(message.params?.["goal"] as { status: string }).status === "active",
-			)?.message?.params?.["goal"];
-			const threadId = trace[setAt]?.message?.params?.["threadId"];
+			const threadId = trace.find(
+				({ message }) => message?.method === "turn/start",
+			)?.message?.params?.["threadId"];
+			const exit = trace.findIndex(({ dir }) => dir === "exit");
 			writeTrace([
-				...trace.slice(0, setAt),
-				{
-					dir: "out",
-					at: 0,
-					message: { id: 900, method: "thread/goal/get", params: { threadId } },
-				},
-				{ dir: "in", at: 0, message: { id: 900, result: { goal } } },
+				...trace.slice(0, exit),
 				{
 					dir: "out",
 					at: 0,
@@ -649,41 +638,46 @@ describe("Codex goals through the daemon and detached runner", () => {
 					message: { method: "thread/goal/cleared", params: { threadId } },
 				},
 				{ dir: "in", at: 0, message: { id: 901, result: { cleared: true } } },
-				{ dir: "exit", at: 0, code: 0, signal: null },
+				...trace.slice(exit),
 			]);
-			await browser.send(id, "/goal", TIMEOUT);
-			expect(snapshot(fixture, id).events).toContainEqual(
-				expect.objectContaining({
-					type: "session.goal_changed",
-					data: expect.objectContaining({
-						goal: expect.objectContaining({ condition: OBJECTIVE }),
-					}),
-				}),
+			await goalSend(browser, id);
+			const commandId = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.ClearGoal({ sessionId: id, commandId }),
+				),
+			).toEqual({ ok: true });
+			await vi.waitFor(
+				() =>
+					expect(snapshot(fixture, id).events).toContainEqual(
+						expect.objectContaining({
+							type: "session.goal_changed",
+							data: expect.objectContaining({
+								goal: null,
+								ended: "cleared",
+								replyTo: commandId,
+							}),
+						}),
+					),
+				{ timeout: TIMEOUT },
 			);
-			await browser.send(id, "/goal clear", TIMEOUT);
 			const { events, turns } = snapshot(fixture, id);
-			expect(turns).toEqual([{ state: "completed" }, { state: "completed" }]);
-			expect(events).toContainEqual(
-				expect.objectContaining({
-					type: "session.goal_changed",
-					data: expect.objectContaining({ goal: null, ended: "cleared" }),
-				}),
-			);
+			expect(turns).toEqual([{ state: "completed" }]);
 			expect(events.filter(({ type }) => type === "turn.error")).toEqual([]);
 			expect(
 				requests().filter(({ message }) => message?.method === "turn/start"),
-			).toEqual([]);
+			).toHaveLength(1);
 		},
 		TIMEOUT * 2,
 	);
 
 	it.each([
-		["blocked", "Blocked"],
-		["usageLimited", "Usage limit reached"],
-		["budgetLimited", "Goal budget reached"],
+		["blocked", "Goal blocked", "blocked"],
+		["usageLimited", "Goal hit a usage limit", "usage"],
+		["budgetLimited", "Goal reached its token budget", "budget"],
 	])(
-		"maps native %s to a paused goal and closes the turn",
-		async (status, reason) => {
+		"a Pause Codex answers %s ends Limited and closes the turn",
+		async (status, reason, limit) => {
 			const { fixture, browser, id } = await start(
 				`goal-${status}`,
 				"goal-paused",
@@ -691,41 +685,40 @@ describe("Codex goals through the daemon and detached runner", () => {
 			let activated = false;
 			writeTrace(
 				fixtureRows("goal-paused").map((row) => {
-					const goal = row.message?.params?.["goal"] as
+					// Codex answers the Pause, in its reply and its notifications, with a limit.
+					const goal = (row.message?.params?.["goal"] ??
+						(row.message?.result as { goal?: unknown } | undefined)?.goal) as
 						| { status: string }
 						| undefined;
-					if (row.message?.method === "thread/goal/updated" && goal) {
-						if (goal.status === "active") activated = true;
-						else if (activated) goal.status = status;
-					}
+					if (goal?.status === "active") activated = true;
+					else if (goal && activated) goal.status = status;
 					return row;
 				}),
 			);
-			const sending = browser.send(id, `/goal ${OBJECTIVE}`, TIMEOUT);
+			const sending = goalSend(browser, id);
 			await vi.waitFor(
 				() =>
 					expect(
 						requests().filter(
 							({ message }) => message?.method === "thread/goal/set",
 						),
-					).toHaveLength(2),
+					).toHaveLength(1),
 				{ timeout: TIMEOUT },
 			);
-			await Effect.runPromise(
-				browser.rpc["input.submit"]({
-					sessionId: id,
-					originId: browser.originId,
-					inputId: randomUUID(),
-					delivery: "steer",
-					text: "/goal pause",
-				}),
-			);
+			const commandId = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.PauseGoal({ sessionId: id, commandId }),
+				),
+			).toEqual({ ok: true });
 			await sending;
 			expect(snapshot(fixture, id).events).toContainEqual(
 				expect.objectContaining({
 					type: "session.goal_changed",
 					data: expect.objectContaining({
+						replyTo: commandId,
 						pausedReason: reason,
+						limit,
 						goal: expect.objectContaining({ condition: OBJECTIVE }),
 					}),
 				}),
@@ -747,15 +740,7 @@ describe("Codex goals through the daemon and detached runner", () => {
 				"goal-interrupt",
 			);
 			await browser.followSession(id);
-			await Effect.runPromise(
-				browser.rpc["input.submit"]({
-					sessionId: id,
-					originId: browser.originId,
-					inputId: randomUUID(),
-					delivery: "queue",
-					text: `/goal ${OBJECTIVE}`,
-				}),
-			);
+			const sending = goalSend(browser, id).catch(() => undefined);
 			await vi.waitFor(
 				() => {
 					const text = snapshot(fixture, id).events.filter(
@@ -775,16 +760,17 @@ describe("Codex goals through the daemon and detached runner", () => {
 					]),
 				{ timeout: TIMEOUT },
 			);
+			await sending;
 			const successor = fixtureRows("goal-interrupt").filter(
 				({ message }) => message?.method === "turn/started",
 			)[1]?.message?.params?.["turn"];
 			// Stop is not a goal action (CONTRACT.md 2057, 2970): the only goal setters are the
-			// /goal command's own, and the goal stays active.
+			// goal set's own, and the goal stays active.
 			expect(
 				requests()
 					.filter(({ message }) => message?.method === "thread/goal/set")
 					.map(({ message }) => message?.params?.["status"]),
-			).toEqual(["paused", "active"]);
+			).toEqual(["active"]);
 			expect(
 				requests().find(({ message }) => message?.method === "turn/interrupt")
 					?.message?.params?.["turnId"],
