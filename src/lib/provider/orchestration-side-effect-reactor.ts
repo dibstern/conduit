@@ -2117,11 +2117,16 @@ export class ProviderSideEffectReactor {
 							// A Stop that captured only a retained steer sends nothing, as main's Stop entry
 							// (provider-turn-service.ts 214). Its row waits behind the steer's send, and an
 							// empty interrupt there would close the idle query the steer answered on.
-							if (
-								payload.stop?.owners.length === 0 &&
-								payload.stop.retainedSteers
-							)
-								break;
+							// With neither an owner nor anything that may still act, Stop issues nothing
+							// (CONTRACT.md 5.1, 5260; oracle RL-079).
+							if (payload.stop?.owners.length === 0) {
+								if (payload.stop.retainedSteers) break;
+								const ledger = yield* loadLedger(row.session_id).pipe(
+									Effect.provideService(SqlClient.SqlClient, this.options.sql),
+									Effect.mapError(storeFailure("stopLedgerView")),
+								);
+								if (ledger && !viewLedger(ledger.state).anythingMayAct) break;
+							}
 							const driver = getProviderDriver(
 								account?.driver ?? instance.providerId,
 							);

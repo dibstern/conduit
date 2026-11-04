@@ -638,6 +638,66 @@ describe("Claude on the Run Ledger", () => {
 		});
 	});
 
+	it("sends the runner nothing for an idle Stop, so the next send reuses the open query", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude ledger idle stop");
+		const first = "claude-ledger-idle-stop-first";
+		expect((await browser.send(sessionId, first)).chunks.join("")).toBe(
+			responseChunks(first).join(""),
+		);
+		const commandId = randomUUID();
+		await fixture.requestRpc({ _tag: "CancelSession", sessionId, commandId });
+		// test-waits-allow polling: the reactor settles the Stop's control row with no browser frame.
+		await vi.waitFor(() => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				expect(
+					db
+						.prepare(
+							"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+						)
+						.get(commandId),
+				).toEqual({ status: "completed" });
+			} finally {
+				db.close();
+			}
+		});
+		const marks = () =>
+			readFileSync(join(fixture.root, "sdk-proof.ndjson"), "utf8")
+				.trim()
+				.split("\n")
+				.filter(Boolean)
+				.map((line) => JSON.parse(line) as Record<string, unknown>);
+		// 5.1: with neither an active Run nor label work, Stop issues nothing (F358, F359).
+		expect(
+			marks().filter(
+				(mark) =>
+					mark["kind"] === "runner-control" && mark["type"] === "interrupt",
+			),
+		).toEqual([]);
+		expect(marks().filter((mark) => mark["kind"] === "query-closed")).toEqual(
+			[],
+		);
+		const second = "claude-ledger-idle-stop-second";
+		expect((await browser.send(sessionId, second)).chunks.join("")).toBe(
+			responseChunks(second).join(""),
+		);
+		// The open query serves the next send (F359, F360).
+		expect(marks().filter((mark) => mark["kind"] === "query")).toHaveLength(1);
+		// An empty Stop opens no stop, so nothing ends forced (F362).
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends.filter((end) => end.forced === 1)).toEqual([]);
+		proofs.push({
+			case: "idle-stop",
+			sessionId,
+			commandId,
+			ends: ledger.ends,
+			runs: ledger.runs,
+			controls: marks().filter((mark) => mark["kind"] === "runner-control"),
+		});
+	});
+
 	it("delivers a send waiting behind a wake once on a new runner when its runner dies", async () => {
 		const { fixture, browser } = await start({
 			claudeReplay: {
