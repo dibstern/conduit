@@ -11,6 +11,7 @@
 			"!test/e2e/linux-service/artifacts",
 			"!test/e2e/macos-service/artifacts",
 			"!test/unit/persistence/artifacts",
+			"!test/integration/daemon/artifacts",
 			"!.claude",
 			"!.scratch",
 			"!.worktrees",
