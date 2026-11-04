@@ -150,6 +150,8 @@ interface NativeSend {
 	/** A release shows the host never handed it over (3.5, 4.5); a rejected resume ranks as permanent. */
 	released: boolean;
 	transportRank: number;
+	/** D52 (CONTRACT.md 645-656): a decline sealed it possibly reached; a later outcome changes no reach. */
+	sealedPossibly?: boolean;
 }
 
 const at = <T>(items: readonly T[], index: number): T | undefined =>
@@ -934,7 +936,14 @@ export class FakeProvider {
 			this.wakeExecutions.has(runId) ||
 			this.hostStarted.has(runId) ||
 			[...this.sends.values()].some(
-				({ send, accepted, deliveryConfirmed, released, transportRank }) =>
+				({
+					send,
+					accepted,
+					deliveryConfirmed,
+					released,
+					transportRank,
+					sealedPossibly,
+				}) =>
 					(send.effect.kind === "start" || send.effect.kind === "steer") &&
 					send.effect.runId === runId &&
 					!this.unlaunchedTries.has(send.token) &&
@@ -943,6 +952,7 @@ export class FakeProvider {
 						this.dispatchRead.has(send.token)) &&
 					(accepted ||
 						deliveryConfirmed ||
+						sealedPossibly === true ||
 						(!released && transportRank !== 1 && transportRank !== 2)),
 			) ||
 			// A hold dispatched to a runner not yet started may have reached (3.6).
@@ -2191,6 +2201,10 @@ export class FakeProvider {
 				break;
 			case "input_declined":
 				native.notConsumed = true;
+				native.sealedPossibly ??=
+					!native.released &&
+					native.transportRank !== 1 &&
+					native.transportRank !== 2;
 				this.refreshQuery(native);
 				break;
 			case "run_released":
