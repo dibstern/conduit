@@ -629,4 +629,60 @@ describe("Codex background terminals", () => {
 			listCallsOnNewConnection: captured(LIST).length,
 		});
 	});
+
+	it("follows list pages and sends the whole set once", async () => {
+		const second = {
+			...terminal,
+			itemId: "call_second",
+			processId: "33819",
+			command: "sleep 301",
+		};
+		const trace = terminalTrace();
+		const index = trace.findIndex((row) => row.message?.method === LIST);
+		const marker = trace[index];
+		const threadId = marker?.message?.params?.["threadId"];
+		if (!marker || typeof threadId !== "string")
+			throw new Error("Missing the list marker");
+		// Codex pages by process id; the next cursor is the last one listed (lane 3245 Q1).
+		const at = Number(marker["at"]);
+		trace.splice(
+			index,
+			2,
+			...listed(at, 901, threadId, [terminal], { nextCursor: PROCESS }),
+			...listed(at, 905, threadId, [second], { cursor: PROCESS }),
+		);
+		const { fixture, browser, sessionId } = await start("paged", trace);
+		await submit(browser, sessionId);
+		const row = await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 2,
+		);
+		const ledger = await runEnded(fixture, sessionId);
+		expect(row["backgroundTasks"]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: PROCESS }),
+				expect.objectContaining({ id: "33819" }),
+			]),
+		);
+		// One snapshot with both pages: a page alone never replaces the set (8.3, 2816).
+		expect(ledger.snapshots).toEqual([
+			[
+				expect.objectContaining({ key: { taskId: PROCESS } }),
+				expect.objectContaining({ key: { taskId: "33819" } }),
+			],
+		]);
+		expect(
+			captured(LIST).filter(
+				(row) => row.message?.params?.["cursor"] === PROCESS,
+			).length,
+		).toBeGreaterThanOrEqual(1);
+		expect(ledger.errors).toEqual([]);
+		followUps.push({
+			case: "paged",
+			row: row["backgroundTasks"],
+			snapshots: ledger.snapshots,
+			listCalls: captured(LIST).map((row) => row.message?.params ?? null),
+		});
+	});
 });

@@ -128,9 +128,14 @@ export function createTraceAppServerTransport(
 				: Number.POSITIVE_INFINITY;
 		// The runner re-reads background terminals whenever their state may change, so a list call
 		// has no fixed place in a trace. A recorded list (request and reply) marks the set from that
-		// point on; every list call gets the latest marked set the gate has reached, an empty page
-		// before any, and its reply skips the gated frames.
-		const listed: { readonly at: number; readonly result: unknown }[] = [];
+		// point on for its cursor; every list call gets the latest marked reply for its cursor that
+		// the gate has reached (a page or Codex's error), an empty page before any, and its reply
+		// skips the gated frames.
+		const listed: {
+			readonly at: number;
+			readonly cursor: unknown;
+			readonly reply: Record<string, unknown>;
+		}[] = [];
 		const scope = yield* Effect.scope;
 		const replies = yield* Queue.unbounded<unknown>();
 		let cursor = 0;
@@ -152,12 +157,21 @@ export function createTraceAppServerTransport(
 					next.message["method"] === LIST
 				) {
 					const reply = trace.rows[cursor + 1];
+					const params = next.message["params"];
 					listed.push({
 						at: next.at,
-						result:
-							reply?.dir === "in" && object(reply.message)
-								? reply.message["result"]
-								: undefined,
+						cursor: (object(params) ? params["cursor"] : undefined) ?? null,
+						reply:
+							reply?.dir === "in" &&
+							object(reply.message) &&
+							"error" in reply.message
+								? { error: reply.message["error"] }
+								: {
+										result:
+											reply?.dir === "in" && object(reply.message)
+												? reply.message["result"]
+												: undefined,
+									},
 					});
 					cursor += 2;
 					continue;
@@ -249,10 +263,14 @@ export function createTraceAppServerTransport(
 						if (exitValue) return yield* new AppServerExited(exitValue);
 						if (object(message) && message["method"] === LIST) {
 							const reached = gate();
+							const params = message["params"];
+							const page =
+								(object(params) ? params["cursor"] : undefined) ?? null;
 							yield* Queue.offer(replies, {
 								id: message["id"],
-								result: listed.filter(({ at }) => at <= reached).at(-1)
-									?.result ?? { data: [], nextCursor: null },
+								...(listed
+									.filter(({ at, cursor }) => at <= reached && cursor === page)
+									.at(-1)?.reply ?? { result: { data: [], nextCursor: null } }),
 							});
 							return;
 						}
