@@ -259,6 +259,7 @@ export class FakeProvider {
 		readonly inputId: string;
 		readonly runId: string;
 		readonly parent: string;
+		readonly issue: IssuedEffect;
 	}[] = [];
 	/** Each input main last sent as a steer, to the Run it sent it into (3.9); every host reads main's issues. */
 	private readonly steerParents = new Map<string, string>();
@@ -3921,7 +3922,7 @@ export class FakeProvider {
 					this.mainInbox.shift();
 					const runId = `main-run:${this.serial++}`;
 					if (open) {
-						dispatch(runId, {
+						const issue = dispatch(runId, {
 							kind: "steer",
 							runId: open.runId,
 							inputId: head.inputId,
@@ -3930,6 +3931,7 @@ export class FakeProvider {
 							inputId: head.inputId,
 							runId,
 							parent: open.runId,
+							issue,
 						});
 						// Round 17 (CONTRACT.md 4083): one steer in three is followed by main's admit of another
 						// input, then by its send's failure: permanent (3.9 D53) or, every other time, retryable (3.6).
@@ -3996,7 +3998,15 @@ export class FakeProvider {
 						!this.stopped(open)
 					) {
 						this.mainSteers.shift();
-						this.mainRun = undefined;
+						// 2.1 (CONTRACT.md 57, 262): the steer's own Run is main's one open Run, so a queued input
+						// waits for its terminal; its steer send is its execution (3.9).
+						this.mainRun = {
+							runId: late.runId,
+							inputId: late.inputId,
+							issue: late.issue,
+							started: true,
+							stopped: false,
+						};
 						const ended: LedgerCommand = {
 							verb: "observe",
 							observation: {
@@ -4064,7 +4074,11 @@ export class FakeProvider {
 					// Main's terminal follows native truth: a clean end completes, a permanent failure
 					// errors, and OpenCode's stop with no confirming evidence is interrupted (L6, 3.9).
 					if (!open) continue;
-					const native = this.nativeStart(open.runId);
+					const native =
+						this.nativeStart(open.runId) ??
+						(open.issue.effect.kind === "steer"
+							? this.sends.get(this.bound(open.issue).token)
+							: undefined);
 					const stopped = this.stopped(open);
 					// OpenCode's turn.error ends the turn and its query in one write: main's error terminal and the
 					// start's query_ended fold back to back, in either order, and the Run ends once (3.4, 3.8 GAP 5).
