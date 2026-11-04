@@ -43,6 +43,7 @@ import {
 } from "./app-server/client.js";
 import {
 	decodeNotification,
+	type KnownNotification,
 	type RateLimitSnapshotSchema,
 	ThreadBackgroundTerminalsListResponseSchema,
 	ThreadBackgroundTerminalsTerminateResponseSchema,
@@ -76,6 +77,7 @@ import {
 	acceptCodexTurn,
 	type CodexTurnState,
 	type CodexTurnUpdate,
+	codexGoalFacts,
 	completeCodexTurn,
 	createCodexTurnState,
 	expireCodexGoalSuccessor,
@@ -104,6 +106,8 @@ type ChildUpdate =
 	// `at` is when the runner received it: the successor deadline judges arrival, not reading.
 	| { readonly notification: AppServerNotification; readonly at: number }
 	| { readonly interrupted: ActiveTurn }
+	// A native command's reply, answered from the turn's loop so it lands in order with the turn's events.
+	| { readonly answer: Effect.Effect<void, unknown> }
 	| { readonly failure: unknown };
 
 interface CodexChild {
@@ -153,6 +157,8 @@ interface CodexSession {
 	last?: { readonly input: SessionTurn; readonly sink: EventSink } | undefined;
 	/** The goal as the last turn left it; main's copy is the send's, not the wake's. */
 	goalState?: CodexTurnState["goalState"] | undefined;
+	/** The newest goal Codex has notified, by its updatedAt; a reply older than it is stale. */
+	goalUpdatedAt?: number;
 	/** Background terminals: one re-read at a time, the set last sent, when each was first listed. */
 	readonly terminals: {
 		readonly lock: Semaphore.Semaphore;
@@ -375,7 +381,8 @@ export class CodexRunnerPayload implements RunnerPayload {
 			current.busy = true;
 			this.onTurnStateChanged?.(true);
 			const now = yield* Clock.currentTimeMillis;
-			const goalState = wake ? current.goalState : input.goalState;
+			// The live session's goal is the newest: replies and idle changes land there first.
+			const goalState = current.goalState ?? input.goalState;
 			const active: ActiveTurn = {
 				sink,
 				state: createCodexTurnState({
@@ -632,7 +639,8 @@ export class CodexRunnerPayload implements RunnerPayload {
 								);
 							child = current.child;
 							active.submitted = true;
-							active.state = acceptCodexTurn(active.state, wake);
+							// Codex reported this turn started, so it runs from here (a goal reply mid-turn reads it).
+							active.state = acceptCodexTurn(active.state, wake, now);
 						} else {
 							if (!input.rewind) yield* admitInput();
 							if (!input.model)
@@ -733,49 +741,6 @@ export class CodexRunnerPayload implements RunnerPayload {
 							const compact = input.prompt.trim() === "/compact";
 							if (compact)
 								active.state = { ...active.state, manualCompaction: true };
-							const goalCommand = parseCodexGoalCommand(input.prompt);
-							if (
-								goalCommand &&
-								!["set", "resume"].includes(goalCommand.type)
-							) {
-								const facts = yield* this.goalCommand(current, goalCommand);
-								const decoded = facts ? decodeNotification(facts) : undefined;
-								if (decoded?._tag === "known") {
-									const outcome = yield* apply(
-										handleCodexTurnNotification(
-											active.state,
-											decoded,
-											yield* Clock.currentTimeMillis,
-										),
-									);
-									if (outcome) return outcome;
-								}
-								return yield* apply(completeCodexTurn(active.state));
-							}
-							const activateGoal =
-								!compact &&
-								(goalCommand?.type === "set" ||
-									goalCommand?.type === "resume" ||
-									!!active.state.goalState.goal);
-							if (goalCommand?.type === "set") {
-								active.state = {
-									...active.state,
-									goalActive: false,
-									goalActivationPending: true,
-								};
-								yield* child.client.request(
-									"thread/goal/set",
-									{
-										threadId: current.threadId,
-										objective: goalCommand.objective,
-										status: "paused",
-										origin: "user",
-									},
-									ThreadGoalSetResponseSchema,
-								);
-							} else if (activateGoal) {
-								active.state = { ...active.state, goalActivationPending: true };
-							}
 							const digest =
 								current.resumeFallbackDigest ?? facts.value.forkDigest;
 							const seed =
@@ -809,12 +774,7 @@ export class CodexRunnerPayload implements RunnerPayload {
 												: []),
 											{
 												type: "text",
-												text:
-													goalCommand?.type === "set"
-														? goalCommand.objective
-														: goalCommand?.type === "resume"
-															? "Continue."
-															: input.prompt,
+												text: input.prompt,
 												text_elements: [],
 											},
 											...(skill._tag === "Skill"
@@ -845,16 +805,20 @@ export class CodexRunnerPayload implements RunnerPayload {
 									TurnStartResponseSchema,
 								);
 								active.state = acceptCodexTurn(active.state, accepted.turn.id);
-								if (activateGoal && !active.cancelRequested)
-									yield* child.client.request(
-										"thread/goal/set",
-										{
-											threadId: current.threadId,
-											status: "active",
-											origin: "user",
-										},
-										ThreadGoalSetResponseSchema,
-									);
+								// 8.5 (CONTRACT.md 2922): goal commands held for this launch go once its turn
+								// is accepted, so a goal set active cannot start a turn of its own beside it.
+								if (input.nativeFirst?.length)
+									yield* Effect.forEach(
+										input.nativeFirst,
+										({ commandId, text }) =>
+											this.sendNativeCommand(
+												input.sessionId,
+												commandId,
+												text,
+												child.updates,
+											).pipe(Effect.ignore),
+										{ discard: true },
+									).pipe(Effect.forkIn(this.scope));
 								if (seed) {
 									current.forkSeedPending = false;
 									current.resumeFallbackDigest = undefined;
@@ -903,6 +867,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 									),
 								);
 								if (outcome) return outcome;
+								continue;
+							}
+							if ("answer" in update) {
+								yield* update.answer.pipe(Effect.ignore);
 								continue;
 							}
 							if ("interrupted" in update) {
@@ -1289,31 +1257,6 @@ export class CodexRunnerPayload implements RunnerPayload {
 				if (active && !active.state.settled && !active.cancelRequested)
 					yield* Deferred.await(active.started);
 				if (session.active !== active) return declined;
-				const command = parseCodexGoalCommand(input.prompt);
-				if (
-					active &&
-					!active.state.settled &&
-					!active.cancelRequested &&
-					command &&
-					sinkId
-				) {
-					if (!claim()) return { ...declined, status: "cancelled" as const };
-					if (input.runId) active.runIds.add(input.runId);
-					const facts = yield* this.goalCommand(session, command).pipe(
-						Effect.mapError(
-							(cause): SessionFailure => ({
-								operation: "goal command",
-								message: turnFailure(cause).message,
-							}),
-						),
-					);
-					if (command.type === "show" && facts && session.child)
-						yield* Queue.offer(session.child.updates, {
-							notification: facts,
-							at: yield* Clock.currentTimeMillis,
-						});
-					return yield* acceptSteer();
-				}
 				if (
 					!active ||
 					active.state.settled ||
@@ -1359,51 +1302,159 @@ export class CodexRunnerPayload implements RunnerPayload {
 		);
 	}
 
-	private goalCommand(
-		session: CodexSession,
-		command: NonNullable<ReturnType<typeof parseCodexGoalCommand>>,
-	) {
-		return Effect.gen(function* () {
-			if (!session.child || !session.threadId)
+	/**
+	 * A goal action as Codex's native goal request (8.5, 8.6): the reply's goal is the action's
+	 * answer, correlated by its command id; "/goal" alone is the unconfirmed action's re-read.
+	 */
+	sendNativeCommand(
+		sessionId: string,
+		commandId: string,
+		text: string,
+		loop?: Queue.Queue<ChildUpdate>,
+	): Effect.Effect<void, SessionFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const session = this.sessions.get(sessionId);
+			const command = parseCodexGoalCommand(text);
+			const child = session?.child;
+			const threadId = session?.threadId;
+			if (!session || !child || child.dead || !threadId || !command)
 				return yield* Effect.fail(
-					new Error("No Codex thread for goal command"),
+					new Error(
+						command
+							? "No live Codex thread"
+							: `Not a Codex goal command: ${text}`,
+					),
 				);
-			const threadId = session.threadId;
-			if (command.type === "clear") {
-				yield* session.child.client.request(
-					"thread/goal/clear",
-					{ threadId, origin: "user" },
-					ThreadGoalClearResponseSchema,
-				);
-				return { method: "thread/goal/cleared", params: { threadId } };
-			}
 			const result =
-				command.type === "show"
-					? yield* session.child.client.request(
-							"thread/goal/get",
-							{ threadId },
-							ThreadGoalGetResponseSchema,
-						)
-					: yield* session.child.client.request(
-							"thread/goal/set",
-							{
-								threadId,
-								origin: "user",
-								status: command.type === "pause" ? "paused" : "active",
-								...(command.type === "set"
-									? { objective: command.objective }
-									: {}),
-							},
-							ThreadGoalSetResponseSchema,
-						);
-			if (command.type === "show" && !result.goal) return undefined;
-			return result.goal
-				? {
-						method: "thread/goal/updated",
-						params: { threadId, goal: result.goal },
-					}
-				: { method: "thread/goal/cleared", params: { threadId } };
-		});
+				command.type === "clear"
+					? yield* child.client
+							.request(
+								"thread/goal/clear",
+								{ threadId, origin: "user" },
+								ThreadGoalClearResponseSchema,
+							)
+							.pipe(Effect.as({ goal: null }))
+					: command.type === "show"
+						? yield* child.client.request(
+								"thread/goal/get",
+								{ threadId },
+								ThreadGoalGetResponseSchema,
+							)
+						: yield* child.client.request(
+								"thread/goal/set",
+								{
+									threadId,
+									origin: "user",
+									status: command.type === "pause" ? "paused" : "active",
+									...(command.type === "set"
+										? { objective: command.objective }
+										: {}),
+								},
+								ThreadGoalSetResponseSchema,
+							);
+			const read = command.type === "show";
+			const answer = Effect.gen({ self: this }, function* () {
+				const previous = session.active?.state.goalState ??
+					session.goalState ?? { sessionId, goal: null };
+				// Notifications behind the reply may have applied first: a reply older than the newest
+				// notified goal answers the command and leaves the goal as it is (8.6 ordering).
+				const stale =
+					(result.goal?.updatedAt ?? Number.POSITIVE_INFINITY) <
+					(session.goalUpdatedAt ?? 0);
+				// A read with no goal changes nothing a Met or Cleared goal shows (8.6).
+				if (
+					!(read && !result.goal && previous.goal === null) &&
+					!(read && stale)
+				)
+					yield* this.pushGoal(
+						sessionId,
+						session,
+						stale
+							? undefined
+							: result.goal
+								? {
+										_tag: "known",
+										method: "thread/goal/updated",
+										params: { threadId, goal: result.goal },
+									}
+								: {
+										_tag: "known",
+										method: "thread/goal/cleared",
+										params: { threadId },
+									},
+						read ? undefined : commandId,
+					);
+				// Codex answers each request, so its reply is the command's completion (8.5).
+				const sink = session.active?.sink ?? session.last?.sink;
+				if (sink)
+					yield* sink.push({
+						eventId: createEventId(),
+						type: "evidence.command_receipt",
+						providerId: "codex",
+						sessionId,
+						providerRefs: { providerSessionId: threadId },
+						rawSource: { kind: "codex.app-server.translator" },
+						createdAt: Date.now(),
+						data: { label: "", commandId, state: "completed" },
+					});
+			});
+			// A turn's loop answers in order with its own events; with none, the answer goes now.
+			yield* loop ? Queue.offer(loop, { answer }) : answer;
+		}).pipe(
+			Effect.mapError(
+				(cause): SessionFailure => ({
+					operation: "native-command",
+					message: turnFailure(cause).message,
+				}),
+			),
+		);
+	}
+
+	/**
+	 * Codex's goal as facts, pushed on the session's sink. A reply names the command it answers;
+	 * with no turn running the session keeps it, so a later turn starts from it, not a stale copy.
+	 */
+	private pushGoal(
+		sessionId: string,
+		session: CodexSession,
+		notification:
+			| Extract<
+					KnownNotification,
+					{ method: "thread/goal/updated" | "thread/goal/cleared" }
+			  >
+			| undefined,
+		replyTo?: string,
+	) {
+		const sink = session.active?.sink ?? session.last?.sink;
+		const { active } = session;
+		const previous = active?.state.goalState ??
+			session.goalState ?? { sessionId, goal: null };
+		const facts = notification
+			? codexGoalFacts(
+					previous,
+					notification,
+					Date.now(),
+					// A wake not yet set up is a turn running; a turn held for its successor is not.
+					session.busy &&
+						(active === undefined ||
+							active.state.executingTurnId !== undefined),
+				).facts
+			: previous;
+		// No turn loop holds the goal yet, so the session keeps it for the next one.
+		if (!session.busy || active === undefined) session.goalState = facts;
+		const data = replyTo ? { ...facts, replyTo } : facts;
+		return sink
+			? sink.push({
+					eventId: createEventId(),
+					type: "session.goal_changed",
+					providerId: "codex",
+					sessionId,
+					providerRefs: { providerSessionId: session.threadId ?? sessionId },
+					rawSource: { kind: "codex.app-server.translator" },
+					createdAt: Date.now(),
+					data,
+				})
+			: Effect.void;
 	}
 
 	applySettings(_sessionId: string, _settings: LiveSettings) {
@@ -1541,6 +1592,29 @@ export class CodexRunnerPayload implements RunnerPayload {
 							});
 							return;
 						}
+						if (
+							decoded._tag === "known" &&
+							decoded.method === "thread/goal/updated" &&
+							decoded.params.threadId === session.threadId
+						)
+							session.goalUpdatedAt = Math.max(
+								session.goalUpdatedAt ?? 0,
+								decoded.params.goal.updatedAt,
+							);
+						// With no turn running, a goal change applies now: queued, the next turn would read
+						// it late and could undo a newer goal action (8.6 ordering).
+						if (
+							!session.busy &&
+							decoded._tag === "known" &&
+							(decoded.method === "thread/goal/updated" ||
+								decoded.method === "thread/goal/cleared") &&
+							decoded.params.threadId === session.threadId
+						)
+							return yield* this.pushGoal(
+								input.sessionId,
+								session,
+								decoded,
+							).pipe(Effect.ignore);
 						// Claimed before the offer: a send arriving now steers into the wake.
 						if (
 							!session.busy &&

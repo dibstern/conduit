@@ -57,6 +57,7 @@ import {
 	ProcessHarness,
 	responseChunks,
 } from "../../helpers/process-harness.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 const OLD_BUILD = "82tn-32-6-before";
 const NEW_BUILD = "82tn-32-6-after";
@@ -235,6 +236,55 @@ describe("Claude on the Run Ledger", () => {
 			evidence: processEvidence(ledger),
 			ends: ledger.ends,
 			runs: ledger.runs,
+		});
+	});
+
+	it("stamps every tool row of a recorded subagent turn, the subagent's too, with its Run's id and the project folder (82tn.45)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: { turns: ["subagent-task-turn"] },
+		});
+		const sessionId = await browser.createSession("Claude tool rows");
+		await browser.send(sessionId, "Ask a subagent to summarise package.json");
+		endsOnce(read(fixture, sessionId));
+		proveToolRowsOnLedger("claude", fixture);
+	});
+
+	// 82tn.45: the subagent's terminal event (its task_notification, line 39 of the trace) ends the
+	// subagent, never the parent's Run. How it could fail: the parent's Run ends there, as completed
+	// or ended by the run; the parent session reads idle while its own turn still runs.
+	it("leaves the parent's Run running past its subagent's terminal event, on a recorded turn (82tn.45)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["subagent-task-turn"],
+				plan: { holdBefore: { turn: 1, message: 40 } },
+			},
+		});
+		const sessionId = await browser.createSession("Claude subagent end");
+		await browser.followSession(sessionId);
+		const sent = browser.send(
+			sessionId,
+			"Ask a subagent to summarise package.json",
+		);
+		await fixture.claudeReplayer?.held();
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				JSON.stringify(message["parts"]).includes('"outcome":"completed"'),
+		);
+		const held = read(fixture, sessionId);
+		expect(held.ends).toEqual([]);
+		expect(held.runs).toEqual([{ id: expect.any(String), status: "running" }]);
+		fixture.claudeReplayer?.release();
+		await sent;
+		const after = read(fixture, sessionId);
+		expect(after.ends).toEqual([
+			{ runId: held.runs[0]?.id, reason: "completed", forced: null },
+		]);
+		proofs.push({
+			case: "82tn.45 subagent terminal event",
+			atSubagentEnd: { ends: held.ends, runs: held.runs },
+			after: { ends: after.ends, runs: after.runs },
 		});
 	});
 

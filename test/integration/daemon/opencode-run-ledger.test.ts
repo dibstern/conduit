@@ -43,6 +43,7 @@ import {
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
+import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
 
 // The default managed instance: its sessions' provider names the OpenCode driver.
 const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
@@ -444,6 +445,66 @@ describe("OpenCode on the Run Ledger", () => {
 			{ runId: heldRun, reason: "process_lost" },
 			{ runId: nextRun, reason: "completed" },
 		]);
+	});
+
+	it("stamps every tool row of a recorded OpenCode turn with its Run's id and the project folder (82tn.45)", async () => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Tool rows",
+			instanceId,
+			"opencode",
+		);
+		await browser.followSessions();
+		const held = await hold(fixture, browser, sessionId);
+		// The recorded session's assistant turn, a bash tool call in it, replayed into the held Run.
+		const recorded = "ses_ef595184dffetwQFDMZsHDkJzm";
+		const payloads = readFileSync(
+			"test/fixtures/opencode-wire/global-stream-1.18.34.jsonl",
+			"utf8",
+		)
+			.split("\n")
+			.filter((line) => line.includes(recorded))
+			.map(
+				(line) =>
+					(
+						JSON.parse(line.replaceAll(recorded, sessionId)) as {
+							payload: {
+								type: string;
+								properties?: {
+									info?: { id: string; role: string };
+									part?: { messageID: string };
+									messageID?: string;
+								};
+							};
+						}
+					).payload,
+			);
+		const users = new Set(
+			payloads.flatMap(({ properties }) =>
+				properties?.info?.role === "user" ? [properties.info.id] : [],
+			),
+		);
+		for (const payload of payloads.filter(
+			({ type, properties }) =>
+				(type === "message.updated" &&
+					properties?.info?.role === "assistant") ||
+				((type === "message.part.updated" || type === "message.part.delta") &&
+					!users.has(
+						properties?.part?.messageID ?? properties?.messageID ?? "",
+					)),
+		))
+			await fixture.emitOpenCodeEvent(
+				{ directory: realpathSync(fixture.projectDir), payload },
+				instanceId,
+			);
+		const cursor = browser.frames.length;
+		await idle(fixture, sessionId);
+		await browser.waitForTurnEnd(sessionId, cursor);
+		expect(read(fixture, sessionId).ends).toEqual([
+			{ runId: held.runs[0]?.id, reason: "completed" },
+		]);
+		proveToolRowsOnLedger("opencode", fixture);
 	});
 
 	it("a send, a refused steer and a Stop go through the ledger under the instance's id", async () => {

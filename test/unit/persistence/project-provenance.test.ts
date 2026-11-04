@@ -142,6 +142,7 @@ describe("Bound project provenance", () => {
 			"0089_runner_cursors",
 			"0090_run_ledger",
 			"0091_messages_ordinal",
+			"0092_tool_row_run",
 		]);
 	});
 

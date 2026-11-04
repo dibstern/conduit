@@ -375,8 +375,13 @@ export const GoalPhaseSchema = Schema.Union([
 		tag: Schema.Literal("Confirmed"),
 		status: Schema.Union([
 			Schema.Struct({
-				tag: Schema.Literals(["Active", "Paused", "Limited", "Met"]),
+				tag: Schema.Literals(["Active", "Paused", "Met"]),
 				condition: Schema.String,
+			}),
+			Schema.Struct({
+				tag: Schema.Literal("Limited"),
+				condition: Schema.String,
+				limit: Schema.Literals(["blocked", "usage", "budget"]),
 			}),
 			Schema.Struct({ tag: Schema.Literal("Cleared") }),
 		]),

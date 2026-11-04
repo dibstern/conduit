@@ -67,12 +67,28 @@ const inboxCommand = <E>(
 		),
 	);
 
+/** The session's driver traits; 8.1 declares a goal pause per adapter. */
+const sessionDriver = (sessionId: string) =>
+	Effect.gen(function* () {
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		return session
+			? PROVIDER_DRIVERS[
+					(yield* (yield* AccountDirectory).resolve({
+						_tag: "Id",
+						id: session.provider,
+					})).driver
+				]
+			: undefined;
+	});
+
 /** The tracker holds the action as pending from before dispatch; a refused dispatch drops it (8.6). */
 const goalCommand = (sessionId: string, commandId: string, goal: GoalAction) =>
 	Effect.gen(function* () {
 		const { goals } = yield* SessionActivityTag;
 		const engine = yield* OrchestrationEngineTag;
-		goals.request(sessionId, commandId, goal);
+		// An adapter with a native pause also reads its goal natively (Codex: thread/goal/get).
+		const driver = yield* sessionDriver(sessionId);
+		goals.request(sessionId, commandId, goal, driver?.nativeGoalPause === true);
 		yield* engine
 			.dispatchEffect({
 				type: "native_command",
@@ -89,10 +105,21 @@ const goalCommand = (sessionId: string, commandId: string, goal: GoalAction) =>
 		return { ok: true as const };
 	});
 
-const refuseGoalPause = (_request: { readonly sessionId: string }) =>
-	Effect.succeed({
-		ok: false as const,
-		reason: "goal_pause_unsupported" as const,
+/** 8.1: Pause and Resume go native where the adapter declares a pause, else are refused. */
+const goalPause = (
+	{
+		sessionId,
+		commandId,
+	}: { readonly sessionId: string; readonly commandId: string },
+	kind: "pause" | "resume",
+) =>
+	Effect.gen(function* () {
+		if ((yield* sessionDriver(sessionId))?.nativeGoalPause !== true)
+			return {
+				ok: false as const,
+				reason: "goal_pause_unsupported" as const,
+			};
+		return yield* goalCommand(sessionId, commandId, { kind });
 	});
 
 export const conversationHandlers = {
@@ -406,8 +433,12 @@ export const conversationHandlers = {
 			Effect.catch(mapRpcFailure("ClearGoal")),
 		),
 	// 8.6 Claude has no goal pause (pause: false), and no other adapter has goals yet.
-	PauseGoal: refuseGoalPause,
-	ResumeGoal: refuseGoalPause,
+	PauseGoal: (request) =>
+		goalPause(request, "pause").pipe(Effect.catch(mapRpcFailure("PauseGoal"))),
+	ResumeGoal: (request) =>
+		goalPause(request, "resume").pipe(
+			Effect.catch(mapRpcFailure("ResumeGoal")),
+		),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "ListRecaps"

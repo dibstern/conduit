@@ -512,6 +512,23 @@ const activeWakeRun = (book: Book) =>
 const activeRun = (book: Book) => activeInputRun(book) ?? activeWakeRun(book);
 const sameKey = (a: TaskKey, b: TaskKey) =>
 	a.taskId === b.taskId && a.runId === b.runId;
+/**
+ * 8.4 (2862-2864): the keys a Stop tasks issues, or why it issues none. "all" means the live
+ * tasks; unknown or none issues nothing. The browser handler refuses by this same reading.
+ */
+export function stopTaskKeys(
+	tasks: TasksView,
+	named: "all" | readonly TaskKey[],
+): readonly TaskKey[] | "unknown" | "none" | "not_live" {
+	if (tasks.tag !== "live") return tasks.tag;
+	const keys =
+		named === "all"
+			? tasks.tasks.map((task) => task.key)
+			: named.filter((key) =>
+					tasks.tasks.some((task) => sameKey(task.key, key)),
+				);
+	return keys.length > 0 ? keys : "not_live";
+}
 /** 8.4: the current runner's tasks; a pending address has none. */
 function taskView(book: Book): TasksView {
 	const runner =
@@ -2903,17 +2920,10 @@ function control(
 			return changed;
 		}
 		case "stop_tasks": {
-			// 8.4: "all" means the live tasks; unknown or none issues nothing.
-			const tasks = taskView(book);
-			if (tasks.tag !== "live")
-				return rejected(`stop_tasks with tasks ${tasks.tag} (8.4)`);
-			const keys =
-				command.tasks === "all"
-					? tasks.tasks.map((task) => task.key)
-					: command.tasks.filter((key) =>
-							tasks.tasks.some((task) => sameKey(task.key, key)),
-						);
-			if (keys.length === 0) return rejected("no live task named (8.4)");
+			const keys = stopTaskKeys(taskView(book), command.tasks);
+			if (keys === "not_live") return rejected("no live task named (8.4)");
+			if (typeof keys === "string")
+				return rejected(`stop_tasks with tasks ${keys} (8.4)`);
 			for (const key of keys)
 				issueTokened(book, step, { kind: "stop_task", key });
 			return changed;

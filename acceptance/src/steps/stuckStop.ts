@@ -153,6 +153,34 @@ export const stuckStopHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "the stuck Stop fits a phone",
+		match: /^the stuck Stop's whole label and both actions are on screen$/,
+		run: async ({ world }) => {
+			const width = world.page.viewportSize()?.width ?? 0;
+			const label = head(world.page).getByText("Stop is stuck", {
+				exact: false,
+			});
+			const shown = [
+				label,
+				...["Stop now", "Stop tasks first"].map((name) =>
+					head(world.page).getByRole("button", { name, exact: true }),
+				),
+			];
+			for (const element of shown) {
+				const box = await element.boundingBox();
+				expect(box).not.toBeNull();
+				expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+				expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+			}
+			// Cut off means clipped: the label shows its whole text.
+			expect(
+				await label.evaluate(
+					(element) => element.scrollWidth <= element.clientWidth,
+				),
+			).toBe(true);
+		},
+	},
+	{
 		name: "end the stuck Stop's ask",
 		match: /^the stuck Stop's ask ends$/,
 		run: async ({ world }) => {

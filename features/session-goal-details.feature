@@ -159,3 +159,45 @@ Scenario: Details in the met composer bar opens the same goal panel
   Then goal details open in the session header popover or phone sheet
   And the goal details condition reads All 38 scenarios pass
   And goal details offer Set a new goal and Dismiss
+
+Scenario: A goal whose harness pauses natively offers Pause, and Pause sends a pause action
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the harness pauses its goal natively
+  And goal details are available for a working goal
+  When I click the session goal subtitle
+  Then goal details offer Pause, Edit and Clear
+  When I press Pause in goal details
+  Then the mock relay received 1 PauseGoal action with distinct command ids and no goal chat message
+
+Scenario: A paused goal whose harness pauses natively offers Resume, which sends no host turn
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the harness pauses its goal natively
+  And goal details are available for a paused goal
+  When I click the session goal subtitle
+  Then goal details offer Resume, Edit and Clear
+  When I press Resume in goal details
+  Then the mock relay received 1 ResumeGoal action with distinct command ids and no goal chat message
+
+Scenario Outline: A goal stopped at a limit reads Limited with its reason and offers Resume
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the harness pauses its goal natively
+  And goal details are available for a <limit> goal
+  Then the session goal subtitle reads Limited · <condition>
+  When I click the session goal subtitle
+  Then the goal details status reads <wording>
+  And goal details offer Resume, Edit and Clear
+
+Examples:
+  | limit          | condition             | wording                       |
+  | blocked        | All 38 scenarios pass | Goal blocked                  |
+  | usage-limited  | All 38 scenarios pass | Goal hit a usage limit        |
+  | budget-limited | All 38 scenarios pass | Goal reached its token budget |

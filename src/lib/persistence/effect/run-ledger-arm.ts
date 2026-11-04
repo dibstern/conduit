@@ -34,6 +34,7 @@ import type {
 	ProviderKind,
 	RunEffect,
 	SendToken,
+	TaskKey,
 } from "../../provider/run-ledger/run-ledger-model.js";
 import { sendToken } from "../../provider/runner/runner-protocol.js";
 import { harnessForModelProvider } from "../../provider/turn-settings.js";
@@ -45,7 +46,12 @@ import type {
 	ProjectionContext,
 	ProjectionTouch,
 } from "./projectors-effect.js";
-import { runTerminalStatus, stampMessage } from "./projectors-effect.js";
+import {
+	mergeTouches,
+	runTerminalStatus,
+	stampMessage,
+} from "./projectors-effect.js";
+import { endRunToolRows } from "./tool-row-run.js";
 
 /**
  * settleMs is 3.7's settle window. probeMs and nativeCommandMs: the contract names no value
@@ -917,6 +923,10 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
 				const view = viewLedger(state);
 				const before = viewLedger(ledger.state);
+				// 82tn.45: the active Run main's tool projector stamps a new tool row with.
+				if (view.active?.runId !== before.active?.runId)
+					yield* sql`UPDATE run_ledger_sessions SET active_run_id = ${view.active?.runId ?? null}
+						WHERE session_id = ${event.sessionId}`;
 				if (
 					JSON.stringify(view.nativeCommands) !==
 					JSON.stringify(before.nativeCommands)
@@ -931,7 +941,7 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				// 8.4 L5 (CONTRACT.md 2907-2913): each label's lost work, decided once, is a timeline notice
 				// at the fact that decided it, so it replays after a reload. The names come from that
 				// label's latest stored snapshot, which carries each task's command.
-				const noticeIds: string[] = [];
+				const notes: { readonly id: string; readonly text: string }[] = [];
 				for (const [index, lost] of view.lostWork
 					.slice(before.lostWork.length)
 					.entries()) {
@@ -967,7 +977,50 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 									})
 									.join(", ")}`
 							: "Background work may have been lost";
-					const messageId = `lost-work-${event.sequence}-${index}`;
+					notes.push({ id: `lost-work-${event.sequence}-${index}`, text });
+				}
+				// 8.4 (CONTRACT.md 2866): a failed stop is a diagnostic. It is a timeline notice whenever it
+				// lands, so one after the browser stopped waiting is still shown; a stop whose task has
+				// already left failed at nothing, so it shows nothing.
+				const [failedStop] =
+					event.type === "evidence.effect_outcome" &&
+					(event.data.outcome.tag === "permanent" ||
+						event.data.outcome.tag === "not_sent") &&
+					view.tasks.tag === "live"
+						? yield* sql<{ key: string }>`
+								SELECT json_extract(payload_json, '$.effect.key') AS key FROM provider_command_outbox
+								WHERE command_id = ${event.data.commandId} AND effect_type = 'stop_task'`
+						: [];
+				const stopKey = failedStop
+					? (JSON.parse(failedStop.key) as TaskKey)
+					: undefined;
+				const stillLive =
+					stopKey && view.tasks.tag === "live"
+						? view.tasks.tasks.find(
+								(task) =>
+									task.key.taskId === stopKey.taskId &&
+									task.key.runId === stopKey.runId,
+							)
+						: undefined;
+				if (stillLive) {
+					const detail = (yield* storedSnapshot(
+						event.sessionId,
+						view.tasks,
+						event.sequence,
+					))?.tasks.find(
+						(task) => task.key.taskId === stillLive.key.taskId,
+					)?.detail;
+					notes.push({
+						id: `stop-failed-${event.sequence}`,
+						text: `Could not stop ${backgroundTaskText({
+							kind: stillLive.kind,
+							type: stillLive.taskType,
+							description: stillLive.description,
+							...(detail ? { detail } : {}),
+						})}; it is still running`,
+					});
+				}
+				for (const { id: messageId, text } of notes) {
 					yield* sql`INSERT INTO messages
 						(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
 						VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt},
@@ -980,9 +1033,11 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							${JSON.stringify({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt},
 							${ctx.version})
 						ON CONFLICT (id) DO NOTHING`;
-					noticeIds.push(messageId);
 				}
-				const noticed = yield* stampMessage(noticeIds, ctx);
+				const noticed = yield* stampMessage(
+					notes.map(({ id }) => id),
+					ctx,
+				);
 				if (event.type === "evidence.tasks_snapshot")
 					handOver(event.sessionId, view, {
 						tasks: event.data.tasks,
@@ -1064,7 +1119,7 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				const stamped = yield* sql<{ id: string }>`
 					UPDATE sessions SET version = ${ctx.version} WHERE id = ${event.sessionId}
 					RETURNING id`;
-				return {
+				const touch: ProjectionTouch = {
 					stamped: [...noticed.stamped, ...stamped.map(({ id }) => id)],
 					removed: noticed.removed,
 					collections: [
@@ -1075,6 +1130,22 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					],
 					...(noticed.sidebar ? { sidebar: noticed.sidebar } : {}),
 				};
+				// 82tn.45: the Run's terminal classification ends its open foreground tool rows.
+				const endedRun = before.active?.runId;
+				return endedRun && endedRun !== view.active?.runId
+					? mergeTouches([
+							touch,
+							yield* stampMessage(
+								yield* endRunToolRows(
+									endedRun,
+									view.tasks,
+									event.createdAt,
+									ctx,
+								),
+								ctx,
+							),
+						])
+					: touch;
 			}),
 	};
 }
