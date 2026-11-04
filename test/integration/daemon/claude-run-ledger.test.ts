@@ -40,9 +40,15 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import {
+	evolve,
+	initialSessionLedgerState,
+	type LedgerEvent,
+	viewLedger,
+} from "../../../src/lib/provider/run-ledger/run-ledger-decider.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -1251,7 +1257,165 @@ describe("Claude on the Run Ledger", () => {
 		).toEqual([expect.objectContaining({ behavior: "deny" })]);
 		endsOnce(read(fixture, sessionId));
 	});
+
+	// Lane 32.9 audit 17-22: a refused answer reads Answered or names no refusal; its answer is lost;
+	// the runner replays its refusal on every retry; the refusal lingers; the SDK gets it twice.
+	it("keeps a refused Claude answer Pending with its refusal while delivery retries, then delivers it once", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude ledger refusal");
+		const prompt = "approval-ledger-refusal";
+		const pending = browser.send(sessionId, prompt).catch(() => undefined);
+		const asked = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+		);
+		const runner = fixture.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
+		const refuse = join(
+			dirname(runner.socketPath),
+			"conduit-test-refuse-answer",
+		);
+		writeFileSync(refuse, "refuse");
+		// Main's reply reports the first transmission's refusal; delivery goes on retrying.
+		await browser.answerApproval(asked, "allow").catch(() => undefined);
+		// test-waits-allow polling: the reactor records the runner's refusal with no browser event.
+		const refused = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual([
+					"retryable_failed",
+				]);
+				expect(found.outcomes).toEqual([
+					expect.objectContaining({ outcome: "retryable" }),
+				]);
+				return found;
+			},
+			{ timeout: 10_000, interval: 50 },
+		);
+		const [row] = refused.outbox;
+		const interactionId = refused.events[0]?.id;
+		// 3.10 (10B): Pending, naming the refused transmission and its code, the answer kept.
+		expect(interactionsOf(fixture, sessionId)).toEqual([
+			{
+				tag: "Pending",
+				interactionId,
+				kind: "permission",
+				lastRefusal: {
+					attempt: { commandId: row?.commandId, transmission: 1 },
+					code: "test_answer_refused",
+				},
+			},
+		]);
+		expect(refused.state).toBe("Open");
+		// The browser's allow is kept as main's decision "once".
+		expect(refused.decisions).toEqual(["once"]);
+		expect(refused.answers).toEqual([
+			{ commandId: row?.commandId, interactionId },
+		]);
+		rmSync(refuse);
+		await browser.waitForTurnEnd(sessionId);
+		await pending;
+		// test-waits-allow polling: the reactor completes the outbox row after the runner's reply, with no browser event.
+		const answer = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual(["completed"]);
+				expect(found.state).toBe("Quiescent");
+				return found;
+			},
+			{ timeout: 10_000, interval: 50 },
+		);
+		proofs.push({ case: "refused-answer-retried", sessionId, ...answer });
+		// The retry's success settles it: the refusal is gone.
+		expect(interactionsOf(fixture, sessionId)).toEqual([
+			{
+				tag: "Answered",
+				interactionId,
+				kind: "permission",
+				delivery: "settled",
+			},
+		]);
+		expect(answer.answers).toEqual([
+			{ commandId: row?.commandId, interactionId },
+		]);
+		expect(answer.outcomes).toEqual([
+			{ commandId: row?.commandId, transmission: 1, outcome: "retryable" },
+			{ commandId: row?.commandId, transmission: 2, outcome: "succeeded" },
+		]);
+		expect(answer.resolved).toEqual([{ interactionId }]);
+		expect(
+			sdkMarks(fixture).filter(
+				(mark) => mark["kind"] === "approval" && mark["prompt"] === prompt,
+			),
+		).toEqual([expect.objectContaining({ behavior: "allow" })]);
+		endsOnce(read(fixture, sessionId));
+	});
+
+	// Lane 32.9 audit 23: at the cap the delivery never ends and the interaction stays Pending.
+	it("ends a Claude answer refused through the cap and resolves its interaction", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude ledger refusal cap");
+		browser.send(sessionId, "approval-ledger-cap").catch(() => undefined);
+		const asked = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+		);
+		const runner = fixture.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started") throw new Error("Missing runner");
+		writeFileSync(
+			join(dirname(runner.socketPath), "conduit-test-refuse-answer"),
+			"refuse",
+		);
+		await browser.answerApproval(asked, "allow").catch(() => undefined);
+		// test-waits-allow polling: main's retries back off 1s, 2s, 4s, 8s with no browser event.
+		const capped = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual(["failed"]);
+				return found;
+			},
+			{ timeout: 25_000, interval: 100 },
+		);
+		proofs.push({ case: "refused-answer-capped", sessionId, ...capped });
+		const [row] = capped.outbox;
+		expect(row?.attempts).toBe(5);
+		expect(capped.outcomes).toEqual([
+			...[1, 2, 3, 4].map((transmission) => ({
+				commandId: row?.commandId,
+				transmission,
+				outcome: "retryable",
+			})),
+			{ commandId: row?.commandId, transmission: 5, outcome: "permanent" },
+		]);
+		// 3.10 (10B): the cap ends delivery and settles the interaction; it is no longer Pending.
+		expect(interactionsOf(fixture, sessionId)).toEqual([
+			{
+				tag: "Answered",
+				interactionId: capped.events[0]?.id,
+				kind: "permission",
+				delivery: "settled",
+			},
+		]);
+	});
 });
+
+/** The session's interactions as the ledger's view reads them, rebuilt from its entries (3.10). */
+const interactionsOf = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		const entries = db
+			.prepare(
+				"SELECT entry_json AS entry FROM run_ledger_entries WHERE session_id = ? ORDER BY entry_seq",
+			)
+			.all(sessionId) as { entry: string }[];
+		return viewLedger(
+			entries.reduce(
+				(state, { entry }) => evolve(state, JSON.parse(entry) as LedgerEvent),
+				initialSessionLedgerState(sessionId, "claude"),
+			),
+		).interactions;
+	} finally {
+		db.close();
+	}
+};
 
 const sdkMarks = (harness: ProcessHarness) =>
 	readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
@@ -1295,6 +1459,13 @@ const answers = (harness: ProcessHarness, sessionId: string) => {
 				status: string;
 				attempts: number;
 			}[],
+			decisions: (
+				db
+					.prepare(
+						"SELECT json_extract(payload_json, '$.decision') AS decision FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'resolve_permission' ORDER BY request_sequence",
+					)
+					.all(sessionId) as { decision: string }[]
+			).map((row) => row.decision),
 			requested: facts(
 				"json_extract(entry_json, '$.command.observation.interactionId') AS interactionId, json_extract(entry_json, '$.command.observation.label') AS label",
 				"json_extract(entry_json, '$.command.observation.kind') = 'interaction_requested'",
