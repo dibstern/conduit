@@ -38,6 +38,7 @@ import {
 } from "../../persistence/effect/claude-event-persist-effect.js";
 import { guardCurrentWrite } from "../../persistence/effect/commit-and-signal.js";
 import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
+import { loadLedgerView } from "../../persistence/effect/run-ledger-arm.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import {
 	nativeCommandUnsupported,
@@ -46,6 +47,7 @@ import {
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { ProviderRegistry } from "../provider-registry.js";
 import type { RelayEventSinkDeps } from "../relay-event-sink.js";
+import type { NativeCommandView } from "../run-ledger/run-ledger-model.js";
 import { settleToolChildRuns } from "../session-run-settlement.js";
 import type {
 	EventSink,
@@ -531,6 +533,52 @@ export class RunnerProviderInstance implements ProviderInstance {
 					this.runner.ownsRetirementCleanupEffect?.(sessionId, runId) ??
 					Effect.succeed(false),
 			);
+			// Gap, CONTRACT.md 8.5 (2919-2924) names no delivery without a live process, and the kept
+			// first sends are in memory. Nearest reading: a restart reloads each command the ledger
+			// still has Sent or Unconfirmed in a session with no live process, for its next launch.
+			const issued = yield* sql<{
+				readonly session_id: string;
+				readonly command_id: string;
+				readonly text: string;
+				readonly provider: string;
+			}>`SELECT event.session_id, json_extract(event.metadata, '$.commandId') AS command_id,
+					json_extract(event.data, '$.text') AS text, sessions.provider
+				FROM events event JOIN sessions ON sessions.id = event.session_id
+				WHERE event.type = 'native_command.requested' ORDER BY event.sequence`;
+			const views = new Map<string, readonly NativeCommandView[] | undefined>();
+			for (const { session_id, command_id, text, provider } of issued) {
+				const driver =
+					accounts.accounts.find((account) => account.id === provider)
+						?.driver ??
+					accounts.deleted.find((account) => account.id === provider)?.driver;
+				if (
+					(sessionIds && !sessionIds.has(session_id)) ||
+					claimed.has(session_id) ||
+					(driver ?? provider) !== this.providerId ||
+					this.firstSends
+						.get(session_id)
+						?.some(({ commandId }) => commandId === command_id) ||
+					// A failed session launches nothing to send them first.
+					(yield* this.getControlProcessIdEffect(session_id).pipe(
+						Effect.map((id) => id !== undefined),
+						Effect.catch(() => Effect.succeed(true)),
+					))
+				)
+					continue;
+				if (!views.has(session_id))
+					views.set(
+						session_id,
+						(yield* loadLedgerView(session_id))?.nativeCommands,
+					);
+				const tag = views
+					.get(session_id)
+					?.find(({ commandId }) => commandId === command_id)?.tag;
+				if (tag === "Sent" || tag === "Unconfirmed")
+					this.firstSends.set(session_id, [
+						...(this.firstSends.get(session_id) ?? []),
+						{ commandId: command_id, text },
+					]);
+			}
 		});
 
 	constructor(
