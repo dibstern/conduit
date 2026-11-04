@@ -35,7 +35,6 @@ const allowed = {
 	// Row readers still to move onto the view (82tn.32.30 remaining; the writers go in 32.13).
 	"src/lib/provider/session-run-settlement.ts": "to move",
 	"src/lib/persistence/effect/read-query-effect.ts": "to move",
-	"src/lib/domain/daemon/Layers/session-git-layer.ts": "to move",
 };
 
 const matched = new Set();
