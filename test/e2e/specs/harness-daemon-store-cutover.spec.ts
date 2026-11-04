@@ -437,15 +437,57 @@ cutoverTest(
 			await harness.terminate();
 			assertNoSources();
 			const after = daemonStoreManifest(destination);
-			// Each daemon start fences earlier runner writers with a fresh attachment id.
-			const durable = ({ tables }: typeof before) => ({
-				...tables,
-				claude_runner_cursors: tables["claude_runner_cursors"]?.map(
-					({ attachment_id: _attachment, ...row }) => row,
+			// The restart adopts the surviving runner and reports it live again,
+			// reattached (CONTRACT.md 2121-2125: "true on every `recover()` adoption
+			// after a daemon restart"). That one event, and the sequence, cursor and
+			// counter it advances, is the only change the restart may make.
+			const beforeIds = new Set(
+				before.tables["events"]?.map(({ event_id }) => event_id),
+			);
+			const added = (after.tables["events"] ?? []).filter(
+				({ event_id }) => !beforeIds.has(event_id),
+			);
+			expect(
+				added.map(({ type, data }) => ({
+					type,
+					reattached: JSON.parse(String(data)).reattached,
+				})),
+			).toEqual([{ type: "evidence.process_started", reattached: true }]);
+			const advance = (table: string, column: string) =>
+				(after.tables[table] ?? []).map(
+					(row, index) =>
+						Number(row[column]) -
+						Number(before.tables[table]?.[index]?.[column]),
+				);
+			expect(advance("sqlite_sequence", "seq")).toEqual(
+				(before.tables["sqlite_sequence"] ?? []).map(({ name }) =>
+					name === "events" ? 1 : 0,
 				),
-			});
+			);
+			// Projecting it takes one or more read model versions, with no row to show.
+			expect(advance("read_model_counter", "value")[0]).toBeGreaterThan(0);
+			// Each daemon start fences earlier runner writers with a fresh attachment id.
+			const durable = ({ tables }: typeof before) => {
+				const {
+					projector_cursors: cursors,
+					read_model_counter: _counter,
+					sqlite_sequence: _sequence,
+					...rest
+				} = tables;
+				return {
+					...rest,
+					events: tables["events"]?.filter(({ event_id }) =>
+						beforeIds.has(event_id),
+					),
+					projector_cursors: cursors?.map(
+						({ last_applied_seq: _seq, updated_at: _at, ...row }) => row,
+					),
+					claude_runner_cursors: tables["claude_runner_cursors"]?.map(
+						({ attachment_id: _attachment, ...row }) => row,
+					),
+				};
+			};
 			expect(durable(after)).toEqual(durable(before));
-			expect(after.hash).toBe(before.hash);
 			evidence.storeUnchangedByRestart = true;
 			await harness.dispose();
 			assertWitness();
