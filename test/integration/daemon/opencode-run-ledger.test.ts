@@ -11,24 +11,34 @@
 // 7. a lost prompt (its send comes back unknown, then it runs late) is read absent and re-sent, or
 //    its Run ends twice, or probing never ends because no probe records what it read, or its echo
 //    is never read as received, so it ends as a failure though it ran (82tn.32.35).
+// 8. a process that dies while the daemon is down leaves its held Run open after the daemon starts,
+//    ends it as completed though the work died, or ends it again when the next process starts.
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
 	AccountIdSchema,
 	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../src/lib/contracts/account.js";
+import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
+import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 
 // The default managed instance: its sessions' provider names the OpenCode driver.
 const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
@@ -150,9 +160,9 @@ describe("OpenCode on the Run Ledger", () => {
 		}
 	};
 	/** The daemon's ledger lives in another process's store, with no event to await. */
-	const until = (check: () => void) =>
+	const until = (check: () => void, timeout = 8_000) =>
 		// test-waits-allow polling: the ledger's writes land in the daemon's store, another process.
-		vi.waitFor(check, { timeout: 8_000, interval: 100 });
+		vi.waitFor(check, { timeout, interval: 100 });
 	/** Submits a turn the fake holds busy, and confirms its user message so main runs it. */
 	const hold = async (
 		fixture: ProcessHarness,
@@ -541,5 +551,583 @@ describe("OpenCode on the Run Ledger", () => {
 		expect(started(after)).toEqual([first, { ...first, reattached: 1 }]);
 		expect(lost(after)).toEqual([]);
 		expect(after.ends).toEqual([{ runId: heldRun, reason: "completed" }]);
+	});
+
+	it("a process that dies while the daemon is down ends its held Run once, as main's restart recovery ends it, and the next send runs under a new id", async () => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(
+			"Process dies while the daemon is down",
+			instanceId,
+			"opencode",
+		);
+		const before = await hold(fixture, browser, sessionId);
+		const [first] = started(before);
+		const heldRun = before.runs[0]?.id;
+
+		await fixture.terminate();
+		const [victim] = spawned(fixture);
+		if (!victim) throw new Error("No fake OpenCode");
+		process.kill(victim.pid, "SIGKILL");
+		await fixture.restart();
+		// Startup re-adopts only a live process, so main's recovery ends the orphaned run, and the
+		// ledger folds that one terminal (CONTRACT.md 2.1 D59: a Run with an open main run ends as
+		// main), with no new process yet to retire the old id.
+		await until(() =>
+			expect(read(fixture, sessionId).ends).toEqual([
+				{ runId: heldRun, reason: "provider_error" },
+			]),
+		);
+		const recovered = read(fixture, sessionId);
+		// The next send starts a new process; its start retires the old id with the Run already ended.
+		await (await fixture.connect()).send(sessionId, "after the daemon restart");
+
+		const after = read(fixture, sessionId);
+		const [, second] = started(after);
+		const nextRun = after.runs.at(-1)?.id;
+		proofs.push({
+			scenario: "death-while-daemon-down",
+			before,
+			recovered,
+			after,
+		});
+		expect(spawned(fixture)).toHaveLength(2);
+		expect(recovered.runs).toEqual([{ id: heldRun, status: "error" }]);
+		expect(second).toMatchObject({
+			label: `${second?.runnerId}:0`,
+			reattached: 0,
+		});
+		expect(second?.runnerId).not.toBe(first?.runnerId);
+		expect(started(after)).toHaveLength(2);
+		// Conduit stopped nothing, so no loss is written (CONTRACT.md 2.1 row 215, 9).
+		expect(lost(after)).toEqual([]);
+		expect(after.ends).toEqual([
+			{ runId: heldRun, reason: "provider_error" },
+			{ runId: nextRun, reason: "completed" },
+		]);
+	});
+
+	// Live checks against the pinned real OpenCode, with a local model server so no credential is
+	// needed (CONTRACT.md 9 "Open, needs a live check": OpenCode `prompt_async`/abort executing after
+	// the client request ended). How these could fail, beyond 1 to 8 above:
+	// 9. a real abort never reaches OpenCode, or reaches it under another process id than the label's;
+	// 10. a real crash or a conduit restart of the instance leaves the held Run open, or ends it twice;
+	// 11. a daemon restart that reuses the real server reports a new id or ends the held Run;
+	// 12. the recorded wire behaviour (late execution after the client request ended) differs from
+	//     what the ledger assumes, unnoticed.
+	describe("live, against a real OpenCode", () => {
+		type ModelCall = {
+			at: number;
+			model: string;
+			text: string;
+			outcome: "answered" | "held" | "released" | "aborted";
+		};
+		let model: Server | undefined;
+		let calls: ModelCall[] = [];
+		let releases: (() => void)[] = [];
+		afterEach(async () => {
+			for (const release of releases) release();
+			releases = [];
+			await new Promise<void>((done) =>
+				model ? model.close(() => done()) : done(),
+			);
+			model = undefined;
+		});
+		/** OpenAI-compatible model: a last user message containing HOLD streams nothing until released. */
+		const serveModel = async () => {
+			calls = [];
+			model = createServer(async (request, response) => {
+				let body = "";
+				for await (const chunk of request) body += String(chunk);
+				const input = JSON.parse(body) as {
+					model: string;
+					stream?: boolean;
+					messages: { role: string; content: unknown }[];
+				};
+				const content = input.messages
+					.filter(({ role }) => role === "user")
+					.at(-1)?.content;
+				const text =
+					typeof content === "string"
+						? content
+						: Array.isArray(content)
+							? content
+									.map((part) => (part as { text?: string }).text ?? "")
+									.join("")
+							: "";
+				const call: ModelCall = {
+					at: Date.now(),
+					model: input.model,
+					text,
+					outcome: "answered",
+				};
+				calls.push(call);
+				const chunk = (delta: object, finish: string | null) =>
+					`data: ${JSON.stringify({ id: "live", object: "chat.completion.chunk", created: 1, model: input.model, choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+				const answer = () => {
+					response.write(chunk({ role: "assistant", content: "Done." }, null));
+					response.write(chunk({}, "stop"));
+					response.end("data: [DONE]\n\n");
+				};
+				if (!input.stream) {
+					response.writeHead(200, { "Content-Type": "application/json" });
+					response.end(
+						JSON.stringify({
+							id: "live",
+							object: "chat.completion",
+							created: 1,
+							model: input.model,
+							choices: [
+								{
+									index: 0,
+									message: { role: "assistant", content: "Title" },
+									finish_reason: "stop",
+								},
+							],
+							usage: {
+								prompt_tokens: 1,
+								completion_tokens: 1,
+								total_tokens: 2,
+							},
+						}),
+					);
+					return;
+				}
+				response.writeHead(200, { "Content-Type": "text/event-stream" });
+				response.flushHeaders();
+				if (input.model !== "main" || !text.includes("HOLD")) return answer();
+				call.outcome = "held";
+				response.once("close", () => {
+					if (call.outcome === "held") call.outcome = "aborted";
+				});
+				releases.push(() => {
+					if (call.outcome !== "held") return;
+					call.outcome = "released";
+					answer();
+				});
+			});
+			await new Promise<void>((done) =>
+				model?.listen(0, "127.0.0.1", () => done()),
+			);
+			const address = model.address();
+			if (!address || typeof address === "string")
+				throw new Error("Missing model port");
+			return {
+				enabled_providers: ["ledger-live"],
+				model: "ledger-live/main",
+				small_model: "ledger-live/title",
+				provider: {
+					"ledger-live": {
+						npm: "@ai-sdk/openai-compatible",
+						options: {
+							baseURL: `http://127.0.0.1:${address.port}/v1`,
+							apiKey: "live",
+						},
+						models: {
+							main: { name: "Main", limit: { context: 16384, output: 1024 } },
+							title: { name: "Title", limit: { context: 16384, output: 64 } },
+						},
+					},
+				},
+			};
+		};
+		const startReal = async () => {
+			const config = await serveModel();
+			const fixture = ProcessHarness.create({
+				managedOpenCode: true,
+				managedOpenCodeId: instanceId,
+				realOpenCode: resolveRealOpenCode(),
+			});
+			harness = fixture;
+			const seed = Result.getOrThrowWith(
+				loadDaemonConfigResult(fixture.configDir),
+				(error) => error,
+			);
+			writeFileSync(
+				join(fixture.configDir, "daemon.json"),
+				JSON.stringify({
+					...seed,
+					instances: seed?.instances?.map((instance) => ({
+						...instance,
+						env: {
+							...instance.env,
+							OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+						},
+					})),
+				}),
+			);
+			await fixture.restart();
+			const browser = await fixture.connect();
+			// test-waits-allow polling: the real server takes a while to listen.
+			await vi.waitFor(() => browser.startInstance(instanceId), {
+				timeout: 60_000,
+				interval: 500,
+			});
+			const sessionId = await browser.createSession(
+				"Live OpenCode",
+				instanceId,
+				"opencode",
+				{ modelProviderId: "ledger-live", modelId: "main" },
+			);
+			return { fixture, browser, sessionId };
+		};
+		/** Submits a turn the model holds, and waits until main runs it. */
+		const holdReal = async (
+			fixture: ProcessHarness,
+			browser: Awaited<ReturnType<ProcessHarness["connect"]>>,
+			sessionId: string,
+		) => {
+			const text = `HOLD ${randomUUID()}`;
+			await Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId: randomUUID(),
+					delivery: "queue",
+					text,
+				}),
+			);
+			await until(() => {
+				expect(calls).toContainEqual(
+					expect.objectContaining({ text, outcome: "held" }),
+				);
+				expect(read(fixture, sessionId).runs.at(-1)?.status).toBe("running");
+			}, 20_000);
+			return read(fixture, sessionId);
+		};
+		const wire = (fixture: ProcessHarness, sessionId: string) =>
+			fixture
+				.opencodeRequests()
+				.filter(({ url }) => url.includes(sessionId))
+				.map(({ pid, at, method, url }) => ({
+					pid,
+					at,
+					method,
+					path: url.split("?")[0],
+				}));
+
+		/** Main's run and turn events, so a proof shows which terminal each Run folded. */
+		const turns = (fixture: ProcessHarness, sessionId: string) => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT type, json_extract(data, '$.code') AS code, json_extract(data, '$.error') AS error FROM events WHERE session_id = ? AND (type LIKE 'turn.%' OR type LIKE 'run.%') AND type NOT IN ('turn.started') ORDER BY sequence",
+					)
+					.all(sessionId) as {
+					type: string;
+					code: string | null;
+					error: string | null;
+				}[];
+			} finally {
+				db.close();
+			}
+		};
+		const live = (
+			scenario: string,
+			fixture: ProcessHarness,
+			sessionId: string,
+			states: Record<string, unknown>,
+		) =>
+			proofs.push({
+				scenario: `live:${scenario}`,
+				opencode: resolveRealOpenCode(),
+				...states,
+				turns: turns(fixture, sessionId),
+				model: calls,
+				wire: wire(fixture, sessionId),
+			});
+
+		it("a send, a refused steer and a Stop go through the ledger, and the abort reaches the real OpenCode under the label's id", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			await browser.send(sessionId, "plain send");
+			const before = await holdReal(fixture, browser, sessionId);
+			const [sentRun, heldRun] = before.runs.map(({ id }) => id);
+			const [first] = started(before);
+			expect(
+				await Effect.runPromise(
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId: randomUUID(),
+						delivery: "steer",
+						text: "steered",
+					}),
+				),
+			).toEqual({ ok: false, reason: "no_steering" });
+			const commandId = randomUUID();
+			expect(
+				await Effect.runPromise(
+					browser.rpc.CancelSession({ sessionId, commandId }),
+				),
+			).toMatchObject({ ok: true });
+			await until(() => expect(read(fixture, sessionId).ends).toHaveLength(2));
+
+			const after = read(fixture, sessionId);
+			live("send-steer-stop", fixture, sessionId, { before, after });
+			expect(started(after)).toEqual([first]);
+			expect(
+				fixture
+					.opencodeRequests()
+					.filter(
+						({ method, url }) =>
+							method === "POST" &&
+							url.split("?")[0] === `/session/${sessionId}/abort`,
+					)
+					.every(({ pid }) => pid === spawned(fixture)[0]?.pid),
+			).toBe(true);
+			expect(after.controls).toContainEqual({
+				effect: "interrupt_turn",
+				processId: first?.runnerId,
+				status: "completed",
+			});
+			// The real model call was cut by the abort.
+			expect(calls.map(({ outcome }) => outcome)).toEqual([
+				"answered",
+				"aborted",
+			]);
+			// Each Run ends once, by main's terminal: OpenCode reports the abort as a session error.
+			expect(after.ends).toEqual([
+				{ runId: sentRun, reason: "completed" },
+				{ runId: heldRun, reason: "provider_error" },
+			]);
+		});
+
+		it("a crash of the real OpenCode mid-Run ends that Run as lost once, at the new process's start, while main leaves its run open", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			const before = await holdReal(fixture, browser, sessionId);
+			const [first] = started(before);
+			const heldRun = before.runs[0]?.id;
+			const [victim] = spawned(fixture) as { pid: number; childPid?: number }[];
+			if (!victim?.childPid) throw new Error("No real OpenCode");
+			process.kill(victim.childPid, "SIGKILL");
+			// The supervisor respawns it; the new process sends nothing for the held session.
+			await streaming(fixture, 1);
+			await until(
+				() =>
+					expect(read(fixture, sessionId).ends).toEqual([
+						{ runId: heldRun, reason: "process_lost" },
+					]),
+				20_000,
+			);
+
+			const after = read(fixture, sessionId);
+			const [, second] = started(after);
+			live("crash-restart", fixture, sessionId, { before, after });
+			expect(second?.runnerId).not.toBe(first?.runnerId);
+			expect(second).toMatchObject({
+				label: `${second?.runnerId}:0`,
+				reattached: 0,
+			});
+			expect(started(after)).toHaveLength(2);
+			// No conduit stop, so no loss event: the old id retires at the new id's start (L1), and
+			// main settles that nowhere and leaves its run open (CONTRACT.md 2.1, 9).
+			expect(lost(after)).toEqual([]);
+			expect(after.runs).toEqual([{ id: heldRun, status: "running" }]);
+		});
+
+		it("a conduit stop and start of the real instance mid-Run writes its loss once, and the next send runs under a new id", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			const before = await holdReal(fixture, browser, sessionId);
+			const [first] = started(before);
+			const heldRun = before.runs[0]?.id;
+			await browser.stopInstance(instanceId);
+			await browser.startInstance(instanceId);
+			await streaming(fixture, 1);
+			await browser.send(sessionId, "after the stop");
+
+			const after = read(fixture, sessionId);
+			const [, second] = started(after);
+			live("instance-stop-start", fixture, sessionId, { before, after });
+			expect(lost(after)).toEqual([
+				{
+					type: "evidence.process_lost",
+					runnerId: first?.runnerId,
+					label: null,
+					reattached: null,
+				},
+			]);
+			expect(second?.runnerId).not.toBe(first?.runnerId);
+			expect(after.ends).toEqual([
+				{ runId: heldRun, reason: "process_lost" },
+				{ runId: after.runs.at(-1)?.id, reason: "completed" },
+			]);
+		});
+
+		it("a daemon restart that reuses the real OpenCode mid-Run reports a reattach with the same id and ends the Run by its own work", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			const before = await holdReal(fixture, browser, sessionId);
+			const [first] = started(before);
+			const heldRun = before.runs[0]?.id;
+			await fixture.terminate();
+			await fixture.restart();
+			expect(spawned(fixture)).toHaveLength(1);
+			await streaming(fixture, 0, 2);
+			for (const release of releases) release();
+			await until(() =>
+				expect(read(fixture, sessionId).runs).toEqual([
+					{ id: heldRun, status: "completed" },
+				]),
+			);
+
+			const after = read(fixture, sessionId);
+			live("daemon-restart-reuse", fixture, sessionId, { before, after });
+			expect(started(after)).toEqual([first, { ...first, reattached: 1 }]);
+			expect(lost(after)).toEqual([]);
+			expect(after.ends).toEqual([{ runId: heldRun, reason: "completed" }]);
+		});
+
+		// CONTRACT.md 3125-3131: the decider reads an absent OpenCode prompt only through a later idle
+		// read, because a prompt or abort whose client request ended may still run. This pins that
+		// wire behaviour of the real server, so a change to it fails here (12 above).
+		it("the real OpenCode runs a prompt and an abort whose client request ended, but not a cut-short body", async () => {
+			const config = await serveModel();
+			const root = mkdtempSync(join(tmpdir(), "oc-wire-"));
+			for (const dir of ["home", "project", "config", "data", "state", "cache"])
+				mkdirSync(join(root, dir));
+			writeFileSync(join(root, "models.json"), "{}");
+			// OpenCode's --port 0 tries 4096 first, so reserve a free port instead.
+			const reservation = createServer();
+			await new Promise<void>((done) =>
+				reservation.listen(0, "127.0.0.1", () => done()),
+			);
+			const reserved = reservation.address();
+			if (!reserved || typeof reserved === "string")
+				throw new Error("Missing OpenCode port");
+			await new Promise<void>((done) => reservation.close(() => done()));
+			const server = spawn(
+				resolveRealOpenCode(),
+				["serve", "--hostname", "127.0.0.1", "--port", String(reserved.port)],
+				{
+					cwd: join(root, "project"),
+					env: {
+						PATH: process.env["PATH"],
+						HOME: join(root, "home"),
+						npm_config_offline: "true",
+						OPENCODE_MODELS_PATH: join(root, "models.json"),
+						OPENCODE_DISABLE_MODELS_FETCH: "true",
+						OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
+						OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+						XDG_CONFIG_HOME: join(root, "config"),
+						XDG_DATA_HOME: join(root, "data"),
+						XDG_STATE_HOME: join(root, "state"),
+						XDG_CACHE_HOME: join(root, "cache"),
+					},
+					stdio: ["ignore", "pipe", "ignore"],
+				},
+			);
+			try {
+				let output = "";
+				const base = await new Promise<string>((done, fail) => {
+					server.once("exit", () =>
+						fail(new Error(`OpenCode exited: ${output}`)),
+					);
+					server.stdout?.on("data", (chunk: Buffer) => {
+						output += chunk.toString("utf8");
+						const url = output.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+						if (url) done(url);
+					});
+				});
+				const port = Number(new URL(base).port);
+				expect([2633, 4096]).not.toContain(port);
+				const json = async (method: string, path: string, body?: object) =>
+					(await fetch(`${base}${path}`, {
+						method,
+						headers: { "Content-Type": "application/json" },
+						...(body ? { body: JSON.stringify(body) } : {}),
+					}).then(async (response) =>
+						JSON.parse((await response.text()) || "null"),
+					)) as unknown;
+				const session = async () =>
+					((await json("POST", "/session", {})) as { id: string }).id;
+				type Message = {
+					info: {
+						role: string;
+						error?: { name: string };
+						time: { completed?: number };
+					};
+				};
+				const messages = async (id: string) =>
+					((await json("GET", `/session/${id}/message`)) as Message[]).map(
+						({ info }) => ({
+							role: info.role,
+							error: info.error?.name,
+							completed: info.time.completed !== undefined,
+						}),
+					);
+				/** Writes the request on a raw socket and destroys it at once, so no reply is read. */
+				const cut = (path: string, body: object, sent?: number) =>
+					new Promise<void>((done) => {
+						const data = JSON.stringify(body);
+						const socket = connect(port, "127.0.0.1", () =>
+							socket.write(
+								`POST ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(data)}\r\n\r\n${data.slice(0, sent)}`,
+								() => {
+									socket.destroy();
+									done();
+								},
+							),
+						);
+					});
+				const prompt = (text: string) => ({
+					parts: [{ type: "text", text }],
+					model: { providerID: "ledger-live", modelID: "main" },
+				});
+
+				const partial = await session();
+				await cut(`/session/${partial}/prompt_async`, prompt("PARTIAL"), 20);
+				const late = await session();
+				await cut(`/session/${late}/prompt_async`, prompt("LATE"));
+				await until(
+					() =>
+						expect(calls).toContainEqual(
+							expect.objectContaining({
+								model: "main",
+								text: "LATE",
+								outcome: "answered",
+							}),
+						),
+					20_000,
+				);
+				const aborted = await session();
+				await json("POST", `/session/${aborted}/prompt_async`, prompt("HOLD"));
+				await until(() =>
+					expect(calls).toContainEqual(
+						expect.objectContaining({ text: "HOLD", outcome: "held" }),
+					),
+				);
+				await cut(`/session/${aborted}/abort`, {});
+				await until(() =>
+					expect(calls).toContainEqual(
+						expect.objectContaining({ text: "HOLD", outcome: "aborted" }),
+					),
+				);
+
+				const wire = {
+					late: await messages(late),
+					partial: await messages(partial),
+					aborted: await messages(aborted),
+				};
+				proofs.push({
+					scenario: "live:client-request-ended",
+					opencode: resolveRealOpenCode(),
+					model: calls,
+					wire,
+				});
+				expect(calls.filter(({ text }) => text === "PARTIAL")).toEqual([]);
+				expect(wire.partial).toEqual([]);
+				expect(wire.late).toEqual([
+					{ role: "user", error: undefined, completed: false },
+					{ role: "assistant", error: undefined, completed: true },
+				]);
+				expect(wire.aborted).toEqual([
+					{ role: "user", error: undefined, completed: false },
+					{ role: "assistant", error: "MessageAbortedError", completed: true },
+				]);
+			} finally {
+				server.kill("SIGKILL");
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
 	});
 });

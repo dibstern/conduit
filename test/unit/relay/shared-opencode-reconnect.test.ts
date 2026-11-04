@@ -456,7 +456,10 @@ describe("Shared OpenCode stream reconnect", () => {
 		await vi.waitFor(() => {
 			for (const project of projects) {
 				expect(project.connected).toHaveBeenCalledOnce();
-				expect(project.onReconnect).toHaveBeenCalledExactlyOnceWith("opencode");
+				expect(project.onReconnect).toHaveBeenCalledExactlyOnceWith(
+					"opencode",
+					expect.stringMatching(/^opencode:/),
+				);
 			}
 		});
 
@@ -484,8 +487,14 @@ describe("Shared OpenCode stream reconnect", () => {
 		streams[0]?.close();
 		await vi.waitFor(
 			() => {
-				expect(first.onReconnect).toHaveBeenCalledExactlyOnceWith("opencode");
-				expect(late.onReconnect).toHaveBeenCalledExactlyOnceWith("opencode");
+				expect(first.onReconnect).toHaveBeenCalledExactlyOnceWith(
+					"opencode",
+					expect.stringMatching(/^opencode:/),
+				);
+				expect(late.onReconnect).toHaveBeenCalledExactlyOnceWith(
+					"opencode",
+					expect.stringMatching(/^opencode:/),
+				);
 			},
 			{ timeout: 5_000 },
 		);
@@ -512,6 +521,7 @@ describe("Shared OpenCode stream reconnect", () => {
 				expect(streams).toHaveLength(2);
 				expect(project.onReconnect).toHaveBeenCalledExactlyOnceWith(
 					"secondary",
+					expect.stringMatching(/^opencode:/),
 				);
 			},
 			{ timeout: 5_000 },

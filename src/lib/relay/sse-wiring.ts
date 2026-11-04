@@ -125,7 +125,10 @@ export interface SSEWiringDeps {
 			providerInstanceId: string,
 			context?: OpenCodeEventContext,
 		): Effect.Effect<OpenCodeRuntimeIngressResult>;
-		onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
+		onReconnect(
+			providerInstanceId?: string,
+			providerProcessId?: string,
+		): Effect.Effect<void, SqlError>;
 		onInstanceStopped?(
 			providerInstanceId: string,
 			isCurrent: () => boolean,
@@ -803,7 +806,7 @@ export const handleSSEEventEffect = (
 
 interface SSEConsumerCallbacks {
 	handleEvent(event: SSEEvent, context?: OpenCodeEventContext): void;
-	onReconnect?(): void;
+	onReconnect?(providerProcessId?: string): void;
 	/** The instance's lifecycle state, for the banner on every tab. */
 	onConnectionStatus(
 		status: OpenCodeConnectionStatus,
@@ -822,11 +825,11 @@ function wireSSEConsumerWithCallbacks(
 
 	// Pending prompts and missed status are recovered upstream by OpenCode
 	// Instances and arrive as ordinary stream events.
-	consumer.on("connected", () => {
+	consumer.on("connected", (providerProcessId) => {
 		log.info("Connected to OpenCode event stream");
 		// PTYs created before this connection, or while it was down, send no event.
 		deps.onPtysChanged?.(deps.providerInstanceId);
-		if (hasConnected) callbacks.onReconnect?.();
+		if (hasConnected) callbacks.onReconnect?.(providerProcessId);
 		hasConnected = true;
 	});
 	consumer.on("status", (status, managedStopped, stoppedProcessId) => {
@@ -921,11 +924,11 @@ export const wireSSEConsumerEffect = (
 						),
 					);
 				},
-				onReconnect: () => {
+				onReconnect: (providerProcessId) => {
 					if (deps.opencodeRuntimeIngress)
 						runFork(
 							deps.opencodeRuntimeIngress
-								.onReconnect(deps.providerInstanceId)
+								.onReconnect(deps.providerInstanceId, providerProcessId)
 								.pipe(
 									Effect.catchCause((cause) =>
 										Effect.sync(() =>

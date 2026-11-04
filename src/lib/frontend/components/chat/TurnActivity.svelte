@@ -79,7 +79,7 @@
 	}) }: {
 		panel?: TurnPanelState;
 		turn: Turn;
-		runLabel?: RunLabel;
+		runLabel?: RunLabel | undefined;
 		segment: Segment;
 		final: boolean;
 		entries?: readonly TurnLogEntry[];
@@ -150,7 +150,7 @@
 	function runText(label: RunLabel): string {
 		switch (label.kind) {
 			case "working": return "Working";
-			case "woken": return label.task ?? "Woken";
+			case "woken": return label.task ? `Working · woken by ${label.task}` : "Working · woken";
 			case "stopping": return label.stuck ? "Still stopping" : "Stopping";
 			default: return assertNever(label);
 		}

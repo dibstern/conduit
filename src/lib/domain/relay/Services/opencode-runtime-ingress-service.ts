@@ -86,7 +86,10 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		providerInstanceId: string,
 		context?: OpenCodeEventContext,
 	): Effect.Effect<OpenCodeRuntimeIngressResult>;
-	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError>;
+	onReconnect(
+		providerInstanceId?: string,
+		providerProcessId?: string,
+	): Effect.Effect<void, SqlError>;
 	/** stoppedProcessId: the stopped process's promptProcessId, when conduit stopped it. */
 	onInstanceStopped(
 		providerInstanceId: string,
@@ -1467,6 +1470,27 @@ export class EffectOpenCodeRuntimeIngress
 		);
 	}
 
+	/** The reporter's process_started for one session, read inside the write that carries it. */
+	private processStarted(sessionId: string, processId: string) {
+		return this.sql<{ runner_id: string }>`
+			SELECT json_extract(data, '$.runnerId') AS runner_id FROM events
+			WHERE session_id = ${sessionId} AND type = 'evidence.process_started'
+			ORDER BY sequence DESC LIMIT 1`.pipe(
+			Effect.map(([latest]) => [
+				canonicalEvent(
+					"evidence.process_started",
+					sessionId,
+					{
+						runnerId: processId,
+						label: `${processId}:0`,
+						reattached: latest?.runner_id === processId,
+					},
+					{ provider: "opencode" },
+				),
+			]),
+		);
+	}
+
 	private ingestSessionEvent(
 		event: SSEEvent,
 		sessionId: string,
@@ -1676,25 +1700,7 @@ export class EffectOpenCodeRuntimeIngress
 					? { beforeCommit: this.invalidateHistory(sessionId) }
 					: {}),
 				...(startedProcess
-					? {
-							evidence: this.sql<{ runner_id: string }>`
-								SELECT json_extract(data, '$.runnerId') AS runner_id FROM events
-								WHERE session_id = ${sessionId} AND type = 'evidence.process_started'
-								ORDER BY sequence DESC LIMIT 1`.pipe(
-								Effect.map(([latest]) => [
-									canonicalEvent(
-										"evidence.process_started",
-										sessionId,
-										{
-											runnerId: startedProcess,
-											label: `${startedProcess}:0`,
-											reattached: latest?.runner_id === startedProcess,
-										},
-										{ provider: "opencode" },
-									),
-								]),
-							),
-						}
+					? { evidence: this.processStarted(sessionId, startedProcess) }
 					: {}),
 				afterCommit: Effect.gen({ self: this }, function* () {
 					if (startedProcess)
@@ -1884,7 +1890,10 @@ export class EffectOpenCodeRuntimeIngress
 
 	/** The SSE callback is synchronous. A stale REST result cannot mark a
 	 *  reconnected session complete; live commits never wait for that result. */
-	onReconnect(providerInstanceId?: string): Effect.Effect<void, SqlError> {
+	onReconnect(
+		providerInstanceId?: string,
+		providerProcessId?: string,
+	): Effect.Effect<void, SqlError> {
 		this.translator.resetAnnouncements();
 		// Events may have been missed while disconnected, even for idle sessions.
 		const instances =
@@ -1921,6 +1930,35 @@ export class EffectOpenCodeRuntimeIngress
 								WHERE id = ${sessionId} AND project_id = ${this.projectId} RETURNING id`;
 							if (rows.length > 0)
 								yield* this.startBackfill(sessionId, instanceId);
+							// CONTRACT.md 9 "OpenCode adapter": the reporter reports to every session bound
+							// to the instance. A respawned process may send nothing for a session it bound
+							// before, so its start is reported here, retiring the old id (L1). Read as the
+							// sessions this ingress saw on another process of this instance (gap, audit).
+							const previous = this.reportedProcesses.get(sessionId);
+							if (
+								providerProcessId === undefined ||
+								previous === undefined ||
+								previous === providerProcessId
+							)
+								return;
+							yield* this.ingestion
+								.ingestBatch([], {
+									publishToRelay: false,
+									evidence: this.processStarted(sessionId, providerProcessId),
+									afterCommit: Effect.sync(() =>
+										this.reportedProcesses.set(sessionId, providerProcessId),
+									),
+								})
+								.pipe(
+									Effect.catchCause((cause) =>
+										Effect.sync(() =>
+											this.log.warn("OpenCode process start report deferred", {
+												sessionId,
+												error: Failure.renderCause(cause),
+											}),
+										),
+									),
+								);
 						}),
 					);
 				}

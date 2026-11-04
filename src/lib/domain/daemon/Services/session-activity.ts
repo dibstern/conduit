@@ -9,6 +9,7 @@ import {
 	Stream,
 } from "effect";
 import type { EventPayloadMap } from "../../../contracts/stored-event.js";
+import type { WakeRun } from "../../../persistence/effect/run-ledger-arm.js";
 import type {
 	LedgerView,
 	Task,
@@ -36,6 +37,8 @@ export type SessionBackground = {
 	readonly checking?: true;
 	/** While checking, the last known list, shown greyed: never live, never work. */
 	readonly stale?: readonly BackgroundTask[];
+	/** 8.3: the active Run is a wake, named by its waking task's description when known. */
+	readonly wakeRun?: { readonly task?: string };
 };
 
 type TaskDisplay = Pick<
@@ -54,6 +57,12 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			readonly view: LedgerView["tasks"];
 			readonly display: ReadonlyMap<string, TaskDisplay>;
 			readonly since: number;
+			readonly wake: WakeRun | undefined;
+			/**
+			 * Each task's description by id, kept past its last listing: Claude's empty snapshot lands
+			 * before the notification that wakes it (8.3).
+			 */
+			readonly named: ReadonlyMap<string, string>;
 		}
 	>();
 	const taskIds = (view: LedgerView["tasks"] | undefined) =>
@@ -67,8 +76,13 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 				readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
 				readonly at: number;
 			},
+			wake?: WakeRun,
 		): boolean {
 			const previous = views.get(sessionId);
+			const listed = [
+				...(view.tag === "live" ? view.tasks : []),
+				...(snapshot?.tasks ?? []),
+			];
 			const display = snapshot
 				? new Map(
 						snapshot.tasks.map(
@@ -94,6 +108,13 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 					taskIds(previous.view).join("\u0000") === taskIds(view).join("\u0000")
 						? previous.since
 						: (snapshot?.at ?? Date.now()),
+				wake,
+				named: new Map([
+					...(previous?.named ?? []),
+					...listed.flatMap(({ key, description }) =>
+						description ? [[key.taskId, description] as const] : [],
+					),
+				]),
 			};
 			views.set(sessionId, next);
 			// A session not yet handed over shows no tasks, so a restart's first hand-over of none moves
@@ -102,7 +123,8 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 				JSON.stringify([
 					previous?.view ?? { tag: "none" },
 					[...(previous?.display ?? [])],
-				]) !== JSON.stringify([view, [...display]]);
+					previous?.wake,
+				]) !== JSON.stringify([view, [...display], wake]);
 			if (moved) changed(sessionId);
 			return moved;
 		},
@@ -112,7 +134,14 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			serving: ReadonlySet<string> = new Set(),
 		): SessionBackground | undefined {
 			const entry = views.get(sessionId);
-			if (entry === undefined || entry.view.tag === "none") return undefined;
+			if (entry === undefined) return undefined;
+			const taskName =
+				entry.wake?.task && entry.named.get(entry.wake.task.taskId);
+			const wakeRun = entry.wake && {
+				wakeRun: taskName ? { task: taskName } : {},
+			};
+			if (entry.view.tag === "none")
+				return wakeRun && { tasks: [], ...wakeRun };
 			const shown = (tasks: readonly Task[]): BackgroundTask[] =>
 				tasks
 					.map((task) => {
@@ -131,8 +160,8 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			if (entry.view.tag === "unknown") {
 				const stale = shown(entry.view.stale ?? []);
 				return stale.length > 0
-					? { tasks: [], checking: true, stale }
-					: { tasks: [], checking: true };
+					? { tasks: [], checking: true, stale, ...wakeRun }
+					: { tasks: [], checking: true, ...wakeRun };
 			}
 			const tasks = shown(entry.view.tasks);
 			// 8.2 (CONTRACT.md 2778-2781): the ledger's class decides; only work tasks
@@ -140,7 +169,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			const working = entry.view.tasks.some(
 				(task) => task.class === "work" && !serving.has(task.key.taskId),
 			);
-			return { work: working ? "working" : "monitoring", tasks };
+			return { work: working ? "working" : "monitoring", tasks, ...wakeRun };
 		},
 		/** 8.3: tasks live or unknown may still act. */
 		hasLiveWork(sessionId: string): boolean {

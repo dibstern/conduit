@@ -426,8 +426,10 @@ export const turnPanelHandlers: StepHandler[] = [
 	},
 	{
 		name: "wake the same Turn",
-		match: /^a wake Run starts in the panel choice turn$/,
-		run: async ({ world }) => {
+		match:
+			/^a wake Run (?:woken by "([^"]+)" )?starts in the panel choice turn$/,
+		run: async ({ world, match }) => {
+			const task = match[1];
 			const messages = fixtures.get(world.page) ?? [];
 			const id = `panel-wake-${messages.length}`;
 			publish(world.page, [
@@ -460,10 +462,24 @@ export const turnPanelHandlers: StepHandler[] = [
 					],
 				},
 			]);
-			setSessionRowStatus(world.page, SESSION, "busy");
+			setSessionRowStatus(
+				world.page,
+				SESSION,
+				"busy",
+				task ? { wakeRun: { task } } : {},
+			);
 			await expect(
 				panel(world.page).locator(".turn-activity-toggle"),
 			).toContainText("Working");
+		},
+	},
+	{
+		name: "assert the turn head's Run label",
+		match: /^the panel choice turn head reads "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				panel(world.page).locator(".turn-activity-toggle"),
+			).toContainText(match[1] ?? "");
 		},
 	},
 	{
