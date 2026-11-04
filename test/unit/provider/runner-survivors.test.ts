@@ -2170,6 +2170,185 @@ for (const first of ["send", "Stop"] as const)
 			),
 	);
 
+// A user Stop the runner never answered reaches its deadline step: U2's
+// end_session retires the runner for the Stop's owner run (provider-turn-service.ts
+// 270-283). The next input's send races that retirement. It follows its Run, never
+// a runner (CONTRACT.md 965-968): held but unwritten, the stop commit releases it
+// NotSent and the next runner delivers it once (1613-1618); the owner ends once,
+// at the retirement (738-741). An owner already ended by its late native result
+// drops the step (8.4, 2881-2883), so the send stays on the same runner.
+for (const lands of [
+	"while the retirement waits to commit",
+	"while the retirement commit fails",
+	"after the retirement commits",
+	"after the runner exits",
+	"after the owner's late interrupted result",
+] as const)
+	it.effect(
+		`STOP-INTENT a send ${lands} reaches one runner once at the stop deadline's retirement`,
+		() =>
+			run(
+				Effect.gen(function* () {
+					const f = yield* stopIntentFixture;
+					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('owner-run', 's', 'running', 1), ('next-run', 's', 'running', 2)`;
+					yield* f.dispatch("owner-run");
+					f.accept("owner-run");
+					const stopped = f.runner.runnerId;
+					const retire = f.manager
+						.executeEffect({
+							type: "end-session",
+							sessionId: "s",
+							control: {
+								commandId: "user-stop:retire",
+								providerProcessId: stopped,
+								retireRunIds: ["owner-run"],
+							},
+						})
+						.pipe(Effect.result, Effect.forkChild);
+					const retiredAt = f.sql<{
+						retired_at: number | null;
+					}>`SELECT retired_at FROM claude_runner_cursors WHERE runner_id = ${stopped}`;
+					const nextSends = () =>
+						f.commands.filter(
+							(command) =>
+								command.type === "send-turn" && command.runId === "next-run",
+						);
+					if (lands === "after the owner's late interrupted result") {
+						yield* f.runner.emit(
+							{
+								type: "event",
+								sinkId: "sink-owner-run",
+								event: {
+									eventId: "owner-late-interrupted",
+									type: "turn.interrupted",
+									providerId: "claude",
+									sessionId: "s",
+									runId: "owner-run",
+									providerRefs: {},
+									rawSource: { kind: "test" },
+									createdAt: 3,
+									data: { messageId: "", reason: "Interrupted" },
+								},
+							},
+							"s",
+						);
+						yield* f.dispatch("next-run");
+						f.exitOnSignal();
+						const stopping = yield* retire;
+						yield* TestClock.adjust("12 seconds");
+						expect((yield* Fiber.join(stopping))._tag).toBe("Success");
+						expect(f.signals).toEqual([]);
+						expect(f.connections).toHaveLength(1);
+						expect(yield* retiredAt).toEqual([{ retired_at: null }]);
+						expect(nextSends().map((command) => command.runnerId)).toEqual([
+							stopped,
+						]);
+						expect(
+							yield* f.sql`SELECT id, status, runner_id FROM provider_runs ORDER BY id`,
+						).toEqual([
+							{ id: "next-run", status: "running", runner_id: stopped },
+							{ id: "owner-run", status: "interrupted", runner_id: stopped },
+						]);
+						return;
+					}
+					if (lands === "after the runner exits") {
+						f.exitOnSignal();
+						const stopping = yield* retire;
+						yield* TestClock.adjust("12 seconds");
+						expect((yield* Fiber.join(stopping))._tag).toBe("Success");
+						yield* f.dispatch("next-run");
+					} else if (lands === "after the retirement commits") {
+						const stopping = yield* retire;
+						yield* TestClock.adjust(0);
+						expect((yield* retiredAt)[0]?.retired_at).not.toBeNull();
+						const sending = yield* f
+							.dispatch("next-run")
+							.pipe(Effect.forkChild);
+						yield* TestClock.adjust(0);
+						f.exitOnSignal();
+						yield* TestClock.adjust("12 seconds");
+						expect((yield* Fiber.join(stopping))._tag).toBe("Success");
+						yield* Fiber.join(sending);
+					} else {
+						const writer = yield* makeCommitAndSignal;
+						const entered = yield* Deferred.make<void>();
+						const release = yield* Deferred.make<void>();
+						if (lands === "while the retirement commit fails") {
+							yield* f.sql`CREATE TABLE stop_commit_parent (id TEXT PRIMARY KEY)`;
+							yield* f.sql`CREATE TABLE stop_commit_check (id TEXT REFERENCES stop_commit_parent(id) DEFERRABLE INITIALLY DEFERRED)`;
+							yield* f.sql`CREATE TRIGGER fail_stop_commit BEFORE INSERT ON claude_runner_cursors
+							WHEN NEW.retired_at IS NOT NULL BEGIN INSERT INTO stop_commit_check VALUES ('missing'); END`;
+							yield* Deferred.succeed(entered, undefined);
+						}
+						const held =
+							lands === "while the retirement waits to commit"
+								? yield* writer
+										.write(() =>
+											Deferred.succeed(entered, undefined).pipe(
+												Effect.andThen(Deferred.await(release)),
+											),
+										)
+										.pipe(Effect.forkChild)
+								: undefined;
+						yield* Deferred.await(entered);
+						yield* Effect.gen(function* () {
+							const stopping = yield* retire;
+							yield* TestClock.adjust("2 seconds");
+							const sending = yield* f
+								.dispatch("next-run")
+								.pipe(Effect.forkChild);
+							yield* TestClock.adjust(0);
+							expect(nextSends()).toEqual([]);
+							expect(f.signals).toEqual([]);
+							expect(stopping.pollUnsafe()).toBeUndefined();
+							// The held writer also holds reads; the failing commit reads now.
+							if (!held)
+								expect(yield* retiredAt).toEqual([{ retired_at: null }]);
+							if (held) {
+								yield* Deferred.succeed(release, undefined);
+								yield* Fiber.join(held);
+							} else yield* f.sql`DROP TRIGGER fail_stop_commit`;
+							f.exitOnSignal();
+							yield* TestClock.adjust("12 seconds");
+							expect((yield* Fiber.join(stopping))._tag).toBe("Success");
+							yield* Fiber.join(sending);
+						}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+					}
+					const [delivered, ...again] = nextSends();
+					expect(again).toEqual([]);
+					expect(delivered?.runnerId).not.toBe(stopped);
+					expect(
+						f.commands.filter(
+							(command) =>
+								command.type === "send-turn" && command.runnerId === stopped,
+						),
+					).toEqual([
+						{ runnerId: stopped, type: "send-turn", runId: "owner-run" },
+					]);
+					expect(
+						yield* f.sql`SELECT id, status, runner_id FROM provider_runs ORDER BY id`,
+					).toEqual([
+						{
+							id: "next-run",
+							status: "running",
+							runner_id: delivered?.runnerId,
+						},
+						{ id: "owner-run", status: "interrupted", runner_id: stopped },
+					]);
+					expect(
+						yield* f.sql`SELECT json_extract(data, '$.runId') AS run, json_extract(data, '$.reason') AS reason FROM events WHERE type = 'run.released'`,
+					).toEqual(
+						lands === "while the retirement commit fails"
+							? [{ run: "next-run", reason: "NotSent" }]
+							: [],
+					);
+					expect(
+						yield* f.sql`SELECT json_extract(metadata, '$.runId') AS run FROM events WHERE type IN ('turn.interrupted', 'turn.error')`,
+					).toEqual([{ run: "owner-run" }]);
+				}),
+			),
+	);
+
 // The write gate (4.4) and the stop commit's releases (4.5), through the real
 // runner, its SQLite store and the session send interface.
 const idleSends = (
