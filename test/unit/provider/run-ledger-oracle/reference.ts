@@ -216,8 +216,18 @@ interface NativeCommandRec {
 }
 
 type TaskState =
-	| { readonly tag: "Unknown"; readonly label: Label }
+	| { readonly tag: "Unknown"; readonly label: Label; readonly stale?: Task[] }
 	| { readonly tag: "Known"; readonly label: Label; readonly tasks: Task[] };
+
+/** Unknown tasks keep the runner's last known list, read by no decision (CONTRACT.md 1389 gap). */
+const lastKnown = (tasks: TaskState | undefined): Task[] =>
+	tasks?.tag === "Known" ? tasks.tasks : (tasks?.stale ?? []);
+function unknownTasks(label: Label, prior: TaskState | undefined): TaskState {
+	const stale = lastKnown(prior);
+	return stale.length > 0
+		? { tag: "Unknown", label, stale }
+		: { tag: "Unknown", label };
+}
 
 interface Runner {
 	latest: Label;
@@ -442,8 +452,12 @@ function taskView(world: World): TasksView {
 		world.current === null ? undefined : world.runners.get(world.current);
 	if (runner === undefined || !reportsTasks(world.provider))
 		return { tag: "none" };
-	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest)
-		return { tag: "unknown", label: runner.latest };
+	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest) {
+		const stale = lastKnown(runner.tasks);
+		return stale.length > 0
+			? { tag: "unknown", label: runner.latest, stale }
+			: { tag: "unknown", label: runner.latest };
+	}
 	return runner.tasks.tasks.length === 0
 		? { tag: "none" }
 		: { tag: "live", label: runner.latest, tasks: runner.tasks.tasks };
@@ -1085,7 +1099,7 @@ function noteLabel(world: World, label: Label): "older" | "current" {
 		runner.latest = label;
 		// D44: the newer label's tasks are unknown until its first snapshot (8.4).
 		runner.tasks = reportsTasks(world.provider)
-			? { tag: "Unknown", label }
+			? unknownTasks(label, runner.tasks)
 			: { tag: "Known", label, tasks: [] };
 		world.snapshotEntry++;
 	}
@@ -2689,7 +2703,7 @@ function settle(
 				retired: false,
 				tasks:
 					settlement.reattached && reportsTasks(world.provider)
-						? { tag: "Unknown", label: settlement.label }
+						? unknownTasks(settlement.label, prior?.tasks)
 						: { tag: "Known", label: settlement.label, tasks: [] },
 			});
 			world.current = runnerId;

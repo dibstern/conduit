@@ -320,6 +320,8 @@ export const sessionRowsToSessionInfoList = (
 				? { backgroundTasks: background.tasks }
 				: {}),
 			...(background?.checking ? { tasksChecking: true } : {}),
+			...(background?.stale ? { staleTasks: background.stale } : {}),
+			...(background?.stale ? { staleTasks: background.stale } : {}),
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),

@@ -408,6 +408,8 @@ export const SessionInfoSchema = Schema.Struct({
 	backgroundTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
 	/** A reattached runner's tasks are unknown until its catch-up list arrives (8.3). */
 	tasksChecking: Schema.optional(Schema.Literal(true)),
+	/** While checking, the last known tasks, shown greyed: never live, never stoppable. */
+	staleTasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */
 	servers: Schema.optional(Schema.Array(SessionServerSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */

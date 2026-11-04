@@ -100,8 +100,9 @@ const sessionIdOf = (url: string): string => {
 export async function setLiveTasks(
 	page: import("@playwright/test").Page,
 	tasks: readonly LiveTask[],
-	// A reattached runner's tasks before its catch-up list (CONTRACT.md 8.3): no list, no work.
-	checking = false,
+	// A reattached runner's tasks before its catch-up list (CONTRACT.md 8.3): no list, no work,
+	// and the last known list shown greyed.
+	checking?: { readonly stale: readonly LiveTask[] },
 ): Promise<void> {
 	const now = await page.evaluate(() => Date.now());
 	const rpc = requireRpcControl(page);
@@ -110,6 +111,23 @@ export async function setLiveTasks(
 		providerCapabilities: PROVIDER_SESSION_CAPABILITIES,
 	});
 	const id = sessionIdOf(page.url());
+	const wire = ({
+		id,
+		type,
+		description,
+		age,
+		parentTaskId,
+		childSessionId,
+		detail,
+	}: LiveTask) => ({
+		id,
+		type,
+		description,
+		firstSeenAt: now - age * 1000,
+		...(parentTaskId ? { parentTaskId } : {}),
+		...(childSessionId ? { childSessionId } : {}),
+		...(detail ? { detail } : {}),
+	});
 	// Merge into the existing row: a row replaces the session's goal state too.
 	const row = rpc.shellRows?.find(
 		(candidate) => (candidate as { id?: string }).id === id,
@@ -127,28 +145,8 @@ export async function setLiveTasks(
 			// The server rolls working background work into attention.
 			attention: tasks.length > 0 ? "working" : undefined,
 			tasksChecking: checking ? true : undefined,
-			backgroundTasks:
-				tasks.length > 0
-					? tasks.map(
-							({
-								id,
-								type,
-								description,
-								age,
-								parentTaskId,
-								childSessionId,
-								detail,
-							}) => ({
-								id,
-								type,
-								description,
-								firstSeenAt: now - age * 1000,
-								...(parentTaskId ? { parentTaskId } : {}),
-								...(childSessionId ? { childSessionId } : {}),
-								...(detail ? { detail } : {}),
-							}),
-						)
-					: undefined,
+			backgroundTasks: tasks.length > 0 ? tasks.map(wire) : undefined,
+			staleTasks: checking?.stale.length ? checking.stale.map(wire) : undefined,
 		},
 	]);
 	// Working attention moves the sidebar row from Idle to Running a beat after
@@ -425,7 +423,47 @@ export const backgroundTasksHandlers: StepHandler[] = [
 		name: "seed tasks being checked",
 		match: /^the session's background tasks are being checked$/,
 		run: async ({ world }) => {
-			await setLiveTasks(world.page, [], true);
+			await setLiveTasks(world.page, [], { stale: [] });
+		},
+	},
+	{
+		name: "seed tasks being checked after a last list",
+		match:
+			/^the session's background tasks are being checked after a last list of ([1-4]) tasks?$/,
+		run: async ({ world, match }) => {
+			await setLiveTasks(world.page, [], {
+				stale: TASKS.slice(0, Number(match[1])),
+			});
+		},
+	},
+	{
+		name: "assert the checking state over greyed tasks",
+		match:
+			/^the background tasks row says Checking tasks… over ([1-4]) greyed tasks?$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("background-tasks-checking"),
+			).toHaveText("Checking tasks…");
+			const row = world.page.getByTestId("background-tasks-row");
+			await expect(row).toHaveAttribute("data-stale", "");
+			await expect(row).toHaveAccessibleName(
+				new RegExp(`^${match[1]} background tasks?, last known:`),
+			);
+			await expect(row).toHaveCSS("opacity", "0.5");
+		},
+	},
+	{
+		name: "assert greyed tasks are inert",
+		match: /^the greyed tasks offer no pull-down and no stop control$/,
+		run: async ({ world }) => {
+			const row = world.page.getByTestId("background-tasks-row");
+			await expect(row.getByRole("button")).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("background-tasks-row-stop-all"),
+			).toHaveCount(0);
+			await expect(
+				world.page.getByTestId("background-tasks-panel"),
+			).toHaveCount(0);
 		},
 	},
 	{

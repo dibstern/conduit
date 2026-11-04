@@ -578,7 +578,12 @@ export const ledgerTask = (
 });
 /** Per runner: its latest snapshot and that snapshot's label. */
 export type Tasks =
-	| { readonly tag: "Unknown"; readonly label: Label }
+	// CONTRACT.md 1389 gives Unknown its label only; `stale` keeps the last known list in sight.
+	| {
+			readonly tag: "Unknown";
+			readonly label: Label;
+			readonly stale?: ReadonlyMap<TaskKey, Task>;
+	  }
 	| {
 			readonly tag: "Known";
 			readonly label: Label;
@@ -586,7 +591,12 @@ export type Tasks =
 	  };
 export type TasksView =
 	| { readonly tag: "none" }
-	| { readonly tag: "unknown"; readonly label: Label }
+	| {
+			readonly tag: "unknown";
+			readonly label: Label;
+			/** The last known list, shown greyed while checking; no decision reads it. */
+			readonly stale?: readonly Task[];
+	  }
 	| {
 			readonly tag: "live";
 			readonly label: Label;
