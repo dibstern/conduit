@@ -29,11 +29,12 @@ const allowed = {
 	"src/lib/session-busy.ts": "view",
 	"src/lib/relay/monitoring-reducer.ts": "view",
 	"src/lib/session/session-info-list.ts": "view",
-	// Row writers (32.13): the stale-busy pass reads the row only to correct it, and only when the
-	// ledger says nothing may act (8.3).
+	// Row writers (32.13) read the row only to correct it. The poller's stale-busy pass does so only
+	// when the ledger says nothing may act (8.3).
 	"src/lib/domain/relay/Services/session-status-poller.ts": "writer",
+	// A dead runner's busy children with no run of their own are settled idle (82tn.32.40).
+	"src/lib/provider/session-run-settlement.ts": "writer",
 	// Row readers still to move onto the view (82tn.32.30 remaining; the writers go in 32.13).
-	"src/lib/provider/session-run-settlement.ts": "to move",
 	"src/lib/persistence/effect/read-query-effect.ts": "to move",
 };
 
