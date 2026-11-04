@@ -29,6 +29,8 @@ import {
 } from "../../helpers/process-harness.js";
 
 const foreground = "task-stop-foreground";
+/** A daemon in another process answers each step; with files in parallel one second is short. */
+const patient = { timeout: 10_000, interval: 50 };
 const allIds = taskStopFixture.map((task) => task.task_id).sort();
 
 const marks = (harness: ProcessHarness): Record<string, unknown>[] => {
@@ -160,8 +162,9 @@ describe("Stop tasks through the Run Ledger", () => {
 			),
 		).toEqual({ ok: true });
 		// test-waits-allow polling: the fake SDK reports each stopTask call only through sdk-proof.ndjson.
-		await vi.waitFor(() =>
-			expect(stopMarks(fixture, "requested").sort()).toEqual(allIds),
+		await vi.waitFor(
+			() => expect(stopMarks(fixture, "requested").sort()).toEqual(allIds),
+			patient,
 		);
 		// The reply is the decision, so each outcome lands after it.
 		// test-waits-allow polling: each outcome reaches only the store.
@@ -171,7 +174,7 @@ describe("Stop tasks through the Run Ledger", () => {
 				Array(4).fill("completed"),
 			);
 			return issued;
-		});
+		}, patient);
 		proof["all: issued"] = {
 			...issued,
 			marks: stopMarks(harness, "requested"),
@@ -241,7 +244,7 @@ describe("Stop tasks through the Run Ledger", () => {
 			);
 			expect(shown).toHaveLength(1);
 			return shown;
-		});
+		}, patient);
 		const failed = read(harness, sessionId);
 		proof["rejected stop"] = {
 			notices: shown,
@@ -444,8 +447,9 @@ describe("Stop tasks while other work is in flight", () => {
 		rmSync(join(fixture.root, "task-stop-hold"));
 	const requested = (fixture: ProcessHarness, count: number) =>
 		// test-waits-allow polling: the fake SDK reports each stopTask call only through sdk-proof.ndjson.
-		vi.waitFor(() =>
-			expect(stopMarks(fixture, "requested")).toHaveLength(count),
+		vi.waitFor(
+			() => expect(stopMarks(fixture, "requested")).toHaveLength(count),
+			patient,
 		);
 
 	it("issues a second Stop tasks while the first is in flight, one more stop per task", async () => {
@@ -472,7 +476,7 @@ describe("Stop tasks while other work is in flight", () => {
 				Array(8).fill("completed"),
 			);
 			return issued;
-		});
+		}, patient);
 		proof["second while in flight"] = {
 			outbox: issued.outbox,
 			requested: stopMarks(fixture, "requested"),
@@ -521,7 +525,7 @@ describe("Stop tasks while other work is in flight", () => {
 			const ended = read(fixture, sessionId);
 			expect(ended.outbox.map((row) => row.status)).toEqual(["failed"]);
 			return ended;
-		});
+		}, patient);
 		const shown = await notices(browser, sessionId);
 		proof["rejected after it ended"] = {
 			answer,
@@ -557,7 +561,7 @@ describe("Stop tasks while other work is in flight", () => {
 			const shown = await notices(browser, sessionId);
 			expect(shown).toHaveLength(1);
 			return shown;
-		});
+		}, patient);
 		const reloaded = await fixture.connect(sessionId);
 		const afterReload = await notices(reloaded, sessionId);
 		proof["late failure"] = {
@@ -603,7 +607,7 @@ describe("Stop tasks while other work is in flight", () => {
 			const replayed = read(fixture, sessionId);
 			expect(replayed.outbox.map((row) => row.status)).toEqual(["completed"]);
 			return replayed;
-		});
+		}, patient);
 		// test-waits-allow real-wait: no third send is an absence, which only elapsed time can show.
 		await new Promise((resolve) => setTimeout(resolve, 1_500));
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
@@ -678,7 +682,7 @@ describe("Stop tasks while other work is in flight", () => {
 				"completed",
 			]);
 			return issued;
-		});
+		}, patient);
 		const cursor = browser.frames.length;
 		fixture.claudeReplayer?.release();
 		const ended = await browser.waitFor(
