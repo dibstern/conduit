@@ -3131,7 +3131,11 @@ class ClaudeRunnerPayload implements RunnerPayload {
 		});
 	}
 
-	/** Issues the interrupt to this query; the result awaits its acknowledgement. */
+	/**
+	 * Issues the interrupt to this query; the result awaits its acknowledgement.
+	 * The receipt's `still_queued` is not read: those inputs keep their intakes,
+	 * and only a result naming them ends them (CONTRACT.md 3107-3108).
+	 */
 	private interruptQueryEffect(
 		ctx: ClaudeSessionContext,
 	): Effect.Effect<

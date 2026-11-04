@@ -27,6 +27,16 @@ const captured = readFileSync(
 )
 	.split("\n")
 	.filter((line) => line.trim() !== "");
+const nativeSession = "f186b7cd-6f1a-468c-9871-349c497272d0";
+const recordedSteer = "9b43c62f-1587-4e80-a70d-421c0c8ac373";
+const command = (commandId: string, state: string) =>
+	JSON.stringify({
+		type: "command_lifecycle",
+		command_uuid: commandId,
+		state,
+		uuid: randomUUID(),
+		session_id: nativeSession,
+	});
 const lines = (from: number, to: number) => captured.slice(from - 1, to);
 
 const read = (harness: ProcessHarness, sessionId: string) => {
@@ -183,5 +193,89 @@ describe("Claude Stop on the Run Ledger, in the live order", () => {
 		]);
 		expect(state.userMessages).toHaveLength(1);
 		proofs.push({ case: `cancel after start, ${order}`, sessionId, ...state });
+	});
+
+	it("keeps both inputs an interrupt's receipt lists still queued, and ends their Run once at the merged result naming them", async () => {
+		// The live order with two steers: both queued (26 and a second), the interrupt (27-29),
+		// the stopped input's cancelled (30), both started (31 and a second), one merged turn
+		// (32-54) whose result names both (55), and both completed (56 and a second).
+		const second = randomUUID();
+		const merged = JSON.parse(captured[54] ?? "{}") as Record<string, unknown>;
+		const trace = [
+			...lines(1, 26),
+			command(second, "queued"),
+			...lines(27, 31),
+			command(second, "started"),
+			...lines(32, 54),
+			JSON.stringify({
+				...merged,
+				result: "bravo\ncharlie",
+				user_message_uuid: second,
+				user_message_uuids: [recordedSteer, second],
+			}),
+			...lines(56, 56),
+			command(second, "completed"),
+		];
+		const { fixture, browser } = await replay(trace);
+		const sessionId = await browser.createSession(
+			"Claude interrupt still queued",
+		);
+		void browser.send(sessionId, "Alpha").catch(() => undefined);
+		// test-waits-allow polling: the SDK's prompt queue reports only through the options file.
+		await vi.waitFor(() => expect(prompted(fixture, "Alpha")).toBe(true), {
+			timeout: 10_000,
+		});
+		for (const text of ["Bravo", "Charlie"]) {
+			void browser
+				.send(sessionId, text, undefined, "steer")
+				.catch(() => undefined);
+			// test-waits-allow polling: the SDK's prompt queue reports only through the options file.
+			await vi.waitFor(() => expect(prompted(fixture, text)).toBe(true), {
+				timeout: 10_000,
+			});
+		}
+		await fixture.requestRpc({
+			_tag: "CancelSession",
+			sessionId,
+			commandId: randomUUID(),
+		});
+		// test-waits-allow polling: the merged turn's end reaches only the store.
+		await vi.waitFor(
+			() => {
+				const state = read(fixture, sessionId);
+				expect(state.session.status).toBe("idle");
+				expect(state.turns).not.toContain("running");
+				expect(state.ends.length).toBeGreaterThanOrEqual(2);
+			},
+			{ timeout: 15_000 },
+		);
+		const state = read(fixture, sessionId);
+		proofs.push({ case: "interrupt still queued", sessionId, ...state });
+		// The stopped input's Run ends once at its own result, interrupted. The first still-queued
+		// input starts a Run of its own after that end and the second joins it (CONTRACT.md 978-990,
+		// case d); the merged result naming both ends that Run once, completed (3107-3108).
+		expect(state.runs.map(({ status }) => status)).toEqual([
+			"interrupted",
+			"completed",
+			"joined",
+		]);
+		const [stopped, owner] = state.runs;
+		expect(state.ends).toEqual([
+			expect.objectContaining({ runId: stopped?.id, reason: "interrupted" }),
+			expect.objectContaining({ runId: owner?.id, reason: "completed" }),
+		]);
+		expect(state.terminals).toEqual([
+			expect.objectContaining({ type: "turn.interrupted", runId: stopped?.id }),
+			expect.objectContaining({ type: "turn.completed", runId: owner?.id }),
+		]);
+		expect(state.sends).toEqual([
+			{ status: "failed", attempts: 1 },
+			{ status: "completed", attempts: 1 },
+			{ status: "completed", attempts: 1 },
+		]);
+		expect(state.turns).toEqual(["interrupted", "completed", "completed"]);
+		expect(state.userMessages).toHaveLength(3);
+		expect(new Set(state.userMessages).size).toBe(3);
+		expect(state.inputs).toEqual(["removed", "removed", "removed"]);
 	});
 });
