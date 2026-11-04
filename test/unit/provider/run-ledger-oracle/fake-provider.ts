@@ -2223,19 +2223,46 @@ export class FakeProvider {
 			case "run_released":
 				if (observation.reason === "ResumeRejected") {
 					native.transportRank = Math.max(native.transportRank, 2);
-					// L6, 3.9: main's next move after a rejected resume of the open run's start is its error terminal.
+					// 4.5 (CONTRACT.md 1692-1696): main's next move after a rejected resume of the open run's start
+					// is a new start of the same commandId, its relaunch (3.6), never an error terminal. In one
+					// draw in two the relaunch's runner then fails it (4.11), so main's error terminal follows.
 					if (effect.kind === "start")
-						this.deferred.push(() =>
-							this.mainRun?.runId === effect.runId
-								? this.main({
-										operation: 28,
-										selection: 0,
-										index: 0,
-										variant: 2,
-										input: 0,
-										advance: 0,
-									})
-								: undefined,
+						this.deferred.push(
+							() =>
+								this.mainRun?.runId === effect.runId
+									? this.main({
+											operation: 28,
+											selection: 0,
+											index: 0,
+											variant: 3,
+											input: 0,
+											advance: 0,
+										})
+									: undefined,
+							...(this.serial % 2 === 0
+								? [
+										(): LedgerCommand | undefined => {
+											const relaunch = this.nativeStart(effect.runId);
+											return relaunch &&
+												relaunch.send.token !== native.send.token &&
+												this.dispatchRead.has(relaunch.send.token) &&
+												!relaunch.ended
+												? {
+														verb: "observe",
+														observation: {
+															tag: "Answer",
+															token: relaunch.send.token,
+															kind: "runner_reply",
+															outcome: {
+																tag: "failed",
+																code: "TraceRunnerFailure",
+															},
+														},
+													}
+												: undefined;
+										},
+									]
+								: []),
 						);
 				} else {
 					native.notConsumed = true;
@@ -2281,6 +2308,20 @@ export class FakeProvider {
 				native.ended = true;
 				native.unfinished = false;
 				this.refreshQuery(native);
+				// L6, 3.9: main's next move after a failed reply on the open run's start is its error terminal.
+				if (observation.outcome.tag !== "succeeded" && effect.kind === "start")
+					this.deferred.push(() =>
+						this.mainRun?.runId === effect.runId
+							? this.main({
+									operation: 28,
+									selection: 0,
+									index: 0,
+									variant: 2,
+									input: 0,
+									advance: 0,
+								})
+							: undefined,
+					);
 				// 4.11, 9: read as `result`, a Codex or Cursor reply ends its Run's execution, every
 				// start and steer of it (a Cursor `wait()` settles every pending steer).
 				if (
@@ -4130,7 +4171,9 @@ export class FakeProvider {
 					// OpenCode's result leaves its send open: a covering idle after an accepted, unstopped turn
 					// is its session.idle, which main writes as turn.completed (3.5, D26, 4.11).
 					const terminal =
-						native?.transportRank === 2
+						native?.transportRank === 2 &&
+						// 4.5 (CONTRACT.md 1692-1696): a rejected resume unlaunched the try; main relaunches it.
+						!this.unlaunchedTries.has(native.send.token)
 							? ({ outcome: "error", code: "TracePermanent" } as const)
 							: (native?.ended === true ||
 										(direct &&
