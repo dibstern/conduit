@@ -25,6 +25,10 @@
 // 91. that wake's work ends forced, by the ledger stop deadline's alarm;
 // 92. the steer's Run ends twice or not at all;
 // 93. the Stop's interrupt fails the replay (an unrecorded interrupt) instead of ending the turn;
+// 153. a send waiting behind a wake when its runner dies is never delivered, or its Run stays
+//      Queued in the ledger (82tn.32.10; CONTRACT.md 3.6, 685-698);
+// 154. that start is handed to the dead runner, or delivered twice;
+// 155. its Run ends twice, or main's run never ends;
 // and the send's transcript changes, or its Run ends other than once.
 import { randomUUID } from "node:crypto";
 import {
@@ -627,6 +631,64 @@ describe("Claude on the Run Ledger", () => {
 			ends: ledger.ends,
 			runs: ledger.runs,
 			types: ledger.events.map((event) => event.type),
+		});
+	});
+
+	it("delivers a send waiting behind a wake once on a new runner when its runner dies", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["background-shell-turn", "pong-thinking-text-turn"],
+				// The replacement runner continues the turn plan where the dead one stopped.
+				followWorkspaceDirectives: true,
+			},
+		});
+		const sessionId = await browser.createSession("Claude ledger fence loss");
+		const hold = join(fixture.root, "claude-replay-hold");
+		writeFileSync(hold, JSON.stringify({ turn: 1, message: 153, id: 1 }));
+		await browser.send(sessionId, "Run sleep 8 in the background");
+		// test-waits-allow polling: the held replay line reports only through this file.
+		await vi.waitFor(() => expect(existsSync(`${hold}.reached`)).toBe(true), {
+			timeout: 10_000,
+		});
+		// A start waits for the wake's turn (8.3); main holds this send until the wake ends.
+		const queued = browser.send(sessionId, "ping");
+		// test-waits-allow polling: the browser sees no frame when a Queued send is admitted.
+		await vi.waitFor(() =>
+			expect(
+				read(fixture, sessionId).events.filter(
+					(event) => event.type === "input.admitted",
+				),
+			).toHaveLength(2),
+		);
+		const [dead] = fixture.runnerPids();
+		rmSync(hold, { force: true });
+		expect(dead && fixture.signalOwnedRunner(dead, "SIGKILL")).toBe(true);
+		// F153: the replacement runner answers the waiting send.
+		expect((await queued).chunks.join("")).toBe("pong");
+		const ledger = read(fixture, sessionId);
+		// F155: each of main's runs ends once in the ledger, as main ended it.
+		endsOnce(ledger);
+		// F154: the waiting start is handed over once, to the new runner, after the old one's loss.
+		const lost = ledger.events.filter(
+			(event) => event.type === "evidence.process_lost",
+		);
+		expect(lost).toHaveLength(1);
+		const ping = ledger.runs[1]?.id;
+		const handed = ledger.facts.filter(
+			(fact) => fact.kind === "run_dispatched" && fact.runId === ping,
+		);
+		expect(handed).toHaveLength(1);
+		expect(handed[0]?.sequence).toBeGreaterThan(lost[0]?.sequence ?? 0);
+		expect(handed[0]?.runnerId).toBe(runnerOf(ledger));
+		expect(handed[0]?.runnerId).not.toBe(lost[0]?.runnerId);
+		proofs.push({
+			case: "fence-runner-lost",
+			sessionId,
+			lost,
+			handed,
+			ends: ledger.ends,
+			runs: ledger.runs,
+			types: ledger.events.map(({ type }) => type),
 		});
 	});
 
