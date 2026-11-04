@@ -743,7 +743,16 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 					.replaceAll(String(before?.["beforeTurnId"]), first.turn.id),
 			) as TraceRow[];
 			writeTrace([...goal.filter(({ dir }) => dir !== "exit"), ...tail]);
-			await browser.send(id, "/goal Say hello", TIMEOUT);
+			expect(
+				await Effect.runPromise(
+					browser.rpc.SetGoal({
+						sessionId: id,
+						commandId: randomUUID(),
+						condition: "Say hello",
+					}),
+				),
+			).toEqual({ ok: true });
+			await browser.send(id, "Say hello", TIMEOUT);
 			await settled(fixture, id, 1);
 			const history = await browser.history(id);
 			for (const message of history) {
