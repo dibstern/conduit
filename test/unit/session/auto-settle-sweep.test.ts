@@ -35,7 +35,7 @@ import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { settleIdleSessions } from "../../../src/lib/session/auto-settle-sweep.js";
-import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
+import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -156,8 +156,8 @@ describe("relay automatic settlement sweep", () => {
 					),
 				);
 				const viewers = new Set(["viewed"]);
-				const background = makeSessionBackgroundLiveness();
-				background.record({
+				const { background } = yield* makeSessionActivity;
+				publishLedgerTasks(background, {
 					sessionId: "background",
 					kind: "snapshot",
 					tasks: [{ id: "task1", type: "local_agent", description: "Audit" }],
@@ -190,7 +190,7 @@ describe("relay automatic settlement sweep", () => {
 				expect(
 					(yield* read.getSession("eligible"))?.settled_automatically,
 				).toBe(0);
-				background.record({
+				publishLedgerTasks(background, {
 					sessionId: "background",
 					kind: "snapshot",
 					tasks: [],

@@ -222,45 +222,6 @@ describe("runner output memory authorization", () => {
 				expect(registered).toBe(0);
 			}),
 	);
-	it.effect(
-		"drops background output delayed until after its live grant is revoked",
-		() =>
-			Effect.gen(function* () {
-				let changed = false;
-				const provider = yield* fixture({
-					onBackgroundTask: () => {
-						changed = true;
-					},
-				});
-				const authority = yield* makeRunnerAuthority();
-				const grant = (yield* authority.adopt(
-					[{ runnerId: "runner", sessionId: "s" }],
-					"live",
-				)).grants.get("runner");
-				if (!grant) return yield* Effect.die("Missing adopted grant");
-				const entered = yield* Deferred.make<void>();
-				const resume = yield* Deferred.make<void>();
-				const output = yield* authority
-					.guarded(
-						grant,
-						{ kind: "output" },
-						Effect.gen(function* () {
-							yield* Deferred.succeed(entered, undefined);
-							yield* Deferred.await(resume);
-							return yield* provider.handleOutputEffect({
-								type: "background-task",
-								transition: { sessionId: "s", kind: "session-ended" },
-							});
-						}),
-					)
-					.pipe(Effect.forkChild);
-				yield* Deferred.await(entered);
-				yield* authority.revoke(grant, "superseded");
-				yield* Deferred.succeed(resume, undefined);
-				yield* Fiber.join(output);
-				expect(changed).toBe(false);
-			}),
-	);
 	it.effect("rechecks authorization after resolving a subagent service", () =>
 		Effect.gen(function* () {
 			let changed = false;

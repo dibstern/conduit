@@ -206,6 +206,23 @@ Scenario: A reattached session's checking state gives way to the tasks its list 
   When the session has 1 live background task
   Then the background tasks row no longer says Checking tasks…
 
+Scenario Outline: A session being checked shows its last known tasks greyed until its list arrives
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has 2 live background tasks
+  When the session's background tasks are being checked after a last list of 2 tasks
+  Then the background tasks row says Checking tasks… over 2 greyed tasks
+  And the greyed tasks offer no pull-down and no stop control
+  When the session has 1 live background task
+  Then the background tasks row no longer says Checking tasks…
+
+  Examples:
+    | viewport |
+    | desktop  |
+    | phone    |
+
 Scenario: A live background shell keeps the session reading as Working
   Given the conduit app is served with the connected mockup
   And the viewport is a desktop
@@ -224,6 +241,29 @@ Scenario: A task of a kind conduit does not know shows under its raw name and co
   And the session has a live background task of the unknown kind future_task
   When I click the background tasks row
   Then the background tasks pull-down lists 1 background task of kind future_task
+
+Scenario: A monitor task reads as a monitor
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has a live background task of the known kind monitor
+  When I click the background tasks row
+  Then the background tasks pull-down lists 1 background task of kind monitor
+
+Scenario Outline: A watcher the ledger counts as work shows under its raw name, not as a monitor
+  Given the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the composer status clock is frozen
+  And a session already exists on the Claude harness
+  And the session has a live background task of the unknown kind <task_type>
+  When I click the background tasks row
+  Then the background tasks pull-down lists 1 background task of kind <task_type>
+
+Examples:
+  | task_type   |
+  | monitor_mcp |
+  | monitor_ws  |
 
 Scenario: Unsupported providers show live tasks without stop controls
   Given the conduit app is served with the connected mockup

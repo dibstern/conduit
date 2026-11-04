@@ -403,21 +403,6 @@ export const makeProcessSessionRunner = (
 									...(exceptCommandId ? { exceptCommandId } : {}),
 								},
 							);
-							yield* lock
-								.withPermits(1)(
-									Effect.suspend(() =>
-										stops.currentEntry(retirement.sessionId)
-											? Effect.void
-											: emit({
-													type: "background-task",
-													transition: {
-														sessionId: retirement.sessionId,
-														kind: "session-ended",
-													},
-												}),
-									),
-								)
-								.pipe(Effect.interruptible, Effect.timeout("1 second"));
 							// The entry scope closed at the stop's commit (6.11); eviction
 							// lets go only of the dead runner's socket.
 							record.identity.entry?.connection?.destroy();

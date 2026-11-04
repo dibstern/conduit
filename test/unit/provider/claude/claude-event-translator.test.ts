@@ -9,7 +9,10 @@ import { createToolMessage } from "../../../../src/lib/frontend/utils/tool-messa
 import { launchRow } from "../../../../src/lib/frontend/utils/turns.js";
 import { createTestLogger } from "../../../../src/lib/logger.js";
 import { messageRowsToHistory } from "../../../../src/lib/persistence/session-history-adapter.js";
-import { ClaudeEventTranslator } from "../../../../src/lib/provider/claude/claude-event-translator.js";
+import {
+	type BackgroundTaskTransition,
+	ClaudeEventTranslator,
+} from "../../../../src/lib/provider/claude/claude-event-translator.js";
 import { createClaudeMessageOwnership } from "../../../../src/lib/provider/claude/claude-message-ownership.js";
 import {
 	applyClaudeOwnershipDecisionEffect,
@@ -23,7 +26,6 @@ import type {
 } from "../../../../src/lib/provider/claude/types.js";
 import { createRelayEventSink } from "../../../../src/lib/provider/relay-event-sink.js";
 import type { EventSink } from "../../../../src/lib/provider/types.js";
-import { makeSessionBackgroundLiveness } from "../../../../src/lib/session/background-liveness.js";
 import { makeEffectProjectionHarness } from "../../../helpers/effect-projection-harness.js";
 import {
 	makeErrorResult,
@@ -167,6 +169,11 @@ function runTranslateError(
 ): Promise<void> {
 	return Effect.runPromise(translator.translateError(...args));
 }
+
+type SnapshotTasks = Extract<
+	BackgroundTaskTransition,
+	{ kind: "snapshot" }
+>["tasks"];
 
 describe("ClaudeEventTranslator", () => {
 	let sink: ReturnType<typeof makeStubSink>;
@@ -2907,11 +2914,11 @@ describe("ClaudeEventTranslator", () => {
 	});
 
 	it("publishes a live task's ancestry even after its parents leave the list", async () => {
-		const liveness = makeSessionBackgroundLiveness();
+		const latest = new Map<string, SnapshotTasks>();
 		const trackingTranslator = new ClaudeEventTranslator({
 			getSink: () => sink,
 			onBackgroundTask: (input) => {
-				liveness.record(input);
+				if (input.kind === "snapshot") latest.set(input.sessionId, input.tasks);
 			},
 		});
 		const nestedCtx = makeCtx({
@@ -2930,7 +2937,7 @@ describe("ClaudeEventTranslator", () => {
 			uuid: "ancestry-snapshot",
 			session_id: "sdk-sess",
 		} as unknown as SDKMessage);
-		expect(liveness.backgroundOf(nestedCtx.sessionId)?.tasks).toMatchObject([
+		expect(latest.get(nestedCtx.sessionId)).toMatchObject([
 			{
 				id: "deeper",
 				parentTaskId: "middle",
@@ -2982,11 +2989,13 @@ describe("ClaudeEventTranslator", () => {
 				session_id: "sdk-sess",
 			}) as unknown as SDKMessage;
 		const setup = () => {
-			const liveness = makeSessionBackgroundLiveness();
+			// The translator's last task list per session, as it hands it to the ledger.
+			const latest = new Map<string, SnapshotTasks>();
 			const instance = new ClaudeEventTranslator({
 				getSink: () => sink,
 				onBackgroundTask: (input) => {
-					liveness.record(input);
+					if (input.kind === "snapshot")
+						latest.set(input.sessionId, input.tasks);
 				},
 			});
 			const context = makeCtx({
@@ -2995,14 +3004,14 @@ describe("ClaudeEventTranslator", () => {
 					childSessionIdFor: (id) => `child-${id}`,
 				}),
 			});
-			return { liveness, instance, context };
+			return { tasksOf: (id: string) => latest.get(id), instance, context };
 		};
 
 		it.each([
 			false,
 			true,
 		])("uses the earliest start or snapshot observation, snapshot first: %s", async (snapshotFirst) => {
-			const { liveness, instance, context } = setup();
+			const { tasksOf, instance, context } = setup();
 			await Effect.runPromise(
 				Effect.gen(function* () {
 					yield* TestClock.setTime(100);
@@ -3018,16 +3027,14 @@ describe("ClaudeEventTranslator", () => {
 					}),
 				),
 			);
-			expect(
-				liveness.backgroundOf(context.sessionId)?.tasks[0]?.firstSeenAt,
-			).toBe(100);
+			expect(tasksOf(context.sessionId)?.[0]?.firstSeenAt).toBe(100);
 		});
 
 		it.each([
 			"Bash",
 			"Monitor",
 		])("retains %s input when the launch returned before task_started and across later turns", async (name) => {
-			const { liveness, instance, context } = setup();
+			const { tasksOf, instance, context } = setup();
 			const command = "printf '<tag>'\nsleep 40";
 			context.messageOwnership?.decide({
 				kind: "sdk",
@@ -3055,9 +3062,7 @@ describe("ClaudeEventTranslator", () => {
 			expect(context.inFlightTools.size).toBe(0);
 			await runTranslate(instance, context, start());
 			await runTranslate(instance, context, snapshot());
-			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
-				{ detail: command },
-			]);
+			expect(tasksOf(context.sessionId)).toMatchObject([{ detail: command }]);
 			instance.resetInFlightState();
 			context.inFlightTools.clear();
 			context.messageOwnership?.decide({
@@ -3067,13 +3072,11 @@ describe("ClaudeEventTranslator", () => {
 				}),
 			});
 			await runTranslate(instance, context, snapshot());
-			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
-				{ detail: command },
-			]);
+			expect(tasksOf(context.sessionId)).toMatchObject([{ detail: command }]);
 		});
 
 		it("fills late streamed input and retains it after completion without an assistant snapshot", async () => {
-			const { liveness, instance, context } = setup();
+			const { tasksOf, instance, context } = setup();
 			await runTranslate(instance, context, start());
 			await runTranslate(instance, context, snapshot());
 			const command = "pnpm test --watch";
@@ -3107,18 +3110,14 @@ describe("ClaudeEventTranslator", () => {
 				makeStreamEvent({ type: "content_block_stop", index: 0 }),
 			);
 			await Effect.runPromise(instance.publishBackgroundTasks(context));
-			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
-				{ detail: command },
-			]);
+			expect(tasksOf(context.sessionId)).toMatchObject([{ detail: command }]);
 			context.inFlightTools.clear();
 			await runTranslate(instance, context, snapshot());
-			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
-				{ detail: command },
-			]);
+			expect(tasksOf(context.sessionId)).toMatchObject([{ detail: command }]);
 		});
 
 		it("uses nested transcript input and keeps session ownership isolated", async () => {
-			const { liveness, instance, context } = setup();
+			const { tasksOf, instance, context } = setup();
 			context.messageOwnership?.decide({
 				kind: "sdk",
 				message: toolMessage("agent-launch", "Agent", {
@@ -3172,7 +3171,7 @@ describe("ClaudeEventTranslator", () => {
 					},
 				]),
 			);
-			expect(liveness.backgroundOf(context.sessionId)?.tasks).toMatchObject([
+			expect(tasksOf(context.sessionId)).toMatchObject([
 				{ detail: "nested command", parentTaskId: "agent" },
 				{ detail: "Explore" },
 			]);
@@ -3183,16 +3182,16 @@ describe("ClaudeEventTranslator", () => {
 			});
 			other.context.subagentTasks?.set("shell", { toolUseId: "launch" });
 			await runTranslate(other.instance, other.context, snapshot());
-			expect(
-				other.liveness.backgroundOf(other.context.sessionId)?.tasks,
-			).toMatchObject([{ detail: "other session" }]);
-			expect(liveness.backgroundOf(context.sessionId)?.tasks[0]).toMatchObject({
+			expect(other.tasksOf(other.context.sessionId)).toMatchObject([
+				{ detail: "other session" },
+			]);
+			expect(tasksOf(context.sessionId)?.[0]).toMatchObject({
 				detail: "nested command",
 			});
 		});
 
 		it("uses workflow_name and falls back for unknown joins, unsupported tools or malformed input", async () => {
-			const { liveness, instance, context } = setup();
+			const { tasksOf, instance, context } = setup();
 			const tasks = [
 				{ task_id: "missing", task_type: "local_bash", description: "No join" },
 				{
@@ -3230,7 +3229,7 @@ describe("ClaudeEventTranslator", () => {
 				workflow_name: "review workflow",
 			} as unknown as SDKMessage);
 			await runTranslate(instance, context, snapshot(tasks));
-			const live = liveness.backgroundOf(context.sessionId)?.tasks ?? [];
+			const live = tasksOf(context.sessionId) ?? [];
 			expect(live.find((task) => task.id === "workflow")).toMatchObject({
 				detail: "review workflow",
 			});

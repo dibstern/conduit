@@ -27,6 +27,7 @@ import type {
 	TasksView,
 	Transport,
 } from "./run-ledger-model.js";
+import { ledgerTask } from "./run-ledger-model.js";
 import { nativePolicies } from "./run-ledger-policy-adapters.js";
 
 declare const stateBrand: unique symbol;
@@ -252,8 +253,21 @@ interface NativeCommandRec {
 
 /** 8.4, D44: a runner's latest snapshot and its label; a raised label's tasks are unknown. */
 type TaskState =
-	| { readonly tag: "Unknown"; readonly label: Label }
+	| { readonly tag: "Unknown"; readonly label: Label; readonly stale?: Task[] }
 	| { readonly tag: "Known"; readonly label: Label; readonly tasks: Task[] };
+/**
+ * Unknown tasks keep the runner's last known list, shown greyed while checking and read by no
+ * decision. CONTRACT.md 1389 types Unknown as its label only; this is the nearest reading of the
+ * user's decision to keep the last list in sight.
+ */
+const lastKnown = (tasks: TaskState | undefined): Task[] =>
+	tasks?.tag === "Known" ? tasks.tasks : (tasks?.stale ?? []);
+function unknownTasks(label: Label, prior: TaskState | undefined): TaskState {
+	const stale = lastKnown(prior);
+	return stale.length > 0
+		? { tag: "Unknown", label, stale }
+		: { tag: "Unknown", label };
+}
 
 /** L6: a stop item is a transmission, or a wake execution by index. */
 type StopItem =
@@ -508,8 +522,12 @@ function taskView(book: Book): TasksView {
 		!nativePolicies[book.provider].capabilities.backgroundTasks
 	)
 		return { tag: "none" };
-	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest)
-		return { tag: "unknown", label: runner.latest };
+	if (runner.tasks.tag === "Unknown" || runner.tasks.label !== runner.latest) {
+		const stale = lastKnown(runner.tasks);
+		return stale.length > 0
+			? { tag: "unknown", label: runner.latest, stale }
+			: { tag: "unknown", label: runner.latest };
+	}
 	if (runner.tasks.tasks.length === 0) return { tag: "none" };
 	// 8.2 (CONTRACT.md 2780-2782): a work task with a live linked server and no declared awaited
 	// covering it is serving; derived here so it falls back the moment server_gone lands.
@@ -1860,10 +1878,13 @@ function dispatched(
 		}
 	} else {
 		// CONTRACT.md 429-431: commandId names the start or steer of the input whose id it is. One
-		// naming no input (a fixed trace's opaque id) binds the Run's first unbound send.
+		// naming no input (a fixed trace's opaque id) binds the Run's first unbound send. 3.6 D50
+		// (CONTRACT.md 671-678): of its current execution, so main's relaunch binds its own issue,
+		// not the one the unlaunch dropped.
 		const named = book.inputs.has(evidence.commandId);
 		send = heldSends.find(
 			(item) =>
+				item.exec === run.exec.n &&
 				item.commandId === undefined &&
 				(!named || item.effect.inputId === evidence.commandId),
 		);
@@ -1942,7 +1963,7 @@ function unsolicited(
 		decideLostWork(book, runner.latest);
 		runner.latest = label;
 		runner.tasks = capabilities.backgroundTasks
-			? { tag: "Unknown", label }
+			? unknownTasks(label, runner.tasks)
 			: { tag: "Known", label, tasks: [] };
 		book.snapshotEntry++;
 		raised = true;
@@ -1962,17 +1983,7 @@ function unsolicited(
 			runner.tasks = {
 				tag: "Known",
 				label,
-				tasks: observation.tasks.map((task) => ({
-					...task,
-					kind:
-						{
-							local_bash: "shell",
-							local_agent: "subagent",
-							local_workflow: "workflow",
-						}[task.taskType] ?? task.taskType,
-					class:
-						task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
-				})),
+				tasks: observation.tasks.map(ledgerTask),
 			};
 			book.snapshotEntry++;
 			return changed;
@@ -2633,7 +2644,7 @@ function settle(
 				tasks:
 					settlement.reattached &&
 					nativePolicies[book.provider].capabilities.backgroundTasks
-						? { tag: "Unknown", label: settlement.label }
+						? unknownTasks(settlement.label, prior?.tasks)
 						: { tag: "Known", label: settlement.label, tasks: [] },
 			});
 			book.current = runnerId;

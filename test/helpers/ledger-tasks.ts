@@ -1,5 +1,5 @@
 import type { SessionActivity } from "../../src/lib/domain/daemon/Services/session-activity.js";
-import type { BackgroundTaskTransition } from "../../src/lib/session/background-liveness.js";
+import type { BackgroundTaskTransition } from "../../src/lib/provider/claude/claude-event-translator.js";
 
 /**
  * Publishes what the Run Ledger's arm would after folding this Claude transition: a snapshot's

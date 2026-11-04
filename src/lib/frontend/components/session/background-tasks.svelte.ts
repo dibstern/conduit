@@ -95,12 +95,9 @@ const KINDS: Record<string, { icon: string; label: string; hue: string }> = {
 		label: "workflow",
 		hue: "var(--color-cat-decision)",
 	},
-	monitor_mcp: {
-		icon: "radar",
-		label: "monitor",
-		hue: "var(--color-status-green)",
-	},
-	monitor_ws: {
+	// 8.2 (CONTRACT.md 2778-2781): only `monitor` is a monitoring kind; monitor_mcp and
+	// monitor_ws are work, so they show under their raw names (the contract is silent on them).
+	monitor: {
 		icon: "radar",
 		label: "monitor",
 		hue: "var(--color-status-green)",

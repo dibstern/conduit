@@ -93,6 +93,7 @@ export const openSavedShell = (
 						retrying: undefined,
 						backgroundWork: undefined,
 						backgroundTasks: undefined,
+						staleTasks: undefined,
 						attention:
 							row.attention === "working" || row.attention === "monitoring"
 								? row.unread

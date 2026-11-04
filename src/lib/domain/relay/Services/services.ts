@@ -27,7 +27,6 @@ import type { OrchestrationEngine } from "../../../provider/orchestration-engine
 import type { Translator } from "../../../relay/event-translator.js";
 import type { PtyManager } from "../../../relay/pty-manager.js";
 import type { WebSocketHandlerShape } from "../../../server/ws-handler-shape.js";
-import type { SessionBackground } from "../../../session/background-liveness.js";
 import type { HistoryMessage } from "../../../shared-types.js";
 import type {
 	ProjectRelayConfig,
@@ -39,6 +38,7 @@ import {
 	OpenCodeInstancesTag,
 	type OpenCodeUnavailable,
 } from "../../daemon/Services/opencode-instances-service.js";
+import type { SessionBackground } from "../../daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
 
@@ -402,7 +402,7 @@ export class AgentLivenessTag extends Context.Service<
 	(sessionId: string) => Effect.Effect<boolean>
 >()("AgentLiveness") {}
 
-/** A Claude runtime's live task ids; see makeSessionBackgroundLiveness. */
+/** A Claude runtime's live task ids; see SessionActivity's background.liveListOf. */
 export class LiveTaskListTag extends Context.Service<
 	LiveTaskListTag,
 	(

@@ -560,9 +560,30 @@ export type Task = Extract<
 	readonly kind: string;
 	readonly class: "monitoring" | "serving" | "work";
 };
+/**
+ * 8.2 (CONTRACT.md 2778-2781): a snapshot task's kind and class, read alike by the decider and the
+ * runner host's idle check (8.3, 2812). Serving is derived from linked servers at view time.
+ */
+export const ledgerTask = (
+	task: Extract<Evidence, { readonly kind: "tasks_snapshot" }>["tasks"][number],
+): Task => ({
+	...task,
+	kind:
+		{
+			local_bash: "shell",
+			local_agent: "subagent",
+			local_workflow: "workflow",
+		}[task.taskType] ?? task.taskType,
+	class: task.ambient || task.taskType === "monitor" ? "monitoring" : "work",
+});
 /** Per runner: its latest snapshot and that snapshot's label. */
 export type Tasks =
-	| { readonly tag: "Unknown"; readonly label: Label }
+	// CONTRACT.md 1389 gives Unknown its label only; `stale` keeps the last known list in sight.
+	| {
+			readonly tag: "Unknown";
+			readonly label: Label;
+			readonly stale?: ReadonlyMap<TaskKey, Task>;
+	  }
 	| {
 			readonly tag: "Known";
 			readonly label: Label;
@@ -570,7 +591,12 @@ export type Tasks =
 	  };
 export type TasksView =
 	| { readonly tag: "none" }
-	| { readonly tag: "unknown"; readonly label: Label }
+	| {
+			readonly tag: "unknown";
+			readonly label: Label;
+			/** The last known list, shown greyed while checking; no decision reads it. */
+			readonly stale?: readonly Task[];
+	  }
 	| {
 			readonly tag: "live";
 			readonly label: Label;

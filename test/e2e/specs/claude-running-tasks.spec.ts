@@ -2,8 +2,8 @@
 // beside the cost (nested tasks included) and the launching steps keep
 // breathing on the strip after the turn's result, until the tasks finish. The
 // session lists background agents beside shells in its tasks row and
-// pull-down, nests an agent's tasks under it, reads as monitoring
-// while they run. Task stops cross the real process runner in
+// pull-down, nests an agent's tasks under it, reads as Working
+// while they run (8.2: agents and shells are work, CONTRACT.md 2778-2781). Task stops cross the real process runner in
 // harness-background-task-stop.spec.ts; recorded replay has no stopTask replies.
 // Spec: conduit-test-i7fy.8.
 //
@@ -135,7 +135,7 @@ test.describe("Claude running tasks", () => {
 		},
 	});
 
-	test("the step log counts its live tasks and the session monitors its agents until they finish", async ({
+	test("the step log counts its live tasks and the session reads Working until its agents finish", async ({
 		page,
 		harness,
 	}, testInfo) => {
@@ -186,8 +186,8 @@ test.describe("Claude running tasks", () => {
 			await expect(pill).toHaveText(/^\s*5\s+running\s*$/);
 			await expect(
 				sidebarRow,
-				"background agents ran after the turn but the session did not read as monitoring",
-			).toHaveAttribute("aria-label", /^Monitoring/);
+				"background agents ran after the turn but the session did not read as working",
+			).toHaveAttribute("aria-label", /^Working/);
 			await expect(tasksRow).toHaveAccessibleName(/^5 background tasks: /);
 			await expect(
 				page.getByRole("button", { name: /^5 background tasks(:|$)/ }),
@@ -231,7 +231,7 @@ test.describe("Claude running tasks", () => {
 				`${harness.baseUrl}/s/${encodeURIComponent(childId)}?p=process-test`,
 			);
 			await expect(page.getByTestId("parent-session-status")).toHaveText(
-				"Monitoring",
+				"Working",
 			);
 			await openStepLogs(page);
 			// Each of the agent's turns counts the shells it launched: one turn
@@ -252,7 +252,7 @@ test.describe("Claude running tasks", () => {
 			await expect(pill).toHaveText(/^\s*5\s+running\s*$/);
 
 			// Every task finishes: the pill goes, the strip settles, the session
-			// stops monitoring.
+			// stops working.
 			replayer.release();
 			await expect
 				.poll(() => chat.getLastAssistantText(), { timeout: 60_000 })
@@ -263,7 +263,7 @@ test.describe("Claude running tasks", () => {
 			await expect(
 				page.getByRole("button", { name: /^\d+ background tasks?(:|$)/ }),
 			).toHaveCount(0);
-			await expect(sidebarRow).not.toHaveAttribute("aria-label", /^Monitoring/);
+			await expect(sidebarRow).not.toHaveAttribute("aria-label", /^Working/);
 			const finished = await steps.record("finished");
 			expect.soft(finished.breathing, "launching steps breathing").toBe(0);
 

@@ -4,7 +4,8 @@
   are one button that opens BackgroundTasksPanel, which owns every stop control.
   `subtitle` (desktop) sits in the title's subline, as many pills as fit, then
   "+N". `swipe` (phones) is a row of every pill that scrolls sideways. `strip`
-  is the folded Duo's count strip.
+  is the folded Duo's count strip. `stale` is the last known list while the
+  session's tasks are checked: greyed and inert, with no pull-down or stop.
 -->
 <script lang="ts">
 	import type { BackgroundTask } from "../../../shared-types.js";
@@ -15,7 +16,7 @@
 	import { taskAge, taskClock, taskKind, tasksPanel } from "./background-tasks.svelte.js";
 	import { sideThreadsPanel } from "./side-threads.svelte.js";
 
-	let { tasks, layout, onstopall }: { tasks: readonly BackgroundTask[]; layout: "subtitle" | "swipe" | "strip"; onstopall?: (() => void) | undefined } = $props();
+	let { tasks, layout, onstopall, stale = false }: { tasks: readonly BackgroundTask[]; layout: "subtitle" | "swipe" | "strip"; onstopall?: (() => void) | undefined; stale?: boolean } = $props();
 
 	const clock = taskClock(() => tasks);
 	let width = $state(0);
@@ -25,7 +26,7 @@
 	const hidden = $derived(newest.slice(shown.length));
 	const count = $derived(`${tasks.length} background ${tasks.length === 1 ? "task" : "tasks"}`);
 	// The pills' names stay in the button's name, so voice control can target what is on screen.
-	const label = $derived(`${count}: ${newest.map((task) => task.description).join(", ")}`);
+	const label = $derived(`${count}${stale ? ", last known" : ""}: ${newest.map((task) => task.description).join(", ")}`);
 	function togglePanel() {
 		goalDetails.open = false;
 		sideThreadsPanel.open = false;
@@ -33,7 +34,27 @@
 	}
 </script>
 
-{#if layout === "strip"}
+{#snippet pills()}
+	{#each shown as task (task.id)}
+		{@const kind = taskKind(task)}
+		<span data-testid="background-task-chip" class="task-pill" style:--hue={kind.hue} title={task.detail ?? task.description}>
+			<span class="task-dot" data-monitor={kind.label === "monitor" ? "" : undefined}></span>
+			<span class="truncate">{task.description}</span>
+			<span class="task-age">{taskAge(task, clock.now)}</span>
+		</span>
+	{/each}
+	{#if hidden.length > 0}
+		<span data-testid="background-tasks-more" class="task-more">
+			<span class="flex gap-[2px]" aria-hidden="true">{#each hidden.slice(0, 3) as task (task.id)}<span class="size-[5px] rounded-full" style:background={taskKind(task).hue}></span>{/each}</span>+{hidden.length}
+		</span>
+	{/if}
+{/snippet}
+
+{#if layout === "strip" && stale}
+	<Surface variant="task-strip" radius="none" data-testid="background-tasks-row" data-stale="" role="group" aria-label={label} class="min-w-0 px-[10px] opacity-50 grayscale text-[12px] text-text-secondary">
+		<span class="truncate">{tasks.length} <span class="task-strip-word">background</span> {tasks.length === 1 ? "task" : "tasks"}</span>
+	</Surface>
+{:else if layout === "strip"}
 	<Surface variant="task-strip" radius="none" data-testid="background-tasks-row" class="min-w-0">
 		<Button id="background-tasks-toggle" variant="ghost" size="phone-task" touchTarget="always" tone="secondary" align="start" class="flex-1 pointer-events-auto" data-testid="background-tasks-toggle" aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" onclick={togglePanel}>
 			<ConduitMark size={12} variant="running" tone="inherit" />
@@ -41,23 +62,13 @@
 		</Button>
 		{#if onstopall}<Button variant="ghost" size="phone-task" touchTarget="always" tone="error" class="shrink-0 px-[8px]" data-testid="background-tasks-row-stop-all" onclick={onstopall}>Stop all</Button>{/if}
 	</Surface>
+{:else if stale}
+	<div data-testid="background-tasks-row" data-layout={layout} data-stale="" role="group" aria-label={label} bind:clientWidth={width} class="task-row task-stale min-w-0 opacity-50 grayscale {layout === 'subtitle' ? 'flex flex-1' : 'basis-full overflow-x-auto'}">
+		<div class="flex items-center {layout === 'subtitle' ? 'min-w-0 gap-[5px]' : 'w-max gap-[6px] px-[4px]'}">{@render pills()}</div>
+	</div>
 {:else}
 	<div data-testid="background-tasks-row" data-layout={layout} bind:clientWidth={width} class="task-row min-w-0 {layout === 'subtitle' ? 'flex flex-1' : 'basis-full overflow-x-auto'}">
-		<Button id="background-tasks-toggle" variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" touchTarget={layout === "swipe" ? "always" : false} data-testid="background-tasks-toggle" ariaLabel={label} aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" class="task-pills flex items-center {layout === 'subtitle' ? 'min-w-0 gap-[5px]' : 'w-max gap-[6px] px-[4px]'}" onclick={togglePanel}>
-			{#each shown as task (task.id)}
-				{@const kind = taskKind(task)}
-				<span data-testid="background-task-chip" class="task-pill" style:--hue={kind.hue} title={task.detail ?? task.description}>
-					<span class="task-dot" data-monitor={kind.label === "monitor" ? "" : undefined}></span>
-					<span class="truncate">{task.description}</span>
-					<span class="task-age">{taskAge(task, clock.now)}</span>
-				</span>
-			{/each}
-			{#if hidden.length > 0}
-				<span data-testid="background-tasks-more" class="task-more">
-					<span class="flex gap-[2px]" aria-hidden="true">{#each hidden.slice(0, 3) as task (task.id)}<span class="size-[5px] rounded-full" style:background={taskKind(task).hue}></span>{/each}</span>+{hidden.length}
-				</span>
-			{/if}
-		</Button>
+		<Button id="background-tasks-toggle" variant="ghost" size="content" layout="flow" tone="inherit" hoverFill="none" touchTarget={layout === "swipe" ? "always" : false} data-testid="background-tasks-toggle" ariaLabel={label} aria-expanded={tasksPanel.open} aria-controls="background-tasks-panel" class="task-pills flex items-center {layout === 'subtitle' ? 'min-w-0 gap-[5px]' : 'w-max gap-[6px] px-[4px]'}" onclick={togglePanel}>{@render pills()}</Button>
 	</div>
 {/if}
 
@@ -131,6 +142,8 @@
 			animation: task-ping 2s ease-out infinite;
 		}
 		.task-dot:not([data-monitor]) { animation: task-breathe 2.4s ease-in-out infinite; }
+		/* The last known list while checking is still: nothing says it is running. */
+		.task-stale .task-dot, .task-stale .task-dot::after { animation: none; }
 	}
 	@keyframes task-ping {
 		0% { transform: scale(1); opacity: 0.55; }
