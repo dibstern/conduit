@@ -516,21 +516,23 @@ describe("subscribeSessionDetail", () => {
 						preview: "Corrected prompt",
 					},
 				});
-				const reordered = yield* takeN(q, 2);
-				if (reordered[0]?._tag !== "snapshot")
-					throw new Error("expected reordered snapshot");
+				// A corrected clock keeps the prompt's write-order place in the
+				// window (conduit-test-lczrn.1).
+				const corrected = yield* takeN(q, 2);
+				if (corrected[0]?._tag !== "snapshot")
+					throw new Error("expected corrected snapshot");
 				expect(
-					reordered[0].rows.flatMap((row) =>
+					corrected[0].rows.flatMap((row) =>
 						row._tag === "message" ? [row.message.id] : [],
 					),
-				).toEqual(messageIds.slice(7, 55));
+				).toEqual(messageIds.slice(6, 55));
 				expect(
-					reordered[0].rows.find((row) => row._tag === "window"),
+					corrected[0].rows.find((row) => row._tag === "window"),
 				).toMatchObject({
 					_tag: "window",
 					window: {
 						kind: "historical",
-						firstMessageId: "mutation-07",
+						firstMessageId: "mutation-06",
 						lastMessageId: "mutation-54",
 						hasEarlier: true,
 						hasLater: true,

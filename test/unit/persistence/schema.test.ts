@@ -54,6 +54,7 @@ describe("Schema Migration", () => {
 					[88, "provider_run_held_transmission"],
 					[89, "runner_cursors"],
 					[90, "run_ledger"],
+					[91, "messages_ordinal"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -128,6 +129,7 @@ describe("Schema Migration", () => {
 					[88, "provider_run_held_transmission"],
 					[89, "runner_cursors"],
 					[90, "run_ledger"],
+					[91, "messages_ordinal"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -368,7 +370,7 @@ describe("Schema Migration", () => {
 				},
 				{ name: "idx_messages_input_id", table: "messages", unique: false },
 				{
-					name: "idx_messages_session_created",
+					name: "idx_messages_session_order",
 					table: "messages",
 					unique: false,
 				},

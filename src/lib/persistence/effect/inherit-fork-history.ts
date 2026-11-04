@@ -38,7 +38,7 @@ export const inheritForkHistory = (
 				SELECT 1 FROM sessions pending JOIN messages cut
 					ON cut.id = pending.pending_rewind_message_id AND cut.session_id = pending.id
 				WHERE pending.id = ${sourceId}
-				AND (m.created_at, m.id) >= (cut.created_at, cut.id))`;
+				AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id))`;
 
 		// Turns precede messages because messages.turn_id has a foreign key.
 		// Copy closed history, never live reservations or native execution.
@@ -132,7 +132,8 @@ export const inheritForkHistory = (
 			 tokens_cache_read, tokens_cache_write, is_streaming, is_inherited,
 			 last_applied_seq, created_at, updated_at, context_window, version,
 			 is_backfilled, rest_digest, rest_event_id, rest_payload, parent_id,
-			 finish, error, input_id, steered, context_tokens, completed_at, is_human_sent)
+			 finish, error, input_id, steered, context_tokens, completed_at, is_human_sent,
+			 ordinal)
 			SELECT m.id || ${suffix}, ${event.sessionId},
 				(SELECT t.id FROM turns t WHERE t.id = m.turn_id || ${suffix}
 					AND (m.role != 'user' OR EXISTS (SELECT 1 FROM retained a
@@ -144,8 +145,11 @@ export const inheritForkHistory = (
 				${event.sequence}, m.created_at, m.updated_at, m.context_window, ${version},
 				m.is_backfilled, m.rest_digest, m.rest_event_id, m.rest_payload,
 				m.parent_id || ${suffix}, m.finish, m.error, m.input_id, 0,
-				m.context_tokens, m.completed_at, 0
-			FROM retained m ORDER BY m.created_at, m.id
+				m.context_tokens, m.completed_at, 0,
+				-- The source's write order, so the child reads the same history
+				-- and its own messages number on from it.
+				m.ordinal
+			FROM retained m ORDER BY m.ordinal, m.created_at, m.id
 			ON CONFLICT (id) DO NOTHING`;
 
 		// The retained result is only the preview. Keep its pointer into the

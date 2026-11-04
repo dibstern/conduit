@@ -251,8 +251,12 @@ function toHistoryMessage(source: WireMessage): HistoryMessage {
 	};
 }
 
+// Write order, then time, then id (conduit-test-lczrn.1). A row from a server
+// built before the ordinal existed has none and falls back to time and id.
 const rowOrder = (a: HistoryMessage, b: HistoryMessage): number =>
-	(a.time?.created ?? 0) - (b.time?.created ?? 0) || a.id.localeCompare(b.id);
+	(a.ordinal ?? 0) - (b.ordinal ?? 0) ||
+	(a.time?.created ?? 0) - (b.time?.created ?? 0) ||
+	a.id.localeCompare(b.id);
 const pendingOrder = (a: PendingInput, b: PendingInput): number =>
 	a.admittedAt - b.admittedAt || a.inputId.localeCompare(b.inputId);
 
@@ -896,7 +900,9 @@ function transcriptView(primary: boolean): TranscriptView {
 		const ordered = (rows: Iterable<SessionPromptSummary>) =>
 			[...rows].sort(
 				(a, b) =>
-					a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+					(a.ordinal ?? 0) - (b.ordinal ?? 0) ||
+					a.createdAt - b.createdAt ||
+					(a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
 			);
 		void stopped.then(async () => {
 			if (epoch !== generation) return;

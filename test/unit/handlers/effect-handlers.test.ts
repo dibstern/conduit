@@ -2947,6 +2947,7 @@ describe("loadMoreHistoryForSession", () => {
 					messages: [
 						{
 							id: "user-1",
+							ordinal: 1,
 							session_id: "session-1",
 							turn_id: "turn-1",
 							role: "user" as const,
@@ -2984,6 +2985,7 @@ describe("loadMoreHistoryForSession", () => {
 				Effect.succeed([
 					{
 						id: "user-1",
+						ordinal: 1,
 						session_id: "session-1",
 						turn_id: "turn-1",
 						role: "user",

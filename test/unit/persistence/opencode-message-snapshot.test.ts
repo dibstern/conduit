@@ -154,11 +154,12 @@ describe("OpenCode message snapshots", () => {
 		);
 		const rows = await harness.sessionMessagesWithParts(sessionId);
 		const history = messageRowsToHistory(rows, { pageSize: 50 }).messages;
-		const expectedHistory: HistoryMessage[] = rest.map((message) => {
+		const expectedHistory: HistoryMessage[] = rest.map((message, index) => {
 			const normalized = snapshotPayload(message).message;
 			const turnId = rows.find((row) => row.id === message.id)?.turn_id;
 			return {
 				...normalized,
+				ordinal: index + 1,
 				...(turnId == null ? {} : { turnId }),
 				role: normalized.role === "user" ? "user" : "assistant",
 				isBackfilled: true,
@@ -468,6 +469,7 @@ describe("OpenCode message snapshots", () => {
 			messageRowsToHistory(projected, { pageSize: 50 }).messages[1],
 		).toEqual({
 			...snapshotPayload(corrected).message,
+			ordinal: 2,
 			...(turnId == null ? {} : { turnId }),
 			parts: snapshotPayload(corrected).message.parts.map(wirePart),
 		});

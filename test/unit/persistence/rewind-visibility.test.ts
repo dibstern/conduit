@@ -1,5 +1,6 @@
-// Reconciliation can move the cut past an unchanged row. Snapshots, pages and
-// live deltas must agree on the current ordering, and undo must restore it all.
+// Rows keep their write order when REST corrects their clocks, so
+// reconciliation never moves the cut past a kept row (conduit-test-lczrn.1).
+// Snapshots, pages and live deltas must agree, and undo must restore it all.
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -7,7 +8,7 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 
-it("derives pending rewind visibility after REST timestamps move the cut", async () => {
+it("keeps pending rewind visibility when REST timestamps reorder the clocks", async () => {
 	await Effect.runPromise(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
@@ -49,9 +50,15 @@ it("derives pending rewind visibility after REST timestamps move the cut", async
 						parts: [],
 					},
 				});
-			// REST arrives one row at a time: the kept row is temporarily after
-			// the streamed cut, then the cut and later rows get their real clocks.
+			// REST arrives one row at a time: the kept row's clock is briefly after
+			// the streamed cut's, then the cut and later rows get their real clocks.
+			// Write order keeps the kept row before the cut throughout.
 			yield* commit([snapshot("m1", 110)]);
+			expect(
+				(yield* reads.getSessionMessagesWithParts("rewind")).map(
+					({ id }) => id,
+				),
+			).toEqual(["m1"]);
 			const beforeCutMoves = (yield* reads.readSessionTranscript("rewind"))
 				.version;
 			yield* commit([
@@ -75,7 +82,7 @@ it("derives pending rewind visibility after REST timestamps move the cut", async
 			const delta = yield* reads.readSessionTranscript("rewind", {
 				after: beforeCutMoves,
 			});
-			expect(delta.messages.map(({ id }) => id)).toEqual(["m1"]);
+			expect(delta.messages.map(({ id }) => id)).toEqual([]);
 			expect(delta.removed?.map(({ id }) => id)).toEqual(["m2", "m3", "m4"]);
 			expect(
 				(yield* reads.getSession("rewind"))?.pending_rewind_message_id,

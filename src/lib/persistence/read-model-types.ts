@@ -96,6 +96,8 @@ export interface PendingClaudeQuestionToolRow {
 
 export interface MessageRow {
 	id: string;
+	/** Per-session write order; the transcript sorts by it, then created_at, then id. */
+	ordinal: number;
 	version: MessageVersion;
 	session_id: string;
 	turn_id: string | null;

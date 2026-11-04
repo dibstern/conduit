@@ -225,7 +225,9 @@ describe("MessageProjector", () => {
 		).toEqual({ is_human_sent: 0 });
 	});
 
-	it("restamps rewind visibility when a user header corrects the cut's clock", async () => {
+	// The cut was written before "middle", so "middle" stays hidden whatever
+	// clock a later header gives the cut (conduit-test-lczrn.1).
+	it("keeps rewind visibility when a user header corrects the cut's clock", async () => {
 		for (const [messageId, createdAt] of [
 			["cut", 200],
 			["middle", 150],
@@ -252,9 +254,11 @@ describe("MessageProjector", () => {
 		await harness.query(
 			"UPDATE sessions SET pending_rewind_message_id = 'cut' WHERE id = 's1'",
 		);
-		const before = await queryOne<{ version: number }>(
-			"SELECT version FROM messages WHERE id = 'middle'",
-		);
+		const middle = () =>
+			harness.query(
+				"SELECT m.version, p.version AS part_version FROM messages m JOIN message_parts p ON p.message_id = m.id WHERE m.id = 'middle'",
+			);
+		const before = await middle();
 		const header = makeStored(
 			"message.created",
 			"s1",
@@ -262,29 +266,17 @@ describe("MessageProjector", () => {
 			3,
 			1000,
 		);
-		await project({ ...header, metadata: { providerCreatedAt: 100 } });
-		expect(
-			(
-				await queryOne<{ version: number }>(
-					"SELECT version FROM messages WHERE id = 'middle'",
-				)
-			)?.version,
-		).toBeGreaterThan(before?.version ?? 0);
-		const middlePart = await queryOne<{ version: number }>(
-			"SELECT version FROM message_parts WHERE id = 'middle-text'",
-		);
-		await project({
-			...header,
-			eventId: createEventId(),
-			metadata: { providerCreatedAt: 250 },
-		});
-		expect(
-			(
-				await queryOne<{ version: number }>(
-					"SELECT version FROM message_parts WHERE id = 'middle-text'",
-				)
-			)?.version,
-		).toBeGreaterThan(middlePart?.version ?? 0);
+		for (const providerCreatedAt of [100, 250]) {
+			await project({
+				...header,
+				eventId: createEventId(),
+				metadata: { providerCreatedAt },
+			});
+			expect(await middle()).toEqual(before);
+			expect(
+				(await harness.sessionMessagesWithParts("s1")).map(({ id }) => id),
+			).toEqual([]);
+		}
 	});
 
 	it("uses a late user header's provider clock and retracts a corrected clock", async () => {
