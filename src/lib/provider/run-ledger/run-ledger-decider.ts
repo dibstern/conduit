@@ -1974,16 +1974,17 @@ function unsolicited(
 		case "result": {
 			if (wake === undefined) {
 				// 3.4: a Claude result naming none, with no wake, answers each started send with no result.
-				const started = book.sends
-					.filter(delivers)
-					.filter((send) =>
-						send.txs.some(
-							(tx) =>
-								tx.label === label &&
-								tx.consumption.tag !== "None" &&
-								!tx.resulted,
-						),
-					);
+				const started = book.sends.filter(delivers).filter((send) =>
+					send.txs.some(
+						(tx) =>
+							tx.label === label &&
+							// started: consumption Observed or Accepted; a release or decline is no start
+							// (CONTRACT.md 501-505).
+							(tx.consumption.tag === "Observed" ||
+								tx.consumption.tag === "Accepted") &&
+							!tx.resulted,
+					),
+				);
 				if (
 					!nativePolicies[book.provider].capabilities.commandReceipts ||
 					started.length === 0

@@ -1433,6 +1433,21 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a result naming no input answers no send that never started, a released one included (3.4)", () => {
+		// Long seed 82103201 (claude), failure mode 124: a released start's chains read past None, so a
+		// result naming none, with no wake, answered it and showed its input sent. It names only the
+		// starts and steers that have started on that query (CONTRACT.md 501-505).
+		agreed("claude", (d) => {
+			const { token } = begin(d);
+			observe(d, token, { kind: "run_released", reason: "JournalAbsent" });
+			unsolicited(d, { kind: "result", outcome: "completed" });
+			expect(visibleInput(d, "A")).toEqual({
+				inputId: "A",
+				state: { tag: "Queued" },
+			});
+		});
+	});
+
 	it("a repeated unsolicited event whose first arrival changed nothing is still a repeat (3.4, 3.1)", () => {
 		// Long seed 82103300 (claude), failure mode 122: a turn start that joined the outstanding
 		// wake execution recorded nothing, so the same (label, event id) after the Run ended opened

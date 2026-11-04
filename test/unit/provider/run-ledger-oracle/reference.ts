@@ -1330,7 +1330,10 @@ function unsolicited(
 						send.txs.some(
 							(tx) =>
 								tx.label === label &&
-								tx.consumption.tag !== "None" &&
+								// started: consumption Observed or Accepted; a release or decline is no start
+								// (CONTRACT.md 501-505).
+								(tx.consumption.tag === "Observed" ||
+									tx.consumption.tag === "Accepted") &&
 								!tx.resulted,
 						),
 				);
