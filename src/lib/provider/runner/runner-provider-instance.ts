@@ -39,7 +39,10 @@ import {
 import { guardCurrentWrite } from "../../persistence/effect/commit-and-signal.js";
 import type { makeRetireReplacedProcessPrompts } from "../../persistence/effect/retire-pending-prompts.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
-import { ProviderInstanceFailure } from "../errors.js";
+import {
+	nativeCommandUnsupported,
+	ProviderInstanceFailure,
+} from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
 import type { ProviderRegistry } from "../provider-registry.js";
 import type { RelayEventSinkDeps } from "../relay-event-sink.js";
@@ -152,6 +155,8 @@ export interface RunnerDriverPieces {
 		ProviderInstanceFailure
 	>;
 	readonly stopTask?: boolean;
+	/** The provider takes native commands (8.5) as session sends. */
+	readonly nativeCommands?: boolean;
 	readonly nativeSession?: boolean;
 }
 
@@ -1373,6 +1378,22 @@ export class RunnerProviderInstance implements ProviderInstance {
 				}),
 			),
 		);
+	}
+	sendNativeCommandEffect(
+		sessionId: string,
+		commandId: string,
+		text: string,
+		call?: ProviderCall,
+	): Effect.Effect<void, ProviderInstanceFailure> {
+		return this.driver.nativeCommands
+			? this.commandEffect({
+					type: "native-command",
+					sessionId,
+					commandId,
+					text,
+					...(call ? { call } : {}),
+				})
+			: Effect.fail(nativeCommandUnsupported(this.providerId));
 	}
 	stopTaskEffect(
 		sessionId: string,

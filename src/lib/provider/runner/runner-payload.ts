@@ -57,6 +57,11 @@ export interface RunnerPayload {
 		sessionId: string,
 		taskId: string,
 	): Effect.Effect<void, PayloadFailure>;
+	sendNativeCommand?(
+		sessionId: string,
+		commandId: string,
+		text: string,
+	): Effect.Effect<void, PayloadFailure>;
 	setPermissionMode?(
 		sessionId: string,
 		mode: Extract<SessionCommand, { type: "set-permission-mode" }>["mode"],

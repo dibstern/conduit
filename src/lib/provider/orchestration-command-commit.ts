@@ -94,6 +94,18 @@ export class DurableCommandCommitRepository {
 					opts,
 				);
 				break;
+			case "native_command":
+				event = canonicalEvent(
+					"native_command.requested",
+					payload.sessionId,
+					{
+						providerProcessId: payload.providerProcessId,
+						text: payload.text,
+						...(payload.goal ? { goal: payload.goal } : {}),
+					},
+					opts,
+				);
+				break;
 			case "resolve_permission":
 				event = canonicalEvent(
 					"permission.resolved",

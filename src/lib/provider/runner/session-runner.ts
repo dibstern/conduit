@@ -159,6 +159,13 @@ export type SessionCommand = (
 			readonly sessionId: string;
 			readonly taskId: string;
 	  }
+	| {
+			/** A native command (8.5): queued into the live query as its own SDK input. */
+			readonly type: "native-command";
+			readonly sessionId: string;
+			readonly commandId: string;
+			readonly text: string;
+	  }
 	| { readonly type: "abort"; readonly sinkId: string }
 	| {
 			readonly type: "apply-live-settings";

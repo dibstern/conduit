@@ -525,6 +525,12 @@ type SnapshotMessage = {
 	readonly [key: string]: unknown;
 };
 
+/** A goal action a native command carries (8.6). */
+export const GoalActionSchema = Schema.Union([
+	Schema.Struct({ kind: Schema.Literal("set"), condition: Schema.String }),
+	Schema.Struct({ kind: Schema.Literals(["clear", "pause", "resume"]) }),
+]);
+
 function live<S extends Schema.Top>(payload: S) {
 	return { status: "live", payload } as const;
 }
@@ -1121,6 +1127,17 @@ export const CanonicalEvents = {
 			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
+	/**
+	 * A native command main issues (8.5, D60), named by its metadata commandId. `goal` is the goal
+	 * action it carries, which the goal tracker's pending id refers to (8.6).
+	 */
+	"native_command.requested": live(
+		Schema.Struct({
+			providerProcessId: Schema.String,
+			text: Schema.String,
+			goal: Schema.optionalKey(GoalActionSchema),
+		}),
+	),
 	// Evidence events (CONTRACT.md 2.1 row 215, 3.9): a fact the Run Ledger's arm folds that has
 	// no main event, appended by its one observer in the write that observes it. Main's
 	// projectors ignore them.
@@ -1206,6 +1223,17 @@ export const CanonicalEvents = {
 					code: Schema.optionalKey(Schema.String),
 				}),
 			),
+		}),
+	),
+	/**
+	 * A Claude receipt for a native command (8.5, D61), by its commandId: a command_lifecycle
+	 * state, or `completed` from the zero-turn result that answers it. The daemon stamps its label.
+	 */
+	"evidence.command_receipt": live(
+		Schema.Struct({
+			label: Schema.String,
+			commandId: Schema.String,
+			state: Schema.Literals(["queued", "started", "completed", "cancelled"]),
 		}),
 	),
 	/**

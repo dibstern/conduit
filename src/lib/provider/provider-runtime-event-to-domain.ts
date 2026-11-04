@@ -641,6 +641,24 @@ export function translateProviderRuntimeEventToDomain(
 			});
 		}
 
+		case "evidence.command_receipt": {
+			const commandId = stringField(data["commandId"]);
+			const receipt = data["state"];
+			if (
+				!commandId ||
+				(receipt !== "queued" &&
+					receipt !== "started" &&
+					receipt !== "completed" &&
+					receipt !== "cancelled")
+			)
+				throw new TypeError("Invalid native command receipt");
+			return singleEvent(event, state, "evidence.command_receipt", {
+				label: stringField(data["label"]) ?? "",
+				commandId,
+				state: receipt,
+			});
+		}
+
 		case "evidence.tasks_snapshot": {
 			const decoded = Schema.decodeUnknownResult(TasksSnapshotPayloadSchema)(
 				event.data,

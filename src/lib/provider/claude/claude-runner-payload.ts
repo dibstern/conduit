@@ -16,7 +16,7 @@
  *   runtime's close(), then clear the session map.
  */
 
-import { randomUUID } from "node:crypto";
+import { randomUUID, type UUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
 	type Settings,
@@ -52,6 +52,7 @@ import {
 	ClaudeBoundaryError,
 	ClaudeResumeRefused,
 	ClaudeRuntimeError,
+	type EventSinkError,
 	isClaudeResumeFailure,
 	isClaudeResumeRefused,
 } from "../event-sink-errors.js";
@@ -188,6 +189,7 @@ import type {
 	ClaudeThreadReadResult,
 	PromptQueueController,
 	Query,
+	SDKMessage,
 	Options as SDKOptions,
 	SDKUserMessage,
 } from "./types.js";
@@ -605,6 +607,48 @@ class ClaudeRunnerPayload implements RunnerPayload {
 					new ClaudeBoundaryError({ operation: "stopTask", cause }),
 			});
 		}).pipe(Effect.mapError((cause) => sessionFailure("stop-task", cause)));
+	}
+	/** 8.5: a native command is its own SDK input. Claude queues it behind a running
+	 *  turn (8.6), so it never goes with priority "now". */
+	sendNativeCommand(
+		sessionId: string,
+		commandId: string,
+		text: string,
+	): Effect.Effect<void, SessionFailure> {
+		return Effect.gen({ self: this }, function* () {
+			const ctx = yield* getSession(this.stateRef, sessionId);
+			if (!ctx || ctx.stopped)
+				return yield* Effect.fail(
+					new ClaudeBoundaryError({
+						operation: "sendNativeCommand",
+						cause: "Claude session is not running in this runner",
+					}),
+				);
+			(ctx.nativeCommandIds ??= new Set()).add(commandId);
+			yield* ctx.promptQueue
+				.enqueue({
+					type: "user",
+					message: { role: "user", content: text },
+					parent_tool_use_id: null,
+					// Command ids are browser-minted UUIDs; receipts and the result name it.
+					uuid: commandId as UUID,
+					priority: "next",
+				})
+				.pipe(
+					Effect.tapError(() =>
+						Effect.sync(() => ctx.nativeCommandIds?.delete(commandId)),
+					),
+					Effect.mapError(
+						(cause) =>
+							new ClaudeBoundaryError({
+								operation: "sendNativeCommand",
+								cause,
+							}),
+					),
+				);
+		}).pipe(
+			Effect.mapError((cause) => sessionFailure("native-command", cause)),
+		);
 	}
 	setPermissionMode(
 		sessionId: string,
@@ -2148,6 +2192,14 @@ class ClaudeRunnerPayload implements RunnerPayload {
 							message: decodedMessage.errors.join("\n"),
 						}),
 					);
+				if (
+					yield* this.nativeCommandMessageEffect(
+						ctx,
+						translator,
+						decodedMessage,
+					)
+				)
+					continue;
 				if (decodedMessage.type === "command_lifecycle") {
 					yield* this.handleCommandLifecycleEffect(ctx, decodedMessage);
 				}
@@ -2841,6 +2893,70 @@ class ClaudeRunnerPayload implements RunnerPayload {
 				}),
 			),
 		);
+	}
+
+	/**
+	 * 8.5, D61: a native command's receipts, synthetic reply and zero-turn result belong to
+	 * the command, not to a Run. True when the message was the command's and is consumed.
+	 */
+	private nativeCommandMessageEffect(
+		ctx: ClaudeSessionContext,
+		translator: ClaudeTranslationService,
+		message: SDKMessage,
+	): Effect.Effect<boolean, EventSinkError> {
+		return Effect.gen({ self: this }, function* () {
+			const ids = ctx.nativeCommandIds;
+			if (!ids?.size) return false;
+			if (message.type === "command_lifecycle") {
+				if (!ids.has(message.command_uuid)) return false;
+				if (message.state === "cancelled") ids.delete(message.command_uuid);
+				yield* this.pushCommandReceiptEffect(
+					ctx,
+					message.command_uuid,
+					message.state,
+				);
+				return true;
+			}
+			if (
+				message.type === "assistant" &&
+				message.parent_tool_use_id == null &&
+				message.message.model === "<synthetic>" &&
+				!ctx.turnInFlight
+			) {
+				yield* translator.observeGoal(ctx, message);
+				return true;
+			}
+			if (message.type !== "result") return false;
+			const answered = message.user_message_uuids ?? [
+				message.user_message_uuid,
+			];
+			if (!answered.every((id) => id !== undefined && ids.has(id)))
+				return false;
+			for (const id of answered.filter((id) => id !== undefined)) {
+				ids.delete(id);
+				yield* this.pushCommandReceiptEffect(ctx, id, "completed");
+			}
+			// A command whose turn ran as a wake (a goal set) ends that wake as usual.
+			return !ctx.wakeTurn;
+		});
+	}
+
+	private pushCommandReceiptEffect(
+		ctx: ClaudeSessionContext,
+		commandId: string,
+		state: ProviderRuntimeEventPayloadMap["evidence.command_receipt"]["state"],
+	): Effect.Effect<void> {
+		return ctx.eventSink
+			? ctx.eventSink
+					.push(
+						claudeRuntimeEvent("evidence.command_receipt", ctx.sessionId, {
+							label: "",
+							commandId,
+							state,
+						}),
+					)
+					.pipe(Effect.ignore)
+			: Effect.void;
 	}
 
 	private pushWakeEvidenceEffect<

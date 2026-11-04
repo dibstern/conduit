@@ -252,6 +252,14 @@ export class InProcessSessionRunner implements NativeSessionRunner {
 						yield* this.payload.endSession(command.sessionId);
 					}).pipe(Effect.forkIn(this.scope));
 					return;
+				case "native-command":
+					if (this.payload.sendNativeCommand)
+						return yield* this.payload.sendNativeCommand(
+							command.sessionId,
+							command.commandId,
+							command.text,
+						);
+					break;
 				case "stop-task":
 					if (this.payload.stopTask)
 						return yield* this.payload.stopTask(

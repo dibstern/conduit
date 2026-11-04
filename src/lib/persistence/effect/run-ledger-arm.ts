@@ -443,6 +443,27 @@ const commandFor = (
 					},
 				};
 			}
+			case "native_command.requested": {
+				const commandId = event.metadata.commandId;
+				if (commandId === undefined) return undefined;
+				return {
+					verb: "control",
+					control: { kind: "native_command", commandId, text: event.data.text },
+				};
+			}
+			case "evidence.command_receipt":
+				// D61: a native command's receipts are unsolicited, by its commandId.
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: event.data.label,
+						eventId: event.eventId,
+						kind: "command_lifecycle",
+						commandId: event.data.commandId,
+						state: event.data.state,
+					},
+				};
 			case "evidence.process_started":
 				return {
 					verb: "settle",
@@ -681,6 +702,7 @@ const HANDLES = [
 	"run.released",
 	"interrupt.requested",
 	"session.end_requested",
+	"native_command.requested",
 	"evidence.process_started",
 	"evidence.process_lost",
 	"evidence.alarm_fired",
@@ -688,6 +710,7 @@ const HANDLES = [
 	"evidence.probe_result",
 	"evidence.turn_started",
 	"evidence.turn_ended",
+	"evidence.command_receipt",
 	"evidence.tasks_snapshot",
 	"evidence.interaction_resolved",
 	"evidence.delivery_indeterminate",

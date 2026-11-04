@@ -348,6 +348,36 @@ export const conversationHandlers = {
 			Effect.as({ ok: true as const }),
 			Effect.catch(mapRpcFailure("CancelSession")),
 		),
+	// 8.6 Claude: a goal action is a native command, delivered at once and never with priority
+	// "now", which would abandon the turn and make it a Stop.
+	SetGoal: ({ sessionId, commandId, condition }) =>
+		OrchestrationEngineTag.pipe(
+			Effect.flatMap((engine) =>
+				engine.dispatchEffect({
+					type: "native_command",
+					sessionId,
+					commandId,
+					text: `/goal ${condition}`,
+					goal: { kind: "set", condition },
+				}),
+			),
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("SetGoal")),
+		),
+	ClearGoal: ({ sessionId, commandId }) =>
+		OrchestrationEngineTag.pipe(
+			Effect.flatMap((engine) =>
+				engine.dispatchEffect({
+					type: "native_command",
+					sessionId,
+					commandId,
+					text: "/goal clear",
+					goal: { kind: "clear" },
+				}),
+			),
+			Effect.as({ ok: true as const }),
+			Effect.catch(mapRpcFailure("ClearGoal")),
+		),
 } satisfies Pick<
 	WsRpcHandlerMap,
 	| "ListRecaps"
@@ -366,4 +396,6 @@ export const conversationHandlers = {
 	| "AddDraftAttachment"
 	| "RemoveDraftAttachment"
 	| "CancelSession"
+	| "SetGoal"
+	| "ClearGoal"
 >;

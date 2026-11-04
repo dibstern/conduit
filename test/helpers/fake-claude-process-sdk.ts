@@ -173,6 +173,8 @@ export type ProcessMark =
 			kind: "enqueue";
 			prompt: string;
 			request: string;
+			/** The SDK input's priority, absent when the sender set none. */
+			priority?: string;
 			at: string;
 			queryId: string;
 			promptIndex: number;
@@ -183,6 +185,8 @@ export type ProcessMark =
 			};
 	  }
 	| { kind: "emit"; prompt: string; text: string; at: string }
+	/** An input that reached the CLI mid-turn and was queued behind the turn. */
+	| { kind: "input-queued"; prompt: string; priority?: string; at: string }
 	| { kind: "approval"; prompt: string; behavior: "allow" | "deny" }
 	| {
 			kind: "prompt-answer";
@@ -704,6 +708,8 @@ function query(params: {
 	let taskStopHolding = false;
 	let taskStopHeldRequest: string | undefined;
 	let taskTurnInterrupted = false;
+	/** Wakes goal-long-turn when Stop interrupts it before a mid-turn input arrives. */
+	let interruptTurn: (() => void) | undefined;
 	let interruptibleTurn = false;
 	let interruptAwaitingDecision = false;
 	let closed = false;
@@ -1008,8 +1014,11 @@ function query(params: {
 			return;
 		}
 		const inputs = params.prompt[Symbol.asyncIterator]();
+		// goal-long-turn reads inputs during its turn, as the CLI does; one it took waits here.
+		let queuedInput: Promise<IteratorResult<SDKUserMessage>> | undefined;
 		while (!closed) {
-			const nextInput = inputs.next();
+			const nextInput = queuedInput ?? inputs.next();
+			queuedInput = undefined;
 			if (taskStopLive.length > 0) {
 				let ready = false;
 				void nextInput.then(
@@ -1047,7 +1056,9 @@ function query(params: {
 							.join("");
 			const request = currentRequest(prompt);
 			interruptibleTurn =
-				request.startsWith("stall-") || request === "terminal-replay-interrupt";
+				request.startsWith("stall-") ||
+				request === "terminal-replay-interrupt" ||
+				request === "goal-long-turn";
 			const userUuid = input.uuid ?? randomUUID();
 			if (request === "fail-before-intake")
 				throw new Error("Harness SDK iterator failed before intake");
@@ -1114,6 +1125,7 @@ function query(params: {
 				kind: "enqueue",
 				prompt,
 				request,
+				...(input.priority === undefined ? {} : { priority: input.priority }),
 				at,
 				queryId,
 				promptIndex: ++promptIndex,
@@ -1355,6 +1367,8 @@ function query(params: {
 					modelUsage: {},
 					permission_denials: [],
 					...(!unknown && !modelReply ? { local_command: "goal" } : {}),
+					// The CLI names the input a zero-turn result answers (CONTRACT.md 8.2).
+					user_message_uuid: userUuid,
 				} as unknown as SDKMessage;
 				continue;
 			}
@@ -1915,6 +1929,36 @@ function query(params: {
 					mark({ kind: "assistant-held", prompt, queryId });
 				// A control receipt is separate from the native result that ends
 				// these interrupted turns.
+				if (request === "goal-long-turn") {
+					// The CLI takes an input that arrives mid-turn and queues it behind the turn
+					// (CONTRACT.md 8.6: "queued by Claude"); it runs once the turn's result is out.
+					queuedInput = inputs.next();
+					const arrived = await Promise.race([
+						queuedInput,
+						new Promise<undefined>((done) => {
+							interruptTurn = () => done(undefined);
+						}),
+					]);
+					interruptTurn = undefined;
+					if (arrived && !arrived.done && arrived.value.uuid) {
+						const text = arrived.value.message.content;
+						mark({
+							kind: "input-queued",
+							prompt: typeof text === "string" ? text : "",
+							...(arrived.value.priority === undefined
+								? {}
+								: { priority: arrived.value.priority }),
+							at: process.hrtime.bigint().toString(),
+						});
+						yield {
+							type: "command_lifecycle",
+							state: "queued",
+							command_uuid: arrived.value.uuid,
+							uuid: randomUUID(),
+							session_id: sessionId,
+						} as unknown as SDKMessage;
+					}
+				}
 				while (!taskTurnInterrupted && !closed)
 					await new Promise<void>((done) => setTimeout(done, 20));
 				if (closed) return;
@@ -2995,7 +3039,10 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding || interruptibleTurn) taskTurnInterrupted = true;
+			if (taskStopHolding || interruptibleTurn) {
+				taskTurnInterrupted = true;
+				interruptTurn?.();
+			}
 			mark({
 				kind: "query-interrupted",
 				queryId,

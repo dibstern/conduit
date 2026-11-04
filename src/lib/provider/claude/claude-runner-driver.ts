@@ -163,6 +163,7 @@ export const makeClaudeRunnerDriver = (
 				),
 		nativeSession: true,
 		stopTask: true,
+		nativeCommands: true,
 		prepareTurnEffect: (input) =>
 			Effect.gen(function* () {
 				const account = input.account;

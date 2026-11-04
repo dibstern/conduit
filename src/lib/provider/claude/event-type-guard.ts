@@ -233,6 +233,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Committed by the provider control outbox",
 	},
+	"native_command.requested": {
+		produced: false,
+		reason: "Committed by the provider control outbox",
+	},
 	"input.interrupt_requested": {
 		produced: false,
 		reason:
@@ -260,6 +264,7 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	},
 	"evidence.turn_started": { produced: true },
 	"evidence.turn_ended": { produced: true },
+	"evidence.command_receipt": { produced: true },
 	"evidence.tasks_snapshot": { produced: true },
 	"evidence.interaction_resolved": {
 		produced: false,

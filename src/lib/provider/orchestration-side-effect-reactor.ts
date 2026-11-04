@@ -72,7 +72,11 @@ import {
 	type PreparedTurn,
 	sendPreparedClaudeTurn,
 } from "./claude/prepare-turn.js";
-import { ProviderInstanceFailure, ProviderNotRegistered } from "./errors.js";
+import {
+	nativeCommandUnsupported,
+	ProviderInstanceFailure,
+	ProviderNotRegistered,
+} from "./errors.js";
 import type { EventSinkError } from "./event-sink-errors.js";
 import { backfillLegacyControlAnswers } from "./legacy-control-outbox.js";
 import {
@@ -1991,15 +1995,17 @@ export class ProviderSideEffectReactor {
 											? { providerId: payload.targetProviderId }
 											: {}),
 									}
-								: {
-										prompt: {
-											id: payload.requestId,
-											kind:
-												payload.type === "resolve_permission"
-													? "permission"
-													: "question",
+								: payload.type === "native_command"
+									? undefined
+									: {
+											prompt: {
+												id: payload.requestId,
+												kind:
+													payload.type === "resolve_permission"
+														? "permission"
+														: "question",
+											},
 										},
-									},
 					) ?? Effect.succeed(undefined));
 				const account =
 					call?.account ??
@@ -2259,6 +2265,16 @@ export class ProviderSideEffectReactor {
 						}
 						case "end_session":
 							yield* instance.endSessionEffect(row.session_id, call, context);
+							break;
+						case "native_command":
+							if (!instance.sendNativeCommandEffect)
+								return yield* nativeCommandUnsupported(row.provider_id);
+							yield* instance.sendNativeCommandEffect(
+								row.session_id,
+								row.command_id,
+								payload.text,
+								call,
+							);
 							break;
 					}
 				});

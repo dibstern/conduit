@@ -3128,6 +3128,26 @@ export const CancelSession = Rpc.make("CancelSession", {
 	error: WsRpcError,
 });
 
+/** 8.6: a goal action is a native command, never a chat message; CancelSession stays Stop. */
+export const SetGoal = Rpc.make("SetGoal", {
+	payload: Schema.TaggedStruct("SetGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+		condition: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const ClearGoal = Rpc.make("ClearGoal", {
+	payload: Schema.TaggedStruct("ClearGoal", {
+		sessionId: NonEmptyString,
+		commandId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const StopBackgroundTask = Rpc.make("StopBackgroundTask", {
 	payload: Schema.TaggedStruct("StopBackgroundTask", {
 		sessionId: NonEmptyString,
@@ -3668,6 +3688,8 @@ const wsRpcRequests = [
 	AddDraftAttachment,
 	RemoveDraftAttachment,
 	CancelSession,
+	SetGoal,
+	ClearGoal,
 	StopBackgroundTask,
 	StopServer,
 	MarkServer,
