@@ -305,9 +305,12 @@ desktop. Phones show an accessible icon and put both actions in the pill menu.
 
 A **Run** is one provider execution owned by Conduit, with a stable identity
 separate from the provider's native execution id. A session has at most one
-active Run, which can accept several Run Inputs. Its states are Queued,
-Starting, Running, Interrupting, Settling and Ended; Ended records an outcome
-and a typed reason.
+active Run, which can accept several Run Inputs. The ledger stores four
+states: Queued, Launched, Interrupting and Ended; Ended records an outcome and
+a typed reason. Starting, Running and Settling are labels derived from a
+Launched Run: Starting before any evidence, Running once there is activity,
+and Settling when a result has arrived with no later activity. (Run ledger
+CONTRACT.md, lines 56-59 and 704-706.)
 
 _Avoid_: turn as a synonym for Run. A transcript turn represents one user
 input; several inputs can belong to one Run.
@@ -315,8 +318,9 @@ input; several inputs can belong to one Run.
 ## Run Input
 
 A **Run Input** is one user message associated with a Run, including its native
-message identity when known. Its states are Queued, Delivered, Accepted and
-Declined; delivery alone does not prove provider acceptance.
+message identity when known. Its states are Queued, Dispatching, Delivered
+(sent or unknown), Accepted and Failed; delivery alone does not prove provider
+acceptance. (Run ledger CONTRACT.md, lines 60-61 and 913-916.)
 
 _Avoid_: Run or turn when the distinction between a message and its execution
 matters.
@@ -324,9 +328,10 @@ matters.
 ## Run Effect
 
 A **Run Effect** is a durable instruction produced by a Run Ledger decision
-for a provider executor, such as start, steer, interrupt, close or end. Its
-outcome returns to the ledger as retryable, permanent or delivery-unknown;
-delivery-unknown work requires a probe before any resend.
+for a provider executor, such as start, steer, interrupt, end session or
+probe. Its outcome returns to the ledger as succeeded, retryable, permanent or
+delivery-unknown; delivery-unknown work requires a probe before any resend.
+(Run ledger CONTRACT.md, lines 62-65.)
 
 _Avoid_: outbox command as the domain name. The old command outbox is replaced
 by Run Effects.
@@ -406,7 +411,8 @@ continues from the Head: the provider's native resume when its own session
 contains the head path, otherwise a recorded context handoff. The UI shows
 which one before sending.
 _Avoid_: Resume, which names a session with a Limit Recovery continuing;
-Resume Planner; Continuation.
+the native resume command, which is a send but not a Run; Resume Planner;
+Continuation.
 
 ## Tool Call
 
