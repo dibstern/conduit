@@ -17,9 +17,11 @@
 // 19. terminate is sent the item id, not the process id;
 // 22. traces without list rows break once the runner lists;
 // 23. Stop is hidden for Codex, or the driver drops the stop as a no-op success.
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -140,7 +142,10 @@ const late = (
  * item starts with a process id and never completes inside the turn. No exit row: the app-server
  * stays up after the turn. `after` follows the turn's completion.
  */
-const terminalTrace = (after: (turn: Turn) => TraceRow[] = () => []) => {
+const terminalTrace = (
+	after: (turn: Turn) => TraceRow[] = () => [],
+	terminals: unknown[] = [terminal],
+) => {
 	const trace = fixtureRows("turn-command").filter(
 		(row) =>
 			row.dir !== "exit" &&
@@ -179,7 +184,7 @@ const terminalTrace = (after: (turn: Turn) => TraceRow[] = () => []) => {
 	trace.splice(
 		index,
 		0,
-		...listed(Number(started["at"]), 901, threadId, [terminal]),
+		...listed(Number(started["at"]), 901, threadId, terminals),
 	);
 	const at = Number(trace.at(-1)?.["at"]) + 1;
 	return [...trace, ...after({ threadId, turnId, item, at })];
@@ -306,7 +311,11 @@ describe("Codex background terminals", () => {
 		);
 	});
 
-	const start = async (name: string, trace: TraceRow[]) => {
+	const start = async (
+		name: string,
+		trace: TraceRow[],
+		environment: Record<string, string> = {},
+	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
 		});
@@ -339,6 +348,7 @@ describe("Codex background terminals", () => {
 				CONDUIT_CODEX_APP_SERVER_TRACE_REPORT: reportPath,
 				CONDUIT_CODEX_APP_SERVER_TRACE_GATE: gatePath,
 				CONDUIT_TEST_CODEX_TRACE_MAP: traceMap,
+				...environment,
 			},
 		});
 		const browser = await fixture.connect();
@@ -863,5 +873,151 @@ describe("Codex background terminals", () => {
 			outbox: ledger.outbox,
 			snapshots: ledger.snapshots,
 		});
+	});
+
+	// 82tn.32.33.6 box 4 (CONTRACT.md 2988-2989): a Codex server links to the one terminal whose
+	// command and cwd match. Audit failure modes 5-12.
+	it("links a Codex server to the one terminal matching its command and cwd, and that task reads serving", async () => {
+		const root = realpathSync(
+			resolve("test-results/codex-background-terminals"),
+		);
+		const work = join(root, "server-link-work");
+		const elsewhere = join(root, "server-link-elsewhere");
+		for (const dir of [work, elsewhere]) mkdirSync(dir, { recursive: true });
+		const script = `const server = require("node:http").createServer((_, res) => res.end("ok"));
+server.listen(0, "127.0.0.1", () => console.log(JSON.stringify({ pid: process.pid, port: server.address().port })));`;
+		for (const name of ["linked.cjs", "twin.cjs", "moved.cjs"])
+			writeFileSync(join(work, name), script);
+		// As Codex lists them: the command as written and the shell's cwd.
+		const entry = (processId: string, command: string, cwd: string) => ({
+			...terminal,
+			itemId: `call_${processId}`,
+			processId,
+			command,
+			cwd,
+		});
+		const linked = entry("701", "node linked.cjs; true", work);
+		let threadId = "";
+		let held = 0;
+		const { fixture, browser, sessionId } = await start(
+			"server-link",
+			terminalTrace(
+				(turn) => {
+					threadId = turn.threadId;
+					held = turn.at - 1;
+					// Later the twins and the moved one exit: only the linked terminal is left.
+					return [
+						...listed(turn.at, 903, turn.threadId, [linked]),
+						late(turn.at, turn, "completed", 0),
+					];
+				},
+				[
+					linked,
+					entry("702", "node twin.cjs; true", work),
+					entry("703", "node twin.cjs; true", work),
+					entry("704", "node moved.cjs; true", elsewhere),
+				],
+			),
+			{
+				CONDUIT_PORT_WATCH_INTERVAL_MS: "200",
+				CONDUIT_PORT_WATCH_HOLD_MS: "400",
+			},
+		);
+		writeFileSync(gatePath, String(held));
+		await submit(browser, sessionId);
+		await runEnded(fixture, sessionId);
+
+		// Each server runs under `zsh -c`, as Codex starts a command, marked with the thread id.
+		const env: NodeJS.ProcessEnv = {
+			...process.env,
+			PATH: `${dirname(process.execPath)}:${process.env["PATH"] ?? ""}`,
+			CODEX_THREAD_ID: threadId,
+		};
+		for (const marker of ["CONDUIT_SESSION_ID", "CONDUIT_OPENCODE_SESSION_ID"])
+			delete env[marker];
+		const shells: number[] = [];
+		const serve = async (command: string) => {
+			const shell = spawn("/bin/zsh", ["-c", command], {
+				cwd: work,
+				env,
+				detached: true,
+				stdio: ["ignore", "pipe", "inherit"],
+			});
+			shells.push(shell.pid ?? 0);
+			const { value } = await createInterface({
+				input: shell.stdout ?? process.stdin,
+			})
+				[Symbol.asyncIterator]()
+				.next();
+			return JSON.parse(String(value)) as { pid: number; port: number };
+		};
+		try {
+			const servers = {
+				linked: await serve("node linked.cjs; true"),
+				twin: await serve("node twin.cjs; true"),
+				moved: await serve("node moved.cjs; true"),
+			};
+			const row = (frame: Record<string, unknown>) =>
+				frame["type"] === "session_row" && frame["id"] === sessionId
+					? (frame as {
+							servers?: readonly { port: number }[];
+							activity?: { background?: string };
+							backgroundTasks?: readonly { id: string }[];
+						})
+					: undefined;
+			const working = await browser.waitFor(
+				(frame) => row(frame)?.servers?.length === 3,
+			);
+			// The unlinked terminals are still work.
+			expect(row(working)?.activity?.background).toBe("work");
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			const seen = (
+				db
+					.prepare(
+						"SELECT data FROM events WHERE session_id = ? AND type = 'evidence.server_seen' ORDER BY sequence",
+					)
+					.all(sessionId) as { data: string }[]
+			).map(
+				({ data }) =>
+					JSON.parse(data) as {
+						server: { port: number };
+						taskKey?: { taskId: string };
+					},
+			);
+			db.close();
+			const links = Object.fromEntries(
+				Object.entries(servers).map(([name, { port }]) => [
+					name,
+					seen.find(({ server }) => server.port === port)?.taskKey ?? null,
+				]),
+			);
+			expect(links).toEqual({
+				linked: { taskId: "701" },
+				twin: null,
+				moved: null,
+			});
+
+			// The list drops the twins and the moved one: the linked task serves, so the row is calm.
+			const cursor = browser.frames.length;
+			writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+			const calm = await browser.waitFor(
+				(frame) => row(frame)?.backgroundTasks?.length === 1,
+				cursor,
+			);
+			expect(row(calm)).toMatchObject({
+				backgroundTasks: [{ id: "701" }],
+				activity: { background: "serving", label: "background" },
+			});
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/82tn-32-33-6-codex-task-link.json",
+				`${JSON.stringify({ ticket: "conduit-test-82tn.32.33.6", servers, links, seen, working: row(working), calm: row(calm) }, null, 2)}\n`,
+			);
+		} finally {
+			for (const pid of shells)
+				try {
+					process.kill(-pid, "SIGKILL");
+				} catch {}
+		}
 	});
 });

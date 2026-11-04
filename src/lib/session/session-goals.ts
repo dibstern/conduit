@@ -35,7 +35,7 @@ const confirmedOf = (facts: SessionGoalChangedPayload): ConfirmedGoal | null =>
 /**
  * Each session's goal tracker (CONTRACT.md 8.1): the action the browser asked for, the provider's
  * confirmations, and the Run Ledger's view of each action's send, from which the phase is derived.
- * Transient like retries: in memory, so a restart forgets a pending action.
+ * In memory; at startup the daemon rebuilds each pending action from the store (82tn.32.44).
  * Queued sends are recovery's resends and, where the provider reads its goal natively (Codex's
  * thread/goal/get), the re-read an unconfirmed action takes (8.5); a re-read carries no action.
  */
@@ -170,16 +170,29 @@ export function makeSessionGoals() {
 				const status = confirmedOf(event.data);
 				if (status === null) continue;
 				if (
-					update(event.sessionId, (entry) => ({
-						...entry,
-						seen: entry.seen + 1,
-						goal: confirmGoal(
+					update(event.sessionId, (entry) => {
+						const goal = confirmGoal(
 							entry.goal,
 							replyTo === undefined
 								? { kind: "read", status, order: entry.seen + 1 }
 								: { kind: "reply", replyTo, status, order: entry.seen + 1 },
-						),
-					}))
+						);
+						const { pending } = goal;
+						// Gap, CONTRACT.md 8.5 (2937) and 8.6 (2948): the re-read an unconfirmed action takes
+						// is its only answer. Nearest reading: a read already matching the action settles it.
+						const unconfirmed =
+							replyTo === undefined &&
+							pending.tag === "Pending" &&
+							entry.sends.some(
+								(send) =>
+									send.commandId === pending.id && send.tag === "Unconfirmed",
+							);
+						return {
+							...entry,
+							seen: entry.seen + 1,
+							goal: unconfirmed ? recoverGoal(goal).goal : goal,
+						};
+					})
 				)
 					moved.add(event.sessionId);
 			}

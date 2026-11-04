@@ -194,12 +194,16 @@ export const serversHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert a plain chat link",
-		match: /^the link to (\S+) is a plain link$/,
+		// CONTRACT.md 3013-3014: "plain text otherwise", so nothing to click.
+		name: "assert a chat link reads as plain text",
+		match: /^the link to (\S+) is plain text$/,
 		run: async ({ world, match }) => {
-			const link = chatLink(world.page, match[1]);
-			await expect(link).toBeVisible();
-			await expect(link).not.toHaveAttribute("data-server-chip");
+			const text = world.page.locator(
+				`#messages .msg-assistant [data-server-link="${match[1]}"]`,
+			);
+			await expect(text).toHaveText(match[1] ?? "");
+			await expect(text).not.toHaveAttribute("href");
+			await expect(text).not.toHaveAttribute("data-server-chip");
 		},
 	},
 	{

@@ -1286,6 +1286,8 @@ export const CanonicalEvents = {
 					),
 					parentTaskId: Schema.optional(Schema.String),
 					ancestorTaskIds: Schema.optional(Schema.Array(Schema.String)),
+					/** A Codex terminal's cwd, for the PortWatcher's task link (8.7), never shown. */
+					cwd: Schema.optional(Schema.String),
 				}),
 			),
 		}),
