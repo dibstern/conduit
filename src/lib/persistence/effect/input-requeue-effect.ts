@@ -50,10 +50,7 @@ export const requeueFailedSteers = <E>(
 				AND (${sessionId ?? null} IS NULL OR pending.session_id = ${sessionId ?? null})
 				AND (${inputId ?? null} IS NULL OR pending.input_id = ${inputId ?? null})
 				AND NOT EXISTS (SELECT 1 FROM messages WHERE input_id = pending.input_id)
-				AND (SELECT command.status = 'failed' OR (
-						command.status = 'cancelled' AND command.error_code = 'project_inactive'
-						AND EXISTS (SELECT 1 FROM provider_runs run
-							WHERE run.id = command.run_id AND run.session_id = command.session_id AND run.status = 'error'))
+				AND (SELECT command.status = 'failed'
 					FROM provider_command_outbox command
 					WHERE command.command_id = pending.input_id AND command.session_id = pending.session_id
 					AND command.effect_type = 'send_turn' ORDER BY command.request_sequence DESC LIMIT 1)

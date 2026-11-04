@@ -758,7 +758,6 @@ export const makeRunnerSendGate = (options: RunnerSendGateOptions) =>
 						accounts?.deleted.find(({ id }) => id === accountId)?.driver ??
 						(accountId === driver.driverKind ? driver.driverKind : undefined),
 					input.sessionId,
-					false,
 					input,
 				);
 				if (!row) return;

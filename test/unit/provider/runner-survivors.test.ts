@@ -5508,14 +5508,14 @@ it.effect(
 				// A successor attachment snapshots only this session's held sends.
 				// The release must not launch the project-wide recovery scan.
 				expect(scans.mock.calls.slice(before)).toEqual([
-					[f.sql, "claude", expect.any(Function), "s", false, undefined, true],
+					[f.sql, "claude", expect.any(Function), "s", undefined, true],
 				]);
 				expect(
 					yield* f.manager.ownsRetirementCleanupEffect?.("s", "run") ??
 						Effect.die("missing retirement ownership seam"),
 				).toBe(false);
 				expect(scans.mock.calls.slice(before)).toEqual([
-					[f.sql, "claude", expect.any(Function), "s", false, undefined, true],
+					[f.sql, "claude", expect.any(Function), "s", undefined, true],
 				]);
 			}),
 		),

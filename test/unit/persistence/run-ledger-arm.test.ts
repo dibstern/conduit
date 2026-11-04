@@ -42,7 +42,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
-import { Effect, Ref, Scope } from "effect";
+import { Effect, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -61,13 +61,14 @@ import {
 	loadLedgerView,
 	makeRunLedgerArm,
 } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
-import { SessionRollupProjects } from "../../../src/lib/persistence/effect/session-rollup-projects.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
-import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
-import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
+import {
+	type ProjectGate,
+	ProviderSideEffectReactor,
+} from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
@@ -970,10 +971,7 @@ describe("Run Ledger arm", () => {
 										${JSON.stringify({ type: "interrupt_turn", sessionId: `s${index + 1}`, providerProcessId: "p1", stop: null })},
 										'r1', ${index === 0 || index === 3 ? "p1" : null}, 'pending', 0, 1010, 1010)`;
 							const reactor = (
-								isProjectReady?: (
-									projectId: string,
-									sessionId: string,
-								) => Effect.Effect<boolean, ProviderInstanceFailure>,
+								projectGate?: (projectId: string) => Effect.Effect<ProjectGate>,
 							) =>
 								new ProviderSideEffectReactor({
 									sql,
@@ -1001,7 +999,7 @@ describe("Run Ledger arm", () => {
 											endSessionEffect: () => Effect.void,
 										},
 									]),
-									...(isProjectReady ? { isProjectReady } : {}),
+									...(projectGate ? { projectGate } : {}),
 									nowMs: () => 2000,
 								});
 							// Pending-prompt retirement ends c4, bound to the expired process p1.
@@ -1010,24 +1008,12 @@ describe("Run Ledger arm", () => {
 							yield* retire(null, { sessionId: "s4", expiredProcessId: "p1" });
 							// The refusal sweep ends c3, and every ledger row still open.
 							yield* control(2);
-							yield* reactor((_, sessionId) =>
-								Effect.fail(
-									new ProviderInstanceFailure({
-										providerId: "opencode",
-										operation: sessionId,
-										cause: new Error("unavailable"),
-										code: "project_unavailable",
-									}),
-								),
-							).drain();
+							yield* reactor(() => Effect.succeed("removed" as const)).drain();
 							// drain cancels c2, whose project is no longer registered.
 							yield* control(1);
-							const registered = yield* Ref.make<readonly string[]>([
-								"test-project",
-							]);
-							const removedProjectDrain = reactor()
-								.drain()
-								.pipe(Effect.provideService(SessionRollupProjects, registered));
+							const removedProjectDrain = reactor((projectId) =>
+								Effect.succeed(projectId === "gone" ? "removed" : "served"),
+							).drain();
 							yield* removedProjectDrain;
 							// The executor claims c1 and records its success.
 							yield* control(0);
@@ -1080,7 +1066,7 @@ describe("Run Ledger arm", () => {
 				expect(online.controls).toEqual([
 					{ command_id: "c1", status: "completed", attempt_count: 1 },
 					{ command_id: "c2", status: "cancelled", attempt_count: 0 },
-					{ command_id: "c3", status: "failed", attempt_count: 0 },
+					{ command_id: "c3", status: "cancelled", attempt_count: 0 },
 					{ command_id: "c4", status: "cancelled", attempt_count: 0 },
 				]);
 				// 13, 14: one outcome per ended control, in its row's project.
@@ -1100,7 +1086,7 @@ describe("Run Ledger arm", () => {
 						project_id: "test-project",
 						commandId: "c3",
 						transmission: 0,
-						outcome: { tag: "permanent", code: "project_unavailable" },
+						outcome: { tag: "permanent", code: "project_inactive" },
 					},
 					{
 						project_id: "gone",

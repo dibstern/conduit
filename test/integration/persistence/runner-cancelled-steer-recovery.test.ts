@@ -13,7 +13,6 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { requeueFailedSteers } from "../../../src/lib/persistence/effect/input-requeue-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { ProviderInstanceFailure } from "../../../src/lib/provider/errors.js";
 import { ProviderSideEffectReactor } from "../../../src/lib/provider/orchestration-side-effect-reactor.js";
 import { ProviderRegistry } from "../../../src/lib/provider/provider-registry.js";
 import { makeRunnerReceiptStore } from "../../../src/lib/provider/runner/runner-receipts.js";
@@ -112,7 +111,7 @@ it.each([
 					]);
 					yield* sql`INSERT INTO command_receipts(command_id,project_key,session_id,status,created_at) VALUES(${inputId},'project','session','side_effect_failed',1)`;
 					yield* sql`INSERT INTO provider_command_outbox(request_sequence,command_id,project_key,session_id,provider_id,effect_type,payload_json,run_id,status,error_code,attempt_count,requested_at,updated_at)
-					VALUES(${index + 1},${inputId},'project','session','claude','send_turn',${JSON.stringify({ sessionId: "session", inputId, prompt: inputId })},${runId},'cancelled','project_inactive',1,1,1)`;
+					VALUES(${index + 1},${inputId},'project','session','claude','send_turn',${JSON.stringify({ sessionId: "session", inputId, prompt: inputId })},${runId},'running',NULL,1,1,1)`;
 				}
 				const recover = () =>
 					settleUnclaimedRunnerCommands(
@@ -173,8 +172,9 @@ it.each([
 	}
 });
 
-// Real refusal, ingestion and recovery transactions: a surviving runner keeps
-// intake ownership; confirmed loss releases only an unplaced inactive steer.
+// Real gate, ingestion and recovery transactions: a removed project never refuses
+// a claimed steer (CONTRACT 3.11, 1053-1108); a surviving runner keeps intake
+// ownership, and confirmed loss releases only an unplaced steer.
 // Repeated sweeps, an accepted message and a user cancellation must not resend.
 it.each(
 	(["claude", "cursor"] as const).flatMap((driver) =>
@@ -186,7 +186,7 @@ it.each(
 			})),
 		),
 	),
-)("recovers a cancelled native steer after runner loss: $driver $placement alive=$alive", async ({
+)("recovers a removed project's native steer after runner loss: $driver $placement alive=$alive", async ({
 	driver,
 	placement,
 	alive,
@@ -278,20 +278,12 @@ it.each(
 					ingestion,
 					write: commit.write,
 					persistUserMessage: persist.persistUserMessage,
-					isProjectReady: () =>
-						Effect.fail(
-							new ProviderInstanceFailure({
-								providerId: "conduit",
-								operation: "executeCommand",
-								code: "project_inactive",
-								cause: "removed",
-							}),
-						),
+					projectGate: () => Effect.succeed("removed" as const),
 				});
 				yield* reactor.drain();
 				if (placement === "user-cancelled") {
 					// An explicit Stop cancels for interruption, not project refusal.
-					yield* sql`UPDATE provider_command_outbox SET error_code = 'interrupted' WHERE command_id = 'input'`;
+					yield* sql`UPDATE provider_command_outbox SET status = 'cancelled', error_code = 'interrupted' WHERE command_id = 'input'`;
 				}
 				const recover = (claimed: ReadonlySet<string>) =>
 					settleUnclaimedRunnerCommands(
@@ -403,15 +395,14 @@ it.each(
 				}
 				const afterLoss = yield* snapshot();
 				scenarios.push({ driver, placement, alive, beforeLoss, afterLoss });
-				expect(afterLoss.settlements).toEqual([{ command_id: "input" }]);
+				// A cancelled steer is no runner candidate; only runner loss settles a running one.
+				expect(afterLoss.settlements).toEqual(
+					placement === "user-cancelled" ? [] : [{ command_id: "input" }],
+				);
 				expect(afterLoss.commands).toEqual([
-					{
-						status: "cancelled",
-						error_code:
-							placement === "user-cancelled"
-								? "interrupted"
-								: "project_inactive",
-					},
+					placement === "user-cancelled"
+						? { status: "cancelled", error_code: "interrupted" }
+						: { status: "failed", error_code: "runner_stopped" },
 				]);
 				expect(afterLoss.runs).toEqual([{ status: "error" }]);
 				expect(afterLoss.inputs).toEqual([
@@ -465,7 +456,9 @@ it.each(
 					).toHaveLength(1);
 					expect(
 						yield* sql`SELECT command_id FROM receipt_settlements`,
-					).toEqual([{ command_id: "input" }]);
+					).toEqual(
+						placement === "user-cancelled" ? [] : [{ command_id: "input" }],
+					);
 				}),
 			);
 		}

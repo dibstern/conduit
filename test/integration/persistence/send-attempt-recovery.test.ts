@@ -106,17 +106,10 @@ it.each([
 					registry,
 					write: commit.write,
 					ingestion,
-					isProjectReady: () =>
+					projectGate: () =>
 						removed
-							? Effect.fail(
-									new ProviderInstanceFailure({
-										providerId: "conduit",
-										operation: "executeCommand",
-										code: "project_inactive",
-										cause: "Project removed",
-									}),
-								)
-							: Effect.succeed(true),
+							? Effect.succeed("removed" as const)
+							: Effect.succeed("served" as const),
 				});
 				const worker = yield* Effect.forkChild(reactor.drain());
 				yield* Deferred.await(entered).pipe(Effect.timeout("3 seconds"));
@@ -132,25 +125,12 @@ it.each([
 				for (let index = 0; index < 3; index++) yield* reactor.drain();
 				const released =
 					yield* sql`SELECT status, error_code, attempt_count, run_id, payload_json FROM provider_command_outbox`;
-				if (settlement === "removed") {
-					expect(released).toEqual([
-						{
-							...claimed[0],
-							status: "cancelled",
-							error_code: "project_inactive",
-						},
-					]);
-					expect(
-						yield* sql`SELECT status, error_code FROM command_receipts`,
-					).toEqual([
-						{ status: "side_effect_failed", error_code: "project_inactive" },
-					]);
-				} else {
-					expect(released).toEqual([{ ...claimed[0], error_code: null }]);
-					expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
-						{ status: "side_effect_requested" },
-					]);
-				}
+				// A claimed send is never refused, even once its project is removed
+				// (CONTRACT 3.11, 1053-1108); runner loss ends it.
+				expect(released).toEqual([{ ...claimed[0], error_code: null }]);
+				expect(yield* sql`SELECT status FROM command_receipts`).toEqual([
+					{ status: "side_effect_requested" },
+				]);
 				yield* Fiber.join(worker).pipe(Effect.timeout("1 second"));
 				expect(
 					yield* sql`SELECT type FROM events WHERE type = 'turn.error'`,
@@ -172,7 +152,8 @@ it.each([
 							{ runId: "run" },
 						),
 					);
-				} else if (settlement === "runner lost") {
+				} else {
+					// Removal's own Stop loses the runner; that loss ends the run.
 					yield* settleUnclaimedRunnerCommands(
 						sql,
 						new Set(),
@@ -208,18 +189,9 @@ it.each([
 					yield* sql`SELECT status, error_code, attempt_count FROM provider_command_outbox`;
 				expect(final).toEqual([
 					{
-						status:
-							settlement === "removed"
-								? "cancelled"
-								: settlement === "runner lost"
-									? "failed"
-									: "completed",
+						status: settlement === "recovered intake" ? "completed" : "failed",
 						error_code:
-							settlement === "removed"
-								? "project_inactive"
-								: settlement === "runner lost"
-									? "runner_stopped"
-									: null,
+							settlement === "recovered intake" ? null : "runner_stopped",
 						attempt_count: 1,
 					},
 				]);
@@ -423,7 +395,7 @@ it.each([
 							snapshot: yield* new CommandReadModelRepository(sql).bootstrap(),
 							now: () => Date.now(),
 							generateId: () => crypto.randomUUID(),
-							isProjectReady: () => Effect.succeed(true),
+							projectGate: () => Effect.succeed("served" as const),
 						},
 					});
 					yield* Effect.addFinalizer(() => engine.shutdownEffect());

@@ -706,7 +706,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 															? driver.driverKind
 															: undefined),
 													sessionId,
-													false,
 													undefined,
 													true,
 												);
@@ -1266,7 +1265,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 											? driver.driverKind
 											: undefined),
 									sessionId,
-									false,
 									undefined,
 									true,
 								);
