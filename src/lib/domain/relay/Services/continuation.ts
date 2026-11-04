@@ -43,6 +43,7 @@ import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -383,8 +384,9 @@ export const makeContinuation = Effect.gen(function* () {
 						(!ownRequest && requesting.has(sessionId)) ||
 						(!policy &&
 							options.at === undefined &&
-							(session.status === "busy" ||
-								session.status === "retry" ||
+							// 8.1: the foreground is the ledger's active Run; gap review 1B: a foreground
+							// action, so background work never blocks it.
+							((yield* loadLedgerView(sessionId))?.active !== undefined ||
 								(yield* hasActiveProcessingTimeout(sessionId))))
 					)
 						return yield* new SessionBusy({ sessionId });

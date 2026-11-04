@@ -1,4 +1,5 @@
 import type { SessionActivity } from "../../src/lib/domain/daemon/Services/session-activity.js";
+import { canonicalEvent } from "../../src/lib/persistence/events.js";
 import type { BackgroundTaskTransition } from "../../src/lib/provider/claude/claude-event-translator.js";
 import {
 	type ActivityOf,
@@ -96,3 +97,23 @@ export const activityFrom =
 			prompts,
 		});
 	};
+
+/**
+ * The events that leave the Run Ledger holding an active Run for `sessionId` once committed
+ * (admitted, sent, requested): what a busy row stood for before 82tn.32.30.
+ */
+export const activeRunEvents = (sessionId: string, inputId = "ledger-u1") => [
+	canonicalEvent("input.admitted", sessionId, {
+		sessionId,
+		inputId,
+		delivery: "queue",
+		request: { text: "hi", images: [] },
+	}),
+	canonicalEvent("input.sent", sessionId, { sessionId, inputId }),
+	canonicalEvent(
+		"run.requested",
+		sessionId,
+		{ runId: `${inputId}-run`, inputId },
+		{ metadata: { runId: `${inputId}-run` } },
+	),
+];

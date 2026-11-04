@@ -289,6 +289,93 @@ describe("Session activity over a Claude background shell and its wake", () => {
 		expect(done()).toEqual([{ sessionId, afterTheWake: true }]);
 	});
 
+	// 32, 33. Rewind is a foreground action (gap review 1B): refused while the user turn or
+	// Claude's wake runs, let through while only the shell runs.
+	it("refuses rewind while the turn runs and allows it while only the shell runs", async () => {
+		const name =
+			"refuses rewind while the turn runs and allows it while only the shell runs";
+		const fixture = await ProcessHarness.start({
+			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			claudeReplay: { turns: ["background-shell-turn"] },
+		});
+		harness = fixture;
+		const browser = await fixture.connect();
+		await browser.followSessions();
+		const sessionId = await browser.createSession("Rewind beside a shell");
+		const hold = join(fixture.root, "claude-replay-hold");
+		const steps: Record<string, unknown>[] = [];
+		proof[name] = { sessionId, steps };
+		const holdAt = (message: number, id: number) =>
+			writeFileSync(hold, JSON.stringify({ turn: 1, message, id }));
+		const reached = async (id: number) => {
+			// test-waits-allow polling: the held replay line reports only through this file.
+			await vi.waitFor(
+				() =>
+					expect(
+						existsSync(`${hold}.reached`)
+							? readFileSync(`${hold}.reached`, "utf8")
+									.split("\n")
+									.filter(Boolean).length
+							: 0,
+					).toBe(id),
+				{ timeout: 10_000 },
+			);
+		};
+		const rewind = async (label: string) => {
+			const messageId = (await browser.history(sessionId)).find(
+				(message) => message.role === "user",
+			)?.id;
+			const result = await fixture
+				.requestRpc({
+					_tag: "RewindSession",
+					sessionId,
+					messageId: String(messageId),
+				})
+				.then(
+					() => "rewound",
+					(error: unknown) => String(error),
+				);
+			const undo =
+				result === "rewound"
+					? await fixture.requestRpc({ _tag: "UndoRewind", sessionId }).then(
+							() => "undone",
+							(error: unknown) => String(error),
+						)
+					: undefined;
+			steps.push({
+				label,
+				activity: latest(browser, sessionId)["shell"]?.["activity"] ?? null,
+				result,
+				...(undo === undefined ? {} : { undo }),
+			});
+			return { result, undo };
+		};
+		holdAt(84, 1);
+		browser.send(sessionId, "Run sleep 8 in the background").catch(() => {});
+		await reached(1);
+		const during = await rewind("the user turn, its shell started");
+		holdAt(85, 2);
+		await reached(2);
+		// test-waits-allow polling: rows are coalesced up to a second after the change.
+		await vi.waitFor(
+			() =>
+				expect(latest(browser, sessionId)["shell"]?.["activity"]).toMatchObject(
+					{ foreground: "idle", background: "work" },
+				),
+			{ timeout: 5_000 },
+		);
+		const beside = await rewind(
+			"after the turn's result, the shell still running",
+		);
+		holdAt(153, 3);
+		await reached(3);
+		const wake = await rewind("Claude's wake turn");
+		rmSync(hold);
+		expect(during.result).toMatch(/Stop the current turn/);
+		expect(beside).toEqual({ result: "rewound", undo: "undone" });
+		expect(wake.result).toMatch(/Stop the current turn/);
+	});
+
 	// 30. The session's own family row lags its sidebar row, so a reader that takes the family row
 	// shows an old goal phase (lane 3226: the last family row read queued by Claude while the
 	// sidebar read Cleared).

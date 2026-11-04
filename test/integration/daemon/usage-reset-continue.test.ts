@@ -47,6 +47,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -326,12 +327,7 @@ it.effect("keeps the sign-in refusal for a signed-out account", () =>
 it.effect("keeps the busy refusal without sending or changing recovery", () =>
 	withFixture((value) =>
 		Effect.gen(function* () {
-			yield* value.commit([
-				canonicalEvent("session.status", "s1", {
-					sessionId: "s1",
-					status: "busy",
-				}),
-			]);
+			yield* value.commit(activeRunEvents("s1"));
 			const before = yield* value.store.readAllBySession("s1");
 			expect(yield* value.continue.pipe(Effect.result)).toMatchObject({
 				_tag: "Failure",

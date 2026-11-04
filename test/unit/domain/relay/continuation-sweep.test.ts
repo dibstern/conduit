@@ -97,6 +97,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../../src/lib/provider/provider-registry.js";
+import { activeRunEvents } from "../../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -904,11 +905,7 @@ for (const schedule of [
 									messageId: "busy-input",
 									role: "user",
 								}),
-								...acceptRun("s1", "busy-input", "busy-run"),
-								canonicalEvent("session.status", "s1", {
-									sessionId: "s1",
-									status: "busy",
-								}),
+								...activeRunEvents("s1", "busy-input"),
 							]);
 						if (schedule === "stopped")
 							yield* fixture.commit([
@@ -1002,7 +999,7 @@ for (const schedule of [
 									"turn.completed",
 									"s1",
 									{ messageId: "" },
-									{ provider: "claude", metadata: { runId: "busy-run" } },
+									{ provider: "claude", metadata: { runId: "busy-input-run" } },
 								),
 								canonicalEvent("session.status", "s1", {
 									sessionId: "s1",
@@ -1160,7 +1157,7 @@ for (const scenario of [
 						break;
 					case "busy":
 					case "retry":
-						yield* sql`UPDATE sessions SET status = ${scenario} WHERE id = 's1'`;
+						yield* commit(activeRunEvents("s1"));
 						break;
 					case "processing":
 						yield* startProcessingTimeout("s1", "1 minute", () => Effect.void);
@@ -1195,7 +1192,7 @@ for (const scenario of [
 										yield* newerTurn;
 										break;
 									case "busy-during-probe":
-										yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`;
+										yield* commit(activeRunEvents("s1"));
 										break;
 									case "account-during-probe":
 										yield* sql`UPDATE sessions SET provider = 'other' WHERE id = 's1'`;
@@ -1362,11 +1359,7 @@ for (const scenario of [
 							messageId: "u2",
 							role: "user",
 						}),
-					]).pipe(
-						Effect.andThen(
-							sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`,
-						),
-					);
+					]).pipe(Effect.andThen(commit(activeRunEvents("s1"))));
 					if (
 						[
 							"auto-turn",
@@ -1673,8 +1666,8 @@ it("a cancelled invalid due row does not prevent another due row from resuming",
 	const dispatched: string[] = [];
 	await Effect.runPromise(
 		Effect.gen(function* () {
-			const { commit, sql, read, continuation } = yield* seed();
-			yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`;
+			const { commit, read, continuation } = yield* seed();
+			yield* commit(activeRunEvents("s1"));
 			yield* commit([
 				canonicalEvent("session.created", "s2", {
 					sessionId: "s2",

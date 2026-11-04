@@ -28,9 +28,23 @@
 			}
 		},
 		{
-			"type": "session.status",
+			"type": "input.admitted",
 			"payload": {
-				"status": "busy"
+				"delivery": "queue",
+				"request": {
+					"text": "hi",
+					"images": []
+				}
+			}
+		},
+		{
+			"type": "input.sent",
+			"payload": {}
+		},
+		{
+			"type": "run.requested",
+			"payload": {
+				"runId": "ledger-u1-run"
 			}
 		}
 	],

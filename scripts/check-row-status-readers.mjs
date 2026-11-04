@@ -28,8 +28,6 @@ const allowed = {
 	"src/lib/session-busy.ts": "to move",
 	"src/lib/relay/monitoring-reducer.ts": "to move",
 	"src/lib/domain/relay/Services/session-status-poller.ts": "to move",
-	"src/lib/domain/relay/Services/session-rewind.ts": "to move",
-	"src/lib/domain/relay/Services/continuation.ts": "to move",
 	"src/lib/session/auto-archive-policy.ts": "to move",
 	"src/lib/session/auto-archive-sweep.ts": "to move",
 	"src/lib/session/auto-delete-archived-sweep.ts": "to move",
