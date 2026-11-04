@@ -527,6 +527,17 @@ export interface ProviderInstance {
 		control?: ProviderControlContext,
 	): Effect.Effect<void, ProviderInstanceFailure>;
 
+	/**
+	 * Deliver a native command (8.5), named by its commandId: at once, never held behind a turn and
+	 * never a chat message. Absent when the provider has no native commands.
+	 */
+	readonly sendNativeCommandEffect?: (
+		sessionId: string,
+		commandId: string,
+		text: string,
+		call?: ProviderCall,
+	) => Effect.Effect<void, ProviderInstanceFailure>;
+
 	/** Stop a background task while leaving the query and its input queue live. */
 	readonly stopTaskEffect?: (
 		sessionId: string,

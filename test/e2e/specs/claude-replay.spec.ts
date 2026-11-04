@@ -2063,65 +2063,6 @@ test.describe("Claude replay lane", () => {
 				]);
 				await expect(s.chat.userMessages).toHaveText([/\bAlpha\b/]);
 			});
-
-			test.describe("a steered slash command", () => {
-				test.use({
-					claudeReplay: {
-						turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
-						delayMs: 300,
-						holdBefore: { turn: 1, message: 6 },
-					},
-				});
-				test("interrupts the running turn and runs as its own input", async ({
-					page,
-					relayUrl,
-					harness,
-				}, testInfo) => {
-					test.setTimeout(60_000);
-					const s = await open(page, relayUrl, harness);
-					await s.app.sendMessage("Alpha");
-					await expect(s.chat.stopBtn).toBeVisible();
-					await expect.poll(() => countEvents(s.dbPath, "run.started")).toBe(1);
-					const input = page.locator("#input");
-					await input.fill("/compact");
-					await expect(page.locator("#send")).toHaveAttribute(
-						"title",
-						/stop the turn and run it/,
-					);
-					await input.press("ControlOrMeta+Enter");
-					await expect(input).toHaveValue("");
-
-					await expect
-						.poll(() => countEvents(s.dbPath, "input.interrupt_requested"))
-						.toBe(1);
-					await expect
-						.poll(() => countEvents(s.dbPath, "turn.interrupted"))
-						.toBe(1);
-					await expect.poll(s.turnEnds).toBe(2);
-					await s.chat.waitForStreamingComplete();
-					const proof = ledger(s.dbPath, s.sessionId);
-					await testInfo.attach("composer-steer-slash-interrupt-proof.json", {
-						body: JSON.stringify({ sends: s.sends, ...proof }, null, 2),
-						contentType: "application/json",
-					});
-
-					await expect(page.getByTestId("composer-steer-refused")).toHaveCount(
-						0,
-					);
-					expect(s.sends.map((send) => [send.text, send.delivery])).toEqual([
-						["Alpha", "queue"],
-						["/compact", "steer"],
-					]);
-					expect(proof.outbox).toEqual(s.sends.map((send) => send.commandId));
-					expect(proof.userMessages.map((message) => message.steered)).toEqual([
-						0, 0,
-					]);
-					await expect(s.chat.userMessages).toHaveText([
-						/\bAlpha\b/,
-						/\$compact\b/,
-					]);
-				});
-			});
 		});
 	});
 

@@ -407,6 +407,10 @@ export const ClaudeSDKAssistantMessageSchema = Schema.Struct({
 	),
 	parent_tool_use_id: Schema.NullOr(Schema.String),
 	error: Schema.optional(ClaudeSDKAssistantMessageErrorSchema),
+	/** The CLI marks a local command's synthetic reply; the SDK types omit it. */
+	local_command_run: Schema.optional(
+		Schema.Struct({ command: Schema.String, args: Schema.String }),
+	),
 	...ClaudeUuidSessionFields,
 });
 

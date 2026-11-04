@@ -62,6 +62,8 @@ export const PROVIDER_RUNTIME_EVENT_TYPES = [
 	"evidence.turn_ended",
 	// A Claude runner's background task set (CONTRACT 8.2, 8.3); the daemon stamps its label.
 	"evidence.tasks_snapshot",
+	// A native command's receipts (CONTRACT 8.5, D61); the daemon stamps their label.
+	"evidence.command_receipt",
 ] as const;
 
 export const ProviderRuntimeEventTypeSchema = Schema.Literals([

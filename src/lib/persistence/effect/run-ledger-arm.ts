@@ -91,6 +91,11 @@ export const ledgerAlarmWakes = new WeakMap<
 	Set<() => void>
 >();
 const alarmWakeKey = Symbol("run-ledger-alarm-wake");
+/** SessionActivity's wakes for a committed change of a session's native command view (8.5). */
+export const ledgerNativeCommandsWakes = new WeakMap<
+	SqlClient.SqlClient,
+	Set<(sessionId: string, commands: LedgerView["nativeCommands"]) => void>
+>();
 type TasksSnapshot = {
 	readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
 	readonly at: number;
@@ -460,6 +465,27 @@ const commandFor = (
 					verb: "control",
 					control: { kind: "stop_tasks", tasks: event.data.tasks },
 				};
+			case "native_command.requested": {
+				const commandId = event.metadata.commandId;
+				if (commandId === undefined) return undefined;
+				return {
+					verb: "control",
+					control: { kind: "native_command", commandId, text: event.data.text },
+				};
+			}
+			case "evidence.command_receipt":
+				// D61: a native command's receipts are unsolicited, by its commandId.
+				return {
+					verb: "observe",
+					observation: {
+						tag: "Unsolicited",
+						label: event.data.label,
+						eventId: event.eventId,
+						kind: "command_lifecycle",
+						commandId: event.data.commandId,
+						state: event.data.state,
+					},
+				};
 			case "evidence.process_started":
 				return {
 					verb: "settle",
@@ -700,6 +726,7 @@ const HANDLES = [
 	"interrupt.requested",
 	"session.end_requested",
 	"tasks.stop_requested",
+	"native_command.requested",
 	"evidence.process_started",
 	"evidence.process_lost",
 	"evidence.alarm_fired",
@@ -707,6 +734,7 @@ const HANDLES = [
 	"evidence.probe_result",
 	"evidence.turn_started",
 	"evidence.turn_ended",
+	"evidence.command_receipt",
 	"evidence.tasks_snapshot",
 	"evidence.interaction_resolved",
 	"evidence.delivery_indeterminate",
@@ -851,6 +879,17 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					wakeAfterCommit(sql, alarmWakeKey, ledgerAlarmWakes);
 				const view = viewLedger(state);
 				const before = viewLedger(ledger.state);
+				if (
+					JSON.stringify(view.nativeCommands) !==
+					JSON.stringify(before.nativeCommands)
+				)
+					queuePendingWrite(sql, `run-ledger-commands:${event.sessionId}`, {
+						apply: Effect.void,
+						committed: () => {
+							for (const wake of ledgerNativeCommandsWakes.get(sql) ?? [])
+								wake(event.sessionId, view.nativeCommands);
+						},
+					});
 				if (event.type === "evidence.tasks_snapshot")
 					handOver(view, { tasks: event.data.tasks, at: event.createdAt });
 				else if (!handedOver.has(event.sessionId))

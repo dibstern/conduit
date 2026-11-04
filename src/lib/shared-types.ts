@@ -22,6 +22,7 @@ export type {
 } from "./contracts/session-workspace.js";
 
 import {
+	GoalActionSchema,
 	SessionGoalChangedPayloadSchema,
 	type ToolFileChange,
 } from "./contracts/stored-event.js";
@@ -359,6 +360,28 @@ export const GoalStuckSchema = Schema.Struct({
 });
 export type GoalStuck = typeof GoalStuckSchema.Type;
 
+/** The goal tracker's derived phase (8.1, 8.5): a pending action and its send, or a failed one. */
+export const GoalPhaseSchema = Schema.Union([
+	Schema.Struct({
+		tag: Schema.Literal("Confirmed"),
+		status: Schema.Union([
+			Schema.Struct({
+				tag: Schema.Literals(["Active", "Paused", "Limited", "Met"]),
+				condition: Schema.String,
+			}),
+			Schema.Struct({ tag: Schema.Literal("Cleared") }),
+		]),
+		failed: Schema.optional(
+			Schema.Struct({ action: GoalActionSchema, code: Schema.String }),
+		),
+	}),
+	Schema.Struct({
+		tag: Schema.Literal("Pending"),
+		action: GoalActionSchema,
+		send: Schema.Literals(["Sent", "Queued", "Unconfirmed"]),
+	}),
+]);
+
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
@@ -376,6 +399,8 @@ export const SessionInfoSchema = Schema.Struct({
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
+	/** Present only while a goal action is pending or its send failed. */
+	goalPhase: Schema.optional(GoalPhaseSchema),
 	/** The current goal's stuck run, derived by code from its checks; absent when the latest checks are not repeating one blocker, and for met or cleared goals. */
 	goalStuck: Schema.optional(GoalStuckSchema),
 	limitRecovery: Schema.optional(Schema.NullOr(LimitRecoverySchema)),

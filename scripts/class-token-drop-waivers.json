@@ -1335,5 +1335,7 @@
 	"src/lib/frontend/components/layout/SessionBar.svelte :: grid-cols-4": {
 		"renamedTo": "auto-cols-[calc((100%-24px)/4)]",
 		"reason": "conduit-test-82tn.32.33.4 lets a fifth view card (Servers) scroll at the same four-across card size instead of squeezing five into the row."
-	}
+	},
+	"src/lib/frontend/components/input/InputArea.svelte :: gap-[7px],pb-[9px]": "conduit-test-82tn.32.26 deletes the composer's Checking goal line: nothing observes a goal check, so no phase can show it.",
+	"src/lib/frontend/components/layout/SessionBar.svelte :: mt-[2px],text-status-goal": "conduit-test-82tn.32.26 deletes the Checking goal label and history row: nothing observes a goal check, so no phase can show them."
 }

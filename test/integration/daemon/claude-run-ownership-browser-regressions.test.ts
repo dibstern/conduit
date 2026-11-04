@@ -489,74 +489,63 @@ describe("Claude browser run-ownership guarantees through the daemon", () => {
 		);
 	}, 45_000);
 
-	it("a steered slash interrupts the running input once and completes on its own run", async () => {
-		proof = { case: "steered-slash-interrupt", outcome: "failed" };
+	// CONTRACT.md 8.1 (2740): the busy-slash hold is deleted, so a steered slash is a steer.
+	it("a steered slash joins the running turn like any steer and stops nothing", async () => {
+		proof = { case: "steered-slash-joins", outcome: "failed" };
 		cases.push(proof);
 		const fixture = await ProcessHarness.start({
 			dist: "dist",
-			claudeReplay: {
-				turns: ["pong-thinking-text-turn", "pong-thinking-text-turn"],
-				delayMs: 300,
-			},
+			claudeReplay: { turns: ["two-steers-one-boundary"], delayMs: 100 },
 		});
 		harness = fixture;
 		const browser = await fixture.connect();
-		sessionId = await browser.createSession("Slash interrupts its predecessor");
+		sessionId = await browser.createSession("A slash steer joins its turn");
 		await browser.followSession(sessionId);
 		const alpha = await submit(browser, sessionId, "Alpha");
-		await vi.waitFor(
-			() => expect(ledger(fixture, sessionId).runs[0]?.status).toBe("running"),
-			{ timeout: 10_000 },
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["sessionId"] === sessionId &&
+				JSON.stringify(message["parts"]).includes("Bash"),
 		);
 		const slash = await submit(browser, sessionId, "/compact", "steer");
+		const charlie = await submit(browser, sessionId, "Charlie", "steer");
 		await vi.waitFor(
-			() => {
-				const state = ledger(fixture, sessionId);
-				expect(state.turns.map(({ id, state }) => ({ id, state }))).toEqual([
-					{ id: alpha, state: "interrupted" },
-					{ id: slash, state: "completed" },
-				]);
-				expect(state.turns.map(({ run_id }) => run_id)).toEqual(
-					state.runs.map(({ id }) => id),
-				);
+			() =>
 				expect(
-					state.events.filter(
-						({ type }) => type === "input.interrupt_requested",
-					),
-				).toHaveLength(1);
-				expect(
-					state.events.filter(({ type }) => type === "turn.interrupted"),
-				).toHaveLength(1);
-				expect(
-					state.events.filter(({ type }) => type === "turn.completed"),
-				).toHaveLength(1);
-				expect(
-					state.events
-						.filter(({ type }) => type === "input.sent")
-						.map(({ data }) => data["inputId"]),
-				).toEqual([alpha, slash]);
-				expect(state.runs.map(({ status }) => status)).toEqual([
-					"interrupted",
-					"completed",
-				]);
-				expect(state.commands.map(({ status }) => status)).toEqual([
-					"failed",
-					"completed",
-				]);
-				expect(
-					state.events
-						.filter(({ type }) =>
-							["turn.completed", "turn.interrupted", "turn.error"].includes(
-								type,
-							),
-						)
-						.map(({ type, metadata }) => ({ type, runId: metadata["runId"] })),
+					ledger(fixture, sessionId).turns.map(({ id, state }) => ({
+						id,
+						state,
+					})),
 				).toEqual([
-					{ type: "turn.interrupted", runId: state.runs[0]?.id },
-					{ type: "turn.completed", runId: state.runs[1]?.id },
-				]);
-			},
+					{ id: alpha, state: "completed" },
+					{ id: slash, state: "completed" },
+					{ id: charlie, state: "completed" },
+				]),
 			{ timeout: 20_000 },
 		);
+		const state = ledger(fixture, sessionId);
+		expect(
+			state.events
+				.filter(({ type }) => type === "input.sent")
+				.map(({ data }) => ({
+					inputId: data["inputId"],
+					steer: data["steer"],
+				})),
+		).toEqual([
+			{ inputId: alpha, steer: undefined },
+			{ inputId: slash, steer: true },
+			{ inputId: charlie, steer: true },
+		]);
+		expect(
+			state.events.filter(({ type }) =>
+				["input.interrupt_requested", "turn.interrupted"].includes(type),
+			),
+		).toEqual([]);
+		expect(state.runs.map(({ status }) => status)).toEqual([
+			"completed",
+			"joined",
+			"joined",
+		]);
 	}, 45_000);
 });

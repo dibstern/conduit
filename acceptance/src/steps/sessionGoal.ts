@@ -64,8 +64,8 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "goal check is running",
-		match: /^the goal check is running$/,
+		name: "goal idle before its next check result",
+		match: /^the goal is idle before its next check result$/,
 		run: async ({ world }) => {
 			const previous = goals.get(world.page);
 			if (!previous?.goal) throw new Error("No goal was set");
@@ -144,6 +144,137 @@ export const sessionGoalHandlers: StepHandler[] = [
 				type: "session.goal_changed",
 				...facts,
 			});
+		},
+	},
+	{
+		name: "session reports the goal action's send",
+		match:
+			/^the session reports the goal (clear|set to .+) (Sent|Queued|Unconfirmed|failed)$/,
+		run: async ({ world, match }) => {
+			const facts = goals.get(world.page);
+			if (!facts?.goal) throw new Error("No goal was set");
+			const action = match[1]?.startsWith("set to ")
+				? { kind: "set", condition: match[1].slice("set to ".length) }
+				: { kind: "clear" };
+			const goalPhase =
+				match[2] === "failed"
+					? {
+							tag: "Confirmed",
+							status: { tag: "Active", condition: facts.goal.condition },
+							failed: { action, code: "delivery_failed" },
+						}
+					: { tag: "Pending", action, send: match[2] };
+			setSessionRowStatus(world.page, facts.sessionId, "busy", {
+				goalState: facts,
+				goalPhase,
+			});
+		},
+	},
+	{
+		name: "Claude confirms the goal clear",
+		match: /^Claude confirms the goal clear$/,
+		run: async ({ world }) => {
+			const previous = goals.get(world.page);
+			if (!previous) throw new Error("No goal was set");
+			const facts: SessionGoalChangedPayload = {
+				sessionId: previous.sessionId,
+				goal: null,
+				ended: "cleared",
+				...(previous.goal ? { endedGoal: previous.goal } : {}),
+				endedAt: await world.page.evaluate(() => Date.now()),
+			};
+			goals.set(world.page, facts);
+			setSessionRowStatus(world.page, facts.sessionId, "idle", {
+				goalState: facts,
+				goalPhase: undefined,
+			});
+			requireRelayControl(world.page).sendMessage({
+				type: "session.goal_changed",
+				...facts,
+			});
+		},
+	},
+	{
+		name: "assert pending goal bar",
+		match: /^the pending goal bar reads (.+?)(?: and offers (Stop|Retry))?$/,
+		run: async ({ world, match }) => {
+			const bar = world.page.getByTestId("composer-goal-pending");
+			await expect(bar.getByTestId("composer-goal-pending-text")).toHaveText(
+				match[1] ?? "",
+			);
+			const offered = bar.getByRole("button", {
+				name: match[2] ?? "",
+				exact: true,
+			});
+			if (match[2]) await expect(offered).toBeVisible();
+			for (const other of ["Stop", "Retry"].filter((name) => name !== match[2]))
+				await expect(
+					bar.getByRole("button", { name: other, exact: true }),
+				).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert pending goal bar absent",
+		match: /^the pending goal bar is not rendered$/,
+		run: async ({ world }) => {
+			await expect(world.page.getByTestId("composer-goal-pending")).toHaveCount(
+				0,
+			);
+		},
+	},
+	{
+		name: "press pending goal bar action",
+		match: /^I press (Stop|Retry) in the pending goal bar$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByTestId("composer-goal-pending")
+				.getByRole("button", { name: match[1] ?? "", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert goal browser action",
+		match:
+			/^the mock relay received (\d+) (SetGoal|ClearGoal) actions?(?: for (.+))? with distinct command ids and no goal chat message$/,
+		run: async ({ world, match }) => {
+			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
+			const rpc = requireRpcControl(world.page);
+			const count = Number(match[1]);
+			const actions = () =>
+				rpc.getRequests().filter((request) => request.tag === match[2]);
+			await expect.poll(() => actions().length).toBe(count);
+			for (const { payload } of actions()) {
+				expect(payload["sessionId"]).toBe(sessionId);
+				if (match[3]) expect(payload["condition"]).toBe(match[3]);
+			}
+			expect(
+				new Set(actions().map(({ payload }) => payload["commandId"])).size,
+			).toBe(count);
+			expect(
+				rpc
+					.getRequests()
+					.filter(
+						({ tag, payload }) =>
+							tag === "input.submit" &&
+							/^[/$]goal\b/.test(String(payload["text"])),
+					),
+			).toEqual([]);
+		},
+	},
+	{
+		name: "assert stop without a goal action",
+		match: /^the mock relay received a stop and no further goal action$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			const before = rpc
+				.getRequests()
+				.filter(({ tag }) => tag === "SetGoal" || tag === "ClearGoal").length;
+			await rpc.waitForRequest(({ tag }) => tag === "CancelSession");
+			expect(
+				rpc
+					.getRequests()
+					.filter(({ tag }) => tag === "SetGoal" || tag === "ClearGoal"),
+			).toHaveLength(before);
 		},
 	},
 	{
@@ -227,22 +358,25 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "assert session goal running glyph",
-		match: /^the session goal subtitle has a running glyph$/,
+		name: "assert session goal has no running glyph",
+		match: /^the session goal subtitle has no running glyph$/,
 		run: async ({ world }) => {
-			const glyph = world.page
-				.getByTestId("session-goal-subtitle")
-				.locator('[data-flow-glyph="running"]');
-			await expect(glyph).toBeVisible();
-			const packet = glyph.locator("[data-flow-packet]");
-			await expect(packet).toBeVisible();
-			const reducedMotion = await world.page.evaluate(
-				() => matchMedia("(prefers-reduced-motion: reduce)").matches,
-			);
-			await expect(packet).toHaveCSS(
-				"animation-name",
-				reducedMotion ? "none" : /flow/,
-			);
+			await expect(
+				world.page.getByTestId("session-goal-subtitle"),
+			).toBeVisible();
+			await expect(
+				world.page
+					.getByTestId("session-goal-subtitle")
+					.locator('[data-flow-glyph="running"]'),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert composer has no checking goal line",
+		match: /^the composer shows no checking goal line$/,
+		run: async ({ world }) => {
+			await expect(world.page.locator("#input")).toBeVisible();
+			await expect(world.page.getByText("Checking goal")).toHaveCount(0);
 		},
 	},
 	{
@@ -348,21 +482,6 @@ export const sessionGoalHandlers: StepHandler[] = [
 				.getByTestId("composer-goal-cleared")
 				.getByRole("button", { name: "Undo", exact: true })
 				.click();
-		},
-	},
-	{
-		name: "assert sent goal command",
-		match:
-			/^the mock relay received the goal message (\/goal .+) for the current session$/,
-		run: async ({ world, match }) => {
-			const request = await requireRpcControl(world.page).waitForRequest(
-				(request) =>
-					request.tag === "input.submit" &&
-					request.payload["text"] === match[1],
-			);
-			expect(request.payload["sessionId"]).toBe(
-				new URL(world.page.url()).pathname.split("/")[2],
-			);
 		},
 	},
 	{

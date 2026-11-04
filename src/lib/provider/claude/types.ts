@@ -323,6 +323,10 @@ export interface ClaudeSessionContext {
 	turnInFlight?: boolean;
 	/** A wake's turnInFlight is set: its turn_started is reported, its turn_ended not yet (2.1 row 215). */
 	wakeTurn?: boolean;
+	/** Native commands (8.5) sent into this query and not yet answered by their result. */
+	nativeCommandIds?: Set<string>;
+	/** A native command's synthetic reply, held until its zero-turn result names the input. */
+	nativeReply?: SDKMessage | undefined;
 	/** Number of live tasks in the latest filtered SDK snapshot, including monitors. */
 	liveBackgroundTaskCount?: number;
 	/** Input whose Stop kept the query live for background tasks or a pending steer. */

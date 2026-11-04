@@ -1077,29 +1077,6 @@ function setupGoal(
 	};
 }
 
-export const GoalChecking: Story = {
-	beforeEach: () => setupGoal("checking"),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(
-			canvas.getByTestId("composer-checking-goal"),
-		).toHaveTextContent("Checking goal");
-		await expect(
-			canvas
-				.getByTestId("composer-checking-goal")
-				.querySelector('[data-flow-glyph="running"]'),
-		).toBeVisible();
-		await expect(
-			canvas.queryByTestId("composer-status-elapsed"),
-		).not.toBeInTheDocument();
-		// The line above names the check; the box keeps its goal outline.
-		await expect(canvasElement.querySelector("#input-row")).toHaveAttribute(
-			"data-goal",
-			"solid",
-		);
-	},
-};
-
 export const GoalNotYetWorking: Story = {
 	beforeEach: () => setupGoal("not_yet"),
 	play: async ({ canvasElement }) => {
@@ -1180,10 +1157,6 @@ export const GoalCleared: Story = {
 	},
 };
 
-export const GoalCheckingLight: Story = {
-	...GoalChecking,
-	globals: { theme: "light" },
-};
 export const GoalNotYetWorkingLight: Story = {
 	...GoalNotYetWorking,
 	globals: { theme: "light" },
@@ -1424,13 +1397,20 @@ function narrowComposer(
 	width: number,
 	mode: "reply" | "goal" | "limited" = "reply",
 ): Story {
+	// A Claude goal draft is a browser goal action, not a chat send (82tn.32.26).
+	const goalSets: unknown[] = [];
 	return {
 		tags: ["autodocs"],
 		globals: { theme: "dark" },
 		beforeEach: ({ canvasElement }) => {
 			// Each story owns its sends and the client limiter's queued callbacks.
 			_resetRateLimit();
+			goalSets.length = 0;
 			const cleanup = setupWords(canvasElement, false);
+			const restoreSetGoal = replyRpc("SetGoal", (payload) => {
+				goalSets.push(payload);
+				return { ok: true };
+			});
 			const restoreDraftSync = replyRpc("SyncInputDraft", () => ({ ok: true }));
 			const restoreSubmit = replyRpc("input.submit", () => ({
 				ok: true,
@@ -1502,6 +1482,7 @@ function narrowComposer(
 			return () => {
 				_resetRateLimit();
 				restoreSubmit();
+				restoreSetGoal();
 				restoreDraftSync();
 				Date.now = realNow;
 				chat.messages = previousMessages;
@@ -1587,7 +1568,11 @@ function narrowComposer(
 				async () => {
 					await userEvent.click(send);
 					await waitFor(() => expect(textarea).toHaveValue(""));
-					if (mode !== "limited") {
+					if (mode === "goal") {
+						expect(goalSets).toEqual([
+							expect.objectContaining({ condition: "Verify send visibility" }),
+						]);
+					} else if (mode !== "limited") {
 						await waitFor(() => expect(readTurn().working).toBe(true));
 					}
 					composer.dataset["sendVisibilityProof"] = JSON.stringify({
