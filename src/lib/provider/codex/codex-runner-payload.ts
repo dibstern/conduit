@@ -896,8 +896,13 @@ export class CodexRunnerPayload implements RunnerPayload {
 									),
 								);
 							}
+							// Inside the successor window the turn has completed; a closed
+							// app-server can start no successor, so the held result stands
+							// (CONTRACT 3087, 3118).
 							if ("failure" in update)
-								return yield* Effect.fail(update.failure);
+								return deadline === undefined
+									? yield* Effect.fail(update.failure)
+									: yield* apply(completeCodexTurn(active.state));
 							const decoded = decodeNotification(update.notification);
 							if (decoded._tag === "malformed") {
 								log.warn("codex.decode_failed", {

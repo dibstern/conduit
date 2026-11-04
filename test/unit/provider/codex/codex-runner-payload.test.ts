@@ -1,6 +1,7 @@
 // Failure modes: process exit hides a native missing-thread error; a session
 // retains the previous account's home after an account switch; a goal
-// successor that arrived inside its window is dropped when read after it.
+// successor that arrived inside its window is dropped when read after it; an
+// app-server exit inside the successor window fails a turn that completed.
 import {
 	existsSync,
 	mkdtempSync,
@@ -349,6 +350,95 @@ describe("Codex runner preparation", () => {
 				expect(events.filter(({ type }) => type === "text.delta")).toHaveLength(
 					6,
 				);
+			}),
+	);
+
+	it.live(
+		"an app-server exit ends a completed goal turn as completed, a live turn as an error",
+		() =>
+			Effect.gen(function* () {
+				const root = yield* Effect.acquireRelease(
+					Effect.sync(() => mkdtempSync(join(tmpdir(), "codex-runner-exit-"))),
+					(path) =>
+						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+				);
+				const lines = readFileSync(
+					fileURLToPath(
+						new URL(
+							"../../../fixtures/codex-app-server-traces/goal-chain.jsonl",
+							import.meta.url,
+						),
+					),
+					"utf8",
+				)
+					.trim()
+					.split("\n");
+				const method = (line: string): unknown =>
+					JSON.parse(line).message?.method;
+				const completed = lines.findIndex(
+					(line) => method(line) === "turn/completed",
+				);
+				const delta = lines.findIndex(
+					(line) => method(line) === "item/agentMessage/delta",
+				);
+				// The trace ends with the app-server's exit row.
+				const endOf = (cut: number) =>
+					Effect.gen(function* () {
+						const trace = join(root, `exit-${cut}.jsonl`);
+						writeFileSync(
+							trace,
+							`${[...lines.slice(0, cut + 1), lines.at(-1)].join("\n")}\n`,
+						);
+						const ended = yield* Deferred.make<ProviderRuntimeEvent>();
+						const runner = yield* makeCodexSessionRunner(
+							{
+								workspaceRoot: root,
+								daemonConfigDir: root,
+								environment: () => ({
+									CODEX_HOME: root,
+									NODE_ENV: "test",
+									CONDUIT_CODEX_APP_SERVER_TRACE: trace,
+								}),
+							},
+							(output) =>
+								(output.type === "event" &&
+								["turn.interrupted", "turn.completed", "turn.error"].includes(
+									output.event.type,
+								)
+									? Deferred.succeed(ended, output.event)
+									: Effect.void
+								).pipe(Effect.as({})),
+						);
+						const admission = yield* makeRunnerAdmission(runner, "codex");
+						yield* admitRunnerCommand(admission, runner, {
+							type: "send-turn",
+							sinkId: "input",
+							aborted: false,
+							input: {
+								sessionId: "session",
+								inputId: "input",
+								runId: "run",
+								prompt: "$goal Say hello",
+								history: [],
+								providerState: {},
+								workspaceRoot: root,
+								extraFolders: [],
+								configDir: configuredClaudeConfigDir(root),
+								folderSource: "account",
+								model: { providerId: "codex", modelId: "gpt-6.1-sol" },
+								facts: {
+									_tag: "Codex",
+									skill: { _tag: "None" },
+									truncate: { _tag: "None" },
+								},
+							},
+						});
+						return (yield* Deferred.await(ended)).type;
+					});
+				// No successor can start once the app-server is gone, so the
+				// withheld result is the turn's own (CONTRACT 3087, 3118).
+				expect(yield* endOf(completed)).toBe("turn.completed");
+				expect(yield* endOf(delta)).toBe("turn.error");
 			}),
 	);
 
