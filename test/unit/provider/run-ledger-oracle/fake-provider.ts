@@ -3581,12 +3581,12 @@ export class FakeProvider {
 		const dispatch = (
 			runId: string,
 			effect: Extract<RunEffect, { kind: "start" | "steer" }>,
-			commandId = `main-command:${this.serial++}`,
 		): IssuedEffect => {
-			// 3.13: a direct start or steer is Main under its input's id; its token is the runId (3.4).
+			// 3.4 (CONTRACT.md 429-431), 3.13: main's send commandId is its input's id, a relaunch's
+			// included; a direct start or steer's token is the runId.
 			const issue: IssuedEffect = {
 				tag: "Main",
-				commandId: direct ? effect.inputId : commandId,
+				commandId: effect.inputId,
 				effect,
 			};
 			if (direct)
@@ -3872,11 +3872,7 @@ export class FakeProvider {
 							direct,
 						});
 					}
-					open.issue = dispatch(
-						open.runId,
-						open.issue.effect,
-						this.isHeld(open.issue) ? open.issue.commandId : undefined,
-					);
+					open.issue = dispatch(open.runId, open.issue.effect);
 					const held = this.bound(open.issue).token;
 					const dispatched = this.dispatchFirst((n) => n.token === held);
 					return dispatched

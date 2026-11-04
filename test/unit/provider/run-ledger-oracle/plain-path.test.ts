@@ -1463,6 +1463,40 @@ describe("[32.2.7] core authority and stopping: the bead's acceptance criteria",
 		});
 	});
 
+	it("a steer's run.dispatched binds the steer, not its Run's start still unheld (3.4)", () => {
+		// Long seed 82103200 (claude), failure mode 130: the steer's hold bound the Run's first unbound
+		// send, its never-held start, so the ledger showed a start under the steer's commandId. commandId
+		// names the start or steer of the input whose id it is (CONTRACT.md 429-431).
+		agreed("claude", (d) => {
+			admit(d, "A");
+			const runId = `main-A-${d.next()}`;
+			main(d, { kind: "run_requested", runId, inputId: "A", direct: false });
+			admit(d, "B", "steer");
+			main(d, {
+				kind: "run_requested",
+				runId: `main-B-${d.next()}`,
+				inputId: "B",
+				direct: false,
+			});
+			observe(d, "hold-B-1" as SendToken, {
+				kind: "run_dispatched",
+				runId,
+				runnerId: "r1",
+				commandId: "B",
+				transmission: 1,
+			});
+			expect(
+				d
+					.view()
+					.live.flatMap((issue) =>
+						issue.tag === "Main" && issue.commandId === "B"
+							? [issue.effect.kind]
+							: [],
+					),
+			).toEqual(["steer"]);
+		});
+	});
+
 	it("a late start on a send an unlaunch dropped changes nothing, so its input stays queued (3.6 D50)", () => {
 		// Long seed 82103202 (codex), failure mode 127: a release returned the Run to Queued and
 		// dropped its send, then a late start on that send showed the input sent. The drop ends the

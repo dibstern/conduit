@@ -2001,7 +2001,16 @@ function dispatched(
 			send.commandId = observation.commandId;
 		}
 	} else {
-		send = held.find((item) => item.commandId === undefined);
+		// CONTRACT.md 429-431: commandId names the start or steer of the input whose id it is.
+		// One naming no input (a fixed trace's opaque id) binds the Run's first unbound send.
+		const named = world.inputs.has(observation.commandId);
+		send = held.find(
+			(item) =>
+				item.commandId === undefined &&
+				(!named ||
+					("inputId" in item.effect &&
+						item.effect.inputId === observation.commandId)),
+		);
 		if (send === undefined) return noop("unknown or never-issued token (3.4)");
 		send.commandId = observation.commandId;
 	}
