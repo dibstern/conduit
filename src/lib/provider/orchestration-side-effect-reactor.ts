@@ -2538,7 +2538,31 @@ export class ProviderSideEffectReactor {
 					code: "unknown_provider_command_effect",
 				}),
 			);
-		}).pipe(Effect.scoped);
+		}).pipe(
+			Effect.scoped,
+			// 3.11 (CONTRACT.md 1083-1085): a send its project's removal cut short is
+			// not sent and writes nothing; its next try meets the project gate. While
+			// served, the failure stands, so a missing root never loops a spawn.
+			Effect.catchIf(
+				(failure) =>
+					failure instanceof ProviderInstanceFailure &&
+					failure.code === "not_sent",
+				(failure) =>
+					this.readProjectGate(row).pipe(
+						Effect.flatMap((gate) =>
+							gate === "served"
+								? Effect.fail(failure)
+								: this.runProviderEffect(
+										row,
+										interactions,
+										makeInteractions,
+										abortSignal,
+										liveContext,
+									),
+						),
+					),
+			),
+		);
 	}
 
 	private awaitIntake(row: ProviderCommandOutboxRow) {

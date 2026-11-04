@@ -251,7 +251,13 @@ export const makeRunnerSendFeeder = (options: {
 								);
 								if (!start) return { started: false, ordinal: 0 };
 								if (start._tag === "Failure") {
-									yield* options.failed(item.input, start.failure);
+									const live = item.live;
+									// 3.11: a spawn its project's removal cut short is not sent; its
+									// caller writes nothing and tries again, meeting the project gate.
+									if (start.failure.code === "not_sent" && live) {
+										item.live = undefined;
+										yield* Deferred.fail(live.reply, start.failure);
+									} else yield* options.failed(item.input, start.failure);
 									return;
 								}
 								return { started: true, ordinal: 0 };

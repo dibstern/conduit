@@ -785,6 +785,7 @@ export class RunnerProviderInstance implements ProviderInstance {
 					: new ProviderInstanceFailure({
 							providerId: this.providerId,
 							operation: cause.operation,
+							...(cause.code === "not_sent" ? { code: "not_sent" } : {}),
 							cause,
 						}),
 			),
