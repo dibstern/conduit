@@ -11,6 +11,7 @@
 // 8. a redelivered tool.started re-stamps a row with a later Run;
 // 9. a wake Run's row gets no folder though the session's launch folder is known;
 // 10. a subagent's terminal event ends the parent Run;
+// 12. a task-linked row is closed at its Run's end while the ledger cannot tell which tasks are live;
 // 13. run-end closing does not advance the read model.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -333,6 +334,48 @@ describe("Tool rows on the Run Ledger", () => {
 					expect(yield* row("fg")).toMatchObject({
 						status: "completed",
 						ended_at: 1070,
+						ended_by: null,
+					});
+				}),
+			),
+	);
+
+	// 12: a process harness cannot reach this. A restart reattaches at the same label and keeps the
+	// stored tasks, Codex never raises its label, and a replaced Claude query lists its empty set
+	// straight after its busy status, so no Run ends in between.
+	it.effect(
+		"keeps a task-linked row open when its Run ends while the ledger's tasks are unknown (12)",
+		() =>
+			withStore(
+				Effect.gen(function* () {
+					yield* project([
+						created("s1"),
+						canonicalEvent(
+							"evidence.process_started",
+							"s1",
+							{ runnerId: "rn", label: "rn:1", reattached: false },
+							at(1000),
+						),
+						...start("s1", "r1", 1001),
+					]);
+					yield* project([
+						toolStarted("s1", "fg", 1010),
+						toolStarted("s1", "linked", 1011),
+						toolRunning("s1", "linked", { providerTaskId: "task-9" }, 1012),
+						// A newer label's first output: its tasks are unknown until it lists them.
+						canonicalEvent(
+							"evidence.turn_ended",
+							"s1",
+							{ label: "rn:2" },
+							at(1013),
+						),
+					]);
+					expect((yield* loadLedgerView("s1"))?.tasks.tag).toBe("unknown");
+					yield* project([end("s1", "r1", 1020)]);
+					expect(yield* row("fg")).toMatchObject({ ended_by: "run" });
+					expect(yield* row("linked")).toMatchObject({
+						status: "running",
+						ended_at: null,
 						ended_by: null,
 					});
 				}),
