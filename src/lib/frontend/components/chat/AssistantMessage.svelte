@@ -88,26 +88,25 @@
 	});
 
 	// A localhost link to one of the session's live servers (8.7) reads as a live chip, opening
-	// through the Preview Gate while the gate serves the port; it goes back to the written link
-	// once the server is gone. data-server-link keeps the link as written.
+	// through the Preview Gate while the gate serves the port; any other localhost link is plain
+	// text (CONTRACT.md 3013-3014). data-server-link keeps the link as written.
 	$effect(() => {
 		void message.html;
 		const servers = findSession(sessionId ?? sessionState.currentId ?? "")?.servers ?? [];
-		for (const link of containerEl?.querySelectorAll<HTMLAnchorElement>(".md-content a[href]") ?? []) {
+		for (const link of containerEl?.querySelectorAll<HTMLAnchorElement>(".md-content a[href], .md-content a[data-server-link]") ?? []) {
 			const written = link.dataset["serverLink"] ?? link.getAttribute("href") ?? "";
 			const url = URL.canParse(written) ? new URL(written) : undefined;
-			const server = url && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
-				? servers.find(({ port }) => String(port) === url.port)
-				: undefined;
+			const local = url !== undefined && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+			const server = local ? servers.find(({ port }) => String(port) === url.port) : undefined;
 			if (url && server) {
 				link.dataset["serverLink"] = written;
 				link.dataset["serverChip"] = "live";
 				link.href = server.gateUrl ? `${server.gateUrl}${url.pathname}${url.search}${url.hash}` : written;
 				link.target = "_blank";
 				link.rel = "noopener noreferrer";
-			} else if (link.dataset["serverLink"] !== undefined) {
-				link.href = written;
-				for (const name of ["data-server-link", "data-server-chip", "target", "rel"]) link.removeAttribute(name);
+			} else if (local) {
+				link.dataset["serverLink"] = written;
+				for (const name of ["href", "data-server-chip", "target", "rel"]) link.removeAttribute(name);
 			}
 		}
 	});

@@ -804,7 +804,8 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 		}),
 	]);
 
-	// Serving: a calm server, the row's status back to idle.
+	// Serving: a calm server. 8.7 Views (CONTRACT.md 2996): background, not idle; the row shows
+	// background activity as monitoring.
 	let cursor = browser.frames.length;
 	expect(await mark(sessionId, String(first.port), "--serving")).toMatchObject({
 		code: 0,
@@ -815,7 +816,12 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 	);
 	expect(row(calm)).toMatchObject({
 		servers: [{ port: first.port, source: "declared", role: "serving" }],
-		attention: "idle",
+		activity: {
+			foreground: "idle",
+			background: "serving",
+			label: "background",
+		},
+		attention: "monitoring",
 	});
 
 	// A new process on the port starts detected, after its own hold.

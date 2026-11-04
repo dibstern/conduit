@@ -130,6 +130,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 								subagentType,
 								description,
 								ambient,
+								cwd: _cwd,
 								...display
 							}) => [
 								key.taskId,

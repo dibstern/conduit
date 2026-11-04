@@ -1886,12 +1886,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 						]),
 					);
 					session.terminals.seen = seen;
-					const tasks = terminals.map(({ processId, command }) => ({
+					const tasks = terminals.map(({ processId, command, cwd }) => ({
 						key: { taskId: processId },
 						taskType: "local_bash",
 						description: command,
 						ambient: false,
 						firstSeenAt: seen.get(processId) ?? now,
+						// 8.7 (CONTRACT.md 2988): the PortWatcher's task link matches command and cwd.
+						cwd,
 					}));
 					const sent = JSON.stringify(tasks);
 					if (sent === session.terminals.sent) return terminals;
