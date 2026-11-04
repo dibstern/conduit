@@ -16,8 +16,23 @@
 // 151. the mark leaks into a native-cancel Stop;
 // 152. the held next start is handed to the retiring runner, or delivered twice; or, unlaunched by
 //      that runner's retirement, it is never relaunched (CONTRACT.md 3.6, 3270-3274).
+// Retiring a Cursor runner ends its agent's shell commands (82tn.32.10.1; lane audit F240-F253).
+// Cursor starts each shell command detached, in its own session and group, so the runner's group
+// kill misses it; the stand-in here starts the same way:
+// 240. the runner dies first (abandonment exit, crash, SIGKILL), so a list kept only in the runner
+//      is lost and the shell, reparented to PID 1, is no longer the runner's descendant;
+// 241. the shell's own session and group escape both the group kill and a session sweep;
+// 252. retirement completes, or the marker still appears, while the shell is alive.
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -34,6 +49,19 @@ interface TraceRow {
 }
 
 const TIMEOUT = 25_000;
+// Past the abandonment's 10 s interrupt timeout and the runner's exit.
+const SHELL_DELAY_S = 18;
+const SHELL_TEST_TIMEOUT = 60_000;
+const shellAlive = (pid: number) => {
+	try {
+		const state = execFileSync("ps", ["-o", "stat=", "-p", String(pid)], {
+			encoding: "utf8",
+		}).trim();
+		return state !== "" && !state.startsWith("Z");
+	} catch {
+		return false;
+	}
+};
 const STEER = "After the tool, say STEER_SEEN_7931.";
 
 const traceRows = (path: string): TraceRow[] =>
@@ -133,10 +161,15 @@ describe("Cursor on the Run Ledger", () => {
 	let harness: ProcessHarness | undefined;
 	let capturePath = "";
 	const proofs: Record<string, unknown>[] = [];
+	const shellProofs: Record<string, unknown>[] = [];
+	const standIns: number[] = [];
 	afterEach(async () => {
 		const fixture = harness;
 		harness = undefined;
 		await fixture?.dispose();
+		// A surviving stand-in is this test's own process group; end it so a red run leaves nothing.
+		for (const pid of standIns.splice(0))
+			if (shellAlive(pid)) process.kill(-pid, "SIGKILL");
 		expect(fixture?.remainingRunnerPids() ?? []).toEqual([]);
 	});
 	afterAll(() => {
@@ -145,6 +178,11 @@ describe("Cursor on the Run Ledger", () => {
 			"test-results/82tn-32-10-cursor-ledger.json",
 			`${JSON.stringify({ ticket: "conduit-test-82tn.32.10", proofs }, null, 2)}\n`,
 		);
+		if (shellProofs.length > 0)
+			writeFileSync(
+				"test-results/82tn-32-10-1-cursor-shell-retirement.json",
+				`${JSON.stringify({ ticket: "conduit-test-82tn.32.10.1", proofs: shellProofs }, null, 2)}\n`,
+			);
 	});
 
 	const start = async (
@@ -398,4 +436,126 @@ describe("Cursor on the Run Ledger", () => {
 		expect(captured("send.options")).toHaveLength(2);
 		prove("abandoned", ledger, { lost, handed });
 	});
+
+	const shellStandIn = async (marker: string) => {
+		// test-waits-allow polling: the stand-in reports its pid only through this file.
+		const pid = await vi.waitFor(
+			() => {
+				const text = existsSync(`${marker}.pid`)
+					? readFileSync(`${marker}.pid`, "utf8").trim()
+					: "";
+				expect(text).toMatch(/^\d+$/);
+				return Number(text);
+			},
+			{ timeout: TIMEOUT, interval: 50 },
+		);
+		standIns.push(pid);
+		const [parent, group] = execFileSync(
+			"ps",
+			["-o", "ppid=,pgid=", "-p", String(pid)],
+			{
+				encoding: "utf8",
+			},
+		)
+			.trim()
+			.split(/\s+/)
+			.map(Number);
+		// F241: the stand-in leads its own group, outside its runner's.
+		expect(group).toBe(pid);
+		return { pid, runnerPid: parent ?? 0, startedAt: Date.now() };
+	};
+	/** Waits past the stand-in's marker time, then proves it never wrote the marker (F252). */
+	const shellNeverFinished = async (
+		name: string,
+		marker: string,
+		standIn: { pid: number; startedAt: number },
+		extra = {},
+	) => {
+		await new Promise((done) =>
+			// test-waits-allow real-wait: the claim is that nothing happens by the marker time; only that time proves it.
+			setTimeout(
+				done,
+				standIn.startedAt + SHELL_DELAY_S * 1000 + 1500 - Date.now(),
+			),
+		);
+		const proof = {
+			case: name,
+			shellPid: standIn.pid,
+			shellAlive: shellAlive(standIn.pid),
+			markerWritten: existsSync(marker),
+			...extra,
+		};
+		shellProofs.push(proof);
+		expect(proof).toMatchObject({ shellAlive: false, markerWritten: false });
+	};
+	const shellEnvironment = (marker: string) => ({
+		CONDUIT_TEST_CURSOR_SHELL_MARKER: marker,
+		CONDUIT_TEST_CURSOR_SHELL_DELAY_S: String(SHELL_DELAY_S),
+	});
+	const markerPath = () =>
+		join(mkdtempSync(join(tmpdir(), "cursor-shell-")), "marker");
+
+	// test-waits-allow timeout-override: the abandonment's 10 s interrupt timeout plus the stand-in's 18 s delay.
+	it(
+		"ends an abandoned run's shell command when its runner retires",
+		async () => {
+			const marker = markerPath();
+			const { fixture, browser, sessionId } = await start(
+				"abandoned-shell",
+				"cancel",
+				{
+					CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES: "1",
+					...shellEnvironment(marker),
+				},
+			);
+			await submit(
+				browser,
+				sessionId,
+				"Call the human custom tool once, then say done.",
+			);
+			const standIn = await shellStandIn(marker);
+			await thinking(fixture, sessionId);
+			await stop(browser, sessionId);
+			await turns(fixture, sessionId, ["interrupted"]);
+			// F240: the abandoning runner exits on its own; retirement records its loss.
+			// test-waits-allow polling: the runner's loss reaches the browser as no frame.
+			await vi.waitFor(
+				() =>
+					expect(
+						read(fixture, sessionId).events.filter(
+							({ type }) => type === "evidence.process_lost",
+						),
+					).toHaveLength(1),
+				{ timeout: TIMEOUT, interval: 100 },
+			);
+			await shellNeverFinished("abandoned", marker, standIn, {
+				runnerPid: standIn.runnerPid,
+				retiredAt: Date.now() - standIn.startedAt,
+			});
+		},
+		SHELL_TEST_TIMEOUT,
+	);
+
+	// test-waits-allow timeout-override: the stand-in's 18 s delay runs on the wall clock.
+	it(
+		"ends a shell command when its runner is killed outright",
+		async () => {
+			const marker = markerPath();
+			const { fixture, browser, sessionId } = await start(
+				"killed-shell",
+				"basic",
+				shellEnvironment(marker),
+			);
+			await submit(browser, sessionId, "Replay the captured basic turn.");
+			const standIn = await shellStandIn(marker);
+			// F240: SIGKILL gives the runner no chance to act; only what outlives it can.
+			expect(fixture.signalOwnedRunner(standIn.runnerPid, "SIGKILL")).toBe(
+				true,
+			);
+			await shellNeverFinished("killed", marker, standIn, {
+				runnerPid: standIn.runnerPid,
+			});
+		},
+		SHELL_TEST_TIMEOUT,
+	);
 });
