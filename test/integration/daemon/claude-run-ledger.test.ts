@@ -1418,6 +1418,8 @@ describe("Claude on the Run Ledger", () => {
 		expect(answer.outbox).toEqual([
 			{ commandId, status: "completed", attempts: 1 },
 		]);
+		// main's timeout answer carries the rejection alone; CONTRACT.md 1009-1012 names no reason field.
+		expect(answer.decisions).toEqual(["reject"]);
 		const interactionId = resolved?.id;
 		expect(answer.answers).toEqual([{ commandId, interactionId }]);
 		expect(answer.outcomes).toEqual([

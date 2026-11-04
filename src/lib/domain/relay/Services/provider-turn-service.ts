@@ -18,6 +18,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import type { AttachmentRef } from "../../../contracts/attachment-ref.js";
 import type { InputDelivery } from "../../../contracts/stored-event.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import type {
 	ClaudeEventPersistEffectTag,
 	ClaudeEventPersistFailure,
@@ -53,8 +54,8 @@ import {
 	prepareTurnSession,
 	STOP_ABORT_WAIT_MS,
 } from "./provider-turn-session.js";
-import type { ConfigTag, LoggerTag, WebSocketHandlerTag } from "./services.js";
-import { OrchestrationEngineTag } from "./services.js";
+import type { ConfigTag, WebSocketHandlerTag } from "./services.js";
+import { LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import type { SessionManagerServiceTag } from "./session-manager-service.js";
 import {
@@ -319,6 +320,19 @@ const makeProviderTurnService = Effect.gen(function* () {
 			);
 			return Deferred.await(done);
 		});
+	/** Accept a Stop, or join the session's running one. `cutoff` is absent on a join. */
+	const acceptStop = (input: ProviderTurnServiceInterruptInput) =>
+		Effect.uninterruptible(
+			Effect.gen(function* () {
+				const existing = stopping.get(input.sessionId);
+				if (existing) return { stopped: Deferred.await(existing) };
+				const cutoff = yield* prepareStop(input).pipe(
+					Effect.provide(providedContext),
+					Effect.result,
+				);
+				return { cutoff, stopped: yield* startStop(input, cutoff) };
+			}),
+		);
 	const service: ProviderTurnService = {
 		holdUserTurnsForAccountSwitch: (sessionId) =>
 			Effect.acquireRelease(
@@ -349,7 +363,31 @@ const makeProviderTurnService = Effect.gen(function* () {
 				if (switching) yield* Deferred.await(switching);
 				const inbox = yield* SessionInboxTag;
 				return yield* prepareTurnSession(input, (stopInput) =>
-					inbox.withSession(stopInput.sessionId, service.beginStop(stopInput)),
+					inbox.withSession(stopInput.sessionId, acceptStop(stopInput)).pipe(
+						Effect.flatMap(({ cutoff, stopped }) =>
+							// A Stop main did not accept fails the reply before admission; the
+							// waiter then settles at once. An accepted Stop is not waited on
+							// (RL-081), but its later failure is reported, not dropped.
+							cutoff?._tag === "Failure"
+								? stopped
+								: stopped.pipe(
+										Effect.catchCause((cause) =>
+											Failure.isInterruptedOnly(cause)
+												? Effect.void
+												: Effect.flatMap(LoggerTag, (log) =>
+														Effect.sync(() =>
+															log.warn(
+																`session=${stopInput.sessionId} Stop for a question reply failed: ${Failure.renderCause(cause)}`,
+															),
+														),
+													),
+										),
+										Effect.provide(providedContext),
+										Effect.forkIn(scope),
+									),
+						),
+						Effect.asVoid,
+					),
 				);
 			}).pipe(Effect.provide(providedContext)),
 		sendTurn: (input) =>
@@ -362,17 +400,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 				Effect.provide(providedContext),
 			),
 		beginStop: (input) =>
-			Effect.uninterruptible(
-				Effect.gen(function* () {
-					const existing = stopping.get(input.sessionId);
-					if (existing) return Deferred.await(existing);
-					const cutoff = yield* prepareStop(input).pipe(
-						Effect.provide(providedContext),
-						Effect.result,
-					);
-					return yield* startStop(input, cutoff);
-				}),
-			),
+			Effect.map(acceptStop(input), ({ stopped }) => stopped),
 	};
 	// Completed delivery receipts still own a deadline until their captured runs
 	// end. Restore the fences before the inbox can admit another foreground turn.

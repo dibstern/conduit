@@ -129,9 +129,17 @@ export const completeRecoveredQuestion = (
 		return false;
 	});
 
+/** Commit a Stop, failing when main does not accept it, without waiting on its abort. */
+type CommitStop = (
+	input: ProviderTurnServiceInterruptInput,
+) => Effect.Effect<
+	void,
+	Effect.Error<Effect.Success<ReturnType<ProviderTurnService["beginStop"]>>>
+>;
+
 const resolvePendingClaudeQuestions = (
 	input: ProviderTurnServicePrepareInput,
-	beginStop: ProviderTurnService["beginStop"],
+	commitStop: CommitStop,
 ) =>
 	Effect.gen(function* () {
 		const pendingInteractionService = yield* PendingInteractionServiceTag;
@@ -154,7 +162,8 @@ const resolvePendingClaudeQuestions = (
 			};
 			// Commit the Stop without waiting on its deadline: the reply is admitted
 			// behind it as the reserved next turn (failure catalogue RL-081, 1304-1318).
-			yield* beginStop(stop);
+			// A Stop main does not accept fails the reply before admission.
+			yield* commitStop(stop);
 		}
 	});
 
@@ -209,7 +218,7 @@ const materializeOpenCodeSession = (
 
 export const prepareTurnSession = (
 	input: ProviderTurnServicePrepareInput,
-	beginStop: ProviderTurnService["beginStop"],
+	commitStop: CommitStop,
 ) =>
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
@@ -237,7 +246,7 @@ export const prepareTurnSession = (
 			traits.interactionSink === "permission-asking" &&
 			input.delivery !== "steer"
 		)
-			yield* resolvePendingClaudeQuestions(input, beginStop);
+			yield* resolvePendingClaudeQuestions(input, commitStop);
 		if (traits.runsOpenCodeServer)
 			return yield* materializeOpenCodeSession(
 				input,
