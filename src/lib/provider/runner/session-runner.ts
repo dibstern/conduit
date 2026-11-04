@@ -10,7 +10,6 @@ import type { AttachmentRef } from "../../contracts/attachment-ref.js";
 import type { AccountSwitchBusy } from "../../contracts/limit-recovery.js";
 import type { UsageHarness } from "../../contracts/provider-instance.js";
 import type { ProviderRuntimeEvent } from "../../contracts/providers/provider-runtime-event.js";
-import type { BackgroundTaskTransition } from "../../session/background-liveness.js";
 import type { SessionPermissionMode } from "../../shared-types.js";
 import type {
 	LegacyRunnerPermissionMode as LegacyPermissionMode,
@@ -186,10 +185,6 @@ export type SessionOutput =
 			readonly accountId: string;
 			readonly harness: UsageHarness;
 			readonly reading: UsageRead;
-	  }
-	| {
-			readonly type: "background-task";
-			readonly transition: BackgroundTaskTransition;
 	  }
 	| ({ readonly sinkId: string } & (
 			| { readonly type: "event"; readonly event: ProviderRuntimeEvent }

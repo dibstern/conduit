@@ -436,9 +436,14 @@ export function historyToChatMessages(
 		const messageOrder =
 			createdAt === undefined
 				? undefined
-				: previousOrder?.createdAt === createdAt
+				: previousOrder?.createdAt === createdAt &&
+						previousOrder.ordinal === msg.ordinal
 					? previousOrder
-					: { createdAt, id: msg.id };
+					: {
+							...(msg.ordinal === undefined ? {} : { ordinal: msg.ordinal }),
+							createdAt,
+							id: msg.id,
+						};
 		if (msg.role === "user") {
 			// User messages: extract text from parts
 			const text =

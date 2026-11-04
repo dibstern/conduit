@@ -3038,6 +3038,24 @@ describe("[32.2.11] core background tasks, wake Runs and native commands: the be
 		});
 	});
 
+	it("tasks: unknown keeps the runner's last known list as stale through a raise and a reattach, until its next snapshot (decision 4A; CONTRACT.md 1389 names no such field)", () => {
+		agreed("claude", (d) => {
+			snapshot(d, [shell, monitor]);
+			const stale = [
+				viewed(shell, "shell", "work"),
+				viewed(monitor, "monitor", "monitoring"),
+			];
+			// 8.4, L5: r1:2 raises the runner; its tasks are unknown, the last list kept in sight.
+			unsolicited(d, { kind: "activity" }, "r1:2");
+			expect(d.view().tasks).toEqual({ tag: "unknown", label: "r1:2", stale });
+			// 8.3: a reattach (a daemon restart) is unknown too, and still shows the same list.
+			started(d, "r1:3", true);
+			expect(d.view().tasks).toEqual({ tag: "unknown", label: "r1:3", stale });
+			snapshot(d, [], "r1:3");
+			expect(d.view().tasks).toEqual({ tag: "none" });
+		});
+	});
+
 	it.each<Unsolicited>([
 		{ kind: "turn_started" },
 		{ kind: "tasks_snapshot", tasks: [shell] },

@@ -1286,7 +1286,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 		});
 		let runner: SessionRunner | undefined;
 		const finalized = vi.fn();
-		const onBackgroundTask = vi.fn();
 		const instance = makeTestClaudeProviderInstance({
 			queryFactory: ({ prompt }) => {
 				const stream = query[Symbol.asyncIterator]();
@@ -1301,7 +1300,6 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 			subagentSdk,
 			subagentPollIntervalMs: 10,
 			subagentPollTimeoutMs: 100,
-			onBackgroundTask,
 			runnerFactory: (deps, emit) =>
 				makeClaudeSessionRunner(
 					{ ...deps, onSubagentFinalizationComplete: finalized },
@@ -1370,10 +1368,15 @@ describe("ClaudeProviderInstance.sendTurn()", () => {
 						.mock.calls.some(([event]) => event.type === "turn.interrupted"),
 				).toBe(true);
 			}
-			expect(onBackgroundTask).toHaveBeenCalledWith({
-				sessionId: ctx.sessionId,
-				kind: "session-ended",
-			});
+			// The ended query's tasks can never report again: its list empties.
+			expect(
+				vi
+					.mocked(sink.push)
+					.mock.calls.flatMap(([event]) =>
+						event.type === "evidence.tasks_snapshot" ? [event.data] : [],
+					)
+					.at(-1),
+			).toEqual({ label: "", tasks: [] });
 			await clock.runPromise(TestClock.adjust("99 millis"));
 			expect(runner?.hasPendingSubagentFinalizers?.(ctx.sessionId)).toBe(true);
 			expect(finalized).not.toHaveBeenCalled();

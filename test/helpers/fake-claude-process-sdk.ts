@@ -308,7 +308,7 @@ export type ProcessMark =
 			effectiveSettingsJson: string;
 	  }
 	| {
-			kind: "stop-accept-paused";
+			kind: "stop-accept-paused" | "stop-refused";
 			commandId: string;
 			sessionId: string;
 	  }
@@ -497,12 +497,17 @@ export const resolveSettings: typeof import("@anthropic-ai/claude-agent-sdk").re
 		return resolved;
 	};
 
-// A test holds a Stop between its snapshot and acceptance with this gate file.
+// A test holds a Stop between its snapshot and acceptance with this gate file, or refuses it
+// while the refuse gate exists.
 export const beforeStopAcceptance = async (input: {
 	readonly commandId: string;
 	readonly sessionId: string;
 }): Promise<void> => {
 	const proof = process.env["CONDUIT_TEST_PROCESS_PROOF"];
+	if (proof && existsSync(join(dirname(proof), "conduit-test-stop-refuse"))) {
+		mark({ kind: "stop-refused", ...input });
+		throw new Error(`test refused Stop ${input.commandId}`);
+	}
 	const gate = proof && join(dirname(proof), "conduit-test-stop-acceptance");
 	if (!gate || !existsSync(gate)) return;
 	mark({ kind: "stop-accept-paused", ...input });
@@ -2842,8 +2847,41 @@ function query(params: {
 								description: "watch",
 								ambient: true,
 							},
+							// A monitor is monitoring too (CONTRACT.md 2778-2779), not activity.
+							{
+								task_id: "monitor",
+								task_type: "monitor",
+								description: "watch logs",
+							},
 						],
 					} as unknown as SDKMessage;
+				}
+			}
+			// A live shell until the test writes end-shell-idle, then none; the query stays open.
+			if (request === "shell-idle") {
+				const end = join(
+					params.options?.cwd ?? process.cwd(),
+					"end-shell-idle",
+				);
+				const shellList = (tasks: readonly object[]) =>
+					({
+						type: "system",
+						subtype: "background_tasks_changed",
+						session_id: sessionId,
+						uuid: randomUUID(),
+						tasks,
+					}) as unknown as SDKMessage;
+				yield shellList([
+					{ task_id: "shell", task_type: "local_bash", description: "serve" },
+				]);
+				let shell = true;
+				while (!closed) {
+					if (shell && existsSync(end)) {
+						shell = false;
+						yield shellList([]);
+					}
+					// test-waits-allow real-wait: the end gate is the test process's file.
+					await new Promise<void>((done) => setTimeout(done, 50));
 				}
 			}
 		}

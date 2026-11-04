@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "../../../src/lib/frontend/types.js";
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
+import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 
 function user(
 	uuid: string,
@@ -113,6 +115,51 @@ describe("splitAtForkPoint — timestamp-based", () => {
 		const result = splitAtForkPoint([], undefined, 1000);
 		expect(result.inherited).toHaveLength(0);
 		expect(result.current).toHaveLength(0);
+	});
+});
+
+// Failure modes (conduit-test-lczrn.1): with equal times whose write order
+// differs from id order, a time/id split puts the point's neighbours on the
+// wrong side of the divider. The point's row, in the loaded page, carries its
+// ordinal; a paged-out point or an older server without ordinals keeps the
+// time/id split.
+describe("splitAtForkPoint — write order", () => {
+	// The child's copies of z and y (written z, y at one time) and its own reply a.
+	const history = (ordinals: boolean): ChatMessage[] =>
+		historyToChatMessages(
+			(
+				[
+					["z_child", "user", 1],
+					["y_child", "assistant", 2],
+					["a", "user", 3],
+				] as const
+			).map(
+				([id, role, ordinal]): HistoryMessage => ({
+					id,
+					role,
+					...(ordinals ? { ordinal } : {}),
+					time: { created: 10 },
+					parts: [{ id: `${id}-p`, type: "text", text: id }],
+				}),
+			),
+		);
+	const ids = (messages: ChatMessage[]) =>
+		messages.map((message) => message.messageOrder?.id);
+
+	it("cuts at the point's place in write order", () => {
+		const atFirst = splitAtForkPoint(history(true), "z", 10, "child");
+		expect(ids(atFirst.inherited)).toEqual(["z_child"]);
+		expect(ids(atFirst.current)).toEqual(["y_child", "a"]);
+		const atSecond = splitAtForkPoint(history(true), "y", 10, "child");
+		expect(ids(atSecond.inherited)).toEqual(["z_child", "y_child"]);
+		expect(ids(atSecond.current)).toEqual(["a"]);
+	});
+
+	it("keeps the time/id split without the point's ordinal", () => {
+		const legacy = splitAtForkPoint(history(false), "y", 10, "child");
+		expect(ids(legacy.inherited)).toEqual(["y_child", "a"]);
+		const pagedOut = splitAtForkPoint(history(true).slice(2), "y", 10, "child");
+		expect(ids(pagedOut.inherited)).toEqual(["a"]);
 	});
 });
 

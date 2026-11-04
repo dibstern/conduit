@@ -99,6 +99,7 @@
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let goalFocusHandedOff = false;
 	const backgroundTasks = $derived(session?.backgroundTasks ?? []);
+	const staleTasks = $derived(session?.staleTasks ?? []);
 	// A reattached runner's tasks read as checking until its catch-up list (8.3).
 	const tasksShown = $derived(backgroundTasks.length > 0 || session?.tasksChecking === true);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
@@ -566,6 +567,8 @@
 		<BackgroundTasksRow tasks={backgroundTasks} {layout} onstopall={supportsTaskStop && layout === "strip" ? () => { void stopBackgroundTasks(sessionState.currentId); } : undefined} />
 	{:else}
 		<span data-testid="background-tasks-checking" role="status" class="truncate text-[12px] leading-[16px] text-text-secondary">Checking tasks…</span>
+		<!-- Decision 4A: the last known list stays in sight, greyed, until the catch-up list lands. -->
+		{#if staleTasks.length > 0}<BackgroundTasksRow tasks={staleTasks} {layout} stale />{/if}
 	{/if}
 {/snippet}
 

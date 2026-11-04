@@ -117,7 +117,6 @@ import type {
 	SessionRunner,
 } from "../../../src/lib/provider/runner/session-runner.js";
 import type { EventSink, TurnResult } from "../../../src/lib/provider/types.js";
-import { makeSessionBackgroundLiveness } from "../../../src/lib/session/background-liveness.js";
 import { MainRunnerSendJournal } from "../../helpers/main-runner-send-journal.js";
 import { makeTestHandlerLayer } from "../../helpers/mock-factories.js";
 import {
@@ -145,6 +144,14 @@ vi.mock("node:child_process", async (original) => {
 			(args[0] === "ps" && spawned.commands.get(args[1]?.at(-1) ?? "")) ||
 			actual.execFileSync(...args),
 	};
+});
+
+/** A session-wide output with no sink, labelled so a test can tell runners apart. */
+const usageOutput = (planLabel: string): SessionOutput => ({
+	type: "account-usage",
+	accountId: "account",
+	harness: "claude",
+	reading: { status: "available", planLabel, windows: [] },
 });
 
 const retirementFixture = (
@@ -344,14 +351,15 @@ const retirementFixture = (
 		};
 		const outputs: SessionOutput[] = [];
 		const retained = new Set(retainedSinkIds);
-		const background = makeSessionBackgroundLiveness(undefined, () => 1);
+		// The last account reading each runner reported: a session-wide output with no sink.
+		const usage = new Map<string, string | undefined>();
 		const output = vi.fn<Parameters<typeof makeProcessSessionRunner>[1]>(
 			(output) =>
 				Effect.sync(() => {
 					outputs.push(output);
 					if (output.type === "release-sink") retained.delete(output.sinkId);
-					if (output.type === "background-task")
-						background.record(output.transition);
+					if (output.type === "account-usage")
+						usage.set(output.accountId, output.reading.planLabel);
 					return {};
 				}),
 		);
@@ -450,7 +458,7 @@ const retirementFixture = (
 			accountsGate,
 			outputs,
 			retained,
-			background,
+			usage,
 			output,
 		};
 	});
@@ -6238,54 +6246,49 @@ for (const cleanupFailure of ["deadline", "unavailable services"] as const)
 			),
 	);
 
-for (const blocked of ["release-sink", "background-task"] as const) {
-	it.effect(
-		`bounds retirement cleanup waiting for ${blocked} before releasing admission`,
-		() =>
-			runRetirement(
-				Effect.gen(function* () {
-					const f = yield* retirementFixture();
-					const old = f.attachments[0];
-					if (!old)
-						return yield* Effect.fail(
-							runnerFailure("test", "No old attachment"),
-						);
-					const entered = yield* Deferred.make<void>();
-					const release = yield* Deferred.make<void>();
-					const record = f.output.getMockImplementation();
-					if (!record)
-						return yield* Effect.fail(
-							runnerFailure("test", "No output recorder"),
-						);
-					f.output.mockImplementation((output, sessionId) =>
-						Effect.gen(function* () {
-							if (output.type === blocked) {
-								yield* Deferred.succeed(entered, undefined);
-								yield* Deferred.await(release);
-							}
-							return yield* record(output, sessionId);
-						}),
+it.effect(
+	"bounds retirement cleanup waiting for release-sink before releasing admission",
+	() =>
+		runRetirement(
+			Effect.gen(function* () {
+				const f = yield* retirementFixture();
+				const old = f.attachments[0];
+				if (!old)
+					return yield* Effect.fail(runnerFailure("test", "No old attachment"));
+				const entered = yield* Deferred.make<void>();
+				const release = yield* Deferred.make<void>();
+				const record = f.output.getMockImplementation();
+				if (!record)
+					return yield* Effect.fail(
+						runnerFailure("test", "No output recorder"),
 					);
-					yield* Effect.gen(function* () {
-						f.processes.delete(old.pid ?? 100_088);
-						const stopping = yield* Effect.forkChild(
-							f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
-						);
-						yield* TestClock.adjust("4 seconds");
-						yield* Deferred.await(entered);
-						yield* TestClock.adjust("3 seconds");
-						expect(stopping.pollUnsafe()).toMatchObject({ _tag: "Success" });
-						yield* Deferred.succeed(release, undefined);
-						yield* Fiber.join(stopping);
-						expect(
-							yield* f.manager.hasLiveProcessEffect("s", old.runnerId),
-						).toBe(false);
-					}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
-				}),
-			),
-	);
-}
-
+				f.output.mockImplementation((output, sessionId) =>
+					Effect.gen(function* () {
+						if (output.type === "release-sink") {
+							yield* Deferred.succeed(entered, undefined);
+							yield* Deferred.await(release);
+						}
+						return yield* record(output, sessionId);
+					}),
+				);
+				yield* Effect.gen(function* () {
+					f.processes.delete(old.pid ?? 100_088);
+					const stopping = yield* Effect.forkChild(
+						f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
+					);
+					yield* TestClock.adjust("4 seconds");
+					yield* Deferred.await(entered);
+					yield* TestClock.adjust("3 seconds");
+					expect(stopping.pollUnsafe()).toMatchObject({ _tag: "Success" });
+					yield* Deferred.succeed(release, undefined);
+					yield* Fiber.join(stopping);
+					expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+						false,
+					);
+				}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
+			}),
+		),
+);
 it.effect(
 	"releases Stop while the commit permit is held past cleanup expiry and commits settlement",
 	() =>
@@ -6701,13 +6704,6 @@ it.effect(
 					yield* TestClock.adjust("1 millis");
 					recovering.interruptUnsafe();
 					yield* TestClock.adjust("1 millis");
-					expect(
-						f.outputs.some(
-							(output) =>
-								output.type === "background-task" &&
-								output.transition.kind === "session-ended",
-						),
-					).toBe(false);
 					yield* Deferred.succeed(unlock, undefined);
 					yield* Fiber.join(transaction);
 					yield* TestClock.adjust("4 seconds");
@@ -6719,13 +6715,6 @@ it.effect(
 					).toEqual([{ attachment_id: "" }]);
 					f.processes.delete(100_088);
 					yield* TestClock.adjust("6 seconds");
-					expect(
-						f.outputs.some(
-							(output) =>
-								output.type === "background-task" &&
-								output.transition.kind === "session-ended",
-						),
-					).toBe(true);
 					vi.mocked(f.driver.connect).mockClear();
 					const restarted = yield* makeProcessSessionRunner(
 						{
@@ -6824,13 +6813,7 @@ for (const survived of [false, true])
 														yield* Deferred.succeed(stopping, undefined);
 														yield* Deferred.await(releaseStop);
 														yield* options.emit(
-															{
-																type: "background-task",
-																transition: {
-																	sessionId: "s",
-																	kind: "session-ended",
-																},
-															},
+															usageOutput("candidate-stop"),
 															"s",
 														);
 														if (hello.pid !== undefined && !survived) {
@@ -6899,22 +6882,9 @@ for (const survived of [false, true])
 							},
 						});
 					}
-					const task: SessionOutput = {
-						type: "background-task",
-						transition: {
-							sessionId: "s",
-							kind: "snapshot",
-							tasks: [
-								{
-									id: "active",
-									type: "local_bash",
-									description: "Active task",
-								},
-							],
-						},
-					};
+					const task = usageOutput("active");
 					yield* candidate.emit(task, "s");
-					expect(f.background.backgroundOf("s")).toBeUndefined();
+					expect(f.usage.get("account")).toBeUndefined();
 					yield* old.emit(task, "s");
 					sending = yield* Effect.forkChild(
 						f.admitCommand({
@@ -6943,17 +6913,11 @@ for (const survived of [false, true])
 					yield* Deferred.succeed(releaseWarm, undefined);
 					yield* Deferred.await(stopping);
 					f.outputs.length = 0;
-					yield* candidate.emit(
-						{
-							type: "background-task",
-							transition: { sessionId: "s", kind: "snapshot", tasks: [] },
-						},
-						"s",
-					);
+					yield* candidate.emit(usageOutput("candidate"), "s");
 					yield* Deferred.succeed(releaseStop, undefined);
 					yield* Deferred.await(stopped);
 					const staleOutputs = [...f.outputs];
-					const background = f.background.backgroundOf("s");
+					const usage = f.usage.get("account");
 					const owner = yield* f.manager.getControlProcessIdEffect?.("s") ??
 						Effect.succeed(undefined);
 					for (const step of [0, 1000, 1000, 1000, 999, 1]) {
@@ -6999,7 +6963,7 @@ for (const survived of [false, true])
 					});
 					yield* Fiber.await(sending);
 					expect(staleOutputs).toEqual([]);
-					expect(background?.tasks[0]?.id).toBe("active");
+					expect(usage).toBe("active");
 					expect(owner).toBe(old.runnerId);
 					if (survived) {
 						expect(
@@ -7075,14 +7039,7 @@ it.effect(
 						runnerFailure("test", "No connection factory"),
 					);
 				const staleOutputs: SessionOutput[] = [
-					{
-						type: "background-task",
-						transition: { sessionId: "s", kind: "session-ended" },
-					},
-					{
-						type: "background-task",
-						transition: { sessionId: "s", kind: "snapshot", tasks: [] },
-					},
+					usageOutput("superseded"),
 					{ type: "release-sink", sinkId: "new-sink" },
 					{
 						type: "event",
@@ -7167,23 +7124,7 @@ it.effect(
 											);
 										warmingReceipts.push(receipt);
 									}
-									yield* options.emit(
-										{
-											type: "background-task",
-											transition: {
-												sessionId: "s",
-												kind: "snapshot",
-												tasks: [
-													{
-														id: "warming",
-														type: "local_bash",
-														description: "Warming task",
-													},
-												],
-											},
-										},
-										"s",
-									);
+									yield* options.emit(usageOutput("warming"), "s");
 									yield* Deferred.succeed(warmingEmitted, undefined);
 								}
 								yield* options.onHello(
@@ -7220,7 +7161,7 @@ it.effect(
 					// The connection can reply and release its output permit before Live output.
 					yield* Deferred.await(receipt.committed);
 				}
-				expect(f.background.backgroundOf("s")).toBeUndefined();
+				expect(f.usage.get("account")).toBeUndefined();
 				yield* Deferred.await(shutdownEntered);
 				const replacement = f.attachments[1];
 				if (!replacement)
@@ -7239,23 +7180,7 @@ it.effect(
 					},
 				});
 				f.retained.add("new-sink");
-				yield* replacement.emit(
-					{
-						type: "background-task",
-						transition: {
-							sessionId: "s",
-							kind: "snapshot",
-							tasks: [
-								{
-									id: "new",
-									type: "local_bash",
-									description: "Replacement task",
-								},
-							],
-						},
-					},
-					"s",
-				);
+				yield* replacement.emit(usageOutput("new"), "s");
 				expect(
 					f.outputs.filter(
 						(output) =>
@@ -7268,7 +7193,7 @@ it.effect(
 				yield* TestClock.adjust(0);
 				expect(f.outputs).toEqual([]);
 				expect(f.retained.has("retained")).toBe(false);
-				expect(f.background.backgroundOf("s")?.tasks[0]?.id).toBe("new");
+				expect(f.usage.get("account")).toBe("new");
 				expect(f.retained.has("new-sink")).toBe(true);
 				const commandsBeforeReleasedAbort = f.commands.length;
 				yield* f.manager.executeEffect({ type: "abort", sinkId: "retained" });
@@ -7439,19 +7364,7 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 								history: [],
 							},
 						});
-					yield* replacement.emit(
-						{
-							type: "background-task",
-							transition: {
-								sessionId: "s",
-								kind: "snapshot",
-								tasks: [
-									{ id: "new", type: "local_bash", description: "New task" },
-								],
-							},
-						},
-						"s",
-					);
+					yield* replacement.emit(usageOutput("new"), "s");
 					f.outputs.length = 0;
 					yield* Deferred.succeed(unblock, undefined);
 					yield* Fiber.join(blocked);
@@ -7492,9 +7405,7 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 					}
 					expect(admittedBeforeCleanup).toBe(blockedRetirement);
 					expect(f.outputs).toEqual([]);
-					expect(f.background.backgroundOf("s")).toMatchObject({
-						tasks: [{ id: "new" }],
-					});
+					expect(f.usage.get("account")).toBe("new");
 					expect(
 						yield* f.manager.hasLiveProcessEffect("s", replacement.runnerId),
 					).toBe(true);
@@ -7512,58 +7423,33 @@ for (const interleaving of ["replacement", "retirement", "pending"] as const) {
 	);
 }
 
-it.effect(
-	"retirement releases recovered sinks and background without a replacement",
-	() =>
-		runRetirement(
-			Effect.gen(function* () {
-				const f = yield* retirementFixture();
-				const old = f.attachments[0];
-				if (!old)
-					return yield* Effect.fail(runnerFailure("test", "No old attachment"));
-				yield* old.emit(
-					{
-						type: "background-task",
-						transition: {
-							sessionId: "s",
-							kind: "snapshot",
-							tasks: [
-								{ id: "old", type: "local_bash", description: "Old task" },
-							],
-						},
-					},
-					"s",
-				);
-				const ending = yield* Effect.forkChild(
-					f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
-				);
-				yield* TestClock.adjust("4 seconds");
-				yield* Fiber.join(ending);
-				f.processes.delete(old.pid ?? 100_088);
-				yield* TestClock.adjust("6 seconds");
-				expect({
-					retainedSinks: [...f.retained],
-					background: f.background.backgroundOf("s"),
-				}).toEqual({ retainedSinks: [], background: undefined });
-				expect(
-					f.outputs.filter((output) => output.type === "release-sink"),
-				).toEqual([{ type: "release-sink", sinkId: "retained" }]);
-				expect(
-					f.outputs.filter(
-						(output) =>
-							output.type === "background-task" &&
-							output.transition.kind === "session-ended",
-					),
-				).toHaveLength(1);
-				expect(f.destroyed).toHaveBeenCalledWith(old.runnerId);
-				expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
-					false,
-				);
-				f.outputs.length = 0;
-				yield* old.emit({ type: "release-sink", sinkId: "retained" }, "s");
-				expect(f.outputs).toEqual([]);
-			}),
-		),
+it.effect("retirement releases recovered sinks without a replacement", () =>
+	runRetirement(
+		Effect.gen(function* () {
+			const f = yield* retirementFixture();
+			const old = f.attachments[0];
+			if (!old)
+				return yield* Effect.fail(runnerFailure("test", "No old attachment"));
+			const ending = yield* Effect.forkChild(
+				f.manager.executeEffect({ type: "end-session", sessionId: "s" }),
+			);
+			yield* TestClock.adjust("4 seconds");
+			yield* Fiber.join(ending);
+			f.processes.delete(old.pid ?? 100_088);
+			yield* TestClock.adjust("6 seconds");
+			expect([...f.retained]).toEqual([]);
+			expect(
+				f.outputs.filter((output) => output.type === "release-sink"),
+			).toEqual([{ type: "release-sink", sinkId: "retained" }]);
+			expect(f.destroyed).toHaveBeenCalledWith(old.runnerId);
+			expect(yield* f.manager.hasLiveProcessEffect("s", old.runnerId)).toBe(
+				false,
+			);
+			f.outputs.length = 0;
+			yield* old.emit({ type: "release-sink", sinkId: "retained" }, "s");
+			expect(f.outputs).toEqual([]);
+		}),
+	),
 );
 
 // Failure cases were recorded first in art-3216/fence-failures.md.

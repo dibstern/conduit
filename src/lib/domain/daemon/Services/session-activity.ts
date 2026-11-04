@@ -9,17 +9,33 @@ import {
 	Stream,
 } from "effect";
 import type { EventPayloadMap } from "../../../contracts/stored-event.js";
-import type { LedgerView } from "../../../provider/run-ledger/run-ledger-model.js";
+import type {
+	LedgerView,
+	Task,
+} from "../../../provider/run-ledger/run-ledger-model.js";
 import type {
 	EventDelivery,
 	Interests,
 } from "../../../server/event-audiences.js";
-import type { SessionBackground } from "../../../session/background-liveness.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
-import type { BackgroundTask, SessionServer } from "../../../shared-types.js";
+import type {
+	BackgroundTask,
+	BackgroundWork,
+	SessionServer,
+} from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { DaemonEvent, DaemonEventBusTag } from "./daemon-pubsub.js";
+
+export type SessionBackground = {
+	/** Absent while checking: unknown tasks are neither work nor monitoring. */
+	readonly work?: BackgroundWork;
+	readonly tasks: readonly BackgroundTask[];
+	/** 8.3: a reattached runner's tasks, unknown until its catch-up snapshot. */
+	readonly checking?: true;
+	/** While checking, the last known list, shown greyed: never live, never work. */
+	readonly stale?: readonly BackgroundTask[];
+};
 
 type TaskDisplay = Pick<
 	BackgroundTask,
@@ -95,21 +111,29 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			serving: ReadonlySet<string> = new Set(),
 		): SessionBackground | undefined {
 			const entry = views.get(sessionId);
-			if (entry?.view.tag === "unknown") return { tasks: [], checking: true };
-			if (entry?.view.tag !== "live") return undefined;
-			const tasks = entry.view.tasks
-				.map((task) => {
-					const display = entry.display.get(task.key.taskId);
-					return {
-						...display,
-						id: task.key.taskId,
-						type: task.taskType,
-						kind: task.kind,
-						description: task.description,
-						firstSeenAt: display?.firstSeenAt ?? entry.since,
-					};
-				})
-				.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+			if (entry === undefined || entry.view.tag === "none") return undefined;
+			const shown = (tasks: readonly Task[]): BackgroundTask[] =>
+				tasks
+					.map((task) => {
+						const display = entry.display.get(task.key.taskId);
+						return {
+							...display,
+							id: task.key.taskId,
+							type: task.taskType,
+							kind: task.kind,
+							description: task.description,
+							firstSeenAt: display?.firstSeenAt ?? entry.since,
+						};
+					})
+					.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
+			// 8.3: unknown tasks are neither work nor monitoring; the last known list only shows greyed.
+			if (entry.view.tag === "unknown") {
+				const stale = shown(entry.view.stale ?? []);
+				return stale.length > 0
+					? { tasks: [], checking: true, stale }
+					: { tasks: [], checking: true };
+			}
+			const tasks = shown(entry.view.tasks);
 			// 8.2 (CONTRACT.md 2778-2781): the ledger's class decides; only work tasks
 			// not serving a server make the session work.
 			const working = entry.view.tasks.some(

@@ -27,8 +27,8 @@ import type {
 	SessionTodos,
 	TodoItem,
 } from "../../contracts/ws-rpc.js";
+import type { SessionBackground } from "../../domain/daemon/Services/session-activity.js";
 import { SessionWorkspaceHintStateTag } from "../../domain/relay/Services/session-workspace-hint-state.js";
-import type { SessionBackground } from "../../session/background-liveness.js";
 import {
 	claudeWorkspaceMismatch,
 	decodeClaudeWorktreeState,
@@ -320,6 +320,8 @@ export const sessionRowsToSessionInfoList = (
 				? { backgroundTasks: background.tasks }
 				: {}),
 			...(background?.checking ? { tasksChecking: true } : {}),
+			...(background?.stale ? { staleTasks: background.stale } : {}),
+			...(background?.stale ? { staleTasks: background.stale } : {}),
 			...(pendingQuestionCount ? { pendingQuestionCount } : {}),
 			...(pendingPermissionCount ? { pendingPermissionCount } : {}),
 			...(unread ? { unread: true } : {}),

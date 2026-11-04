@@ -11,7 +11,7 @@ interface ClaudeSdkTestModule {
 	};
 	readonly claudeSubagentSdk?: ClaudeSessionRunnerDeps["subagentSdk"];
 	readonly resolveSettings?: typeof resolveSettings;
-	/** Holds a Stop inside its command write until the test releases it. */
+	/** Holds a Stop inside its command write until the test lets it go; a rejection refuses it. */
 	readonly beforeStopAcceptance?: (input: {
 		readonly commandId: string;
 		readonly sessionId: string;

@@ -134,7 +134,7 @@ type CommitStop = (
 	input: ProviderTurnServiceInterruptInput,
 ) => Effect.Effect<
 	void,
-	Effect.Error<Effect.Success<ReturnType<ProviderTurnService["beginStop"]>>>
+	Effect.Error<ReturnType<ProviderTurnService["beginStop"]>>
 >;
 
 const resolvePendingClaudeQuestions = (
@@ -162,7 +162,8 @@ const resolvePendingClaudeQuestions = (
 			};
 			// Commit the Stop without waiting on its deadline: the reply is admitted
 			// behind it as the reserved next turn (failure catalogue RL-081, 1304-1318).
-			// A Stop main does not accept fails the reply before admission.
+			// A Stop main does not accept fails the reply before admission; a reply
+			// that joins an accepted Stop is admitted behind it.
 			yield* commitStop(stop);
 		}
 	});

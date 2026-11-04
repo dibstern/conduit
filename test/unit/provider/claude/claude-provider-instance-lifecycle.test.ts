@@ -902,20 +902,20 @@ describe("ClaudeProviderInstance lifecycle", () => {
 	});
 
 	describe("endSessionEffect()", () => {
-		it("signals session-ended on terminal disposal", async () => {
-			const onBackgroundTask = vi.fn();
-			const instance = makeTestClaudeProviderInstance({
-				onBackgroundTask,
-			});
-			const ctx = makeFakeSessionContext("sess-end");
+		it("reports an empty task list on terminal disposal", async () => {
+			const instance = makeTestClaudeProviderInstance({});
+			const eventSink = createMockEventSink();
+			const ctx = makeFakeSessionContext("sess-end", { eventSink });
 			setClaudeRuntimeSessionForTest(instance, "sess-end", ctx);
 
 			await Effect.runPromise(instance.endSessionEffect("sess-end"));
-			expect(onBackgroundTask).toHaveBeenCalledOnce();
-			expect(onBackgroundTask).toHaveBeenCalledWith({
-				sessionId: "sess-end",
-				kind: "session-ended",
-			});
+			expect(
+				vi
+					.mocked(eventSink.push)
+					.mock.calls.flatMap(([event]) =>
+						event.type === "evidence.tasks_snapshot" ? [event.data] : [],
+					),
+			).toEqual([{ label: "", tasks: [] }]);
 		});
 
 		it("closes query and removes session from map", async () => {

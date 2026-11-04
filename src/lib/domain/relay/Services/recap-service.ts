@@ -165,7 +165,7 @@ export const makeRecapServiceLive = (
 					SELECT p.text FROM message_parts p JOIN messages m ON m.id = p.message_id
 					WHERE m.turn_id = t.id AND m.session_id = t.session_id AND m.role = 'assistant'
 					AND p.type = 'text' AND p.surfacing_ordinal IS NULL
-					ORDER BY m.created_at DESC, p.sort_order DESC, p.created_at DESC LIMIT 1
+					ORDER BY m.ordinal DESC, m.created_at DESC, m.id DESC, p.sort_order DESC, p.created_at DESC LIMIT 1
 				) ELSE NULL END AS finalReply, s.workspace, s.jev
 				FROM turns t JOIN sessions s ON s.id = t.session_id
 				LEFT JOIN messages u ON u.id = t.user_message_id
@@ -225,7 +225,7 @@ export const makeRecapServiceLive = (
 			FROM message_parts p JOIN messages m ON m.id = p.message_id
 			WHERE m.session_id = ${target.sessionId} AND m.turn_id = ${target.turnId}
 			AND m.role = 'assistant'
-			ORDER BY m.created_at, m.id, p.sort_order`;
+			ORDER BY m.ordinal, m.created_at, m.id, p.sort_order`;
 					// A later step folds pending prose into the log. Trailing replies
 					// and prose before a hand-back stay outside the numbered log.
 					const logged = new Set<string>();

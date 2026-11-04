@@ -229,7 +229,15 @@ export const DaemonOrchestrationLive = Layer.effect(
 		const engine = new OrchestrationEngine({
 			...(beforeStopAcceptance && {
 				beforeStopAcceptance: (input) =>
-					Effect.promise(() => beforeStopAcceptance(input)),
+					Effect.tryPromise({
+						try: () => beforeStopAcceptance(input),
+						catch: (cause) =>
+							new ProviderInstanceFailure({
+								providerId: "conduit",
+								operation: "acceptStop",
+								cause,
+							}),
+					}),
 			}),
 			registry: adapters.registry,
 			attachmentStore: Context.get(store, AttachmentStoreTag),

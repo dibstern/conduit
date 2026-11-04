@@ -19,9 +19,19 @@ export const inheritForkHistory = (
 		)
 			return;
 		const suffix = `_${event.sessionId}`;
+		// The cut is the point's place in the Source's write order. The stored
+		// point carries only its id and time, which suffice once the row is
+		// found; a point whose row is gone falls back to time, then id.
+		const atOrBeforeCut = (alias: "m" | "owner") => {
+			const row = sql.literal(alias);
+			return sql`COALESCE((${row}.ordinal, ${row}.created_at, ${row}.id) <= (
+				SELECT cut.ordinal, cut.created_at, cut.id FROM messages cut
+				WHERE cut.id = ${cutId} AND cut.session_id = ${sourceId}),
+				(${row}.created_at, ${row}.id) <= (${cutTimestamp}, ${cutId}))`;
+		};
 		const retained = sql`SELECT m.* FROM messages m
 			WHERE m.session_id = ${sourceId}
-			AND ((m.created_at, m.id) <= (${cutTimestamp}, ${cutId})
+			AND (${atOrBeforeCut("m")}
 				OR (m.id GLOB 'turn-error-[0-9]*' AND EXISTS (
 					SELECT 1 FROM events error JOIN messages owner
 						ON owner.id = json_extract(error.data, '$.messageId') ||
@@ -29,7 +39,7 @@ export const inheritForkHistory = (
 					WHERE error.sequence = CAST(substr(m.id, length('turn-error-') + 1) AS INTEGER)
 					AND error.type = 'turn.error' AND error.sequence < ${event.sequence}
 					AND owner.session_id = ${sourceId}
-					AND (owner.created_at, owner.id) <= (${cutTimestamp}, ${cutId})
+					AND ${atOrBeforeCut("owner")}
 					AND NOT EXISTS (SELECT 1 FROM message_tombstones removed
 						WHERE removed.session_id = ${sourceId} AND removed.message_id = owner.id))))
 			AND NOT EXISTS (SELECT 1 FROM message_tombstones removed
@@ -101,8 +111,8 @@ export const inheritForkHistory = (
 						ORDER BY (SELECT MAX(previous.completed_at) FROM retained previous
 							WHERE previous.turn_id = t.id AND previous.role = 'assistant'
 							AND previous.completed_at <= m.created_at
-							AND (previous.created_at, previous.id) < (m.created_at, m.id)) DESC,
-							m.created_at, m.id LIMIT 1)),
+							AND (previous.ordinal, previous.created_at, previous.id) < (m.ordinal, m.created_at, m.id)) DESC,
+							m.ordinal, m.created_at, m.id LIMIT 1)),
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.cost ELSE a.cost END,
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.tokens_in ELSE a.tokens_in END,
 				CASE WHEN t.whole AND a.turn_id IS NOT NULL THEN t.tokens_out ELSE a.tokens_out END,
@@ -110,7 +120,7 @@ export const inheritForkHistory = (
 				CASE WHEN t.whole AND t.state NOT IN ('pending', 'running') THEN t.completed_at
 					WHEN a.turn_id IS NULL THEN ${event.createdAt}
 					WHEN (SELECT m.is_streaming FROM retained m WHERE m.turn_id = t.id AND m.role = 'assistant'
-						ORDER BY m.created_at DESC, m.id DESC LIMIT 1) = 0 THEN a.completed_at
+						ORDER BY m.ordinal DESC, m.created_at DESC, m.id DESC LIMIT 1) = 0 THEN a.completed_at
 					ELSE ${event.createdAt} END,
 				CASE WHEN a.turn_id IS NOT NULL THEN CASE WHEN t.whole THEN t.requested_model
 					ELSE json_extract(resolution.data, '$.requestedModel') END END,

@@ -812,6 +812,117 @@ describe("readForkSource", () => {
 	);
 
 	it.effect(
+		"picks and cuts fork points in write order (conduit-test-lczrn.1)",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				// Written z, y, x at one time: id order is the reverse of write order.
+				const written = (sessionId: string, messageId: string) =>
+					canonicalEvent(
+						"message.created",
+						sessionId,
+						{ sessionId, messageId, role: "assistant" },
+						{ createdAt: 10 },
+					);
+				yield* seed(["z", "y", "x"].map((id) => written("parent", id)));
+				const forkAt = (sessionId: string, from: string, point: string) =>
+					commit([
+						canonicalEvent("session.created", sessionId, {
+							sessionId,
+							provider: "claude",
+							title: sessionId,
+							forkedFrom: from,
+							inheritsHistory: true,
+							forkPointMessageId: point,
+							forkPointTimestamp: 10,
+						}),
+					]);
+				const copied = (sessionId: string) =>
+					sql<{ id: string }>`SELECT id FROM messages
+						WHERE session_id = ${sessionId} ORDER BY ordinal, created_at, id`.pipe(
+						Effect.map((rows) => rows.map(({ id }) => id)),
+					);
+
+				const latest = yield* readForkSource("parent", { sideThread: false });
+				expect(latest.boundary.messageId).toBe("x");
+				expect(latest.retained.map(({ id }) => id)).toEqual(["z", "y", "x"]);
+
+				// The first and the second written of the equal-time run.
+				yield* forkAt("first", "parent", "z");
+				expect(yield* copied("first")).toEqual(["z_first"]);
+				yield* forkAt("second", "parent", "y");
+				expect(yield* copied("second")).toEqual(["z_second", "y_second"]);
+
+				// A fork of a fork cuts at the inherited row's place, and the
+				// middle session's own later message stays behind.
+				yield* commit([written("second", "a")]);
+				yield* forkAt("grandchild", "second", "y_second");
+				expect(yield* copied("grandchild")).toEqual([
+					"z_second_grandchild",
+					"y_second_grandchild",
+				]);
+
+				// A stored point whose row is gone falls back to time, then id.
+				yield* forkAt("legacy", "parent", "missing");
+				expect(yield* copied("legacy")).toEqual([]);
+
+				// A pending rewind at x leaves y as the last visible message.
+				yield* commit([
+					canonicalEvent("session.rewound", "parent", { messageId: "x" }),
+				]);
+				const rewound = yield* readForkSource("parent", {
+					sideThread: false,
+				});
+				expect(rewound.boundary.messageId).toBe("y");
+				expect(rewound.retained.map(({ id }) => id)).toEqual(["z", "y"]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
+	// Failure modes (conduit-test-lczrn.1): a fork cut inside a turn picks the
+	// copied turn's reply and reads whether it was still streaming from the
+	// copied assistant messages. With equal times whose write order differs
+	// from id order, a time/id pick names the wrong message.
+	it.effect(
+		"picks inside a copied turn in write order (conduit-test-lczrn.1)",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seed([]);
+				// Written z, y, x at one time: z and y finished, x still streams.
+				// The turn's own reply ("final") is past the cut at x.
+				yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, assistant_message_id, requested_at)
+					VALUES ('u', 'parent', 'completed', 'u', 'final', 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, turn_id, role, text, created_at, updated_at, ordinal, is_streaming, completed_at)
+					VALUES ('u', 'parent', 'u', 'user', 'Ask', 1, 1, 1, 0, NULL),
+						('z', 'parent', 'u', 'assistant', 'z', 5, 5, 2, 0, 5),
+						('y', 'parent', 'u', 'assistant', 'y', 5, 5, 3, 0, 5),
+						('x', 'parent', 'u', 'assistant', 'x', 5, 5, 4, 1, NULL),
+						('final', 'parent', 'u', 'assistant', 'final', 6, 6, 5, 0, 6)`;
+				yield* commit([
+					canonicalEvent(
+						"session.created",
+						"fork",
+						{
+							sessionId: "fork",
+							provider: "claude",
+							title: "Fork",
+							forkedFrom: "parent",
+							inheritsHistory: true,
+							forkPointMessageId: "x",
+							forkPointTimestamp: 5,
+						},
+						{ createdAt: 100 },
+					),
+				]);
+				expect(
+					yield* sql`SELECT assistant_message_id, completed_at FROM turns WHERE id = 'u_fork'`,
+				).toEqual([{ assistant_message_id: "y_fork", completed_at: 100 }]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
+	it.effect(
 		"preserves committed rewind and native transcript account provenance",
 		() =>
 			Effect.gen(function* () {

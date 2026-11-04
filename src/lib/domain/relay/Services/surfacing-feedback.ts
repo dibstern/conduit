@@ -15,7 +15,7 @@ const surfacingTextEligibility = (sql: SqlClient.SqlClient) => sql`
 	mp.type = 'text' AND m.role = 'assistant' AND m.turn_id IS NOT NULL
 	AND (mp.surfacing_ordinal IS NOT NULL
 		OR EXISTS (SELECT 1 FROM message_parts later WHERE later.message_id = m.id AND later.sort_order > mp.sort_order)
-		OR EXISTS (SELECT 1 FROM messages later WHERE later.turn_id = m.turn_id AND later.role = 'assistant' AND (later.created_at > m.created_at OR (later.created_at = m.created_at AND later.id > m.id))))`;
+		OR EXISTS (SELECT 1 FROM messages later WHERE later.turn_id = m.turn_id AND later.role = 'assistant' AND (later.ordinal, later.created_at, later.id) > (m.ordinal, m.created_at, m.id)))`;
 
 /** Read every eligible part, independently of the browser's transcript window. */
 export const readSessionCategoryCounts = (
@@ -36,7 +36,7 @@ export const readSessionCategoryCounts = (
 			WHERE m.session_id = ${sessionId} AND ${surfacingTextEligibility(sql)}
 			AND NOT EXISTS (
 				SELECT 1 FROM sessions s JOIN messages cut ON cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
-				WHERE s.id = m.session_id AND (m.created_at > cut.created_at OR (m.created_at = cut.created_at AND m.id >= cut.id)))`;
+				WHERE s.id = m.session_id AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id))`;
 		const verdicts = yield* Schema.decodeUnknownEffect(
 			Schema.Array(
 				Schema.Struct({

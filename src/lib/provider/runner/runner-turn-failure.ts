@@ -32,10 +32,6 @@ export function failRunnerTurn(
 ) {
 	return Effect.gen(function* () {
 		yield* emit({
-			type: "background-task",
-			transition: { sessionId: turn.sessionId, kind: "session-ended" },
-		});
-		yield* emit({
 			type: "cancel-interactions",
 			sinkId,
 			reason: failure.message,

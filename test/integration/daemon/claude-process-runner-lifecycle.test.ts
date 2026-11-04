@@ -1064,6 +1064,26 @@ describe("built-dist Claude runner lifecycle", () => {
 		);
 	});
 
+	it("keeps a runner with a live shell past the idle window and exits once the shell ends", async () => {
+		const { harness, browser, sessionId } = await start({
+			idleTimeoutMs: 1200,
+		});
+		await browser.send(sessionId, "shell-idle");
+		const runner = started(harness);
+		// test-waits-allow real-wait: no event marks an idle timer that does not fire, so let its window pass.
+		await new Promise<void>((done) => setTimeout(done, 2000));
+		expect(() => process.kill(runner.pid, 0)).not.toThrow();
+		writeFileSync(join(harness.projectDir, "end-shell-idle"), "end");
+		await waitFor(
+			harness,
+			() => {
+				expect(() => process.kill(runner.pid, 0)).toThrow();
+				expect(existsSync(runner.socketPath)).toBe(false);
+			},
+			{ timeout: 6000 },
+		);
+	});
+
 	it("releases end-session admission when interrupted before runner readiness", async () => {
 		const { harness, browser, sessionId } = await start({
 			helloDelayMs: 3000,
