@@ -51,16 +51,41 @@ const terminal = {
 };
 
 /**
- * A list marker: from here on the trace player answers every list call with `data` (see
- * trace-player.ts). It sits before the frame that prompts the re-read.
+ * A list marker: from here on the trace player answers every list call for `cursor` with `data`
+ * (see trace-player.ts), or with Codex's error for a cursor it cannot read (lane 3245 Q2). It
+ * sits before the frame that prompts the re-read.
  */
-const listed = (at: number, id: number, threadId: string, data: unknown[]) => [
+const listed = (
+	at: number,
+	id: number,
+	threadId: string,
+	data: unknown[] | "error",
+	page: { readonly cursor?: string; readonly nextCursor?: string } = {},
+) => [
 	{
 		dir: "out",
 		at,
-		message: { jsonrpc: "2.0", id, method: LIST, params: { threadId } },
+		message: {
+			jsonrpc: "2.0",
+			id,
+			method: LIST,
+			params: { threadId, ...(page.cursor ? { cursor: page.cursor } : {}) },
+		},
 	},
-	{ dir: "in", at, message: { id, result: { data, nextCursor: null } } },
+	{
+		dir: "in",
+		at,
+		message:
+			data === "error"
+				? {
+						id,
+						error: {
+							code: -32600,
+							message: "invalid cursor: invalid digit found in string",
+						},
+					}
+				: { id, result: { data, nextCursor: page.nextCursor ?? null } },
+	},
 ];
 
 /** The recorded command's turn: what follows the turn names it, as a late Codex event does. */
@@ -160,6 +185,29 @@ const terminalTrace = (after: (turn: Turn) => TraceRow[] = () => []) => {
 	return [...trace, ...after({ threadId, turnId, item, at })];
 };
 
+/** The app-server exits once its turn is done (a crash or a closed connection between turns). */
+const exit = (at: number) => ({ dir: "exit", at, code: 0, signal: null });
+
+/**
+ * A later app-server for the same thread, as a reconnect opens one: it resumes the thread and
+ * lists `data` as it answers the resume. `held` is that answer's time; a gate there holds the turn.
+ */
+const resumedTrace = (data: unknown[]) => {
+	const trace = fixtureRows("turn-command").filter((row) => row.dir !== "exit");
+	const index = trace.findIndex(
+		(row) => row.message?.method === "thread/start",
+	);
+	const request = trace[index];
+	const reply = trace[index + 1];
+	const threadId = (reply?.message?.result?.["thread"] as { id?: string })?.id;
+	if (!request?.message || !reply || typeof threadId !== "string")
+		throw new Error("Missing the recorded thread");
+	request.message = { ...request.message, method: "thread/resume" };
+	const held = Number(reply["at"]);
+	trace.splice(index + 2, 0, ...listed(held, 904, threadId, data));
+	return { trace, held };
+};
+
 const read = (harness: ProcessHarness, sessionId: string) => {
 	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
@@ -204,6 +252,7 @@ describe("Codex background terminals", () => {
 	let gatePath = "";
 	let tracePath = "";
 	const proofs: Record<string, unknown>[] = [];
+	const followUps: Record<string, unknown>[] = [];
 
 	const writeTrace = (trace: TraceRow[]) =>
 		writeFileSync(
@@ -235,6 +284,10 @@ describe("Codex background terminals", () => {
 		writeFileSync(
 			"test-results/82tn-32-28-codex-terminals.json",
 			`${JSON.stringify({ ticket: "conduit-test-82tn.32.28", proofs }, null, 2)}\n`,
+		);
+		writeFileSync(
+			"test-results/82tn-32-45-codex-terminals.json",
+			`${JSON.stringify({ ticket: "conduit-test-82tn.32.45", proofs: followUps }, null, 2)}\n`,
 		);
 	});
 
@@ -507,6 +560,73 @@ describe("Codex background terminals", () => {
 			runs: ledger.runs,
 			ends: ledger.ends,
 			listCalls: captured(LIST).length,
+		});
+	});
+
+	it("re-reads the set when a new app-server connection opens, before the next turn runs", async () => {
+		let held = 0;
+		const { fixture, browser, sessionId } = await start(
+			"reconnect",
+			terminalTrace((turn) => {
+				held = turn.at - 1;
+				return [exit(turn.at)];
+			}),
+		);
+		// The app-server exits only once its terminal is listed and its turn has ended.
+		writeFileSync(gatePath, String(held));
+		await submit(browser, sessionId);
+		await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => Array.isArray(tasks) && tasks.length === 1,
+		);
+		await runEnded(fixture, sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: the app-server's exit reaches only its capture.
+		await vi.waitFor(() =>
+			expect(rows<TraceRow>(capturePath).at(-1)?.dir).toBe("exit"),
+		);
+		// The next turn opens a new app-server, which no longer runs the terminal. Its turn is held
+		// at the resume, so only the connection's own re-read can drop the terminal (8.2, 2792).
+		const resumed = resumedTrace([]);
+		writeTrace(resumed.trace);
+		writeFileSync(gatePath, String(resumed.held));
+		const cursor = browser.frames.length;
+		await submit(browser, sessionId);
+		const row = await rowTasks(
+			browser,
+			sessionId,
+			(tasks) => tasks === undefined,
+			cursor,
+		);
+		const reconnected = read(fixture, sessionId);
+		expect(reconnected.ends).toHaveLength(1);
+		expect(captured("thread/resume")).toHaveLength(1);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: the second Run's end reaches only the store's ledger.
+		const ledger = await vi.waitFor(
+			() => {
+				const ledger = read(fixture, sessionId);
+				expect(ledger.ends.map(({ outcome }) => outcome)).toEqual([
+					"completed",
+					"completed",
+				]);
+				return ledger;
+			},
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		expect(ledger.snapshots).toEqual([
+			[expect.objectContaining({ key: { taskId: PROCESS } })],
+			[],
+		]);
+		expect(ledger.errors).toEqual([]);
+		followUps.push({
+			case: "reconnect",
+			rowWhileHeld: row["backgroundTasks"] ?? null,
+			endsWhileHeld: reconnected.ends,
+			snapshots: ledger.snapshots,
+			ends: ledger.ends,
+			listCallsOnNewConnection: captured(LIST).length,
 		});
 	});
 });

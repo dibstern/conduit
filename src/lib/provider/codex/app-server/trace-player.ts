@@ -131,6 +131,7 @@ export function createTraceAppServerTransport(
 		// point on; every list call gets the latest marked set the gate has reached, an empty page
 		// before any, and its reply skips the gated frames.
 		const listed: { readonly at: number; readonly result: unknown }[] = [];
+		const scope = yield* Effect.scope;
 		const replies = yield* Queue.unbounded<unknown>();
 		let cursor = 0;
 		let exitValue: AppServerExit | undefined;
@@ -164,11 +165,16 @@ export function createTraceAppServerTransport(
 				if (!next || next.dir === "out") return;
 				cursor += 1;
 				if (next.dir === "exit") {
-					yield* finish({
-						code: next.code,
-						signal: next.signal,
-						stderrTail: "",
-					});
+					// The exit waits for the gate like any frame, so a test can keep the app-server up
+					// past its last frame (lane 3245: it exits only after the runner has listed).
+					yield* Effect.gen(function* () {
+						while (next.at > gate()) yield* Effect.sleep("10 millis");
+						yield* finish({
+							code: next.code,
+							signal: next.signal,
+							stderrTail: "",
+						});
+					}).pipe(Effect.forkIn(scope));
 					return;
 				}
 				let message = next.message;
