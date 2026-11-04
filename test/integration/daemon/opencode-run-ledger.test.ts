@@ -13,16 +13,21 @@
 //    is never read as received, so it ends as a failure though it ran (82tn.32.35).
 // 8. a process that dies while the daemon is down leaves its held Run open after the daemon starts,
 //    ends it as completed though the work died, or ends it again when the next process starts.
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
+	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { connect } from "node:net";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Result } from "effect";
@@ -970,6 +975,159 @@ describe("OpenCode on the Run Ledger", () => {
 			expect(started(after)).toEqual([first, { ...first, reattached: 1 }]);
 			expect(lost(after)).toEqual([]);
 			expect(after.ends).toEqual([{ runId: heldRun, reason: "completed" }]);
+		});
+
+		// CONTRACT.md 3125-3131: the decider reads an absent OpenCode prompt only through a later idle
+		// read, because a prompt or abort whose client request ended may still run. This pins that
+		// wire behaviour of the real server, so a change to it fails here (12 above).
+		it("the real OpenCode runs a prompt and an abort whose client request ended, but not a cut-short body", async () => {
+			const config = await serveModel();
+			const root = mkdtempSync(join(tmpdir(), "oc-wire-"));
+			for (const dir of ["home", "project", "config", "data", "state", "cache"])
+				mkdirSync(join(root, dir));
+			writeFileSync(join(root, "models.json"), "{}");
+			// OpenCode's --port 0 tries 4096 first, so reserve a free port instead.
+			const reservation = createServer();
+			await new Promise<void>((done) =>
+				reservation.listen(0, "127.0.0.1", () => done()),
+			);
+			const reserved = reservation.address();
+			if (!reserved || typeof reserved === "string")
+				throw new Error("Missing OpenCode port");
+			await new Promise<void>((done) => reservation.close(() => done()));
+			const server = spawn(
+				resolveRealOpenCode(),
+				["serve", "--hostname", "127.0.0.1", "--port", String(reserved.port)],
+				{
+					cwd: join(root, "project"),
+					env: {
+						PATH: process.env["PATH"],
+						HOME: join(root, "home"),
+						npm_config_offline: "true",
+						OPENCODE_MODELS_PATH: join(root, "models.json"),
+						OPENCODE_DISABLE_MODELS_FETCH: "true",
+						OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
+						OPENCODE_CONFIG_CONTENT: JSON.stringify(config),
+						XDG_CONFIG_HOME: join(root, "config"),
+						XDG_DATA_HOME: join(root, "data"),
+						XDG_STATE_HOME: join(root, "state"),
+						XDG_CACHE_HOME: join(root, "cache"),
+					},
+					stdio: ["ignore", "pipe", "ignore"],
+				},
+			);
+			try {
+				let output = "";
+				const base = await new Promise<string>((done, fail) => {
+					server.once("exit", () =>
+						fail(new Error(`OpenCode exited: ${output}`)),
+					);
+					server.stdout?.on("data", (chunk: Buffer) => {
+						output += chunk.toString("utf8");
+						const url = output.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+						if (url) done(url);
+					});
+				});
+				const port = Number(new URL(base).port);
+				expect([2633, 4096]).not.toContain(port);
+				const json = async (method: string, path: string, body?: object) =>
+					(await fetch(`${base}${path}`, {
+						method,
+						headers: { "Content-Type": "application/json" },
+						...(body ? { body: JSON.stringify(body) } : {}),
+					}).then(async (response) =>
+						JSON.parse((await response.text()) || "null"),
+					)) as unknown;
+				const session = async () =>
+					((await json("POST", "/session", {})) as { id: string }).id;
+				type Message = {
+					info: {
+						role: string;
+						error?: { name: string };
+						time: { completed?: number };
+					};
+				};
+				const messages = async (id: string) =>
+					((await json("GET", `/session/${id}/message`)) as Message[]).map(
+						({ info }) => ({
+							role: info.role,
+							error: info.error?.name,
+							completed: info.time.completed !== undefined,
+						}),
+					);
+				/** Writes the request on a raw socket and destroys it at once, so no reply is read. */
+				const cut = (path: string, body: object, sent?: number) =>
+					new Promise<void>((done) => {
+						const data = JSON.stringify(body);
+						const socket = connect(port, "127.0.0.1", () =>
+							socket.write(
+								`POST ${path} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(data)}\r\n\r\n${data.slice(0, sent)}`,
+								() => {
+									socket.destroy();
+									done();
+								},
+							),
+						);
+					});
+				const prompt = (text: string) => ({
+					parts: [{ type: "text", text }],
+					model: { providerID: "ledger-live", modelID: "main" },
+				});
+
+				const partial = await session();
+				await cut(`/session/${partial}/prompt_async`, prompt("PARTIAL"), 20);
+				const late = await session();
+				await cut(`/session/${late}/prompt_async`, prompt("LATE"));
+				await until(
+					() =>
+						expect(calls).toContainEqual(
+							expect.objectContaining({
+								model: "main",
+								text: "LATE",
+								outcome: "answered",
+							}),
+						),
+					20_000,
+				);
+				const aborted = await session();
+				await json("POST", `/session/${aborted}/prompt_async`, prompt("HOLD"));
+				await until(() =>
+					expect(calls).toContainEqual(
+						expect.objectContaining({ text: "HOLD", outcome: "held" }),
+					),
+				);
+				await cut(`/session/${aborted}/abort`, {});
+				await until(() =>
+					expect(calls).toContainEqual(
+						expect.objectContaining({ text: "HOLD", outcome: "aborted" }),
+					),
+				);
+
+				const wire = {
+					late: await messages(late),
+					partial: await messages(partial),
+					aborted: await messages(aborted),
+				};
+				proofs.push({
+					scenario: "live:client-request-ended",
+					opencode: resolveRealOpenCode(),
+					model: calls,
+					wire,
+				});
+				expect(calls.filter(({ text }) => text === "PARTIAL")).toEqual([]);
+				expect(wire.partial).toEqual([]);
+				expect(wire.late).toEqual([
+					{ role: "user", error: undefined, completed: false },
+					{ role: "assistant", error: undefined, completed: true },
+				]);
+				expect(wire.aborted).toEqual([
+					{ role: "user", error: undefined, completed: false },
+					{ role: "assistant", error: "MessageAbortedError", completed: true },
+				]);
+			} finally {
+				server.kill("SIGKILL");
+				rmSync(root, { recursive: true, force: true });
+			}
 		});
 	});
 });
