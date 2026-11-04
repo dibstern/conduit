@@ -2,6 +2,7 @@ import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { LoggerTag } from "./services.js";
@@ -41,8 +42,9 @@ const readRewindSession = (sessionId: string) =>
 			AND (json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 				OR json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL)) AS busy`;
 		if (
-			row.status === "busy" ||
-			row.status === "retry" ||
+			// 8.1: the foreground is the ledger's active Run; gap review 1B: rewind is a foreground
+			// action, so background work never blocks it.
+			(yield* loadLedgerView(sessionId))?.active !== undefined ||
 			busy?.busy === 1 ||
 			(yield* hasActiveProcessingTimeout(sessionId))
 		)

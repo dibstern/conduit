@@ -513,10 +513,17 @@ export const makeSessionGit = Effect.gen(function* () {
 				const [row] = yield* sql<{
 					project_id: string;
 					workspace: string | null;
-					status: string;
 					settled_at: number | null;
-				}>`SELECT project_id, workspace, status, settled_at FROM sessions WHERE id = ${sessionId}`;
+				}>`SELECT project_id, workspace, settled_at FROM sessions WHERE id = ${sessionId}`;
 				if (!row) return undefined;
+				// 8.1 (2734): a session runs while the ledger holds its active Run; SessionActivity
+				// re-attaches it whenever that changes.
+				const running =
+					Option.isSome(activity) &&
+					activity.value.background.activityOf(sessionId, {
+						approvals: 0,
+						questions: 0,
+					}).foreground === "working";
 				const project = HashMap.get(yield* Ref.get(registry), row.project_id);
 				if (Option.isNone(project)) return undefined;
 				const folders = project.value.project.folders;
@@ -539,7 +546,7 @@ export const makeSessionGit = Effect.gen(function* () {
 				];
 				const previous = sessions.get(sessionId);
 				if (previous && isDeepStrictEqual(previous.directories, keys)) {
-					previous.running = row.status === "busy" || row.status === "retry";
+					previous.running = running;
 					return previous;
 				}
 				const owner = yield* owners.sessionScope(sessionId);
@@ -557,7 +564,7 @@ export const makeSessionGit = Effect.gen(function* () {
 					folders,
 					workspace,
 					directories: keys,
-					running: row.status === "busy" || row.status === "retry",
+					running,
 				};
 				yield* owner.acquire<void, never, never>(
 					Effect.acquireRelease(

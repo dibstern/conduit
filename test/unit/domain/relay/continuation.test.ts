@@ -56,6 +56,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../../src/lib/provider/provider-registry.js";
 import type { PreWarmSessionInput } from "../../../../src/lib/provider/types.js";
+import { activeRunEvents } from "../../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -320,7 +321,7 @@ for (const scenario of [
 					}),
 				]);
 				if ("busy" in scenario && scenario.busy)
-					yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`;
+					yield* commit(activeRunEvents("s1"));
 				const before = yield* store.readAllBySession("s1");
 				const result = yield* continuation
 					.requestContinuation("s1", {
@@ -342,7 +343,7 @@ for (const scenario of [
 										if (scenario.duringProbe === "provider")
 											yield* sql`UPDATE sessions SET provider = 'other' WHERE id = 's1'`;
 										else if (scenario.duringProbe === "busy")
-											yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 's1'`;
+											yield* commit(activeRunEvents("s1"));
 										else
 											accountState = accountsStateFromInstances(
 												[
@@ -402,7 +403,13 @@ for (const scenario of [
 					});
 				} else {
 					expect(admittedSessions).toEqual([]);
-					expect(yield* store.readAllBySession("s1")).toEqual(before);
+					const after = yield* store.readAllBySession("s1");
+					expect(after.slice(0, before.length)).toEqual(before);
+					expect(after.slice(before.length).map((event) => event.type)).toEqual(
+						"duringProbe" in scenario && scenario.duringProbe === "busy"
+							? ["input.admitted", "input.sent", "run.requested"]
+							: [],
+					);
 				}
 			}).pipe(
 				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),

@@ -61,6 +61,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { UsageRead } from "../../../src/lib/provider/usage-reader.js";
+import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -475,12 +476,7 @@ it.effect("leaves a not-yet-due busy Limit Recovery untouched", () =>
 	withSweep((fixture) =>
 		Effect.gen(function* () {
 			const project = yield* fixture.project();
-			yield* project.commit([
-				canonicalEvent("session.status", "s1", {
-					sessionId: "s1",
-					status: "busy",
-				}),
-			]);
+			yield* project.commit(activeRunEvents("s1"));
 			const before = yield* project.session;
 			const events = yield* project.store.readAllBySession("s1");
 			yield* at(start + 1000);

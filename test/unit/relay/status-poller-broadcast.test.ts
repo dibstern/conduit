@@ -15,10 +15,12 @@ import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
+import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
 import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
 
@@ -373,7 +375,12 @@ describe("Status poller → browser shell transitions", () => {
 	});
 
 	it("shares status-poller state with the relay Effect runtime", async () => {
-		publishStatus("sess-A", "busy");
+		// The poller's busy is the ledger's active Run (82tn.32.30), so the relay commits one.
+		await harness.relay.effectRuntime.runtime.runPromise(
+			Effect.gen(function* () {
+				yield* (yield* makeCommitAndSignal)(activeRunEvents("sess-A"));
+			}),
+		);
 
 		await vi.waitFor(
 			async () =>
