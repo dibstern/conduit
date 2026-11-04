@@ -1021,7 +1021,10 @@ export class CodexRunnerPayload implements RunnerPayload {
 			const session = this.sessions.get(sessionId);
 			if (!session) return;
 			const active = session.active;
-			if (runIds && !runIds.some((id) => active?.runIds.has(id))) return;
+			// An empty cohort names no send, so it reaches only a wake (no Runs of its own), as Claude's.
+			const wakeStop = runIds?.length === 0 && active?.runIds.size === 0;
+			if (runIds && !wakeStop && !runIds.some((id) => active?.runIds.has(id)))
+				return;
 			session.subagents?.beginInterrupt();
 			if (!active) {
 				yield* this.interruptChildren(session);

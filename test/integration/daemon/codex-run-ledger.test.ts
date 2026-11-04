@@ -12,7 +12,7 @@
 // 230. it is dropped: no wake Run in the ledger;
 // 231. the wake Run never ends, or ends other than once at its own result;
 // 232. its output is lost or lands on no message;
-// 233. (open) Stop while it runs sends no turn/interrupt, or the alarm ends it;
+// 233. Stop while it runs sends no turn/interrupt, or the alarm ends it;
 // 237. its evidence carries no runner-stamped label;
 // 242. its start reaches the store only when its end follows at once (held-gate variant).
 import { randomUUID } from "node:crypto";
@@ -428,5 +428,48 @@ describe("Codex on the Run Ledger", () => {
 		expect(output).not.toEqual([]);
 		expect(captured("turn/start", "out")).toHaveLength(1);
 		prove(held ? "wake-held" : "wake", ledger);
+	});
+
+	it("Stops a wake Run with turn/interrupt, not the alarm", async () => {
+		const { fixture, browser, sessionId, trace } = await wake(
+			"wake-stop",
+			"goal-stop",
+		);
+		const pause = trace.find(
+			({ dir, message }) =>
+				dir === "out" &&
+				message?.method === "thread/goal/set" &&
+				message.params?.["status"] === "paused" &&
+				typeof message.params?.["objective"] !== "string",
+		)?.["at"];
+		if (typeof pause !== "number") throw new Error("Missing goal pause");
+		writeFileSync(gatePath, String(pause - 1));
+		// test-waits-allow polling: the wake's start reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(
+					read(fixture, sessionId).events.map(({ type }) => type),
+				).toContain("evidence.turn_started"),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		const stopping = Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		// The replay answers the pause and the interrupt only once conduit sends them.
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await stopping;
+		// test-waits-allow polling: a wake Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
+			{ timeout: TIMEOUT, interval: 100 },
+		);
+		expect(captured("turn/interrupt", "out")).toHaveLength(1);
+		const ledger = read(fixture, sessionId);
+		expect(wakeEvidence(ledger)[1]?.result).toBe("interrupted");
+		expect(ledger.ends[1]).toEqual(
+			expect.objectContaining({ outcome: "interrupted" }),
+		);
+		expect(ledger.ends[1]?.forced).not.toBe(1);
+		prove("wake-stop", ledger);
 	});
 });
