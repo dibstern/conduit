@@ -2538,6 +2538,16 @@ describe("generated D34 coverage", () => {
 		"Stop of a late steer's turn", // 3.9, L6
 		"steer send failure with inputs queued", // 3.9 D53
 		"next start after a Cursor abandonment, then retirement", // 3113-3117
+		// 3.10: every answer path (CONTRACT.md 999-1050).
+		"prompt asked", // 3.10 1001-1006
+		"answer submitted", // 3.10 1007-1008
+		"timeout answer", // 3.10 1009-1012
+		"answer after the first answer won", // 3.10 1007-1012
+		"refused answer retrying", // 3.10 1015-1018
+		"answer refused for good", // 3.10 1019-1022
+		"answer refused through the retry cap", // 3.10 1015-1022
+		"prompt reopened after its answer failed for good", // 3.10 1019-1022
+		"late outcome for a reopened prompt's old answer", // 3.10 1019-1022, 3.4
 		// Round 2d: the native clock no longer pauses at not_sent, so neither its pause nor its resume at
 		// re-issue is a shape (8.5).
 	] as const)

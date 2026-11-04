@@ -3202,21 +3202,79 @@ export class FakeProvider {
 			if (action.advance % 3 === 0) this.commit.push(this.stop(now + 1_000));
 			else if (action.advance % 3 === 1)
 				this.deferred.push(() => this.loss(runner, action.variant));
-			else
-				this.deferred.push(
-					() => ({
+			else {
+				const { interactionId } = observation;
+				const answer =
+					(prefix: string, value: unknown) => (): LedgerCommand => ({
 						verb: "control",
 						control: {
 							kind: "answer",
-							commandId: `control:${this.serial++}`,
-							interactionId: observation.interactionId,
-							answer: { allow: action.input % 2 === 0 },
+							commandId: `${prefix}:${this.serial++}`,
+							interactionId,
+							answer: value,
 						},
-					}),
-					() => this.answered(),
-				);
+					});
+				const user = answer("control", { allow: action.input % 2 === 0 });
+				const refused = {
+					tag: "retryable",
+					retryAt: now + 100,
+					code: "answer_refused",
+				} as const;
+				const failed = { tag: "permanent", code: "TracePermanent" } as const;
+				// 3.10 (CONTRACT.md 1015-1022): main reopens a prompt whose answer failed for good unconsumed;
+				// the old send's outcome may repeat after it.
+				const reopened = [
+					() => ({ verb: "observe", observation }) as const,
+					() => this.lateAnswerOutcome(interactionId),
+				];
+				const paths = [
+					[user, () => this.answered()],
+					// Refused once, then delivered on main's next transmission.
+					[user, () => this.answered(refused), () => this.answered()],
+					// Refused, then main's cap fails the row (a permanent outcome).
+					[
+						user,
+						() => this.answered(refused),
+						() => this.answered(failed),
+						...reopened,
+					],
+					[user, () => this.answered(failed), ...reopened],
+					// Main's timeout answers first (named as legacy-control-outbox.ts names it); the user's later
+					// answer changes nothing (1007-1012).
+					[
+						answer("legacy-answer", { decision: "reject" }),
+						user,
+						() => this.answered(),
+					],
+				];
+				this.deferred.push(...(paths[action.index % paths.length] ?? []));
+			}
 		}
 		return { verb: "observe", observation };
+	}
+	/** A repeat of a failed answer send's outcome, read after its prompt reopened (3.4, 3.10). */
+	private lateAnswerOutcome(interactionId: string): LedgerCommand | undefined {
+		const old = [...this.sends.values()]
+			.reverse()
+			.find(
+				({ send }) =>
+					send.effect.kind === "deliver_answer" &&
+					send.effect.interactionId === interactionId &&
+					this.controlOutcomes.get(send.token)?.tag === "permanent",
+			);
+		const claimed = old && this.mainTransmissions.get(old.send.token);
+		const outcome = old && this.controlOutcomes.get(old.send.token);
+		if (!old || !claimed || !outcome) return undefined;
+		return {
+			verb: "observe",
+			observation: {
+				tag: "Answer",
+				token: old.send.token,
+				kind: "effect_outcome",
+				outcome,
+				transmission: claimed.name,
+			},
+		};
 	}
 	/** D53, 3.9: a permanent failure of a steer's send its Run has not taken. */
 	private steerFailed(
@@ -3256,8 +3314,12 @@ export class FakeProvider {
 		this.commit.unshift(failed);
 		return { verb: "observe", observation: dispatched };
 	}
-	/** A claimed answer's success, followed at once by a Stop commit (3.10). */
-	private answered(): LedgerCommand | undefined {
+	/** A claimed answer's outcome; a success is followed at once by a Stop commit (3.10). */
+	private answered(
+		outcome: Extract<Observation, { kind: "effect_outcome" }>["outcome"] = {
+			tag: "succeeded",
+		},
+	): LedgerCommand | undefined {
 		const answer = [...this.sends.values()]
 			.reverse()
 			.find(
@@ -3269,14 +3331,15 @@ export class FakeProvider {
 			);
 		const claimed = answer && this.mainTransmissions.get(answer.send.token);
 		if (!answer || !claimed) return undefined;
-		this.commit.push(this.stop(this.clock + 1_000));
+		if (outcome.tag === "succeeded")
+			this.commit.push(this.stop(this.clock + 1_000));
 		return {
 			verb: "observe",
 			observation: {
 				tag: "Answer",
 				token: answer.send.token,
 				kind: "effect_outcome",
-				outcome: { tag: "succeeded" },
+				outcome,
 				transmission: claimed.name,
 			},
 		};
