@@ -3128,10 +3128,14 @@ export const CancelSession = Rpc.make("CancelSession", {
 	error: WsRpcError,
 });
 
-export const StopBackgroundTask = Rpc.make("StopBackgroundTask", {
-	payload: Schema.TaggedStruct("StopBackgroundTask", {
+/** Stops background tasks without touching a turn (8.4): "all" is the ledger's live tasks at decision time. */
+export const StopTasks = Rpc.make("StopTasks", {
+	payload: Schema.TaggedStruct("StopTasks", {
 		sessionId: NonEmptyString,
-		taskId: NonEmptyString,
+		tasks: Schema.Union([
+			Schema.Literal("all"),
+			Schema.NonEmptyArray(NonEmptyString),
+		]),
 	}),
 	success: OkResponseSchema,
 	error: WsRpcError,
@@ -3668,7 +3672,7 @@ const wsRpcRequests = [
 	AddDraftAttachment,
 	RemoveDraftAttachment,
 	CancelSession,
-	StopBackgroundTask,
+	StopTasks,
 	StopServer,
 	MarkServer,
 	SetLogLevel,

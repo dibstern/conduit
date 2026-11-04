@@ -91,7 +91,7 @@ test("background task stop shows the server refusal and keeps the task", async (
 	harness,
 }, testInfo) => {
 	const { rpc } = await openChat(page, harness.relayBaseUrl, {
-		StopBackgroundTask: () => {
+		StopTasks: () => {
 			throw new WsRpcError({ message: "The task cannot be stopped yet." });
 		},
 	});
@@ -157,7 +157,7 @@ for (const ending of [
 	}, testInfo) => {
 		const { rpc } = await openChat(page, harness.relayBaseUrl, {
 			CancelSession: () => ({ ok: true }),
-			StopBackgroundTask: () => ({ ok: true }),
+			StopTasks: () => ({ ok: true }),
 		});
 		const sessionId = "sess-mockup-001";
 		rpc.setDaemonList("SubscribeInstances", {
@@ -222,19 +222,14 @@ for (const ending of [
 			await expect(page.locator("#stop")).toBeHidden();
 			if (ending === "stop tasks") {
 				await offer.getByRole("button", { name: "Stop them" }).click();
-				await rpc.waitForRequest(
-					({ tag, payload }) =>
-						tag === "StopBackgroundTask" && payload["taskId"] === "watch-tests",
-				);
+				await rpc.waitForRequest(({ tag }) => tag === "StopTasks");
+				// One request; the server reads "all" from its own latest snapshot.
 				expect(
 					rpc
 						.getRequests()
-						.filter(({ tag }) => tag === "StopBackgroundTask")
+						.filter(({ tag }) => tag === "StopTasks")
 						.map(({ payload }) => payload),
-				).toEqual([
-					{ _tag: "StopBackgroundTask", sessionId, taskId: "watch-build" },
-					{ _tag: "StopBackgroundTask", sessionId, taskId: "watch-tests" },
-				]);
+				).toEqual([{ _tag: "StopTasks", sessionId, tasks: "all" }]);
 				// Requests alone do not remove tasks; the server owns their rows.
 				await expect(
 					page.getByRole("button", {
@@ -270,7 +265,7 @@ for (const ending of [
 		}
 		if (ending !== "stop tasks")
 			expect(
-				rpc.getRequests().filter(({ tag }) => tag === "StopBackgroundTask"),
+				rpc.getRequests().filter(({ tag }) => tag === "StopTasks"),
 			).toEqual([]);
 		const path = testInfo.outputPath("stop-background-tasks.png");
 		await page.screenshot({ path });

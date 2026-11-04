@@ -1113,8 +1113,14 @@ it.each([
 		if (action === "control")
 			cancel = await Effect.runPromise(
 				browser.rpc
-					.StopBackgroundTask({ sessionId, taskId: "upgrade-background-task" })
-					.pipe(Effect.timeoutOption("3 seconds")),
+					.StopTasks({ sessionId, tasks: ["upgrade-background-task"] })
+					.pipe(
+						Effect.match({
+							onFailure: (error) => error.message,
+							onSuccess: () => "stopped",
+						}),
+						Effect.timeoutOption("3 seconds"),
+					),
 			);
 		if (action === "cancel" || action === "cancel-preparing")
 			cancel = await Effect.runPromise(
@@ -1167,7 +1173,7 @@ it.each([
 			requests,
 		});
 		if (action === "control")
-			expect(cancel).toMatchObject({ _tag: "Some", value: { ok: true } });
+			expect(cancel).toMatchObject({ _tag: "Some", value: "stopped" });
 		if (action === "end") {
 			expect(requests).toEqual(["upgrade-background-work"]);
 		} else if (action === "cancel" || action === "cancel-preparing") {

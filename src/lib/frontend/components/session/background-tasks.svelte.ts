@@ -172,32 +172,33 @@ export function taskStopIds(
 	return ids;
 }
 
-/** Request one live subtree or all live tasks, children first, awaiting SDK row updates. */
+/**
+ * Stop tasks (CONTRACT.md 8.4): the selected task's live subtree, or "all", which the server reads
+ * from its own latest snapshot. Rows leave only when the provider's next snapshot drops them; a
+ * rejection or a refused stop shows the server's reason.
+ */
 export async function stopBackgroundTasks(
 	sessionId: string | null,
 	taskId?: string,
 ): Promise<void> {
 	if (!sessionId) return;
-	const ids = taskStopIds(
-		findSession(sessionId)?.backgroundTasks ?? [],
-		taskId,
-	);
-	let failed = false;
-	let failure: unknown;
-	for (const id of ids) {
-		try {
-			await rpc("StopBackgroundTask", { sessionId, taskId: id });
-		} catch (error) {
-			failed = true;
-			failure = error;
-		}
-	}
-	if (failed)
+	// An id the list no longer shows is still sent, so the server says it has finished.
+	const [first = taskId, ...rest] =
+		taskId === undefined
+			? []
+			: taskStopIds(findSession(sessionId)?.backgroundTasks ?? [], taskId);
+	try {
+		await rpc("StopTasks", {
+			sessionId,
+			tasks: first === undefined ? "all" : [first, ...rest],
+		});
+	} catch (error) {
 		toastFailure(
 			taskId
 				? "Failed to stop background task"
 				: "Failed to stop background tasks",
-		)(failure);
+		)(error);
+	}
 }
 
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */

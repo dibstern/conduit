@@ -45,7 +45,7 @@ export type BrowserCommand =
 			readonly commandId: string;
 			readonly interactionId: string;
 	  }
-	| { readonly rpc: "StopBackgroundTask"; readonly taskId: string };
+	| { readonly rpc: "StopTasks"; readonly taskId: string };
 
 /** A provider call main makes that a trace answers. */
 export type Call =
@@ -548,12 +548,12 @@ export function wireSteps(trace: Trace, provider: WireProvider): WireStep[] {
 							? {
 									kind: "unwired",
 									what: "stop_tasks",
-									why: "the browser stops one task per StopBackgroundTask",
+									why: "this replay sends one named task per StopTasks",
 								}
 							: {
 									kind: "browser",
 									command: {
-										rpc: "StopBackgroundTask",
+										rpc: "StopTasks",
 										taskId: control.tasks[0]?.taskId ?? "",
 									},
 									reply: { tag: "ok" },
