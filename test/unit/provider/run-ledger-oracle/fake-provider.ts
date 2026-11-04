@@ -1804,6 +1804,18 @@ export class FakeProvider {
 						native.ended = true;
 						native.unfinished = false;
 					}
+			// 3.9 (CONTRACT.md 978-980): a steer outlives its Run only at a completed end or a Stop; at main's
+			// error terminal its work ends with the Run's, as main (D59, 4106-4107).
+			if (
+				observation.kind === "run_terminal" &&
+				observation.outcome === "error"
+			)
+				for (const { send } of this.sends.values())
+					if (
+						send.effect.kind === "steer" &&
+						send.effect.runId === observation.runId
+					)
+						this.forcedSends.add(send.token);
 			// L6 (CONTRACT.md 795-797): OpenCode's stop_unconfirmed terminal is its Run's deadline step, which
 			// ends that Run's work, its aborts' included, whatever the provider still does. D59 (4106-4107):
 			// any interrupted terminal main writes without the runner's confirmation ends its Run's work as main.
@@ -2235,6 +2247,8 @@ export class FakeProvider {
 					this.unlaunch(effect.runId, true);
 				break;
 			case "delivery_indeterminate":
+				// D50 (CONTRACT.md 669-671): a dropped execution's send resolves no further; the drop ended its work.
+				if (this.unlaunchedTries.has(observation.token)) break;
 				native.transportRank = Math.max(native.transportRank, 3);
 				this.refreshQuery(native);
 				break;
