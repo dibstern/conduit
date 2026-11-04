@@ -12,7 +12,7 @@ export interface ToolMessageInit {
 	id: string;
 	name: string;
 	status: ToolStatus;
-	outcome?: "succeeded" | "failed";
+	outcome?: "succeeded" | "failed" | "endedByRun";
 	fileChanges?: readonly ToolFileChange[];
 	presentation?: ToolPresentation;
 	result?: string;

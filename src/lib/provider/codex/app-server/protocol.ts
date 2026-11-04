@@ -527,6 +527,8 @@ export const CommandExecutionItemSchema = Schema.Struct({
 	id: Schema.String,
 	command: Schema.String,
 	cwd: Schema.String,
+	// The background terminal's id, the key `thread/backgroundTerminals/list` reports it under.
+	processId: Schema.optional(Schema.NullOr(Schema.String)),
 	status: Schema.String,
 	aggregatedOutput: Schema.optional(Schema.NullOr(Schema.String)),
 	exitCode: Schema.optional(Schema.NullOr(Schema.Number)),
