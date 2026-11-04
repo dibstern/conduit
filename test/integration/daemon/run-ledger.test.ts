@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -158,6 +158,125 @@ describe("Run Ledger e2e regressions", () => {
 				evidence.questions.map((event) => (event as { type: string }).type),
 			).toEqual(["question.asked", "question.resolved"]);
 			expect(evidence.state).toEqual({ state: "Quiescent" });
+		} finally {
+			db.close();
+		}
+	}, 120_000);
+	// A guard, not a red proof: a single refused reply already failed before the Stop entry
+	// redesign. How it could fail: 70. the refused reply is admitted, or resolves the question;
+	// 71. the refusal leaves an interrupt row or an open Stop that blocks the next reply;
+	// 72. the next reply waits on the refused Stop instead of being admitted at once.
+	// test-waits-allow timeout-override: the held question turn ends at the Stop's 30 s deadline on the daemon's wall clock.
+	it("RL-081: a question reply fails when main refuses its Stop", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+		});
+		harnesses.push(harness);
+		const refuseGate = join(harness.root, "conduit-test-stop-refuse");
+		writeFileSync(refuseGate, "refuse");
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("RL-081 refused");
+		const asking = browser
+			.send(sessionId, "question-hold-refused")
+			.catch(() => undefined);
+		const askedAt = Date.now();
+		await browser.waitFor((message) => message["type"] === "question_pending");
+		const askedMs = Date.now() - askedAt;
+		const reply = (inputId: string, text: string) =>
+			Effect.runPromise(
+				Effect.result(
+					browser.rpc["input.submit"]({
+						sessionId,
+						originId: browser.originId,
+						inputId,
+						delivery: "queue",
+						text,
+					}),
+				),
+			);
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
+		try {
+			const read = (inputIds: readonly string[]) => ({
+				questions: db
+					.prepare(
+						"SELECT type FROM events WHERE session_id = ? AND type IN ('question.asked', 'question.resolved') ORDER BY sequence",
+					)
+					.all(sessionId)
+					.map((row) => (row as { type: string }).type),
+				admitted: inputIds.map(
+					(inputId) =>
+						(
+							db
+								.prepare(
+									"SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND type = 'input.admitted' AND json_extract(data, '$.inputId') = ?",
+								)
+								.get(sessionId, inputId) as { n: number }
+						).n,
+				),
+				outbox: db
+					.prepare(
+						"SELECT effect_type AS effect, status FROM provider_command_outbox WHERE session_id = ? ORDER BY request_sequence",
+					)
+					.all(sessionId),
+			});
+			const refusedId = randomUUID();
+			const refusingAt = Date.now();
+			const refused = await reply(refusedId, "refused-reply");
+			const refusedMs = Date.now() - refusingAt;
+			await harness.waitForMark((mark) => mark.kind === "stop-refused");
+			const afterRefusal = read([refusedId]);
+			rmSync(refuseGate);
+			const cursor = browser.frames.length;
+			const acceptedId = randomUUID();
+			const submittedAt = Date.now();
+			const accepted = await reply(acceptedId, "accepted-reply");
+			const submitMs = Date.now() - submittedAt;
+			const done = await browser
+				.waitForTurnEnd(sessionId, cursor, 60_000, acceptedId)
+				.catch((error: unknown) => ({ error: String(error) }));
+			const doneMs = Date.now() - submittedAt;
+			await asking;
+			const evidence = {
+				askedMs,
+				refused,
+				refusedMs,
+				afterRefusal,
+				accepted,
+				submitMs,
+				doneMs,
+				done,
+				afterAcceptance: read([refusedId, acceptedId]),
+				marks: harness.marks
+					.filter((mark) => mark.kind !== "runner-started")
+					.map((mark) => mark.kind),
+			};
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				"test-results/run-ledger-stop-refused.json",
+				`${JSON.stringify(evidence, null, "\t")}\n`,
+			);
+			// 70: the refused reply fails, is not admitted and leaves the question pending.
+			expect(refused._tag).toBe("Failure");
+			expect(afterRefusal).toMatchObject({
+				questions: ["question.asked"],
+				admitted: [0],
+			});
+			// 71: the refusal writes no interrupt row.
+			expect(
+				afterRefusal.outbox.map((row) => (row as { effect: string }).effect),
+			).not.toContain("interrupt_turn");
+			// 72: with main accepting, the next reply is admitted at once and runs; the question resolves.
+			expect(accepted).toMatchObject({
+				_tag: "Success",
+				success: { ok: true, handedOff: false },
+			});
+			expect(submitMs).toBeLessThan(STOP_ABORT_WAIT_MS);
+			expect(done).toMatchObject({ lastTurnEndInputId: acceptedId });
+			expect(evidence.afterAcceptance).toMatchObject({
+				questions: ["question.asked", "question.resolved"],
+				admitted: [0, 1],
+			});
 		} finally {
 			db.close();
 		}
