@@ -24,6 +24,7 @@ import type {
 } from "./claude/claude-sdk-env.js";
 import type { ProviderInstanceFailure } from "./errors.js";
 import type { EventSinkError } from "./event-sink-errors.js";
+import type { Evidence, RunEffect } from "./run-ledger/run-ledger-model.js";
 
 export type PermissionDecision = "once" | "always" | "reject";
 
@@ -494,6 +495,19 @@ export interface ProviderInstance {
 		sessionId: string,
 	) => Effect.Effect<
 		ProviderNativeSession | undefined,
+		ProviderInstanceFailure
+	>;
+
+	/**
+	 * Read what a Run Ledger probe asks of the native session: its input's presence or the
+	 * session's idle or busy state (3.7, 3.12). Without it a probe records no finding.
+	 */
+	readonly probeEffect?: (
+		sessionId: string,
+		target: Extract<RunEffect, { kind: "probe" }>["target"],
+		call?: ProviderCall,
+	) => Effect.Effect<
+		Extract<Evidence, { kind: "probe_result" }>["finding"],
 		ProviderInstanceFailure
 	>;
 

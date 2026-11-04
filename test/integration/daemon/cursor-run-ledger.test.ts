@@ -179,6 +179,23 @@ const oneRunnerStartedFirst = (ledger: Ledger) => {
 	).toEqual([]);
 };
 
+// 82tn.32.35: only an OpenCode probe records what it read; this provider's probes record nothing.
+const probeFindings = (fixture: ProcessHarness | undefined) => {
+	if (!fixture) return 0;
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		return (
+			db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM events WHERE type = 'evidence.probe_result'",
+				)
+				.get() as { n: number }
+		).n;
+	} finally {
+		db.close();
+	}
+};
+
 describe("Cursor on the Run Ledger", () => {
 	let harness: ProcessHarness | undefined;
 	let capturePath = "";
@@ -188,7 +205,9 @@ describe("Cursor on the Run Ledger", () => {
 	afterEach(async () => {
 		const fixture = harness;
 		harness = undefined;
+		const findings = probeFindings(fixture);
 		await fixture?.dispose();
+		expect(findings).toBe(0);
 		// A surviving stand-in is this test's own process group; end it so a red run leaves nothing.
 		for (const pid of standIns.splice(0))
 			if (shellAlive(pid)) process.kill(-pid, "SIGKILL");

@@ -151,6 +151,23 @@ const oneRunnerStartedFirst = (ledger: Ledger) => {
 	).toEqual([]);
 };
 
+// 82tn.32.35: only an OpenCode probe records what it read; this provider's probes record nothing.
+const probeFindings = (fixture: ProcessHarness | undefined) => {
+	if (!fixture) return 0;
+	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	try {
+		return (
+			db
+				.prepare(
+					"SELECT COUNT(*) AS n FROM events WHERE type = 'evidence.probe_result'",
+				)
+				.get() as { n: number }
+		).n;
+	} finally {
+		db.close();
+	}
+};
+
 describe("Codex on the Run Ledger", () => {
 	let harness: ProcessHarness | undefined;
 	let reportPath = "";
@@ -169,8 +186,10 @@ describe("Codex on the Run Ledger", () => {
 		const fixture = harness;
 		harness = undefined;
 		if (!fixture) return;
+		const findings = probeFindings(fixture);
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		await fixture.dispose();
+		expect(findings).toBe(0);
 		const reports = rows<AppServerTraceReport>(reportPath);
 		expect(reports.length).toBeGreaterThan(0);
 		for (const report of reports) {
