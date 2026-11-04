@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import type { Page } from "@playwright/test";
 import { Effect, Fiber, Schema, Stream } from "effect";
 import type { SessionInfo } from "../../../src/lib/contracts/ws-rpc.js";
 import {
@@ -50,6 +51,22 @@ test.use({
 		],
 	},
 });
+
+/**
+ * Main keeps a resume divider in its turn's log, which opens collapsed
+ * (755079a0, 4ee235af): open every turn until the divider shows.
+ */
+const openDivider = async (page: Page) => {
+	const divider = page.getByTestId("transcript-divider");
+	const collapsed = page.locator(
+		'.turn-activity-toggle[aria-expanded="false"]',
+	);
+	await expect(async () => {
+		while (await collapsed.count()) await collapsed.first().click();
+		expect(await divider.count()).toBeGreaterThan(0);
+	}).toPass();
+	return divider;
+};
 
 /** A runner that outlived a restart reports to the old server, so read its marks from the proof file. */
 const readProofMarks = (root: string): ProcessMark[] =>
@@ -1021,6 +1038,7 @@ for (const decision of [
 						.filter({ hasText: "done(Continue where you left off.)" });
 					const dividerAboveReply = async (): Promise<void> => {
 						await expect(strip).toHaveCount(0);
+						await openDivider(page);
 						await expect(divider).toHaveText(
 							"↻ Resumed on Retry account · retried by you",
 						);
@@ -1396,7 +1414,7 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				).toBe(false);
 				writeFileSync(join(harness.root, "release-switch-turn"), "release");
 				await expect.poll(() => latest()?.limitRecovery).toBeNull();
-				await expect(page.getByTestId("transcript-divider")).toContainText(
+				await expect(await openDivider(page)).toContainText(
 					"Continued on Account 2 · auto-switch",
 				);
 				await page.screenshot({
@@ -1423,8 +1441,9 @@ for (const scenario of ["limited", "probe-failed", "ordered"] as const) {
 				await expect.poll(() => Date.now()).toBeGreaterThan(settled);
 				await expect(strip).toHaveAttribute("data-state", "limited");
 				expect(latest()?.limitRecovery?.scheduledAt).toBeUndefined();
-				// Opening the page reads every account once for the usage meter.
-				expect(sourceProbes()).toHaveLength(1);
+				// The limit's live reading carried every window, so it counts as a
+				// fresh read and opening the page reads nothing (main 6688191d, 4a005431).
+				expect(sourceProbes()).toHaveLength(0);
 				await page.screenshot({ path: join(artifacts, "target-limited.png") });
 			}
 			await expect.poll(() => latest()?.status).toBe("idle");
@@ -1822,6 +1841,7 @@ for (const scenario of [
 					.filter({ hasText: "done(Continue where you left off.)" });
 				const dividerAboveReply = async (): Promise<void> => {
 					await expect(strip).toHaveCount(0);
+					await openDivider(page);
 					await expect(divider).toHaveText(
 						`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 					);
@@ -2089,7 +2109,7 @@ for (const scenario of ["auto", "restart", "no-reset", "off"] as const) {
 			expect(resume).toMatchObject({ instanceId, reason: "reset" });
 			if (!resume) throw new Error("No reset resume");
 			await expect(strip).toHaveCount(0);
-			await expect(page.getByTestId("transcript-divider")).toHaveText(
+			await expect(await openDivider(page)).toHaveText(
 				`↻ Resumed on Reset account after reset · ${await page.evaluate(formatSnoozeTime, resume.at)}`,
 			);
 			await expect(
@@ -3348,7 +3368,7 @@ for (const behavior of [
 				await expect.poll(() => latest()?.status).toBe("idle");
 				const delivered = await receipt();
 				if (viaStrip && delivered.handoff) {
-					const divider = page.getByTestId("transcript-divider");
+					const divider = await openDivider(page);
 					await expect(divider).toContainText(
 						"↪ Continued on Account 2 · switched by you",
 					);

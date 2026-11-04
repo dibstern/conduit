@@ -1738,7 +1738,7 @@ function answer(
 			return changed;
 		}
 		case "probe_result":
-			return probeResult(world, send, tx, evidence.finding);
+			return probeResult(world, step, send, tx, evidence.finding);
 		default:
 			return rejected(`${evidence.kind} is never an answer (3.4)`);
 	}
@@ -1882,14 +1882,15 @@ function failInput(world: World, send: Send, tx: Tx): void {
 
 function probeResult(
 	world: World,
+	step: Step,
 	send: Send,
 	tx: Tx,
 	finding: Extract<Evidence, { kind: "probe_result" }>["finding"],
 ): Outcome {
-	const probe = send.probe;
-	if (probe === undefined)
+	const pending = send.probe;
+	if (pending === undefined)
 		return rejected("probe_result for a non-probe (3.4)");
-	const target = probe.target.tag;
+	const target = pending.target.tag;
 	const fits =
 		finding.tag === "native_busy" ||
 		(target === "input" &&
@@ -1898,11 +1899,13 @@ function probeResult(
 	if (!fits)
 		return rejected(`${finding.tag} cannot answer a ${target} probe (3.4)`);
 	const subjectSend =
-		probe.subject === undefined ? undefined : world.sends[probe.subject.send];
-	const subject =
-		probe.subject === undefined
+		pending.subject === undefined
 			? undefined
-			: subjectSend?.txs[probe.subject.tx];
+			: world.sends[pending.subject.send];
+	const subject =
+		pending.subject === undefined
+			? undefined
+			: subjectSend?.txs[pending.subject.tx];
 	if (
 		finding.tag === "input_present" &&
 		finding.nativeMessageId !== undefined &&
@@ -1916,14 +1919,14 @@ function probeResult(
 		return rejected("a contradicting native id (3.4, 6C)");
 	tx.consumption = joinConsumption(tx.consumption, { tag: "Observed" });
 	seal(tx);
-	if (probe.done) return noop("late probe answer");
+	if (pending.done) return noop("late probe answer");
 	if (finding.tag === "native_busy") {
-		probe.busy = true;
+		pending.busy = true;
 		return changed;
 	}
-	probe.answered = true;
-	probe.done = true;
-	probe.deadline = undefined;
+	pending.answered = true;
+	pending.done = true;
+	pending.deadline = undefined;
 	switch (finding.tag) {
 		case "input_present":
 			if (subject !== undefined) {
@@ -1935,15 +1938,18 @@ function probeResult(
 			}
 			break;
 		case "input_absent":
-			if (subject !== undefined) {
-				// 9 (decided 2026-10-28): input_absent ends probing; a later acceptance beats it.
-				subject.absent = true;
-				subject.consumption = joinConsumption(subject.consumption, {
-					tag: "NotConsumed",
-					why: "absent",
-				});
-				seal(subject);
-			}
+			if (subject === undefined) break;
+			// 9 (CONTRACT.md 3128-3132): OpenCode runs a prompt whose request was lost late (the live
+			// check), so its absent reading needs an idle read issued after it.
+			if (world.provider === "opencode" && send.effect.kind === "probe")
+				probe(
+					world,
+					step,
+					send.effect.runId,
+					{ tag: "native_session" },
+					pending.subject,
+				);
+			else absent(subject);
 			break;
 		case "native_idle":
 			// 9: an idle probe covers sends issued before it whose delivery is confirmed, aborts and
@@ -1964,9 +1970,22 @@ function probeResult(
 						endWork(item, "evidence");
 			}
 			for (const wake of world.wakes) endWork(wake, "own");
+			// 3128-3132: the idle read after an OpenCode absent one settles it unless it was seen running.
+			if (subject !== undefined && consumptionRank[subject.consumption.tag] < 2)
+				absent(subject);
 			break;
 	}
 	return changed;
+}
+
+/** 9 (decided 2026-10-28): input_absent ends probing; a later acceptance beats it. */
+function absent(tx: Tx): void {
+	tx.absent = true;
+	tx.consumption = joinConsumption(tx.consumption, {
+		tag: "NotConsumed",
+		why: "absent",
+	});
+	seal(tx);
 }
 
 /** run.dispatched binds a held issue's transmission by commandId (3.4, 4.11). */
