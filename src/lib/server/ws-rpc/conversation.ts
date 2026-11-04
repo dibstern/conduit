@@ -44,7 +44,10 @@ import {
 	syncInputDraft,
 } from "../../handlers/prompt.js";
 import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
-import type { GoalAction } from "../../provider/goal-tracker.js";
+import {
+	type GoalAction,
+	goalCommandText,
+} from "../../provider/goal-tracker.js";
 import { ProviderRegistryTag } from "../../provider/provider-registry.js";
 import type { PermissionId } from "../../shared-types.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
@@ -62,12 +65,7 @@ const inboxCommand = <E>(
 	);
 
 /** The tracker holds the action as pending from before dispatch; a refused dispatch drops it (8.6). */
-const goalCommand = (
-	sessionId: string,
-	commandId: string,
-	text: string,
-	goal: GoalAction,
-) =>
+const goalCommand = (sessionId: string, commandId: string, goal: GoalAction) =>
 	Effect.gen(function* () {
 		const { goals } = yield* SessionActivityTag;
 		const engine = yield* OrchestrationEngineTag;
@@ -77,7 +75,7 @@ const goalCommand = (
 				type: "native_command",
 				sessionId,
 				commandId,
-				text,
+				text: goalCommandText(goal),
 				goal,
 			})
 			.pipe(
@@ -379,12 +377,11 @@ export const conversationHandlers = {
 	// 8.6 Claude: a goal action is a native command, delivered at once and never with priority
 	// "now", which would abandon the turn and make it a Stop.
 	SetGoal: ({ sessionId, commandId, condition }) =>
-		goalCommand(sessionId, commandId, `/goal ${condition}`, {
-			kind: "set",
-			condition,
-		}).pipe(Effect.catch(mapRpcFailure("SetGoal"))),
+		goalCommand(sessionId, commandId, { kind: "set", condition }).pipe(
+			Effect.catch(mapRpcFailure("SetGoal")),
+		),
 	ClearGoal: ({ sessionId, commandId }) =>
-		goalCommand(sessionId, commandId, "/goal clear", { kind: "clear" }).pipe(
+		goalCommand(sessionId, commandId, { kind: "clear" }).pipe(
 			Effect.catch(mapRpcFailure("ClearGoal")),
 		),
 } satisfies Pick<

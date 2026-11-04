@@ -315,6 +315,7 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 				request: announce(goals.request),
 				drop: announce(goals.drop),
 				sends: announce(goals.sends),
+				takeResends: goals.takeResends,
 				observe: (events) => {
 					const moved = goals.observe(events);
 					for (const sessionId of moved) changed(sessionId);

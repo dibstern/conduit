@@ -65,6 +65,10 @@ export type GoalPhase =
 			readonly send: "Sent" | "Queued" | "Unconfirmed";
 	  };
 
+/** The native command a goal action is (8.6 Claude: `/goal <condition>`, `/goal clear`). */
+export const goalCommandText = (action: GoalAction): string =>
+	action.kind === "set" ? `/goal ${action.condition}` : `/goal ${action.kind}`;
+
 export const NO_GOAL: GoalTracker = {
 	confirmed: { tag: "Cleared" },
 	pending: { tag: "None" },

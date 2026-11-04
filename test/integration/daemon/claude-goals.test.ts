@@ -9,7 +9,9 @@
 // 23. Stop during Clearing leaves the clear queued;
 // 29-31. with no live process the clear fails, or the next launch sends the prompt first, renders
 //     the clear's reply as chat or ends that launch's Run with the clear's result;
-// 34. the row shows no phase while Claude queues the clear, or keeps it after the reply.
+// 34. the row shows no phase while Claude queues the clear, or keeps it after the reply;
+// 37, 39, 40. the process dies after the clear is sent and the clear is never resent, is resent
+//     under the dead id, or goes after the next launch's prompt.
 import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import Database from "better-sqlite3";
@@ -20,6 +22,7 @@ import {
 	type LedgerEvent,
 	viewLedger,
 } from "../../../src/lib/provider/run-ledger/run-ledger-decider.js";
+import { runnerProcessTable } from "../../../src/lib/provider/runner/runner-registry.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const EVIDENCE = "test-results/lane-3226-claude-goals.json";
@@ -56,6 +59,14 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 		db.close();
 	}
 };
+
+const sessionRow = async (harness: ProcessHarness, sessionId: string) =>
+	(
+		await harness.requestRpc({
+			_tag: "ListDaemonSessions",
+			projectSlug: "process-test",
+		})
+	).sessions.find((session) => session.id === sessionId);
 
 const goalPhase = async (harness: ProcessHarness, sessionId: string) =>
 	(
@@ -254,6 +265,87 @@ describe("Claude goals as native commands", () => {
 			case: "cold-clear-first-at-next-launch",
 			sessionId,
 			phaseBefore,
+			nativeCommands: after.nativeCommands,
+			runs: after.runs,
+			order: { clear, prompt },
+		});
+	});
+	it("resends a clear first at the next launch when the process dies after sending it", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude goal process death");
+		await browser.send(sessionId, "goal-rebind");
+		// test-waits-allow polling: the goal's confirmation reaches the row with no browser frame.
+		await vi.waitFor(async () => {
+			const row = await sessionRow(fixture, sessionId);
+			expect(row?.goalState?.goal?.condition).toBe("After rebinding");
+		}, 10_000);
+		const turn = browser
+			.send(sessionId, "goal-long-turn")
+			.catch(() => undefined);
+		await fixture.waitForMark(
+			(mark) => mark.kind === "enqueue" && mark.prompt === "goal-long-turn",
+		);
+		const commandId = randomUUID();
+		await fixture.requestRpc({ _tag: "ClearGoal", sessionId, commandId });
+		await fixture.waitForMark(
+			(mark) => mark.kind === "input-queued" && mark.prompt === "/goal clear",
+		);
+		const runner = fixture.marks.find(
+			(mark) => mark.kind === "runner-started" && mark.sessionId === sessionId,
+		);
+		if (runner?.kind !== "runner-started") throw new Error("no runner mark");
+		const owned = runnerProcessTable.inspect(runner.pid);
+		if (owned.state !== "running") throw new Error("runner not running");
+		process.kill(runner.pid, "SIGKILL");
+		await turn;
+		// test-waits-allow polling: the process death and the resend reach the store with no browser frame.
+		const afterDeath = await vi.waitFor(() => {
+			const ledger = read(fixture, sessionId);
+			expect(ledger.nativeCommands).toEqual([
+				{ commandId, tag: "Failed", code: "process_lost" },
+				expect.objectContaining({ tag: "Sent" }),
+			]);
+			return ledger;
+		}, 15_000);
+		const resent = afterDeath.nativeCommands[1]?.commandId;
+		expect(resent).not.toBe(commandId);
+		// The clear still shows as pending, not failed: Active does not confirm a clear (8.6).
+		expect(await goalPhase(fixture, sessionId)).toEqual({
+			tag: "Pending",
+			action: { kind: "clear" },
+			send: "Sent",
+		});
+		const deathMark = fixture.marks.length;
+		await browser.send(sessionId, "goal-after-death");
+		// test-waits-allow polling: the resent clear's result reaches the store with no browser frame.
+		const after = await vi.waitFor(() => {
+			const ledger = read(fixture, sessionId);
+			expect(ledger.nativeCommands.at(-1)).toEqual({
+				commandId: resent,
+				tag: "Completed",
+			});
+			return ledger;
+		}, 15_000);
+		const later = fixture.marks.slice(deathMark);
+		const clear = later.findIndex(
+			(mark) => mark.kind === "enqueue" && mark.prompt === "/goal clear",
+		);
+		const prompt = later.findIndex(
+			(mark) => mark.kind === "enqueue" && mark.prompt === "goal-after-death",
+		);
+		expect(clear).toBeGreaterThanOrEqual(0);
+		expect(prompt).toBeGreaterThan(clear);
+		// test-waits-allow polling: the reply's confirmation reaches the row with no browser frame.
+		await vi.waitFor(async () => {
+			const row = await sessionRow(fixture, sessionId);
+			expect(row?.goalPhase).toBeUndefined();
+			expect(row?.goalState?.goal).toBeFalsy();
+		}, 10_000);
+		proofs.push({
+			case: "process-death-resends-clear-first",
+			sessionId,
+			deadCommand: commandId,
+			resent,
 			nativeCommands: after.nativeCommands,
 			runs: after.runs,
 			order: { clear, prompt },

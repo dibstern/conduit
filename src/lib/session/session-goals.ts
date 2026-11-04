@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { SessionGoalChangedPayload } from "../contracts/stored-event.js";
 import type { CanonicalEvent } from "../persistence/events.js";
 import {
@@ -8,6 +9,7 @@ import {
 	type GoalTracker,
 	goalPhase,
 	NO_GOAL,
+	recoverGoal,
 	requestGoalAction,
 } from "../provider/goal-tracker.js";
 import type { NativeCommandView } from "../provider/run-ledger/run-ledger-model.js";
@@ -37,6 +39,8 @@ export function makeSessionGoals() {
 			readonly seen: number;
 		}
 	>();
+	/** Actions recovery resends under a new id, until the relay dispatches them. */
+	const resends = new Map<string, { id: string; action: GoalAction }[]>();
 	const entryOf = (sessionId: string) =>
 		sessions.get(sessionId) ?? { goal: NO_GOAL, sends: [], seen: 0 };
 	const phaseOf = (sessionId: string): GoalPhase | undefined => {
@@ -78,9 +82,44 @@ export function makeSessionGoals() {
 					? { ...entry, goal: { ...entry.goal, pending: { tag: "None" } } }
 					: entry,
 			),
-		/** The arm's committed native command view (8.5). */
+		/**
+		 * The arm's committed native command view (8.5). When the process died after the pending
+		 * action was sent, recovery resends it first under a new id unless the confirmed status
+		 * already matches (8.4, 8.6). CONTRACT.md 8.6 (2939) reconciles the transcript first; here
+		 * the confirmed status is the latest applied read, and later reads still apply by order.
+		 */
 		sends: (sessionId: string, sends: readonly NativeCommandView[]) =>
-			update(sessionId, (entry) => ({ ...entry, sends })),
+			// A queued resend counts as a move, so the relay is woken to dispatch it.
+			update(sessionId, (entry) => {
+				const { pending } = entry.goal;
+				const died =
+					pending.tag === "Pending" &&
+					sends.some(
+						(send) =>
+							send.commandId === pending.id &&
+							send.tag === "Failed" &&
+							send.code === "process_lost",
+					);
+				if (!died) return { ...entry, sends };
+				const { goal, resend } = recoverGoal(entry.goal);
+				if (resend === undefined) return { ...entry, goal, sends };
+				const id = randomUUID();
+				resends.set(sessionId, [
+					...(resends.get(sessionId) ?? []),
+					{ id, action: resend.action },
+				]);
+				return {
+					...entry,
+					goal: requestGoalAction(goal, id, resend.action),
+					sends,
+				};
+			}) || resends.has(sessionId),
+		/** Takes the resends recovery queued for a session. */
+		takeResends(sessionId: string) {
+			const taken = resends.get(sessionId) ?? [];
+			resends.delete(sessionId);
+			return taken;
+		},
 		/** Follow the ingested events; returns the sessions whose phase moved. */
 		observe(events: readonly CanonicalEvent[]): string[] {
 			const moved = new Set<string>();

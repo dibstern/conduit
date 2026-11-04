@@ -60,6 +60,7 @@ import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { goalCommandText } from "../provider/goal-tracker.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { runningRunnerCommands } from "../provider/runner/runner-recovery.js";
 import { makeWsRpcWebSocketHandler } from "../server/ws-rpc-handler.js";
@@ -161,6 +162,21 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const onBackgroundWorkChanged = (sessionId: string) => {
 			runFork(
 				Effect.gen(function* () {
+					// 8.6: recovery's resends reach the ledger as the browser's goal actions do.
+					for (const { id, action } of activity.goals.takeResends(sessionId))
+						yield* orchestration.engine
+							.dispatchEffect({
+								type: "native_command",
+								sessionId,
+								commandId: id,
+								text: goalCommandText(action),
+								goal: action,
+							})
+							.pipe(
+								Effect.catch(() =>
+									Effect.sync(() => activity.goals.drop(sessionId, id)),
+								),
+							);
 					yield* announceBackgroundWork(sessionId);
 					if (
 						config.requestWorktreeCleanup &&
