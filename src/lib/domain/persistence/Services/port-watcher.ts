@@ -110,11 +110,12 @@ const PS_TREE =
 	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
 
 /**
- * Linux scans /proc (proc(5)); other hosts run lsof and ps. "" selects lsof and ps; tests point it at
- * a fixture tree.
+ * Linux scans /proc (proc(5)); other hosts run lsof and ps. "lsof" selects lsof and ps (read as "",
+ * since Config takes an empty value as unset); tests point it at a fixture tree.
  */
 const procRoot = Config.String("CONDUIT_PORT_WATCH_PROC_ROOT").pipe(
-	Config.withDefault(process.platform === "linux" ? "/proc" : ""),
+	Config.withDefault(process.platform === "linux" ? "/proc" : "lsof"),
+	Config.map((root) => (root === "lsof" ? "" : root)),
 );
 /** /proc start times count USER_HZ ticks, 100 a second on every architecture (proc(5)). */
 const USER_HZ = 100;
