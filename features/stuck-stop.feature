@@ -56,3 +56,25 @@ Scenario: On a phone the stuck Stop's whole label and both actions stay on scree
   Then the stuck Stop's whole label and both actions are on screen
   When I press Stop now on the stuck Stop
   Then the confirm reads "Stopping now will end: pnpm dev (shell), (shell): Run vitest in watch mode. Continue?"
+
+Scenario: Deleting a session with live tasks asks with the tasks it would end, and the delete carries the entry
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a live turn
+  And the panel choice session's background is a dev server and a vitest shell without its command, and deleting it needs a confirm of snapshot entry 7
+  When I delete the panel choice session
+  And I accept the delete
+  Then the confirm reads "Deleting will end: pnpm dev (shell), (shell): Run vitest in watch mode. Continue?"
+  When I accept the delete
+  Then the panel choice session's deletes carried confirms none, 7
+
+Scenario: Dismissing the delete ask sends nothing more, and unknown tasks say so
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a live turn
+  And the panel choice session's background is being checked, and deleting it needs a confirm of snapshot entry 3
+  When I delete the panel choice session
+  And I accept the delete
+  Then the confirm reads "Background state unknown. Deleting may end background work. Continue?"
+  When I cancel the confirm
+  Then the panel choice session's deletes carried confirms none
