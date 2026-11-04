@@ -625,6 +625,9 @@
 		"polling": 13,
 		"timeout-override": 24
 	},
+	"test/integration/daemon/codex-run-ledger.test.ts": {
+		"polling": 6
+	},
 	"test/integration/daemon/codex-skills-fork.test.ts": {
 		"polling": 4,
 		"timeout-override": 3
