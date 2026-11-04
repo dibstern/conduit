@@ -64,7 +64,12 @@ export const RUN_LEDGER_POLICY: DecideContext["policy"] = {
 		process.env["NODE_ENV"] === "test"
 			? Number(process.env["CONDUIT_TEST_RUN_LEDGER_PROBE_MS"] ?? 30_000)
 			: 30_000,
-	nativeCommandMs: 60_000,
+	nativeCommandMs:
+		process.env["NODE_ENV"] === "test"
+			? Number(
+					process.env["CONDUIT_TEST_RUN_LEDGER_NATIVE_COMMAND_MS"] ?? 60_000,
+				)
+			: 60_000,
 };
 
 /** The three effect types decide issues (3.12); every other outbox type is main's. */

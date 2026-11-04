@@ -271,6 +271,76 @@ describe("Claude goals as native commands", () => {
 			order: { clear, prompt },
 		});
 	});
+
+	// 82tn.32.44 (lane-3244 audit.md 1-5): a pending Clear survives a daemon restart.
+	it("rebuilds a pending clear after a daemon restart: Clearing, then one completed clear", async () => {
+		const { fixture } = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession("Claude goal clear restart");
+		const commandId = randomUUID();
+		await fixture.requestRpc({ _tag: "ClearGoal", sessionId, commandId });
+		const clearing = {
+			tag: "Pending",
+			action: { kind: "clear" },
+			send: "Sent",
+		};
+		// test-waits-allow polling: the kept clear's phase reaches the row with no browser frame.
+		await vi.waitFor(
+			async () => expect(await goalPhase(fixture, sessionId)).toEqual(clearing),
+			10_000,
+		);
+		await fixture.kill();
+		await fixture.restart();
+		const after = await fixture.connect(sessionId);
+		await after.setAutoSettle(null);
+		// test-waits-allow polling: the rebuilt phase reaches the row with no browser frame.
+		const phaseAfterRestart = await vi.waitFor(async () => {
+			const phase = await goalPhase(fixture, sessionId);
+			expect(phase).toEqual(clearing);
+			return phase;
+		}, 10_000);
+		await after.send(sessionId, "goal-after-cold-clear");
+		// test-waits-allow polling: the clear's result reaches the store with no browser frame.
+		const ledger = await vi.waitFor(() => {
+			const now = read(fixture, sessionId);
+			expect(now.nativeCommands).toEqual([{ commandId, tag: "Completed" }]);
+			expect(now.runs.map(({ status }) => status)).toEqual(["completed"]);
+			return now;
+		}, 10_000);
+		// test-waits-allow polling: the reply's confirmation reaches the row with no browser frame.
+		await vi.waitFor(
+			async () => expect(await goalPhase(fixture, sessionId)).toBeUndefined(),
+			10_000,
+		);
+		const clears = fixture.marks.filter(
+			(mark) => mark.kind === "enqueue" && mark.prompt === "/goal clear",
+		);
+		expect(clears).toHaveLength(1);
+		// A finished clear is not rebuilt as pending by a second restart (lane-3244 audit.md 5).
+		await fixture.kill();
+		await fixture.restart();
+		await fixture.connect(sessionId);
+		const phaseAfterSecondRestart = await goalPhase(fixture, sessionId);
+		expect(phaseAfterSecondRestart).toBeUndefined();
+		const evidence = "test-results/82tn-32-44-claude-clear-restart.json";
+		writeFileSync(
+			evidence,
+			JSON.stringify(
+				{
+					ticket: "conduit-test-82tn.32.44",
+					sessionId,
+					phaseAfterRestart,
+					clears,
+					nativeCommands: ledger.nativeCommands,
+					runs: ledger.runs,
+					phaseAtEnd: null,
+					phaseAfterSecondRestart: phaseAfterSecondRestart ?? null,
+				},
+				null,
+				2,
+			),
+		);
+	});
 	// goal-long-turn-unset: the SDK drops its active goal before Claude runs the clear, which is
 	// not a confirmation, so the clear is still resent (CONTRACT.md 8.6, 2963).
 	it.each([
