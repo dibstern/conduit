@@ -879,6 +879,49 @@ describe("readForkSource", () => {
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 
+	// Failure modes (conduit-test-lczrn.1): a fork cut inside a turn picks the
+	// copied turn's reply and reads whether it was still streaming from the
+	// copied assistant messages. With equal times whose write order differs
+	// from id order, a time/id pick names the wrong message.
+	it.effect(
+		"picks inside a copied turn in write order (conduit-test-lczrn.1)",
+		() =>
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const sql = yield* SqlClient.SqlClient;
+				yield* seed([]);
+				// Written z, y, x at one time: z and y finished, x still streams.
+				// The turn's own reply ("final") is past the cut at x.
+				yield* sql`INSERT INTO turns (id, session_id, state, user_message_id, assistant_message_id, requested_at)
+					VALUES ('u', 'parent', 'completed', 'u', 'final', 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, turn_id, role, text, created_at, updated_at, ordinal, is_streaming, completed_at)
+					VALUES ('u', 'parent', 'u', 'user', 'Ask', 1, 1, 1, 0, NULL),
+						('z', 'parent', 'u', 'assistant', 'z', 5, 5, 2, 0, 5),
+						('y', 'parent', 'u', 'assistant', 'y', 5, 5, 3, 0, 5),
+						('x', 'parent', 'u', 'assistant', 'x', 5, 5, 4, 1, NULL),
+						('final', 'parent', 'u', 'assistant', 'final', 6, 6, 5, 0, 6)`;
+				yield* commit([
+					canonicalEvent(
+						"session.created",
+						"fork",
+						{
+							sessionId: "fork",
+							provider: "claude",
+							title: "Fork",
+							forkedFrom: "parent",
+							inheritsHistory: true,
+							forkPointMessageId: "x",
+							forkPointTimestamp: 5,
+						},
+						{ createdAt: 100 },
+					),
+				]);
+				expect(
+					yield* sql`SELECT assistant_message_id, completed_at FROM turns WHERE id = 'u_fork'`,
+				).toEqual([{ assistant_message_id: "y_fork", completed_at: 100 }]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+
 	it.effect(
 		"preserves committed rewind and native transcript account provenance",
 		() =>
