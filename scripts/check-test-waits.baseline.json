@@ -15,7 +15,7 @@
 		"real-wait": 1
 	},
 	"acceptance/src/steps/sessionPresentation.ts": {
-		"real-wait": 2
+		"real-wait": 1
 	},
 	"acceptance/src/steps/sessionSheetSnooze.ts": {
 		"real-wait": 2

@@ -6,11 +6,14 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
 	getOrCreateSessionSlot,
-	phaseToProcessing,
+	getSessionPhase,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	WORKING_ACTIVITY,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 
 afterEach(() => {
 	sessionActivity.clear();
@@ -18,22 +21,32 @@ afterEach(() => {
 	openSessionForSetup(null);
 });
 
-it("a background session's busy row moves only that session's phase", () => {
+it("a background session's working row moves only that session's phase", () => {
 	seedSessions([
 		{ id: "A", title: "A", status: "idle" },
 		{ id: "B", title: "B", status: "idle" },
 	]);
 	openSessionForSetup("A", "project-a");
 	const a = getOrCreateSessionSlot("A");
-	const b = getOrCreateSessionSlot("B");
+	getOrCreateSessionSlot("B");
 	applySessionUpsert({
 		projectSlug: "project-a",
 		id: "B",
 		title: "B",
 		status: "busy",
 	});
-	expect(b.activity.phase).toBe("processing");
-	expect(a.activity.phase).toBe("idle");
+	expect(getSessionPhase("B")).toBe("idle");
+	applySessionUpsert({
+		projectSlug: "project-a",
+		id: "B",
+		title: "B",
+		status: "busy",
+		activity: WORKING_ACTIVITY,
+	});
+	expect(getSessionPhase("B")).toBe("processing");
+	expect(getSessionPhase("A")).toBe("idle");
+	expect(a.activity.endedGeneration).toBe(-1);
+	expect(a.activity.turnGeneration).toBe(0);
 });
 
 it("routes idle rows to the named background session", () => {
@@ -44,12 +57,12 @@ it("routes idle rows to the named background session", () => {
 	openSessionForSetup("A", "project-a");
 	const a = getOrCreateSessionSlot("A");
 	const b = getOrCreateSessionSlot("B");
-	phaseToProcessing(b.activity);
 	applySessionUpsert({
 		projectSlug: "project-a",
 		id: "B",
 		title: "B",
 		status: "busy",
+		activity: WORKING_ACTIVITY,
 	});
 	applySessionUpsert({
 		projectSlug: "project-a",
@@ -57,7 +70,7 @@ it("routes idle rows to the named background session", () => {
 		title: "B",
 		status: "idle",
 	});
-	expect(b.activity.phase).toBe("idle");
+	expect(getSessionPhase("B")).toBe("idle");
 	expect(b.activity.endedGeneration).toBe(b.activity.turnGeneration);
 	expect(a.activity.endedGeneration).toBe(-1);
 });

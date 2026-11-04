@@ -57,7 +57,6 @@ describe("getOrCreateSessionSlot", () => {
 		const slot = getOrCreateSessionSlot(TEST_ID);
 		expect(slot.activity).toBeDefined();
 		expect(slot.messages).toBeDefined();
-		expect(slot.activity.phase).toBe("idle");
 		expect(slot.activity.turnGeneration).toBe(0);
 		expect(slot.activity.doneMessageIds.size).toBe(0);
 		expect(slot.activity.seenMessageIds.size).toBe(0);

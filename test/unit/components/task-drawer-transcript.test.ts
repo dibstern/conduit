@@ -71,7 +71,10 @@ import {
 	type TranscriptView,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import type { PermissionRequest } from "../../../src/lib/frontend/types.js";
 import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 
@@ -423,7 +426,7 @@ describe("Task drawer transcript", () => {
 		await settle();
 		const child = within(pane).getByRole("region");
 		setScrollSize(child);
-		getOrCreateSessionSlot(childId).activity.phase = "processing";
+		setSessionWorkingForSetup(childId, true);
 		requestScrollOnNextContent();
 		const messages = getOrCreateSessionSlot(childId).messages;
 		messages.messages = [

@@ -32,11 +32,12 @@ import {
 	clearMessages,
 	getOrCreateSessionActivity,
 	isProcessing,
-	isStreaming,
-	phaseToStreaming,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { showToast } from "../../../src/lib/frontend/stores/ui.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
 	openSessionForSetup("test-session", "project-a");
@@ -97,7 +98,8 @@ describe("applyAlert fires the ding for a session no tab is viewing", () => {
 	});
 
 	it("does NOT update chat state (only triggers notification)", () => {
-		phaseToStreaming(getOrCreateSessionActivity("test-session"));
+		const activity = getOrCreateSessionActivity("test-session");
+		setSessionWorkingForSetup("test-session", true);
 
 		applyAlert({
 			_tag: "alert",
@@ -107,6 +109,6 @@ describe("applyAlert fires the ding for a session no tab is viewing", () => {
 		});
 
 		expect(isProcessing()).toBe(true);
-		expect(isStreaming()).toBe(true);
+		expect(activity.endedGeneration).not.toBe(activity.turnGeneration);
 	});
 });

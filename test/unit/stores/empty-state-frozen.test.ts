@@ -45,12 +45,11 @@ describe("EMPTY_ACTIVITY", () => {
 	it("throws on direct property mutation", () => {
 		expect(() => {
 			// biome-ignore lint/suspicious/noExplicitAny: intentional write for test
-			(EMPTY_ACTIVITY as any).phase = "processing";
+			(EMPTY_ACTIVITY as any).turnGeneration = 1;
 		}).toThrow();
 	});
 
 	it("has default idle values", () => {
-		expect(EMPTY_ACTIVITY.phase).toBe("idle");
 		expect(EMPTY_ACTIVITY.turnGeneration).toBe(0);
 		expect(EMPTY_ACTIVITY.currentMessageId).toBeNull();
 		expect(EMPTY_ACTIVITY.replayGeneration).toBe(0);
@@ -79,7 +78,6 @@ describe("EMPTY_MESSAGES", () => {
 
 describe("EMPTY_STATE (composeChatState-wrapped)", () => {
 	it("reads from frozen activity tier", () => {
-		expect(EMPTY_STATE.phase).toBe("idle");
 		expect(EMPTY_STATE.turnGeneration).toBe(0);
 		expect(EMPTY_STATE.currentMessageId).toBeNull();
 	});
@@ -93,19 +91,19 @@ describe("EMPTY_STATE (composeChatState-wrapped)", () => {
 	it("set trap throws on property assignment", () => {
 		expect(() => {
 			// biome-ignore lint/suspicious/noExplicitAny: intentional write for test
-			(EMPTY_STATE as any).phase = "processing";
+			(EMPTY_STATE as any).turnGeneration = 1;
 		}).toThrow();
 	});
 
 	it("has operator works", () => {
-		expect("phase" in EMPTY_STATE).toBe(true);
+		expect("turnGeneration" in EMPTY_STATE).toBe(true);
 		expect("messages" in EMPTY_STATE).toBe(true);
 		expect("nonexistent" in EMPTY_STATE).toBe(false);
 	});
 
 	it("Object.keys returns all keys", () => {
 		const keys = Object.keys(EMPTY_STATE);
-		expect(keys).toContain("phase");
+		expect(keys).toContain("turnGeneration");
 		expect(keys).toContain("messages");
 		expect(keys.length).toBeGreaterThan(0);
 	});

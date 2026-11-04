@@ -4,9 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
 import {
-	followSessionBusy,
 	getOrCreateSessionSlot,
-	phaseToProcessing,
+	getSessionPhase,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
@@ -14,7 +13,10 @@ import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import { detailUpserts } from "../../helpers/detail-rows.js";
 
 afterEach(() => {
@@ -27,7 +29,8 @@ it("keeps a background session's row in its own slot", () => {
 	const foreground = getOrCreateSessionSlot("A");
 	const background = getOrCreateSessionSlot("B");
 	openSessionForSetup("A", "project-a");
-	phaseToProcessing(background.activity);
+	setSessionWorkingForSetup("B", true);
+	expect(getSessionPhase("B")).toBe("processing");
 	const entry = {
 		project: "test",
 		rows: [],
@@ -61,13 +64,13 @@ it("keeps a background session's row in its own slot", () => {
 		text: "queued",
 	});
 	expect(foreground.messages.messages).toHaveLength(0);
-	expect(foreground.activity.phase).toBe("idle");
+	expect(getSessionPhase("A")).toBe("idle");
 });
 
 it("the row going idle finalizes the visible turn once", () => {
 	const { activity, messages } = getOrCreateSessionSlot("A");
 	openSessionForSetup("A", "project-a");
-	phaseToProcessing(activity);
+	setSessionWorkingForSetup("A", true);
 	const entry = detailUpserts(
 		{
 			id: "a",
@@ -86,9 +89,11 @@ it("the row going idle finalizes the visible turn once", () => {
 		partOrder: new Map(),
 	});
 	messages.messages = deriveTranscriptMessages(entry, []);
-	followSessionBusy("A", false);
-	followSessionBusy("A", false);
-	expect(activity.phase).toBe("idle");
+	setSessionWorkingForSetup("A", false);
+	const finalized = messages.messages;
+	setSessionWorkingForSetup("A", false);
+	expect(getSessionPhase("A")).toBe("idle");
+	expect(messages.messages).toBe(finalized);
 	expect(activity.endedGeneration).toBe(activity.turnGeneration);
 	expect(messages.messages[0]).toMatchObject({
 		type: "assistant",

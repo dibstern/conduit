@@ -5,7 +5,10 @@ import type {
 	GetSessionSkillsResponseSchema,
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
-import type { RpcMockControl } from "../../../test/e2e/helpers/rpc-mock.js";
+import {
+	type RpcMockControl,
+	rowActivity,
+} from "../../../test/e2e/helpers/rpc-mock.js";
 import type { WsMockControl } from "../../../test/e2e/helpers/ws-mock.js";
 
 export const relayControls = new WeakMap<Page, WsMockControl>();
@@ -74,7 +77,8 @@ export function requireRpcControl(page: Page): RpcMockControl {
 }
 
 /** Move a session's shell row to `status`, the way the server reports a turn
- *  starting (busy) or ending (idle). The row is the client's only busy signal. */
+ *  starting (busy) or ending (idle): its activity, the client's only busy signal,
+ *  follows the status unless `fields` names its own. */
 export function setSessionRowStatus(
 	page: Page,
 	sessionId: string,
@@ -88,6 +92,7 @@ export function setSessionRowStatus(
 	rpc.upsertShellRow({
 		title: sessionId,
 		...(row as object | undefined),
+		activity: rowActivity(status === "busy"),
 		...fields,
 		id: sessionId,
 		status,

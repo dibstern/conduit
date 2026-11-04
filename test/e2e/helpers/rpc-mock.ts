@@ -53,6 +53,13 @@ type DraftKey = { readonly session: string } | { readonly draft: string };
 const draftKeyId = (key: DraftKey): string =>
 	"session" in key ? `session:${key.session}` : `draft:${key.draft}`;
 
+/** What the server's SessionActivity answers for a row with no tasks: a working
+ *  foreground while a turn runs (CONTRACT.md 8.1). */
+export const rowActivity = (working: boolean) =>
+	working
+		? ({ foreground: "working", background: "none", label: "working" } as const)
+		: ({ foreground: "idle", background: "none", label: "idle" } as const);
+
 export const MOCK_SERVER_STATUS: GetStatusResponse = {
 	uptime: 273_600,
 	version: "0.42.1",

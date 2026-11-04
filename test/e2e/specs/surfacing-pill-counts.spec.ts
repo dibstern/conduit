@@ -8,7 +8,7 @@ import type {
 	HistoryMessagePart,
 } from "../../../src/lib/shared-types.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, rowActivity } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 test.use({ recording: "chat-simple" });
@@ -146,6 +146,7 @@ for (const scenario of [
 							id: sessionId,
 							title: "Surfacing counts",
 							status: scenario.live ? "busy" : "idle",
+							activity: rowActivity(scenario.live),
 							updatedAt: start,
 							messageCount: 2,
 						},

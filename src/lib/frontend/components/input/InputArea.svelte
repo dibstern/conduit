@@ -174,10 +174,7 @@
 	});
 	let dismissedGoalFailure = $state<string | null>(null);
 	const goalFailureKey = $derived(goalPhase?.tag === "Confirmed" ? `${sessionState.currentId}:${JSON.stringify(goalPhase.failed)}` : null);
-	const goal = $derived(goalView(
-		goalFacts,
-		isProcessing() ? "busy" : currentSession?.status ?? "idle",
-	));
+	const goal = $derived(goalView(goalFacts, isProcessing()));
 	let goalNow = $state(Date.now());
 	let undoneClearKey = $state<string | null>(null);
 	const clearKey = $derived(goalFacts ? `${goalFacts.sessionId}:${goalFacts.endedAt}` : null);

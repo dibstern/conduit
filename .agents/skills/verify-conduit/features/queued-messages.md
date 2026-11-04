@@ -72,4 +72,3 @@ Evidence from 2026-10-28: `test-results/verify-conduit/b-queue/evidence/` (Claud
 - Cursor: Stop with a queue under `--cursor-trace steer` lets the trace finish, so the queue drains instead of pausing (see [stopping.md](./stopping.md)).
 - OpenCode: the stored user text is the recording's prompt, not what you typed. Type the recording's prompts exactly.
 - `pending-input-send-now` shows only for usage-limit or scheduled queues. No recording reaches it here, so it is unverified.
-- `InputArea.svelte` still holds `[DEBUG-st33r]` code that opens a `/__debug-st33r` WebSocket when a queued row has had no Steer button for 1.5 s. It fires on every OpenCode queue, since OpenCode never offers Steer. Committed as temporary in `39fc7d44`. Not fixed.

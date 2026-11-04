@@ -3,16 +3,18 @@ import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InputArea from "../../../src/lib/frontend/components/input/InputArea.svelte";
 import {
-	followSessionBusy,
 	getOrCreateSessionActivity,
 	handleInputSyncReceived,
 	inputSyncState,
 	insertInputDraft,
 	persistInputDraft,
-	phaseToIdle,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+	WORKING_ACTIVITY,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import { connectionState } from "../../../src/lib/frontend/transport/connection-status.svelte.js";
 import { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import {
@@ -97,7 +99,8 @@ describe("InputArea build reload recovery", () => {
 		openSessionForSetup(sessionId, "test");
 		attachedProjectState.slug = "test";
 		connectionState.status = "connected";
-		phaseToIdle(getOrCreateSessionActivity(sessionId));
+		getOrCreateSessionActivity(sessionId);
+		setSessionWorkingForSetup(sessionId, false);
 		handleInputSyncReceived({ key: { session: sessionId }, initial: true });
 		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
 			callback(0);
@@ -171,9 +174,9 @@ describe("InputArea build reload recovery", () => {
 				title: "Foreign session",
 				projectSlug: "dotfiles",
 				status: "busy",
+				activity: WORKING_ACTIVITY,
 			},
 		]);
-		followSessionBusy(sessionId, true);
 		const { getByRole } = render(InputArea);
 		await fireEvent.click(getByRole("button", { name: "Stop generating" }));
 		expect(rpc).toHaveBeenCalledWith(

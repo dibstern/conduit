@@ -134,8 +134,7 @@ function predictsHandoff(sessionId: string): boolean {
 	);
 	const recovery = row.limitRecovery;
 	return (
-		row.status !== "busy" &&
-		row.status !== "retry" &&
+		getSessionPhase(sessionId) === "idle" &&
 		!row.retrying &&
 		!permissionsState.pendingPermissions.some(
 			(permission) => permission.sessionId === sessionId,

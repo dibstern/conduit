@@ -17,7 +17,6 @@ import {
 	getFilteredSessions,
 	groupSessionsByAttention,
 	groupSessionsByDate,
-	isSessionBusy,
 	isSessionSnoozed,
 	isSessionWoken,
 	parentOf,
@@ -35,6 +34,7 @@ import {
 	applySessionRemoved,
 	applySessionSnapshot,
 	applySessionUpsert,
+	seedFamilySessions,
 	seedSearchResults,
 	seedSessions,
 } from "./session-fixtures.js";
@@ -245,7 +245,26 @@ it("keeps a newer family row when an older family upsert arrives", () => {
 	});
 
 	expect(findSession("child")?.title).toBe("New child");
-	expect(isSessionBusy("child")).toBe(true);
+	expect(findSession("child")?.status).toBe("busy");
+});
+
+it("a family-only child and a Side Thread's subagent name the root's family", () => {
+	seedFamilySessions([
+		{ id: "root", title: "Root", status: "idle" },
+		{ id: "child", title: "Child", status: "busy", parentID: "root" },
+		{
+			id: "side",
+			title: "Side Thread",
+			status: "idle",
+			parentID: "root",
+			sideThread: true,
+		},
+		{ id: "agent", title: "Agent", status: "busy", parentID: "side" },
+	]);
+	openSessionForSetup("child", "project-a");
+	expect(sessionState.currentParentId).toBe("root");
+	openSessionForSetup("side", "project-a");
+	expect(sessionState.currentParentId).toBe("root");
 });
 
 it("a project switch forgets the family, and the next project's family applies", () => {
