@@ -67,6 +67,17 @@ export function createCursorSdkPort(account?: {
 								cancelNeverSettles:
 									process.env["CONDUIT_TEST_CURSOR_CANCEL_NEVER_SETTLES"] ===
 									"1",
+								...(process.env["CONDUIT_TEST_CURSOR_SHELL_MARKER"]
+									? {
+											shellCommand: {
+												marker: process.env["CONDUIT_TEST_CURSOR_SHELL_MARKER"],
+												delayS: Number(
+													process.env["CONDUIT_TEST_CURSOR_SHELL_DELAY_S"] ??
+														10,
+												),
+											},
+										}
+									: {}),
 								...(process.env["CONDUIT_TEST_CURSOR_SEND_GATE"]
 									? { sendGate: process.env["CONDUIT_TEST_CURSOR_SEND_GATE"] }
 									: {}),

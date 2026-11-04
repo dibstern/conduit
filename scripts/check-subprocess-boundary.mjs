@@ -16,6 +16,8 @@ const longLivedOwners = new Set(
 		"src/lib/instance/managed-opencode-process.ts",
 		"src/lib/instance/managed-opencode-supervisor.ts",
 		"src/lib/provider/codex/app-server/transport.ts",
+		// Test playback stands in for Cursor SDK's detached agent shell.
+		"src/lib/provider/cursor/sdk-trace-player.ts",
 		"src/lib/provider/runner/runner-host.ts",
 		"src/lib/provider/runner/runner-starter.ts",
 		"src/lib/terminal/pty-host-client.ts",

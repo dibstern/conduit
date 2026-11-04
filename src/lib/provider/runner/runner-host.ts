@@ -1,7 +1,13 @@
-import { spawn } from "node:child_process";
+import {
+	type ChildProcess,
+	type SpawnOptions,
+	spawn,
+} from "node:child_process";
+import { tracingChannel } from "node:diagnostics_channel";
 import { appendFileSync, chmodSync, existsSync } from "node:fs";
 import { createServer, Socket } from "node:net";
 import { dirname, join } from "node:path";
+import type { Writable } from "node:stream";
 import { Deferred, Effect, FiberSet, Scope } from "effect";
 import * as Failure from "../../effect/failure-classification.js";
 import { createLogger } from "../../logger.js";
@@ -21,6 +27,7 @@ import {
 import {
 	registerRunner,
 	removeRunnerDiscovery,
+	runnerPidAlive,
 	runnerProcessTable,
 } from "./runner-registry.js";
 import { RunnerSendJournal } from "./runner-send-journal.js";
@@ -140,7 +147,16 @@ set -- $(LC_ALL=C ps -o pgid= -p $$)
 [ "$1" = "$group" ] || exit 0
 printf 'ready\\n'
 exec 1>/dev/null
-while IFS= read -r ignored; do :; done
+groups=
+# The runner reports each detached child's group as it starts (+id) and once it empties (-id).
+while IFS= read -r line; do
+  id=\${line#?}
+  case $id in ''|*[!0-9]*) continue ;; esac
+  case $line in
+    +*) groups="$groups $id" ;;
+    -*) kept=; for g in $groups; do [ "$g" = "$id" ] || kept="$kept $g"; done; groups=$kept ;;
+  esac
+done
 # EOF can precede the parent's actual exit while its exit handlers are running.
 while :; do
   set -- $(LC_ALL=C ps -o ppid= -p $$)
@@ -148,23 +164,62 @@ while :; do
   sleep 0.05
 done
 kill -s TERM -- "-$group" 2>/dev/null || :
+for g in $groups; do kill -s TERM -- "-$g" 2>/dev/null || :; done
 deadline=$(( $(date +%s) + 3 ))
+polls=0
 while [ "$(date +%s)" -lt "$deadline" ]; do
   # exec keeps ps a direct child, so the reaper never waits on its own ps.
   members=$(LC_ALL=C exec ps -axo pid=,pgid=,ppid=,stat=) || break
   remaining=0
   while read -r member pgid parent state; do
-    if [ "$pgid" = "$group" ] && [ "$member" != "$$" ] && [ "$parent" != "$$" ]; then
-      case "$state" in Z*) ;; *) remaining=1; break ;; esac
-    fi
+    case "$state" in Z*) continue ;; esac
+    [ "$member" != "$$" ] && [ "$parent" != "$$" ] || continue
+    case " $group $groups " in *" $pgid "*) remaining=1; break ;; esac
   done <<MEMBERS
 $members
 MEMBERS
   [ "$remaining" = 1 ] || break
+  polls=$((polls + 1))
+  # About a second in, before the daemon's KILL of this group at 3 s can end the reaper.
+  [ "$polls" = 20 ] && for g in $groups; do kill -s KILL -- "-$g" 2>/dev/null || :; done
   sleep 0.05
 done
+for g in $groups; do kill -s KILL -- "-$g" 2>/dev/null || :; done
 kill -s KILL -- "-$group" 2>/dev/null
 `;
+
+/**
+ * Agent tools start detached children in their own session and group (Cursor's shell, live check
+ * 2026-11-04), which the group kill misses. Each one's group is reported to the reaper as it
+ * starts, so the list outlives this runner. CONTRACT.md 2447-2449 leaves such descendants as a
+ * limit; this narrows it to commands that leave the group the runner started.
+ */
+const reportDetachedGroups = (reaperInput: Writable) => {
+	const groups = new Set<number>();
+	// A group id can be reused only once the group is empty, so it is dropped then and not before.
+	const prune = () => {
+		for (const group of groups)
+			if (!runnerPidAlive(-group)) {
+				groups.delete(group);
+				reaperInput.write(`-${group}\n`);
+			}
+	};
+	setInterval(prune, 10_000).unref();
+	tracingChannel<{
+		readonly process: ChildProcess;
+		readonly options: SpawnOptions;
+	}>("child_process.spawn").subscribe({
+		start: ({ process: child, options }) => {
+			if (!options.detached) return;
+			child.once("spawn", () => {
+				if (child.pid === undefined) return;
+				groups.add(child.pid);
+				reaperInput.write(`+${child.pid}\n`);
+			});
+			child.once("exit", prune);
+		},
+	});
+};
 
 // Allow delayed source ACKs under load without approaching the daemon's send deadline.
 const SOURCE_DELIVERY_ADMISSION_WAIT_MS = 2_000;
@@ -216,8 +271,10 @@ export const runSessionRunner = (
 						finished = true;
 						clearTimeout(timeout);
 						if (child.stdout instanceof Socket) child.stdout.unref();
-						if (identity) done(identity);
-						else fail(cause ?? "Reaper exited before startup completed");
+						if (identity) {
+							reportDetachedGroups(child.stdin);
+							done(identity);
+						} else fail(cause ?? "Reaper exited before startup completed");
 					};
 					const timeout = setTimeout(
 						() => finish(undefined, "Reaper startup timed out"),
