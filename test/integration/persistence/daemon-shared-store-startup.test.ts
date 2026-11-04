@@ -993,8 +993,10 @@ describe("daemon shared-store startup", () => {
 				await runtime.runPromise(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
-						yield* sql`UPDATE sessions SET status = 'busy', last_message_at = 2000`;
+						// 3.12: a cold store reads the session's ledger row, never the row's status.
+						yield* sql`UPDATE sessions SET last_message_at = 2000`;
 						for (const { slug } of projects) {
+							yield* sql`INSERT OR REPLACE INTO run_ledger_sessions (session_id, provider, state) VALUES (${`${slug}-session`}, 'opencode', 'Open')`;
 							yield* sql`INSERT INTO command_receipts (command_id, session_id, status, created_at, project_key) VALUES (${`${slug}-command`}, ${`${slug}-session`}, 'accepted', 1000, ${slug})`;
 							yield* sql`INSERT INTO provider_command_meta (project_key, last_applied_sequence, schema_version, rebuilt_at) VALUES (${slug}, 0, 1, 1000)`;
 						}
@@ -1037,10 +1039,13 @@ describe("daemon shared-store startup", () => {
 					]);
 				}
 				await runtime.runPromise(
-					Effect.flatMap(
-						SqlClient.SqlClient,
-						(sql) =>
-							sql`UPDATE sessions SET status = 'idle' WHERE project_id = 'alpha'`,
+					Effect.flatMap(SqlClient.SqlClient, (sql) =>
+						sql`UPDATE run_ledger_sessions SET state = 'Quiescent' WHERE session_id = 'alpha-session'`.pipe(
+							// A busy row the ledger calls quiet is not running.
+							Effect.andThen(
+								sql`UPDATE sessions SET status = 'busy' WHERE project_id = 'alpha'`,
+							),
+						),
 					),
 				);
 				expect(
@@ -1052,9 +1057,12 @@ describe("daemon shared-store startup", () => {
 					await runtime.runPromise(countRunningProjectSessions(projects[0])),
 				).toBe(0);
 				await runtime.runPromise(
-					Effect.flatMap(
-						SqlClient.SqlClient,
-						(sql) => sql`UPDATE sessions SET status = 'idle'`,
+					Effect.flatMap(SqlClient.SqlClient, (sql) =>
+						sql`UPDATE sessions SET status = 'idle'`.pipe(
+							Effect.andThen(
+								sql`UPDATE run_ledger_sessions SET state = 'Quiescent'`,
+							),
+						),
 					),
 				);
 				for (const own of projects)

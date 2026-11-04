@@ -131,7 +131,9 @@ export const hasProviderRecoveryCandidate = (
 				JOIN session_providers AS binding ON binding.session_id = session.id
 				WHERE session.project_id = ${project.slug} AND binding.status = 'active'
 				AND binding.provider IN ${sql.in(openCodeInstanceIds)}
-				AND (session.status IN ('busy', 'retry') OR EXISTS (
+				-- 3.12 (CONTRACT 823-826): a cold store reads the session's ledger row, not its status.
+				AND (EXISTS (SELECT 1 FROM run_ledger_sessions ledger
+					WHERE ledger.session_id = session.id AND ledger.state = 'Open') OR EXISTS (
 					SELECT 1 FROM pending_approvals AS approval
 					WHERE approval.session_id = session.id AND approval.status = 'pending'
 				))
@@ -149,7 +151,7 @@ export const hasProviderRecoveryCandidate = (
 		}).pipe(Effect.provide(database));
 	});
 
-/** Count busy/retry sessions and admitted turns awaiting their first provider event. */
+/** Count sessions whose ledger row is Open (3.12: something may still act) and admitted turns. */
 export const countRunningProjectSessions = (
 	project: Pick<StoredProject, "slug" | "folders">,
 ) =>
@@ -158,7 +160,9 @@ export const countRunningProjectSessions = (
 		return yield* Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count FROM (
-				SELECT id FROM sessions WHERE project_id = ${project.slug} AND status IN ('busy', 'retry')
+				SELECT ledger.session_id FROM run_ledger_sessions ledger
+				JOIN sessions ON sessions.id = ledger.session_id
+				WHERE sessions.project_id = ${project.slug} AND ledger.state = 'Open'
 				UNION
 				SELECT session_id FROM provider_command_outbox
 				WHERE project_key = ${project.slug} AND effect_type = 'send_turn' AND status IN ('pending', 'running')
