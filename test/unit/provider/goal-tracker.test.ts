@@ -4,6 +4,10 @@
 // transitional phase is stored, or outlives a failed delivery; a deadline shows nothing to retry;
 // a queued clear is not told apart; an uncorrelated reply clears the pending action; a read that
 // finds no record drops the goal; "No goal set" leaves Clearing showing.
+// Lane-3227 audit.md 7, 8, 13, 14, 18, 19: a Limited status loses which limit it was; a Pause that
+// comes back budgetLimited leaves Pausing showing; the not-confirmed re-read drops the pending
+// Pause; a slow re-read undoes newer state; Resume while Limited assumes Active; two tabs' Pauses
+// let the first one's late reply decide; recovery resends a Pause over a Limited goal.
 import { describe, expect, it } from "vitest";
 import {
 	confirmGoal,
@@ -222,6 +226,126 @@ describe("goal tracker", () => {
 			tag: "Pending",
 			action: { kind: "clear" },
 			send: "Sent",
+		});
+	});
+
+	describe("Codex Pause, Resume and Limited (82tn.32.27)", () => {
+		const limited = (limit: "blocked" | "usage" | "budget") =>
+			({ tag: "Limited", condition: "A", limit }) as const;
+		const pausing = requestGoalAction(activeA, "pause-1", { kind: "pause" });
+
+		it("fixed trace: Pause sent, not confirmed, the re-read finds budgetLimited", () => {
+			// Coverage gate (moved from the Run Ledger gate): the deadline fires, the tracker
+			// re-reads thread/goal/get, which returns budgetLimited.
+			expect(
+				goalPhase(pausing, { commandId: "pause-1", tag: "Unconfirmed" }),
+			).toEqual({
+				tag: "Pending",
+				action: { kind: "pause" },
+				send: "Unconfirmed",
+			});
+			const reread = confirmGoal(pausing, {
+				kind: "read",
+				status: limited("budget"),
+				order: 20,
+			});
+			expect(reread.confirmed).toEqual(limited("budget"));
+			// A read is not the reply: "Pause not confirmed" with Retry stays.
+			expect(
+				goalPhase(reread, { commandId: "pause-1", tag: "Unconfirmed" }),
+			).toEqual({
+				tag: "Pending",
+				action: { kind: "pause" },
+				send: "Unconfirmed",
+			});
+			const stale = confirmGoal(reread, {
+				kind: "read",
+				status: active("A"),
+				order: 15,
+			});
+			expect(stale).toBe(reread);
+			const replied = confirmGoal(stale, {
+				kind: "reply",
+				replyTo: "pause-1",
+				status: limited("budget"),
+				order: 30,
+			});
+			expect(replied.pending).toEqual({ tag: "None" });
+			expect(goalPhase(replied, undefined)).toEqual({
+				tag: "Confirmed",
+				status: limited("budget"),
+			});
+		});
+
+		it("a Pause confirmed as budgetLimited shows Limited, not Paused", () => {
+			const end = confirmGoal(pausing, {
+				kind: "reply",
+				replyTo: "pause-1",
+				status: limited("budget"),
+				order: 20,
+			});
+			expect(end).toEqual({
+				confirmed: limited("budget"),
+				pending: { tag: "None" },
+				order: 20,
+			});
+		});
+
+		it("Resume while Limited shows what Codex returns", () => {
+			const resuming = requestGoalAction(
+				confirmGoal(NO_GOAL, {
+					kind: "read",
+					status: limited("usage"),
+					order: 10,
+				}),
+				"resume-1",
+				{ kind: "resume" },
+			);
+			const end = confirmGoal(resuming, {
+				kind: "reply",
+				replyTo: "resume-1",
+				status: limited("usage"),
+				order: 20,
+			});
+			expect(end.confirmed).toEqual(limited("usage"));
+			expect(end.pending).toEqual({ tag: "None" });
+		});
+
+		it("two tabs pressing Pause: the first one's late reply changes nothing", () => {
+			const second = requestGoalAction(pausing, "pause-2", { kind: "pause" });
+			const late = confirmGoal(second, {
+				kind: "reply",
+				replyTo: "pause-1",
+				status: { tag: "Paused", condition: "A" },
+				order: 20,
+			});
+			expect(late).toBe(second);
+			const end = confirmGoal(late, {
+				kind: "reply",
+				replyTo: "pause-2",
+				status: { tag: "Paused", condition: "A" },
+				order: 30,
+			});
+			expect(end.confirmed).toEqual({ tag: "Paused", condition: "A" });
+			expect(end.pending).toEqual({ tag: "None" });
+		});
+
+		it("recovery does not resend a Pause over a Limited goal, but resends a Resume", () => {
+			const limitedPausing = confirmGoal(pausing, {
+				kind: "read",
+				status: limited("blocked"),
+				order: 20,
+			});
+			expect(recoverGoal(limitedPausing)).toEqual({
+				goal: { ...limitedPausing, pending: { tag: "None" } },
+			});
+			const resuming = requestGoalAction(limitedPausing, "resume-1", {
+				kind: "resume",
+			});
+			expect(recoverGoal(resuming).resend).toEqual({
+				id: "resume-1",
+				action: { kind: "resume" },
+			});
 		});
 	});
 });

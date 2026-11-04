@@ -8,10 +8,18 @@ import type { NativeCommandView } from "./run-ledger/run-ledger-model.js";
  */
 export type ConfirmedGoal =
 	| {
-			readonly tag: "Active" | "Paused" | "Limited" | "Met";
+			readonly tag: "Active" | "Paused" | "Met";
 			readonly condition: string;
 	  }
+	| {
+			/** Codex's blocked, usageLimited or budgetLimited (8.6), shown as one phase. */
+			readonly tag: "Limited";
+			readonly condition: string;
+			readonly limit: GoalLimit;
+	  }
 	| { readonly tag: "Cleared" };
+
+export type GoalLimit = "blocked" | "usage" | "budget";
 
 export type GoalAction =
 	| { readonly kind: "set"; readonly condition: string }
@@ -69,6 +77,9 @@ export type GoalPhase =
 export const goalCommandText = (action: GoalAction): string =>
 	action.kind === "set" ? `/goal ${action.condition}` : `/goal ${action.kind}`;
 
+/** The native read an unconfirmed action takes (8.5; Codex: thread/goal/get). */
+export const GOAL_READ_TEXT = "/goal";
+
 export const NO_GOAL: GoalTracker = {
 	confirmed: { tag: "Cleared" },
 	pending: { tag: "None" },
@@ -109,8 +120,10 @@ const satisfies = (status: ConfirmedGoal, action: GoalAction): boolean => {
 			return status.tag === "Active" && status.condition === action.condition;
 		case "clear":
 			return status.tag === "Cleared";
+		// CONTRACT.md 8.6 (2956) does not say whether a Limited goal satisfies a Pause; the nearest
+		// reading: neither runs, so resending would only turn a limit Codex reported into Paused.
 		case "pause":
-			return status.tag === "Paused";
+			return status.tag === "Paused" || status.tag === "Limited";
 		case "resume":
 			return status.tag === "Active";
 	}

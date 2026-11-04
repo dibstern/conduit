@@ -1058,6 +1058,8 @@ export const CanonicalEvents = {
 			endedGoal: Schema.optional(SessionGoalSchema),
 			endedAt: Schema.optional(Schema.Number),
 			pausedReason: Schema.optional(Schema.String),
+			/** Codex stopped the goal at a limit (8.6 Limited): blocked, usageLimited or budgetLimited. */
+			limit: Schema.optional(Schema.Literals(["blocked", "usage", "budget"])),
 			/** The goal action (its native command id) this reply answers (8.6). */
 			replyTo: Schema.optional(Schema.String),
 		}),
