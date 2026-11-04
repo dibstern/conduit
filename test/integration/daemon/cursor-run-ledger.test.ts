@@ -275,12 +275,13 @@ describe("Cursor on the Run Ledger", () => {
 		sessionId: string,
 		text: string,
 		delivery: "queue" | "steer" = "queue",
+		inputId: string = randomUUID(),
 	) =>
 		Effect.runPromise(
 			browser.rpc["input.submit"]({
 				sessionId,
 				originId: browser.originId,
-				inputId: randomUUID(),
+				inputId,
 				delivery,
 				text,
 			}),
@@ -649,6 +650,78 @@ describe("Cursor on the Run Ledger", () => {
 			handed,
 		});
 	}, 120_000);
+
+	// Failure modes (32.8): F379 Run now steers or sends without cancelling; F380 the active
+	// Run ends twice or not interrupted; F381 the queued input launches twice or never; F382 it
+	// launches before the active Run ends; F383 Run now retires the runner; F384 the queued
+	// input stays in the tray.
+	it("ends the active Run interrupted on Run now and launches the queued input once, on the same runner", async () => {
+		// cancel.jsonl's captured follow-up is the send after its cancelled turn.
+		const { fixture, browser, sessionId } = await start("run-now", "cancel");
+		await submit(
+			browser,
+			sessionId,
+			"Call the human custom tool once, then say done.",
+		);
+		await thinking(fixture, sessionId);
+		const queued = randomUUID();
+		await submit(browser, sessionId, "Say cancel followup.", "queue", queued);
+		const tray = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT state FROM pending_inputs WHERE session_id = ? AND input_id = ?",
+					)
+					.all(sessionId, queued) as { state: string }[];
+			} finally {
+				db.close();
+			}
+		};
+		// test-waits-allow polling: the queued input's tray state reaches only the store.
+		await vi.waitFor(() => expect(tray()).toEqual([{ state: "queued" }]), {
+			timeout: TIMEOUT,
+		});
+		expect(captured("send.options")).toHaveLength(1);
+		await browser.sendNow(sessionId, queued, true);
+		await turns(fixture, sessionId, ["interrupted", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		oneRunnerStartedFirst(ledger);
+		expect(ledger.runs.map((run) => run.status)).toEqual([
+			"interrupted",
+			"completed",
+		]);
+		expect(
+			ledger.ends.map(({ reason, forced }) => ({ reason, forced })),
+		).toEqual([
+			{ reason: "interrupted", forced: 0 },
+			expect.objectContaining({ reason: "completed" }),
+		]);
+		expect(
+			ledger.events
+				.filter(({ type }) => type === "turn.interrupted")
+				.map(({ code }) => code),
+		).toEqual([null]);
+		expect(captured("cancel.call")).toHaveLength(1);
+		expect(captured("steer.call")).toEqual([]);
+		const sends = captured("send.options");
+		expect(sends).toHaveLength(2);
+		expect(JSON.stringify(sends[1]?.data)).toContain("Say cancel followup.");
+		// The queued input was sent only after the cancelled wait settled.
+		const capture = traceRows(capturePath);
+		const cancelled = capture.findIndex(
+			(row) =>
+				row.kind === "wait.result" &&
+				(row.data as { status?: string } | undefined)?.status === "cancelled",
+		);
+		expect(cancelled).toBeGreaterThan(-1);
+		expect(cancelled).toBeLessThan(
+			capture.map(({ kind }) => kind).lastIndexOf("send.options"),
+		);
+		expect(tray()).toEqual([{ state: "removed" }]);
+		prove("run-now", ledger);
+	});
 
 	it("lands old's process_lost and R's process_started together when a new build swaps the runner", async () => {
 		const { fixture, browser, sessionId, restart } = await start(
