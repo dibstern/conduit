@@ -1881,6 +1881,32 @@ function query(params: {
 						!taskTurnInterrupted
 					) {
 						releaseTaskStops();
+						// A task that ends on its own while the turn is held.
+						for (const task of taskStopLive.filter((entry) =>
+							consumeMarker(`task-stop-end-${entry.task_id}`),
+						)) {
+							taskStopLive = taskStopLive.filter((entry) => entry !== task);
+							outOfBand.push(
+								{
+									type: "system",
+									subtype: "background_tasks_changed",
+									session_id: sessionId,
+									uuid: randomUUID(),
+									tasks: taskStopLive,
+								},
+								{
+									type: "system",
+									subtype: "task_notification",
+									session_id: sessionId,
+									uuid: randomUUID(),
+									task_id: task.task_id,
+									tool_use_id: task.tool_use_id,
+									status: "completed",
+									output_file: join(dirname(proof), `${task.task_id}.output`),
+									summary: `${task.description} completed`,
+								},
+							);
+						}
 						// A task that starts while the turn is held, e.g. after its Stop (8.4).
 						if (consumeMarker("task-stop-late-task")) {
 							taskStopLive = [...taskStopLive, ...taskStopMonitorFixture];
@@ -3098,16 +3124,16 @@ function query(params: {
 				queryId,
 				at: process.hrtime.bigint().toString(),
 			});
-			if (!taskStopLive.some((task) => task.task_id === taskId)) {
-				mark({
-					kind: "task-stop",
-					phase: "already-finished",
-					taskId,
-					queryId,
-					at: process.hrtime.bigint().toString(),
-				});
-				return;
+			// A stop still in flight: the SDK has not answered it yet.
+			while (
+				proof &&
+				existsSync(join(dirname(proof), "task-stop-hold")) &&
+				!closed
+			) {
+				// test-waits-allow real-wait: the hold is the test process's file.
+				await new Promise<void>((done) => setTimeout(done, 20));
 			}
+			// Checked first, so a rejection can also answer a task that has already ended.
 			if (
 				proof &&
 				existsSync(join(dirname(proof), `task-stop-fail-${taskId}`))
@@ -3120,6 +3146,16 @@ function query(params: {
 					at: process.hrtime.bigint().toString(),
 				});
 				throw new Error("Synthetic task stop failure");
+			}
+			if (!taskStopLive.some((task) => task.task_id === taskId)) {
+				mark({
+					kind: "task-stop",
+					phase: "already-finished",
+					taskId,
+					queryId,
+					at: process.hrtime.bigint().toString(),
+				});
+				return;
 			}
 			pendingTaskStops.add(taskId);
 		},

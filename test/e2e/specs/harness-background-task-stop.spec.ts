@@ -543,16 +543,15 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 				exact: true,
 			})
 			.click();
+		// 8.4 (2866): a failed stop is a timeline notice, shown whenever it lands.
 		await expect(
-			page
-				.locator('[role="alert"]')
-				.filter({ hasText: /Failed to stop background tasks?/ }),
+			page.getByText(/^Could not stop .*; it is still running$/),
 		).toBeVisible();
 		await expectTasks(
 			page,
 			taskStopFixture.map((task) => task.description),
 		);
-		await steps.record("failure-toast-row-retained");
+		await steps.record("failure-notice-row-retained");
 		unlinkSync(failGate);
 		await new AppPage(second).goto(`${harness.baseUrl}/s/${sessionId}`);
 		await second

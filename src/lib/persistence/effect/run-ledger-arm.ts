@@ -912,7 +912,7 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				// 8.4 L5 (CONTRACT.md 2907-2913): each label's lost work, decided once, is a timeline notice
 				// at the fact that decided it, so it replays after a reload. The names come from that
 				// label's latest stored snapshot, which carries each task's command.
-				const noticeIds: string[] = [];
+				const notes: { readonly id: string; readonly text: string }[] = [];
 				for (const [index, lost] of view.lostWork
 					.slice(before.lostWork.length)
 					.entries()) {
@@ -948,7 +948,46 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 									})
 									.join(", ")}`
 							: "Background work may have been lost";
-					const messageId = `lost-work-${event.sequence}-${index}`;
+					notes.push({ id: `lost-work-${event.sequence}-${index}`, text });
+				}
+				// 8.4 (CONTRACT.md 2866): a failed stop is a diagnostic. It is a timeline notice whenever it
+				// lands, so one after the browser stopped waiting is still shown; a stop whose task has
+				// already left failed at nothing, so it shows nothing.
+				const [failedStop] =
+					event.type === "evidence.effect_outcome" &&
+					(event.data.outcome.tag === "permanent" ||
+						event.data.outcome.tag === "not_sent") &&
+					view.tasks.tag === "live"
+						? yield* sql<{ key: string }>`
+								SELECT json_extract(payload_json, '$.effect.key') AS key FROM provider_command_outbox
+								WHERE command_id = ${event.data.commandId} AND effect_type = 'stop_task'`
+						: [];
+				const stopKey = failedStop
+					? (JSON.parse(failedStop.key) as TaskKey)
+					: undefined;
+				const stillLive =
+					stopKey && view.tasks.tag === "live"
+						? view.tasks.tasks.find(
+								(task) =>
+									task.key.taskId === stopKey.taskId &&
+									task.key.runId === stopKey.runId,
+							)
+						: undefined;
+				if (stillLive) {
+					const detail = (yield* storedSnapshot(view.tasks))?.tasks.find(
+						(task) => task.key.taskId === stillLive.key.taskId,
+					)?.detail;
+					notes.push({
+						id: `stop-failed-${event.sequence}`,
+						text: `Could not stop ${backgroundTaskText({
+							kind: stillLive.kind,
+							type: stillLive.taskType,
+							description: stillLive.description,
+							...(detail ? { detail } : {}),
+						})}; it is still running`,
+					});
+				}
+				for (const { id: messageId, text } of notes) {
 					yield* sql`INSERT INTO messages
 						(id, session_id, role, text, is_streaming, created_at, updated_at, version, ordinal)
 						VALUES (${messageId}, ${event.sessionId}, 'assistant', '', 0, ${event.createdAt},
@@ -961,9 +1000,11 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							${JSON.stringify({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt},
 							${ctx.version})
 						ON CONFLICT (id) DO NOTHING`;
-					noticeIds.push(messageId);
 				}
-				const noticed = yield* stampMessage(noticeIds, ctx);
+				const noticed = yield* stampMessage(
+					notes.map(({ id }) => id),
+					ctx,
+				);
 				if (event.type === "evidence.tasks_snapshot")
 					handOver(view, { tasks: event.data.tasks, at: event.createdAt });
 				else if (!handedOver.has(event.sessionId))
