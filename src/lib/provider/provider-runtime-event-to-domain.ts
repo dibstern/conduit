@@ -626,10 +626,19 @@ export function translateProviderRuntimeEventToDomain(
 			});
 		}
 
-		case "evidence.turn_ended":
+		case "evidence.turn_ended": {
+			const result = isRecord(data["result"]) ? data["result"] : undefined;
+			const outcome = result?.["outcome"];
+			const code = stringField(result?.["code"]);
 			return singleEvent(event, state, "evidence.turn_ended", {
 				label: stringField(data["label"]) ?? "",
+				...(outcome === "completed" ||
+				outcome === "error" ||
+				outcome === "interrupted"
+					? { result: { outcome, ...(code ? { code } : {}) } }
+					: {}),
 			});
+		}
 
 		default: {
 			const _exhaustive: never = event;

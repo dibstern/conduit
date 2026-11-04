@@ -1175,7 +1175,21 @@ export const CanonicalEvents = {
 			),
 		}),
 	),
-	"evidence.turn_ended": live(Schema.Struct({ label: Schema.String })),
+	/**
+	 * A Claude wake's end (row 215). `result` when its first clear is its result, which main
+	 * stores no event for: the wake's labelled result (8.3, 3.4), folded as its outcome.
+	 */
+	"evidence.turn_ended": live(
+		Schema.Struct({
+			label: Schema.String,
+			result: Schema.optionalKey(
+				Schema.Struct({
+					outcome: Schema.Literals(["completed", "error", "interrupted"]),
+					code: Schema.optionalKey(Schema.String),
+				}),
+			),
+		}),
+	),
 	/** holdRun's cap (4.3): the held send under commandId spent its five transmissions. */
 	"evidence.hold_exhausted": live(Schema.Struct({ commandId: Schema.String })),
 	/**

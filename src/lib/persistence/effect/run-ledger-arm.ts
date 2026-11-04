@@ -452,16 +452,31 @@ const commandFor = (
 						...(event.data.wakeTask ? { wakeTask: event.data.wakeTask } : {}),
 					},
 				};
-			case "evidence.turn_ended":
+			case "evidence.turn_ended": {
+				// 8.3 (CONTRACT.md 2823-2828): a Claude wake ended by its result, which main stores no
+				// event for, folds that result, its outcome with it; with none it ends at turn_ended.
+				const result = event.data.result;
 				return {
 					verb: "observe",
-					observation: {
-						tag: "Unsolicited",
-						label: event.data.label,
-						eventId: event.eventId,
-						kind: "turn_ended",
-					},
+					observation: result
+						? {
+								tag: "Unsolicited",
+								label: event.data.label,
+								eventId: event.eventId,
+								kind: "result",
+								outcome: result.outcome,
+								...(result.code === undefined
+									? {}
+									: { error: { code: result.code, retryable: false } }),
+							}
+						: {
+								tag: "Unsolicited",
+								label: event.data.label,
+								eventId: event.eventId,
+								kind: "turn_ended",
+							},
 				};
+			}
 			case "evidence.server_seen":
 				return {
 					verb: "settle",

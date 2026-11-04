@@ -1729,8 +1729,14 @@ export class ProviderSideEffectReactor {
 						const input =
 							ledger && inputPlacement(ledger.state, row.command_id, claim);
 						// 2.1 row 202 (CONTRACT.md 215, 714-717): a start waits with no clock while some
-						// label has work; the commit that releases the fence wakes the drain.
-						if (ledger && input?.start && fenceHolds(ledger.state, claim))
+						// label has work; the commit that releases the fence wakes the drain. A steer is sent
+						// as a steer even as its own Run's start, so a wake takes it (CONTRACT.md 992-995).
+						if (
+							ledger &&
+							input?.start &&
+							!input.steer &&
+							fenceHolds(ledger.state, claim)
+						)
 							return undefined;
 						// 2.1 row 212 (CONTRACT.md 1873-1876): 5 transmissions per direct send; a runner-held
 						// one is holdRun's to cap. The view folds a retry's run.requested on an ended Run only
