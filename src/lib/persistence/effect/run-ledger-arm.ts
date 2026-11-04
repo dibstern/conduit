@@ -531,15 +531,53 @@ const commandFor = (
 			case "permission.asked":
 			case "question.asked":
 			case "permission.resolved":
-			case "question.resolved": {
+			case "question.resolved":
+			case "evidence.interaction_resolved": {
+				const opencode =
+					getProviderDriver(provider)?.runsOpenCodeServer === true;
+				// Codex's prompts are not folded yet: its async questions never resolve (3.10).
+				const runnerPrompts = provider === "claude";
+				if (!opencode && !runnerPrompts) return undefined;
+				const { id: interactionId, providerProcessId } = event.data;
+				// 3.10 (CONTRACT.md 1007-1014): Claude's answer from main, its control-outbox commit's
+				// commandId, or the timeout's, whose row enqueueCommittedControlAnswers names after the
+				// event; first wins. OpenCode's resolves natively at main's answer, as before.
+				const commandId = opencode
+					? undefined
+					: (event.metadata.commandId ??
+						(event.metadata.source === "permission-timeout" &&
+						providerProcessId !== undefined
+							? `legacy-answer:${event.eventId}`
+							: undefined));
+				if (event.type === "permission.resolved" && commandId !== undefined)
+					return {
+						verb: "control",
+						control: {
+							kind: "answer",
+							commandId,
+							interactionId,
+							answer: event.data.decision,
+						},
+					};
+				if (event.type === "question.resolved" && commandId !== undefined)
+					return {
+						verb: "control",
+						control: {
+							kind: "answer",
+							commandId,
+							interactionId,
+							answer: event.data.answers,
+						},
+					};
 				// 2.1 row 205, 3.10 (CONTRACT.md 216, 999-1006): an OpenCode interaction belongs to the
-				// label its session's process reported last; the arm folds its request and its native
-				// resolution there (gap, reported). Claude's come from its runner.
-				if (getProviderDriver(provider)?.runsOpenCodeServer !== true)
-					return undefined;
+				// label its session's process reported last (gap, reported); Claude's to its runner's,
+				// the prompt's providerProcessId (relay-event-sink.ts 257).
+				const runnerId = opencode ? null : (providerProcessId ?? null);
+				if (!opencode && runnerId === null) return undefined;
 				const [started] = yield* sql<{ label: string }>`
 					SELECT json_extract(data, '$.label') AS label FROM events
 					WHERE session_id = ${event.sessionId} AND type = 'evidence.process_started'
+						AND (${runnerId} IS NULL OR json_extract(data, '$.runnerId') = ${runnerId})
 						AND sequence < ${event.sequence}
 					ORDER BY sequence DESC LIMIT 1`;
 				if (!started) return undefined;
@@ -547,7 +585,7 @@ const commandFor = (
 					tag: "Unsolicited",
 					label: started.label,
 					eventId: event.eventId,
-					interactionId: event.data.id,
+					interactionId,
 				} as const;
 				return {
 					verb: "observe",
@@ -607,6 +645,7 @@ const HANDLES = [
 	"evidence.turn_started",
 	"evidence.turn_ended",
 	"evidence.tasks_snapshot",
+	"evidence.interaction_resolved",
 	"evidence.delivery_indeterminate",
 	"evidence.hold_exhausted",
 	"evidence.server_seen",

@@ -1103,4 +1103,135 @@ describe("Claude on the Run Ledger", () => {
 			types: ledger.events.map(({ type }) => type),
 		});
 	});
+
+	it("folds a Claude permission and main's answer once across a daemon restart, the answer reaching the SDK once", async () => {
+		const { fixture, browser } = await start();
+		const sessionId = await browser.createSession("Claude ledger answer");
+		const prompt = "approval-ledger-answer";
+		const pending = browser.send(sessionId, prompt).catch(() => undefined);
+		const asked = await browser.waitFor(
+			(message) => message["type"] === "permission_pending",
+		);
+		// The interaction outlives the daemon: its rebuilt ledger still reads it Pending.
+		await fixture.kill();
+		await pending;
+		await fixture.restart();
+		const after = await fixture.connect(sessionId);
+		await after.view(sessionId);
+		const recovered = await after.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" &&
+				message["requestId"] === asked["requestId"],
+		);
+		await after.answerApproval(recovered, "allow");
+		await after.waitForTurnEnd(sessionId);
+		// test-waits-allow polling: the reactor completes the outbox row after the runner's reply, with no browser event.
+		const answer = await vi.waitFor(
+			() => {
+				const found = answers(fixture, sessionId);
+				expect(found.outbox.map((row) => row.status)).toEqual(["completed"]);
+				// 3.10, 3.12: the delivered answer holds the session open no longer.
+				expect(found.state).toBe("Quiescent");
+				return found;
+			},
+			{ timeout: 10_000, interval: 50 },
+		);
+		proofs.push({ case: "answer-across-restart", sessionId, ...answer });
+		const [resolved] = answer.events.filter(
+			(event) => event.source === "conduit.control-outbox",
+		);
+		const [row] = answer.outbox;
+		expect(resolved?.commandId).toBe(row?.commandId);
+		const interactionId = resolved?.id;
+		// 3.10: the interaction is its runner's label's, requested once and answered once by main's
+		// answer, whose one transmission's outcome the ledger folds.
+		expect(answer.requested).toEqual([
+			{ interactionId, label: `${runnerOf(read(fixture, sessionId))}:0` },
+		]);
+		expect(answer.answers).toEqual([
+			{ commandId: row?.commandId, interactionId },
+		]);
+		expect(answer.outcomes).toEqual([
+			{ commandId: row?.commandId, transmission: 1, outcome: "succeeded" },
+		]);
+		expect(row?.attempts).toBe(1);
+		// 3.10, D61: the runner's own resolution confirms the delivery as ledger evidence alone; the
+		// UI's events keep main's one resolution.
+		expect(answer.events.map(({ type, source }) => [type, source])).toEqual([
+			["permission.asked", null],
+			["permission.resolved", "conduit.control-outbox"],
+			["evidence.interaction_resolved", null],
+		]);
+		expect(answer.resolved).toEqual([{ interactionId }]);
+		// The answer reached the SDK once.
+		expect(
+			sdkMarks(fixture).filter(
+				(mark) => mark["kind"] === "approval" && mark["prompt"] === prompt,
+			),
+		).toEqual([expect.objectContaining({ behavior: "allow" })]);
+		endsOnce(read(fixture, sessionId));
+	});
 });
+
+const sdkMarks = (harness: ProcessHarness) =>
+	readFileSync(join(harness.root, "sdk-proof.ndjson"), "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as Record<string, unknown>);
+
+/** A session's prompts and answers: main's events, its outbox rows and the ledger's facts (3.10). */
+const answers = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		const facts = (path: string, where: string) =>
+			db
+				.prepare(
+					`SELECT ${path} FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'fact' AND ${where} ORDER BY entry_seq`,
+				)
+				.all(sessionId);
+		return {
+			state: (
+				db
+					.prepare("SELECT state FROM run_ledger_sessions WHERE session_id = ?")
+					.get(sessionId) as { state: string } | undefined
+			)?.state,
+			events: db
+				.prepare(
+					"SELECT type, json_extract(data, '$.id') AS id, json_extract(metadata, '$.commandId') AS commandId, json_extract(metadata, '$.source') AS source FROM events WHERE session_id = ? AND type IN ('permission.asked', 'permission.resolved', 'evidence.interaction_resolved') ORDER BY sequence",
+				)
+				.all(sessionId) as {
+				type: string;
+				id: string;
+				commandId: string | null;
+				source: string | null;
+			}[],
+			outbox: db
+				.prepare(
+					"SELECT command_id AS commandId, status, attempt_count AS attempts FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'resolve_permission' ORDER BY request_sequence",
+				)
+				.all(sessionId) as {
+				commandId: string;
+				status: string;
+				attempts: number;
+			}[],
+			requested: facts(
+				"json_extract(entry_json, '$.command.observation.interactionId') AS interactionId, json_extract(entry_json, '$.command.observation.label') AS label",
+				"json_extract(entry_json, '$.command.observation.kind') = 'interaction_requested'",
+			),
+			answers: facts(
+				"json_extract(entry_json, '$.command.control.commandId') AS commandId, json_extract(entry_json, '$.command.control.interactionId') AS interactionId",
+				"json_extract(entry_json, '$.command.control.kind') = 'answer'",
+			),
+			resolved: facts(
+				"json_extract(entry_json, '$.command.observation.interactionId') AS interactionId",
+				"json_extract(entry_json, '$.command.observation.kind') = 'interaction_resolved'",
+			),
+			outcomes: facts(
+				"json_extract(entry_json, '$.command.observation.transmission.commandId') AS commandId, json_extract(entry_json, '$.command.observation.transmission.transmission') AS transmission, json_extract(entry_json, '$.command.observation.outcome.tag') AS outcome",
+				"json_extract(entry_json, '$.command.observation.kind') = 'effect_outcome' AND json_extract(entry_json, '$.command.observation.transmission.commandId') IN (SELECT command_id FROM provider_command_outbox WHERE effect_type = 'resolve_permission')",
+			),
+		};
+	} finally {
+		db.close();
+	}
+};
