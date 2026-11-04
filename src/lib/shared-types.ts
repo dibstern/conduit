@@ -382,6 +382,35 @@ export const GoalPhaseSchema = Schema.Union([
 	}),
 ]);
 
+/** What the session's background is doing (8.2, 8.7): work reads working; the rest are calm. */
+export const SessionBackgroundActivitySchema = Schema.Literals([
+	"none",
+	"work",
+	"monitoring",
+	"serving",
+	"unknown",
+]);
+export type SessionBackgroundActivity =
+	typeof SessionBackgroundActivitySchema.Type;
+export const SessionActivityLabelSchema = Schema.Literals([
+	"idle",
+	"working",
+	"background",
+	"needs-you",
+]);
+export type SessionActivityLabel = typeof SessionActivityLabelSchema.Type;
+
+/** The one answer to what a session is doing (82tn.32.30, 8.1); every surface reads only this. */
+export const SessionActivityViewSchema = Schema.Struct({
+	/** A Run of the ledger's, input or wake, from Queued until it ends. */
+	foreground: Schema.Literals(["idle", "working"]),
+	background: SessionBackgroundActivitySchema,
+	needsYou: Schema.optional(Schema.Literals(["approval", "reply"])),
+	label: SessionActivityLabelSchema,
+	goal: Schema.optional(GoalPhaseSchema),
+});
+export type SessionActivityView = typeof SessionActivityViewSchema.Type;
+
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
 	id: Schema.String,
