@@ -97,6 +97,24 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 };
 type Ledger = ReturnType<typeof read>;
 
+/** A recorded trace replayed as a thread/resume of `threadId`, as codex-goals' resume does. */
+const resumeTrace = (trace: TraceRow[], threadId: string) => {
+	const original = trace.find(({ message }) => message?.method === "turn/start")
+		?.message?.params?.["threadId"];
+	if (typeof original !== "string")
+		throw new Error("Missing recorded thread id");
+	const resumed = JSON.parse(
+		JSON.stringify(trace).replaceAll(original, threadId),
+	) as TraceRow[];
+	const start = resumed.find(
+		({ message }) => message?.method === "thread/start",
+	)?.message;
+	if (!start) throw new Error("Missing recorded thread/start");
+	start.method = "thread/resume";
+	start.params = { ...start.params, threadId, excludeTurns: true };
+	return resumed;
+};
+
 /** Each Run main started ends in the ledger once, with main's outcome (F220, F225). */
 const endsOnce = (ledger: Ledger) => {
 	expect(ledger.runs.length).toBeGreaterThan(0);
@@ -317,6 +335,116 @@ describe("Codex on the Run Ledger", () => {
 		prove("steer", ledger);
 	});
 
+	// 32.7 box 3 (CONTRACT.md 3.9, 2.1 row 206): a steer whose turn/steer went out with no answer
+	// before its runner died possibly reached Codex. How it could fail:
+	// 280. the steer goes out again on the new runner (a second turn/steer, or its text in a turn/start);
+	// 281. it returns to the queue (input.requeued) and runs as its own turn;
+	// 282. it stays steering after its Run ends, or lands as two user messages;
+	// 283. the next send never starts, or its Run or the killed Run ends other than once.
+	it("places a steer whose delivery is unknown when its runner dies as sent, never re-sent", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"steer-crash",
+			fixtureRows("steer"),
+		);
+		// Hold the replay before turn/steer's answer (at 591): its delivery stays unknown.
+		writeFileSync(gatePath, "590");
+		await submit(browser, sessionId, "Say hello");
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
+			{ timeout: TIMEOUT },
+		);
+		await submit(browser, sessionId, STEER, "steer", "fixture-steer");
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/steer", "out")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		const { threadId } = JSON.parse(
+			readFileSync(
+				join(fixture.configDir, "codex", "stores", sessionId, "session.json"),
+				"utf8",
+			),
+		) as { threadId: string };
+		for (const pid of fixture.remainingRunnerPids())
+			process.kill(pid, "SIGKILL");
+		const inputs = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return {
+					pending: db
+						.prepare(
+							"SELECT input_id, state FROM pending_inputs WHERE session_id = ? AND input_id = 'fixture-steer'",
+						)
+						.all(sessionId),
+					messages: db
+						.prepare(
+							"SELECT steered FROM messages WHERE session_id = ? AND role = 'user' AND input_id = 'fixture-steer'",
+						)
+						.all(sessionId),
+					requeued: db
+						.prepare(
+							"SELECT sequence FROM events WHERE session_id = ? AND type = 'input.requeued' AND json_extract(data, '$.inputId') = 'fixture-steer'",
+						)
+						.all(sessionId),
+				};
+			} finally {
+				db.close();
+			}
+		};
+		// test-waits-allow polling: the runner's death and the steer's place reach only the store.
+		await vi.waitFor(
+			() => {
+				expect(fixture.remainingRunnerPids()).toEqual([]);
+				expect(read(fixture, sessionId).turns).not.toContain("running");
+				expect(inputs()).toEqual({
+					pending: [
+						expect.not.objectContaining({
+							state: expect.stringMatching(/^(steering|queued)$/),
+						}),
+					],
+					messages: [{ steered: 1 }],
+					requeued: [],
+				});
+			},
+			{ timeout: TIMEOUT },
+		);
+		// The next send resumes the thread on a new runner (F283).
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		writeTrace(resumeTrace(fixtureRows("basic"), threadId));
+		await submit(browser, sessionId, "Say hello again");
+		// test-waits-allow polling: the next Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns.at(-1)).toBe("completed"),
+			{ timeout: TIMEOUT },
+		);
+		const ledger = read(fixture, sessionId);
+		// The steer is a Run Input of the Run it steered: its own main run's terminal is the steer's
+		// alone and ends no Run (3.9, 4.8). The killed Run ends once, at its loss; the next one once.
+		expect(
+			ledger.runs.map((run) => ({
+				status: run.status,
+				ends: ledger.ends
+					.filter((end) => end.runId === run.id)
+					.map((end) => end.outcome),
+			})),
+		).toEqual([
+			{ status: "error", ends: ["error"] },
+			{ status: "error", ends: [] },
+			{ status: "completed", ends: ["completed"] },
+		]);
+		// The new runner's app-server writes its own capture: one turn/start, no steer (F280).
+		const starts = captured("turn/start", "out");
+		expect(starts).toHaveLength(1);
+		expect(JSON.stringify(starts[0]?.message?.params)).not.toContain(STEER);
+		expect(captured("turn/steer", "out")).toEqual([]);
+		expect(inputs()).toMatchObject({
+			messages: [{ steered: 1 }],
+			requeued: [],
+		});
+		prove("steer-crash", ledger, { lost: processEvidence(ledger) });
+	});
+
 	it("ends a Stopped Run interrupted once, by the native interrupt and not the alarm", async () => {
 		let begun = false;
 		const { fixture, browser, sessionId } = await start(
@@ -356,6 +484,68 @@ describe("Codex on the Run Ledger", () => {
 		expect(ledger.ends[0]?.forced).not.toBe(1);
 		prove("stop", ledger);
 	});
+
+	// Failure modes (32.8): F300 the Run stays running when turn/interrupt is never answered;
+	// F301 it ends twice, at the deadline step and again at its runner's loss; F302 the runner
+	// outlives the deadline step; F303 the next send waits on the dead stop or its old runner;
+	// F304 the next send re-sends the stopped input or starts a new thread.
+	// test-waits-allow timeout-override: the Stop's 30 s interrupt deadline runs on the daemon's wall clock.
+	it("ends a Stopped Run its app-server never acknowledges at the deadline, and the next send resumes once", async () => {
+		// The app-server takes turn/interrupt and never answers it, nor ends the turn.
+		const silent = fixtureRows("stop-queued");
+		const interrupt = silent.findIndex(
+			(row) => row.message?.method === "turn/interrupt",
+		);
+		const { fixture, browser, sessionId } = await start(
+			"stop-silent",
+			silent.slice(0, interrupt + 1),
+		);
+		await submit(browser, sessionId, "Say hello");
+		await turns(fixture, sessionId, ["running"]);
+		const { threadId } = JSON.parse(
+			readFileSync(
+				join(fixture.configDir, "codex", "stores", sessionId, "session.json"),
+				"utf8",
+			),
+		) as { threadId: string };
+		writeTrace(resumeTrace(fixtureRows("basic"), threadId));
+		await Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		// test-waits-allow polling: the deadline step's retirement reaches only the store and the process table.
+		await vi.waitFor(
+			() => {
+				expect(read(fixture, sessionId).turns).not.toContain("running");
+				expect(fixture.remainingRunnerPids()).toEqual([]);
+			},
+			{ timeout: TIMEOUT, interval: 200 },
+		);
+		expect(captured("turn/interrupt", "out")).toHaveLength(1);
+		await submit(browser, sessionId, "Say hello again");
+		// test-waits-allow polling: the next Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns.at(-1)).toBe("completed"),
+			{ timeout: TIMEOUT },
+		);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.runs.map((run) => run.status)).toEqual([
+			"interrupted",
+			"completed",
+		]);
+		// The new runner's app-server writes its own capture: one turn/start, of the new message.
+		const starts = captured("turn/start", "out");
+		expect(starts).toHaveLength(1);
+		expect(JSON.stringify(starts[0]?.message?.params)).toContain(
+			"Say hello again",
+		);
+		expect(processEvidence(ledger).map(({ type }) => type)).toEqual([
+			"evidence.process_started",
+			"evidence.process_lost",
+			"evidence.process_started",
+		]);
+		prove("stop-silent", ledger, { lost: processEvidence(ledger) });
+	}, 120_000);
 
 	it("ends a goal chain's Run once; its in-window successors are no wake (row 215)", async () => {
 		const { fixture, browser, sessionId } = await start(

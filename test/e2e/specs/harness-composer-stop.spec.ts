@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import type { TestInfo } from "@playwright/test";
+import Database from "better-sqlite3";
 import { Effect } from "effect";
 import {
 	responseChunks,
@@ -703,7 +704,10 @@ test("correction: delayed cancel between a result and pending steer preserves th
 		)
 		.toBe(true);
 	await expect(chat.stopBtn).toBeHidden();
-	await Effect.runPromise(cancel(browser, sessionId));
+	const second = randomUUID();
+	await Effect.runPromise(
+		browser.rpc.CancelSession({ sessionId, commandId: second }),
+	);
 	expect(queryMarks(harness, queryId, "query-interrupted")).toHaveLength(1);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 	writeFileSync(
@@ -724,6 +728,28 @@ test("correction: delayed cancel between a result and pending steer preserves th
 			.filter((call) => call.prompt?.endsWith(steer))
 			.map((call) => call.pid),
 	).toEqual([pid]);
+	// F357: the second Stop captured only the retained steer. Its control waits behind the steer's
+	// send, so hold the check until it settles: it must have sent the runner nothing.
+	await expect
+		.poll(() => {
+			const db = new Database(harness.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT status FROM provider_command_outbox WHERE command_id = ?",
+					)
+					.get(second);
+			} finally {
+				db.close();
+			}
+		})
+		.toEqual({ status: "completed" });
+	expect(
+		marks(harness).filter(
+			(mark) =>
+				mark["kind"] === "runner-control" && mark["type"] === "interrupt",
+		),
+	).toHaveLength(1);
 	expect(queryMarks(harness, queryId, "query-closed")).toEqual([]);
 });
 
