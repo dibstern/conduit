@@ -6,7 +6,10 @@ import {
 	shouldDeleteArchivedSessionTree,
 } from "./auto-archive-policy.js";
 
-/** Follow parent_id, including side threads and subagents, rather than cached root_id. */
+/**
+ * Follow parent_id, including side threads and subagents, rather than cached root_id. Running
+ * work is the ledger's answer (8.3 line 2849: anything may act while its row is Open, 3.12).
+ */
 export const readPersistedAutoDeleteFacts = (projectId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -24,7 +27,7 @@ export const readPersistedAutoDeleteFacts = (projectId: string) =>
 				SELECT tree.root_id, s.id, tree.root_archived_at FROM sessions s JOIN tree ON s.parent_id = tree.id
 			)
 			SELECT tree.root_id, s.id, s.version, tree.root_archived_at, s.pinned_at,
-				(s.status IN ('busy', 'retry', 'running')
+				(EXISTS(SELECT 1 FROM run_ledger_sessions l WHERE l.session_id = s.id AND l.state = 'Open')
 					OR EXISTS(SELECT 1 FROM turns t WHERE t.session_id = s.id AND t.state IN ('pending', 'running'))
 					OR EXISTS(SELECT 1 FROM pending_approvals a WHERE a.session_id = s.id AND a.status = 'pending')
 					OR EXISTS(SELECT 1 FROM pending_inputs i WHERE i.session_id = s.id AND i.state IN ('queued', 'steering'))) AS pending_work

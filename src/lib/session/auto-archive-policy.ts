@@ -3,7 +3,6 @@ export interface AutoArchiveFacts {
 	readonly archivedAt: number | null;
 	readonly unarchivedAt: number | null;
 	readonly lastActivityAt: number;
-	readonly status: string;
 	readonly snoozed: boolean;
 	readonly pinnedAt: number | null;
 	readonly hasPendingWork: boolean;
@@ -21,8 +20,6 @@ export function shouldArchiveIdleSession(
 		facts.archivedAt === null &&
 		!facts.snoozed &&
 		facts.pinnedAt === null &&
-		facts.status !== "busy" &&
-		facts.status !== "retry" &&
 		!facts.hasPendingWork &&
 		!facts.hasLiveBackgroundWork &&
 		(facts.unarchivedAt === null ||

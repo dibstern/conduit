@@ -35,6 +35,7 @@ import type { SessionRow } from "../../../src/lib/persistence/read-model-types.j
 import { sessionFamilyWindowQuery } from "../../../src/lib/persistence/session-family-query.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { pendingClaudeQuestionToolsQuery } from "../../../src/lib/persistence/startup-restore-queries.js";
+import { readPersistedAutoArchiveFacts } from "../../../src/lib/session/auto-archive-sweep.js";
 import { activityFrom } from "../../helpers/ledger-tasks.js";
 
 const scope = { projectIds: ["test-project"] } as const;
@@ -1552,6 +1553,34 @@ describe("ReadQueryEffect idle corrections", () => {
 						({ id }) => id,
 					),
 				).toEqual(["quiet-child"]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+});
+
+describe("auto-archive facts", () => {
+	it.effect(
+		"a family the ledger says may act has pending work; a stale busy row does not (82tn.32.30)",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				for (const [root, child, status, state] of [
+					["open-root", "open-child", "idle", "Open"],
+					["stale-root", "stale-child", "busy", "Quiescent"],
+				] as const) {
+					yield* seedSession(root);
+					yield* seedSession(child, { status, parentId: root });
+					yield* sql`UPDATE sessions SET root_id = ${root}, settled_at = 1 WHERE id IN (${root}, ${child})`;
+					yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state)
+						VALUES (${child}, 'claude', ${state})`;
+				}
+				// 8.3 (2849): archive asks whether anything in the family may act.
+				const facts = yield* readPersistedAutoArchiveFacts("test-project", 2);
+				expect(
+					Object.fromEntries(
+						[...facts].map(([id, fact]) => [id, fact.hasPendingWork]),
+					),
+				).toEqual({ "open-root": true, "stale-root": false });
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 });

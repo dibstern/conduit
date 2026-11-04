@@ -33,9 +33,6 @@ const allowed = {
 	// ledger says nothing may act (8.3).
 	"src/lib/domain/relay/Services/session-status-poller.ts": "writer",
 	// Row readers still to move onto the view (82tn.32.30 remaining; the writers go in 32.13).
-	"src/lib/session/auto-archive-policy.ts": "to move",
-	"src/lib/session/auto-archive-sweep.ts": "to move",
-	"src/lib/session/auto-delete-archived-sweep.ts": "to move",
 	"src/lib/provider/session-run-settlement.ts": "to move",
 	"src/lib/persistence/effect/read-query-effect.ts": "to move",
 	"src/lib/domain/daemon/Layers/session-git-layer.ts": "to move",
