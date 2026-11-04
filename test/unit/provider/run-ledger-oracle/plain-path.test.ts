@@ -1284,6 +1284,26 @@ describe("[32.2.6] core delivery, fences and refusal: the bead's acceptance crit
 		});
 	});
 
+	it("OpenCode: an idle read covers only a wake turn that started before its probe was issued (533-535, D26)", () => {
+		// Long seed 82200003 (opencode), failure mode 172: Stop's session probe read idle after a wake
+		// turn began, and the ledger ended that turn while it still ran.
+		agreed("opencode", (d) => {
+			const a = running(d);
+			const probe = stop(d).issued.find(
+				(issued) => issued.tag === "Tokened" && issued.effect.kind === "probe",
+			);
+			assert(probe?.tag === "Tokened", "Stop issues a session probe");
+			terminal(d, a.runId, "interrupted");
+			unsolicited(d, { kind: "turn_started" });
+			expect(d.view().anythingMayAct).toBe(true);
+			observe(d, probe.token, {
+				kind: "probe_result",
+				finding: { tag: "native_idle" },
+			});
+			expect(d.view().anythingMayAct).toBe(true);
+		});
+	});
+
 	it("OpenCode: an idle probe that reads busy to its cap leaves a lost prompt undecided, never re-sent (3128-3132, 3.7)", () => {
 		agreed("opencode", (d) => {
 			const a = begin(d);

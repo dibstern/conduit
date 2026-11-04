@@ -14,6 +14,7 @@ import type {
 	TaskKey,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
+import { mainGateRefusal, openCodeLateTurn, pendingCases } from "./pending.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
 export interface TraceAction {
@@ -323,6 +324,8 @@ export class FakeProvider {
 	/** Holds whose run.dispatched the ledger has read (D50: until then an undispatched issue, never reached). */
 	private readonly dispatchRead = new Set<SendToken>();
 	private readonly retiredHolds = new Set<string>();
+	/** Runs whose own direct start main's gate refused at removal: D50 leaves them unchecked (pending.ts). */
+	private readonly mainGateRefused = new Set<string>();
 	private readonly terminals = new Map<string, RunEnded>();
 	private readonly seenEvents = new Set<string>();
 	private readonly processFacts = new Set<string>();
@@ -1237,6 +1240,13 @@ export class FakeProvider {
 					this.gate !== "served" &&
 					(gateAddress === undefined || !this.dead(runnerOf(gateAddress)))
 				) {
+					if (
+						effect.tag === "Main" &&
+						this.gate === "removed" &&
+						(send.effect.kind === "start" || send.effect.kind === "steer") &&
+						pendingCases.has(mainGateRefusal)
+					)
+						this.mainGateRefused.add(send.effect.runId);
 					this.gateSend(send, gateAddress);
 					return send;
 				}
@@ -1770,6 +1780,7 @@ export class FakeProvider {
 					) {
 						native.ended = true;
 						native.unfinished = false;
+						if (native.label === this.label) this.turning = false;
 					}
 			// D59 (CONTRACT.md 4106-4107): main's terminal ends its Run's work as main, its end_session
 			// included; a later send issues fresh, so none acts in the session it ends (540-543).
@@ -2031,6 +2042,11 @@ export class FakeProvider {
 							)
 						: [native.label])
 						this.retireLabel(label, scope);
+					// CONTRACT.md 536-541: nothing acts in an ended native session, so a wake's turn on an
+					// older label of the runner ends too, though no send names that label.
+					for (const x of this.executions)
+						if (runnerOf(x.label) === runnerOf(native.label))
+							this.endExecutions(x.label);
 					// Tasks change only by task evidence, a start or a loss: L5 at a later scope end reads
 					// the label's latest snapshot, and a destruction that went to pending recorded nothing.
 					if (native.label === this.label) this.turning = false;
@@ -2151,6 +2167,13 @@ export class FakeProvider {
 					);
 					if (release >= 0) this.notifications.splice(release, 1);
 					this.refreshQuery(native);
+					// Pended (pending.ts openCodeLateTurn): OpenCode's late turn of a Run main already ended.
+					if (
+						this.provider === "opencode" &&
+						this.terminals.has(effect.runId) &&
+						pendingCases.has(openCodeLateTurn)
+					)
+						this.forcedSends.add(native.send.token);
 					// The turn flag is the current query's; a replaced label's send keeps its own facts (3.3). An
 					// unlaunch's drop ended a dropped send's work, so its late start runs no turn (D50, CONTRACT.md
 					// 670-672).
@@ -2160,6 +2183,9 @@ export class FakeProvider {
 					) {
 						this.turning = true;
 						this.turnFinished = false;
+						// D59 (CONTRACT.md 4106-4107): a send whose Run main already ended as main starts a
+						// turn that is main's work, ended with it.
+						if (this.forcedSends.has(native.send.token)) this.forcedTurn = true;
 					}
 				}
 				break;
@@ -2445,7 +2471,8 @@ export class FakeProvider {
 					))) &&
 			before.active !== undefined &&
 			before.active.tag !== "Interrupting" &&
-			(before.active.tag === "Queued" || !this.reached(before.active.runId))
+			(before.active.tag === "Queued" || !this.reached(before.active.runId)) &&
+			!this.mainGateRefused.has(before.active.runId)
 				? before.active.runId
 				: undefined;
 		const truth = this.groundTruth();
@@ -2549,7 +2576,9 @@ export class FakeProvider {
 		if (this.retirement) {
 			const { unlaunched, reached } = this.retirement;
 			this.retirement = undefined;
-			for (const runId of unlaunched)
+			for (const runId of unlaunched.filter(
+				(runId) => !this.mainGateRefused.has(runId),
+			))
 				assert(
 					!ended.some(
 						(t) => t.runId === runId && t.reason.tag === "process_lost",
@@ -3781,8 +3810,12 @@ export class FakeProvider {
 						kind: "effect_outcome",
 						outcome: { tag: "not_sent", retryAt: now + 100 },
 					}
-				: (drawn.kind === "run_released" || drawn.kind === "input_declined") &&
-						(native?.accepted === true || native?.deliveryConfirmed === true)
+				: // CONTRACT.md 1850-1856: a release or decline says no turn took the input, so neither
+					// follows the turn it carried raising a question.
+					(drawn.kind === "run_released" || drawn.kind === "input_declined") &&
+						(native?.accepted === true ||
+							native?.deliveryConfirmed === true ||
+							native?.asked === true)
 					? { kind: "accounting" }
 					: turnOver ||
 							(notTaken && (received || drawn.kind === "interaction_requested"))
