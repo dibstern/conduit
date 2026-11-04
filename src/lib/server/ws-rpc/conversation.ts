@@ -31,7 +31,10 @@ import {
 	getPermissionMode,
 	setPermissionMode,
 } from "../../domain/relay/Services/session-overrides-state.js";
-import { stopTasks } from "../../handlers/background-tasks.js";
+import {
+	confirmEscalation,
+	stopTasks,
+} from "../../handlers/background-tasks.js";
 import {
 	handleAskUserResponse,
 	handlePermissionResponse,
@@ -83,6 +86,14 @@ export const conversationHandlers = {
 				Effect.fail(new WsRpcError({ message })),
 			),
 			Effect.catch(mapRpcFailure("StopTasks")),
+		),
+	ConfirmEscalation: ({ sessionId, snapshotEntry }) =>
+		confirmEscalation(sessionId, snapshotEntry).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchTag("ConfirmEscalationRefused", ({ message }) =>
+				Effect.fail(new WsRpcError({ message })),
+			),
+			Effect.catch(mapRpcFailure("ConfirmEscalation")),
 		),
 	StopServer: ({ sessionId, server }) =>
 		Effect.gen(function* () {
@@ -357,6 +368,7 @@ export const conversationHandlers = {
 	| "GenerateRecap"
 	| "ExplainAsk"
 	| "StopTasks"
+	| "ConfirmEscalation"
 	| "StopServer"
 	| "SwitchPermissionMode"
 	| "RespondPermission"

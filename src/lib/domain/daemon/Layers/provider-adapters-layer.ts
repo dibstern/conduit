@@ -300,8 +300,16 @@ export const makeProviderAdaptersLive = (
 			// hands over after each commit that moves them.
 			const onLedgerTasks: Parameters<
 				NonNullable<ReturnType<typeof ledgerTasksWakes.get>>["add"]
-			>[0] = (sessionId, tasks, snapshot, wake) => {
-				if (!activity.background.publish(sessionId, tasks, snapshot, wake))
+			>[0] = (sessionId, tasks, snapshot, wake, confirm) => {
+				if (
+					!activity.background.publish(
+						sessionId,
+						tasks,
+						snapshot,
+						wake,
+						confirm,
+					)
+				)
 					return;
 				runBackground(
 					projectContext(sessionId).pipe(

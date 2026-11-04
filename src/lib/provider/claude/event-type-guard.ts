@@ -237,6 +237,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Committed by the browser's Stop tasks action",
 	},
+	"escalation.confirmed": {
+		produced: false,
+		reason: "Committed by the browser's confirm of a stuck Stop",
+	},
 	"input.interrupt_requested": {
 		produced: false,
 		reason:

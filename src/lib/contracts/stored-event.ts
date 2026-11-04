@@ -1135,6 +1135,8 @@ export const CanonicalEvents = {
 			]),
 		}),
 	),
+	/** The browser's confirm of a stuck Stop's ask (8.4), naming the snapshot entry it showed. */
+	"escalation.confirmed": live(Schema.Struct({ snapshotEntry: Schema.Number })),
 	// Evidence events (CONTRACT.md 2.1 row 215, 3.9): a fact the Run Ledger's arm folds that has
 	// no main event, appended by its one observer in the write that observes it. Main's
 	// projectors ignore them.

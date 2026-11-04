@@ -2995,7 +2995,12 @@ function query(params: {
 				});
 				throw new Error("Fixture interrupt rejected");
 			}
-			if (taskStopHolding || interruptibleTurn) taskTurnInterrupted = true;
+			// A "deaf" held turn acknowledges the interrupt and keeps running, as a stuck Stop (8.4).
+			if (
+				(taskStopHolding && !taskStopHeldRequest?.includes("deaf")) ||
+				interruptibleTurn
+			)
+				taskTurnInterrupted = true;
 			mark({
 				kind: "query-interrupted",
 				queryId,

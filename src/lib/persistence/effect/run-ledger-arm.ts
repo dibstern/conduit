@@ -104,9 +104,10 @@ const wakeRunOf = (view: LedgerView): WakeRun | undefined =>
 			? { task: view.active.wakeTask }
 			: {};
 /**
- * SessionActivity's wakes for a committed change of a session's tasks view or wake Run (8.1 "a
- * read-only view"), with that view, the wake Run and, for a snapshot, its tasks with their display
- * and its time.
+ * SessionActivity's wakes for a committed change of a session's tasks view, wake Run or pending
+ * confirm (8.1 "a read-only view"), with that view, the wake Run, the confirm's snapshot entry
+ * (8.4: callers copy it, never compute it) and, for a snapshot, its tasks with their display and
+ * its time.
  */
 export const ledgerTasksWakes = new WeakMap<
 	SqlClient.SqlClient,
@@ -116,6 +117,7 @@ export const ledgerTasksWakes = new WeakMap<
 			tasks: LedgerView["tasks"],
 			snapshot: TasksSnapshot | undefined,
 			wake: WakeRun | undefined,
+			confirm: number | undefined,
 		) => void
 	>
 >();
@@ -460,6 +462,15 @@ const commandFor = (
 					verb: "control",
 					control: { kind: "stop_tasks", tasks: event.data.tasks },
 				};
+			// 8.4, D45: the browser's confirm; decide rejects one older than the latest snapshot.
+			case "escalation.confirmed":
+				return {
+					verb: "control",
+					control: {
+						kind: "confirm_escalation",
+						snapshotEntry: event.data.snapshotEntry,
+					},
+				};
 			case "evidence.process_started":
 				return {
 					verb: "settle",
@@ -699,6 +710,7 @@ const HANDLES = [
 	"interrupt.requested",
 	"session.end_requested",
 	"tasks.stop_requested",
+	"escalation.confirmed",
 	"evidence.process_started",
 	"evidence.process_lost",
 	"evidence.alarm_fired",
@@ -789,7 +801,13 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							if (!wakes?.size) return;
 							handedOver.add(event.sessionId);
 							for (const wake of wakes)
-								wake(event.sessionId, view.tasks, snapshot, wakeRunOf(view));
+								wake(
+									event.sessionId,
+									view.tasks,
+									snapshot,
+									wakeRunOf(view),
+									view.pendingConfirm?.snapshotEntry,
+								);
 						},
 					});
 				// The display of a first hand-over's live tasks: its latest stored snapshot.
@@ -846,8 +864,16 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				else if (!handedOver.has(event.sessionId))
 					handOver(view, yield* storedSnapshot(view.tasks));
 				else if (
-					JSON.stringify([view.tasks, wakeRunOf(view)]) !==
-					JSON.stringify([before.tasks, wakeRunOf(before)])
+					JSON.stringify([
+						view.tasks,
+						wakeRunOf(view),
+						view.pendingConfirm?.snapshotEntry,
+					]) !==
+					JSON.stringify([
+						before.tasks,
+						wakeRunOf(before),
+						before.pendingConfirm?.snapshotEntry,
+					])
 				)
 					handOver(view, undefined);
 				cache.set(event.sessionId, {

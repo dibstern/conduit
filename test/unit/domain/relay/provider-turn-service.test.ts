@@ -1444,7 +1444,7 @@ describe("ProviderTurnService", () => {
 		// with an error instead of leaving the process running.
 		for (const reattached of [undefined, true] as const) {
 			it.effect(
-				`the deadline step ${reattached ? "leaves a process with unknown tasks running" : "retires a process with no tasks"}`,
+				`the deadline step ${reattached ? "holds a process with unknown tasks for a confirm" : "retires a process with no tasks"}`,
 				() => {
 					const issued = Deferred.makeUnsafe<void>();
 					const dispatchEffect = vi.fn((command: OrchestrationCommand) =>
@@ -1470,7 +1470,12 @@ describe("ProviderTurnService", () => {
 						const stopping = yield* Effect.forkChild(interruptTurn());
 						yield* Deferred.await(issued);
 						yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
-						yield* Fiber.join(stopping);
+						// 8.4 (2870-2877): unknown tasks hold the Stop for a confirm, never retiring.
+						if (reattached) {
+							yield* TestClock.adjust(1_000);
+							expect(stopping.pollUnsafe()).toBeUndefined();
+							yield* Fiber.interrupt(stopping);
+						} else yield* Fiber.join(stopping);
 						expect(
 							vi
 								.mocked(dispatchEffect)

@@ -33,6 +33,7 @@ import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
@@ -252,13 +253,34 @@ const makeProviderTurnService = Effect.gen(function* () {
 			);
 			if (Option.isSome(ended) || !(yield* running)) return;
 			if (snapshot.runnerBacked) {
-				// Row 213 (CONTRACT.md 223, 8.4 at 2870-2873): the deadline step never
-				// destroys while tasks are live or unknown. 32.25 adds the pending
-				// confirm; until then the process is left running.
-				const view = yield* loadLedgerView(input.sessionId).pipe(
-					Effect.provideService(SqlClient.SqlClient, sql),
+				// Row 213 (CONTRACT.md 223, 8.4 at 2870-2877): past the deadline U2 never
+				// destroys while tasks are live or unknown. It holds the Stop, shown to the
+				// browser as the ask while the ledger's confirm is pending, and retires once
+				// the tasks end or a confirm is recorded after the latest Stop request; the
+				// Run ending lets the Stop go. A gate that never opened keeps the process.
+				const activity = Option.getOrUndefined(
+					yield* Effect.serviceOption(SessionActivityTag),
 				);
-				if (view && view.tasks.tag !== "none") return;
+				const release = activity?.background.holdStop(input.sessionId);
+				const asked = Effect.gen(function* () {
+					if (!(yield* running)) return false;
+					const view = yield* loadLedgerView(input.sessionId).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					if (view === undefined || view.tasks.tag === "none") return false;
+					const [confirmed] = yield* sql<{ confirmed: number }>`
+						SELECT EXISTS (SELECT 1 FROM events WHERE session_id = ${input.sessionId}
+							AND type = 'escalation.confirmed' AND sequence > (
+								SELECT COALESCE(MAX(sequence), 0) FROM events
+								WHERE session_id = ${input.sessionId} AND type = 'interrupt.requested'
+							)) AS confirmed`;
+					return confirmed?.confirmed !== 1;
+				});
+				yield* Effect.repeat(asked, {
+					while: (still) => still,
+					schedule: Schedule.spaced("250 millis"),
+				}).pipe(Effect.ensuring(Effect.sync(() => release?.())));
+				if (!(yield* running)) return;
 				const [target] = yield* sql<{
 					provider_process_id: string | null;
 					provider_id: string;

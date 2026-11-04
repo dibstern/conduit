@@ -930,6 +930,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_RUNNER_WITHOUT_ACCOUNT_REBIND"
 					| "CONDUIT_TEST_CURSOR_STREAM_GATE"
 					| "CONDUIT_TEST_RUN_LEDGER_PROBE_MS"
+					| "CONDUIT_TEST_STOP_ABORT_WAIT_MS"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>

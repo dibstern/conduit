@@ -414,6 +414,16 @@ export const SessionInfoSchema = Schema.Struct({
 	wakeRun: Schema.optional(
 		Schema.Struct({ task: Schema.optional(Schema.String) }),
 	),
+	/**
+	 * A Stop past its deadline asks before it ends background tasks (8.4): the snapshot entry the
+	 * confirm names and the tasks it would end; no tasks means the background state is unknown.
+	 */
+	stopConfirm: Schema.optional(
+		Schema.Struct({
+			snapshotEntry: Schema.Number,
+			tasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+		}),
+	),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */
 	servers: Schema.optional(Schema.Array(SessionServerSchema)),
 	/** A compaction in progress: transient status, never logged (C1). */

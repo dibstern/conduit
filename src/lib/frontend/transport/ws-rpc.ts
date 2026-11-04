@@ -8,6 +8,7 @@ export {
 	type ClaudeSettingsResponse,
 	ClosePty,
 	type CommandInfo,
+	ConfirmEscalation,
 	type ContinuationHandoffResponse,
 	ContinueSession,
 	CreatePty,
