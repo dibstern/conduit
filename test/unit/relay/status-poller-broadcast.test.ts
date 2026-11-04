@@ -388,12 +388,7 @@ describe("Status poller → browser shell transitions", () => {
 				).toBe("busy"),
 			{ timeout: 3000 },
 		);
-		expect(harness.relay.isAnySessionProcessing()).toBe(true);
-
-		publishStatus("sess-A", "idle");
-		await vi.waitFor(
-			() => expect(harness.relay.isAnySessionProcessing()).toBe(false),
-			{ timeout: 3000 },
-		);
+		// The project's processing reads the session's activity, not this status (82tn.32.30);
+		// test/integration/daemon/claude-session-activity.test.ts covers it end to end.
 	});
 });

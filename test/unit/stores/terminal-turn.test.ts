@@ -14,7 +14,10 @@ import {
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { triggerNotifications } from "../../../src/lib/frontend/stores/ws-notifications.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import { detailUpserts } from "../../helpers/detail-rows.js";
 
 afterEach(() => {
@@ -28,7 +31,7 @@ function projectedTurn() {
 	seedSessions([{ id: "s", title: "test", status: "idle" }]);
 	openSessionForSetup("s", "project-a");
 	const slot = chat.getOrCreateSessionSlot("s");
-	chat.phaseToProcessing(slot.activity);
+	setSessionWorkingForSetup("s", true);
 	const empty: TranscriptEntry = {
 		project: "test",
 		rows: [],
@@ -99,7 +102,7 @@ it.each([
 ] as const)("one terminal transition: %s, %s, %s", (...order) => {
 	const { activity, messages } = projectedTurn();
 	const events: Record<(typeof order)[number], () => void> = {
-		"idle row": () => chat.followSessionBusy("s", false),
+		"idle row": () => setSessionWorkingForSetup("s", false),
 		"terminal row": () => chat.applyTerminalTurn(activity, messages),
 		"terminal replay": () => chat.applyTerminalTurn(activity, messages),
 	};
@@ -122,10 +125,10 @@ it.each([
 
 it("durable terminal replay does not repeat the transition or alert", () => {
 	const { activity, messages } = projectedTurn();
-	chat.followSessionBusy("s", false);
+	setSessionWorkingForSetup("s", false);
 	const finalized = messages.messages;
 	const ended = activity.endedGeneration;
-	chat.followSessionBusy("s", false);
+	setSessionWorkingForSetup("s", false);
 	expect(chat.applyTerminalTurn(activity, messages)).toBe(false);
 	expect(activity.endedGeneration).toBe(ended);
 	expect(messages.messages).toBe(finalized);
@@ -136,7 +139,7 @@ it("remembers only eight durable turn IDs", () => {
 	const activity = chat.createEmptySessionActivity();
 	const messages = chat.createEmptySessionMessages();
 	for (let i = 0; i < 32; i++) {
-		chat.phaseToProcessing(activity);
+		activity.turnGeneration++; // a new turn starts
 		expect(
 			chat.applyTerminalTurn(activity, messages, { turnId: `turn-${i}` }),
 		).toBe(true);

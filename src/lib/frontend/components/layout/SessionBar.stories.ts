@@ -3,10 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { tick } from "svelte";
 import type { SessionGoalChangedPayload } from "../../../contracts/stored-event.js";
 import type { GoalDetails, GoalSummary } from "../../../contracts/ws-rpc.js";
-import {
-	getOrCreateSessionActivity,
-	phaseToIdle,
-} from "../../stores/chat.svelte.js";
+import { getOrCreateSessionActivity } from "../../stores/chat.svelte.js";
 import {
 	applyGetAgentsResponse,
 	applyGetModelsResponse,
@@ -40,7 +37,10 @@ import { dimThemeColor, setThemeMode } from "../../stores/theme.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import { wsDebugState } from "../../stores/ws-debug.svelte.js";
 import { mockSession, mockSessionLongTitle } from "../../stories/mocks.js";
-import { openSessionForSetup } from "../../stories/session-setup.js";
+import {
+	openSessionForSetup,
+	WORKING_ACTIVITY,
+} from "../../stories/session-setup.js";
 import {
 	connectedSocket,
 	connectingSocket,
@@ -318,7 +318,7 @@ function setupGoal(
 		},
 		mockSession.id,
 	);
-	phaseToIdle(getOrCreateSessionActivity(mockSession.id));
+	getOrCreateSessionActivity(mockSession.id);
 	goalStorySetAt = Math.max(
 		goalStorySetAt + 1,
 		Date.now() - 41 * 60_000 - 30_000,
@@ -454,7 +454,9 @@ function setupGoalDetails(
 				: {}),
 	};
 	if (state === "starting") {
-		seedSessions([{ ...mockSession, status: "busy" }]);
+		seedSessions([
+			{ ...mockSession, status: "busy", activity: WORKING_ACTIVITY },
+		]);
 	}
 	handleGoalChanged({
 		...facts,
@@ -3204,8 +3206,9 @@ function goalSummaryStory(state: GoalSummaryState, desktop = false): Story {
 				{
 					...mockSession,
 					title: "Finish 16c8 and tidy up",
-					status:
-						state === "Pursuing" || state === "NoChecksYet" ? "busy" : "idle",
+					...(state === "Pursuing" || state === "NoChecksYet"
+						? { status: "busy", activity: WORKING_ACTIVITY }
+						: { status: "idle" }),
 					...(stuck
 						? {
 								goalStuck: {

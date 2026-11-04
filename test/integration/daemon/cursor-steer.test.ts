@@ -123,8 +123,11 @@ function snapshot(harness: ProcessHarness, id: string) {
 						parent_id: string | null;
 						status: string;
 						last_turn_end_input_id: string | null;
+						woken_reason: string | null;
 					}
-				>("SELECT id, parent_id, status, last_turn_end_input_id FROM sessions")
+				>(
+					"SELECT id, parent_id, status, last_turn_end_input_id, woken_reason FROM sessions",
+				)
 				.all(),
 		};
 	} finally {
@@ -296,7 +299,11 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				CONDUIT_CURSOR_SDK_CAPTURE: capturePath,
 				CONDUIT_TEST_CURSOR_DELTA_DELAY_MS: "2",
 				CONDUIT_TEST_CURSOR_WAIT_DELAY_MS:
-					kind === "images" || kind === "missing-method" ? "2000" : "0",
+					kind === "images" ||
+					kind === "missing-method" ||
+					kind === "pending-terminal"
+						? "2000"
+						: "0",
 			},
 		});
 		const account = await harness.requestRpc({
@@ -540,6 +547,7 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 		"pending-terminal",
 	] as const)("requeues %s at the front and runs it once as the next turn", async (kind) => {
 		const { fixture, browser, id } = await start(kind);
+		await browser.followSessions();
 		const queuedId = randomUUID();
 		expect(
 			await Effect.runPromise(
@@ -606,8 +614,55 @@ describe("Cursor steering through the built daemon and detached runner", () => {
 				.flatMap(({ parts }) => parts ?? [])
 				.filter(({ type }) => type === "error"),
 		).toEqual([]);
+		// Nor in the session list: its row never reads as an error (82tn.32.46).
+		const attention = browser.frames
+			.map(({ message }) => message)
+			.filter(
+				(message) => message["type"] === "session_row" && message["id"] === id,
+			)
+			.map((message) => message["attention"]);
+		expect(attention).not.toHaveLength(0);
+		expect(attention).not.toContain("error");
 		observations["requeuedAheadOfExistingInput"] = true;
 	}, 240_000);
+
+	it("wakes a snoozed session for its turn's end, not as an error, when a steer still pending at that end is declined", async () => {
+		const { fixture, browser, id } = await start("pending-terminal");
+		const inputId = randomUUID();
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId: id,
+				originId: browser.originId,
+				inputId,
+				delivery: "steer",
+				text: TEXT,
+			}),
+		);
+		// Sending restores the session, so snooze it while the steer waits on the
+		// turn's end, which the replay holds back (CONDUIT_TEST_CURSOR_WAIT_DELAY_MS).
+		await browser.waitFor(
+			(message) => {
+				const item = message["item"] as
+					| { input?: { inputId?: string; state?: string } }
+					| undefined;
+				return (
+					message["type"] === "session_detail" &&
+					item?.input?.inputId === inputId &&
+					item.input.state === "steering"
+				);
+			},
+			0,
+			TIMEOUT,
+		);
+		await Effect.runPromise(
+			browser.rpc.SnoozeSession({ sessionId: id, until: null }),
+		);
+		await turns(fixture, id, ["completed", "completed"]);
+		expect(
+			snapshot(fixture, id).sessions.find((session) => session.id === id)
+				?.woken_reason,
+		).toBe("turn");
+	});
 
 	it("ends both accepted inputs on their shared run's error and attributes the error to the delivered input", async () => {
 		const { fixture, browser, id, firstId } = await start("delivered-error");

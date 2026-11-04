@@ -15,21 +15,20 @@ vi.mock("dompurify", () => ({
 import {
 	advanceTurnIfNewMessage,
 	clearMessages,
-	followSessionBusy,
-	phaseToIdle,
-	phaseToProcessing,
-	phaseToStreaming,
+	followSessionTurn,
 	type SessionActivity,
 	type SessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	WORKING_ACTIVITY,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import { testActivity, testMessages } from "../../helpers/test-session-slot.js";
 
 /** Shallow snapshot of a SessionActivity, converting Sets to plain arrays
  *  for stable equality comparison. */
 function snapActivity(a: SessionActivity) {
 	return {
-		phase: a.phase,
 		turnGeneration: a.turnGeneration,
 		endedGeneration: a.endedGeneration,
 		terminalTurnIds: [...a.terminalTurnIds],
@@ -71,45 +70,27 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-describe("followSessionBusy — tier contract", () => {
-	it("should modify activity tier (phase → processing)", () => {
-		followSessionBusy("test-session", true);
-		expect(ta.phase).toBe("processing");
+describe("followSessionTurn — tier contract", () => {
+	const working = { activity: WORKING_ACTIVITY };
+
+	it("a working row opens a turn in the activity tier", () => {
+		ta.endedGeneration = ta.turnGeneration;
+		followSessionTurn("test-session", working, undefined);
+		expect(ta.turnGeneration).toBe(ta.endedGeneration + 1);
 	});
 
-	it("should NOT modify messages tier fields on processing", () => {
+	it("should NOT modify messages tier fields on a working row", () => {
 		const before = snapMessages(tm);
-		followSessionBusy("test-session", true);
+		followSessionTurn("test-session", working, undefined);
 		const after = snapMessages(tm);
 		expect(after).toEqual(before);
 	});
 
-	it("an idle row clears activity in-flight state", () => {
-		followSessionBusy("test-session", false);
-		expect(ta.phase).toBe("idle");
+	it("a row leaving working clears activity in-flight state", () => {
+		ta.currentMessageId = "msg-1";
+		followSessionTurn("test-session", {}, working);
+		expect(ta.endedGeneration).toBe(ta.turnGeneration);
 		expect(ta.currentMessageId).toBeNull();
-	});
-});
-
-describe("phaseToIdle — tier contract", () => {
-	it("should write phase to activity tier", () => {
-		phaseToProcessing(ta);
-		phaseToIdle(ta);
-		expect(ta.phase).toBe("idle");
-	});
-});
-
-describe("phaseToProcessing — tier contract", () => {
-	it("should write phase to activity tier", () => {
-		phaseToProcessing(ta);
-		expect(ta.phase).toBe("processing");
-	});
-});
-
-describe("phaseToStreaming — tier contract", () => {
-	it("should write phase to activity tier", () => {
-		phaseToStreaming(ta);
-		expect(ta.phase).toBe("streaming");
 	});
 });
 

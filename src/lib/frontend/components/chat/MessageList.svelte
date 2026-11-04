@@ -272,9 +272,9 @@
 	// Guards:
 	// - Skip during prepend (scroll preservation handles that case).
 	// - Only auto-scroll when the reader was parked at the very bottom, the
-	//   session is actively producing content (processing or streaming), or an
-	//   explicit scroll request was made (e.g. error messages set this before
-	//   phaseToIdle kills the isProcessing guard). On inactive sessions, a
+	//   session is actively producing content (processing), or an explicit
+	//   scroll request was made (e.g. error messages set this before the row's
+	//   activity goes idle and drops the isProcessing guard). On inactive sessions, a
 	//   reader sitting just above the bottom must NOT be snapped down by
 	//   background events (another tab's message, permission state).
 	// NOTE: processing and consumeScrollRequest() are checked via

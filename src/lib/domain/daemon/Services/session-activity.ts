@@ -9,21 +9,23 @@ import {
 	Stream,
 } from "effect";
 import type { EventPayloadMap } from "../../../contracts/stored-event.js";
-import type { WakeRun } from "../../../persistence/effect/run-ledger-arm.js";
 import type {
 	LedgerView,
 	Task,
+	TaskKey,
 } from "../../../provider/run-ledger/run-ledger-model.js";
 import type {
 	EventDelivery,
 	Interests,
 } from "../../../server/event-audiences.js";
+import { deriveSessionActivity } from "../../../session/session-activity-view.js";
 import { makeSessionCompactions } from "../../../session/session-compactions.js";
 import { makeSessionGoals } from "../../../session/session-goals.js";
 import { makeSessionRetries } from "../../../session/session-retries.js";
 import type {
 	BackgroundTask,
 	BackgroundWork,
+	SessionActivityView,
 	SessionServer,
 } from "../../../shared-types.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
@@ -49,6 +51,15 @@ export type SessionBackground = {
 	};
 };
 
+/**
+ * The arm's hand-over beyond tasks: the active Run (8.3), the session's Servers (8.7) and the
+ * pending confirm (8.4).
+ */
+export type LedgerActivity = Pick<
+	LedgerView,
+	"active" | "servers" | "pendingConfirm"
+>;
+
 type TaskDisplay = Pick<
 	BackgroundTask,
 	"detail" | "childSessionId" | "parentTaskId" | "ancestorTaskIds"
@@ -65,9 +76,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			readonly view: LedgerView["tasks"];
 			readonly display: ReadonlyMap<string, TaskDisplay>;
 			readonly since: number;
-			readonly wake: WakeRun | undefined;
-			/** 8.4: the pending confirm's snapshot entry, as the arm handed it over. */
-			readonly confirm: number | undefined;
+			readonly ledger: LedgerActivity | undefined;
 			/**
 			 * Each task's description by id, kept past its last listing: Claude's empty snapshot lands
 			 * before the notification that wakes it (8.3).
@@ -75,6 +84,15 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			readonly named: ReadonlyMap<string, string>;
 		}
 	>();
+	const wakeOf = (ledger: LedgerActivity | undefined) =>
+		ledger?.active?.origin !== "wake"
+			? undefined
+			: ledger.active.wakeTask
+				? { task: ledger.active.wakeTask }
+				: ({} as { readonly task?: TaskKey });
+	const serversOf = (ledger: LedgerActivity | undefined) => [
+		...(ledger?.servers?.values() ?? []),
+	];
 	const taskIds = (view: LedgerView["tasks"] | undefined) =>
 		view?.tag === "live" ? view.tasks.map((task) => task.key.taskId) : [];
 	// Sessions whose Stop is past its deadline and waiting on the confirm gate (U2, row 213).
@@ -96,8 +114,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 				readonly tasks: EventPayloadMap["evidence.tasks_snapshot"]["tasks"];
 				readonly at: number;
 			},
-			wake?: WakeRun,
-			confirm?: number,
+			ledger?: LedgerActivity,
 		): boolean {
 			const previous = views.get(sessionId);
 			const listed = [
@@ -129,8 +146,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 					taskIds(previous.view).join("\u0000") === taskIds(view).join("\u0000")
 						? previous.since
 						: (snapshot?.at ?? Date.now()),
-				wake,
-				confirm,
+				ledger,
 				named: new Map([
 					...(previous?.named ?? []),
 					...listed.flatMap(({ key, description }) =>
@@ -141,30 +157,44 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			views.set(sessionId, next);
 			// A session not yet handed over shows no tasks, so a restart's first hand-over of none moves
 			// nothing and announces nothing.
-			const moved =
+			const shown = (entry: typeof previous) =>
 				JSON.stringify([
-					previous?.view ?? { tag: "none" },
-					[...(previous?.display ?? [])],
-					previous?.wake,
-					previous?.confirm,
-				]) !== JSON.stringify([view, [...display], wake, confirm]);
+					entry?.view ?? { tag: "none" },
+					[...(entry?.display ?? [])],
+					entry?.ledger?.active?.origin,
+					wakeOf(entry?.ledger),
+					serversOf(entry?.ledger),
+					entry?.ledger?.pendingConfirm?.snapshotEntry,
+				]);
+			const moved = shown(previous) !== shown(next);
 			if (moved) changed(sessionId);
 			return moved;
 		},
-		/** `serving`: task ids whose linked server makes them calm (8.2). */
-		backgroundOf(
-			sessionId: string,
-			serving: ReadonlySet<string> = new Set(),
-		): SessionBackground | undefined {
+		backgroundOf(sessionId: string): SessionBackground | undefined {
 			const entry = views.get(sessionId);
 			if (entry === undefined) return undefined;
-			const taskName =
-				entry.wake?.task && entry.named.get(entry.wake.task.taskId);
-			const wakeRun = entry.wake && {
+			const wake = wakeOf(entry.ledger);
+			const taskName = wake?.task && entry.named.get(wake.task.taskId);
+			const wakeRun = wake && {
 				wakeRun: taskName ? { task: taskName } : {},
 			};
+			// 8.7 Views: an awaited server is the session's work, a serving one is calm.
+			const background = deriveSessionActivity({
+				tasks: entry.view,
+				servers: serversOf(entry.ledger),
+				prompts: { approvals: 0, questions: 0 },
+			}).background;
+			const work: BackgroundWork | undefined =
+				background === "work"
+					? "working"
+					: background === "unknown" || background === "none"
+						? undefined
+						: "monitoring";
+			// A serving server alone is no task; its calm shows through the activity view.
 			if (entry.view.tag === "none")
-				return wakeRun && { tasks: [], ...wakeRun };
+				return work === "working" || wakeRun
+					? { ...(work === "working" ? { work } : {}), tasks: [], ...wakeRun }
+					: undefined;
 			const shown = (tasks: readonly Task[]): BackgroundTask[] =>
 				tasks
 					.map((task) => {
@@ -180,10 +210,9 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 					})
 					.sort((a, b) => a.firstSeenAt - b.firstSeenAt);
 			// 8.4: the ask shows only while U2 holds the Stop on a pending confirm.
-			const asking =
-				held.has(sessionId) && entry.confirm !== undefined
-					? entry.confirm
-					: undefined;
+			const asking = held.has(sessionId)
+				? entry.ledger?.pendingConfirm?.snapshotEntry
+				: undefined;
 			// 8.3: unknown tasks are neither work nor monitoring; the last known list only shows greyed.
 			if (entry.view.tag === "unknown") {
 				const stale = shown(entry.view.stale ?? []);
@@ -200,21 +229,72 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 				asking === undefined
 					? {}
 					: { stopConfirm: { snapshotEntry: asking, tasks } };
-			// 8.2 (CONTRACT.md 2778-2781): the ledger's class decides; only work tasks
-			// not serving a server make the session work.
-			const working = entry.view.tasks.some(
-				(task) => task.class === "work" && !serving.has(task.key.taskId),
-			);
 			return {
-				work: working ? "working" : "monitoring",
+				work: work ?? "monitoring",
 				tasks,
 				...wakeRun,
 				...stopConfirm,
 			};
 		},
-		/** 8.3: tasks live or unknown may still act. */
+		/**
+		 * 8.1 (2734): what the session is doing, read only from the ledger's hand-over, the goal
+		 * tracker's phase and the row's open prompts.
+		 */
+		activityOf(
+			sessionId: string,
+			prompts: { readonly approvals: number; readonly questions: number },
+			goal?: SessionActivityView["goal"],
+		): SessionActivityView {
+			const entry = views.get(sessionId);
+			const origin = entry?.ledger?.active?.origin;
+			return deriveSessionActivity({
+				...(origin ? { run: { origin } } : {}),
+				tasks: entry?.view ?? { tag: "none" },
+				servers: serversOf(entry?.ledger).map(({ role, taskKey }) => ({
+					role,
+					...(taskKey ? { taskId: taskKey.taskId } : {}),
+				})),
+				prompts,
+				...(goal ? { goal } : {}),
+			});
+		},
+		/** 8.7: the ledger's Servers, each with the Preview Gate's link while the gate serves it. */
+		serversOf(
+			sessionId: string,
+			gateUrls: ReadonlyMap<number, string>,
+		): readonly SessionServer[] {
+			return serversOf(views.get(sessionId)?.ledger).map(
+				({ key, command, cwd, taskKey, source, role }) => {
+					const gateUrl = gateUrls.get(key.port);
+					return {
+						port: key.port,
+						pid: key.pid,
+						startedAt: key.startedAt,
+						command,
+						cwd,
+						...(taskKey === undefined ? {} : { taskId: taskKey.taskId }),
+						source,
+						role,
+						...(gateUrl === undefined ? {} : { gateUrl }),
+					};
+				},
+			);
+		},
+		/** Every session's live server ports, for the Preview Gate. */
+		ports(): ReadonlyMap<number, string> {
+			return new Map(
+				[...views].flatMap(([sessionId, { ledger }]) =>
+					serversOf(ledger).map(({ key }) => [key.port, sessionId] as const),
+				),
+			);
+		},
+		/** 8.3, 8.7: tasks live or unknown, or a live server, may still act. */
 		hasLiveWork(sessionId: string): boolean {
-			return (views.get(sessionId)?.view.tag ?? "none") !== "none";
+			const entry = views.get(sessionId);
+			return (
+				(entry?.view.tag ?? "none") !== "none" ||
+				serversOf(entry?.ledger).length > 0
+			);
 		},
 		/** The live task ids and since when that set has held; undefined while unknown or unread. */
 		liveListOf(
@@ -236,15 +316,12 @@ export interface SessionActivity {
 	/** 8.1: each session's goal tracker, whose phase rides its row. */
 	readonly goals: ReturnType<typeof makeSessionGoals>;
 	/**
-	 * Each session's live servers as the PortWatcher last read them from the Run Ledger, the
-	 * ledger's Servers (8.7); a reader's copy, never the PortWatcher's comparison basis.
-	 */
-	readonly servers: Map<string, readonly SessionServer[]>;
-	/**
-	 * Each server port the Preview Gate serves, to its https link; the gate is its one writer, and
-	 * the PortWatcher's publish copies it onto `servers`.
+	 * Each server port the Preview Gate serves, to its https link; the gate is its one writer, and a
+	 * write re-sends the rows of the session serving that port.
 	 */
 	readonly gateUrls: Map<number, string>;
+	/** Called for each session whose rows a gate link moved; the daemon's announce adds itself. */
+	readonly onServersMoved: Set<(sessionId: string) => void>;
 	readonly hintDismissals: Map<string, number>;
 	readonly viewers: Map<string, number>;
 	readonly connectionInterests: Map<EventDelivery, Interests>;
@@ -299,42 +376,29 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 			}
 		})();
 		const background = makeLedgerTasks(changed);
-		const servers = new Map<string, readonly SessionServer[]>();
+		const onServersMoved = new Set<(sessionId: string) => void>();
+		const gateMoved = (port: number) => {
+			const sessionId = background.ports().get(port);
+			if (sessionId === undefined) return;
+			changed(sessionId);
+			for (const moved of onServersMoved) moved(sessionId);
+		};
+		const gateUrls = new (class extends Map<number, string> {
+			override set(port: number, url: string): this {
+				const moved = this.get(port) !== url;
+				super.set(port, url);
+				if (moved) gateMoved(port);
+				return this;
+			}
+
+			override delete(port: number): boolean {
+				const moved = super.delete(port);
+				if (moved) gateMoved(port);
+				return moved;
+			}
+		})();
 		return {
-			// A live server is live work: it pauses auto-settle and holds archive, delete and the
-			// worktree sweep back (8.7 "A live server pauses auto-settle").
-			background: {
-				...background,
-				hasLiveWork: (sessionId) =>
-					background.hasLiveWork(sessionId) || servers.has(sessionId),
-				backgroundOf: (sessionId) => {
-					// 8.2: a task with a live linked server and no declared awaited covering it is serving.
-					const linked = (servers.get(sessionId) ?? []).flatMap(
-						({ taskId, role }) =>
-							taskId === undefined ? [] : [{ taskId, role }],
-					);
-					const awaited = new Set(
-						linked.flatMap(({ taskId, role }) =>
-							role === "awaited" ? [taskId] : [],
-						),
-					);
-					const serving = new Set(
-						linked.flatMap(({ taskId }) =>
-							awaited.has(taskId) ? [] : [taskId],
-						),
-					);
-					// 8.7 Views: an awaited server is the session's work; a serving one only makes its
-					// task calm, so an idle session stays idle while it serves.
-					const awaits = (servers.get(sessionId) ?? []).some(
-						({ role }) => role === "awaited",
-					);
-					const found = background.backgroundOf(sessionId, serving);
-					if (!found)
-						return awaits ? { work: "working", tasks: [] } : undefined;
-					if (awaits) return { ...found, work: "working" };
-					return found;
-				},
-			},
+			background,
 			compactions: {
 				...compactions,
 				observe: (events) => {
@@ -363,8 +427,8 @@ export const makeSessionActivity: Effect.Effect<SessionActivity> = Effect.gen(
 					return moved;
 				},
 			},
-			servers,
-			gateUrls: new Map(),
+			gateUrls,
+			onServersMoved,
 			hintDismissals,
 			viewers: new Map(),
 			connectionInterests,

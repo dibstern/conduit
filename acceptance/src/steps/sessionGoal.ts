@@ -149,13 +149,13 @@ export const sessionGoalHandlers: StepHandler[] = [
 	{
 		name: "session reports the goal action's send",
 		match:
-			/^the session reports the goal (clear|set to .+) (Sent|Queued|Unconfirmed|failed)$/,
+			/^the session reports the goal (clear|pause|resume|set to .+) (Sent|Queued|Unconfirmed|failed)$/,
 		run: async ({ world, match }) => {
 			const facts = goals.get(world.page);
 			if (!facts?.goal) throw new Error("No goal was set");
 			const action = match[1]?.startsWith("set to ")
 				? { kind: "set", condition: match[1].slice("set to ".length) }
-				: { kind: "clear" };
+				: { kind: match[1] };
 			const goalPhase =
 				match[2] === "failed"
 					? {
@@ -214,6 +214,88 @@ export const sessionGoalHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "goal applied while the turn finishes",
+		// 12A: Codex applied the pause or clear with its turn still running.
+		match: /^Codex (pauses|clears) the goal while its turn finishes$/,
+		run: async ({ world, match }) => {
+			const previous = goals.get(world.page);
+			if (!previous?.goal) throw new Error("No goal was set");
+			const facts: SessionGoalChangedPayload =
+				match[1] === "pauses"
+					? {
+							...previous,
+							pausedReason: "Goal paused",
+							turnFinishing: true,
+						}
+					: {
+							sessionId: previous.sessionId,
+							goal: null,
+							ended: "cleared",
+							endedGoal: previous.goal,
+							endedAt: await world.page.evaluate(() => Date.now()),
+							turnFinishing: true,
+						};
+			goals.set(world.page, facts);
+			setSessionRowStatus(world.page, facts.sessionId, "busy", {
+				goalState: facts,
+				goalPhase: undefined,
+			});
+			requireRelayControl(world.page).sendMessage({
+				type: "session.goal_changed",
+				...facts,
+			});
+		},
+	},
+	{
+		name: "turn ends after the goal note",
+		match: /^Codex's turn ends$/,
+		run: async ({ world }) => {
+			const previous = goals.get(world.page);
+			if (!previous) throw new Error("No goal was set");
+			const { turnFinishing: _note, ...facts } = previous;
+			goals.set(world.page, facts);
+			setSessionRowStatus(world.page, facts.sessionId, "idle", {
+				goalState: facts,
+			});
+			requireRelayControl(world.page).sendMessage({
+				type: "session.goal_changed",
+				...facts,
+			});
+		},
+	},
+	{
+		name: "assert goal finishing note",
+		match: /^the goal note reads (.+) and offers Stop$/,
+		run: async ({ world, match }) => {
+			const note = world.page.getByTestId("composer-goal-finishing");
+			await expect(note.getByTestId("composer-goal-finishing-text")).toHaveText(
+				match[1] ?? "",
+			);
+			await expect(
+				note.getByRole("button", { name: "Stop", exact: true }),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "press Stop in the goal note",
+		match: /^I press Stop in the goal note$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("composer-goal-finishing")
+				.getByRole("button", { name: "Stop", exact: true })
+				.click();
+		},
+	},
+	{
+		name: "assert goal finishing note absent",
+		match: /^the goal note is not rendered$/,
+		run: async ({ world }) => {
+			await expect(
+				world.page.getByTestId("composer-goal-finishing"),
+			).toHaveCount(0);
+		},
+	},
+	{
 		name: "assert pending goal bar absent",
 		match: /^the pending goal bar is not rendered$/,
 		run: async ({ world }) => {
@@ -235,7 +317,7 @@ export const sessionGoalHandlers: StepHandler[] = [
 	{
 		name: "assert goal browser action",
 		match:
-			/^the mock relay received (\d+) (SetGoal|ClearGoal) actions?(?: for (.+))? with distinct command ids and no goal chat message$/,
+			/^the mock relay received (\d+) (SetGoal|ClearGoal|PauseGoal|ResumeGoal) actions?(?: for (.+))? with distinct command ids and no goal chat message$/,
 		run: async ({ world, match }) => {
 			const sessionId = new URL(world.page.url()).pathname.split("/")[2];
 			const rpc = requireRpcControl(world.page);
@@ -251,13 +333,12 @@ export const sessionGoalHandlers: StepHandler[] = [
 				new Set(actions().map(({ payload }) => payload["commandId"])).size,
 			).toBe(count);
 			expect(
-				rpc
-					.getRequests()
-					.filter(
-						({ tag, payload }) =>
-							tag === "input.submit" &&
-							/^[/$]goal\b/.test(String(payload["text"])),
-					),
+				rpc.getRequests().filter(
+					({ tag, payload }) =>
+						tag === "input.submit" &&
+						// 8.6: a native Resume sends status active only, never a host "Continue." turn.
+						/^([/$]goal\b|Continue\.$)/.test(String(payload["text"])),
+				),
 			).toEqual([]);
 		},
 	},

@@ -299,14 +299,12 @@ export const makeProviderAdaptersLive = (
 					),
 				);
 			const runBackground = Effect.runForkWith(Context.empty());
-			// 8.1, 8.3: SessionActivity reads the Run Ledger's tasks view and wake Run, which the arm
-			// hands over after each commit that moves them.
+			// 8.1, 8.3: SessionActivity reads the Run Ledger's tasks view, active Run and Servers, which
+			// the arm hands over after each commit that moves them.
 			const onLedgerTasks: Parameters<
 				NonNullable<ReturnType<typeof ledgerTasksWakes.get>>["add"]
-			>[0] = (sessionId, tasks, snapshot, wake, confirm) => {
-				if (
-					activity.background.publish(sessionId, tasks, snapshot, wake, confirm)
-				)
+			>[0] = (sessionId, tasks, snapshot, ledger) => {
+				if (activity.background.publish(sessionId, tasks, snapshot, ledger))
 					announce(sessionId);
 			};
 			// 8.5: the goal tracker reads each goal action's send from the same hand-over.
@@ -340,8 +338,11 @@ export const makeProviderAdaptersLive = (
 				);
 			};
 			listenForTasks(sql);
+			// A server's gate link moves its session's row too.
+			activity.onServersMoved.add(announce);
 			yield* Effect.addFinalizer(() =>
 				Effect.sync(() => {
+					activity.onServersMoved.delete(announce);
 					for (const store of listenedStores) {
 						ledgerTasksWakes.get(store)?.delete(onLedgerTasks);
 						ledgerNativeCommandsWakes

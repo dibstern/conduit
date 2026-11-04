@@ -375,8 +375,13 @@ export const GoalPhaseSchema = Schema.Union([
 		tag: Schema.Literal("Confirmed"),
 		status: Schema.Union([
 			Schema.Struct({
-				tag: Schema.Literals(["Active", "Paused", "Limited", "Met"]),
+				tag: Schema.Literals(["Active", "Paused", "Met"]),
 				condition: Schema.String,
+			}),
+			Schema.Struct({
+				tag: Schema.Literal("Limited"),
+				condition: Schema.String,
+				limit: Schema.Literals(["blocked", "usage", "budget"]),
 			}),
 			Schema.Struct({ tag: Schema.Literal("Cleared") }),
 		]),
@@ -390,6 +395,35 @@ export const GoalPhaseSchema = Schema.Union([
 		send: Schema.Literals(["Sent", "Queued", "Unconfirmed"]),
 	}),
 ]);
+
+/** What the session's background is doing (8.2, 8.7): work reads working; the rest are calm. */
+export const SessionBackgroundActivitySchema = Schema.Literals([
+	"none",
+	"work",
+	"monitoring",
+	"serving",
+	"unknown",
+]);
+export type SessionBackgroundActivity =
+	typeof SessionBackgroundActivitySchema.Type;
+export const SessionActivityLabelSchema = Schema.Literals([
+	"idle",
+	"working",
+	"background",
+	"needs-you",
+]);
+export type SessionActivityLabel = typeof SessionActivityLabelSchema.Type;
+
+/** The one answer to what a session is doing (82tn.32.30, 8.1); every surface reads only this. */
+export const SessionActivityViewSchema = Schema.Struct({
+	/** A Run of the ledger's, input or wake, from Queued until it ends. */
+	foreground: Schema.Literals(["idle", "working"]),
+	background: SessionBackgroundActivitySchema,
+	needsYou: Schema.optional(Schema.Literals(["approval", "reply"])),
+	label: SessionActivityLabelSchema,
+	goal: Schema.optional(GoalPhaseSchema),
+});
+export type SessionActivityView = typeof SessionActivityViewSchema.Type;
 
 /** One wire shape for projected sessions and daemon-wide lists. */
 export const SessionInfoSchema = Schema.Struct({
@@ -407,6 +441,8 @@ export const SessionInfoSchema = Schema.Struct({
 	lastUserMessageAt: Schema.optional(Schema.Number),
 	messageCount: Schema.optional(Schema.Number),
 	processing: Schema.optional(Schema.Boolean),
+	/** 8.1: what the session is doing, the one answer every surface reads (82tn.32.30). */
+	activity: Schema.optional(SessionActivityViewSchema),
 	goalState: Schema.optional(SessionGoalChangedPayloadSchema),
 	/** Present only while a goal action is pending or its send failed. */
 	goalPhase: Schema.optional(GoalPhaseSchema),

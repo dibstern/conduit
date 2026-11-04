@@ -98,8 +98,10 @@ import {
 	rerootSession,
 } from "../../../src/lib/persistence/effect/sidebar-projection.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import type { ActivityOf } from "../../../src/lib/session/session-activity-view.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
 import { seedSessionLoadFixture } from "../../fixtures/session-load.js";
+import { activityFrom } from "../../helpers/ledger-tasks.js";
 
 const openStore = (filename: string) =>
 	ManagedRuntime.make(makePersistenceEffectLayer(filename, "test-project"));
@@ -164,10 +166,11 @@ type Command =
 	  };
 
 // Commands that change rows only through what the sidebar shows, so an
-// unchanged item must keep its version. Lineage and background commands can
-// also move a row for what it holds but does not show (its members).
+// unchanged item must keep its version. Lineage, background and status
+// commands can also move a row for what it holds but does not show (its
+// members): a Run starting or ending reaches the sidebar through the same
+// announcement as background work.
 const QUIET = new Set<Command["kind"]>([
-	"status",
 	"chunk",
 	"turn",
 	"ask",
@@ -208,6 +211,17 @@ const scenario = (store: Store) => {
 	const pending: { id: string; sessionId: string; question: boolean }[] = [];
 	const background = new Map<string, SessionBackground>();
 	const backgroundOf = (id: string) => background.get(id);
+	/** Sessions with an active Run, as the ledger would hand them to SessionActivity. */
+	const running = new Set<string>();
+	const activityOf: ActivityOf = (id, prompts) => {
+		const work = background.get(id)?.work;
+		return activityFrom({
+			running: [...running],
+			...(work
+				? { background: { [id]: work === "working" ? "work" : work } }
+				: {}),
+		})(id, prompts);
+	};
 	let shown = new Map<string, Shown>();
 	let readVersion = -1;
 	/** What a device held after each check, to resume from. */
@@ -361,16 +375,27 @@ const scenario = (store: Store) => {
 					]),
 				);
 			}
-			case "status":
+			case "status": {
 				if (!exists) return undefined;
+				const wasRunning = running.has(command.id);
+				if (command.status === "busy" || command.status === "retry")
+					running.add(command.id);
+				else running.delete(command.id);
 				return run(
-					commit([
-						event("session.status", command.id, {
-							sessionId: command.id,
-							status: command.status,
-						}),
-					]),
+					Effect.andThen(
+						commit([
+							event("session.status", command.id, {
+								sessionId: command.id,
+								status: command.status,
+							}),
+						]),
+						// The ledger's hand-over announces a Run that starts or ends.
+						wasRunning === running.has(command.id)
+							? Effect.void
+							: announceBackgroundWork(command.id),
+					),
 				);
+			}
 			case "chunk": {
 				if (!exists) return undefined;
 				const messageId = `${command.id}-m${messages++}`;
@@ -496,13 +521,14 @@ const scenario = (store: Store) => {
 		const readQuery = yield* ReadQueryEffectTag;
 		const sidebar = yield* readQuery.readSessionList(
 			{ projectIds: ["test-project"] },
-			{ backgroundOf },
+			{ backgroundOf, activityOf },
 		);
 		const oracle = yield* readQuery.listSessionInfos(
 			{ projectIds: ["test-project"] },
 			{
 				roots: true,
 				backgroundOf,
+				activityOf,
 			},
 		);
 		// The range interface: a delta from the last read names exactly the
@@ -512,6 +538,7 @@ const scenario = (store: Store) => {
 			{
 				after: readVersion,
 				backgroundOf,
+				activityOf,
 			},
 		);
 		const stored = yield* readQuery.readSessionList({
@@ -537,6 +564,7 @@ const scenario = (store: Store) => {
 				{
 					after: from.version,
 					backgroundOf,
+					activityOf,
 				},
 			);
 			const exists = yield* storedIds;

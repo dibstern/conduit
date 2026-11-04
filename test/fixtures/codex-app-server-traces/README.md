@@ -73,9 +73,9 @@ names. Capture and fixture files use mode 0600.
 
 - `goal-chain.jsonl` records one `turn/start` followed by three native turns
   on the same thread. The per-scenario mock response sequence calls the real
-  `update_goal` tool with `complete` after the third streamed greeting. Goals
-  start paused, and activate after `turn/start` accepts, so they cannot start
-  work before the runner owns it. CLI 0.162.1 emits `thread/goal/updated`
+  `update_goal` tool with `complete` after the third streamed greeting. The
+  goal is set active in one `thread/goal/set` after `turn/start` accepts, so it
+  cannot start work before the runner owns it. CLI 0.162.1 emits `thread/goal/updated`
   accounting facts before each turn end and a final `complete` fact.
 - `goal-paused.jsonl` and `goal-cleared.jsonl` record user-origin
   `thread/goal/set` and `thread/goal/clear` during a native turn, including the

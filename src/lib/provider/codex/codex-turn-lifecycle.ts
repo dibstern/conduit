@@ -20,7 +20,6 @@ export interface CodexTurnState {
 	readonly goalState: SessionGoalChangedPayload;
 	readonly goalActive: boolean;
 	readonly successorDeadline?: number | undefined;
-	readonly goalActivationPending?: boolean;
 	readonly interruptRequested?: boolean;
 	readonly manualCompaction?: boolean;
 	readonly compactions?: readonly {
@@ -129,6 +128,90 @@ export function handleCodexTurnNotification(
 	return update;
 }
 
+const LIMITS = {
+	blocked: { limit: "blocked", reason: "Goal blocked" },
+	usageLimited: { limit: "usage", reason: "Goal hit a usage limit" },
+	budgetLimited: { limit: "budget", reason: "Goal reached its token budget" },
+} as const;
+
+/**
+ * Codex's goal as conduit's facts (8.6): the returned status, never the requested one. blocked,
+ * usageLimited and budgetLimited are Limited; complete is Met. A pause or clear applied while a
+ * turn runs carries the 12A note until that turn ends.
+ */
+export function codexGoalFacts(
+	previousState: SessionGoalChangedPayload,
+	notification: Extract<
+		KnownNotification,
+		{ method: "thread/goal/updated" | "thread/goal/cleared" }
+	>,
+	now: number,
+	turnRunning: boolean,
+): { readonly facts: SessionGoalChangedPayload; readonly active: boolean } {
+	const sessionId = previousState.sessionId;
+	const previous = previousState.goal ?? previousState.endedGoal;
+	if (notification.method === "thread/goal/cleared")
+		return {
+			active: false,
+			facts: {
+				sessionId,
+				goal: null,
+				ended: "cleared",
+				endedAt: now,
+				...(previous ? { endedGoal: previous } : {}),
+				...(turnRunning ? { turnFinishing: true as const } : {}),
+			},
+		};
+	const native = notification.params.goal;
+	const goal =
+		previous?.condition === native.objective &&
+		previous.setAt === native.createdAt * 1000
+			? previous
+			: {
+					condition: native.objective,
+					iterations: 0,
+					setAt: native.createdAt * 1000,
+					tokensAtStart: 0,
+				};
+	if (native.status === "complete")
+		return {
+			active: false,
+			facts: {
+				sessionId,
+				goal: null,
+				ended: "met",
+				endedGoal: {
+					...goal,
+					iterations: goal.iterations + (turnRunning ? 1 : 0),
+				},
+				endedAt: now,
+			},
+		};
+	const limited =
+		native.status === "blocked" ||
+		native.status === "usageLimited" ||
+		native.status === "budgetLimited"
+			? LIMITS[native.status]
+			: undefined;
+	return {
+		active: native.status === "active",
+		facts: {
+			sessionId,
+			goal,
+			...(native.status === "paused"
+				? {
+						pausedReason: "Paused",
+						...(turnRunning ? { turnFinishing: true as const } : {}),
+					}
+				: limited
+					? { pausedReason: limited.reason, limit: limited.limit }
+					: native.status === "active"
+						? {}
+						: { pausedReason: native.status }),
+		},
+	};
+}
+
 function handleNotification(
 	state: CodexTurnState,
 	notification: KnownNotification,
@@ -148,68 +231,13 @@ function handleNotification(
 		notification.method === "thread/goal/updated" ||
 		notification.method === "thread/goal/cleared"
 	) {
-		const previous = state.goalState.goal ?? state.goalState.endedGoal;
-		let facts: SessionGoalChangedPayload;
-		let active = false;
-		if (notification.method === "thread/goal/cleared") {
-			facts = {
-				sessionId: state.items.sessionId,
-				goal: null,
-				ended: "cleared",
-				endedAt: now,
-				...(previous ? { endedGoal: previous } : {}),
-			};
-		} else {
-			const native = notification.params.goal;
-			const same =
-				previous?.condition === native.objective &&
-				previous.setAt === native.createdAt * 1000;
-			const goal = same
-				? previous
-				: {
-						condition: native.objective,
-						iterations: 0,
-						setAt: native.createdAt * 1000,
-						tokensAtStart: 0,
-					};
-			active = native.status === "active";
-			facts =
-				native.status === "complete"
-					? {
-							sessionId: state.items.sessionId,
-							goal: null,
-							ended: "met",
-							endedGoal: {
-								...goal,
-								iterations: goal.iterations + (state.executingTurnId ? 1 : 0),
-							},
-							endedAt: now,
-						}
-					: {
-							sessionId: state.items.sessionId,
-							goal,
-							...(!active
-								? {
-										pausedReason:
-											native.status === "paused"
-												? "Paused"
-												: native.status === "blocked"
-													? "Blocked"
-													: native.status === "usageLimited"
-														? "Usage limit reached"
-														: native.status === "budgetLimited"
-															? "Goal budget reached"
-															: native.status,
-									}
-								: {}),
-						};
-		}
-		next = {
-			...next,
-			goalState: facts,
-			goalActive: active,
-			...(active ? { goalActivationPending: false } : {}),
-		};
+		const { facts, active } = codexGoalFacts(
+			state.goalState,
+			notification,
+			now,
+			state.executingTurnId !== undefined,
+		);
+		next = { ...next, goalState: facts, goalActive: active };
 		const [items, event] = codexRuntimeEvent(
 			next.items,
 			"session.goal_changed",
@@ -220,7 +248,6 @@ function handleNotification(
 			!active &&
 			state.goalActive &&
 			!state.executingTurnId &&
-			!state.goalActivationPending &&
 			!state.interruptRequested
 				? settle(next, "completed")
 				: { state: next, events: [] };
@@ -237,9 +264,7 @@ function handleNotification(
 	const successor =
 		notification.method === "turn/started" &&
 		notification.params.turn.id !== state.items.nativeTurnId &&
-		(state.goalActive ||
-			state.goalActivationPending ||
-			state.interruptRequested) &&
+		(state.goalActive || state.interruptRequested) &&
 		state.successorDeadline !== undefined;
 	// compact/start acknowledges with {}, so its native id arrives in turn/started.
 	if (
@@ -338,7 +363,7 @@ function handleNotification(
 			status === "completed" &&
 			!state.interruptRequested &&
 			!next.manualCompaction &&
-			(next.goalActive || next.goalActivationPending)
+			next.goalActive
 		) {
 			const [items, events] = settleCodexItems(next.items);
 			const goal = next.goalState.goal;
@@ -454,6 +479,19 @@ function settle(
 		closedItems = items;
 		events = [...events, failure];
 	}
+	// 12A: the note that Codex is finishing its current turn goes when the turn ends.
+	let goalState = state.goalState;
+	if (goalState.turnFinishing) {
+		const { turnFinishing: _note, ...rest } = goalState;
+		goalState = rest;
+		const [items, settled] = codexRuntimeEvent(
+			closedItems,
+			"session.goal_changed",
+			goalState,
+		);
+		closedItems = items;
+		events = [...events, settled];
+	}
 	const [items, terminal] =
 		status === "completed"
 			? codexRuntimeEvent(closedItems, "turn.completed", {
@@ -479,6 +517,7 @@ function settle(
 	return {
 		state: {
 			...state,
+			goalState,
 			items,
 			settled: true,
 			executingTurnId: undefined,

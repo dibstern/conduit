@@ -20,10 +20,12 @@ import type { NativeCommandView } from "../provider/run-ledger/run-ledger-model.
  */
 const confirmedOf = (facts: SessionGoalChangedPayload): ConfirmedGoal | null =>
 	facts.goal
-		? {
-				tag: facts.pausedReason === undefined ? "Active" : "Paused",
-				condition: facts.goal.condition,
-			}
+		? facts.limit
+			? { tag: "Limited", condition: facts.goal.condition, limit: facts.limit }
+			: {
+					tag: facts.pausedReason === undefined ? "Active" : "Paused",
+					condition: facts.goal.condition,
+				}
 		: facts.ended === "met" && facts.endedGoal
 			? { tag: "Met", condition: facts.endedGoal.condition }
 			: facts.ended === undefined
@@ -34,6 +36,8 @@ const confirmedOf = (facts: SessionGoalChangedPayload): ConfirmedGoal | null =>
  * Each session's goal tracker (CONTRACT.md 8.1): the action the browser asked for, the provider's
  * confirmations, and the Run Ledger's view of each action's send, from which the phase is derived.
  * Transient like retries: in memory, so a restart forgets a pending action.
+ * Queued sends are recovery's resends and, where the provider reads its goal natively (Codex's
+ * thread/goal/get), the re-read an unconfirmed action takes (8.5); a re-read carries no action.
  */
 export function makeSessionGoals() {
 	const sessions = new Map<
@@ -43,12 +47,27 @@ export function makeSessionGoals() {
 			readonly sends: readonly NativeCommandView[];
 			/** Arrival order of goal changes, the order of the provider's reads (8.6). */
 			readonly seen: number;
+			/** The provider can re-read its goal when an action goes unconfirmed (8.5). */
+			readonly nativeReads: boolean;
 		}
 	>();
-	/** Actions recovery resends under a new id, until the relay dispatches them. */
-	const resends = new Map<string, { id: string; action: GoalAction }[]>();
+	/** Sends queued under new ids until the relay dispatches them. */
+	const resends = new Map<string, { id: string; action?: GoalAction }[]>();
+	const queue = (sessionId: string, action?: GoalAction) => {
+		const id = randomUUID();
+		resends.set(sessionId, [
+			...(resends.get(sessionId) ?? []),
+			{ id, ...(action ? { action } : {}) },
+		]);
+		return id;
+	};
 	const entryOf = (sessionId: string) =>
-		sessions.get(sessionId) ?? { goal: NO_GOAL, sends: [], seen: 0 };
+		sessions.get(sessionId) ?? {
+			goal: NO_GOAL,
+			sends: [],
+			seen: 0,
+			nativeReads: false,
+		};
 	const phaseOf = (sessionId: string): GoalPhase | undefined => {
 		const entry = sessions.get(sessionId);
 		if (entry === undefined) return undefined;
@@ -76,9 +95,15 @@ export function makeSessionGoals() {
 	return {
 		phaseOf,
 		/** 8.6: a new action supersedes the pending one. */
-		request: (sessionId: string, id: string, action: GoalAction) =>
+		request: (
+			sessionId: string,
+			id: string,
+			action: GoalAction,
+			nativeReads = false,
+		) =>
 			update(sessionId, (entry) => ({
 				...entry,
+				nativeReads,
 				goal: requestGoalAction(entry.goal, id, action),
 			})),
 		/** The ledger refused to issue it, so nothing will answer it. */
@@ -98,6 +123,17 @@ export function makeSessionGoals() {
 			// A queued resend counts as a move, so the relay is woken to dispatch it.
 			update(sessionId, (entry) => {
 				const { pending } = entry.goal;
+				const tagOf = (views: readonly NativeCommandView[]) =>
+					pending.tag === "Pending"
+						? views.find((send) => send.commandId === pending.id)?.tag
+						: undefined;
+				// 8.5 (CONTRACT.md 2937): when the deadline fires, the tracker re-reads native state.
+				if (
+					entry.nativeReads &&
+					tagOf(sends) === "Unconfirmed" &&
+					tagOf(entry.sends) !== "Unconfirmed"
+				)
+					queue(sessionId);
 				const died =
 					pending.tag === "Pending" &&
 					sends.some(
@@ -109,14 +145,13 @@ export function makeSessionGoals() {
 				if (!died) return { ...entry, sends };
 				const { goal, resend } = recoverGoal(entry.goal);
 				if (resend === undefined) return { ...entry, goal, sends };
-				const id = randomUUID();
-				resends.set(sessionId, [
-					...(resends.get(sessionId) ?? []),
-					{ id, action: resend.action },
-				]);
 				return {
 					...entry,
-					goal: requestGoalAction(goal, id, resend.action),
+					goal: requestGoalAction(
+						goal,
+						queue(sessionId, resend.action),
+						resend.action,
+					),
 					sends,
 				};
 			}) || resends.has(sessionId),

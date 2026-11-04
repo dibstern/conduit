@@ -5,7 +5,10 @@ import MessageList from "../../../src/lib/frontend/components/chat/MessageList.s
 import { getOrCreateSessionSlot } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { permissionsState } from "../../../src/lib/frontend/stores/permissions.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 import { seedSessionsWithFamily } from "../stores/session-fixtures.js";
 
 vi.mock(
@@ -176,7 +179,7 @@ describe("MessageList reader follow", () => {
 		"tool",
 	])("renders resumed %s activity as working after a result", async (kind) => {
 		const slot = getOrCreateSessionSlot("session-view-first");
-		slot.activity.phase = "processing";
+		setSessionWorkingForSetup("session-view-first", true);
 		slot.messages.messages = [
 			{ type: "user", uuid: "prompt", text: "Check the files" },
 			{
@@ -240,7 +243,7 @@ describe("MessageList reader follow", () => {
 		if (kind === "assistant")
 			expect(container.querySelector(".result-bar")).toBeNull();
 		slot.messages.messages = [];
-		slot.activity.phase = "idle";
+		setSessionWorkingForSetup("session-view-first", false);
 	});
 });
 

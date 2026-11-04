@@ -70,7 +70,10 @@ import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectContext,
 } from "../../../src/lib/persistence/effect/live.js";
-import { loadLedgerView } from "../../../src/lib/persistence/effect/run-ledger-arm.js";
+import {
+	ledgerTasksWakes,
+	loadLedgerView,
+} from "../../../src/lib/persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
 
@@ -292,6 +295,20 @@ const open = <A, E>(
 	Effect.scoped(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
+			// SessionActivity reads Servers from the ledger's hand-over, as the daemon wires it.
+			const activity = yield* SessionActivityTag;
+			ledgerTasksWakes.set(
+				yield* SqlClient.SqlClient,
+				new Set([
+					(sessionId, tasks, snapshot, ledger) =>
+						void activity.background.publish(
+							sessionId,
+							tasks,
+							snapshot,
+							ledger,
+						),
+				]),
+			);
 			yield* Layer.build(makePortWatcherLive(() => undefined));
 			return yield* body(commit);
 		}),
@@ -496,11 +513,13 @@ describe.each(["lsof", "proc"] as const)("PortWatcher over %s", (mode) => {
 						const events = yield* eventsUntil(5);
 						// SessionActivity gets the write's Servers after its commit.
 						const activity = yield* SessionActivityTag;
-						yield* until(() => activity.servers.get("s1")?.[0]?.pid === 601);
+						const listed = () =>
+							activity.background.serversOf("s1", activity.gateUrls);
+						yield* until(() => listed()[0]?.pid === 601);
 						return {
 							events,
 							servers: yield* serversOf("s1"),
-							published: activity.servers.get("s1"),
+							published: listed(),
 						};
 					}),
 				),
@@ -793,7 +812,7 @@ describe.each(["lsof", "proc"] as const)("PortWatcher over %s", (mode) => {
 							yield* scans(fake, 2);
 							const activity = yield* SessionActivityTag;
 							return {
-								published: [...activity.servers.keys()],
+								published: [...activity.background.ports().values()],
 								before,
 								events,
 								after: yield* serverEvents,

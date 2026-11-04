@@ -39,14 +39,17 @@ import {
 	getOrCreateSessionSlot,
 	isProcessing,
 	isReplaying,
-	isStreaming,
-	phaseToStreaming,
 	sessionActivity,
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
+import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
+import {
+	openSessionForSetup,
+	setSessionWorkingForSetup,
+} from "../../../src/lib/frontend/stories/session-setup.js";
 
 beforeEach(() => {
+	clearSessionState();
 	openSessionForSetup("session-a", "project-a");
 });
 
@@ -63,7 +66,6 @@ describe("chatState is read-only", () => {
 		// Getter-only properties on a frozen object: assignment is a compile
 		// error under `Readonly<…>` and a TypeError under strict mode.
 		for (const patch of [
-			{ phase: "streaming" },
 			{ loadLifecycle: "ready" },
 			{ messages: [] },
 			{ currentAssistantText: "x" },
@@ -78,15 +80,15 @@ describe("chatState reflects the current session's slot", () => {
 	it("follows currentId rather than the last writer", () => {
 		const a = getOrCreateSessionSlot("session-a");
 		const b = getOrCreateSessionSlot("session-b");
-		phaseToStreaming(a.activity);
+		setSessionWorkingForSetup("session-a", true);
 		a.messages.messages = [userMessage("from a")];
 		b.messages.messages = [userMessage("from b")];
 
-		expect(chatState.phase).toBe("streaming");
+		expect(isProcessing()).toBe(true);
 		expect(chatState.messages).toEqual(a.messages.messages);
 
 		openSessionForSetup("session-b", "project-a");
-		expect(chatState.phase).toBe("idle");
+		expect(isProcessing()).toBe(false);
 		expect(chatState.messages).toEqual(b.messages.messages);
 	});
 
@@ -94,7 +96,7 @@ describe("chatState reflects the current session's slot", () => {
 		getOrCreateSessionSlot("session-a");
 		openSessionForSetup(null);
 		expect(chatState.messages).toEqual([]);
-		expect(chatState.phase).toBe("idle");
+		expect(isProcessing()).toBe(false);
 		expect(chatState.loadLifecycle).toBe("empty");
 		expect(chatState.currentMessageId).toBeNull();
 	});
@@ -104,24 +106,21 @@ describe("phase flags read the current session's slot", () => {
 	it("report the same values the slot holds", () => {
 		const a = getOrCreateSessionSlot("session-a");
 		expect(isProcessing()).toBe(false);
-		expect(isStreaming()).toBe(false);
 		expect(isReplaying()).toBe(false);
 
-		phaseToStreaming(a.activity);
+		setSessionWorkingForSetup("session-a", true);
 		expect(isProcessing()).toBe(true);
-		expect(isStreaming()).toBe(true);
 
 		a.messages.loadLifecycle = "loading";
 		expect(isReplaying()).toBe(true);
 		expect(isProcessing()).toBe(false);
-		expect(isStreaming()).toBe(false);
 	});
 
 	it("ignore a background session's phase", () => {
 		getOrCreateSessionSlot("session-a");
-		const b = getOrCreateSessionSlot("session-b");
-		phaseToStreaming(b.activity);
-		expect(isStreaming()).toBe(false);
+		getOrCreateSessionSlot("session-b");
+		setSessionWorkingForSetup("session-b", true);
+		expect(isProcessing()).toBe(false);
 	});
 });
 

@@ -22,7 +22,7 @@
 	import { isProcessing } from "../../stores/chat.svelte.js";
 	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
-	import { dismissGoalMet, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
+	import { dismissGoalMet, GOAL_LIMITED, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import {
@@ -91,10 +91,7 @@
 	const parent = $derived(getParentSessionContext());
 	const isSideThread = $derived(session?.sideThread === true && parent.id !== null);
 	const goalFacts = $derived(discoveryState.currentTraits?.supportsGoalState ? sessionGoals.get(sessionState.currentId ?? "") : undefined);
-	const goal = $derived(goalView(
-		goalFacts,
-		isProcessing() ? "busy" : session?.status ?? "idle",
-	));
+	const goal = $derived(goalView(goalFacts, isProcessing()));
 	const detailsGoal = $derived(goalFacts?.goal ?? goalFacts?.endedGoal);
 	let goalSubtitleEl: HTMLButtonElement | HTMLAnchorElement | undefined = $state();
 	let goalFocusHandedOff = false;
@@ -103,7 +100,7 @@
 	// A reattached runner's tasks read as checking until its catch-up list (8.3).
 	const tasksShown = $derived(backgroundTasks.length > 0 || session?.tasksChecking === true);
 	const goalShown = $derived(goal.phase !== null && goal.phase !== "cleared" && !isGoalMetDismissed(goalFacts));
-	// The family push carries the whole tree; prefer the versioned row, as busySessionIds does.
+	// The family push carries the whole tree; prefer the versioned shell row.
 	const sideThreads = $derived.by(() => {
 		const rows = new Map(sessionState.familySessions.map((row) => [row.id, row]));
 		for (const row of sessionState.sessions.values()) rows.set(row.id, row);
@@ -288,9 +285,11 @@
 		return getPrimaryCommand(session, sessionState.now);
 	});
 	const goalButtonTone = $derived(goal.phase === "met" ? "goal-met" : stuck || (!sessionViewState.compact && goal.phase === "paused") ? "goal-paused" : "goal");
-	// 8.1: Clearing is derived from the pending clear, never stored.
-	const clearing = $derived(session?.goalPhase?.tag === "Pending" && session.goalPhase.action.kind === "clear");
-	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : clearing ? "Clearing" : goal.phase === "paused" ? "Paused" : stuck ? "Stuck" : "Pursuing");
+	// 8.1: Clearing, Pausing and Resuming are derived from the pending action, never stored.
+	const pendingGoalKind = $derived(session?.goalPhase?.tag === "Pending" ? session.goalPhase.action.kind : undefined);
+	const desktopGoalLabel = $derived(goal.phase === "met" ? "Goal met" : pendingGoalKind === "clear" ? "Clearing" : pendingGoalKind === "pause" ? "Pausing" : pendingGoalKind === "resume" ? "Resuming" : goal.phase === "paused" ? (goalFacts?.limit ? "Limited" : "Paused") : stuck ? "Stuck" : "Pursuing");
+	// 8.1 (pause: boolean): Pause and a native Resume show only where the provider pauses its goal.
+	const nativeGoalPause = $derived(discoveryState.currentTraits?.nativeGoalPause === true);
 	const goalIcon = $derived(goal.phase === "met" ? "circle-check" : goal.phase === "paused" ? "pause" : stuck ? "circle-alert" : "target");
 	const statusTitle = $derived(connectionState.statusText || "Connecting");
 	const statusClass = $derived.by(() => {
@@ -474,7 +473,7 @@
 {#snippet goalContent()}
 	{#if detailsGoal && goalFacts}
 		<div class={sessionViewState.compact ? "pt-[2px]" : ""}>
-			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session"><Icon name={goalIcon} size={12} />{desktopGoalLabel}</Badge>
+			<Badge variant={goal.phase === "met" ? "success" : stuck ? "warning" : "goal"} shape="pill" size="session" data-testid="goal-details-status"><Icon name={goalIcon} size={12} />{goal.phase === "paused" && goalFacts.limit && !pendingGoalKind ? GOAL_LIMITED[goalFacts.limit] : desktopGoalLabel}</Badge>
 			<h2 id="goal-details-title" data-testid="goal-details-condition" class="mt-[10px] mb-[4px] text-[15px] font-semibold leading-[1.35] tracking-[-0.01em]">{detailsGoal.condition}</h2>
 			<p data-testid="goal-details-meta" class="m-0 font-mono text-[10.5px] text-text-dimmer">Set {goalClock(details?.setAt ?? detailsGoal.setAt)}{details?.judgeModel ? ` · ${details.judgeModel} judges` : ""}{#if details?.tokensSinceStart != null}<span data-testid="goal-details-tokens">{" · "}{goalTokens(details.tokensSinceStart)} tokens</span>{/if}</p>
 		</div>
@@ -530,7 +529,8 @@
 		{/if}
 	<div class="flex gap-[8px] mt-[16px] pb-[4px]">
 		{#if goalFacts.goal}
-			{#if goal.phase === "paused" && !discoveryState.currentTraits?.nativeGoalActions}<Button variant="primary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon="play" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-resume" onclick={() => runGoalAction("resume")}>Resume</Button>{/if}
+			{#if goal.phase === "paused" && (nativeGoalPause || !discoveryState.currentTraits?.nativeGoalActions)}<Button variant="primary" size={sessionViewState.compact ? "phone-card-action" : "card-action"} icon="play" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-resume" onclick={() => runGoalAction("resume")}>Resume</Button>
+			{:else if goal.phase !== "paused" && nativeGoalPause}<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pause" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-pause" onclick={() => runGoalAction("pause")}>Pause</Button>{/if}
 			<Button variant="chip" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="secondary" icon="pencil" iconSize={13} touchTarget={sessionViewState.compact ? "always" : true} data-testid="goal-details-edit" onclick={() => runGoalAction("edit")}>Edit</Button>
 			<Button variant="danger-soft" size={sessionViewState.compact ? "phone-card-action" : "card-action"} tone="error" touchTarget={sessionViewState.compact ? "always" : true} class="ml-auto" data-testid="goal-details-clear" onclick={() => runGoalAction("clear")}>Clear goal</Button>
 		{:else if goalFacts.ended === "met"}

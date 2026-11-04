@@ -6,7 +6,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockWsRpc } from "../helpers/rpc-mock.js";
+import { mockWsRpc, rowActivity } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
 const projectSlug = "e2e-replay";
@@ -1438,7 +1438,12 @@ test("a refused steer keeps the text and shows the server's reason", async ({
 	});
 	await page.goto(`${harness.relayBaseUrl}/s/${seed}`);
 	await expect(page.locator("#input")).toHaveValue("Seed draft");
-	rpc.upsertShellRow({ ...rows[0], id: seed, status: "busy" });
+	rpc.upsertShellRow({
+		...rows[0],
+		id: seed,
+		status: "busy",
+		activity: rowActivity(true),
+	});
 	rpc.sendChunk(
 		"SubscribeSessionDetail",
 		[

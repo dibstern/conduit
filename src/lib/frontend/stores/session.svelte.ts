@@ -2,13 +2,10 @@
 // the other. The two halves never write each other.
 
 import { SvelteMap } from "svelte/reactivity";
-import { busySessionIds as calculateBusySessionIds } from "../../session-busy.js";
 import type { BackgroundTask } from "../../shared-types.js";
 import {
-	isBusy,
 	resetSessionSubscription,
 	sessionSubscription,
-	turnEnded,
 } from "../transport/session-subscription.svelte.js";
 import {
 	type Change,
@@ -31,9 +28,9 @@ import type {
 import {
 	activateSessionChatState,
 	clearSessionChatState,
-	followSessionBusy,
 	followSessionCompaction,
 	followSessionRetry,
+	followSessionTurn,
 	sessionActivity,
 	sessionMessages,
 } from "./chat.svelte.js";
@@ -53,10 +50,6 @@ import { clearTodoState } from "./todo.svelte.js";
 import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
 import { showToast } from "./ui.svelte.js";
 import { projectAttachedListeners } from "./ws-listeners.js";
-
-// Re-exported so chat.svelte.ts need not import the subscription directly,
-// which would load it ahead of this store and leave its rows undefined.
-export { isBusy };
 
 // Every session the server has told us about, keyed by id — one representation,
 // not a map plus two arrays kept in step by hand. The map itself belongs to the
@@ -104,17 +97,6 @@ export function rootBackgroundTasks(id: string): readonly BackgroundTask[] {
 		(serverSessions.get(root) ?? familySessions.find((row) => row.id === root))
 			?.backgroundTasks ?? []
 	);
-}
-
-const busySessionIds = $derived.by(() => {
-	const rows = new Map(familySessions.map((row) => [row.id, row]));
-	for (const row of serverSessions.values()) rows.set(row.id, row);
-	return calculateBusySessionIds(rows);
-});
-
-/** The session view's single busy decision, shared by every sidebar row. */
-export function isSessionBusy(id: string): boolean {
-	return busySessionIds.has(id);
 }
 
 /** Attach this tab from an AttachProject or cross-project ViewSession reply. */
@@ -549,14 +531,14 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 				next.rows.has(row.id)
 			)
 				continue;
-			if (isBusy(row)) followSessionBusy(row.id, false);
+			followSessionTurn(row.id, undefined, row);
 			followSessionCompaction(row.id, undefined);
 			followSessionRetry(row.id, undefined);
 		}
 		for (const row of next.rows.values()) {
 			applyTurnRow(row);
 			if (row.parentID === undefined && row.archivedAt == null) continue;
-			followSessionBusy(row.id, isBusy(row), row.lastTurnEndVersion);
+			followSessionTurn(row.id, row, previousRows.get(row.id));
 			followSessionCompaction(row.id, row.compacting);
 			followSessionRetry(row.id, row.retrying);
 		}
@@ -566,12 +548,7 @@ export function applyFamilyChange(change: Change<SessionInfo>): void {
 		(change.item.parentID !== undefined || change.item.archivedAt != null)
 	) {
 		const previousRow = previousRows.get(change.item.id);
-		const busy = isBusy(change.item);
-		if (
-			busy !== isBusy(previousRow) ||
-			(!busy && turnEnded(previousRow, change.item))
-		)
-			followSessionBusy(change.item.id, busy, change.item.lastTurnEndVersion);
+		followSessionTurn(change.item.id, change.item, previousRow);
 		if (change.item.compacting !== previousRow?.compacting)
 			followSessionCompaction(change.item.id, change.item.compacting);
 		if (change.item.retrying !== previousRow?.retrying)

@@ -852,8 +852,11 @@ export const makeProviderRuntimeIngestionLive = (
 							) {
 								yield* guardCurrentWrite(
 									publishRelayMessages(
-										domainEvents.filter((event) =>
-											endedRunEvents.has(event.eventId),
+										// A wake has no Run of its own, so its turn_ended is its only end (82tn.32.30).
+										domainEvents.filter(
+											(event) =>
+												endedRunEvents.has(event.eventId) ||
+												event.type === "evidence.turn_ended",
 										),
 										options.relayPublisher,
 									),

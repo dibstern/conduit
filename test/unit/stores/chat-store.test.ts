@@ -39,9 +39,6 @@ import {
 	chatState,
 	clearMessages,
 	historyState,
-	isProcessing,
-	isStreaming,
-	phaseToProcessing,
 	prependMessages,
 	restoreContextFromMessages,
 	type SessionActivity,
@@ -133,12 +130,14 @@ describe("addSystemMessage", () => {
 
 describe("clearMessages", () => {
 	it("resets all state", () => {
-		phaseToProcessing(ta);
+		ta.turnGeneration = 3;
+		ta.currentMessageId = "msg-1";
 		addSystemMessage(ta, tm, "test");
 		clearMessages();
 		expect(chatState.messages).toHaveLength(0);
-		expect(isProcessing()).toBe(false);
-		expect(isStreaming()).toBe(false);
+		expect(ta.turnGeneration).toBe(0);
+		expect(ta.endedGeneration).toBe(-1);
+		expect(ta.currentMessageId).toBeNull();
 	});
 });
 

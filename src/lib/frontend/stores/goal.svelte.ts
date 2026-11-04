@@ -10,7 +10,7 @@ export const goalDetails = $state({ open: false });
 
 export type GoalComposerAction = {
 	sessionId: string;
-	action: "resume" | "edit" | "clear" | "new";
+	action: "pause" | "resume" | "edit" | "clear" | "new";
 	condition?: string;
 };
 
@@ -66,9 +66,17 @@ export type GoalView = {
 	icon: "target" | "pause" | "check";
 };
 
+/** 8.6 Limited: Codex stopped the goal at a limit; a Resume sends it active again. */
+export const GOAL_LIMITED = {
+	blocked: "Goal blocked",
+	usage: "Goal hit a usage limit",
+	budget: "Goal reached its token budget",
+} as const;
+
 export function goalView(
 	facts: SessionGoalChangedPayload | undefined,
-	sessionStatus: SessionInfo["status"],
+	/** The session's foreground Run is working (SessionActivity, CONTRACT.md 8.1). */
+	working: boolean,
 ): GoalView {
 	const goal = facts?.goal;
 	if (!goal) {
@@ -109,19 +117,15 @@ export function goalView(
 	if (facts?.pausedReason) {
 		return {
 			phase: "paused",
-			subtitle: `Goal paused · ${goal.condition}`,
+			subtitle: `${facts.limit ? GOAL_LIMITED[facts.limit] : "Goal paused"} · ${goal.condition}`,
 			tone: "violet",
 			border: "dashed",
 			icon: "pause",
 		};
 	}
 	const checks = `${goal.iterations} ${goal.iterations === 1 ? "check" : "checks"}`;
-	// Nothing observes a goal check, so session status never makes a starting or checking phase.
-	if (
-		goal.lastReason &&
-		sessionStatus !== "busy" &&
-		sessionStatus !== "retry"
-	) {
+	// Nothing observes a goal check, so the session's activity never makes a starting or checking phase.
+	if (goal.lastReason && !working) {
 		return {
 			phase: "not_yet",
 			subtitle: `${goal.condition} · ${checks}`,

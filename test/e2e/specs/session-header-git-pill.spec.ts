@@ -8,7 +8,11 @@ import type {
 } from "../../../src/lib/shared-types.js";
 import { openCheckoutDetails } from "../helpers/model-picker.js";
 import { expect, test } from "../helpers/replay-fixture.js";
-import { mockWsRpc, sendMockShellRowPatch } from "../helpers/rpc-mock.js";
+import {
+	mockWsRpc,
+	rowActivity,
+	sendMockShellRowPatch,
+} from "../helpers/rpc-mock.js";
 import { settleSheet } from "../helpers/sheet-drag.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
 
@@ -86,6 +90,7 @@ async function openCheckout(
 			id: "header-session",
 			title: "Session header",
 			status: options.status ?? "idle",
+			activity: rowActivity(options.status === "busy"),
 			projectSlug: "e2e-replay",
 			...(options.sessionGit ? { git: options.sessionGit } : {}),
 			...(options.workspace ? { workspace: options.workspace } : {}),
