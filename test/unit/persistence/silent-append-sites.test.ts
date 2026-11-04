@@ -20,6 +20,10 @@ import { SqlClient } from "effect/sql";
 import { expect, it } from "vitest";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../src/lib/contracts/provider-instance.js";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -111,6 +115,7 @@ const makeStatusPollerLayer = (dbPath: string) => {
 			makePollerStateLive(),
 			makePollerPubSubLive(),
 			RelayStatusSnapshotLive,
+			Layer.effect(SessionActivityTag, makeSessionActivity),
 			makeSessionManagerStateLive(),
 			PendingInteractionServiceLive,
 		),

@@ -1,6 +1,10 @@
 import { Effect, HashMap, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
+import {
+	makeSessionActivity,
+	SessionActivityTag,
+} from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { StatusPollerLive } from "../../../src/lib/domain/relay/Layers/status-poller-layer.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
@@ -34,6 +38,7 @@ const pollerLayer = (api: ReturnType<typeof makeMockOpenCodeAPI>) =>
 				makePollerStateLive(),
 				makePollerPubSubLive(),
 				RelayStatusSnapshotLive,
+				Layer.effect(SessionActivityTag, makeSessionActivity),
 				makeSessionManagerStateLive({
 					cachedParentMap: HashMap.make(["child", "parent"]),
 				}),

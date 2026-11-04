@@ -4,7 +4,7 @@ import { publishAlert } from "../domain/relay/Services/alerts.js";
 import type { Logger } from "../logger.js";
 import type { PushNotificationSender } from "../server/push.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
-import type { RelayMessage } from "../shared-types.js";
+import type { RelayMessage, SessionActivityView } from "../shared-types.js";
 import { resolveNotifications } from "./notification-policy.js";
 import { sendPushForEventEffect } from "./sse-wiring.js";
 
@@ -15,11 +15,19 @@ export const publishProviderRelayMessage = (
 		pushManager?: Pick<PushNotificationSender, "sendToAll">;
 		log: Logger;
 		slug: string;
+		/** 8.1: the session's activity, the one answer the done ding reads. */
+		activityOf: (sessionId: string) => SessionActivityView;
 	},
 ) =>
 	Effect.gen(function* () {
 		const sessionId = msg.sessionId;
 		if (!sessionId) return;
+		// The turn ended but its tasks still run: the session is not done until they finish.
+		if (
+			msg.error === undefined &&
+			deps.activityOf(sessionId).background === "work"
+		)
+			return;
 		const sql = yield* SqlClient.SqlClient;
 		const rows = yield* sql<{
 			parent_id: string | null;

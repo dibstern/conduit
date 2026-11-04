@@ -1593,7 +1593,7 @@
 		"real-wait": 3
 	},
 	"test/unit/relay/status-poller-broadcast.test.ts": {
-		"polling": 4,
+		"polling": 3,
 		"timeout-override": 2
 	},
 	"test/unit/server/pty-storm.test.ts": {

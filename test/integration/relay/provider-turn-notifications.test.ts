@@ -18,6 +18,12 @@ import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/
 import { publishProviderRelayMessage } from "../../../src/lib/relay/project-relay-publisher.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
+const idleActivity = {
+	foreground: "idle",
+	background: "none",
+	label: "idle",
+} as const;
+
 it("persists Claude content for a session without a session.created event", async () => {
 	const layer = makeProviderRuntimeIngestionLive().pipe(
 		Layer.provideMerge(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -136,6 +142,7 @@ it.each([
 							pushManager: { sendToAll },
 							log: createSilentLogger(),
 							slug: "project",
+							activityOf: () => idleActivity,
 						}).pipe(
 							Effect.provideService(SqlClient.SqlClient, sql),
 							Effect.provideService(AlertsTag, alerts),
