@@ -28,6 +28,7 @@ import type {
 import type { UnboundEventStoreEffect } from "../../persistence/effect/event-store-effect.js";
 import { PersistenceStore } from "../../persistence/effect/live.js";
 import { makeEffectSqlMigrator } from "../../persistence/effect/migrations.js";
+import { loadLedgerView } from "../../persistence/effect/run-ledger-arm.js";
 import {
 	canonicalEvent,
 	type EventPayloadMap,
@@ -323,8 +324,33 @@ export const makeRunnerRunLifecycle = (
 									predecessor: Option.fromUndefinedOr(predecessor),
 								};
 							}
+							// CONTRACT 674-679, 692-698: its runner's retirement before this start's first
+							// hold unlaunched the Run, so main requests it again at once, in this hold's
+							// write, and the hold binds the relaunch (no hold precedes it; reported).
+							const active =
+								transmission === 1
+									? (yield* loadLedgerView(input.sessionId).pipe(
+											Effect.provideService(SqlClient.SqlClient, sql),
+										))?.active
+									: undefined;
+							const relaunch =
+								active?.tag === "Queued" &&
+								active.inputs[0]?.inputId === commandId;
 							yield* project(
 								yield* eventStore.appendBatch([
+									...(relaunch
+										? [
+												canonicalEvent(
+													"run.requested",
+													input.sessionId,
+													{ runId: run.id, inputId: commandId },
+													{
+														provider: owner.provider,
+														metadata: { runId: run.id },
+													},
+												),
+											]
+										: []),
 									canonicalEvent(
 										"run.dispatched",
 										input.sessionId,
