@@ -2012,7 +2012,9 @@ function probeResult(
 					)
 						endWork(item, "evidence");
 			}
-			for (const wake of world.wakes) endWork(wake, "own");
+			// CONTRACT.md 533-535: only a wake execution begun before the probe was issued.
+			for (const wake of world.wakes)
+				if (wake.seq <= tx.seq) endWork(wake, "own");
 			// 3128-3132: the idle read after an OpenCode absent one settles it unless it was seen running.
 			if (subject !== undefined && consumptionRank[subject.consumption.tag] < 2)
 				absent(subject);

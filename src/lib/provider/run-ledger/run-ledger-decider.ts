@@ -1750,8 +1750,9 @@ const evidenceTable: EvidenceTable = {
 									)
 								)
 									item.ended = "evidence";
-					// 8.3, D26: and every wake execution.
-					for (const wake of book.wakes) wake.ended ??= "own";
+					// 8.3, D26: and every wake execution begun before it was issued (533-535).
+					for (const wake of book.wakes)
+						if (wake.seq <= tx.seq) wake.ended ??= "own";
 					// 3128-3132: the idle read after an OpenCode absent one settles it, unless the send was
 					// seen running since.
 					if (
