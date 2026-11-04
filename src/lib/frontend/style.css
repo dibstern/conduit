@@ -1885,6 +1885,11 @@ body:has(dialog:modal) {
 	.md-content a:hover {
 		@apply underline;
 	}
+	/* A localhost link with no live server: plain text (8.7). */
+	.md-content a:not([href]) {
+		color: inherit;
+		@apply no-underline;
+	}
 	/* A localhost link to one of the session's live servers. */
 	.md-content a[data-server-chip] {
 		display: inline-flex;

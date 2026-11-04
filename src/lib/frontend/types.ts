@@ -181,7 +181,7 @@ export interface ToolMessage {
 	/** Tool input parameters — stored for tools that need rich rendering (e.g. task/subagent). */
 	input?: unknown;
 	status: ToolStatus;
-	outcome?: "succeeded" | "failed";
+	outcome?: "succeeded" | "failed" | "endedByRun";
 	fileChanges?: readonly ToolFileChange[];
 	presentation?: ToolPresentation;
 	result?: string;

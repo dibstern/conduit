@@ -99,6 +99,8 @@ function toolForItem(
 					isError:
 						metadata["isError"] === true ||
 						(exitCode !== null && exitCode !== 0),
+					// Joins the row to the terminal the Run Ledger lists (82tn.45).
+					...(item.processId ? { providerTaskId: item.processId } : {}),
 				},
 				duration,
 			};
@@ -629,7 +631,10 @@ export function mapCodexItem(
 				const part = next.parts[index];
 				if (part?.kind === "tool" && !part.closed)
 					next.parts[index] = { ...part, ...tool };
-				if (item.type === "collabAgentToolCall" && !("raw" in item)) {
+				if (
+					(item.type === "collabAgentToolCall" && !("raw" in item)) ||
+					(!complete && tool.metadata["providerTaskId"])
+				) {
 					emit(
 						"tool.running",
 						{
@@ -687,7 +692,13 @@ export function settleCodexItems(
 	const events: ProviderRuntimeEvent[] = [];
 	const parts: ContentPart[] = [];
 	for (const part of state.parts) {
-		if (part.kind === "tool" && part.metadata["childSessionId"]) {
+		// A background terminal's row outlives its turn: its own completion or the Run Ledger
+		// ends it (82tn.45, CONTRACT.md 2817).
+		if (
+			part.kind === "tool" &&
+			(part.metadata["childSessionId"] ||
+				(!part.closed && part.metadata["providerTaskId"]))
+		) {
 			parts.push(part);
 			continue;
 		}

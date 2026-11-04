@@ -35,10 +35,18 @@
 // 20. a command not joined from cmdline, or an environment marker split wrong;
 // 21. /proc missing, or a malformed socket table, read as "no servers";
 // 22. a process exiting mid-scan, or one whose fds cannot be read, failing the scan.
+// 23. a real kernel's /proc (a dual-stack tcp6 socket, real stat and environ, the recording
+//     process's own fds) differs from the hand-made tree, so a Linux host sees no server, or not
+//     its start time, cwd or task. test/fixtures/proc-linux-recorded is a /proc tree recorded from
+//     a Linux container by its record.sh.
+// 24. a Linux host asked for lsof and ps scanning /proc instead (Effect's Config reads an empty
+//     value as unset, so "" fell back to the /proc default), so every lsof test there watches the
+//     live /proc and sees none of its fake servers.
 import { spawn } from "node:child_process";
 import {
 	appendFileSync,
 	chmodSync,
+	cpSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -272,7 +280,7 @@ const showListeners = (fake: Fake, listeners: Listeners) => {
 	fake.show({ listeners });
 };
 
-/** The watcher's timing, and its scanner: "" for lsof and ps, a /proc root, or the host default. */
+/** The watcher's timing, and its scanner: "lsof" for lsof and ps, a /proc root, or the host default (24). */
 const config = (intervalMs: number, holdMs: number, procRoot: string) =>
 	ConfigProvider.layer(
 		ConfigProvider.fromUnknown({
@@ -280,7 +288,10 @@ const config = (intervalMs: number, holdMs: number, procRoot: string) =>
 			CONDUIT_PORT_WATCH_HOLD_MS: String(holdMs),
 			...(scanner === "host"
 				? {}
-				: { CONDUIT_PORT_WATCH_PROC_ROOT: scanner === "proc" ? procRoot : "" }),
+				: {
+						CONDUIT_PORT_WATCH_PROC_ROOT:
+							scanner === "proc" ? procRoot : "lsof",
+					}),
 		}),
 	);
 
@@ -941,6 +952,96 @@ describe("PortWatcher over /proc", () => {
 						expect(servers.map((server) => server.key)).toEqual([
 							seen600.server,
 						]);
+					}),
+				),
+			),
+	);
+});
+
+describe("PortWatcher over a /proc tree recorded on Linux", () => {
+	beforeEach(() => {
+		scanner = "proc";
+	});
+	it.live(
+		"23: a marked server in a real kernel's /proc is seen with its start time, command, cwd and task",
+		() =>
+			withDir((dir) =>
+				Effect.gen(function* () {
+					const recorded = join(
+						import.meta.dirname,
+						"../../fixtures/proc-linux-recorded",
+					);
+					const meta = JSON.parse(
+						readFileSync(join(recorded, "meta.json"), "utf8"),
+					) as { uid: number; pid: number; port: number; startedMs: number };
+					const proc = join(dir, "bin", "proc");
+					cpSync(join(recorded, "proc"), proc, {
+						recursive: true,
+						verbatimSymlinks: true,
+					});
+					const links = JSON.parse(
+						readFileSync(join(recorded, "links.json"), "utf8"),
+					) as Record<string, string>;
+					// git keeps no empty fd directory.
+					for (const [at, target] of Object.entries(links)) {
+						mkdirSync(dirname(join(proc, at)), { recursive: true });
+						symlinkSync(target, join(proc, at));
+					}
+					// The one edit: the socket owner becomes this user (the recording ran as meta.uid).
+					for (const table of ["tcp", "tcp6"]) {
+						const file = join(proc, "net", table);
+						writeFileSync(
+							file,
+							readFileSync(file, "utf8").replace(
+								/^(\s*\d+:\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+)(\d+)/gm,
+								(row, head: string, uid: string) =>
+									Number(uid) === meta.uid
+										? `${head}${process.getuid?.() ?? 0}`
+										: row,
+							),
+						);
+					}
+					const { events, servers } = yield* open(
+						join(dir, "events.db"),
+						(commit) =>
+							Effect.gen(function* () {
+								yield* sessions(commit);
+								yield* eventsUntil(1);
+								yield* Effect.sleep(HOLD_MS * 3);
+								return {
+									events: yield* serverEvents,
+									servers: yield* serversOf("s1"),
+								};
+							}),
+					);
+					return { meta, events, servers };
+				}),
+			).pipe(
+				Effect.tap(({ meta, events, servers }) =>
+					Effect.sync(() => {
+						const seen = {
+							session: "s1",
+							type: "server_seen",
+							server: { pid: meta.pid, port: meta.port },
+							command: "node server.cjs",
+							cwd: "/tmp/work/app",
+							source: "detected",
+						};
+						expect(events).toMatchObject([seen]);
+						// Whole seconds from btime and the stat ticks, within a second of the server's own clock.
+						const startedAt = (events[0]?.server as { startedAt: number })
+							.startedAt;
+						expect(startedAt % 1000).toBe(0);
+						expect(Math.abs(startedAt - meta.startedMs)).toBeLessThan(2000);
+						expect(
+							servers.map(({ key, taskKey }) => [key.port, taskKey]),
+						).toEqual([[meta.port, { taskId: "brec1" }]]);
+						const results = join(import.meta.dirname, "../../../test-results");
+						mkdirSync(results, { recursive: true });
+						writeFileSync(
+							join(results, "82tn-32-33-8-recorded-proc.json"),
+							JSON.stringify({ meta, events, servers }, null, 2),
+						);
 					}),
 				),
 			),

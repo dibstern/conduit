@@ -108,7 +108,7 @@
 {#if part.type === "tool" && isHandBack(part)}
 	<div data-part={part.uuid}><ToolItem message={part} presentation="log" onopen={onhandback} /></div>
 {:else if part.type === "tool"}
-	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.outcome !== "failed")}
+	{@const running = launch ? launch.state.kind === "running" : part.status === "running" || part.status === "pending" || (live && part.result === undefined && part.outcome !== "failed" && part.outcome !== "endedByRun")}
 	{@const failed = part.outcome === "failed"}
 	{@const movedToBackground = part.metadata?.['movedToBackground'] === true}
 	{@const isSkill = part.name === "Skill"}
@@ -125,6 +125,7 @@
 		data-part={part.uuid}
 		data-tool-id={part.id}
 		data-tool-status={part.status}
+		data-tool-outcome={part.outcome}
 		data-launch-state={launch?.state.kind === "finished" ? launch.state.outcome : launch?.state.kind}
 	>
 		<div class="flex items-center gap-[6px]">
@@ -143,7 +144,7 @@
 						]
 							.filter(Boolean)
 							.join(", ")
-					: `${verb} ${subject}`}
+					: `${verb} ${subject}${part.outcome === "endedByRun" ? ", ended by the run" : ""}`}
 				onclick={(event) => {
 					if (hasRowSelection(event)) return;
 					if (launch) return openChildSession(subject);
@@ -190,6 +191,10 @@
 					<span class="shrink-0 text-error [&_.lucide]:w-3 [&_.lucide]:h-3">
 						<Icon name="circle-alert" size={12} />
 					</span>
+				{:else if part.outcome === "endedByRun"}
+					<!-- Its Run ended it before it finished: neutral, as t3code shows an
+					     interrupted tool, not failed (82tn.45). -->
+					<span class="tool-ended-by-run shrink-0 inline-flex items-center gap-[4px] text-text-dimmer [&_.lucide]:w-3 [&_.lucide]:h-3"><Icon name="circle-stop" size={12} />Ended by the run</span>
 				{/if}
 			</Button>
 			{#if childSession}
