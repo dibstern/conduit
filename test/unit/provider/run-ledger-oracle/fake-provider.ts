@@ -642,10 +642,11 @@ export class FakeProvider {
 		this.removing = source.removing;
 		this.survivor = source.survivor;
 		for (const label of source.restartLabels) this.restartLabels.add(label);
-		// D60: main is one host process, so its direct sends are the same for every ledger (3.4).
+		// D60: main is one host process, so its direct sends are the same for every ledger (3.4), a
+		// relaunch's new transmission included (3.6, D50).
 		for (const [key, sends] of source.mainSends)
 			if (
-				!this.mainSends.has(key) &&
+				this.mainSends.get(key) !== sends &&
 				sends.every(({ token }) => !source.mainTransmissions.has(token))
 			)
 				this.mainSends.set(key, sends);
@@ -4014,8 +4015,10 @@ export class FakeProvider {
 					)
 						continue;
 					if (direct) {
+						// The relaunch is a new transmission of the same Run's start (3.6, D50): its token is the
+						// new runId, and the start stays its Run's, so reached reads it (CONTRACT.md 621-640).
 						const runId = `main-run:${this.serial++}`;
-						open.issue = dispatch(runId, { ...open.issue.effect, runId });
+						open.issue = dispatch(runId, open.issue.effect);
 						return emit({
 							tag: "Main",
 							eventId: `main:${this.serial++}`,
