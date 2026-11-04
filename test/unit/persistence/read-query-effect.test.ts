@@ -1520,6 +1520,42 @@ describe("ReadQueryEffect.getStrandedChildren", () => {
 	);
 });
 
+describe("ReadQueryEffect idle corrections", () => {
+	it.effect(
+		"never offer to correct a session the ledger says may still act (82tn.32.30)",
+		() =>
+			Effect.gen(function* () {
+				yield* makeEffectSqlMigrator();
+				const sql = yield* SqlClient.SqlClient;
+				yield* seedSession("root", { status: "idle" });
+				for (const [child, state] of [
+					["quiet-child", "Quiescent"],
+					["open-child", "Open"],
+				] as const) {
+					yield* seedSession(child, { status: "busy", parentId: "root" });
+					yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at)
+						VALUES (${`m-${child}`}, 'root', 'assistant', '', 1, 1)`;
+					yield* sql`INSERT INTO message_parts
+						(id, message_id, type, tool_name, sort_order, created_at, updated_at, metadata)
+						VALUES (${`p-${child}`}, ${`m-${child}`}, 'tool', 'Bash', 0, 1, 1,
+							${JSON.stringify({ childSessionId: child, providerTaskId: `t-${child}` })})`;
+					yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state)
+						VALUES (${child}, 'claude', ${state})`;
+				}
+				const readQuery = yield* makeReadQueryEffect;
+				// 8.3 (2849): the status poller's idle corrections ask whether anything may act.
+				expect(
+					(yield* readQuery.getStrandedChildren(scope)).map(({ id }) => id),
+				).toEqual(["quiet-child"]);
+				expect(
+					(yield* readQuery.getSessionsForReconciliation(scope, [])).map(
+						({ id }) => id,
+					),
+				).toEqual(["quiet-child"]);
+			}).pipe(Effect.provide(testLayer, { local: true })),
+	);
+});
+
 describe("ReadQueryEffect.countPendingApprovalsBySession", () => {
 	it.effect("counts pending approvals by session and type", () =>
 		Effect.gen(function* () {
