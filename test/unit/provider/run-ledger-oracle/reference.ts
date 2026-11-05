@@ -3238,10 +3238,7 @@ export function viewLedger(state: ReferenceState): LedgerView {
 	);
 	const confirm = world.confirm;
 	return {
-		paused: false,
 		...(run === undefined ? {} : { active: activeView(world, run) }),
-		// D58: the oracle models no inbox; main's module computes it in T2.
-		inbox: [],
 		live,
 		tasks,
 		anythingMayAct:

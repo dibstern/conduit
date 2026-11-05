@@ -3378,10 +3378,7 @@ export function viewLedger(state: SessionLedgerState): LedgerView {
 	});
 	const tasks = taskView(book);
 	return {
-		paused: false,
 		...(run === undefined ? {} : { active: activeView(book, run) }),
-		// D58: main's module computes the inbox (T2).
-		inbox: [],
 		live,
 		tasks,
 		...(book.servers.size === 0 ? {} : { servers: new Map(book.servers) }),

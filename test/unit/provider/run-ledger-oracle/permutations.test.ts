@@ -91,10 +91,7 @@ const rename = <T>(value: T, ids: ReadonlyMap<string, string>): T =>
 const outcome = (view: LedgerView, ended: readonly RunEnded[]) => ({
 	ended: ended.map((end) => JSON.stringify(end)).sort(),
 	inputs: Object.fromEntries(
-		[...view.inbox, ...(view.active?.inputs ?? [])].map((input) => [
-			input.inputId,
-			input.state,
-		]),
+		(view.active?.inputs ?? []).map((input) => [input.inputId, input.state]),
 	),
 	stop:
 		view.active?.deadline?.owner === "Stop" ? view.active.deadline.at : null,

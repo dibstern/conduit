@@ -926,7 +926,6 @@ export const scenarios: readonly OracleScenario[] = [
 			});
 			expect(declined.ended).toEqual([]);
 			expect(d.view()).toMatchObject({
-				paused: false,
 				active: { tag: "Running" },
 			});
 			expect(visibleInput(d, "B")?.state).toEqual({ tag: "Queued" });

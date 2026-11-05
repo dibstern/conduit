@@ -17,8 +17,6 @@ import {
 } from "./fake-provider.js";
 
 const emptyView = (): LedgerView => ({
-	paused: false,
-	inbox: [],
 	live: [],
 	interactions: [],
 	tasks: { tag: "none" },

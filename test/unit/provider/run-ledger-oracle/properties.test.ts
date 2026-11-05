@@ -66,8 +66,6 @@ const seedTimeout = 30_000 * Math.max(1, runs / 100);
 const maxCommands = count("RUN_LEDGER_TRACE_COMMANDS", 80);
 const oracleCoverage = new Coverage();
 const emptyView = (): LedgerView => ({
-	paused: false,
-	inbox: [],
 	live: [],
 	tasks: { tag: "none" },
 	anythingMayAct: false,
