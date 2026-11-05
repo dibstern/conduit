@@ -216,21 +216,16 @@ describe("per-project relay stays retired (82tn.16)", () => {
 	it("tests reach projects only through the daemon harness", () => {
 		const tests = ["test", "scripts"].flatMap(sources);
 		expect(
-			tests.filter((file) => file.endsWith("helpers/relay-harness.ts")),
+			tests.filter((file) =>
+				/helpers\/(relay-harness|project-relay)\.ts$/.test(file),
+			),
 		).toEqual([]);
-		// relay: the last users of the standalone relay helpers.
 		expect(
 			tally(
 				tests,
 				named(new Set(["createTestProjectRelay", "createTestRelayStack"])),
 			),
-		).toEqual(
-			new Map([
-				["test/e2e/helpers/e2e-harness.ts", 1],
-				["test/helpers/project-relay.ts", 2],
-				["test/integration/relay/sse-aware-poller-gating.test.ts", 1],
-			]),
-		);
+		).toEqual(new Map());
 	});
 
 	it.each([

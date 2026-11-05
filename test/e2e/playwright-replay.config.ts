@@ -1,5 +1,5 @@
 // Tests UI against recorded HTTP-level OpenCode snapshots (replay mode).
-// No real OpenCode needed — each test starts a real relay backed by
+// No real OpenCode needed — each test starts an in-process daemon backed by
 // MockOpenCodeServer serving the built frontend from dist/frontend/.
 // No separate webServer (vite preview) is needed.
 
@@ -8,6 +8,9 @@ import { defineConfig } from "@playwright/test";
 // Auto-settle waits for the PortWatcher's first scan and hold (CONTRACT.md 8.7). Specs sweep
 // within seconds of starting a relay, so the hold is zero here: readiness is the first scan.
 process.env["CONDUIT_PORT_WATCH_HOLD_MS"] ??= "0";
+// The daemon adds a signed-in host Codex as an account and discovers it; a
+// missing binary keeps the host's Codex out of replay runs.
+process.env["CONDUIT_CODEX_BINARY"] ??= "/nonexistent/conduit-e2e/codex";
 
 export default defineConfig({
 	testDir: "./specs",

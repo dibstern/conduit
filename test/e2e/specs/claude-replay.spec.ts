@@ -811,6 +811,11 @@ test.describe("Claude replay lane", () => {
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/, /^Charlie$/]);
 				await expect(page.getByTestId("pending-input-paused")).toHaveCount(0);
 
+				// Stop once Claude is running Alpha. A Stop that lands before the
+				// prompt reaches Claude is a different case than the one tested here.
+				await expect
+					.poll(() => harness.claudeReplayer?.sentPermissionModes.length)
+					.toBe(1);
 				await chat.stopBtn.click();
 				await expect
 					.poll(() => countEvents(dbPath, "turn.interrupted"))
@@ -1022,6 +1027,11 @@ test.describe("Claude replay lane", () => {
 				await expect.poll(() => sends.length).toBe(2);
 				const [a, b] = sends.map((send) => send.commandId);
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
+				// Restart once Claude is running Alpha, so the restart cuts a running
+				// turn and Bravo is the next prompt Claude receives.
+				await expect
+					.poll(() => harness.claudeReplayer?.sentPermissionModes.length)
+					.toBe(1);
 				const before = ledger(dbPath, sessionId);
 
 				await harness.restart();
@@ -1029,9 +1039,10 @@ test.describe("Claude replay lane", () => {
 					timeout: 30_000,
 				});
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
-				// The cut-off turn never reached the provider, so the row never went
-				// busy and an interrupt is no turn end: nothing tells this live tab
-				// its optimistic turn is over. A fresh load reads the closed turn.
+				// The cut-off turn can end before Claude's first output, so the row
+				// may never go busy and an interrupt is no turn end: nothing tells
+				// this live tab its optimistic turn is over. A fresh load reads the
+				// closed turn.
 				await page.reload();
 				await expect(trayTexts(page)).toHaveText([/^Bravo$/]);
 				await expect(chat.stopBtn).toBeHidden();

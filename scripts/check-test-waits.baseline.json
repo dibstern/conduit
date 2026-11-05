@@ -1337,10 +1337,6 @@
 	"test/integration/relay/pending-input-run-now.test.ts": {
 		"timeout-override": 1
 	},
-	"test/integration/relay/sse-aware-poller-gating.test.ts": {
-		"polling": 12,
-		"timeout-override": 28
-	},
 	"test/media/media-generation.test.ts": {
 		"timeout-override": 1
 	},

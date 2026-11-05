@@ -130,7 +130,7 @@ const {Socket}=require(${JSON.stringify(requireFromHere.resolve("effect/socket")
 const {RpcClient,RpcSerialization}=require(${JSON.stringify(requireFromHere.resolve("effect/rpc"))});
 __setProbeOverrideForTesting(async()=>({models:[],commands:[],agents:[]}));
 test('actual replay fixture worker',async({harness})=>{
- const browser=new TestWsClient('ws://127.0.0.1:'+harness.relayPort+'/rpc?p=e2e-replay',harness.stack.initialSessionId);
+ const browser=new TestWsClient('ws://127.0.0.1:'+harness.relayPort+'/rpc?p=e2e-replay');
  await browser.waitForOpen();
  const originId=browser.getClientId();
  const creation=${JSON.stringify(startupState)}==='losing'?Promise.resolve():Effect.runPromise(Effect.scoped(Effect.gen(function*(){
@@ -323,7 +323,6 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 			const configDir = dirname(harness.eventsDbPath);
 			browser = new TestWsClient(
 				`ws://127.0.0.1:${harness.relayPort}/rpc?p=e2e-replay`,
-				harness.stack.initialSessionId,
 			);
 			await browser.waitForOpen();
 			await browser.subscribePtys("e2e-replay");
@@ -477,7 +476,7 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 	});
 
 	it.each([
-		"relay",
+		"daemon",
 		"mock",
 	] as const)("stops its isolated host when upstream teardown fails (%s)", async (failingStop) => {
 		const root = mkdtempSync("/tmp/conduit-process-e2e-teardown-failure-");
@@ -499,7 +498,7 @@ test.afterAll(()=>writeFileSync(${JSON.stringify(releasePath)},'worker fixtures 
 			env: { HOME: root, PATH: process.env["PATH"] ?? "/usr/bin:/bin" },
 		});
 		const stop = vi
-			.spyOn(failingStop === "relay" ? harness.stack : harness.mock, "stop")
+			.spyOn(failingStop === "daemon" ? harness.project : harness.mock, "stop")
 			.mockRejectedValueOnce(new Error(`${failingStop} teardown failed`));
 		let passed = false;
 		const evidence: Record<string, unknown> = {

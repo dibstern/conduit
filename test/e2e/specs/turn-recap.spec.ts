@@ -3,18 +3,13 @@
 import { isRecord } from "../../../src/lib/utils.js";
 import { surfacingSettingsFixture } from "../fixtures/surfacing-settings.js";
 import { seedPagedRecapTurn } from "../helpers/recap-history.js";
-import {
-	answerSubscribeInstances,
-	expect,
-	test,
-} from "../helpers/replay-fixture.js";
+import { expect, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 
 test("a history page without its prompt subscribes to the stored turn", async ({
 	page,
 	relayUrl,
 	harness,
-	relayInstances,
 }, testInfo) => {
 	const { sessionId, turnId } = await seedPagedRecapTurn(harness);
 	const surfacing = surfacingSettingsFixture();
@@ -33,11 +28,10 @@ test("a history page without its prompt subscribes to the stored turn", async ({
 		)
 			warnings.push(text);
 	});
-	// The replay relay has no daemon settings RPCs. Supply those settings and
-	// the fixture's accounts, but send every recap request to the real relay.
+	// Supply the surfacing settings, but send every recap request to the real
+	// daemon.
 	await page.routeWebSocket(/\/rpc(?:\?|$)/, (ws) => {
 		const server = ws.connectToServer();
-		const answerInstances = answerSubscribeInstances(ws, relayInstances);
 		ws.onMessage((data) => {
 			if (typeof data !== "string") {
 				server.send(data);
@@ -46,7 +40,6 @@ test("a history page without its prompt subscribes to the stored turn", async ({
 			const decoded: unknown = JSON.parse(data);
 			for (const frame of Array.isArray(decoded) ? decoded : [decoded]) {
 				const encoded = JSON.stringify(frame);
-				if (answerInstances(encoded)) continue;
 				if (isRecord(frame) && frame["_tag"] === "Request") {
 					if (
 						frame["tag"] === "GetMessageSurfacing" ||
