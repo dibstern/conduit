@@ -280,6 +280,10 @@ interface World {
 		  }
 		| undefined;
 	snapshotEntry: number;
+	/** 8.4 (2876-2877, 2893-2897): the Run a retire confirm released, and its entry, used once. */
+	retireConfirmed?:
+		| { readonly runId?: string | undefined; entry?: number | undefined }
+		| undefined;
 	lastNotified?: TaskKey | undefined;
 }
 
@@ -1046,7 +1050,14 @@ function gateEndSession(
 	commandId: string,
 	confirmed?: number,
 ): void {
-	if (taskView(world).tag === "none" || confirmed === world.snapshotEntry)
+	const retired = world.retireConfirmed;
+	const continues = confirmed !== undefined && confirmed === retired?.entry;
+	if (continues) retired.entry = undefined;
+	if (
+		taskView(world).tag === "none" ||
+		confirmed === world.snapshotEntry ||
+		continues
+	)
 		foldEndSession(world, runId, commandId);
 	else
 		world.confirm = {
@@ -1255,6 +1266,7 @@ function openRetireGate(world: World) {
 	if (
 		run?.phase === "Interrupting" &&
 		run.by !== "end" &&
+		world.retireConfirmed?.runId !== run.runId &&
 		taskView(world).tag !== "none"
 	)
 		world.confirm ??= { step: "retire", runId: run.runId };
@@ -2398,6 +2410,7 @@ function commit(
 	else if (
 		run !== undefined &&
 		run.phase === "Interrupting" &&
+		world.retireConfirmed?.runId !== run.runId &&
 		taskView(world).tag !== "none"
 	)
 		world.confirm ??= { step: "retire", runId: run.runId };
@@ -2614,6 +2627,11 @@ function control(
 			if (command.snapshotEntry !== world.snapshotEntry)
 				return rejected("stale confirm (8.4)");
 			world.confirm = undefined;
+			if (gate.step === "retire")
+				world.retireConfirmed = {
+					runId: gate.runId,
+					entry: command.snapshotEntry,
+				};
 			if (gate.step === "end_session" && gate.commandId !== undefined)
 				foldEndSession(world, gate.runId ?? null, gate.commandId);
 			return changed;

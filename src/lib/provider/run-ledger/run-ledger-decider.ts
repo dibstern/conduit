@@ -330,6 +330,14 @@ interface Book {
 		| undefined;
 	/** 8.4, D45: raised by every non-older snapshot, process_started and raised label. */
 	snapshotEntry: number;
+	/**
+	 * 8.4 (2876-2877, 2893-2897): the Run whose retire a confirm released, which no snapshot asks
+	 * about again, and the entry it matched, which U2's close carries once to continue that step.
+	 * D45 still counts every snapshot.
+	 */
+	retireConfirmed?:
+		| { readonly runId?: string | undefined; entry?: number | undefined }
+		| undefined;
 	/** 8.7: by port; only server_gone removes one (8.2). */
 	readonly servers: Map<number, Server>;
 }
@@ -2763,6 +2771,7 @@ function openRetireGate(book: Book) {
 	if (
 		run?.phase === "Interrupting" &&
 		run.by !== "end" &&
+		book.retireConfirmed?.runId !== run.runId &&
 		taskView(book).tag !== "none"
 	)
 		book.confirm ??= { step: "retire", runId: run.runId };
@@ -2778,7 +2787,16 @@ function gateEndSession(
 	commandId: string,
 	confirmed?: number,
 ) {
-	if (taskView(book).tag === "none" || confirmed === book.snapshotEntry)
+	// 2893-2897: U2's close continues the retire step its confirm released, which matched the latest
+	// snapshot when given (2873), so a repeat snapshot since does not ask twice.
+	const retired = book.retireConfirmed;
+	const continues = confirmed !== undefined && confirmed === retired?.entry;
+	if (continues) retired.entry = undefined;
+	if (
+		taskView(book).tag === "none" ||
+		confirmed === book.snapshotEntry ||
+		continues
+	)
 		endSession(book, run, commandId);
 	else book.confirm = { step: "end_session", runId: run?.runId, commandId };
 }
@@ -2854,6 +2872,7 @@ function commit(
 	if (
 		by !== "end" &&
 		run?.phase === "Interrupting" &&
+		book.retireConfirmed?.runId !== run.runId &&
 		taskView(book).tag !== "none"
 	)
 		book.confirm ??= { step: "retire", runId: run.runId };
@@ -2981,6 +3000,11 @@ function control(
 			if (command.snapshotEntry !== book.snapshotEntry)
 				return rejected("stale confirm (8.4)");
 			book.confirm = undefined;
+			if (gate.step === "retire")
+				book.retireConfirmed = {
+					runId: gate.runId,
+					entry: command.snapshotEntry,
+				};
 			if (gate.step === "end_session" && gate.commandId !== undefined)
 				endSession(book, findRun(book, gate.runId), gate.commandId);
 			return changed;
