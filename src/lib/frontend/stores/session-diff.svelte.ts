@@ -64,6 +64,8 @@ export class SessionDiffView {
 				readonly folders: readonly DiffFolder[];
 				/** The turn's run was never captured, so there is nothing to list. */
 				readonly notCaptured?: true;
+				/** A tool call's listing: where its Tool File Changes came from. */
+				readonly source?: "provider" | "toolInput";
 		  }
 	>({ kind: "loading" });
 	// Reactive: a row's load() reads it, so a row refused while hidden asks again when shown.
@@ -187,6 +189,7 @@ export class SessionDiffView {
 				kind: "listed",
 				folders,
 				...(listing.notCaptured && { notCaptured: listing.notCaptured }),
+				...(listing.source && { source: listing.source }),
 			};
 			for (const row of rows.values())
 				if (row.patch.kind === "gone") row.load();

@@ -12,7 +12,12 @@
 			highlighterOptions: { theme, tokenizeMaxLineLength: 1000 },
 		});
 	const kindLabel = { lfs: "Git LFS", submodule: "Submodule", symlink: "Symlink" } as const;
-	const noteLabel = { crlf: "CRLF", latin1: "Not UTF-8 (Latin-1)" } as const;
+	const noteLabel = {
+		crlf: "CRLF",
+		latin1: "Not UTF-8 (Latin-1)",
+		replaced: "Replaced an existing file",
+		unchecked: "May replace an existing file",
+	} as const;
 </script>
 
 <script lang="ts">

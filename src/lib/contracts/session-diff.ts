@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-/** Which change set a Session Diff shows. Tool-call scopes extend this union. */
+/** Which change set a Session Diff shows. */
 export const SessionDiffScopeSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("unstaged") }),
 	/** The merge-base of base and HEAD against the live working tree; null base is the launch base. */
@@ -10,6 +10,8 @@ export const SessionDiffScopeSchema = Schema.Union([
 	}),
 	/** One finished turn's captured changes; `turnId` is the durable turns.id. */
 	Schema.Struct({ kind: Schema.Literal("turn"), turnId: Schema.String }),
+	/** One tool call's Tool File Changes; `toolId` is the tool part's call id. */
+	Schema.Struct({ kind: Schema.Literal("toolCall"), toolId: Schema.String }),
 ]);
 export type SessionDiffScope = typeof SessionDiffScopeSchema.Type;
 
@@ -91,16 +93,22 @@ export const SessionDiffListingSchema = Schema.Struct({
 	folders: Schema.Array(SessionDiffFolderSchema),
 	/** Turn scope: the turn's run has no capture, so it lists no folders. */
 	notCaptured: Schema.optionalKey(Schema.Literal(true)),
+	/** Tool-call scope: the provider reported the changes, or they were read from the tool's input. */
+	source: Schema.optionalKey(Schema.Literals(["provider", "toolInput"])),
 });
 export type SessionDiffListing = typeof SessionDiffListingSchema.Type;
 
 /**
  * One file's patch. `crlf`: its lines end in CRLF, which renders invisibly.
  * `latin1`: it is not UTF-8, so each byte was decoded as one Latin-1 character.
+ * `replaced`: a tool reported a new file where the run started with one.
+ * `unchecked`: a tool reported a new file the run's capture cannot confirm.
  */
 export const SessionDiffPatchSchema = Schema.Struct({
 	patch: Schema.String,
-	notes: Schema.optional(Schema.Array(Schema.Literals(["crlf", "latin1"]))),
+	notes: Schema.optional(
+		Schema.Array(Schema.Literals(["crlf", "latin1", "replaced", "unchecked"])),
+	),
 });
 export type SessionDiffPatch = typeof SessionDiffPatchSchema.Type;
 

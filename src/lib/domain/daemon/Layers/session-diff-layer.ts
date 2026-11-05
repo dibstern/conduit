@@ -9,6 +9,7 @@ import {
 	type SessionDiffFile,
 	type SessionDiffFolder,
 	type SessionDiffListing,
+	type SessionDiffPatch,
 	type SessionDiffScope,
 } from "../../../contracts/session-diff.js";
 import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
@@ -24,6 +25,7 @@ import type {
 } from "../Services/session-diff.js";
 import { SessionGit } from "../Services/session-git.js";
 import type { SubprocessResult } from "../Services/subprocess.js";
+import { listToolCall } from "./session-diff-tool-call.js";
 
 const MEMO_LIMIT = 64;
 const STATUS = {
@@ -116,7 +118,54 @@ type Listed =
 			readonly files: readonly SessionDiffFile[];
 			readonly shared?: true;
 	  }
+	/** A tool call's files, with the patches its Tool File Changes carried. */
+	| {
+			readonly folder: string;
+			readonly files: readonly SessionDiffFile[];
+			readonly patches: ReadonlyMap<string, SessionDiffPatch>;
+	  }
 	| Extract<SessionDiffFolder, { readonly error: unknown }>;
+
+/** What file() needs to serve a listed folder's patches again. */
+type MemoFolder = (
+	| { readonly snapshot: FolderSnapshot; readonly from: string }
+	| { readonly patches: ReadonlyMap<string, SessionDiffPatch> }
+) & { readonly files: ReadonlyMap<string, SessionDiffFile> };
+
+/** What a listed folder's revision hashes. */
+const revisionOf = (folder: Listed) => {
+	if ("snapshot" in folder)
+		return [folder.folder, folder.snapshot, folder.from, folder.base];
+	// A tool call's notes can change with its capture while its files do not.
+	if ("files" in folder)
+		return [folder.folder, folder.files, [...folder.patches]];
+	return [folder.folder, folder.error, folder.message];
+};
+
+const listingOf = (folder: Listed): SessionDiffFolder => {
+	if ("snapshot" in folder)
+		return {
+			folder: folder.folder,
+			files: folder.files,
+			...(folder.base ? { base: folder.base } : {}),
+			...(folder.shared ? { shared: true as const } : {}),
+		};
+	if ("files" in folder) return { folder: folder.folder, files: folder.files };
+	return folder;
+};
+
+const memoOf = (folder: Listed): (readonly [string, MemoFolder])[] => {
+	if (!("files" in folder)) return [];
+	const files = new Map(folder.files.map((file) => [file.path, file]));
+	return [
+		[
+			folder.folder,
+			"snapshot" in folder
+				? { snapshot: folder.snapshot, from: folder.from, files }
+				: { patches: folder.patches, files },
+		],
+	];
+};
 
 export const makeSessionDiff = Effect.gen(function* () {
 	const timeline = yield* FolderTimeline;
@@ -128,14 +177,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 			readonly sessionId: string;
 			readonly scope: string;
 			readonly listing: SessionDiffListing;
-			readonly folders: ReadonlyMap<
-				string,
-				{
-					readonly snapshot: FolderSnapshot;
-					readonly from: string;
-					readonly files: ReadonlyMap<string, SessionDiffFile>;
-				}
-			>;
+			readonly folders: ReadonlyMap<string, MemoFolder>;
 		}
 	>();
 	// One per subscribed (session, folders, scope): the only thing that snapshots on a change.
@@ -404,74 +446,54 @@ export const makeSessionDiff = Effect.gen(function* () {
 			: undefined;
 	};
 
+	/** A tool call's own changes, a turn's capture, or each folder's git diff. */
+	const listScope = (session: SessionDiffSession, scope: SessionDiffScope) =>
+		Effect.gen(function* () {
+			if (scope.kind === "toolCall")
+				return listToolCall(
+					session.folders,
+					session.toolCall?.changes ?? [],
+					session.capture,
+				);
+			if (scope.kind === "turn")
+				return session.capture ? yield* listTurn(session, session.capture) : [];
+			return yield* Effect.forEach(
+				session.folders,
+				(folder) => listFolder(folder, scope),
+				{ concurrency: "unbounded" },
+			);
+		});
+
 	const list: SessionDiff["Service"]["list"] = (session, scope, revision) =>
 		Effect.gen(function* () {
 			const scopeKey = JSON.stringify(scope);
 			const recalled = recall(session.id, scopeKey, revision);
 			if (recalled) return recalled;
 			const notCaptured = scope.kind === "turn" && !session.capture;
-			const folders =
-				scope.kind !== "turn"
-					? yield* Effect.forEach(
-							session.folders,
-							(folder) => listFolder(folder, scope),
-							{ concurrency: "unbounded" },
-						)
-					: session.capture
-						? yield* listTurn(session, session.capture)
-						: [];
+			const folders: readonly Listed[] = yield* listScope(session, scope);
 			const listed = createHash("sha256")
 				.update(
 					JSON.stringify([
 						session.id,
 						scopeKey,
-						folders.map((folder) =>
-							"snapshot" in folder
-								? [folder.folder, folder.snapshot, folder.from, folder.base]
-								: [folder.folder, folder.error, folder.message],
-						),
+						session.toolCall?.source,
+						folders.map(revisionOf),
 					]),
 				)
 				.digest("hex")
 				.slice(0, 32);
 			const listing = {
 				revision: listed,
-				folders: folders.map(
-					(folder): SessionDiffFolder =>
-						"snapshot" in folder
-							? {
-									folder: folder.folder,
-									files: folder.files,
-									...(folder.base ? { base: folder.base } : {}),
-									...(folder.shared ? { shared: true as const } : {}),
-								}
-							: folder,
-				),
+				folders: folders.map(listingOf),
 				...(notCaptured ? { notCaptured: true as const } : {}),
+				...(session.toolCall ? { source: session.toolCall.source } : {}),
 			} satisfies SessionDiffListing;
 			memo.delete(listed);
 			memo.set(listed, {
 				sessionId: session.id,
 				scope: scopeKey,
 				listing,
-				folders: new Map(
-					folders.flatMap((folder) =>
-						"snapshot" in folder
-							? [
-									[
-										folder.folder,
-										{
-											snapshot: folder.snapshot,
-											from: folder.from,
-											files: new Map(
-												folder.files.map((file) => [file.path, file]),
-											),
-										},
-									],
-								]
-							: [],
-					),
-				),
+				folders: new Map(folders.flatMap(memoOf)),
 			});
 			for (const stale of memo.keys()) {
 				if (memo.size <= MEMO_LIMIT) break;
@@ -580,6 +602,14 @@ export const makeSessionDiff = Effect.gen(function* () {
 						reason: "too-large",
 						message: `${request.path} is too large to diff`,
 					});
+				if ("patches" in folder) {
+					const patch = folder.patches.get(request.path);
+					if (patch) return patch;
+					return yield* new SessionDiffError({
+						reason: "not-listed",
+						message: `${request.path} has no recorded patch`,
+					});
+				}
 				const { snapshot, from } = folder;
 				const chunks: Buffer[] = [];
 				yield* timeline

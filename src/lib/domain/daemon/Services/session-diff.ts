@@ -5,7 +5,10 @@ import type {
 	SessionDiffPatch,
 	SessionDiffScope,
 } from "../../../contracts/session-diff.js";
-import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
+import type {
+	RunChangesCaptured,
+	ToolFileChange,
+} from "../../../contracts/stored-event.js";
 import { makeSessionDiff } from "../Layers/session-diff-layer.js";
 import { FolderTimelineLive } from "./folder-timeline.js";
 
@@ -23,6 +26,11 @@ export interface SessionDiffSession {
 	readonly folders: readonly SessionDiffFolder[];
 	/** The turn's recorded run capture; a turn scope without one is not captured. */
 	readonly capture?: RunChangesCaptured;
+	/** A tool-call scope's Tool File Changes and where they came from. */
+	readonly toolCall?: {
+		readonly source: "provider" | "toolInput";
+		readonly changes: readonly ToolFileChange[];
+	};
 }
 
 /**

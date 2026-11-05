@@ -73,6 +73,7 @@ export type ClaudeTraceName =
 	| "stop-with-steer-pending"
 	| "subagent-task-error-turn"
 	| "subagent-task-turn"
+	| "tool-file-changes-turn"
 	| "two-steers-one-boundary";
 
 export interface ClaudeReplayPlan {
