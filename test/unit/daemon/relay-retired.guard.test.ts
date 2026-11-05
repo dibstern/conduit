@@ -116,6 +116,16 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		);
 	});
 
+	it("builds daemon-wide services once, in the daemon's layers", () => {
+		expect(tally(server, named(new Set(["makePortWatcherLive"])))).toEqual(
+			new Map([
+				["src/lib/domain/persistence/Services/port-watcher.ts", 1],
+				// Its import and its one build.
+				[`${daemon}/Layers/daemon-layers.ts`, 2],
+			]),
+		);
+	});
+
 	it("opens project and session lifetimes only in Owner Scopes", () => {
 		expect(tally(server, named(scopeOpeners))).toEqual(
 			new Map([

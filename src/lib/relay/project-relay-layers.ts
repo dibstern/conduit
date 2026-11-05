@@ -76,7 +76,6 @@ import { SessionManagerOwner } from "../domain/daemon/Services/session-manager-o
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
-import { makePortWatcherLive } from "../domain/persistence/Services/port-watcher.js";
 import { RunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -205,7 +204,6 @@ import { ClaudeProviderInstance } from "../provider/claude/claude-provider-insta
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
-import { readCodexSessionIdentity } from "../provider/codex/codex-session-store.js";
 import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
@@ -1111,17 +1109,7 @@ export function createProjectRelayLayers({
 		relayStateAndBridges,
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
-		Layer.mergeAll(
-			StatusPollerLive,
-			RunLedgerSchedulerLive,
-			makePortWatcherLive(
-				(sessionId) =>
-					readCodexSessionIdentity(
-						config.configDir ?? getConfigDir(),
-						sessionId,
-					)?.threadId,
-			),
-		),
+		Layer.merge(StatusPollerLive, RunLedgerSchedulerLive),
 		relayStateBridgesAndSessions,
 	);
 	const relayStateWithRecaps = Layer.merge(
