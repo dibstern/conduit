@@ -191,6 +191,8 @@ for (const ending of [
 			updatedAt: Date.now(),
 			backgroundTasks: tasks,
 		};
+		// The composer reads busy from the row's activity, not its status (82tn.32.30).
+		const idle = { ...row, status: "idle", activity: rowActivity(false) };
 		rpc.upsertShellRow(row);
 		await expect(
 			page.getByRole("button", { name: /^2 background tasks(:|$)/ }),
@@ -209,7 +211,7 @@ for (const ending of [
 			.filter({ hasText: "Turn stopped." });
 		if (ending === "unsupported driver") {
 			// A later wire round trip ensures the stop reply was processed.
-			rpc.upsertShellRow({ ...row, status: "idle" });
+			rpc.upsertShellRow(idle);
 			await expect(page.locator("#stop")).toBeHidden();
 			await expect(offer).toHaveCount(0);
 		} else {
@@ -219,7 +221,7 @@ for (const ending of [
 			).toBeVisible();
 			// Cancel alone must not hide working while the server still says busy.
 			await expect(page.locator("#stop")).toBeVisible();
-			rpc.upsertShellRow({ ...row, status: "idle" });
+			rpc.upsertShellRow(idle);
 			await expect(page.locator("#stop")).toBeHidden();
 			if (ending === "stop tasks") {
 				await offer.getByRole("button", { name: "Stop them" }).click();
@@ -237,21 +239,19 @@ for (const ending of [
 						name: /^2 background tasks(:|$)/,
 					}),
 				).toBeVisible();
-				rpc.upsertShellRow({ ...row, status: "idle", backgroundTasks: [] });
+				rpc.upsertShellRow({ ...idle, backgroundTasks: [] });
 			} else if (ending === "tasks finish") {
 				rpc.upsertShellRow({
-					...row,
-					status: "idle",
+					...idle,
 					backgroundTasks: tasks.slice(0, 1),
 				});
 				await expect(offer).toContainText("Turn stopped. 1 task still running");
-				rpc.upsertShellRow({ ...row, status: "idle", backgroundTasks: [] });
+				rpc.upsertShellRow({ ...idle, backgroundTasks: [] });
 			} else if (ending === "navigate") {
 				rpc.upsertShellRow({
-					...row,
+					...idle,
 					id: "another-session",
 					title: "Another session",
-					status: "idle",
 					backgroundTasks: [],
 				});
 				await page
