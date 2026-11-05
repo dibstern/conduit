@@ -93,6 +93,8 @@ export const SessionDiffBaseSchema = Schema.Struct({
 	/** A ref, the launch commit, or HEAD. */
 	ref: Schema.String,
 	source: Schema.Literals(["override", "launch", "default", "head"]),
+	/** What the ref resolved as: a branch shadows a remote branch, which shadows a tag. */
+	kind: Schema.Literals(["branch", "remote", "tag", "commit"]),
 	fallback: Schema.optional(
 		Schema.Struct({
 			wanted: Schema.String,

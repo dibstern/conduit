@@ -234,19 +234,37 @@ export const makeSessionDiff = Effect.gen(function* () {
 			const verify = (ref: string) =>
 				git("rev-parse", "--verify", "--quiet", "--end-of-options", ref);
 			let fallback: SessionDiffBase["fallback"];
-			const attempt = (ref: string, source: SessionDiffBase["source"]) =>
+			type Kind = SessionDiffBase["kind"];
+			/** The first candidate that names a commit wins, so git never picks among same-named refs. */
+			const attempt = (
+				ref: string,
+				source: SessionDiffBase["source"],
+				candidates: readonly (readonly [string, Kind])[],
+			) =>
 				Effect.gen(function* () {
-					const commit = yield* verify(`${ref}^{commit}`);
+					let resolved: { commit: string; kind: Kind } | undefined;
+					for (const [name, kind] of candidates) {
+						const commit = yield* verify(`${name}^{commit}`);
+						if (commit) {
+							resolved = { commit, kind };
+							break;
+						}
+					}
 					const mergeBase =
-						commit && (yield* git("merge-base", commit, "HEAD"));
-					if (mergeBase)
+						resolved && (yield* git("merge-base", resolved.commit, "HEAD"));
+					if (resolved && mergeBase)
 						return {
 							from: mergeBase,
-							base: { ref, source, ...(fallback ? { fallback } : {}) },
+							base: {
+								ref,
+								source,
+								kind: resolved.kind,
+								...(fallback ? { fallback } : {}),
+							},
 						};
 					fallback ??= {
 						wanted: ref,
-						reason: !commit
+						reason: !resolved
 							? "missing"
 							: (yield* git("rev-parse", "--is-shallow-repository")) === "true"
 								? "shallow"
@@ -254,23 +272,40 @@ export const makeSessionDiff = Effect.gen(function* () {
 					};
 					return undefined;
 				});
+			const branch = (name: string) =>
+				[`refs/heads/${name}`, "branch"] as const;
 			const wanted = [
-				override === null ? undefined : attempt(override, "override"),
+				// The picker offers branches, so a name is a branch first; git resolves it bare only when no ref has it.
+				override === null
+					? undefined
+					: attempt(override, "override", [
+							branch(override),
+							[`refs/remotes/${override}`, "remote"],
+							[`refs/tags/${override}`, "tag"],
+							[override, "commit"],
+						]),
 				folder.launchBase === undefined
 					? undefined
-					: attempt(folder.launchBase, "launch"),
+					: attempt(folder.launchBase, "launch", [
+							[folder.launchBase, "commit"],
+						]),
 				// origin/HEAD can name a branch the remote has since renamed, so each default gets its try.
-				...[
-					git("symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"),
-					verify("refs/heads/main").pipe(
-						Effect.map((found) => found && "main"),
+				git("symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").pipe(
+					Effect.flatMap((ref) =>
+						ref === null
+							? Effect.undefined
+							: attempt(ref.replace(/^refs\/remotes\//, ""), "default", [
+									[ref, "remote"],
+								]),
 					),
-					verify("refs/heads/master").pipe(
-						Effect.map((found) => found && "master"),
-					),
-				].map((ref) =>
-					Effect.flatMap(ref, (found) =>
-						found === null ? Effect.undefined : attempt(found, "default"),
+				),
+				...["main", "master"].map((name) =>
+					verify(`refs/heads/${name}`).pipe(
+						Effect.flatMap((found) =>
+							found === null
+								? Effect.undefined
+								: attempt(name, "default", [branch(name)]),
+						),
 					),
 				),
 			];
@@ -291,6 +326,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 				base: {
 					ref: "HEAD",
 					source: "head",
+					kind: "commit",
 					...(fallback ? { fallback } : {}),
 				} satisfies SessionDiffBase,
 			};

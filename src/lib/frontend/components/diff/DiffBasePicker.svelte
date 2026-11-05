@@ -2,8 +2,9 @@
 <script module lang="ts">
 	import type { SessionDiffBase } from "../../../contracts/session-diff.js";
 
-	/** A launch base is a bare commit, so it reads as one. */
-	export const baseLabel = ({ ref, source }: SessionDiffBase) => (source === "launch" ? `launch ${ref.slice(0, 7)}` : ref);
+	/** A launch base is a bare commit, so it reads as one; a tag says so, since branches come first. */
+	export const baseLabel = ({ ref, source, kind }: SessionDiffBase) =>
+		source === "launch" ? `launch ${ref.slice(0, 7)}` : kind === "tag" ? `tag ${ref}` : ref;
 </script>
 
 <script lang="ts">
