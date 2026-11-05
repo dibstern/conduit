@@ -31,6 +31,7 @@ interface CursorCapture {
 	data?: {
 		agentId?: string;
 		credentialFingerprint?: string;
+		prompt?: string | { text?: string };
 		local?: {
 			cwd: string;
 			dirs: string[];
@@ -555,7 +556,7 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 			.opencodeRequests()
 			.filter(({ url }) => url.includes("/prompt_async")),
 	};
-	const continuation: Record<string, unknown> = {
+	const continuation: Record<string, Record<string, unknown>> = {
 		claude: {
 			status: "pending",
 			requires: ["conduit-test-82tn.9.3", "conduit-test-82tn.9.4"],
@@ -572,33 +573,30 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 		const before = snapshot(session.id);
 		const historyBefore = (await a.history(session.id)).map(({ id }) => id);
 		const runnerPidsBefore = fixture.runnerPids();
-		const outcome = await fixture
-			.requestRpc({
-				_tag: "ContinueSession",
-				sessionId: session.id,
-				instanceId: accounts[driver][1],
-				expectedInstanceId: accounts[driver][0],
-			})
-			.then(
-				() => ({ status: "accepted" }),
-				(error: unknown) => ({
-					status: "rejected",
-					reason: error instanceof Error ? error.message : String(error),
-				}),
+		// ad4c: OpenCode has no switch handoff yet, so a move to another
+		// OpenCode account is refused; Cursor's is proven after this loop.
+		if (driver === "opencode") {
+			const outcome = await fixture
+				.requestRpc({
+					_tag: "ContinueSession",
+					sessionId: session.id,
+					instanceId: accounts[driver][1],
+					expectedInstanceId: accounts[driver][0],
+				})
+				.then(
+					() => ({ status: "accepted" }),
+					(error: unknown) => ({
+						status: "rejected",
+						reason: error instanceof Error ? error.message : String(error),
+					}),
+				);
+			continuation[driver] = { otherAccount: { status: "refused", outcome } };
+			expect(outcome.status).toBe("rejected");
+			expect("reason" in outcome && outcome.reason).toMatch(
+				/native resume|driver|account/i,
 			);
-		const attempt = {
-			status: "blocked-on-HEAD",
-			reason:
-				"Public ContinueSession rejects this driver's supportsNativeResume=false contract; same-account continuation is verified below",
-			outcome,
-			before,
-		};
-		continuation[driver] = attempt;
-		expect(outcome.status).toBe("rejected");
-		expect("reason" in outcome && outcome.reason).toMatch(
-			/native resume|driver|account/i,
-		);
-		expect(snapshot(session.id)).toEqual(before);
+			expect(snapshot(session.id)).toEqual(before);
+		}
 		if (driver === "cursor") {
 			const auth = JSON.parse(readFileSync(cursorAuth, "utf8")) as {
 				accounts: Record<string, { credential: { apiKey: string } }>;
@@ -630,7 +628,7 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 			expect(fixture.runnerPids()).toEqual(runnerPidsBefore);
 		}
 		continuation[driver] = {
-			...attempt,
+			...continuation[driver],
 			sameAccount: {
 				status: "passed",
 				before,
@@ -641,6 +639,97 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 			},
 		};
 	}
+	// ad4c: Cursor cannot resume a native agent on another account, so a move
+	// to Cursor B opens a fresh agent there and hands it the kept history.
+	const cursorSession = sessions.find(
+		(row) => row.driver === "cursor" && row.project === "process-test",
+	);
+	if (!cursorSession) throw new Error("Missing Cursor continuation session");
+	const cursorHistoryBefore = (await a.history(cursorSession.id)).map(
+		({ id }) => id,
+	);
+	const switchObservationIndex = rows().length;
+	const switchCaptureIndex = cursorRows().length;
+	await fixture.requestRpc({
+		_tag: "ContinueSession",
+		sessionId: cursorSession.id,
+		instanceId: accounts.cursor[1],
+		expectedInstanceId: accounts.cursor[0],
+	});
+	const switchPrompt = "other-account-continuation-cursor";
+	await a.send(cursorSession.id, switchPrompt, 90_000);
+	const cursorHistoryAfter = (await a.history(cursorSession.id)).map(
+		({ id }) => id,
+	);
+	expect(cursorHistoryAfter).toEqual(
+		expect.arrayContaining(cursorHistoryBefore),
+	);
+	expect(cursorHistoryAfter.length).toBeGreaterThan(cursorHistoryBefore.length);
+	expect(
+		rows()
+			.slice(switchObservationIndex)
+			.find((row) => row.kind === "send" && row.sessionId === cursorSession.id),
+	).toMatchObject({
+		driver: "cursor",
+		projectId: "process-test",
+		accountId: accounts.cursor[1],
+		workspaceRoot: fixture.projectDir,
+		extraFolders: [extraA],
+	});
+	const switchCapture = cursorRows().slice(switchCaptureIndex);
+	const switchCreate = switchCapture.find(
+		({ kind }) => kind === "create.options",
+	)?.data;
+	expect(switchCreate?.local?.cwd).toBe(fixture.projectDir);
+	expect(switchCreate?.credentialFingerprint).toBe(
+		cursorCreates.find(({ data }) => data?.local?.cwd === projectB)?.data
+			?.credentialFingerprint,
+	);
+	expect(switchCapture.some(({ kind }) => kind === "resumed")).toBe(false);
+	const switchSend = switchCapture
+		.filter(({ kind }) => kind === "send.options")
+		.map(({ data }) =>
+			typeof data?.prompt === "string" ? data.prompt : data?.prompt?.text,
+		)
+		.at(-1);
+	// The handoff text itself is proven by ad4c-provider-switch.test.ts. Here
+	// the replay gives the new agent the old agent's fixed id, so the store's
+	// earlier run reads as an accepted seed and the prompt goes out bare.
+	expect(switchSend?.endsWith(switchPrompt)).toBe(true);
+	const handoffs = (() => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare<[string], { data: string }>(
+					"SELECT data FROM events WHERE session_id = ? AND type = 'session.handoff_delivered' ORDER BY sequence",
+				)
+				.all(cursorSession.id)
+				.map(({ data }) => JSON.parse(data) as Record<string, unknown>);
+		} finally {
+			db.close();
+		}
+	})();
+	expect(handoffs).toEqual([
+		expect.objectContaining({
+			instanceId: accounts.cursor[1],
+			strategy: "fresh",
+		}),
+	]);
+	expect(snapshot(cursorSession.id).bindings.at(-1)?.provider).toBe(
+		accounts.cursor[1],
+	);
+	continuation["cursor"] = {
+		...continuation["cursor"],
+		otherAccount: {
+			status: "passed",
+			historyBefore: cursorHistoryBefore,
+			historyAfter: cursorHistoryAfter,
+			launch: switchCreate,
+			prompt: switchSend,
+			handoffs,
+			after: snapshot(cursorSession.id),
+		},
+	};
 	const survivorPids = sessions
 		.filter(
 			({ project, driver }) => project === "project-b" && driver !== "opencode",
@@ -726,7 +815,7 @@ it("proves daemon driver ownership, account isolation, launch context and contin
 		accountResourceIsolationAndExactRemoval:
 			"passed for Cursor/OpenCode; Claude account scopes pending 9.4",
 		crossAccountContinuation:
-			"partial: public cross-account native resume disabled for Cursor/OpenCode on HEAD; Claude pending 9.3/9.4",
+			"Cursor passed: another account starts a fresh agent, keeps the history and records a fresh handoff (ad4c); OpenCode refused until its switch handoff lands; Claude pending 9.3/9.4",
 		perCallLaunchContext: "passed; source guard is verified separately",
 	};
 }, 240_000);
