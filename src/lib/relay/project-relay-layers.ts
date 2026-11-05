@@ -158,7 +158,11 @@ import {
 	SessionEventBusTag,
 } from "../domain/relay/Services/session-event-bus.js";
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
-import type { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	attachSessionManagerLive,
+	SessionManagerServiceLive,
+	SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import {
 	emptySessionManagerState,
 	makeSessionManagerCoordination,
@@ -1076,6 +1080,26 @@ export function createProjectRelayLayers({
 		}),
 		bridgeLayers,
 	);
+	const daemonSessionManager = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		SessionManagerServiceTag,
+	);
+	const relayStateBridgesAndSessions = Layer.provideMerge(
+		attachSessionManagerLive.pipe(
+			Layer.provide(
+				Option.isSome(daemonSessionManager)
+					? Layer.succeedContext(
+							Context.make(
+								SessionManagerServiceTag,
+								daemonSessionManager.value,
+							),
+						)
+					: // A standalone relay is its own daemon.
+						SessionManagerServiceLive,
+			),
+		),
+		relayStateAndBridges,
+	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		Layer.mergeAll(
 			StatusPollerLive,
@@ -1088,7 +1112,7 @@ export function createProjectRelayLayers({
 					)?.threadId,
 			),
 		),
-		relayStateAndBridges,
+		relayStateBridgesAndSessions,
 	);
 	const relayStateWithRecaps = Layer.merge(
 		makeRecapServiceLive({

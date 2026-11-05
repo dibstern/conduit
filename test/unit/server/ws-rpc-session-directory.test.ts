@@ -21,6 +21,7 @@ import {
 import {
 	makeMockConfig,
 	makeMockSessionManagerService,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
 // Failure modes: payload/default project overrides ownership; missing ids touch
@@ -42,9 +43,11 @@ it.effect(
 							makePersistenceEffectLayer(":memory:", "b", undefined, bus),
 							Layer.succeed(ConfigTag)(makeMockConfig({ slug: "b" })),
 							Layer.succeed(SessionManagerServiceTag)(
-								makeMockSessionManagerService({
-									sessionExists: () => Effect.succeed(true),
-								}),
+								mockSessionManagers(
+									makeMockSessionManagerService({
+										sessionExists: () => Effect.succeed(true),
+									}),
+								),
 							),
 						),
 					),

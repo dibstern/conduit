@@ -2,7 +2,10 @@ import { Effect, Layer, PubSub, Scope } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import type { Alert } from "../../../src/lib/contracts/ws-rpc.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	StatusPollerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
@@ -11,6 +14,10 @@ import {
 	wirePollersEffect,
 } from "../../../src/lib/relay/poller-wiring.js";
 import type { RelayMessage } from "../../../src/lib/shared-types.js";
+import {
+	makeMockConfig,
+	mockSessionManagers,
+} from "../../helpers/mock-factories.js";
 
 describe("wirePollers", () => {
 	it("uses the service-backed parent map when suppressing subagent done notifications", () => {
@@ -82,10 +89,13 @@ describe("wirePollers", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(AlertsTag)(alerts),
-			Layer.succeed(SessionManagerServiceTag)({
-				getSessionParentMap: () =>
-					Effect.succeed(new Map([["child-session", "parent-session"]])),
-			} as never),
+			Layer.succeed(SessionManagerServiceTag)(
+				mockSessionManagers({
+					getSessionParentMap: () =>
+						Effect.succeed(new Map([["child-session", "parent-session"]])),
+				} as never),
+			),
+			Layer.succeed(ConfigTag)(makeMockConfig()),
 			Layer.succeed(StatusPollerTag)({
 				markMessageActivity: vi.fn(),
 			} as never),

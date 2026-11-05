@@ -8,8 +8,14 @@ import {
 	type AlertsTag,
 	publishAlert,
 } from "../domain/relay/Services/alerts.js";
-import { StatusPollerTag } from "../domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	type ConfigTag,
+	StatusPollerTag,
+} from "../domain/relay/Services/services.js";
+import {
+	projectSessionManager,
+	type SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import type { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import {
 	PROCESSING_TIMEOUT_DURATION,
@@ -93,7 +99,7 @@ const handlePollerEventsEffect = (
 ) =>
 	Effect.gen(function* () {
 		const statusPoller = yield* StatusPollerTag;
-		const sessionService = yield* SessionManagerServiceTag;
+		const sessionService = yield* projectSessionManager;
 		const { wsHandler, pipelineDeps, config, pollerLog } = deps;
 
 		if (polledSessionId) {
@@ -240,7 +246,11 @@ export function wirePollers(deps: PollerWiringDeps): void {
 export const wirePollersEffect = (deps: EffectPollerWiringDeps) =>
 	Effect.gen(function* () {
 		const runtime = yield* Effect.context<
-			SessionManagerServiceTag | StatusPollerTag | OverridesStateTag | AlertsTag
+			| SessionManagerServiceTag
+			| ConfigTag
+			| StatusPollerTag
+			| OverridesStateTag
+			| AlertsTag
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Effect.runForkWith(runtime);

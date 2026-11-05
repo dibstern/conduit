@@ -4,13 +4,18 @@ import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.js";
 import { SessionStateProjectionNotifierLive } from "../../../src/lib/domain/relay/Layers/session-state-projection-notifier-layer.js";
-import { WebSocketHandlerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	WebSocketHandlerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionStateProjectionNotifierTag } from "../../../src/lib/persistence/effect/session-state-projection-notifier.js";
 import {
+	makeMockConfig,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
 describe("SessionStateProjectionNotifier", () => {
@@ -40,9 +45,12 @@ describe("SessionStateProjectionNotifier", () => {
 				});
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
-						Layer.merge(
+						Layer.mergeAll(
 							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
-							Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+							Layer.succeed(SessionManagerServiceTag)(
+								mockSessionManagers(sessionManagerService),
+							),
+							Layer.succeed(ConfigTag)(makeMockConfig()),
 						),
 					),
 				);
@@ -82,9 +90,13 @@ describe("SessionStateProjectionNotifier", () => {
 						}),
 					),
 					Layer.provide(
-						Layer.succeed(
-							SessionManagerServiceTag,
-							makeMockSessionManagerService({ refreshSessionLineage }),
+						Layer.mergeAll(
+							Layer.succeed(SessionManagerServiceTag)(
+								mockSessionManagers(
+									makeMockSessionManagerService({ refreshSessionLineage }),
+								),
+							),
+							Layer.succeed(ConfigTag)(makeMockConfig()),
 						),
 					),
 				);
@@ -120,9 +132,12 @@ describe("SessionStateProjectionNotifier", () => {
 			});
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
-					Layer.merge(
+					Layer.mergeAll(
 						Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
-						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+						Layer.succeed(SessionManagerServiceTag)(
+							mockSessionManagers(sessionManagerService),
+						),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 					),
 				),
 			);
@@ -163,9 +178,12 @@ describe("SessionStateProjectionNotifier", () => {
 						}),
 					),
 					Layer.provide(
-						Layer.merge(
+						Layer.mergeAll(
 							Layer.succeed(WebSocketHandlerTag)(wsHandler),
-							Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+							Layer.succeed(SessionManagerServiceTag)(
+								mockSessionManagers(sessionManagerService),
+							),
+							Layer.succeed(ConfigTag)(makeMockConfig()),
 						),
 					),
 				);
@@ -190,9 +208,12 @@ describe("SessionStateProjectionNotifier", () => {
 				});
 				const layer = SessionStateProjectionNotifierLive.pipe(
 					Layer.provide(
-						Layer.merge(
+						Layer.mergeAll(
 							Layer.succeed(WebSocketHandlerTag)(wsHandler),
-							Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+							Layer.succeed(SessionManagerServiceTag)(
+								mockSessionManagers(sessionManagerService),
+							),
+							Layer.succeed(ConfigTag)(makeMockConfig()),
 						),
 					),
 				);
@@ -228,9 +249,12 @@ describe("SessionStateProjectionNotifier", () => {
 			});
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
-					Layer.merge(
+					Layer.mergeAll(
 						Layer.succeed(WebSocketHandlerTag)(wsHandler),
-						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+						Layer.succeed(SessionManagerServiceTag)(
+							mockSessionManagers(sessionManagerService),
+						),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 					),
 				),
 			);
@@ -269,9 +293,12 @@ describe("SessionStateProjectionNotifier", () => {
 			});
 			const layer = SessionStateProjectionNotifierLive.pipe(
 				Layer.provide(
-					Layer.merge(
+					Layer.mergeAll(
 						Layer.succeed(WebSocketHandlerTag)(wsHandler),
-						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+						Layer.succeed(SessionManagerServiceTag)(
+							mockSessionManagers(sessionManagerService),
+						),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 					),
 				),
 			);

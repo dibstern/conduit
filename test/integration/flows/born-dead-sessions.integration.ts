@@ -10,7 +10,7 @@ import {
 	EventRetentionTag,
 } from "../../../src/lib/domain/persistence/Services/event-retention.js";
 import { ProviderRuntimeIngestionTag } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeClaudeEventPersistEffect } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { isSessionDeleted } from "../../../src/lib/persistence/effect/session-seeder-effect.js";
@@ -439,7 +439,7 @@ describe("born-dead sessions through the relay", () => {
 					}),
 				]);
 				return {
-					manager: yield* SessionManagerServiceTag,
+					manager: yield* projectSessionManager,
 					persist: yield* makeClaudeEventPersistEffect,
 				};
 			}),

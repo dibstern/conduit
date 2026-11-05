@@ -21,10 +21,7 @@ import {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -43,6 +40,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 
 const DAY = 86_400_000;
@@ -95,7 +93,7 @@ describe("relay automatic settlement sweep", () => {
 			const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 			const openCodeApi = makeMockOpenCodeAPI();
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(standaloneSessionManagerLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
@@ -120,7 +118,7 @@ describe("relay automatic settlement sweep", () => {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				const read = yield* ReadQueryEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				const now = Date.now();

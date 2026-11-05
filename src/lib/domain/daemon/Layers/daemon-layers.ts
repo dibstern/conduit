@@ -61,6 +61,7 @@ import {
 	releaseInputDraftClaims,
 } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
+import { SessionManagerServiceLive } from "../../relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
 import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
@@ -950,9 +951,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withSessionWorkspace));
-	const withSessionManager = SessionManagerOwnerLive.pipe(
-		Layer.provideMerge(withSessionSetup),
-	);
+	const withSessionManager = Layer.merge(
+		SessionManagerOwnerLive,
+		SessionManagerServiceLive,
+	).pipe(Layer.provideMerge(withSessionSetup));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),
 	);

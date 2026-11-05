@@ -43,6 +43,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeOpenCodeInstancesStub,
+	mockSessionManagers,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
@@ -93,7 +94,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 					PendingInteractionServiceLive,
 					Layer.succeed(LoggerTag)(createSilentLogger()),
 					Layer.succeed(SessionManagerServiceTag)(
-						makeMockSessionManagerService(),
+						mockSessionManagers(makeMockSessionManagerService()),
 					),
 					makeOverridesStateLive(),
 					persistence,
@@ -169,7 +170,7 @@ describe("permission/question processing timeouts through Effect state", () => {
 				Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
 				Layer.succeed(LoggerTag)(createSilentLogger()),
 				Layer.succeed(SessionManagerServiceTag)(
-					makeMockSessionManagerService(),
+					mockSessionManagers(makeMockSessionManagerService()),
 				),
 				makeOverridesStateLive(),
 				PendingInteractionServiceLive,

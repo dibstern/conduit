@@ -77,6 +77,7 @@ import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
+	mockSessionManagers,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
@@ -154,7 +155,9 @@ const withHandlerStack = async (
 		Layer.succeed(OpenCodeAPITag)(client),
 		Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
 		Layer.succeed(LoggerTag)(createSilentLogger()),
-		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers(makeMockSessionManagerService()),
+		),
 		Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 		NoopProviderRuntimeIngestionLive,
 		Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),

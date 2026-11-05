@@ -56,6 +56,7 @@ import {
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import { SessionSetupTag } from "../../relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
@@ -237,6 +238,9 @@ export const RelayFactoryLive = (
 			const sessionSetup = yield* Effect.serviceOption(SessionSetupTag);
 			const owners = yield* Effect.serviceOption(OwnerScopes);
 			const sessionManager = yield* Effect.serviceOption(SessionManagerOwner);
+			const sessionManagers = yield* Effect.serviceOption(
+				SessionManagerServiceTag,
+			);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -639,6 +643,14 @@ export const RelayFactoryLive = (
 													? Context.make(
 															SessionManagerOwner,
 															sessionManager.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(sessionManagers)
+													? Context.make(
+															SessionManagerServiceTag,
+															sessionManagers.value,
 														)
 													: Context.empty(),
 											),

@@ -61,6 +61,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeOpenCodeInstancesStub,
+	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import {
@@ -137,7 +138,7 @@ describe("prompt processing timeouts through Effect state", () => {
 							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 							Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
 							Layer.succeed(SessionManagerServiceTag)(
-								makeMockSessionManagerService(),
+								mockSessionManagers(makeMockSessionManagerService()),
 							),
 							PendingInteractionServiceLive,
 							makeOverridesStateLive(),
@@ -476,7 +477,7 @@ describe("prompt processing timeouts through Effect state", () => {
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag)(config as ProjectRelayConfig),
 				Layer.succeed(SessionManagerServiceTag)(
-					makeMockSessionManagerService(),
+					mockSessionManagers(makeMockSessionManagerService()),
 				),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),

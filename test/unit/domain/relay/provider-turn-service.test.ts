@@ -141,6 +141,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../../helpers/mock-factories.js";
 import { withDurableStopAcceptance } from "../../../helpers/orchestration-engine-test-double.js";
@@ -444,7 +445,9 @@ const serviceLayer = (input: {
 					: { configDir: input.configDir }),
 			}),
 		),
-		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers(sessionManagerService),
+		),
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
 		makePersistenceEffectLayer(":memory:", "test-project"),

@@ -18,10 +18,10 @@ import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
 } from "../Services/session-event-bus.js";
-import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
 import {
+	makeSessionManagerCoordination,
 	makeSessionManagerStateLive,
-	type SessionManagerCoordinationTag,
+	SessionManagerCoordinationTag,
 	type SessionManagerStateTag,
 } from "../Services/session-manager-state.js";
 import {
@@ -62,15 +62,19 @@ export const makeRelayStateLive = (
 ) => {
 	const sessionEventBusLayer =
 		options.sessionEventBusLayer ?? SessionEventBusLive;
-	const sessionManagerStateAndServiceLive = SessionManagerServiceLive.pipe(
-		Layer.provideMerge(
-			Layer.mergeAll(
-				options.sessionManagerStateLayer ?? makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				sessionEventBusLayer,
-				RelayStatusSnapshotLive,
+	// The session manager itself is the daemon's; the relay lends it these parts.
+	const sessionManagerParts = Layer.mergeAll(
+		options.sessionManagerStateLayer ??
+			Layer.merge(
+				makeSessionManagerStateLive(),
+				Layer.effect(
+					SessionManagerCoordinationTag,
+					makeSessionManagerCoordination(),
+				),
 			),
-		),
+		DaemonEventBusLive,
+		sessionEventBusLayer,
+		RelayStatusSnapshotLive,
 	);
 	return Layer.mergeAll(
 		// Session state
@@ -79,8 +83,8 @@ export const makeRelayStateLive = (
 			makeSessionTitleServiceLive(),
 			Layer.mergeAll(
 				ProjectSettingsLive,
-				Layer.provideMerge(
-					sessionManagerStateAndServiceLive,
+				Layer.merge(
+					sessionManagerParts,
 					options.overridesStateLayer ?? makeOverridesStateLive(),
 				),
 			),

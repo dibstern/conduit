@@ -119,12 +119,16 @@ import {
 } from "../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
 import {
+	attachSessionManagerLive,
 	type SessionManagerService,
 	SessionManagerServiceLive,
 	SessionManagerServiceTag,
+	type SessionManagers,
 } from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
+	makeSessionManagerCoordination,
 	makeSessionManagerStateLive,
+	SessionManagerCoordinationTag,
 	type SessionManagerState,
 } from "../../src/lib/domain/relay/Services/session-manager-state.js";
 import {
@@ -684,6 +688,31 @@ export function makeMockSessionManagerShape(
 	} as unknown as SessionManagerShape;
 }
 
+/** A daemon session manager handing `service` to every project. */
+export const mockSessionManagers = (
+	service: SessionManagerService = makeMockSessionManagerService(),
+): SessionManagers => ({
+	forProject: () => service,
+	attach: () => Effect.void,
+});
+
+/**
+ * The real session manager as a standalone relay builds it: its own daemon
+ * manager, with the relay's project (ConfigTag) attached.
+ */
+export const standaloneSessionManagerLive = attachSessionManagerLive.pipe(
+	Layer.provide(
+		Layer.mergeAll(
+			SessionManagerServiceLive,
+			Layer.effect(
+				SessionManagerCoordinationTag,
+				makeSessionManagerCoordination(),
+			),
+			InputDraftsLive,
+		),
+	),
+);
+
 /** Create a mock SessionManagerService for Effect-native handler tests. */
 export function makeMockSessionManagerService(
 	overrides?: Partial<SessionManagerService>,
@@ -1219,8 +1248,10 @@ export function makeTestHandlerLayer(
 		),
 	);
 	const sessionManagerServiceLayer = opts?.sessionManagerService
-		? Layer.succeed(SessionManagerServiceTag)(opts.sessionManagerService)
-		: SessionManagerServiceLive.pipe(
+		? Layer.succeed(SessionManagerServiceTag)(
+				mockSessionManagers(opts.sessionManagerService),
+			)
+		: standaloneSessionManagerLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
 						openCodeApiLayer,

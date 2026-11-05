@@ -27,7 +27,7 @@ import {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "./services.js";
-import { SessionManagerServiceTag } from "./session-manager-service.js";
+import { projectSessionManager } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
 
 export { STOP_ABORT_WAIT_MS };
@@ -177,7 +177,7 @@ const materializeOpenCodeSession = (
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const readQuery = yield* ReadQueryEffectTag;
 
 		const rowResult = yield* Effect.result(

@@ -52,6 +52,7 @@ import {
 	makeMockSessionTitleService,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	mockSessionManagers,
 } from "../../../helpers/mock-factories.js";
 
 const persistence = makePersistenceEffectLayer(":memory:", "test-project");
@@ -82,7 +83,9 @@ const baseServices = Layer.mergeAll(
 	Layer.succeed(ConfigTag)(
 		makeMockConfig({ configDir: "/tmp/conduit-rewind-commit-no-config" }),
 	),
-	Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+	Layer.succeed(SessionManagerServiceTag)(
+		mockSessionManagers(makeMockSessionManagerService()),
+	),
 	Layer.succeed(SessionTitleServiceTag)(makeMockSessionTitleService()),
 	PendingInteractionServiceLive,
 	makeOverridesStateLive(),
