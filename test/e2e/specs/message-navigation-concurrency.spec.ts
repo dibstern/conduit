@@ -370,10 +370,17 @@ test("skill links reveal unloaded parts before and after the current window", as
 			}),
 			SubscribeSessionDetail: ({ window }) => {
 				requested.push(window);
-				const first = window?.anchorMessageId === "answer-1" ? 1 : 101;
-				return Stream.make(skillPage(first, first + 19, !!window), {
-					_tag: "synchronized",
-				} as const).pipe(Stream.concat(Stream.never));
+				// As the server reads: the newest 50 messages, or 50 from the
+				// prompt of the turn holding the anchor (two messages a turn).
+				const first = window
+					? Number(window.anchorMessageId.split("-")[1])
+					: 96;
+				return Stream.make(
+					skillPage(first, Math.min(first + 24, 120), !!window),
+					{
+						_tag: "synchronized",
+					} as const,
+				).pipe(Stream.concat(Stream.never));
 			},
 		},
 		streams: {
@@ -434,6 +441,10 @@ test("skill links reveal unloaded parts before and after the current window", as
 			.click();
 		await expect(target).toBeVisible();
 		await expect(target).toBeInViewport();
+		// The window opens at the turn's prompt, so what was asked is there.
+		await expect(page.locator("#messages .msg-user").first()).toContainText(
+			`Prompt ${index}:`,
+		);
 		expect(requested.at(-1)?.anchorMessageId).toBe(`answer-${index}`);
 	}
 	await page.screenshot({

@@ -141,6 +141,7 @@ const nextTimestamp = (state: SessionProjection): number =>
 
 // Like the server, a window request reads one page of 50 at its anchor and
 // names the interval it holds; without one the snapshot is the latest page.
+// A `from` page opens at the prompt of the anchor's turn and reaches the anchor.
 const snapshot = (
 	state: SessionProjection,
 	request?: SessionDetailWindowRequest,
@@ -150,11 +151,17 @@ const snapshot = (
 		? rows.findIndex((row) => row.id === request.anchorMessageId)
 		: rows.length;
 	if (at < 0) throw new Error(`No message ${request?.anchorMessageId}`);
+	const prompt = rows
+		.slice(0, at + 1)
+		.map((row) => row.role)
+		.lastIndexOf("user");
 	const start =
 		request === undefined || request.direction === "before"
 			? Math.max(0, at - 50)
-			: at + (request.direction === "after" ? 1 : 0);
-	const end = Math.min(rows.length, start + 50);
+			: request.direction === "after"
+				? at + 1
+				: Math.max(prompt, 0);
+	const end = Math.min(rows.length, Math.max(start + 50, at + 1));
 	const page = rows.slice(start, end);
 	const first = page[0]?.id;
 	const last = page.at(-1)?.id;
