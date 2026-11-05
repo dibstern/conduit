@@ -15,10 +15,9 @@ describe("standalone ProjectManagementServiceLive", () => {
 		),
 	);
 
-	it.effect("starts with local config and lists no daemon projects", () =>
+	it.effect("lists no daemon projects", () =>
 		Effect.gen(function* () {
 			const service = yield* ProjectManagementServiceTag;
-			expect(yield* service.currentSlug()).toBe("standalone");
 			expect(yield* service.list()).toEqual([]);
 		}).pipe(Effect.provide(layer)),
 	);

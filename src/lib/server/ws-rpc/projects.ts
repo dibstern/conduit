@@ -9,12 +9,7 @@ export const projectsHandlers = {
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
 			const projects = yield* projectService.list();
-			const current = yield* projectService.currentSlug();
-			return {
-				projectSlug: request.projectSlug,
-				projects,
-				...(current ? { current } : {}),
-			};
+			return { projectSlug: request.projectSlug, projects };
 		}).pipe(
 			Effect.catch((error) =>
 				Effect.fail(
@@ -46,12 +41,10 @@ export const projectsHandlers = {
 					sessionMode: request.sessionMode,
 				}),
 			});
-			const current = yield* projectService.currentSlug();
 			return {
 				kind: result.kind,
 				projectSlug: request.projectSlug,
 				projects: result.projects,
-				...(current ? { current } : {}),
 				savedSlug: result.project.slug,
 				warnings: result.warnings,
 			};
@@ -70,12 +63,7 @@ export const projectsHandlers = {
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
 			const projects = yield* projectService.remove(request.slug);
-			const current = yield* projectService.currentSlug();
-			return {
-				projectSlug: request.projectSlug,
-				projects,
-				...(current ? { current } : {}),
-			};
+			return { projectSlug: request.projectSlug, projects };
 		}).pipe(
 			Effect.catch((error) =>
 				Effect.fail(

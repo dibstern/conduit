@@ -290,7 +290,6 @@ describe("routed RPC server", () => {
 					),
 				);
 				expect(yield* client.GetProjects({})).toMatchObject({
-					current: "initial",
 					projects: [],
 				});
 				expect(resolve).toHaveBeenCalledWith("initial");
@@ -334,7 +333,6 @@ describe("routed RPC server", () => {
 							makeTestHandlerLayer({
 								config: makeMockConfig({ slug }),
 								projectManagementService: {
-									currentSlug: () => Effect.succeed(slug),
 									list: () =>
 										Effect.succeed([
 											{ slug, title: slug, folders: [`/tmp/${slug}`] as const },
@@ -370,11 +368,11 @@ describe("routed RPC server", () => {
 					{ concurrency: 2 },
 				);
 				expect(results[0]).toMatchObject({
-					current: "project-a",
+					projectSlug: "project-a",
 					projects: [{ slug: "project-a" }],
 				});
 				expect(results[1]).toMatchObject({
-					current: "project-b",
+					projectSlug: "project-b",
 					projects: [{ slug: "project-b" }],
 				});
 				const missing = yield* Effect.result(
@@ -387,7 +385,7 @@ describe("routed RPC server", () => {
 				}
 				expect(
 					yield* client.GetProjects({ projectSlug: "project-b" }),
-				).toMatchObject({ current: "project-b" });
+				).toMatchObject({ projectSlug: "project-b" });
 				expect(resolve.mock.calls.map(([slug]) => slug)).toEqual([
 					"project-a",
 					"project-b",

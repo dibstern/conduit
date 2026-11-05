@@ -721,8 +721,7 @@ export async function createRelayStack(
 			folders: p.folders,
 		}));
 
-	const projectManagement = (slug: string): ProjectManagementService => ({
-		currentSlug: () => Effect.succeed(slug),
+	const projectManagement: ProjectManagementService = {
 		list: () =>
 			withPublishedProjectGit(getProjectList()).pipe(
 				Effect.mapError(
@@ -759,7 +758,7 @@ export async function createRelayStack(
 					message: "Removing projects is not supported in this mode",
 				}),
 			),
-	});
+	};
 
 	/** Create a new project relay and register it. */
 	async function addProjectRelay(directory: string): Promise<{
@@ -820,7 +819,7 @@ export async function createRelayStack(
 					SessionActivityTag,
 					ProviderAdapters,
 				)(parentContext),
-			).pipe(Context.add(ProjectManagementServiceTag, projectManagement(slug)));
+			).pipe(Context.add(ProjectManagementServiceTag, projectManagement));
 			const newRelay = await createProjectRelay({
 				httpServer,
 				daemonConfigContext: daemonContext,
@@ -870,7 +869,7 @@ export async function createRelayStack(
 		daemonConfigContext: Context.add(
 			config.daemonConfigContext ?? Context.empty(),
 			ProjectManagementServiceTag,
-			projectManagement(config.slug),
+			projectManagement,
 		),
 		opencodeUrl: config.opencodeUrl,
 		projectDir: config.projectDir,

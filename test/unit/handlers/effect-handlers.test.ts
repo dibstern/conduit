@@ -385,7 +385,6 @@ describe("GetProjects", () => {
 		const layer = Layer.mergeAll(
 			projectManagementLayer(client, config),
 			Layer.succeed(ProjectManagementServiceTag)({
-				currentSlug: () => Effect.succeed(config.slug),
 				list: () => Effect.succeed(projects),
 				save: () => Effect.die("Unexpected save"),
 				remove: () => Effect.die("Unexpected remove"),
@@ -399,7 +398,6 @@ describe("GetProjects", () => {
 				expect(reply).toEqual({
 					projectSlug: "test-project",
 					projects,
-					current: "test-project",
 				});
 			})),
 		);
@@ -430,7 +428,6 @@ describe("GetProjects", () => {
 					expect(reply).toEqual({
 						projectSlug: "test-project",
 						projects: [],
-						current: "test-project",
 					});
 				})),
 			);

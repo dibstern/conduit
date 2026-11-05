@@ -292,7 +292,6 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 			return Promise.resolve({
 				projectSlug: "test-project",
 				projects: [],
-				current: "test-project",
 			});
 		if (tag === "ListDaemonSessions")
 			return Promise.resolve({

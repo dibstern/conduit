@@ -24,7 +24,7 @@ describe("Integration: WS Handler Coverage", () => {
 
 		const result = await client.getProjects();
 		expect(Array.isArray(result.projects)).toBe(true);
-		expect(result.current).toBe("integration-test");
+		expect(result).not.toHaveProperty("current");
 		await client.close();
 	});
 

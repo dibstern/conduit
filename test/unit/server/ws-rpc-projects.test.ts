@@ -25,7 +25,6 @@ const project = {
 const makeService = (
 	projects: readonly (typeof project)[],
 ): ProjectManagementService => ({
-	currentSlug: () => Effect.succeed(project.slug),
 	list: () => Effect.succeed(projects),
 	save: vi.fn(() =>
 		Effect.succeed({ project: projects[0] ?? project, projects, warnings: [] }),
@@ -34,6 +33,27 @@ const makeService = (
 });
 
 describe("WsRpcServerLayer project management", () => {
+	// 82tn.16: the server keeps no current project; a browser names what it wants.
+	it.effect("lists projects without naming a current one", () => {
+		const service = makeService([project]);
+		const config = makeMockConfig({ slug: project.slug });
+		return Effect.gen(function* () {
+			const client = yield* rpcClient;
+			const response = yield* client.GetProjects({});
+			expect(response).toEqual({ projects: [project] });
+		}).pipe(
+			Effect.scoped,
+			Effect.provide(
+				WsRpcServerLayer.pipe(
+					Layer.provideMerge(
+						makeTestHandlerLayer({ config, projectManagementService: service }),
+					),
+				),
+				{ local: true },
+			),
+		);
+	});
+
 	it.effect(
 		"round-trips project git state through the RPC project list",
 		() => {
@@ -95,7 +115,6 @@ describe("WsRpcServerLayer project management", () => {
 			expect(response).toEqual({
 				projectSlug: "proj-1",
 				projects: [project],
-				current: "proj-1",
 				savedSlug: "proj-1",
 				warnings: [],
 			});
@@ -131,7 +150,6 @@ describe("WsRpcServerLayer project management", () => {
 			expect(response).toEqual({
 				projectSlug: "proj-1",
 				projects: [],
-				current: "proj-1",
 			});
 		}).pipe(
 			Effect.scoped,
