@@ -433,9 +433,10 @@ test("stopping an agent also stops its live descendants and leaves unrelated wor
 				exact: true,
 			})
 			.click();
+		// The server issues stops in its own snapshot's order, which 8.4 leaves open (82tn.32.24).
 		await expect
-			.poll(() => requestedIds(harness))
-			.toEqual([nested.task_id, agent.task_id]);
+			.poll(() => requestedIds(harness).sort())
+			.toEqual([agent.task_id, nested.task_id].sort());
 		await expectTasks(
 			page,
 			taskStopFixture.map((task) => task.description),
