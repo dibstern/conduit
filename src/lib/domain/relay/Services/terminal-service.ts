@@ -33,6 +33,7 @@ import {
 	type OpenCodeClient,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
+import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import {
 	ConfigTag,
@@ -622,6 +623,38 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			),
 			{ uninterruptible: "inherit" },
 		);
+
+		// 82tn.14: a removed project's hosted terminals close with its owner scope; a detach keeps
+		// them in the host for the next daemon. Each relay binds once; a replaced relay's binding
+		// does nothing, so the newest relay closes them.
+		let live = true;
+		yield* Effect.addFinalizer(() => Effect.sync(() => (live = false)));
+		const owners = yield* Effect.serviceOption(OwnerScopes);
+		if (Option.isSome(owners))
+			yield* owners.value.projectScope(config.slug).pipe(
+				Effect.flatMap((scope) =>
+					scope.acquire<void, never, never>(
+						Effect.addFinalizer((exit) =>
+							live && Exit.isSuccess(exit) && exit.value === "remove"
+								? localPty.list(config.projectDir).pipe(
+										Effect.flatMap((hosted) =>
+											Effect.forEach(hosted, ({ id }) => terminal.close(id), {
+												discard: true,
+											}),
+										),
+										Effect.catchCause((cause) =>
+											Effect.logWarning(
+												"Could not close a removed project's terminals",
+												Failure.renderCause(cause),
+											),
+										),
+									)
+								: Effect.void,
+						),
+					),
+				),
+				Effect.ignore,
+			);
 
 		return terminal;
 	}),
