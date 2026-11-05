@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import * as Migrator from "effect/sql/Migrator";
@@ -1900,6 +1901,75 @@ export const effectMigrationEntries = {
 		"diff_base",
 		readMigrationSql(SESSIONS_DIFF_BASE_MIGRATION),
 	),
+	// 82tn.51: a rewind the build before left pending until the next send becomes a landed head move,
+	// and its column goes. The move goes back before the cut's Run (a node is one Run), as a rewind
+	// asked today does: a cut inside the Run returns the Run's typed text to the composer. Startup
+	// projects the move, the Head Log offers its undo, and the next send tells the provider.
+	"0096_pending_rewind_to_head_move": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{
+			name: string;
+		}>`PRAGMA table_info(sessions)`;
+		if (!columns.some(({ name }) => name === "pending_rewind_message_id"))
+			return;
+		const pending = yield* sql<{ id: string; cut: string }>`
+			SELECT id, pending_rewind_message_id AS cut FROM sessions
+			WHERE pending_rewind_message_id IS NOT NULL`;
+		for (const { id, cut } of pending) {
+			const [at] = yield* sql<{ node: string; parent: string | null }>`
+				SELECT m.history_node_id AS node, n.parent_id AS parent FROM messages m
+				JOIN history_nodes n ON n.session_id = m.session_id AND n.id = m.history_node_id
+				WHERE m.session_id = ${id} AND m.id = ${cut}`;
+			// A cut at a message that is gone, or in a Run that never ended, moves nothing.
+			if (!at) continue;
+			const run = yield* sql<{ id: string; role: string; text: string }>`
+				SELECT id, role, text FROM messages WHERE session_id = ${id} AND history_node_id = ${at.node}
+				ORDER BY ordinal, created_at, id`;
+			const [tip] = yield* sql<{ node: string }>`
+				SELECT history_node_id AS node FROM messages
+				WHERE session_id = ${id} AND history_node_id IS NOT NULL
+				ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
+			const from = tip?.node ?? at.node;
+			const first = run[0]?.id ?? cut;
+			const [rewound] = yield* sql<{ at: number | null }>`
+				SELECT MAX(created_at) AS at FROM events WHERE session_id = ${id} AND type = 'session.rewound'`;
+			const movedAt = rewound?.at ?? Date.now();
+			const moveId = `pending-rewind:${id}`;
+			// The old projection left the Head before the cut; the move starts from the Head's tip.
+			yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES (${id}, ${from})
+				ON CONFLICT (session_id) DO UPDATE SET node_id = excluded.node_id`;
+			const journal = (
+				type: string,
+				offset: number,
+				data: Record<string, unknown>,
+			) => sql`INSERT INTO events
+				(project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+				SELECT project_id, ${`evt_${randomUUID()}`}, session_id, stream_version + ${offset},
+					${type}, ${JSON.stringify(data)}, '{}', provider, ${movedAt}
+				FROM events WHERE session_id = ${id} ORDER BY stream_version DESC LIMIT 1`;
+			yield* journal("head.move_started", 1, {
+				moveId,
+				kind: "rewind",
+				messageId: first,
+				from,
+				to: at.parent,
+			});
+			yield* journal("head.moved", 1, { moveId, to: at.parent });
+			const inputs = run.flatMap(({ role, text }) =>
+				role === "user" && text !== "" ? [text] : [],
+			);
+			if (first === cut || inputs.length === 0) continue;
+			yield* sql`INSERT INTO input_drafts (draft_key, project_id, kind, text, updated_at)
+				SELECT id, project_id, 'session', ${inputs.join("\n\n")}, ${Date.now()}
+				FROM sessions WHERE id = ${id}
+				ON CONFLICT (draft_key) DO UPDATE SET
+					text = excluded.text || CASE WHEN input_drafts.text != '' AND input_drafts.text != excluded.text
+						THEN '\n\n' || input_drafts.text ELSE '' END,
+					updated_at = excluded.updated_at
+				WHERE input_drafts.kind = 'session' AND input_drafts.promoted_session_id IS NULL`;
+		}
+		yield* sql`ALTER TABLE sessions DROP COLUMN pending_rewind_message_id`;
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

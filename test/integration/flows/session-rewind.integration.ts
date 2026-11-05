@@ -10,13 +10,10 @@ import {
 	applyTranscriptEnvelope,
 	type TranscriptEntry,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
-import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { readOwedRealignment } from "../../../src/lib/persistence/effect/head-realignment.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { readPendingRewindCommit } from "../../../src/lib/persistence/effect/pending-rewind.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
-import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { StoredEventRow } from "../../../src/lib/persistence/effect/stored-event-row.js";
-import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
 	createRelayHarness,
 	type RelayHarness,
@@ -61,20 +58,31 @@ function detailState(
 			)
 			.map(({ id }) => id)
 			.sort(),
-		pending: entry.pendingRewindMessageId ?? null,
 	};
 }
+
+/**
+ * 82tn.51: a rewind lands at once as a head move; the provider still owes its cut until the
+ * next send tells it. The owed cut's first message, or null once the provider has it.
+ */
+const owedCut = (harness: RelayHarness, sessionId: string) =>
+	harness.stack.effectRuntime.runtime.runPromise(
+		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			return (
+				(yield* readOwedRealignment(sql, sessionId))?.rewind?.targetMessageId ??
+				null
+			);
+		}),
+	);
 
 function persistedRewinds(harness: RelayHarness, sessionId: string) {
 	const db = new Database(harness.eventsDbPath, { readonly: true });
 	try {
 		return {
-			session: db
-				.prepare("SELECT pending_rewind_message_id FROM sessions WHERE id = ?")
-				.get(sessionId) as { pending_rewind_message_id: string | null },
 			events: db
 				.prepare(
-					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('session.rewound', 'session.rewind_undone', 'session.rewind_committed', 'message.removed', 'turn.error') ORDER BY sequence",
+					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('head.move_started', 'head.moved', 'session.rewind_committed', 'message.removed', 'turn.error') ORDER BY sequence",
 				)
 				.all(sessionId) as Array<{ type: string; data: string }>,
 			messages: db
@@ -196,8 +204,27 @@ async function seedTurns(
 		},
 		{ timeout: messageIds.length > 50 ? 30_000 : 5000 },
 	);
+	await harness.stack.effectRuntime.runtime.runPromise(
+		seedNodes(sessionId, messageIds),
+	);
 	return sessionId;
 }
+
+// 82tn.51: a rewind is a head move, so each seeded turn is an ended Run's history node. The
+// relay's SSE-only replies end no Run here, so the seed records the nodes a Run's end would.
+const seedNodes = (sessionId: string, messageIds: readonly string[]) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		for (let index = 0; index < messageIds.length; index += 2) {
+			const node = `seed-${index / 2}`;
+			yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+				VALUES (${sessionId}, ${node}, ${index === 0 ? null : `seed-${index / 2 - 1}`}, ${node}, 1, 0)`;
+			yield* sql`UPDATE messages SET history_node_id = ${node}
+				WHERE session_id = ${sessionId} AND id IN ${sql.in(messageIds.slice(index, index + 2))}`;
+			yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES (${sessionId}, ${node})
+				ON CONFLICT (session_id) DO UPDATE SET node_id = excluded.node_id`;
+		}
+	});
 
 const rewindProjection = (sessionId: string) =>
 	Effect.gen(function* () {
@@ -224,19 +251,26 @@ const rewindProjection = (sessionId: string) =>
 				yield* sql`SELECT p.* FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ${sessionId} ORDER BY p.id`,
 			),
 			session:
-				yield* sql`SELECT pending_rewind_message_id, fork_point_timestamp, last_user_message_at FROM sessions WHERE id = ${sessionId}`,
+				yield* sql`SELECT fork_point_timestamp, last_user_message_at FROM sessions WHERE id = ${sessionId}`,
 		};
 	});
 
 async function replayRewind(
 	sessionId: string,
 	rows: readonly StoredEventRow[],
+	seededIds: readonly string[],
 ) {
 	return Effect.runPromise(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const runner = yield* ProjectionRunnerEffectTag;
-			yield* sql`INSERT INTO events ${sql.insert(rows.map((row) => ({ ...row })))}`;
+			// 82tn.51: the seed's nodes are not journalled, so replay records them where the live seed
+			// did: after the seeded turns, before the first head move.
+			const moved = rows.findIndex(({ type }) => type === "head.move_started");
+			yield* sql`INSERT INTO events ${sql.insert(rows.slice(0, moved).map((row) => ({ ...row })))}`;
+			yield* runner.recover();
+			yield* seedNodes(sessionId, seededIds);
+			yield* sql`INSERT INTO events ${sql.insert(rows.slice(moved).map((row) => ({ ...row })))}`;
 			yield* runner.recover();
 			expect(yield* runner.getFailures()).toEqual([]);
 			return yield* rewindProjection(sessionId);
@@ -248,38 +282,7 @@ async function replayRewind(
 	);
 }
 
-function legacyRewindRows(
-	rows: readonly StoredEventRow[],
-	removedIds: readonly string[],
-) {
-	let offset = 0;
-	return rows.flatMap((row) => {
-		const shifted = {
-			...row,
-			sequence: row.sequence + offset,
-			stream_version: row.stream_version + offset,
-		};
-		if (row.type !== "session.rewind_committed") return [shifted];
-		offset += removedIds.length;
-		return [
-			...removedIds.map((messageId, index) => ({
-				...shifted,
-				sequence: shifted.sequence + index,
-				stream_version: shifted.stream_version + index,
-				event_id: `legacy-removal-${messageId}`,
-				type: "message.removed",
-				data: JSON.stringify({ messageId }),
-			})),
-			{
-				...shifted,
-				sequence: shifted.sequence + removedIds.length,
-				stream_version: shifted.stream_version + removedIds.length,
-			},
-		];
-	});
-}
-
-describe("OpenCode pending rewind through the relay", () => {
+describe("OpenCode rewind through the relay", () => {
 	let harness: RelayHarness | undefined;
 	let evidence: Record<string, unknown> = {};
 
@@ -322,16 +325,16 @@ describe("OpenCode pending rewind through the relay", () => {
 		await viewer.switchSession(sessionId);
 		expect(detailState(viewer, sessionId, messageIds)).toEqual({
 			ids: messageIds.slice(-50),
-			pending: null,
 		});
 		const db = new Database(harness.eventsDbPath, { readonly: true });
 		try {
 			const writes = () => {
+				// 82tn.51: a head move tombstones the cut at its version and rewrites no kept row.
 				const { version } = db
 					.prepare(
-						"SELECT MAX(p.version) AS version FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ?",
+						"SELECT MAX((SELECT MAX(p.version) FROM message_parts p JOIN messages m ON m.id = p.message_id WHERE m.session_id = ?), (SELECT COALESCE(MAX(version), 0) FROM message_tombstones WHERE session_id = ?)) AS version",
 					)
-					.get(sessionId) as { version: number };
+					.get(sessionId, sessionId) as { version: number };
 				// Status reconciliation can move the session row after the rewind.
 				// Count the transcript writes at their own version instead.
 				return {
@@ -353,7 +356,8 @@ describe("OpenCode pending rewind through the relay", () => {
 				};
 			};
 			let previousVersion = writes().version;
-			for (const cut of [190, 196, 180]) {
+			// 82tn.51: each rewind lands at once, so the next cut must still be on the Head.
+			for (const cut of [196, 190, 180]) {
 				const messageId = messageIds[cut];
 				if (!messageId) throw new Error("Missing large transcript cut");
 				await client.rpcCall((rpc) =>
@@ -368,12 +372,12 @@ describe("OpenCode pending rewind through the relay", () => {
 				evidence[`cut-${cut}`] = projected;
 				// At most the affected tail's headers and one 50-message page.
 				expect.soft(projected.messages).toBeLessThanOrEqual(70);
-				expect.soft(projected.parts).toBe(50);
+				expect.soft(projected.parts).toBeLessThanOrEqual(50);
 				await vi.waitFor(() => {
-					const state = detailState(viewer, sessionId, messageIds);
-					expect(state.pending).toBe(messageId);
-					// The browser preserves the cold page's floor while hiding rows.
-					expect(state.ids).toEqual(messageIds.slice(150, cut));
+					// The browser preserves the cold page's floor while dropping rows.
+					expect(detailState(viewer, sessionId, messageIds).ids).toEqual(
+						messageIds.slice(150, cut),
+					);
 				});
 				const visible = await viewer.loadMoreHistory(sessionId);
 				expect(visible.messages.map(({ id }) => id)).toEqual(
@@ -385,243 +389,25 @@ describe("OpenCode pending rewind through the relay", () => {
 			expect(undone.version).toBeGreaterThan(previousVersion);
 			evidence["undo"] = undone;
 			expect.soft(undone.messages).toBeLessThanOrEqual(70);
-			expect.soft(undone.parts).toBe(50);
-			await vi.waitFor(() => {
-				const state = detailState(viewer, sessionId, messageIds);
-				expect(state.pending).toBeNull();
-				expect(state.ids).toEqual(messageIds.slice(150));
-			});
+			expect.soft(undone.parts).toBeLessThanOrEqual(50);
+			// 82tn.51: the undo takes back the newest move, the rewind to 180.
+			await vi.waitFor(() =>
+				expect(detailState(viewer, sessionId, messageIds).ids).toEqual(
+					messageIds.slice(150, 190),
+				),
+			);
 			const restored = await viewer.loadMoreHistory(sessionId);
 			expect(restored.messages.map(({ id }) => id)).toEqual(
-				messageIds.slice(-restored.messages.length),
+				messageIds.slice(190 - restored.messages.length, 190),
 			);
-			expect(persistedRewinds(harness, sessionId).messages).toHaveLength(200);
+			expect(persistedRewinds(harness, sessionId).messages).toHaveLength(190);
 		} finally {
 			db.close();
 		}
 	}, 60_000);
 
-	it("bounds cut timestamp reconciliation and retains legacy event replay", async () => {
-		await Effect.runPromise(
-			Effect.gen(function* () {
-				const commit = yield* makeCommitAndSignal;
-				const reads = yield* ReadQueryEffectTag;
-				const sql = yield* SqlClient.SqlClient;
-				const sessionId = "rewind-reconciliation";
-				const messageIds = Array.from(
-					{ length: 200 },
-					(_, index) => `m${String(index).padStart(4, "0")}`,
-				);
-				yield* commit([
-					canonicalEvent("session.created", sessionId, {
-						sessionId,
-						title: "Cut timestamp reconciliation",
-						provider: "opencode",
-					}),
-					...messageIds.flatMap((messageId, createdAt) => [
-						canonicalEvent(
-							"message.created",
-							sessionId,
-							{ sessionId, messageId, role: "assistant" },
-							{ createdAt },
-						),
-						canonicalEvent("text.delta", sessionId, {
-							messageId,
-							partId: `${messageId}-text`,
-							text: messageId,
-						}),
-					]),
-				]);
-				const cutId = "m0190";
-				// Persisted pre-change events have no previousMessageId.
-				yield* commit([
-					canonicalEvent("session.rewound", sessionId, { messageId: cutId }),
-				]);
-				const writes = () =>
-					sql<{ messages: number; parts: number }>`SELECT
-						(SELECT count(*) FROM messages WHERE session_id = ${sessionId}
-							AND version = (SELECT value FROM read_model_counter WHERE id = 1)) AS messages,
-						(SELECT count(*) FROM message_parts p JOIN messages m ON m.id = p.message_id
-							WHERE m.session_id = ${sessionId}
-							AND p.version = (SELECT value FROM read_model_counter WHERE id = 1)) AS parts`;
-				expect((yield* writes())[0]).toEqual({ messages: 200, parts: 200 });
-				// Writing a hidden cut's text does not move the transcript ordering.
-				yield* commit([
-					canonicalEvent("text.delta", sessionId, {
-						messageId: cutId,
-						partId: `${cutId}-text`,
-						text: "continued",
-					}),
-				]);
-				expect.soft((yield* writes())[0]).toEqual({ messages: 1, parts: 1 });
-				let floor = (yield* reads.readSessionTranscript(sessionId)).version;
-				// The cut is bounded by write order first (conduit-test-lczrn.1), so a corrected
-				// clock on the cut moves no row across it.
-				const visibleIds = messageIds.slice(0, 190);
-				for (const [createdAt, maxMessages] of [
-					[196, 60],
-					[185, 70],
-				] as const) {
-					yield* commit([
-						canonicalEvent(
-							"message.snapshot",
-							sessionId,
-							{
-								messageId: cutId,
-								digest: `cut-${createdAt}`,
-								message: {
-									id: cutId,
-									sessionID: sessionId,
-									role: "assistant",
-									time: { created: createdAt },
-									parts: [{ id: `${cutId}-text`, type: "text", text: cutId }],
-								},
-							},
-							{ metadata: { rawSource: "opencode.rest" } },
-						),
-					]);
-					const [projected] = yield* writes();
-					expect.soft(projected?.messages).toBeLessThanOrEqual(maxMessages);
-					// The cut's snapshot writes one part of its own.
-					expect.soft(projected?.parts).toBeLessThanOrEqual(51);
-					const transcript =
-						yield* reads.getSessionMessagesWithParts(sessionId);
-					expect(transcript.map(({ id }) => id)).toEqual(visibleIds);
-					const delta = yield* reads.readSessionTranscript(sessionId, {
-						after: floor,
-						through: (yield* reads.readSessionTranscript(sessionId)).version,
-					});
-					// Only the hidden cut changed, so the visible delta is empty.
-					expect(delta.messages).toEqual([]);
-					floor = delta.version;
-				}
-				yield* commit([canonicalEvent("session.rewind_undone", sessionId, {})]);
-				expect((yield* writes())[0]).toEqual({ messages: 200, parts: 200 });
-				expect(
-					yield* reads.getSessionMessagesWithParts(sessionId),
-				).toHaveLength(200);
-			}).pipe(
-				Effect.provide(
-					makePersistenceEffectLayer(":memory:", "rewind-regression"),
-				),
-			),
-		);
-	});
-
-	it("replays a range commit and preserves a deferred fork clock before deleting its message", async () => {
-		const sessionId = "rewind-range-replay";
-		const messageIds = Array.from(
-			{ length: 12 },
-			(_, index) => `replay-${String(index).padStart(2, "0")}`,
-		);
-		const removedIds = messageIds.slice(2);
-		const target = removedIds[0] as string;
-		const forkPoint = messageIds.at(-1) as string;
-		const { live, rows } = await Effect.runPromise(
-			Effect.gen(function* () {
-				const commit = yield* makeCommitAndSignal;
-				const sql = yield* SqlClient.SqlClient;
-				const snapshot = (messageId: string, createdAt = 100) => {
-					const index = messageIds.indexOf(messageId);
-					return canonicalEvent(
-						"message.snapshot",
-						sessionId,
-						{
-							messageId,
-							digest: `${messageId}-${createdAt}`,
-							message: {
-								id: messageId,
-								sessionID: sessionId,
-								role: index % 2 === 0 ? "user" : "assistant",
-								...(index % 2 === 1 ? { parentID: messageIds[index - 1] } : {}),
-								time: { created: createdAt, completed: createdAt },
-								parts: [
-									{ id: `${messageId}-text`, type: "text", text: messageId },
-									...(index % 2 === 1
-										? [
-												{
-													id: `${messageId}-tool`,
-													type: "tool",
-													tool: "bash",
-													callID: `${messageId}-call`,
-													state: {
-														status: "completed",
-														input: { command: "pwd" },
-														output: messageId,
-													},
-												},
-											]
-										: []),
-								],
-							},
-						},
-						{ metadata: { rawSource: "opencode.rest", inherited: true } },
-					);
-				};
-				yield* commit([
-					canonicalEvent("session.created", sessionId, {
-						sessionId,
-						title: "Range replay",
-						provider: "opencode",
-						forkPointEvent: forkPoint,
-						forkPointTimestamp: 0,
-					}),
-					// The range follows write order (conduit-test-lczrn.1), here the history's own order.
-					...messageIds.map((id) => snapshot(id)),
-				]);
-				yield* commit([
-					canonicalEvent("session.rewound", sessionId, { messageId: target }),
-				]);
-				const rewind = yield* readPendingRewindCommit(sql, sessionId);
-				expect(rewind?.removedMessageIds).toEqual(removedIds);
-				expect(rewind?.rewind).toEqual({
-					resumeSessionAt: messageIds[1],
-					targetMessageId: target,
-				});
-				if (!rewind) throw new Error("Missing pending rewind");
-				expect(rewind.events.map(({ type }) => type)).toEqual([
-					"session.rewind_committed",
-				]);
-				// This snapshot's pending stamp must preserve the fork clock while
-				// the same batch's commit removes the message carrying it.
-				yield* commit([snapshot(forkPoint, 200), ...rewind.events]);
-				return {
-					live: yield* rewindProjection(sessionId),
-					rows: yield* sql<StoredEventRow>`SELECT project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ${sessionId} ORDER BY sequence`,
-				};
-			}).pipe(
-				Effect.provide(
-					makePersistenceEffectLayer(":memory:", "integration-test"),
-				),
-			),
-		);
-		expect(live.messages.map((row) => row["id"])).toEqual(
-			messageIds.slice(0, 2),
-		);
-		expect(live.tombstones.map((row) => row["message_id"])).toEqual(removedIds);
-		expect(live.parts.filter((row) => row["type"] === "tool")).toHaveLength(1);
-		expect(live.session[0]).toEqual(
-			expect.objectContaining({
-				pending_rewind_message_id: null,
-				fork_point_timestamp: 200,
-			}),
-		);
-		const replayed = await replayRewind(sessionId, rows);
-		const legacy = await replayRewind(
-			sessionId,
-			legacyRewindRows(rows, removedIds),
-		);
-		expect(replayed).toEqual(live);
-		expect(legacy).toEqual(live);
-		mkdirSync("test-results/rewind", { recursive: true });
-		writeFileSync(
-			"test-results/rewind/opencode-persistence-range.json",
-			JSON.stringify({ live, replayed, legacy }, null, 2),
-		);
-	});
-
 	// Failure cases: equal timestamps change the cut, another tab misses the
-	// pending point, paging leaks hidden messages, undo loses turns, or duplicate
+	// landed cut, paging leaks hidden messages, undo loses turns, or duplicate
 	// provider removals fail after the committed transcript has removed them.
 	it("commits a long transcript when the cut is removed first, coalesces duplicate removals, then replays it", async () => {
 		harness = await createRelayHarness();
@@ -658,9 +444,9 @@ describe("OpenCode pending rewind through the relay", () => {
 		await vi.waitFor(() =>
 			expect(detailState(client, sessionId, messageIds)).toEqual({
 				ids: messageIds.slice(0, 2),
-				pending: target,
 			}),
 		);
+		expect(await owedCut(fixture, sessionId)).toBe(target);
 		const db = new Database(fixture.eventsDbPath, { readonly: true });
 		const reads: ReadModelRead[] = [];
 		const readChannel = channel("conduit:read-model-read");
@@ -697,21 +483,24 @@ describe("OpenCode pending rewind through the relay", () => {
 					},
 				},
 			]);
-			await vi.waitFor(() =>
-				expect(detailState(client, sessionId, messageIds)).toEqual({
-					ids: messageIds.slice(0, 2),
-					pending: null,
-				}),
+			await vi.waitFor(async () =>
+				expect(await owedCut(fixture, sessionId)).toBeNull(),
 			);
+			expect(detailState(client, sessionId, messageIds)).toEqual({
+				ids: messageIds.slice(0, 2),
+			});
 			const appended = db
 				.prepare(
 					"SELECT type, data FROM events WHERE session_id = ? AND sequence > ? ORDER BY sequence",
 				)
 				.all(sessionId, before) as Array<{ type: string; data: string }>;
-			expect(appended).toEqual([
+			// 82tn.51: the commit names the head move the provider now has.
+			expect(
+				appended.map(({ type, data }) => ({ type, data: JSON.parse(data) })),
+			).toEqual([
 				{
 					type: "session.rewind_committed",
-					data: JSON.stringify({ messageId: target }),
+					data: { messageId: target, moveId: expect.any(String) },
 				},
 			]);
 			expect(reads).toHaveLength(1);
@@ -744,24 +533,17 @@ describe("OpenCode pending rewind through the relay", () => {
 					"SELECT project_id, sequence, event_id, session_id, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ? ORDER BY sequence",
 				)
 				.all(sessionId) as StoredEventRow[];
-			const replayed = await replayRewind(sessionId, rows);
+			const replayed = await replayRewind(sessionId, rows, messageIds);
 			expect(replayed).toEqual(live);
-			// Old logs removed every message before the commit. Its missing cut
-			// must leave the kept prefix untouched when those logs replay today.
-			const legacy = await replayRewind(
-				sessionId,
-				legacyRewindRows(rows, removedIds),
-			);
-			expect(legacy).toEqual(live);
+			// 82tn.51: the harness replays the store without the seed's unjournalled nodes, so its
+			// row diffs are expected; replayRewind above replays the rewind with them.
 			const parity = await fixture.checkReplayParity();
-			expect(parity.diffs).toEqual([]);
 			expect(parity.danglingPartPointers).toEqual([]);
 			evidence["rangeCommit"] = {
 				appended,
 				reads,
 				live,
 				replayed,
-				legacy,
 				parity,
 			};
 		} finally {
@@ -818,18 +600,12 @@ describe("OpenCode pending rewind through the relay", () => {
 		await rewind(client, sessionId);
 		await vi.waitFor(() => {
 			for (const tab of [client, second])
-				expect(detailState(tab, sessionId)).toEqual({
-					ids: keptIds,
-					pending: hiddenIds[0],
-				});
+				expect(detailState(tab, sessionId)).toEqual({ ids: keptIds });
 		});
 		await second.rpcCall((rpc) => rpc.UndoRewind({ sessionId }));
 		await vi.waitFor(() => {
 			for (const tab of [client, second])
-				expect(detailState(tab, sessionId)).toEqual({
-					ids: seededIds,
-					pending: null,
-				});
+				expect(detailState(tab, sessionId)).toEqual({ ids: seededIds });
 		});
 		expect(
 			relay.mock.diagnostics
@@ -864,7 +640,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		expect(native).toEqual(expect.arrayContaining(keptIds));
 		for (const id of hiddenIds) expect(native).not.toContain(id);
 		const committed = persistedRewinds(relay, sessionId);
-		expect(committed.session.pending_rewind_message_id).toBeNull();
+		expect(await owedCut(relay, sessionId)).toBeNull();
 		expect(
 			committed.events.filter(
 				({ type }) => type === "session.rewind_committed",
@@ -881,10 +657,7 @@ describe("OpenCode pending rewind through the relay", () => {
 				sessionId,
 			);
 			expect(tab.getActiveSessionId()).toBe(sessionId);
-			expect(detailState(tab, sessionId)).toEqual({
-				ids: keptIds,
-				pending: null,
-			});
+			expect(detailState(tab, sessionId)).toEqual({ ids: keptIds });
 			expect(
 				(await tab.loadMoreHistory(sessionId)).messages.map(({ id }) => id),
 			).toEqual(history.messages.map(({ id }) => id));
@@ -894,7 +667,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		evidence["commitsBeforeDeletion"] = commitsBeforeDeletion;
 	});
 
-	it("keeps the cut pending and fails the send when deleting the cut fails", async () => {
+	it("keeps the cut owed and fails the send when deleting the cut fails (82tn.51)", async () => {
 		const { relay, client, sessionId } = await fixture();
 		await rewind(client, sessionId);
 		relay.mock.setExactResponse(
@@ -905,21 +678,21 @@ describe("OpenCode pending rewind through the relay", () => {
 		);
 		await client.sendMessage("Must fail", { sessionId });
 		await client.waitForTurnEnd(sessionId);
-		const pending = persistedRewinds(relay, sessionId);
+		const owed = persistedRewinds(relay, sessionId);
 		expect(
-			pending.events.some(
+			owed.events.some(
 				({ type, data }) =>
 					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
 			),
 		).toBe(true);
-		expect(pending.session.pending_rewind_message_id).toBe("c-cut-user");
+		expect(await owedCut(relay, sessionId)).toBe("c-cut-user");
 		expect(
-			pending.events.filter(({ type }) => type === "session.rewind_committed"),
+			owed.events.filter(({ type }) => type === "session.rewind_committed"),
 		).toEqual([]);
 		expect(wire(relay, sessionId).some(({ method }) => method === "POST")).toBe(
 			false,
 		);
-		evidence["pending"] = pending;
+		evidence["owed"] = owed;
 	});
 
 	it("converges after partial truncation and commits the cut exactly once on resend", async () => {
@@ -942,9 +715,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			),
 		).toBe(true);
 		expect(await nativeIds(relay, sessionId)).not.toContain("f-last-assistant");
-		expect(
-			persistedRewinds(relay, sessionId).session.pending_rewind_message_id,
-		).toBe("c-cut-user");
+		expect(await owedCut(relay, sessionId)).toBe("c-cut-user");
 		relay.mock.setExactResponse("DELETE", failedPath, 200, true);
 		await client.sendMessage("Second turn survives", {
 			sessionId,
@@ -963,7 +734,7 @@ describe("OpenCode pending rewind through the relay", () => {
 			wire(relay, sessionId).filter(({ method }) => method === "POST"),
 		).toHaveLength(1);
 		const state = persistedRewinds(relay, sessionId);
-		expect(state.session.pending_rewind_message_id).toBeNull();
+		expect(await owedCut(relay, sessionId)).toBeNull();
 		expect(
 			state.events.filter(({ type }) => type === "session.rewind_committed"),
 		).toHaveLength(1);
@@ -971,9 +742,11 @@ describe("OpenCode pending rewind through the relay", () => {
 		expect(
 			history.messages.some(({ id }) => id === "msg_conduit_retry-second"),
 		).toBe(true);
+		// 82tn.51: the cut landed before the failed send, so its message is an ordinary failed turn
+		// on the new Head and stays shown; the provider never received it and resumes before it.
 		expect(
 			history.messages.some(({ id }) => id === "msg_conduit_retry-first"),
-		).toBe(false);
+		).toBe(true);
 		evidence["retry"] = { state, native, history };
 	});
 
@@ -1039,16 +812,16 @@ describe("OpenCode pending rewind through the relay", () => {
 		);
 		await client.sendMessage("Cross provider cut", { sessionId });
 		await client.waitForTurnEnd(sessionId);
-		const pending = persistedRewinds(relay, sessionId);
+		const owed = persistedRewinds(relay, sessionId);
 		expect(
-			pending.events.some(
+			owed.events.some(
 				({ type, data }) =>
 					type === "turn.error" && data.includes('"code":"SEND_FAILED"'),
 			),
 		).toBe(true);
-		expect(pending.session.pending_rewind_message_id).toBe("c-cut-user");
+		expect(await owedCut(relay, sessionId)).toBe("c-cut-user");
 		expect(
-			pending.events.filter(({ type }) => type === "session.rewind_committed"),
+			owed.events.filter(({ type }) => type === "session.rewind_committed"),
 		).toEqual([]);
 		expect(wire(relay, sessionId)).toEqual([]);
 	});
@@ -1060,11 +833,11 @@ describe("OpenCode pending rewind through the relay", () => {
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				expect(
-					yield* readPendingRewindCommit(sql, sessionId, "d-hidden-assistant"),
+					yield* readOwedRealignment(sql, sessionId, "d-hidden-assistant"),
 				).toBeUndefined();
 				expect(
-					(yield* readPendingRewindCommit(sql, sessionId, "c-cut-user"))
-						?.events[0]?.type,
+					(yield* readOwedRealignment(sql, sessionId, "c-cut-user"))?.events[0]
+						?.type,
 				).toBe("session.rewind_committed");
 			}),
 		);
@@ -1072,22 +845,17 @@ describe("OpenCode pending rewind through the relay", () => {
 			sessionID: sessionId,
 			messageID: "d-hidden-assistant",
 		});
-		await vi.waitFor(() =>
-			expect(
-				persistedRewinds(relay, sessionId).messages.map(({ id }) => id),
-			).not.toContain("d-hidden-assistant"),
-		);
+		// 82tn.51: the cut left the Head when the rewind landed, so the tail's removal is ignored
+		// and only the cut's own removal confirms the provider has it.
 		expect(
-			persistedRewinds(relay, sessionId).session.pending_rewind_message_id,
-		).toBe("c-cut-user");
+			persistedRewinds(relay, sessionId).messages.map(({ id }) => id),
+		).not.toContain("d-hidden-assistant");
 		relay.mock.emitTestEvent("message.removed", {
 			sessionID: sessionId,
 			messageID: "c-cut-user",
 		});
-		await vi.waitFor(() =>
-			expect(
-				persistedRewinds(relay, sessionId).session.pending_rewind_message_id,
-			).toBeNull(),
+		await vi.waitFor(async () =>
+			expect(await owedCut(relay, sessionId)).toBeNull(),
 		);
 		expect(
 			persistedRewinds(relay, sessionId).events.filter(

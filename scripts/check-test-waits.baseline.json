@@ -1261,7 +1261,7 @@
 		"timeout-override": 1
 	},
 	"test/integration/flows/session-rewind.integration.ts": {
-		"polling": 10,
+		"polling": 9,
 		"timeout-override": 2
 	},
 	"test/integration/flows/session-visibility-repro.integration.ts": {

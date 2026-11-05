@@ -8,8 +8,8 @@ import { pathToRoot, readHead } from "./history-graph.js";
  * provider still holds the path it last saw: the Head before the first move since the last
  * confirmation. What it must drop starts at the first node of that path off the Head now, and
  * it resumes at the Head's last message. A provider that cannot resume there (a branch it never
- * saw) falls back as it does for a failed cut. Read inside the send's write boundary, like
- * the legacy pending rewind it replaces; with `upstreamRemovedId`, only that removal confirms.
+ * saw) falls back as it does for a failed cut. Read inside the send's write boundary; with
+ * `upstreamRemovedId`, only that removal confirms.
  */
 export const readOwedRealignment = (
 	sql: SqlClient.SqlClient,
@@ -17,8 +17,12 @@ export const readOwedRealignment = (
 	upstreamRemovedId?: string,
 ) =>
 	Effect.gen(function* () {
-		const moves = yield* sql<{ move_id: string; from_node: string | null }>`
-			SELECT json_extract(moved.data, '$.moveId') AS move_id,
+		const moves = yield* sql<{
+			move_id: string;
+			from_node: string | null;
+			started_at: number;
+		}>`
+			SELECT json_extract(moved.data, '$.moveId') AS move_id, started.sequence AS started_at,
 				json_extract(started.data, '$.from') AS from_node
 			FROM events moved JOIN events started ON started.session_id = moved.session_id
 				AND started.type = 'head.move_started'
@@ -48,8 +52,16 @@ export const readOwedRealignment = (
 		const target = removed.find(({ node }) => node === lost[0])?.id;
 		if (upstreamRemovedId !== undefined && upstreamRemovedId !== target)
 			return undefined;
+		// The provider resumes at the newest row it holds. Conduit's own notices (an error, a
+		// compaction marker) never reach it (as inherit-fork-history skips them), and nothing written
+		// since the first move did either: a send that reached it would have confirmed the move.
 		const [resume] = yield* sql<{ id: string }>`SELECT id FROM messages
-			WHERE session_id = ${sessionId} ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
+			WHERE session_id = ${sessionId}
+				AND id NOT GLOB 'compaction-[0-9]*' AND id NOT GLOB 'turn-error-[0-9]*'
+				AND id NOT IN (SELECT COALESCE(json_extract(data, '$.messageId'), '') FROM events
+					WHERE session_id = ${sessionId} AND sequence > ${first.started_at}
+						AND type = 'message.created')
+			ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
 		const [session] = yield* sql<{ provider: string }>`
 			SELECT provider FROM sessions WHERE id = ${sessionId}`;
 		return {

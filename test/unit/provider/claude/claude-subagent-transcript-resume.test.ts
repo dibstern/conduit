@@ -451,7 +451,10 @@ describe("Claude subagent transcripts across session contexts", () => {
 								(event) =>
 									event.type !== "session.read" &&
 									event.type !== "session.unread" &&
-									event.type !== "tool.input_updated",
+									event.type !== "tool.input_updated" &&
+									// 82tn.51: a rewind and its undo are head moves now.
+									event.type !== "session.rewound" &&
+									event.type !== "session.rewind_undone",
 							);
 							expect(liveEvents).toHaveLength(events.length);
 							yield* replayStore.appendBatch(liveEvents);

@@ -91,14 +91,6 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		reason:
 			"Fork lineage is recorded by the relay, not the Claude event translator",
 	},
-	"session.rewound": {
-		produced: false,
-		reason: "Relay-owned pending transcript cut, with no Claude SDK mutation",
-	},
-	"session.rewind_undone": {
-		produced: false,
-		reason: "Relay-owned restoration of a pending cut",
-	},
 	"session.rewind_committed": {
 		produced: false,
 		reason: "Relay-owned cut committed at send admission or upstream removal",

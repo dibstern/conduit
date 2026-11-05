@@ -115,13 +115,12 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 				readonly last_applied_seq: number | null;
 				readonly is_inherited: number;
 				readonly current_provider: string;
-				readonly pending_rewind_message_id: string | null;
 				readonly completed_turn: number;
 				readonly assistant_message_id: string | null;
 				readonly removed: number;
 			}>`
 				SELECT m.id, m.role, m.created_at, m.last_applied_seq, m.is_inherited,
-					s.provider AS current_provider, s.pending_rewind_message_id,
+					s.provider AS current_provider,
 					COALESCE(t.state = 'completed', 0) AS completed_turn, t.assistant_message_id,
 					EXISTS (SELECT 1 FROM message_tombstones removed
 						WHERE removed.session_id = m.session_id AND removed.message_id = m.id) AS removed
@@ -129,11 +128,6 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 				LEFT JOIN turns t ON t.id = COALESCE(m.turn_id, m.id)
 					AND t.session_id = m.session_id
 				WHERE m.session_id = ${parentId}
-					AND NOT EXISTS (
-						SELECT 1 FROM messages cut
-						WHERE cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
-							AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id)
-					)
 				-- The fork point copies in write order, so it is picked in that order.
 				ORDER BY m.ordinal, m.created_at, m.id`;
 			if (
@@ -179,8 +173,10 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 				(SELECT MIN(sequence) FROM events
 					WHERE session_id = ${parentId} AND type = 'message.created'
 						AND json_extract(data, '$.messageId') = ${point.id}) AS creation,
+				-- 82tn.51: a landed head move rewrites history the native thread may not know yet.
 				(SELECT MAX(sequence) FROM events
-					WHERE session_id = ${parentId} AND type = 'session.rewind_committed') AS rewind`;
+					WHERE session_id = ${parentId} AND (type = 'session.rewind_committed'
+						OR (type = 'head.moved' AND json_type(data, '$.to') IS NOT NULL))) AS rewind`;
 			const sequence =
 				keys?.creation ??
 				(point.is_inherited === 1 ? point.last_applied_seq : null);
@@ -197,11 +193,7 @@ export const readForkSource = Effect.fn("fork.readForkSource")(function* (
 			const lastRewindCommitSequence = keys?.rewind ?? 0;
 			const historyMessageId =
 				at.messageId ??
-				(at.sideThread ||
-				point.pending_rewind_message_id !== null ||
-				lastRewindCommitSequence > 0
-					? point.id
-					: undefined);
+				(at.sideThread || lastRewindCommitSequence > 0 ? point.id : undefined);
 			const source: ForkSource = {
 				boundary: {
 					messageId: point.id,

@@ -249,17 +249,18 @@ describe("Head moves into pruned history through the built daemon", () => {
 		expect(await visible(sent)).not.toContain(later);
 		await run(rpc.UndoRewind({ sessionId: sent }));
 		expect(await visible(sent)).toContain(later);
+		// 82tn.51: rewinds and undos are recorded as head moves.
 		evidence["headMoves"] = {
 			sent: events(
 				sent,
-				"session.rewound",
-				"session.rewind_undone",
+				"head.move_started",
+				"head.moved",
 				"session.rewind_committed",
 			),
 			undone: events(
 				undone,
-				"session.rewound",
-				"session.rewind_undone",
+				"head.move_started",
+				"head.moved",
 				"session.rewind_committed",
 			),
 		};

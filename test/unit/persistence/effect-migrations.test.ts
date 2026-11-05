@@ -55,6 +55,7 @@ it.effect(
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			expect(
 				yield* sql`SELECT runner_id FROM provider_runs WHERE id = 'old'`,
@@ -87,6 +88,7 @@ it.effect(
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			expect(
 				yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'legacy'`,
@@ -198,6 +200,7 @@ it.effect(
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			expect(yield* sql`SELECT effort, context_window FROM turns`).toEqual([
 				{ effort: null, context_window: null },
@@ -753,6 +756,7 @@ const expectedNames = [
 	"drop_owned_run_ids",
 	"history_graph",
 	"sessions_diff_base",
+	"pending_rewind_to_head_move",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -814,6 +818,7 @@ it.effect(
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -876,6 +881,7 @@ describe("Effect migration lineage", () => {
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			expect(
 				yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 68 ORDER BY migration_id`,
@@ -969,7 +975,7 @@ describe("Effect migration lineage", () => {
 						const entries = {
 							...effectMigrationEntries,
 							...(migrationPath === "gap"
-								? { "0096_test_marker": Effect.void }
+								? { "0097_test_marker": Effect.void }
 								: {}),
 						};
 						yield* makeEffectSqlMigrator(entries);
@@ -1037,6 +1043,7 @@ describe("Effect migration lineage", () => {
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			expect(
 				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
@@ -1085,6 +1092,7 @@ describe("Effect migration lineage", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				expect(
 					yield* sql`SELECT text, created_at, updated_at, surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model FROM message_parts`,
@@ -1236,6 +1244,7 @@ describe("Effect migration lineage", () => {
 					93,
 					94,
 					95,
+					96,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -1400,8 +1409,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 95", () => {
-		expect(migrationEntries).toHaveLength(95);
+	it("registers the contiguous production chain from 1 through 96", () => {
+		expect(migrationEntries).toHaveLength(96);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -1613,6 +1622,7 @@ describe("Effect migration lineage", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -1729,6 +1739,7 @@ describe("Effect migration lineage", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -1824,6 +1835,7 @@ describe("Effect migration lineage", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1893,6 +1905,7 @@ describe("Effect migration lineage", () => {
 				expect(yield* makeEffectSqlMigrator()).toEqual([
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				expect(yield* graph).toEqual({
 					tables: ["history_heads", "history_nodes", "history_off_head"],
@@ -2220,11 +2233,16 @@ describe("Effect migration lineage", () => {
 						"claude_worktree_state",
 						"workspace_hint",
 						"workspace_hint_sequence",
-						"pending_rewind_message_id",
 						"forked_from",
 					]),
 				);
-				for (const retired of ["read_at", "marked_unread_at", "last_viewed_at"])
+				// 82tn.51: migration 0096 lands any pending rewind as a head move and drops its column.
+				for (const retired of [
+					"read_at",
+					"marked_unread_at",
+					"last_viewed_at",
+					"pending_rewind_message_id",
+				])
 					expect(columns.map((row) => row.name)).not.toContain(retired);
 				expect(columns.map((row) => row.name)).not.toContain("rewind_version");
 				const messageColumns = yield* sql<{
@@ -2502,6 +2520,7 @@ describe("Effect migration lineage", () => {
 				[93, "drop_owned_run_ids"],
 				[94, "history_graph"],
 				[95, "sessions_diff_base"],
+				[96, "pending_rewind_to_head_move"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -2634,6 +2653,7 @@ describe("Effect migration lineage", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				const rows = yield* sql<{
 					id: string;

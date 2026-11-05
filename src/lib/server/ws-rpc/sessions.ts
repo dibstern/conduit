@@ -1,6 +1,7 @@
-import { Clock, Effect, Ref, Schema, Semaphore } from "effect";
+import { Clock, Effect, Option, Ref, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import { validateAttachmentDataUrls } from "../../attachment-data-url.js";
+import { AttachmentRefSchema } from "../../contracts/attachment-ref.js";
 import {
 	AccountUnroutable,
 	type ContinuationError,
@@ -111,6 +112,10 @@ import { saveRelaySettings } from "../../relay/relay-settings.js";
 import { getAutoSettleOutlook } from "../../session/auto-settle-policy.js";
 import { readPersistedAutoSettleFacts } from "../../session/auto-settle-reader.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
+
+const decodeAttachmentRef = Schema.decodeUnknownOption(
+	Schema.fromJsonString(AttachmentRefSchema),
+);
 
 const sideThreadStarts = Semaphore.makeUnsafe(1);
 
@@ -1105,10 +1110,25 @@ export const sessionsHandlers = {
 		),
 	CommitHeadMove: ({ sessionId, intent, moveId }) =>
 		Effect.gen(function* () {
-			const resend =
+			const request =
 				intent._tag === "rewind" && intent.resend !== undefined
 					? yield* sessionInputRequest(sessionId, intent.resend)
 					: undefined;
+			// An edit or a regenerate resends the message's images with its text, as t3code's edit does.
+			const sources =
+				request && intent._tag === "rewind"
+					? yield* (yield* SqlClient.SqlClient)<{ source: string }>`
+						SELECT json_extract(p.metadata, '$.source') AS source
+						FROM message_parts p JOIN messages m ON m.id = p.message_id
+						WHERE m.id = ${intent.messageId} AND m.session_id = ${sessionId}
+							AND m.role = 'user' AND p.type = 'file'
+						ORDER BY p.sort_order`
+					: [];
+			const images = sources.flatMap(({ source }) =>
+				Option.toArray(decodeAttachmentRef(source)),
+			);
+			const resend =
+				request && images.length > 0 ? { ...request, images } : request;
 			return yield* commitHeadMove({
 				sessionId,
 				intent,

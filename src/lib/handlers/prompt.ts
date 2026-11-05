@@ -225,8 +225,6 @@ export const cancelSessionById = (
 	});
 
 export {
-	RewindTargetNotFound,
-	RewindUnavailable,
 	rewindSessionToMessage,
 	undoSessionRewind,
 } from "../domain/relay/Services/session-rewind.js";

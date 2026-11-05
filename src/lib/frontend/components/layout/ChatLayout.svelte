@@ -569,7 +569,6 @@
 								<span class="text-[13px] text-text-dimmer">Nothing is created until you send.</span>
 							</div>
 						{/if}
-						<RewindBanner pendingOnly />
 						<InputArea />
 					</div>
 

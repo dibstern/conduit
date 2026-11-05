@@ -277,9 +277,8 @@ const readModelVersion = Effect.gen(function* () {
 	return rows[0]?.value ?? 0;
 });
 
-// These tests count and order transcript messages. Ignore only the rewind
-// metadata row so it cannot consume a message pull or the reconnect boundary;
-// the pending-state tests cover its delivery, and the wire tests retain it.
+// These tests count and order transcript messages. Ignore the window row so it
+// cannot consume a message pull or the reconnect boundary (82tn.51 retired the rewind row).
 const subscribeMessages = (
 	options: Parameters<typeof subscribeSessionDetail>[0],
 ) =>
@@ -288,17 +287,15 @@ const subscribeMessages = (
 		Stream.filter(
 			(envelope) =>
 				envelope._tag !== "upsert" ||
-				(envelope.item._tag !== "rewind" &&
-					(options.window !== undefined || envelope.item._tag !== "window")),
+				options.window !== undefined ||
+				envelope.item._tag !== "window",
 		),
 		Stream.map((envelope) =>
 			envelope._tag === "snapshot"
 				? {
 						...envelope,
 						rows: envelope.rows.filter(
-							(row) =>
-								row._tag !== "rewind" &&
-								(options.window !== undefined || row._tag !== "window"),
+							(row) => options.window !== undefined || row._tag !== "window",
 						),
 					}
 				: envelope,
@@ -541,7 +538,7 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 	it.effect(
-		"prompt index follows projected rewind and undo without fetching bodies",
+		"prompt index follows a rewind and its undo without fetching bodies (82tn.51)",
 		() =>
 			Effect.gen(function* () {
 				const { subscribeSessionPromptIndex } = yield* Effect.promise(
@@ -573,11 +570,22 @@ describe("subscribeSessionDetail", () => {
 					"rewind-c",
 				]);
 				yield* Queue.take(q);
+				// 82tn.51: a rewind and its undo are head moves between two ended Runs.
+				const sql = yield* SqlClient.SqlClient;
+				for (const [node, parent, rows] of [
+					["a", null, ["rewind-a"]],
+					["bc", "a", ["rewind-b", "rewind-c"]],
+				] as const) {
+					yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+						VALUES (${SID}, ${node}, ${parent}, ${node}, 1, 0)`;
+					yield* sql`UPDATE messages SET history_node_id = ${node} WHERE id IN ${sql.in(rows)}`;
+				}
+				yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES (${SID}, 'bc')`;
 				yield* commit([
 					canonicalEvent(
-						"session.rewound",
+						"head.moved",
 						SID,
-						{ messageId: "rewind-b", previousMessageId: null },
+						{ moveId: "rewind", to: "a" },
 						{ provider: "claude", createdAt: at() },
 					),
 				]);
@@ -589,9 +597,9 @@ describe("subscribeSessionDetail", () => {
 				expect(removed).toEqual(["rewind-b", "rewind-c"]);
 				yield* commit([
 					canonicalEvent(
-						"session.rewind_undone",
+						"head.moved",
 						SID,
-						{ previousMessageId: "rewind-b" },
+						{ moveId: "undo", to: "bc" },
 						{ provider: "claude", createdAt: at() },
 					),
 				]);

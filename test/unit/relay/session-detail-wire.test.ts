@@ -452,8 +452,8 @@ describe("session detail wire", () => {
 					throw new Error("expected whole-row repair");
 				expect(repair.rows).toMatchObject([
 					{ _tag: "part", part: { text: "Hello world" } },
+					// 82tn.51: no pending cut row follows the messages any more.
 					{ _tag: "message", message: { id: "m" } },
-					{ _tag: "rewind", messageId: null },
 					{
 						_tag: "window",
 						window: {

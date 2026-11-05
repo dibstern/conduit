@@ -19,7 +19,6 @@ import {
 	SESSION_HANDLED_TYPES,
 	SESSION_SUBTREE_SQL,
 } from "../projectors/session-handlers.js";
-import { PAGE_MESSAGES } from "../session-history-adapter.js";
 import {
 	NEVER_CUT_TOOL_NAMES,
 	PREVIEW_CODE_POINTS,
@@ -367,60 +366,6 @@ const removeMessages = (
 					: ["sessions", "messages"],
 			...(changed.length > 0 ? { sidebar: [...new Set(changed)] } : {}),
 		};
-	});
-
-interface RewindCut {
-	readonly id: string;
-	readonly ordinal: number;
-	readonly created_at: number;
-}
-
-const restampRewind = (
-	sessionId: string,
-	previousCut: RewindCut | null | undefined,
-	cut: RewindCut | null | undefined,
-	version: number,
-): Effect.Effect<readonly string[], SqlError, SqlClient.SqlClient> =>
-	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		// Old events did not carry the preceding cut. A missing cut row also
-		// leaves its ordering unknown, so preserve the full-restamp behavior.
-		if (previousCut === undefined || cut === undefined) {
-			yield* sql`UPDATE message_parts SET version = ${version}
-				WHERE message_id IN (SELECT id FROM messages WHERE session_id = ${sessionId})`;
-			return ids(
-				yield* sql<{
-					id: string;
-				}>`SELECT id FROM messages WHERE session_id = ${sessionId}`,
-			);
-		}
-		const boundary = previousCut ?? cut;
-		// Either range starts at the earlier cut in the transcript's
-		// (ordinal, created_at, id) order. Null means no pending cut, i.e. no
-		// hidden messages.
-		const from = (at: RewindCut) =>
-			sql`(ordinal, created_at, id) >= (${at.ordinal}, ${at.created_at}, ${at.id})`;
-		const affected =
-			previousCut && cut
-				? sql`${from(previousCut)} OR ${from(cut)}`
-				: boundary
-					? from(boundary)
-					: sql.literal("0");
-		const visible = cut ? sql`NOT ${from(cut)}` : sql.literal("1");
-		const restored = previousCut ? from(previousCut) : sql.literal("0");
-		const page = sql`SELECT id FROM messages WHERE session_id = ${sessionId}
-			AND ${visible} ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT ${PAGE_MESSAGES}`;
-		// Hidden messages need only headers for removals. Restored messages and
-		// the visible page before the new cut need their parts and headers whole.
-		yield* sql`UPDATE message_parts SET version = ${version} WHERE message_id IN (
-			SELECT id FROM messages WHERE session_id = ${sessionId} AND ${restored} AND ${visible}
-			UNION SELECT id FROM (${page})
-		)`;
-		return ids(
-			yield* sql<{ id: string }>`SELECT id FROM messages
-				WHERE session_id = ${sessionId} AND (${affected})
-				UNION SELECT id FROM (${page})`,
-		);
 	});
 
 function encodeJson(value: unknown): string {
@@ -794,8 +739,6 @@ export const makeMessageProjector = defineProjector(() => ({
 	name: "message",
 	handles: [
 		"head.moved",
-		"session.rewound",
-		"session.rewind_undone",
 		"session.rewind_committed",
 		"message.created",
 		"message.removed",
@@ -827,7 +770,8 @@ export const makeMessageProjector = defineProjector(() => ({
 			return Effect.gen(function* () {
 				// 82tn.51: the move lands at once. Rows of nodes leaving the head path are kept off
 				// it, rows of nodes joining come back, and a replay finds nothing to move. An old
-				// log's move names no target: its rows moved with the legacy rewind events.
+				// log's move names no target: its rewind was pending, and the upgrade to 0096 wrote
+				// a move with one.
 				const to = event.data.to;
 				if (to === undefined)
 					return { stamped: [], removed: [], collections: [] };
@@ -861,7 +805,7 @@ export const makeMessageProjector = defineProjector(() => ({
 				// 82tn.50: the cut leaves the head path but stays in the graph, off the Head.
 				yield* keepOffHead(event.sessionId, ids(removed));
 				const touch = yield* removeMessages(event.sessionId, ids(removed), ctx);
-				yield* refreshHistoryHead(event.sessionId, null);
+				yield* refreshHistoryHead(event.sessionId);
 				return touch;
 			});
 		let replacesUserMessage = false;
@@ -911,31 +855,6 @@ export const makeMessageProjector = defineProjector(() => ({
 					yield* sql<{ id: string }>`UPDATE messages
 					SET updated_at = ${event.createdAt}, completed_at = ${event.createdAt}
 					WHERE id = ${messageId} RETURNING id`,
-				);
-			}
-			if (
-				isEventType(event, "session.rewound") ||
-				isEventType(event, "session.rewind_undone")
-			) {
-				const previousId = event.data.previousMessageId;
-				const cutId = isEventType(event, "session.rewound")
-					? event.data.messageId
-					: null;
-				const cutIds = [previousId, cutId].filter(
-					(id): id is string => typeof id === "string",
-				);
-				const cuts =
-					previousId === undefined || cutIds.length === 0
-						? []
-						: yield* sql<RewindCut>`SELECT id, ordinal, created_at FROM messages
-							WHERE session_id = ${event.sessionId} AND id IN ${sql.in(cutIds)}`;
-				// 82tn.50: a rewind moves the Head to before its cut; an undo moves it back.
-				yield* refreshHistoryHead(event.sessionId, cutId);
-				return yield* restampRewind(
-					event.sessionId,
-					previousId === null ? null : cuts.find(({ id }) => id === previousId),
-					cutId === null ? null : cuts.find(({ id }) => id === cutId),
-					ctx.version,
 				);
 			}
 			// A turn that ends without thinking.end must not leave thinking open.
@@ -1040,8 +959,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					)
 					.map((part) => part["text"])
 					.join("");
-				// A snapshot may correct a message's clock, but not its write order,
-				// so a pending rewind's visible rows never change with it
+				// A snapshot may correct a message's clock, but not its write order
 				// (conduit-test-lczrn.1).
 				const existing = yield* sql<{
 					is_backfilled: number;
@@ -1253,8 +1171,7 @@ export const makeMessageProjector = defineProjector(() => ({
 							OR (${event.metadata.providerCreatedAt !== undefined ? 1 : 0} AND messages.created_at <> excluded.created_at)
 							OR (messages.input_id IS NULL AND excluded.input_id IS NOT NULL)
 						RETURNING id`;
-				// A corrected clock keeps the write order, so a pending rewind's
-				// visible rows stay put (conduit-test-lczrn.1).
+				// A corrected clock keeps the write order (conduit-test-lczrn.1).
 				return ids(written);
 			}
 

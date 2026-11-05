@@ -44,6 +44,7 @@ import {
 	type ClaudeEventPersistFailure,
 } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { readOwedRealignment } from "../../../persistence/effect/head-realignment.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { loadLedger } from "../../../persistence/effect/run-ledger-arm.js";
@@ -724,11 +725,11 @@ export const SessionInboxLive = Layer.effect(
 					account,
 				);
 				if (!block || block.fromAccountId === block.toAccountId) {
-					// An agent change or a pending rewind replaces the query too; with no tasks at risk it
-					// keeps its in-place restart, so only tasks live or unknown send it through the close.
-					const [rewind] = yield* sql<{ pending: string | null }>`
-						SELECT pending_rewind_message_id AS pending FROM sessions WHERE id = ${sessionId}`;
-					if (request.agent === native.agent && !rewind?.pending) return false;
+					// An agent change or a head move the provider has not heard of replaces the query too
+					// (82tn.51); with no tasks at risk it keeps its in-place restart, so only tasks live or
+					// unknown send it through the close.
+					const owed = yield* readOwedRealignment(sql, sessionId);
+					if (request.agent === native.agent && !owed?.rewind) return false;
 					const ledger = yield* loadLedger(sessionId).pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);

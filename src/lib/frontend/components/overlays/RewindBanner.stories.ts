@@ -1,9 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/svelte-vite";
-import { expect, within } from "storybook/test";
-import {
-	getOrCreateSessionActivity,
-	getOrCreateSessionMessages,
-} from "../../stores/chat.svelte.js";
+import { getOrCreateSessionActivity } from "../../stores/chat.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
 import {
@@ -21,12 +17,10 @@ let sequence = 0;
 function seed({
 	active = false,
 	selectedUuid = null,
-	pending = false,
 	provider = "opencode",
 }: {
 	active?: boolean;
 	selectedUuid?: string | null;
-	pending?: boolean;
 	provider?: "opencode" | "claude";
 } = {}): () => void {
 	// Whether files rewind too comes from the session's account's driver.
@@ -51,19 +45,6 @@ function seed({
 	applySessionChange({ _tag: "synchronized" });
 	openSessionForSetup(storySessionId, "conduit");
 	getOrCreateSessionActivity(storySessionId);
-	getOrCreateSessionMessages(storySessionId).transcript = pending
-		? {
-				rows: [],
-				hwm: sequence,
-				hasMore: false,
-				status: { _tag: "live" },
-				project: "story-project",
-				pending: [],
-				pendingRewindMessageId: "message-after-cut",
-				waiting: new Map(),
-				partOrder: new Map(),
-			}
-		: null;
 	return () => {
 		instanceState.instances = instances;
 	};
@@ -97,18 +78,6 @@ export const WithModal: Story = {
 
 /** Rewind mode off — nothing visible. */
 export const Inactive: Story = { beforeEach: () => seed() };
-
-export const Pending: Story = {
-	args: { pendingOnly: true },
-	beforeEach: () => seed({ pending: true }),
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await expect(canvas.getByRole("status")).toHaveTextContent(
-			"Rewound. Sending your next message makes it permanent.",
-		);
-		await expect(canvas.getByRole("button", { name: "Undo" })).toBeVisible();
-	},
-};
 
 export const WithClaudeModal: Story = {
 	tags: ["viewport-capture"],
