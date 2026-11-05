@@ -83,6 +83,56 @@ export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
 	}
 }
 
+/**
+ * Why a head move cannot take its files (82tn.53); moving the conversation alone still can.
+ * `other` names the session that ran in, or restored, the folder after the target, or has a
+ * run open there now.
+ */
+export class FilesRefused extends Schema.TaggedError<FilesRefused>()(
+	"FilesRefused",
+	{
+		sessionId: Schema.String,
+		reason: Schema.Literals([
+			"pruned",
+			"not_available",
+			"other_session",
+			"folder_missing",
+			"changed",
+			"failed",
+		]),
+		directory: Schema.optionalKey(Schema.String),
+		/** Folder-relative paths that changed since the plan. */
+		paths: Schema.optionalKey(Schema.Array(Schema.String)),
+		other: Schema.optionalKey(
+			Schema.Struct({
+				sessionId: Schema.String,
+				title: Schema.String,
+				running: Schema.Boolean,
+			}),
+		),
+	},
+) {
+	get message() {
+		const name = this.other?.title || "Another session";
+		switch (this.reason) {
+			case "pruned":
+				return "Files from this point were pruned.";
+			case "not_available":
+				return "Files from this point are not available.";
+			case "other_session":
+				return this.other?.running
+					? `${name} is running in ${this.directory}.`
+					: `${name} changed files in ${this.directory} since this point.`;
+			case "folder_missing":
+				return `${this.directory} is gone.`;
+			case "changed":
+				return `Files in ${this.directory} changed. Review it again.`;
+			default:
+				return "The files could not be restored.";
+		}
+	}
+}
+
 export class StaleSwitch extends Schema.TaggedError<StaleSwitch>()(
 	"StaleSwitch",
 	{
@@ -207,6 +257,27 @@ export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 	order: [],
 };
 
+/**
+ * ad4c: how a switch's handoff reached its account. `resume` resumed the
+ * account's own native thread and caught it up after `afterSequence`; `fresh`
+ * started a new thread with the full kept history (`afterSequence` 0).
+ * `throughSequence` is the last event the handoff covers; `inputId` the send.
+ */
+export const handoffDeliveryFields = {
+	strategy: Schema.optionalKey(Schema.Literals(["resume", "fresh"])),
+	afterSequence: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	),
+	throughSequence: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	),
+	inputId: Schema.optionalKey(Schema.String),
+	/** Why a resume became a fresh handoff: the provider refused it, or the catch-up did not fit. */
+	fallback: Schema.optionalKey(
+		Schema.Literals(["resume_rejected", "catch_up_too_long"]),
+	),
+};
+
 export const HandoffSummarySchema = Schema.Struct({
 	continuationKind: Schema.optional(
 		Schema.Literals(["native-thread", "transcript-digest"]),
@@ -221,6 +292,7 @@ export const HandoffSummarySchema = Schema.Struct({
 	),
 	firstMessageIncluded: Schema.Boolean,
 	tokens: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	...handoffDeliveryFields,
 });
 export type HandoffSummary = typeof HandoffSummarySchema.Type;
 

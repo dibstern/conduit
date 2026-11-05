@@ -68,6 +68,15 @@ class ClaudeAccounts {
 		return this.configuredAccounts;
 	}
 
+	/** Where a session can move: its harness's accounts, and Claude and Cursor into each other (ad4c). */
+	get switchTargets() {
+		return this.harness === "codex"
+			? this.configuredAccounts
+			: instanceState.instances.filter(
+					({ driver }) => driver === "claude" || driver === "cursor",
+				);
+	}
+
 	nameOf(
 		instanceId: string | undefined,
 		fallback = this.harness === "codex" ? "Codex" : "Claude",
@@ -82,7 +91,10 @@ class ClaudeAccounts {
 	readingOf(instanceId: string | undefined): UsageReading | undefined {
 		return usageState.readings.find(
 			(reading) =>
-				reading.accountId === instanceId && reading.harness === this.harness,
+				reading.accountId === instanceId &&
+				reading.harness ===
+					(getDriverTraits(getInstanceById(instanceId ?? "")?.driver)
+						?.usageHarness ?? this.harness),
 		);
 	}
 

@@ -69,6 +69,7 @@ interface CursorSession {
 	agentId?: string | undefined;
 	controllerPid?: number | undefined;
 	forkSeedPending?: boolean | undefined;
+	handoffFor?: number | undefined;
 	open?:
 		| {
 				readonly agent: CursorAgent;
@@ -302,6 +303,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 								...(identity.forkSeedPending !== undefined
 									? { forkSeedPending: identity.forkSeedPending }
 									: {}),
+								handoffFor: identity.handoffFor,
 							}
 						: typeof storedId === "string"
 							? { agentId: storedId }
@@ -590,6 +592,15 @@ export class CursorRunnerPayload implements RunnerPayload {
 								: [],
 						credential,
 					});
+					// ad4c: an unanswered switch into this account opens a new agent
+					// and seeds it once; re-delivery of the same switch keeps it.
+					const handoff = facts.value.switchHandoff;
+					if (handoff && session.handoffFor !== handoff.switchSequence) {
+						yield* this.close(session);
+						session.agentId = undefined;
+						session.handoffFor = handoff.switchSequence;
+						session.forkSeedPending = true;
+					}
 					if (
 						session.open &&
 						!isDeepStrictEqual(session.open.options, config.agent)
@@ -702,7 +713,7 @@ export class CursorRunnerPayload implements RunnerPayload {
 							}),
 						);
 					}
-					const digest = facts.value.forkDigest;
+					const digest = handoff?.text ?? facts.value.forkDigest;
 					// A recorded accepted run can settle the seed after a crash.
 					// A rejected send leaves it pending for a new input.
 					if (digest !== undefined && session.forkSeedPending === undefined)
@@ -725,6 +736,9 @@ export class CursorRunnerPayload implements RunnerPayload {
 										controllerPid: process.pid,
 										...(session.forkSeedPending !== undefined
 											? { forkSeedPending: session.forkSeedPending }
+											: {}),
+										...(session.handoffFor !== undefined
+											? { handoffFor: session.handoffFor }
 											: {}),
 									},
 								),

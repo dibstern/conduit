@@ -110,6 +110,7 @@ import {
 } from "./runner/send-settlement-outbox.js";
 import type { SessionFailure } from "./runner/session-runner.js";
 import { legacyStopOwnersQuery, stopCovers } from "./session-run-settlement.js";
+import { planSwitchHandoff } from "./switch-handoff.js";
 import type {
 	EventSink,
 	ProviderCall,
@@ -2423,7 +2424,12 @@ export class ProviderSideEffectReactor {
 						],
 					});
 				mark(turnKey, "reactor-start");
-				const send = (planned: ClaudeLaunchFields | undefined) =>
+				const send = (
+					planned:
+						| ClaudeLaunchFields
+						| Pick<SendTurnInput, "switchHandoff">
+						| undefined,
+				) =>
 					Effect.gen({ self: this }, function* () {
 						mark(turnKey, "history-ready");
 						const input = yield* resolveTurnImages(
@@ -2449,7 +2455,10 @@ export class ProviderSideEffectReactor {
 							awaitIntake: this.awaitIntake(row),
 							commandAttempt: row.attempt_count,
 							account:
-								account?.driver === "claude" && planned && !payload.account
+								account?.driver === "claude" &&
+								planned &&
+								"configDir" in planned &&
+								!payload.account
 									? { ...account, folder: planned.configDir }
 									: account,
 							instanceId,
@@ -2542,7 +2551,36 @@ export class ProviderSideEffectReactor {
 									: storeFailure("prepareTurn")(cause),
 							),
 						)
-					: yield* send(undefined);
+					: getProviderDriver(driver)?.forkStrategy === "transcript-digest"
+						? yield* Effect.gen({ self: this }, function* () {
+								const read = yield* makeReadQueryEffect;
+								const owed = yield* planSwitchHandoff({
+									read,
+									sessionId: payload.sessionId,
+									instanceId,
+									inputId: payload.inputId,
+									prompt: payload.prompt,
+								});
+								if (!owed) return yield* send(undefined);
+								// The handoff receipt records it when this run completes.
+								yield* this.options.sql`UPDATE provider_command_outbox
+									SET payload_json = json_set(payload_json, '$.handoff', json(${JSON.stringify(owed.summary)}))
+									WHERE command_id = ${row.command_id} AND session_id = ${payload.sessionId} AND status = 'running'`;
+								return yield* send({
+									switchHandoff: {
+										switchSequence: owed.switchSequence,
+										text: owed.text,
+									},
+								});
+							}).pipe(
+								Effect.provideService(SqlClient.SqlClient, this.options.sql),
+								Effect.mapError((cause) =>
+									cause instanceof ProviderInstanceFailure
+										? cause
+										: storeFailure("prepareTurn")(cause),
+								),
+							)
+						: yield* send(undefined);
 				return result;
 			}
 			if (row.effect_type === "interrupt_turn") {

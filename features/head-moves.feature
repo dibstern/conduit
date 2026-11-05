@@ -116,3 +116,49 @@ Examples:
   | viewport | reply | notice                       |
   | phone    | 2     | Stop the current turn first. |
   | desktop  | 2     | Stop the current turn first. |
+
+Scenario Outline: rewind the conversation and files after reading the paths that change
+  Given the viewport is a <viewport>
+  And a rewind there would change <first_path> and <second_path>
+  And a branched conversation is open
+  When I open the head log from the first reply's message menu
+  And I choose to rewind to a message from the head log
+  And I pick the message <message> to rewind to
+  Then the rewind dialog lists <first_path> and <second_path> as changing
+  When I choose to rewind the conversation and files
+  Then the conversation moves with a rewind before <messageId> with files
+
+Examples:
+  | viewport | first_path        | second_path | message                 | messageId |
+  | phone    | docs/migration.md | notes.md    | Add a migration section | hm-user-2 |
+  | desktop  | docs/migration.md | notes.md    | Add a migration section | hm-user-2 |
+
+Scenario Outline: another session in the folder keeps the files, and the conversation-only rewind still goes
+  Given the viewport is a <viewport>
+  And the session <other> has run in <folder> since
+  And a branched conversation is open
+  When I open the head log from the first reply's message menu
+  And I choose to rewind to a message from the head log
+  And I pick the message <message> to rewind to
+  Then rewinding the files is unavailable because <reason>
+  When I choose to rewind the conversation only
+  Then the conversation moves with a rewind before <messageId>
+
+Examples:
+  | viewport | other     | folder      | message                 | reason                                                    | messageId |
+  | phone    | Docs pass | /work/notes | Add a migration section | Docs pass changed files in /work/notes since this point. | hm-user-2 |
+  | desktop  | Docs pass | /work/notes | Add a migration section | Docs pass changed files in /work/notes since this point. | hm-user-2 |
+
+Scenario Outline: files from pruned history cannot be rewound
+  Given the viewport is a <viewport>
+  And the files at every move's target were pruned
+  And a branched conversation is open
+  When I open the head log from the first reply's message menu
+  And I choose to rewind to a message from the head log
+  And I pick the message <message> to rewind to
+  Then rewinding the files is unavailable because <reason>
+
+Examples:
+  | viewport | message                 | reason                             |
+  | phone    | Add a migration section | Files from this point were pruned. |
+  | desktop  | Add a migration section | Files from this point were pruned. |

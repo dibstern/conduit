@@ -39,6 +39,7 @@ export const copy: {
 	AccountUnroutable: (error) => error.message,
 	AccountSwitchBusy: (error) => error.message,
 	SessionBusy: (error) => error.message,
+	FilesRefused: (error) => error.message,
 	StaleSwitch: (error) => error.message,
 	AccountUnavailable: (error) => error.message,
 	AccountStillLimited: (error) =>

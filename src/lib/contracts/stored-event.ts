@@ -3,7 +3,10 @@ import {
 	AttachmentRefSchema,
 	AttachmentSourceSchema,
 } from "./attachment-ref.js";
-import { ContinuationReasonSchema } from "./limit-recovery.js";
+import {
+	ContinuationReasonSchema,
+	handoffDeliveryFields,
+} from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
 	SessionSetupOutputPayloadSchema,
@@ -937,6 +940,8 @@ export const CanonicalEvents = {
 			undoes: Schema.optionalKey(Schema.String),
 			/** Edit-and-resend and regenerate: admitted after the move, keyed by the move id. */
 			resend: Schema.optionalKey(InputRequestSchema),
+			/** 82tn.53: the folders the move restored, each with a Restore Receipt. */
+			files: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
 	"head.moved": live(
@@ -1180,6 +1185,7 @@ export const CanonicalEvents = {
 			),
 			firstMessageIncluded: Schema.optionalKey(Schema.Boolean),
 			instanceId: Schema.optionalKey(Schema.String),
+			...handoffDeliveryFields,
 		}),
 	),
 	"session.usage_limited": live(

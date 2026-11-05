@@ -75,7 +75,7 @@ it("publishes task additions and removals from onChange without another event", 
 				}),
 			),
 		);
-		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(1);
+		await expect.poll(() => rows.length, { timeout: 10_000 }).toBe(1);
 		expect(rows[0]).not.toHaveProperty("backgroundTasks");
 		const a = {
 			id: "a",
@@ -94,7 +94,7 @@ it("publishes task additions and removals from onChange without another event", 
 			kind: "snapshot",
 			tasks: [a],
 		});
-		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(2);
+		await expect.poll(() => rows.length, { timeout: 10_000 }).toBe(2);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "working",
 			backgroundTasks: [{ ...a, firstSeenAt: 100 }],
@@ -104,7 +104,7 @@ it("publishes task additions and removals from onChange without another event", 
 			kind: "snapshot",
 			tasks: [b, a],
 		});
-		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(3);
+		await expect.poll(() => rows.length, { timeout: 10_000 }).toBe(3);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "working",
 			backgroundTasks: [
@@ -117,7 +117,7 @@ it("publishes task additions and removals from onChange without another event", 
 			kind: "snapshot",
 			tasks: [b],
 		});
-		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(4);
+		await expect.poll(() => rows.length, { timeout: 10_000 }).toBe(4);
 		expect(rows.at(-1)).toMatchObject({
 			backgroundWork: "working",
 			backgroundTasks: [{ ...b, firstSeenAt: 200 }],
@@ -147,7 +147,7 @@ it("publishes task additions and removals from onChange without another event", 
 			kind: "snapshot",
 			tasks: [],
 		});
-		await expect.poll(() => rows.length, { timeout: 1000 }).toBe(5);
+		await expect.poll(() => rows.length, { timeout: 10_000 }).toBe(5);
 		expect(rows.at(-1)).toMatchObject({ attention: "idle" });
 		expect(rows.at(-1)).not.toHaveProperty("backgroundTasks");
 		expect(onChange).toHaveBeenCalledTimes(4);

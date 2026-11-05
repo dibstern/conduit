@@ -286,6 +286,11 @@ export interface SendTurnInput
 	/** What the user sent, when the prompt wraps it in a hidden handoff. */
 	readonly text?: string;
 	readonly handoff?: SessionHandoffDeliveredPayload;
+	/** ad4c: the switch this fresh thread answers and the full handoff it is seeded with. */
+	readonly switchHandoff?: {
+		readonly switchSequence: number;
+		readonly text: string;
+	};
 	readonly history: readonly HistoryMessage[];
 	readonly providerState: Readonly<Record<string, unknown>>;
 	/** Resolved once at admission and retained for this turn, including replay. */

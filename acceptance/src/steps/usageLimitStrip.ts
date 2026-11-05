@@ -750,6 +750,45 @@ export const usageLimitStripHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "stub how the delivered handoff went across",
+		match:
+			/^the delivered handoff to (\S+) (resumed|started fresh after a refused resume|started fresh after a long catch-up)$/,
+		run: ({ world, match }) => {
+			const resumed = match[2] === "resumed";
+			const fallback =
+				match[2] === "started fresh after a refused resume"
+					? "resume_rejected"
+					: "catch_up_too_long";
+			requireRpcControl(world.page).setStubs({
+				GetContinuationHandoff: () => ({
+					handoff: {
+						included: 3,
+						omitted: 0,
+						firstMessageIncluded: !resumed,
+						tokens: 900,
+						...(resumed
+							? { strategy: "resume" as const }
+							: { strategy: "fresh" as const, fallback }),
+						eventId: "evt-handoff",
+						instanceId: match[1] ?? "",
+						at: PINNED_CLOCK_MS - 60_000,
+					},
+				}),
+			});
+		},
+	},
+	{
+		name: "assert how the handoff review says it went across",
+		match: /^the handoff review says (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("handoff-dialog")
+					.getByTestId("handoff-strategy"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
 		name: "open the account picker",
 		match: /^I open Switch account on the usage limit strip$/,
 		run: async ({ world }) => {

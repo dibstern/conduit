@@ -11,9 +11,10 @@
 	import { clock } from "../../stores/clock.svelte.js";
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import type { HandoffSummary, UsageReading } from "../../../contracts/limit-recovery.js";
-	import { getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
+	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { handoffMessagesLine, quotaReading } from "../../utils/continuation.js";
+	import { getProviderPresentation } from "../../utils/provider-presentation.js";
 	import AccountDot from "../ui/AccountDot.svelte";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
@@ -51,7 +52,9 @@
 	const compact = $derived(sessionViewState.compact);
 	const nameOf = (instanceId: string) => getInstanceById(instanceId)?.name ?? instanceId;
 	const nativeThread = $derived(summary?.continuationKind === "native-thread");
-	const providerName = $derived(getDriverTraits(getInstanceById(to)?.driver)?.usageHarness === "codex" ? "Codex" : "Claude");
+	const providerName = $derived(getProviderPresentation(getInstanceById(to)?.driver)?.label ?? "Claude");
+	// ad4c: a resume caught the account's own session up; nothing was dropped from it.
+	const resumed = $derived(summary?.strategy === "resume");
 	const codexDigest = $derived(providerName === "Codex" && summary?.continuationKind === "transcript-digest");
 
 	// Each row is its words and an optional dim aside.
@@ -63,6 +66,14 @@
 		};
 		if (codexDigest) return {
 			carries: [["A condensed copy of the conversation so far"], ["Model, mode and session settings"]],
+			drops: [],
+		};
+		if (resumed) return {
+			carries: [
+				[summary.included === 0 ? "Nothing new since it last ran" : `${summary.included} new ${summary.included === 1 ? "message" : "messages"} since it last ran`],
+				["Its earlier session and conversation history"],
+				["Model, mode and session settings"],
+			],
 			drops: [],
 		};
 		const messages = handoffMessagesLine(summary, compact);
@@ -141,8 +152,11 @@
 				<QuotaMeter {...quotaReading(confirm.quota, clock.now)} size="lg" track={!compact} />
 			</Surface>
 		{:else}
-			<p>
-				{#if nativeThread}The conversation continued on <b class="font-semibold text-text">{nameOf(to)}</b> in the same Codex thread, with its full history.
+			<p data-testid="handoff-strategy" data-strategy={summary?.strategy} data-fallback={summary?.fallback}>
+				{#if resumed}<b class="font-semibold text-text">{nameOf(to)}</b> resumed its earlier session and caught up on what happened since it last ran.
+				{:else if summary?.fallback === "resume_rejected"}<b class="font-semibold text-text">{nameOf(to)}</b> couldn't reopen its earlier session, so Conduit started a fresh one and handed the conversation over.
+				{:else if summary?.fallback === "catch_up_too_long"}Too much happened since <b class="font-semibold text-text">{nameOf(to)}</b> last ran to catch it up, so Conduit started a fresh session and handed the conversation over.
+				{:else if nativeThread}The conversation continued on <b class="font-semibold text-text">{nameOf(to)}</b> in the same Codex thread, with its full history.
 				{:else if codexDigest}<b class="font-semibold text-text">{nameOf(to)}</b> couldn't open the original Codex thread, so Conduit started a new one with a condensed copy of the conversation so far.
 				{:else if providerName === "Codex" && summary === null}The conversation continued on <b class="font-semibold text-text">{nameOf(to)}</b>.
 				{:else}The conversation was handed to a fresh session on <b class="font-semibold text-text">{nameOf(to)}</b>{summary === null ? `. Nothing has gone across yet: the handoff counts once ${providerName} finishes a reply there.` : "."}{/if}
