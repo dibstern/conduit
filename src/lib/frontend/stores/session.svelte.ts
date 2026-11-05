@@ -698,7 +698,7 @@ export function followFork(
 	showToast(
 		`Forked from "${findSession(response.forkedFrom)?.title || "session"}"`,
 	);
-	selection.follow(from, response.sessionId, "push");
+	selection.follow(from, response.sessionId, "push", response.projectSlug);
 }
 
 // Components should wrap these in $derived() for reactive caching.

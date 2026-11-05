@@ -3,6 +3,7 @@ import {
 	messageSurfacing,
 	sessionJevEnabled,
 } from "../../stores/message-surfacing.svelte.js";
+import { projectState } from "../../stores/project-state.svelte.js";
 import { selection } from "../../stores/selection.svelte.js";
 import {
 	followFork,
@@ -360,13 +361,44 @@ async function remove(
 	return true;
 }
 
-function fork(session: SessionInfo) {
+function fork(session: SessionInfo, targetProjectSlug?: string) {
 	const input = rpcInput(session);
 	if (!input) return;
 	const from = selection.scope;
-	void rpc("ForkSession", input)
+	void rpc("ForkSession", {
+		...input,
+		...(targetProjectSlug && { targetProjectSlug }),
+	})
 		.then((response) => followFork(from, response))
 		.catch(toastFailure("Failed to fork session"));
+}
+
+/** Every other project, when there is one: the fork starts there, seeded with this transcript. */
+function forkInto(session: SessionInfo): SessionCommand[] {
+	const targets = projectState.projects.filter(
+		(project) => project.slug !== session.projectSlug,
+	);
+	if (targets.length === 0) return [];
+	return [
+		{
+			testId: "session-ctx-fork-into",
+			label: "Fork into",
+			section: "manage",
+			icon: "git-fork",
+			options: {
+				title: "Fork into",
+				hint: "pick a project",
+				items: targets.map((project) => ({
+					id: project.slug,
+					label: project.title,
+					icon: "folder",
+					run: () => fork(session, project.slug),
+				})),
+			},
+			// Only its options act; the tile and the menu header open them.
+			run: () => undefined,
+		},
+	];
 }
 
 async function copyResume(session: SessionInfo) {
@@ -640,6 +672,7 @@ export function getSessionCommands(
 			icon: "git-fork",
 			run: () => fork(session),
 		},
+		...forkInto(session),
 		{
 			testId: "session-ctx-copy-resume",
 			label: "Copy resume command",

@@ -154,9 +154,10 @@ export const selection = {
 		from: typeof scope,
 		sessionId: string,
 		history: "push" | "replace",
+		project?: string,
 	): void {
 		if (!from) return;
-		placement.set(sessionId, { project: from.project });
+		placement.set(sessionId, { project: project ?? from.project });
 		if (
 			scope?.project !== from.project ||
 			scope.sessionId !== from.sessionId ||

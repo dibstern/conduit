@@ -39,6 +39,7 @@ import { duoFoldedPortraitHandlers } from "./steps/duoFoldedPortrait.js";
 import { duoPoseHandlers } from "./steps/duoPose.js";
 import { duoUnfoldedPortraitHandlers } from "./steps/duoUnfoldedPortrait.js";
 import { firstRunProjectsHandlers } from "./steps/firstRunProjects.js";
+import { forkIntoProjectHandlers } from "./steps/forkIntoProject.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { headerTapOnLiftHandlers } from "./steps/headerTapOnLift.js";
 import { headMoveHandlers } from "./steps/headMove.js";
@@ -122,6 +123,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...sessionRowsHandlers,
 	...projectTreeHandlers,
 	...crossProjectAsksHandlers,
+	...forkIntoProjectHandlers,
 	...rightPaneHandlers,
 	...serversHandlers,
 	...sessionDiffHandlers,
