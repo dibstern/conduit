@@ -560,6 +560,15 @@ export function createProjectRelayLayers({
 		config.daemonConfigContext ?? Context.empty(),
 		InputDraftsTag,
 	);
+	const sharedAlerts = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		AlertsTag,
+	);
+	// One reference, so the ingestion publisher and SubscribeAlerts share a feed:
+	// the daemon's, which every project's tab reads, or a standalone relay's own.
+	const alertsLayer = Option.isSome(sharedAlerts)
+		? Layer.succeedContext(Context.make(AlertsTag, sharedAlerts.value))
+		: AlertsLive;
 	// Returning the daemon instance adds no ownership to the relay scope.
 	// Keep one layer reference so every writer and subscriber uses the same bus.
 	const sessionEventBusLayer = Option.isSome(sharedBus)
@@ -814,7 +823,7 @@ export function createProjectRelayLayers({
 				pendingInteractionServiceLayer,
 				// The same reference makeRelayStateLive merges, so it memoizes to the
 				// one PubSub SubscribeAlerts reads.
-				AlertsLive,
+				alertsLayer,
 				loggerLayer,
 				usageLayer,
 				recapSettingsLayer,
@@ -1057,6 +1066,7 @@ export function createProjectRelayLayers({
 	const relayStateAndBridges = Layer.provideMerge(
 		makeRelayStateLive({
 			sessionEventBusLayer,
+			alertsLayer,
 			...(Option.isSome(sharedSessionManager) && {
 				sessionManagerStateLayer: Layer.effectContext(
 					sharedSessionManager.value.project(config.slug).pipe(

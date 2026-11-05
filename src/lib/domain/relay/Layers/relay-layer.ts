@@ -7,7 +7,7 @@
 import { Layer } from "effect";
 import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeOpenCodeRuntimeStateLive } from "../../daemon/Services/instance-manager-service.js";
-import { AlertsLive } from "../Services/alerts.js";
+import { AlertsLive, type AlertsTag } from "../Services/alerts.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
 import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
@@ -58,6 +58,8 @@ export const makeRelayStateLive = (
 		readonly sessionManagerStateLayer?: Layer.Layer<
 			SessionManagerStateTag | SessionManagerCoordinationTag
 		>;
+		/** Daemon relays publish to the daemon's one alert feed. */
+		readonly alertsLayer?: Layer.Layer<AlertsTag>;
 	} = {},
 ) => {
 	const sessionEventBusLayer =
@@ -97,8 +99,8 @@ export const makeRelayStateLive = (
 		RelayEventBusLive,
 		// Committed-event change signal, shared by daemon relays.
 		sessionEventBusLayer,
-		// Per-relay alert and composer-draft fanout (live-only subscriptions)
-		AlertsLive,
+		// Alert and composer-draft fanout (live-only subscriptions)
+		options.alertsLayer ?? AlertsLive,
 		InputDraftsLive,
 		// PTY state
 		PtyManagerStateLive,

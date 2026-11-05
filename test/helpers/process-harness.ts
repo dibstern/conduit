@@ -2774,6 +2774,23 @@ export class ProcessBrowser {
 		return this.sessionsReady;
 	}
 
+	/** Records each in-app alert as `{ type: "alert", ... }`; resolves once live. */
+	async followAlerts(): Promise<void> {
+		const cursor = this.frames.length;
+		this.detailFibers.add(
+			this.watch(
+				this.rpc.SubscribeAlerts({ projectSlug: this.projectSlug }),
+				(envelope) =>
+					Effect.sync(() => this.record({ ...envelope, type: "alert" })),
+			),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "alert" && message["_tag"] === "synchronized",
+			cursor,
+		);
+	}
+
 	followSession(sessionId: string): Promise<void> {
 		const existing = this.details.get(sessionId);
 		if (existing) return existing;

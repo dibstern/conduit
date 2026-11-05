@@ -1,5 +1,6 @@
-// The attached project's in-app alerts, fed by its SubscribeAlerts stream: a
-// session finished or failed while this tab was looking elsewhere. Push covers
+// Every project's in-app alerts, read through the attached project's
+// SubscribeAlerts stream: a session finished or failed while this tab was
+// looking elsewhere. Push covers
 // subscribed browsers (triggerNotifications stands down for them); this is the
 // ding for every other one. Live-only, so a reconnect never re-fires an alert.
 

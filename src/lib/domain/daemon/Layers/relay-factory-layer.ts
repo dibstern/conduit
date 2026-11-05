@@ -36,6 +36,7 @@ import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-sco
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { StoredProject } from "../../../types.js";
+import { AlertsTag } from "../../relay/Services/alerts.js";
 import {
 	DaemonSessionQueryServiceError,
 	DaemonSessionQueryServiceTag,
@@ -247,6 +248,7 @@ export const RelayFactoryLive = (
 			const providerTurns = yield* Effect.serviceOption(ProviderTurns);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
+			const alerts = yield* Effect.serviceOption(AlertsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
 				? sharedDrafts.value
 				: yield* makeInputDrafts.pipe(Effect.provide(yield* PersistenceStore));
@@ -632,6 +634,11 @@ export const RelayFactoryLive = (
 										)
 										.pipe(
 											Context.add(Subprocess, subprocess),
+											Context.merge(
+												Option.isSome(alerts)
+													? Context.make(AlertsTag, alerts.value)
+													: Context.empty(),
+											),
 											Context.merge(
 												Option.isSome(owners)
 													? Context.make(OwnerScopes, owners.value)
