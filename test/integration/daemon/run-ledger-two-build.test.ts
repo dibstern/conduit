@@ -49,9 +49,41 @@ describe("two-build upgrade from main", () => {
 			startupTimeoutMs: TIMEOUT,
 			runnerStartupTimeoutMs: TIMEOUT,
 		});
-		const browser = await harness.connect();
-		const sessionId = await browser.createSession("Two-build Claude");
-		await browser.send(sessionId, "Say hello", TIMEOUT);
+		// main's session detail feed fails this build's schema (82tn.51 dropped its rewind row),
+		// so the browser leaves main's session unviewed and the store shows each turn.
+		const browser = await harness.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const sessionId = await browser.createSession(
+			"Two-build Claude",
+			undefined,
+			"claude",
+			{ view: false },
+		);
+		const submit = (text: string, delivery: "queue" | "steer" = "queue") =>
+			Effect.runPromise(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId: randomUUID(),
+					delivery,
+					text,
+				}),
+			);
+		const turnStates = () =>
+			query<{ state: string }>(
+				harness,
+				"SELECT state FROM turns WHERE session_id = ?",
+				sessionId,
+			).map(({ state }) => state);
+		await submit("Say hello");
+		// test-waits-allow polling: an unviewed session's turn end reaches only the store.
+		await vi.waitFor(() => expect(turnStates()).toEqual(["completed"]), {
+			timeout: TIMEOUT,
+		});
 		// A fresh runner resumes the native session; main falls back from the refusal and
 		// marks its command with the old resume marker.
 		writeFileSync(
@@ -65,12 +97,11 @@ describe("two-build upgrade from main", () => {
 			timeout: TIMEOUT,
 		});
 		const prompt = "upgrade-long-turn";
-		const pending = browser.send(sessionId, prompt, TIMEOUT).catch((e) => e);
+		await submit(prompt);
 		await harness.waitForMark(
 			(mark) => mark.kind === "assistant-held" && mark.prompt.endsWith(prompt),
 		);
 		const steerId = randomUUID();
-		await browser.followSession(sessionId);
 		await Effect.runPromise(
 			browser.rpc["input.submit"]({
 				sessionId,
@@ -100,7 +131,6 @@ describe("two-build upgrade from main", () => {
 			),
 		).toContainEqual({ marker: 1 });
 		await harness.kill();
-		await pending;
 		await harness.restart({
 			dist: CURRENT_DIST,
 			startupTimeoutMs: TIMEOUT,
@@ -112,14 +142,7 @@ describe("two-build upgrade from main", () => {
 		// the inbox front, paused, as main's requeue leaves it (CONTRACT.md 217, row 206).
 		// test-waits-allow polling: the retired runner's settle reaches only the store.
 		await vi.waitFor(
-			() =>
-				expect(
-					query<{ state: string }>(
-						harness,
-						"SELECT state FROM turns WHERE session_id = ?",
-						sessionId,
-					).map(({ state }) => state),
-				).toEqual(["completed", "error"]),
+			() => expect(turnStates()).toEqual(["completed", "error"]),
 			{ timeout: TIMEOUT },
 		);
 		// test-waits-allow polling: the requeued steer reaches only the store's inbox.
