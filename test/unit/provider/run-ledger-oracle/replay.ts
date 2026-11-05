@@ -474,6 +474,21 @@ export function replayTrace(
 		commands: [],
 		agents: [],
 	}));
+	const origin = Date.UTC(2026, 0, 1);
+	// Timers and Date are faked from before the stack is built until after it is torn down (Effect's
+	// scheduler stays on the real setImmediate). Faked only around the steps, the stack's own timers
+	// (a 6h sweep, a 30s and two 1s timeouts) ran on the real clock across the steps of this and the
+	// next replay, and fired at whichever step the machine's load put them in.
+	vi.useFakeTimers({
+		toFake: [
+			"setTimeout",
+			"clearTimeout",
+			"setInterval",
+			"clearInterval",
+			"Date",
+		],
+		now: origin,
+	});
 	return Effect.runPromise(
 		Effect.gen(function* () {
 			const adapters = yield* ProviderAdapters;
@@ -494,27 +509,10 @@ export function replayTrace(
 			yield* (yield* SessionInboxTag).start;
 			const sql = yield* SqlClient.SqlClient;
 
-			const origin = Date.UTC(2026, 0, 1);
-			// Failure 4: steps run on a fake clock (timers and Date; Effect's scheduler stays on the real
-			// setImmediate). A step first moves it to the step's trace time, then 600ms past its action,
-			// beyond the reactor's 500ms polls (orchestration-side-effect-reactor.ts 291), in 5ms ticks,
-			// draining the stack's ready work before each tick, so whatever a step's timers release
-			// lands in that step.
-			yield* Effect.acquireRelease(
-				Effect.sync(() =>
-					vi.useFakeTimers({
-						toFake: [
-							"setTimeout",
-							"clearTimeout",
-							"setInterval",
-							"clearInterval",
-							"Date",
-						],
-						now: origin,
-					}),
-				),
-				() => Effect.sync(() => vi.useRealTimers()),
-			);
+			// Failure 4: steps run on the fake clock faked above. A step first
+			// moves it to the step's trace time, then 600ms past its action, beyond the reactor's 500ms
+			// polls (orchestration-side-effect-reactor.ts 291), in 5ms ticks, draining the stack's ready
+			// work before each tick, so whatever a step's timers release lands in that step.
 			// Ready work: Effect's scheduler queues setImmediate, and the stack's fs calls (FSReqPromise)
 			// finish on libuv's pool, so drained once neither is pending.
 			const drain = Effect.promise(async () => {
@@ -753,6 +751,7 @@ export function replayTrace(
 			Effect.provide(layer),
 			Effect.ensuring(
 				Effect.sync(() => {
+					vi.useRealTimers();
 					__setProbeOverrideForTesting(undefined);
 					rmSync(scratch, { recursive: true, force: true });
 				}),
