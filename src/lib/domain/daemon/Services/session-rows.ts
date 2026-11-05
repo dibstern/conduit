@@ -15,7 +15,7 @@ import { withSessionWorktreeStatus } from "../../relay/Services/session-workspac
 import { AccountDirectory } from "./account-directory.js";
 import { ReadRequest } from "./read-request.js";
 import { resolveSessionAccountIds } from "./session-accounts.js";
-import { SessionActivityTag } from "./session-activity.js";
+import { openChildRuns, SessionActivityTag } from "./session-activity.js";
 import { SessionGit } from "./session-git.js";
 
 export interface SessionRowsScope {
@@ -45,7 +45,11 @@ export const makeSessionRows = (
 		const sessionScope: SessionScope | undefined = first && {
 			projectIds: [first.slug, ...rest.map(({ slug }) => slug)],
 		};
-		const overlay = {
+		/** The subagent children whose own Run is open, read in the rows' snapshot (82tn.68). */
+		const childRuns = openChildRuns.pipe(
+			Effect.provideService(SqlClient.SqlClient, sql),
+		);
+		const overlay = (open: ReadonlySet<string>) => ({
 			backgroundOf: activity.background.backgroundOf,
 			// 8.1: what a session is doing, the one answer every row and roll-up reads.
 			activityOf: (
@@ -56,9 +60,10 @@ export const makeSessionRows = (
 					sessionId,
 					prompts,
 					activity.goals.phaseOf(sessionId),
+					open.has(sessionId),
 				),
 			hintDismissals: activity.hintDismissals,
-		};
+		});
 		const readOwned = <T>(
 			read: Effect.Effect<T, ReadQueryEffectError | SqlError>,
 			items: (value: T) => readonly { readonly id: string }[],
@@ -191,10 +196,14 @@ export const makeSessionRows = (
 			sessionScope === undefined
 				? Effect.succeed({ value: [], owners: undefined })
 				: readOwned(
-						readQuery.listSessionInfos(sessionScope, {
-							...options,
-							...overlay,
-						}),
+						childRuns.pipe(
+							Effect.flatMap((open) =>
+								readQuery.listSessionInfos(sessionScope, {
+									...options,
+									...overlay(open),
+								}),
+							),
+						),
 						(sessions) => sessions,
 					);
 
@@ -253,10 +262,14 @@ export const makeSessionRows = (
 						)
 					: sql.withTransaction(
 							readOwned(
-								readQuery.readSessionList(sessionScope, {
-									...range,
-									...overlay,
-								}),
+								childRuns.pipe(
+									Effect.flatMap((open) =>
+										readQuery.readSessionList(sessionScope, {
+											...range,
+											...overlay(open),
+										}),
+									),
+								),
 								(list) => list.rows.map(({ item }) => item),
 							).pipe(
 								Effect.flatMap(({ value: list, owners }) =>
