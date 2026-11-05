@@ -55,6 +55,8 @@ export default defineConfig({
 			testIgnore: [
 				"**/harness-create-latency.spec.ts",
 				"**/harness-daemon-services.spec.ts",
+				// The desktop sidebar and terminal panel carry these checks.
+				"**/harness-m379-5-projects.spec.ts",
 				"**/harness-daemon-store-cutover.spec.ts",
 				"**/harness-daemon-store-import.spec.ts",
 				"**/harness-overflow-fanout-pin.spec.ts",

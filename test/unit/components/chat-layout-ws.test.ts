@@ -192,8 +192,8 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
-	attachSessionList: vi.fn(),
-	detachSessionList: vi.fn(),
+	followSessionList: vi.fn(),
+	stopFollowingSessionList: vi.fn(),
 	onShellSynchronized: vi.fn(() => () => {}),
 	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
 	currentSearchQuery: vi.fn(() => null),
@@ -326,8 +326,8 @@ import {
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	attachSessionList,
-	detachSessionList,
+	followSessionList,
+	stopFollowingSessionList,
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
@@ -446,7 +446,7 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.clearAllMocks();
 		attach("test-project");
 		expect(clearMessages).not.toHaveBeenCalled();
-		expect(attachSessionList).toHaveBeenCalledTimes(1);
+		expect(followSessionList).not.toHaveBeenCalled();
 	});
 
 	it("follows every project's asks and alerts once, whatever project it shows", () => {
@@ -463,9 +463,11 @@ describe("ChatLayout RPC lifecycle", () => {
 		expect(stopFeeds.alerts).toHaveBeenCalledTimes(1);
 	});
 
-	it("detaches the shell feed on unmount", () => {
+	it("follows the shell feed once and stops it on unmount", () => {
 		const { unmount } = render(ChatLayout);
+		attach("project-a");
+		expect(followSessionList).toHaveBeenCalledTimes(1);
 		unmount();
-		expect(detachSessionList).toHaveBeenCalledTimes(1);
+		expect(stopFollowingSessionList).toHaveBeenCalledTimes(1);
 	});
 });

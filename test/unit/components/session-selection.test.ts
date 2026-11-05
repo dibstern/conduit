@@ -641,8 +641,7 @@ describe("session selection at the browser RPC wire", () => {
 		table.ResolveSession = () => pending.promise;
 		replaceRoute("/s/saved-sidebar");
 		drawSavedShell({
-			schema: 1,
-			project: "stale",
+			schema: 2,
 			protocolVersion: 1,
 			savedAt: 1,
 			rows: [
