@@ -13,7 +13,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
-	import { failureLine } from "../../transport/rpc-errors.js";
+	import { failureLine, isPromptSettled, toastFailure } from "../../transport/rpc-errors.js";
 	import {
 		buildAnswerPayload,
 		formatQuestionHeader,
@@ -160,8 +160,10 @@
 				if (resolved === "submitting") {
 					resolved = null;
 				}
-				errorMessage = failureLine(error, "No response from server. You can try again, or send a follow-up message to continue.");
 				clearTimeout(submitTimeout);
+				// A settled ask leaves the feed, taking any inline error with it.
+				if (isPromptSettled(error)) return toastFailure("Answer not sent")(error);
+				errorMessage = failureLine(error, "No response from server. You can try again, or send a follow-up message to continue.");
 			});
 		// Show "submitting" state until the server confirms the answer; the
 		// approvals subscription then removes this question. A refusal comes back
@@ -193,6 +195,7 @@
 			})
 			.catch((error) => {
 				if (resolved === "skipped") resolved = null;
+				if (isPromptSettled(error)) return toastFailure("Answer not sent")(error);
 				errorMessage = failureLine(error, isAsync ? "Could not dismiss this question." : "Could not skip this question.");
 			});
 		resolved = "skipped";

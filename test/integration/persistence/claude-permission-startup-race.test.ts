@@ -340,7 +340,10 @@ describe("Claude permission ownership during startup cleanup", () => {
 				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
 			);
 			await runtime.runPromise(answer);
-			await runtime.runPromise(answer);
+			// A second, separate answer meets a settled ask: refused, not silently accepted.
+			await expect(runtime.runPromise(answer)).rejects.toThrow(
+				"This prompt was already answered or ended with its run, so your answer was not sent.",
+			);
 			await runtime.runPromise(engine.drainSideEffects());
 			expect(await asking).toEqual(Result.succeed({ decision: "once" }));
 			expect(

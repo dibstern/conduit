@@ -76,6 +76,12 @@ export function failureLine(error: unknown, fallback: string): string {
 	return sentence(error) ?? fallback;
 }
 
+/** The server refused an answer because its ask was already settled elsewhere. */
+export const isPromptSettled = (error: unknown): boolean =>
+	isDeclared(error) &&
+	error._tag === "WsRpcError" &&
+	error.code === "prompt-settled";
+
 export const toastFailure =
 	(action: string, variant: "error" | "warn" = "error") =>
 	(error: unknown): void => {
