@@ -1095,7 +1095,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -1530,7 +1530,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -1654,7 +1654,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -2089,7 +2089,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -2218,7 +2218,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -2617,7 +2617,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -2858,7 +2858,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -3257,7 +3257,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -4057,7 +4057,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -4457,7 +4457,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -4581,7 +4581,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -4981,7 +4981,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -5105,7 +5105,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -5505,7 +5505,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -5629,7 +5629,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -6029,7 +6029,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -6153,7 +6153,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -6553,7 +6553,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -6677,7 +6677,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -7077,7 +7077,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -7201,7 +7201,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -7601,7 +7601,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -7725,7 +7725,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -8125,7 +8125,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -8254,7 +8254,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -8654,7 +8654,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -8778,7 +8778,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -9178,7 +9178,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
@@ -9424,7 +9424,7 @@
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/session-switch-history.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/model-selection.integration.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/test/integration/flows/cache-staleness.integration.ts": [],
-									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/relay-harness.ts": [],
+									"/home/test/src/personal/opencode-relay/conduit/test/integration/helpers/daemon-harness.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/settings.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/files.ts": [],
 									"/home/test/src/personal/opencode-relay/conduit/src/lib/handlers/index.ts": [],
@@ -9825,7 +9825,7 @@
 													"character": 36
 												}
 											},
-											"message": "Cannot find module '../helpers/relay-harness.js' or its corresponding type declarations.",
+											"message": "Cannot find module '../helpers/daemon-harness.js' or its corresponding type declarations.",
 											"severity": 1,
 											"code": 2307,
 											"source": "typescript"
