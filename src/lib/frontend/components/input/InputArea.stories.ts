@@ -183,6 +183,9 @@ const meta = {
 		seedSessionAccount(mockOpenCodeAccount);
 		openSessionForSetup(testId, "conduit");
 		setSessionWorkingForSetup(testId, false);
+		// The app makes the chat slot on transcript load; without it the composer
+		// reads an empty chat (82tn.32.30).
+		getOrCreateSessionActivity(testId);
 		getOrCreateSessionMessages(testId).contextPercent = 0;
 		setupDiscovery();
 		fileTreeState.entries = fileEntries;
@@ -634,7 +637,22 @@ function setupWords(
 export const WordsDesktop: Story = {
 	tags: ["autodocs"],
 	globals: { theme: "dark" },
-	beforeEach: ({ canvasElement }) => setupWords(canvasElement, false),
+	beforeEach: ({ canvasElement }) => {
+		const cleanup = setupWords(canvasElement, false);
+		// Answer the effort switch, or its wait outlives the story.
+		const restoreVariant = replyRpc("SwitchVariant", (payload) => ({
+			projectSlug: "conduit",
+			variant:
+				typeof payload === "object" && payload !== null && "variant" in payload
+					? payload.variant
+					: "",
+			variants: ["low", "medium", "high", "xhigh", "max"],
+		}));
+		return () => {
+			restoreVariant();
+			cleanup();
+		};
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const body = within(canvasElement.ownerDocument.body);
@@ -848,6 +866,7 @@ export const WordsDesktop: Story = {
 		await expect(canvas.getByTestId("composer-word-effort")).toHaveTextContent(
 			"xhigh",
 		);
+		await waitFor(() => expect(effort.pending).toBe(false));
 		await expect(body.queryByTestId("variant-dropdown")).toBeNull();
 		await closePicker();
 		await userEvent.click(canvas.getByTestId("composer-word-model"));
@@ -1064,9 +1083,10 @@ function setupGoal(
 						? { pausedReason: "Goal check interrupted" }
 						: {}),
 				};
-	handleGoalChanged(facts);
 	const endTurn = state === "not_yet" ? startTurn() : undefined;
 	if (!endTurn) setSessionWorkingForSetup(testId, false);
+	// Set after the row snapshot above, which loads the row's goal (none) (82tn.32.30).
+	handleGoalChanged(facts);
 	return () => {
 		endTurn?.();
 		if (previous) handleGoalChanged(previous);
