@@ -1044,35 +1044,38 @@ const hostFactRun = (
 };
 
 describe.each(providers)("%s generated host facts (H1 to H3)", (provider) => {
-	it("never starts a second serving runner, reattaches a retired one or dispatches a covered send", ({
-		task,
-	}) => {
-		const shapes: Record<string, number> = {};
-		for (const seed of fixedSeeds) {
-			const violations = hostFactRun(provider, false, seed, shapes);
-			expect(violations.slice(0, 5), `seed ${seed}`).toEqual([]);
-		}
-		writeTraceArtifact(
-			`host-facts-${provider}`,
-			{ seeds: fixedSeeds, runs, maxCommands, shapes },
-			task.id,
-		);
-		// Sends issued with no serving process (L2): these kinds need ledger-issued sends.
-		for (const shape of [
-			"issued:start-pending",
-			"issued:steer-while-start-pending",
-			"issued:end_session-while-sends-pending",
-			...(provider === "opencode"
-				? []
-				: [
-						"run_dispatched:before-runner-start",
-						"run_dispatched:retired-runner",
-						"process_lost:dispatched-before-start",
-						"alarm:between-dispatch-and-start",
-					]),
-		])
-			expect(shapes[shape] ?? 0, shape).toBeGreaterThan(0);
-	});
+	// test-waits-allow timeout-override: eight seeds at about 0.2 ms a run alone; 2000 runs took 19 s beside a second loaded long-seed run, so the seed bound, which scales with runs.
+	it(
+		"never starts a second serving runner, reattaches a retired one or dispatches a covered send",
+		{ timeout: seedTimeout },
+		({ task }) => {
+			const shapes: Record<string, number> = {};
+			for (const seed of fixedSeeds) {
+				const violations = hostFactRun(provider, false, seed, shapes);
+				expect(violations.slice(0, 5), `seed ${seed}`).toEqual([]);
+			}
+			writeTraceArtifact(
+				`host-facts-${provider}`,
+				{ seeds: fixedSeeds, runs, maxCommands, shapes },
+				task.id,
+			);
+			// Sends issued with no serving process (L2): these kinds need ledger-issued sends.
+			for (const shape of [
+				"issued:start-pending",
+				"issued:steer-while-start-pending",
+				"issued:end_session-while-sends-pending",
+				...(provider === "opencode"
+					? []
+					: [
+							"run_dispatched:before-runner-start",
+							"run_dispatched:retired-runner",
+							"process_lost:dispatched-before-start",
+							"alarm:between-dispatch-and-start",
+						]),
+			])
+				expect(shapes[shape] ?? 0, shape).toBeGreaterThan(0);
+		},
+	);
 	it("produces another runner's start while one serves only in the explicit totality property (L1 totality)", () => {
 		const violations = hostFactRun(provider, true, fixedSeeds[0]);
 		expect(violations.some((v) => v.includes(": H1 "))).toBe(true);

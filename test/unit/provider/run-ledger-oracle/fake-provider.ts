@@ -830,12 +830,12 @@ export class FakeProvider {
 					this.mainTransmissions.get(send.token)?.name.transmission ??
 					index + 1,
 			}));
-		return [...this.holdBindings].flatMap(([token, binding]) => {
-			const send = this.sends.get(token)?.send;
-			return binding.commandId === issue.commandId && send
-				? [{ send, transmission: binding.transmission }]
-				: [];
-		});
+		const found: { send: Send; transmission: number }[] = [];
+		for (const [token, { commandId, transmission }] of this.holdBindings) {
+			const send = commandId === issue.commandId && this.sends.get(token)?.send;
+			if (send) found.push({ send, transmission });
+		}
+		return found;
 	}
 	/** Older label (3.4, L1): its runner retired, or a querySeq below the latest. A send's own label is never older, so an Answer never is. */
 	private older(observation: Observation): boolean {
@@ -3242,16 +3242,26 @@ export class FakeProvider {
 		action: TraceAction,
 	): Send | undefined {
 		const known = snapshot.issued.map((issued) => this.bound(issued));
+		const tokens = new Set(known.map(({ token }) => token));
+		// One read of an issue's bindings per step: bindingsFor scans every hold.
+		const bindings = new Map<MainIssue, readonly { readonly send: Send }[]>();
+		const bindingsOf = (issue: MainIssue) => {
+			const found = bindings.get(issue) ?? this.bindingsFor(issue);
+			bindings.set(issue, found);
+			return found;
+		};
 		for (const issued of snapshot.issued)
 			if (issued.tag === "Main")
-				for (const binding of this.bindingsFor(issued))
-					if (!known.some((send) => send.token === binding.send.token))
-						known.push(binding.send);
+				for (const { send } of bindingsOf(issued))
+					if (!tokens.has(send.token)) {
+						tokens.add(send.token);
+						known.push(send);
+					}
 		const live = new Set(
 			snapshot.view.live.flatMap((issued) =>
 				issued.tag === "Tokened"
 					? [issued.token]
-					: this.bindingsFor(issued).map(({ send }) => send.token),
+					: bindingsOf(issued).map(({ send }) => send.token),
 			),
 		);
 		const held = new Set(
