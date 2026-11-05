@@ -42,6 +42,7 @@ import {
 	signedInCodexDiscoveryTrace,
 	type TraceRow,
 } from "../../helpers/codex-app-server.js";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -486,6 +487,12 @@ describe("Codex on the Run Ledger", () => {
 			requeued: [],
 		});
 		prove("steer-crash", ledger, { lost: processEvidence(ledger) });
+		proveCrashMatrixCell(
+			"codex/steer/runner/uncertain",
+			fixture.daemonStorePath(),
+			sessionId,
+			["fixture-steer"],
+		);
 	});
 
 	it("ends a Stopped Run interrupted once, by the native interrupt and not the alarm", async () => {
@@ -1090,6 +1097,11 @@ describe("Codex on the Run Ledger", () => {
 			).length,
 		);
 		prove("restart-mid-turn", ledger);
+		proveCrashMatrixCell(
+			"codex/send/daemon/running",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
 	});
 
 	it("keeps a wake running through a daemon restart; it ends once at its own result", async () => {
@@ -1209,5 +1221,296 @@ describe("Codex on the Run Ledger", () => {
 		prove("restart-unheld", ledger, {
 			lost: processEvidence(ledger),
 		});
+		proveCrashMatrixCell(
+			"codex/send/daemon/absent",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
 	});
+
+	// The crash matrix (82tn.32.14; CONTRACT.md 4.9 1914-1945, 9, 11.3). How a cell could fail:
+	// M1. a Run ends twice, never, or other than main's status says;
+	// M2. an effect is left running or held with no Run or runner to own it (S9.6);
+	// M3. an input lands twice, returns to the queue twice, or never lands when it should;
+	// M4. a turn or the session stays busy, or a steer stays steering;
+	// M5. a send or control goes out again after the kill (a second turn/start, turn/steer,
+	//     turn/interrupt or approval reply), or past five transmissions;
+	// M6. the next send after a runner's death never runs, or carries the lost send's text.
+	const threadOf = (fixture: ProcessHarness, sessionId: string) =>
+		(
+			JSON.parse(
+				readFileSync(
+					join(fixture.configDir, "codex", "stores", sessionId, "session.json"),
+					"utf8",
+				),
+			) as { threadId: string }
+		).threadId;
+	/** After a runner's death the next send resumes the thread once, with only its own text (M6). */
+	const nextSendResumes = async (
+		fixture: ProcessHarness,
+		browser: ProcessBrowser,
+		sessionId: string,
+		threadId: string,
+	) => {
+		// test-waits-allow polling: the runner's death reaches only the store and the process table.
+		await vi.waitFor(
+			() => {
+				expect(fixture.remainingRunnerPids()).toEqual([]);
+				expect(read(fixture, sessionId).turns).not.toContain("running");
+			},
+			{ timeout: TIMEOUT, interval: 200 },
+		);
+		writeTrace(resumeTrace(fixtureRows("basic"), threadId));
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await submit(browser, sessionId, "Say hello again");
+		// test-waits-allow polling: the next Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns.at(-1)).toBe("completed"),
+			{ timeout: TIMEOUT },
+		);
+		const starts = captured("turn/start", "out");
+		expect(starts).toHaveLength(1);
+		expect(JSON.stringify(starts[0]?.message?.params)).toContain(
+			"Say hello again",
+		);
+	};
+	/** stop-queued with turn/started and turn/interrupt behind gate 1, the interrupt's answer and
+	 * the turn's end behind gate 2: at gate 1 the Stop goes out and stays unanswered. */
+	const stopTrace = () => {
+		let at = 0;
+		return fixtureRows("stop-queued").map((row) => {
+			if (row.message?.method === "turn/started") at = 1;
+			if (at === 1 && row.dir === "in" && row.message?.id === 99) at = 2;
+			return { ...row, at };
+		});
+	};
+	const stopInFlight = async (name: string) => {
+		const started = await start(name, stopTrace());
+		writeFileSync(gatePath, "0");
+		await submit(started.browser, started.sessionId, "Say hello");
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() =>
+				expect(
+					rows<TraceRow>(capturePath).some(
+						(row) => row.message?.result?.["turn"],
+					),
+				).toBe(true),
+			{ timeout: TIMEOUT },
+		);
+		const stopping = Effect.runPromiseExit(
+			started.browser.rpc.CancelSession({
+				sessionId: started.sessionId,
+				commandId: randomUUID(),
+			}),
+		);
+		writeFileSync(gatePath, "1");
+		// test-waits-allow polling: the app-server's input reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/interrupt", "out")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		return { ...started, stopping };
+	};
+
+	// test-waits-allow timeout-override: a daemon restart and a resumed send each take seconds.
+	it("ends a Stop's Run interrupted once when the daemon dies with turn/interrupt unanswered", async () => {
+		const { fixture, sessionId, restart, stopping } =
+			await stopInFlight("matrix-stop-daemon");
+		await fixture.kill();
+		await stopping;
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await turns(fixture, sessionId, ["interrupted"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "interrupted" }),
+		]);
+		reattachedOnce(ledger);
+		expect(captured("turn/interrupt", "out")).toHaveLength(1);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"codex/stop/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and a resumed send each take seconds.
+	it("ends a Stop's Run once when its runner dies with turn/interrupt unanswered, and the next send resumes once", async () => {
+		const { fixture, browser, sessionId, stopping } =
+			await stopInFlight("matrix-stop-runner");
+		const threadId = threadOf(fixture, sessionId);
+		for (const pid of fixture.remainingRunnerPids())
+			process.kill(pid, "SIGKILL");
+		await stopping;
+		await nextSendResumes(fixture, browser, sessionId, threadId);
+		const ledger = read(fixture, sessionId);
+		// A Stop asked ends its Run interrupted before its lost runner's error (CONTRACT 857-859),
+		// though main's row reads error: the ledger owns the Run's outcome (5774-5776).
+		expect(
+			ledger.runs.map((run) => ({
+				status: run.status,
+				ends: ledger.ends
+					.filter((end) => end.runId === run.id)
+					.map((end) => end.outcome),
+			})),
+		).toEqual([
+			{ status: "error", ends: ["interrupted"] },
+			{ status: "completed", ends: ["completed"] },
+		]);
+		proveCrashMatrixCell(
+			"codex/stop/runner",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and a resumed send each take seconds.
+	it("delivers a steer once when the daemon dies with its turn/steer unanswered", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"matrix-steer-daemon",
+			fixtureRows("steer"),
+		);
+		writeFileSync(gatePath, "590");
+		await submit(browser, sessionId, "Say hello");
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
+			{ timeout: TIMEOUT },
+		);
+		await submit(browser, sessionId, STEER, "steer", "matrix-steer");
+		// test-waits-allow polling: the app-server's input reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/steer", "out")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		await fixture.kill();
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		await turns(fixture, sessionId, ["completed", "completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		reattachedOnce(ledger);
+		expect(captured("turn/steer", "out")).toHaveLength(1);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"codex/steer/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+			["matrix-steer"],
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and a resumed send each take seconds.
+	it("ends an answered approval's Run once when its runner dies before the app-server takes the reply, never replying again", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"matrix-answer-runner",
+			fixtureRows("approval-command-once"),
+		);
+		// Hold the replay after the approval request (134), before the app-server resolves it (135).
+		writeFileSync(gatePath, "134");
+		const cursor = browser.frames.length;
+		await submit(browser, sessionId, "Run the command");
+		const card = await browser.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" &&
+				message["sessionId"] === sessionId,
+			cursor,
+			TIMEOUT,
+		);
+		const threadId = threadOf(fixture, sessionId);
+		await browser.answerApproval(card, "allow");
+		const replied = () =>
+			rows<TraceRow>(capturePath).filter(
+				(row) => row.dir === "out" && row.message?.id === 0,
+			);
+		// test-waits-allow polling: the app-server's input reaches only its capture file.
+		await vi.waitFor(() => expect(replied()).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+		for (const pid of fixture.remainingRunnerPids())
+			process.kill(pid, "SIGKILL");
+		await nextSendResumes(fixture, browser, sessionId, threadId);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.runs).toHaveLength(2);
+		expect(replied()).toEqual([]);
+		proveCrashMatrixCell(
+			"codex/answer/runner",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and a resumed send each take seconds.
+	it("settles a send its runner finished while the daemon was down once, from the runner's journal (finished)", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"matrix-journal-finished",
+			fixtureRows("basic"),
+		);
+		writeFileSync(gatePath, "383");
+		await submit(browser, sessionId, "Say hello");
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
+			{ timeout: TIMEOUT },
+		);
+		await fixture.kill();
+		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/completed", "in")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		await restart();
+		await (await fixture.connect()).followSession(sessionId);
+		await turns(fixture, sessionId, ["completed"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "completed" }),
+		]);
+		reattachedOnce(ledger);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"codex/journal/finished",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and a resumed send each take seconds.
+	it("never re-sends a send whose turn/start went out unanswered when its runner died (uncertain)", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"matrix-journal-uncertain",
+			fixtureRows("basic"),
+		);
+		// Hold the replay before turn/start's answer (183): its delivery stays unknown.
+		writeFileSync(gatePath, "182");
+		await submit(browser, sessionId, "Say hello");
+		// test-waits-allow polling: the app-server's input reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("turn/start", "out")).toHaveLength(1),
+			{ timeout: TIMEOUT },
+		);
+		const threadId = threadOf(fixture, sessionId);
+		for (const pid of fixture.remainingRunnerPids())
+			process.kill(pid, "SIGKILL");
+		await nextSendResumes(fixture, browser, sessionId, threadId);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.runs.map(({ status }) => status)).toEqual([
+			"error",
+			"completed",
+		]);
+		proveCrashMatrixCell(
+			"codex/journal/uncertain",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
 });

@@ -43,6 +43,7 @@ import {
 	MANAGED_OPENCODE_ACCOUNT_ID,
 } from "../../../src/lib/contracts/account.js";
 import { loadDaemonConfigResult } from "../../../src/lib/daemon/config-persistence.js";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { resolveRealOpenCode } from "../../helpers/real-opencode.js";
 import { proveToolRowsOnLedger } from "../../helpers/tool-rows-proof.js";
@@ -789,6 +790,77 @@ describe("OpenCode on the Run Ledger", () => {
 			{ runId: nextRun, reason: "completed" },
 		]);
 	});
+
+	// The crash matrix's OpenCode Stop cells (82tn.32.14; CONTRACT.md 11.3). How they could fail:
+	// M1 the Stopped Run ends twice, or never; M2 the abort is left running or held with no owner
+	// (S9.6); M4 a turn or the session stays busy; M5 the abort goes out again after the kill.
+	const stopInFlight = async (name: string) => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(name, instanceId, "opencode");
+		const before = await hold(fixture, browser, sessionId);
+		const stopping = Effect.runPromiseExit(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		);
+		const aborts = () =>
+			fixture
+				.opencodeRequests()
+				.filter(
+					({ method, url }) =>
+						method === "POST" &&
+						url.split("?")[0] === `/session/${sessionId}/abort`,
+				);
+		await until(() => expect(aborts().length).toBeGreaterThan(0), 15_000);
+		return { fixture, sessionId, before, stopping, aborts };
+	};
+
+	// test-waits-allow timeout-override: a daemon restart takes seconds.
+	it("ends a Stop's Run once when the daemon dies with the abort sent and OpenCode not yet idle", async () => {
+		const { fixture, sessionId, before, stopping, aborts } =
+			await stopInFlight("Stop, daemon dies");
+		await fixture.kill();
+		await stopping;
+		await fixture.restart();
+		await idle(fixture, sessionId);
+		await until(() => expect(read(fixture, sessionId).ends).toHaveLength(1));
+		expect(read(fixture, sessionId).ends.map(({ runId }) => runId)).toEqual([
+			before.runs[0]?.id,
+		]);
+		// Main repeats an abort OpenCode has not settled; S9.5 bounds it at five transmissions.
+		expect(aborts().length).toBeLessThanOrEqual(5);
+		proveCrashMatrixCell(
+			"opencode/stop/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 60_000);
+
+	// test-waits-allow timeout-override: the managed instance restarts its OpenCode, which takes seconds.
+	it("ends a Stop's Run once when OpenCode dies with the abort sent and not yet idle", async () => {
+		const { fixture, sessionId, before, stopping, aborts } = await stopInFlight(
+			"Stop, OpenCode dies",
+		);
+		const [victim] = spawned(fixture);
+		if (!victim) throw new Error("No fake OpenCode");
+		process.kill(victim.pid, "SIGKILL");
+		await stopping;
+		await streaming(fixture, 1);
+		await idle(fixture, sessionId);
+		await until(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(1),
+			15_000,
+		);
+		expect(read(fixture, sessionId).ends.map(({ runId }) => runId)).toEqual([
+			before.runs[0]?.id,
+		]);
+		// Main repeats an abort OpenCode has not settled; S9.5 bounds it at five transmissions.
+		expect(aborts().length).toBeLessThanOrEqual(5);
+		proveCrashMatrixCell(
+			"opencode/stop/runner",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 60_000);
 
 	// Live checks against the pinned real OpenCode, with a local model server so no credential is
 	// needed (CONTRACT.md 9 "Open, needs a live check": OpenCode `prompt_async`/abort executing after
