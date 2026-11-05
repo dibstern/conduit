@@ -1044,6 +1044,9 @@ describe("Integration: Session Visibility Repros", () => {
 
 	it("REPRO-I: permission-gated history matches REST and persists permission events", async () => {
 		const permissionHarness = await createRelayHarness("permissions-bash");
+		// The first answer wins and a later one is refused (CONTRACT.md 1006-1007,
+		// 82tn.11), so the recording's own reply waits for the user's, as in OpenCode.
+		permissionHarness.mock.holdRepliesUntilAnswered();
 		const dbPath = permissionHarness.eventsDbPath;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
@@ -1060,8 +1063,7 @@ describe("Integration: Session Visibility Repros", () => {
 				"List the files in the current directory using bash: ls -la",
 			);
 			// The card reaches browsers through the approvals subscription (ni8.9),
-			// which reads this row through RPC. The
-			// recording may resolve it first, so the row's status is not asserted.
+			// which reads this row through RPC.
 			const requestId = await vi.waitFor(
 				async () => {
 					const [row] = await readStore(
@@ -1071,7 +1073,7 @@ describe("Integration: Session Visibility Repros", () => {
 							(sql) =>
 								sql<{
 									id: string;
-								}>`SELECT id FROM pending_approvals WHERE session_id = ${sessionId}`,
+								}>`SELECT id FROM pending_approvals WHERE session_id = ${sessionId} AND status = 'pending'`,
 						),
 					);
 					if (!row) throw new Error("permission not asked yet");
