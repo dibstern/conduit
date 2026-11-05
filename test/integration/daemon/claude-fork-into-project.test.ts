@@ -107,6 +107,8 @@ describe("a Claude session forks into another project", () => {
 		for (const name of ["A", "B"]) {
 			const configDir = join(fixture.root, name);
 			mkdirSync(configDir, { recursive: true });
+			// The fake SDK keeps native transcripts, so a native resume of the source is possible.
+			writeFileSync(join(configDir, "conduit-test-record-forks"), "");
 			const { addedInstanceId } = await fixture.requestRpc({
 				_tag: "AddInstance",
 				name,
@@ -176,6 +178,59 @@ describe("a Claude session forks into another project", () => {
 			inTarget: true,
 			inSource: false,
 			eventProjects: ["project-b"],
+		});
+	});
+
+	// 4 for a fork whose account changes before its first turn: the source talked on A, then moved to B, so
+	// the fork starts on B; moving the fork back to A must not resume the source's conversation on A.
+	it("starts fresh after the fork's account is switched before its first turn", async () => {
+		const { fixture, browser, sessionId, targetDir, accounts } = await start();
+		await Effect.runPromise(
+			browser.rpc.ContinueSession({
+				sessionId,
+				instanceId: accounts.b,
+				expectedInstanceId: accounts.a,
+			}),
+		);
+		const fork = await Effect.runPromise(
+			browser.rpc.ForkSession({
+				sessionId,
+				originId: browser.originId,
+				targetProjectSlug: "project-b",
+			}),
+		);
+		const target = await fixture.connect(undefined, undefined, "project-b");
+		await Effect.runPromise(
+			target.rpc.ContinueSession({
+				sessionId: fork.sessionId,
+				instanceId: accounts.a,
+				expectedInstanceId: accounts.b,
+			}),
+		);
+		await target.send(fork.sessionId, writeTurn("switched-fork.txt"));
+		const sent = queryFor(fixture, "switched-fork.txt");
+		const landed = {
+			provider: query<{ provider: string }>(
+				fixture,
+				"SELECT provider FROM sessions WHERE id = ?",
+				fork.sessionId,
+			)[0]?.provider,
+			cwd: sent.options["cwd"],
+			resumeId: sent.resumeId,
+			forkSession: sent.options["forkSession"] ?? null,
+			handoff: sent.prompt?.startsWith("[Conduit context handoff]"),
+			carriesSource: sent.prompt?.includes("fork-source-said"),
+			inTarget: existsSync(join(targetDir, "switched-fork.txt")),
+		};
+		proof["fork after an account switch"] = landed;
+		expect(landed).toEqual({
+			provider: accounts.a,
+			cwd: realpathSync(targetDir),
+			resumeId: null,
+			forkSession: null,
+			handoff: true,
+			carriesSource: true,
+			inTarget: true,
 		});
 	});
 

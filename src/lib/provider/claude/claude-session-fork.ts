@@ -31,6 +31,8 @@ export interface ClaudeTranscriptEntry {
 }
 
 export const CLAUDE_FORK_SOURCE_KEY = "claude.forkSource";
+/** A fork that must start a fresh conversation on whichever account runs it. */
+export const CLAUDE_FRESH_START_KEY = "claude.freshStart";
 
 export interface ClaudeSessionForkSdk {
 	/** Every main-conversation entry in the transcript, in file order. */

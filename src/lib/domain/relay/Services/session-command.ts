@@ -55,7 +55,10 @@ import {
 	readSideThreadForkBoundary,
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
-import { CLAUDE_FORK_SOURCE_KEY } from "../../../provider/claude/claude-session-fork.js";
+import {
+	CLAUDE_FORK_SOURCE_KEY,
+	CLAUDE_FRESH_START_KEY,
+} from "../../../provider/claude/claude-session-fork.js";
 import { prepareCodexAccount } from "../../../provider/codex/codex-home.js";
 import { resolveCodexForkSource } from "../../../provider/codex/codex-native-history.js";
 import { writeCodexSessionIdentity } from "../../../provider/codex/codex-session-store.js";
@@ -1354,7 +1357,7 @@ const forkSessionInWorkspace = (
 				saveProviderState: () =>
 					options?.intoProject
 						? state.saveUpdates(id, [
-								{ key: `claude.forkRefused:${provider}`, value: "true" },
+								{ key: CLAUDE_FRESH_START_KEY, value: "true" },
 							])
 						: parentThread
 							? state.saveUpdates(id, [
