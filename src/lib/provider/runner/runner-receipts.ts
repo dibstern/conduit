@@ -84,7 +84,6 @@ const Signal = Schema.Union([
 	}),
 ]);
 export type RunnerSignal = typeof Signal.Type;
-const Owned = Schema.fromJsonString(Schema.Array(Schema.NonEmptyString));
 const Reply = Schema.fromJsonString(
 	Schema.StructWithRest(
 		Schema.Struct({
@@ -118,13 +117,12 @@ const RetirementRow = Schema.Struct({
 	driver_kind: Schema.NonEmptyString,
 	pid: Schema.NullOr(Member.fields.pid),
 	start_time: Schema.NullOr(Schema.NonEmptyString),
-	owned_run_ids: Owned,
 	retired_at: Schema.Number.check(
 		Schema.isInt(),
 		Schema.isGreaterThanOrEqualTo(0),
 	),
 	signalled: Schema.Literals([0, 1]),
-	retirement_state: Schema.Literals(["Watching", "GonePending", "Complete"]),
+	retirement_state: Schema.Literals(["Watching", "Complete"]),
 	signal_state: Schema.Literals(["None", "TermSent", "KillSent"]),
 	signal_members: Schema.fromJsonString(Schema.Array(Member)),
 	signal_sent_members: Schema.fromJsonString(Schema.Array(Member)),
@@ -157,13 +155,11 @@ export interface RunnerRetirement {
 	readonly identity: RunnerProcessIdentity;
 	readonly retirement:
 		| { readonly tag: "Watching" }
-		| { readonly tag: "GonePending"; readonly owned: readonly string[] }
 		| { readonly tag: "Complete" };
 	readonly signal: RunnerSignal;
 	readonly reaper: RunnerMember | undefined;
 	readonly members: readonly RunnerMember[];
 	readonly signalLog: readonly RunnerSignalAttempt[];
-	readonly ownedRunIds: readonly string[];
 	readonly retiredAt: number;
 	readonly stopState?:
 		| "Requested"
@@ -210,7 +206,6 @@ export const stopRecord = (
 	signalLog: [],
 	signal: { tag: "None" },
 	retirement: { tag: "Watching" },
-	ownedRunIds: [],
 	retiredAt,
 });
 
@@ -219,9 +214,7 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 		const row = yield* Schema.decodeUnknownEffect(RetirementRow)(raw);
 		if (
 			(row.pid === null && row.start_time !== null) ||
-			(row.reaper_pid === null) !== (row.reaper_start_time === null) ||
-			(row.retirement_state === "Complete" && row.owned_run_ids.length > 0) ||
-			(row.retirement_state === "GonePending" && row.owned_run_ids.length === 0)
+			(row.reaper_pid === null) !== (row.reaper_start_time === null)
 		)
 			return yield* Effect.fail("Inconsistent retirement state");
 		const signal = yield* Schema.decodeUnknownEffect(Signal)(
@@ -251,10 +244,7 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 							tag: "Unverifiable",
 							...(row.pid === null ? {} : { pid: row.pid }),
 						},
-			retirement:
-				row.retirement_state === "GonePending"
-					? { tag: "GonePending", owned: row.owned_run_ids }
-					: { tag: row.retirement_state },
+			retirement: { tag: row.retirement_state },
 			signal,
 			reaper:
 				row.reaper_pid !== null && row.reaper_start_time !== null
@@ -271,7 +261,6 @@ const decodeRetirement = (raw: { readonly runner_id: string }) =>
 					: [],
 			),
 			signalLog: row.signal_log,
-			ownedRunIds: row.owned_run_ids,
 			retiredAt: row.retired_at,
 			stopState: row.stop_state,
 			stopReason: row.stop_reason,
@@ -307,7 +296,6 @@ export interface RunnerCursorIdentity {
 	readonly driverKind?: string | undefined;
 	readonly pid?: number | undefined;
 	readonly startTime?: string | undefined;
-	readonly ownedRunIds?: readonly string[] | undefined;
 	readonly reaper?: RunnerMember | undefined;
 	/** Recorded at hello; see journalsBeforeExecution. */
 	readonly journalsBeforeExecution?: boolean | undefined;
@@ -318,8 +306,6 @@ export interface RunnerOutputReceipt {
 	readonly runnerId: string;
 	readonly sequence: number;
 	readonly attachmentId: string;
-	/** Accepted Run ownership commits atomically with this output checkpoint. */
-	readonly ownedRunId?: string | undefined;
 	readonly committed: Deferred.Deferred<void>;
 	/** Called only after this receipt claims and commits its event transaction. */
 	readonly onCommitted?: (() => void) | undefined;
@@ -611,7 +597,7 @@ export const makeRunnerReceiptStore = (
 				}
 				// The row is the identity source. The caller adds the members it
 				// observed and a reaper the row lacks (the hello reports it after
-				// register). New intents never write owned_run_ids.
+				// register).
 				const record = observe(
 					stopRecord(
 						existing
@@ -725,7 +711,7 @@ export const makeRunnerReceiptStore = (
 				flushPendingWrites(
 					sql,
 					sql`UPDATE claude_runner_cursors SET stop_state = ${record.stopState ?? "Requested"}, stop_started_at = ${record.stopStartedAt ?? null},
-					retirement_state = CASE WHEN ${record.stopState === "Gone" || record.stopState === "Settled"} THEN CASE WHEN json_array_length(owned_run_ids) = 0 THEN 'Complete' ELSE 'GonePending' END ELSE retirement_state END
+					retirement_state = CASE WHEN ${record.stopState === "Gone" || record.stopState === "Settled"} THEN 'Complete' ELSE retirement_state END
 					WHERE runner_id = ${record.runnerId} AND retired_at IS NOT NULL`.pipe(
 						Effect.asVoid,
 					),
@@ -763,43 +749,10 @@ export const makeRunnerReceiptStore = (
 				signal_members = ${JSON.stringify(signal.members ?? [])}, signal_sent_members = ${JSON.stringify(signal.tag === "KillSent" ? signal.sent : [])}
 				WHERE runner_id = ${runnerId}`.pipe(Effect.asVoid),
 				),
-			owners: (runnerIds: readonly string[]) =>
-				runnerIds.length === 0
-					? Effect.succeed({ rows: [], rejected: [] })
-					: sql<{
-							runner_id: string;
-							owned_run_ids: string;
-						}>`SELECT runner_id, owned_run_ids
-					FROM claude_runner_cursors WHERE runner_id IN ${sql.in(runnerIds)}`.pipe(
-							Effect.flatMap((rows) =>
-								Effect.partition(rows, (row) =>
-									Schema.decodeUnknownEffect(Owned)(row.owned_run_ids).pipe(
-										Effect.map((ownedRunIds) => ({
-											runnerId: row.runner_id,
-											ownedRunIds,
-										})),
-										Effect.mapError(
-											(cause) =>
-												new RunnerRetirementDecodeError({
-													runnerId: row.runner_id,
-													cause,
-												}),
-										),
-										Effect.tapError((error) =>
-											Effect.logWarning(
-												`Rejected malformed runner ownership: runnerId=${error.runnerId}`,
-												error,
-											),
-										),
-									),
-								),
-							),
-							Effect.map(([rows, rejected]) => ({ rows, rejected })),
-						),
 			retirements: (runnerIds?: readonly string[]) =>
 				sql<{
 					runner_id: string;
-				}>`SELECT runner_id, session_id, role, driver_kind, pid, start_time, owned_run_ids, COALESCE(retired_at, 0) AS retired_at, signalled, retirement_state, signal_state, signal_members, signal_sent_members, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason, stop_started_at
+				}>`SELECT runner_id, session_id, role, driver_kind, pid, start_time, COALESCE(retired_at, 0) AS retired_at, signalled, retirement_state, signal_state, signal_members, signal_sent_members, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason, stop_started_at
 					FROM claude_runner_cursors WHERE retired_at IS NOT NULL OR signal_members <> '[]' OR member_snapshot <> '[]'`.pipe(
 					Effect.flatMap((rows) =>
 						Effect.partition(
@@ -811,27 +764,12 @@ export const makeRunnerReceiptStore = (
 					),
 					Effect.map(([rows, rejected]) => ({ rows, rejected })),
 				),
-			/** Called in the settlement ingestion transaction, after its projections. */
-			settled: (runnerId: string) =>
-				sql`UPDATE claude_runner_cursors
-				SET owned_run_ids = COALESCE((SELECT json_group_array(value) FROM json_each(owned_run_ids)
-					WHERE EXISTS (SELECT 1 FROM provider_runs requested JOIN provider_runs owner
-						ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
-						WHERE requested.id = value AND requested.session_id = claude_runner_cursors.session_id AND owner.status IN ('pending', 'running')
-						AND (owner.runner_id IS NULL OR owner.runner_id = claude_runner_cursors.runner_id))), '[]')
-				WHERE runner_id = ${runnerId} AND retired_at IS NOT NULL`.pipe(
-					Effect.andThen(
-						sql`UPDATE claude_runner_cursors SET retirement_state = CASE WHEN json_array_length(owned_run_ids) = 0 THEN 'Complete' ELSE 'GonePending' END
-					WHERE runner_id = ${runnerId} AND retirement_state <> 'Watching'`,
-					),
-					Effect.asVoid,
-				),
 			markGone: (runnerId: string) =>
 				flushPendingWrites(sql).pipe(
 					Effect.andThen(
 						flushPendingWrites(
 							sql,
-							sql`UPDATE claude_runner_cursors SET retirement_state = CASE WHEN json_array_length(owned_run_ids) = 0 THEN 'Complete' ELSE 'GonePending' END
+							sql`UPDATE claude_runner_cursors SET retirement_state = 'Complete'
 					WHERE runner_id = ${runnerId} AND retired_at IS NOT NULL`.pipe(
 								Effect.asVoid,
 							),
@@ -842,7 +780,7 @@ export const makeRunnerReceiptStore = (
 				flushPendingWrites(
 					sql,
 					sql`DELETE FROM claude_runner_cursors WHERE runner_id = ${runnerId} AND retired_at IS NOT NULL
-                        AND retirement_state = 'Complete' AND json_array_length(owned_run_ids) = 0
+                        AND retirement_state = 'Complete'
                         AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = claude_runner_cursors.session_id
                             AND run.runner_id = claude_runner_cursors.runner_id AND run.status IN ('pending', 'running'))`.pipe(
 						Effect.asVoid,

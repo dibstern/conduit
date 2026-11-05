@@ -29,7 +29,6 @@ const record: RunnerRetirement = {
 	signalLog: [],
 	signal: { tag: "None" },
 	retirement: { tag: "Watching" },
-	ownedRunIds: [],
 	retiredAt: 1,
 };
 const release: RunRelease = {

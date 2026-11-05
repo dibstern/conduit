@@ -88,7 +88,7 @@ function fire(d: TraceDriver, at = d.alarmAt) {
 }
 
 function input(d: TraceDriver, inputId: string) {
-	return [...(d.view().active?.inputs ?? []), ...d.view().inbox].find(
+	return (d.view().active?.inputs ?? []).find(
 		(value) => value.inputId === inputId,
 	);
 }

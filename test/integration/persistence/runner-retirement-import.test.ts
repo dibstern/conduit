@@ -25,7 +25,7 @@ it.live(
 			const sql = yield* SqlClient.SqlClient;
 			// A store from a build before migration 0089.
 			yield* sql`DROP TABLE claude_runner_cursors`;
-			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 89`;
+			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93)`;
 			yield* sql`CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL, session_id TEXT NOT NULL)`;
 			yield* sql`INSERT INTO claude_runner_cursors VALUES ('older', 3, 'session'), ('newer', 9, 'session')`;
 			yield* makeEffectSqlMigrator();
@@ -86,7 +86,7 @@ it.live(
 				try {
 					// Both sources come from builds before migration 0089.
 					legacyDb.exec(`DROP TABLE claude_runner_cursors;
-				DELETE FROM effect_sql_migrations WHERE migration_id = 89;
+				DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93);
 				CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
 				result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '');
 				INSERT INTO claude_runner_cursors VALUES ('legacy_runner', 1, '{}', 'fixture-attachment')`);
@@ -96,7 +96,7 @@ it.live(
 				const recentDb = new DatabaseSync(recent.sourcePath);
 				try {
 					recentDb.exec(`DROP TABLE claude_runner_cursors;
-					DELETE FROM effect_sql_migrations WHERE migration_id = 89;
+					DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93);
 					CREATE TABLE claude_runner_cursors (
 					runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
 					result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
@@ -131,13 +131,12 @@ it.live(
 				const destination = new DatabaseSync(daemonStorePath(configDir));
 				try {
 					destination.exec(
-						"DROP INDEX IF EXISTS idx_runner_serving_session; DELETE FROM effect_sql_migrations WHERE migration_id = 89",
+						"DROP INDEX IF EXISTS idx_runner_serving_session; DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93)",
 					);
 					for (const field of [
 						"retired_at",
 						"pid",
 						"start_time",
-						"owned_run_ids",
 						"session_id",
 						"signalled",
 						"driver_kind",
@@ -208,13 +207,12 @@ it.live(
 					expect(
 						imported
 							.prepare(
-								"SELECT pid, start_time, owned_run_ids, signalled, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason, stop_started_at, role FROM claude_runner_cursors WHERE runner_id = 'recent_runner'",
+								"SELECT pid, start_time, signalled, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason, stop_started_at, role FROM claude_runner_cursors WHERE runner_id = 'recent_runner'",
 							)
 							.get(),
 					).toEqual({
 						pid: 123,
 						start_time: "verified-start",
-						owned_run_ids: '["owned-run"]',
 						signalled: 1,
 						stop_state: "Escalated",
 						stop_reason: "Explicit Stop",
@@ -297,7 +295,7 @@ it.live(
 					const db = new DatabaseSync(source.sourcePath);
 					try {
 						db.exec(`DROP TABLE claude_runner_cursors;
-						DELETE FROM effect_sql_migrations WHERE migration_id = 89;
+						DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93);
 						CREATE TABLE claude_runner_cursors (runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
 						result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
 						retired_at INTEGER, pid INTEGER, start_time TEXT, owned_run_ids TEXT NOT NULL DEFAULT '[]',

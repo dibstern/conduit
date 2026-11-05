@@ -32,8 +32,6 @@ describe("Run Ledger public model", () => {
 			policy: { settleMs: 7_000, probeMs: 10, nativeCommandMs: 30 },
 		};
 		const empty = {
-			paused: false,
-			inbox: [],
 			live: [],
 			tasks: { tag: "none" },
 			anythingMayAct: false,

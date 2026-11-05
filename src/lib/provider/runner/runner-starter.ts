@@ -92,7 +92,6 @@ import {
 } from "./runner-registry.js";
 import type { makeRunnerRetirement } from "./runner-retirement.js";
 import { retryRunnerPersistence, runnerRetrySchedule } from "./runner-retry.js";
-import { runnerSendCommandsForProcess } from "./runner-send-journal.js";
 import type { makeRunnerSends, SendBinding } from "./runner-sends.js";
 import { makeRunnerUpgrade } from "./runner-upgrade.js";
 import type { SendScope } from "./send-scope.js";
@@ -1144,12 +1143,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									stops.grantOf(outputAuthority),
 									{ kind: "output" },
 									() => {
-										if (
-											output.type === "event" &&
-											output.event.type === "run.started" &&
-											output.event.runId
-										)
-											Entry.ownRun(entry, output.event.runId);
 										sends.observe(
 											output,
 											"sinkId" in output
@@ -1829,23 +1822,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 									Effect.gen(function* () {
 										for (const token of tokens) {
 											if (!sends.isPending(entry, token)) continue;
-											const commandId = sends.pendingOn(entry).get(token);
-											if (sql && commandId) {
-												const rows = yield* sql<{
-													run_id: string | null;
-												}>`SELECT run_id
-											FROM provider_command_outbox WHERE project_key = (SELECT project_id FROM sessions WHERE id = ${sessionId})
-											AND session_id = ${sessionId} AND command_id = ${commandId}`;
-												for (const row of rows)
-													if (row.run_id)
-														yield* stops.guarded(
-															stops.grantOf(outputAuthority),
-															{ kind: "output" },
-															() => {
-																if (row.run_id) Entry.ownRun(entry, row.run_id);
-															},
-														);
-											}
 											yield* stops.guarded(
 												stops.grantOf(outputAuthority),
 												{ kind: "output" },
@@ -2559,64 +2535,11 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							...registration,
 							entry: undefined as RunnerChild | undefined,
 						}));
-						// Legacy cursor rows have no owned_run_ids, and send_turn never
-						// stores provider_process_id. Read the host's send journal before
-						// adoption revokes a losing registration, without replaying output.
-						const cursorOwners = receipts
-							? yield* receipts
-									.owners(identities.map((identity) => identity.runnerId))
-									.pipe(
-										Effect.mapError((cause) =>
-											runnerFailure("recover runner cohort", cause),
-										),
-									)
-							: { rows: [], rejected: [] };
-						const known = yield* Effect.forEach(
-							identities.filter(
-								(identity) =>
-									!cursorOwners.rejected.some(
-										(error) => error.runnerId === identity.runnerId,
-									),
-							),
-							(identity) =>
-								Effect.gen(function* () {
-									const commands = yield* Effect.try({
-										try: () =>
-											runnerSendCommandsForProcess(
-												dirname(identity.socketPath),
-												identity.sessionId,
-												driver.driverKind,
-												identity.pid,
-											),
-										catch: (cause) =>
-											runnerFailure("recover runner journal", cause),
-									});
-									const owned = yield* issuedSendTokens(
-										sql,
-										identity.sessionId,
-										commands,
-									);
-									return {
-										...identity,
-										ownedRunIds: [
-											...new Set([
-												...(identity.ownedRunIds ?? []),
-												...(cursorOwners.rows.find(
-													(owner) => owner.runnerId === identity.runnerId,
-												)?.ownedRunIds ?? []),
-												...[...owned.values()].flatMap((command) =>
-													command?.runId ? [command.runId] : [],
-												),
-											]),
-										],
-									};
-								}),
-						);
 						// Only durable serving rows restore process authority. Other hosts
 						// get a Starting grant solely to verify hello and retire the host.
 						const active = yield* stops
 							.adopt(
-								known.filter(
+								identities.filter(
 									(identity) => !unregistered.has(identity.runnerId),
 								),
 							)
@@ -2718,10 +2641,6 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 								...registration,
 								recoveringCommands: !abandoned,
 								ownsPendingSend,
-								ownedRunIds: new Set(
-									stops.records.get(registration.runnerId)?.identity
-										.ownedRunIds ?? registration.ownedRunIds,
-								),
 								...(outstandingEnd
 									? { registrationRoot: cleanupRoot ?? configDir }
 									: {}),

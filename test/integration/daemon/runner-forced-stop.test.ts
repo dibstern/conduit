@@ -156,7 +156,7 @@ function cursor(harness: ProcessHarness, runnerId: string) {
 	try {
 		return db
 			.prepare(
-				"SELECT sequence, attachment_id, retired_at, pid, start_time, owned_run_ids, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason FROM claude_runner_cursors WHERE runner_id = ?",
+				"SELECT sequence, attachment_id, retired_at, pid, start_time, reaper_pid, reaper_start_time, member_snapshot, signal_log, stop_state, stop_reason FROM claude_runner_cursors WHERE runner_id = ?",
 			)
 			.get(runnerId) as
 			| {
@@ -165,7 +165,6 @@ function cursor(harness: ProcessHarness, runnerId: string) {
 					retired_at: number | null;
 					pid: number | null;
 					start_time: string | null;
-					owned_run_ids: string;
 					reaper_pid: number | null;
 					reaper_start_time: string | null;
 					member_snapshot: string;
@@ -802,7 +801,6 @@ describe("runner forced stop with real processes", () => {
 					fixture.descendant,
 				]),
 			);
-			expect(JSON.parse(retired.owned_run_ids)).toEqual([]);
 			expect(
 				runnerRuns(harness, basename(fixture.runner.socketPath)),
 			).toContainEqual(

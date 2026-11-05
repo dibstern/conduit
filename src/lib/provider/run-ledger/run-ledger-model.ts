@@ -635,10 +635,7 @@ export type NativeCommand = { readonly commandId: string } & (
 export type NativeCommandView = NativeCommand;
 
 export interface LedgerView {
-	/** Main's `readInboxState.paused`, read from main's module (D58). */
-	readonly paused: boolean;
 	readonly active?: ActiveRunView;
-	readonly inbox: readonly InputView[];
 	/** Work that may still act, in issue order. */
 	readonly live: readonly IssuedEffect[];
 	readonly tasks: TasksView;

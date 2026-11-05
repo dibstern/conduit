@@ -4,7 +4,7 @@
 // file. How it could fail:
 // 1. an effect ends twice: it leaves the live view and comes back, or its Run ends twice;
 // 2. a live effect names a Run that is not the active one (a running effect with no owner);
-// 3. an input returns to the inbox twice, or after it was shown;
+// 3. (the inbox is main's module, D58; the ledger view holds none, CONTRACT.md 3610);
 // 4. a label's lost work is reported twice (the ledger's reading of a draft restored twice);
 // 5. more than 5 transmissions of one input's start;
 // 6. the later input starts while the earlier one is still queued;
@@ -254,12 +254,9 @@ const run = (
 /** The first view that breaks an invariant (index 0 is the prefix's), with its reason. */
 const firstViolation = (trace: readonly LedgerView[], runEnds: number) => {
 	const ended = new Set<string>();
-	const returns = new Map<string, number>();
-	const shown = new Set<string>();
 	const lost = new Set<string>();
 	const starts = new Map<string, Set<string>>();
 	let live = new Set<string>();
-	let inbox = new Set<string>();
 	let lostNow = new Set<string>();
 	for (const [step, view] of trace.entries()) {
 		const fail = (reason: string) => ({ step, reason });
@@ -291,19 +288,6 @@ const firstViolation = (trace: readonly LedgerView[], runEnds: number) => {
 			}
 		}
 		const inputs = view.active?.inputs ?? [];
-		for (const input of inputs)
-			if (input.state.tag === "Accepted" || input.state.tag === "Delivered")
-				shown.add(input.inputId);
-		const nextInbox = new Set(view.inbox.map((input) => input.inputId));
-		for (const inputId of nextInbox)
-			if (!inbox.has(inputId)) {
-				if (shown.has(inputId))
-					return fail(`3: ${inputId} returned after shown`);
-				const count = (returns.get(inputId) ?? 0) + 1;
-				returns.set(inputId, count);
-				if (count > 1) return fail(`3: ${inputId} returned twice`);
-			}
-		inbox = nextInbox;
 		const state = (inputId: string) =>
 			inputs.find((input) => input.inputId === inputId)?.state.tag;
 		if (

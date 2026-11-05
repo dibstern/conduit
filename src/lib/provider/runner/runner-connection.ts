@@ -486,11 +486,6 @@ export const connectRunner = (options: {
 											sequence,
 											attachmentId,
 											committed,
-											ownedRunId:
-												message.output.type === "event" &&
-												message.output.event.type === "run.started"
-													? message.output.event.runId
-													: undefined,
 											consumed: false,
 											onCommitted: () => {
 												// Durable terminal state must survive publication failure.

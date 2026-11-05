@@ -52,21 +52,12 @@ export const legacyRunnerRunPredicate = (
 	AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id
 		AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id
 		AND json_extract(data, '$.commandId') IS NOT NULL)
-	AND (EXISTS (
-		SELECT 1 FROM claude_runner_cursors legacy_cursor
-		JOIN json_each(CASE WHEN json_valid(legacy_cursor.owned_run_ids)
-			THEN CASE json_type(legacy_cursor.owned_run_ids) WHEN 'array' THEN legacy_cursor.owned_run_ids ELSE '[]' END
-			ELSE '[]' END) cohort
-		JOIN provider_runs legacy_owned ON legacy_owned.id = cohort.value AND legacy_owned.session_id = legacy_cursor.session_id
-		WHERE legacy_cursor.session_id = legacy_run.session_id AND cohort.type = 'text'
-			AND COALESCE(legacy_owned.joined_into, legacy_owned.id) = legacy_run.id
-	) OR EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id AND type = 'run.dispatched'
+	AND (EXISTS (SELECT 1 FROM events WHERE session_id = legacy_run.session_id AND type = 'run.dispatched'
 		AND json_extract(data, '$.runId') = legacy_run.id AND json_extract(data, '$.commandId') IS NULL)
 		OR (legacy_run.started_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events
 			WHERE session_id = legacy_run.session_id AND type = 'run.dispatched' AND json_extract(data, '$.runId') = legacy_run.id)))
 )`;
 
-// claude_runner_cursors exists from migration 0089 on, so no reader creates it.
 export const legacyRunnerRunQuery = (
 	sql: SqlClient.SqlClient,
 	sessionId: string,

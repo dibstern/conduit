@@ -39,7 +39,6 @@ const retirement = {
 	driverKind: "cursor",
 	pid: 123,
 	startTime: "process-start",
-	ownedRunIds: ["owned-run"],
 	retiredAt: 100,
 	signalled: true,
 };
@@ -49,7 +48,6 @@ const decodedRetirement = {
 	sessionId: "session",
 	driverKind: "cursor",
 	identity: { tag: "Verified", pid: 123, startTime: "process-start" },
-	ownedRunIds: ["owned-run"],
 	retiredAt: 100,
 	retirement: { tag: "Watching" },
 	signal: { tag: "KillSent", members: [], sent: [] },
@@ -64,8 +62,8 @@ const stopped = (commit: StopCommit): RunnerRetirement =>
 	commit._tag === "Requested" ? commit.record : expect.unreachable("Ignored");
 
 const seedLegacy = (sql: SqlClient.SqlClient, signalled = true) =>
-	sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, retired_at, session_id, pid, start_time, owned_run_ids, signalled, driver_kind)
-	VALUES ('runner', 0, '', 100, 'session', 123, 'process-start', '["owned-run"]', ${signalled ? 1 : 0}, 'cursor')`;
+	sql`INSERT INTO claude_runner_cursors (runner_id, sequence, attachment_id, retired_at, session_id, pid, start_time, signalled, driver_kind)
+	VALUES ('runner', 0, '', 100, 'session', 123, 'process-start', ${signalled ? 1 : 0}, 'cursor')`;
 
 it.effect(
 	"registration distinguishes unavailable storage from corrupt and constrained rows",
@@ -286,37 +284,6 @@ it.effect("decodes retirement identity, obligation and signal states", () =>
 	}).pipe(Effect.provide(testLayer)),
 );
 
-it.effect(
-	"rejects malformed persisted retirement obligations with a typed error",
-	() =>
-		Effect.gen(function* () {
-			const sql = yield* SqlClient.SqlClient;
-			const receipts = yield* makeRunnerReceiptStore(sql);
-			yield* seedLegacy(sql);
-			for (const value of ["{", "[1]", '"run"']) {
-				yield* sql`UPDATE claude_runner_cursors SET owned_run_ids = ${value}`;
-				const result = yield* receipts.retirements();
-				expect(result).toMatchObject({
-					rows: [],
-					rejected: [
-						{ _tag: "RunnerRetirementDecodeError", runnerId: "runner" },
-					],
-				});
-			}
-		}).pipe(Effect.provide(testLayer)),
-);
-
-it.effect("retains an unsettled retirement when pruning is requested", () =>
-	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		const receipts = yield* makeRunnerReceiptStore(sql);
-		yield* seedLegacy(sql);
-		yield* receipts.markGone("runner");
-		yield* receipts.pruneRetired("runner");
-		expect((yield* receipts.retirements()).rows).toHaveLength(1);
-	}).pipe(Effect.provide(testLayer)),
-);
-
 for (const status of ["pending", "running"] as const)
 	it.effect(
 		`retains a Gone retirement with a ${status} held run until settlement commits`,
@@ -329,18 +296,16 @@ for (const status of ["pending", "running"] as const)
 				const record = stopped(yield* receipts.requestStop(decodedRetirement));
 				yield* receipts.stopProgress({ ...record, stopState: "Gone" });
 				yield* receipts.markGone("runner");
-				yield* receipts.settled("runner");
 				yield* receipts.pruneRetired("runner");
 				const retained = yield* receipts.retirements();
 				expect(retained.rejected).toEqual([]);
 				expect(retained.rows).toMatchObject([
-					{ runnerId: "runner", stopState: "Gone", ownedRunIds: [] },
+					{ runnerId: "runner", stopState: "Gone" },
 				]);
 				expect(
 					yield* sql`SELECT status, runner_id FROM provider_runs WHERE id = 'held-run'`,
 				).toEqual([{ status, runner_id: "runner" }]);
 				yield* sql`UPDATE provider_runs SET status = 'interrupted', completed_at = 2 WHERE id = 'held-run'`;
-				yield* receipts.settled("runner");
 				yield* receipts.stopProgress({ ...record, stopState: "Settled" });
 				yield* receipts.pruneRetired("runner");
 				expect((yield* receipts.retirements()).rows).toEqual([]);
@@ -354,7 +319,7 @@ it.effect(
 			const sql = yield* SqlClient.SqlClient;
 			// A store from a build before migration 0089, whose table stops at retirement_state.
 			yield* sql`DROP TABLE claude_runner_cursors`;
-			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id = 89`;
+			yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (89, 93)`;
 			yield* sql`CREATE TABLE claude_runner_cursors (
 			runner_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
 			result_json TEXT NOT NULL DEFAULT '{}', attachment_id TEXT NOT NULL DEFAULT '',
@@ -376,7 +341,6 @@ it.effect(
 				"retired_at",
 				"pid",
 				"start_time",
-				"owned_run_ids",
 				"session_id",
 				"signalled",
 				"driver_kind",
@@ -418,25 +382,16 @@ it.effect(
 			});
 			expect((yield* receipts.retirements()).rows).toEqual([]);
 			expect(
-				yield* sql`SELECT retired_at, pid, start_time, session_id, owned_run_ids, driver_kind FROM claude_runner_cursors`,
+				yield* sql`SELECT retired_at, pid, start_time, session_id, driver_kind FROM claude_runner_cursors`,
 			).toEqual([
 				{
 					retired_at: null,
 					pid: 123,
 					start_time: "process-start",
 					session_id: "session",
-					owned_run_ids: "[]",
 					driver_kind: "cursor",
 				},
 			]);
-			yield* sql`UPDATE claude_runner_cursors SET owned_run_ids = '["legacy-run"]' WHERE runner_id = 'runner'`;
-			yield* receipts.attach("runner", "newer", {
-				...retirement,
-				ownedRunIds: ["new-run"],
-			});
-			expect(
-				yield* sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = 'runner'`,
-			).toEqual([{ owned_run_ids: '["legacy-run"]' }]);
 		}).pipe(Effect.provide(testLayer)),
 );
 
@@ -452,27 +407,22 @@ it.effect(
 			expect(first).toMatchObject({
 				runnerId: "runner",
 				retiredAt: 100,
-				ownedRunIds: [],
 				stopState: "Requested",
 			});
-			yield* receipts.attach("runner", "replacement", {
-				...retirement,
-				ownedRunIds: ["new-run"],
-			});
+			yield* receipts.attach("runner", "replacement", retirement);
 			yield* TestClock.setTime(200);
 			expect(stopped(yield* receipts.requestStop(decodedRetirement))).toEqual(
 				first,
 			);
 			expect((yield* receipts.retirements()).rows).toEqual([first]);
 			expect(
-				yield* sql`SELECT attachment_id, owned_run_ids FROM claude_runner_cursors`,
-			).toEqual([{ attachment_id: "", owned_run_ids: "[]" }]);
+				yield* sql`SELECT attachment_id FROM claude_runner_cursors`,
+			).toEqual([{ attachment_id: "" }]);
 			const gone = stopped(
 				yield* receipts.requestStop({ ...decodedRetirement, runnerId: "gone" }),
 			);
 			yield* receipts.stopProgress({ ...gone, stopState: "Gone" });
 			yield* receipts.markGone("gone");
-			yield* receipts.settled("gone");
 			yield* receipts.stopProgress({ ...gone, stopState: "Settled" });
 			yield* receipts.pruneRetired("gone");
 			expect((yield* receipts.retirements()).rows).toEqual([first]);
@@ -511,7 +461,6 @@ it.effect(
 				expect(record).toMatchObject({
 					runnerId: "runner",
 					retiredAt: 5100,
-					ownedRunIds: [],
 				});
 				expect((yield* receipts.retirements()).rows).toEqual([record]);
 			}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
@@ -535,10 +484,8 @@ it.effect(
 			expect(failed._tag).toBe("Failure");
 			expect((yield* receipts.retirements()).rows).toEqual([]);
 			expect(
-				yield* sql`SELECT retired_at, attachment_id, owned_run_ids FROM claude_runner_cursors`,
-			).toEqual([
-				{ retired_at: null, attachment_id: "old", owned_run_ids: "[]" },
-			]);
+				yield* sql`SELECT retired_at, attachment_id FROM claude_runner_cursors`,
+			).toEqual([{ retired_at: null, attachment_id: "old" }]);
 			yield* sql`DROP TRIGGER reject_stop`;
 			const writer = yield* makeCommitAndSignal;
 			yield* writer.write(() => Effect.void);

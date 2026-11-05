@@ -2543,7 +2543,7 @@ export class FakeProvider {
 			command.verb === "control" &&
 			(command.control.kind === "stop" ||
 				(command.control.kind === "run_now" &&
-					![...(before.active?.inputs ?? []), ...before.inbox].some(
+					!(before.active?.inputs ?? []).some(
 						({ inputId }) =>
 							command.control.kind === "run_now" &&
 							inputId === command.control.inputId,

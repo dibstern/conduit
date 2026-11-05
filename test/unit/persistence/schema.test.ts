@@ -56,6 +56,7 @@ describe("Schema Migration", () => {
 					[90, "run_ledger"],
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
+					[93, "drop_owned_run_ids"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -132,6 +133,7 @@ describe("Schema Migration", () => {
 					[90, "run_ledger"],
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
+					[93, "drop_owned_run_ids"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

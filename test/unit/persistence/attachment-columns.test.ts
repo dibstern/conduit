@@ -12,7 +12,7 @@ const cannotHoldRefs = {
 	draft_attachments: "id draft_key name hash state",
 	attachment_uses: "source_table source_column source_row_key hash",
 	claude_runner_cursors:
-		"runner_id result_json attachment_id start_time owned_run_ids session_id driver_kind retirement_state signal_state signal_members signal_sent_members reaper_start_time member_snapshot signal_log stop_state stop_reason role",
+		"runner_id result_json attachment_id start_time session_id driver_kind retirement_state signal_state signal_members signal_sent_members reaper_start_time member_snapshot signal_log stop_state stop_reason role",
 	command_receipts:
 		"command_id session_id status error command_type project_key fingerprint_hash error_code",
 	daemon_store_imports:
