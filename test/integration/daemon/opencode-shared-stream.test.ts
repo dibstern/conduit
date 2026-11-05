@@ -72,7 +72,7 @@ describe("daemon shared OpenCode global stream", () => {
 		});
 	}
 
-	function requests(browser: ProcessBrowser, prefix: string) {
+	function prompts(browser: ProcessBrowser, prefix: string) {
 		return browser.frames.filter(
 			({ message }) =>
 				message["type"] === "permission_pending" &&
@@ -80,7 +80,44 @@ describe("daemon shared OpenCode global stream", () => {
 					harness?.providerRequestIdForPrompt(String(message["requestId"])) ??
 					""
 				).startsWith(prefix),
-		).length;
+		);
+	}
+
+	function requests(browser: ProcessBrowser, prefix: string) {
+		return prompts(browser, prefix).length;
+	}
+
+	// Ask cards reach every tab, whatever project it shows (82tn.13), so a card
+	// shows its routing by the session it names and that session's project.
+	function cards(
+		fixture: ProcessHarness,
+		browser: ProcessBrowser,
+		prefix: string,
+	) {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			return prompts(browser, prefix).map(({ message }) => {
+				const sessionId = String(message["sessionId"]);
+				const row = db
+					.prepare("SELECT project_id FROM sessions WHERE id = ?")
+					.get(sessionId) as { project_id: string } | undefined;
+				return { project: row?.project_id, sessionId };
+			});
+		} finally {
+			db.close();
+		}
+	}
+
+	// Another project's session reaches a tab only as its ask card; any other
+	// frame naming it (detail, transcript) is a leak.
+	function sessionFrames(browser: ProcessBrowser, sessionId: string) {
+		return browser.frames
+			.filter(
+				({ message }) =>
+					message["sessionId"] === sessionId &&
+					message["type"] !== "permission_pending",
+			)
+			.map(({ message }) => message["type"]);
 	}
 
 	const permission = (id: string, sessionID: string) => ({
@@ -185,30 +222,35 @@ describe("daemon shared OpenCode global stream", () => {
 			directory: directoryB,
 			payload: permission("pa3r-b-2", sessionB),
 		});
-		await a.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa3r-a-2",
-		);
-		await b.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa3r-b-2",
-		);
-		const counts = {
-			a: { a: requests(a, "pa3r-a-"), b: requests(a, "pa3r-b-") },
-			b: { a: requests(b, "pa3r-a-"), b: requests(b, "pa3r-b-") },
+		// Every tab gets both projects' cards (82tn.13).
+		for (const tab of [a, b])
+			for (const id of ["pa3r-a-2", "pa3r-b-2"])
+				await tab.waitFor(
+					(message) =>
+						fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+						id,
+				);
+		const ownA = { project: "process-test", sessionId: sessionA };
+		const ownB = { project: slugB, sessionId: sessionB };
+		const routed = {
+			a: { a: cards(fixture, a, "pa3r-a-"), b: cards(fixture, a, "pa3r-b-") },
+			b: { a: cards(fixture, b, "pa3r-a-"), b: cards(fixture, b, "pa3r-b-") },
 			dropped:
 				requests(a, "pa3r-global") +
 				requests(b, "pa3r-global") +
 				requests(a, "pa3r-unsubscribed") +
 				requests(b, "pa3r-unsubscribed"),
+			leaks: {
+				a: sessionFrames(a, sessionB),
+				b: sessionFrames(b, sessionA),
+			},
 		};
-		evidence["routedEventCounts"] = counts;
-		expect(counts).toEqual({
-			a: { a: 2, b: 0 },
-			b: { a: 0, b: 2 },
+		evidence["routedEventCards"] = routed;
+		expect(routed).toEqual({
+			a: { a: [ownA, ownA], b: [ownB, ownB] },
+			b: { a: [ownA, ownA], b: [ownB, ownB] },
 			dropped: 0,
+			leaks: { a: [], b: [] },
 		});
 		expect(
 			fixture
@@ -517,25 +559,35 @@ describe("daemon shared OpenCode global stream", () => {
 			},
 			defaultId,
 		);
-		await a.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa3r-default-a",
-		);
-		const counts = {
+		// Every tab gets both projects' cards (82tn.13).
+		for (const tab of [a, b])
+			for (const id of ["pa3r-selected-b", "pa3r-default-a"])
+				await tab.waitFor(
+					(message) =>
+						fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+						id,
+				);
+		const ownA = { project: "process-test", sessionId: sessionA };
+		const ownB = { project: slugB, sessionId: sessionB };
+		const routed = {
 			a: {
-				own: requests(a, "pa3r-default-a"),
-				other: requests(a, "pa3r-selected-b"),
+				a: cards(fixture, a, "pa3r-default-a"),
+				b: cards(fixture, a, "pa3r-selected-b"),
 			},
 			b: {
-				own: requests(b, "pa3r-selected-b"),
-				other: requests(b, "pa3r-default-a"),
+				a: cards(fixture, b, "pa3r-default-a"),
+				b: cards(fixture, b, "pa3r-selected-b"),
+			},
+			leaks: {
+				a: sessionFrames(a, sessionB),
+				b: sessionFrames(b, sessionA),
 			},
 		};
-		evidence["routedEventCounts"] = counts;
-		expect(counts).toEqual({
-			a: { own: 1, other: 0 },
-			b: { own: 1, other: 0 },
+		evidence["routedEventCards"] = routed;
+		expect(routed).toEqual({
+			a: { a: [ownA], b: [ownB] },
+			b: { a: [ownA], b: [ownB] },
+			leaks: { a: [], b: [] },
 		});
 		expect(
 			fixture
