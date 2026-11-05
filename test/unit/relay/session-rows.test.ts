@@ -36,7 +36,6 @@ import { publishLedgerTasks, publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
-	makeMockOpenCodeAPI,
 } from "../../helpers/mock-factories.js";
 
 const sessionId = "same-session";
@@ -317,7 +316,6 @@ describe("Session Rows read paths", () => {
 						]);
 						yield* announceBackgroundWork(sessionId);
 						const operations = makeSessionListOperations({
-							api: makeMockOpenCodeAPI(),
 							stateRef: yield* Ref.make(emptySessionManagerState()),
 							readQuery,
 							sql,

@@ -35,6 +35,7 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: client }),
 		),
+		Layer.succeed(ConfigTag)(makeMockConfig({ projectDir: "/primary-folder" })),
 	);
 	return Layer.merge(
 		apiLayer,
@@ -42,9 +43,6 @@ function openCodeSettingsLayer(client: OpenCodeAPI) {
 			makeOverridesStateLive(),
 			OpenCodeSettingsServiceLive.pipe(Layer.provide(apiLayer)),
 			Layer.succeed(LoggerTag)(makeHandlerLogger()),
-			Layer.succeed(ConfigTag)(
-				makeMockConfig({ projectDir: "/primary-folder" }),
-			),
 			Layer.succeed(SessionWorkspaceTag)({
 				renameBranch: () => Effect.die("unused"),
 				get: () => Effect.succeed("/session-worktree"),

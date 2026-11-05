@@ -91,14 +91,10 @@ import {
 } from "./session-command.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionManagerError } from "./session-manager-error.js";
-import {
-	CURSOR_SCAN_LIMIT,
-	loadPreRenderedHistory,
-} from "./session-manager-history.js";
+import { loadPreRenderedHistory } from "./session-manager-history.js";
 import {
 	incrementLastKnownSessionCount,
 	makeSessionListOperations,
-	sessionDetailsParentMap,
 	sessionExists,
 	updateRelaySessionCountSnapshot,
 } from "./session-manager-list.js";
@@ -220,69 +216,6 @@ export type SetSessionArchivedOptions =
 	  };
 
 /**
- * Initialize session state from the provider and return the most recent session,
- * creating one when none exists.
- */
-export const initialize = (title?: string) =>
-	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
-		const stateRef = yield* SessionManagerStateTag;
-		const existing = yield* Effect.tryPromise(() =>
-			api.session.list({ limit: CURSOR_SCAN_LIMIT }),
-		).pipe(
-			Effect.mapError(
-				(cause) => new SessionManagerError({ operation: "initialize", cause }),
-			),
-		);
-
-		yield* Ref.update(stateRef, (s) => {
-			let lastMessageAt = s.lastMessageAt;
-			for (const session of existing) {
-				const ts = session.time?.updated ?? session.time?.created ?? 0;
-				if (ts > 0) {
-					const current = HashMap.get(lastMessageAt, session.id);
-					if (current._tag === "None" || ts > current.value) {
-						lastMessageAt = HashMap.set(lastMessageAt, session.id, ts);
-					}
-				}
-			}
-			return {
-				...s,
-				cachedParentMap: sessionDetailsParentMap(existing),
-				lastMessageAt,
-				lastKnownSessionCount: existing.length,
-			};
-		});
-		yield* updateRelaySessionCountSnapshot(existing.length);
-
-		if (existing.length > 0) {
-			const sorted = [...existing].sort((a, b) => {
-				const aTime = a.time?.updated ?? a.time?.created ?? 0;
-				const bTime = b.time?.updated ?? b.time?.created ?? 0;
-				return bTime - aTime;
-			});
-			return sorted[0]?.id ?? "";
-		}
-
-		// Same seam as every other create: this path used to call the provider
-		// and record nothing, so the session it returned was invisible to
-		// listSessions until a poller happened to pick it up.
-		const session = yield* createOpenCodeSession(title, "opencode").pipe(
-			Effect.provideService(OpenCodeAPITag, api),
-			Effect.mapError(
-				(cause) =>
-					new SessionManagerError({ operation: "getDefaultSessionId", cause }),
-			),
-		);
-		yield* Ref.update(stateRef, (s) => ({
-			...s,
-			lastKnownSessionCount: 1,
-		}));
-		yield* updateRelaySessionCountSnapshot(1);
-		return session.id;
-	}).pipe(Effect.withSpan("session.initialize"));
-
-/**
  * Create a new session via the API.
  */
 export const createLocalSessionId = (): string =>
@@ -343,7 +276,6 @@ export const deleteSession = (
 	closeCommandId: string = randomUUID(),
 ) =>
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
 		const stateRef = yield* SessionManagerStateTag;
 		const logOption = yield* Effect.serviceOption(LoggerTag);
 		const engineOption = yield* Effect.serviceOption(OrchestrationEngineTag);
@@ -563,14 +495,14 @@ export const deleteSession = (
 
 				const providerDeleteExit = yield* Effect.exit(
 					Effect.gen(function* () {
-						let deleteApi = api;
-						if (instanceClients !== undefined) {
-							deleteApi = yield* instanceClients.use(
-								capturedInstanceId,
-								capturedDirectory,
-							);
-						}
-
+						// Only a session on an OpenCode server has a folder and an upstream to sync.
+						const deleteApi =
+							instanceClients === undefined
+								? undefined
+								: yield* instanceClients.use(
+										capturedInstanceId,
+										capturedDirectory ?? null,
+									);
 						const adapter = yield* sessionUpstreamAdapter(provider, deleteApi);
 						yield* adapter.sync(command);
 						if (
@@ -911,7 +843,6 @@ export interface SessionManagerService {
  */
 export type ProjectSessionManagerParts =
 	| AccountDirectory
-	| OpenCodeAPITag
 	| SessionManagerStateTag
 	| SessionManagerCoordinationTag
 	| InputDraftsTag
@@ -1060,7 +991,6 @@ const makeProjectSessionManager: Effect.Effect<
 	never,
 	ProjectSessionManagerParts
 > = Effect.gen(function* () {
-	const api = yield* OpenCodeAPITag;
 	const stateRef = yield* SessionManagerStateTag;
 	const log = yield* LoggerTag;
 	const eventBus = yield* DaemonEventBusTag;
@@ -1094,7 +1024,6 @@ const makeProjectSessionManager: Effect.Effect<
 		yield* SessionManagerCoordinationTag;
 	const { serviceListSessions, refreshSessionLineage } =
 		makeSessionListOperations({
-			api,
 			stateRef,
 			readQuery,
 			sql,
@@ -1260,7 +1189,6 @@ const makeProjectSessionManager: Effect.Effect<
 			Effect.provideService(AccountDirectory, accounts),
 			Effect.provideService(ConfigTag, config),
 			Effect.provideService(LoggerTag, log),
-			Effect.provideService(OpenCodeAPITag, api),
 			Effect.provideService(OrchestrationEngineTag, engine),
 			Effect.provideService(OverridesStateTag, overrides),
 			Effect.provideService(RelayStatusSnapshotTag, snapshot),
@@ -1277,7 +1205,6 @@ const makeProjectSessionManager: Effect.Effect<
 			A,
 			E,
 			| AccountDirectory
-			| OpenCodeAPITag
 			| ReadQueryEffectTag
 			| EventStoreEffectTag
 			| ProjectionRunnerEffectTag
@@ -1290,7 +1217,6 @@ const makeProjectSessionManager: Effect.Effect<
 		const provided = effect.pipe(
 			Effect.provideService(SessionActivityTag, activity),
 			Effect.provideService(AccountDirectory, accounts),
-			Effect.provideService(OpenCodeAPITag, api),
 			Effect.provideService(ReadQueryEffectTag, readQuery),
 			Effect.provideService(EventStoreEffectTag, eventStore),
 			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
@@ -1406,7 +1332,6 @@ const makeProjectSessionManager: Effect.Effect<
 							options?.closeCommandId,
 						).pipe(
 							Effect.provideService(AccountDirectory, accounts),
-							Effect.provideService(OpenCodeAPITag, api),
 							Effect.provideService(OrchestrationEngineTag, engine),
 							Effect.provideService(OpenCodeInstancesTag, instanceClients),
 							Effect.provideService(SessionManagerStateTag, stateRef),
@@ -1590,25 +1515,27 @@ const makeProjectSessionManager: Effect.Effect<
 										}),
 								),
 							);
-				const instanceApi =
-					account !== undefined &&
-					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
-						? yield* Effect.gen(function* () {
-								const directory = yield* workspace.get(sessionId);
-								return yield* instanceClients.use(account.id, directory);
-							}).pipe(
-								Effect.mapError(
-									(cause) =>
-										new SessionManagerError({
-											operation: "loadPreRenderedHistory",
-											cause,
-										}),
-								),
-							)
-						: undefined;
-
+				// A session with no OpenCode account asks the managed instance, in its own folder.
+				const instanceApi = yield* Effect.gen(function* () {
+					const directory = yield* workspace.get(sessionId);
+					return yield* instanceClients.use(
+						account !== undefined &&
+							PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
+							? account.id
+							: MANAGED_OPENCODE_ACCOUNT_ID,
+						directory,
+					);
+				}).pipe(
+					Effect.mapError(
+						(cause) =>
+							new SessionManagerError({
+								operation: "loadPreRenderedHistory",
+								cause,
+							}),
+					),
+				);
 				return yield* loadPreRenderedHistory(sessionId).pipe(
-					Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
+					Effect.provideService(OpenCodeAPITag, instanceApi),
 				);
 			}).pipe(Effect.scoped),
 		holdSession: hold,
@@ -1640,7 +1567,6 @@ const makeProjectSessionManager: Effect.Effect<
 					Effect.provideService(SqlClient.SqlClient, sql),
 					Effect.provideService(ConfigTag, config),
 					Effect.provideService(LoggerTag, log),
-					Effect.provideService(OpenCodeAPITag, api),
 				);
 			}),
 		refreshSessionLineage,

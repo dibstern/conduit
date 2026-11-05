@@ -2114,7 +2114,7 @@ export class ProviderSideEffectReactor {
 				if (instance.providerId === "opencode" && Option.isSome(instances)) {
 					const running = yield* instances.value.ifRunning(
 						call?.account.id ?? row.provider_id,
-						call?.workspaceRoot,
+						call?.workspaceRoot ?? null,
 					);
 					if (
 						Option.isNone(running) ||
@@ -2139,7 +2139,10 @@ export class ProviderSideEffectReactor {
 						payload.operation === "reject"
 					) {
 						const client = yield* instances.value
-							.use(call?.account.id ?? row.provider_id, call?.workspaceRoot)
+							.use(
+								call?.account.id ?? row.provider_id,
+								call?.workspaceRoot ?? null,
+							)
 							.pipe(
 								Effect.provideService(
 									OpenCodeControlTarget,
@@ -3094,7 +3097,7 @@ export class ProviderSideEffectReactor {
 				if (Option.isNone(instances)) return reopened;
 				const running = yield* instances.value.ifRunning(
 					call?.account.id ?? row.provider_id,
-					call?.workspaceRoot,
+					call?.workspaceRoot ?? null,
 				);
 				if (Option.isNone(running)) return reopened;
 				if (running.value.promptProcessId !== row.provider_process_id)
@@ -3112,7 +3115,7 @@ export class ProviderSideEffectReactor {
 				);
 				const current = yield* instances.value.ifRunning(
 					call?.account.id ?? row.provider_id,
-					call?.workspaceRoot,
+					call?.workspaceRoot ?? null,
 				);
 				if (Option.isNone(current)) return reopened;
 				if (current.value.promptProcessId !== row.provider_process_id)

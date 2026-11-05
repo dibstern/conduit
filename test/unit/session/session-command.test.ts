@@ -8,6 +8,7 @@ import { expect, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import { AUTO_TITLE_SOURCE } from "../../../src/lib/contracts/session-title.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	ConfigTag,
@@ -50,6 +51,7 @@ import {
 	makeMockAccountDirectory,
 	makeMockConfig,
 	makeMockLogger,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -110,6 +112,9 @@ describe("applySessionCommand", () => {
 			},
 			dir,
 		);
+		const client = partialFake<OpenCodeAPI>({
+			session: partialFake<OpenCodeAPI["session"]>(api.session),
+		});
 		const persistenceLayer = makePersistenceEffectLayer(
 			join(dir, "events.db"),
 			"test-project",
@@ -119,10 +124,9 @@ describe("applySessionCommand", () => {
 			Effect.provide(
 				Layer.mergeAll(
 					persistenceLayer,
-					Layer.succeed(OpenCodeAPITag)(
-						partialFake<OpenCodeAPI>({
-							session: partialFake<OpenCodeAPI["session"]>(api.session),
-						}),
+					Layer.succeed(OpenCodeAPITag)(client),
+					Layer.succeed(OpenCodeInstancesTag)(
+						makeOpenCodeInstancesStub({ opencode: client }),
 					),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(OrchestrationEngineTag)(

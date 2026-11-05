@@ -29,10 +29,6 @@ import {
 	RateLimiterLive,
 	RateLimiterTag,
 } from "../../src/lib/domain/relay/Layers/rate-limiter-layer.js";
-import {
-	makePollerManagerStateLive,
-	PollerManagerStateTag,
-} from "../../src/lib/domain/relay/Services/message-poller.js";
 
 import {
 	makeSessionManagerStateLive,
@@ -56,7 +52,6 @@ const composedLayer = Layer.mergeAll(
 	makeDaemonStateLive(),
 	makeSessionManagerStateLive(),
 	makePollerStateLive(),
-	makePollerManagerStateLive(),
 	makeInstanceManagerStateLive(undefined, [], {
 		launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 	}),
@@ -82,7 +77,6 @@ describe("Integration: Full Layer Composition", () => {
 			const daemonState = yield* DaemonStateTag;
 			const sessionState = yield* SessionManagerStateTag;
 			const pollerState = yield* PollerStateTag;
-			const pollerManager = yield* PollerManagerStateTag;
 			const instanceState = yield* InstanceManagerStateTag;
 			const relayCache = yield* RelayCacheTag;
 			const limiter = yield* RateLimiterTag;
@@ -92,7 +86,6 @@ describe("Integration: Full Layer Composition", () => {
 			expect(daemonState).toBeDefined();
 			expect(sessionState).toBeDefined();
 			expect(pollerState).toBeDefined();
-			expect(pollerManager).toBeDefined();
 			expect(instanceState).toBeDefined();
 			expect(relayCache).toBeDefined();
 			expect(limiter).toBeDefined();

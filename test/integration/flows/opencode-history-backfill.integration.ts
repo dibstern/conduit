@@ -16,7 +16,6 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
@@ -288,7 +287,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		try {
 			// Startup only subscribes to instance events. A provider read opens
 			// the lazy OpenCode stream without creating or viewing a session.
-			await (await started.run(OpenCodeAPITag)).app.path();
+			await (await started.opencode()).app.path();
 			await waitFor(
 				() =>
 					server.diagnostics.filter((entry) => entry.event === "sse_connect")

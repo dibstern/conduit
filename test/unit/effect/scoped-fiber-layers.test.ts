@@ -102,7 +102,7 @@ const makeInstancesLayer = (
 		),
 		Layer.succeed(OpenCodeInstancesTag)({
 			...stub,
-			ifRunning: (instanceId: string, directory?: string | null) => {
+			ifRunning: (instanceId: string, directory: string | null) => {
 				calls.push([instanceId, directory]);
 				return stub.ifRunning(instanceId, directory);
 			},

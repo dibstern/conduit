@@ -39,7 +39,6 @@ import {
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
 import type {
 	PendingInteractionServiceTag,
@@ -180,7 +179,6 @@ export type ProviderTurnParts =
 	| AccountDirectory
 	| OpenCodeInstancesTag
 	| SessionWorkspaceTag
-	| OpenCodeAPITag
 	| LoggerTag
 	| ConfigTag
 	| SessionManagerServiceTag

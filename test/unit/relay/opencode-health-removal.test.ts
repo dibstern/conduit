@@ -132,7 +132,7 @@ it.each([
 					})),
 				}));
 				const instances = yield* OpenCodeInstancesTag;
-				yield* instances.use("opencode").pipe(Effect.scoped);
+				yield* instances.use("opencode", null).pipe(Effect.scoped);
 			}),
 		);
 		expect(disconnect).toBeDefined();

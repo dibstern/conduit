@@ -232,7 +232,7 @@ describe("Shared OpenCode stream reconnect", () => {
 	const start = (instanceId = "opencode") =>
 		runtime.runPromise(
 			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-				Effect.scoped(instances.use(instanceId)),
+				Effect.scoped(instances.use(instanceId, null)),
 			),
 		);
 
@@ -247,7 +247,7 @@ describe("Shared OpenCode stream reconnect", () => {
 		});
 		const instances = await runtime.runPromise(OpenCodeInstancesTag);
 		const client = await runtime.runPromise(
-			Effect.scoped(instances.useIfRunning("opencode")),
+			Effect.scoped(instances.useIfRunning("opencode", null)),
 		);
 		expect(Option.isNone(client)).toBe(true);
 		expect(endpoints.get("opencode")?.status).toBe(status);
@@ -260,7 +260,7 @@ describe("Shared OpenCode stream reconnect", () => {
 		try {
 			const instances = await runtime.runPromise(OpenCodeInstancesTag);
 			const client = await runtime.runPromise(
-				instances.useIfRunning("opencode").pipe(Scope.provide(scope)),
+				instances.useIfRunning("opencode", null).pipe(Scope.provide(scope)),
 			);
 			expect(Option.isSome(client)).toBe(true);
 			await vi.advanceTimersByTimeAsync(120_001);
