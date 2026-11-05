@@ -53,6 +53,7 @@ import {
 import {
 	commitHeadMove,
 	previewHeadMove,
+	readHeadBranches,
 	readHeadLog,
 } from "../../domain/relay/Services/session-rewind.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
@@ -1122,6 +1123,11 @@ export const sessionsHandlers = {
 						: mapRpcFailure("CommitHeadMove")(error),
 			),
 		),
+	GetHeadBranches: (request) =>
+		readHeadBranches(request.sessionId).pipe(
+			Effect.map((forks) => ({ forks })),
+			Effect.catch(mapRpcFailure("GetHeadBranches")),
+		),
 	GetHeadLog: (request) =>
 		readHeadLog(request.sessionId).pipe(
 			Effect.map((entries) => ({ entries })),
@@ -1198,4 +1204,5 @@ export const sessionsHandlers = {
 	| "PreviewHeadMove"
 	| "CommitHeadMove"
 	| "GetHeadLog"
+	| "GetHeadBranches"
 >;

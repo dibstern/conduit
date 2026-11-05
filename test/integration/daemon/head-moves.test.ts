@@ -9,6 +9,8 @@
 //    branch, or its reply lands on the old branch;
 // 5. an undo pops the entry it undoes, or cannot itself be undone; the next send after a chain of
 //    moves tells the provider the wrong cut.
+// 6, 7. a switch to another branch brings back other rows than that branch's own, lands mid-branch
+//    instead of at its tip, or cannot be undone; a branch whose rows are gone is offered or moved to.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -528,5 +530,135 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		expect(after.head).toBe(siblings.at(-1)?.id);
 		// The two branches left behind keep their user message and reply each.
 		expect(after.kept).toBe(4);
+	});
+
+	// 6, 7.
+	it("switches back to a branch at its tip, undoes the switch, and refuses a branch whose rows are gone", async () => {
+		const { browser, sessionId, target, fixture } = await start(
+			"branch-switch",
+			0,
+		);
+		const ids = async () =>
+			(await browser.history(sessionId)).map(({ id }) => id);
+		const branches = async (reader: ProcessBrowser) =>
+			(await Effect.runPromise(reader.rpc.GetHeadBranches({ sessionId })))
+				.forks;
+		/** Waits for a send's reply and for its Run's node, sealed when the send settles. */
+		const settled = async (messages: number, nodes: number) => {
+			// test-waits-allow polling: the reply lands after the send's receipt.
+			await vi.waitFor(
+				async () =>
+					expect(await browser.history(sessionId)).toHaveLength(messages),
+				{ timeout: 20_000 },
+			);
+			// test-waits-allow polling: the Run's node is sealed when its send settles.
+			await vi.waitFor(() =>
+				expect(graph(fixture, sessionId).nodes).toHaveLength(nodes),
+			);
+		};
+		const original = await ids();
+		await move(browser, sessionId, {
+			_tag: "rewind",
+			messageId: target.id,
+			resend: "moves-branch-b",
+		});
+		await settled(4, 3);
+		const edited = await ids();
+		const [, cut, branchB] = graph(fixture, sessionId).nodes;
+		if (!cut || !branchB) throw new Error("Missing branch nodes");
+		const offered = await branches(browser);
+		// Back to the cut branch, then one more turn on it.
+		await move(browser, sessionId, { _tag: "switch", nodeId: cut.id });
+		const back = await ids();
+		await browser.send(sessionId, "moves-cut-more");
+		await settled(6, 4);
+		const deeper = await ids();
+		const cutTip = graph(fixture, sessionId).nodes[3];
+		if (!cutTip) throw new Error("Missing cut branch tip");
+		await move(browser, sessionId, { _tag: "switch", nodeId: branchB.id });
+		const onB = await ids();
+		// The page offers the cut branch at its tip, so a switch returns to where it was left.
+		const offeredOnB = await branches(browser);
+		const tip = offeredOnB[0]?.branches[0]?.tip ?? "";
+		const switched = await move(browser, sessionId, {
+			_tag: "switch",
+			nodeId: tip,
+		});
+		const atTip = await ids();
+		const [entry] = (
+			await Effect.runPromise(browser.rpc.GetHeadLog({ sessionId }))
+		).entries;
+		await move(browser, sessionId, { _tag: "undo", moveId: switched.moveId });
+		const undone = await ids();
+		// The cut branch's rows are lost while the daemon is down.
+		await fixture.kill();
+		const db = new Database(fixture.daemonStorePath());
+		db.prepare(
+			"UPDATE history_nodes SET available = 0 WHERE session_id = ? AND id = ?",
+		).run(sessionId, cut.id);
+		db.close();
+		await fixture.restart();
+		const reader = await fixture.connect();
+		const offeredLost = await branches(reader);
+		const refused = await Effect.runPromise(
+			Effect.flip(
+				reader.rpc.PreviewHeadMove({
+					sessionId,
+					intent: { _tag: "switch", nodeId: tip },
+				}),
+			),
+		);
+		proof = {
+			original,
+			edited,
+			offered,
+			back,
+			deeper,
+			onB,
+			offeredOnB,
+			atTip,
+			entry,
+			undone,
+			offeredLost,
+			refused: { ...refused, message: refused.message },
+			graph: graph(fixture, sessionId),
+			journal: journal(fixture, sessionId),
+		};
+		const fork = (tipOfCut: string, available = true) => [
+			{
+				messageId: edited[2],
+				branches: [
+					{ tip: tipOfCut, text: "moves-cut", onHead: false, available },
+					{
+						tip: branchB.id,
+						text: "moves-branch-b",
+						onHead: true,
+						available: true,
+					},
+				],
+			},
+		];
+		expect(offered).toEqual(fork(cut.id));
+		// A switch brings back that branch's own rows, and nothing else.
+		expect(back).toEqual(original);
+		expect(deeper.slice(0, 4)).toEqual(original);
+		expect(onB).toEqual(edited);
+		expect(offeredOnB).toEqual(fork(cutTip.id));
+		expect(atTip).toEqual(deeper);
+		expect(entry).toMatchObject({
+			moveId: switched.moveId,
+			kind: "switch",
+			landed: true,
+		});
+		expect(undone).toEqual(edited);
+		expect(offeredLost).toEqual(fork(cutTip.id, false));
+		expect(refused).toMatchObject({
+			_tag: "SessionBusy",
+			command: "head_move",
+			reason: "history_unavailable",
+		});
+		// A switch sends nothing: each prompt reached Claude once.
+		for (const prompt of ["moves-cut", "moves-branch-b", "moves-cut-more"])
+			expect(enqueued(fixture, prompt)).toHaveLength(1);
 	});
 });

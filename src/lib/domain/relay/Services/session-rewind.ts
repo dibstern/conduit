@@ -376,3 +376,58 @@ export const readHeadLog = (sessionId: string) =>
 			};
 		});
 	});
+
+/**
+ * Where the Head's path branched (82tn.51), root first. A branch's tip is its newest descendant, so a
+ * switch returns to where that branch was left. A branch's text is its first user message, read from
+ * the kept rows when it is off the Head.
+ */
+export const readHeadBranches = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const nodes = yield* sql<{
+			id: string;
+			parent: string | null;
+			available: number;
+		}>`SELECT id, parent_id AS parent, available FROM history_nodes
+			WHERE session_id = ${sessionId} ORDER BY created_at, id`;
+		const firsts = yield* sql<{ node: string; id: string; text: string }>`
+			SELECT node, id, text FROM (
+				SELECT history_node_id AS node, id, text, role, ordinal, created_at FROM messages
+				WHERE session_id = ${sessionId} AND history_node_id IS NOT NULL
+				UNION ALL
+				SELECT node_id, row_key, json_extract(row_json, '$.text'), json_extract(row_json, '$.role'),
+					json_extract(row_json, '$.ordinal'), json_extract(row_json, '$.created_at')
+				FROM history_off_head WHERE session_id = ${sessionId} AND source_table = 'messages'
+			) WHERE role = 'user' ORDER BY ordinal DESC, created_at DESC, id DESC`;
+		// Ordered newest first, so the last write per node is its first user message.
+		const first = new Map(firsts.map((row) => [row.node, row]));
+		const children = (id: string | null) =>
+			nodes.filter(({ parent }) => parent === id);
+		const tip = (id: string): string => {
+			const newest = children(id).at(-1);
+			return newest === undefined ? id : tip(newest.id);
+		};
+		const path = (yield* pathToRoot(
+			sessionId,
+			yield* readHead(sessionId),
+		)).reverse();
+		return path.flatMap((node) => {
+			const parent = nodes.find(({ id }) => id === node)?.parent ?? null;
+			const siblings = children(parent);
+			const at = first.get(node)?.id;
+			return siblings.length > 1 && at !== undefined
+				? [
+						{
+							messageId: at,
+							branches: siblings.map((sibling) => ({
+								tip: tip(sibling.id),
+								text: first.get(sibling.id)?.text ?? "",
+								onHead: sibling.id === node,
+								available: sibling.available === 1,
+							})),
+						},
+					]
+				: [];
+		});
+	});

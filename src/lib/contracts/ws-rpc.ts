@@ -3181,6 +3181,32 @@ export const GetHeadLog = Rpc.make("GetHeadLog", {
 	error: WsRpcError,
 });
 
+/**
+ * The points on the Head's path where the conversation branched (82tn.51), root first: each names the
+ * on-Head message the branches start at, and each branch the tip a switch lands on.
+ */
+export const GetHeadBranches = Rpc.make("GetHeadBranches", {
+	payload: Schema.TaggedStruct("GetHeadBranches", {
+		sessionId: NonEmptyString,
+	}),
+	success: Schema.Struct({
+		forks: Schema.Array(
+			Schema.Struct({
+				messageId: NonEmptyString,
+				branches: Schema.Array(
+					Schema.Struct({
+						tip: NonEmptyString,
+						text: Schema.String,
+						onHead: Schema.Boolean,
+						available: Schema.Boolean,
+					}),
+				),
+			}),
+		),
+	}),
+	error: WsRpcError,
+});
+
 /** Whether the files at a head move's target are still kept, or were pruned. */
 export const GetHeadMoveFiles = Rpc.make("GetHeadMoveFiles", {
 	payload: Schema.TaggedStruct("GetHeadMoveFiles", {
@@ -3961,6 +3987,7 @@ const wsRpcRequests = [
 	PreviewHeadMove,
 	CommitHeadMove,
 	GetHeadLog,
+	GetHeadBranches,
 	SubmitInput,
 	CancelInput,
 	SendInputNow,
