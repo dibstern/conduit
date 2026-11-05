@@ -42,6 +42,17 @@
 // 24. a Linux host asked for lsof and ps scanning /proc instead (Effect's Config reads an empty
 //     value as unset, so "" fell back to the /proc default), so every lsof test there watches the
 //     live /proc and sees none of its fake servers.
+// lsof and ps cost (82tn.71; 8.7 fixes one scan every 2s, so an idle scan reuses what it read):
+// 25. a reused pid's server is missed or misattributed, read from the exited process's cached
+//     table, environment or cwd;
+// 26. a process that starts listening after the first scan is never read, as the scan reuses a
+//     table from before it listened;
+// 27. a failed ps or lsof leaves its listing or reads cached, so the listener it missed is never
+//     seen once the tools answer;
+// 28. an idle scan, or one where only an unmarked listener goes, still runs ps; one where an
+//     unmarked listener appears re-reads every known process's environment; or server_gone is not
+//     recorded when a server goes without a ps.
+// IPv4 and IPv6 of one process as one server is 9; the hold is 7; server_gone is 5, 6 and 10.
 import { spawn } from "node:child_process";
 import {
 	appendFileSync,
@@ -159,11 +170,25 @@ const fakeTools = (dir: string) => {
 		writeFileSync(join(root, "net", "tcp6"), tables.tcp6.join(""));
 		symlinkSync(root, join(dir, "proc.next"));
 		renameSync(join(dir, "proc.next"), join(dir, "proc"));
+		// lsof -F: each socket's device is its kernel address, new for every socket a process opens,
+		// so a reused pid's socket has another. Swapped in whole, as the /proc tree is.
+		if (scanner !== "proc") {
+			writeFileSync(
+				join(dir, "listen.next"),
+				listeners
+					.map(([pid, ...names]) => {
+						const started = procs.find((p) => p.pid === pid)?.lstart;
+						return `p${pid}\n${names.map((name, i) => `f${10 + i}\nd0x${pid}${started === undefined ? "" : at(started)}${i}\nn${name}\n`).join("")}`;
+					})
+					.join(""),
+			);
+			renameSync(join(dir, "listen.next"), join(dir, "listen.out"));
+		}
 	};
 	const script = (pick: string) => `#!/bin/sh
 d=$(/usr/bin/dirname "$0")
 ${pick}
-echo "$kind" >> "$d/calls"
+echo "$kind $*" >> "$d/calls"
 if [ -f "$d/$kind.once" ]; then /bin/cat "$d/$kind.once"; /bin/rm "$d/$kind.once"; exit 0; fi
 [ -f "$d/$kind.sleep" ] && /bin/sleep "$(/bin/cat "$d/$kind.sleep")"
 [ -f "$d/$kind.err" ] && /bin/cat "$d/$kind.err" >&2
@@ -194,11 +219,16 @@ exit "$(/bin/cat "$d/$kind.rc" 2>/dev/null || echo 0)"
 			content === undefined
 				? rmSync(join(dir, file), { force: true })
 				: writeFileSync(join(dir, file), content),
+		/** Every tool call so far, as `<kind> <args>`: listen, table, env or cwd. */
+		calls: () =>
+			readFileSync(join(dir, "calls"), { encoding: "utf8", flag: "a+" })
+				.split("\n")
+				.filter((line) => line !== ""),
 		/** Listen scans begun so far (lsof): scan n is complete, write included, once scan n + 1 begins. */
 		scans: () =>
 			readFileSync(join(dir, "calls"), { encoding: "utf8", flag: "a+" })
 				.split("\n")
-				.filter((line) => line === "listen").length,
+				.filter((line) => line.startsWith("listen ")).length,
 		has: (file: string) => existsSync(join(dir, file)),
 	};
 };
@@ -265,17 +295,8 @@ const showWorld = (fake: Fake, procs: readonly Proc[]) => {
 	);
 	fake.show({ procs });
 };
-/** lsof -F pn output, and /proc/net/tcp and tcp6 rows, for [pid, ...names]. */
+/** lsof -F pdn output, and /proc/net/tcp and tcp6 rows, for [pid, ...names]. */
 const showListeners = (fake: Fake, listeners: Listeners) => {
-	fake.set(
-		"listen.out",
-		listeners
-			.map(
-				([pid, ...names]) =>
-					`p${pid}\n${names.map((name, i) => `f${10 + i}\nn${name}\n`).join("")}`,
-			)
-			.join(""),
-	);
 	fake.set("listen.rc", listeners.length === 0 ? "1" : undefined);
 	fake.show({ listeners });
 };
@@ -476,6 +497,186 @@ describe("PortWatcher, lsof and ps only", () => {
 					fake.set("listen.rc", "1");
 				},
 				(fake) => scans(fake, 3),
+			),
+	);
+});
+
+/** The calls each tool made since `from` calls, as `<kind> <args>` (listen, table, env, cwd). */
+const callsSince = (fake: Fake, from: number) => fake.calls().slice(from);
+/** Waits `n` more scans and returns the calls they made. */
+const callsOver = (fake: Fake, n: number) =>
+	Effect.gen(function* () {
+		const from = fake.calls().length;
+		yield* scans(fake, n);
+		return callsSince(fake, from);
+	});
+const kinds = (calls: readonly string[]) =>
+	calls.map((call) => call.split(" ")[0]).filter((kind) => kind !== "listen");
+
+describe("PortWatcher's lsof and ps reads", () => {
+	beforeEach(() => {
+		scanner = "lsof";
+	});
+
+	it.live(
+		"28: an idle scan runs one lsof and no ps; an unmarked listener going reads nothing more, one appearing reads only its own process, and a server going is server_gone",
+		() =>
+			withDir((dir, fake) =>
+				open(join(dir, "events.db"), (commit) =>
+					Effect.gen(function* () {
+						yield* sessions(commit);
+						showWorld(fake, [
+							...world,
+							{ pid: 920, ppid: 1, lstart: T.agent, command: "node y" },
+						]);
+						showListeners(fake, [
+							[600, "*:3000", "[::1]:3000"],
+							[900, "*:8080"],
+						]);
+						yield* eventsUntil(1);
+						yield* scans(fake, 2);
+						const idle = yield* callsOver(fake, 5);
+						showListeners(fake, [[600, "*:3000", "[::1]:3000"]]);
+						const gone = yield* callsOver(fake, 3);
+						showListeners(fake, [
+							[600, "*:3000", "[::1]:3000"],
+							[920, "*:9090"],
+						]);
+						const appeared = yield* callsOver(fake, 3);
+						const after = yield* callsOver(fake, 3);
+						const from = fake.calls().length;
+						showListeners(fake, [[920, "*:9090"]]);
+						const events = yield* eventsUntil(2);
+						return {
+							idle,
+							gone,
+							appeared,
+							after,
+							serverGone: callsSince(fake, from),
+							events,
+						};
+					}),
+				),
+			).pipe(
+				Effect.tap(({ idle, gone, appeared, after, serverGone, events }) =>
+					Effect.sync(() => {
+						expect(idle.length).toBeGreaterThanOrEqual(5);
+						expect(kinds(idle)).toEqual([]);
+						expect(kinds(gone)).toEqual([]);
+						expect(
+							appeared.filter((call) => !call.startsWith("listen ")),
+						).toEqual([
+							"table -axww -o pid=,ppid=,lstart=,command=",
+							"env -wwE -p 920 -o pid=,command=",
+						]);
+						expect(kinds(after)).toEqual([]);
+						expect(kinds(serverGone)).toEqual([]);
+						expect(events).toEqual([seen600, gone600]);
+					}),
+				),
+			),
+	);
+
+	it.live(
+		"25, 26: a process that starts listening after the first scan, and a pid reused by a marked server, are read afresh",
+		() =>
+			withDir((dir, fake) =>
+				open(join(dir, "events.db"), (commit) =>
+					Effect.gen(function* () {
+						yield* sessions(commit);
+						showWorld(fake, world);
+						showListeners(fake, [[900, "*:8080"]]);
+						yield* scans(fake, 2);
+						const idle = yield* callsOver(fake, 3);
+						// 26: 600 ran unlistening through those scans.
+						showListeners(fake, [
+							[600, "*:3000"],
+							[900, "*:8080"],
+						]);
+						yield* eventsUntil(1);
+						// 25: 900 exits and its pid is reused by s2's vite, on the same port.
+						showWorld(fake, [
+							...world.filter((p) => p.pid !== 900),
+							{
+								pid: 900,
+								ppid: 510,
+								lstart: T.later,
+								command: "vite --port 8080",
+							},
+						]);
+						return { idle, events: yield* eventsUntil(2) };
+					}),
+				),
+			).pipe(
+				Effect.tap(({ idle, events }) =>
+					Effect.sync(() => {
+						expect(kinds(idle)).toEqual([]);
+						expect(events).toEqual([
+							seen600,
+							{
+								session: "s2",
+								type: "server_seen",
+								server: { pid: 900, startedAt: at(T.later), port: 8080 },
+								command: "vite --port 8080",
+								cwd: "/work/900",
+								source: "detected",
+							},
+						]);
+					}),
+				),
+			),
+	);
+
+	it.live(
+		"27: a failed ps or lsof read caches nothing, so the listener it missed is seen once the tools answer",
+		() =>
+			withDir((dir, fake) =>
+				open(join(dir, "events.db"), (commit) =>
+					Effect.gen(function* () {
+						yield* sessions(commit);
+						showWorld(fake, world);
+						showListeners(fake, [[900, "*:8080"]]);
+						yield* scans(fake, 2);
+						const idle = yield* callsOver(fake, 3);
+						const failing: string[] = [];
+						// The table, then each process's environment, then its cwd fail, each for several scans:
+						// a scan stops at its first failed read, so each is the one failing until cleared.
+						const reads = ["table", "env", "cwd"];
+						for (const kind of reads) {
+							fake.set(`${kind}.rc`, "1");
+							fake.set(`${kind}.err`, `${kind}: failed\n`);
+						}
+						showListeners(fake, [
+							[600, "*:3000"],
+							[900, "*:8080"],
+						]);
+						for (const kind of reads) {
+							const calls = yield* callsOver(fake, HOLD_MS / INTERVAL_MS + 2);
+							failing.push(
+								...calls.filter((call) => call.startsWith(`${kind} `)),
+							);
+							expect(yield* serverEvents).toEqual([]);
+							fake.set(`${kind}.rc`, undefined);
+							fake.set(`${kind}.err`, undefined);
+						}
+						return { idle, failing, events: yield* eventsUntil(1) };
+					}),
+				),
+			).pipe(
+				Effect.tap(({ idle, failing, events }) =>
+					Effect.sync(() => {
+						expect(kinds(idle)).toEqual([]);
+						// Every failing read was tried again on the next scan.
+						expect(
+							["table", "env", "cwd"].map(
+								(kind) =>
+									failing.filter((call) => call.startsWith(`${kind} `))
+										.length >= 3,
+							),
+						).toEqual([true, true, true]);
+						expect(events).toEqual([seen600]);
+					}),
+				),
 			),
 	);
 });

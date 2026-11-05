@@ -1040,7 +1040,11 @@ it("branch scope diffs the merge-base of each base in order against the live tre
 	const folder = { ...present(repo), launchBase: launch };
 
 	const byLaunch = await listBranch(folder, null);
-	expect(byLaunch.base).toEqual({ ref: launch, source: "launch" });
+	expect(byLaunch.base).toEqual({
+		ref: launch,
+		source: "launch",
+		kind: "commit",
+	});
 	expect(byLaunch.files).toEqual([
 		"added second.txt",
 		"modified shared.txt",
@@ -1049,7 +1053,11 @@ it("branch scope diffs the merge-base of each base in order against the live tre
 	expect(byLaunch.patches[1]).toContain("-base\n+edited\n");
 
 	const byOverride = await listBranch(folder, "main");
-	expect(byOverride.base).toEqual({ ref: "main", source: "override" });
+	expect(byOverride.base).toEqual({
+		ref: "main",
+		source: "override",
+		kind: "branch",
+	});
 	expect(byOverride.files).toEqual([
 		"added first.txt",
 		"added second.txt",
@@ -1059,7 +1067,11 @@ it("branch scope diffs the merge-base of each base in order against the live tre
 	expect(byOverride.revision).not.toBe(byLaunch.revision);
 
 	const byDefault = await listBranch(present(repo), null);
-	expect(byDefault.base).toEqual({ ref: "main", source: "default" });
+	expect(byDefault.base).toEqual({
+		ref: "main",
+		source: "default",
+		kind: "branch",
+	});
 	expect(byDefault.files).toEqual(byOverride.files);
 });
 
@@ -1075,6 +1087,7 @@ it("falls back past a missing launch commit or override with a notice, and lists
 	expect(missingLaunch.base).toEqual({
 		ref: "main",
 		source: "default",
+		kind: "branch",
 		fallback: { wanted: gone, reason: "missing" },
 	});
 	expect(missingLaunch.files).toEqual(["modified tracked.txt"]);
@@ -1086,6 +1099,7 @@ it("falls back past a missing launch commit or override with a notice, and lists
 	expect(missingOverride.base).toEqual({
 		ref: "main",
 		source: "default",
+		kind: "branch",
 		fallback: { wanted: "no-such-branch", reason: "missing" },
 	});
 
@@ -1100,6 +1114,7 @@ it("falls back past a missing launch commit or override with a notice, and lists
 	expect(staleRemote.base).toEqual({
 		ref: "main",
 		source: "default",
+		kind: "branch",
 		fallback: { wanted: "origin/gone", reason: "missing" },
 	});
 
@@ -1108,7 +1123,7 @@ it("falls back past a missing launch commit or override with a notice, and lists
 	git(fresh, "init", "-q", "-b", "main");
 	writeFileSync(join(fresh, "untracked.txt"), "new\n");
 	const unborn = await listBranch(present(fresh), null);
-	expect(unborn.base).toEqual({ ref: "HEAD", source: "head" });
+	expect(unborn.base).toEqual({ ref: "HEAD", source: "head", kind: "commit" });
 	expect(unborn.files).toEqual(["added untracked.txt"]);
 });
 
@@ -1138,9 +1153,106 @@ it("falls back to HEAD with a shallow notice when a shallow clone has no common 
 	expect(shallow.base).toEqual({
 		ref: "HEAD",
 		source: "head",
+		kind: "commit",
 		fallback: { wanted: "origin/main", reason: "shallow" },
 	});
 	expect(shallow.files).toEqual(["modified feature.txt"]);
+});
+
+// Base names: a tag shadows the branch it shares a name with; a branch named
+// like a sha resolves as that commit; a branch with a slash resolves as the tag
+// it spells; a remote branch resolves as a same-named tag or local branch; a
+// deleted branch's same-named tag is used without saying so. A deleted branch
+// with no namesake falls back as missing, as `no-such-branch` does above.
+/** Branch v1 and tag v1 fork from main; HEAD works on the branch with an uncommitted edit. */
+const sameNames = () => {
+	const repo = repository({ "shared.txt": "base\n" });
+	git(repo, "checkout", "-q", "-b", "v1");
+	writeFileSync(join(repo, "branch.txt"), "branch\n");
+	const branch = commit(repo, "Branch");
+	git(repo, "checkout", "-q", "main");
+	writeFileSync(join(repo, "tagged.txt"), "tagged\n");
+	const tagged = commit(repo, "Tagged");
+	git(repo, "tag", "v1");
+	git(repo, "checkout", "-q", "-b", "work", branch);
+	writeFileSync(join(repo, "work.txt"), "work\n");
+	commit(repo, "Work");
+	writeFileSync(join(repo, "shared.txt"), "edited\n");
+	return { repo, branch, tagged };
+};
+const sinceBranch = ["modified shared.txt", "added work.txt"];
+const sinceMain = ["added branch.txt", "modified shared.txt", "added work.txt"];
+
+it("diffs against the branch when a branch and a tag share its name", async () => {
+	const { repo } = sameNames();
+	const listed = await listBranch(present(repo), "v1");
+	expect(listed.base).toEqual({
+		ref: "v1",
+		source: "override",
+		kind: "branch",
+	});
+	expect(listed.files).toEqual(sinceBranch);
+});
+
+it("names the tag it used once the same-named branch is deleted", async () => {
+	const { repo } = sameNames();
+	git(repo, "branch", "-D", "v1");
+	const listed = await listBranch(present(repo), "v1");
+	expect(listed.base).toEqual({ ref: "v1", source: "override", kind: "tag" });
+	expect(listed.files).toEqual(sinceMain);
+});
+
+it("diffs against a branch named like a sha rather than that commit", async () => {
+	const { repo, branch, tagged } = sameNames();
+	git(repo, "branch", tagged, branch);
+	const listed = await listBranch(present(repo), tagged);
+	expect(listed.base).toEqual({
+		ref: tagged,
+		source: "override",
+		kind: "branch",
+	});
+	expect(listed.files).toEqual(sinceBranch);
+});
+
+it("diffs against a branch with a slash rather than the tag it spells", async () => {
+	const { repo, branch } = sameNames();
+	git(repo, "branch", "tags/v1", branch);
+	const listed = await listBranch(present(repo), "tags/v1");
+	expect(listed.base).toEqual({
+		ref: "tags/v1",
+		source: "override",
+		kind: "branch",
+	});
+	expect(listed.files).toEqual(sinceBranch);
+});
+
+it("diffs against a remote-only branch past a same-named tag, and origin/HEAD past a same-named local branch", async () => {
+	const { repo, branch, tagged } = sameNames();
+	git(repo, "update-ref", "refs/remotes/origin/feature", branch);
+	git(repo, "tag", "origin/feature", tagged);
+	const override = await listBranch(present(repo), "origin/feature");
+	expect(override.base).toEqual({
+		ref: "origin/feature",
+		source: "override",
+		kind: "remote",
+	});
+	expect(override.files).toEqual(sinceBranch);
+
+	git(repo, "update-ref", "refs/remotes/origin/main", branch);
+	git(
+		repo,
+		"symbolic-ref",
+		"refs/remotes/origin/HEAD",
+		"refs/remotes/origin/main",
+	);
+	git(repo, "branch", "origin/main", tagged);
+	const byDefault = await listBranch(present(repo), null);
+	expect(byDefault.base).toEqual({
+		ref: "origin/main",
+		source: "default",
+		kind: "remote",
+	});
+	expect(byDefault.files).toEqual(sinceBranch);
 });
 
 // A tool call lists from its recorded changes without git: the source is
