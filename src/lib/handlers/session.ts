@@ -739,6 +739,7 @@ export const forkSessionForClient = ({
 			...(instanceId === undefined ? {} : { instanceId }),
 		});
 
+		yield* sessionManagerService.holdSession(forked.id);
 		yield* clearEffectOverrideSession(sessionId);
 
 		// The forking tab gets the lineage in its response; other tabs read it

@@ -96,6 +96,7 @@ import { usageSettingsHandlers } from "./steps/usageSettings.js";
 import { usageWarningStripHandlers } from "./steps/usageWarningStrip.js";
 import { userAvatarHandlers } from "./steps/userAvatar.js";
 import { visualHandlers } from "./steps/visual.js";
+import { whyBusyHandlers } from "./steps/whyBusy.js";
 import { worktreeCleanupSettingsHandlers } from "./steps/worktreeCleanupSettings.js";
 
 const driver = new PlaywrightDriver();
@@ -184,6 +185,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
 	...sessionActivityHandlers,
+	...whyBusyHandlers,
 	...composerPickerHandlers,
 	...composerAccountsHandlers,
 	...composerWordsHandlers,

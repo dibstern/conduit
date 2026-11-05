@@ -593,7 +593,7 @@ export async function startProjectRelay(inputs: StartupInputs) {
 						),
 						relayManagedRuntime.scope,
 					);
-					yield* (yield* SessionSetupTag).recover;
+					yield* (yield* SessionSetupTag).recover(config.slug);
 					const daemon = yield* Effect.serviceOption(DaemonOrchestration);
 					if (Option.isNone(daemon)) {
 						const makeInteractions = yield* makeEventSinkFactory;

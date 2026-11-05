@@ -9,7 +9,6 @@ import {
 	Option,
 	PubSub,
 	Ref,
-	Semaphore,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -66,6 +65,7 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../../daemon/Services/opencode-instances-service.js";
+import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
@@ -100,7 +100,11 @@ import {
 	sessionExists,
 	updateRelaySessionCountSnapshot,
 } from "./session-manager-list.js";
-import { SessionManagerStateTag } from "./session-manager-state.js";
+import {
+	makeSessionManagerCoordination,
+	SessionManagerCoordinationTag,
+	SessionManagerStateTag,
+} from "./session-manager-state.js";
 import {
 	addToParentMap,
 	type ForkEntry,
@@ -667,6 +671,22 @@ export const deleteSession = (
 		});
 		const state = yield* Ref.get(stateRef);
 		yield* updateRelaySessionCountSnapshot(state.lastKnownSessionCount);
+		// After the committed delete and its provider cleanup: closing first would
+		// interrupt cleanup the session's own resources depend on.
+		const owners = yield* Effect.serviceOption(OwnerScopes);
+		if (Option.isSome(owners))
+			yield* Effect.forEach(
+				deleted,
+				(id) =>
+					owners.value
+						.close({ kind: "session", sessionId: id }, "remove")
+						.pipe(
+							Effect.catch((error) =>
+								Effect.logWarning(`Could not close session ${id}`, error),
+							),
+						),
+				{ discard: true },
+			);
 
 		if (cleanupFailures.length > 0) {
 			const reason = truncateProviderCleanupDiagnostic(
@@ -811,6 +831,12 @@ export interface SessionManagerService {
 	loadPreRenderedHistory(
 		sessionId: string,
 	): Effect.Effect<HistoryPage, SessionManagerError>;
+	/**
+	 * Open the session's owner scope and hold its manager state there. Create
+	 * does this itself; fork callers call it once the fork commits. False once
+	 * the session was deleted.
+	 */
+	holdSession(sessionId: string): Effect.Effect<boolean>;
 	recordMessageActivity(
 		sessionId: string,
 		timestamp?: number,
@@ -987,10 +1013,14 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const retentionScheduler = yield* Effect.serviceOption(
 			EventRetentionSchedulerTag,
 		);
-		const inFlightDeletes = new Map<
-			string,
-			Deferred.Deferred<void, SessionManagerError>
-		>();
+		// The daemon shares one per project, so a rebuilt or overlapping relay
+		// waits on the same triage lock and delete table.
+		const coordination = yield* Effect.serviceOption(
+			SessionManagerCoordinationTag,
+		);
+		const { triageLock, inFlightDeletes, hold } = Option.isSome(coordination)
+			? coordination.value
+			: yield* makeSessionManagerCoordination();
 		const { serviceListSessions, refreshSessionLineage } =
 			makeSessionListOperations({
 				api,
@@ -1154,6 +1184,8 @@ export const SessionManagerServiceLive: Layer.Layer<
 			options?: CreateSessionOptions,
 		) => {
 			const create = serviceCreateSession(title, options).pipe(
+				// A new session's owner scope opens with it.
+				Effect.tap((session) => hold(session.id)),
 				Effect.provideService(AccountDirectory, accounts),
 				Effect.provideService(ConfigTag, config),
 				Effect.provideService(LoggerTag, log),
@@ -1204,7 +1236,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				: provided;
 		};
 
-		const triageLock = yield* Semaphore.make(1);
 		const service: SessionManagerService = {
 			getDefaultSessionId: (title) =>
 				Effect.gen(function* () {
@@ -1506,13 +1537,18 @@ export const SessionManagerServiceLive: Layer.Layer<
 						Effect.provideService(OpenCodeAPITag, instanceApi ?? api),
 					);
 				}).pipe(Effect.scoped),
+			holdSession: hold,
 			recordMessageActivity: (sessionId, timestamp) =>
 				recordMessageActivity(sessionId, timestamp).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
+					Effect.when(hold(sessionId)),
+					Effect.asVoid,
 				),
 			addToParentMap: (childId, parentId) =>
 				addToParentMap(childId, parentId).pipe(
 					Effect.provideService(SessionManagerStateTag, stateRef),
+					Effect.when(hold(childId)),
+					Effect.asVoid,
 				),
 			getSessionParentMap: (options) =>
 				getSessionParentMap(options).pipe(
@@ -1520,6 +1556,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 				),
 			setForkEntry: (sessionId, entry) =>
 				Effect.gen(function* () {
+					if (!(yield* hold(sessionId))) return;
 					yield* setForkEntry(sessionId, entry).pipe(
 						Effect.provideService(AccountDirectory, accounts),
 						Effect.provideService(SessionManagerStateTag, stateRef),
