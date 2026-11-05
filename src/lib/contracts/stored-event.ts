@@ -912,17 +912,36 @@ export const CanonicalEvents = {
 			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		}),
 	),
-	"session.rewind_committed": live(Schema.Struct({ messageId: Schema.String })),
+	// The provider's own history now follows the Head. Legacy logs remove the cut here; since
+	// 82tn.51 the cut left at the move, and `moveId` names the move the provider caught up with.
+	"session.rewind_committed": live(
+		Schema.Struct({
+			messageId: Schema.String,
+			moveId: Schema.optionalKey(Schema.String),
+		}),
+	),
 	// 82tn.49, ADR-0014: a head move is journalled started, then moved; a start with no moved is a
-	// move in progress, which the inbox's admit reads.
+	// move in progress, which the inbox's admit reads. 82tn.51: `from` and `to` are the Head before
+	// and after (null is the empty root); a move without them landed through the rewind events.
 	"head.move_started": live(
 		Schema.Struct({
 			moveId: Schema.String,
-			kind: Schema.Literals(["rewind", "undo"]),
+			kind: Schema.Literals(["rewind", "undo", "switch"]),
 			messageId: Schema.optionalKey(Schema.String),
+			from: Schema.optionalKey(Schema.NullOr(Schema.String)),
+			to: Schema.optionalKey(Schema.NullOr(Schema.String)),
+			/** An undo names the Head Log entry it undoes. */
+			undoes: Schema.optionalKey(Schema.String),
+			/** Edit-and-resend and regenerate: admitted after the move, keyed by the move id. */
+			resend: Schema.optionalKey(Schema.Struct({ text: Schema.String })),
 		}),
 	),
-	"head.moved": live(Schema.Struct({ moveId: Schema.String })),
+	"head.moved": live(
+		Schema.Struct({
+			moveId: Schema.String,
+			to: Schema.optionalKey(Schema.NullOr(Schema.String)),
+		}),
+	),
 	"session.workspace_changed": live(
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),

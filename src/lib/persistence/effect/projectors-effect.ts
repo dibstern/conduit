@@ -25,9 +25,12 @@ import {
 	PREVIEW_CODE_POINTS,
 } from "../tool-wire-projection.js";
 import {
+	headMoveDiff,
 	joinHeadWhileIdle,
 	keepOffHead,
 	refreshHistoryHead,
+	restoreToHead,
+	setHead,
 } from "./history-graph.js";
 import { inheritForkHistory } from "./inherit-fork-history.js";
 import { makeProviderStateEffect } from "./provider-state-effect.js";
@@ -790,6 +793,7 @@ export const makeSessionProjector = defineProjector(() => {
 export const makeMessageProjector = defineProjector(() => ({
 	name: "message",
 	handles: [
+		"head.moved",
 		"session.rewound",
 		"session.rewind_undone",
 		"session.rewind_committed",
@@ -819,6 +823,31 @@ export const makeMessageProjector = defineProjector(() => ({
 	project: (event, ctx) => {
 		if (isEventType(event, "message.removed"))
 			return removeMessages(event.sessionId, [event.data.messageId], ctx);
+		if (isEventType(event, "head.moved"))
+			return Effect.gen(function* () {
+				// 82tn.51: the move lands at once. Rows of nodes leaving the head path are kept off
+				// it, rows of nodes joining come back, and a replay finds nothing to move. An old
+				// log's move names no target: its rows moved with the legacy rewind events.
+				const to = event.data.to;
+				if (to === undefined)
+					return { stamped: [], removed: [], collections: [] };
+				const { leaving, joining } = yield* headMoveDiff(event.sessionId, to);
+				yield* keepOffHead(event.sessionId, leaving);
+				const removed = yield* removeMessages(event.sessionId, leaving, ctx);
+				const restored = yield* restoreToHead(
+					event.sessionId,
+					joining,
+					ctx.version,
+				);
+				yield* setHead(event.sessionId, to);
+				return mergeTouches([removed, yield* stampMessage(restored, ctx)]);
+			});
+		// A move's confirmation tells the provider path only; the move already landed.
+		if (
+			isEventType(event, "session.rewind_committed") &&
+			event.data.moveId !== undefined
+		)
+			return Effect.succeed({ stamped: [], removed: [], collections: [] });
 		if (isEventType(event, "session.rewind_committed"))
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
