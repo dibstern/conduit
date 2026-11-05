@@ -1187,7 +1187,7 @@ export class ProviderSideEffectReactor {
 		result: TurnResult | undefined,
 		failure: SessionFailure | undefined,
 		now: number,
-		scope: "all" | "unheld_runner" = "all",
+		scope: "all" | "unheld_runner" | "covered" = "all",
 	) {
 		return Effect.gen({ self: this }, function* () {
 			const followUps: Effect.Effect<void>[] = [];
@@ -1274,7 +1274,7 @@ export class ProviderSideEffectReactor {
 										RunnerProviderInstance
 									)
 								) {
-									if (scope === "unheld_runner" || run.joined === 1) return;
+									if (scope !== "all" || run.joined === 1) return;
 									yield* settleDirectSend(
 										settlementTx,
 										row,
@@ -1324,7 +1324,7 @@ export class ProviderSideEffectReactor {
 									row,
 								);
 								if (legacy) {
-									if (scope === "unheld_runner" || run.joined === 1) return;
+									if (scope !== "all" || run.joined === 1) return;
 									return yield* settleLegacySend(
 										settlementTx,
 										legacy,
@@ -1340,6 +1340,16 @@ export class ProviderSideEffectReactor {
 									requestSequence: row.request_sequence,
 									attempt: row.attempt_count,
 								};
+								// A Stop that found no process covers a send never held: the hold's own
+								// settlement, made now (CONTRACT 664-666, D50).
+								if (scope === "covered")
+									return run.runner_id === null
+										? yield* settleSend(settlementTx, {
+												_tag: "covered",
+												send,
+												observedAt: now,
+											})
+										: undefined;
 								if (failure) {
 									// A transport failure after a hold is owned by reply recovery or Settle.
 									return yield* settleSend(settlementTx, {
@@ -2048,6 +2058,42 @@ export class ProviderSideEffectReactor {
 					const currentProcessId = yield* instance.getControlProcessIdEffect(
 						row.session_id,
 					);
+					// CONTRACT 664-666 (D50): a Stop that found no process ended each owner the ledger
+					// held not yet delivered; that owner's send settles now, so its executor recalls it.
+					if (
+						currentProcessId !== row.provider_process_id &&
+						row.provider_process_id?.startsWith("absent:") &&
+						stopOwners?.length
+					) {
+						const ledger = yield* loadLedger(row.session_id).pipe(
+							Effect.provideService(SqlClient.SqlClient, this.options.sql),
+							Effect.mapError(storeFailure("stopLedgerView")),
+						);
+						const active = ledger && viewLedger(ledger.state).active?.runId;
+						const ended = stopOwners
+							.map(({ runId }) => runId)
+							.filter((runId) => runId !== active);
+						const sends =
+							ledger && ended.length
+								? yield* this.options.sql<ProviderCommandOutboxRow>`
+								SELECT request_sequence, command_id, project_key, session_id, provider_id,
+									effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
+								FROM provider_command_outbox WHERE session_id = ${row.session_id}
+									AND effect_type = 'send_turn' AND status = 'running'
+									AND run_id IN ${this.options.sql.in(ended)}`.pipe(
+										Effect.mapError(storeFailure("stopUndelivered")),
+									)
+								: [];
+						const now = yield* this.currentTimeMillis();
+						for (const send of sends)
+							yield* this.recordSendReply(
+								send,
+								undefined,
+								undefined,
+								now,
+								"covered",
+							);
+					}
 					if (currentProcessId !== row.provider_process_id)
 						return yield* new ProviderInstanceFailure({
 							providerId: row.provider_id,
