@@ -15,6 +15,7 @@ import {
 	type OpenCodeEndpoint,
 } from "../../../src/lib/domain/daemon/Layers/opencode-instances-layer.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { makeOpenCodeProjectStreamsLive } from "../../../src/lib/domain/daemon/Services/opencode-project-streams.js";
 import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	SSEStreamLive,
@@ -163,7 +164,11 @@ describe("Shared OpenCode stream reconnect", () => {
 				SSEStreamLive.pipe(
 					Layer.provide(
 						Layer.mergeAll(
-							Layer.succeed(OpenCodeInstancesTag)(instances),
+							makeOpenCodeProjectStreamsLive(() => [
+								{ slug: "test-project", folders: [projectDir] },
+							]).pipe(
+								Layer.provide(Layer.succeed(OpenCodeInstancesTag)(instances)),
+							),
 							Layer.succeed(ConfigTag)(makeMockConfig({ projectDir })),
 						),
 					),
