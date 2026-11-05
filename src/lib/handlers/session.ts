@@ -27,7 +27,10 @@ import {
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
 import type { CreateSessionOptions } from "../domain/relay/Services/session-manager-service.js";
-import { projectSessionManager } from "../domain/relay/Services/session-manager-service.js";
+import {
+	projectSessionManager,
+	SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import {
@@ -757,15 +760,23 @@ export const forkSessionForClient = ({
 	sessionId: requestedSessionId,
 	messageId,
 	instanceId,
+	targetProjectSlug,
 }: {
 	readonly clientId: string;
 	readonly sessionId?: string;
 	readonly messageId?: string;
 	readonly instanceId?: string;
+	readonly targetProjectSlug?: string;
 }) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionManagerService = yield* projectSessionManager;
+		const managers = yield* SessionManagerServiceTag;
+		const ownSlug = (yield* ConfigTag).slug;
+		const target =
+			targetProjectSlug === undefined || targetProjectSlug === ownSlug
+				? undefined
+				: targetProjectSlug;
+		const sessionManagerService = managers.forProject(target ?? ownSlug);
 
 		const sessionId =
 			requestedSessionId || wsHandler.getClientSession(clientId) || "";
@@ -777,6 +788,7 @@ export const forkSessionForClient = ({
 		const forked = yield* forkSession(sessionId, {
 			...(messageId === undefined ? {} : { messageId }),
 			...(instanceId === undefined ? {} : { instanceId }),
+			...(target === undefined ? {} : { into: yield* managers.parts(target) }),
 		});
 
 		yield* sessionManagerService.holdSession(forked.id);
@@ -801,6 +813,7 @@ export const forkSessionForClient = ({
 		return {
 			id: forked.id,
 			forkedFrom: sessionId,
+			projectSlug: target ?? ownSlug,
 			...(forkMessageId && { forkMessageId }),
 			...(forkPointTimestamp != null && { forkPointTimestamp }),
 		};

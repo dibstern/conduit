@@ -118,6 +118,7 @@ import {
 	WebSocketHandlerTag,
 } from "../../src/lib/domain/relay/Services/services.js";
 import { SessionInboxTag } from "../../src/lib/domain/relay/Services/session-inbox.js";
+import { SessionManagerError } from "../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
 	attachSessionManagerLive,
 	type SessionManagerService,
@@ -694,6 +695,13 @@ export const mockSessionManagers = (
 ): SessionManagers => ({
 	forProject: () => service,
 	attach: () => Effect.void,
+	parts: (projectId) =>
+		Effect.fail(
+			new SessionManagerError({
+				operation: "forProject",
+				cause: `No relay serves project ${projectId}`,
+			}),
+		),
 });
 
 /**

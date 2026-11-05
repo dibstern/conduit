@@ -2914,7 +2914,8 @@ export const ForkSession = Rpc.make("ForkSession", {
 		originId: NonEmptyString,
 		/** Destination account; defaults to the parent's account. */
 		instanceId: Schema.optional(NonEmptyString),
-
+		/** Project the fork joins; defaults to the parent's project. */
+		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
 	}),
 	success: ForkSessionResponseSchema,
@@ -2933,6 +2934,8 @@ export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
 		sessionId: NonEmptyString,
 		/** Destination account; defaults to the parent's account. */
 		instanceId: Schema.optional(NonEmptyString),
+		/** Project the fork joins; defaults to the parent's project. */
+		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
 	}),
 	success: ForkSession.successSchema,

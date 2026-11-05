@@ -9,7 +9,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type {
 	ResolvedSettings,
 	ResolveSettingsOptions,
@@ -2096,6 +2096,8 @@ function query(params: {
 					declareWorkspace?: string;
 					holdBeforeResult?: boolean;
 					failAfterTools?: boolean;
+					/** Each Write lands its file, resolved against the query's folder. */
+					create?: boolean;
 				};
 				interruptibleTurn = turn.holdBeforeResult === true;
 				const tools: readonly {
@@ -2122,6 +2124,14 @@ function query(params: {
 					})),
 				];
 				for (const [offset, tool] of tools.entries()) {
+					if (turn.create && tool.name === "Write")
+						writeFileSync(
+							resolve(
+								params.options?.cwd ?? process.cwd(),
+								String(tool.input["file_path"]),
+							),
+							String(tool.input["content"]),
+						);
 					const toolUseID = randomUUID();
 					const index = offset + 1;
 					yield stream(sessionId, {

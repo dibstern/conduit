@@ -927,6 +927,13 @@ export type ProjectSessionManagerParts =
 /** The daemon's one session manager; every call names its project. */
 export interface SessionManagers {
 	readonly forProject: (projectId: string) => SessionManagerService;
+	/** The parts a project's relay lent, for work that lands in that project. */
+	readonly parts: (
+		projectId: string,
+	) => Effect.Effect<
+		Context.Context<ProjectSessionManagerParts>,
+		SessionManagerError
+	>;
 	/** Lend a relay's parts for its project until the relay's scope closes. */
 	readonly attach: (
 		projectId: string,
@@ -1643,11 +1650,11 @@ export const SessionManagerServiceLive = Layer.sync(
 			Array<Context.Context<ProjectSessionManagerParts>>
 		>();
 		const services = new Map<string, SessionManagerService>();
-		const project = (projectId: string) =>
+		const parts = (projectId: string) =>
 			Effect.suspend(() => {
-				const parts = attached.get(projectId)?.at(-1);
-				return parts
-					? Effect.provide(makeProjectSessionManager, parts)
+				const lent = attached.get(projectId)?.at(-1);
+				return lent
+					? Effect.succeed(lent)
 					: Effect.fail(
 							new SessionManagerError({
 								operation: "forProject",
@@ -1655,7 +1662,12 @@ export const SessionManagerServiceLive = Layer.sync(
 							}),
 						);
 			});
+		const project = (projectId: string) =>
+			Effect.flatMap(parts(projectId), (lent) =>
+				Effect.provide(makeProjectSessionManager, lent),
+			);
 		return {
+			parts,
 			attach: (projectId, parts) =>
 				Effect.acquireRelease(
 					Effect.sync(() =>
