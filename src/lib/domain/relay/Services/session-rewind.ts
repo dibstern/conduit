@@ -199,10 +199,19 @@ export const commitHeadMove = ({
 		const started = yield* inbox.withSession(
 			sessionId,
 			Effect.gen(function* () {
-				const [journalled] = yield* sql<{ n: number }>`SELECT 1 AS n FROM events
+				const [journalled] = yield* sql<{
+					data: string;
+				}>`SELECT data FROM events
 					WHERE session_id = ${sessionId} AND type = 'head.move_started'
 					AND json_extract(data, '$.moveId') = ${moveId} LIMIT 1`;
-				if (journalled) return undefined;
+				// A second confirmation joins the landing, so its receipt follows the move's.
+				if (journalled)
+					return {
+						move: JSON.parse(
+							journalled.data,
+						) as EventPayloadMap["head.move_started"],
+						inputs: [],
+					};
 				const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
 				if (!row) return yield* noTarget(sessionId);
 				const plan = yield* planHeadMove(sessionId, intent);
@@ -226,7 +235,6 @@ export const commitHeadMove = ({
 				return { move, inputs: target.inputs };
 			}),
 		);
-		if (!started) return { moveId };
 		// Test seam: widens the window a send or a crash can arrive in while the move is in progress.
 		if (process.env["NODE_ENV"] === "test")
 			yield* Effect.sleep(
