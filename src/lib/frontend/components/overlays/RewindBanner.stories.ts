@@ -23,7 +23,7 @@ function seed({
 	selectedUuid?: string | null;
 	provider?: "opencode" | "claude";
 } = {}): () => void {
-	// Whether files rewind too comes from the session's account's driver.
+	// 82tn.53: conduit restores files for every driver; the account only names the session.
 	const account =
 		provider === "claude" ? mockClaudeAccount : mockOpenCodeAccount;
 	const instances = instanceState.instances;

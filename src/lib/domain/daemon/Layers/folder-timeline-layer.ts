@@ -4,11 +4,12 @@ import {
 	mkdir,
 	readdir,
 	rm,
+	rmdir,
 	stat,
 	utimes,
 	writeFile,
 } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
 	Clock,
 	Deferred,
@@ -22,6 +23,7 @@ import {
 import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import {
+	FolderRestoreRefused,
 	type FolderSnapshot,
 	type FolderTimeline,
 	FolderTimelineError,
@@ -39,6 +41,8 @@ const START_BUDGET_MS = 3_000;
 const MAX_CHANGES = 5_000;
 const SESSION_REF = "refs/conduit/session";
 const PINS = "refs/conduit/runs/";
+/** A session's kept refs in a repository store: its checkpoints, then its receipts. */
+const KEPT = "refs/conduit/sessions/";
 const IDENTITY = {
 	GIT_AUTHOR_NAME: "conduit",
 	GIT_AUTHOR_EMAIL: "conduit@localhost",
@@ -59,9 +63,18 @@ const Pin = Schema.Struct({
 	),
 });
 const decodePin = Schema.decodeUnknownOption(Schema.fromJsonString(Pin));
+/** A Restore Receipt's subject: the move that restored the folder. */
+const Receipt = Schema.Struct({
+	sessionId: Schema.String,
+	moveId: Schema.String,
+	directory: Schema.String,
+});
+const decodeReceipt = Schema.decodeUnknownOption(
+	Schema.fromJsonString(Receipt),
+);
 
 // Copied indexes must never split, monitor or trigger maintenance, and LFS
-// clean filters would write into the repository's .git/lfs.
+// filters would read or write the repository's .git/lfs.
 const CONFIG = [
 	"-c",
 	"core.splitIndex=false",
@@ -77,6 +90,8 @@ const CONFIG = [
 	"filter.lfs.process=",
 	"-c",
 	"filter.lfs.clean=",
+	"-c",
+	"filter.lfs.smudge=",
 	"-c",
 	"filter.lfs.required=false",
 ];
@@ -233,6 +248,44 @@ const pin = (
 			git(store, ["update-ref", ref, stdout.trim()]),
 		),
 	);
+
+/** A test holds a restore at `step`, so a test can stop the daemon there. */
+const pause = (step: "receipt" | "deleted" | "written") =>
+	Effect.suspend(() =>
+		process.env["NODE_ENV"] === "test" &&
+		process.env["CONDUIT_TEST_RESTORE_PAUSE_AT"] === step
+			? Effect.never
+			: Effect.void,
+	);
+
+/** Whether the folder is still there to restore. */
+const present = (directory: string) =>
+	Effect.promise(() =>
+		stat(directory).then(
+			(found) => found.isDirectory(),
+			() => false,
+		),
+	);
+
+/** Deletes folder-relative files, then the folders they leave empty. */
+const remove = (directory: string, paths: readonly string[]) =>
+	fs(async () => {
+		for (const path of paths) {
+			await rm(join(directory, path), { force: true });
+			for (
+				let parent = dirname(join(directory, path));
+				parent.startsWith(`${directory}/`);
+				parent = dirname(parent)
+			)
+				if (
+					!(await rmdir(parent).then(
+						() => true,
+						() => false,
+					))
+				)
+					break;
+		}
+	});
 
 /** Marks the folders a new run shares with live runs of other sessions, on both sides. */
 function markShared(runs: Iterable<LiveRun>, live: LiveRun) {
@@ -439,21 +492,30 @@ export const makeFolderTimeline = (configDir: string) =>
 		const creating = yield* Semaphore.make(1);
 		let swept = false;
 		const runs = new Map<string, LiveRun>();
+		const lockIn =
+			(locks: Map<string, Semaphore.Semaphore>) => (key: string) => {
+				const known = locks.get(key);
+				if (known) return known;
+				const lock = Semaphore.makeUnsafe(1);
+				locks.set(key, lock);
+				return lock;
+			};
 		// A session's captures and its forgetting write one store, one at a time.
 		const sessionLocks = new Map<string, Semaphore.Semaphore>();
+		const sessionLock = lockIn(sessionLocks);
+		// A restore applies while no run takes a start checkpoint in its folders.
+		const folderLock = lockIn(new Map());
+		const hash = (text: string) =>
+			createHash("sha256").update(text).digest("hex").slice(0, 16);
 		const sessionStore = (sessionId: string) =>
-			join(
-				root,
-				"sessions",
-				`${createHash("sha256").update(sessionId).digest("hex").slice(0, 16)}.git`,
-			);
-		const sessionLock = (sessionId: string) => {
-			const known = sessionLocks.get(sessionId);
-			if (known) return known;
-			const lock = Semaphore.makeUnsafe(1);
-			sessionLocks.set(sessionId, lock);
-			return lock;
-		};
+			join(root, "sessions", `${hash(sessionId)}.git`);
+		const checkpointRef = (
+			sessionId: string,
+			runId: string,
+			directory: string,
+		) => `${KEPT}${hash(sessionId)}/checkpoints/${runId}/${hash(directory)}`;
+		const receiptRef = (sessionId: string, moveId: string, directory: string) =>
+			`${KEPT}${hash(sessionId)}/receipts/${moveId}/${hash(directory)}`;
 
 		const run = (
 			cwd: string,
@@ -652,6 +714,141 @@ export const makeFolderTimeline = (configDir: string) =>
 			} = {},
 		) => run(store, ["--git-dir", store, ...args], options);
 
+		/** Deletes the session's kept refs in every repository store. */
+		const dropKept = (sessionId: string) =>
+			Effect.gen(function* () {
+				const names = yield* fs(() => readdir(root)).pipe(
+					Effect.orElseSucceed((): string[] => []),
+				);
+				for (const name of names.filter((name) => name.endsWith(".git"))) {
+					const store = join(root, name);
+					const { stdout } = yield* git(store, [
+						"for-each-ref",
+						"--format=%(refname)",
+						`${KEPT}${hash(sessionId)}/`,
+					]).pipe(Effect.orElseSucceed(() => ({ stdout: "" })));
+					const refs = stdout.split("\n").filter((ref) => ref !== "");
+					if (refs.length > 0)
+						yield* git(store, ["update-ref", "--stdin"], {
+							input: refs.map((ref) => `delete ${ref}\n`).join(""),
+						}).pipe(Effect.ignore);
+				}
+			});
+		/** A kept ref's tree and its parent's tree, or nothing once it is gone. */
+		const readKept = (store: string, ref: string) =>
+			git(store, ["rev-parse", `${ref}^{tree}`, `${ref}^1^{tree}`]).pipe(
+				Effect.map(({ stdout }) => {
+					const [tree, parent] = stdout.trim().split("\n");
+					return tree && parent ? { tree, parent } : undefined;
+				}),
+				Effect.orElseSucceed(() => undefined),
+			);
+		/** Keeps `tree` under `ref`, its parent a commit of `parent`. */
+		const keep = (
+			store: string,
+			ref: string,
+			tree: string,
+			parent: string,
+			subject: string,
+		) =>
+			Effect.gen(function* () {
+				const base = (yield* git(
+					store,
+					["commit-tree", parent, "-m", "target"],
+					{
+						env: IDENTITY,
+					},
+				)).stdout.trim();
+				const commit = (yield* git(
+					store,
+					["commit-tree", tree, "-p", base, "-m", subject],
+					{ env: IDENTITY },
+				)).stdout.trim();
+				yield* git(store, ["update-ref", ref, commit]);
+			});
+		/** The folder's paths (folder-relative) that differ between two trees; submodules excepted. */
+		const diff = (store: string, prefix: string, from: string, to: string) =>
+			git(store, [
+				"diff-tree",
+				"-r",
+				"-z",
+				"--raw",
+				"--no-renames",
+				...(prefix === "" ? [] : [`--relative=${prefix}`]),
+				from,
+				to,
+			]).pipe(
+				Effect.map(({ stdout }) =>
+					parseRaw(stdout).filter(
+						({ before, after }) =>
+							before?.mode !== "160000" && after?.mode !== "160000",
+					),
+				),
+			);
+		/**
+		 * A fresh snapshot against a move from `from` to `to`: the planned paths
+		 * still as planned are written, those already at `to` are skipped, and any
+		 * other planned path changed since the plan.
+		 */
+		const classify = (directory: string, from: string, to: string) =>
+			Effect.gen(function* () {
+				const now = yield* take(directory);
+				const [planned, pending, moved] = yield* Effect.all(
+					[
+						diff(now.store, now.prefix, from, to),
+						diff(now.store, now.prefix, now.worktree, to),
+						diff(now.store, now.prefix, now.worktree, from),
+					],
+					{ concurrency: "unbounded" },
+				);
+				const plannedPaths = new Set(planned.map(({ path }) => path));
+				const movedPaths = new Set(moved.map(({ path }) => path));
+				const changes = pending.filter(({ path }) => plannedPaths.has(path));
+				return {
+					now,
+					writes: changes.filter(({ path }) => !movedPaths.has(path)),
+					conflicts: changes
+						.filter(({ path }) => movedPaths.has(path))
+						.map(({ path }) => path),
+				};
+			});
+		/** Writes folder-relative paths as `tree` holds them, through an index of its own. */
+		const checkout = (
+			directory: string,
+			store: string,
+			tree: string,
+			paths: readonly string[],
+		) =>
+			paths.length === 0
+				? Effect.void
+				: Effect.suspend(() => {
+						const index = join(store, `restore-${randomUUID()}.index`);
+						const env = {
+							GIT_INDEX_FILE: index,
+							GIT_OBJECT_DIRECTORY: join(store, "objects"),
+						};
+						return run(directory, ["read-tree", tree], { env }).pipe(
+							Effect.andThen(
+								run(directory, ["checkout-index", "-f", "-z", "--stdin"], {
+									env,
+									input: paths.map((path) => `${path}\0`).join(""),
+								}),
+							),
+							Effect.ensuring(Effect.promise(() => rm(index, { force: true }))),
+						);
+					});
+		const deletes = (writes: readonly Change[]) =>
+			writes.filter(({ after }) => after === null).map(({ path }) => path);
+		const updates = (writes: readonly Change[]) =>
+			writes.filter(({ after }) => after !== null).map(({ path }) => path);
+		/** Moves the folder's paths still at `from` to `to`, leaving any other change be. */
+		const putBack = (directory: string, from: string, to: string) =>
+			Effect.gen(function* () {
+				if (!(yield* present(directory))) return;
+				const { now, writes } = yield* classify(directory, from, to);
+				yield* remove(directory, deletes(writes));
+				yield* checkout(directory, now.store, to, updates(writes));
+			});
 		const unpin = (runId: string, live: LiveRun) =>
 			Effect.forEach(live.directories, (directory, index) => {
 				const start = live.starts.get(directory);
@@ -717,6 +914,22 @@ export const makeFolderTimeline = (configDir: string) =>
 							}),
 						),
 					);
+					// The end pin (its parent the start pin) outlives the run as the
+					// folder's checkpoint, for head moves with files.
+					yield* Effect.forEach(
+						live.directories,
+						(directory, index) => {
+							const start = live.starts.get(directory);
+							return start && "store" in start
+								? git(start.store, [
+										"update-ref",
+										checkpointRef(live.sessionId, runId, directory),
+										`${PINS}${runId}/${index}`,
+									]).pipe(Effect.ignore)
+								: Effect.void;
+						},
+						{ concurrency: "unbounded", discard: true },
+					);
 					yield* record(live.sessionId, capture);
 				}),
 			);
@@ -742,6 +955,190 @@ export const makeFolderTimeline = (configDir: string) =>
 				run(directory, args),
 			collect,
 			sessionStore,
+			runsIn: (directory) =>
+				Effect.sync(() =>
+					[...runs]
+						.filter(([, live]) => live.directories.includes(directory))
+						.map(([runId, { sessionId }]) => ({ sessionId, runId })),
+				),
+			checkpoint: (sessionId, runId, directory) =>
+				Effect.gen(function* () {
+					const { store, prefix } = yield* resolve(directory);
+					// A pin without a parent is a start whose end was never pinned.
+					const kept = yield* readKept(
+						store,
+						checkpointRef(sessionId, runId, directory),
+					);
+					return kept && { store, prefix, start: kept.parent, end: kept.tree };
+				}),
+			plan: (directory, to) =>
+				Effect.gen(function* () {
+					if (!(yield* present(directory)))
+						return yield* new FolderRestoreRefused({
+							reason: "folder_missing",
+							directory,
+							paths: [],
+						});
+					const now = yield* take(directory);
+					const changes = yield* diff(now.store, now.prefix, now.worktree, to);
+					return {
+						from: now.worktree,
+						key: createHash("sha256")
+							.update(
+								JSON.stringify(
+									changes.map(({ path, before, after }) => [
+										path,
+										before,
+										after,
+									]),
+								),
+							)
+							.digest("hex"),
+						changes: changes.map(({ path, before, after }) => ({
+							path,
+							change:
+								before === null
+									? ("added" as const)
+									: after === null
+										? ("deleted" as const)
+										: ("modified" as const),
+						})),
+					};
+				}),
+			restore: ({ sessionId, moveId, folders, guard, journal }) => {
+				const apply = Effect.gen(function* () {
+					yield* guard;
+					// Every folder is checked before any is written.
+					const checked = yield* Effect.forEach(folders, (folder) =>
+						Effect.gen(function* () {
+							const { directory, from, to } = folder;
+							if (!(yield* present(directory)))
+								return yield* new FolderRestoreRefused({
+									reason: "folder_missing",
+									directory,
+									paths: [],
+								});
+							const { now, writes, conflicts } = yield* classify(
+								directory,
+								from,
+								to,
+							);
+							if (conflicts.length > 0)
+								return yield* new FolderRestoreRefused({
+									reason: "changed",
+									directory,
+									paths: conflicts,
+								});
+							return {
+								folder,
+								now,
+								writes,
+								ref: receiptRef(sessionId, moveId, directory),
+							};
+						}),
+					);
+					const receipted: typeof checked = [];
+					return yield* Effect.gen(function* () {
+						for (const entry of checked) {
+							yield* keep(
+								entry.now.store,
+								entry.ref,
+								entry.now.worktree,
+								entry.folder.to,
+								JSON.stringify({
+									sessionId,
+									moveId,
+									directory: entry.folder.directory,
+								} satisfies typeof Receipt.Type),
+							);
+							receipted.push(entry);
+						}
+						yield* pause("receipt");
+						for (const { folder, writes } of checked)
+							yield* remove(folder.directory, deletes(writes));
+						yield* pause("deleted");
+						for (const { folder, now, writes } of checked)
+							yield* checkout(
+								folder.directory,
+								now.store,
+								folder.to,
+								updates(writes),
+							);
+						yield* pause("written");
+						return yield* journal;
+					}).pipe(
+						Effect.tapError(() =>
+							Effect.forEach(
+								receipted,
+								({ folder, now, ref }) =>
+									putBack(folder.directory, folder.to, now.worktree).pipe(
+										Effect.andThen(git(now.store, ["update-ref", "-d", ref])),
+										Effect.catch((error) =>
+											Effect.logWarning("Restore not rolled back", {
+												directory: folder.directory,
+												error,
+											}),
+										),
+									),
+								{ discard: true },
+							),
+						),
+					);
+				});
+				// Sorted, so two restores sharing folders take their locks in one order.
+				return [...new Set(folders.map(({ directory }) => directory))]
+					.sort()
+					.reduceRight(
+						(locked, directory) => folderLock(directory).withPermits(1)(locked),
+						sessionLock(sessionId).withPermits(1)(apply),
+					);
+			},
+			receipt: (sessionId, moveId, directory) =>
+				Effect.gen(function* () {
+					const { store } = yield* resolve(directory);
+					const kept = yield* readKept(
+						store,
+						receiptRef(sessionId, moveId, directory),
+					);
+					return kept && { store, before: kept.tree, target: kept.parent };
+				}),
+			recoverRestores: (journalled) =>
+				Effect.gen(function* () {
+					const names = yield* fs(() => readdir(root)).pipe(
+						Effect.orElseSucceed((): string[] => []),
+					);
+					for (const name of names.filter((name) => name.endsWith(".git"))) {
+						const store = join(root, name);
+						const { stdout } = yield* git(store, [
+							"for-each-ref",
+							"--format=%(refname)%00%(contents:subject)",
+							KEPT,
+						]).pipe(Effect.orElseSucceed(() => ({ stdout: "" })));
+						for (const line of stdout.split("\n")) {
+							const [ref = "", subject = ""] = line.split("\0");
+							const receipt = ref.includes("/receipts/")
+								? decodeReceipt(subject)
+								: Option.none();
+							if (Option.isNone(receipt)) continue;
+							const { sessionId, moveId, directory } = receipt.value;
+							// A journalled move was applied whole; its receipt stays for undo.
+							if (yield* journalled(sessionId, moveId)) continue;
+							const kept = yield* readKept(store, ref);
+							yield* (
+								kept ? putBack(directory, kept.parent, kept.tree) : Effect.void
+							).pipe(
+								Effect.andThen(git(store, ["update-ref", "-d", ref])),
+								folderLock(directory).withPermits(1),
+								Effect.catch((error) =>
+									Effect.logWarning("Unjournalled restore not rolled back", {
+										directory,
+										error,
+									}),
+								),
+							);
+						}
+					}
+				}),
 			runStarted: ({ sessionId, runId, directories }) =>
 				Effect.gen(function* () {
 					// A retried send keeps its first checkpoint.
@@ -759,7 +1156,15 @@ export const makeFolderTimeline = (configDir: string) =>
 					yield* Effect.forEach(
 						directories,
 						(directory, index) =>
-							checkpointStart({ git, snapshot }, runId, live, directory, index),
+							folderLock(directory).withPermits(1)(
+								checkpointStart(
+									{ git, snapshot },
+									runId,
+									live,
+									directory,
+									index,
+								),
+							),
 						{ concurrency: "unbounded", discard: true },
 					);
 				}),
@@ -904,7 +1309,7 @@ export const makeFolderTimeline = (configDir: string) =>
 					yield* sessionLock(sessionId).withPermits(1)(
 						fs(() =>
 							rm(sessionStore(sessionId), { recursive: true, force: true }),
-						).pipe(Effect.ignore),
+						).pipe(Effect.ignore, Effect.andThen(dropKept(sessionId))),
 					);
 					sessionLocks.delete(sessionId);
 				}),
@@ -920,6 +1325,7 @@ export const makeFolderTimeline = (configDir: string) =>
 						yield* git(store, ["update-ref", "-d", SESSION_REF]).pipe(
 							Effect.ignore,
 						);
+						yield* dropKept(sessionId);
 						yield* fs(() => rm(store, { recursive: true, force: true })).pipe(
 							Effect.catch((error) =>
 								Effect.logWarning("Evicted store not removed", {
