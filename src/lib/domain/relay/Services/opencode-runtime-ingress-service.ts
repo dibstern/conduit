@@ -1944,24 +1944,31 @@ export class EffectOpenCodeRuntimeIngress
 								previous === providerProcessId
 							)
 								return;
-							yield* this.ingestion
-								.ingestBatch([], {
-									publishToRelay: false,
-									evidence: this.processStarted(sessionId, providerProcessId),
-									afterCommit: Effect.sync(() =>
-										this.reportedProcesses.set(sessionId, providerProcessId),
-									),
-								})
-								.pipe(
-									Effect.catchCause((cause) =>
-										Effect.sync(() =>
-											this.log.warn("OpenCode process start report deferred", {
-												sessionId,
-												error: Failure.renderCause(cause),
-											}),
+							// The old process is gone, so main's runs on it end in the same write, as at
+							// a conduit stop (onInstanceStopped). CONTRACT.md 2.1 (235-237) and 9
+							// (3045-3047) leave them open in main; 82tn.32.13 closes that (gap, audit).
+							yield* settleSessionRuns(
+								sql,
+								sessionId,
+								"OpenCode process replaced",
+								(events) =>
+									this.ingestion.ingestBatch(events, {
+										evidence: this.processStarted(sessionId, providerProcessId),
+										afterCommit: Effect.sync(() =>
+											this.reportedProcesses.set(sessionId, providerProcessId),
 										),
+									}),
+								{ confirmedStop: true },
+							).pipe(
+								Effect.catchCause((cause) =>
+									Effect.sync(() =>
+										this.log.warn("OpenCode process start report deferred", {
+											sessionId,
+											error: Failure.renderCause(cause),
+										}),
 									),
-								);
+								),
+							);
 						}),
 					);
 				}
