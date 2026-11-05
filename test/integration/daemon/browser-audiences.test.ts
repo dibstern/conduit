@@ -217,10 +217,11 @@ describe("browser audiences without attaching a project (82tn.13)", () => {
 			30_000,
 		);
 
-		// 3: answered in A, the card leaves both tabs.
+		// 3: answered from B's tab, which never opened A, the card leaves both tabs.
+		// m379.5: the answer names its session, so it reaches A's project.
 		const cursorA = onA.frames.length;
 		const cursorB = onB.frames.length;
-		await onA.answerApproval(askA, "allow");
+		await onB.answerApproval(askB, "allow");
 		await Promise.all([
 			removed(onA, String(askA["requestId"]), cursorA),
 			removed(onB, String(askA["requestId"]), cursorB),
@@ -241,11 +242,10 @@ describe("browser audiences without attaching a project (82tn.13)", () => {
 		const cardsOnReconnect = cards(reconnected, sessions.a);
 		expect(cardsOnReconnect).toBe(1);
 
-		// 9: B answers A's question once it opens A's session.
-		await reconnected.open(sessions.a);
-		const end = reconnected.frames.length;
+		// m379.5: B answers A's question without opening A's session.
+		const end = onA.frames.length;
 		await reconnected.answerQuestion(question, { "0": "Continue" });
-		await reconnected.waitForTurnEnd(sessions.a, end, 60_000);
+		await onA.waitForTurnEnd(sessions.a, end, 60_000);
 
 		evidence = {
 			...evidence,

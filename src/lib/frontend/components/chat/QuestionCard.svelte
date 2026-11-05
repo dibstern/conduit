@@ -10,7 +10,6 @@
 	import Radio from "../ui/Radio.svelte";
 	import TextInput from "../ui/TextInput.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine, isPromptSettled, toastFailure } from "../../transport/rpc-errors.js";
@@ -139,11 +138,11 @@
 	function handleSubmit() {
 		if (!canSubmit || resolved) return;
 		errorMessage = null; // Clear any previous error
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
+		const sessionId = request.sessionId;
+		if (!sessionId) return;
 		const answers = buildAnswerPayload(selections, request.questions);
 		void rpc("AnswerQuestion", {
-			projectSlug,
+			sessionId,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			toolId: request.toolId,
@@ -181,11 +180,11 @@
 
 	function handleSkip() {
 		if (resolved) return;
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
+		const sessionId = request.sessionId;
+		if (!sessionId) return;
 		errorMessage = null;
 		void rpc("RejectQuestion", {
-			projectSlug,
+			sessionId,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			toolId: request.toolId,

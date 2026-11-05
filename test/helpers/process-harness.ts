@@ -3233,13 +3233,21 @@ export class ProcessBrowser {
 		);
 	}
 
+	/** An ask's answer names its session; a bare id falls back to this tab's project. */
+	private answerRoute(request: Record<string, unknown>) {
+		const sessionId = request["sessionId"];
+		return typeof sessionId === "string" && sessionId !== ""
+			? { sessionId }
+			: { projectSlug: this.projectSlug };
+	}
+
 	async answerApproval(
 		request: Record<string, unknown>,
 		decision: "allow" | "allow_always" | "deny",
 	): Promise<void> {
 		await this.run(
 			this.rpc.RespondPermission({
-				projectSlug: this.projectSlug,
+				...this.answerRoute(request),
 				originId: this.originId,
 				commandId: randomUUID(),
 				requestId: String(request["requestId"]),
@@ -3257,7 +3265,7 @@ export class ProcessBrowser {
 	): Promise<void> {
 		await this.run(
 			this.rpc.AnswerQuestion({
-				projectSlug: this.projectSlug,
+				...this.answerRoute(request),
 				originId: this.originId,
 				commandId: randomUUID(),
 				toolId: String(request["toolId"]),
@@ -3269,7 +3277,7 @@ export class ProcessBrowser {
 	async rejectQuestion(request: Record<string, unknown>): Promise<void> {
 		await this.run(
 			this.rpc.RejectQuestion({
-				projectSlug: this.projectSlug,
+				...this.answerRoute(request),
 				originId: this.originId,
 				commandId: randomUUID(),
 				toolId: String(request["toolId"]),
