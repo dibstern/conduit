@@ -81,12 +81,10 @@ import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
-import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
 import {
 	makeProjectRelayConfigLive,
-	OpenCodeAPILive,
 	ProjectRelayLoggerLive,
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
@@ -286,7 +284,6 @@ export type RelayRuntimeServices =
 	| SessionActivityTag
 	| ConfigTag
 	| LoggerTag
-	| OpenCodeAPITag
 	| OpenCodeSettingsServiceTag
 	| OrchestrationEngineTag
 	| SessionWorkspaceTag
@@ -666,10 +663,6 @@ export function createProjectRelayLayers({
 			),
 		),
 	);
-	// The relay's default client resolves its endpoint through that view.
-	const openCodeApiLayer = OpenCodeAPILive.pipe(
-		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
-	);
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),
 	);
@@ -688,7 +681,6 @@ export function createProjectRelayLayers({
 				persistenceEffectLayer,
 				configLayer,
 				loggerLayer,
-				openCodeApiLayer,
 				sessionEventBusLayer,
 				worktreeLayer,
 			),
@@ -889,7 +881,6 @@ export function createProjectRelayLayers({
 		usageLayer,
 		daemonConfigLayer,
 		sessionWorkspaceLayer,
-		openCodeApiLayer,
 		persistenceEffectLayer,
 		// The engine commits input.sent through commit-and-signal, which
 		// announces on the same bus as the relay's subscribers.
@@ -1069,7 +1060,6 @@ export function createProjectRelayLayers({
 		historyReconcileLayer,
 		processLinkLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
-		openCodeApiLayer,
 		openCodeFileServiceLayer,
 		openCodeModelServiceLayer,
 		openCodeSettingsServiceLayer,

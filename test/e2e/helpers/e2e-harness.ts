@@ -31,6 +31,8 @@ import {
 	DaemonSessionQueryServiceError,
 	DaemonSessionQueryServiceTag,
 } from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
+import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import {
 	makePersistenceStoreLayer,
@@ -63,6 +65,8 @@ const E2E_PROVIDER = process.env["E2E_PROVIDER"] ?? "";
 
 export interface E2EHarness {
 	stack: RelayStack;
+	/** OpenCode client for the harness project's folder. */
+	client: OpenCodeAPI;
 	opencodeUrl: string;
 	relayPort: number;
 	relayBaseUrl: string;
@@ -125,8 +129,16 @@ export async function createE2EHarness(opts?: {
 
 	await switchToFreeModel(relayPort);
 
+	const projectDir = opts?.projectDir ?? process.cwd();
+	const { client: sdk, authHeaders } = createSdkClient({
+		baseUrl: opencodeUrl,
+		directory: projectDir,
+	});
+	const client = new OpenCodeAPI({ sdk, baseUrl: opencodeUrl, authHeaders });
+
 	return {
 		stack,
+		client,
 		opencodeUrl,
 		relayPort,
 		relayBaseUrl,
@@ -135,7 +147,7 @@ export async function createE2EHarness(opts?: {
 		async stop(): Promise<void> {
 			for (const id of createdSessionIds) {
 				try {
-					await stack.client.session.delete(id);
+					await client.session.delete(id);
 				} catch {
 					// Best-effort cleanup
 				}

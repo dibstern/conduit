@@ -195,87 +195,6 @@ function createMockWsHandlerFull(): HandlerDeps["wsHandler"] {
 	};
 }
 
-function createMockClient(): HandlerDeps["client"] {
-	// Structured to match OpenCodeAPI's namespace shape.
-	// The cast is contained here so no test file needs it.
-	return {
-		session: {
-			list: vi.fn().mockResolvedValue([]),
-			get: vi.fn().mockResolvedValue({
-				id: "s1",
-				modelID: "gpt-4",
-				providerID: "openai",
-			}),
-			create: vi.fn().mockResolvedValue({ id: "session-new" }),
-			delete: vi.fn().mockResolvedValue(undefined),
-			update: vi.fn().mockResolvedValue(undefined),
-			statuses: vi.fn().mockResolvedValue({}),
-			messages: vi.fn().mockResolvedValue([]),
-			messagesPage: vi.fn().mockResolvedValue([]),
-			message: vi.fn().mockResolvedValue({ id: "msg-1", time: { created: 0 } }),
-			prompt: vi.fn().mockResolvedValue(undefined),
-			abort: vi.fn().mockResolvedValue(undefined),
-			fork: vi.fn().mockResolvedValue({ id: "ses_forked" }),
-			deleteMessage: vi.fn().mockResolvedValue(undefined),
-			summarize: vi.fn().mockResolvedValue(undefined),
-			children: vi.fn().mockResolvedValue([]),
-		},
-		permission: {
-			list: vi.fn().mockResolvedValue([]),
-			reply: vi.fn().mockResolvedValue(undefined),
-		},
-		question: {
-			list: vi.fn().mockResolvedValue([]),
-			reply: vi.fn().mockResolvedValue(undefined),
-			reject: vi.fn().mockResolvedValue(undefined),
-		},
-		config: {
-			get: vi.fn().mockResolvedValue({}),
-			update: vi.fn().mockResolvedValue({}),
-		},
-		provider: {
-			list: vi.fn().mockResolvedValue({
-				providers: [],
-				defaults: {},
-				connected: [],
-			}),
-		},
-		pty: {
-			list: vi.fn().mockResolvedValue([]),
-			create: vi
-				.fn()
-				.mockResolvedValue({ id: "pty-1", title: "Terminal", pid: 42 }),
-			delete: vi.fn().mockResolvedValue(undefined),
-			resize: vi.fn().mockResolvedValue(undefined),
-		},
-		file: {
-			list: vi.fn().mockResolvedValue([]),
-			read: vi
-				.fn()
-				.mockResolvedValue({ content: "file content", binary: false }),
-		},
-		find: {
-			files: vi.fn().mockResolvedValue([]),
-		},
-		app: {
-			agents: vi.fn().mockResolvedValue([]),
-			commands: vi.fn().mockResolvedValue([]),
-			skills: vi.fn().mockResolvedValue([]),
-			path: vi.fn().mockResolvedValue(""),
-			vcs: vi.fn().mockResolvedValue({}),
-			projects: vi.fn().mockResolvedValue([]),
-			currentProject: vi.fn().mockResolvedValue({}),
-		},
-		event: {
-			subscribe: vi
-				.fn()
-				.mockResolvedValue({ stream: (async function* () {})() }),
-		},
-		getBaseUrl: vi.fn().mockReturnValue("http://localhost:4096"),
-		getAuthHeaders: vi.fn().mockReturnValue({}),
-	} as unknown as HandlerDeps["client"];
-}
-
 function createMockSessionMgr(): HandlerDeps["sessionMgr"] {
 	return {
 		getDefaultSessionId: vi.fn().mockResolvedValue("session-1"),
@@ -356,7 +275,6 @@ export function createMockHandlerDeps(
 ): HandlerDeps {
 	return {
 		wsHandler: createMockWsHandlerFull(),
-		client: createMockClient(),
 		sessionMgr: createMockSessionMgr(),
 		ptyManager: createMockPtyManager(),
 		config: createMockConfig(),
@@ -419,7 +337,6 @@ export function createMockProjectRelay(
 			isConnected: vi.fn(),
 			on: vi.fn(),
 		}),
-		client: createMockClient(),
 		translator: partialFake<ProjectRelay["translator"]>({}),
 		orchestration: {
 			engine: {

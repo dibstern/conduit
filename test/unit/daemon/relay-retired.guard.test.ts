@@ -39,6 +39,9 @@ const openCodeHomeNames = new Set([
 	"openCodeInstanceId",
 	"relayOpenCodeInstances",
 	"makeStandaloneOpenCodeInstancesLive",
+	// The relay's default OpenCode client, whose requests named the project folder.
+	"OpenCodeAPILive",
+	"backgroundOpenCodeAPI",
 ]);
 
 /** Identifiers and called names in code, never in comments or strings. */

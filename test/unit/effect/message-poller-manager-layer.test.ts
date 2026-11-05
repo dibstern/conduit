@@ -2,9 +2,7 @@ import { setImmediate } from "node:timers/promises";
 import { Effect, Exit, Layer, Option, Scope } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../../../src/lib/domain/relay/Layers/message-poller-manager-layer.js";
-import { backgroundOpenCodeAPI } from "../../../src/lib/domain/relay/Layers/relay-core-layers.js";
 import {
 	ConfigTag,
 	LoggerTag,
@@ -16,10 +14,7 @@ import type { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
 import type { Message } from "../../../src/lib/instance/sdk-types.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import type { SessionRow } from "../../../src/lib/persistence/read-model-types.js";
-import {
-	MessagePoller,
-	MessagePollerManager,
-} from "../../../src/lib/relay/message-poller-impl.js";
+import { MessagePollerManager } from "../../../src/lib/relay/message-poller-impl.js";
 import {
 	makeMockConfig,
 	makeMockLogger,
@@ -50,6 +45,7 @@ async function buildLayerHarness(options?: {
 	readonly interval?: number;
 	readonly hasViewers?: (sessionId: string) => boolean;
 	readonly messages?: OpenCodeAPI["session"]["messages"];
+	readonly running?: () => boolean;
 }) {
 	const messages = vi.fn(
 		options?.messages ??
@@ -61,14 +57,18 @@ async function buildLayerHarness(options?: {
 	const workspaceGet = vi.fn((sessionId: string) =>
 		Effect.succeed(`/tmp/${sessionId}`),
 	);
-	const ifRunning = vi.fn(() => Effect.succeed(Option.some(api)));
+	const ifRunning = vi.fn(() =>
+		Effect.sync(() =>
+			(options?.running?.() ?? true) ? Option.some(api) : Option.none(),
+		),
+	);
+	const log = makeMockLogger();
 	const useIfRunning = vi.fn(() =>
 		Effect.die(
 			new Error("Background message reads must not acquire an instance hold"),
 		),
 	);
 	const dependencyLayer = Layer.mergeAll(
-		Layer.succeed(OpenCodeAPITag)(api),
 		Layer.succeed(OpenCodeInstancesTag)(
 			partialFake<OpenCodeInstancesTag["Service"]>({ ifRunning, useIfRunning }),
 		),
@@ -92,7 +92,7 @@ async function buildLayerHarness(options?: {
 				messagePollerInterval: options?.interval ?? 1_000,
 			}),
 		),
-		Layer.succeed(LoggerTag)(makeMockLogger()),
+		Layer.succeed(LoggerTag)(log),
 	);
 	const layer = makeMessagePollerManagerLive({
 		...(options?.hasViewers != null && { hasViewers: options.hasViewers }),
@@ -109,6 +109,7 @@ async function buildLayerHarness(options?: {
 	return {
 		api,
 		close,
+		log,
 		messages,
 		ifRunning,
 		runWithContext,
@@ -220,51 +221,26 @@ describe("MessagePollerManagerLive", () => {
 			toFake: ["Date", "setInterval", "clearInterval"],
 		});
 		let running = false;
-		const fetch = vi
-			.spyOn(globalThis, "fetch")
-			.mockImplementation(async () => Response.json([]));
-		const runningApi = partialFake<OpenCodeAPI>({
-			getBaseUrl: () => "http://managed.test",
-			getAuthHeaders: () => ({}),
-		});
-		const client = await Effect.runPromise(
-			backgroundOpenCodeAPI.pipe(
-				Effect.provide(
-					Layer.mergeAll(
-						Layer.succeed(ConfigTag)(makeMockConfig()),
-						Layer.succeed(OpenCodeInstancesTag)(
-							partialFake<OpenCodeInstancesTag["Service"]>({
-								ifRunning: () =>
-									Effect.sync(() =>
-										running ? Option.some(runningApi) : Option.none(),
-									),
-							}),
-						),
-					),
-				),
-			),
-		);
-		const log = makeMockLogger();
-		const poller = new MessagePoller({
-			client,
-			log,
+		const harness = await buildLayerHarness({
 			interval: 750,
 			hasViewers: () => true,
+			running: () => running,
 		});
 		try {
-			poller.startPolling("s1", []);
+			const manager = await harness.runWithContext(PollerManagerTag);
+			manager.startPolling("s1", []);
 			await vi.advanceTimersByTimeAsync(3_000);
-			// A non-starting client is expected to reject without making a request.
-			// Main logs that expected rejection on every fallback tick.
-			expect(fetch).not.toHaveBeenCalled();
-			expect(log.warn).not.toHaveBeenCalled();
+			// A stopped instance rejects the read before any request, and quietly.
+			expect(harness.ifRunning).toHaveBeenCalledWith("named-test", "/tmp/s1");
+			expect(harness.messages).not.toHaveBeenCalled();
+			expect(harness.log.warn).not.toHaveBeenCalled();
 			running = true;
 			await vi.advanceTimersByTimeAsync(750);
-			await poller.drain();
-			expect(log.warn).not.toHaveBeenCalled();
-			expect(fetch).toHaveBeenCalled();
+			await flushMicrotasks();
+			expect(harness.messages).toHaveBeenCalled();
+			expect(harness.log.warn).not.toHaveBeenCalled();
 		} finally {
-			await poller.drain();
+			await harness.close();
 		}
 	});
 

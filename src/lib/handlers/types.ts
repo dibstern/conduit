@@ -5,7 +5,6 @@ import type {
 	PollerManagerShape,
 	SessionManagerShape,
 } from "../domain/relay/Services/services.js";
-import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import type { PromptOptions } from "../instance/sdk-types.js";
 import type { Logger } from "../logger.js";
 import type { OrchestrationEngine } from "../provider/orchestration-engine.js";
@@ -53,7 +52,6 @@ export interface HandlerDeps {
 		getClientSession: (clientId: string) => string | undefined;
 		getClientsForSession: (sessionId: string) => string[];
 	};
-	client: OpenCodeAPI;
 	sessionMgr: SessionManagerShape;
 	ptyManager: PtyManager;
 	config: ProjectRelayConfig;

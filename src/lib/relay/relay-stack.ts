@@ -65,7 +65,6 @@ import {
 import * as Failure from "../effect/failure-classification.js";
 import { ENV } from "../env.js";
 import { formatErrorDetail } from "../errors.js";
-import type { OpenCodeAPI } from "../instance/opencode-api.js";
 import { createLogger, type Logger } from "../logger.js";
 import {
 	AttachmentMissing,
@@ -331,7 +330,6 @@ export interface ProjectRelay {
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
-	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
 	/** Orchestration layer: provider registry, instances, and engine. */
 	orchestration: OrchestrationLayer;
@@ -402,7 +400,6 @@ export interface RelayStack {
 	wsHandler: WebSocketHandlerShape;
 	rpcWsHandler: RpcWebSocketHandlerShape;
 	sseStream: SSEStreamPort;
-	client: OpenCodeAPI;
 	translator: ReturnType<typeof createTranslator>;
 	/** Initial project relay's orchestration view (provider instances/engine). */
 	orchestration: OrchestrationLayer;
@@ -502,7 +499,6 @@ export async function createProjectRelay(
 		initialDefaultVariant,
 		layers,
 	});
-	const api = startup.api;
 	wsHandler = startup.wsHandler;
 	// The relay lends its continuation to the daemon's one sweep until stop().
 	const continuationSweep = layers.relayManagedRuntime.runFork(
@@ -617,7 +613,6 @@ export async function createProjectRelay(
 		wsHandler,
 		rpcWsHandler,
 		sseStream,
-		client: api,
 		translator,
 		orchestration,
 		effectRuntime,
@@ -1010,7 +1005,6 @@ export async function createRelayStack(
 		wsHandler: relay.wsHandler,
 		rpcWsHandler: relay.rpcWsHandler,
 		sseStream: relay.sseStream,
-		client: relay.client,
 		translator: relay.translator,
 		orchestration: relay.orchestration,
 		initialSessionId: relay.initialSessionId,

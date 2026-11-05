@@ -17,6 +17,7 @@ import {
 	Ref,
 	Result,
 } from "effect";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../src/lib/contracts/provider-instance.js";
 import { loadDaemonConfigStartupResult } from "../../src/lib/daemon/config-persistence.js";
 import {
 	type SendRPC,
@@ -235,6 +236,7 @@ export async function createDaemonProject(
 		await mock.stop();
 		rmSync(root, { recursive: true, force: true });
 	};
+	const projectDir = options.projectDir ?? process.cwd();
 	try {
 		const { port, projectContext } = await daemon.runPromise(
 			Effect.gen(function* () {
@@ -242,10 +244,7 @@ export async function createDaemonProject(
 					{
 						slug,
 						title: slug,
-						folders: [
-							options.projectDir ?? process.cwd(),
-							...(options.extraFolders ?? []),
-						],
+						folders: [projectDir, ...(options.extraFolders ?? [])],
 					},
 					{ silent: true },
 				).pipe(
@@ -293,6 +292,15 @@ export async function createDaemonProject(
 			mock,
 			daemon,
 			run,
+			/** The managed OpenCode client for the project's folder. */
+			opencode: () =>
+				run(
+					Effect.scoped(
+						Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+							instances.use(MANAGED_OPENCODE_ACCOUNT_ID, projectDir),
+						),
+					),
+				),
 			/** The daemon's handle on the project relay (settle, archive, status). */
 			relay: () =>
 				daemon.runPromise(

@@ -452,29 +452,27 @@ export class ClientIdTag extends Context.Service<ClientIdTag, string>()(
 type _AssertCoverage = {
 	[K in keyof Required<HandlerDeps>]: K extends "wsHandler"
 		? WebSocketHandlerShape
-		: K extends "client"
-			? OpenCodeAPI
-			: K extends "sessionMgr"
-				? SessionManagerShape
-				: K extends "ptyManager"
-					? PtyManager
-					: K extends "config"
-						? ProjectRelayConfig
-						: K extends "log"
-							? Logger
-							: K extends "statusPoller"
-								? StatusPollerShape
-								: K extends "pollerManager"
-									? PollerManagerShape
-									: K extends "connectPtyUpstream"
-										? ConnectPtyUpstreamShape
-										: K extends "instanceMgmt"
-											? InstanceManagementDeps
-											: K extends "projectMgmt"
-												? ProjectManagementDeps
-												: K extends "orchestrationEngine"
-													? OrchestrationEngine
-													: never;
+		: K extends "sessionMgr"
+			? SessionManagerShape
+			: K extends "ptyManager"
+				? PtyManager
+				: K extends "config"
+					? ProjectRelayConfig
+					: K extends "log"
+						? Logger
+						: K extends "statusPoller"
+							? StatusPollerShape
+							: K extends "pollerManager"
+								? PollerManagerShape
+								: K extends "connectPtyUpstream"
+									? ConnectPtyUpstreamShape
+									: K extends "instanceMgmt"
+										? InstanceManagementDeps
+										: K extends "projectMgmt"
+											? ProjectManagementDeps
+											: K extends "orchestrationEngine"
+												? OrchestrationEngine
+												: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.
