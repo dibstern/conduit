@@ -379,6 +379,17 @@ export type DaemonRpcHandlers = {
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeShell">>,
 	) => Stream.Stream<ShellEnvelope, WsRpcError>;
 	readonly SubscribeServerStatus: () => Stream.Stream<ServerStatus, WsRpcError>;
+	/** Every project's asks, for every tab (82tn.13). */
+	readonly SubscribeApprovals: (
+		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeApprovals">>,
+	) => Stream.Stream<
+		Rpc.SuccessChunk<Rpc.ExtractTag<WsRpcs, "SubscribeApprovals">>,
+		WsRpcError
+	>;
+	readonly SubscribeAlerts: () => Stream.Stream<
+		Rpc.SuccessChunk<Rpc.ExtractTag<WsRpcs, "SubscribeAlerts">>,
+		WsRpcError
+	>;
 	readonly SubscribeInputDraft?: (
 		request: Rpc.Payload<Rpc.ExtractTag<WsRpcs, "SubscribeInputDraft">>,
 	) => Stream.Stream<InputDraftEnvelope, WsRpcError>;
@@ -649,7 +660,9 @@ export const makeRoutedWsRpcServerLayer = <
 									() => handler(request),
 									name === "SubscribeShell" ||
 										name === "SubscribeInputDraft" ||
-										name === "SubscribeDrafts"
+										name === "SubscribeDrafts" ||
+										name === "SubscribeApprovals" ||
+										name === "SubscribeAlerts"
 										? defaultProjectSlug
 										: undefined,
 								);

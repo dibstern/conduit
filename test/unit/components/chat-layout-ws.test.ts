@@ -169,8 +169,9 @@ vi.mock("../../../src/lib/frontend/stores/saved-transcripts.js", () => ({
 vi.mock("../../../src/lib/frontend/stores/project-settings.js", () => ({
 	viewProjectSettings: vi.fn(),
 }));
+const stopFeeds = vi.hoisted(() => ({ approvals: vi.fn(), alerts: vi.fn() }));
 vi.mock("../../../src/lib/frontend/stores/alerts.js", () => ({
-	viewAlerts: vi.fn(),
+	followAlerts: vi.fn(() => stopFeeds.alerts),
 }));
 vi.mock("../../../src/lib/frontend/stores/input-draft.js", () => ({
 	viewInputDraft: vi.fn(),
@@ -199,8 +200,7 @@ vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/approvals.js", () => ({
-	attachApprovals: vi.fn(),
-	detachApprovals: vi.fn(),
+	followApprovals: vi.fn(() => stopFeeds.approvals),
 }));
 
 vi.mock("../../../src/lib/frontend/stores/permissions.svelte.js", () => ({
@@ -328,6 +328,8 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 
 import ChatLayout from "../../../src/lib/frontend/components/layout/ChatLayout.svelte";
 import { taskDrawer } from "../../../src/lib/frontend/components/session/background-tasks.svelte.js";
+import { followAlerts } from "../../../src/lib/frontend/stores/alerts.js";
+import { followApprovals } from "../../../src/lib/frontend/stores/approvals.js";
 import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import {
 	attachedProjectState,
@@ -462,6 +464,20 @@ describe("ChatLayout RPC lifecycle", () => {
 		attach("test-project");
 		expect(clearMessages).not.toHaveBeenCalled();
 		expect(attachSessionList).toHaveBeenCalledTimes(1);
+	});
+
+	it("follows every project's asks and alerts once, whatever project it shows", () => {
+		const { unmount } = render(ChatLayout);
+		attach("project-a");
+		// The attached project moves; the per-project feeds follow it, these do not.
+		attachedProjectState.slug = "project-b";
+		flushSync();
+		expect(followApprovals).toHaveBeenCalledTimes(1);
+		expect(followAlerts).toHaveBeenCalledTimes(1);
+		expect(stopFeeds.approvals).not.toHaveBeenCalled();
+		unmount();
+		expect(stopFeeds.approvals).toHaveBeenCalledTimes(1);
+		expect(stopFeeds.alerts).toHaveBeenCalledTimes(1);
 	});
 
 	it("detaches the shell feed on unmount", () => {

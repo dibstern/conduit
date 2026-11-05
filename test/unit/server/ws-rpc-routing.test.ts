@@ -133,7 +133,7 @@ describe("routed RPC server", () => {
 	);
 
 	it.effect(
-		"serves a named project's approvals, a subagent's included, and no other project's",
+		"a standalone relay serves its own project's approvals, a subagent's included, and no other project's",
 		() =>
 			Effect.gen(function* () {
 				const contexts = new Map<string, Context.Context<unknown>>();
@@ -205,19 +205,23 @@ describe("routed RPC server", () => {
 				}
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(
-						makeRoutedWsRpcServerLayer((slug) => {
-							const context = contexts.get(slug);
-							return context
-								? Effect.succeed(context)
-								: Effect.fail(
-										new WsRpcError({ message: `Unknown project ${slug}` }),
-									);
-						}).pipe(Layer.provide(sessionDirectory)),
+						makeRoutedWsRpcServerLayer(
+							(slug) => {
+								const context = contexts.get(slug);
+								return context
+									? Effect.succeed(context)
+									: Effect.fail(
+											new WsRpcError({ message: `Unknown project ${slug}` }),
+										);
+							},
+							undefined,
+							"project-b",
+						).pipe(Layer.provide(sessionDirectory)),
 						{ local: true },
 					),
 				);
 				const envelopes = yield* client
-					.SubscribeApprovals({ projectSlug: "project-b" })
+					.SubscribeApprovals({})
 					.pipe(Stream.take(2), Stream.runCollect);
 				const [snapshot, synchronized] = Array.from(envelopes);
 				expect(synchronized).toEqual({ _tag: "synchronized" });

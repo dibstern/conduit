@@ -846,7 +846,7 @@ export class TestWsClient {
 		const projectSlug = this.projectSlug;
 		return this.follow(
 			"approvals",
-			(client) => client.SubscribeApprovals({ projectSlug }),
+			(client) => client.SubscribeApprovals({}),
 			{ projectSlug },
 			(envelope) => {
 				const items =
@@ -868,11 +868,9 @@ export class TestWsClient {
 	 * Each envelope lands in `received` as `{ type: "alerts", ...envelope }`.
 	 */
 	subscribeAlerts(projectSlug = this.projectSlug): Promise<void> {
-		return this.follow(
-			"alerts",
-			(client) => client.SubscribeAlerts({ projectSlug }),
-			{ projectSlug },
-		);
+		return this.follow("alerts", (client) => client.SubscribeAlerts({}), {
+			projectSlug,
+		});
 	}
 
 	/**

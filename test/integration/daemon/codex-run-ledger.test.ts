@@ -825,19 +825,17 @@ describe("Codex on the Run Ledger", () => {
 		}[] = [];
 		let synchronized = false;
 		const alertFiber = Effect.runFork(
-			Stream.runForEach(
-				watcher.rpc.SubscribeAlerts({ projectSlug: "process-test" }),
-				(envelope) =>
-					Effect.sync(() => {
-						if (envelope._tag === "synchronized") synchronized = true;
-						if (envelope._tag !== "alert") return;
-						alerts.push({
-							kind: envelope.kind,
-							sessionId: envelope.sessionId,
-							// How many Runs the store had ended when this alert arrived.
-							endsBefore: read(fixture, sessionId).ends.length,
-						});
-					}),
+			Stream.runForEach(watcher.rpc.SubscribeAlerts({}), (envelope) =>
+				Effect.sync(() => {
+					if (envelope._tag === "synchronized") synchronized = true;
+					if (envelope._tag !== "alert") return;
+					alerts.push({
+						kind: envelope.kind,
+						sessionId: envelope.sessionId,
+						// How many Runs the store had ended when this alert arrived.
+						endsBefore: read(fixture, sessionId).ends.length,
+					});
+				}),
 			),
 		);
 		// The feed is live-only, so it must be open before the wake can end.

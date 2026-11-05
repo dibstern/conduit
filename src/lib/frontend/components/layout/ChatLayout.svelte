@@ -50,13 +50,13 @@
 	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
 	import { clearSessionSearch, findSession, resetSessionFamily, sessionState } from "../../stores/session.svelte.js";
 	import { attachSessionList, detachSessionList, drawSavedShell, sessionList } from "../../stores/session-list.svelte.js";
-	import { attachApprovals, detachApprovals } from "../../stores/approvals.js";
+	import { followApprovals } from "../../stores/approvals.js";
 	import { selection, watchSelection } from "../../stores/selection.svelte.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
 	import { clearDiscoveryState, watchCatalogs } from "../../stores/discovery.svelte.js";
 	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
-	import { viewAlerts } from "../../stores/alerts.js";
+	import { followAlerts } from "../../stores/alerts.js";
 	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { isBarCollapsed, sessionViewState, watchKeyboard, watchViewportPose } from "../../stores/session-view.svelte.js";
@@ -348,15 +348,18 @@
 			previousSlug = slug;
 			// Keep the daemon shell while switching project-owned subscriptions.
 			attachSessionList(slug);
-			attachApprovals(slug);
 		};
 		const unsubscribe = onProjectAttached(hydrateProject);
 		if (previousSlug !== null) hydrateProject(previousSlug);
+		// Asks and alerts are every project's, so one feed each serves the page.
+		const stopApprovals = followApprovals();
+		const stopAlerts = followAlerts();
 		initSWMessageListener();
 		return () => {
 			attachGeneration++;
 			detachSessionList();
-			detachApprovals();
+			stopApprovals();
+			stopAlerts();
 			unsubscribe();
 		};
 	});
@@ -379,12 +382,10 @@
 		untrack(() => {
 			viewPtys(project);
 			viewProjectSettings(project);
-			viewAlerts(project);
 		});
 		return () => {
 			viewPtys(null);
 			viewProjectSettings(null);
-			viewAlerts(null);
 		};
 	});
 	$effect(() => {

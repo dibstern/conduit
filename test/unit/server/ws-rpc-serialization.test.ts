@@ -294,7 +294,7 @@ const group = RpcGroup.make(
 );
 const handlers = group.toLayer({
 	SubscribeApprovals: (payload) => {
-		expect(payload).toEqual({ projectSlug: "project", resumeFromSequence: 39 });
+		expect(payload).toEqual({ resumeFromSequence: 39 });
 		return Rpc.fork(
 			Stream.fromIterable(approvalEnvelopes).pipe(Stream.rechunk(1)),
 		);
@@ -474,10 +474,7 @@ it("SubscribeApprovals preserves both approval kinds and every envelope variant 
 			Effect.gen(function* () {
 				const { client, serverFrames } = yield* connect;
 				const result = yield* Stream.runCollect(
-					client.SubscribeApprovals({
-						projectSlug: "project",
-						resumeFromSequence: 39,
-					}),
+					client.SubscribeApprovals({ resumeFromSequence: 39 }),
 				);
 				expect(Array.from(result)).toEqual(approvalEnvelopes);
 				for (const envelope of approvalEnvelopes) {

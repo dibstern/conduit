@@ -1,5 +1,6 @@
-// The approvals subscription (ni8.9): the project's pending permissions and
-// questions, folded into the permissions store. The ding for a new ask comes
+// The approvals subscription (ni8.9): every project's pending permissions and
+// questions, folded into the permissions store. A tab follows them for its
+// lifetime, whatever project it shows (82tn.13). The ding for a new ask comes
 // from the daemon's alert feed, which covers every project (82tn.12).
 
 import { Effect, Fiber, Stream } from "effect";
@@ -11,46 +12,26 @@ import {
 	clearAllPermissions,
 } from "./permissions.svelte.js";
 
-let attachGeneration = 0;
-let approvalsFiber: Fiber.Fiber<void, unknown> | null = null;
-let attachedProject: string | null = null;
-
-async function stopApprovals(): Promise<void> {
-	const fiber = approvalsFiber;
-	approvalsFiber = null;
-	if (fiber) await runTransportEffect(Fiber.interrupt(fiber));
-}
-
-export function attachApprovals(project: string): void {
-	const generation = ++attachGeneration;
-	// Another project's sequences mean nothing here.
-	if (attachedProject !== project) clearAllPermissions();
-	attachedProject = project;
-	void stopApprovals().then(async () => {
-		const runtime = await getRuntime();
-		if (generation !== attachGeneration) return;
-		const fiber = runtime.runFork(
+/** Follow every project's asks until the returned stop is called. */
+export function followApprovals(): () => void {
+	let live = true;
+	let fiber: Fiber.Fiber<void, unknown> | null = null;
+	void getRuntime().then((runtime) => {
+		if (!live) return;
+		fiber = runtime.runFork(
 			Effect.flatMap(WsRpcClients, (clients) =>
-				Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+				Effect.flatMap(clients.forProject(""), ({ subscriptions }) =>
 					Stream.runForEach(
 						supervise(subscriptions.approvals(), () => {}),
-						(change) =>
-							Effect.sync(() => {
-								if (generation === attachGeneration)
-									applyApprovalEnvelope(change);
-							}),
+						(change) => Effect.sync(() => applyApprovalEnvelope(change)),
 					),
 				),
 			),
 		);
-		if (generation === attachGeneration) approvalsFiber = fiber;
-		else runtime.runFork(Fiber.interrupt(fiber));
 	});
-}
-
-export function detachApprovals(): void {
-	attachGeneration++;
-	void stopApprovals();
-	attachedProject = null;
-	clearAllPermissions();
+	return () => {
+		live = false;
+		if (fiber) void runTransportEffect(Fiber.interrupt(fiber));
+		clearAllPermissions();
+	};
 }

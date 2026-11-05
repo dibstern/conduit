@@ -316,7 +316,6 @@ describe("RPC event audiences", () => {
 			for (const method of [
 				"SubscribeProjectSettings",
 				"SubscribePtys",
-				"SubscribeAlerts",
 			] as const) {
 				let opened = false;
 				const result = yield* deliverEventStream(
@@ -744,7 +743,7 @@ describe("RPC event audiences", () => {
 			expect(
 				yield* deliverEventStream(
 					"SubscribeApprovals",
-					{ projectSlug: "project-a" },
+					{},
 					Stream.make({ _tag: "permission", sessionId: "unknown" }),
 				).pipe(Stream.runCollect),
 			).toEqual([{ _tag: "permission", sessionId: "unknown" }]);

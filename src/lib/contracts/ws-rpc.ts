@@ -3928,14 +3928,13 @@ export const SubscribePtys = Rpc.make("SubscribePtys", {
 });
 
 /**
- * Every pending permission request and question in the project (ni8.9). The
- * scope is the project, not a session: a subagent's approval renders inline in
- * its parent, and another session's in the attention banner. Removal ids are
- * the requestId or toolId the item carries.
+ * Every pending permission request and question the daemon holds (ni8.9,
+ * 82tn.13). No project: a tab shows asks from every project, a subagent's
+ * approval inline in its parent and another session's in the attention banner.
+ * Removal ids are the requestId or toolId the item carries.
  */
 export const SubscribeApprovals = Rpc.make("SubscribeApprovals", {
 	payload: {
-		projectSlug: NonEmptyString,
 		resumeFromSequence: Schema.optional(Schema.Number),
 	},
 	success: EnvelopeSchema(ApprovalSchema),
@@ -4102,11 +4101,11 @@ export type AlertsEnvelope = typeof AlertsEnvelopeSchema.Type;
 
 /**
  * Live-only: opens with `synchronized` and has no snapshot, so a reconnect or
- * reload never re-fires a ding. Cross-tab dedupe rides the alertId. The
- * project checks the producer; the feed carries every project's alerts.
+ * reload never re-fires a ding. Cross-tab dedupe rides the alertId. The feed
+ * is the daemon's and carries every project's alerts, so it takes no project.
  */
 export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
-	payload: { projectSlug: NonEmptyString },
+	payload: {},
 	success: AlertsEnvelopeSchema,
 	error: WsRpcError,
 	stream: true,

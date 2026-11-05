@@ -138,14 +138,12 @@ export const subscriptionAudiences = {
 			),
 		),
 	SubscribePtys: projectAudience,
-	SubscribeApprovals: (request, producer) =>
-		projectAudience(request, producer).pipe(Effect.andThen(globalAudience)),
+	// Asks and alerts are the daemon's: every project's reach every tab (82tn.13).
+	SubscribeApprovals: globalAudience,
 	SubscribeProjectSettings: projectAudience,
 	SubscribeDraftModels: (request, producer) =>
 		projectAudience(request, producer).pipe(Effect.andThen(globalAudience)),
-	// The feed is the daemon's: every project's completions reach every tab.
-	SubscribeAlerts: (request, producer) =>
-		projectAudience(request, producer).pipe(Effect.andThen(globalAudience)),
+	SubscribeAlerts: globalAudience,
 	SubscribeInputDraft: (request, producer) =>
 		"session" in request.key
 			? sessionAudience(request.key.session, producer)
