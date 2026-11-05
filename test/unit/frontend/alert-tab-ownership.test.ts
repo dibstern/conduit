@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-const { emit, settings } = vi.hoisted(() => ({
+const { emit, settings, slug } = vi.hoisted(() => ({
 	emit: vi.fn(),
 	settings: { sound: true, browser: true, push: true },
+	slug: { current: "project" },
 }));
 vi.mock("../../../src/lib/frontend/utils/sound.js", () => ({
 	readyDoneSound: async () => {},
@@ -12,7 +13,7 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 	getNotifSettings: () => settings,
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "project",
+	getCurrentSlug: () => slug.current,
 	navigate: vi.fn(),
 }));
 const question = {
@@ -27,6 +28,7 @@ let lookup: Promise<void>;
 beforeEach(() => {
 	vi.resetModules();
 	emit.mockClear();
+	slug.current = "project";
 	subscribed = false;
 	lookup = Promise.resolve();
 	const receipts = new Map<string, string>();
@@ -101,6 +103,30 @@ it("suppresses the same no-push alert in a second tab and after reload", async (
 	await reloaded.triggerNotifications(question);
 	expect(emit).toHaveBeenCalledOnce();
 	await reloaded.triggerNotifications({ ...question, toolId: "q2" });
+	expect(emit).toHaveBeenCalledTimes(2);
+});
+
+// Every project's alerts reach every tab (82tn.12): tabs attached to different
+// projects must still share one receipt per alert.
+it("delivers one alert once across tabs attached to different projects", async () => {
+	const done = {
+		type: "done" as const,
+		sessionId: "s1",
+		code: 0,
+		alertId: "turn-1:done",
+	};
+	const onA = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await onA.triggerNotifications(done);
+	await onA.triggerNotifications(question);
+	vi.resetModules();
+	slug.current = "other-project";
+	const onB = await import(
+		"../../../src/lib/frontend/stores/ws-notifications.js"
+	);
+	await onB.triggerNotifications(done);
+	await onB.triggerNotifications(question);
 	expect(emit).toHaveBeenCalledTimes(2);
 });
 
@@ -182,12 +208,12 @@ it("ignores anonymous idle hints without claiming completion receipts", async ()
 	);
 	const idle = { type: "done" as const, sessionId: "s1", code: 0 };
 	await page.triggerNotifications(idle);
-	expect(localStorage.getItem("conduit-alert:project:s1:done")).toBeNull();
+	expect(localStorage.getItem("conduit-alert:s1:done")).toBeNull();
 	expect(emit).not.toHaveBeenCalled();
 	await page.triggerNotifications({ ...idle, alertId: "turn-1:done" });
 	await page.triggerNotifications(idle);
 	await page.triggerNotifications({ ...idle, alertId: "turn-1:done" });
 	await page.triggerNotifications({ ...idle, alertId: "turn-2:done" });
 	expect(emit).toHaveBeenCalledTimes(2);
-	expect(localStorage.getItem("conduit-alert:project:s1:done")).toBeNull();
+	expect(localStorage.getItem("conduit-alert:s1:done")).toBeNull();
 });
