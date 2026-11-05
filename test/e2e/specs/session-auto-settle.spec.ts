@@ -116,8 +116,11 @@ test("the auto-settle outlook reads the same with or without a viewer", async ({
 	try {
 		const read = () =>
 			Effect.runPromise(client.GetSessionAutoSettleOutlook({ sessionId }));
-		const sweep = (now: number) =>
-			Effect.runPromise(harness.stack.settleIdleSessions(IDLE_WINDOW_MS, now));
+		const sweep = async (now: number) => {
+			const { settleIdleSessions } = await harness.project.relay();
+			if (!settleIdleSessions) throw new Error("The project cannot settle");
+			return Effect.runPromise(settleIdleSessions(IDLE_WINDOW_MS, now));
+		};
 
 		// An unread reply holds settlement back; reading it lets the clock run.
 		await Effect.runPromise(client.MarkSessionRead({ sessionId }));

@@ -191,6 +191,7 @@ import {
 import { makeProviderAdaptersLive } from "./provider-adapters-layer.js";
 import {
 	HttpServerRefTag,
+	type PollerTimings,
 	RelayFactoryLive,
 	RelayFactoryTag,
 } from "./relay-factory-layer.js";
@@ -711,6 +712,8 @@ export interface DaemonLiveOptions {
 	openCodeInstances?: OpenCodeInstances;
 	/** Test seam: stands in for project shell environment capture and readiness. */
 	shellEnv?: ProjectShellEnvResolver;
+	/** Test seam: shortened poll intervals and SSE grace/staleness, so gating runs in test time. */
+	pollerTimings?: PollerTimings;
 }
 
 /**
@@ -984,7 +987,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 				makeRunLedgerSchedulerLive(served),
 			).pipe(
-				Layer.merge(makeStatusPollerCoreLive(served)),
+				Layer.merge(
+					makeStatusPollerCoreLive(
+						served,
+						options.pollerTimings?.statusPollerInterval,
+					),
+				),
 				Layer.merge(
 					Layer.effectDiscard(
 						Effect.flatMap(EventRetentionSchedulerTag, (s) => s.kick),
@@ -1094,9 +1102,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),
 	);
-	const registries = RelayFactoryLive(configDir, options.claudeSdk).pipe(
-		Layer.provideMerge(withOrchestration),
-	);
+	const registries = RelayFactoryLive(
+		configDir,
+		options.claudeSdk,
+		options.pollerTimings,
+	).pipe(Layer.provideMerge(withOrchestration));
 
 	const withRelayCache = makeRelayCacheLayer().pipe(
 		Layer.provideMerge(registries),

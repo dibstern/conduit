@@ -154,13 +154,14 @@ export const makeStatusPollerCore = (options: {
 
 export const makeStatusPollerCoreLive = (
 	projects: Effect.Effect<readonly string[]>,
+	intervalMs = DEFAULT_RECONCILIATION_INTERVAL_MS,
 ) =>
 	Layer.effect(
 		StatusPollerCoreTag,
 		Effect.flatMap(makeUnboundCommitAndSignal, (commit) =>
 			makeStatusPollerCore({
 				projects,
-				interval: Duration.millis(DEFAULT_RECONCILIATION_INTERVAL_MS),
+				interval: Duration.millis(intervalMs),
 				commit,
 			}),
 		),

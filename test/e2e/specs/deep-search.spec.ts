@@ -1,15 +1,9 @@
 import type { Page } from "@playwright/test";
 import { Effect, Exit, Scope } from "effect";
-import type { OpenCodeInstance } from "../../../src/lib/contracts/ws-rpc.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { serveRpc } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
-import {
-	answerSubscribeInstances,
-	expect,
-	gotoRelay,
-	test,
-} from "../helpers/replay-fixture.js";
+import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
 test.use({
@@ -26,13 +20,9 @@ type SearchRow = {
 	settledAt?: number;
 };
 
-// The replay harness hosts one relay without the daemon's cross-project
-// reader. Intercept only that RPC; all other calls still reach the real relay,
-// except the relay's accounts, which this route answers as the fixture's does.
-async function mockDaemonSearch(
-	page: Page,
-	instances: readonly OpenCodeInstance[],
-) {
+// The specs pick the cross-project reader's rows. Intercept only that RPC;
+// all other calls still reach the real daemon.
+async function mockDaemonSearch(page: Page) {
 	const rows: SearchRow[] = [];
 	const requests: Record<string, unknown>[] = [];
 	const stubs = {
@@ -69,7 +59,6 @@ async function mockDaemonSearch(
 	});
 	await page.routeWebSocket(/\/rpc$/, (ws) => {
 		const server = ws.connectToServer();
-		const answerInstances = answerSubscribeInstances(ws, instances);
 		const ready = Effect.runPromise(
 			serveRpc(stubs, (json) => Effect.sync(() => ws.send(json))).pipe(
 				Effect.provideService(Scope.Scope, scope),
@@ -87,7 +76,6 @@ async function mockDaemonSearch(
 				server.send(message);
 				return;
 			}
-			if (answerInstances(message)) return;
 			if (
 				!isRecord(frame) ||
 				frame["_tag"] !== "Request" ||
@@ -106,9 +94,8 @@ async function mockDaemonSearch(
 test("searches recent and settled sessions, then opens one without unsettling it", async ({
 	page,
 	relayUrl,
-	relayInstances,
 }) => {
-	const daemonSearch = await mockDaemonSearch(page, relayInstances);
+	const daemonSearch = await mockDaemonSearch(page);
 	await gotoRelay(page, relayUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
@@ -182,9 +169,8 @@ test("searches recent and settled sessions, then opens one without unsettling it
 test("no match, Escape, and repeated shortcut leave sidebar state intact", async ({
 	page,
 	relayUrl,
-	relayInstances,
 }) => {
-	const daemonSearch = await mockDaemonSearch(page, relayInstances);
+	const daemonSearch = await mockDaemonSearch(page);
 	await gotoRelay(page, relayUrl);
 	const rows = page.locator("#session-list .session-item");
 	await expect(rows.first()).toBeVisible();
@@ -230,12 +216,8 @@ test("no match, Escape, and repeated shortcut leave sidebar state intact", async
 		.toEqual(before);
 });
 
-test("palette fits a phone viewport", async ({
-	page,
-	relayUrl,
-	relayInstances,
-}) => {
-	await mockDaemonSearch(page, relayInstances);
+test("palette fits a phone viewport", async ({ page, relayUrl }) => {
+	await mockDaemonSearch(page);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await gotoRelay(page, relayUrl);
 	await page.keyboard.press("ControlOrMeta+k");
@@ -251,9 +233,8 @@ test("palette fits a phone viewport", async ({
 test("query results page by cursor without loading the whole match set", async ({
 	page,
 	relayUrl,
-	relayInstances,
 }) => {
-	const daemonSearch = await mockDaemonSearch(page, relayInstances);
+	const daemonSearch = await mockDaemonSearch(page);
 	for (let index = 0; index < 25; index++) {
 		daemonSearch.rows.push({
 			id: `batch-${index}`,

@@ -15,7 +15,7 @@ export async function seedPagedRecapTurn(harness: ReplayHarness) {
 	// Seed only the isolated replay store. The real detail subscription applies
 	// its normal 50-message page. A newer prompt anchors that page, leaving the
 	// preceding long turn's prompt above the window.
-	await harness.stack.effectRuntime.runtime.runPromise(
+	await harness.project.run(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			yield* sql`UPDATE sessions SET history_complete = 1 WHERE id = ${sessionId}`;

@@ -225,9 +225,16 @@ describe("Folder Timeline eviction through the built daemon", () => {
 		);
 		evidence["storeBytes"] = sizes;
 		const total = names.reduce((sum, name) => sum + (sizes[name] ?? 0), 0);
+		// Disk use also counts the whole-folder checkpoints, which the newest
+		// session's checkpoint mostly shares with the others.
+		const kept =
+			((await sendRpcRequest(socket, { _tag: "GetStatus" })).snapshotBytes ??
+				0) - bytesOf(sessionsDir);
+		evidence["keptBefore"] = kept;
+		expect(kept).toBeGreaterThan(sizes["newest"] ?? 0);
 		// 90% of this budget fits one store, not two: the two oldest go.
 		const budget = Math.floor(
-			((sizes["newest"] ?? 0) + (sizes["middle"] ?? 0) * 0.5) / 0.9,
+			((sizes["newest"] ?? 0) + (sizes["middle"] ?? 0) * 0.5 + kept) / 0.9,
 		);
 		evidence["budget"] = budget;
 		evidence["totalBefore"] = total;
@@ -257,7 +264,8 @@ describe("Folder Timeline eviction through the built daemon", () => {
 
 		const status = await sendRpcRequest(socket, { _tag: "GetStatus" });
 		evidence["statusSnapshotBytes"] = status.snapshotBytes;
-		expect(status.snapshotBytes).toBe(remaining);
+		expect(status.snapshotBytes).toBeGreaterThan(remaining);
+		expect(status.snapshotBytes).toBeLessThanOrEqual(budget * 0.9);
 
 		// The pruned turn keeps its files and counts, marked Pruned.
 		const after = await list(settled.oldest, pruned);

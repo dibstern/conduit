@@ -9,6 +9,26 @@ import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { ChatPage } from "../page-objects/chat.page.js";
 
+/** Waits until the store holds `count` finished turns. The stop button alone
+ *  can read hidden before a just-sent turn starts. */
+async function turnsCompleted(dbPath: string, count: number): Promise<void> {
+	await expect
+		.poll(() => {
+			const db = new DatabaseSync(dbPath, { readOnly: true });
+			try {
+				const row = db
+					.prepare(
+						"SELECT COUNT(*) AS n FROM events WHERE type = 'turn.completed'",
+					)
+					.get();
+				return Number(row?.["n"]);
+			} finally {
+				db.close();
+			}
+		})
+		.toBe(count);
+}
+
 test.describe("Claude session model across a relay restart", () => {
 	test.use({
 		claudeReplay: {
@@ -26,6 +46,7 @@ test.describe("Claude session model across a relay restart", () => {
 		const trigger = page.getByTestId("model-picker-trigger");
 		await app.goto(relayUrl);
 		await app.sendMessage("One");
+		await turnsCompleted(harness.eventsDbPath, 1);
 		await chat.waitForStreamingComplete();
 		await expect(trigger).toHaveAttribute("aria-label", /Fable 5/);
 
@@ -46,6 +67,7 @@ test.describe("Claude session model across a relay restart", () => {
 
 		// The next turn must go to the same harness and model, not the new default.
 		await app.sendMessage("Two");
+		await turnsCompleted(harness.eventsDbPath, 2);
 		await chat.waitForStreamingComplete();
 		const sessionId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 		const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
@@ -99,6 +121,7 @@ test.describe("Claude session effort and context window across a relay restart",
 		const effort = page.getByTestId("variant-badge");
 		await app.goto(relayUrl);
 		await app.sendMessage("One");
+		await turnsCompleted(harness.eventsDbPath, 1);
 		await chat.waitForStreamingComplete();
 
 		// Option-click opens the picker root, where context sits beside effort.
@@ -109,6 +132,7 @@ test.describe("Claude session effort and context window across a relay restart",
 		await page.keyboard.press("Escape");
 		await expect(trigger).toHaveAttribute("data-shown-context-window", "200k");
 		await app.sendMessage("Two");
+		await turnsCompleted(harness.eventsDbPath, 2);
 		await chat.waitForStreamingComplete();
 
 		// Clear every saved default, so only the session's own history remains.
@@ -130,6 +154,7 @@ test.describe("Claude session effort and context window across a relay restart",
 
 		// The next turn must carry both choices, not the model defaults.
 		await app.sendMessage("Three");
+		await turnsCompleted(harness.eventsDbPath, 3);
 		await chat.waitForStreamingComplete();
 		const sessionId = new URL(page.url()).pathname.split("/").at(-1) ?? "";
 		const db = new DatabaseSync(harness.eventsDbPath, { readOnly: true });
@@ -165,6 +190,7 @@ test.describe("Claude session model with a renamed catalog id", () => {
 		const trigger = page.getByTestId("model-picker-trigger");
 		await app.goto(relayUrl);
 		await app.sendMessage("One");
+		await turnsCompleted(harness.eventsDbPath, 1);
 		await new ChatPage(page).waitForStreamingComplete();
 		await expect(page.getByTestId("variant-badge")).toBeVisible();
 
@@ -194,6 +220,7 @@ test.describe("Claude session model with a renamed catalog id", () => {
 		const app = new AppPage(page);
 		await app.goto(relayUrl);
 		await app.sendMessage("One");
+		await turnsCompleted(harness.eventsDbPath, 1);
 		await new ChatPage(page).waitForStreamingComplete();
 		await expect(page.getByTestId("variant-badge")).toBeVisible();
 

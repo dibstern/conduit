@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
 	chmodSync,
 	existsSync,
@@ -33,7 +34,10 @@ import { SessionGit } from "../../../src/lib/domain/daemon/Services/session-git.
 // user edited after the plan is overwritten (7), or a multi-folder restore
 // writes one folder and refuses the other (20); a failed journal leaves the
 // files restored (3); a gone folder is recreated (12); a crash at any apply
-// step leaves the folder half restored (1, 2, 3); a run starts mid-apply (5).
+// step leaves the folder half restored (1, 2, 3); a run starts mid-apply (5);
+// the bytes only a session's checkpoints hold are missing from its size or
+// the disk use, so eviction never sees them, or stay counted once it is
+// evicted (23).
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -290,6 +294,43 @@ const restoreToStart = (
 		});
 		return folders;
 	});
+
+it("counts the bytes only a session's checkpoints hold in its size and the disk use, until it is evicted", async () => {
+	const repo = repository("repo", { "a.txt": "one\n" });
+	const size = 300_000;
+	const result = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			// Untracked and unchanged by the run: only s1's start checkpoint holds it.
+			writeFileSync(join(repo, "only-s1.bin"), randomBytes(size));
+			yield* turn("s1", "s1-r", [repo], () =>
+				writeFileSync(join(repo, "a.txt"), "s1\n"),
+			);
+			rmSync(join(repo, "only-s1.bin"));
+			yield* turn("s2", "s2-r", [repo], () =>
+				writeFileSync(join(repo, "a.txt"), "s2\n"),
+			);
+			const before = {
+				s1: yield* timeline.storeBytes("s1"),
+				s2: yield* timeline.storeBytes("s2"),
+				total: yield* timeline.diskUse,
+			};
+			yield* timeline.evict("s1", Effect.succeed(true));
+			return {
+				before,
+				after: {
+					s1: yield* timeline.storeBytes("s1"),
+					total: yield* timeline.diskUse,
+				},
+			};
+		}),
+	);
+	expect(result.before.s1).toBeGreaterThan(size);
+	expect(result.before.s2).toBeLessThan(size);
+	expect(result.before.total).toBeGreaterThan(size);
+	expect(result.after.s1).toBe(0);
+	expect(result.before.total - result.after.total).toBeGreaterThan(size);
+});
 
 it("restores a folder to a checkpoint and back byte for byte, never writing the user's index, HEAD or refs", async () => {
 	const repo = reshaped("repo");

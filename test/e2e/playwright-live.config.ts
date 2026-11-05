@@ -1,8 +1,11 @@
 // Runs the live smoke test that spawns an ephemeral OpenCode instance.
 // Much longer timeouts since we're waiting for real API responses.
-// NO webServer block — the test manages its own relay via createE2EHarness.
+// NO webServer block — the test manages its own daemon via createE2EHarness.
 
 import { defineConfig } from "@playwright/test";
+
+// The daemon adds a signed-in host Codex as an account; keep it out of live runs.
+process.env["CONDUIT_CODEX_BINARY"] ??= "/nonexistent/conduit-e2e/codex";
 
 export default defineConfig({
 	testDir: "./specs",

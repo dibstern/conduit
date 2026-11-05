@@ -37,8 +37,6 @@ export interface ProviderDriverTraits {
 	)[];
 	/** question-card.test.ts pins whether a provider accepts skipped questions. */
 	readonly supportsQuestionSkip: boolean;
-	/** rewind-banner.test.ts pins whether conversation rewind can also restore files. */
-	readonly supportsFileRewind: boolean;
 	/** Provider captures pin multi-folder, worktree and task-stop session contracts. */
 	readonly sessionCapabilities: ProviderSessionCapabilities;
 	/** OpenCode's SDK/API and SSE lifecycle pin server-owned operations. */
@@ -100,7 +98,6 @@ export const PROVIDER_DRIVERS = {
 		composerModeControl: "permission-mode",
 		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"],
 		supportsQuestionSkip: false,
-		supportsFileRewind: false,
 		sessionCapabilities: {
 			supportsMultiFolder: true,
 			supportsWorktree: true,
@@ -141,7 +138,6 @@ export const PROVIDER_DRIVERS = {
 		composerModeControl: "agent",
 		permissionModes: ["ask", "acceptEdits", "full"],
 		supportsQuestionSkip: true,
-		supportsFileRewind: false,
 		sessionCapabilities: {
 			supportsMultiFolder: true,
 			supportsWorktree: false,
@@ -181,7 +177,6 @@ export const PROVIDER_DRIVERS = {
 		composerModeControl: "permission-mode", // cursor-turn.feature pins the no-per-call-approval notice.
 		permissionModes: ["ask", "acceptEdits", "full", "plan", "auto"], // cursor-turn.test.ts pins sandbox reopen; sandbox-anchored pins enforcement.
 		supportsQuestionSkip: false, // Skipping questions needs a captured Cursor contract.
-		supportsFileRewind: false, // No runtime can restore files yet.
 		sessionCapabilities: {
 			supportsMultiFolder: true, // workspace-resume and cursor-turn.test.ts pin changed dirs with fixed cwd.
 			supportsWorktree: false, // Await a Cursor worktree trace.
@@ -220,7 +215,6 @@ export const PROVIDER_DRIVERS = {
 		composerModeControl: "permission-mode", // codex-session-config pins the per-turn sandbox.
 		permissionModes: ["ask", "acceptEdits", "auto", "full", "plan"], // Per-turn sandbox, reviewer and collaboration settings are pinned by Codex traces.
 		supportsQuestionSkip: false, // Question responses need a captured Codex contract.
-		supportsFileRewind: false, // thread/revert restores conversation history only.
 		sessionCapabilities: {
 			supportsMultiFolder: false, // The captured thread/start contract consumes one cwd.
 			supportsWorktree: false, // Worktree support needs a captured Codex contract.
@@ -284,7 +278,6 @@ export const BrowserDriverTraitsSchema = Schema.Struct({
 		Schema.Literals(["ask", "acceptEdits", "full", "plan", "auto", "dontAsk"]),
 	),
 	supportsQuestionSkip: Schema.Boolean,
-	supportsFileRewind: Schema.Boolean,
 });
 export type BrowserDriverTraits = typeof BrowserDriverTraitsSchema.Type;
 

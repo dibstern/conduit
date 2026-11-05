@@ -9,7 +9,16 @@ import { expect, gotoRelay, test } from "../helpers/replay-fixture.js";
 import { AppPage } from "../page-objects/app.page.js";
 import { SidebarPage } from "../page-objects/sidebar.page.js";
 
-test.use({ recording: "chat-simple", daemonSessionQueries: true });
+test.use({ recording: "chat-simple" });
+
+/** The daemon's automatic archive sweep over the replay project, once. */
+async function archiveIdleSessions(harness: ReplayHarness) {
+	const relay = await harness.project.relay();
+	if (!relay.archiveIdleSessions) throw new Error("The project cannot archive");
+	return Effect.runPromise(
+		relay.archiveIdleSessions(30 * 86_400_000, Date.now()),
+	);
+}
 
 const row = (page: Page, id: string) =>
 	page.locator(`#session-list [data-session-id="${id}"]`);
@@ -207,16 +216,8 @@ test("the sweep archives old settled sessions once and leaves restored activity 
 	} finally {
 		db.close();
 	}
-	expect(
-		await Effect.runPromise(
-			harness.stack.archiveIdleSessions(30 * 86_400_000, Date.now()),
-		),
-	).toBe(1);
-	expect(
-		await Effect.runPromise(
-			harness.stack.archiveIdleSessions(30 * 86_400_000, Date.now()),
-		),
-	).toBe(0);
+	expect(await archiveIdleSessions(harness)).toBe(1);
+	expect(await archiveIdleSessions(harness)).toBe(0);
 	await expect(page.getByTestId("settled-shelf-toggle")).toHaveCount(0);
 	expect(
 		(await browse(harness, title, true)).sessions.find(
@@ -225,11 +226,7 @@ test("the sweep archives old settled sessions once and leaves restored activity 
 	).toEqual(expect.any(Number));
 	await new AppPage(page).sendMessage("Return to this old conversation");
 	await expect(row(page, id)).toBeVisible();
-	expect(
-		await Effect.runPromise(
-			harness.stack.archiveIdleSessions(30 * 86_400_000, Date.now()),
-		),
-	).toBe(0);
+	expect(await archiveIdleSessions(harness)).toBe(0);
 	await page.screenshot({
 		path: testInfo.outputPath("automatic-archive-restored.png"),
 	});

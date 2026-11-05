@@ -734,6 +734,57 @@ export const makeFolderTimeline = (configDir: string) =>
 						}).pipe(Effect.ignore);
 				}
 			});
+		/**
+		 * Bytes of the loose objects in the repository stores that a session's kept refs hold and
+		 * no other ref does: what eviction frees. Without a session, what every kept ref holds.
+		 * Objects borrowed from the user's repository are not loose here, so they never count.
+		 */
+		const keptBytes = (sessionId?: string) =>
+			Effect.gen(function* () {
+				const prefix =
+					sessionId === undefined ? KEPT : `${KEPT}${hash(sessionId)}/`;
+				const names = yield* fs(() => readdir(root));
+				let total = 0;
+				for (const name of names.filter((name) => name.endsWith(".git"))) {
+					const store = join(root, name);
+					const refs = (yield* git(store, [
+						"for-each-ref",
+						"--format=%(refname)",
+					])).stdout
+						.split("\n")
+						.filter((ref) => ref !== "");
+					const mine = refs.filter((ref) => ref.startsWith(prefix));
+					if (mine.length === 0) continue;
+					const reachable = (from: readonly string[]) =>
+						from.length === 0
+							? Effect.succeed(new Set<string>())
+							: git(store, ["rev-list", "--objects", "--stdin"], {
+									input: `${from.join("\n")}\n`,
+								}).pipe(
+									// Each line is an object id, then its path for blobs and trees.
+									Effect.map(({ stdout }) => new Set(stdout.match(/^\w+/gm))),
+								);
+					const others =
+						sessionId === undefined
+							? new Set<string>()
+							: yield* reachable(refs.filter((ref) => !ref.startsWith(prefix)));
+					const held = yield* reachable(mine);
+					const loose = yield* fs(() =>
+						readdir(join(store, "objects"), {
+							recursive: true,
+							withFileTypes: true,
+						}),
+					);
+					for (const entry of loose) {
+						const id = `${entry.parentPath.slice(-2)}${entry.name}`;
+						if (entry.isFile() && held.has(id) && !others.has(id))
+							total += (yield* fs(() =>
+								stat(join(entry.parentPath, entry.name)),
+							)).size;
+					}
+				}
+				return total;
+			}).pipe(Effect.orElseSucceed(() => 0));
 		/** A kept ref's tree and its parent's tree, or nothing once it is gone. */
 		const readKept = (store: string, ref: string) =>
 			git(store, ["rev-parse", `${ref}^{tree}`, `${ref}^1^{tree}`]).pipe(
@@ -1314,8 +1365,16 @@ export const makeFolderTimeline = (configDir: string) =>
 					sessionLocks.delete(sessionId);
 				}),
 			storeBytes: (sessionId) =>
-				Effect.promise(() => bytesUnder(sessionStore(sessionId))),
-			diskUse: Effect.promise(() => bytesUnder(join(root, "sessions"))),
+				Effect.zipWith(
+					Effect.promise(() => bytesUnder(sessionStore(sessionId))),
+					keptBytes(sessionId),
+					(store, kept) => store + kept,
+				),
+			diskUse: Effect.zipWith(
+				Effect.promise(() => bytesUnder(join(root, "sessions"))),
+				keptBytes(),
+				(sessions, kept) => sessions + kept,
+			),
 			evict: (sessionId, append) =>
 				sessionLock(sessionId).withPermits(1)(
 					Effect.gen(function* () {
