@@ -288,6 +288,20 @@ export const DaemonOrchestrationLive = Layer.effect(
 						if (session) yield* record(session.provider)(sessionId, capture);
 					}),
 			);
+			// Head moves with files a restart cut off mid-apply (82tn.53): a move journalled started
+			// keeps its files; any other is rolled back.
+			yield* folders.recoverRestores((_sessionId, moveId) =>
+				sql`SELECT 1 FROM events WHERE type = 'head.move_started'
+					AND json_extract(data, '$.moveId') = ${moveId} LIMIT 1`.pipe(
+					Effect.map((rows) => rows.length > 0),
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Restore recovery could not read the move", {
+							moveId,
+							cause,
+						}).pipe(Effect.as(true)),
+					),
+				),
+			);
 		}
 		const bindings = new SqliteProviderSessionBindingReadModel(sql);
 		const resolveCallContext = yield* makeProviderCallContextResolver({

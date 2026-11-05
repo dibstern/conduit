@@ -14,6 +14,15 @@ export interface FolderSnapshot {
 	readonly worktree: string;
 }
 
+/** A run's folder at its start and end, kept for head moves with files. */
+export interface Checkpoint {
+	readonly store: string;
+	readonly prefix: string;
+	/** Repository-wide worktree trees; the folder is under `prefix`. */
+	readonly start: string;
+	readonly end: string;
+}
+
 export class FolderTimelineError extends Data.TaggedError(
 	"FolderTimelineError",
 )<{
@@ -22,11 +31,38 @@ export class FolderTimelineError extends Data.TaggedError(
 }> {}
 
 /**
+ * A restore that would lose work: the folder is gone, or files it would write
+ * changed since the plan (`paths`, folder-relative).
+ */
+export class FolderRestoreRefused extends Data.TaggedError(
+	"FolderRestoreRefused",
+)<{
+	readonly reason: "folder_missing" | "changed";
+	readonly directory: string;
+	readonly paths: readonly string[];
+}> {}
+
+/** A path a restore changes, as the move will leave it. */
+export interface RestoreChange {
+	readonly path: string;
+	readonly change: "added" | "modified" | "deleted";
+}
+
+/** A folder a restore moves from its planned tree to `to`. */
+export interface RestoreFolder {
+	readonly directory: string;
+	readonly from: string;
+	readonly to: string;
+}
+
+/**
  * Sole owner of the private object stores. A store borrows its repository's
  * objects read-only and never writes into the repository; live snapshots get
  * no ref and are pruned after a grace period. A run's checkpoints are pinned
  * until its capture is recorded, so a restart can finish it; captures are copied into the session's own store
  * under one ref, so they outlive the user's history and leave with the session.
+ * The whole-folder checkpoints then stay in the repository's store, for head
+ * moves with files, until the session is evicted or forgotten.
  */
 export class FolderTimeline extends Context.Service<
 	FolderTimeline,
@@ -105,6 +141,77 @@ export class FolderTimeline extends Context.Service<
 		readonly settled: (runId: string) => Effect.Effect<void>;
 		/** The store holding a session's captures, for `git`. */
 		readonly sessionStore: (sessionId: string) => string;
+		/**
+		 * The run's whole-folder checkpoint in `directory`, kept from its
+		 * capture until the session is evicted or forgotten.
+		 */
+		readonly checkpoint: (
+			sessionId: string,
+			runId: string,
+			directory: string,
+		) => Effect.Effect<Checkpoint | undefined, FolderTimelineError>;
+		/** The runs the timeline holds that name the folder, live or still capturing. */
+		readonly runsIn: (
+			directory: string,
+		) => Effect.Effect<
+			readonly { readonly sessionId: string; readonly runId: string }[]
+		>;
+		/**
+		 * The Restore Plan for moving the folder to `to` (a repository-wide
+		 * tree): a fresh snapshot, and the paths that change. `key` names the
+		 * plan by each path's state now, so edits outside the folder keep it.
+		 */
+		readonly plan: (
+			directory: string,
+			to: string,
+		) => Effect.Effect<
+			{
+				readonly from: string;
+				readonly key: string;
+				readonly changes: readonly RestoreChange[];
+			},
+			FolderTimelineError | FolderRestoreRefused
+		>;
+		/**
+		 * Applies a head move's files under each folder's apply lock, which a
+		 * run's start checkpoint also takes. `guard` runs under the locks first.
+		 * A folder that is gone, or a planned path changed since `from`, refuses
+		 * before any write. Each folder gets a Restore Receipt, then deletes, then
+		 * writes (only paths still as planned), then `journal` records the move.
+		 * A failure rolls the written paths back and drops the receipts. The
+		 * user's index, refs and HEAD are never written.
+		 */
+		readonly restore: <A, E, R>(move: {
+			readonly sessionId: string;
+			readonly moveId: string;
+			readonly folders: readonly RestoreFolder[];
+			readonly guard: Effect.Effect<void, E, R>;
+			readonly journal: Effect.Effect<A, E, R>;
+		}) => Effect.Effect<A, E | FolderTimelineError | FolderRestoreRefused, R>;
+		/** A restored folder's receipt: its tree before the move, and the move's target. */
+		readonly receipt: (
+			sessionId: string,
+			moveId: string,
+			directory: string,
+		) => Effect.Effect<
+			| {
+					readonly store: string;
+					readonly before: string;
+					readonly target: string;
+			  }
+			| undefined,
+			FolderTimelineError
+		>;
+		/**
+		 * Startup: a receipt whose move was not journalled died mid-apply, so its
+		 * folder is put back as the move found it and the receipt dropped.
+		 */
+		readonly recoverRestores: <E, R>(
+			journalled: (
+				sessionId: string,
+				moveId: string,
+			) => Effect.Effect<boolean, E, R>,
+		) => Effect.Effect<void, E, R>;
 		/** Bytes the session's store holds on disk; 0 without one. */
 		readonly storeBytes: (sessionId: string) => Effect.Effect<number>;
 		/** Bytes all session stores hold on disk. */
@@ -156,7 +263,7 @@ export const isPruned = (sessionId: string, sequence: number) =>
  * eviction came after `messageId` was created, since its run's checkpoints went
  * with it. Head moves that need files refuse "pruned"; conversation-only moves
  * go ahead and show the files unavailable. A message this session did not
- * create (inherited by a fork) has no checkpoints here, so it reads "pruned".
+ * create (inherited by a fork) never had checkpoints here: "not_available".
  */
 export const headMoveFiles = (sessionId: string, messageId: string) =>
 	Effect.gen(function* () {
@@ -166,7 +273,8 @@ export const headMoveFiles = (sessionId: string, messageId: string) =>
 			WHERE session_id = ${sessionId} AND type = 'message.created'
 				AND json_extract(data, '$.messageId') = ${messageId}`;
 		const sequence = row?.sequence;
-		return sequence == null || (yield* isPruned(sessionId, sequence))
+		if (sequence == null) return "not_available" as const;
+		return (yield* isPruned(sessionId, sequence))
 			? ("pruned" as const)
 			: ("available" as const);
 	});

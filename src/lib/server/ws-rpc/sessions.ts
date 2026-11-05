@@ -6,6 +6,7 @@ import {
 	AccountUnroutable,
 	type ContinuationError,
 	ContinuationErrorSchema,
+	FilesRefused,
 	SessionBusy,
 } from "../../contracts/limit-recovery.js";
 import {
@@ -1103,8 +1104,10 @@ export const sessionsHandlers = {
 	PreviewHeadMove: (request) =>
 		previewHeadMove(request.sessionId, request.intent).pipe(
 			Effect.catch(
-				(error): Effect.Effect<never, SessionBusy | WsRpcError> =>
-					error instanceof SessionBusy
+				(
+					error,
+				): Effect.Effect<never, SessionBusy | FilesRefused | WsRpcError> =>
+					error instanceof SessionBusy || error instanceof FilesRefused
 						? Effect.fail(error)
 						: mapRpcFailure("PreviewHeadMove")(error),
 			),
@@ -1138,8 +1141,10 @@ export const sessionsHandlers = {
 			});
 		}).pipe(
 			Effect.catch(
-				(error): Effect.Effect<never, SessionBusy | WsRpcError> =>
-					error instanceof SessionBusy
+				(
+					error,
+				): Effect.Effect<never, SessionBusy | FilesRefused | WsRpcError> =>
+					error instanceof SessionBusy || error instanceof FilesRefused
 						? Effect.fail(error)
 						: mapRpcFailure("CommitHeadMove")(error),
 			),

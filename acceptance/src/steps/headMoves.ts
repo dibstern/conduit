@@ -1,5 +1,8 @@
 import { expect, type Page } from "@playwright/test";
-import { SessionBusy } from "../../../src/lib/contracts/limit-recovery.js";
+import {
+	FilesRefused,
+	SessionBusy,
+} from "../../../src/lib/contracts/limit-recovery.js";
 import type {
 	HeadLogEntry,
 	MoveIntent,
@@ -20,6 +23,10 @@ const at = PINNED_CLOCK_MS - 600_000;
 type Scene = {
 	pruned: boolean;
 	image: boolean;
+	/** The paths a rewind with files would change. */
+	changes: string[];
+	/** Another session that ran in a folder since, which keeps the files. */
+	other: { title: string; folder: string } | undefined;
 	log: HeadLogEntry[];
 };
 const scenes = new WeakMap<Page, Scene>();
@@ -29,6 +36,8 @@ const scene = (page: Page): Scene => {
 	const fresh: Scene = {
 		pruned: false,
 		image: false,
+		changes: [],
+		other: undefined,
 		log: [
 			{
 				moveId: "move-2",
@@ -112,6 +121,8 @@ async function expectMove(page: Page, intent: MoveIntent): Promise<void> {
 }
 
 const headLog = (page: Page) => page.getByTestId("head-log");
+const rewindDialog = (page: Page) =>
+	page.getByRole("dialog", { name: "Rewind to this point?" });
 const entry = (page: Page, text: string) =>
 	headLog(page).getByTestId("head-log-entry").filter({ hasText: text });
 
@@ -161,10 +172,40 @@ export const headMovesHandlers: StepHandler[] = [
 						},
 					],
 				}),
-				PreviewHeadMove: ({ intent }) => ({
-					moveId: `preview-${JSON.stringify(intent)}`,
-					files: state.pruned ? "pruned" : "available",
-				}),
+				PreviewHeadMove: ({ intent }) => {
+					if (intent.withFiles && state.pruned)
+						throw new FilesRefused({ sessionId, reason: "pruned" });
+					if (intent.withFiles && state.other)
+						throw new FilesRefused({
+							sessionId,
+							reason: "other_session",
+							directory: state.other.folder,
+							other: {
+								sessionId: "sess-other",
+								title: state.other.title,
+								running: false,
+							},
+						});
+					return {
+						moveId: `preview-${JSON.stringify(intent)}`,
+						files: state.pruned ? "pruned" : "available",
+						...(intent.withFiles
+							? {
+									restore: {
+										folders: [
+											{
+												directory: "/work/notes",
+												changes: state.changes.map((path) => ({
+													path,
+													change: "modified" as const,
+												})),
+											},
+										],
+									},
+								}
+							: {}),
+					};
+				},
 				CommitHeadMove: ({ intent, moveId }) => {
 					if (intent._tag === "undo")
 						state.log = [
@@ -247,6 +288,93 @@ export const headMovesHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "a rewind with files would change paths",
+		match: /^a rewind there would change (.+) and (.+)$/,
+		run: ({ world, match }) => {
+			scene(world.page).changes = [match[1] ?? "", match[2] ?? ""];
+		},
+	},
+	{
+		name: "another session ran in the folder",
+		match: /^the session (.+) has run in (.+) since$/,
+		run: ({ world, match }) => {
+			scene(world.page).other = {
+				title: match[1] ?? "",
+				folder: match[2] ?? "",
+			};
+		},
+	},
+	{
+		name: "pick the message to rewind to",
+		match: /^I pick the message (.+) to rewind to$/,
+		run: async ({ world, match }) => {
+			await expect(headLog(world.page)).toBeHidden();
+			await world.page
+				.locator("#messages .msg-user")
+				.filter({ hasText: match[1] ?? "" })
+				// The message text: its header holds the branch switcher.
+				.getByText(match[1] ?? "", { exact: true })
+				.click();
+			await expect(rewindDialog(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "the rewind dialog lists the paths that change",
+		match: /^the rewind dialog lists (.+) and (.+) as changing$/,
+		run: async ({ world, match }) => {
+			const paths = rewindDialog(world.page).getByRole("list", {
+				name: "Files that change",
+			});
+			await expect(paths.getByRole("listitem")).toHaveCount(2);
+			await expect(paths).toContainText(match[1] ?? "");
+			await expect(paths).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "rewinding the files is unavailable, with the reason",
+		match: /^rewinding the files is unavailable because (.+)$/,
+		run: async ({ world, match }) => {
+			const files = rewindDialog(world.page).getByRole("button", {
+				name: "Rewind conversation and files",
+			});
+			await expect(files).toBeDisabled();
+			// A screen reader hears the reason with the control.
+			await expect(files).toHaveAccessibleDescription(match[1] ?? "");
+			await expect(rewindDialog(world.page).getByRole("status")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "rewind the conversation and files",
+		match: /^I choose to rewind the conversation and files$/,
+		run: async ({ world }) => {
+			await rewindDialog(world.page)
+				.getByRole("button", { name: "Rewind conversation and files" })
+				.click();
+		},
+	},
+	{
+		name: "rewind the conversation only",
+		match: /^I choose to rewind the conversation only$/,
+		run: async ({ world }) => {
+			await rewindDialog(world.page)
+				.getByRole("button", { name: "Conversation only" })
+				.click();
+		},
+	},
+	{
+		name: "the conversation moves with a rewind with files",
+		match: /^the conversation moves with a rewind before (\S+) with files$/,
+		run: async ({ world, match }) => {
+			await expectMove(world.page, {
+				_tag: "rewind",
+				messageId: match[1] ?? "",
+				withFiles: true,
+			});
+		},
+	},
+	{
 		name: "the conversation did not move",
 		match: /^the conversation did not move$/,
 		run: ({ world }) => {
@@ -255,6 +383,16 @@ export const headMovesHandlers: StepHandler[] = [
 				.map((request) => request.tag);
 			expect(tags).toContain("PreviewHeadMove");
 			expect(tags).not.toContain("CommitHeadMove");
+		},
+	},
+	{
+		name: "the conversation moves with a rewind",
+		match: /^the conversation moves with a rewind before (\S+)$/,
+		run: async ({ world, match }) => {
+			await expectMove(world.page, {
+				_tag: "rewind",
+				messageId: match[1] ?? "",
+			});
 		},
 	},
 	{
@@ -367,6 +505,8 @@ export const headMovesHandlers: StepHandler[] = [
 			await world.page
 				.getByRole("menuitem")
 				.filter({ hasText: match[1] ?? "" })
+				// The message text: its header holds the branch switcher.
+				.getByText(match[1] ?? "", { exact: true })
 				.click();
 		},
 	},
