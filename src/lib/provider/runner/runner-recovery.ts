@@ -16,6 +16,7 @@ import {
 import { ProjectionRunnerEffectTag } from "../../persistence/effect/projection-runner-effect.js";
 import { runTerminalStatus } from "../../persistence/effect/projectors-effect.js";
 import { makeProviderStateEffect } from "../../persistence/effect/provider-state-effect.js";
+import { loadLedger } from "../../persistence/effect/run-ledger-arm.js";
 import { isRecord } from "../../utils.js";
 import {
 	ClaudeConfigDirSchema,
@@ -23,12 +24,13 @@ import {
 } from "../claude/claude-sdk-env.js";
 import { ProviderInstanceFailure } from "../errors.js";
 import type { OrchestrationEngine } from "../orchestration-engine.js";
+import { viewLedger } from "../run-ledger/run-ledger-decider.js";
 import type { TurnResult } from "../types.js";
 import { legacyRunnerRunQuery } from "./runner-legacy-classification.js";
 import { runnerFailure, runnerSinkId } from "./runner-protocol.js";
 import type { RunnerRecoveryDependencies } from "./runner-provider-instance.js";
 import { retrySettlementWrite } from "./send-settlement.js";
-import { settleSend } from "./send-settlement-outbox.js";
+import { requeueLegacySend, settleSend } from "./send-settlement-outbox.js";
 import type { DurableSessionTurn, SessionFailure } from "./session-runner.js";
 
 /** Same-daemon recovery keeps a row while its exact reactor attempt owns it. */
@@ -293,6 +295,25 @@ export const settleUnclaimedRunnerCommands = <E>(
 									)
 								)
 									return;
+								// CONTRACT 667-672, 689-691 (D50): a send its Run's ledger holds Launched with no
+								// evidence, never held, was not yet delivered; main returns it to the outbox to be
+								// sent once under its commandId, appending no terminal.
+								const ledger = yield* loadLedger(row.session_id).pipe(
+									Effect.provideService(SqlClient.SqlClient, sql),
+								);
+								const active = ledger && viewLedger(ledger.state).active;
+								if (
+									active?.runId === evidence.send.runId &&
+									active.tag === "Starting" &&
+									(yield* sql`SELECT 1 FROM provider_runs WHERE id = ${evidence.send.runId}
+										AND session_id = ${row.session_id} AND runner_id IS NULL
+										AND held_transmission IS NULL`).length > 0
+								)
+									return yield* requeueLegacySend(
+										{ sql, project, stamp },
+										row,
+										evidence.observedAt,
+									);
 								yield* settleSend(
 									{
 										sql,

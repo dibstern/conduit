@@ -170,12 +170,7 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 
 	for (const timing of ["accepted", "queued"] as const) {
 		for (const action of ["stop", "restart", "slash"] as const) {
-			it(`${timing} ${action} closes only its own run and leaves subsequent inputs deliverable`, async ({
-				skip,
-			}) => {
-				// Gap on the daemon: a send not yet handed to the runner ends `error` on restart
-				// instead of unlaunching (CONTRACT.md 667-672, 689-691).
-				skip(timing === "queued" && action === "restart");
+			it(`${timing} ${action} closes only its own run and leaves subsequent inputs deliverable`, async () => {
 				const proof: (typeof cases)[number] = {
 					case: `${timing}-${action}`,
 					outcome: "failed",
@@ -253,7 +248,9 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 							),
 						).toMatchObject({ ok: true });
 				}
-				if (action !== "slash") {
+				// CONTRACT 667-672, 689-691 (D50): a restart before delivery relaunches Alpha once.
+				const relaunched = timing === "queued" && action === "restart";
+				if (action !== "slash" && !relaunched) {
 					await vi.waitFor(
 						() => {
 							const state = ledger(fixture);
@@ -280,7 +277,7 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 					() => {
 						const state = ledger(fixture);
 						expect(state.turns.map((turn) => turn.state)).toEqual([
-							action === "slash" ? "completed" : "interrupted",
+							action === "slash" || relaunched ? "completed" : "interrupted",
 							"completed",
 							...(action === "stop" ? ["completed"] : []),
 						]);
@@ -299,13 +296,19 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 				);
 				expect(final.ends.every((event) => event.run_id !== null)).toBe(true);
 				// Each run ends once, under its own id.
-				if (action === "slash")
+				if (action === "slash" || relaunched)
 					expect(final.ends).toEqual(
 						final.runs.map((run) => ({
 							type: "turn.completed",
 							run_id: run.id,
 						})),
 					);
+				// Alpha relaunches under its own command, one row, not a second send.
+				if (relaunched)
+					expect(final.commands.map((command) => command.command_id)).toEqual([
+						a,
+						b,
+					]);
 				proof.turns = final.turns.map((turn) => turn.state);
 				proof.ownedEnds = final.ends.length;
 				proof.outcome = "passed";
