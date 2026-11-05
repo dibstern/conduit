@@ -3181,29 +3181,27 @@ export const GetHeadLog = Rpc.make("GetHeadLog", {
 	error: WsRpcError,
 });
 
-/**
- * The points on the Head's path where the conversation branched (82tn.51), root first: each names the
- * on-Head message the branches start at, and each branch the tip a switch lands on.
- */
+/** A point on the Head's path where the conversation branched: the on-Head message the branches
+ *  start at, and each branch the tip a switch lands on. */
+export const HeadForkSchema = Schema.Struct({
+	messageId: NonEmptyString,
+	branches: Schema.Array(
+		Schema.Struct({
+			tip: NonEmptyString,
+			text: Schema.String,
+			onHead: Schema.Boolean,
+			available: Schema.Boolean,
+		}),
+	),
+});
+export type HeadFork = typeof HeadForkSchema.Type;
+
+/** Where the conversation branched along the Head's path (82tn.51), root first. */
 export const GetHeadBranches = Rpc.make("GetHeadBranches", {
 	payload: Schema.TaggedStruct("GetHeadBranches", {
 		sessionId: NonEmptyString,
 	}),
-	success: Schema.Struct({
-		forks: Schema.Array(
-			Schema.Struct({
-				messageId: NonEmptyString,
-				branches: Schema.Array(
-					Schema.Struct({
-						tip: NonEmptyString,
-						text: Schema.String,
-						onHead: Schema.Boolean,
-						available: Schema.Boolean,
-					}),
-				),
-			}),
-		),
-	}),
+	success: Schema.Struct({ forks: Schema.Array(HeadForkSchema) }),
 	error: WsRpcError,
 });
 

@@ -4,7 +4,7 @@
 
 <script lang="ts">
 	import { tick, onDestroy, mount, unmount } from "svelte";
-	import type { AssistantMessage, ModelExecution } from "../../types.js";
+	import type { AssistantMessage, ModelExecution, UserMessage } from "../../types.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { isLoading, sessionMessages } from "../../stores/chat.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
@@ -14,13 +14,14 @@
 	import Diagram from "./Diagram.svelte";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { message, forkMessageId, sessionId, hideHeader = false, modelExecution, providerId }: {
+	let { message, forkMessageId, sessionId, hideHeader = false, modelExecution, providerId, turnUser }: {
 		message: AssistantMessage;
 		forkMessageId?: string | undefined;
 		sessionId?: string | undefined;
 		hideHeader?: boolean;
 		modelExecution?: ModelExecution | undefined;
 		providerId?: string | undefined;
+		turnUser?: UserMessage | undefined;
 	} = $props();
 	let containerEl: HTMLDivElement | undefined = $state();
 
@@ -246,7 +247,7 @@
 	role="article"
 >
 	{#if !hideHeader}
-		<AssistantHeader {message} {forkMessageId} {sessionId} {modelExecution} {providerId} bind:copyState />
+		<AssistantHeader {message} {forkMessageId} {sessionId} {modelExecution} {providerId} {turnUser} bind:copyState />
 	{/if}
 	<div class="md-content min-w-0 text-[15px] leading-[1.65] md:ml-[42px] {hideHeader ? '' : 'mt-[2px]'} {copyState === 'primed' ? 'bg-selection' : copyState === 'done' ? 'bg-success/5' : ''}">
 		{@html message.html}
