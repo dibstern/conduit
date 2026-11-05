@@ -1,16 +1,13 @@
-import { createTestRelayStack as createRelayStack } from "../../helpers/project-relay.js";
-// Two harness modes:
+// Two harness modes, both an in-process daemon serving the built frontend
+// from dist/frontend/, so Playwright navigates straight to the daemon URL:
 //
-// 1. createE2EHarness()    — real relay + real OpenCode (live E2E tests)
-// 2. createReplayHarness() — real relay + MockOpenCodeServer (replay tests)
-//
-// Both serve the built frontend from dist/frontend/ via the relay's static
-// file server, so Playwright can navigate directly to the relay URL.
+// 1. createE2EHarness()    — real OpenCode (live E2E tests)
+// 2. createReplayHarness() — MockOpenCodeServer replaying a recording
 
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
 import {
@@ -22,26 +19,18 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import {
-	listArchivedSessions,
-	listDaemonSessions,
-} from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
-import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import {
-	DaemonSessionQueryServiceError,
-	DaemonSessionQueryServiceTag,
-} from "../../../src/lib/domain/relay/Services/daemon-session-query-service.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
-import {
-	makePersistenceStoreLayer,
-	PersistenceStore,
-	type PersistenceStoreContext,
-} from "../../../src/lib/persistence/effect/live.js";
+import { OpenCodeAPI } from "../../../src/lib/instance/opencode-api.js";
+import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
-import type { RelayStack } from "../../../src/lib/relay/relay-stack.js";
+import {
+	loadRelaySettings,
+	saveRelaySettings,
+} from "../../../src/lib/relay/relay-settings.js";
 import { stopPtyHost } from "../../../src/lib/terminal/pty-host-client.js";
-import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
 	isOpenCodeRunning,
@@ -60,9 +49,12 @@ const OPENCODE_URL = process.env["OPENCODE_URL"] ?? "http://localhost:4096";
 // Only switch model if BOTH env vars are explicitly set — otherwise use OpenCode's default
 const E2E_MODEL = process.env["E2E_MODEL"] ?? "";
 const E2E_PROVIDER = process.env["E2E_PROVIDER"] ?? "";
+const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
 
 export interface E2EHarness {
-	stack: RelayStack;
+	project: DaemonProject;
+	/** OpenCode client for the harness project's folder. */
+	client: OpenCodeAPI;
 	opencodeUrl: string;
 	relayPort: number;
 	relayBaseUrl: string;
@@ -73,79 +65,62 @@ export interface E2EHarness {
 	trackSession(id: string): void;
 }
 
-/**
- * Switch to a free-tier model if E2E_MODEL and E2E_PROVIDER env vars are set.
- * Delegates to the shared switchModelViaWs helper.
- */
-async function switchToFreeModel(relayPort: number): Promise<void> {
-	if (!E2E_MODEL || !E2E_PROVIDER) return;
-	await switchModelViaWs(relayPort, E2E_MODEL, E2E_PROVIDER);
-}
-
-/** Create a relay pointed at real OpenCode, serving the built frontend */
+/** Create a daemon project pointed at real OpenCode, serving the built frontend */
 export async function createE2EHarness(opts?: {
 	opencodeUrl?: string;
 	projectDir?: string;
 }): Promise<E2EHarness> {
 	const opencodeUrl = opts?.opencodeUrl ?? OPENCODE_URL;
-
-	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
-	const dbDir = mkdtempSync(path.join(tmpdir(), "e2e-live-relay-"));
+	const projectDir = opts?.projectDir ?? process.cwd();
+	const configDir = mkdtempSync(path.join(tmpdir(), "e2e-live-relay-"));
 	await saveDaemonConfig(
 		{
 			...defaultDaemonConfig(),
 			avatar: { kind: "initial" },
 		},
-		dbDir,
+		configDir,
 	);
+	const project = await createDaemonProject("chat-simple", {
+		configDir,
+		opencodeUrl,
+		projectDir,
+		slug: "e2e-test",
+		staticDir,
+		// OpenCode's own default model, as a live instance configures it.
+		defaultModel: null,
+	});
+	if (E2E_MODEL && E2E_PROVIDER)
+		await switchModelViaWs(project.port, E2E_MODEL, E2E_PROVIDER);
 
-	const startStack = (port: number) =>
-		createRelayStack({
-			port,
-			host: "127.0.0.1",
-			opencodeUrl,
-			projectDir: opts?.projectDir ?? process.cwd(),
-			slug: "e2e-test",
-			sessionTitle: "E2E Test Session",
-			staticDir,
-			configDir: dbDir,
-			persistenceDbPath: path.join(dbDir, "events.db"),
-			// Stubbed session titles: no test makes a live title call.
-			titleQuery: fakeClaudeSdk.titleQuery,
-			log: createSilentLogger(),
-		});
-	const stack = await startStack(0);
-
-	const relayPort = stack.getPort();
-	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
-
+	const { client: sdk, authHeaders } = createSdkClient({
+		baseUrl: opencodeUrl,
+		directory: projectDir,
+	});
+	const client = new OpenCodeAPI({ sdk, baseUrl: opencodeUrl, authHeaders });
 	const createdSessionIds: string[] = [];
-	const initialSessionId = stack.initialSessionId;
-	if (initialSessionId) createdSessionIds.push(initialSessionId);
-
-	await switchToFreeModel(relayPort);
 
 	return {
-		stack,
+		project,
+		client,
 		opencodeUrl,
-		relayPort,
-		relayBaseUrl,
+		relayPort: project.port,
+		relayBaseUrl: project.baseUrl,
 		model: E2E_MODEL,
 		provider: E2E_PROVIDER,
 		async stop(): Promise<void> {
 			for (const id of createdSessionIds) {
 				try {
-					await stack.client.session.delete(id);
+					await client.session.delete(id);
 				} catch {
 					// Best-effort cleanup
 				}
 			}
 			try {
-				await stack.stop();
+				await project.stop();
 			} finally {
-				await stopPtyHost({ configDir: dbDir, force: true });
+				await stopPtyHost({ configDir, force: true });
 			}
-			rmSync(dbDir, { recursive: true, force: true });
+			rmSync(configDir, { recursive: true, force: true });
 		},
 		trackSession(id: string): void {
 			createdSessionIds.push(id);
@@ -154,18 +129,19 @@ export async function createE2EHarness(opts?: {
 }
 
 export interface ReplayHarness {
-	stack: RelayStack;
+	/** The daemon project; a restart replaces it. */
+	readonly project: DaemonProject;
 	mock: MockOpenCodeServer;
 	relayPort: number;
 	relayBaseUrl: string;
-	/** The relay's startup session route (e.g. "/s/ses_abc"); `/` opens no session.
+	/** The replay session's route (e.g. "/s/ses_abc"); `/` opens no session.
 	 *  With a Claude replay plan, the route of a fresh Claude session instead. */
 	projectUrl: string;
 	/** Present when the harness was created with a Claude replay plan. */
 	claudeReplayer?: ClaudeTraceReplayer;
 	/** The fresh per-run SQLite event store. */
 	eventsDbPath: string;
-	/** Stop the relay and start a fresh one on the same port, config dir and
+	/** Stop the daemon and start a fresh one on the same port, config dir and
 	 *  event store, as a daemon restart would. Open pages reconnect on their own.
 	 *  `whileStopped` runs between the two, e.g. to rewrite the event store. */
 	restart(whileStopped?: () => void): Promise<void>;
@@ -176,7 +152,7 @@ export interface ReplayHarness {
 // `model`), so the runtime sees no model drift during replay.
 const CLAUDE_TRACE_MODEL = "claude-fable-5";
 
-/** Create a relay-owned replay session over the typed WS RPC. */
+/** Create a replay session over the typed WS RPC. */
 export async function createSession(
 	relayPort: number,
 	providerId: "claude" | "opencode",
@@ -231,40 +207,27 @@ export async function createSession(
 }
 
 /**
- * Create a relay backed by a MockOpenCodeServer replaying a recording.
- * The relay serves the built frontend from dist/frontend/, so Playwright
- * navigates directly to the relay URL — no separate vite preview needed.
+ * Create an in-process daemon whose OpenCode is a MockOpenCodeServer replaying
+ * a recording. The daemon serves the built frontend from dist/frontend/, so
+ * Playwright navigates directly to the daemon URL — no separate vite preview.
  *
- * Each call creates an isolated mock + relay pair on random ports.
+ * Each call creates an isolated mock + daemon pair on random ports.
  * Call stop() to clean up both.
  */
 export async function createReplayHarness(
 	recordingName: string,
 	options: {
 		projectDir?: string;
-		/** Exercise the real daemon browse/search reads against this isolated store. */
-		daemonSessionQueries?: boolean;
 		/** Claude lane: open a Claude session whose SDK turns replay these
 		 *  committed traces. No live model call is possible. */
 		claudeReplay?: ClaudeReplayPlan;
 	} = {},
 ): Promise<ReplayHarness> {
-	const recording = loadOpenCodeRecording(recordingName);
-	const mock = new MockOpenCodeServer(recording);
+	const mock = new MockOpenCodeServer(loadOpenCodeRecording(recordingName));
 	await mock.start();
 
-	const staticDir = path.resolve(import.meta.dirname, "../../../dist/frontend");
-
-	// Use an isolated temp dir for config/cache to avoid stale JSONL files
-	// from previous runs polluting the MessageCache.
+	// An isolated config dir and event store per harness.
 	const configDir = mkdtempSync(path.join(tmpdir(), "e2e-relay-"));
-	// Without a default model the first session is a local Claude one, and the
-	// recording's OpenCode session is never created or viewed.
-	writeFileSync(
-		path.join(configDir, "settings.jsonc"),
-		JSON.stringify({ defaultModel: "anthropic/claude-opus-4-5-20251101" }),
-	);
-
 	const claudeReplayer =
 		options.claudeReplay && createClaudeTraceReplayer(options.claudeReplay);
 	const eventsDbPath = path.join(configDir, "events.db");
@@ -319,81 +282,26 @@ export async function createReplayHarness(
 		agents: [],
 	}));
 
-	const daemonReads = options.daemonSessionQueries
-		? ManagedRuntime.make(
-				Layer.mergeAll(
-					makeProjectRegistryLive([
-						{
-							folders: [options.projectDir ?? process.cwd()],
-							slug: "e2e-replay",
-							title: "E2E Replay",
-						},
-					]),
-					Layer.effect(
-						PersistenceStore,
-						Effect.context<PersistenceStoreContext>(),
-					).pipe(Layer.provideMerge(makePersistenceStoreLayer(eventsDbPath))),
-				),
-			)
-		: undefined;
-	const daemonReadContext = daemonReads
-		? await daemonReads.context()
-		: undefined;
-	const startStack = (port: number): Promise<RelayStack> =>
-		createRelayStack({
-			port,
-			host: "127.0.0.1",
-			opencodeUrl: mock.url,
-			projectDir: options.projectDir ?? process.cwd(),
-			slug: "e2e-replay",
-			sessionTitle: "E2E Replay Session",
-			staticDir,
+	// Each start reads settings.jsonc as it stands, so a restart keeps what
+	// the run (or `whileStopped`) saved there.
+	const start = (port: number) =>
+		createDaemonProject(recordingName, {
+			mock,
 			configDir,
-			persistenceDbPath: eventsDbPath,
-			...(daemonReadContext
-				? {
-						daemonConfigContext: Context.add(
-							daemonReadContext,
-							DaemonSessionQueryServiceTag,
-							{
-								listArchived: (query) =>
-									Effect.tryPromise({
-										try: () =>
-											stack.effectRuntime.runtime.runPromise(
-												listArchivedSessions(query).pipe(
-													Effect.provide(daemonReadContext),
-												),
-											),
-										catch: (cause) =>
-											new DaemonSessionQueryServiceError({ cause }),
-									}),
-								list: (query) =>
-									Effect.tryPromise({
-										try: () =>
-											stack.effectRuntime.runtime.runPromise(
-												listDaemonSessions(query).pipe(
-													Effect.provide(daemonReadContext),
-												),
-											),
-										catch: (cause) =>
-											new DaemonSessionQueryServiceError({ cause }),
-									}),
-							},
-						),
-					}
-				: {}),
-			...(claudeReplayer
-				? { claudeSdk: claudeReplayer.sdk }
-				: { titleQuery: fakeClaudeSdk.titleQuery }),
-			log: createSilentLogger(),
+			port,
+			staticDir,
+			slug: "e2e-replay",
+			...(options.projectDir && { projectDir: options.projectDir }),
+			defaultModel: null,
+			settings: { ...loadRelaySettings(configDir) },
+			...(claudeReplayer && { claudeSdk: claudeReplayer.sdk }),
 		});
-	let stack: RelayStack = await startStack(0);
-	let stoppedStack: RelayStack | undefined;
+	let project = await start(0);
+	let stoppedProject: DaemonProject | undefined;
 	let mockStopped = false;
 
-	const relayPort = stack.getPort();
-	const relayBaseUrl = `http://127.0.0.1:${relayPort}`;
-	// Relay startup makes no OpenCode requests, so create the replay session
+	const relayPort = project.port;
+	// Daemon startup makes no OpenCode requests, so create the replay session
 	// explicitly. For OpenCode this replays the recording's POST /session.
 	const sessionId = await createSession(
 		relayPort,
@@ -410,33 +318,32 @@ export async function createReplayHarness(
 	}
 
 	return {
-		get stack() {
-			return stack;
+		get project() {
+			return project;
 		},
 		mock,
 		relayPort,
-		relayBaseUrl,
+		relayBaseUrl: project.baseUrl,
 		projectUrl: `/s/${encodeURIComponent(sessionId)}`,
 		...(claudeReplayer ? { claudeReplayer } : {}),
 		eventsDbPath,
 		async restart(whileStopped?: () => void): Promise<void> {
-			await stack.stop();
+			await project.stop();
 			whileStopped?.();
-			stack = await startStack(relayPort);
+			project = await start(relayPort);
 		},
 		async stop(): Promise<void> {
 			try {
-				// A later cleanup failure must not dispose the same runtime twice.
-				if (stoppedStack !== stack) {
-					await stack.stop();
-					stoppedStack = stack;
+				// A later cleanup failure must not stop the same daemon twice.
+				if (stoppedProject !== project) {
+					await project.stop();
+					stoppedProject = project;
 				}
 				if (!mockStopped) {
 					await mock.stop();
 					mockStopped = true;
 				}
 			} finally {
-				await daemonReads?.dispose();
 				__setProbeOverrideForTesting(undefined);
 				await stopPtyHost({ configDir, force: true });
 			}

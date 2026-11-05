@@ -182,15 +182,23 @@ export async function createDaemonProject(
 		readonly shellEnv?: DaemonLiveOptions["shellEnv"];
 		/** Shortened poll intervals and SSE grace/staleness. */
 		readonly pollerTimings?: DaemonLiveOptions["pollerTimings"];
+		/** A started mock the caller owns and stops, in place of the recording's. */
+		readonly mock?: MockOpenCodeServer;
+		/** The built frontend to serve; an empty directory by default. */
+		readonly staticDir?: string;
+		/** A fixed port, as a restart reuses; OS-assigned by default. */
+		readonly port?: number;
 	} = {},
 ) {
 	const slug = options.slug ?? "integration-test";
-	const mock = new MockOpenCodeServer(
-		typeof recording === "string"
-			? loadOpenCodeRecording(recording)
-			: recording,
-	);
-	await mock.start();
+	const mock =
+		options.mock ??
+		new MockOpenCodeServer(
+			typeof recording === "string"
+				? loadOpenCodeRecording(recording)
+				: recording,
+		);
+	if (!options.mock) await mock.start();
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "dp-")));
 	const configDir = options.configDir ?? join(root, "config");
 	mkdirSync(configDir, { recursive: true });
@@ -209,13 +217,18 @@ export async function createDaemonProject(
 	const daemon = makeDaemonRuntime({
 		configDir,
 		socketPath: join(root, "d.sock"),
-		staticDir: root,
+		staticDir: options.staticDir ?? root,
 		launchLogin: sdkDefaultClaudeConfigDir(join(root, "home", ".claude")),
 		initialConfig: makeDaemonConfigFromOptions({
-			port: 0,
+			port: options.port ?? 0,
 			host: "127.0.0.1",
 			tlsEnabled: false,
 			hostExplicit: true,
+			// An answered avatar question, as foreground startup carries it over.
+			...(Result.isSuccess(loaded) &&
+				loaded.success.config.avatar !== undefined && {
+					avatar: loaded.success.config.avatar,
+				}),
 		}),
 		smartDefault: false,
 		defaultOpencodeUrl: options.opencodeUrl ?? mock.url,
@@ -235,7 +248,7 @@ export async function createDaemonProject(
 	const stop = async () => {
 		for (const client of clients) await client.close().catch(() => {});
 		await daemon.dispose();
-		await mock.stop();
+		if (!options.mock) await mock.stop();
 		rmSync(root, { recursive: true, force: true });
 	};
 	try {

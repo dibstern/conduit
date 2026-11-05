@@ -4,6 +4,8 @@
 // report and written to the test output dir as the repeatable artifact.
 
 import type { Page, TestInfo } from "@playwright/test";
+import { Effect } from "effect";
+import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { expect, test } from "../helpers/replay-fixture.js";
 import { mockWsRpc, sendMockDaemonList } from "../helpers/rpc-mock.js";
 import { mockRelayWebSocket } from "../helpers/ws-mock.js";
@@ -96,11 +98,24 @@ test.describe("New session draft", () => {
 	test("start chip defaults to the current checkout and offers a new worktree", async ({
 		page,
 		harness,
-		relayInstances,
 	}, testInfo) => {
 		await mockTwoProjects(page);
+		// The mock stands in for the daemon, so it publishes the daemon's accounts.
+		const accounts = await harness.project.run(
+			Effect.flatMap(AccountDirectory, (directory) => directory.list),
+		);
 		sendMockDaemonList(page, "SubscribeInstances", {
-			instances: relayInstances,
+			instances: accounts.map((account) => ({
+				id: account.id,
+				name: account.name,
+				driver: account.driver,
+				port: 0,
+				managed: account.driver === "opencode" && account.managed === true,
+				isDefault: account.isDefault,
+				status: "healthy",
+				restartCount: 0,
+				createdAt: 0,
+			})),
 		});
 		await page.goto(`${harness.relayBaseUrl}/new?project=e2e-replay`);
 
