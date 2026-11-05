@@ -162,7 +162,11 @@ describe("Session diff base override through the built daemon", () => {
 			await rowBase(clientB, sessionId, null),
 		);
 		evidence["initial"] = initial;
-		expect(initial.base).toEqual({ ref: "main", source: "default" });
+		expect(initial.base).toEqual({
+			ref: "main",
+			source: "default",
+			kind: "branch",
+		});
 		expect(initial.files).toEqual([
 			"added feature.txt",
 			"modified shared.txt",
@@ -175,7 +179,11 @@ describe("Session diff base override through the built daemon", () => {
 			await rowBase(clientB, sessionId, "feature"),
 		);
 		evidence["shared"] = shared;
-		expect(shared.base).toEqual({ ref: "feature", source: "override" });
+		expect(shared.base).toEqual({
+			ref: "feature",
+			source: "override",
+			kind: "branch",
+		});
 		expect(shared.files).toEqual([
 			"modified shared.txt",
 			"added untracked.txt",

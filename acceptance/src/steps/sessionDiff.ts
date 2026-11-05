@@ -140,7 +140,7 @@ function seed(
 	const fixture: DiffFixture = {
 		files,
 		folders,
-		base: { ref: "main", source: "default" },
+		base: { ref: "main", source: "default", kind: "branch" },
 		scopes: [],
 		setBases: [],
 		others,
@@ -181,7 +181,11 @@ function seed(
 									base:
 										scope.base === null
 											? fixture.base
-											: { ref: scope.base, source: "override" as const },
+											: {
+													ref: scope.base,
+													source: "override" as const,
+													kind: "branch" as const,
+												},
 								}
 							: {}),
 					})),
@@ -353,6 +357,7 @@ export const sessionDiffHandlers: StepHandler[] = [
 			requireFixture(world.page).base = {
 				ref,
 				source: ref === "HEAD" ? "head" : "default",
+				kind: ref === "HEAD" ? "commit" : "branch",
 				fallback: {
 					wanted,
 					reason: reason as "missing" | "shallow" | "unrelated",
