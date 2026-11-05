@@ -214,6 +214,7 @@ describe("Codex on the Run Ledger", () => {
 		trace: TraceRow[],
 		environment: Record<string, string> = {},
 		options: Parameters<typeof ProcessHarness.create>[0] = {},
+		view = true,
 	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
@@ -251,7 +252,12 @@ describe("Codex on the Run Ledger", () => {
 				},
 			});
 		await restart();
-		const browser = await fixture.connect();
+		const browser = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			view,
+		);
 		const account = await vi.waitFor(
 			async () => {
 				const found = (await browser.instances()).instances.find(
@@ -268,6 +274,7 @@ describe("Codex on the Run Ledger", () => {
 			modelId: "gpt-6.1-sol",
 			contextWindow: "",
 			permissionMode: "ask",
+			view,
 		});
 		writeTrace(trace);
 		return { fixture, browser, sessionId, restart };
@@ -278,8 +285,9 @@ describe("Codex on the Run Ledger", () => {
 		text: string,
 		delivery: "queue" | "steer" = "queue",
 		inputId: string = randomUUID(),
+		view = true,
 	) => {
-		await browser.followSession(sessionId);
+		if (view) await browser.followSession(sessionId);
 		const result = await Effect.runPromise(
 			browser.rpc["input.submit"]({
 				sessionId,
@@ -292,7 +300,11 @@ describe("Codex on the Run Ledger", () => {
 		expect(result.ok).toBe(true);
 	};
 	/** Sets the goal (it goes to Codex first at the next launch), then sends its prompt. */
-	const goalSubmit = async (browser: ProcessBrowser, sessionId: string) => {
+	const goalSubmit = async (
+		browser: ProcessBrowser,
+		sessionId: string,
+		view = true,
+	) => {
 		const set = await Effect.runPromise(
 			browser.rpc.SetGoal({
 				sessionId,
@@ -301,7 +313,7 @@ describe("Codex on the Run Ledger", () => {
 			}),
 		);
 		expect(set).toEqual({ ok: true });
-		await submit(browser, sessionId, "Say hello");
+		await submit(browser, sessionId, "Say hello", "queue", randomUUID(), view);
 	};
 	const turns = (
 		fixture: ProcessHarness,
@@ -715,16 +727,20 @@ describe("Codex on the Run Ledger", () => {
 		] as TraceRow[];
 	};
 	/** A goal send whose successor misses the window, so Codex starts it while conduit is idle. */
-	const wake = async (name: string, trace: TraceRow[]) => {
+	const wake = async (name: string, trace: TraceRow[], view = true) => {
 		const firstEnd = trace.find(
 			({ message }) => message?.method === "turn/completed",
 		)?.["at"];
 		if (typeof firstEnd !== "number") throw new Error("Missing turn end");
-		const started = await start(name, trace, {
-			CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500",
-		});
+		const started = await start(
+			name,
+			trace,
+			{ CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500" },
+			{},
+			view,
+		);
 		writeFileSync(gatePath, String(firstEnd));
-		await goalSubmit(started.browser, started.sessionId);
+		await goalSubmit(started.browser, started.sessionId, view);
 		// test-waits-allow polling: the window closing reaches only the store's ledger.
 		await vi.waitFor(
 			() =>
@@ -804,7 +820,9 @@ describe("Codex on the Run Ledger", () => {
 	// With no tab viewing the session, every done reaches the project's alerts.
 	it("sends one done alert for a Codex wake, at its end", async () => {
 		const chain = oneWake(fixtureRows("goal-chain"));
-		const { fixture, browser, sessionId } = await wake("wake-done", chain);
+		// No tab ever views the session: closing a viewer is not seen by the daemon at once,
+		// so a wake ending first would route its done to that viewer, not to the alerts.
+		const { fixture, sessionId } = await wake("wake-done", chain, false);
 		const wakeEnd = chain.filter(
 			({ message }) => message?.method === "turn/completed",
 		)[1]?.["at"];
@@ -853,7 +871,6 @@ describe("Codex on the Run Ledger", () => {
 			timeout: TIMEOUT,
 			interval: 50,
 		});
-		await browser.close();
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		const done = () =>
 			alerts.filter(

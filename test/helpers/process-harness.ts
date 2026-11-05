@@ -2981,6 +2981,8 @@ export class ProcessBrowser {
 			contextWindow?: string;
 			permissionMode?: SessionPermissionMode;
 			worktreePath?: string;
+			/** False leaves the session unviewed, so its dones reach the alerts feed. */
+			view?: boolean;
 		} = {},
 	): Promise<string> {
 		const result = await this.run(
@@ -2990,7 +2992,7 @@ export class ProcessBrowser {
 				...(title !== undefined ? { title } : {}),
 			}),
 		);
-		await this.view(result.sessionId);
+		if (draft.view !== false) await this.view(result.sessionId);
 		return result.sessionId;
 	}
 
