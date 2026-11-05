@@ -22,10 +22,7 @@ import {
 } from "../../../contracts/provider-instance.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { formatErrorDetail } from "../../../errors.js";
-import type {
-	SessionDetail,
-	SessionStatus,
-} from "../../../instance/sdk-types.js";
+import type { SessionDetail } from "../../../instance/sdk-types.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import {
 	type EventStoreEffect,
@@ -81,7 +78,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	StatusPollerTag,
 } from "./services.js";
 import {
 	applySessionCommand,
@@ -183,7 +179,6 @@ function renderProviderCleanupDetail(error: unknown): string {
 export type ListSessionsOptions = {
 	limit?: number;
 	roots?: boolean;
-	statuses?: Record<string, SessionStatus> | undefined;
 };
 
 export interface CreateSessionOptions {
@@ -998,9 +993,7 @@ export const SessionManagerServiceLive: Layer.Layer<
 		const eventStore = yield* EventStoreEffectTag;
 		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		// The relay constructs the session manager before its status-poller layer.
 		const drafts = yield* InputDraftsTag;
-		const statusPollerOption = yield* Effect.serviceOption(StatusPollerTag);
 		const activity = yield* SessionActivityTag;
 		const snapshot = yield* RelayStatusSnapshotTag;
 		const instanceClients = yield* OpenCodeInstancesTag;
@@ -1031,7 +1024,6 @@ export const SessionManagerServiceLive: Layer.Layer<
 				readQuery,
 				sql,
 				accounts,
-				statusPollerOption,
 				activity,
 				snapshot,
 				projectFolders: [config.projectDir, ...(config.extraFolders ?? [])],

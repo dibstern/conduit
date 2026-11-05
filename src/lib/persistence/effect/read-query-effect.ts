@@ -150,7 +150,6 @@ export const sessionRowsToSessionInfoList = (
 	rows: readonly SessionRow[],
 	opts: {
 		readonly now?: number;
-		readonly statuses?: Readonly<Record<string, { type: string }>>;
 		readonly parentMap?: ReadonlyMap<string, string>;
 		/** Contribution owners; the parent map still includes the whole family. */
 		readonly contributingSessionIds?: ReadonlySet<string> | undefined;
@@ -251,7 +250,6 @@ export const sessionRowsToSessionInfoList = (
 		const pendingPermissionCount =
 			state?.permissions ?? opts.pendingPermissionCounts?.get(row.id);
 		const unread = row.unread === 1;
-		const status = opts.statuses?.[row.id]?.type ?? row.status;
 		const background = opts.backgroundOf?.(row.id);
 		const backgroundWork = background?.work;
 		const activity = opts.activityOf?.(row.id, {
@@ -273,10 +271,13 @@ export const sessionRowsToSessionInfoList = (
 		return {
 			id: row.id,
 			title: row.title,
+			// 8.1 (2734): busy while the view holds the session's own active Run, not its row's busy.
 			status:
-				status === "busy" || status === "retry" || status === "error"
-					? status
-					: "idle",
+				activity?.foreground === "working"
+					? "busy"
+					: row.status === "error"
+						? "error"
+						: "idle",
 			createdAt: row.created_at,
 			updatedAt: row.updated_at,
 			...(row.last_user_message_at == null
@@ -422,6 +423,13 @@ const sidebarItem = (
 	);
 	return {
 		...session,
+		// 8.1 (2734): stored rows hold no busy (the projector reads no view); the view says it now.
+		status:
+			activity?.foreground === "working"
+				? "busy"
+				: session.status === "error"
+					? "error"
+					: "idle",
 		updatedAt: row.lastActivity,
 		...(running === "working" ? { processing: true } : {}),
 		...(activity ? { activity } : {}),
@@ -535,10 +543,6 @@ export interface ReadQueryEffect {
 		sessionId: string,
 	) => Effect.Effect<GoalDetails, ReadQueryEffectError | SqlError>;
 
-	readonly getAllSessionStatuses: (
-		scope: SessionScope,
-	) => Effect.Effect<Record<string, string>, ReadQueryEffectError | SqlError>;
-
 	readonly getAllSessionStatusesWithProviders: (
 		scope: SessionScope,
 	) => Effect.Effect<
@@ -551,15 +555,6 @@ export interface ReadQueryEffect {
 		reportedIds: readonly string[],
 	) => Effect.Effect<
 		readonly Pick<SessionRow, "id" | "status" | "updated_at">[],
-		ReadQueryEffectError | SqlError
-	>;
-
-	/** Busy children launched by a task while their parent has no turn in
-	 * flight, with the task id and the session whose Claude runtime lists it. */
-	readonly getStrandedChildren: (
-		scope: SessionScope,
-	) => Effect.Effect<
-		readonly { id: string; task_id: string; owner_id: string }[],
 		ReadQueryEffectError | SqlError
 	>;
 
@@ -597,7 +592,6 @@ export interface ReadQueryEffect {
 			archivedOnly?: boolean;
 			orderColumn?: "updated_at" | "archived_at";
 			before?: { at: number; id: string };
-			statuses?: Readonly<Record<string, { type: string }>>;
 			backgroundOf?: (sessionId: string) => SessionBackground | undefined;
 			activityOf?: ActivityOf;
 			hintDismissals?: ReadonlyMap<string, number>;
@@ -1301,28 +1295,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 			),
 		);
 
-	const getAllSessionStatuses = (
-		scope: SessionScope,
-	): Effect.Effect<Record<string, string>, ReadQueryEffectError | SqlError> =>
-		Effect.gen(function* () {
-			const rows = yield* sql<{ id: string; status: string }>`
-				SELECT id, status FROM sessions WHERE project_id IN ${sql.in(scope.projectIds)}`;
-			const result: Record<string, string> = {};
-			for (const row of rows) {
-				result[row.id] = row.status;
-			}
-			return result;
-		}).pipe(
-			Effect.mapError((e) =>
-				e instanceof ReadQueryEffectError
-					? e
-					: new ReadQueryEffectError({
-							operation: "getAllSessionStatuses",
-							cause: e,
-						}),
-			),
-		);
-
 	const getSessionsForReconciliation = (
 		scope: SessionScope,
 		reportedIds: readonly string[],
@@ -1343,51 +1315,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				(cause) =>
 					new ReadQueryEffectError({
 						operation: "getSessionsForReconciliation",
-						cause,
-					}),
-			),
-		);
-
-	// The link is found through the parent's own messages, which are indexed;
-	// CROSS JOIN pins that order, as the planner otherwise scans every part. SDK subagents share their
-	// parent's runtime, so the owner climbs through them; forks own theirs.
-	const getStrandedChildren = (scope: SessionScope) =>
-		sql<{ id: string; task_id: string; owner_id: string }>`
-			WITH RECURSIVE stranded AS (
-				SELECT c.id, c.parent_id AS owner_id,
-					json_extract(mp.metadata, '$.providerTaskId') AS task_id
-				FROM sessions c
-				CROSS JOIN sessions parent
-				CROSS JOIN messages m
-				CROSS JOIN message_parts mp
-				WHERE c.status IN ('busy', 'retry')
-					AND c.project_id IN ${sql.in(scope.projectIds)}
-					AND parent.project_id IN ${sql.in(scope.projectIds)}
-					AND parent.id = c.parent_id AND parent.status = 'idle'
-					AND m.session_id = c.parent_id AND mp.message_id = m.id
-					AND json_valid(mp.metadata)
-					AND json_extract(mp.metadata, '$.childSessionId') = c.id
-					AND json_type(mp.metadata, '$.providerTaskId') = 'text'
-					-- A child resumed directly runs its own turn, outside the task list.
-					AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = c.id
-						AND run.status IN ('pending', 'running'))
-					-- 8.3 (2849): an idle correction asks whether anything may act (3.12: the Open row).
-					AND NOT EXISTS (SELECT 1 FROM run_ledger_sessions ledger
-						WHERE ledger.session_id = c.id AND ledger.state = 'Open')
-			),
-			owned AS (
-				SELECT id, task_id, owner_id FROM stranded
-				UNION
-				SELECT o.id, o.task_id, s.parent_id FROM owned o
-				JOIN sessions s ON s.id = o.owner_id
-				WHERE o.owner_id LIKE 'claude-subagent-%' AND s.parent_id IS NOT NULL
-			)
-			SELECT id, task_id, owner_id FROM owned
-			WHERE owner_id NOT LIKE 'claude-subagent-%'`.pipe(
-			Effect.mapError(
-				(cause) =>
-					new ReadQueryEffectError({
-						operation: "getStrandedChildren",
 						cause,
 					}),
 			),
@@ -1637,12 +1564,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 				unreadSessionIds: new Set(
 					family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
 				),
-				statuses: {
-					...Object.fromEntries(
-						family.map((row) => [row.id, { type: row.status }]),
-					),
-					...opts?.statuses,
-				},
 				pendingQuestionCounts: pending.questions,
 				pendingPermissionCounts: pending.permissions,
 				hintDismissals: opts?.hintDismissals ?? hintDismissals,
@@ -2356,8 +2277,8 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						for (const member of family) {
 							if (
 								(member.side_thread === 1 && member.parent_id === viewed) ||
-								member.status === "busy" ||
-								member.status === "retry" ||
+								range.activityOf?.(member.id, noPrompts).foreground ===
+									"working" ||
 								pending.questions.has(member.id) ||
 								pending.permissions.has(member.id)
 							) {
@@ -2400,9 +2321,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 						),
 						unreadSessionIds: new Set(
 							family.flatMap((row) => (row.unread === 1 ? [row.id] : [])),
-						),
-						statuses: Object.fromEntries(
-							family.map((row) => [row.id, { type: row.status }]),
 						),
 						pendingQuestionCounts: pending.questions,
 						pendingPermissionCounts: pending.permissions,
@@ -2873,7 +2791,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		getSession,
 		getSessionFamilyRoot,
 		getGoalDetails,
-		getAllSessionStatuses,
 		getAllSessionStatusesWithProviders,
 		listSessions,
 		countSettledSessions,
@@ -2881,7 +2798,6 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 		listSessionGitRefreshTargets,
 		getSessionLineage,
 		getSessionsForReconciliation,
-		getStrandedChildren,
 		countPendingApprovalsBySession,
 		readPendingApprovals,
 		listPendingClaudeQuestionTools,

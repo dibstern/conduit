@@ -32,7 +32,7 @@ import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/p
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SessionInfo } from "../../../src/lib/shared-types.js";
-import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
+import { publishLedgerTasks, publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -176,6 +176,8 @@ describe("Session Rows read paths", () => {
 					]);
 					yield* sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, payload_json, status, attempt_count, requested_at, updated_at)
 					VALUES (1, 'b', 'project', ${sessionId}, ${provider}, 'send_turn', 'steer', '{}', 'running', 1, 1, 1)`;
+					// 82tn.32.30: busy, and so Stop, follow the view's active Run; these facts skip the arm.
+					publishRun((yield* SessionActivityTag).background, sessionId);
 					const visible = Effect.map(rows.list(), (items) =>
 						items.find(({ id }) => id === sessionId),
 					);
@@ -320,7 +322,6 @@ describe("Session Rows read paths", () => {
 							readQuery,
 							sql,
 							accounts,
-							statusPollerOption: Option.none(),
 							activity,
 							snapshot: makeRelayStatusSnapshot(),
 							projectFolders: folders,

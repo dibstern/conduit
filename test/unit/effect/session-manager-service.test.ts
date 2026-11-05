@@ -112,6 +112,7 @@ import type { TurnSettings } from "../../../src/lib/provider/turn-settings.js";
 import type { ProviderInstance } from "../../../src/lib/provider/types.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import { publishRun } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockAgentService,
 	makeMockConfig,
@@ -177,10 +178,8 @@ function makeReadQueryEffect(
 		),
 		getGoalDetails: () =>
 			Effect.succeed({ checks: [], tokensSinceStart: null }),
-		getAllSessionStatuses: vi.fn(() => Effect.succeed({})),
 		getAllSessionStatusesWithProviders: vi.fn(() => Effect.succeed([])),
 		getSessionsForReconciliation: () => Effect.succeed([]),
-		getStrandedChildren: () => Effect.succeed([]),
 		listSessions: vi.fn(() => Effect.succeed(rows)),
 		listSessionGitRefreshTargets: vi.fn(() => Effect.succeed([])),
 		getSessionSkillMessages: vi.fn(() => Effect.succeed([])),
@@ -199,7 +198,7 @@ function makeReadQueryEffect(
 					),
 					pendingQuestionCounts: pending.questions,
 					pendingPermissionCounts: pending.permissions,
-					statuses: options?.statuses,
+					...(options?.activityOf && { activityOf: options.activityOf }),
 				}),
 			);
 		}),
@@ -2563,15 +2562,12 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const sessions = yield* listSessions(
-				"test-project",
-				{
-					statuses: {
-						"child-1": { type: "busy" } as SessionStatus,
-					},
-				},
-				{ slug: "test-project", folders: [tmpdir()] },
-			);
+			// Busy is the session's active Run, as SessionActivity holds it (82tn.32.30).
+			publishRun((yield* SessionActivityTag).background, "child-1");
+			const sessions = yield* listSessions("test-project", undefined, {
+				slug: "test-project",
+				folders: [tmpdir()],
+			});
 			const stateRef = yield* SessionManagerStateTag;
 			const state = yield* Ref.get(stateRef);
 
@@ -2652,6 +2648,7 @@ describe("SessionManagerService", () => {
 					forkMessageId: "msg-1",
 					forkPointTimestamp: 250,
 					attention: "idle",
+					activity: { foreground: "idle", background: "none", label: "idle" },
 					limitRecovery: null,
 					resumes: [],
 				},
@@ -3130,56 +3127,59 @@ describe("SessionManagerService", () => {
 		);
 	});
 
-	it.effect("live service falls back to current status poller statuses", () => {
-		const api = makeMockOpenCodeAPI();
-		const readQuery = makeReadQueryEffect([
-			makeRow("session-1", { title: "Session 1", updated_at: 1 }),
-		]);
-		const layer = SessionManagerServiceLive.pipe(
-			Layer.provide(
-				Layer.mergeAll(
-					Layer.succeed(OpenCodeAPITag)(api),
-					Layer.succeed(OpenCodeInstancesTag)(
-						makeOpenCodeInstancesStub({ opencode: api }),
-					),
-					Layer.succeed(ReadQueryEffectTag)(readQuery),
-					Layer.succeed(LoggerTag)(makeMockLogger()),
-					Layer.succeed(StatusPollerTag)(
-						makeMockStatusPoller({
-							isProcessing: vi.fn(() => Effect.succeed(true)),
-							clearMessageActivity: vi.fn(() => Effect.void),
-							getCurrentStatuses: vi.fn(() =>
-								Effect.succeed({
-									"session-1": { type: "busy" } as SessionStatus,
-								}),
-							),
-						}),
-					),
-					makeSessionManagerStateLive(),
-					DaemonEventBusLive,
-				),
-			),
-		);
-
-		return Effect.gen(function* () {
-			const service = yield* SessionManagerServiceTag;
-			const sessions = yield* service.listSessions();
-
-			// The poller's status shows as status only: what runs is SessionActivity's (82tn.32.30).
-			expect(sessions).toMatchObject([
-				{
-					id: "session-1",
-					attention: "idle",
-					title: "Session 1",
-					updatedAt: 1,
-					status: "busy",
-				},
+	it.effect(
+		"live service lists the poller's busy as idle without an active Run",
+		() => {
+			const api = makeMockOpenCodeAPI();
+			const readQuery = makeReadQueryEffect([
+				makeRow("session-1", { title: "Session 1", updated_at: 1 }),
 			]);
-		}).pipe(
-			Effect.provide(layer),
-			Effect.provide(requiredSessionServices, { local: true }),
-		);
-	});
+			const layer = SessionManagerServiceLive.pipe(
+				Layer.provide(
+					Layer.mergeAll(
+						Layer.succeed(OpenCodeAPITag)(api),
+						Layer.succeed(OpenCodeInstancesTag)(
+							makeOpenCodeInstancesStub({ opencode: api }),
+						),
+						Layer.succeed(ReadQueryEffectTag)(readQuery),
+						Layer.succeed(LoggerTag)(makeMockLogger()),
+						Layer.succeed(StatusPollerTag)(
+							makeMockStatusPoller({
+								isProcessing: vi.fn(() => Effect.succeed(true)),
+								clearMessageActivity: vi.fn(() => Effect.void),
+								getCurrentStatuses: vi.fn(() =>
+									Effect.succeed({
+										"session-1": { type: "busy" } as SessionStatus,
+									}),
+								),
+							}),
+						),
+						makeSessionManagerStateLive(),
+						DaemonEventBusLive,
+					),
+				),
+			);
+
+			return Effect.gen(function* () {
+				const service = yield* SessionManagerServiceTag;
+				const sessions = yield* service.listSessions();
+
+				// 8.1 (CONTRACT.md 2734): busy is SessionActivity's active Run, never the poller's (82tn.32.30).
+				expect(sessions).toMatchObject([
+					{
+						id: "session-1",
+						attention: "idle",
+						title: "Session 1",
+						updatedAt: 1,
+						status: "idle",
+					},
+				]);
+			}).pipe(
+				Effect.provide(layer),
+				Effect.provide(requiredSessionServices, { local: true }),
+			);
+		},
+	);
 });
 
 describe("snooze session commands", () => {

@@ -18,6 +18,8 @@ import {
 	Ref,
 	Schedule,
 } from "effect";
+import { SqlClient } from "effect/sql";
+import type { SessionScope } from "../../../contracts/session-scope.js";
 import { ENV } from "../../../env.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
 import { busySessionIds } from "../../../session-busy.js";
@@ -259,6 +261,52 @@ export const poll = <E, R>(deps: PollDeps<E, R>) =>
 	}).pipe(
 		Effect.annotateLogs("component", "status-poller"),
 		Effect.withSpan("statusPoller.poll"),
+	);
+
+/**
+ * Busy children launched by a task while their parent has no turn in flight, with the task id
+ * and the session whose Claude runtime lists it. The poller reads the row's busy here only to
+ * correct it, and only when the ledger says nothing may act (8.3, 2849).
+ *
+ * The link is found through the parent's own messages, which are indexed; CROSS JOIN pins that
+ * order, as the planner otherwise scans every part. SDK subagents share their parent's runtime,
+ * so the owner climbs through them; forks own theirs.
+ */
+export const strandedChildren = (scope: SessionScope) =>
+	Effect.flatMap(
+		SqlClient.SqlClient,
+		(sql) => sql<{ id: string; task_id: string; owner_id: string }>`
+			WITH RECURSIVE stranded AS (
+				SELECT c.id, c.parent_id AS owner_id,
+					json_extract(mp.metadata, '$.providerTaskId') AS task_id
+				FROM sessions c
+				CROSS JOIN sessions parent
+				CROSS JOIN messages m
+				CROSS JOIN message_parts mp
+				WHERE c.status IN ('busy', 'retry')
+					AND c.project_id IN ${sql.in(scope.projectIds)}
+					AND parent.project_id IN ${sql.in(scope.projectIds)}
+					AND parent.id = c.parent_id AND parent.status = 'idle'
+					AND m.session_id = c.parent_id AND mp.message_id = m.id
+					AND json_valid(mp.metadata)
+					AND json_extract(mp.metadata, '$.childSessionId') = c.id
+					AND json_type(mp.metadata, '$.providerTaskId') = 'text'
+					-- A child resumed directly runs its own turn, outside the task list.
+					AND NOT EXISTS (SELECT 1 FROM provider_runs run WHERE run.session_id = c.id
+						AND run.status IN ('pending', 'running'))
+					-- 8.3 (2849): an idle correction asks whether anything may act (3.12: the Open row).
+					AND NOT EXISTS (SELECT 1 FROM run_ledger_sessions ledger
+						WHERE ledger.session_id = c.id AND ledger.state = 'Open')
+			),
+			owned AS (
+				SELECT id, task_id, owner_id FROM stranded
+				UNION
+				SELECT o.id, o.task_id, s.parent_id FROM owned o
+				JOIN sessions s ON s.id = o.owner_id
+				WHERE o.owner_id LIKE 'claude-subagent-%' AND s.parent_id IS NOT NULL
+			)
+			SELECT id, task_id, owner_id FROM owned
+			WHERE owner_id NOT LIKE 'claude-subagent-%'`,
 	);
 
 export interface ReconciliationDeps {

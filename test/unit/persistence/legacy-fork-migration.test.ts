@@ -269,7 +269,7 @@ describe("legacy Fork migration", () => {
 				expect(
 					(yield* sidebar).find(({ session_id }) => session_id === "fork")
 						?.session,
-				).toMatchObject({ status: "busy", unread: true });
+				).toMatchObject({ status: "idle", unread: true });
 				expect(
 					yield* sql`SELECT session_id, version FROM session_sidebar WHERE session_id IN ('fork', 'source') ORDER BY session_id`,
 				).toEqual([
