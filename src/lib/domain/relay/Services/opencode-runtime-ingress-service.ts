@@ -27,6 +27,7 @@ import {
 } from "../../../provider/opencode/opencode-history-backfill.js";
 import {
 	inputIdFromOpenCodeMessageId,
+	isOpenCodeForkSeed,
 	openCodeInputMessageId,
 } from "../../../provider/opencode/opencode-input-message-id.js";
 import {
@@ -726,7 +727,7 @@ export class EffectOpenCodeRuntimeIngress
 
 	private applyBackfill(
 		sessionId: string,
-		rest: readonly Message[],
+		fetched: readonly Message[],
 		providerInstanceId: string,
 		generation: number,
 		historyRevision: number,
@@ -736,6 +737,8 @@ export class EffectOpenCodeRuntimeIngress
 			restoreTurns: boolean;
 		},
 	): Effect.Effect<void, unknown> {
+		// A fork's seed is context, not history: it is neither stored nor counted.
+		const rest = fetched.filter(({ id }) => !isOpenCodeForkSeed(id));
 		return Effect.gen({ self: this }, function* () {
 			if (
 				this.stopped ||
@@ -866,9 +869,14 @@ export class EffectOpenCodeRuntimeIngress
 					Effect.gen({ self: this }, function* () {
 						yield* options?.beforeCommit ?? Effect.void;
 						const sql = yield* SqlClient.SqlClient;
-						const rows = yield* sql<StoredMessage>`
-						SELECT id, rest_digest, rest_event_id FROM messages
-						WHERE session_id = ${sessionId} ORDER BY created_at ASC, id ASC`;
+						const restIds = new Set(rest.map(({ id }) => id));
+						// A fork into another project copies its source's turns, which
+						// its fresh OpenCode session never had.
+						const rows = (yield* sql<StoredMessage>`
+						SELECT id, is_inherited, rest_digest, rest_event_id FROM messages
+						WHERE session_id = ${sessionId} ORDER BY created_at ASC, id ASC`).filter(
+							(row) => row.is_inherited === 0 || restIds.has(row.id),
+						);
 						complete =
 							(options?.completeHistory ?? true) &&
 							(yield* this.hasProjectedSession(sessionId)) &&

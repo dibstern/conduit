@@ -73,6 +73,7 @@ import { PersistenceProjectTag } from "../../persistence/Services/persistence-se
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { DraftChange } from "./input-drafts.js";
 import { InputDraftsTag } from "./input-drafts.js";
+import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -1758,9 +1759,14 @@ export const attachSessionManagerLive = Layer.effect(
 	SessionManagerServiceTag,
 	Effect.gen(function* () {
 		const managers = yield* SessionManagerServiceTag;
+		const parts = yield* Effect.context<ProjectSessionManagerParts>();
+		// A fork into this project creates its OpenCode session under this gate.
+		const gate = yield* Effect.serviceOption(OpenCodeSessionCreationGateTag);
 		yield* managers.attach(
 			(yield* ConfigTag).slug,
-			yield* Effect.context<ProjectSessionManagerParts>(),
+			gate._tag === "Some"
+				? Context.add(parts, OpenCodeSessionCreationGateTag, gate.value)
+				: parts,
 		);
 		return managers;
 	}),

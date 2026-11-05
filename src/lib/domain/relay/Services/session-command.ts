@@ -65,6 +65,7 @@ import { writeCodexSessionIdentity } from "../../../provider/codex/codex-session
 import { codexUpstreamAdapter } from "../../../provider/codex/codex-session-upstream.js";
 import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { renderForkDigest } from "../../../provider/fork-digest.js";
+import { openCodeForkSeedMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
 	PickRequired,
@@ -1074,15 +1075,10 @@ const forkSessionInWorkspace = (
 			}
 		}
 		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
-		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-			// OpenCode has no seeded fresh start: its fork copies the session on the
-			// source's server, and its stream would show a seed sent as a prompt.
-			if (options?.intoProject)
-				return yield* new SessionCommandError({
-					operation: "session.forked.project",
-					cause: account.driver,
-					message: "OpenCode sessions can't be forked into another project yet",
-				});
+		if (
+			PROVIDER_DRIVERS[account.driver].runsOpenCodeServer &&
+			!options?.intoProject
+		) {
 			// A native OpenCode fork needs only the Side Thread's mid-turn cut.
 			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 			const messageId =
@@ -1177,6 +1173,9 @@ const forkSessionInWorkspace = (
 					};
 				}
 				case "opencode":
+					// Only a fork into another project gets here; it starts a fresh
+					// session on that folder's server, seeded after publication.
+					return undefined;
 				case "cursor":
 					return yield* new SessionCommandError({
 						operation: "session.forked.unsupported_account",
@@ -1208,9 +1207,35 @@ const forkSessionInWorkspace = (
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
 		const relayConfig = config;
+		const openCode =
+			account.driver === "opencode"
+				? yield* Effect.gen(function* () {
+						if (relayConfig._tag === "None")
+							return yield* new SessionCommandError({
+								operation: "session.forked.opencode",
+								cause: "OpenCode fork requires the target project's folder",
+							});
+						const directory = relayConfig.value.projectDir;
+						const api = yield* (yield* OpenCodeInstancesTag)
+							.use(account.id, directory)
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionCommandError({
+											operation: "session.forked.opencode",
+											cause,
+										}),
+								),
+							);
+						return { api, directory };
+					})
+				: undefined;
 		const fork = yield* Effect.gen(function* () {
 			if (!native) {
-				const id = randomUUID();
+				// OpenCode's session id is the conduit session's id.
+				const id = openCode
+					? `ses_${randomUUID().replaceAll("-", "")}`
+					: randomUUID();
 				const configDir =
 					relayConfig._tag === "Some"
 						? (relayConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
@@ -1259,7 +1284,7 @@ const forkSessionInWorkspace = (
 					provider: account.id,
 					driver: account.driver,
 					pick,
-					providerSessionId: undefined,
+					providerSessionId: openCode ? id : undefined,
 					saveProviderState: codex
 						? () =>
 								Effect.gen(function* () {
@@ -1451,9 +1476,60 @@ const forkSessionInWorkspace = (
 				return current.boundary;
 			}),
 		);
-		const boundary = yield* workspace._tag === "Some"
-			? workspace.value.withLaunch(id, publish)
+		// OpenCode's session exists before the fork is announced, and the target's
+		// stream waits on the creation gate until conduit owns the id. The seed
+		// follows publication, which copies the turns it carries.
+		const creationGate = yield* Effect.serviceOption(
+			OpenCodeSessionCreationGateTag,
+		);
+		const seeded = openCode
+			? Effect.gen(function* () {
+					yield* Effect.tryPromise(() =>
+						openCode.api.session.create({
+							title,
+							directory: openCode.directory,
+							id,
+						}),
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "session.forked.upstream",
+									cause,
+								}),
+						),
+					);
+					const published = yield* publish;
+					const inherited =
+						(yield* readOption.value.getSessionMessagesWithParts(id)).filter(
+							(message) => message.is_inherited === 1,
+						);
+					yield* Effect.tryPromise(() =>
+						openCode.api.session.seed(
+							id,
+							openCodeForkSeedMessageId(id),
+							renderForkDigest(inherited),
+						),
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "session.forked.seed",
+									cause,
+									message: "Could not give the fork its transcript",
+								}),
+						),
+					);
+					return published;
+				})
 			: publish;
+		const launch =
+			openCode && creationGate._tag === "Some"
+				? creationGate.value.withPermits(1)(seeded)
+				: seeded;
+		const boundary = yield* workspace._tag === "Some"
+			? workspace.value.withLaunch(id, launch)
+			: launch;
 		// The copied turns were the parent's to read, so the fork starts seen up
 		// to its last imported turn end rather than with a dot. SessionAttention
 		// caps at the committed turn end, so this has to follow the commit.

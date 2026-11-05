@@ -5,7 +5,7 @@ Feature: Fork a session into another project
 # the fork opens attached to it. t3code has no such choice; its fork stays in
 # the source project, as plain Fork still does here. With one project there is
 # nothing to choose, so the commands keep plain Fork only. An OpenCode session
-# has no seeded fresh start yet, so it keeps plain Fork only too.
+# offers Fork into like any other.
 
 Scenario Outline: On a <viewport>, Fork into lists the other projects and opens the fork in the chosen one
   Given the conduit app is served with the connected mockup
@@ -36,13 +36,13 @@ Examples:
   | desktop  |
   | phone    |
 
-Scenario Outline: On a <viewport>, an OpenCode session keeps plain Fork only
+Scenario Outline: On a <viewport>, an OpenCode session offers Fork into too
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>
   And the sidebar has the project tree fixture
   And Atlas session 1 runs on OpenCode
   When I open the commands for Atlas session 1 on a <viewport>
-  Then the commands offer Fork without Fork into
+  Then Fork into offers beacon, comet and delta on a <viewport>
 
 Examples:
   | viewport |

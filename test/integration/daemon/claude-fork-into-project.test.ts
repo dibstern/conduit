@@ -7,9 +7,8 @@
 // 12. the response names the source project, so the page opens the fork in the wrong project;
 // 5, 6. a removed target or a target whose folder is gone still gets a fork row;
 // 7. a fork during the source's Run is refused, or its seed carries the in-flight prompt;
-// 10. a daemon restart between the fork and its first turn loses the seed or the folder;
-// 8. an OpenCode session, which has no seeded fresh start yet, forks natively in the source's folder
-// and lists under the target.
+// 10. a daemon restart between the fork and its first turn loses the seed or the folder.
+// 8 (an OpenCode source) is opencode-fork-into-project.test.ts.
 import {
 	existsSync,
 	mkdirSync,
@@ -84,16 +83,8 @@ describe("a Claude session forks into another project", () => {
 		}
 	});
 
-	const start = async (openCode = false) => {
+	const start = async () => {
 		const fixture = ProcessHarness.create({
-			...(openCode
-				? {
-						managedOpenCode: true,
-						managedOpenCodeId: "opencode",
-						autoStartOpenCode: true,
-						managedOpenCodeStopGraceMs: 100,
-					}
-				: {}),
 			restartProof: true,
 			logLevel: "warn",
 			serverLogFile: join("test-results", "m379-11-daemon.log"),
@@ -286,15 +277,9 @@ describe("a Claude session forks into another project", () => {
 		});
 	});
 
-	// 5, 6, 8.
-	it("refuses a fork into a removed project, one whose folder is gone, or of an OpenCode session, writing no fork", async () => {
-		const { fixture, browser, sessionId } = await start(true);
-		const openCodeSession = await browser.createSession(
-			"OpenCode source",
-			"opencode",
-			"opencode",
-		);
-		await browser.send(openCodeSession, "opencode-source-said");
+	// 5, 6.
+	it("refuses a fork into a removed project or one whose folder is gone, writing no fork", async () => {
+		const { fixture, browser, sessionId } = await start();
 		const removedDir = join(fixture.root, "project-c");
 		const goneDir = join(fixture.root, "project-d");
 		for (const directory of [removedDir, goneDir]) {
@@ -320,23 +305,10 @@ describe("a Claude session forks into another project", () => {
 			);
 			refusals[target] = error.message;
 		}
-		refusals["opencode"] = (
-			await Effect.runPromise(
-				Effect.flip(
-					browser.rpc.ForkSession({
-						sessionId: openCodeSession,
-						originId: browser.originId,
-						targetProjectSlug: "project-b",
-					}),
-				),
-			)
-		).message;
 		proof["refusals"] = refusals;
 		proof["fork rows after refusals"] = forkRows(fixture, sessionId);
 		expect(refusals["project-c"]).toMatch(/project-c/);
 		expect(refusals["project-d"]).toMatch(/folder/i);
-		expect(refusals["opencode"]).toMatch(/opencode.*another project/i);
 		expect(forkRows(fixture, sessionId)).toEqual([]);
-		expect(forkRows(fixture, openCodeSession)).toEqual([]);
 	});
 });
