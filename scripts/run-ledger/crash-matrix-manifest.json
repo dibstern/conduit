@@ -340,8 +340,8 @@
 		},
 		{
 			"cell": "claude/steer/daemon",
-			"status": "covered",
-			"tests": "claude-steer-recovery:157 mode=adopted (daemon SIGINT, not SIGKILL)"
+			"status": "proved",
+			"file": "test/integration/daemon/claude-steer-recovery.test.ts"
 		},
 		{
 			"cell": "claude/steer/runner",
