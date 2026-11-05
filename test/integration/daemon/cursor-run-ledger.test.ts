@@ -236,6 +236,9 @@ describe("Cursor on the Run Ledger", () => {
 		buildId?: string,
 		dist = process.env["CONDUIT_TEST_DIST"] ?? "dist",
 	) => {
+		// main's session detail feed fails this build's schema (82tn.51 dropped its rewind row),
+		// so a browser on main's daemon leaves the session unviewed.
+		const view = dist === (process.env["CONDUIT_TEST_DIST"] ?? "dist");
 		const fixture = ProcessHarness.create({
 			dist,
 			...(buildId ? { buildId } : {}),
@@ -285,12 +288,22 @@ describe("Cursor on the Run Ledger", () => {
 			driver: "cursor",
 		});
 		if (!added.addedInstanceId) throw new Error("Missing Cursor account");
-		const browser = await fixture.connect();
+		const browser = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			view,
+		);
 		const sessionId = await browser.createSession(
 			name,
 			added.addedInstanceId,
 			"cursor",
-			{ modelId: "composer-2.5", contextWindow: "", permissionMode: "ask" },
+			{
+				modelId: "composer-2.5",
+				contextWindow: "",
+				permissionMode: "ask",
+				view,
+			},
 		);
 		return { fixture, browser, sessionId, restart };
 	};
