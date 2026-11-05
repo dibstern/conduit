@@ -121,6 +121,7 @@ import {
 	renameSession,
 	setSessionArchived,
 	setSessionAutoSettleDisabled,
+	setSessionDiffBase,
 	setSessionJev,
 	setSessionPinned,
 	setSessionSettled,
@@ -853,6 +854,10 @@ export interface SessionManagerService {
 		sessionId: string,
 		jev: "on" | "off" | null,
 	): Effect.Effect<boolean, SessionManagerError>;
+	setSessionDiffBase(
+		sessionId: string,
+		base: string | null,
+	): Effect.Effect<boolean, SessionManagerError>;
 	setSessionPinned(
 		sessionId: string,
 		pinned: boolean,
@@ -1546,6 +1551,10 @@ const makeProjectSessionManager: Effect.Effect<
 			triageLock.withPermits(1)(
 				withSessionCommandServices(setSessionJev(sessionId, jev)),
 			),
+		setSessionDiffBase: (sessionId, base) =>
+			triageLock.withPermits(1)(
+				withSessionCommandServices(setSessionDiffBase(sessionId, base)),
+			),
 		setSessionPinned: (sessionId, pinned) =>
 			triageLock.withPermits(1)(
 				withSessionCommandServices(setSessionPinned(sessionId, pinned)),
@@ -1724,6 +1733,8 @@ export const SessionManagerServiceLive = Layer.sync(
 					setSessionAutoSettleDisabled: (id, disabled) =>
 						run((s) => s.setSessionAutoSettleDisabled(id, disabled)),
 					setSessionJev: (id, jev) => run((s) => s.setSessionJev(id, jev)),
+					setSessionDiffBase: (id, base) =>
+						run((s) => s.setSessionDiffBase(id, base)),
 					setSessionPinned: (id, pinned) =>
 						run((s) => s.setSessionPinned(id, pinned)),
 					snoozeSession: (id, until) => run((s) => s.snoozeSession(id, until)),

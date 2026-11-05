@@ -1,19 +1,44 @@
 import { expect, type Page } from "@playwright/test";
+import { Stream } from "effect";
 import {
+	type SessionDiffBase,
 	SessionDiffError,
 	type SessionDiffFile,
+	type SessionDiffFolder,
+	type SessionDiffListing,
+	type SessionDiffPatch,
+	type SessionDiffScope,
 } from "../../../src/lib/contracts/session-diff.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl } from "./shared.js";
 
 interface DiffFixture {
+	/** The first folder's files, listed under `folder`; `others` list after it. */
 	readonly files: SessionDiffFile[];
+	/** Each folder lists every file. */
+	readonly folders: readonly string[];
+	/** What the daemon resolves when no override is set. */
+	base: SessionDiffBase;
+	/** Every listing's scope, in order. */
+	readonly scopes: SessionDiffScope[];
+	/** Every SetSessionDiffBase payload's base, in order. */
+	readonly setBases: (string | null)[];
+	/** Folders listed as given, after those that list every file. */
+	readonly others: readonly SessionDiffFolder[];
+	readonly notes: ReadonlyMap<string, SessionDiffPatch["notes"]>;
 	readonly requested: string[];
 	/** Gone answers left per path. */
 	readonly gone: Map<string, number>;
 	/** Patch requests whose revision another session listed. */
 	readonly foreign: string[];
 	lists: number;
+	/** The revision each listing asked for, if any. */
+	readonly asked: (string | undefined)[];
+	/** Bumped by a pair change, so the listing's revision follows its content. */
+	version: number;
+	/** Live subscriptions opened, and the session the latest one is for. */
+	subscriptions: number;
+	live: string;
 	holdList: boolean;
 	holdPatch: string | null;
 	release: (() => void) | null;
@@ -21,6 +46,9 @@ interface DiffFixture {
 }
 
 const fixtures = new WeakMap<Page, DiffFixture>();
+
+/** How many RPC requests the page had sent when the last reveal was clicked. */
+const revealMarks = new WeakMap<Page, number>();
 
 /** Row observer callbacks a step parks, and the paths each one saw come into view. */
 interface DiffObservations {
@@ -89,13 +117,34 @@ const changed = (path: string, insertions = 1, deletions = 1) =>
 		binary: false,
 	}) satisfies SessionDiffFile;
 
-function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
+const revisionOf = (fixture: DiffFixture, sessionId: string) =>
+	`rev-${sessionId}#${fixture.version}`;
+
+function seed(
+	page: Page,
+	files: SessionDiffFile[],
+	{
+		folders = ["/workspace/myapp"],
+		others = [],
+		notes = new Map(),
+	}: Partial<Pick<DiffFixture, "folders" | "others" | "notes">> = {},
+): DiffFixture {
 	const fixture: DiffFixture = {
 		files,
+		folders,
+		base: { ref: "main", source: "default" },
+		scopes: [],
+		setBases: [],
+		others,
+		notes,
 		requested: [],
 		gone: new Map(),
 		foreign: [],
 		lists: 0,
+		asked: [],
+		version: 0,
+		subscriptions: 0,
+		live: "",
 		holdList: false,
 		holdPatch: null,
 		release: null,
@@ -103,17 +152,51 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 	};
 	fixtures.set(page, fixture);
 	requireRpcControl(page).setStubs({
-		SessionDiffList: async ({ sessionId }) => {
+		SessionDiffList: async ({ sessionId, revision, scope }) => {
+			// Settled turns in the transcript list their own scope; these steps count the pane's.
+			if (scope.kind === "turn") return { revision: "turn", folders: [] };
 			fixture.lists += 1;
+			fixture.asked.push(revision);
+			fixture.scopes.push(scope);
+			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
+			// A held listing answers with the snapshot taken when it was asked.
+			const listing = {
+				revision: revisionOf(fixture, sessionId),
+				folders: [
+					...fixture.folders.map((folder) => ({
+						folder,
+						files: [...fixture.files],
+						...(scope.kind === "branch"
+							? {
+									base:
+										scope.base === null
+											? fixture.base
+											: { ref: scope.base, source: "override" as const },
+								}
+							: {}),
+					})),
+					...fixture.others,
+				],
+			};
 			if (fixture.holdList) {
 				fixture.holdList = false;
 				await held(fixture);
 			}
-			// The revision hashes the snapshot, so an unchanged folder re-lists the same one.
-			return {
-				revision: `rev-${sessionId}`,
-				folders: [{ folder: "/workspace/myapp", files: fixture.files }],
-			};
+			return listing;
+		},
+		// The daemon answers by publishing the session's row with its new base.
+		SetSessionDiffBase: async ({ sessionId, base }) => {
+			fixture.setBases.push(base);
+			const rpc = requireRpcControl(page);
+			const { diffBase: _, ...row } = (rpc.shellRows?.find(
+				(candidate) => (candidate as { id?: string }).id === sessionId,
+			) ?? {}) as Record<string, unknown>;
+			rpc.upsertShellRow({
+				...row,
+				...(base === null ? {} : { diffBase: base }),
+				id: sessionId,
+			});
+			return { ok: true };
 		},
 		SessionDiffFile: async ({ path, sessionId, revision }) => {
 			fixture.requested.push(path);
@@ -121,7 +204,7 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 				fixture.holdPatch = null;
 				await held(fixture);
 			}
-			if (revision !== `rev-${sessionId}`) {
+			if (!revision.startsWith(`rev-${sessionId}#`)) {
 				fixture.foreign.push(`${sessionId} ${revision} ${path}`);
 				throw new SessionDiffError({
 					reason: "not-listed",
@@ -135,13 +218,27 @@ function seed(page: Page, files: SessionDiffFile[]): DiffFixture {
 					reason: "gone",
 					message: "The listing is no longer available",
 				});
-			const file = fixture.files.find((entry) => entry.path === path);
-			return {
-				patch:
-					file && "insertions" in file
-						? patchFor(path, file.insertions, file.deletions)
-						: "",
-			};
+			const file = [
+				fixture.files,
+				...others.map((entry) => ("files" in entry ? entry.files : [])),
+			]
+				.flat()
+				.find((entry) => entry.path === path);
+			const patch =
+				file && "insertions" in file
+					? patchFor(path, file.insertions, file.deletions)
+					: "";
+			const fileNotes = notes.get(path);
+			return fileNotes ? { patch, notes: fileNotes } : { patch };
+		},
+		// The server opens a live scope with its current revision.
+		SubscribeSessionDiff: ({ sessionId }) => {
+			fixture.subscriptions += 1;
+			fixture.live = sessionId;
+			return Stream.concat(
+				Stream.succeed({ revision: revisionOf(fixture, sessionId) }),
+				Stream.never,
+			);
 		},
 	});
 	return fixture;
@@ -153,10 +250,113 @@ function requireFixture(page: Page): DiffFixture {
 	return fixture;
 }
 
+/** Answers one turn's listing; every other turn and the pane list nothing. */
+function seedTurn(
+	page: Page,
+	turnId: string,
+	listing: Omit<SessionDiffListing, "revision">,
+): void {
+	requireRpcControl(page).setStubs({
+		SessionDiffList: ({ scope }) => ({
+			revision: "turn",
+			folders: [],
+			...(scope.kind === "turn" && scope.turnId === turnId && listing),
+		}),
+		SessionDiffFile: ({ path }) => ({ patch: patchFor(path) }),
+	});
+}
+
+const turnFooter = (page: Page) =>
+	page.locator("#messages .turn-activity").last().getByTestId("turn-show-bar");
+
 const row = (page: Page, path: string) =>
 	page.locator(`[data-testid="session-diff-file"][data-path="${path}"]`);
 
+/** A row's header, which sits in the pane's view only while the row is scrolled to. */
+const rowHeader = (page: Page, path: string) =>
+	row(page, path).locator("header");
+
+const baseTrigger = (page: Page) =>
+	page.locator('[data-testid="session-diff-base"]');
+
+/** "automatic" names the null base: the launch base and its fallbacks. */
+const named = (base: string) => (base === "automatic" ? null : base);
+
 export const sessionDiffHandlers: StepHandler[] = [
+	{
+		name: "project branches",
+		match: /^the project has branches (\S+) and (\S+)$/,
+		run: async ({ world, match }) => {
+			requireRpcControl(world.page).setStubs({
+				ListBranches: async () => ({
+					current: match[1] ?? "",
+					branches: [match[1] ?? "", match[2] ?? ""],
+				}),
+			});
+		},
+	},
+	{
+		name: "diff base falls back",
+		match:
+			/^the diff base (\S+) is (missing|shallow|unrelated), so the diff falls back to (\S+)$/,
+		run: async ({ world, match }) => {
+			const [, wanted = "", reason, ref = ""] = match;
+			requireFixture(world.page).base = {
+				ref,
+				source: ref === "HEAD" ? "head" : "default",
+				fallback: {
+					wanted,
+					reason: reason as "missing" | "shallow" | "unrelated",
+				},
+			};
+		},
+	},
+	{
+		name: "pick diff base",
+		match: /^I pick (\S+) as the diff base$/,
+		run: async ({ world, match }) => {
+			await baseTrigger(world.page).click();
+			await world.page
+				.getByRole("menuitemradio", { name: match[1] ?? "" })
+				.click();
+		},
+	},
+	{
+		name: "diff compares against",
+		match: /^the diff compares against (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect(baseTrigger(world.page)).toHaveText(
+				`against ${match[1] ?? ""}`,
+			);
+		},
+	},
+	{
+		name: "diff base was set",
+		match: /^the diff base was set to (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => requireFixture(world.page).setBases.at(-1))
+				.toBe(named(match[1] ?? ""));
+		},
+	},
+	{
+		name: "diff last listed against",
+		match: /^the diff was last listed against (\S+)$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => requireFixture(world.page).scopes.at(-1))
+				.toEqual({ kind: "branch", base: named(match[1] ?? "") });
+		},
+	},
+	{
+		name: "diff notice",
+		match: /^the diff notice reads "(.+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.locator('[data-testid="session-diff-base-notice"]'),
+			).toHaveText(match[1] ?? "");
+		},
+	},
 	{
 		name: "seed diff tiers",
 		match:
@@ -193,15 +393,103 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "seed many small diffs",
-		match: /^the session has ([0-9]+) small unstaged files$/,
+		name: "seed many diffs",
+		// Long files wait for a click, so a shot of them never races highlighting.
+		match:
+			/^the session has ([0-9]+) (small|long) unstaged files(?: in each of (\S+) and (\S+))?$/,
 		run: async ({ world, match }) => {
-			const count = Number(match[1]);
+			const [, count = "", size, ...folders] = match;
+			const lines = size === "long" ? 600 : 1;
 			seed(
 				world.page,
-				Array.from({ length: count }, (_, index) =>
-					changed(`file-${String(index + 1).padStart(2, "0")}.ts`),
+				Array.from({ length: Number(count) }, (_, index) =>
+					changed(`file-${String(index + 1).padStart(2, "0")}.ts`, lines),
 				),
+				folders[0] && folders[1] ? { folders: [folders[0], folders[1]] } : {},
+			);
+		},
+	},
+	{
+		name: "seed diff folders",
+		match:
+			/^the session diff has folders (\S+) with (\S+), (\S+) with (\S+), and (\S+) unavailable$/,
+		run: async ({ world, match }) => {
+			const [
+				,
+				first = "",
+				firstPath = "",
+				second = "",
+				secondPath = "",
+				gone = "",
+			] = match;
+			seed(world.page, [changed(firstPath)], {
+				folders: [first],
+				others: [
+					{ folder: second, files: [changed(secondPath)] },
+					{
+						folder: gone,
+						error: "unavailable",
+						message: `Folder is missing: ${gone}`,
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "seed diff edge cases",
+		match:
+			/^the session has unstaged edge cases: submodule (\S+), LFS (\S+), symlink (\S+), mode change (\S+) from ([0-7]+) to ([0-7]+), rename (\S+) to (\S+), CRLF (\S+) and Latin-1 (\S+)$/,
+		run: async ({ world, match }) => {
+			const [
+				,
+				submodule = "",
+				lfs = "",
+				symlink = "",
+				script = "",
+				modeBefore = "",
+				modeAfter = "",
+				oldPath = "",
+				moved = "",
+				crlf = "",
+				latin1 = "",
+			] = match;
+			const same = "7777777777777777777777777777777777777777";
+			seed(
+				world.page,
+				(
+					[
+						{
+							...changed(submodule),
+							kind: "submodule",
+							before: "5555555555555555555555555555555555555555",
+							after: "6666666666666666666666666666666666666666",
+							bytes: 0,
+						},
+						{ ...changed(lfs, 2, 2), kind: "lfs" },
+						{ ...changed(symlink), kind: "symlink" },
+						{
+							...changed(script, 0, 0),
+							before: same,
+							after: same,
+							mode: { before: modeBefore, after: modeAfter },
+						},
+						{
+							...changed(moved, 0, 0),
+							status: "renamed",
+							oldPath,
+							before: same,
+							after: same,
+						},
+						changed(crlf),
+						changed(latin1),
+					] satisfies SessionDiffFile[]
+				).sort((left, right) => left.path.localeCompare(right.path)),
+				{
+					notes: new Map([
+						[crlf, ["crlf"]],
+						[latin1, ["latin1"]],
+					]),
+				},
 			);
 		},
 	},
@@ -227,6 +515,22 @@ export const sessionDiffHandlers: StepHandler[] = [
 				...file,
 				after: "5555555555555555555555555555555555555555",
 			};
+			fixture.version += 1;
+		},
+	},
+	{
+		name: "diff mode changes",
+		match: /^the (\S+) mode changes from ([0-7]+) to ([0-7]+)$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const index = fixture.files.findIndex((file) => file.path === match[1]);
+			const file = fixture.files[index];
+			if (!file) throw new Error(`No diff fixture file ${match[1]}`);
+			fixture.files[index] = {
+				...file,
+				mode: { before: match[2] ?? "", after: match[3] ?? "" },
+			};
+			fixture.version += 1;
 		},
 	},
 	{
@@ -370,6 +674,14 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "held diff listing asked",
+		match: /^the held diff listing has been asked for$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			await expect.poll(() => fixture.release !== null).toBe(true);
+		},
+	},
+	{
 		name: "release held diff reply",
 		match: /^the held diff (?:listing|patch) lands$/,
 		run: async ({ world }) => {
@@ -397,6 +709,92 @@ export const sessionDiffHandlers: StepHandler[] = [
 				})
 				.click({ position: { x: 8, y: 6 } });
 			await expect(world.page).not.toHaveURL(before);
+		},
+	},
+	{
+		name: "seed a turn's captured changes",
+		match:
+			/^the (\S+) turn changed (\S+) and (\S+) in a (shared|private) folder$/,
+		run: async ({ world, match }) => {
+			const [, turnId = "", first = "", second = "", sharing] = match;
+			seedTurn(world.page, turnId, {
+				folders: [
+					{
+						folder: "/workspace/myapp",
+						files: [changed(first, 3, 1), changed(second)],
+						...(sharing === "shared" && { shared: true }),
+					},
+				],
+			});
+		},
+	},
+	{
+		name: "seed an uncaptured turn",
+		match: /^the (\S+) turn was not captured$/,
+		run: async ({ world, match }) => {
+			seedTurn(world.page, match[1] ?? "", { folders: [], notCaptured: true });
+		},
+	},
+	{
+		name: "turn footer entry",
+		match: /^the turn footer shows "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				turnFooter(world.page).getByTestId("turn-diff-toggle"),
+			).toHaveText(match[1] ?? "");
+		},
+	},
+	{
+		name: "open a turn's changed files",
+		match: /^I open the turn's changed files$/,
+		run: async ({ world }) => {
+			const toggle = turnFooter(world.page).getByTestId("turn-diff-toggle");
+			await toggle.click();
+			await expect(toggle).toHaveAttribute("aria-expanded", "true");
+		},
+	},
+	{
+		name: "turn diff rows",
+		match: /^the turn diff lists (\S+) and (\S+)$/,
+		run: async ({ world, match }) => {
+			const rows = turnFooter(world.page)
+				.getByTestId("turn-diff")
+				.getByTestId("session-diff-file");
+			await expect(rows).toHaveCount(2);
+			await expect(rows.first()).toHaveAttribute("data-path", match[1] ?? "");
+			await expect(rows.last()).toHaveAttribute("data-path", match[2] ?? "");
+		},
+	},
+	{
+		name: "turn diff shared label",
+		match: /^the turn diff (is|is not) labelled as shared with other sessions$/,
+		run: async ({ world, match }) => {
+			const label = turnFooter(world.page).getByTestId("turn-diff-shared");
+			await expect(label).toHaveCount(match[1] === "is" ? 1 : 0);
+			if (match[1] === "is")
+				await expect(label).toHaveText(
+					"May include changes from other sessions",
+				);
+		},
+	},
+	{
+		name: "turn not captured",
+		match: /^the turn footer says Not captured$/,
+		run: async ({ world }) => {
+			const footer = turnFooter(world.page);
+			await expect(footer.getByTestId("turn-diff-not-captured")).toContainText(
+				"Not captured",
+			);
+			await expect(footer.getByTestId("turn-diff-toggle")).toHaveCount(0);
+		},
+	},
+	{
+		name: "open the branch diff from a turn",
+		match: /^I open the branch diff from the turn footer$/,
+		run: async ({ world }) => {
+			await turnFooter(world.page)
+				.getByRole("button", { name: "Branch diff", exact: true })
+				.click();
 		},
 	},
 	{
@@ -480,12 +878,218 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "diff live",
+		match: /^the diff is (live|not live)$/,
+		run: async ({ world, match }) => {
+			const fixture = requireFixture(world.page);
+			const rpc = requireRpcControl(world.page);
+			await expect
+				.poll(() => rpc.hasStream("SubscribeSessionDiff", fixture.live))
+				.toBe(match[1] === "live");
+		},
+	},
+	{
+		name: "push diff revision",
+		match: /^the diff's current revision is pushed$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			requireRpcControl(world.page).sendChunk(
+				"SubscribeSessionDiff",
+				[{ revision: revisionOf(fixture, fixture.live) }],
+				fixture.live,
+			);
+		},
+	},
+	{
+		name: "listing pinned to pushed revision",
+		match: /^the last diff listing asked for the pushed revision$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			expect(fixture.asked.at(-1)).toBe(revisionOf(fixture, fixture.live));
+		},
+	},
+	{
+		name: "reconnect diff subscription",
+		match: /^the connection drops and the diff subscribes again$/,
+		run: async ({ world }) => {
+			const fixture = requireFixture(world.page);
+			const opened = fixture.subscriptions;
+			requireRpcControl(world.page).closeSockets();
+			await expect.poll(() => fixture.subscriptions).toBe(opened + 1);
+		},
+	},
+	{
+		name: "diff folder group",
+		match:
+			/^the (\S+) diff group is headed (\S+) and (?:lists (\S+)|shows "([^"]+)")$/,
+		run: async ({ world, match }) => {
+			const [, folder = "", name = "", path, error] = match;
+			const group = world.page.locator(
+				`[data-testid="session-diff-folder"][data-folder="${folder}"]`,
+			);
+			const rows = group.locator('[data-testid="session-diff-file"]');
+			const errors = group.locator('[data-testid="session-diff-error"]');
+			await expect(group.getByRole("heading")).toHaveText(name);
+			if (path === undefined) {
+				await expect(errors).toHaveText(error ?? "");
+				await expect(rows).toHaveCount(0);
+			} else {
+				await expect(rows).toHaveAttribute("data-path", path);
+				await expect(errors).toHaveCount(0);
+			}
+		},
+	},
+	{
+		name: "diff row label",
+		match: /^the (\S+) diff is labelled "([^"]+)"$/,
+		run: async ({ world, match }) => {
+			await expect(
+				row(world.page, match[1] ?? "").getByTestId("session-diff-label"),
+			).toHaveText(match[2] ?? "");
+		},
+	},
+	{
+		name: "patchless diff row",
+		match: /^the (\S+) diff reads "([^"]+)" without a patch$/,
+		run: async ({ world, match }) => {
+			const path = match[1] ?? "";
+			await expect(row(world.page, path)).toContainText(match[2] ?? "");
+			await settle(world.page);
+			expect(requireFixture(world.page).requested).not.toContain(path);
+		},
+	},
+	{
 		name: "diff without error",
 		match: /^the diff shows no error$/,
 		run: async ({ world }) => {
 			await expect(
 				world.page.locator('[data-testid="session-diff-error"]'),
 			).toHaveCount(0);
+		},
+	},
+	{
+		name: "preview diff file in files",
+		match: /^I preview (\S+) in Files$/,
+		run: async ({ world, match }) => {
+			const { page } = world;
+			const entries = requireFixture(page).files.map(({ path }) => path);
+			requireRpcControl(page).setStubs({
+				GetFileTree: () => ({ projectSlug: "myapp", entries }),
+				GetFileList: ({ path = "." }) => ({
+					projectSlug: "myapp",
+					path,
+					entries: entries.map((name) => ({ name, type: "file", size: 12 })),
+				}),
+				GetFileContent: ({ path = "" }) => ({
+					projectSlug: "myapp",
+					path,
+					content: `// ${path}\n`,
+				}),
+			});
+			const pane = page.locator("#right-pane");
+			if (await pane.isVisible())
+				await pane.getByRole("tab", { name: "Files", exact: true }).click();
+			else await page.getByTestId("views-rail-files").click();
+			const browser = pane.getByRole("button", { name: "File browser" });
+			if (await browser.isVisible()) await browser.click();
+			await pane.locator(".fb-entry", { hasText: match[1] ?? "" }).click();
+			await expect(page.locator("#file-viewer-path")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "reveal previewed file diff",
+		match: /^I open the previewed file's diff$/,
+		run: async ({ world }) => {
+			const { page } = world;
+			revealMarks.set(page, requireRpcControl(page).getRequests().length);
+			await page
+				.locator("#file-viewer")
+				.getByRole("button", { name: "Show diff" })
+				.click();
+		},
+	},
+	{
+		name: "open diff link",
+		match: /^I open the diff link for (\S+) in (?:the (\S+) scope|(\S+))$/,
+		run: async ({ world, match }) => {
+			const [, path = "", scope, folder] = match;
+			const url = new URL(world.page.url());
+			url.searchParams.set("diffPath", path);
+			url.searchParams.set("diffReveal", "link");
+			if (scope) url.searchParams.set("diff", scope);
+			if (folder) url.searchParams.set("diffFolder", folder);
+			await world.page.goto(url.toString());
+		},
+	},
+	{
+		name: "diff revealed",
+		match: /^the (\S+) diff is revealed$/,
+		run: async ({ world, match }) => {
+			await expect(rowHeader(world.page, match[1] ?? "")).toBeInViewport();
+		},
+	},
+	{
+		name: "diff revealed in folder",
+		match: /^the (\S+) diff in (\S+) is (revealed|out of view)$/,
+		run: async ({ world, match }) => {
+			const [, path = "", folder = "", seen] = match;
+			const header = row(world.page, path)
+				.and(world.page.locator(`[data-folder="${folder}"]`))
+				.locator("header");
+			if (seen === "revealed") await expect(header).toBeInViewport();
+			else await expect(header).not.toBeInViewport();
+		},
+	},
+	{
+		name: "diff out of view",
+		match: /^the (\S+) diff is out of view$/,
+		run: async ({ world, match }) => {
+			await expect(rowHeader(world.page, match[1] ?? "")).not.toBeInViewport();
+		},
+	},
+	{
+		name: "diff selection in url",
+		match: /^the URL holds the (\S+) diff selection$/,
+		run: async ({ world, match }) => {
+			await expect
+				.poll(() => {
+					const params = new URL(world.page.url()).searchParams;
+					return {
+						path: params.get("diffPath"),
+						reveal: Boolean(params.get("diffReveal")),
+						scope: params.get("diff"),
+					};
+				})
+				.toEqual({ path: match[1], reveal: true, scope: null });
+		},
+	},
+	{
+		name: "reveal stays on this device",
+		match: /^revealing the diff sent the daemon only diff reads$/,
+		run: async ({ world }) => {
+			const { page } = world;
+			await settle(page);
+			const tags = requireRpcControl(page)
+				.getRequests()
+				.slice(revealMarks.get(page))
+				.map(({ tag }) => tag);
+			expect(
+				tags.filter(
+					(tag) =>
+						tag !== "SessionDiffList" &&
+						tag !== "SessionDiffFile" &&
+						tag !== "SubscribeSessionDiff",
+				),
+			).toEqual([]);
+		},
+	},
+	{
+		name: "browser back",
+		match: /^I go back in the browser$/,
+		run: async ({ world }) => {
+			await world.page.goBack();
 		},
 	},
 ];

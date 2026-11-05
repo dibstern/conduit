@@ -18,7 +18,7 @@ import {
 import { RelayError } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { readPublishedWorkspaceMissing } from "../../../persistence/effect/session-git-publication.js";
-import { recordedBranchForFolder } from "../../../persistence/effect/session-worktree-ownership.js";
+import { recordedOwnershipForFolder } from "../../../persistence/effect/session-worktree-ownership.js";
 import { labelProjectFolders } from "../../../project-folders.js";
 import { effectiveWorkingDirectory } from "../../../session/session-workspace.js";
 import { readWorkspaceFolders } from "../../../session/workspace-directories.js";
@@ -238,11 +238,11 @@ export const recreateSessionWorktrees = (sessionId: string) =>
 				);
 				yield* worktrees.recreateAll(
 					folders.map(([path, directory]) => {
-						const recordedBranch = recordedBranchForFolder(
+						const recordedBranch = recordedOwnershipForFolder(
 							ownership,
 							path,
 							directory,
-						);
+						)?.branchName;
 						return {
 							folder: { path, projectSlug: config.slug, sessionId },
 							directory,
@@ -318,7 +318,8 @@ export const inspectSessionWorktree = (
 									},
 									directory,
 									allEntries.map(([folder]) => folder),
-									recordedBranchForFolder(recorded, folder, directory),
+									recordedOwnershipForFolder(recorded, folder, directory)
+										?.branchName,
 								)
 								.pipe(
 									Effect.catch((error) =>

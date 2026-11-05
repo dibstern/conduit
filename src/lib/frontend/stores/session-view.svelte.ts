@@ -3,6 +3,7 @@
 
 import { tick, untrack } from "svelte";
 import { classifyDuoPose, type DuoPose } from "../utils/duo-pose.js";
+import { DIFF_PATH_PARAM, getCurrentSearchParams } from "./router.svelte.js";
 
 /**
  * 767px is Tailwind's `md` breakpoint minus one, so this agrees with every
@@ -188,7 +189,13 @@ export function noteSessionChanged(sessionId: string | null = null): void {
 			: undefined;
 	const opening = arrival?.sessionId === sessionId ? arrival.view : undefined;
 	arrival = undefined;
-	sessionViewState.rightPaneView = opening ?? memory?.view ?? "closed";
+	// A reveal in the URL came from a link or a reload, so it opens the Diff
+	// pane on any device, ahead of this one's memory.
+	sessionViewState.rightPaneView =
+		opening ??
+		(getCurrentSearchParams().has(DIFF_PATH_PARAM)
+			? "diff"
+			: (memory?.view ?? "closed"));
 	sessionViewState.filePreview = null;
 	sessionViewState.rightPaneWidth = memory?.width ?? null;
 	sessionViewState.rightPaneExpanded = false;

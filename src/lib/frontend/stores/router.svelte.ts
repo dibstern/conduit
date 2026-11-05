@@ -34,6 +34,13 @@ export const SCOPE_PARAM = "p";
 export const DRAFT_PROJECT_PARAM = "project";
 export const STATUS_PARAM = "status";
 export const GROUP_PARAM = "group";
+/** The Diff pane's selection: its scope (`?diff=`) and the file it was last
+ *  asked to reveal. Read and written through stores/diff-selection.ts; declared
+ *  here because arriving at a session reads it to choose the pane. */
+export const DIFF_SCOPE_PARAM = "diff";
+export const DIFF_PATH_PARAM = "diffPath";
+export const DIFF_FOLDER_PARAM = "diffFolder";
+export const DIFF_REVEAL_PARAM = "diffReveal";
 
 /**
  * Keeps sidebar list parameters across a move to another page that names no query of its

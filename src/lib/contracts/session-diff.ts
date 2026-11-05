@@ -1,8 +1,15 @@
 import { Schema } from "effect";
 
-/** Which change set a Session Diff shows. Branch, turn and tool-call scopes extend this union. */
+/** Which change set a Session Diff shows. Tool-call scopes extend this union. */
 export const SessionDiffScopeSchema = Schema.Union([
 	Schema.Struct({ kind: Schema.Literal("unstaged") }),
+	/** The merge-base of base and HEAD against the live working tree; null base is the launch base. */
+	Schema.Struct({
+		kind: Schema.Literal("branch"),
+		base: Schema.NullOr(Schema.String),
+	}),
+	/** One finished turn's captured changes; `turnId` is the durable turns.id. */
+	Schema.Struct({ kind: Schema.Literal("turn"), turnId: Schema.String }),
 ]);
 export type SessionDiffScope = typeof SessionDiffScopeSchema.Type;
 
@@ -26,6 +33,12 @@ const fileFields = {
 	after: Schema.NullOr(Schema.String),
 	/** The larger side's size. */
 	bytes: Schema.Number,
+	/** A path that holds a Git LFS file, a submodule's commit or a symlink's target, not text. */
+	kind: Schema.optional(Schema.Literals(["lfs", "submodule", "symlink"])),
+	/** Git file modes, when both sides exist and they differ. */
+	mode: Schema.optional(
+		Schema.Struct({ before: Schema.String, after: Schema.String }),
+	),
 };
 
 /** A tooLarge file carries no line counts: git never diffs it. */
@@ -41,11 +54,29 @@ export const SessionDiffFileSchema = Schema.Union([
 ]);
 export type SessionDiffFile = typeof SessionDiffFileSchema.Type;
 
+/** The base a branch scope compared against; fallback names the preferred base it could not use. */
+export const SessionDiffBaseSchema = Schema.Struct({
+	/** A ref, the launch commit, or HEAD. */
+	ref: Schema.String,
+	source: Schema.Literals(["override", "launch", "default", "head"]),
+	fallback: Schema.optional(
+		Schema.Struct({
+			wanted: Schema.String,
+			reason: Schema.Literals(["missing", "shallow", "unrelated"]),
+		}),
+	),
+});
+export type SessionDiffBase = typeof SessionDiffBaseSchema.Type;
+
 /** `folder` is the Project Folder root, as in the file RPCs. */
 export const SessionDiffFolderSchema = Schema.Union([
 	Schema.Struct({
 		folder: Schema.String,
 		files: Schema.Array(SessionDiffFileSchema),
+		/** Branch scope only. */
+		base: Schema.optional(SessionDiffBaseSchema),
+		/** Turn scope: another session ran in this folder during the turn. */
+		shared: Schema.optionalKey(Schema.Literal(true)),
 	}),
 	Schema.Struct({
 		folder: Schema.String,
@@ -58,8 +89,20 @@ export type SessionDiffFolder = typeof SessionDiffFolderSchema.Type;
 export const SessionDiffListingSchema = Schema.Struct({
 	revision: Schema.String,
 	folders: Schema.Array(SessionDiffFolderSchema),
+	/** Turn scope: the turn's run has no capture, so it lists no folders. */
+	notCaptured: Schema.optionalKey(Schema.Literal(true)),
 });
 export type SessionDiffListing = typeof SessionDiffListingSchema.Type;
+
+/**
+ * One file's patch. `crlf`: its lines end in CRLF, which renders invisibly.
+ * `latin1`: it is not UTF-8, so each byte was decoded as one Latin-1 character.
+ */
+export const SessionDiffPatchSchema = Schema.Struct({
+	patch: Schema.String,
+	notes: Schema.optional(Schema.Array(Schema.Literals(["crlf", "latin1"]))),
+});
+export type SessionDiffPatch = typeof SessionDiffPatchSchema.Type;
 
 /** Gone means the listing's snapshot was forgotten or collected: re-list. */
 export class SessionDiffError extends Schema.TaggedError<SessionDiffError>()(

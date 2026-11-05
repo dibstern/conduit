@@ -115,6 +115,7 @@ export {
 	SetLogLevel,
 	SetPinRejected,
 	SetSessionArchived,
+	SetSessionDiffBase,
 	SetSessionJev,
 	SetSessionPinned,
 	SetSessionSettled,

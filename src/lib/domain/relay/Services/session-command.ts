@@ -343,6 +343,7 @@ type SessionCommandType =
 	| "session.snoozed"
 	| "session.auto_settle_set"
 	| "session.jev_set"
+	| "session.diff_base_set"
 	| "session.unsnoozed"
 	| "session.deleted"
 	| "session.provider_changed"
@@ -437,6 +438,7 @@ export const openCodeUpstreamAdapter = (
 			case "session.snoozed":
 			case "session.auto_settle_set":
 			case "session.jev_set":
+			case "session.diff_base_set":
 			case "session.unsnoozed":
 			case "session.provider_changed":
 			case "session.workspace_changed":

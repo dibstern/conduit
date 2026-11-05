@@ -19,6 +19,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Emitted at the runtime input acceptance boundary",
 	},
+	"run.changes_captured": {
+		produced: false,
+		reason: "Recorded by the Folder Timeline's run-end checkpoint",
+	},
 	"message.created": { produced: true },
 	"text.delta": { produced: true },
 	"text.surfaced": {
@@ -196,6 +200,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 	"session.jev_set": {
 		produced: false,
 		reason: "Relay-owned Jev preference",
+	},
+	"session.diff_base_set": {
+		produced: false,
+		reason: "Relay-owned diff base preference",
 	},
 	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
 	"permission.asked": {

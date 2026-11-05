@@ -1037,19 +1037,23 @@ export const SessionInboxLive = Layer.effect(
 						if (view.known) return { _tag: "Accepted" as const, events: [] };
 						// Busy and approval-blocked inputs may never reach runner execution.
 						yield* admits(input.sessionId, view.provider);
-						const refs = input.draft
+						const { refs, reviewContext, hashes } = input.draft
 							? yield* drafts.takeForSend(
 									input.draft.key,
 									input.draft.attachmentIds,
 								)
-							: [];
-						const request =
-							refs.length > 0
-								? {
-										...input.request,
-										images: [...(input.request.images ?? []), ...refs],
-									}
-								: input.request;
+							: { refs: [], reviewContext: "", hashes: [] };
+						const request = {
+							...input.request,
+							...(refs.length > 0 && {
+								images: [...(input.request.images ?? []), ...refs],
+							}),
+							...(reviewContext && {
+								text: [input.request.text, reviewContext]
+									.filter(Boolean)
+									.join("\n\n"),
+							}),
+						};
 						const decision = decideInbox(input.sessionId, view, {
 							_tag: "Submit",
 							inputId: input.inputId,
@@ -1062,9 +1066,9 @@ export const SessionInboxLive = Layer.effect(
 							? drafts.sendChange(
 									input.draft.key,
 									input.sessionId,
-									input.draft.text ?? request.text,
+									input.draft.text ?? input.request.text,
 									input.draft.attachmentIds,
-									refs,
+									hashes,
 								)
 							: undefined;
 						const delayMs =

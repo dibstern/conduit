@@ -1,6 +1,6 @@
 <!-- One file of a session diff: asks for its patch by size tier and renders it with @pierre/diffs. -->
 <script module lang="ts">
-	import { FileDiff, parsePatchFiles } from "@pierre/diffs";
+	import { FileDiff, parsePatchFiles, type SelectedLineRange } from "@pierre/diffs";
 	import { getOrCreateWorkerPoolSingleton } from "@pierre/diffs/worker";
 	import DiffsWorker from "@pierre/diffs/worker/worker.js?worker";
 
@@ -11,31 +11,76 @@
 			poolOptions: { workerFactory: () => new DiffsWorker(), poolSize: 2 },
 			highlighterOptions: { theme, tokenizeMaxLineLength: 1000 },
 		});
+	const kindLabel = { lfs: "Git LFS", submodule: "Submodule", symlink: "Symlink" } as const;
+	const noteLabel = { crlf: "CRLF", latin1: "Not UTF-8 (Latin-1)" } as const;
 </script>
 
 <script lang="ts">
 	import { untrack } from "svelte";
+	import { REVIEW_EXCERPT_MAX_CHARS, REVIEW_TEXT_MAX_CHARS } from "../../../contracts/review-comment.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import type { DiffRow } from "../../stores/session-diff.svelte.js";
 	import { openFileViewer } from "../../stores/session-view.svelte.js";
 	import { themeState } from "../../stores/theme.svelte.js";
+	import { failureLine } from "../../transport/rpc-errors.js";
+	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { formatFileSize } from "../../utils/format.js";
+	import { reviewExcerpt } from "../../utils/review-excerpt.js";
+	import Button from "../ui/Button.svelte";
+	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
 
-	const { row }: { row: DiffRow } = $props();
+	// `reveal` changes each time this file is asked for, from a link, Back or a click.
+	const { row, reveal }: { row: DiffRow; reveal?: string | null | undefined } = $props();
 	const { folder, file } = $derived(row);
 	const patch = $derived(row.patch.kind === "ready" ? row.patch.patch : null);
+	const labels = $derived([
+		...(file.kind ? [kindLabel[file.kind]] : []),
+		...(file.mode ? [`${file.mode.before} → ${file.mode.after}`] : []),
+		...(row.patch.kind === "ready" ? (row.patch.notes ?? []).map((note) => noteLabel[note]) : []),
+	]);
+	// Git's patch for these is a hash, a commit pair or only a header, so the row says what changed instead.
+	const patchless = $derived(
+		file.tier === "tooLarge" ||
+			file.binary ||
+			file.kind === "lfs" ||
+			file.kind === "submodule" ||
+			file.before === file.after,
+	);
 
 	let visible = $state(false);
 	let clicked = $state(false);
 	let host = $state<HTMLDivElement>();
+	let section = $state<HTMLElement>();
 	let view: FileDiff | undefined;
+	// The lines picked for a review comment, and the comment being written.
+	let selection = $state<SelectedLineRange | null>(null);
+	let comment = $state("");
+	let commentError = $state("");
+	let saving = $state(false);
+	const side = $derived(selection?.side ?? "additions");
+	const endSide = $derived(selection?.endSide ?? side);
+	// One side's numbers sort; numbers from the old and new file do not, so they keep selection order.
+	const lines = $derived(
+		selection &&
+			(endSide === side
+				? { start: Math.min(selection.start, selection.end), end: Math.max(selection.start, selection.end) }
+				: { start: selection.start, end: selection.end }),
+	);
 
 	const wanted = $derived(
-		file.tier === "tooLarge" || file.binary ? false : file.tier === "auto" ? visible : clicked,
+		patchless ? false : file.tier === "auto" ? visible : clicked,
 	);
 
 	$effect(() => {
 		if (wanted && row.patch.kind === "idle") row.load();
+	});
+
+	// A reveal scrolls here and counts as the click a long diff waits for.
+	$effect(() => {
+		if (reveal === undefined || !section) return;
+		clicked = true;
+		return holdAtTop(section);
 	});
 
 	$effect(() => {
@@ -51,6 +96,12 @@
 				diffStyle: "unified",
 				overflow: "scroll",
 				disableFileHeader: true,
+				enableLineSelection: true,
+				onLineSelectionEnd: (range) => {
+					if (saving) return;
+					selection = range;
+					commentError = "";
+				},
 			},
 			workerPool(),
 		);
@@ -67,9 +118,69 @@
 		view?.setThemeType(type);
 	});
 
+	/**
+	 * Keeps a revealed row at the top of the pane while the rows around it load
+	 * and resize, until the pane is scrolled from there. Only the pane scrolls,
+	 * never the page around it. Rows sit inside folder groups, so the pane is
+	 * found, not assumed to be the row's parent; its children are those groups.
+	 */
+	function holdAtTop(node: HTMLElement) {
+		const pane = node.closest<HTMLElement>('[data-testid="session-diff"]');
+		if (!pane) return;
+		let held = pane.scrollTop;
+		const sizes = new ResizeObserver(() => {
+			pane.scrollTop += node.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+			held = pane.scrollTop;
+		});
+		for (const child of pane.children) sizes.observe(child);
+		const release = () => {
+			if (Math.abs(pane.scrollTop - held) > 1) stop();
+		};
+		const stop = () => {
+			sizes.disconnect();
+			pane.removeEventListener("scroll", release);
+		};
+		pane.addEventListener("scroll", release, { passive: true });
+		return stop;
+	}
+
+	function closeComment() {
+		selection = null;
+		comment = "";
+		view?.setSelectedLines(null);
+	}
+
+	/** The server adds the comment to the session's draft, so every device's composer shows it. */
+	async function addComment(event: SubmitEvent) {
+		event.preventDefault();
+		const sessionId = getCurrentSessionId();
+		if (saving || !selection || !lines || !sessionId || patch === null || !comment.trim()) return;
+		saving = true;
+		try {
+			await rpc("AddDraftReview", {
+				key: { session: sessionId },
+				id: crypto.randomUUID(),
+				review: {
+					folder,
+					path: file.path,
+					side,
+					...(endSide !== side && { endSide }),
+					lines,
+					excerpt: reviewExcerpt(patch, selection).slice(0, REVIEW_EXCERPT_MAX_CHARS),
+					text: comment.trim(),
+				},
+			});
+			closeComment();
+		} catch (error) {
+			commentError = failureLine(error, "Could not add the comment. Try again.");
+		} finally {
+			saving = false;
+		}
+	}
+
 	/** Small diffs load as they near the viewport. */
 	function observe(node: HTMLElement) {
-		if (file.tier !== "auto" || file.binary) return;
+		if (file.tier !== "auto" || patchless) return;
 		const observer = new IntersectionObserver(
 			([entry]) => {
 				if (!entry?.isIntersecting) return;
@@ -83,11 +194,14 @@
 	}
 </script>
 
-<section data-testid="session-diff-file" data-path={file.path} class="border-b border-border-subtle" {@attach observe}>
+<section bind:this={section} data-testid="session-diff-file" data-path={file.path} data-folder={folder} class="border-b border-border-subtle" {@attach observe}>
 	<header class="flex items-center gap-2 px-3 py-1.5 text-xs">
 		<span class="min-w-0 flex-1 truncate font-mono text-text-secondary" title={file.path}>
 			{file.oldPath === undefined ? file.path : `${file.oldPath} → ${file.path}`}
 		</span>
+		{#each labels as label (label)}
+			<span data-testid="session-diff-label" class="shrink-0 text-text-dimmer">{label}</span>
+		{/each}
 		{#if file.tier === "tooLarge"}
 			<span class="shrink-0 text-text-dimmer">{formatFileSize(file.bytes)}</span>
 		{:else if file.binary}
@@ -102,6 +216,14 @@
 			<span>Too large to diff.</span>
 			<TextButton underline="always" class="text-xs" onclick={() => openFileViewer(file.path, folder)}>Open in Files</TextButton>
 		</div>
+	{:else if file.kind === "submodule"}
+		<p class="px-3 pb-2 font-mono text-xs text-text-dimmer">
+			Commit {[file.before, file.after].flatMap((id) => (id ? [id.slice(0, 7)] : [])).join(" → ")}
+		</p>
+	{:else if file.kind === "lfs"}
+		<p class="px-3 pb-2 text-xs text-text-dimmer">Stored in Git LFS.</p>
+	{:else if file.before === file.after}
+		<p class="px-3 pb-2 text-xs text-text-dimmer">No content changes.</p>
 	{:else if file.tier === "onDemand" && !clicked}
 		<div class="flex items-center gap-2 px-3 pb-2 text-xs text-text-dimmer">
 			<span>{file.insertions + file.deletions} changed lines.</span>
@@ -113,6 +235,16 @@
 		<!-- Unloaded rows reserve roughly their patch's height (changed lines plus
 		     context, at pierre's 20px rows), so only nearby rows load and nothing jumps. -->
 		<div bind:this={host} style:min-height={patch === null ? `${(file.insertions + file.deletions + 6) * 20}px` : undefined}></div>
+		{#if lines}
+			<form data-testid="review-comment-form" class="flex flex-col gap-2 px-3 py-2" onsubmit={addComment}>
+				<Textarea bind:value={comment} disabled={saving} size="sm" rows={3} maxlength={REVIEW_TEXT_MAX_CHARS} aria-label="Review comment" placeholder={lines.start === lines.end ? `Comment on line ${lines.start}` : `Comment on lines ${lines.start}–${lines.end}`} />
+				{#if commentError}<p role="alert" class="text-xs text-error">{commentError}</p>{/if}
+				<div class="flex justify-end gap-2">
+					<Button variant="ghost" size="sm" onclick={closeComment}>Cancel</Button>
+					<Button variant="primary" size="sm" type="submit" disabled={saving || !comment.trim()}>Add to message</Button>
+				</div>
+			</form>
+		{/if}
 	{/if}
 </section>
 

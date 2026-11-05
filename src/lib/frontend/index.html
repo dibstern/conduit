@@ -15,6 +15,10 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#111113">
   <title>Conduit</title>
+  <!-- Cascade layers rank by first mention. The build links shared-chunk CSS
+       before style.css, so a component <style> with an @layer would otherwise
+       rank that layer below Tailwind's base reset. -->
+  <style>@layer properties, theme, base, components, utilities;</style>
   <script>
     (() => {
       try {

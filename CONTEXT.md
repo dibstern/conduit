@@ -542,7 +542,12 @@ private bare store per repository under `<configDir>/folder-timeline/` that
 borrows the repository's objects and never writes its index, objects or refs.
 A file's patch is served only for a path and blob pair the listing named;
 once the store collects that snapshot the request answers Gone and the client
-re-lists.
+re-lists. Each folder lists or fails on its own: a deleted, moved or non-git
+folder answers unavailable while the others list. A row whose git patch would
+mislead names what changed instead: a submodule shows its commit pair; a Git
+LFS file (by its `filter=lfs` attribute), a pure rename and a mode-only change
+show no patch; CRLF and non-UTF-8 text is labelled, and non-UTF-8 bytes show
+as Latin-1.
 
 ## Sidebar Overlay
 

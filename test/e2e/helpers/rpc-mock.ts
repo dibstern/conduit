@@ -5,6 +5,7 @@ import { RpcSchema } from "effect/rpc";
 import { DEFAULT_CATEGORY_SET } from "../../../src/lib/contracts/category-set.js";
 import type { UsageReading } from "../../../src/lib/contracts/limit-recovery.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../src/lib/contracts/message-surfacing.js";
+import type { DraftReview } from "../../../src/lib/contracts/review-comment.js";
 import { DEFAULT_TERMINAL_KEYS } from "../../../src/lib/contracts/terminal-keys.js";
 import type { TitleGenerationState } from "../../../src/lib/contracts/title-generation.js";
 import type { Avatar } from "../../../src/lib/contracts/user-avatar.js";
@@ -31,6 +32,7 @@ import {
 	WsRpcError,
 	WsRpcGroup,
 } from "../../../src/lib/contracts/ws-rpc.js";
+import { REVIEW_MIME } from "../../../src/lib/persistence/attachment-store.js";
 import { isRecord } from "../../../src/lib/utils.js";
 import { makeRpcStream, serveRpc } from "../../helpers/rpc-wire.js";
 import type { StubTable } from "../../helpers/stub-ws-rpc.js";
@@ -88,6 +90,7 @@ const isSessionStream = (tag: string): boolean =>
 	tag === "SubscribeSessionDetail" ||
 	tag === "SubscribeSessionPromptIndex" ||
 	tag === "SubscribeSessionTodos" ||
+	tag === "SubscribeSessionDiff" ||
 	tag === "SubscribeInputDraft";
 
 /** Live-only feeds open synchronized, with nothing to replay. */
@@ -497,21 +500,41 @@ export class RpcMockControl {
 		mime: string,
 		dataUrl: string,
 	): { attachment: DraftAttachment } {
+		return this.saveDraftAttachment(
+			key,
+			{ id, name, mime },
+			Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64"),
+		);
+	}
+
+	addDraftReview(
+		key: DraftKey,
+		id: string,
+		review: DraftReview,
+	): { attachment: DraftAttachment } {
+		return this.saveDraftAttachment(
+			key,
+			{ id, name: review.path, mime: REVIEW_MIME, review },
+			Buffer.from(JSON.stringify(review)),
+		);
+	}
+
+	private saveDraftAttachment(
+		key: DraftKey,
+		saved: Omit<DraftAttachment, "size" | "hash">,
+		bytes: Buffer,
+	): { attachment: DraftAttachment } {
 		const keyId = draftKeyId(key);
 		const attachments = this.draftAttachments.get(keyId) ?? [];
-		const existing = attachments.find((item) => item.id === id);
+		const existing = attachments.find((item) => item.id === saved.id);
 		if (existing) return { attachment: existing };
-		const bytes = Buffer.from(
-			dataUrl.slice(dataUrl.indexOf(",") + 1),
-			"base64",
-		);
 		const hash = createHash("sha256")
-			.update(mime)
+			.update(saved.mime)
 			.update(Buffer.from([0]))
 			.update(bytes)
 			.digest("hex");
-		const attachment = { id, name, mime, size: bytes.length, hash };
-		this.attachmentData.set(hash, { mime, bytes });
+		const attachment = { ...saved, size: bytes.length, hash };
+		this.attachmentData.set(hash, { mime: saved.mime, bytes });
 		this.draftAttachments.set(keyId, [...attachments, attachment]);
 		this.sendInputDraft(key, this.inputDrafts.get(keyId) ?? { text: "" });
 		return { attachment };
@@ -1294,6 +1317,8 @@ export async function mockWsRpc(
 		},
 		AddDraftAttachment: ({ key, id, name, mime, dataUrl }) =>
 			control.addDraftAttachment(key, id, name, mime, dataUrl),
+		AddDraftReview: ({ key, id, review }) =>
+			control.addDraftReview(key, id, review),
 		RemoveDraftAttachment: ({ key, id }) =>
 			control.removeDraftAttachment(key, id),
 		ViewSession: () => ({ ok: true }),

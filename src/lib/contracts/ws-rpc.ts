@@ -29,6 +29,7 @@ import {
 import {
 	SessionDiffError,
 	SessionDiffListingSchema,
+	SessionDiffPatchSchema,
 	SessionDiffScopeSchema,
 } from "./session-diff.js";
 import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
@@ -81,6 +82,7 @@ import {
 	ProviderDriverKindSchema,
 	ProviderSessionCapabilitiesSchema,
 } from "./provider-instance.js";
+import { DraftReviewSchema } from "./review-comment.js";
 import {
 	SessionWorktreeInspectionSchema,
 	WorkspaceMoveError,
@@ -2395,6 +2397,16 @@ export const SetSessionJev = Rpc.make("SetSessionJev", {
 	error: WsRpcError,
 });
 
+export const SetSessionDiffBase = Rpc.make("SetSessionDiffBase", {
+	payload: Schema.TaggedStruct("SetSessionDiffBase", {
+		sessionId: NonEmptyString,
+		base: Schema.NullOr(NonEmptyString),
+		originId: Schema.optional(NonEmptyString),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const SnoozeSession = Rpc.make("SnoozeSession", {
 	payload: Schema.TaggedStruct("SnoozeSession", {
 		sessionId: NonEmptyString,
@@ -2663,9 +2675,19 @@ export const SessionDiffList = Rpc.make("SessionDiffList", {
 	payload: Schema.TaggedStruct("SessionDiffList", {
 		sessionId: NonEmptyString,
 		scope: SessionDiffScopeSchema,
+		// A pushed revision: answered from that snapshot when still remembered.
+		revision: Schema.optional(NonEmptyString),
 	}),
 	success: SessionDiffListingSchema,
 	error: WsRpcError,
+});
+
+/** Each new revision of a live (session, scope); held only while a view shows it. */
+export const SubscribeSessionDiff = Rpc.make("SubscribeSessionDiff", {
+	payload: { sessionId: NonEmptyString, scope: SessionDiffScopeSchema },
+	success: Schema.Struct({ revision: NonEmptyString }),
+	error: WsRpcError,
+	stream: true,
 });
 
 /** Serves only a file the listing named, by its folder, path and blob pair. */
@@ -2679,7 +2701,7 @@ export const SessionDiffFile = Rpc.make("SessionDiffFile", {
 		before: Schema.NullOr(Schema.String),
 		after: Schema.NullOr(Schema.String),
 	}),
-	success: Schema.Struct({ patch: Schema.String }),
+	success: SessionDiffPatchSchema,
 	error: Schema.Union([WsRpcError, SessionDiffError]),
 });
 
@@ -3080,6 +3102,8 @@ export const DraftAttachmentSchema = Schema.Struct({
 	mime: Schema.String,
 	size: Schema.Number,
 	hash: Schema.String,
+	/** Present exactly when the attachment is a review comment. */
+	review: Schema.optional(DraftReviewSchema),
 });
 export type DraftAttachment = typeof DraftAttachmentSchema.Type;
 
@@ -3097,6 +3121,18 @@ export const AddDraftAttachment = Rpc.make("AddDraftAttachment", {
 		Schema.Struct({ ended: Schema.Literals(["removed", "sent"]) }),
 	]),
 	error: Schema.Union([WsRpcError, DraftAttachmentRejected]),
+});
+
+/** A review comment joins the draft as an attachment; removal is RemoveDraftAttachment. */
+export const AddDraftReview = Rpc.make("AddDraftReview", {
+	payload: Schema.TaggedStruct("AddDraftReview", {
+		key: InputDraftKeySchema,
+		id: NonEmptyString,
+		review: DraftReviewSchema,
+		projectSlug: Schema.optional(NonEmptyString),
+	}),
+	success: AddDraftAttachment.successSchema,
+	error: WsRpcError,
 });
 
 export const RemoveDraftAttachment = Rpc.make("RemoveDraftAttachment", {
@@ -3524,6 +3560,7 @@ const wsRpcRequests = [
 	SetSessionPinned,
 	SetSessionAutoSettle,
 	SetSessionJev,
+	SetSessionDiffBase,
 	GetSessionAutoSettleOutlook,
 	SnoozeSession,
 	UnsnoozeSession,
@@ -3723,6 +3760,7 @@ const wsRpcRequests = [
 	SendInputNow,
 	SyncInputDraft,
 	AddDraftAttachment,
+	AddDraftReview,
 	RemoveDraftAttachment,
 	CancelSession,
 	StopTasks,
@@ -4141,6 +4179,7 @@ export const WsRpcGroup = RpcGroup.make(
 	SubscribeSessionPromptIndex,
 	SubscribeSessionTodos,
 	SubscribeSessionFamily,
+	SubscribeSessionDiff,
 	SubscribePtys,
 	SubscribeApprovals,
 	SubscribeProjectSettings,

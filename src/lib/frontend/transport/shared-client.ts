@@ -31,6 +31,7 @@ import {
 } from "effect";
 import { RpcClient, RpcSerialization } from "effect/rpc";
 import { Socket } from "effect/socket";
+import type { SessionDiffScope } from "../../contracts/session-diff.js";
 import type {
 	InputDraftKey,
 	SessionDetailEnvelope,
@@ -83,6 +84,11 @@ const makeSubscriptions = (
 	/** Cached snapshots, including an automatic recap finishing after the turn. */
 	recaps: (options: { readonly sessionId: string; readonly turnId: string }) =>
 		resumeStream(() => sockets.control("SubscribeRecaps", options)),
+	/** A live Session Diff scope's revisions; each (re)subscribe opens with the current one. */
+	sessionDiff: (options: {
+		readonly sessionId: string;
+		readonly scope: SessionDiffScope;
+	}) => resumeStream(() => sockets.control("SubscribeSessionDiff", options)),
 	/** The session list. Low-rate, so it rides the control socket. */
 	shell: (
 		options: {

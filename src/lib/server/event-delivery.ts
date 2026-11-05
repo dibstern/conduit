@@ -137,6 +137,8 @@ export const subscriptionAudiences = {
 				}),
 			),
 		),
+	SubscribeSessionDiff: (request, producer) =>
+		sessionAudience(request.sessionId, producer),
 	SubscribePtys: projectAudience,
 	// Asks and alerts are the daemon's: every project's reach every tab (82tn.13).
 	SubscribeApprovals: globalAudience,

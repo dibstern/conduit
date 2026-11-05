@@ -59,6 +59,7 @@ import {
 	SESSIONS_ARCHIVED_MIGRATION,
 	SESSIONS_AUTO_SETTLE_MIGRATION,
 	SESSIONS_CLAUDE_WORKTREE_STATE_MIGRATION,
+	SESSIONS_DIFF_BASE_MIGRATION,
 	SESSIONS_FORKED_FROM_MIGRATION,
 	SESSIONS_GOAL_STUCK_MIGRATION,
 	SESSIONS_HISTORY_COMPLETE_MIGRATION,
@@ -536,6 +537,7 @@ const appendedSessionColumns = [
 	"unarchived_at",
 	"goal_stuck",
 	"jev",
+	"diff_base",
 ] as const;
 
 function sameStrings(
@@ -1893,6 +1895,11 @@ export const effectMigrationEntries = {
 			}
 		}
 	}),
+	"0095_sessions_diff_base": runAddColumnMigrationIfMissing(
+		"sessions",
+		"diff_base",
+		readMigrationSql(SESSIONS_DIFF_BASE_MIGRATION),
+	),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>

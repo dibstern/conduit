@@ -114,7 +114,7 @@ describe("SubscribeInputDraft", () => {
 				expect(yield* drafts.read({ session: "retry" })).toBe("original text");
 				expect(
 					yield* drafts.takeForSend({ session: "retry" }, ["live"]),
-				).toMatchObject([{ name: "image.png" }]);
+				).toMatchObject({ refs: [{ name: "image.png" }] });
 			}).pipe(Effect.provide(makeLayer(), { local: true })),
 	);
 

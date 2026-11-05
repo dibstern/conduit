@@ -413,6 +413,18 @@ export const conversationHandlers = {
 						: mapRpcFailure("AddDraftAttachment")(error),
 			),
 		),
+	AddDraftReview: (request) =>
+		Effect.gen(function* () {
+			const drafts = yield* InputDraftsTag;
+			const projectId =
+				"draft" in request.key ? (yield* ConfigTag).slug : undefined;
+			return yield* drafts.addReview(
+				request.key,
+				request.id,
+				request.review,
+				projectId,
+			);
+		}).pipe(Effect.catch(mapRpcFailure("AddDraftReview"))),
 	RemoveDraftAttachment: (request) =>
 		Effect.gen(function* () {
 			const drafts = yield* InputDraftsTag;
@@ -460,6 +472,7 @@ export const conversationHandlers = {
 	| "input.sendNow"
 	| "SyncInputDraft"
 	| "AddDraftAttachment"
+	| "AddDraftReview"
 	| "RemoveDraftAttachment"
 	| "CancelSession"
 	| "SetGoal"

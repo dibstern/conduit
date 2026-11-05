@@ -632,6 +632,28 @@ export const setSessionJevForClient = ({
 		}
 	});
 
+export const setSessionDiffBaseForClient = ({
+	clientId,
+	sessionId,
+	base,
+}: {
+	readonly clientId: string;
+	readonly sessionId: string;
+	readonly base: string | null;
+}) =>
+	Effect.gen(function* () {
+		const service = yield* projectSessionManager;
+		const log = yield* LoggerTag;
+		if (yield* service.setSessionDiffBase(sessionId, base)) {
+			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
+			if (bus._tag === "Some")
+				yield* PubSub.publish(bus.value, DaemonEvent.DaemonSessionsChanged());
+			log.info(
+				`client=${clientId} Set diff base=${base ?? "launch"}: ${sessionId}`,
+			);
+		}
+	});
+
 export const snoozeSessionForClient = ({
 	clientId,
 	sessionId,

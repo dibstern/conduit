@@ -72,6 +72,7 @@
 	import ActivityStrip from "./ActivityStrip.svelte";
 	import TurnLog from "./TurnLog.svelte";
 	import TurnShowBar from "./TurnShowBar.svelte";
+	import TurnDiff from "../diff/TurnDiff.svelte";
 	import TurnUsage from "./TurnUsage.svelte";
 	import TurnQa from "./TurnQa.svelte";
 	import { turnLog } from "../../utils/turns.js";
@@ -717,7 +718,12 @@
 				{/if}
 			{/snippet}
 		</TurnLog>
-		{#if !minimised}<TurnShowBar {panel} {counts} {bill} running={final ? running.size : 0} onlevelchange={followLatest} />{/if}
+		{#if !minimised}
+			<TurnShowBar {panel} {counts} {bill} running={final ? running.size : 0} onlevelchange={followLatest}>
+				<!-- A live run's capture is not recorded until it ends. -->
+				{#snippet changes()}{#if !live && sessionId && storeTurnId}<TurnDiff {sessionId} turnId={storeTurnId} />{/if}{/snippet}
+			</TurnShowBar>
+		{/if}
 		</div>
 	</div>
 </div>
