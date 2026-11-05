@@ -42,6 +42,28 @@
 		showBanner && uiState.rewindSelectedUuid !== null,
 	);
 
+	const selectedMessageId = $derived.by(() => {
+		const message = chatState.messages.find((message) => message.uuid === uiState.rewindSelectedUuid);
+		return message && "messageId" in message ? message.messageId : undefined;
+	});
+	// Rewind moves only the conversation, so a pruned point stays a valid target.
+	let filesPruned = $state(false);
+	$effect(() => {
+		const sessionId = sessionState.currentId;
+		const messageId = selectedMessageId;
+		filesPruned = false;
+		if (!showModal || !sessionId || !messageId) return;
+		let current = true;
+		rpc("GetHeadMoveFiles", { sessionId, messageId })
+			.then(({ files }) => {
+				if (current) filesPruned = files === "pruned";
+			})
+			.catch(() => {});
+		return () => {
+			current = false;
+		};
+	});
+
 	function handleExit(): void {
 		exitRewindMode();
 	}
@@ -166,7 +188,11 @@
 				This message and everything after it will be removed. You can undo until you send your next message.
 			</p>
 			<p class="mb-5 text-sm text-text-secondary">
-				{restoresFiles ? "Files are restored to this point." : "Files are not restored."}
+				{filesPruned
+					? "Files from this point were pruned."
+					: restoresFiles
+						? "Files are restored to this point."
+						: "Files are not restored."}
 			</p>
 
 			<!-- Action buttons -->
