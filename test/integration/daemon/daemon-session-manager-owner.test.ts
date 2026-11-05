@@ -7,7 +7,9 @@
  *    threads, session count) until the next list;
  * 14 removing a project leaves its manager state in the daemon, so a project
  *    added again under the same slug reads the old caches;
- *  1 one owner serving two projects mixes their state.
+ *  1 one owner serving two projects mixes their state;
+ * 22 a session scope that cannot open for a reason other than a delete (an
+ *    unregistered project, a directory read error) still lets the write land.
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -23,6 +25,7 @@ import { NodePath } from "@effect/platform-node";
 import {
 	Context,
 	Effect,
+	Exit,
 	HashMap,
 	Layer,
 	ManagedRuntime,
@@ -325,6 +328,32 @@ describe("daemon-owned session manager state", () => {
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({ deleted: true, activity: {}, parents: {} });
+	});
+
+	it("fails a write whose session scope cannot open, unless the session has no row yet", async () => {
+		const daemon = await start("hold-fails-closed");
+		await daemon.register("alpha");
+		const alpha = await daemon.relay("alpha");
+		// beta is never registered, so its session's scope cannot open.
+		const beta = await daemon.relay("beta");
+		await daemon.sessions(beta, { id: "stray" });
+		const write = (sessionId: string) =>
+			daemon.manager(alpha, (service) =>
+				service
+					.recordMessageActivity(sessionId, 1_000)
+					.pipe(Effect.exit, Effect.map(Exit.isSuccess)),
+			);
+		const observed = {
+			unborn: await write("unborn"),
+			stray: await write("stray"),
+			activity: await daemon.activity(alpha),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			unborn: true,
+			stray: false,
+			activity: { unborn: 1_000 },
+		});
 	});
 
 	it("closes every session a delete removes and none a declined delete keeps", async () => {

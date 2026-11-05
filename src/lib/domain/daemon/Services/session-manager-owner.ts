@@ -1,4 +1,6 @@
 import { Context, Effect, Layer, Ref, Semaphore } from "effect";
+import { SqlClient } from "effect/sql";
+import { SessionManagerError } from "../../relay/Services/session-manager-error.js";
 import {
 	emptySessionManagerState,
 	forgetSession,
@@ -35,6 +37,7 @@ export const SessionManagerOwnerLive = Layer.effect(
 	SessionManagerOwner,
 	Effect.gen(function* () {
 		const owners = yield* OwnerScopes;
+		const sql = yield* SqlClient.SqlClient;
 		const projects = new Map<string, ProjectSessionManager>();
 		const lock = yield* Semaphore.make(1);
 		return {
@@ -73,8 +76,25 @@ export const SessionManagerOwnerLive = Layer.effect(
 													Effect.catchTag("OwnerScopeClosedError", () =>
 														Effect.succeed(false),
 													),
-													// No row yet (or no provenance): write as a relay would.
-													Effect.catch(() => Effect.succeed(true)),
+													// No row yet: write as a relay would. Anything else fails the write.
+													Effect.catchTag(
+														"OwnerScopeProvenanceError",
+														(error) =>
+															sql`SELECT 1 FROM sessions WHERE id = ${sessionId}`.pipe(
+																Effect.flatMap((rows) =>
+																	rows.length === 0
+																		? Effect.succeed(true)
+																		: Effect.fail(error),
+																),
+															),
+													),
+													Effect.mapError(
+														(cause) =>
+															new SessionManagerError({
+																operation: "holdSession",
+																cause,
+															}),
+													),
 												);
 									const created = {
 										state,

@@ -832,12 +832,15 @@ export interface SessionManagerService {
 	 * does this itself; fork callers call it once the fork commits. False once
 	 * the session was deleted.
 	 */
-	holdSession(sessionId: string): Effect.Effect<boolean>;
+	holdSession(sessionId: string): Effect.Effect<boolean, SessionManagerError>;
 	recordMessageActivity(
 		sessionId: string,
 		timestamp?: number,
-	): Effect.Effect<void>;
-	addToParentMap(childId: string, parentId: string): Effect.Effect<void>;
+	): Effect.Effect<void, SessionManagerError>;
+	addToParentMap(
+		childId: string,
+		parentId: string,
+	): Effect.Effect<void, SessionManagerError>;
 	getSessionParentMap(options?: {
 		readonly activityOnly?: boolean;
 	}): Effect.Effect<Map<string, string>>;
