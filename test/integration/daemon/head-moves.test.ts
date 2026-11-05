@@ -5,6 +5,8 @@
 // 11. a second restart moves the rows again or sends the resend again;
 // 2, 4. desktop and phone confirming the same proposal get two moves, two resends, different
 //    receipts, or the second is refused as stale.
+// 5. an undo pops the entry it undoes, or cannot itself be undone; the next send after a chain of
+//    moves tells the provider the wrong cut.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -79,6 +81,24 @@ const openSends = (harness: ProcessHarness, sessionId: string) => {
 	} finally {
 		db.close();
 	}
+};
+
+type MoveIntent = Parameters<
+	ProcessBrowser["rpc"]["PreviewHeadMove"]
+>[0]["intent"];
+
+/** What a page does: preview the move, then confirm the proposal it was shown. */
+const move = async (
+	browser: ProcessBrowser,
+	sessionId: string,
+	intent: MoveIntent,
+) => {
+	const { moveId } = await Effect.runPromise(
+		browser.rpc.PreviewHeadMove({ sessionId, intent }),
+	);
+	return Effect.runPromise(
+		browser.rpc.CommitHeadMove({ sessionId, intent, moveId }),
+	);
 };
 
 const userTexts = async (browser: ProcessBrowser, sessionId: string) =>
@@ -334,6 +354,80 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		expect(journal(fixture, sessionId)).toEqual(events);
 		expect(enqueued(fixture, "moves-from-both")).toHaveLength(1);
 		// One realignment: the resend resumes Claude's own thread at a cut.
+		const [opened, resumed, ...more] = resumes(fixture);
+		expect(more).toEqual([]);
+		expect(resumed?.thread).toBe(opened?.thread);
+		expect(resumed?.at).not.toBeNull();
+	});
+
+	// 5.
+	it("undoes a rewind from the Head Log, undoes that undo, and keeps every entry", async () => {
+		const { browser, sessionId, target, fixture } = await start(
+			"undo-chain",
+			0,
+		);
+		const ids = async () =>
+			(await browser.history(sessionId)).map(({ id }) => id);
+		const whole = await ids();
+		const log = async () =>
+			(await Effect.runPromise(browser.rpc.GetHeadLog({ sessionId }))).entries;
+		const rewind = await move(browser, sessionId, {
+			_tag: "rewind",
+			messageId: target.id,
+		});
+		const rewound = await ids();
+		const undo = await move(browser, sessionId, {
+			_tag: "undo",
+			moveId: rewind.moveId,
+		});
+		const undone = await ids();
+		const redo = await move(browser, sessionId, {
+			_tag: "undo",
+			moveId: undo.moveId,
+		});
+		const redone = await ids();
+		const entries = await log();
+		await browser.send(sessionId, "moves-after-chain");
+		proof = {
+			whole,
+			rewound,
+			undone,
+			redone,
+			entries,
+			afterSend: await userTexts(browser, sessionId),
+			journal: journal(fixture, sessionId),
+			queries: resumes(fixture),
+		};
+		expect(rewound).toEqual(whole.slice(0, 2));
+		expect(undone).toEqual(whole);
+		expect(redone).toEqual(rewound);
+		expect(
+			entries.map(({ moveId, kind, undoes, landed }) => ({
+				moveId,
+				kind,
+				undoes,
+				landed,
+			})),
+		).toEqual([
+			{ moveId: redo.moveId, kind: "undo", undoes: undo.moveId, landed: true },
+			{
+				moveId: undo.moveId,
+				kind: "undo",
+				undoes: rewind.moveId,
+				landed: true,
+			},
+			{
+				moveId: rewind.moveId,
+				kind: "rewind",
+				undoes: undefined,
+				landed: true,
+			},
+		]);
+		expect(await userTexts(browser, sessionId)).toEqual([
+			"moves-kept",
+			"moves-after-chain",
+		]);
+		// The three moves reach Claude as one cut: it resumes its own thread before the cut.
 		const [opened, resumed, ...more] = resumes(fixture);
 		expect(more).toEqual([]);
 		expect(resumed?.thread).toBe(opened?.thread);
