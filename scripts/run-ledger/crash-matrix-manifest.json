@@ -556,8 +556,8 @@
 		},
 		{
 			"cell": "background/confirm",
-			"status": "covered",
-			"tests": "claude-destructive-confirm:513, :702, :754"
+			"status": "proved",
+			"file": "test/integration/daemon/claude-destructive-confirm.test.ts"
 		},
 		{
 			"cell": "background/lost-work",
