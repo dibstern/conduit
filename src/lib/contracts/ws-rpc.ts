@@ -3239,16 +3239,6 @@ export const GetHeadBranches = Rpc.make("GetHeadBranches", {
 	error: WsRpcError,
 });
 
-/** Whether the files at a head move's target are still kept, or were pruned. */
-export const GetHeadMoveFiles = Rpc.make("GetHeadMoveFiles", {
-	payload: Schema.TaggedStruct("GetHeadMoveFiles", {
-		sessionId: NonEmptyString,
-		messageId: NonEmptyString,
-	}),
-	success: Schema.Struct({ files: HeadMoveFilesSchema }),
-	error: WsRpcError,
-});
-
 /** The composer's only send. The inbox hands it off when the session is idle
  *  and queues it otherwise, or with delivery "steer" hands it into the running
  *  turn; a refused steer admits nothing. A retry with the same input id is a
@@ -4015,7 +4005,6 @@ const wsRpcRequests = [
 	LoadMoreHistory,
 	RewindSession,
 	UndoRewind,
-	GetHeadMoveFiles,
 	PreviewHeadMove,
 	CommitHeadMove,
 	GetHeadLog,

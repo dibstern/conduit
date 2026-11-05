@@ -134,8 +134,21 @@ describe("Head moves into pruned history through the built daemon", () => {
 				.map(
 					({ text, parts }) => text || parts?.map((part) => part.text).join(""),
 				);
-		const files = async (sessionId: string, messageId: string) =>
-			(await run(rpc.GetHeadMoveFiles({ sessionId, messageId }))).files;
+		/** What a rewind there says of its files, or why the rewind itself is refused. */
+		const files = (sessionId: string, messageId: string) =>
+			run(
+				Effect.match(
+					rpc.PreviewHeadMove({
+						sessionId,
+						intent: { _tag: "rewind", messageId },
+					}),
+					{
+						onFailure: (error) =>
+							"reason" in error ? error.reason : error._tag,
+						onSuccess: ({ files }) => files,
+					},
+				),
+			);
 		/** One turn that writes `name` while its run is open, so it captures changes. */
 		const editingTurn = async (sessionId: string, name: string) => {
 			evidence["step"] = `turn ${name}`;
@@ -197,7 +210,8 @@ describe("Head moves into pruned history through the built daemon", () => {
 		};
 		expect(evidence["filesBeforeEviction"]).toEqual({
 			sentFirst: "pruned",
-			sentSecond: "pruned",
+			// Off the Head since the rewind, and its rows went with the eviction.
+			sentSecond: "history_unavailable",
 			undoneFirst: "pruned",
 		});
 

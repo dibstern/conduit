@@ -68,6 +68,19 @@ Examples:
   | phone    | Add a migration section | Add an upgrade guide section | hm-user-2  |
   | desktop  | Add a migration section | Add an upgrade guide section | hm-user-2  |
 
+Scenario Outline: an edit-and-resend refused because the files there were pruned keeps the edit
+  Given the viewport is a <viewport>
+  And a branched conversation is open
+  And the files there are pruned before the move is confirmed
+  When I edit the message <old> to <new> and send it
+  Then a notice says <notice>
+  And the edit box still holds <new>
+
+Examples:
+  | viewport | old                     | new                          | notice                             |
+  | phone    | Add a migration section | Add an upgrade guide section | Files from this point were pruned. |
+  | desktop  | Add a migration section | Add an upgrade guide section | Files from this point were pruned. |
+
 Scenario Outline: regenerate a reply as a new branch
   Given the viewport is a <viewport>
   And a branched conversation is open
