@@ -42,11 +42,9 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 			],
 			[
 				"coverage, CONTRACT.md 3456-3477 (11.2: the generator has not reached these shapes at default runs since the oracle port; no seed is pended any more, so no gap holds them. Wrong side: the generator, reach work open on 82tn.32.2.9.2)",
-				[
-					"not_sent start ended its Run",
-					"unheld_outcome after a reissue",
-					"unlaunch by retryable",
-				].map((shape) => `generated traces reach ${shape}`),
+				["not_sent start ended its Run", "unheld_outcome after a reissue"].map(
+					(shape) => `generated traces reach ${shape}`,
+				),
 			],
 		] as const
 	).flatMap(([disagreement, names]) =>

@@ -4427,10 +4427,14 @@ export class FakeProvider {
 				? [...this.pendingHeld].find(
 						([, held]) =>
 							held.effect.kind === "start" &&
-							snapshot.view.live.some(
-								(item) =>
-									this.isHeld(item) && item.commandId === held.commandId,
-							),
+							// 3.6 (CONTRACT.md 668-669, 709-711): main's start reaches live only by its run.dispatched,
+							// so one pending before any hold shows as its Starting Run, not in live.
+							((snapshot.view.active?.runId === heldRunId(held) &&
+								snapshot.view.active.tag === "Starting") ||
+								snapshot.view.live.some(
+									(item) =>
+										this.isHeld(item) && item.commandId === held.commandId,
+								)),
 					)
 				: undefined;
 		const binding = spawn && this.holdBindings.get(spawn[0]);
