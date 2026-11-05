@@ -251,8 +251,8 @@ const pin = (
 		),
 	);
 
-/** A test holds a restore at `step`, so a test can stop the daemon there. */
-const pause = (step: "receipt" | "deleted" | "written") =>
+/** A test holds a restore or a materialize at `step`, so a test can stop the daemon there. */
+const pause = (step: "receipt" | "deleted" | "written" | "materialized") =>
 	Effect.suspend(() =>
 		process.env["NODE_ENV"] === "test" &&
 		process.env["CONDUIT_TEST_RESTORE_PAUSE_AT"] === step
@@ -1240,7 +1240,9 @@ export const makeFolderTimeline = (configDir: string) =>
 						const writes = yield* diff(now.store, now.prefix, now.worktree, to);
 						yield* remove(directory, deletes(writes));
 						yield* checkout(directory, now.store, to, updates(writes));
-						return (yield* take(directory)).worktree;
+						const written = (yield* take(directory)).worktree;
+						yield* pause("materialized");
+						return written;
 					}),
 				),
 			receipt: (sessionId, moveId, directory) =>

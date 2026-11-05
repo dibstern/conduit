@@ -1046,7 +1046,9 @@ export const sessionsHandlers = {
 							return [realpathSync(common), rest] as const;
 						}),
 					);
+			// Held until the fork owns the worktrees, so a restart in between rolls them back.
 			return yield* Effect.gen(function* () {
+				yield* worktrees.hold(created);
 				const checkouts = yield* Effect.forEach(
 					Object.values(created.worktrees),
 					(path) => repository(path, "--show-toplevel"),
@@ -1091,7 +1093,23 @@ export const sessionsHandlers = {
 				Effect.catchCause((cause) =>
 					worktrees
 						.rollback(created)
-						.pipe(Effect.andThen(Effect.failCause(cause))),
+						.pipe(
+							Effect.andThen(worktrees.settle(created)),
+							Effect.andThen(Effect.failCause(cause)),
+						),
+				),
+				// The fork owns its worktrees now, so a note left behind is kept at startup.
+				Effect.tap(() =>
+					worktrees
+						.settle(created)
+						.pipe(
+							Effect.catchCause((cause) =>
+								Effect.logWarning(
+									"A fork's worktree note was not removed",
+									cause,
+								),
+							),
+						),
 				),
 			);
 		}).pipe(

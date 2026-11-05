@@ -1,6 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 import { realpathSync } from "node:fs";
-import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
+import {
+	lstat,
+	mkdir,
+	readdir,
+	readFile,
+	realpath,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import {
 	basename,
 	dirname,
@@ -1524,6 +1532,58 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 						}),
 					);
 				});
+			const held = join(worktreesRoot(configDir), ".held");
+			const heldFile = (created: CreatedWorktrees) =>
+				join(
+					held,
+					`${createHash("sha256")
+						.update(created.ownership.map(({ path }) => path).join("\0"))
+						.digest("hex")
+						.slice(0, 16)}.json`,
+				);
+			// A launch with no checkouts has nothing to undo.
+			const hold: WorktreeService["hold"] = (created) =>
+				filesystem(held, async () => {
+					if (created.ownership.length === 0) return;
+					await mkdir(held, { recursive: true });
+					await writeFile(heldFile(created), JSON.stringify(created));
+				});
+			const settle: WorktreeService["settle"] = (created) =>
+				filesystem(held, () => rm(heldFile(created), { force: true }));
+			const recoverHeld: WorktreeService["recoverHeld"] = (owns) =>
+				Effect.gen(function* () {
+					const names = yield* filesystem(held, () =>
+						readdir(held).catch(() => []),
+					);
+					for (const name of names)
+						yield* Effect.gen(function* () {
+							const created: CreatedWorktrees = JSON.parse(
+								yield* filesystem(held, () =>
+									readFile(join(held, name), "utf8"),
+								),
+							);
+							if (!(yield* owns(created))) yield* rollback(created);
+							yield* filesystem(held, () =>
+								rm(join(held, name), { force: true }),
+							);
+						}).pipe(
+							Effect.catchCause((cause) =>
+								Effect.logWarning(
+									"A held worktree launch could not be undone",
+									{
+										name,
+										cause: Failure.renderCause(cause),
+									},
+								),
+							),
+						);
+				}).pipe(
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Held worktree launches could not be read", {
+							cause: Failure.renderCause(cause),
+						}),
+					),
+				);
 			return {
 				withCheckoutUse: checkoutUse.withPermits(1),
 				renameBranch,
@@ -1532,6 +1592,9 @@ if [ -n "$1" ] && command -v "$1" >/dev/null 2>&1; then exec "$1" -lc "$2"; else
 				removeCheckout,
 				create,
 				rollback,
+				hold,
+				settle,
+				recoverHeld,
 				inspectMissing,
 				recreate,
 				recreateAll,

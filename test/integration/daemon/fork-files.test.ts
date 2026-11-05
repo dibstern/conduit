@@ -7,6 +7,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	watch,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,7 +96,13 @@ describe("Fork with files through the built daemon", () => {
 		}
 	});
 
-	const start = async ({ repository = true } = {}) => {
+	const start = async ({
+		repository = true,
+		pauseAt,
+	}: {
+		repository?: boolean;
+		pauseAt?: string;
+	} = {}) => {
 		for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
 		harness = ProcessHarness.create({
 			claudeReplay: {
@@ -123,7 +130,11 @@ describe("Fork with files through the built daemon", () => {
 				"Initial",
 			]);
 		}
-		await fixture.restart();
+		await fixture.restart(
+			pauseAt === undefined
+				? {}
+				: { serviceEnvironment: { CONDUIT_TEST_RESTORE_PAUSE_AT: pauseAt } },
+		);
 		const socket = join(fixture.configDir, "relay.sock");
 		await sendRpcRequest(socket, {
 			_tag: "SaveProject",
@@ -370,5 +381,39 @@ describe("Fork with files through the built daemon", () => {
 			directory: repo,
 		});
 		expect(existsSync(join(fixture.configDir, "worktrees"))).toBe(false);
+	});
+
+	it("rolls back at startup the worktree of a fork with files the daemon died in before writing its session", async () => {
+		evidence["name"] = "crash-before-session";
+		const { fixture, repo, browser, turn, fork, query } = await start({
+			pauseAt: "materialized",
+		});
+		const session = await browser.createSession("Crash mid-fork");
+		const first = await turn(session, "first", () =>
+			writeFileSync(join(repo, "first.txt"), "first\n"),
+		);
+		const branches = git(repo, ["branch", "--format=%(refname:short)"]);
+		// The fork holds once the files are written: first.txt showing in the new checkout is the signal.
+		const root = join(fixture.configDir, "worktrees");
+		mkdirSync(root, { recursive: true });
+		const written = new Promise<void>((resolve) => {
+			const watcher = watch(root, { recursive: true }, (_event, name) => {
+				if (!name?.endsWith("first.txt") || !existsSync(join(root, name)))
+					return;
+				watcher.close();
+				resolve();
+			});
+		});
+		void fork(session, first).catch(() => {});
+		await written;
+		evidence["midFork"] = worktrees(repo);
+		await fixture.kill();
+		await fixture.restart();
+		evidence["recovered"] = worktrees(repo);
+		expect(worktrees(repo)).toEqual([]);
+		expect(git(repo, ["branch", "--format=%(refname:short)"])).toBe(branches);
+		expect(
+			query("SELECT id FROM sessions WHERE forked_from = ?", session),
+		).toEqual([]);
 	});
 });
