@@ -14,6 +14,8 @@
 // 12-18. a rewind left pending by the build before is lost, comes back, is missing from the Head
 //    Log, is never told to Claude, splits its Run, or is landed twice; a pending cut at a message
 //    that is gone invents a move.
+// 27. an edit or a regenerate of a message with an image resends its text without the image.
+import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -745,6 +747,76 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 	});
 
 	// 6, 7.
+	// 27.
+	it("resends an edited message with the image it was sent with", async () => {
+		const { browser, sessionId, fixture } = await start("resend-image", 0);
+		const png = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4AWP4z8DwHwAFAAH/e+m+7wAAAABJRU5ErkJggg==",
+			"base64",
+		);
+		const attachmentId = randomUUID();
+		await Effect.runPromise(
+			browser.rpc.AddDraftAttachment({
+				key: { session: sessionId },
+				id: attachmentId,
+				name: "pixel.png",
+				mime: "image/png",
+				dataUrl: `data:image/png;base64,${png.toString("base64")}`,
+			}),
+		);
+		await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: randomUUID(),
+				text: "moves-image",
+				attachmentIds: [attachmentId],
+				delivery: "queue",
+			}),
+		);
+		// test-waits-allow polling: the native cursor publishes when the send command settles.
+		await vi.waitFor(() => expect(openSends(fixture, sessionId)).toBe(0), {
+			timeout: 20_000,
+		});
+		const target = await userMessage(browser, sessionId, "moves-image");
+		const edit = await move(browser, sessionId, {
+			_tag: "rewind",
+			messageId: target.id,
+			resend: "moves-image-edited",
+		});
+		const image = {
+			type: "image",
+			source: {
+				type: "base64",
+				media_type: "image/png",
+				data: png.toString("base64"),
+			},
+		};
+		const delivered = (text: string) =>
+			sdkMarks(fixture).filter(
+				(mark) =>
+					mark.kind === "input-content" &&
+					JSON.stringify(mark.content).includes(`"${text}"`),
+			);
+		// test-waits-allow polling: the resend reaches the SDK after the move's receipt.
+		await vi.waitFor(
+			() => expect(delivered("moves-image-edited")).toHaveLength(1),
+			{ timeout: 20_000 },
+		);
+		proof = {
+			edit,
+			original: delivered("moves-image"),
+			resent: delivered("moves-image-edited"),
+			journal: journal(fixture, sessionId),
+		};
+		expect(delivered("moves-image")[0]).toMatchObject({
+			content: expect.arrayContaining([image]),
+		});
+		expect(delivered("moves-image-edited")[0]).toMatchObject({
+			content: expect.arrayContaining([image]),
+		});
+	});
+
 	it("switches back to a branch at its tip, undoes the switch, and refuses a branch whose rows are gone", async () => {
 		const { browser, sessionId, target, fixture } = await start(
 			"branch-switch",

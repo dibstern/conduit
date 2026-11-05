@@ -85,9 +85,6 @@
 	}
 
 	const moveSessionId = $derived(sessionId ?? sessionState.currentId ?? undefined);
-	// The resend carries text only, so a message with attachments would ask a different question.
-	const regenerateBlocked = $derived(Boolean(turnUser?.attachments?.length));
-
 	function regenerate() {
 		if (!moveSessionId || !turnUser?.messageId) return;
 		void resendFrom(moveSessionId, turnUser.messageId, turnUser.text);
@@ -138,7 +135,7 @@
 					<MenuItem onselect={copyMessage}>Copy message</MenuItem>
 					{#if forkMessageId}<MenuItem onselect={forkMessage}>Fork from here</MenuItem>{/if}
 					{#if moveSessionId && turnUser?.messageId && turnUser.text}
-						<MenuItem disabled={regenerateBlocked} detail={regenerateBlocked ? "Attachments are not resent" : undefined} onselect={regenerate}>Regenerate</MenuItem>
+						<MenuItem onselect={regenerate}>Regenerate</MenuItem>
 					{/if}
 					{#if moveSessionId && turnUser}<MenuItem onselect={() => { headLog.sessionId = moveSessionId; }}>Rewind and undo…</MenuItem>{/if}
 				</Menu>
