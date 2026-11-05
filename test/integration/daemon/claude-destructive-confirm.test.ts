@@ -1091,6 +1091,51 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		expect(launch?.["resume"]).toBeUndefined();
 	});
 
+	// 82tn.49 (lane 49 audit 7): a rewind while a send waits behind a held close would race it.
+	it("refuses a rewind while a send waits behind a held close, then sends it once on a confirm", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { cursor, enqueued } = await holdSend(
+			"rewind refused",
+			started,
+			sessionId,
+			queryId,
+		);
+		const target = (await browser.history(sessionId)).find(
+			(message) => message.role === "user",
+		);
+		if (!target) throw new Error("Missing rewind target");
+		const refused = await Effect.runPromise(
+			Effect.flip(
+				browser.rpc.RewindSession({ sessionId, messageId: target.id }),
+			),
+		);
+		await confirmNewest(browser, sessionId, cursor);
+		// test-waits-allow polling: the fake SDK reports its queries only through sdk-proof.ndjson.
+		await vi.waitFor(() => expect(enqueued()).toHaveLength(1), {
+			timeout: 10_000,
+		});
+		const evidence = {
+			refused: { ...refused, message: refused.message },
+			sent: enqueued(),
+			closed: closedQueries(fixture, queryId).length,
+		};
+		proof["rewind refused behind a held close"] = evidence;
+		writeFileSync(
+			"test-results/82tn-49-held-close.json",
+			`${JSON.stringify(evidence, null, 2)}\n`,
+		);
+		expect(refused).toMatchObject({
+			_tag: "SessionBusy",
+			command: "head_move",
+			reason: "inputs_queued",
+		});
+		expect(closedQueries(fixture, queryId)).toHaveLength(1);
+	});
+
 	/** The session's composer draft and the timeline notices, from the daemon's store. */
 	const composer = (fixture: ProcessHarness, sessionId: string) => {
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });

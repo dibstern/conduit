@@ -42,7 +42,6 @@ import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
-import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -66,13 +65,9 @@ import {
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "./services.js";
-import { applySessionCommand } from "./session-command.js";
+import { admitOrRefuse, applySessionCommand } from "./session-command.js";
 import { SessionInboxTag } from "./session-inbox.js";
-import {
-	getAgent,
-	hasActiveProcessingTimeout,
-	type OverridesStateTag,
-} from "./session-overrides-state.js";
+import { getAgent, type OverridesStateTag } from "./session-overrides-state.js";
 
 type UsageLimitedEvent = Extract<
 	CanonicalEvent,
@@ -384,16 +379,16 @@ export const makeContinuation = Effect.gen(function* () {
 									}
 								: {}),
 						});
-					if (
-						(options.at === undefined && session.pending_rewind_message_id) ||
-						(!ownRequest && requesting.has(sessionId)) ||
-						(!policy &&
-							options.at === undefined &&
-							// 8.1: the foreground is the ledger's active Run; gap review 1B: a foreground
-							// action, so background work never blocks it.
-							((yield* loadLedgerView(sessionId))?.active !== undefined ||
-								(yield* hasActiveProcessingTimeout(sessionId))))
-					)
+					// The one admission (82tn.49) reads the ledger and SessionActivity; a scheduled
+					// continuation was admitted when it was scheduled. Background work never refuses
+					// it (gap review 1B).
+					if (options.at === undefined)
+						yield* admitOrRefuse(sessionId, {
+							kind: "provider_switch",
+							policy: Boolean(policy),
+						});
+					// The command's own request in flight, not the session's state.
+					if (!ownRequest && requesting.has(sessionId))
 						return yield* new SessionBusy({ sessionId });
 					if (policy) {
 						const recovery =

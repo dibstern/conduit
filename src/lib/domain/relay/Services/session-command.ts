@@ -15,6 +15,10 @@ import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
 import {
+	SessionBusy,
+	type SessionRefusal,
+} from "../../../contracts/limit-recovery.js";
+import {
 	type KnownProviderDriverKind,
 	PROVIDER_DRIVERS,
 } from "../../../contracts/provider-instance.js";
@@ -25,6 +29,7 @@ import {
 } from "../../../contracts/session-title.js";
 import { DEFAULT_CONFIG_DIR } from "../../../env.js";
 import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
+import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import {
 	type CommitAndSignalProject,
 	makeCommitAndSignal,
@@ -36,6 +41,7 @@ import {
 	ProviderStateEffectTag,
 } from "../../../persistence/effect/provider-state-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import { isSessionDeleted } from "../../../persistence/effect/session-seeder-effect.js";
 import { readSessionWorktreeOwnershipSnapshot } from "../../../persistence/effect/session-worktree-ownership.js";
 import {
@@ -111,6 +117,203 @@ export class SessionCommandError extends Data.TaggedError(
 	readonly cause: unknown;
 	readonly message?: string;
 }> {}
+
+/**
+ * What a head move, fork or provider switch is admitted against (82tn.49). The CONTRACT names no
+ * admission for these (gap, reported); the nearest reading is 8.1 (CONTRACT.md 2734): the
+ * foreground is the ledger's active Run and SessionActivity's open prompts, and queued input is
+ * main's `pending_inputs` (CONTRACT.md 5865, D57).
+ */
+export interface SessionCommandFacts {
+	/** The ledger's active Run, SessionActivity's foreground. Background work never counts (1B). */
+	readonly runActive: boolean;
+	/** The ledger's Pending interactions, or the row's open prompts SessionActivity reads (3.10 folds no Codex prompt). */
+	readonly interactionPending: boolean;
+	/** Main's queued or steering inputs, a send held behind a close among them (32.25). */
+	readonly inputsQueued: boolean;
+	/** Limit Recovery: an open cut-off or a scheduled continuation. */
+	readonly limitRecovery: boolean;
+	readonly rewindPending: boolean;
+	/** A head move started and not moved (ADR-0014). */
+	readonly headMoving: boolean;
+}
+
+export type SessionCommandRequest =
+	| { readonly kind: "head_move" | "fork" }
+	/** `policy`: the limit policy's own continuation of the current cut-off. */
+	| { readonly kind: "provider_switch"; readonly policy: boolean };
+
+/** The one admission for the commands the ledger does not own; undefined admits. */
+export const admitSessionCommand = (
+	request: SessionCommandRequest,
+	facts: SessionCommandFacts,
+): SessionRefusal | undefined => {
+	if (facts.headMoving) return "head_move_in_progress";
+	switch (request.kind) {
+		// A fork reads a settled boundary (or a Side Thread's cut), so a Run never refuses it (t3code).
+		case "fork":
+			return undefined;
+		// A switch starts its continuation turn on the next account, so only a Run refuses it.
+		case "provider_switch":
+			if (facts.rewindPending) return "rewind_pending";
+			return facts.runActive && !request.policy ? "run_active" : undefined;
+		case "head_move":
+			if (facts.runActive) return "run_active";
+			if (facts.interactionPending) return "interaction_pending";
+			if (facts.inputsQueued) return "inputs_queued";
+			// A pending rewind already cut the limit's request off the head.
+			return facts.limitRecovery && !facts.rewindPending
+				? "limit_recovery"
+				: undefined;
+	}
+};
+
+/** A head move started with no moved (ADR-0014): the inbox's admit and the admission both read it. */
+export const headMoveInProgress = (
+	sql: SqlClient.SqlClient,
+	sessionId: string,
+) =>
+	sql`EXISTS (SELECT 1 FROM events started
+		WHERE started.session_id = ${sessionId} AND started.type = 'head.move_started'
+		AND NOT EXISTS (SELECT 1 FROM events moved
+			WHERE moved.session_id = started.session_id AND moved.type = 'head.moved'
+			AND json_extract(moved.data, '$.moveId') = json_extract(started.data, '$.moveId')))`;
+
+export const readSessionCommandFacts = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const view = yield* loadLedgerView(sessionId);
+		const [row] = yield* sql<{
+			inputs_queued: number;
+			prompt_open: number;
+			limited: number | null;
+			rewind_pending: number | null;
+			head_moving: number;
+		}>`SELECT
+			EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId}
+				AND state IN ('queued', 'steering')) AS inputs_queued,
+			EXISTS (SELECT 1 FROM pending_approvals WHERE session_id = ${sessionId}
+				AND status = 'pending') AS prompt_open,
+			(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
+				OR json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL
+				FROM sessions WHERE id = ${sessionId}) AS limited,
+			(SELECT pending_rewind_message_id IS NOT NULL FROM sessions WHERE id = ${sessionId}) AS rewind_pending,
+			${headMoveInProgress(sql, sessionId)} AS head_moving`;
+		return {
+			runActive: view?.active !== undefined,
+			interactionPending:
+				row?.prompt_open === 1 ||
+				(view?.interactions.some(
+					(interaction) => interaction.tag === "Pending",
+				) ??
+					false),
+			inputsQueued: row?.inputs_queued === 1,
+			limitRecovery: row?.limited === 1,
+			rewindPending: row?.rewind_pending === 1,
+			headMoving: row?.head_moving === 1,
+		} satisfies SessionCommandFacts;
+	});
+
+/** Reads the facts and fails with the typed refusal the UI shows. */
+export const admitOrRefuse = (
+	sessionId: string,
+	request: SessionCommandRequest,
+) =>
+	Effect.gen(function* () {
+		const reason = admitSessionCommand(
+			request,
+			yield* readSessionCommandFacts(sessionId),
+		);
+		if (reason !== undefined)
+			return yield* new SessionBusy({
+				sessionId,
+				command: request.kind,
+				reason,
+			});
+	});
+
+type HeadMoveStart = EventPayloadMap["head.move_started"];
+
+/** Journals a head move's start (ADR-0014); finishHeadMove lands it. */
+export const startHeadMove = (
+	sessionId: string,
+	provider: string,
+	move: Omit<HeadMoveStart, "moveId">,
+) =>
+	Effect.gen(function* () {
+		const started: HeadMoveStart = { moveId: randomUUID(), ...move };
+		yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
+			canonicalEvent("head.move_started", sessionId, started, { provider }),
+		);
+		return started;
+	});
+
+/**
+ * Lands a started move on the row as it is now, and journals it moved in the same commit. The
+ * startup roll-forward reuses it, so a move whose daemon died between the two still lands.
+ */
+export const finishHeadMove = (sessionId: string, move: HeadMoveStart) =>
+	Effect.gen(function* () {
+		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		if (!row) return;
+		const sql = yield* SqlClient.SqlClient;
+		const pending = row.pending_rewind_message_id ?? null;
+		const target =
+			move.kind === "rewind" && move.messageId !== undefined
+				? (yield* sql<{ id: string }>`SELECT id FROM messages
+					WHERE session_id = ${sessionId} AND id = ${move.messageId}`)[0]?.id
+				: undefined;
+		const provider = { provider: row.provider };
+		const landed =
+			move.kind === "undo"
+				? pending === null
+					? []
+					: [
+							canonicalEvent(
+								"session.rewind_undone",
+								sessionId,
+								{ previousMessageId: pending },
+								provider,
+							),
+						]
+				: target === undefined || target === pending
+					? []
+					: [
+							canonicalEvent(
+								"session.rewound",
+								sessionId,
+								{ messageId: target, previousMessageId: pending },
+								provider,
+							),
+						];
+		yield* (yield* ClaudeEventPersistEffectTag).persistEvents([
+			...landed,
+			canonicalEvent(
+				"head.moved",
+				sessionId,
+				{ moveId: move.moveId },
+				provider,
+			),
+		]);
+	});
+
+/** The project's moves started and never moved: a daemon died between the two (ADR-0014). */
+export const danglingHeadMoves = (projectId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{ session_id: string; data: string }>`
+			SELECT started.session_id, started.data FROM events started
+			JOIN sessions ON sessions.id = started.session_id
+			WHERE started.type = 'head.move_started' AND sessions.project_id = ${projectId}
+			AND NOT EXISTS (SELECT 1 FROM events moved
+				WHERE moved.session_id = started.session_id AND moved.type = 'head.moved'
+				AND json_extract(moved.data, '$.moveId') = json_extract(started.data, '$.moveId'))
+			ORDER BY started.sequence`;
+		return rows.map((row) => ({
+			sessionId: row.session_id,
+			move: JSON.parse(row.data) as HeadMoveStart,
+		}));
+	});
 
 /**
  * A session mutation, typed as the canonical event it becomes. Indexing
@@ -1242,6 +1445,7 @@ export const forkSession = (
 	},
 ) =>
 	Effect.gen(function* () {
+		yield* admitOrRefuse(parentSessionId, { kind: "fork" });
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const fork = forkSessionInWorkspace(parentSessionId, options);
 		return yield* workspace._tag === "Some"

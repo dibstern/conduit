@@ -36,14 +36,47 @@ export const ContinuationReasonSchema = Schema.Literals([
 ]);
 export type ContinuationReason = typeof ContinuationReasonSchema.Type;
 
+/** The commands the ledger does not own: a head move (rewind, undo), a fork, a provider switch (82tn.49). */
+export const SessionCommandSchema = Schema.Literals([
+	"head_move",
+	"fork",
+	"provider_switch",
+]);
+export type SessionCommand = typeof SessionCommandSchema.Type;
+
+/** Why the session refused one, read from the Run Ledger and SessionActivity (82tn.49). */
+export const SessionRefusalSchema = Schema.Literals([
+	"head_move_in_progress",
+	"run_active",
+	"interaction_pending",
+	"inputs_queued",
+	"limit_recovery",
+	"rewind_pending",
+]);
+export type SessionRefusal = typeof SessionRefusalSchema.Type;
+
+const refusalCopy: Record<SessionRefusal, string> = {
+	head_move_in_progress:
+		"The conversation is still moving to another point. Try again in a moment.",
+	run_active: "Stop the current turn first.",
+	interaction_pending: "Answer the pending question or permission first.",
+	inputs_queued: "Send or remove the queued messages first.",
+	limit_recovery: "Resume or dismiss the usage-limit continuation first.",
+	rewind_pending: "Send a message or undo the rewind first.",
+};
+
 export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
 	"SessionBusy",
 	{
 		sessionId: Schema.String,
+		command: Schema.optionalKey(SessionCommandSchema),
+		reason: Schema.optionalKey(SessionRefusalSchema),
 	},
 ) {
 	get message() {
-		return "Wait for the current turn to finish before continuing.";
+		return this.reason === undefined
+			? "Wait for the current turn to finish before continuing."
+			: refusalCopy[this.reason];
 	}
 }
 

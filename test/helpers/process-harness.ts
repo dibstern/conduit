@@ -933,6 +933,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_RUN_LEDGER_NATIVE_COMMAND_MS"
 					| "CONDUIT_TEST_STOP_ABORT_WAIT_MS"
 					| "CONDUIT_TEST_REAL_CLAUDE_DEAF_INTERRUPT"
+					| "CONDUIT_TEST_HEAD_MOVE_DELAY_MS"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>

@@ -41,6 +41,7 @@ import { duoUnfoldedPortraitHandlers } from "./steps/duoUnfoldedPortrait.js";
 import { firstRunProjectsHandlers } from "./steps/firstRunProjects.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { headerTapOnLiftHandlers } from "./steps/headerTapOnLift.js";
+import { headMoveHandlers } from "./steps/headMove.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
@@ -186,6 +187,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerFinalDesignHandlers,
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
+	...headMoveHandlers,
 	...sessionActivityHandlers,
 	...whyBusyHandlers,
 	...composerPickerHandlers,
