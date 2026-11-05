@@ -80,15 +80,21 @@ export const runnerMembersGone = (
 };
 
 /** Legacy role ranking is used only by the one-time cursor backfill. Delete with 32.13. */
-export function legacyRunnerRanking(
-	configDir: string,
-): ReadonlyMap<
+export function legacyRunnerRanking(configDir: string): ReadonlyMap<
 	string,
-	{ readonly role?: "candidate" | "retiring"; readonly registeredAt: number }
+	{
+		readonly role?: "candidate" | "retiring";
+		readonly registeredAt: number;
+		readonly sessionId?: string;
+	}
 > {
 	const ranking = new Map<
 		string,
-		{ readonly role?: "candidate" | "retiring"; readonly registeredAt: number }
+		{
+			readonly role?: "candidate" | "retiring";
+			readonly registeredAt: number;
+			readonly sessionId?: string;
+		}
 	>();
 	const root = join(resolve(configDir), "r");
 	let directories: string[];
@@ -109,6 +115,9 @@ export function legacyRunnerRanking(
 					ranking.set(filename.slice(0, -5), {
 						...(value["role"] === "candidate" || value["role"] === "retiring"
 							? { role: value["role"] }
+							: {}),
+						...(typeof value["sessionId"] === "string"
+							? { sessionId: value["sessionId"] }
 							: {}),
 						registeredAt:
 							typeof value["registeredAt"] === "number"

@@ -171,6 +171,12 @@ const runnerTables = [
 function backfillRunnerRoles(db: DatabaseSync, configDir: string) {
 	if (!tables(db, "main").includes("claude_runner_cursors")) return;
 	const registry = legacyRunnerRanking(configDir);
+	// Older rows have no session_id; their registration names the session (S9.6).
+	const backfill = db.prepare(
+		"UPDATE claude_runner_cursors SET session_id = ? WHERE runner_id = ? AND session_id = ''",
+	);
+	for (const [runnerId, { sessionId }] of registry)
+		if (sessionId) backfill.run(sessionId, runnerId);
 	const live = rows<{
 		runner_id: string;
 		session_id: string;

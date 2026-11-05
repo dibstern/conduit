@@ -356,6 +356,10 @@ export const makeRunnerReceiptStore = (
 					const registry: ReturnType<typeof legacyRunnerRanking> = configDir
 						? yield* Effect.sync(() => legacyRunnerRanking(configDir))
 						: new Map();
+					// main's rows have no session_id; its registration names the session (S9.6).
+					for (const [runnerId, { sessionId }] of registry)
+						if (sessionId)
+							yield* sql`UPDATE claude_runner_cursors SET session_id = ${sessionId} WHERE runner_id = ${runnerId} AND session_id = ''`;
 					const live = yield* sql<{
 						runner_id: string;
 						session_id: string;
