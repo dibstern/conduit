@@ -779,8 +779,8 @@
 		{/if}
 	</div>
 	{#if !sessionViewState.compact && (goalShown || tasksShown)}
-		<!-- Under the title line, so the pills get the full title column rather than the title's width. Beside pills the goal keeps at most 55% and they fill the rest; alone it takes the line. -->
-		<div class="flex min-w-0 items-center gap-[8px] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:max-w-[55%] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:shrink-0">
+		<!-- Under the title line, so the pills get the full title column rather than the title's width. Beside pills the goal keeps at most 55% and they fill the rest; alone it takes the line. Positioned so it stacks over the title line's 44px touch targets, which reach into it: a tap on a pill opens the pill. -->
+		<div class="relative flex min-w-0 items-center gap-[8px] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:max-w-[55%] [&>[data-testid=session-goal-subtitle]:not(:only-child)]:shrink-0">
 			{#if goalShown}{@render goalLine()}{/if}
 			{#if tasksShown}{@render tasksRow("subtitle")}{/if}
 		</div>

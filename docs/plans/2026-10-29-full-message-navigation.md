@@ -17,7 +17,7 @@
 - Latest remains the existing default. Loading a prompt changes the window only after a successful response; failures leave the current reading location usable.
 - Every asynchronous commit belongs to a view identity and navigation generation. Old page/jump responses cannot overwrite a newer target, another session, or a disposed view.
 - Legacy latest-window prepends also require the immutable source entry to remain unchanged during the page request. A concurrent update discards that page and permits retry, preventing stale edits or deletions from being resurrected without a second replay ledger. Continuous streaming can defer prepending until a quiet interval; direct indexed jumps remain available.
-- A jump to a loaded row is immediate. A jump outside the window reads a bounded page at the target, never every intervening page.
+- A jump to a loaded row is immediate. A jump outside the window reads a bounded page from the prompt of the target's turn, never every intervening page.
 - Reconnect resumes or refreshes the selected window, not silently the latest window. Historical views do not overwrite the saved latest-page cache.
 - Index delivery is bounded/chunked for long sessions. It must include a complete snapshot barrier and retain stable ordering while synchronizing. Markers do not rely on body presence.
 - Mutations, removals, forks and provider backfill use the existing persisted ordering and rewind visibility rules. Local sends retain their existing owner; reconcile identities rather than independently writing index rows.

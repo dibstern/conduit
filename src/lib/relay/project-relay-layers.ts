@@ -116,6 +116,7 @@ import { makeMessageSurfacing } from "../domain/relay/Services/message-surfacing
 import {
 	type EffectOpenCodeRuntimeIngressPort,
 	OpenCodeHistoryReconcileTag,
+	OpenCodeProcessLinkTag,
 	OpenCodeSessionCreationGateTag,
 } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
@@ -1012,6 +1013,10 @@ export function createProjectRelayLayers({
 		reconcileSession: (sessionId: string) =>
 			historyIngress?.reconcileSession(sessionId) ?? Effect.void,
 	}));
+	const processLinkLayer = Layer.sync(OpenCodeProcessLinkTag, () => ({
+		linkProcess: (sessionId: string, processId: string) =>
+			historyIngress?.linkProcess(sessionId, processId) ?? Effect.void,
+	}));
 
 	const coreBridgeLayers = Layer.mergeAll(
 		sessionWorkspaceLayer,
@@ -1021,6 +1026,7 @@ export function createProjectRelayLayers({
 		worktreeLayer,
 		usageLayer,
 		historyReconcileLayer,
+		processLinkLayer,
 		Layer.effect(OpenCodeSessionCreationGateTag, Semaphore.make(1)),
 		openCodeApiLayer,
 		openCodeFileServiceLayer,

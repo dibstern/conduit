@@ -53,7 +53,8 @@ export const stampToolRow = (
  * The ledger ended `runId`: its rows still open are ended by the run, not failed, unless they are
  * background work, or under it (their message ids are returned). A row is background while the ledger lists its task live, while
  * the ledger cannot tell (8.3, CONTRACT.md 2812-2817), or while Claude marks its agent
- * backgrounded; it then closes only on its own completion.
+ * backgrounded; it then closes only on its own completion. A question row whose question is
+ * still pending stays open too.
  */
 export const endRunToolRows = (
 	runId: string,
@@ -83,7 +84,13 @@ export const endRunToolRows = (
 					JOIN message_parts p ON p.parent_tool_id = tree.id
 				)
 				SELECT tree.id FROM tree JOIN message_parts p ON p.id = tree.id
-				WHERE NOT tree.background AND p.status IN ('started', 'running'))
+				WHERE NOT tree.background AND p.status IN ('started', 'running')
+					-- A question still Pending is its label's, not the Run's (CONTRACT.md 1001-1004):
+					-- its row stays open, so it is still answered, recovered and restored.
+					AND NOT EXISTS (SELECT 1 FROM pending_approvals pa
+						WHERE pa.session_id = (SELECT session_id FROM messages WHERE id = p.message_id)
+							AND pa.type = 'question' AND pa.status = 'pending' AND json_valid(pa.details)
+							AND json_extract(pa.details, '$.toolUseId') = p.call_id))
 			RETURNING message_id`;
 		return [...new Set(ended.map(({ message_id }) => message_id))];
 	});

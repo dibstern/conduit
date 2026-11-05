@@ -145,7 +145,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 				const val = argv[i + 1];
 				if (val === undefined) break;
 				const port = Number.parseInt(val, 10);
-				if (!Number.isNaN(port) && port >= 1 && port <= 65535) {
+				// 0 binds a free port; status and the startup line report it.
+				if (!Number.isNaN(port) && port >= 0 && port <= 65535) {
 					result.port = port;
 					result.portExplicit = true;
 				}
@@ -380,7 +381,7 @@ Options:
                         Actions: list, add, remove, start, stop, status
                         Managed:   --instance add work --port 4097 --managed
                         Unmanaged: --instance add remote --url http://host:4096
-  -p, --port <port>     HTTP server port (default: 2633)
+  -p, --port <port>     HTTP server port (default: 2633, 0 picks a free port)
                         When used with --instance, sets the instance port
   -H, --host <addr>     Bind address (default: 127.0.0.1, or HOST env var)
   --oc-port <port>      OpenCode server port (default: 4096)
