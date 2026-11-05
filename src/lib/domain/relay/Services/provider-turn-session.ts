@@ -1,5 +1,4 @@
 import { Effect } from "effect";
-import type { Account } from "../../../contracts/account.js";
 import {
 	PROVIDER_DRIVERS,
 	type ProviderDriverTraits,
@@ -8,7 +7,6 @@ import { formatErrorDetail } from "../../../errors.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { createEventId } from "../../../persistence/events.js";
 import { STOP_ABORT_WAIT_MS } from "../../../provider/orchestration-command-contracts.js";
-import { CurrentEventDelivery } from "../../../server/event-delivery.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	PendingInteractionServiceTag,
@@ -21,8 +19,7 @@ import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
 } from "./provider-turn-service.js";
-import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
-import { projectSessionManager } from "./session-manager-service.js";
+import { LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
 
 export { STOP_ABORT_WAIT_MS };
@@ -163,54 +160,6 @@ const resolvePendingClaudeQuestions = (
 		}
 	});
 
-const materializeOpenCodeSession = (
-	input: ProviderTurnServicePrepareInput,
-	account: Account,
-	providerId: string,
-) =>
-	Effect.gen(function* () {
-		const orchestrationEngine = yield* OrchestrationEngineTag;
-		const log = yield* LoggerTag;
-		const sessionManagerService = yield* projectSessionManager;
-		const readQuery = yield* ReadQueryEffectTag;
-
-		const rowResult = yield* Effect.result(
-			readQuery.getSession(input.sessionId),
-		);
-		if (rowResult._tag === "Failure") {
-			log.warn(
-				`Could not inspect session provider before OpenCode dispatch for ${input.sessionId}: ${formatErrorDetail(rowResult.failure)}`,
-			);
-			return input.sessionId;
-		}
-
-		const row = rowResult.success;
-		if (!row || row.provider === providerId) {
-			return input.sessionId;
-		}
-		const source = yield* (yield* AccountDirectory).resolve({
-			_tag: "Id",
-			id: row.provider,
-		});
-		if (PROVIDER_DRIVERS[source.driver].runsOpenCodeServer)
-			return input.sessionId;
-		const session = yield* sessionManagerService.createSession(row.title, {
-			account,
-			sourceSessionId: row.id,
-		});
-		orchestrationEngine.bindSession(session.id, account.id);
-		// The connection's interests follow it; no relay handler is involved.
-		(yield* CurrentEventDelivery)?.setClientSession(
-			input.clientId,
-			session.id,
-			(yield* ConfigTag).slug,
-		);
-		log.info(
-			`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,
-		);
-		return session.id;
-	});
-
 export const prepareTurnSession = (
 	input: ProviderTurnServicePrepareInput,
 	commitStop: CommitStop,
@@ -242,14 +191,6 @@ export const prepareTurnSession = (
 			input.delivery !== "steer"
 		)
 			yield* resolvePendingClaudeQuestions(input, commitStop);
-		if (traits.runsOpenCodeServer)
-			return yield* materializeOpenCodeSession(
-				input,
-				account,
-				providerId ?? account.id,
-			).pipe(
-				Effect.provideService(OrchestrationEngineTag, orchestrationEngine),
-			);
 		return input.sessionId;
 	});
 
