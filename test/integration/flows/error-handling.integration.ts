@@ -5,15 +5,15 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { createSdkClient } from "../../../src/lib/instance/sdk-factory.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Error Handling", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {
@@ -66,7 +66,7 @@ describe("Integration: Error Handling", () => {
 
 	it("rejects the removed project RPC socket", async () => {
 		const socket = new WebSocket(
-			`ws://127.0.0.1:${harness.relayPort}/p/integration-test/rpc`,
+			`ws://127.0.0.1:${harness.port}/p/integration-test/rpc`,
 		);
 		try {
 			const error = await new Promise<Error>((resolve, reject) => {
@@ -83,7 +83,7 @@ describe("Integration: Error Handling", () => {
 
 	it("sending invalid JSON does not crash the server", async () => {
 		// Exercise malformed input on the RPC transport.
-		const rawWs = new WebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`);
+		const rawWs = new WebSocket(`ws://127.0.0.1:${harness.port}/rpc`);
 		await new Promise<void>((resolve, reject) => {
 			rawWs.once("open", resolve);
 			rawWs.once("error", reject);

@@ -1275,9 +1275,6 @@
 		"polling": 1,
 		"timeout-override": 6
 	},
-	"test/integration/flows/standalone-added-project-routing.integration.ts": {
-		"timeout-override": 1
-	},
 	"test/integration/flows/stop-resume-cohort.integration.ts": {
 		"polling": 9,
 		"timeout-override": 2

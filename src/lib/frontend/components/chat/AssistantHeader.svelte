@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { onDestroy } from "svelte";
-	import type { AssistantMessage, ModelExecution } from "../../types.js";
+	import type { AssistantMessage, ModelExecution, UserMessage } from "../../types.js";
 	import { getAllModels, getModelDisplayName, modelMatchesId } from "../../stores/discovery.svelte.js";
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { followFork, sessionState } from "../../stores/session.svelte.js";
+	import { headLog, resendFrom } from "../../stores/head-moves.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -26,6 +27,7 @@
 		providerId,
 		createdAt,
 		pending,
+		turnUser,
 		copyState = $bindable("idle"),
 	}: {
 		message?: AssistantMessage | undefined;
@@ -36,6 +38,9 @@
 		createdAt?: number | undefined;
 		/** Before the turn's first step: a dimmed avatar and this pulsing label stand in for the name. */
 		pending?: string | undefined;
+		/** The message that opened this reply's turn, where the conversation's Head can move:
+		 *  Regenerate resends it as a sibling branch, and the Head Log opens from here. */
+		turnUser?: UserMessage | undefined;
 		copyState?: "idle" | "primed" | "done";
 	} = $props();
 
@@ -77,6 +82,15 @@
 			originId: getBrowserClientId(),
 			messageId: forkMessageId,
 		}).then((response) => followFork(from, response)).catch(toastFailure("Failed to fork session"));
+	}
+
+	const moveSessionId = $derived(sessionId ?? sessionState.currentId ?? undefined);
+	// The resend carries text only, so a message with attachments would ask a different question.
+	const regenerateBlocked = $derived(Boolean(turnUser?.attachments?.length));
+
+	function regenerate() {
+		if (!moveSessionId || !turnUser?.messageId) return;
+		void resendFrom(moveSessionId, turnUser.messageId, turnUser.text);
 	}
 
 	onDestroy(() => clearTimeout(copyResetTimer));
@@ -123,6 +137,10 @@
 					{/snippet}
 					<MenuItem onselect={copyMessage}>Copy message</MenuItem>
 					{#if forkMessageId}<MenuItem onselect={forkMessage}>Fork from here</MenuItem>{/if}
+					{#if moveSessionId && turnUser?.messageId && turnUser.text}
+						<MenuItem disabled={regenerateBlocked} detail={regenerateBlocked ? "Attachments are not resent" : undefined} onselect={regenerate}>Regenerate</MenuItem>
+					{/if}
+					{#if moveSessionId && turnUser}<MenuItem onselect={() => { headLog.sessionId = moveSessionId; }}>Rewind and undo…</MenuItem>{/if}
 				</Menu>
 			</div>
 		{/if}

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { expect, it, vi } from "vitest";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
-import { createRelayHarness } from "../helpers/relay-harness.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
 const artifactDirectory =
 	process.env["CONDUIT_TEST_ARTIFACT_DIR"] ??
@@ -15,7 +15,7 @@ const artifactDirectory =
 // Explicit resume gets a fresh attempt, never the stopped reservation.
 it("an empty Stop resumes an unused input in a fresh cohort without native abort", async () => {
 	const recording = loadOpenCodeRecording("chat-simple");
-	const relay = await createRelayHarness(
+	const relay = await createDaemonProject(
 		{
 			...recording,
 			interactions: recording.interactions.filter(
@@ -251,7 +251,7 @@ it("an empty Stop resumes an unused input in a fresh cohort without native abort
 
 it("a captured Stop holds a resumed input until native abort settles", async () => {
 	const recording = loadOpenCodeRecording("chat-simple");
-	const relay = await createRelayHarness(
+	const relay = await createDaemonProject(
 		{
 			...recording,
 			interactions: recording.interactions.filter(

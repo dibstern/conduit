@@ -40,11 +40,13 @@ import {
 	PersistenceStore,
 } from "../../../persistence/effect/live.js";
 import { ClaudeAccountScopesLive } from "../../../provider/claude/claude-account-scopes.js";
+import { makeClaudeSessionRunner } from "../../../provider/claude/claude-provider-runtime.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
 } from "../../../provider/claude/claude-sdk-env.js";
 import { CodexAccountResourcesLive } from "../../../provider/codex/codex-account-resources.js";
+import { readCodexSessionIdentity } from "../../../provider/codex/codex-session-store.js";
 import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
@@ -55,6 +57,9 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import type { ClaudeSdkSeam } from "../../../types.js";
+import { makePortWatcherLive } from "../../persistence/Services/port-watcher.js";
+import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledger-scheduler.js";
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
 import { AlertsLive } from "../../relay/Services/alerts.js";
 import {
@@ -110,6 +115,7 @@ import {
 } from "../Services/instance-manager-service.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
+	allProjects,
 	broadcastProjectList,
 	getProject,
 	makeProjectRegistryFromDaemonStateLive,
@@ -665,6 +671,8 @@ export interface DaemonLiveOptions {
 	persistedConfig?: DaemonConfig;
 	/** Computed while loading that snapshot, before normalization discards the old values. */
 	persistedConfigNeedsMigration?: boolean;
+	/** Test seam: an in-process Claude SDK for the provider adapters and every project. */
+	claudeSdk?: ClaudeSdkSeam;
 }
 
 /**
@@ -901,9 +909,43 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.merge(AlertsLive),
 		Layer.provideMerge(withProjectContext),
 	);
+	// One PortWatcher per daemon (CONTRACT.md 8.7), serving every registered project's sessions.
+	// One watcher and one alarm scheduler per daemon, serving registered projects' sessions.
+	const withPortWatcher = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			const registry = yield* ProjectRegistryTag;
+			const served = allProjects.pipe(
+				Effect.map((projects) => projects.map(({ slug }) => slug)),
+				Effect.provideService(ProjectRegistryTag, registry),
+			);
+			return Layer.merge(
+				makePortWatcherLive(
+					(sessionId) =>
+						readCodexSessionIdentity(configDir, sessionId)?.threadId,
+					served,
+				),
+				makeRunLedgerSchedulerLive(served),
+			).pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withInputDrafts));
 	// Runner adapters record account usage readings (Codex), so Usage precedes them.
-	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
-		Layer.provideMerge(UsageLive().pipe(Layer.provideMerge(withInputDrafts))),
+	const withProviderAdapters = makeProviderAdaptersLive(
+		configDir,
+		options.claudeSdk
+			? {
+					claudeSdk: options.claudeSdk,
+					claudeRunnerFactory: makeClaudeSessionRunner,
+				}
+			: {},
+	).pipe(
+		Layer.provideMerge(UsageLive().pipe(Layer.provideMerge(withPortWatcher))),
 	);
 	const withWorktrees = Layer.mergeAll(
 		makeWorktreeLive(configDir, {
@@ -989,7 +1031,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),
 	);
-	const registries = RelayFactoryLive(configDir).pipe(
+	const registries = RelayFactoryLive(configDir, options.claudeSdk).pipe(
 		Layer.provideMerge(withOrchestration),
 	);
 

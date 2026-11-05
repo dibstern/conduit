@@ -5,14 +5,14 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Tool presentation compatibility through the relay", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 	afterAll(async () => {
 		if (harness) await harness.stop();

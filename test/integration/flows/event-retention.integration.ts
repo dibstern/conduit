@@ -38,9 +38,9 @@ import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/c
 import { ProjectShellEnvResolver } from "../../../src/lib/provider/project-shell-env.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 const projectId = "integration-test";
 const emptyReport: DrainReport = {
@@ -105,10 +105,10 @@ const drainCopy = (filename: string, owner = projectId) =>
 	);
 
 describe("EventRetention through the relay", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 	let db: Database.Database;
 	let directory: string;
-	let drain: () => ReturnType<RelayHarness["drainEventRetention"]>;
+	let drain: () => ReturnType<DaemonProject["drainEventRetention"]>;
 	const evidence: Record<string, unknown> = {};
 
 	beforeEach(() => {
@@ -147,23 +147,23 @@ describe("EventRetention through the relay", () => {
 	});
 
 	async function setup() {
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: directory,
 			defaultModel: null,
 			claudeSdk,
 		});
 		db = new Database(harness.eventsDbPath, { readonly: true });
-		const runtime = harness.stack.effectRuntime.runtime;
-		const retention = await runtime.runPromise(EventRetentionTag);
+		const run = harness.run;
+		const retention = await run(EventRetentionTag);
 		const originalDrain = retention.drain;
 		// Explicit drains let each command's report be asserted deterministically.
 		// The separate scheduler flow exercises automatic background execution.
 		vi.spyOn(retention, "drain").mockImplementation(() =>
 			Effect.succeed(emptyReport),
 		);
-		drain = () => runtime.runPromise(originalDrain());
-		const commit = await runtime.runPromise(makeCommitAndSignal);
-		const ingestion = await runtime.runPromise(ProviderRuntimeIngestionTag);
+		drain = () => run(originalDrain());
+		const commit = await run(makeCommitAndSignal);
+		const ingestion = await run(ProviderRuntimeIngestionTag);
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const parent = await client.createSession("Retention Source", {
@@ -177,7 +177,7 @@ describe("EventRetention through the relay", () => {
 		});
 		const root = String(parent["id"]);
 		return {
-			runtime,
+			run,
 			commit,
 			ingestion,
 			client,
@@ -190,9 +190,8 @@ describe("EventRetention through the relay", () => {
 		const messageId = `answer_${sessionId}_${randomUUID()}`;
 		const userMessageId = `user_${messageId}`;
 		const runId = `run_${messageId}`;
-		const commit =
-			await harness.stack.effectRuntime.runtime.runPromise(makeCommitAndSignal);
-		await harness.stack.effectRuntime.runtime.runPromise(
+		const commit = await harness.run(makeCommitAndSignal);
+		await harness.run(
 			commit(
 				[
 					canonicalEvent("run.requested", sessionId, {
@@ -308,13 +307,13 @@ describe("EventRetention through the relay", () => {
 			"parent-first",
 			"fork-first",
 		] as const)(`${scenario} keeps exact lineage bounds in %s order`, async (order) => {
-			const { client, root, runtime, ingestion } = await setup();
+			const { client, root, run, ingestion } = await setup();
 			await transcript(root);
 			const removedWithRoot = [root];
 			let source = root;
 			if (scenario === "R3") {
 				source = `subagent_${randomUUID()}`;
-				const written = await runtime.runPromise(
+				const written = await run(
 					ingestion.ingestBatch(
 						[
 							{
@@ -391,7 +390,7 @@ describe("EventRetention through the relay", () => {
 			if (source !== root) await transcript(source);
 			// Read annotations are deliberately outside the log under ADR-0004.
 			// Start this fixture from replay's unseen state before exercising deletes.
-			await runtime.runPromise(
+			await run(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql.withTransaction(
@@ -452,13 +451,13 @@ describe("EventRetention through the relay", () => {
 	}
 
 	it("one call releases a parent's hold when it reclaims the child", async () => {
-		const { client, root, runtime, ingestion } = await setup();
+		const { client, root, run, ingestion } = await setup();
 		await transcript(root);
 		// Candidates sort by id. Process the held parent before the dead child,
 		// so reclaiming both requires another pass through the parent's events.
 		const child = `zz_retention_child_${randomUUID()}`;
 		expect(root < child).toBe(true);
-		await runtime.runPromise(
+		await run(
 			ingestion.ingest({
 				eventId: randomUUID(),
 				type: "session.created",
@@ -483,8 +482,8 @@ describe("EventRetention through the relay", () => {
 	});
 
 	it("resumes after the first committed 500-event batch", async () => {
-		const { client, root, runtime, commit } = await setup();
-		await runtime.runPromise(
+		const { client, root, run, commit } = await setup();
+		await run(
 			commit(
 				Array.from({ length: 1300 }, (_, index) =>
 					canonicalEvent("session.renamed", root, {
@@ -636,11 +635,11 @@ describe("EventRetention through the relay", () => {
 	}, 30_000);
 
 	it("refuses late provider events after reclaim and a full projection reset", async () => {
-		const { client, root, runtime, ingestion } = await setup();
+		const { client, root, run, ingestion } = await setup();
 		await transcript(root);
 		await client.deleteSession(root);
 		await drain();
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql.withTransaction(
@@ -658,7 +657,7 @@ describe("EventRetention through the relay", () => {
 			db.prepare("SELECT id FROM sessions WHERE id = ?").get(root),
 		).toBeUndefined();
 		const before = events(db);
-		const written = await runtime.runPromise(
+		const written = await run(
 			ingestion.ingest({
 				eventId: randomUUID(),
 				type: "session.created",
@@ -691,12 +690,12 @@ describe("EventRetention through the relay", () => {
 	});
 
 	it("drains only its project's rows in the daemon-wide store", async () => {
-		const { client, root, runtime } = await setup();
+		const { client, root, run } = await setup();
 		await transcript(root);
 		await client.deleteSession(root);
 		const otherProject = "another-project";
 		const otherSession = `other_${randomUUID()}`;
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				const store = yield* makeEventStoreEffect;
 				const stored = yield* store.appendBatch([
@@ -722,7 +721,7 @@ describe("EventRetention through the relay", () => {
 			before.filter((row) => row.project_id === otherProject),
 		);
 		const keptOurs = events(db).filter((row) => row.project_id === projectId);
-		const theirs = await runtime.runPromise(
+		const theirs = await run(
 			Effect.gen(function* () {
 				return yield* (yield* makeEventRetention).drain();
 			}).pipe(
@@ -849,7 +848,7 @@ describe("EventRetention through the relay", () => {
 	});
 
 	it("reports fully held sessions without opening a write transaction", async () => {
-		const { root, client, runtime } = await setup();
+		const { root, client, run } = await setup();
 		await transcript(root);
 		const forkId = String(
 			(await client.forkSession({ sessionId: root }))["id"],
@@ -857,7 +856,7 @@ describe("EventRetention through the relay", () => {
 		await client.deleteSession(root);
 		const first = await drain();
 		expect(first.held).toHaveLength(1);
-		const sql = await runtime.runPromise(SqlClient.SqlClient);
+		const sql = await run(SqlClient.SqlClient);
 		const transactions = vi.spyOn(sql, "withTransaction");
 		const report = await drain();
 		expect(transactions).not.toHaveBeenCalled();
@@ -868,13 +867,13 @@ describe("EventRetention through the relay", () => {
 	});
 
 	it("seeks indexes for every production retention query and live pointer check", async () => {
-		const { root, client, runtime, retentionDrain } = await setup();
+		const { root, client, run, retentionDrain } = await setup();
 		await transcript(root);
 		await client.forkSession({ sessionId: root });
 		await transcript(root);
 		await client.deleteSession(root);
 		const queries = new Map<string, readonly unknown[]>();
-		await runtime.runPromise(
+		await run(
 			retentionDrain().pipe(
 				Effect.provideService(CurrentTransformer, (statement) => {
 					const [query, parameters] = statement.compile();

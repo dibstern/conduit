@@ -27,6 +27,7 @@
 	import MediaViewer from "../overlays/MediaViewer.svelte";
 	import type { SettingsOpenDetail, SettingsSection } from "./chrome-actions.js";
 	import RewindBanner from "../overlays/RewindBanner.svelte";
+	import HeadLogDialog from "../overlays/HeadLogDialog.svelte";
 	import Button from "../ui/Button.svelte";
 	import { clickOnLift } from "../../actions/click-on-lift.js";
 	import {
@@ -552,6 +553,7 @@
 			{#if uiState.rewindActive}
 				<RewindBanner />
 			{/if}
+			<HeadLogDialog />
 		</div>
 
 		<!-- Keep the transcript mounted and sized beneath phone views so its scrollTop survives. -->

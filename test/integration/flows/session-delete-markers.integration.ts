@@ -12,12 +12,12 @@ import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("cascaded session deletion markers", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 	let db: Database.Database;
 	const evidence: Record<string, unknown> = {};
 
@@ -33,14 +33,14 @@ describe("cascaded session deletion markers", () => {
 	});
 
 	async function setup() {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		db = new Database(harness.eventsDbPath, { readonly: true });
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const source = await client.createSession("Source", {
 			providerId: "opencode",
 		});
-		const services = await harness.stack.effectRuntime.runtime.runPromise(
+		const services = await harness.run(
 			Effect.gen(function* () {
 				return {
 					commit: yield* makeCommitAndSignal,
@@ -151,7 +151,7 @@ describe("cascaded session deletion markers", () => {
 		const child = "ses_delete_child";
 		const grandchild = "ses_delete_grandchild";
 		const side = "ses_delete_side";
-		await harness.stack.effectRuntime.runtime.runPromise(
+		await harness.run(
 			commit([
 				created(child, root),
 				created(grandchild, child),
@@ -187,9 +187,7 @@ describe("cascaded session deletion markers", () => {
 		);
 		const published = vi.spyOn(bus, "publish");
 		const advances = vi.spyOn(bus, "publishAdvance");
-		await harness.stack.effectRuntime.runtime.runPromise(
-			manager.deleteSession(root),
-		);
+		await harness.run(manager.deleteSession(root));
 		expect(snapshotIds).toContain(root);
 		expect(snapshotIds).not.toContain(child);
 		await verifyDeletion(
@@ -204,9 +202,7 @@ describe("cascaded session deletion markers", () => {
 	it("marks a child when OpenCode deletes its parent upstream", async () => {
 		const { root, commit, bus } = await setup();
 		const child = "ses_delete_upstream_child";
-		await harness.stack.effectRuntime.runtime.runPromise(
-			commit([created(child, root)]),
-		);
+		await harness.run(commit([created(child, root)]));
 		const published = vi.spyOn(bus, "publish");
 		const advances = vi.spyOn(bus, "publishAdvance");
 		harness.mock.emitTestEvent("session.deleted", { info: { id: root } });
@@ -219,7 +215,7 @@ describe("cascaded session deletion markers", () => {
 		const grandchild = "ses_delete_batch_grandchild";
 		const published = vi.spyOn(bus, "publish");
 		const advances = vi.spyOn(bus, "publishAdvance");
-		await harness.stack.effectRuntime.runtime.runPromise(
+		await harness.run(
 			commit([
 				created(child, root),
 				created(grandchild, child),
@@ -238,12 +234,10 @@ describe("cascaded session deletion markers", () => {
 	it("rolls back descendant markers with the root and projection", async () => {
 		const { client, root, commit, bus, sql } = await setup();
 		const child = "ses_delete_rollback_child";
-		await harness.stack.effectRuntime.runtime.runPromise(
-			commit([created(child, root)]),
-		);
+		await harness.run(commit([created(child, root)]));
 		const published = vi.spyOn(bus, "publish");
 		const advances = vi.spyOn(bus, "publishAdvance");
-		const result = await harness.stack.effectRuntime.runtime.runPromise(
+		const result = await harness.run(
 			Effect.result(
 				commit([canonicalEvent("session.deleted", root, { sessionId: root })], {
 					beforeCommit: sql
@@ -283,13 +277,11 @@ describe("cascaded session deletion markers", () => {
 	])("projects explicit markers in %s order without duplicates", async (order) => {
 		const { root, commit, bus } = await setup();
 		const child = "ses_delete_order_child";
-		await harness.stack.effectRuntime.runtime.runPromise(
-			commit([created(child, root)]),
-		);
+		await harness.run(commit([created(child, root)]));
 		const published = vi.spyOn(bus, "publish");
 		const advances = vi.spyOn(bus, "publishAdvance");
 		const ids = order === "root-first" ? [root, child] : [child, root];
-		await harness.stack.effectRuntime.runtime.runPromise(
+		await harness.run(
 			commit(
 				ids.map((sessionId) =>
 					canonicalEvent("session.deleted", sessionId, { sessionId }),

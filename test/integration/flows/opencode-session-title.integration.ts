@@ -14,9 +14,9 @@ import {
 	startControlledOpenCodeInference,
 } from "../../helpers/controlled-opencode-inference.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 const FALLBACK_TITLE = /^Session \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/;
@@ -38,7 +38,7 @@ const makeSignal = () => {
 
 describe("Integration: OpenCode session titles", () => {
 	let opencode: SpawnedOpenCode;
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 	let client: TestWsClient;
 	let inference:
 		| Awaited<ReturnType<typeof startControlledOpenCodeInference>>
@@ -54,7 +54,7 @@ describe("Integration: OpenCode session titles", () => {
 			);
 			opencode = await spawnOpenCode({ env: inference.env });
 			await inference.assertOpenCodeConfig(opencode.url);
-			harness = await createRelayHarness("chat-simple", {
+			harness = await createDaemonProject("chat-simple", {
 				opencodeUrl: opencode.url,
 				defaultModel: CONTROLLED_MODEL_ID,
 				titleQuery: (params) => {

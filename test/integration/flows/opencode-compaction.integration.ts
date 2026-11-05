@@ -26,12 +26,12 @@ import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
 import type { OpenCodeRecording } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { createMockQuery, makeSuccessResult } from "../../helpers/mock-sdk.js";
 import { testMessages } from "../../helpers/test-session-slot.js";
-import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
 
 vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 
@@ -53,7 +53,7 @@ function recording(status = 200): OpenCodeRecording {
 }
 
 function seedNativeUserTurn(
-	relay: RelayHarness,
+	relay: DaemonProject,
 	sessionId: string,
 	modelID: string,
 ): void {
@@ -80,7 +80,7 @@ function seedNativeUserTurn(
 	]);
 }
 
-function persistedCompactions(harness: RelayHarness, sessionId: string) {
+function persistedCompactions(harness: DaemonProject, sessionId: string) {
 	return Effect.runPromise(
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
@@ -118,7 +118,7 @@ function saveEvidence(name: string, evidence: unknown): void {
 }
 
 describe("Integration: OpenCode compaction through the relay", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 
 	beforeEach(() => {
 		// Use the built-in fallback catalogue without launching a real Claude query.
@@ -174,7 +174,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		name,
 		modelID,
 	}) => {
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "claude/sonnet",
 		});
 		harness = relay;
@@ -234,7 +234,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	});
 
 	it("rejects Compact without a stored pick even when native history has a model", async () => {
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "claude/sonnet",
 		});
 		harness = relay;
@@ -319,7 +319,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 
 	it("keeps Claude context when compact_boundary omits post_tokens", async () => {
 		let turns = 0;
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "claude/sonnet",
 			claudeSdk: {
 				query: () => {
@@ -435,7 +435,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		"MessageAbortedError",
 		"UnknownError",
 	])("does not clear context for an unsuccessful live summary (%s)", async (name) => {
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
 		harness = relay;
@@ -509,7 +509,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		"legacy-only",
 		"summary-only",
 	])("summarizes with the current model and delivers one durable notice per compaction (%s)", async (mode) => {
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
 		harness = relay;
@@ -876,7 +876,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 		"/compact explain this",
 		"Please run /compact",
 	])("keeps a non-bare command as ordinary prompt text (%s)", async (text) => {
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
 		harness = relay;
@@ -904,7 +904,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	});
 
 	it("keeps a failed submitted summarize indeterminate across an unowned Stop idle", async () => {
-		const relay = await createRelayHarness(recording(500), {
+		const relay = await createDaemonProject(recording(500), {
 			defaultModel: "opencode/big-pickle",
 		});
 		harness = relay;
@@ -1040,7 +1040,7 @@ describe("Integration: OpenCode compaction through the relay", () => {
 	});
 
 	it("translates delta-first progress and a provider compaction error", async () => {
-		const relay = await createRelayHarness(recording(), {
+		const relay = await createDaemonProject(recording(), {
 			defaultModel: "opencode/big-pickle",
 		});
 		harness = relay;

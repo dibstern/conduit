@@ -1,17 +1,16 @@
 /*
- * Catalogue failure modes at the browser RPC and relay boundary:
+ * Catalogue failure modes at the browser RPC boundary:
  * - Unknown explicit and stored account refs must fail with the ref named.
  * - A just-added account must work before daemon.json is flushed.
  * - Commands and skills must use that account's folder and session workspace.
  * - Driver catalogue keys must remain independent of account ids.
- * - A standalone relay must not start its saved OpenCode default without health,
- *   or let that missing health block Claude account/session model catalogues.
+ * - The daemon must not start its saved OpenCode default without health, or let
+ *   that missing health block Claude account/session model catalogues.
  * Every folder, login and config file belongs to this temporary fixture.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Effect, Layer, ManagedRuntime } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import {
@@ -19,35 +18,23 @@ import {
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
-import {
-	DaemonConfigRefLive,
-	type DaemonConfigRefTag,
-	makeDaemonConfigFromOptions,
-} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
-import {
-	addInstance,
-	makeInstanceManagerStateLive,
-} from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
+import { addInstance } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { getSkillNamesForSession } from "../../../src/lib/handlers/settings.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
-import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
+import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 
 describe("Integration: account catalogues", () => {
 	const evidence: Array<{ name: string; result: string | undefined }> = [];
 	let root: string;
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let savedServer: MockOpenCodeServer | undefined;
-	let disposeRegistry: (() => Promise<void>) | undefined;
 
 	beforeEach(() => {
 		root = mkdtempSync(join(tmpdir(), "conduit-account-catalogues-"));
@@ -68,8 +55,6 @@ describe("Integration: account catalogues", () => {
 		harness = undefined;
 		await savedServer?.stop();
 		savedServer = undefined;
-		await disposeRegistry?.();
-		disposeRegistry = undefined;
 		vi.unstubAllEnvs();
 		__setProbeOverrideForTesting(undefined);
 		evidence.push({ name: task.name, result: task.result?.state });
@@ -84,6 +69,10 @@ describe("Integration: account catalogues", () => {
 	it("keeps no-health OpenCode defaults off the saved server and rejects unroutable refs", async () => {
 		savedServer = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await savedServer.start();
+		// The daemon health-checks saved servers; this one never reports healthy.
+		savedServer.setExactResponse("GET", "/global/health", 503, {
+			healthy: false,
+		});
 		await saveDaemonConfig(
 			{
 				...defaultDaemonConfig(),
@@ -109,22 +98,19 @@ describe("Integration: account catalogues", () => {
 			},
 			root,
 		);
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
 			defaultModel: null,
 			claudeSdk,
 		});
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
-		const runtime = harness.stack.effectRuntime.runtime;
-		const directory = await runtime.runPromise(AccountDirectory);
+		const directory = await harness.run(AccountDirectory);
 		expect(
-			(await runtime.runPromise(directory.list)).find(
-				({ id }) => id === "remote",
-			),
+			(await harness.run(directory.list)).find(({ id }) => id === "remote"),
 		).toMatchObject({ isDefault: true });
 		expect(
-			await runtime.runPromise(
+			await harness.run(
 				directory.resolve({ _tag: "DriverDefault", driver: "opencode" }),
 			),
 		).toMatchObject({ id: "opencode", driver: "opencode" });
@@ -160,9 +146,17 @@ describe("Integration: account catalogues", () => {
 		expect(active.instanceId).toBe("claude");
 		expect(active.active).toEqual({ provider: "claude", model: "sonnet" });
 		expect(
-			savedServer.diagnostics.filter(({ event }) => event === "request"),
+			savedServer.diagnostics.filter(
+				// The daemon watches every saved server (health, events, pending
+				// status, permissions and questions); no default work may reach it.
+				({ event, detail }) =>
+					event === "request" &&
+					!/^GET \/(global\/(health|event)|session\/status|permission|question)\b/.test(
+						detail ?? "",
+					),
+			),
 		).toEqual([]);
-		await harness.stack.effectRuntime.runtime.runPromise(
+		await harness.run(
 			applySessionCommand({
 				type: "session.created",
 				data: {
@@ -216,44 +210,28 @@ describe("Integration: account catalogues", () => {
 			join(login, "commands", "default-only.md"),
 			"Default command\n",
 		);
-		const registry = makeInstanceManagerStateLive(
-			{},
-			[
-				{
-					id: "claude",
-					name: "Default",
-					driver: "claude",
-					configDir: login,
-					port: 0,
-					managed: false,
-				},
-			],
-			{ launchLogin: configuredClaudeConfigDir(login) },
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "claude",
+						name: "Default",
+						driver: "claude",
+						configDir: login,
+						port: 0,
+						managed: false,
+					},
+				],
+			},
+			root,
 		);
-		const runtime = ManagedRuntime.make(
-			Layer.mergeAll(
-				registry,
-				DaemonEventBusLive,
-				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag)({
-					requestSave: Effect.void,
-					flush: Effect.fail(new Error("Fixture never flushes config")),
-				}),
-			),
-		);
-		disposeRegistry = () => runtime.dispose();
-		const daemonConfigContext = await runtime.runPromise(
-			Effect.context<
-				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
-			>(),
-		);
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
-			daemonConfigContext,
 			defaultModel: null,
 			claudeSdk,
 		});
-		await runtime.runPromise(
+		await harness.run(
 			addInstance({
 				id: "personal-account",
 				name: "Personal",
@@ -303,9 +281,7 @@ describe("Integration: account catalogues", () => {
 		expect(commands.commands.map((command) => command.name)).not.toContain(
 			"default-only",
 		);
-		const skills = await harness.stack.effectRuntime.runtime.runPromise(
-			getSkillNamesForSession(sessionId),
-		);
+		const skills = await harness.run(getSkillNamesForSession(sessionId));
 		expect(skills.has("account-skill")).toBe(true);
 		expect(skills.has("account-command")).toBe(false);
 	});

@@ -6,7 +6,6 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -14,15 +13,14 @@ import { Effect, Schema } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionDetailItemSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 function inbox(harness: ProcessHarness, sessionId: string) {
 	const db = new Database(harness.daemonStorePath(), { readonly: true });
@@ -495,20 +493,12 @@ describe("Claude pending steer recovery through the process seam", () => {
 // and pending-tray query. The handoff facts stand in for a provider's decline.
 it("returns a declined steer to the front and ignores duplicate or obsolete recovery", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-declined-steer-"));
-	const server = createServer();
-	const relay = await createProjectRelay({
-		httpServer: server,
-		persistenceDbPath: join(root, "events.db"),
+	const relay = await createDaemonProject("chat-simple", {
 		projectDir: root,
-		configDir: join(root, "config"),
 		slug: "declined-steer",
-		noServer: true,
-		opencodeUrl: "http://127.0.0.1:1",
-		publishGlobalSetting: () => Effect.void,
-		log: createSilentLogger(),
 	});
 	try {
-		const proof = await relay.effectRuntime.runtime.runPromise(
+		const proof = await relay.run(
 			Effect.gen(function* () {
 				const persistService = yield* Effect.serviceOption(
 					ClaudeEventPersistEffectTag,
@@ -568,7 +558,7 @@ it("returns a declined steer to the front and ignores duplicate or obsolete reco
 				const duplicate = yield* read.readPendingInputs(sessionId, {
 					through: Number.MAX_SAFE_INTEGER,
 				});
-				const db = new Database(join(root, "events.db"), { readonly: true });
+				const db = new Database(relay.eventsDbPath, { readonly: true });
 				let requeued: { data: string };
 				try {
 					requeued = db
@@ -612,7 +602,7 @@ it("returns a declined steer to the front and ignores duplicate or obsolete reco
 						{ metadata: { source: "inbox-reset" } },
 					),
 				);
-				const failedHandoff = new Database(join(root, "events.db"), {
+				const failedHandoff = new Database(relay.eventsDbPath, {
 					readonly: true,
 				});
 				let sentSequence: number;

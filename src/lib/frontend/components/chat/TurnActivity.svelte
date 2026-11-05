@@ -47,7 +47,7 @@
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import { backgroundTaskText } from "../../../shared-types.js";
 	import { confirmStuckStop, keepTasks, stopBackgroundTasks, taskKind } from "../session/background-tasks.svelte.js";
-	import type { ModelExecution } from "../../types.js";
+	import type { ModelExecution, UserMessage } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
 	import Icon from "../ui/Icon.svelte";
@@ -79,7 +79,7 @@
 	import { turnLog } from "../../utils/turns.js";
 	import AssistantHeader from "./AssistantHeader.svelte";
 
-	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, onsummarize, onreposition = (step) => repositionWithoutController(scrollRoot, step), numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
+	let { view = primaryTranscript, scrollRoot, turn, segment, final, entries, renderResume, runLabel = { kind: "working" }, liveTasks = [], taskListedAt = new Map<string, number>(), taskNow = Date.now(), sessionId, forkMessageId, modelExecution, providerId, turnUser, onsummarize, onreposition = (step) => repositionWithoutController(scrollRoot, step), numbered = false, latestTurn = true, newestSettledTurn = latestTurn, surfacing, surfacingRegions = {}, onSurfacingShortcut, onMessagesRead, onReplyToAsk, hasRecap = false, panel = createTurnPanel({
 		get viewId() { return view.id; },
 		get sessionId() { return sessionId; }, get turn() { return turn; },
 		get jev() { return surfacingActive; }, get processing() { return turn.live; },
@@ -88,6 +88,8 @@
 	}) }: {
 		panel?: TurnPanelState;
 		turn: Turn;
+		/** The turn's user message where the conversation's Head can move; see AssistantHeader. */
+		turnUser?: UserMessage | undefined;
 		runLabel?: RunLabel | undefined;
 		segment: Segment;
 		final: boolean;
@@ -685,7 +687,7 @@
 {/snippet}
 
 <div bind:this={panelEl} data-turn-id={turn.id} data-minimised={minimised} role={surfacingActive || summaryEnabled ? "group" : undefined} aria-label={surfacingActive || summaryEnabled ? "Turn activity" : undefined} onkeydown={surfaceCommand} class="turn-activity max-w-[820px] mx-auto px-[14px] md:px-[32px] mt-[6px] mb-[14px]">
-	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
+	<AssistantHeader message={segment.reply[0]} {sessionId} {forkMessageId} {modelExecution} {providerId} {turnUser} createdAt={segment.reply.length > 0 ? undefined : segment.activity[0]?.createdAt} />
 	<div class="md:ml-[42px]">
 		<!-- The active turn is a keyboard navigation group; inactive turns add no tab stop. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->

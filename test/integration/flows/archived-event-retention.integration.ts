@@ -18,9 +18,9 @@ import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/c
 import { ProjectShellEnvResolver } from "../../../src/lib/provider/project-shell-env.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 const DAY = 86_400_000;
 const emptyReport: DrainReport = {
@@ -44,7 +44,7 @@ interface EventRow {
 // deletion, a deleted middle fork loses its Source hold, or a child's reclaimed
 // approval leaves an ancestor's read annotation looking like replay corruption.
 describe("archived event retention through the relay", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let db: Database.Database | undefined;
 	let directory: string;
 	const evidence: Record<string, Record<string, unknown>> = {};
@@ -92,7 +92,7 @@ describe("archived event retention through the relay", () => {
 	async function setup(name: string) {
 		const scenario: Record<string, unknown> = {};
 		evidence[name] = scenario;
-		const relay = await createRelayHarness("chat-simple", {
+		const relay = await createDaemonProject("chat-simple", {
 			configDir: directory,
 			defaultModel: null,
 			claudeSdk,
@@ -100,15 +100,15 @@ describe("archived event retention through the relay", () => {
 		harness = relay;
 		const database = new Database(relay.eventsDbPath, { readonly: true });
 		db = database;
-		const runtime = relay.stack.effectRuntime.runtime;
-		const retention = await runtime.runPromise(EventRetentionTag);
+		const run = relay.run;
+		const retention = await run(EventRetentionTag);
 		const originalDrain = retention.drain;
 		// Separate sweep and drain observations. Automatic kicks are covered by
 		// event-retention-scheduling.integration.ts and the daemon sweep test.
 		const scheduledDrains = vi
 			.spyOn(retention, "drain")
 			.mockImplementation(() => Effect.succeed(emptyReport));
-		const commit = await runtime.runPromise(makeCommitAndSignal);
+		const commit = await run(makeCommitAndSignal);
 		const client = await relay.connectWsClient();
 		await client.waitForInitialState();
 		const root = String(
@@ -149,7 +149,7 @@ describe("archived event retention through the relay", () => {
 			const messageId = randomUUID();
 			const userMessageId = randomUUID();
 			const runId = `run_${messageId}`;
-			await runtime.runPromise(
+			await run(
 				commit(
 					[
 						canonicalEvent("run.requested", sessionId, {
@@ -201,7 +201,7 @@ describe("archived event retention through the relay", () => {
 		};
 		const child = async (parentId: string) => {
 			const sessionId = `child_${randomUUID()}`;
-			await runtime.runPromise(
+			await run(
 				commit([
 					canonicalEvent("session.created", sessionId, {
 						sessionId,
@@ -214,7 +214,7 @@ describe("archived event retention through the relay", () => {
 			return sessionId;
 		};
 		const archive = () =>
-			runtime.runPromise(
+			run(
 				commit([
 					canonicalEvent(
 						"session.archived",
@@ -229,8 +229,10 @@ describe("archived event retention through the relay", () => {
 			const scheduledBefore = scheduledDrains.mock.calls.length;
 			scenario["eventsBeforeSweep"] = beforeSweep;
 			// The daemon invokes this effect outside the project's runtime.
+			const { deleteArchivedSessions } = await relay.relay();
+			if (!deleteArchivedSessions) throw new Error("No archive sweep");
 			const sweepResult = await Effect.runPromise(
-				relay.stack.deleteArchivedSessions(30 * DAY, Date.now()),
+				deleteArchivedSessions(30 * DAY, Date.now()),
 			);
 			const afterSweep = events();
 			scenario["sweepResult"] = sweepResult;
@@ -275,7 +277,7 @@ describe("archived event retention through the relay", () => {
 				);
 			scenario["scheduledDrains"] =
 				scheduledDrains.mock.calls.length - scheduledBefore;
-			const drainReport = await runtime.runPromise(originalDrain());
+			const drainReport = await run(originalDrain());
 			const afterDrain = events();
 			const parity = await relay.checkReplayParity();
 			scenario["drainReport"] = drainReport;
@@ -298,7 +300,7 @@ describe("archived event retention through the relay", () => {
 		return {
 			relay,
 			database,
-			runtime,
+			run,
 			commit,
 			client,
 			root,
@@ -353,7 +355,7 @@ describe("archived event retention through the relay", () => {
 		);
 		// Match the existing retention fixture's replay baseline for per-viewer
 		// read state, which is outside the log under ADR-0004.
-		await flow.runtime.runPromise(
+		await flow.run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql.withTransaction(
@@ -394,7 +396,7 @@ describe("archived event retention through the relay", () => {
 		const child = await flow.child(flow.root);
 		const snoozedAt = Date.now() - 1000;
 		const wokenAt = snoozedAt + 1;
-		await flow.runtime.runPromise(
+		await flow.run(
 			flow.commit([
 				canonicalEvent(
 					"session.snoozed",

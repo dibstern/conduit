@@ -5,20 +5,23 @@
 import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TurnErrorPayload } from "../../../src/lib/contracts/stored-event.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: SSE to RPC Pipeline", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeEach(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		harness.mock.resetQueues();
-		await harness.stack.client.app.path();
+		await (await harness.run(OpenCodeAPITag)).app.path();
+		const sse = await harness.run(SSEStreamTag);
 		await vi.waitFor(() => {
-			expect(harness.stack.sseStream.getHealth().connected).toBe(true);
+			expect(sse.getHealth().connected).toBe(true);
 		});
 	}, 30_000);
 
