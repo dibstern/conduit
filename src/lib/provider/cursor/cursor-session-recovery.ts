@@ -11,6 +11,8 @@ export interface CursorSessionIdentity {
 	readonly cwd: string;
 	readonly controllerPid: number;
 	readonly forkSeedPending?: boolean;
+	/** The switch record whose handoff this agent was opened for (ad4c). */
+	readonly handoffFor?: number;
 }
 
 export function cursorSessionStorePath(
@@ -36,7 +38,9 @@ export function readCursorSessionIdentity(
 		!Number.isSafeInteger(value["controllerPid"]) ||
 		value["controllerPid"] <= 0 ||
 		(value["forkSeedPending"] !== undefined &&
-			typeof value["forkSeedPending"] !== "boolean")
+			typeof value["forkSeedPending"] !== "boolean") ||
+		(value["handoffFor"] !== undefined &&
+			typeof value["handoffFor"] !== "number")
 	) {
 		throw new CursorSdkFailure({
 			operation: "session.identity",
@@ -49,6 +53,9 @@ export function readCursorSessionIdentity(
 		controllerPid: value["controllerPid"],
 		...(typeof value["forkSeedPending"] === "boolean"
 			? { forkSeedPending: value["forkSeedPending"] }
+			: {}),
+		...(typeof value["handoffFor"] === "number"
+			? { handoffFor: value["handoffFor"] }
 			: {}),
 	};
 }

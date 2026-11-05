@@ -13,6 +13,11 @@ export const TurnFacts = Schema.TaggedUnion({
 			Schema.TaggedStruct("SignedOut", {}),
 		]),
 		forkDigest: Schema.optionalKey(Schema.String),
+		// ad4c: a switch into this account owes a fresh agent seeded once with
+		// this full handoff; the switch record's sequence keys it.
+		switchHandoff: Schema.optionalKey(
+			Schema.Struct({ switchSequence: Schema.Number, text: Schema.String }),
+		),
 	},
 	Codex: {
 		effort: Schema.optionalKey(Schema.String),

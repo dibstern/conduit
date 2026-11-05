@@ -23,6 +23,7 @@ import {
 	isClaudeResumeRefused,
 } from "../event-sink-errors.js";
 import { historicalMessageText } from "../historical-message-text.js";
+import { handoffThrough } from "../switch-handoff.js";
 import type {
 	ProviderNativeSession,
 	SendTurnInput,
@@ -256,6 +257,8 @@ function planTurn(input: {
 							omitted: 0,
 							firstMessageIncluded: false,
 							tokens: 0,
+							strategy: "resume" as const,
+							afterSequence: nativeThread.deliveredThrough,
 						},
 					}
 				: {}),
@@ -282,6 +285,8 @@ function planTurn(input: {
 			omitted: handoff.omitted,
 			firstMessageIncluded: !catchingUp && handoff.firstUserIncluded,
 			tokens: handoff.tokens,
+			strategy: catchingUp ? "resume" : "fresh",
+			afterSequence: catchingUp ? nativeThread.deliveredThrough : 0,
 		},
 	};
 }
@@ -292,15 +297,6 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 		const state = yield* ProviderStateEffectTag;
 		const read = yield* ReadQueryEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const configuredCap = Number(
-			process.env["CONDUIT_CONTEXT_HANDOFF_TOKEN_CAP"] ?? 16000,
-		);
-		const budgetOptions = {
-			...options,
-			tokenCap:
-				options.tokenCap ??
-				(Number.isFinite(configuredCap) ? configuredCap : 16000),
-		};
 		return (sessionId: string, instanceId: string, userText?: string) =>
 			Effect.gen(function* () {
 				const session = yield* read.getSession(sessionId);
@@ -545,11 +541,11 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 				const nativeThread = invalidated ? undefined : recordedThread;
 				const turnOptions = invalidated
 					? {
-							...budgetOptions,
+							...options,
 							configDir: resumeConfigDir,
 							liveSession: undefined,
 						}
-					: budgetOptions;
+					: options;
 				const providerState = nativeThread
 					? yield* state.getState(sessionId)
 					: {};
@@ -654,6 +650,21 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 								}
 							: {}),
 					});
+					// ad4c: a catch-up that cannot fit drops the resume and starts fresh
+					// with the full kept history (t3code Orchestrator.ts 1796-1802).
+					if (
+						!options.continuation &&
+						!(plan instanceof Error) &&
+						!("_tag" in plan) &&
+						plan.handoff?.strategy === "resume" &&
+						plan.handoff.omitted > 0
+					)
+						plan = planTurn({
+							...input,
+							nativeThread: undefined,
+							messages,
+							options: { ...turnOptions, liveSession: undefined },
+						});
 				}
 				if (
 					plan instanceof HandoffTooLarge ||
@@ -662,7 +673,19 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					return yield* plan;
 				if ("_tag" in plan)
 					return yield* Effect.die("prepareTurn did not resolve history");
-				return plan;
+				return plan.handoff
+					? {
+							...plan,
+							handoff: {
+								...plan.handoff,
+								throughSequence: yield* handoffThrough(
+									sql,
+									sessionId,
+									options.userMessageId,
+								),
+							},
+						}
+					: plan;
 			});
 	});
 

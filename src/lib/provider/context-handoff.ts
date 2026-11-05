@@ -18,7 +18,16 @@ export const buildContextHandoff = (input: {
 }) => {
 	const { messages } = input;
 	const window = input.contextWindow ?? 128000;
-	const cap = Math.max(1024, Math.min(64000, input.tokenCap ?? 16000));
+	const configured = Number(
+		process.env["CONDUIT_CONTEXT_HANDOFF_TOKEN_CAP"] ?? 16000,
+	);
+	const cap = Math.max(
+		1024,
+		Math.min(
+			64000,
+			input.tokenCap ?? (Number.isFinite(configured) ? configured : 16000),
+		),
+	);
 	const budget = Math.max(
 		0,
 		Math.min(
