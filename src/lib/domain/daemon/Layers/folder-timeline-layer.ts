@@ -1233,6 +1233,16 @@ export const makeFolderTimeline = (configDir: string) =>
 						sessionLock(sessionId).withPermits(1)(apply),
 					);
 			},
+			materialize: (directory, to) =>
+				folderLock(directory).withPermits(1)(
+					Effect.gen(function* () {
+						const now = yield* take(directory);
+						const writes = yield* diff(now.store, now.prefix, now.worktree, to);
+						yield* remove(directory, deletes(writes));
+						yield* checkout(directory, now.store, to, updates(writes));
+						return (yield* take(directory)).worktree;
+					}),
+				),
 			receipt: (sessionId, moveId, directory) =>
 				Effect.gen(function* () {
 					const { store } = yield* resolve(directory);
