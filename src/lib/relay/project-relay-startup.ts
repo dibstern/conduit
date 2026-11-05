@@ -63,6 +63,7 @@ import { formatErrorDetail } from "../errors.js";
 import type { Logger } from "../logger.js";
 import { ProjectionRunnerEffectTag } from "../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
+import { retireAsksOnProjectRemoval } from "../persistence/effect/retire-pending-prompts.js";
 import { GOAL_READ_TEXT, goalCommandText } from "../provider/goal-tracker.js";
 import { getOrchestrationLayer } from "../provider/orchestration-wiring.js";
 import { runningRunnerCommands } from "../provider/runner/runner-recovery.js";
@@ -155,6 +156,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 		// Recover pending state before initialization advances projector cursors.
 		yield* restoreClaudeQuestionsFromStore;
 		yield* restoreAsyncQuestionsFromStore;
+		yield* retireAsksOnProjectRemoval(relayManagedRuntime.scope);
 		const orchestration = yield* getOrchestrationLayer;
 		const runFork = Effect.runForkWith(
 			yield* Effect.context<
