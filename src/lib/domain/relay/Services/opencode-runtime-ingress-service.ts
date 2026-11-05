@@ -38,6 +38,7 @@ import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { TurnSettings } from "../../../provider/turn-settings.js";
 import {
 	isPartUpdatedEvent,
+	isSessionStatusEvent,
 	type SSEEvent,
 } from "../../../relay/opencode-events.js";
 import type { OpenCodeEventContext } from "../../../relay/sse-stream.js";
@@ -1537,6 +1538,15 @@ export class EffectOpenCodeRuntimeIngress
 				this.stats.eventsSkipped++;
 				return { ok: false, reason: "no-session" } as const;
 			}
+			// A turn conduit did not start writes no live message when the stream
+			// misses its message events, so a synced session rereads history once
+			// the turn settles.
+			if (
+				isSessionStatusEvent(event) &&
+				event.properties.status?.type === "busy" &&
+				this.syncedSessions.has(sessionId)
+			)
+				yield* this.invalidateHistory(sessionId);
 			const translation = this.translator.forkSession(sessionId);
 			let normalizedEvent = event;
 			if (isPartUpdatedEvent(event) && event.properties.part?.type === "file") {
