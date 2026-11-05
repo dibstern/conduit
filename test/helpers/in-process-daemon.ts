@@ -26,7 +26,10 @@ import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../../src/lib/domain/daemon/Layers/daemon-foreground.js";
-import { makeDaemonLive } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import {
+	type DaemonLiveOptions,
+	makeDaemonLive,
+} from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	DaemonConfigRefTag,
@@ -152,6 +155,11 @@ export async function createDaemonProject(
 		readonly opencodeUrl?: string;
 		readonly slug?: string;
 		readonly projectDir?: string;
+		readonly extraFolders?: readonly string[];
+		/** Stands in for every OpenCode server (the recording's mock goes unused). */
+		readonly openCodeInstances?: DaemonLiveOptions["openCodeInstances"];
+		/** Stands in for shell environment capture and its readiness. */
+		readonly shellEnv?: DaemonLiveOptions["shellEnv"];
 	} = {},
 ) {
 	const slug = options.slug ?? "integration-test";
@@ -195,6 +203,10 @@ export async function createDaemonProject(
 		}),
 		// Stubbed session titles: no test makes a live title call.
 		claudeSdk: { ...sdk, titleQuery: options.titleQuery ?? sdk.titleQuery },
+		...(options.openCodeInstances && {
+			openCodeInstances: options.openCodeInstances,
+		}),
+		...(options.shellEnv && { shellEnv: options.shellEnv }),
 	});
 	const clients: TestWsClient[] = [];
 	const stop = async () => {
@@ -210,7 +222,10 @@ export async function createDaemonProject(
 					{
 						slug,
 						title: slug,
-						folders: [options.projectDir ?? process.cwd()],
+						folders: [
+							options.projectDir ?? process.cwd(),
+							...(options.extraFolders ?? []),
+						],
 					},
 					{ silent: true },
 				).pipe(

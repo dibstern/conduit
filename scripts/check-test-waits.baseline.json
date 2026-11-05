@@ -1592,9 +1592,6 @@
 	"test/unit/relay/push-notification-done.test.ts": {
 		"polling": 1
 	},
-	"test/unit/relay/relay-startup-recovery.test.ts": {
-		"polling": 2
-	},
 	"test/unit/relay/shared-opencode-reconnect.test.ts": {
 		"polling": 20
 	},
