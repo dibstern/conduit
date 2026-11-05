@@ -546,7 +546,9 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 			.click();
 		// 8.4 (2866): a failed stop is a timeline notice, shown whenever it lands.
 		await expect(
-			page.getByText(/^Could not stop .*; it is still running$/),
+			page.getByText("Could not stop sleep 600 (shell); it is still running", {
+				exact: true,
+			}),
 		).toBeVisible();
 		await expectTasks(
 			page,
