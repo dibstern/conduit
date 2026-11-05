@@ -40,12 +40,39 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		return result.savedSlug;
 	}
 
-	function requests(browser: ProcessBrowser, id: string) {
-		return browser.frames.filter(
-			({ message }) =>
-				message["type"] === "permission_pending" &&
-				message["requestId"] === harness?.promptIdForProviderRequest(id),
-		).length;
+	// Ask cards reach every tab, whatever project it shows (82tn.13), so a card
+	// shows its routing by the session it names and that session's project.
+	function cards(fixture: ProcessHarness, browser: ProcessBrowser, id: string) {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			return browser.frames
+				.filter(
+					({ message }) =>
+						message["type"] === "permission_pending" &&
+						message["requestId"] === fixture.promptIdForProviderRequest(id),
+				)
+				.map(({ message }) => {
+					const sessionId = String(message["sessionId"]);
+					const row = db
+						.prepare("SELECT project_id FROM sessions WHERE id = ?")
+						.get(sessionId) as { project_id: string } | undefined;
+					return { project: row?.project_id, sessionId };
+				});
+		} finally {
+			db.close();
+		}
+	}
+
+	// Another project's session reaches a tab only as its ask card; any other
+	// frame naming it (detail, transcript) is a leak.
+	function sessionFrames(browser: ProcessBrowser, sessionId: string) {
+		return browser.frames
+			.filter(
+				({ message }) =>
+					message["sessionId"] === sessionId &&
+					message["type"] !== "permission_pending",
+			)
+			.map(({ message }) => message["type"]);
 	}
 
 	function persistedStatus(
@@ -100,7 +127,8 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 	});
 
 	// The card is a pending_approvals row, so the reconnect's re-emitted ask is
-	// idempotent: each browser holds its own prompt exactly once (ni8.9).
+	// idempotent: each browser holds every project's prompt exactly once (ni8.9,
+	// 82tn.13), each naming its own session in its own project.
 	it("keeps each project's pending prompt once across a reconnect, never across projects", async () => {
 		const fixture = await start("reconnect");
 		const a = await fixture.connect();
@@ -119,16 +147,14 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 			directoryB,
 			permission("pa4-b", sessionB),
 		);
-		await a.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa4-a",
-		);
-		await b.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa4-b",
-		);
+		// Every tab gets both projects' cards (82tn.13).
+		for (const tab of [a, b])
+			for (const id of ["pa4-a", "pa4-b"])
+				await tab.waitFor(
+					(message) =>
+						fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+						id,
+				);
 
 		const cursorA = a.frames.length;
 		const cursorB = b.frames.length;
@@ -160,32 +186,32 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 				properties: permission("pa4-b-barrier", sessionB),
 			},
 		});
-		await a.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa4-a-barrier",
-			cursorA,
-		);
-		await b.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa4-b-barrier",
-			cursorB,
-		);
-		const counts = {
-			a: {
-				own: requests(a, "pa4-a"),
-				other: requests(a, "pa4-b"),
-			},
-			b: {
-				own: requests(b, "pa4-b"),
-				other: requests(b, "pa4-a"),
+		for (const [tab, cursor] of [
+			[a, cursorA],
+			[b, cursorB],
+		] as const)
+			for (const id of ["pa4-a-barrier", "pa4-b-barrier"])
+				await tab.waitFor(
+					(message) =>
+						fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+						id,
+					cursor,
+				);
+		const ownA = { project: "process-test", sessionId: sessionA };
+		const ownB = { project: slugB, sessionId: sessionB };
+		const seen = {
+			a: { a: cards(fixture, a, "pa4-a"), b: cards(fixture, a, "pa4-b") },
+			b: { a: cards(fixture, b, "pa4-a"), b: cards(fixture, b, "pa4-b") },
+			leaks: {
+				a: sessionFrames(a, sessionB),
+				b: sessionFrames(b, sessionA),
 			},
 		};
-		evidence["recoveredPromptCounts"] = counts;
-		expect(counts).toEqual({
-			a: { own: 1, other: 0 },
-			b: { own: 1, other: 0 },
+		evidence["recoveredPromptCards"] = seen;
+		expect(seen).toEqual({
+			a: { a: [ownA], b: [ownB] },
+			b: { a: [ownA], b: [ownB] },
+			leaks: { a: [], b: [] },
 		});
 	}, 90_000);
 
@@ -347,24 +373,27 @@ describe("OpenCode Instances recovery and reconciliation", () => {
 		const slugB = await addProject(fixture, directoryB);
 		// Project relays start lazily, so B's relay subscribes on first connect.
 		const b = await fixture.connect(undefined, undefined, slugB);
-		await b.waitFor(
-			(message) =>
-				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
-				"pa4-late",
-		);
+		for (const tab of [b, a])
+			await tab.waitFor(
+				(message) =>
+					fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					"pa4-late",
+			);
 		await vi.waitFor(
 			() => expect(persistedStatus(fixture, slugB, sessionB)).toBe("busy"),
 			{ timeout: 15_000 },
 		);
-		const counts = {
-			b: requests(b, "pa4-late"),
-			aLeak: requests(a, "pa4-late"),
+		const late = { project: slugB, sessionId: sessionB };
+		const seen = {
+			b: cards(fixture, b, "pa4-late"),
+			a: cards(fixture, a, "pa4-late"),
+			aLeak: sessionFrames(a, sessionB),
 		};
 		evidence["lateSubscriber"] = {
 			status: persistedStatus(fixture, slugB, sessionB),
-			counts,
+			seen,
 		};
-		expect(counts).toEqual({ b: 1, aLeak: 0 });
+		expect(seen).toEqual({ b: [late], a: [late], aLeak: [] });
 		expect(
 			fixture
 				.opencodeStreamConnections()
