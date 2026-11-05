@@ -15,6 +15,7 @@ import { readdir, readFile, readlink } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { Clock, Config, Data, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
+import type { EventPayloadMap } from "../../../contracts/stored-event.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
@@ -39,12 +40,7 @@ interface Scanned {
 	readonly taskKey?: TaskKey;
 }
 
-/**
- * A Claude background task's stdout file (8.7): `.../tasks/<task id>.output`.
- * Codex's link (CONTRACT.md 2988-2989, a unique command and cwd match in
- * `thread/backgroundTerminals/list`) waits for that snapshot (CONTRACT.md 2791, 32.21);
- * until then Codex servers are session-level.
- */
+/** A Claude background task's stdout file (8.7): `.../tasks/<task id>.output`. */
 const TASK_OUTPUT = /\/tasks\/([^/]+)\.output$/;
 
 /**
@@ -114,11 +110,12 @@ const PS_TREE =
 	/^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\w{3}\s+\w{3}\s+\d+\s+\d\d:\d\d:\d\d\s+\d{4})\s+(.*)$/;
 
 /**
- * Linux scans /proc (proc(5)); other hosts run lsof and ps. "" selects lsof and ps; tests point it at
- * a fixture tree.
+ * Linux scans /proc (proc(5)); other hosts run lsof and ps. "lsof" selects lsof and ps (read as "",
+ * since Config takes an empty value as unset); tests point it at a fixture tree.
  */
 const procRoot = Config.String("CONDUIT_PORT_WATCH_PROC_ROOT").pipe(
-	Config.withDefault(process.platform === "linux" ? "/proc" : ""),
+	Config.withDefault(process.platform === "linux" ? "/proc" : "lsof"),
+	Config.map((root) => (root === "lsof" ? "" : root)),
 );
 /** /proc start times count USER_HZ ticks, 100 a second on every architecture (proc(5)). */
 const USER_HZ = 100;
@@ -821,12 +818,51 @@ export const makePortWatcherLive = (
 							...(taskId === undefined ? {} : { taskKey: { taskId } }),
 						};
 					};
+					// 8.7 Task link (CONTRACT.md 2988-2989): a server no task output file links goes to the
+					// one terminal its session's latest snapshot lists with the server's cwd and a command
+					// its process chain runs, bare or under a shell's -c. None or several leave it
+					// session-level. Only Codex terminals carry a cwd.
+					const linked = (scanned: Scanned) =>
+						scanned.taskKey !== undefined
+							? Effect.succeed(scanned)
+							: sql<{ data: string }>`SELECT data FROM events
+								WHERE session_id = ${scanned.sessionId} AND type = 'evidence.tasks_snapshot'
+								ORDER BY sequence DESC LIMIT 1`.pipe(
+									Effect.mapError(
+										(cause) =>
+											new PortScanError({ reason: "task link lookup", cause }),
+									),
+									Effect.map(([row]) => {
+										const commands = chainOf(scanned.server.pid).map(
+											(pid) => procs.get(pid)?.command ?? "",
+										);
+										const matches = (
+											row
+												? (
+														JSON.parse(
+															row.data,
+														) as EventPayloadMap["evidence.tasks_snapshot"]
+													).tasks
+												: []
+										).filter(
+											({ cwd, description }) =>
+												cwd === scanned.cwd &&
+												commands.some(
+													(command) =>
+														command === description ||
+														command.endsWith(` -c ${description}`) ||
+														command.endsWith(` -lc ${description}`),
+												),
+										);
+										const [only] = matches;
+										return matches.length === 1 && only
+											? { ...scanned, taskKey: only.key }
+											: scanned;
+									}),
+								);
 					return {
-						scanned: marked.map(
-							({ server, sessionId }): Scanned => ({
-								sessionId,
-								...describe(server),
-							}),
+						scanned: yield* Effect.forEach(marked, ({ server, sessionId }) =>
+							linked({ sessionId, ...describe(server) }),
 						),
 						servers,
 						caller,

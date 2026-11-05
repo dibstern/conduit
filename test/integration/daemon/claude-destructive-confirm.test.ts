@@ -11,6 +11,7 @@
 // 16. a task that starts after the Stop (no gate at the Stop) is closed, or held with no ask;
 // 19. the list shown and the snapshot entry come from different reads;
 // 13, 14. a confirmed close leaves no timeline entry, or a close with no tasks leaves one.
+// 24. a delete with tasks live ends them unasked, or a stale confirm deletes.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -53,6 +54,15 @@ const read = (harness: ProcessHarness, sessionId: string) => {
 			snapshotEntry: number | null;
 			retire: string | null;
 		}[];
+	} finally {
+		db.close();
+	}
+};
+
+const sessionRows = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return db.prepare("SELECT id FROM sessions WHERE id = ?").all(sessionId);
 	} finally {
 		db.close();
 	}
@@ -582,5 +592,39 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		await vi.waitFor(() =>
 			expect(closedQueries(fixture, queryId)).toHaveLength(1),
 		);
+	});
+
+	it("refuses a delete while tasks are live until it carries the current snapshot", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		const unasked = await Effect.runPromise(
+			Effect.flip(browser.rpc.DeleteSession({ sessionId })),
+		);
+		proof["delete unasked"] = unasked;
+		expect(unasked).toMatchObject({ _tag: "DeleteNeedsConfirm" });
+		const entry =
+			"snapshotEntry" in unasked ? Number(unasked.snapshotEntry) : Number.NaN;
+		expect(entry).toBeGreaterThan(0);
+		const stale = await Effect.runPromise(
+			Effect.flip(browser.rpc.DeleteSession({ sessionId, confirm: entry - 1 })),
+		);
+		expect(stale).toMatchObject({
+			_tag: "DeleteNeedsConfirm",
+			snapshotEntry: entry,
+		});
+		expect(sessionRows(fixture, sessionId)).toHaveLength(1);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		expect(
+			await Effect.runPromise(
+				browser.rpc.DeleteSession({ sessionId, confirm: entry }),
+			),
+		).toEqual({ ok: true });
+		// test-waits-allow polling: the fake SDK reports a closed query only through sdk-proof.ndjson.
+		await vi.waitFor(() =>
+			expect(closedQueries(fixture, queryId)).toHaveLength(1),
+		);
+		proof["delete confirmed"] = {
+			closed: closedQueries(fixture, queryId).length,
+		};
 	});
 });

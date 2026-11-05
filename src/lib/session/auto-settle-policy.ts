@@ -18,7 +18,8 @@ export interface AutoSettleFacts {
 	readonly lastMessageAt: number | null;
 	readonly latestUserMessageAt: number | null;
 	readonly latestTurn: AutoSettleTurn | null;
-	readonly status: string;
+	/** The session's ledger row is Open (3.12): anything may still act (8.3 `anythingMayAct`). */
+	readonly mayAct: boolean;
 	readonly hasPendingApproval: boolean;
 	readonly hasLiveBackgroundWork: boolean;
 	readonly hasViewer: boolean;
@@ -46,8 +47,7 @@ export function getAutoSettleOutlook(
 
 	if (
 		facts.hasPendingApproval ||
-		facts.status === "busy" ||
-		facts.status === "retry" ||
+		facts.mayAct ||
 		facts.latestTurn?.state === "pending" ||
 		facts.latestTurn?.state === "running" ||
 		facts.hasLiveBackgroundWork ||
@@ -103,7 +103,6 @@ export function sessionRowToAutoSettleFacts(
 		| "isChild"
 		| "settledAt"
 		| "lastMessageAt"
-		| "status"
 		| "pinnedAt"
 		| "unread"
 		| "autoSettleDisabledAt"
@@ -117,7 +116,6 @@ export function sessionRowToAutoSettleFacts(
 		isChild: (row?.parent_id ?? null) !== null,
 		settledAt: row?.settled_at ?? null,
 		lastMessageAt: row?.last_message_at ?? null,
-		status: row?.status ?? "idle",
 		pinnedAt: row?.pinned_at ?? null,
 		unread: row?.unread === 1,
 		autoSettleDisabledAt: row?.auto_settle_disabled_at ?? null,

@@ -15,7 +15,7 @@ const eligible = (): AutoSettleFacts => ({
 	lastMessageAt: NOW - idle - 1,
 	latestUserMessageAt: null,
 	latestTurn: null,
-	status: "idle",
+	mayAct: false,
 	hasPendingApproval: false,
 	hasLiveBackgroundWork: false,
 	hasViewer: false,
@@ -55,8 +55,7 @@ describe("automatic idle settlement policy", () => {
 		["missing", { exists: false }],
 		["already settled", { settledAt: NOW - 2_000 }],
 		["unread", { unread: true }],
-		["running", { status: "busy" }],
-		["retrying", { status: "retry" }],
+		["anything may act", { mayAct: true }],
 		[
 			"pending turn",
 			{
@@ -143,8 +142,7 @@ describe("automatic idle settlement policy", () => {
 
 	it.each([
 		["pending approval or question", { hasPendingApproval: true }],
-		["busy", { status: "busy" }],
-		["retrying", { status: "retry" }],
+		["anything may act", { mayAct: true }],
 		["live background work", { hasLiveBackgroundWork: true }],
 		["pinned", { pinnedAt: NOW - DAY }],
 		["open in a browser", { hasViewer: true }],

@@ -65,7 +65,11 @@ import { AppServerExited } from "./app-server/transport.js";
 import { invalidateCodexAuth } from "./codex-discovery.js";
 import { prepareCodexAccount } from "./codex-home.js";
 import { CodexInteractions } from "./codex-interactions.js";
-import { codexRuntimeEvent } from "./codex-item-mapper.js";
+import {
+	type CodexItemState,
+	codexRuntimeEvent,
+	mapCodexItem,
+} from "./codex-item-mapper.js";
 import { answerServerMark, SERVER_MARK_TOOL } from "./codex-server-mark.js";
 import { codexSessionConfig } from "./codex-session-config.js";
 import {
@@ -164,7 +168,40 @@ interface CodexSession {
 		readonly lock: Semaphore.Semaphore;
 		sent?: string;
 		seen: ReadonlyMap<string, number>;
+		/** Rows settled turns left open for their terminals, by item id; they share their turn's state. */
+		readonly rows: Map<
+			string,
+			{ readonly turn: { items: CodexItemState }; readonly sink: EventSink }
+		>;
+		/** Terminal completions read before their turn settled, by item id. */
+		readonly finished: Map<string, TerminalCompletion>;
 	};
+}
+
+type TerminalCompletion = Extract<
+	KnownNotification,
+	{ readonly method: "item/completed" }
+>;
+
+/** Closes the row a settled turn left open for this terminal; the check and claim are synchronous. */
+function closeTerminalRow(
+	session: CodexSession,
+	completion: TerminalCompletion,
+) {
+	const row = session.terminals.rows.get(completion.params.item.id);
+	if (!row) return Effect.void;
+	session.terminals.rows.delete(completion.params.item.id);
+	const [items, events] = mapCodexItem(
+		{ ...row.turn.items, now: Date.now() },
+		completion,
+	);
+	row.turn.items = items;
+	// Fresh ids: a push reusing the settled turn's sequence ids was never acknowledged.
+	return Effect.forEach(
+		events,
+		(event) => row.sink.push({ ...event, eventId: createEventId() }),
+		{ discard: true },
+	);
 }
 
 function turnFailure(cause: unknown): { code: TurnErrorCode; message: string } {
@@ -358,7 +395,12 @@ export class CodexRunnerPayload implements RunnerPayload {
 						? { continuationInputId: identity.continuationInputId }
 						: {}),
 					rateLimits: new Map(),
-					terminals: { lock: yield* Semaphore.make(1), seen: new Map() },
+					terminals: {
+						lock: yield* Semaphore.make(1),
+						seen: new Map(),
+						rows: new Map(),
+						finished: new Map(),
+					},
 				};
 				this.sessions.set(input.sessionId, session);
 			}
@@ -602,6 +644,22 @@ export class CodexRunnerPayload implements RunnerPayload {
 									}
 								: event,
 						);
+					}
+					// 82tn.45: a row the turn left open for its terminal closes on the terminal's own
+					// completion, read before the turn settled or after it.
+					if (update.outcome) {
+						const turn = { items: update.state.items };
+						for (const part of turn.items.parts)
+							if (
+								part.kind === "tool" &&
+								!part.closed &&
+								part.metadata["providerTaskId"]
+							)
+								current.terminals.rows.set(part.itemId, { turn, sink });
+						const finished = [...current.terminals.finished.values()];
+						current.terminals.finished.clear();
+						for (const completion of finished)
+							yield* closeTerminalRow(current, completion);
 					}
 					return update.outcome;
 				});
@@ -1325,81 +1383,99 @@ export class CodexRunnerPayload implements RunnerPayload {
 							: `Not a Codex goal command: ${text}`,
 					),
 				);
-			const result =
-				command.type === "clear"
-					? yield* child.client
-							.request(
-								"thread/goal/clear",
-								{ threadId, origin: "user" },
-								ThreadGoalClearResponseSchema,
-							)
-							.pipe(Effect.as({ goal: null }))
-					: command.type === "show"
-						? yield* child.client.request(
-								"thread/goal/get",
-								{ threadId },
-								ThreadGoalGetResponseSchema,
-							)
-						: yield* child.client.request(
-								"thread/goal/set",
-								{
-									threadId,
-									origin: "user",
-									status: command.type === "pause" ? "paused" : "active",
-									...(command.type === "set"
-										? { objective: command.objective }
-										: {}),
-								},
-								ThreadGoalSetResponseSchema,
-							);
-			const read = command.type === "show";
-			const answer = Effect.gen({ self: this }, function* () {
-				const previous = session.active?.state.goalState ??
-					session.goalState ?? { sessionId, goal: null };
-				// Notifications behind the reply may have applied first: a reply older than the newest
-				// notified goal answers the command and leaves the goal as it is (8.6 ordering).
-				const stale =
-					(result.goal?.updatedAt ?? Number.POSITIVE_INFINITY) <
-					(session.goalUpdatedAt ?? 0);
-				// A read with no goal changes nothing a Met or Cleared goal shows (8.6).
-				if (
-					!(read && !result.goal && previous.goal === null) &&
-					!(read && stale)
-				)
-					yield* this.pushGoal(
-						sessionId,
-						session,
-						stale
-							? undefined
-							: result.goal
-								? {
-										_tag: "known",
-										method: "thread/goal/updated",
-										params: { threadId, goal: result.goal },
-									}
-								: {
-										_tag: "known",
-										method: "thread/goal/cleared",
-										params: { threadId },
+			// The command is delivered once sent: an unanswered request leaves the action to the
+			// ledger's deadline (8.5, CONTRACT.md 2937), whose re-read settles it, not a failed send.
+			const deliver = Effect.gen({ self: this }, function* () {
+				const result =
+					command.type === "clear"
+						? yield* child.client
+								.request(
+									"thread/goal/clear",
+									{ threadId, origin: "user" },
+									ThreadGoalClearResponseSchema,
+								)
+								.pipe(Effect.as({ goal: null }))
+						: command.type === "show"
+							? yield* child.client.request(
+									"thread/goal/get",
+									{ threadId },
+									ThreadGoalGetResponseSchema,
+								)
+							: yield* child.client.request(
+									"thread/goal/set",
+									{
+										threadId,
+										origin: "user",
+										status: command.type === "pause" ? "paused" : "active",
+										...(command.type === "set"
+											? { objective: command.objective }
+											: {}),
 									},
-						read ? undefined : commandId,
-					);
-				// Codex answers each request, so its reply is the command's completion (8.5).
-				const sink = session.active?.sink ?? session.last?.sink;
-				if (sink)
-					yield* sink.push({
-						eventId: createEventId(),
-						type: "evidence.command_receipt",
-						providerId: "codex",
-						sessionId,
-						providerRefs: { providerSessionId: threadId },
-						rawSource: { kind: "codex.app-server.translator" },
-						createdAt: Date.now(),
-						data: { label: "", commandId, state: "completed" },
-					});
+									ThreadGoalSetResponseSchema,
+								);
+				const read = command.type === "show";
+				const answer = Effect.gen({ self: this }, function* () {
+					const previous = session.active?.state.goalState ??
+						session.goalState ?? { sessionId, goal: null };
+					// Notifications behind the reply may have applied first: a reply older than the newest
+					// notified goal answers the command and leaves the goal as it is (8.6 ordering).
+					const stale =
+						(result.goal?.updatedAt ?? Number.POSITIVE_INFINITY) <
+						(session.goalUpdatedAt ?? 0);
+					// A read with no goal changes nothing a Met or Cleared goal shows (8.6).
+					if (
+						!(read && !result.goal && previous.goal === null) &&
+						!(read && stale)
+					)
+						yield* this.pushGoal(
+							sessionId,
+							session,
+							stale
+								? undefined
+								: result.goal
+									? {
+											_tag: "known",
+											method: "thread/goal/updated",
+											params: { threadId, goal: result.goal },
+										}
+									: {
+											_tag: "known",
+											method: "thread/goal/cleared",
+											params: { threadId },
+										},
+							read ? undefined : commandId,
+						);
+					// Codex answers each request, so its reply is the command's completion (8.5).
+					const sink = session.active?.sink ?? session.last?.sink;
+					if (sink)
+						yield* sink.push({
+							eventId: createEventId(),
+							type: "evidence.command_receipt",
+							providerId: "codex",
+							sessionId,
+							providerRefs: { providerSessionId: threadId },
+							rawSource: { kind: "codex.app-server.translator" },
+							createdAt: Date.now(),
+							data: { label: "", commandId, state: "completed" },
+						});
+				});
+				// A turn's loop answers in order with its own events, as a goal notification does while
+				// the session is busy: its state lags the wire, so an answer now would undo the turn's
+				// later goal state (lane-3227 audit 33). With no turn running, the answer goes now.
+				const queue = loop ?? (session.busy ? child.updates : undefined);
+				yield* queue ? Queue.offer(queue, { answer }) : answer;
 			});
-			// A turn's loop answers in order with its own events; with none, the answer goes now.
-			yield* loop ? Queue.offer(loop, { answer }) : answer;
+			yield* deliver.pipe(
+				Effect.catch((cause) =>
+					Effect.sync(() =>
+						log.warn("codex.native_command_failed", {
+							commandId,
+							message: turnFailure(cause).message,
+						}),
+					),
+				),
+				Effect.forkIn(this.scope),
+			);
 		}).pipe(
 			Effect.mapError(
 				(cause): SessionFailure => ({
@@ -1635,6 +1711,19 @@ export class CodexRunnerPayload implements RunnerPayload {
 							notification,
 							at: yield* Clock.currentTimeMillis,
 						});
+						if (
+							decoded._tag === "known" &&
+							decoded.method === "item/completed" &&
+							decoded.params.item.type === "commandExecution" &&
+							decoded.params.threadId === session.threadId
+						) {
+							if (session.terminals.rows.has(decoded.params.item.id))
+								yield* closeTerminalRow(session, decoded).pipe(
+									Effect.forkIn(scope),
+								);
+							else
+								session.terminals.finished.set(decoded.params.item.id, decoded);
+						}
 						// 8.2 (CONTRACT.md 2791-2793): re-read at turn completion and at a terminal
 						// command's start or finish, a late one included; it only updates the set.
 						if (
@@ -1868,12 +1957,14 @@ export class CodexRunnerPayload implements RunnerPayload {
 						]),
 					);
 					session.terminals.seen = seen;
-					const tasks = terminals.map(({ processId, command }) => ({
+					const tasks = terminals.map(({ processId, command, cwd }) => ({
 						key: { taskId: processId },
 						taskType: "local_bash",
 						description: command,
 						ambient: false,
 						firstSeenAt: seen.get(processId) ?? now,
+						// 8.7 (CONTRACT.md 2988): the PortWatcher's task link matches command and cwd.
+						cwd,
 					}));
 					const sent = JSON.stringify(tasks);
 					if (sent === session.terminals.sent) return terminals;

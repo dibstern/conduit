@@ -1,0 +1,7 @@
+{
+	"uid": 501,
+	"port": 36263,
+	"pid": 12,
+	"startedMs": 1793825883493,
+	"kernel": "Linux version 6.12.76-linuxkit (root@buildkitsandbox) (gcc (Alpine 15.2.0) 15.2.0, GNU ld (GNU Binutils) 2.45.1) #1 SMP Sat Jul 11 11:18:11 UTC 2026"
+}

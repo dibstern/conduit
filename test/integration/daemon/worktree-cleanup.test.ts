@@ -706,6 +706,39 @@ describe("Daemon-wide worktree cleanup through the built daemon", () => {
 		}
 	}, 300_000);
 
+	it("reads whether anything may act from the ledger row, not the row's status (82tn.32.30)", async () => {
+		const { fixture, create, settle, enable, sweep } = await start();
+		const session = await create("ledger liveness");
+		await settle(session.id);
+		await enable(session, { onSettle: "keep", settledAfterDays: 0 });
+		const db = new Database(fixture.daemonStorePath());
+		try {
+			// 8.3: every liveness reader asks the ledger; its stored row is Open while anything may act.
+			db.prepare(
+				"INSERT OR REPLACE INTO run_ledger_sessions (session_id, provider, state) VALUES (?, 'claude', 'Open')",
+			).run(session.id);
+			const kept = await sweep("ledger Open, row idle");
+			expect(kept.kept).toContainEqual({
+				projectSlug: "process-test",
+				sessionId: session.id,
+				path: session.path,
+				reason: "Session is running",
+			});
+			db.prepare(
+				"UPDATE run_ledger_sessions SET state = 'Quiescent' WHERE session_id = ?",
+			).run(session.id);
+			db.prepare("UPDATE sessions SET status = 'busy' WHERE id = ?").run(
+				session.id,
+			);
+			const removed = await sweep("ledger Quiescent, row busy");
+			expect(
+				removed.removed.some(({ sessionId }) => sessionId === session.id),
+			).toBe(true);
+		} finally {
+			db.close();
+		}
+	});
+
 	it.each([
 		false,
 		true,

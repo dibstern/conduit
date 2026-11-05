@@ -42,7 +42,7 @@ describe("session goals for Codex (82tn.32.27)", () => {
 		});
 	});
 
-	it("an unconfirmed Pause queues one native re-read, and the read keeps Retry", () => {
+	it("an unconfirmed Pause queues one native re-read, and a read still active keeps Retry", () => {
 		const goals = makeSessionGoals();
 		goals.request("s1", "pause-1", { kind: "pause" }, true);
 		const unconfirmed = [{ commandId: "pause-1", tag: "Unconfirmed" } as const];
@@ -53,7 +53,10 @@ describe("session goals for Codex (82tn.32.27)", () => {
 		expect(read?.id).not.toBe("pause-1");
 		goals.sends("s1", unconfirmed);
 		expect(goals.takeResends("s1")).toEqual([]);
-		goals.observe([limitedFacts()]);
+		// A read already Paused or Limited settles it instead (codex-goals integration, audit 8).
+		goals.observe([
+			canonicalEvent("session.goal_changed", "s1", { sessionId: "s1", goal }),
+		]);
 		expect(goals.phaseOf("s1")).toEqual({
 			tag: "Pending",
 			action: { kind: "pause" },

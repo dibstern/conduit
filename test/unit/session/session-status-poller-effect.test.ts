@@ -1,9 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref } from "effect";
-import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
 import {
 	getCurrentStatuses,
@@ -13,8 +9,6 @@ import {
 	PollerStateTag,
 	poll,
 } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
-import { readSessionStatusesFromEffect } from "../../../src/lib/session/session-status-effect.js";
 
 const makeTestLayer = () =>
 	Layer.fresh(makePollerStateLive()).pipe(
@@ -35,40 +29,6 @@ describe("SessionStatusPoller Effect", () => {
 			const statuses = yield* getCurrentStatuses;
 			expect(Object.keys(statuses).length).toBe(0);
 		}).pipe(Effect.provide(makeTestLayer())),
-	);
-
-	it.effect(
-		"poll reads projected statuses from the Effect SQLite read service",
-		() => {
-			const dir = mkdtempSync(join(tmpdir(), "conduit-status-effect-read-"));
-			const filename = join(dir, "events.db");
-			const layer = Layer.merge(
-				makeTestLayer(),
-				makePersistenceEffectLayer(filename, "test-project"),
-			);
-
-			return Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql`
-				INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at)
-				VALUES
-					('session-idle', 'test-project', 'opencode', 'Idle Session', 'idle', 1, 1),
-					('session-busy', 'test-project', 'opencode', 'Busy Session', 'busy', 2, 2)`;
-
-				yield* poll({
-					getRawStatuses: () => readSessionStatusesFromEffect,
-				});
-
-				const statuses = yield* getCurrentStatuses;
-				expect(statuses["session-idle"]).toEqual({ type: "idle" });
-				expect(statuses["session-busy"]).toEqual({ type: "busy" });
-			}).pipe(
-				Effect.provide(layer),
-				Effect.ensuring(
-					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
-				),
-			);
-		},
 	);
 
 	it.effect("staleness check skips sessions waiting on the user", () =>

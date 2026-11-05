@@ -82,6 +82,7 @@ import {
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { EventDelivery } from "../../../src/lib/server/event-audiences.js";
 import { WorkspaceDirectories } from "../../../src/lib/session/workspace-directories.js";
+import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 
 const gitCommand = (directory: string, ...args: string[]) =>
 	execFileSync("git", args, {
@@ -1114,12 +1115,20 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 				f.activity.connectionInterests.clear();
 				f.activity.watchInterests(projectDelivery());
 				f.activity.changed("one");
+				// Running is the ledger's active Run (8.1), not the row's busy status.
 				yield* f.commit([
 					canonicalEvent("session.status", "one", {
 						sessionId: "one",
 						status: "busy",
 					}),
 				]);
+				yield* settle;
+				yield* waitForIdle(f.metrics);
+				const rowBusy = (yield* f.metrics).spawnCount;
+				yield* TestClock.adjust(15_000);
+				yield* settle;
+				expect((yield* f.metrics).spawnCount).toBe(rowBusy);
+				yield* f.commit(activeRunEvents("one"));
 				yield* settle;
 				yield* waitForIdle(f.metrics);
 				const running = (yield* f.metrics).spawnCount;
@@ -1134,9 +1143,12 @@ describe("daemon session git", { timeout: 60_000 }, () => {
 						sessionId: "one",
 						status: "idle",
 					}),
-					canonicalEvent("turn.completed", "one", {
-						messageId: "run",
-					}),
+					canonicalEvent(
+						"turn.completed",
+						"one",
+						{ messageId: "run" },
+						{ provider: "claude", metadata: { runId: "ledger-u1-run" } },
+					),
 				]);
 				yield* settle;
 				yield* waitForIdle(f.metrics);

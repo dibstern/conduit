@@ -208,7 +208,9 @@ describe("archived tree retention", () => {
 						(yield* read.getSession("eligible-agent"))?.archived_at,
 					).toBeNull();
 					yield* sql`UPDATE sessions SET pinned_at = 1 WHERE id = 'pinned-agent'`;
-					yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 'busy-agent'`;
+					// 8.3 (2849): deletion asks the ledger whether anything may act, not the row's status.
+					yield* sql`INSERT INTO run_ledger_sessions (session_id, provider, state) VALUES ('busy-agent', 'claude', 'Open')`;
+					yield* sql`UPDATE sessions SET status = 'busy' WHERE id = 'eligible-agent'`;
 					yield* sql`INSERT INTO turns (id, session_id, state, requested_at) VALUES ('active-turn', 'running-agent', 'running', 1)`;
 					yield* seed("outside-fork");
 					yield* sql`UPDATE sessions SET forked_from = 'fork-source-agent' WHERE id = 'outside-fork'`;

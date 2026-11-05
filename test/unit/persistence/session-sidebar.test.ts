@@ -854,18 +854,14 @@ describe("sidebar table against the full computation", () => {
 							title: "Legacy",
 							provider: "claude",
 						}),
-						canonicalEvent("session.status", "legacy", {
-							sessionId: "legacy",
-							status: "busy",
-						}),
 					]);
 					yield* sql`DROP TABLE provider_runs`;
 					yield* sql`DELETE FROM session_sidebar`;
 					yield* refreshSidebar(["legacy"], 100);
 					expect(
-						yield* sql`SELECT json_extract(row, '$.session.status') AS status,
+						yield* sql`SELECT json_extract(row, '$.session.title') AS title,
 					json_extract(row, '$.onlyRetainedSteers') AS retained FROM session_sidebar WHERE session_id = 'legacy'`,
-					).toEqual([{ status: "busy", retained: null }]);
+					).toEqual([{ title: "Legacy", retained: null }]);
 				}),
 			);
 		} finally {
@@ -1212,11 +1208,11 @@ describe("sidebar table on the 10k-session fixture", () => {
 					yield* commitAndSignal(
 						[
 							canonicalEvent(
-								"session.status",
+								"session.renamed",
 								`load-f${index}`,
 								{
 									sessionId: `load-f${index}`,
-									status: "busy",
+									title: `Renamed ${index}`,
 								},
 								{ provider: "claude" },
 							),

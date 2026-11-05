@@ -17,7 +17,8 @@ export const readPersistedAutoArchiveFacts = (
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		// Archiving hides the whole family, so any descendant's activity, running
-		// work, open approval or queued input keeps the root visible.
+		// work, open approval or queued input keeps the root visible. Running work is
+		// the ledger's answer (8.3 line 2849: anything may act while its row is Open, 3.12).
 		const rows = yield* sql<
 			SessionRow & { last_activity_at: number; pending_work: number }
 		>`
@@ -28,7 +29,7 @@ export const readPersistedAutoArchiveFacts = (
 						FROM turns t JOIN sessions f ON f.id = t.session_id WHERE f.root_id = s.id), 0),
 					COALESCE((SELECT MAX(m.created_at) FROM messages m JOIN sessions f ON f.id = m.session_id WHERE f.root_id = s.id), 0),
 					COALESCE((SELECT MAX(i.admitted_at) FROM pending_inputs i JOIN sessions f ON f.id = i.session_id WHERE f.root_id = s.id), 0)) AS last_activity_at,
-				(EXISTS(SELECT 1 FROM sessions f WHERE f.root_id = s.id AND f.status IN ('busy', 'retry'))
+				(EXISTS(SELECT 1 FROM run_ledger_sessions l JOIN sessions f ON f.id = l.session_id WHERE f.root_id = s.id AND l.state = 'Open')
 					OR EXISTS(SELECT 1 FROM turns t JOIN sessions f ON f.id = t.session_id WHERE f.root_id = s.id AND t.state IN ('pending', 'running'))
 					OR EXISTS(SELECT 1 FROM pending_approvals a JOIN sessions f ON f.id = a.session_id WHERE f.root_id = s.id AND a.status = 'pending')
 					OR EXISTS(SELECT 1 FROM pending_inputs i JOIN sessions f ON f.id = i.session_id WHERE f.root_id = s.id AND i.state IN ('queued', 'steering'))) AS pending_work
@@ -42,7 +43,6 @@ export const readPersistedAutoArchiveFacts = (
 					archivedAt: row.archived_at ?? null,
 					unarchivedAt: row.unarchived_at ?? null,
 					lastActivityAt: row.last_activity_at,
-					status: row.status,
 					snoozed: deriveSessionSnooze(row, now).snoozedAt !== undefined,
 					pinnedAt: row.pinned_at,
 					hasPendingWork: row.pending_work !== 0,

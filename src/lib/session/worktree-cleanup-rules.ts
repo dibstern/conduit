@@ -147,7 +147,7 @@ export function decideWorktreeCleanup(
 
 interface SessionQuiescenceState {
 	readonly facts:
-		| Pick<AutoSettleFacts, "status" | "latestTurn" | "hasPendingApproval">
+		| Pick<AutoSettleFacts, "mayAct" | "latestTurn" | "hasPendingApproval">
 		| undefined;
 	readonly isRetrying: boolean;
 	readonly hasPendingTurn: boolean;
@@ -159,9 +159,6 @@ export function sessionQuiescenceBlockReason(
 ): string | undefined {
 	const facts = state.facts;
 	if (
-		facts?.status === "busy" ||
-		facts?.status === "pending" ||
-		facts?.status === "retry" ||
 		facts?.latestTurn?.state === "pending" ||
 		facts?.latestTurn?.state === "running" ||
 		state.isRetrying ||
@@ -170,6 +167,8 @@ export function sessionQuiescenceBlockReason(
 		return "Session is running";
 	if (facts?.hasPendingApproval) return "Has a pending approval or question";
 	if (state.hasLiveBackgroundWork) return "Has live background work";
+	// 8.3: the ledger row is Open for a Run, a send, tasks or a server; tasks and servers read above.
+	if (facts?.mayAct) return "Session is running";
 	return undefined;
 }
 
