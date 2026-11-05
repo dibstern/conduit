@@ -144,6 +144,7 @@ describe("Bound project provenance", () => {
 			"0091_messages_ordinal",
 			"0092_tool_row_run",
 			"0093_drop_owned_run_ids",
+			"0094_history_graph",
 		]);
 	});
 

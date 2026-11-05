@@ -20,7 +20,7 @@ import { AppPage } from "../page-objects/app.page.js";
 
 const artifactPath = "test-results/82tn21-daemon-services.json";
 const stepNames = [
-	"attach-project-a",
+	"route-project-a",
 	"list-projects",
 	"save-project-b",
 	"create-session-b",
@@ -220,14 +220,13 @@ test("project relays retain daemon services and their own default agent", async 
 			},
 		});
 	try {
-		const attached = await rpc<{ projectSlug: string }>("AttachProject", {
+		const routed = await rpc<{ projectSlug: string }>("GetCommands", {
 			projectSlug: "process-test",
-			originId: "daemon-services",
 		});
 		await check(
-			"attach-project-a",
-			{ project: attached.projectSlug === "process-test" ? "A" : "unexpected" },
-			() => expect(attached.projectSlug).toBe("process-test"),
+			"route-project-a",
+			{ project: routed.projectSlug === "process-test" ? "A" : "unexpected" },
+			() => expect(routed.projectSlug).toBe("process-test"),
 		);
 		const projects = await rpc<GetProjectsResponse>("GetProjects");
 		await check(

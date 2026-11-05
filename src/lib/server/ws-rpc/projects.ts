@@ -1,38 +1,10 @@
 import { Effect } from "effect";
 import { ProjectSaveRejected, WsRpcError } from "../../contracts/ws-rpc.js";
 import { ProjectManagementServiceTag } from "../../domain/relay/Services/project-management-service.js";
-import * as Failure from "../../effect/failure-classification.js";
 import { normalizeProjectTitle } from "../../handlers/settings.js";
-import { ReadQueryEffectTag } from "../../persistence/effect/read-query-effect.js";
 import type { WsRpcHandlerMap } from "./shared.js";
 
 export const projectsHandlers = {
-	// A standalone relay serves one project, so every tab attaches to it.
-	AttachProject: (request) =>
-		Effect.gen(function* () {
-			const projectService = yield* ProjectManagementServiceTag;
-			const projectSlug = yield* projectService.currentSlug();
-			const read = yield* ReadQueryEffectTag;
-			const session =
-				"sessionId" in request
-					? yield* read.getSession(request.sessionId)
-					: undefined;
-			const response: {
-				readonly projectSlug: string | null;
-				readonly sessionSlug: string | null;
-			} = {
-				projectSlug,
-				sessionSlug: session ? projectSlug : null,
-			};
-			return response;
-		}).pipe(
-			Failure.mapEffectFailures(
-				(cause) =>
-					new WsRpcError({
-						message: `AttachProject failed: ${String(cause)}`,
-					}),
-			),
-		),
 	GetProjects: (request) =>
 		Effect.gen(function* () {
 			const projectService = yield* ProjectManagementServiceTag;
@@ -115,5 +87,5 @@ export const projectsHandlers = {
 		),
 } satisfies Pick<
 	WsRpcHandlerMap,
-	"AttachProject" | "GetProjects" | "SaveProject" | "RemoveProject"
+	"GetProjects" | "SaveProject" | "RemoveProject"
 >;

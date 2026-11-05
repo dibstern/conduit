@@ -110,11 +110,6 @@ async function setup(page: Page) {
 				hasMore: false,
 				nextCursor: null,
 			}),
-			AttachProject: (payload) => ({
-				projectSlug:
-					("projectSlug" in payload && payload.projectSlug) || "e2e-replay",
-				sessionSlug: "sessionId" in payload ? "e2e-replay" : null,
-			}),
 		},
 		streams: {
 			SubscribeInputDraft: ({ key }) => [
@@ -471,7 +466,6 @@ test("a new draft's model, agent and command lists match its project", async ({
 						.getRequests()
 						.filter((request) =>
 							[
-								"AttachProject",
 								"GetModels",
 								"GetAgents",
 								"GetCommands",

@@ -90,7 +90,6 @@ test("Claude accounts can be edited and link to Usage with no project open", asy
 				sessionId,
 				handedOff: true,
 			}),
-			AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 			GetProjects: () => ({ projects }),
 			DetectProxy: () => ({ found: false, port: 8317 }),
 			UpdateInstance: (payload) => {

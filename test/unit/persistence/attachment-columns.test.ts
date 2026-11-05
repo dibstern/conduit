@@ -18,6 +18,9 @@ const cannotHoldRefs = {
 	daemon_store_imports:
 		"project_id method source_path source_fingerprint rowid_offsets",
 	events: "event_id session_id type metadata provider project_id",
+	history_heads: "session_id node_id",
+	history_nodes: "session_id id parent_id run_id",
+	history_off_head: "session_id node_id source_table row_key",
 	input_drafts: "draft_key project_id kind text promoted_session_id",
 	message_part_read_state: "session_id part_id",
 	message_part_tombstones: "session_id message_id part_id",
@@ -25,7 +28,7 @@ const cannotHoldRefs = {
 		"id message_id type text tool_name call_id input result status surfacing_probabilities surfacing_model run_id folder ended_by parent_tool_id",
 	message_tombstones: "session_id message_id",
 	messages:
-		"id session_id turn_id role text rest_digest rest_event_id parent_id finish error input_id",
+		"id session_id turn_id role text rest_digest rest_event_id parent_id finish error input_id history_node_id",
 	pending_approvals:
 		"id session_id turn_id type status tool_name input decision always details provider_process_id provider_request_id",
 	pending_inputs: "input_id session_id text state",
@@ -76,6 +79,9 @@ it.effect(
 		WHERE m.type = 'table' AND upper(p.type) = 'TEXT' ORDER BY qualified`;
 			const classified = [
 				...indexedAttachmentColumns,
+				// A whole messages or parts row kept off the head path (82tn.50): its triggers index
+				// the refs in the row's rest_payload and metadata.
+				"history_off_head.row_json",
 				...Object.entries(cannotHoldRefs).flatMap(([table, names]) =>
 					names.split(" ").map((name) => `${table}.${name}`),
 				),

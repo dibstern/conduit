@@ -4,7 +4,6 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Exit, Layer, Option, Ref, Scope } from "effect";
 import { expect, type Mock, vi } from "vitest";
 import { AuthManager, hashPin } from "../../../src/lib/auth.js";
-import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { ConfigPersistenceNoopLive } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
 import {
@@ -25,7 +24,6 @@ import {
 	WebSocketRoutingLive,
 	WebSocketUpgradeError,
 } from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
-import * as wsRpcHandlerModule from "../../../src/lib/server/ws-rpc-handler.js";
 import { WsRpcWebSocketHandler } from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
@@ -227,95 +225,6 @@ describe("WebSocketRelayRouterLive", () => {
 });
 
 describe("WebSocketRoutingLive", () => {
-	it.effect.each([
-		{ hint: "older", projects: true, fails: false, expected: "older" },
-		{ hint: "missing", projects: true, fails: false, expected: "recent" },
-		{ hint: undefined, projects: true, fails: false, expected: "recent" },
-		{
-			hint: "older",
-			sessionId: "missing",
-			projects: true,
-			fails: false,
-			expected: null,
-		},
-		{ hint: "older", projects: false, fails: false, expected: null },
-		{ hint: "older", projects: true, fails: true, expected: null },
-	])(
-		"AttachProject resolves hint $hint (session $sessionId, fails=$fails) to $expected",
-		(scenario) =>
-			Effect.gen(function* () {
-				const routing = vi.spyOn(
-					wsRpcHandlerModule,
-					"makeRoutedWsRpcWebSocketHandler",
-				);
-				yield* Effect.addFinalizer(() =>
-					Effect.sync(() => routing.mockRestore()),
-				);
-				const relay = makeWebSocketRelay();
-				yield* Layer.build(
-					makeLayer(createServer(), {
-						relay,
-						projects: scenario.projects
-							? [
-									{ ...project, slug: "older", lastUsed: 1 },
-									{ ...project, slug: "recent", lastUsed: 2 },
-								]
-							: [],
-						waitForRelay: (slug) =>
-							scenario.fails
-								? Effect.fail(
-										new WebSocketUpgradeError({
-											reason: "relay_unavailable",
-											slug,
-										}),
-									)
-								: Effect.succeed(relay),
-					}),
-				);
-				const attachProject = routing.mock.calls.at(-1)?.[4];
-				if (!attachProject) {
-					return yield* Effect.fail(
-						new Error("Missing daemon attachProject handler"),
-					);
-				}
-				const result = yield* Effect.result(
-					attachProject({
-						originId: "unregistered",
-						...(scenario.sessionId
-							? { sessionId: scenario.sessionId }
-							: scenario.hint
-								? { projectSlug: scenario.hint }
-								: {}),
-					}),
-				);
-				if (scenario.sessionId) {
-					expect(result).toMatchObject({
-						_tag: "Failure",
-						failure: {
-							_tag: "WsRpcError",
-							message: expect.stringContaining("Unknown session: missing"),
-						},
-					});
-				} else if (scenario.fails) {
-					expect(result._tag).toBe("Failure");
-					if (result._tag === "Failure") {
-						expect(result.failure).toBeInstanceOf(WsRpcError);
-						expect(result.failure.message).toContain(
-							'Project "older" unavailable',
-						);
-					}
-				} else {
-					expect(result._tag).toBe("Success");
-					if (result._tag === "Success") {
-						expect(result.success).toEqual({
-							projectSlug: scenario.expected,
-							sessionSlug: null,
-						});
-					}
-				}
-			}),
-	);
-
 	it.effect.each([
 		"/invalid",
 		"/rpc/",

@@ -21,6 +21,7 @@ import {
 import { WorkspaceMoveError } from "../../../contracts/session-workspace.js";
 import { DEFAULT_TERMINAL_KEYS } from "../../../contracts/terminal-keys.js";
 import {
+	type Alert,
 	ProjectSaveRejected,
 	SetPinRejected,
 	WsRpcError,
@@ -33,6 +34,10 @@ import { getRecent } from "../../../daemon/recent-projects.js";
 import { formatErrorDetail } from "../../../errors.js";
 import { getLogLevel } from "../../../logger.js";
 import { PersistenceStore } from "../../../persistence/effect/live.js";
+import {
+	makeReadQueryEffect,
+	ReadQueryEffectTag,
+} from "../../../persistence/effect/read-query-effect.js";
 import { CodexAccountResources } from "../../../provider/codex/codex-account-resources.js";
 import { discoverCodex } from "../../../provider/codex/codex-discovery.js";
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
@@ -55,6 +60,8 @@ import {
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
 import { portWatcherMark } from "../../persistence/Services/port-watcher.js";
+import { AlertsTag, subscribeAlerts } from "../../relay/Services/alerts.js";
+import { subscribeEveryProjectApprovals } from "../../relay/Services/approvals-subscription.js";
 import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
 import { findFolders } from "../../relay/Services/directory-listing-service.js";
 import {
@@ -171,6 +178,18 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			Context.merge(yield* persistenceStoreContext),
 		);
 		const shellContext = Context.merge(context, yield* PersistenceStore);
+		const readQuery = yield* makeReadQueryEffect.pipe(
+			Effect.provide(yield* PersistenceStore),
+		);
+		const projectSlugs = Effect.map(
+			allProjects.pipe(Effect.provide(context)),
+			(projects) => projects.map((project) => project.slug),
+		);
+		// The daemon lends its one alert feed; handler-only fixtures get an idle one.
+		const sharedAlerts = yield* Effect.serviceOption(AlertsTag);
+		const alerts = Option.isSome(sharedAlerts)
+			? sharedAlerts.value
+			: yield* PubSub.unbounded<Alert>();
 		const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 		const drafts = Option.isSome(sharedDrafts)
 			? sharedDrafts.value
@@ -521,6 +540,17 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			},
 			SubscribeUsage: () =>
 				usage.readings.pipe(Stream.map((readings) => ({ readings }))),
+			// Asks have no resume: a re-issue rebases on the pending set (82tn.13).
+			SubscribeApprovals: () =>
+				subscribeEveryProjectApprovals(projectSlugs).pipe(
+					Stream.provideService(ReadQueryEffectTag, readQuery),
+					Stream.provideService(SessionEventBusTag, sessionEventBus),
+					Stream.mapError(
+						(error) => new WsRpcError({ message: formatErrorDetail(error) }),
+					),
+				),
+			SubscribeAlerts: () =>
+				subscribeAlerts().pipe(Stream.provideService(AlertsTag, alerts)),
 			SubscribeShell: (request) =>
 				subscribeDaemonShell(
 					request,

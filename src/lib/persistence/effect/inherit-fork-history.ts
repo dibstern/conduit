@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { StoredEvent } from "../events.js";
+import { refreshHistoryHead } from "./history-graph.js";
 
 /** Called by session.created while the append transaction still owns the cut. */
 export const inheritForkHistory = (
@@ -143,7 +144,7 @@ export const inheritForkHistory = (
 			 last_applied_seq, created_at, updated_at, context_window, version,
 			 is_backfilled, rest_digest, rest_event_id, rest_payload, parent_id,
 			 finish, error, input_id, steered, context_tokens, completed_at, is_human_sent,
-			 ordinal)
+			 ordinal, history_node_id)
 			SELECT m.id || ${suffix}, ${event.sessionId},
 				(SELECT t.id FROM turns t WHERE t.id = m.turn_id || ${suffix}
 					AND (m.role != 'user' OR EXISTS (SELECT 1 FROM retained a
@@ -158,9 +159,16 @@ export const inheritForkHistory = (
 				m.context_tokens, m.completed_at, 0,
 				-- The source's write order, so the child reads the same history
 				-- and its own messages number on from it.
-				m.ordinal
+				m.ordinal, m.history_node_id
 			FROM retained m ORDER BY m.ordinal, m.created_at, m.id
 			ON CONFLICT (id) DO NOTHING`;
+		// 82tn.50: the fork starts from a node: it keeps the copied rows' nodes and their Head.
+		yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+			SELECT ${event.sessionId}, n.id, n.parent_id, n.run_id, n.available, n.created_at
+			FROM history_nodes n WHERE n.session_id = ${sourceId}
+			AND n.id IN (SELECT history_node_id FROM messages WHERE session_id = ${event.sessionId})
+			ON CONFLICT (session_id, id) DO NOTHING`;
+		yield* refreshHistoryHead(event.sessionId, null);
 
 		// The retained result is only the preview. Keep its pointer into the
 		// Source event log so opening full tool output does not duplicate it.

@@ -341,7 +341,7 @@
 		"timeout-override": 1
 	},
 	"test/e2e/specs/project-scope.spec.ts": {
-		"real-wait": 2
+		"real-wait": 1
 	},
 	"test/e2e/specs/pwa-background-resume.spec.ts": {
 		"timeout-override": 1
@@ -1360,7 +1360,7 @@
 		"polling": 1
 	},
 	"test/unit/components/session-selection.test.ts": {
-		"polling": 31
+		"polling": 27
 	},
 	"test/unit/contracts/stub-ws-rpc.test.ts": {
 		"polling": 1

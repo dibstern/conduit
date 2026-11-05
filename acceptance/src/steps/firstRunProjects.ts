@@ -76,7 +76,6 @@ export const firstRunProjectsHandlers: StepHandler[] = [
 			rpc.setProjects({ projects: [] });
 			rpc.setStubs({
 				GetProjects: () => ({ projects: fixture.projects }),
-				AttachProject: () => ({ projectSlug: null, sessionSlug: null }),
 				FindFolders: ({ query }) => ({
 					home,
 					entries:

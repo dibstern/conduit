@@ -99,7 +99,7 @@ export function rootBackgroundTasks(id: string): readonly BackgroundTask[] {
 	);
 }
 
-/** Attach this tab from an AttachProject or cross-project ViewSession reply. */
+/** Mark this tab's project, from the selection or a cross-project ViewSession reply. */
 export function setAttachedProject(slug: string): void {
 	if (attachedProjectState.slug !== slug)
 		for (const activity of sessionActivity.values())

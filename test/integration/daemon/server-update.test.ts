@@ -511,7 +511,6 @@ describe("supervised server build updates", () => {
 		});
 		await browser.close();
 
-		const originId = randomUUID();
 		const pinned = followStatus(generation.port, { "x-relay-pin": pin });
 		await initialStatus(pinned, false);
 		const cursor = pinned.frames.length;
@@ -535,14 +534,6 @@ describe("supervised server build updates", () => {
 			Effect.scoped(
 				Effect.gen(function* () {
 					const client = yield* RpcClient.make(WsRpcGroup);
-					const attached = yield* client.AttachProject({
-						projectSlug: "process-test",
-						originId,
-					});
-					expect(attached).toEqual({
-						projectSlug: "process-test",
-						sessionSlug: null,
-					});
 					return yield* client.RestartWithConfig({});
 				}),
 			).pipe(Effect.provide(protocol), Effect.timeout(10_000)),

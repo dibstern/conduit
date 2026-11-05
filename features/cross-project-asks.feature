@@ -3,8 +3,9 @@ Feature: A session in another project that needs you toasts where you are, and O
 # conduit-test-82tn.11. You are in Atlas. A Beacon session starts asking for
 # approval or asks a question. The daemon shell carries every project's rows,
 # so the arrival toast shows in Atlas, on desktop and phone. As in t3code, the
-# ask is answered in the asking session: Open goes there and attaches Beacon,
-# whose approvals feed then shows the card.
+# ask is answered in the asking session: Open goes there and the tab takes
+# Beacon as its project. The approvals feed is the daemon's (82tn.13), so the
+# card is already held.
 
 Scenario Outline: A Beacon session waiting on <need> toasts in Atlas on a <viewport>, and Open goes there
   Given the conduit app is served with the connected mockup

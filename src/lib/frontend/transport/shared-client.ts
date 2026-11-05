@@ -107,14 +107,14 @@ const makeSubscriptions = (
 					: { onTransportDrop: options.onTransportDrop }),
 			},
 		),
-	/** The project's pending permissions and questions, on the control socket. */
+	/** Every project's pending permissions and questions, on the control socket. */
 	approvals: (options: { readonly onTransportDrop?: () => void } = {}) =>
 		resumeStream(
 			(resumeFromSequence) =>
-				sockets.control("SubscribeApprovals", {
-					projectSlug,
-					...(resumeFromSequence === undefined ? {} : { resumeFromSequence }),
-				}),
+				sockets.control(
+					"SubscribeApprovals",
+					resumeFromSequence === undefined ? {} : { resumeFromSequence },
+				),
 			options,
 		),
 	sessionPromptIndex: (options: { readonly sessionId: string }) =>
@@ -201,10 +201,9 @@ const makeSubscriptions = (
 		resumeStream(() =>
 			sockets.control("SubscribeDraftModels", { projectSlug, instanceId }),
 		),
-	/** Done/error alerts for sessions no tab is viewing. Live-only: a re-issue
-	 *  never replays one, so a reconnect cannot re-fire a ding. */
-	alerts: () =>
-		resumeStream(() => sockets.control("SubscribeAlerts", { projectSlug })),
+	/** Every project's done/error/ask alerts. Live-only: a re-issue never
+	 *  replays one, so a reconnect cannot re-fire a ding. */
+	alerts: () => resumeStream(() => sockets.control("SubscribeAlerts", {})),
 	/** Stored composer text followed by live draft changes. */
 	inputDraft: (options: { readonly key: InputDraftKey }) =>
 		resumeStream(() =>

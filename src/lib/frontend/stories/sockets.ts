@@ -64,7 +64,7 @@ let opens = true;
  * Replaces `globalThis.WebSocket` with a socket that opens on the next tick and
  * stays open, and opens any socket `connectingSocket()` left dialing. Returns a
  * cleanup that restores the original, suitable for returning straight from a
- * story's `beforeEach`. `project` is the project AttachProject reports for a
+ * story's `beforeEach`. `project` is the project ResolveSession reports for a
  * session route, whose transcript then opens empty and settled; null means the
  * session does not exist.
  */
@@ -234,7 +234,7 @@ function fakeSocket(project: string | null, opensNow: boolean): () => void {
 					}),
 				);
 			}
-			if (request._tag === "Request" && request.tag === "AttachProject") {
+			if (request._tag === "Request" && request.tag === "ResolveSession") {
 				this.emit(
 					"message",
 					new MessageEvent("message", {
@@ -243,12 +243,7 @@ function fakeSocket(project: string | null, opensNow: boolean): () => void {
 							requestId: request.id,
 							exit: {
 								_tag: "Success",
-								value: request.payload?.sessionId
-									? { projectSlug: sessionProject, sessionSlug: sessionProject }
-									: {
-											projectSlug: request.payload?.projectSlug ?? null,
-											sessionSlug: null,
-										},
+								value: { projectSlug: sessionProject },
 							},
 						}),
 					}),
