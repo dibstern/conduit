@@ -361,6 +361,75 @@ it("hands Cursor only the kept history after a rewind, and a later Claude turn s
 	);
 });
 
+it("rewinds past a switch: Claude resumes its own row natively, and starts fresh from the kept path at Cursor's (82tn.52)", async () => {
+	const s = await switchFixture("rewind-past-switch");
+	// Claude's stub keeps its native transcript, so a resume finds the kept row.
+	mkdirSync(join(s.fixture.root, "claude"), { recursive: true });
+	writeFileSync(
+		join(s.fixture.root, "claude", "conduit-test-record-forks"),
+		"",
+	);
+	await s.browser.send(s.sessionId, "ad4c-claude-one MARK-C1", 90_000);
+	const thread = s.receipt(s.claude).resumeSessionId;
+	await s.switchTo(s.cursor, s.claude);
+	await s.browser.send(s.sessionId, "ad4c-cursor-two MARK-CUR2", 90_000);
+	await s.switchTo(s.claude, s.cursor);
+	await s.browser.send(s.sessionId, "ad4c-claude-three MARK-C3", 90_000);
+	const rewindTo = async (index: number) => {
+		const messageId = (await s.browser.history(s.sessionId))
+			.filter(({ role }) => role === "user")
+			.map(({ id }) => String(id))[index];
+		if (!messageId) throw new Error(`Missing user message ${index}`);
+		await s.fixture.requestRpc({
+			_tag: "RewindSession",
+			sessionId: s.sessionId,
+			messageId,
+		});
+	};
+	// Cut back past the switch: the Head ends on Claude's own first reply.
+	await rewindTo(1);
+	const planAtClaudeRow = await s.plan();
+	await s.browser.send(s.sessionId, "ad4c-claude-four MARK-C4", 90_000);
+	const native = s.claudeTurn("ad4c-claude-four MARK-C4");
+	// Out and back again, then cut Claude's turn: the Head ends on Cursor's reply, which
+	// Claude's session never held.
+	await s.switchTo(s.cursor, s.claude);
+	await s.browser.send(s.sessionId, "ad4c-cursor-five MARK-CUR5", 90_000);
+	const cursorPrompt = s.cursorPrompts().at(-1) ?? "";
+	await s.switchTo(s.claude, s.cursor);
+	await s.browser.send(s.sessionId, "ad4c-claude-six MARK-C6", 90_000);
+	await rewindTo(3);
+	const planAtCursorRow = await s.plan();
+	await s.browser.send(s.sessionId, "ad4c-claude-seven", 90_000);
+	const fresh = s.claudeTurn("ad4c-claude-seven");
+	const recorded = s.handoffs();
+	Object.assign(evidence, {
+		planAtClaudeRow,
+		native,
+		cursorPrompt,
+		cursorPrompts: s.cursorPrompts(),
+		planAtCursorRow,
+		fresh,
+		handoffs: recorded,
+	});
+	expect(planAtClaudeRow).toBe("native");
+	expect(native?.resumeId).toBe(thread);
+	expect(native?.prompt).not.toContain("[Conduit context handoff]");
+	// Cursor's second handoff carries the kept path only.
+	expect(cursorPrompt).toContain("MARK-C4");
+	expect(cursorPrompt).not.toContain("MARK-CUR2");
+	expect(cursorPrompt).not.toContain("MARK-C3");
+	expect(planAtCursorRow).toBe("handoff");
+	expect(fresh?.resumeId ?? null).toBeNull();
+	for (const kept of ["MARK-C1", "MARK-C4", "MARK-CUR5"])
+		expect(fresh?.prompt).toContain(kept);
+	for (const cut of ["MARK-CUR2", "MARK-C3", "MARK-C6"])
+		expect(fresh?.prompt).not.toContain(cut);
+	expect(recorded.at(-1)).toEqual(
+		expect.objectContaining({ instanceId: s.claude, strategy: "fresh" }),
+	);
+});
+
 it("still owes Cursor the handoff after a crash between the switch and its first turn (entry 7)", async () => {
 	const s = await switchFixture("crash");
 	await s.browser.send(s.sessionId, "ad4c-claude-one MARK-CLAUDE-1", 90_000);

@@ -764,7 +764,7 @@ export function createTraceCursorSdkPort(
 		async primeSandbox() {
 			result("sandbox.prime");
 		},
-		async createAgent(options, _credential, _store, customTools) {
+		async createAgent(options, _credential, store, customTools) {
 			const created = result("created");
 			if (!object(created) || typeof created["agentId"] !== "string") {
 				throw new CursorSdkFailure({
@@ -772,6 +772,10 @@ export function createTraceCursorSdkPort(
 					reason: "Cursor trace contains no captured agent",
 				});
 			}
+			// A trace replays one captured agent id; a new agent still starts with no runs.
+			const storePath = stores.get(store);
+			if (storePath && readState(storePath)?.id === created["agentId"])
+				unlinkSync(statePath(storePath));
 			return agent(created["agentId"], options, customTools);
 		},
 		async resumeAgent(id, options, _credential, _store, customTools) {

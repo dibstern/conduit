@@ -166,7 +166,21 @@ export const readResumePlan = (
 		const through = receipt?.deliveredThrough;
 		if (through === undefined)
 			return (facts?.history ? "handoff" : "current") satisfies ResumePlan;
-		if (moved) return "native" satisfies ResumePlan;
+		if (moved) {
+			// As prepare-turn: Claude resumes at the newest kept row only when that row is its own;
+			// a row another provider wrote is not in its session, so it starts fresh from the path.
+			const resume = (yield* readOwedRealignment(sql, sessionId))?.rewind
+				?.resumeSessionAt;
+			const [writer] = resume
+				? yield* sql<{ provider: string }>`SELECT provider FROM events
+					WHERE session_id = ${sessionId} AND type = 'message.created'
+						AND json_extract(data, '$.messageId') = ${resume}
+					ORDER BY sequence LIMIT 1`
+				: [];
+			return (
+				writer?.provider === instanceId ? "native" : "handoff"
+			) satisfies ResumePlan;
+		}
 		// As prepare-turn: a rewind it never heard of invalidates the thread; a switch since its
 		// receipt is caught up on top of a resume.
 		const [since] = yield* sql<{ rewound: number; switched: number }>`SELECT

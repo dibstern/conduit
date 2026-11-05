@@ -275,10 +275,10 @@ export function resolveRewindUpToUuid(
 	const targetIndex = visible.findIndex((entry) =>
 		matches(entry, targetMessageId),
 	);
-	if (
-		targetIndex < 0 ||
-		!visible.slice(0, targetIndex).some((entry) => matches(entry, messageId))
-	)
+	// 82tn.52: a target this session never held (another provider's turn) cuts nothing from it:
+	// it resumes through the end of the kept row's own turn.
+	if (targetIndex < 0) return resolveForkUpToUuid(messages, messageId);
+	if (!visible.slice(0, targetIndex).some((entry) => matches(entry, messageId)))
 		return undefined;
 	const target = visible[targetIndex];
 	// Imported SDK entries retain the native chain link. File-order adjacency
