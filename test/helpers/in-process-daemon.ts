@@ -212,6 +212,9 @@ export async function createDaemonProject(
 						folders: [options.projectDir ?? process.cwd()],
 					},
 					{ silent: true },
+				).pipe(
+					// A reused configDir is a restart: daemon.json already holds the project.
+					Effect.catchTag("ProjectAlreadyExists", () => Effect.void),
 				);
 				yield* startRelay(slug);
 				// Foreground startup starts the provider command outbox once its
