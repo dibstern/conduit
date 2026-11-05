@@ -130,3 +130,23 @@ export const isPruned = (sessionId: string, sequence: number) =>
 			LIMIT 1`;
 		return rows.length > 0;
 	});
+
+/**
+ * Whether the files at a head move's target are still there: "pruned" when an
+ * eviction came after `messageId` was created, since its run's checkpoints went
+ * with it. Head moves that need files refuse "pruned"; conversation-only moves
+ * go ahead and show the files unavailable. A message this session did not
+ * create (inherited by a fork) has no checkpoints here, so it reads "pruned".
+ */
+export const headMoveFiles = (sessionId: string, messageId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [row] = yield* sql<{ readonly sequence: number | null }>`
+			SELECT MIN(sequence) AS sequence FROM events
+			WHERE session_id = ${sessionId} AND type = 'message.created'
+				AND json_extract(data, '$.messageId') = ${messageId}`;
+		const sequence = row?.sequence;
+		return sequence == null || (yield* isPruned(sessionId, sequence))
+			? ("pruned" as const)
+			: ("available" as const);
+	});

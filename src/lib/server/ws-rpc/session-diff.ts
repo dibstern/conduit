@@ -10,6 +10,7 @@ import { RunChangesCapturedSchema } from "../../contracts/stored-event.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
 	FolderTimeline,
+	headMoveFiles,
 	isPruned,
 } from "../../domain/daemon/Services/folder-timeline.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
@@ -217,8 +218,14 @@ export const sessionDiffHandlers = {
 						: mapRpcFailure("SessionDiffFile")(error),
 			),
 		),
+	GetHeadMoveFiles: (request) =>
+		headMoveFiles(request.sessionId, request.messageId).pipe(
+			Effect.map((files) => ({ files })),
+			Effect.catch(mapRpcFailure("GetHeadMoveFiles")),
+		),
 } satisfies Pick<
 	WsRpcHandlerMap,
+	| "GetHeadMoveFiles"
 	| "SessionDiffList"
 	| "SessionDiffFile"
 	| "SessionDiffDiscard"
