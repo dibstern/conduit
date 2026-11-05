@@ -67,6 +67,7 @@ import {
 	SecretAnswersLive,
 } from "../Services/secret-answers.js";
 import { SessionDirectory } from "../Services/session-directory.js";
+import { makeOrphanedClaudePermissions } from "./orphaned-permissions-layer.js";
 
 export const DaemonOrchestrationLive = Layer.effect(
 	DaemonOrchestration,
@@ -375,6 +376,7 @@ export const DaemonOrchestrationLive = Layer.effect(
 			yield* DaemonStoreAvailability,
 			drafts.discardProject,
 		);
+		const clearOrphanedAsks = yield* makeOrphanedClaudePermissions;
 		let started = false;
 		return {
 			engine,
@@ -383,6 +385,8 @@ export const DaemonOrchestrationLive = Layer.effect(
 				yield* adapters.recover;
 				if (started) return;
 				started = true;
+				// Before the outbox drains, as relay start cleared them before its command gate opened.
+				yield* clearOrphanedAsks;
 				channel("conduit.orchestration.engine").publish({
 					event: "drain-started",
 					engine,

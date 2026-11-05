@@ -17,7 +17,6 @@ import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/openc
 import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
 import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
 import { RelayStatusSnapshotTag } from "../domain/relay/Services/relay-status-snapshot.js";
-import { resolveOrphanedClaudePermissions } from "../domain/relay/Services/resolve-orphaned-claude-permissions.js";
 import { restoreAsyncQuestionsFromStore } from "../domain/relay/Services/restore-async-questions.js";
 import { restoreClaudeQuestionsFromStore } from "../domain/relay/Services/restore-claude-questions.js";
 import {
@@ -246,23 +245,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			log.info(
 				`Restored permission modes for ${restored.permissionModes} session(s)`,
 			);
-		const rejectedPermissions = yield* resolveOrphanedClaudePermissions.pipe(
-			Effect.catch((error) =>
-				Effect.sync(() => {
-					log.warn(
-						`Could not reject Claude permissions left pending by a crash: ${formatErrorDetail(error)}`,
-					);
-					return 0;
-				}),
-			),
-		);
-		if (rejectedPermissions > 0) {
-			yield* Effect.sync(() =>
-				log.info(
-					`Rejected ${rejectedPermissions} Claude permission(s) left pending by a crash`,
-				),
-			);
-		}
 		const sessionManagerService = yield* projectSessionManager;
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).

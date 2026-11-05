@@ -123,6 +123,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeEventRetentionSchedulerLive",
 			"makeStatusPollerCoreLive",
 			"makeStatusPollerCore",
+			"resolveOrphanedClaudePermissions",
+			"makeOrphanedClaudePermissions",
 		]);
 		expect(tally(server, named(services))).toEqual(
 			new Map([
@@ -131,6 +133,13 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/persistence/Services/event-retention-scheduler.ts", 1],
 				// Each one's import and its one build.
 				[`${daemon}/Layers/daemon-layers.ts`, 8],
+				// Orphaned Claude asks: cleared for every registered project when the daemon starts, not at relay start.
+				[
+					"src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.ts",
+					1,
+				],
+				[`${daemon}/Layers/orphaned-permissions-layer.ts`, 3],
+				[`${daemon}/Layers/daemon-orchestration-layer.ts`, 2],
 				// A store opened without the daemon schedules its own project's retention.
 				["src/lib/persistence/effect/live.ts", 2],
 				// relay: a standalone relay's own alarm scheduler.
