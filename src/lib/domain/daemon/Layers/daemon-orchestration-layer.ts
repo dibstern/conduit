@@ -305,7 +305,9 @@ export const DaemonOrchestrationLive = Layer.effect(
 			);
 		}
 		// Worktrees a fork with files made before a restart cut it off (82tn.54): kept when a session's
-		// workspace names one, else rolled back.
+		// workspace names one, else rolled back. CONTRACT.md 2849-2854 has every liveness reader ask
+		// anythingMayAct; nearest reading: a worktree no session's workspace names has no Run that
+		// could act in it, so this asks no Run Ledger.
 		const worktrees = yield* Effect.serviceOption(WorktreeServiceTag);
 		if (Option.isSome(worktrees))
 			yield* worktrees.value.recoverHeld((created) =>
