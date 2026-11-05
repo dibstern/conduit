@@ -222,6 +222,10 @@ export const handoffDeliveryFields = {
 		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
 	),
 	inputId: Schema.optionalKey(Schema.String),
+	/** Why a resume became a fresh handoff: the provider refused it, or the catch-up did not fit. */
+	fallback: Schema.optionalKey(
+		Schema.Literals(["resume_rejected", "catch_up_too_long"]),
+	),
 };
 
 export const HandoffSummarySchema = Schema.Struct({

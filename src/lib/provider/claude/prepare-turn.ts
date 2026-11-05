@@ -658,13 +658,24 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						!("_tag" in plan) &&
 						plan.handoff?.strategy === "resume" &&
 						plan.handoff.omitted > 0
-					)
-						plan = planTurn({
+					) {
+						const fresh = planTurn({
 							...input,
 							nativeThread: undefined,
 							messages,
 							options: { ...turnOptions, liveSession: undefined },
 						});
+						plan =
+							fresh instanceof Error || "_tag" in fresh || !fresh.handoff
+								? fresh
+								: {
+										...fresh,
+										handoff: {
+											...fresh.handoff,
+											fallback: "catch_up_too_long",
+										},
+									};
+					}
 				}
 				if (
 					plan instanceof HandoffTooLarge ||
@@ -678,6 +689,10 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 							...plan,
 							handoff: {
 								...plan.handoff,
+								// ad4c: the review says when a refused resume started fresh.
+								...(options.nativeResumeFallback
+									? { fallback: "resume_rejected" as const }
+									: {}),
 								throughSequence: yield* handoffThrough(
 									sql,
 									sessionId,
