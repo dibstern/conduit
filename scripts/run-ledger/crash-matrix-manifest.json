@@ -561,8 +561,8 @@
 		},
 		{
 			"cell": "background/lost-work",
-			"status": "uncovered",
-			"gap": "lost-work notice across a daemon restart: oracle unit only (plain-path:3547)"
+			"status": "proved",
+			"file": "test/integration/daemon/claude-lost-work.test.ts"
 		},
 		{
 			"cell": "background/native-command",
