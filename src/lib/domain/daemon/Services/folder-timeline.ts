@@ -31,6 +31,31 @@ export class FolderTimelineError extends Data.TaggedError(
 }> {}
 
 /**
+ * A restore that would lose work: the folder is gone, or files it would write
+ * changed since the plan (`paths`, folder-relative).
+ */
+export class FolderRestoreRefused extends Data.TaggedError(
+	"FolderRestoreRefused",
+)<{
+	readonly reason: "folder_missing" | "changed";
+	readonly directory: string;
+	readonly paths: readonly string[];
+}> {}
+
+/** A path a restore changes, as the move will leave it. */
+export interface RestoreChange {
+	readonly path: string;
+	readonly change: "added" | "modified" | "deleted";
+}
+
+/** A folder a restore moves from its planned tree to `to`. */
+export interface RestoreFolder {
+	readonly directory: string;
+	readonly from: string;
+	readonly to: string;
+}
+
+/**
  * Sole owner of the private object stores. A store borrows its repository's
  * objects read-only and never writes into the repository; live snapshots get
  * no ref and are pruned after a grace period. A run's checkpoints are pinned
@@ -125,6 +150,57 @@ export class FolderTimeline extends Context.Service<
 			runId: string,
 			directory: string,
 		) => Effect.Effect<Checkpoint | undefined, FolderTimelineError>;
+		/**
+		 * The Restore Plan for moving the folder to `to` (a repository-wide
+		 * tree): a fresh snapshot, and the paths that change.
+		 */
+		readonly plan: (
+			directory: string,
+			to: string,
+		) => Effect.Effect<
+			{ readonly from: string; readonly changes: readonly RestoreChange[] },
+			FolderTimelineError | FolderRestoreRefused
+		>;
+		/**
+		 * Applies a head move's files under each folder's apply lock, which a
+		 * run's start checkpoint also takes. `guard` runs under the locks first.
+		 * A folder that is gone, or a planned path changed since `from`, refuses
+		 * before any write. Each folder gets a Restore Receipt, then deletes, then
+		 * writes (only paths still as planned), then `journal` records the move.
+		 * A failure rolls the written paths back and drops the receipts. The
+		 * user's index, refs and HEAD are never written.
+		 */
+		readonly restore: <A, E, R>(move: {
+			readonly sessionId: string;
+			readonly moveId: string;
+			readonly folders: readonly RestoreFolder[];
+			readonly guard: Effect.Effect<void, E, R>;
+			readonly journal: Effect.Effect<A, E, R>;
+		}) => Effect.Effect<A, E | FolderTimelineError | FolderRestoreRefused, R>;
+		/** A restored folder's receipt: its tree before the move, and the move's target. */
+		readonly receipt: (
+			sessionId: string,
+			moveId: string,
+			directory: string,
+		) => Effect.Effect<
+			| {
+					readonly store: string;
+					readonly before: string;
+					readonly target: string;
+			  }
+			| undefined,
+			FolderTimelineError
+		>;
+		/**
+		 * Startup: a receipt whose move was not journalled died mid-apply, so its
+		 * folder is put back as the move found it and the receipt dropped.
+		 */
+		readonly recoverRestores: <E, R>(
+			journalled: (
+				sessionId: string,
+				moveId: string,
+			) => Effect.Effect<boolean, E, R>,
+		) => Effect.Effect<void, E, R>;
 		/** Bytes the session's store holds on disk; 0 without one. */
 		readonly storeBytes: (sessionId: string) => Effect.Effect<number>;
 		/** Bytes all session stores hold on disk. */
