@@ -288,6 +288,18 @@ export const headMovesHandlers: StepHandler[] = [
 		},
 	},
 	{
+		// The preview read the files kept; an eviction lands before the commit (f02e9.13).
+		name: "the files are pruned before the commit",
+		match: /^the files there are pruned before the move is confirmed$/,
+		run: ({ world }) => {
+			requireRpcControl(world.page).setStubs({
+				CommitHeadMove: () => {
+					throw new FilesRefused({ sessionId, reason: "pruned" });
+				},
+			});
+		},
+	},
+	{
 		name: "a rewind with files would change paths",
 		match: /^a rewind there would change (.+) and (.+)$/,
 		run: ({ world, match }) => {
@@ -550,6 +562,17 @@ export const headMovesHandlers: StepHandler[] = [
 				.getByRole("textbox", { name: "Edit message" })
 				.fill(match[2] ?? "");
 			await edit.getByRole("button", { name: "Send" }).click();
+		},
+	},
+	{
+		name: "the edit box keeps the draft",
+		match: /^the edit box still holds (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("user-message-edit")
+					.getByRole("textbox", { name: "Edit message" }),
+			).toHaveValue(match[1] ?? "");
 		},
 	},
 	{
