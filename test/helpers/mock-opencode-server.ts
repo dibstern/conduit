@@ -1286,6 +1286,14 @@ export class MockOpenCodeServer {
 			return;
 		}
 
+		// Recordings capture /permission/:id/reply; the relay answers on the
+		// session-scoped route, which OpenCode also answers with `true`.
+		if (!queue && method === "POST" && answered) {
+			res.writeHead(200, { "Content-Type": "application/json" });
+			res.end("true");
+			return;
+		}
+
 		if (!queue) {
 			res.writeHead(404);
 			res.end(
