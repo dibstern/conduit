@@ -2489,7 +2489,6 @@ describe("generated D34 coverage", () => {
 		"not_sent after a joined turn", // 3.6 Otherwise, 8.3
 		"long not_sent run", // 4.8 no cap for not_sent
 		"unlaunch", // 3.6
-		"not_sent start ended its Run", // 3.6 Otherwise, 8.3
 		"removal process_lost", // H4, 6.3
 		"Registering restart turn", // H4 Registering, 6.1 adopted runner
 		// Round 14: D49 unheld_outcome, 3.13 releases, D50 unlaunch and not yet delivered, Q28, D48 amended.
@@ -2558,6 +2557,10 @@ describe("generated D34 coverage", () => {
 	// 8.3 (oracle round 8 clarifications): older wake execution labels never end the Run.
 	it("generated older wake label Run-end evidence never ends the Run", () => {
 		expect(oracleCoverage.shapes["older wake label Run end"]).toBe(0);
+	});
+	// H4 as amended (CONTRACT.md 4008-4009, 4930): a not_sent try ends only its own work, never a Run.
+	it("generated not_sent start never ends its Run", () => {
+		expect(oracleCoverage.shapes["not_sent start ended its Run"]).toBe(0);
 	});
 });
 

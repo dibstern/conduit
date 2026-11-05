@@ -41,8 +41,8 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 				],
 			],
 			[
-				"coverage, CONTRACT.md 3456-3477 (11.2: the generator has not reached these shapes at default runs since the oracle port; no seed is pended any more, so no gap holds them. Wrong side: the generator, reach work open on 82tn.32.2.9.2)",
-				["not_sent start ended its Run", "unheld_outcome after a reissue"].map(
+				"coverage, CONTRACT.md 3456-3477 (11.2: reached at 2000 runs, not at default. The host answers an older try of a commandId main re-issued (D49, 1566-1577); a served re-issue is held at once, so the only window is a re-issue still waiting on its spawn. Wrong side: the generator, needs a multi-step draw)",
+				["unheld_outcome after a reissue"].map(
 					(shape) => `generated traces reach ${shape}`,
 				),
 			],
