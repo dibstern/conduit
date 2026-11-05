@@ -19,7 +19,8 @@
 
 <script lang="ts">
 	import { tick, untrack } from "svelte";
-	import { isProcessing } from "../../stores/chat.svelte.js";
+	import { currentChat, isProcessing } from "../../stores/chat.svelte.js";
+	import { whyBusy } from "../../../session/why-busy.js";
 	import { discoveryState, getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { instanceState } from "../../stores/instance.svelte.js";
 	import { dismissGoalMet, GOAL_LIMITED, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
@@ -71,6 +72,7 @@
 	import SessionSheetBody from "../session/SessionSheetBody.svelte";
 	import SessionCommandItems from "../session/SessionCommandItems.svelte";
 	import AutoSettleRow from "../session/AutoSettleRow.svelte";
+	import WhyBusy from "../session/WhyBusy.svelte";
 	import { getProjectAccent } from "../session/session-list-project.js";
 	import ProjectMark from "../ui/ProjectMark.svelte";
 	import ViewCard from "../ui/ViewCard.svelte";
@@ -314,6 +316,8 @@
 
 	const activeView = $derived(activeSessionView());
 	const collapsed = $derived(isBarCollapsed() && activeView === "chat" && !goalDetails.open && !sideThreadsPanel.open && !tasksPanel.open);
+	// 82tn.56: open only while the indicator reads busy; every reason is Session Activity's.
+	const busyView = $derived(session && !collapsed ? whyBusy(session, { pending: currentChat().transcript?.pending ?? [], messages: currentChat().transcript?.rows ?? [] }) : undefined);
 	const duoFolded = $derived(sessionViewState.pose === "duo-folded-portrait");
 	const chipsFolded = $derived(isDuoChipRowFolded() && !goalDetails.open && !tasksPanel.open);
 	// A running server is not an unread update, so Servers stays out of the island's count.
@@ -706,6 +710,7 @@
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>
+		{#if busyView && session}<WhyBusy attention={sessionAttention(session)} view={busyView} />{/if}
 		{#if session?.unread === true && !collapsed}
 			<Menu appearance="final" ariaLabel="Unread session options" align="end" data-testid="session-bar-unread-menu">
 				{#snippet trigger({ props })}
