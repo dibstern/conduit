@@ -592,13 +592,18 @@ test("a resume is checked against the server, and the server wins", async ({
 		async () => {
 			for (const { live, kept } of files)
 				if (existsSync(live)) copyFileSync(live, kept);
-			// Two commits, so the tab runs more than one version ahead: the
-			// rollback's own restart takes one with no row, projecting the runner
-			// it reports reattached (CONTRACT.md 2121-2125), and a tab only one
-			// ahead would tie the server and resume by checksum instead.
+			// Two turns, so the session's feed runs more than one version ahead:
+			// the rollback's own restart takes one with no row, projecting the
+			// runner it reports reattached (CONTRACT.md 2121-2125, 82tn.32.11),
+			// and a feed only one ahead would tie the server and resume by
+			// checksum instead. The rename moves the sidebar, not this feed.
 			await seed(
 				store,
 				turns(SESSION, 6, "ahead", 1, () => "Ahead reply."),
+			);
+			await seed(
+				store,
+				turns(SESSION, 7, "further", 1, () => "Further reply."),
 			);
 			await seed(store, [renamed(6, "Resume check ahead")]);
 		},
