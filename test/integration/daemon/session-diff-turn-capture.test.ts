@@ -1,0 +1,244 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import Database from "better-sqlite3";
+import { Effect, Fiber, Queue, Stream } from "effect";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { SessionDiffListing } from "../../../src/lib/contracts/session-diff.js";
+import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
+import {
+	type ProcessBrowser,
+	ProcessHarness,
+} from "../../helpers/process-harness.js";
+
+// Failure modes of a turn diff whose run-end capture is late or fails (the
+// numbers are the lane audit's): 1 a capture that lands after the browser
+// asked reads Not captured, and the live view never learns it landed; 2 a
+// capture that fails after pending was shown stays pending, or reads Not
+// captured with no reason; 3 a daemon restart mid-capture leaves the turn
+// pending forever; 4 a packaging failure records nothing, or the next turn's
+// capture chains onto it or lists its files; 5 a capture queued behind an
+// earlier turn's reads Not captured or lands with the earlier files; 6 a
+// browser that reconnects while pending never follows the landing; 7 the
+// pending and Not captured listings share a revision. Holding the session
+// store's ref lock holds a capture at packaging, as a slow disk would.
+const GIT_KEYS = [
+	"GIT_DIR",
+	"GIT_INDEX_FILE",
+	"GIT_WORK_TREE",
+	"GIT_COMMON_DIR",
+];
+const gitEnv = { ...process.env };
+for (const key of GIT_KEYS) delete gitEnv[key];
+
+const git = (directory: string, ...args: string[]) =>
+	execFileSync("git", ["-C", directory, ...args], {
+		env: gitEnv,
+		encoding: "utf8",
+		stdio: ["ignore", "pipe", "pipe"],
+	}).trim();
+
+/** A listing as the turn footer reads it. */
+const shape = (listing: SessionDiffListing) => ({
+	...(listing.notCaptured ? { notCaptured: true } : {}),
+	folders: listing.folders.map((folder) =>
+		"files" in folder
+			? folder.files.map(({ path, status }) => [path, status])
+			: folder.error,
+	),
+});
+
+describe("Turn diff capture states through the built daemon", () => {
+	let harness: ProcessHarness | undefined;
+	let evidenceFile = "";
+	const evidence: Record<string, unknown> = {};
+	const feeds: Fiber.Fiber<void, unknown>[] = [];
+
+	afterEach(async ({ task }) => {
+		await Promise.all(
+			feeds.splice(0).map((feed) => Effect.runPromise(Fiber.interrupt(feed))),
+		);
+		if (!harness) return;
+		const fixture = harness;
+		evidence["errors"] =
+			task.result?.errors?.map(({ message }) => message) ?? [];
+		if (task.result?.errors?.length) evidence["logs"] = fixture.logTail;
+		const root = realpathSync(fixture.root);
+		writeFileSync(join(fixture.root, "claude-replay-release"), "release\n");
+		try {
+			await fixture.dispose();
+		} finally {
+			mkdirSync("test-results", { recursive: true });
+			writeFileSync(
+				evidenceFile,
+				`${JSON.stringify(evidence, null, 2).replaceAll(root, "<root>").replaceAll(fixture.root, "<root>")}\n`,
+			);
+			for (const key of Object.keys(evidence)) delete evidence[key];
+			harness = undefined;
+			vi.unstubAllEnvs();
+		}
+	});
+
+	/** A daemon with one git project folder and a session that edits it once per turn. */
+	async function start(turns: number) {
+		for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
+		const fixture = ProcessHarness.create({
+			claudeReplay: {
+				turns: Array.from({ length: turns }, () => "pong-thinking-text-turn"),
+				delayMs: 0,
+				holdBeforeResult: true,
+			},
+		});
+		harness = fixture;
+		const repo = fixture.projectDir;
+		mkdirSync(repo, { recursive: true });
+		git(repo, "init", "-q", "-b", "main");
+		writeFileSync(join(repo, "base.txt"), "base\n");
+		git(repo, "add", ".");
+		git(
+			repo,
+			"-c",
+			"user.name=Capture test",
+			"-c",
+			"user.email=capture@example.test",
+			"-c",
+			"core.hooksPath=/dev/null",
+			"commit",
+			"-q",
+			"-m",
+			"Initial commit",
+		);
+		await fixture.restart();
+		const socket = join(fixture.configDir, "relay.sock");
+		await sendRpcRequest(socket, {
+			_tag: "SaveProject",
+			slug: "process-test",
+			folders: [repo],
+		});
+		const browser = await fixture.connect();
+		const session = await browser.createSession("Captures");
+		const release = join(fixture.root, "claude-replay-release");
+		const store = join(
+			fixture.configDir,
+			"folder-timeline",
+			"sessions",
+			`${createHash("sha256").update(session).digest("hex").slice(0, 16)}.git`,
+		);
+		const query = <Row>(statement: string, ...params: string[]) => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db.prepare(statement).all(...params) as Row[];
+			} finally {
+				db.close();
+			}
+		};
+		return {
+			fixture,
+			repo,
+			browser,
+			session,
+			store,
+			/** The session store's ref lock: while it exists, a capture cannot finish packaging. */
+			lock: join(store, "refs", "conduit", "session.lock"),
+			/** Runs one turn that writes `path` while its run is open; answers its turn id. */
+			turn: async (path: string) => {
+				rmSync(release, { force: true });
+				const cursor = browser.frames.length;
+				const sending = browser.send(session, `Write ${path}.`);
+				void sending.catch(() => {});
+				await browser.waitFor(
+					(frame) =>
+						frame["type"] === "transcript_message" &&
+						frame["sessionId"] === session &&
+						frame["role"] === "assistant",
+					cursor,
+				);
+				writeFileSync(join(repo, path), `${path}\n`);
+				writeFileSync(release, "release\n");
+				await sending;
+				return (
+					query<{ id: string }>(
+						"SELECT id FROM turns WHERE session_id = ? ORDER BY requested_at",
+						session,
+					).at(-1)?.id ?? ""
+				);
+			},
+			list: (turnId: string, revision?: string) =>
+				sendRpcRequest(socket, {
+					_tag: "SessionDiffList",
+					sessionId: session,
+					scope: { kind: "turn", turnId },
+					...(revision === undefined ? {} : { revision }),
+				}),
+			/** Follows a browser's live turn scope; answers the next revision it pushes. */
+			follow: (viewer: ProcessBrowser, turnId: string) => {
+				const pushed = Effect.runSync(Queue.unbounded<string>());
+				feeds.push(
+					Effect.runFork(
+						Stream.runForEach(
+							viewer.rpc.SubscribeSessionDiff({
+								sessionId: session,
+								scope: { kind: "turn", turnId },
+							}),
+							({ revision }) => Queue.offer(pushed, revision),
+						),
+					),
+				);
+				return {
+					next: () => Effect.runPromise(Queue.take(pushed)),
+					waiting: () => Effect.runSync(Queue.size(pushed)),
+				};
+			},
+			runOf: (turnId: string) =>
+				query<{ run_id: string }>(
+					"SELECT run_id FROM turns WHERE id = ?",
+					turnId,
+				)[0]?.run_id,
+			capturedEvents: () =>
+				query<{ data: string }>(
+					"SELECT data FROM events WHERE session_id = ? AND type = 'run.changes_captured' ORDER BY sequence",
+					session,
+				).map(({ data }) => JSON.parse(data) as { runId: string }),
+		};
+	}
+
+	it("records a gap when packaging a capture fails, and the next turn captures on its own", async () => {
+		evidenceFile = "test-results/f02e9-17-packaging-gap.json";
+		const { store, lock, turn, list, capturedEvents } = await start(3);
+		const first = await turn("first.txt");
+		const firstListing = await list(first);
+		expect(shape(firstListing)).toEqual({
+			folders: [[["first.txt", "added"]]],
+		});
+		// Git's default ref lock retry is short, so packaging fails at once.
+		writeFileSync(lock, "");
+		const second = await turn("second.txt");
+		const failed = await list(second);
+		evidence["failed"] = failed;
+		expect(shape(failed)).toEqual({ folders: ["unavailable"] });
+		const [failedFolder] = failed.folders;
+		expect(
+			failedFolder && "message" in failedFolder && failedFolder.message,
+		).toContain("session.lock");
+		rmSync(lock);
+
+		const third = await turn("third.txt");
+		const next = await list(third);
+		evidence["next"] = next;
+		expect(shape(next)).toEqual({ folders: [[["third.txt", "added"]]] });
+		expect(await list(first)).toEqual(firstListing);
+		const events = capturedEvents();
+		evidence["capturedEvents"] = events;
+		expect(events).toHaveLength(3);
+		expect(events[1]).toMatchObject({ folders: [{ gap: "failed" }] });
+		// The failed capture never joined the session's chain.
+		evidence["chainLength"] = git(
+			store,
+			"rev-list",
+			"--count",
+			"refs/conduit/session",
+		);
+		expect(evidence["chainLength"]).toBe("2");
+	});
+});

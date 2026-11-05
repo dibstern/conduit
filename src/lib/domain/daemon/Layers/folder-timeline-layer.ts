@@ -638,22 +638,37 @@ export const makeFolderTimeline = (configDir: string) =>
 						Effect.gen(function* () {
 							// Forgotten while its end checkpoint was taken.
 							if (!runs.has(runId)) return;
-							const store = yield* openSessionStore(
-								run,
-								root,
-								sessionStore(live.sessionId),
-								live,
-							);
-							const capture = {
-								runId,
-								folders: yield* Effect.forEach(
-									ends,
-									([directory, end]) =>
-										captureFolder(git, live, store, directory, end),
-									{ concurrency: "unbounded" },
+							const capture = yield* Effect.gen(function* () {
+								const store = yield* openSessionStore(
+									run,
+									root,
+									sessionStore(live.sessionId),
+									live,
+								);
+								const capture = {
+									runId,
+									folders: yield* Effect.forEach(
+										ends,
+										([directory, end]) =>
+											captureFolder(git, live, store, directory, end),
+										{ concurrency: "unbounded" },
+									),
+								};
+								yield* commitCapture(git, store, capture);
+								return capture;
+							}).pipe(
+								// A capture the store cannot save still says why each folder is missing.
+								Effect.catch((error) =>
+									Effect.succeed({
+										runId,
+										folders: live.directories.map((directory) => ({
+											directory,
+											...gapOf(error),
+											message: `Saving the capture failed: ${error.message}`,
+										})),
+									}),
 								),
-							};
-							yield* commitCapture(git, store, capture);
+							);
 							yield* record(live.sessionId, capture);
 						}),
 					);
