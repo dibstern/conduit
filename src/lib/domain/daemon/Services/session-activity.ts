@@ -48,6 +48,8 @@ export type SessionBackground = {
 	readonly stopConfirm?: {
 		readonly snapshotEntry: number;
 		readonly tasks?: readonly BackgroundTask[];
+		/** A held close (2897): the gate holds main's end_session step, with or without a turn. */
+		readonly step?: "end_session";
 	};
 };
 
@@ -213,17 +215,17 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			// 8.4: the ask shows while U2 holds the Stop on a pending confirm, or while the gate holds
 			// an end_session step, which waits with no turn (CONTRACT.md 2875-2899).
 			const pending = entry.ledger?.pendingConfirm;
+			const closing = pending?.step === "end_session";
 			const asking =
-				held.has(sessionId) || pending?.step === "end_session"
-					? pending?.snapshotEntry
-					: undefined;
+				held.has(sessionId) || closing ? pending?.snapshotEntry : undefined;
+			const step = closing ? { step: "end_session" as const } : {};
 			// 8.3: unknown tasks are neither work nor monitoring; the last known list only shows greyed.
 			if (entry.view.tag === "unknown") {
 				const stale = shown(entry.view.stale ?? []);
 				const stopConfirm =
 					asking === undefined
 						? {}
-						: { stopConfirm: { snapshotEntry: asking } };
+						: { stopConfirm: { snapshotEntry: asking, ...step } };
 				return stale.length > 0
 					? { tasks: [], checking: true, stale, ...wakeRun, ...stopConfirm }
 					: { tasks: [], checking: true, ...wakeRun, ...stopConfirm };
@@ -232,7 +234,7 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 			const stopConfirm =
 				asking === undefined
 					? {}
-					: { stopConfirm: { snapshotEntry: asking, tasks } };
+					: { stopConfirm: { snapshotEntry: asking, tasks, ...step } };
 			return {
 				work: work ?? "monitoring",
 				tasks,

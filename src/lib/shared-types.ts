@@ -487,11 +487,13 @@ export const SessionInfoSchema = Schema.Struct({
 	/**
 	 * A Stop past its deadline asks before it ends background tasks (8.4): the snapshot entry the
 	 * confirm names and the tasks it would end; no tasks means the background state is unknown.
+	 * `end_session` names a held close (a refresh), which asks with no turn live (2897).
 	 */
 	stopConfirm: Schema.optional(
 		Schema.Struct({
 			snapshotEntry: Schema.Number,
 			tasks: Schema.optional(Schema.Array(BackgroundTaskSchema)),
+			step: Schema.optional(Schema.Literal("end_session")),
 		}),
 	),
 	/** The session's live servers by port, read from the Run Ledger; absent with none. */

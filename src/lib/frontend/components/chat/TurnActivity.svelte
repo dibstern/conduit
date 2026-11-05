@@ -3,11 +3,15 @@
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script module lang="ts">
 	import type { BackgroundTask } from "../../../shared-types.js";
-	/** A stuck Stop waits for a confirm (8.4) and names the tasks closing would end; no tasks means unknown. */
+	/**
+	 * A stuck Stop waits for a confirm (8.4) and names the tasks closing would end; no tasks means
+	 * unknown. A held close (a refresh, 2897) asks the same way, on a live or settled turn.
+	 */
 	export type RunLabel =
 		| { kind: "working" }
 		| { kind: "woken"; task?: string }
-		| { kind: "stopping"; stuck?: { readonly tasks?: readonly BackgroundTask[] } };
+		| { kind: "stopping"; stuck?: { readonly tasks?: readonly BackgroundTask[] } }
+		| { kind: "closing"; stuck: { readonly tasks?: readonly BackgroundTask[] } };
 </script>
 
 <script lang="ts">
@@ -150,16 +154,20 @@
 	const phrase = $derived(countsPhrase(stats));
 	const logEntries = $derived(entries ?? segment.activity.map((part, index): TurnLogEntry => ({ kind: "step", uuid: part.uuid, index, part })));
 	const live = $derived(panel.phase !== "settled");
-	const stuck = $derived(live && runLabel.kind === "stopping" ? runLabel.stuck : undefined);
+	// A held close waits with no turn live (2897), so it asks on a settled head too.
+	const stuck = $derived(runLabel.kind === "closing" || (live && runLabel.kind === "stopping") ? runLabel.stuck : undefined);
+	const closing = $derived(runLabel.kind === "closing");
 	function runText(label: RunLabel): string {
 		switch (label.kind) {
 			case "working": return "Working";
 			case "woken": return label.task ? `Working · woken by ${label.task}` : "Working · woken";
-			case "stopping": {
+			case "stopping":
+			case "closing": {
 				if (!label.stuck) return "Stopping";
+				const lead = label.kind === "closing" ? "Close is held" : "Stop is stuck";
 				const tasks = label.stuck.tasks;
-				if (!tasks) return "Stop is stuck. Background state unknown";
-				return `Stop is stuck. Closing will end ${plural(tasks.length, "task")}: ${tasks.map((task) => backgroundTaskText({ ...task, kind: taskKind(task).label })).join(", ")}`;
+				if (!tasks) return `${lead}. Background state unknown`;
+				return `${lead}. Closing will end ${plural(tasks.length, "task")}: ${tasks.map((task) => backgroundTaskText({ ...task, kind: taskKind(task).label })).join(", ")}`;
 			}
 			default: return assertNever(label);
 		}
@@ -596,7 +604,7 @@
 							<Icon name={minimised ? "chevron-right" : "chevron-down"} size={14} class="shrink-0 text-text-dimmer" />
 							{#if live}<ConduitMark size={16} variant="running" />
 							{/if}
-							<span class="text-[14px] font-semibold text-text {stuck ? 'min-w-0 truncate' : ''}" title={stuck ? runText(runLabel) : undefined}>{live ? (stuck && phone ? "Stopping" : runText(runLabel)) : "Worked"}</span>
+							<span class="text-[14px] font-semibold text-text {stuck ? 'min-w-0 truncate' : ''}" title={stuck ? runText(runLabel) : undefined}>{live || closing ? (stuck && phone ? (closing ? "Close held" : "Stopping") : runText(runLabel)) : "Worked"}</span>
 							{#if live && !turn.user}
 								<span class="text-[12px] text-text-dimmer" data-testid="turn-live-elapsed">(no prompt to time from)</span>
 							{:else if duration !== undefined}
@@ -616,7 +624,7 @@
 					<!-- A phone has no room beside the head: the whole label and the actions take their own lines. -->
 					{#if phone}<p class="order-last m-0 basis-full text-[13px] leading-[1.4] text-text">{runText(runLabel)}</p>{/if}
 					<span class="flex shrink-0 gap-[6px] {phone ? 'order-last basis-full flex-wrap' : ''}" data-testid="stuck-stop-actions">
-						<Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px]" onclick={() => confirmStuckStop(stuckSession)}>Stop now</Button>
+						<Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px]" onclick={() => confirmStuckStop(stuckSession)}>{closing ? "Close now" : "Stop now"}</Button>
 						{#if stuck.tasks}<Button variant="ghost" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] bg-chip" onclick={() => stopBackgroundTasks(stuckSession)}>Stop tasks first</Button>{/if}
 					</span>
 				{/if}

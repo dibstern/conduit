@@ -94,6 +94,7 @@ const lostNotices = async (browser: BrowserClient, sessionId: string) =>
 type StopConfirm = {
 	readonly snapshotEntry: number;
 	readonly tasks?: readonly { readonly id: string }[];
+	readonly step?: "end_session";
 };
 const confirmOf = (message: Record<string, unknown>) =>
 	message["stopConfirm"] as StopConfirm | undefined;
@@ -230,6 +231,8 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		const first = confirmOf(asked);
 		proof["asked"] = first;
 		expect(first?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		// A stuck Stop names no step: the page reads it as a Stop, not a held close.
+		expect(first?.step).toBeUndefined();
 		// test-waits-allow real-wait: nothing destroying is an absence past the deadline.
 		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
 		expect(closedQueries(fixture, queryId)).toEqual([]);
@@ -556,6 +559,8 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		);
 		proof["refresh: asked"] = { repliedMs, asked };
 		expect(asked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		// 2897: the ask names the held close, so the page asks with no turn live.
+		expect(asked?.step).toBe("end_session");
 		// test-waits-allow real-wait: nothing destroying is an absence over time.
 		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
 		expect(closedQueries(fixture, queryId)).toEqual([]);
