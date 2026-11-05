@@ -1272,15 +1272,6 @@ describe("Effect runtime boundary grep", () => {
 	it("does not throw plain Error for expected project registry failures", () => {
 		const checks = [
 			{
-				path: "src/lib/daemon/project-registry.ts",
-				patterns: [
-					/throw new Error\(`Project "\$\{slug\}"/,
-					/reject\(new Error\(`Project "\$\{slug\}"/,
-					/reject\(new Error\(`Wait for relay "\$\{slug\}"/,
-					/reject\(\s*new Error\(`Timed out waiting for relay/,
-				],
-			},
-			{
 				path: "src/lib/domain/daemon/Layers/daemon-main.ts",
 				patterns: [
 					/throw new Error\(`Project "\$\{slug\}" not found`/,

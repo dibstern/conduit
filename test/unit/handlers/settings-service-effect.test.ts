@@ -172,7 +172,6 @@ describe("settings reads with Effect-native settings service", () => {
 							expect(reply).toEqual({
 								projectSlug: "test-project",
 								projects: [],
-								current: "test-project",
 							});
 						}),
 					),

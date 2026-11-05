@@ -334,7 +334,6 @@ describe("daemon shared RPC routing", () => {
 										slug,
 									}),
 									projectManagementService: {
-										currentSlug: () => Effect.succeed(slug),
 										list: () =>
 											Effect.succeed(
 												projects.filter((project) => project.slug === slug),

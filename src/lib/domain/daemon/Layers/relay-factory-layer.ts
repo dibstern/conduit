@@ -434,7 +434,6 @@ export const RelayFactoryLive = (
 						const projectManagementAdapter = Context.make(
 							ProjectManagementServiceTag,
 							{
-								currentSlug: () => Effect.succeed(project.slug),
 								list: () => listProjects,
 								save: (input) =>
 									Effect.gen(function* () {

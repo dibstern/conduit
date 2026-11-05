@@ -144,7 +144,6 @@ async function setupWithProjectManagement(
 									folders,
 								},
 							],
-					current: "myapp",
 					savedSlug: slug,
 					warnings: [],
 				};
@@ -154,7 +153,6 @@ async function setupWithProjectManagement(
 				return {
 					projectSlug: String(params["projectSlug"] ?? "myapp"),
 					projects: baseProjects().filter((project) => project.slug !== slug),
-					current: "myapp",
 				};
 			},
 		},

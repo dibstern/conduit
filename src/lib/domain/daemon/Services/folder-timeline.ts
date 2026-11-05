@@ -24,8 +24,8 @@ export class FolderTimelineError extends Data.TaggedError(
 /**
  * Sole owner of the private object stores. A store borrows its repository's
  * objects read-only and never writes into the repository; live snapshots get
- * no ref and are pruned after a grace period. A run's start tree is pinned
- * until its end checkpoint; captures are copied into the session's own store
+ * no ref and are pruned after a grace period. A run's checkpoints are pinned
+ * until its capture is recorded, so a restart can finish it; captures are copied into the session's own store
  * under one ref, so they outlive the user's history and leave with the session.
  */
 export class FolderTimeline extends Context.Service<
@@ -82,9 +82,25 @@ export class FolderTimeline extends Context.Service<
 			) => Effect.Effect<void, E>,
 		) => Effect.Effect<void>;
 		/**
+		 * Startup: takes back the runs a restart left pinned. `owed` says what
+		 * became of each: an "ended" run is captured from its pinned checkpoints
+		 * (a folder whose end checkpoint was lost records a gap), a "running" run
+		 * is live again, and a "done" run (recorded, or its session gone) is
+		 * unpinned. Returns once they are live; captures run on.
+		 */
+		readonly recover: <E>(
+			owed: (
+				sessionId: string,
+				runId: string,
+			) => Effect.Effect<"ended" | "running" | "done">,
+			record: (
+				sessionId: string,
+				capture: RunChangesCaptured,
+			) => Effect.Effect<void, E>,
+		) => Effect.Effect<void>;
+		/**
 		 * Waits until a live run's capture is recorded or abandoned (failed, or
-		 * its session forgotten); at once for a run the timeline no longer holds,
-		 * which after a daemon restart is every run that was still capturing.
+		 * its session forgotten); at once for a run the timeline no longer holds.
 		 */
 		readonly settled: (runId: string) => Effect.Effect<void>;
 		/** The store holding a session's captures, for `git`. */

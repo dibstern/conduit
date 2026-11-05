@@ -3,14 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
-import { HttpRouter, HttpServerResponse } from "effect/http";
+import { HttpRouter } from "effect/http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthManager } from "../../../src/lib/auth.js";
 import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
 import { StaticDirTag } from "../../../src/lib/domain/server/Services/static-file-handler.js";
 import {
 	effectRouterWithOriginCheck,
-	ProjectApiDelegateProvider,
 	ProjectsProvider,
 	type RouterProjectInfo,
 	SetupInfoProvider,
@@ -62,10 +61,6 @@ function makeHandler(options?: {
 			getPort: () => Effect.succeed(2633),
 			getIsTls: () => Effect.succeed(false),
 			getPublicUrl: () => Effect.succeed(null),
-		}),
-		Layer.succeed(ProjectApiDelegateProvider)({
-			delegateApiRequest: () =>
-				Effect.succeed(HttpServerResponse.text("delegated", { status: 299 })),
 		}),
 		NodeFileSystem.layer,
 		NodePath.layer,
@@ -163,6 +158,19 @@ describe("Effect HTTP Router production routes", () => {
 			);
 			expect(response.status).toBe(200);
 			await expect(response.json()).resolves.toEqual({ status: "ready" });
+		} finally {
+			await dispose();
+		}
+	});
+
+	// 82tn.16: no per-project API sits behind an old /p/<slug> link.
+	it("GET /p/:slug/api/<other> answers not found", async () => {
+		const { handler, dispose } = makeHandler();
+		try {
+			const response = await handler(
+				new Request("http://localhost/p/test-project/api/sessions"),
+			);
+			expect(response.status).toBe(404);
 		} finally {
 			await dispose();
 		}

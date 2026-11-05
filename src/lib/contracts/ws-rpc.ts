@@ -851,13 +851,11 @@ export const GetCommandsResponseSchema = Schema.Struct({
 export const GetProjectsResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
-	current: Schema.optional(Schema.String),
 });
 
 export const ProjectMutationResponseSchema = Schema.Struct({
 	projectSlug: Schema.optional(Schema.String),
 	projects: Schema.Array(ProjectInfoSchema),
-	current: Schema.optional(Schema.String),
 });
 
 export const FolderIssueSchema: Schema.Codec<FolderIssue> = Schema.Union([

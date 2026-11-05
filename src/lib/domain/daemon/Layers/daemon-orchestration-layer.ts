@@ -11,6 +11,7 @@ import {
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
 import { createLogger } from "../../../logger.js";
@@ -26,6 +27,7 @@ import {
 	makeReadQueryEffect,
 	ReadQueryEffectTag,
 } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent, EventId } from "../../../persistence/events.js";
 import { loadClaudeSdkTestModule } from "../../../provider/claude/claude-sdk-module.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
@@ -208,31 +210,31 @@ export const DaemonOrchestrationLive = Layer.effect(
 		if (Option.isSome(timeline) && Option.isSome(events)) {
 			const folders = timeline.value;
 			const scope = yield* Effect.scope;
+			const captureId = (runId: string) =>
+				Schema.decodeSync(EventId)(`evt_conduit_run_changes_captured_${runId}`);
+			const record =
+				(provider: string) =>
+				(sessionId: string, capture: RunChangesCaptured) =>
+					Effect.gen(function* () {
+						const projectId = yield* projectOfSession(sessionId);
+						yield* persist.persistEvent(
+							canonicalEvent("run.changes_captured", sessionId, capture, {
+								provider,
+								eventId: captureId(capture.runId),
+							}),
+							{ projectId },
+						);
+					});
 			// The run-end checkpoint, a joined run's release and a deleted session's captures.
 			yield* (yield* events.value.subscribe()).pipe(
 				Stream.runForEach((event) => {
 					const { runId } = event.metadata;
 					if (event.runEnded && runId)
-						return folders
-							.runEnded(runId, (sessionId, capture) =>
-								Effect.gen(function* () {
-									const projectId = yield* projectOfSession(sessionId);
-									yield* persist.persistEvent(
-										canonicalEvent("run.changes_captured", sessionId, capture, {
-											provider: event.provider,
-											eventId: Schema.decodeSync(EventId)(
-												`evt_conduit_run_changes_captured_${runId}`,
-											),
-										}),
-										{ projectId },
-									);
-								}),
-							)
-							.pipe(
-								// Captures run beside the bus, which drops events a stalled subscriber misses.
-								Effect.forkIn(scope),
-								Effect.asVoid,
-							);
+						return folders.runEnded(runId, record(event.provider)).pipe(
+							// Captures run beside the bus, which drops events a stalled subscriber misses.
+							Effect.forkIn(scope),
+							Effect.asVoid,
+						);
 					if (
 						event.type === "run.started" &&
 						runId &&
@@ -252,6 +254,39 @@ export const DaemonOrchestrationLive = Layer.effect(
 					return Effect.void;
 				}),
 				Effect.forkScoped,
+			);
+			// Captures a restart interrupted. CONTRACT.md 8.3 (2849-2853) names the
+			// Run Ledger's liveness readers and not this one; its nearest reading is
+			// the ledger's active run: a pinned run it no longer holds has ended.
+			yield* folders.recover(
+				(sessionId, runId) =>
+					Effect.gen(function* () {
+						const done = yield* sql`
+							SELECT 1 FROM events WHERE event_id = ${captureId(runId)}
+							UNION ALL
+							SELECT 1 FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted'
+							LIMIT 1`;
+						if (done.length > 0) return "done" as const;
+						const view = yield* loadLedgerView(sessionId);
+						if (!view) return "done" as const;
+						return view.active?.runId === runId
+							? ("running" as const)
+							: ("ended" as const);
+					}).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.catchCause((cause) =>
+							Effect.logWarning("Capture recovery could not read the run", {
+								runId,
+								cause,
+							}).pipe(Effect.as("running" as const)),
+						),
+					),
+				(sessionId, capture) =>
+					Effect.gen(function* () {
+						const [session] = yield* sql<{ readonly provider: string }>`
+							SELECT provider FROM sessions WHERE id = ${sessionId}`;
+						if (session) yield* record(session.provider)(sessionId, capture);
+					}),
 			);
 		}
 		const bindings = new SqliteProviderSessionBindingReadModel(sql);
