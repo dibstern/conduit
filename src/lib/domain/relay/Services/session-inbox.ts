@@ -693,9 +693,11 @@ export const SessionInboxLive = Layer.effect(
 					account,
 				);
 				if (!block || block.fromAccountId === block.toAccountId) {
-					// An agent change replaces the query too; with no tasks at risk it keeps its in-place
-					// restart, so only tasks live or unknown send it through the close.
-					if (request.agent === native.agent) return false;
+					// An agent change or a pending rewind replaces the query too; with no tasks at risk it
+					// keeps its in-place restart, so only tasks live or unknown send it through the close.
+					const [rewind] = yield* sql<{ pending: string | null }>`
+						SELECT pending_rewind_message_id AS pending FROM sessions WHERE id = ${sessionId}`;
+					if (request.agent === native.agent && !rewind?.pending) return false;
 					const ledger = yield* loadLedger(sessionId).pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);

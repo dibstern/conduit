@@ -1010,4 +1010,22 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		const launch = await holdsSend("agent", started, sessionId, queryId);
 		proof["agent: launch agent"] = launch?.["agent"] ?? null;
 	});
+
+	// 29: a send after a rewind starts a fresh query from the cut.
+	it("holds a send after a rewind while tasks are live, then closes the old process once and sends on a new one", async () => {
+		const started = await start();
+		const { browser } = started;
+		const { sessionId, queryId } = await startTurn(started.fixture, browser);
+		await endTurn(started.fixture, browser, sessionId);
+		const target = (await browser.history(sessionId)).find(
+			(message) => message.role === "user",
+		);
+		if (!target) throw new Error("Missing rewind target");
+		await Effect.runPromise(
+			browser.rpc.RewindSession({ sessionId, messageId: target.id }),
+		);
+		const launch = await holdsSend("rewind", started, sessionId, queryId);
+		// The cut is the first message, so the new process resumes nothing.
+		expect(launch?.["resume"]).toBeUndefined();
+	});
 });
