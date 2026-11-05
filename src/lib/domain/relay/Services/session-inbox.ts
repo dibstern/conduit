@@ -435,6 +435,8 @@ export const SessionInboxLive = Layer.effect(
 				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 			>();
 		// The daemon holds the permits, so two relays of one project share them.
+		// Queued and held inputs stay in pending_inputs (CONTRACT.md 5865, D57); only
+		// the per-session permit moves to the daemon.
 		const { serialised } = yield* DaemonTurns;
 
 		const readView = (sessionId: string, inputId?: string) =>

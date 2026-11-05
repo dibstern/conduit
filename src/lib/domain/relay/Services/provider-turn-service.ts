@@ -204,6 +204,8 @@ const makeProviderTurnService = Effect.gen(function* () {
 	// A Stop ends with session-wide frames (idle status, done) that can trail
 	// the button press. Each entry lives exactly as long as its abort worker,
 	// so a fence never outlives the process, scope or call that owns it.
+	// Stop fences stay with the relay's turn service, main's run seam (CONTRACT.md
+	// 5874, D57); a replacing relay recovers them from the outbox.
 	const stopping = new Map<string, Deferred.Deferred<void, StopFailure>>();
 	const accountSwitches = new Map<string, Deferred.Deferred<void>>();
 	// In memory, so no failed write can strand input reserved behind a fence.
