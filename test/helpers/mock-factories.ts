@@ -77,7 +77,6 @@ import {
 	InstanceManagementServiceError,
 	InstanceManagementServiceTag,
 } from "../../src/lib/domain/relay/Services/instance-management-service.js";
-import { makePollerManagerStateLive } from "../../src/lib/domain/relay/Services/message-poller.js";
 import { PendingInteractionServiceLive } from "../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import {
 	type ProjectManagementService,
@@ -1392,7 +1391,6 @@ export function makeTestDaemonStateLayer(
 		makeDaemonStateLive(opts?.daemonState),
 		makeSessionManagerStateLive(opts?.sessionManagerState),
 		makePollerStateLive(),
-		makePollerManagerStateLive(),
 		makeInstanceManagerStateLive(opts?.instanceManagerConfig, [], {
 			launchLogin: sdkDefaultClaudeConfigDir("/isolated-test-home/.claude"),
 		}),

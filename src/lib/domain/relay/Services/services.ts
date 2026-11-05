@@ -484,7 +484,6 @@ type _ExhaustiveCheck = {
 declare const _check: _ExhaustiveCheck;
 
 export { RateLimiterTag } from "../Layers/rate-limiter-layer.js";
-export { PollerManagerStateTag } from "./message-poller.js";
 export { SessionManagerStateTag } from "./session-manager-state.js";
 export { OverridesStateTag } from "./session-overrides-state.js";
 export { SessionRegistryStateTag } from "./session-registry-state.js";
