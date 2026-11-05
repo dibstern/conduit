@@ -173,7 +173,7 @@ interface ProviderCommandOutboxRow {
 	readonly provider_process_id: string | null;
 	readonly attempt_count: number;
 	readonly requested_at: number;
-	readonly status: "pending" | "running" | "retryable_failed";
+	readonly status: "pending" | "running" | "retryable_failed" | "held";
 }
 
 interface SendTurnOutboxPayload
@@ -529,12 +529,13 @@ export class ProviderSideEffectReactor {
 			);
 			if (this.options.projectGate) {
 				// A removed project has no reactor of its own, so every reactor sweeps
-				// its rows: a removed head must not block a process another project shares.
+				// its rows: a removed head must not block a process another project shares. A
+				// close held for a confirm is one of them: removal's Stops end its process.
 				const commands = yield* this.options.sql<ProviderCommandOutboxRow>`
 					SELECT request_sequence, command_id, project_key, session_id, provider_id,
 						effect_type, payload_json, run_id, provider_process_id, attempt_count, status, requested_at
 					FROM provider_command_outbox
-					WHERE status IN ('pending', 'running', 'retryable_failed')
+					WHERE status IN ('pending', 'running', 'retryable_failed', 'held')
 					ORDER BY request_sequence
 				`.pipe(Effect.mapError(storeFailure("inactiveCommands")));
 				for (const row of commands)
@@ -3147,7 +3148,7 @@ export class ProviderSideEffectReactor {
 						payload_json = CASE WHEN json_valid(payload_json) THEN json_remove(payload_json, '$.images') ELSE payload_json END,
 						next_attempt_at = NULL, updated_at = ${now}, run_id = ${unstarted?.id ?? row.run_id}
 					WHERE request_sequence = ${row.request_sequence} AND project_key = ${row.project_key}
-						AND attempt_count = ${row.attempt_count} AND status IN ('pending', 'running', 'retryable_failed')
+						AND attempt_count = ${row.attempt_count} AND status IN ('pending', 'running', 'retryable_failed', 'held')
 					RETURNING ${this.options.sql.literal(ENDED_ROW_COLUMNS)}`;
 						if (changed.length === 0) return;
 						// 3.12: a control row the refusal sweep ends appends its outcome, n 0 unclaimed.

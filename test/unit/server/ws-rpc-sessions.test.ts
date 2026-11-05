@@ -447,7 +447,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(deleteSession).toHaveBeenCalledWith("session-1");
+			expect(deleteSession).toHaveBeenCalledWith("session-1", {
+				closeCommandId: expect.any(String),
+			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(
@@ -474,7 +476,9 @@ describe("WsRpcServerLayer ListSessions", () => {
 			});
 
 			expect(result).toEqual({ ok: true });
-			expect(deleteSession).toHaveBeenCalledWith("session-1");
+			expect(deleteSession).toHaveBeenCalledWith("session-1", {
+				closeCommandId: expect.any(String),
+			});
 		}).pipe(
 			Effect.scoped,
 			Effect.provide(

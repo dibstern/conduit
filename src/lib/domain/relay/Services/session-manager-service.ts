@@ -338,6 +338,7 @@ export const deleteSession = (
 	sessionId: string,
 	beforeWrite?: Effect.Effect<boolean, SqlError>,
 	confirmed?: number,
+	closeCommandId: string = randomUUID(),
 ) =>
 	Effect.gen(function* () {
 		const api = yield* OpenCodeAPITag;
@@ -482,46 +483,81 @@ export const deleteSession = (
 				`call_context: ${renderProviderCleanupDetail(Failure.squashCause(capturedCallExit.cause))}`,
 			);
 
+		/** Ends the session's process; true once End is accepted. */
+		const endSession = (targetProviderId: string) =>
+			Effect.gen(function* () {
+				if (engineOption._tag === "None") {
+					cleanupFailures.push(
+						"end_session: orchestration engine is unavailable",
+					);
+					return false;
+				}
+				const engine = engineOption.value;
+				const endSessionExit = yield* Effect.exit(
+					Effect.suspend(() =>
+						engine.dispatchEffect({
+							type: "end_session",
+							commandId: closeCommandId,
+							sessionId,
+							targetProviderId,
+							...(capturedCall ? { call: capturedCall } : {}),
+							...(account ? { account } : {}),
+							...(confirmed === undefined ? {} : { confirmed }),
+							unbind: true,
+						}),
+					),
+				);
+				if (Exit.isSuccess(endSessionExit)) return true;
+				if (Failure.isInterrupted(endSessionExit.cause))
+					return yield* Effect.interrupt;
+				cleanupFailures.push(
+					`end_session: ${renderProviderCleanupDetail(
+						Failure.squashCause(endSessionExit.cause),
+					)}`,
+				);
+				return false;
+			});
+		// 8.4 2880 "a confirm must match": a user's delete settles its close before the row goes, so
+		// a snapshot after the browser's check holds the close with the session still there to ask
+		// on; the caller withdraws it and asks again. A retention delete (beforeWrite) keeps the
+		// close after its write: its check refuses sessions with live work.
+		const closedFirst =
+			beforeWrite === undefined &&
+			capturedInstanceId !== undefined &&
+			provider !== undefined
+				? Option.getOrElse(
+						yield* endSession(capturedInstanceId).pipe(
+							Effect.timeoutOption(PROVIDER_CLEANUP_TIMEOUT),
+						),
+						() => {
+							cleanupFailures.push("end_session: timed out after 2s");
+							return false;
+						},
+					)
+				: undefined;
+		if (closedFirst !== undefined) {
+			const [held] = yield* sql<{ held: number }>`
+				SELECT 1 AS held FROM provider_command_outbox
+				WHERE command_id = ${closeCommandId} AND status = 'held'`.pipe(
+				Effect.mapError(
+					(cause) =>
+						new SessionManagerError({
+							operation: "deleteSession.close",
+							cause,
+						}),
+				),
+			);
+			if (held) return false;
+		}
+
 		const providerCleanup = (command: SessionCommand) =>
 			Effect.gen(function* () {
 				if (capturedInstanceId === undefined || provider === undefined) {
 					return;
 				}
 
-				let runnerStopped = false;
-				if (engineOption._tag === "None") {
-					cleanupFailures.push(
-						"end_session: orchestration engine is unavailable",
-					);
-				} else {
-					const engine = engineOption.value;
-					const endSessionExit = yield* Effect.exit(
-						Effect.suspend(() =>
-							engine.dispatchEffect({
-								type: "end_session",
-								commandId: randomUUID(),
-								sessionId,
-								targetProviderId: capturedInstanceId,
-								...(capturedCall ? { call: capturedCall } : {}),
-								...(account ? { account } : {}),
-								...(confirmed === undefined ? {} : { confirmed }),
-								unbind: true,
-							}),
-						),
-					);
-					if (Exit.isFailure(endSessionExit)) {
-						if (Failure.isInterrupted(endSessionExit.cause)) {
-							return yield* Effect.failCause(endSessionExit.cause);
-						}
-						cleanupFailures.push(
-							`end_session: ${renderProviderCleanupDetail(
-								Failure.squashCause(endSessionExit.cause),
-							)}`,
-						);
-					} else {
-						runnerStopped = true;
-					}
-				}
+				const runnerStopped =
+					closedFirst ?? (yield* endSession(capturedInstanceId));
 
 				const providerDeleteExit = yield* Effect.exit(
 					Effect.gen(function* () {
@@ -780,6 +816,8 @@ export interface SessionManagerService {
 			readonly retentionVersions?: ReadonlyMap<string, number>;
 			/** 8.4: the snapshot entry the user confirmed the delete at. */
 			readonly confirmed?: number;
+			/** The delete's end_session command; a held one leaves the session undeleted. */
+			readonly closeCommandId?: string;
 		},
 	): Effect.Effect<boolean, SessionManagerError>;
 	deleteArchivedSessions(
@@ -1352,6 +1390,7 @@ const makeProjectSessionManager: Effect.Effect<
 							sessionId,
 							beforeWrite,
 							options?.confirmed,
+							options?.closeCommandId,
 						).pipe(
 							Effect.provideService(AccountDirectory, accounts),
 							Effect.provideService(OpenCodeAPITag, api),
