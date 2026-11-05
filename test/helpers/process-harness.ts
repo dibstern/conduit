@@ -969,6 +969,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 		this.continuationSweepIntervalMs =
 			options.continuationSweepIntervalMs ?? this.continuationSweepIntervalMs;
 		this.logs = "";
+		// A healthy daemon at warn writes nothing (conduit-test-kb0ch), so the
+		// retained log exists from the start instead of on first output.
+		if (options.logFile) appendFileSync(options.logFile, "");
 		const runnerStartupTimeoutMs =
 			options.runnerStartupTimeoutMs ??
 			(this.deadline === undefined
