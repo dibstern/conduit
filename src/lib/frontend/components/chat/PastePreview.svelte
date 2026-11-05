@@ -3,12 +3,12 @@
 <!-- Preserves #image-preview wrapper and .paste-thumb / .paste-chip classes. -->
 
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import ImageAttachmentThumb from "../ui/ImageAttachmentThumb.svelte";
 	import FileAttachmentChip from "../ui/FileAttachmentChip.svelte";
 	import Button from "../ui/Button.svelte";
 	import { formatFileSize } from "../../utils/format.js";
 	import type { DraftAttachmentItem } from "../../stores/composer-draft/state.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { openMediaViewer } from "../../stores/ui.svelte.js";
 
 	let {
@@ -33,7 +33,7 @@
 			style="-webkit-overflow-scrolling: touch"
 		>
 			{#each images as image (image.id)}
-				{@const src = image.hash ? `/p/${encodeURIComponent(projectSlug ?? getCurrentSlug() ?? "")}/attachments/${image.hash}` : image.dataUrl ?? ""}
+				{@const src = image.hash ? `/p/${encodeURIComponent(projectSlug ?? selection.scope?.project ?? "")}/attachments/${image.hash}` : image.dataUrl ?? ""}
 				<div data-testid="draft-attachment" data-attachment-id={image.id} data-status={image.status} class="flex shrink-0 items-center gap-[14px]">
 				{#if image.mime.startsWith("image/")}
 				<ImageAttachmentThumb {src} name={image.name} imageId={image.id} onopen={(event) => openMediaViewer({ kind: "image", src }, event.currentTarget)} onremove={(event) => {

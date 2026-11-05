@@ -3,10 +3,7 @@ import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import { clearSessionState } from "../../stores/session.svelte.js";
 import { sessionViewState } from "../../stores/session-view.svelte.js";
 import { uiState } from "../../stores/ui.svelte.js";
@@ -41,7 +38,6 @@ const meta = {
 		clearSessionState();
 		routerState.path = "/";
 		routerState.search = "";
-		attachedProjectState.slug = "conduit";
 		projectState.projects = [
 			{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 		];

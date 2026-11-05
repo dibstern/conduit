@@ -4,9 +4,9 @@
 	skill spends no width on it.
 -->
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { onDestroy, tick, untrack } from "svelte";
 	import { reveal } from "../../stores/reveal.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 	import {
 		loadSessionSkills,
@@ -42,7 +42,7 @@
 	const sessionId = $derived(placedSessionId());
 	// A deep link places the session before its project attaches, and the loader
 	// needs the slug, so attaching has to trigger the first load.
-	const projectSlug = $derived(getCurrentSlug());
+	const projectSlug = $derived(selection.scope?.project);
 	$effect(() => {
 		if (sessionId && projectSlug) void untrack(() => loadSessionSkills(sessionId));
 	});

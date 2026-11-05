@@ -1,10 +1,11 @@
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import SettingsGroup from "../ui/SettingsGroup.svelte";
 	import SettingsRow from "../ui/SettingsRow.svelte";
 	import SettingsPicker from "../ui/SettingsPicker.svelte";
 	import { Schema } from "effect";
 	import { DefaultSessionModeSchema } from "../../../contracts/project-file.js";
-	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -19,7 +20,7 @@
 	let state = $state({ autoSettleDays: 3 as number | null, autoSettleSaving: false, autoArchiveDays: 30 as number | null, autoArchiveSaving: false, autoDeleteDays: 30 as number | null, autoDeleteSaving: false, sessionModeSaving: false, cleanupGlobal: DEFAULT_WORKTREE_CLEANUP as WorktreeCleanup, cleanupOverride: null as ProjectWorktreeCleanup | null, cleanupScope: "global" as "global" | "project", cleanupLoaded: true, cleanupSaving: false, cleanupOpen: false, cleanupDetailsOpen: false, cleanupRun: { status: "idle" } as { status: "idle" | "running" | "failed" } | { status: "done"; report: WorktreeCleanupReport } });
 	const cleanupProjectSlug = $derived.by(() => {
 		const route = getCurrentRoute();
-		return route.page === "chat" && route.draft ? getDraftProject() : getCurrentSlug();
+		return route.page === "chat" && route.draft ? getDraftProject() : selection.scope?.project;
 	});
 	const cleanupProject = $derived(projectState.projects.find((project) => project.slug === cleanupProjectSlug));
 	const cleanupScope = $derived(cleanupProject ? state.cleanupScope : "global");
@@ -93,7 +94,7 @@
 	$effect(() => {
 		if (!getIsConnected()) return;
 		const route = getCurrentRoute();
-		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
+		if (route.page === "chat" && route.sessionId && !selection.scope?.project) return;
 		let current = true;
 		void rpc("GetAutoDeleteArchivedSetting", {})
 			.then(({ autoDeleteArchivedAfterDays: days }) => {
@@ -150,9 +151,9 @@
 				label="Default session mode"
 				data-testid="settings-default-session-mode"
 				value={discoveryState.defaultSessionMode}
-				disabled={state.sessionModeSaving || !(getDraftProject() ?? getCurrentSlug())}
+				disabled={state.sessionModeSaving || !(getDraftProject() ?? selection.scope?.project)}
 				onvaluechange={(mode) => {
-					const projectSlug = getDraftProject() ?? getCurrentSlug();
+					const projectSlug = getDraftProject() ?? selection.scope?.project;
 					if (!projectSlug || !Schema.is(DefaultSessionModeSchema)(mode)) return;
 					state.sessionModeSaving = true;
 					void rpc("SetDefaultSessionMode", { projectSlug, mode })

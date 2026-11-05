@@ -15,10 +15,8 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: vi.fn(),
 }));
 
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { projectState } from "../../../src/lib/frontend/stores/project-state.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionSearch,
 	DAEMON_SESSION_PAGE_SIZE,
@@ -80,8 +78,13 @@ beforeEach(() => {
 	openSessionForSetup(null);
 	sessionState.searchQuery = "";
 	clearSessionSearch();
+	// Home routes the search through the first project.
+	projectState.projects = ["project-a", "project-b"].map((slug) => ({
+		slug,
+		title: slug,
+		folders: [`/${slug}`],
+	}));
 	routerState.path = "/";
-	attachedProjectState.slug = "project-a";
 	routerState.search = "";
 });
 

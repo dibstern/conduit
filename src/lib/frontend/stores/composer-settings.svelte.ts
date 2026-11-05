@@ -21,7 +21,7 @@ import {
 	getProviderGroupsForInstance,
 	refreshCatalogs,
 } from "./discovery.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 
 export type ComposerSetting<T> = {
@@ -113,7 +113,7 @@ export const effort: ComposerSetting<string> = {
 	select(value) {
 		const variant = value ?? "";
 		const undo = chooseVariant(variant);
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (!projectSlug || !sessionId) return;
 		const apply = followSessionPickChange(sessionId, undo);
@@ -170,7 +170,7 @@ export const approvals: ComposerSetting<ApprovalOption> = {
 		// Re-assert even unchanged modes: a daemon restart can reset its mode.
 		const mode = value.mode;
 		const undo = choosePermissionMode(mode);
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (!projectSlug || !sessionId) return;
 		switchSetting(
@@ -208,7 +208,7 @@ export const contextWindow: ComposerSetting<Immutable<ContextWindowOption>> = {
 	select(value) {
 		const contextWindowValue = value?.value ?? "";
 		const undo = chooseContextWindow(contextWindowValue);
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
 			const apply = followSessionPickChange(sessionId, undo);
@@ -269,7 +269,7 @@ export const model: ComposerSetting<ComposerModel> = {
 	select(value) {
 		if (!value) return;
 		const undo = chooseModel(value);
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (!projectSlug || !sessionId) return;
 		const apply = followSessionPickChange(sessionId, undo);

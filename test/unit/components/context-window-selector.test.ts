@@ -34,7 +34,6 @@ vi.mock(
 	"../../../src/lib/frontend/stores/router.svelte.js",
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
-		getCurrentSlug: () => "project-a",
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({

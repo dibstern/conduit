@@ -10,9 +10,9 @@
      steered message carries a "Steered" chip: it joined a running turn. -->
 
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { SvelteSet } from "svelte/reactivity";
 	import type { UserMessage } from "../../types.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { openMediaViewer } from "../../stores/ui.svelte.js";
 	import {
 		discoveryState,
@@ -84,7 +84,7 @@
 		{#if message.attachments?.length}
 			<div data-testid="user-message-attachments" class="mt-[8px] flex min-w-0 flex-wrap items-start gap-[8px] max-md:col-span-2">
 				{#each message.attachments as attachment (attachment.id)}
-					{@const url = attachment.source.attachmentHash !== undefined ? `/p/${encodeURIComponent(getCurrentSlug() ?? "")}/attachments/${attachment.source.attachmentHash}` : attachment.source.url}
+					{@const url = attachment.source.attachmentHash !== undefined ? `/p/${encodeURIComponent(selection.scope?.project ?? "")}/attachments/${attachment.source.attachmentHash}` : attachment.source.url}
 					{#if attachment.mime.startsWith("image/")}
 						{#if failedImages.has(url)}
 							<span role="img" aria-label={attachment.name} class="flex size-[96px] items-center justify-center rounded-[10px] bg-bg-raised p-2 text-center text-xs text-text-muted">image unavailable</span>

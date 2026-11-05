@@ -4,9 +4,9 @@
 <!-- Renders nothing — the rows are rendered by SessionList's {#each}.          -->
 
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { onDestroy, onMount, tick } from "svelte";
 	import { browsePage, currentSearchQuery, sessionList } from "../../stores/session-list.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { sessionState } from "../../stores/session.svelte.js";
 
 	let {
@@ -59,7 +59,7 @@
 			void query.loadMore();
 			return;
 		}
-		const slug = getCurrentSlug();
+		const slug = selection.scope?.project;
 		const scroller = sentinelEl?.closest<HTMLElement>("#session-list-scroller");
 		const focused = document.activeElement;
 		const before = scroller?.contains(focused)
@@ -75,7 +75,7 @@
 			scroller?.isConnected && focused?.isConnected &&
 			scroller.contains(focused) && document.activeElement === focused &&
 			scroller.scrollTop === scrollTop &&
-			getCurrentSlug() === slug && currentSearchQuery() === null
+			selection.scope?.project === slug && currentSearchQuery() === null
 		) {
 			// Keep the focused shelf in place when another page appears before it.
 			scroller.scrollTop += focused.getBoundingClientRect().top - before.top;

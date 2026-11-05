@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import type { HarnessDefaultState } from "../../transport/ws-rpc.js";
 	import { catalogFromProviderList, findCatalogModel, type Harness, offeredOptions } from "../../../provider/turn-settings.js";
 	import SettingsPicker from "../ui/SettingsPicker.svelte";
@@ -11,7 +12,6 @@
 	import { PROVIDER_PRESENTATION } from "../../utils/provider-presentation.js";
 	import { applyHarnessDefaultSet, discoveryState, getHarnessDefaultProviders } from "../../stores/discovery.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import ModelVisibilityList from "./ModelVisibilityList.svelte";
 	let saving = $state<Partial<Record<Harness, boolean>>>({});
@@ -33,7 +33,7 @@
 	}
 
 	async function updateDefault(harness: Harness, setting: "model" | "effort" | "contextWindow", value: string): Promise<void> {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug || saving[harness]) return;
 		const current = discoveryState.harnessDefaults[harness].pick;
 		const separator = value.indexOf("/");

@@ -4,7 +4,7 @@ import {
 	clearFileTreeState,
 	fileTreeState,
 } from "../../stores/file-tree.svelte.js";
-import { attachedProjectState } from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import {
 	closeFileViewer,
 	openFileViewer,
@@ -15,6 +15,7 @@ import {
 } from "../../stores/ws-listeners.js";
 import { mockFileContent } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
+import { viewRelayStatus } from "../../transport/connection-status.svelte.js";
 import FileViewerHost from "./__fixtures__/FileViewerHost.svelte";
 
 const truncatedFileContent = "export const migrationBaseline = true;\n".repeat(
@@ -61,15 +62,17 @@ export const Loading: Story = {
 			return Response.json({ status: "ready" });
 		});
 		const restoreSocket = connectedSocket();
-		const previousProject = attachedProjectState.slug;
-		attachedProjectState.slug = "storybook";
+		routerState.path = "/";
+		routerState.search = "?project=storybook";
+		viewRelayStatus("storybook");
 		clearFileTreeState();
 		fileTreeState.scope = "storybook";
 		openFileViewer("src/lib/project.ts");
 		return () => {
 			restoreSocket();
+			viewRelayStatus(null);
+			routerState.search = "";
 			globalThis.fetch = realFetch;
-			attachedProjectState.slug = previousProject;
 			closeFileViewer();
 			clearFileTreeState();
 		};

@@ -9,7 +9,6 @@
 	import Button from "../ui/Button.svelte";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { renderMarkdown } from "../../utils/markdown.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -129,13 +128,12 @@
 	function sendPermissionResponse(
 		input: Omit<
 			Parameters<typeof rpc<"RespondPermission">>[1],
-			"projectSlug" | "originId" | "commandId"
+			"sessionId" | "projectSlug" | "originId" | "commandId"
 		>,
 	) {
-		const projectSlug = getCurrentSlug();
-		if (!projectSlug) return;
+		if (!request.sessionId) return;
 		void rpc("RespondPermission", {
-			projectSlug,
+			sessionId: request.sessionId,
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			...input,

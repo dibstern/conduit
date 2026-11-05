@@ -36,8 +36,6 @@ vi.mock(
 			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
 		>()),
 		// Feed delivery is seeded below; no live socket is needed for this seam.
-		attachedProjectState: { slug: null },
-		getCurrentSlug: () => "conduit",
 	}),
 );
 

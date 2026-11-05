@@ -2,12 +2,13 @@
 <!-- Owns the GetFileList/GetFileContent reply subscriptions. -->
 
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import type { Snippet } from "svelte";
 	import { untrack } from "svelte";
 	import type { BreadcrumbSegment, FileEntry } from "../../types.js";
 	import { onFileBrowser, applyGetFileListResponse } from "../../stores/ws-listeners.js";
 	import { openFileViewer, sessionViewState, setRightPaneView } from "../../stores/session-view.svelte.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import FileTreeNode from "./FileTreeNode.svelte";
 	import ConduitMark from "../ui/ConduitMark.svelte";
@@ -47,7 +48,7 @@
 			fileTreeState.browserPath = path;
 			return;
 		}
-		const slug = getCurrentSlug();
+		const slug = selection.scope?.project;
 		const sessionId = getCurrentSessionId();
 		if (!slug) return;
 		loading = true;
@@ -113,7 +114,7 @@
 	function handleDirClick(fullPath: string, root?: string) {
 		const scope = fileTreeState.scope;
 		if (scope === null) return;
-		const slug = getCurrentSlug();
+		const slug = selection.scope?.project;
 		const sessionId = getCurrentSessionId();
 		if (slug && !fileTreeState.browserChildren.has(fileBrowserKey(fullPath, root))) {
 			void rpc("GetFileList", { ...(sessionId ? { sessionId } : { projectSlug: slug }), path: fullPath, ...(root !== undefined ? { root } : {}) }).then(

@@ -1,6 +1,7 @@
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { loadHighlighter } from "../../utils/load-highlighter.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { discoveryState } from "../../stores/discovery.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -32,7 +33,7 @@
 	}
 
 	$effect(() => {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const requestedRef = skillRef;
 		const requestedWorkspace = workspace;
 		let active = true;

@@ -17,7 +17,6 @@ import {
 import { viewInputDraft } from "./input-draft.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
 import {
-	attachedProjectState,
 	DRAFT_PROJECT_PARAM,
 	getCurrentRoute,
 	getCurrentSearchParams,
@@ -34,10 +33,8 @@ import {
 	followShownSession,
 	getFilteredSessions,
 	sessionState,
-	setAttachedProject,
 } from "./session.svelte.js";
 import { viewFamily } from "./session-family-feed.js";
-import { getSessionScope } from "./session-scope.js";
 import { closeFileViewer } from "./session-view.svelte.js";
 import { viewTodos } from "./todo.svelte.js";
 import {
@@ -93,6 +90,12 @@ const shown: Shown = $derived.by(() => {
 		sessionId,
 	};
 });
+/** With nothing shown, the project a new session would take. */
+const homeProject = $derived(
+	shown.kind === "none" && getCurrentRoute().page === "chat"
+		? getDraftProject()
+		: null,
+);
 const scope = $derived<{
 	readonly project: string;
 	readonly sessionId: string | null;
@@ -107,21 +110,10 @@ const scope = $derived<{
 					sessionId: null,
 					draftId: shown.draftId,
 				}
-			: shown.kind === "none" &&
-					getCurrentRoute().page === "chat" &&
-					attachedProjectState.slug
-				? {
-						project: getDraftProject() ?? attachedProjectState.slug,
-						sessionId: null,
-					}
+			: homeProject
+				? { project: homeProject, sessionId: null }
 				: null,
 );
-const wantedProject = $derived.by(() => {
-	if (shown.kind === "placed" || shown.kind === "draft") return shown.project;
-	if (shown.kind === "none" && scope && getDraftProject() !== null)
-		return scope.project;
-	return getSessionScope();
-});
 
 export const selection = {
 	open(sessionId: string): void {
@@ -267,34 +259,6 @@ export function watchSelection(): () => void {
 			previousId = id;
 		});
 
-		// The browser marks its own project (82tn.13): a placed session's, else a
-		// listed hint, else the marked one while it is listed, else the first. A
-		// session still placing keeps the mark until its resolve places it.
-		const markedProject = $derived.by(() => {
-			const attached = attachedProjectState.slug;
-			if (shown.kind === "placed") return shown.project;
-			if (
-				shown.kind === "placing" ||
-				shown.kind === "drawn" ||
-				!projectState.projectsLoaded
-			)
-				return attached;
-			const listed = (slug: string | null) =>
-				projectState.projects.some((project) => project.slug === slug);
-			if (listed(wantedProject)) return wantedProject;
-			if (listed(attached)) return attached;
-			return projectState.projects[0]?.slug ?? null;
-		});
-		$effect(() => {
-			const target = markedProject;
-			if (
-				getCurrentRoute().page === "chat" &&
-				target !== null &&
-				target !== attachedProjectState.slug
-			)
-				untrack(() => setAttachedProject(target));
-		});
-
 		$effect(() => {
 			const current = shown;
 			const connected = getIsConnected();
@@ -347,13 +311,8 @@ export function watchSelection(): () => void {
 			});
 		});
 		let feedKey: string | null | undefined;
-		const feedScopeKey = $derived(
-			shown.kind === "placed" && shown.project === attachedProjectState.slug
-				? placedKey
-				: null,
-		);
 		$effect(() => {
-			const key = feedScopeKey;
+			const key = placedKey;
 			if (key === feedKey) return;
 			feedKey = key;
 			untrack(() => {
@@ -372,11 +331,10 @@ export function watchSelection(): () => void {
 			const route = getCurrentRoute();
 			if (route.page === "chat" && route.draftId)
 				return {
-					project: getDraftProject() ?? attachedProjectState.slug ?? "",
+					project: getDraftProject() ?? "",
 					key: { draft: route.draftId },
 				};
-			return shown.kind === "placed" &&
-				shown.project === attachedProjectState.slug
+			return shown.kind === "placed"
 				? { project: shown.project, key: { session: shown.sessionId } }
 				: null;
 		});
@@ -420,9 +378,7 @@ export function watchSelection(): () => void {
 				]),
 			};
 		});
-		const fileKey = $derived(
-			fileScope?.project === attachedProjectState.slug ? fileScope.key : null,
-		);
+		const fileKey = $derived(fileScope?.key ?? null);
 		$effect(() => {
 			const key = fileKey;
 			const connected = getIsConnected();

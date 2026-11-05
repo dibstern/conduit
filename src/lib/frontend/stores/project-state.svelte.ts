@@ -9,14 +9,12 @@ import {
 	SCOPE_PARAM,
 } from "./router.svelte.js";
 
-// The shell feed owns projects and the new-session preference. Project mutation
-// replies may update the attached hint through project.svelte.ts.
+// The shell feed owns projects and the new-session preference.
 
 export const projectState = $state({
 	projects: [] as ProjectInfo[],
 	/** True once the shell feed has delivered a project list. */
 	projectsLoaded: false,
-	currentSlug: null as string | null,
 	terminalKeys: DEFAULT_TERMINAL_KEYS,
 	terminalKeysRevision: 0,
 	/** The project the daemon says a new session prefills, on every client. */

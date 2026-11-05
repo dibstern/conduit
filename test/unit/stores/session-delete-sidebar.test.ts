@@ -38,10 +38,7 @@ vi.hoisted(() => {
 
 vi.mock("dompurify", () => ({ default: { sanitize: (h: string) => h } }));
 
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
 	getFilteredSessions,
@@ -69,7 +66,6 @@ const KEEPER = {
 
 beforeEach(() => {
 	clearSessionState();
-	attachedProjectState.slug = "project-a";
 	routerState.search = "";
 	openSessionForSetup("keeper", "project-a");
 	seedSessions([VICTIM, KEEPER]);

@@ -2,6 +2,7 @@
   Rewind selection and confirmation, or the pending rewind notice at the composer.
 -->
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import Button from "../ui/Button.svelte";
 	import Dialog from "../ui/Dialog.svelte";
 	import {
@@ -14,7 +15,6 @@
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import Surface from "../ui/Surface.svelte";
@@ -53,7 +53,7 @@
 	function handleConfirm(): void {
 		const uuid = uiState.rewindSelectedUuid;
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!uuid || !sessionId || !projectSlug) return;
 		const mode = restoresFiles ? "both" : "conversation";
 		const message = chatState.messages.find((message) => message.uuid === uuid);
@@ -74,14 +74,14 @@
 				if (
 					!result.ok ||
 					sessionState.currentId !== result.sessionId ||
-					getCurrentSlug() !== projectSlug
+					selection.scope?.project !== projectSlug
 				) {
 					return;
 				}
 				onRewind?.(uuid, mode);
 			})
 			.catch((error) => {
-				if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
+				if (sessionState.currentId === sessionId && selection.scope?.project === projectSlug)
 					toastFailure("Could not rewind the conversation.", "warn")(error);
 			});
 
@@ -90,13 +90,13 @@
 
 	async function handleUndo(): Promise<void> {
 		const sessionId = sessionState.currentId;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!pendingMessageId || !sessionId || !projectSlug || undoing) return;
 		undoing = true;
 		try {
 			await rpc("UndoRewind", { sessionId });
 		} catch (error) {
-			if (sessionState.currentId === sessionId && getCurrentSlug() === projectSlug)
+			if (sessionState.currentId === sessionId && selection.scope?.project === projectSlug)
 				toastFailure("Could not undo the rewind.", "warn")(error);
 		} finally {
 			undoing = false;

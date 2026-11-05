@@ -1,6 +1,7 @@
 <!-- File preview inside the shared right pane. -->
 
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import type { Snippet } from "svelte";
 	import { COPY_FEEDBACK_MS } from "../../ui-constants.js";
 	import { onFileBrowser, applyGetFileContentResponse } from "../../stores/ws-listeners.js";
@@ -8,7 +9,7 @@
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { revealInDiff } from "../../stores/diff-selection.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
@@ -87,7 +88,7 @@
 		if (!path) return;
 		const scope = fileTreeState.scope;
 		if (scope === null) return;
-		const slug = getCurrentSlug();
+		const slug = selection.scope?.project;
 		const sessionId = getCurrentSessionId();
 		if (!slug) return;
 		filePath = path;

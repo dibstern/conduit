@@ -3,11 +3,12 @@
 <!-- tool-detail module, and a failed load says so with a retry rather than       -->
 <!-- passing the preview off as the whole.                                        -->
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { type Snippet, untrack } from "svelte";
 	import type { ToolFileChange } from "../../../contracts/stored-event.js";
 	import type { ToolDetail } from "../../../contracts/tool-wire.js";
 	import type { ToolMessage } from "../../types.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { type SessionRef, shownCut, toolDetails } from "../../stores/tool-details.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { renderMarkdown } from "../../utils/markdown.js";
@@ -70,7 +71,7 @@
 
 	// The session the tool is shown in: a fork repeats its parent's call ids.
 	const session = $derived.by((): SessionRef | undefined => {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const sessionId = getCurrentSessionId();
 		return projectSlug && sessionId ? { projectSlug, sessionId } : undefined;
 	});

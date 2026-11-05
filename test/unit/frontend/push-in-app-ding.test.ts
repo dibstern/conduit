@@ -24,7 +24,6 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: vi.fn(() => "test-project"),
 	navigate: vi.fn(),
 }));
 

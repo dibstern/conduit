@@ -42,7 +42,6 @@ vi.mock(
 			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
 		>()),
 		DRAFT_PROJECT_PARAM: "project",
-		getCurrentSlug: () => "project-a",
 		getCurrentSearchParams: () => new URLSearchParams(),
 	}),
 );

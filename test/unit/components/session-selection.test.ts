@@ -62,7 +62,6 @@ import {
 	projectState,
 } from "../../../src/lib/frontend/stores/project-state.svelte.js";
 import {
-	attachedProjectState,
 	replaceRoute,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
@@ -124,7 +123,6 @@ function start() {
 beforeEach(async () => {
 	replaceRoute("/?");
 	routerState.sessionNotFound = false;
-	attachedProjectState.slug = null;
 	clearSessionState();
 	projectState.projects = [];
 	projectState.projectsLoaded = false;
@@ -157,7 +155,6 @@ describe("turn readiness for the shown scope", () => {
 			{ slug: "ready", title: "Ready", folders: ["/ready"] },
 		];
 		projectState.newSessionProject = "ready";
-		attachedProjectState.slug = "ready";
 		replaceRoute("/new?project=ready");
 		applyInstanceListResponse({
 			instances: ["ready-account", "ready-other"].map((id) => ({
@@ -280,12 +277,10 @@ afterEach(async () => {
 	sessionActivity.clear();
 	sessionMessages.clear();
 	replaceRoute("/?");
-	attachedProjectState.slug = null;
 });
 
 describe("session selection at the browser RPC wire", () => {
 	it("setup opens a placed session in its project and clearing returns home", async () => {
-		attachedProjectState.slug = "setup-project";
 		start();
 		openSessionForSetup("setup-session", "setup-project");
 		expect(module.selection.shown).toEqual({
@@ -313,7 +308,6 @@ describe("session selection at the browser RPC wire", () => {
 			value: serviceWorker,
 		});
 		initSWMessageListener();
-		attachedProjectState.slug = "A";
 		seedSessions([
 			{ id: `notification-${slug}`, title: "Notification", projectSlug: slug },
 		]);
@@ -342,7 +336,7 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		expect(calls("ResolveSession")).toHaveLength(0);
 		// 9: the session's own project is marked here, with no round trip.
-		expect(attachedProjectState.slug).toBe(slug);
+		expect(module.selection.scope?.project).toBe(slug);
 		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it.each([
@@ -362,7 +356,6 @@ describe("session selection at the browser RPC wire", () => {
 			projectSlug: "A",
 		};
 		seedSessions([parent, other]);
-		attachedProjectState.slug = "A";
 		module.selection.open(parent.id);
 		const pending = deferred<{
 			projectSlug: string;
@@ -531,11 +524,10 @@ describe("session selection at the browser RPC wire", () => {
 			project: "B",
 		});
 		expect(routerState.path).toBe("/s/attach-new");
-		expect(attachedProjectState.slug).toBe("B");
+		expect(module.selection.scope?.project).toBe("B");
 		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it("a late resolve never moves another session or its route", async () => {
-		attachedProjectState.slug = "A";
 		const pending = deferred<{ projectSlug: string | null }>();
 		table.ResolveSession = () => pending.promise;
 		start();
@@ -555,7 +547,6 @@ describe("session selection at the browser RPC wire", () => {
 		expect(routerState.path).toBe("/s/resolve-new");
 	});
 	it("two quick project switches finish on the second project with no round trip", async () => {
-		attachedProjectState.slug = "A";
 		projectState.projects = ["A", "B", "C"].map((slug) => ({
 			slug,
 			title: slug,
@@ -565,11 +556,11 @@ describe("session selection at the browser RPC wire", () => {
 		start();
 		module.selection.openDraft("B");
 		flushSync();
-		expect(attachedProjectState.slug).toBe("B");
+		expect(module.selection.scope?.project).toBe("B");
 		module.selection.openDraft("C");
 		await settle();
 		expect(calls("AttachProject")).toHaveLength(0);
-		expect(attachedProjectState.slug).toBe("C");
+		expect(module.selection.scope?.project).toBe("C");
 		expect(module.selection.scope).toEqual({
 			project: "C",
 			sessionId: null,
@@ -577,7 +568,6 @@ describe("session selection at the browser RPC wire", () => {
 		});
 	});
 	it("places a live sidebar session immediately without attach or resolve", async () => {
-		attachedProjectState.slug = "A";
 		seedSessions([{ id: "sidebar", title: "Sidebar", projectSlug: "A" }]);
 		start();
 		module.selection.open("sidebar");
@@ -591,15 +581,14 @@ describe("session selection at the browser RPC wire", () => {
 		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it("an unknown session goes home with the not-found notice", async () => {
-		attachedProjectState.slug = "A";
 		table.ResolveSession = () => ({ projectSlug: null });
 		start();
 		module.selection.open("unknown");
 		await vi.waitFor(() => expect(routerState.path).toBe("/"));
 		expect(routerState.sessionNotFound).toBe(true);
 		expect(module.selection.shown).toEqual({ kind: "none" });
-		// 10: an unknown session leaves the marked project alone.
-		expect(attachedProjectState.slug).toBe("A");
+		// 10: an unknown session names no project; with none listed, home shows none.
+		expect(module.selection.scope).toBeNull();
 		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it("draws a saved cold page while every scoped read and feed waits for placement", async () => {
@@ -641,8 +630,7 @@ describe("session selection at the browser RPC wire", () => {
 		table.ResolveSession = () => pending.promise;
 		replaceRoute("/s/saved-sidebar");
 		drawSavedShell({
-			schema: 1,
-			project: "stale",
+			schema: 2,
 			protocolVersion: 1,
 			savedAt: 1,
 			rows: [
@@ -709,7 +697,6 @@ describe("session selection at the browser RPC wire", () => {
 		expect(savedDraw.sessionId).toBeNull();
 	});
 	it("a late file-tree reply never appears under the next scope", async () => {
-		attachedProjectState.slug = "A";
 		const first = deferred<{ projectSlug: string; entries: string[] }>();
 		table.GetFileTree = (payload) =>
 			"sessionId" in payload && payload.sessionId === "tree-old"
@@ -729,7 +716,6 @@ describe("session selection at the browser RPC wire", () => {
 		expect(fileTreeState.entries).toEqual(["new.txt"]);
 	});
 	it("a cold session link places and marks its project in one resolve", async () => {
-		attachedProjectState.slug = "A";
 		table.ResolveSession = () => ({ projectSlug: "B" });
 		replaceRoute("/s/cold");
 		start();
@@ -741,7 +727,7 @@ describe("session selection at the browser RPC wire", () => {
 			}),
 		);
 		await settle();
-		expect(attachedProjectState.slug).toBe("B");
+		expect(module.selection.scope?.project).toBe("B");
 		expect(calls("ResolveSession")).toHaveLength(1);
 		expect(calls("AttachProject")).toHaveLength(0);
 	});
@@ -755,24 +741,19 @@ describe("session selection at the browser RPC wire", () => {
 			projectState.projectsLoaded = true;
 		});
 		it("choosing a project scope from home marks that project with no round trip", async () => {
-			attachedProjectState.slug = "A";
 			start();
 			setSessionScope("B");
 			flushSync();
-			expect(attachedProjectState.slug).toBe("B");
+			expect(module.selection.scope?.project).toBe("B");
 			expect(module.selection.scope).toEqual({ project: "B", sessionId: null });
 			await settle();
 			expect(calls("AttachProject")).toHaveLength(0);
 		});
-		it.each([
-			"B",
-			null,
-		])("11: a scope naming a project the daemon no longer holds marks the home draft's project, the first, from %s", async (attached) => {
-			attachedProjectState.slug = attached;
+		it("11: a scope naming a project the daemon no longer holds shows the home draft's project, the first", async () => {
 			start();
 			setSessionScope("gone");
 			await settle();
-			expect(attachedProjectState.slug).toBe("A");
+			expect(module.selection.scope?.project).toBe("A");
 			expect(calls("AttachProject")).toHaveLength(0);
 		});
 		it("12: nothing is marked before the project list loads; the first project is marked once it does", async () => {
@@ -781,11 +762,11 @@ describe("session selection at the browser RPC wire", () => {
 			projectState.projectsLoaded = false;
 			start();
 			await settle();
-			expect(attachedProjectState.slug).toBeNull();
+			expect(module.selection.scope).toBeNull();
 			projectState.projects = projects;
 			projectState.projectsLoaded = true;
 			await settle();
-			expect(attachedProjectState.slug).toBe("A");
+			expect(module.selection.scope?.project).toBe("A");
 			expect(calls("AttachProject")).toHaveLength(0);
 		});
 	});
@@ -795,7 +776,6 @@ describe("session selection at the browser RPC wire", () => {
 			{ slug: "B", title: "Project B", folders: ["/B"] },
 		];
 		projectState.newSessionProject = "B";
-		attachedProjectState.slug = "B";
 		applyInstanceListResponse({
 			instances: [
 				{
@@ -879,7 +859,6 @@ describe("session selection at the browser RPC wire", () => {
 		"shell",
 		"family",
 	])("deleting the open %s session selects the next filtered session with no notice", async (source) => {
-		attachedProjectState.slug = "A";
 		replaceRoute("/?p=A");
 		const id = `${source}-deleted`;
 		const survivor = `${source}-survivor`;
@@ -909,7 +888,6 @@ describe("session selection at the browser RPC wire", () => {
 		expect(routerState.sessionNotFound).toBe(false);
 	});
 	it("deleting the last session goes home and clears the shown session", async () => {
-		attachedProjectState.slug = "A";
 		seedSessions([{ id: "last", title: "Last", projectSlug: "A" }]);
 		start();
 		module.selection.open("last");
@@ -924,7 +902,6 @@ describe("session selection at the browser RPC wire", () => {
 		expect(currentChat().contextPercent).toBe(0);
 	});
 	it("sends one view after placement and keeps the current route when an earlier view completes", async () => {
-		attachedProjectState.slug = "A";
 		const pending = deferred<{ projectSlug: string | null }>();
 		const draft = deferred<{ ok: true }>();
 		const secondVisit = deferred<{ ok: true }>();
@@ -981,7 +958,6 @@ describe("session selection at the browser RPC wire", () => {
 	});
 	it("consumes the pick on session bind so the next draft starts on the default", async () => {
 		clearDiscoveryState();
-		attachedProjectState.slug = "conduit";
 		openSessionForSetup(null);
 		applyInstanceListResponse({
 			instances: ["claude", "claude-2", "opencode"].map((id) => ({

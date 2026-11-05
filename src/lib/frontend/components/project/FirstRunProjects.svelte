@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Rpc } from "effect/rpc";
 	import { onMount, tick } from "svelte";
-	import { applyProjectList, projectState } from "../../stores/project.svelte.js";
+	import { projectState } from "../../stores/project.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -92,8 +92,7 @@
 		for (const path of selected) {
 			try {
 				if (!projectFolders.has(path)) {
-					const response = await saveProject({ title: path.split("/").filter(Boolean).at(-1) ?? path, folders: [path] });
-					applyProjectList(response);
+					await saveProject({ title: path.split("/").filter(Boolean).at(-1) ?? path, folders: [path] });
 				}
 				selected = selected.filter((value) => value !== path);
 			} catch (error) {

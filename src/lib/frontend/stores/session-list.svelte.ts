@@ -2,7 +2,6 @@ import { Effect, Fiber, Stream } from "effect";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import {
 	applySessionChange,
-	discardForeignSavedShell,
 	noteTransportDrop,
 	sessionSubscription,
 	setShellFeedStatus,
@@ -107,21 +106,18 @@ export const sessionList: SessionListView = {
 	},
 };
 
-let attachGeneration = 0;
+let followGeneration = 0;
 let shellFiber: Fiber.Fiber<void, unknown> | null = null;
 let shellSaveTimer: ReturnType<typeof setTimeout> | undefined;
-let attachedProject: ProjectRef | null = null;
+let following = false;
 accountSnapshotChangedListeners.add(({ firstList }) => {
-	if (firstList || attachedProject === null) return;
-	const project = attachedProject;
-	detachSessionList();
-	attachSessionList(project);
+	if (firstList || !following) return;
+	stopFollowingSessionList();
+	followSessionList();
 });
-const shellSynchronizedListeners = new Set<(project: ProjectRef) => void>();
+const shellSynchronizedListeners = new Set<() => void>();
 
-export function onShellSynchronized(
-	fn: (project: ProjectRef) => void,
-): () => void {
+export function onShellSynchronized(fn: () => void): () => void {
 	shellSynchronizedListeners.add(fn);
 	return () => shellSynchronizedListeners.delete(fn);
 }
@@ -134,38 +130,33 @@ async function stopShell(): Promise<void> {
 	if (fiber) await runTransportEffect(Fiber.interrupt(fiber));
 }
 
-export function attachSessionList(project: ProjectRef = ""): void {
-	if (attachedProject !== null) {
-		attachedProject = project;
-		return;
-	}
-	const generation = ++attachGeneration;
-	discardForeignSavedShell(project);
-	if (attachedProject !== project) setShellFeedStatus({ _tag: "cold" });
-	attachedProject = project;
+/** The sidebar follows the daemon-wide shell feed for the page's life (m379.5). */
+export function followSessionList(): void {
+	if (following) return;
+	following = true;
+	const generation = ++followGeneration;
 	let synchronized = false;
 	const save = () => {
-		if (generation !== attachGeneration) return;
+		if (generation !== followGeneration) return;
 		clearTimeout(shellSaveTimer);
 		shellSaveTimer = undefined;
-		if (synchronized && attachedProject)
-			void saveShell(attachedProject, [...sessionSubscription.rows.values()]);
+		if (synchronized) void saveShell([...sessionSubscription.rows.values()]);
 	};
 	void stopShell().then(async () => {
 		const runtime = await getRuntime();
-		if (generation !== attachGeneration) return;
+		if (generation !== followGeneration) return;
 		const fiber = runtime.runFork(
 			Effect.flatMap(WsRpcClients, (clients) =>
-				Effect.flatMap(clients.forProject(project), ({ subscriptions }) =>
+				Effect.flatMap(clients.forProject(""), ({ subscriptions }) =>
 					Stream.runForEach(
 						supervise(
 							subscriptions.shell({
 								onTransportDrop: () => {
-									if (generation === attachGeneration) noteTransportDrop();
+									if (generation === followGeneration) noteTransportDrop();
 								},
 							}),
 							(status) => {
-								if (generation !== attachGeneration) return;
+								if (generation !== followGeneration) return;
 								const previous = sessionSubscription.status;
 								if (previous._tag === "failing" && status._tag !== "live") {
 									if (status._tag === "failing")
@@ -177,7 +168,7 @@ export function attachSessionList(project: ProjectRef = ""): void {
 						),
 						(change) =>
 							Effect.sync(() => {
-								if (generation !== attachGeneration) return;
+								if (generation !== followGeneration) return;
 								applySessionChange(change);
 								if (change._tag === "projects") return;
 								if (change._tag === "snapshot") {
@@ -190,8 +181,7 @@ export function attachSessionList(project: ProjectRef = ""): void {
 									save();
 									for (const { slug } of projectState.projects)
 										flushPendingSeen(slug);
-									for (const listener of shellSynchronizedListeners)
-										listener(attachedProject ?? "");
+									for (const listener of shellSynchronizedListeners) listener();
 									void refreshListedSessions();
 								} else if (synchronized && shellSaveTimer === undefined) {
 									shellSaveTimer = setTimeout(save, 3_000);
@@ -201,15 +191,15 @@ export function attachSessionList(project: ProjectRef = ""): void {
 				),
 			),
 		);
-		if (generation === attachGeneration) shellFiber = fiber;
+		if (generation === followGeneration) shellFiber = fiber;
 		else runtime.runFork(Fiber.interrupt(fiber));
 	});
 }
 
-export function detachSessionList(): void {
-	attachGeneration++;
+export function stopFollowingSessionList(): void {
+	followGeneration++;
 	void stopShell();
-	attachedProject = null;
+	following = false;
 	setShellFeedStatus({ _tag: "cold" });
 }
 

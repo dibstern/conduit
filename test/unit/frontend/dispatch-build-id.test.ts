@@ -80,7 +80,6 @@ vi.mock("dompurify", () => ({ default: { sanitize: (html: string) => html } }));
 describe("build ID dispatch", () => {
 	let server: typeof import("../../../src/lib/frontend/stores/server-status.svelte.js");
 	let current: ServerStatus;
-	let setAttachedProject: typeof import("../../../src/lib/frontend/stores/session.svelte.js")["setAttachedProject"];
 
 	beforeEach(async () => {
 		vi.resetModules();
@@ -129,9 +128,6 @@ describe("build ID dispatch", () => {
 	});
 
 	async function load() {
-		({ setAttachedProject } = await import(
-			"../../../src/lib/frontend/stores/session.svelte.js"
-		));
 		server = await import(
 			"../../../src/lib/frontend/stores/server-status.svelte.js"
 		);
@@ -168,25 +164,6 @@ describe("build ID dispatch", () => {
 		if (!banner?.action) throw new Error("No server restart action");
 		return banner.action.run;
 	}
-
-	it("shows the restart action when a server build is ready after a project UI reset", async () => {
-		serverUpdate(true);
-		const { onProjectAttached } = await import(
-			"../../../src/lib/frontend/stores/ws-listeners.js"
-		);
-		const unsubscribe = onProjectAttached(() => mocks.showBanner.mockClear());
-		setAttachedProject("test-project");
-		unsubscribe();
-		expect(mocks.showBanner).toHaveBeenCalledWith({
-			id: "server-update",
-			variant: "update",
-			icon: "refresh-cw",
-			text: "A new conduit build is ready. Restart the server to load it. Sessions and terminals keep running.",
-			summary: "New build ready",
-			dismissible: true,
-			action: { label: "Restart", run: expect.any(Function) },
-		});
-	});
 
 	it("removes the banner but allows restart without an available update", async () => {
 		serverUpdate(true);
@@ -227,7 +204,6 @@ describe("build ID dispatch", () => {
 		serverUpdate(false);
 		finishRestart();
 		await Promise.all([first, second, third]);
-		setAttachedProject("test-project");
 		serverUpdate(true);
 		await run();
 		expect(mocks.restartWithConfig).toHaveBeenCalledTimes(1);

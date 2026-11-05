@@ -1,6 +1,7 @@
 <!-- Session choices: a phone sheet or a desktop drop-up. -->
 
 <script lang="ts">
+	import { selection as appSelection } from "../../stores/selection.svelte.js";
 	import SheetChrome from "../ui/SheetChrome.svelte";
 	import { onDestroy, tick, untrack, type Snippet } from "svelte";
 	import type { ProviderDriverKind } from "../../../contracts/provider-instance.js";
@@ -50,7 +51,6 @@
 	import { cursorAuthFor, openCursorLogin, refreshCursorAuth } from "../../stores/cursor-auth.svelte.js";
 	import { usageResetTime } from "../../utils/continuation.js";
 	import { getDraftProject } from "../../stores/project.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { openSettings } from "../layout/chrome-actions.js";
@@ -204,7 +204,7 @@
 	$effect(() => {
 		// Refetch once each turn ends.
 		const endedGeneration = currentChat().endedGeneration;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = appSelection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (endedGeneration < 0 || !projectSlug || !sessionId) return;
 
@@ -232,7 +232,7 @@
 		view = "root";
 		if (agent.id === activeAgent?.id) return;
 		const undoAgent = chooseAgent(agent.id);
-		const projectSlug = getCurrentSlug();
+		const projectSlug = appSelection.scope?.project;
 		const sessionId = sessionState.currentId;
 		if (projectSlug && sessionId) {
 			void rpc("SwitchAgent", { sessionId, agentId: agent.id }).catch(undoAgent);
@@ -330,7 +330,7 @@
 			modelId: model.id,
 			providerId: model.provider,
 		});
-		const projectSlug = getCurrentSlug();
+		const projectSlug = appSelection.scope?.project;
 		if (projectSlug) {
 			void rpc("SetDefaultModel", {
 				projectSlug,

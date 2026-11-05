@@ -22,7 +22,6 @@ import {
 	clearDiscoveryState,
 	handleModelList,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import type { RelayMessage } from "../../../src/lib/frontend/types.js";
 import { probeClaudeCapabilitiesEffect } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
@@ -73,14 +72,12 @@ describe("context percent computation", () => {
 		seedSessions([
 			{ id: "history-session", title: "History", projectSlug: "project-a" },
 		]);
-		attachedProjectState.slug = "project-a";
 		openSessionForSetup("history-session", "project-a");
 	});
 
 	afterEach(() => {
 		clearDiscoveryState();
 		openSessionForSetup(null);
-		attachedProjectState.slug = null;
 	});
 
 	it("restores percent from the last result message in history", () => {

@@ -70,7 +70,7 @@
 	import { findSession, isSessionSnoozed, sessionState } from "../../stores/session.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { permissionsState } from "../../stores/permissions.svelte.js";
-	import { getCurrentRoute, getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute, getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { connectionState } from "../../transport/connection-status.svelte.js";
 	import { createComposerDraft } from "../../stores/composer-draft/runner.svelte.js";
 	import { draftKeyId } from "../../stores/composer-draft/state.js";
@@ -729,7 +729,7 @@
 		if (startingSideThread || composerDraft.sending || !composerDraft.attachmentsReady) return false;
 		const from = selection.scope;
 		const parentSessionId = sessionState.currentId;
-		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? getCurrentSlug() : null;
+		const projectSlug = parentSessionId ? findSession(parentSessionId)?.projectSlug ?? selection.scope?.project ?? null : null;
 		if (!parentSessionId) {
 			showToast("Open a session to start a Side Thread", { variant: "error" });
 			return false;
@@ -848,7 +848,7 @@
 		if (sourceId !== (preparedKey && draftKeyId(preparedKey)) || composerDraft.text !== draftText) return false;
 
 		const sentFromSessionId = sessionState.currentId;
-		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? getCurrentSlug() : getDraftProject();
+		const projectSlug = sentFromSessionId ? findSession(sentFromSessionId)?.projectSlug ?? selection.scope?.project ?? null : getDraftProject();
 		const draftId = selection.scope?.draftId;
 		if (!sentFromSessionId && creatingDrafts.has(draftId)) return false;
 		if (!sentFromSessionId) creatingDrafts.add(draftId);

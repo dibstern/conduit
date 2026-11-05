@@ -8,10 +8,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
-const wsLifecycleHarness = vi.hoisted(() => ({
-	onAttachCallbacks: [] as Array<(slug: string) => void>,
-	attachedSlugs: [] as string[],
-}));
 
 // Layout components
 vi.mock(
@@ -105,7 +101,7 @@ vi.mock(
 // reactive dependencies on routerState.path).
 
 vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", async () => {
-	const { getCurrentRoute } = await import(
+	const { getCurrentRoute, getCurrentSearchParams } = await import(
 		"../../../src/lib/frontend/stores/router.svelte.js"
 	);
 	return {
@@ -118,16 +114,15 @@ vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", async () => {
 					? { kind: "placing", sessionId: route.sessionId }
 					: { kind: "none" };
 			},
+			// The route's draft pick stands in for the shown project.
+			get scope() {
+				const project = getCurrentSearchParams().get("project");
+				return project ? { project, sessionId: null } : null;
+			},
 		},
 	};
 });
 
-vi.mock("../../../src/lib/frontend/stores/ws-listeners.js", () => ({
-	onProjectAttached: vi.fn((callback: (slug: string) => void) => {
-		wsLifecycleHarness.onAttachCallbacks.push(callback);
-		return () => {};
-	}),
-}));
 vi.mock("../../../src/lib/frontend/stores/ws-notifications.js", () => ({
 	initSWMessageListener: vi.fn(),
 	reconcilePushActive: vi.fn(async () => {}),
@@ -138,6 +133,7 @@ vi.mock(
 	() => ({
 		getIsConnected: () => true,
 		connectionState: { status: "connected", statusText: "" },
+		viewRelayStatus: vi.fn(),
 	}),
 );
 
@@ -178,9 +174,6 @@ vi.mock("../../../src/lib/frontend/stores/input-draft.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
-	setAttachedProject: vi.fn((slug: string) => {
-		wsLifecycleHarness.attachedSlugs.push(slug);
-	}),
 	sessionState: {
 		currentId: null,
 		sessions: [],
@@ -192,8 +185,8 @@ vi.mock("../../../src/lib/frontend/stores/session.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/session-list.svelte.js", () => ({
-	attachSessionList: vi.fn(),
-	detachSessionList: vi.fn(),
+	followSessionList: vi.fn(),
+	stopFollowingSessionList: vi.fn(),
 	onShellSynchronized: vi.fn(() => () => {}),
 	sessionList: { groups: [], settled: false, status: { _tag: "cold" } },
 	currentSearchQuery: vi.fn(() => null),
@@ -262,7 +255,6 @@ vi.mock("../../../src/lib/frontend/stores/ui.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/project.svelte.js", () => ({
-	applyProjectList: vi.fn(),
 	followDaemonLists: vi.fn(),
 	getDraftProject: () => null,
 	projectState: { projects: [] },
@@ -320,22 +312,17 @@ import { taskDrawer } from "../../../src/lib/frontend/components/session/backgro
 import { followAlerts } from "../../../src/lib/frontend/stores/alerts.js";
 import { followApprovals } from "../../../src/lib/frontend/stores/approvals.js";
 import { clearMessages } from "../../../src/lib/frontend/stores/chat.svelte.js";
+import { viewProjectSettings } from "../../../src/lib/frontend/stores/project-settings.js";
 import {
-	attachedProjectState,
 	replaceRoute,
 	routerState,
 } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
-	attachSessionList,
-	detachSessionList,
+	followSessionList,
+	stopFollowingSessionList,
 } from "../../../src/lib/frontend/stores/session-list.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
-
-function attach(slug: string): void {
-	attachedProjectState.slug = slug;
-	wsLifecycleHarness.onAttachCallbacks[0]?.(slug);
-}
 
 describe("ChatLayout RPC lifecycle", () => {
 	beforeEach(() => {
@@ -348,8 +335,6 @@ describe("ChatLayout RPC lifecycle", () => {
 				disconnect() {}
 			},
 		);
-		wsLifecycleHarness.onAttachCallbacks = [];
-		wsLifecycleHarness.attachedSlugs = [];
 		// Stub localStorage — the component reads terminal panel height from it
 		// on mount, but the test environment may not provide a full Storage impl.
 		vi.stubGlobal("localStorage", {
@@ -368,7 +353,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.mocked(resolveSession).mockResolvedValue({
 			projectSlug: "test-project",
 		});
-		attachedProjectState.slug = null;
 	});
 
 	afterEach(() => {
@@ -376,7 +360,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.unstubAllGlobals();
 		// Reset router state so it doesn't leak between tests
 		routerState.path = "/";
-		attachedProjectState.slug = null;
 		sessionViewState.compact = false;
 	});
 
@@ -434,27 +417,17 @@ describe("ChatLayout RPC lifecycle", () => {
 		expect(scroller.scrollTop).toBe(84);
 	});
 
-	it("keeps the /ws bootstrap that lands before the first attach reply", () => {
-		render(ChatLayout);
-		attach("test-project");
-		expect(clearMessages).not.toHaveBeenCalled();
-	});
-
-	it("rehydrates once on a reconnect attach to the same project without resetting", () => {
-		render(ChatLayout);
-		attach("test-project");
-		vi.clearAllMocks();
-		attach("test-project");
-		expect(clearMessages).not.toHaveBeenCalled();
-		expect(attachSessionList).toHaveBeenCalledTimes(1);
-	});
-
-	it("follows every project's asks and alerts once, whatever project it shows", () => {
+	it("follows every project's rows, asks and alerts once, whatever project it shows", () => {
 		const { unmount } = render(ChatLayout);
-		attach("project-a");
-		// The attached project moves; the per-project feeds follow it, these do not.
-		attachedProjectState.slug = "project-b";
+		replaceRoute("/?project=project-a");
 		flushSync();
+		expect(viewProjectSettings).toHaveBeenLastCalledWith("project-a");
+		// The shown project moves; the per-project feeds follow it, these do not.
+		replaceRoute("/?project=project-b");
+		flushSync();
+		expect(viewProjectSettings).toHaveBeenLastCalledWith("project-b");
+		expect(clearMessages).not.toHaveBeenCalled();
+		expect(followSessionList).toHaveBeenCalledTimes(1);
 		expect(followApprovals).toHaveBeenCalledTimes(1);
 		expect(followAlerts).toHaveBeenCalledTimes(1);
 		expect(stopFeeds.approvals).not.toHaveBeenCalled();
@@ -463,9 +436,10 @@ describe("ChatLayout RPC lifecycle", () => {
 		expect(stopFeeds.alerts).toHaveBeenCalledTimes(1);
 	});
 
-	it("detaches the shell feed on unmount", () => {
+	it("follows the shell feed once and stops it on unmount", () => {
 		const { unmount } = render(ChatLayout);
+		expect(followSessionList).toHaveBeenCalledTimes(1);
 		unmount();
-		expect(detachSessionList).toHaveBeenCalledTimes(1);
+		expect(stopFollowingSessionList).toHaveBeenCalledTimes(1);
 	});
 });

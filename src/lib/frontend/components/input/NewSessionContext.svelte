@@ -6,7 +6,7 @@
 	import { getAvailableInstances, getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import { tick } from "svelte";
-	import { applyProjectList, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
@@ -115,7 +115,6 @@
 	// The draft lands in the saved project, including one that already held the
 	// folder. The sidebar scope stays put: this only answers where the draft starts.
 	async function projectAdded(response: SaveProjectResponse) {
-		applyProjectList(response);
 		startIn(response.savedSlug);
 		addProjectOpen = false;
 		// Closing hands focus back to the chip; the prompt is what comes next.

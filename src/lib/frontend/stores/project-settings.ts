@@ -19,12 +19,12 @@ import {
 	handleVisibilityInfo,
 } from "./discovery.svelte.js";
 import { projectState } from "./project-state.svelte.js";
-import { getCurrentSlug } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 import { setClientCount, uiState } from "./ui.svelte.js";
 
 export const applyProjectSetting = (
 	setting: ProjectSetting,
-	project = getCurrentSlug() ?? "",
+	project = selection.scope?.project ?? "",
 ): void => {
 	switch (setting._tag) {
 		case "defaultModel":

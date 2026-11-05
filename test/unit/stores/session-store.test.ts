@@ -6,10 +6,7 @@ import {
 	sessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
 import { clearDiscoveryState } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applyFamilyChange,
 	clearSessionState,
@@ -81,14 +78,12 @@ beforeEach(() => {
 	clearDiscoveryState();
 	routerState.path = "/s/old-session";
 	routerState.search = "";
-	attachedProjectState.slug = "project-a";
 });
 
 it.each([
 	"shell",
 	"search",
 ] as const)("keeps project ownership for a loaded %s row before attachment changes", (source) => {
-	attachedProjectState.slug = "conduit";
 	const foreign = makeSession({
 		id: "dotfiles-session",
 		projectSlug: "dotfiles",

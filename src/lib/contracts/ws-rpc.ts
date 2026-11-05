@@ -3022,6 +3022,45 @@ export const RejectQuestion = Rpc.make("RejectQuestion", {
 	error: WsRpcError,
 });
 
+/** Session-scoped forms of the ask answers; the ask's session supplies the project. */
+export const RespondPermissionForSession = Rpc.make(RespondPermission._tag, {
+	payload: Schema.TaggedStruct(RespondPermission._tag, {
+		sessionId: NonEmptyString,
+		originId: NonEmptyString,
+		commandId: NonEmptyString,
+		requestId: NonEmptyString,
+		decision: PermissionDecisionSchema,
+		persistScope: Schema.optional(PermissionPersistScopeSchema),
+		persistPattern: Schema.optional(Schema.String),
+		permissionDestination: Schema.optional(PermissionUpdateDestinationSchema),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const AnswerQuestionForSession = Rpc.make(AnswerQuestion._tag, {
+	payload: Schema.TaggedStruct(AnswerQuestion._tag, {
+		sessionId: NonEmptyString,
+		originId: NonEmptyString,
+		commandId: NonEmptyString,
+		toolId: NonEmptyString,
+		answers: Schema.Record(Schema.String, Schema.String),
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
+export const RejectQuestionForSession = Rpc.make(RejectQuestion._tag, {
+	payload: Schema.TaggedStruct(RejectQuestion._tag, {
+		sessionId: NonEmptyString,
+		originId: NonEmptyString,
+		commandId: NonEmptyString,
+		toolId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 export const LoadMoreHistory = Rpc.make("LoadMoreHistory", {
 	payload: Schema.TaggedStruct("LoadMoreHistory", {
 		sessionId: NonEmptyString,
@@ -3773,9 +3812,57 @@ const wsRpcRequests = [
 		}),
 	},
 	StartSideThread,
-	RespondPermission,
-	AnswerQuestion,
-	RejectQuestion,
+	{
+		requests: [RespondPermissionForSession, RespondPermission],
+		rpc: Rpc.make(RespondPermission._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...RespondPermissionForSession.payloadSchema.fields,
+					_tag: wireTag(RespondPermissionForSession._tag),
+				}),
+				closedPayload({
+					...RespondPermission.payloadSchema.fields,
+					_tag: wireTag(RespondPermission._tag),
+				}),
+			]),
+			success: RespondPermission.successSchema,
+			error: RespondPermission.errorSchema,
+		}),
+	},
+	{
+		requests: [AnswerQuestionForSession, AnswerQuestion],
+		rpc: Rpc.make(AnswerQuestion._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...AnswerQuestionForSession.payloadSchema.fields,
+					_tag: wireTag(AnswerQuestionForSession._tag),
+				}),
+				closedPayload({
+					...AnswerQuestion.payloadSchema.fields,
+					_tag: wireTag(AnswerQuestion._tag),
+				}),
+			]),
+			success: AnswerQuestion.successSchema,
+			error: AnswerQuestion.errorSchema,
+		}),
+	},
+	{
+		requests: [RejectQuestionForSession, RejectQuestion],
+		rpc: Rpc.make(RejectQuestion._tag, {
+			payload: Schema.Union([
+				closedPayload({
+					...RejectQuestionForSession.payloadSchema.fields,
+					_tag: wireTag(RejectQuestionForSession._tag),
+				}),
+				closedPayload({
+					...RejectQuestion.payloadSchema.fields,
+					_tag: wireTag(RejectQuestion._tag),
+				}),
+			]),
+			success: RejectQuestion.successSchema,
+			error: RejectQuestion.errorSchema,
+		}),
+	},
 	LoadMoreHistory,
 	RewindSession,
 	UndoRewind,

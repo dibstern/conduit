@@ -50,10 +50,7 @@ import {
 	getOrCreateSessionSlot,
 	sessionActivity,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
 import {
 	clearSessionState,
@@ -76,7 +73,6 @@ const decodeServerHalf = (): readonly (typeof SessionInfoSchema.Type)[] =>
 
 beforeEach(() => {
 	clearSessionState();
-	attachedProjectState.slug = "p";
 	routerState.search = "";
 });
 

@@ -58,7 +58,6 @@ import {
 	instanceState,
 } from "./instance.svelte.js";
 import { getDraftProject } from "./project-state.svelte.js";
-import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { selection } from "./selection.svelte.js";
 import { findSession, sessionState } from "./session.svelte.js";
 import { onShellSynchronized } from "./session-list.svelte.js";
@@ -313,7 +312,7 @@ function agentsFor(scope = catalogScope()) {
 /** Keep the current account's merged catalog; use an account-scoped catalog for others. */
 export function getModelProvidersForInstance(
 	instanceId: string | undefined,
-	project = getCurrentSlug() ?? "",
+	project = selection.scope?.project ?? "",
 ): readonly Immutable<ProviderInfo>[] {
 	if (!instanceId) return providersFor();
 	const scope = catalogScope(null, instanceId, project);
@@ -328,7 +327,7 @@ export function getModelProvidersForInstance(
 
 export function getModelCatalogForInstance(
 	instanceId: string,
-	project = getCurrentSlug() ?? "",
+	project = selection.scope?.project ?? "",
 ) {
 	const driver = instanceState.instances.find(
 		(account) => account.id === instanceId,
@@ -370,12 +369,7 @@ export async function loadModelCatalog(
 /** All callers refresh the currently shown scope; replies retain their issued key. */
 export async function refreshCatalogs(): Promise<void> {
 	const scope = catalogScope();
-	if (
-		!selection.scope ||
-		!scope.project ||
-		scope.project !== attachedProjectState.slug
-	)
-		return;
+	if (!selection.scope || !scope.project) return;
 	await readCatalogs(scope);
 }
 
@@ -409,7 +403,7 @@ function readCatalogs(
 	return Promise.allSettled(reads).then(() => undefined);
 }
 
-/** Mounted once by the shell; reads follow selection's placed or attached scope. */
+/** Mounted once by the shell; reads follow selection's scope. */
 export function watchCatalogs(): () => void {
 	return $effect.root(() => {
 		const modelKey = $derived(catalogScope().key);
@@ -417,7 +411,6 @@ export function watchCatalogs(): () => void {
 		$effect(() => {
 			const key = modelKey;
 			const connected = getIsConnected();
-			const attached = attachedProjectState.slug;
 			untrack(() => {
 				for (const held of Object.keys(modelCatalogs))
 					if (held !== key) delete modelCatalogs[held];
@@ -427,19 +420,18 @@ export function watchCatalogs(): () => void {
 					if (held !== key) delete draftModels[held];
 				const scope = catalogScope();
 				draftModelKey = key;
-				if (connected && scope.project === attached && selection.scope !== null)
+				if (connected && scope.project && selection.scope !== null)
 					void readCatalogs(scope, "models-agents");
 			});
 		});
 		$effect(() => {
 			const key = commandKey;
 			const connected = getIsConnected();
-			const attached = attachedProjectState.slug;
 			untrack(() => {
 				for (const held of Object.keys(commandCatalogs))
 					if (held !== key) delete commandCatalogs[held];
 				const scope = catalogScope();
-				if (connected && scope.project === attached && selection.scope !== null)
+				if (connected && scope.project && selection.scope !== null)
 					void readCatalogs(scope, "commands");
 			});
 		});
@@ -454,9 +446,9 @@ export function watchCatalogs(): () => void {
 					? getDraftProject()
 					: null;
 			const instanceId = getEffectiveInstanceId();
-			const ready =
-				instanceState.loaded && project === attachedProjectState.slug;
-			untrack(() => viewDraftModels(ready ? project : null, instanceId));
+			untrack(() =>
+				viewDraftModels(instanceState.loaded ? project : null, instanceId),
+			);
 		});
 		$effect(() => () => viewDraftModels(null));
 	});
@@ -1533,7 +1525,7 @@ export function handleModelList(
 		readonly providers: GetModelsResponse["providers"];
 		readonly accountId?: string | undefined;
 	},
-	project = getCurrentSlug() ?? "",
+	project = selection.scope?.project ?? "",
 ): void {
 	const scope = catalogScope(sessionState.currentId, undefined, project);
 	const catalog = providersFromGetModelsResponse(providers);

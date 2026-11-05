@@ -127,7 +127,7 @@ export const cursorQuestionHandlers: StepHandler[] = [
 			const request = await requireRpcControl(world.page).waitForRequest(
 				(candidate) => candidate.tag === "AnswerQuestion",
 			);
-			expect(request.payload["projectSlug"]).toBe("myapp");
+			expect(request.payload["sessionId"]).toBe(sessionId);
 			expect(request.payload["toolId"]).toBe(toolId);
 			expect(request.payload["answers"]).toEqual({ "0": match[1] });
 		},

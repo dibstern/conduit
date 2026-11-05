@@ -3,7 +3,7 @@
 
 import type { GetSessionSkillsResponse } from "../../contracts/ws-rpc.js";
 import { rpc } from "../transport/ws-rpc-client.js";
-import { getCurrentSlug } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 import { sessionViewLoaded } from "./transcript.svelte.js";
 
 type SkillLoad = GetSessionSkillsResponse["loads"][number];
@@ -39,7 +39,7 @@ const pendingRequests = new Map<
 /** Fetch on session open and at turn end. A failed fetch keeps the last
  *  answer: the server fails rather than return a partial count. */
 export function loadSessionSkills(sessionId: string): Promise<void> {
-	const projectSlug = getCurrentSlug();
+	const projectSlug = selection.scope?.project;
 	if (!projectSlug) return Promise.resolve();
 	if (sessionSkillsState.sessionId !== sessionId) {
 		sessionSkillsState.sessionId = sessionId;

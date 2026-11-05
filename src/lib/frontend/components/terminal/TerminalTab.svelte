@@ -6,13 +6,13 @@
   handles its own resize via ResizeObserver on the container element.
 -->
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { onMount } from "svelte";
 	import {
 		onOutput,
 		getScrollback,
 	} from "../../stores/terminal.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { FitAddon } from "@xterm/addon-fit";
@@ -46,7 +46,7 @@
 	}
 
 	function sendResize(size: { cols: number; rows: number }) {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug) return;
 		void rpc("ResizePty", {
 			projectSlug,
@@ -68,7 +68,7 @@
 		if (sendingInput) return;
 		sendingInput = true;
 		while (unsentInput) {
-			const projectSlug = getCurrentSlug();
+			const projectSlug = selection.scope?.project;
 			const chunk = unsentInput;
 			unsentInput = "";
 			if (!projectSlug) break;

@@ -2,6 +2,7 @@
      Usage holds the bill and notable events; running tasks stay in the footer.
      Resting on the turn prefetches tool details; a strip tap opens its log row. -->
 <script module lang="ts">
+	import { selection as appSelection } from "../../stores/selection.svelte.js";
 	import type { BackgroundTask } from "../../../shared-types.js";
 	/**
 	 * A stuck Stop waits for a confirm (8.4) and names the tasks closing would end; no tasks means
@@ -42,7 +43,7 @@
 	import { clock } from "../../stores/clock.svelte.js";
 	import { reveal } from "../../stores/reveal.svelte.js";
 	import { primaryTranscript, type TranscriptView } from "../../stores/transcript.svelte.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import { backgroundTaskText } from "../../../shared-types.js";
 	import { confirmStuckStop, keepTasks, stopBackgroundTasks, taskKind } from "../session/background-tasks.svelte.js";
@@ -524,7 +525,7 @@
 		if (!onScreen) return;
 		void toLoad;
 		const resting = setTimeout(() => {
-			const projectSlug = getCurrentSlug();
+			const projectSlug = appSelection.scope?.project;
 			const sessionId = getCurrentSessionId();
 			if (projectSlug && sessionId) toolDetails.wantSoon({ projectSlug, sessionId }, tools);
 		}, PREFETCH_REST_MS);

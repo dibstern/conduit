@@ -4,7 +4,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Module mocks (must be declared before importing ws-notifications)
 
-const getCurrentSlugMock = vi.fn(() => "test-project");
 const navigateMock = vi.fn();
 const openSession = vi.hoisted(() => vi.fn());
 
@@ -13,12 +12,10 @@ vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
 }));
 
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: getCurrentSlugMock,
 	navigate: navigateMock,
 	getCurrentRoute: vi.fn(() => ({ page: "chat", slug: "test-project" })),
 	getCurrentSessionId: vi.fn(() => null),
 	routerState: { path: "/p/test-project/" },
-	attachedProjectState: { slug: "test-project" },
 	replaceRoute: vi.fn(),
 	getSessionHref: vi.fn(),
 	getTransitionLog: vi.fn(() => []),
@@ -68,7 +65,6 @@ beforeEach(() => {
 	vi.resetModules();
 	messageListeners = [];
 	addEventListenerMock.mockClear();
-	getCurrentSlugMock.mockReturnValue("test-project");
 	navigateMock.mockClear();
 	openSession.mockClear();
 });
@@ -151,8 +147,6 @@ describe("SW navigation listener", () => {
 			"../../../src/lib/frontend/stores/ws-notifications.js"
 		);
 		mod.initSWMessageListener();
-
-		getCurrentSlugMock.mockReturnValue("my-project");
 
 		postSWMessage({
 			type: "navigate_to_session",

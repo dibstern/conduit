@@ -8,10 +8,7 @@ import {
 } from "../../stores/claude-settings.svelte.js";
 import { clearDiscoveryState } from "../../stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../stores/instance.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import ClaudeSettingsTab from "./ClaudeSettingsTab.svelte";
 
 const meta = {
@@ -22,20 +19,10 @@ const meta = {
 		clearClaudeSettingsState();
 		clearDiscoveryState();
 		applyInstanceListResponse({ instances: [] });
-		attachedProjectState.slug = "storybook-project";
 		routerState.path = "/";
-		// The tab's settings reads dial the control socket, and every dial probes
-		// the attached project's relay status. Answer that probe; anything else
-		// still reaches the network guard.
-		const guardedFetch = globalThis.fetch;
-		globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit) =>
-			String(input instanceof Request ? input.url : input).endsWith(
-				"/api/status",
-			)
-				? Promise.resolve(Response.json({ status: "ready" }))
-				: guardedFetch(input, init);
+		routerState.search = "?project=storybook-project";
 		return () => {
-			globalThis.fetch = guardedFetch;
+			routerState.search = "";
 		};
 	},
 } satisfies Meta<typeof ClaudeSettingsTab>;

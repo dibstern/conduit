@@ -54,10 +54,7 @@ const identify = (session: SessionInfo): string => session.id;
 // mutates it, so a deep proxy would cost work to track writes that cannot
 // happen.
 let applied = $state.raw<SubscriptionState<SessionInfo>>(emptySubscription());
-let savedShell = $state.raw<{
-	project: string;
-	rows: ReadonlyMap<string, SessionInfo>;
-} | null>(null);
+let savedShell = $state.raw<ReadonlyMap<string, SessionInfo> | null>(null);
 
 /** Provisional rows only: no versions, synchronization or live row side effects. */
 export function drawSavedShell(record: SavedShell): void {
@@ -67,15 +64,7 @@ export function drawSavedShell(record: SavedShell): void {
 		applied.settled
 	)
 		return;
-	savedShell = {
-		project: record.project,
-		rows: new Map(record.rows.map((row) => [row.id, row])),
-	};
-}
-
-/** An attachment confirms which project's provisional rows may stay on screen. */
-export function discardForeignSavedShell(project: string): void {
-	if (savedShell?.project !== project) savedShell = null;
+	savedShell = new Map(record.rows.map((row) => [row.id, row]));
 }
 
 let feedStatus = $state<FeedStatus>({ _tag: "cold" });
@@ -98,7 +87,7 @@ export const sessionSubscription = {
 	},
 	/** Live rows, or the device's provisional rows before the first snapshot. */
 	get rows(): ReadonlyMap<string, SessionInfo> {
-		return savedShell?.rows ?? applied.rows;
+		return savedShell ?? applied.rows;
 	},
 	/** Whether the server has said we hold everything. ni8.5.20/T-11 keys the
 	 *  switching state off this. */

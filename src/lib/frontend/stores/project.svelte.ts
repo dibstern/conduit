@@ -1,4 +1,4 @@
-// Manages the list of registered projects and the current project slug.
+// Manages the list of registered projects.
 
 import { Effect, Fiber, Schedule, Stream } from "effect";
 import type { ShellEnvelope } from "../../contracts/ws-rpc.js";
@@ -15,43 +15,31 @@ import { getBrowserClientId } from "./client-identity.js";
 import { draftList } from "./draft-list.svelte.js";
 import { applyInstanceListResponse } from "./instance.svelte.js";
 import { getDraftProject, projectState } from "./project-state.svelte.js";
-import {
-	attachedProjectState,
-	getCurrentSlug,
-	replaceRoute,
-} from "./router.svelte.js";
+import { replaceRoute } from "./router.svelte.js";
+import { selection } from "./selection.svelte.js";
 import { applyServerStatus, serverStatusFeed } from "./server-status.svelte.js";
-import { findSession, sessionState } from "./session.svelte.js";
 import { confirm } from "./ui.svelte.js";
 import { applyUsageLimitsSetting, applyUsageReadings } from "./usage.svelte.js";
 
 export { getDraftProject, projectState } from "./project-state.svelte.js";
-
-/** Project mutation replies only update the attached project hint. */
-export function applyProjectList(
-	response: Pick<ProjectMutationResponse, "projects" | "current">,
-): void {
-	if (response.current != null) projectState.currentSlug = response.current;
-}
 
 /** The shell feed owns the registered project list. */
 export function applyShellProjects(
 	frame: Extract<ShellEnvelope, { readonly _tag: "projects" }>,
 ): void {
 	const projects = toProjectInfoList(frame.projects);
+	const listed = (list: readonly ProjectInfo[], slug: string | undefined) =>
+		list.some((project) => project.slug === slug);
+	// A removal of the shown session's or draft's project returns to the session list.
+	const shown = selection.scope?.project;
+	const removed =
+		listed(projectState.projects, shown) && !listed(projects, shown);
 	projectState.projects = projects;
 	projectState.projectsLoaded = true;
 	projectState.newSessionProject = frame.newSessionProject ?? null;
 	projectState.projectOrder = frame.projectOrder ?? [];
 
-	// Removing the attached project returns to the session list.
-	if (
-		attachedProjectState.slug !== null &&
-		!projects.some((p) => p.slug === attachedProjectState.slug)
-	) {
-		attachedProjectState.slug = null;
-		replaceRoute("/?");
-	}
+	if (removed) replaceRoute("/?");
 }
 
 /** Asks once for all of them, then removes; resolves whether the user confirmed. */
@@ -75,16 +63,14 @@ export async function confirmRemoveProjects(
 	// Each RPC routes through a project's relay, so prefer one that survives;
 	// only when every project goes does a removal route through itself.
 	const router = [
-		getCurrentSlug(),
+		selection.scope?.project,
 		...projectState.projects.map((project) => project.slug),
 	].find((slug) => slug != null && !slugs.includes(slug));
 	// Remove one at a time so a later request cannot route through a project
 	// whose removal is still in flight.
 	void (async () => {
 		for (const slug of slugs) {
-			applyProjectList(
-				await rpc("RemoveProject", { projectSlug: router ?? slug, slug }),
-			);
+			await rpc("RemoveProject", { projectSlug: router ?? slug, slug });
 		}
 	})().catch(() => undefined);
 	return true;
@@ -125,10 +111,7 @@ let lastFocusRead = -Infinity;
 function refreshUsageOnFocus(): void {
 	if (document.visibilityState !== "visible") return;
 	// The request is routed by project; the readings it refreshes are daemon-wide.
-	const projectSlug =
-		findSession(sessionState.currentId ?? "")?.projectSlug ??
-		getCurrentSlug() ??
-		getDraftProject();
+	const projectSlug = selection.scope?.project ?? getDraftProject();
 	if (!projectSlug) return;
 	const now = Date.now();
 	if (now - lastFocusRead < 30_000) return;

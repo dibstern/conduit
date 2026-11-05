@@ -11,10 +11,7 @@ import Toast from "../../../src/lib/frontend/components/overlays/Toast.svelte";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import SnoozePickerHost from "../../../src/lib/frontend/components/session/SnoozePickerHost.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -69,7 +66,6 @@ beforeEach(() => {
 	routerState.path = "/";
 	routerState.search = "";
 	routerState.sessionNotFound = false;
-	attachedProjectState.slug = "current-project";
 	projectState.projects = [
 		{ slug: "current-project", title: "Current", folders: ["/current"] },
 	];
@@ -486,7 +482,6 @@ describe("session triage list", () => {
 		expect((await screen.findByRole("status")).textContent).toContain(
 			"Moved “New Session” to Settled",
 		);
-		attachedProjectState.slug = "another-project";
 		vi.mocked(callRpc).mockRejectedValueOnce(new Error("offline"));
 		await fireEvent.click(screen.getByTestId("toast-action"));
 		expect(callRpc).toHaveBeenLastCalledWith(

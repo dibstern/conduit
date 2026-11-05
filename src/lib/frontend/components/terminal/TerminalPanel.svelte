@@ -5,6 +5,7 @@
   Each TerminalTab handles its own resize via ResizeObserver.
 -->
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { tick } from "svelte";
 	import { MediaQuery } from "svelte/reactivity";
 	import {
@@ -21,7 +22,7 @@
 	} from "../../stores/terminal.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { terminalAccountId } from "../layout/chrome-actions.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { failureLine } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import type { GetFileTreeResponse } from "../../transport/ws-rpc.js";
@@ -248,7 +249,7 @@
 	}
 
 	function handleFontSizeResize(size: { cols: number; rows: number }) {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (activeTabId && projectSlug) {
 			void rpc("ResizePty", {
 				projectSlug,
@@ -261,7 +262,7 @@
 	}
 
 	function handleNewTab(root?: string) {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const sessionId = getCurrentSessionId();
 		const accountId = terminalAccountId();
 		if (!projectSlug || !beginCreateTab()) return;
@@ -276,7 +277,7 @@
 	}
 
 	function handleCloseTab(ptyId: string) {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (projectSlug) {
 			void rpc("ClosePty", { projectSlug, ptyId }).catch(() => undefined);
 		}

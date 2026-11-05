@@ -12,7 +12,6 @@ export type FileBrowserReply =
 export type FileBrowserListener = (reply: FileBrowserReply) => void;
 
 export const fileBrowserListeners = new Set<FileBrowserListener>();
-export const projectAttachedListeners = new Set<(slug: string) => void>();
 /**
  * Account configuration changed; rebase rows whose effective account can change.
  * `firstList` marks the first instance list, which the open feeds were already
@@ -21,12 +20,6 @@ export const projectAttachedListeners = new Set<(slug: string) => void>();
 export const accountSnapshotChangedListeners = new Set<
 	(change: { readonly firstList: boolean }) => void
 >();
-
-/** Runs synchronously when an RPC reply attaches this tab to a project. */
-export function onProjectAttached(fn: (slug: string) => void): () => void {
-	projectAttachedListeners.add(fn);
-	return () => projectAttachedListeners.delete(fn);
-}
 
 /** Subscribe to file browser RPC replies. Returns unsubscribe function. */
 export function onFileBrowser(fn: FileBrowserListener): () => void {
