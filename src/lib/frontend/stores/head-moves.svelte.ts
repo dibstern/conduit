@@ -13,11 +13,13 @@ export const headLog = $state<{ sessionId: string | undefined }>({
 
 export type { HeadFork, HeadLogEntry } from "../../contracts/ws-rpc.js";
 
-/** Back to before a message, sending nothing: the rewind dialog's move. */
+/** Back to before a message, sending nothing: the rewind dialog's move. The dialog has already
+ *  said whether the files there were pruned, so the move does not say it again. */
 export const rewindTo = (
 	sessionId: string,
 	messageId: string,
-): Promise<boolean> => moveHead(sessionId, { _tag: "rewind", messageId });
+): Promise<boolean> =>
+	moveHead(sessionId, { _tag: "rewind", messageId }, { saysPruned: false });
 
 /** Back to before a message, sending `resend` from there: edit-and-resend, or regenerate. */
 export const resendFrom = (
@@ -42,6 +44,7 @@ export const switchBranch = (
 async function moveHead(
 	sessionId: string,
 	intent: MoveIntent,
+	{ saysPruned = true } = {},
 ): Promise<boolean> {
 	try {
 		const { moveId, files } = await rpc("PreviewHeadMove", {
@@ -50,7 +53,8 @@ async function moveHead(
 		});
 		await rpc("CommitHeadMove", { sessionId, intent, moveId });
 		// Conversation-only moves go into pruned history; only the files there are gone.
-		if (files === "pruned") showToast("Files from this point were pruned.");
+		if (saysPruned && files === "pruned")
+			showToast("Files from this point were pruned.");
 		return true;
 	} catch (error) {
 		toastFailure("Could not move the conversation.", "warn")(error);

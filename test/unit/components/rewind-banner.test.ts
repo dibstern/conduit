@@ -166,8 +166,14 @@ describe("RewindBanner", () => {
 		expect(uiState.rewindSelectedUuid).toBeNull();
 	});
 
-	it("says the files at a pruned point were pruned and keeps Rewind enabled", async () => {
-		rpcSpy.mockResolvedValueOnce({ files: "pruned" });
+	it("says the files at a pruned point were pruned once, and keeps Rewind enabled", async () => {
+		rpcSpy.mockImplementation((tag) =>
+			Promise.resolve(
+				tag === "CommitHeadMove"
+					? { moveId: "move-1" }
+					: { moveId: "move-1", files: "pruned" },
+			),
+		);
 		const { findByText, getByRole, queryByText } = render(RewindBanner);
 
 		expect(await findByText("Files from this point were pruned.")).toBeTruthy();
@@ -186,6 +192,10 @@ describe("RewindBanner", () => {
 				"CommitHeadMove",
 			]),
 		);
+		// 82tn.51: the dialog said it before the move; the move does not toast it again.
+		await Promise.resolve();
+		expect(uiState.toasts).toEqual([]);
+		rpcSpy.mockReset();
 	});
 
 	it("rewinds to an assistant message with a provider id", async () => {
