@@ -3,6 +3,7 @@ import {
 	Context,
 	Deferred,
 	Effect,
+	Exit,
 	Fiber,
 	FiberMap,
 	Option,
@@ -56,6 +57,7 @@ import { workspaceFolderPresent } from "../../../session/workspace-directories.j
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { publishAlert } from "./alerts.js";
@@ -750,6 +752,9 @@ const prepareEngineTurnInput = (
 		return { sendTurnInput, workspaceMoveSequence };
 	});
 
+/** Session scope generations (keyed by their dispatch fibers) that already hold an OpenCode abort. */
+const abortBound = new WeakSet<object>();
+
 const dispatchEngineTurn = (
 	resolvedInput: ProviderTurnServiceSendInput,
 	providerId: string,
@@ -944,6 +949,49 @@ const dispatchEngineTurn = (
 					const processId = Option.getOrUndefined(client)?.promptProcessId;
 					if (processId)
 						yield* link.value.linkProcess(resolvedInput.sessionId, processId);
+				}
+				// 82tn.14: the session's OpenCode work ends with its owner scope on a removal (a project removal
+				// or a session delete); a detach leaves it for the next daemon. Bound once per scope generation.
+				// The Run still ends by its deadlines (CONTRACT.md 6754-6758).
+				const owners = yield* Effect.serviceOption(OwnerScopes);
+				if (
+					PROVIDER_DRIVERS[driver].runsOpenCodeServer &&
+					Option.isSome(owners) &&
+					!abortBound.has(dispatchFibers)
+				) {
+					abortBound.add(dispatchFibers);
+					const instances = yield* OpenCodeInstancesTag;
+					yield* owners.value.sessionScope(resolvedInput.sessionId).pipe(
+						Effect.flatMap((scope) =>
+							scope.acquire<void, never, never>(
+								Effect.addFinalizer((exit) =>
+									Exit.isSuccess(exit) && exit.value === "remove"
+										? instances
+												.useIfRunning(account.id, sendTurnInput.workspaceRoot)
+												.pipe(
+													Effect.flatMap(
+														Option.match({
+															onNone: () => Effect.void,
+															onSome: (client) =>
+																Effect.tryPromise(() =>
+																	client.session.abort(resolvedInput.sessionId),
+																),
+														}),
+													),
+													Effect.scoped,
+													Effect.catchCause((cause) =>
+														Effect.logWarning(
+															"Could not abort a removed session's OpenCode work",
+															Failure.renderCause(cause),
+														),
+													),
+												)
+										: Effect.void,
+								),
+							),
+						),
+						Effect.ignore,
+					);
 				}
 				return yield* dispatchProgram;
 			}),
