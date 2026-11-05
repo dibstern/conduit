@@ -3,7 +3,6 @@
 // end inside the bus consumer, duplicate stops/pushes, and missing relay layers.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -13,15 +12,17 @@ import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/cla
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
 import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { notificationContent } from "../../../src/lib/notification-content.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import type { SDKMessage } from "../../../src/lib/provider/claude/types.js";
-import type { PushPayload } from "../../../src/lib/server/push.js";
+import {
+	PushNotificationManager,
+	type PushPayload,
+} from "../../../src/lib/server/push.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 import { createMockQuery, makeErrorResult } from "../../helpers/mock-sdk.js";
-import { createTestProjectRelay } from "../../helpers/project-relay.js";
 
 it("stops and pushes after ten live stuck verdicts, restarting the count after user input and progress", async () => {
 	const root = mkdtempSync(join(tmpdir(), "conduit-goal-stuck-stop-"));
@@ -39,39 +40,24 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 	const interrupt = vi.fn(async () => {});
 	const pushes: PushPayload[] = [];
 	const logs: unknown[][] = [];
-	const log = createSilentLogger();
-	log.warn =
-		log.error =
-		log.info =
-		log.debug =
-		log.verbose =
-			(...args) => {
-				logs.push(args);
-			};
-	log.child = () => log;
-	const relay = await createTestProjectRelay({
-		httpServer: createServer(),
-		persistenceDbPath: join(root, "events.db"),
-		projectDir: root,
-		configDir: root,
-		slug: "goal-stuck-test",
-		noServer: true,
-		opencodeUrl: "http://127.0.0.1:1",
-		publishGlobalSetting: () => Effect.void,
-		log,
-		pushManager: {
-			getPublicKey: () => null,
-			addSubscription: () => {},
-			removeSubscription: () => {},
-			getSubscriptionIds: () => ["device"],
-			sendTo: async (_recipientId, payload) => {
-				pushes.push(payload);
-				return { delivered: ["device"], failed: [], expired: [] };
-			},
-			sendToAll: async () => {
-				throw new Error("Expected per-recipient delivery");
-			},
+	// The daemon's own push manager delivers; only its transport is observed.
+	vi.spyOn(
+		PushNotificationManager.prototype,
+		"getSubscriptionIds",
+	).mockReturnValue(["device"]);
+	vi.spyOn(PushNotificationManager.prototype, "sendTo").mockImplementation(
+		async (_recipientId, payload) => {
+			pushes.push(payload);
+			return { delivered: ["device"], failed: [], expired: [] };
 		},
+	);
+	vi.spyOn(PushNotificationManager.prototype, "sendToAll").mockRejectedValue(
+		new Error("Expected per-recipient delivery"),
+	);
+	const relay = await createDaemonProject("chat-simple", {
+		projectDir: root,
+		slug: "goal-stuck-test",
+		defaultModel: null,
 		claudeSdk: {
 			...claudeSdk,
 			query: ({ prompt }) => {
@@ -125,10 +111,10 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 			},
 		},
 	});
-	const runtime = relay.effectRuntime.runtime;
+	const run = relay.run;
 	const goalPushes = () => pushes.filter((push) => push.type === "goal_stuck");
 	const stops = () =>
-		runtime.runPromise(
+		run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				return yield* sql<{
@@ -138,7 +124,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 			}),
 		);
 	const send = async (text: string) => {
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				const turns = yield* Effect.serviceOption(ProviderTurnServiceTag);
 				const inbox = yield* Effect.serviceOption(SessionInboxTag);
@@ -169,7 +155,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 			),
 		);
 		await vi.waitFor(async () => {
-			const [row] = await runtime.runPromise(
+			const [row] = await run(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					return yield* sql<{
@@ -198,7 +184,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		});
 		await vi.waitFor(
 			async () => {
-				const [row] = await runtime.runPromise(
+				const [row] = await run(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						return yield* sql<{
@@ -217,7 +203,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		await new Promise<void>((resolve) => setTimeout(resolve, 20));
 	};
 	try {
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				yield* (yield* projectSessionManager).createSession("Stuck goal", {
 					sessionId,
@@ -236,7 +222,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 			await verdict();
 			if (stuck) counted++;
 			if (counted === 5)
-				await runtime.runPromise(
+				await run(
 					Effect.gen(function* () {
 						const commit = yield* makeCommitAndSignal;
 						yield* commit([
@@ -257,7 +243,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		expect(await stops()).toEqual([]);
 		await verdict();
 		await vi.waitFor(async () => expect(await stops()).toHaveLength(1));
-		const [trigger] = await runtime.runPromise(
+		const [trigger] = await run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				return yield* sql<{
@@ -305,7 +291,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		await verdict(progress);
 		await vi.waitFor(async () => expect(await stops()).toHaveLength(3));
 		await vi.waitFor(() => expect(goalPushes()).toHaveLength(3));
-		const receipts = await runtime.runPromise(
+		const receipts = await run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				return yield* sql`SELECT alert_key, anchor, state FROM sent_alerts WHERE session_id = ${sessionId}
@@ -324,7 +310,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		);
 	} finally {
 		mkdirSync("test-results", { recursive: true });
-		const events = await runtime.runPromise(
+		const events = await run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				return yield* sql`SELECT type, data FROM events WHERE session_id = ${sessionId} ORDER BY sequence DESC LIMIT 15`;
@@ -337,6 +323,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 		closed = true;
 		emit(undefined);
 		await relay.stop();
+		vi.restoreAllMocks();
 		rmSync(root, { recursive: true, force: true, maxRetries: 3 });
 	}
 }, 30_000);

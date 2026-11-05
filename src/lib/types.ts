@@ -139,6 +139,17 @@ export interface FileContentResult {
 	path: string;
 }
 
+/** Test seam: in-process Claude session queries, title generation and forks. */
+export interface ClaudeSdkSeam {
+	readonly query: NonNullable<
+		import("./provider/claude/claude-provider-runtime.js").ClaudeProviderInstanceDeps["queryFactory"]
+	>;
+	readonly titleQuery: import("./provider/claude/claude-provider-runtime.js").ClaudeOneShotQueryFactory;
+	readonly fork: import("./provider/claude/claude-session-fork.js").ClaudeSessionForkSdk;
+	/** Agent transcript reads; defaults to the real SDK's. */
+	readonly subagentSdk?: import("./provider/claude/claude-subagent-materializer.js").ClaudeSubagentSdk;
+}
+
 /** Config for creating a per-project relay that receives attached sockets. */
 export interface ProjectRelayConfig {
 	/** Immediate cached environment snapshot; shell resolution runs in the background. */
@@ -233,13 +244,5 @@ export interface ProjectRelayConfig {
 	 * Directly supplied fakes run Claude sessions in-process.
 	 * Defaults to the real SDK.
 	 */
-	claudeSdk?: {
-		readonly query: NonNullable<
-			import("./provider/claude/claude-provider-runtime.js").ClaudeProviderInstanceDeps["queryFactory"]
-		>;
-		readonly titleQuery: import("./provider/claude/claude-provider-runtime.js").ClaudeOneShotQueryFactory;
-		readonly fork: import("./provider/claude/claude-session-fork.js").ClaudeSessionForkSdk;
-		/** Agent transcript reads; defaults to the real SDK's. */
-		readonly subagentSdk?: import("./provider/claude/claude-subagent-materializer.js").ClaudeSubagentSdk;
-	};
+	claudeSdk?: ClaudeSdkSeam;
 }
