@@ -137,6 +137,8 @@ export type InboxCommand =
 			readonly inputId: string;
 			readonly delivery: InputDelivery;
 			readonly request: InputRequest;
+			/** A head move's resend precedes what was sent while the move landed (82tn.51). */
+			readonly ahead?: boolean;
 	  }
 	| { readonly _tag: "Cancel"; readonly inputId: string }
 	| {
@@ -294,7 +296,7 @@ export function decideInbox(
 			const next =
 				view.interruptRequested && !view.limited
 					? view.interruptRequested
-					: paused
+					: paused || command.ahead
 						? undefined
 						: view.queued[0];
 			const handoff = next ?? { inputId, request };
@@ -1038,7 +1040,7 @@ export const SessionInboxLive = Layer.effect(
 			{ uninterruptible: "inherit" },
 		);
 
-		const submitHeld = (input: SessionInboxSubmitInput) =>
+		const submitHeld = (input: SessionInboxSubmitInput & { ahead?: boolean }) =>
 			Effect.gen(function* () {
 				const view = yield* readView(input.sessionId, input.inputId);
 				if (view.known) return { _tag: "Accepted" as const, events: [] };
@@ -1066,6 +1068,7 @@ export const SessionInboxLive = Layer.effect(
 					inputId: input.inputId,
 					delivery: input.delivery,
 					request,
+					...(input.ahead && { ahead: true }),
 				});
 				// Submit is only refused as a steer: a known id is accepted.
 				if (decision._tag === "Rejected") return decision;
@@ -1129,6 +1132,7 @@ export const SessionInboxLive = Layer.effect(
 						inputId: resendInputId(move.moveId),
 						delivery: "queue",
 						request: move.resend,
+						ahead: true,
 					});
 			});
 

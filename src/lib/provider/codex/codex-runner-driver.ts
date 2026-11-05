@@ -14,7 +14,10 @@ import type { TurnFacts } from "../runner/turn-facts.js";
 import { modelParameterChoices } from "../turn-settings.js";
 import { discoverCodex, discoverCodexEffect } from "./codex-discovery.js";
 import { codexAccountHome, prepareCodexAccount } from "./codex-home.js";
-import { readCodexNativeTurns } from "./codex-native-history.js";
+import {
+	readCodexNativeTurns,
+	readCodexRemovedTurns,
+} from "./codex-native-history.js";
 import {
 	readCodexSessionIdentity,
 	writeCodexSessionIdentity,
@@ -149,26 +152,16 @@ export const makeCodexRunnerDriver = (
 					const removed = new Set(
 						messages.slice(keptIndex + 1).map(({ turnId }) => turnId),
 					);
-					// 82tn.51: a head move took the cut's Run, and the Runs after it, off the Head when it
-					// landed. Their native turns come from their journalled rows, earliest first.
-					const offHead =
-						rewind.targetMessageId === undefined
-							? []
-							: yield* sql<{ nativeTurnId: string; threadId: string }>`
-								WITH RECURSIVE below(id) AS (
-									SELECT node_id FROM history_off_head WHERE session_id = ${input.sessionId}
-										AND source_table = 'messages' AND row_key = ${rewind.targetMessageId}
-									UNION SELECT n.id FROM history_nodes n JOIN below b
-										ON n.session_id = ${input.sessionId} AND n.parent_id = b.id
-								)
-								SELECT json_extract(e.metadata, '$.providerRefs.providerTurnId') AS nativeTurnId,
-									json_extract(e.metadata, '$.providerRefs.providerSessionId') AS threadId
-								FROM history_off_head h JOIN below b ON h.node_id = b.id
-								JOIN events e ON e.session_id = h.session_id AND e.type = 'message.created'
-									AND json_extract(e.data, '$.messageId') = h.row_key
-								WHERE h.session_id = ${input.sessionId} AND h.source_table = 'messages'
-									AND json_type(e.metadata, '$.providerRefs.providerTurnId') = 'text'
-								ORDER BY e.sequence`;
+					// 82tn.51: a head move took these rows off the path Codex holds; their native turns
+					// come from their journalled rows, earliest first. An outbox row written before the
+					// rewind listed them names only the cut.
+					const offHead = yield* readCodexRemovedTurns(
+						input.sessionId,
+						rewind.removedMessageIds ??
+							(rewind.targetMessageId === undefined
+								? []
+								: [rewind.targetMessageId]),
+					).pipe(Effect.provideService(SqlClient.SqlClient, sql));
 					const refs = yield* readCodexNativeTurns(input.sessionId).pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);

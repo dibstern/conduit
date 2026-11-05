@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { SessionBusy } from "../../../src/lib/contracts/limit-recovery.js";
 import type {
 	HeadLogEntry,
 	MoveIntent,
@@ -227,6 +228,33 @@ export const headMovesHandlers: StepHandler[] = [
 		match: /^the files at every move's target were pruned$/,
 		run: ({ world }) => {
 			scene(world.page).pruned = true;
+		},
+	},
+	{
+		// The page still shows the session idle; the server refuses the move (82tn.51).
+		name: "a turn started on another device",
+		match: /^another device has started a turn in the conversation$/,
+		run: ({ world }) => {
+			requireRpcControl(world.page).setStubs({
+				PreviewHeadMove: () => {
+					throw new SessionBusy({
+						sessionId,
+						command: "head_move",
+						reason: "run_active",
+					});
+				},
+			});
+		},
+	},
+	{
+		name: "the conversation did not move",
+		match: /^the conversation did not move$/,
+		run: ({ world }) => {
+			const tags = requireRpcControl(world.page)
+				.getRequests()
+				.map((request) => request.tag);
+			expect(tags).toContain("PreviewHeadMove");
+			expect(tags).not.toContain("CommitHeadMove");
 		},
 	},
 	{

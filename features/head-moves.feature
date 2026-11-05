@@ -103,3 +103,16 @@ Examples:
   | viewport | reply | messageId | text                    |
   | phone    | 1     | hm-user-1 | Draft the release notes |
   | desktop  | 1     | hm-user-1 | Draft the release notes |
+
+Scenario Outline: a move refused because a turn started elsewhere says why and moves nothing
+  Given the viewport is a <viewport>
+  And a branched conversation is open
+  And another device has started a turn in the conversation
+  When I regenerate the reply from the message menu of reply <reply>
+  Then a notice says <notice>
+  And the conversation did not move
+
+Examples:
+  | viewport | reply | notice                       |
+  | phone    | 2     | Stop the current turn first. |
+  | desktop  | 2     | Stop the current turn first. |
