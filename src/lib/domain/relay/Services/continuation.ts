@@ -48,6 +48,7 @@ import {
 } from "../../../persistence/events.js";
 import type { SessionRow } from "../../../persistence/read-model-types.js";
 import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
+import { previewFreshHandoff } from "../../../provider/switch-handoff.js";
 import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
@@ -68,6 +69,7 @@ import {
 import { admitOrRefuse, applySessionCommand } from "./session-command.js";
 import { SessionInboxTag } from "./session-inbox.js";
 import { getAgent, type OverridesStateTag } from "./session-overrides-state.js";
+import { loadServerSessionPick } from "./session-pick.js";
 
 type UsageLimitedEvent = Extract<
 	CanonicalEvent,
@@ -126,13 +128,28 @@ const continuationPlanner = (account: Account) => {
 					firstMessageIncluded: false,
 					tokens: 0,
 				} satisfies HandoffSummary);
-		case "opencode":
+		// ad4c: Cursor cannot resume a native thread across a switch, so it
+		// always starts fresh with the full kept history.
 		case "cursor":
+			return (session: Parameters<typeof previewContinuationForAccount>[0]) =>
+				Effect.flatMap(ReadQueryEffectTag, (read) =>
+					previewFreshHandoff(read, session.id),
+				);
+		case "opencode":
 			return undefined;
 		default:
 			return assertNever(account);
 	}
 };
+
+/** Drivers whose sends carry a handoff from the store, so a switch may cross between them. */
+const handoffDrivers: ReadonlySet<Account["driver"]> = new Set([
+	"claude",
+	"cursor",
+]);
+const switchable = (source: Account, target: Account) =>
+	source.driver === target.driver ||
+	(handoffDrivers.has(source.driver) && handoffDrivers.has(target.driver));
 
 // A read still running when the probe stopped waiting answers nothing, so the
 // prior reading it carries can't refuse.
@@ -171,7 +188,7 @@ export const previewContinuation = (
 				? account
 				: yield* directory.resolve({ _tag: "Id", id: session.provider });
 		const planner = continuationPlanner(account);
-		if (!planner || source.driver !== account.driver)
+		if (!planner || !switchable(source, account))
 			return yield* new DriverMismatch({ sessionId, instanceId });
 		return yield* planner(session);
 	});
@@ -197,6 +214,7 @@ export interface Continuation {
 		| Effect.Error<ReturnType<typeof previewContinuation>>
 		| Effect.Error<ReturnType<typeof applySessionCommand>>
 		| Effect.Error<ReturnType<typeof preWarmSession>>
+		| Effect.Error<ReturnType<typeof loadServerSessionPick>>
 		| Effect.Error<
 				ReturnType<
 					Context.Service.Shape<typeof OrchestrationEngineTag>["dispatchEffect"]
@@ -211,6 +229,7 @@ export interface Continuation {
 		| Effect.Services<ReturnType<typeof previewContinuation>>
 		| Effect.Services<ReturnType<typeof applySessionCommand>>
 		| Effect.Services<ReturnType<typeof preWarmSession>>
+		| Effect.Services<ReturnType<typeof loadServerSessionPick>>
 	>;
 	/** The supplied projector joins runner intake's existing claimed transaction. */
 	readonly intakeLimit: (
@@ -343,7 +362,7 @@ export const makeContinuation = Effect.gen(function* () {
 							id: initialSession.provider,
 						});
 			const planner = continuationPlanner(account);
-			if (!planner || source.driver !== account.driver)
+			if (!planner || !switchable(source, account))
 				return yield* new DriverMismatch({
 					sessionId,
 					instanceId: options.instanceId,
@@ -386,6 +405,7 @@ export const makeContinuation = Effect.gen(function* () {
 						yield* admitOrRefuse(sessionId, {
 							kind: "provider_switch",
 							policy: Boolean(policy),
+							crossDriver: source.driver !== account.driver,
 						});
 					// The command's own request in flight, not the session's state.
 					if (!ownRequest && requesting.has(sessionId))
@@ -444,8 +464,11 @@ export const makeContinuation = Effect.gen(function* () {
 							// native due-time sign-in and missing-reset checks.
 							// Shutdown may interrupt the probe, but an accepted resume must
 							// reach the existing turn dispatcher before this fiber stops.
+							// An account without a usage reader (a Cursor account with no
+							// usage binding) has no reading to refuse with (ad4c).
 							const decision =
 								options.at === undefined &&
+								account.usageEligible &&
 								(!due || due.autoResume || account.driver === "codex")
 									? yield* restore(
 											Effect.flatMap(Usage, (usage) =>
@@ -648,6 +671,15 @@ export const makeContinuation = Effect.gen(function* () {
 									if (switched) {
 										// Complete every refusal decision before any canonical write.
 										yield* planner(session);
+										// The target driver cannot run the source's model, so its
+										// account default joins the switch record (ad4c).
+										const pick =
+											source.driver === account.driver
+												? undefined
+												: yield* loadServerSessionPick(
+														account.driver,
+														account.id,
+													);
 										yield* applySessionCommand(
 											{
 												type: "session.provider_changed",
@@ -658,7 +690,7 @@ export const makeContinuation = Effect.gen(function* () {
 													reason: options.reason,
 												},
 											},
-											{ project },
+											{ project, ...(pick ? { pick } : {}) },
 										);
 									} else
 										yield* project(

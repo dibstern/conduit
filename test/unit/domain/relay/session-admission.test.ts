@@ -87,6 +87,38 @@ describe("admitSessionCommand", () => {
 		);
 	});
 
+	// ad4c: the other driver cannot answer the old one's prompt or take its queue.
+	it("refuses a user's cross-driver switch while a prompt is open or inputs wait", () => {
+		const cross = {
+			kind: "provider_switch",
+			policy: false,
+			crossDriver: true,
+		} as const;
+		expect(admitSessionCommand(cross, idle)).toBeUndefined();
+		expect(admitSessionCommand(cross, { ...idle, limitRecovery: true })).toBe(
+			undefined,
+		);
+		expect(
+			admitSessionCommand(cross, { ...idle, interactionPending: true }),
+		).toBe("interaction_pending");
+		expect(admitSessionCommand(cross, { ...idle, inputsQueued: true })).toBe(
+			"inputs_queued",
+		);
+		expect(
+			admitSessionCommand(cross, {
+				...idle,
+				runActive: true,
+				interactionPending: true,
+			}),
+		).toBe("run_active");
+		expect(
+			admitSessionCommand(
+				{ ...cross, policy: true },
+				{ ...idle, interactionPending: true, inputsQueued: true },
+			),
+		).toBeUndefined();
+	});
+
 	it("lets the limit policy's continuation past a Run, not past a head move (82tn.51)", () => {
 		const policy = { kind: "provider_switch", policy: true } as const;
 		expect(

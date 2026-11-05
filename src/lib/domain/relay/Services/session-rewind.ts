@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import { SessionBusy } from "../../../contracts/limit-recovery.js";
+import {
+	FilesRefused,
+	SessionBusy,
+} from "../../../contracts/limit-recovery.js";
 import type { InputRequest } from "../../../contracts/stored-event.js";
 import type { HeadLogEntry, MoveIntent } from "../../../contracts/ws-rpc.js";
 import {
@@ -11,6 +14,7 @@ import {
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { EventPayloadMap } from "../../../persistence/events.js";
 import { headMoveFiles } from "../../daemon/Services/folder-timeline.js";
+import { planFiles, restoreFiles } from "./head-move-files.js";
 import { InputDraftsTag } from "./input-drafts.js";
 import { LoggerTag } from "./services.js";
 import { admitOrRefuse, startHeadMove } from "./session-command.js";
@@ -81,10 +85,6 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 			SELECT json_extract(data, '$.moveId') AS id FROM events
 			WHERE session_id = ${sessionId} AND type = 'head.move_started'
 			ORDER BY sequence DESC LIMIT 1`;
-		const moveId = createHash("sha256")
-			.update(JSON.stringify([sessionId, head, last?.id ?? null, intent]))
-			.digest("hex")
-			.slice(0, 32);
 		const nodeRows = (node: string | null) =>
 			sql<{ id: string; role: string; text: string }>`
 				SELECT id, role, text FROM messages
@@ -157,15 +157,37 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 					WHERE session_id = ${sessionId} AND node_id = ${target.to} AND source_table = 'messages'
 					LIMIT 1`;
 		const filesAt = "filesAt" in target ? target.filesAt : tip?.id;
-		return {
-			moveId,
-			head,
-			target,
-			files:
-				filesAt === undefined
-					? ("available" as const)
-					: yield* headMoveFiles(sessionId, filesAt),
-		};
+		const files =
+			filesAt === undefined
+				? ("available" as const)
+				: yield* headMoveFiles(sessionId, filesAt);
+		// 82tn.53: a move with files needs them kept at the target, and plans each folder it restores.
+		if (intent.withFiles && files !== "available")
+			return yield* new FilesRefused({ sessionId, reason: files });
+		const folders = intent.withFiles
+			? yield* planFiles(
+					sessionId,
+					head,
+					target.to,
+					intent._tag === "undo" ? intent.moveId : undefined,
+				)
+			: undefined;
+		// A folder's plan joins the id, so a proposal the folder moved past no longer matches.
+		const moveId = createHash("sha256")
+			.update(
+				JSON.stringify([
+					sessionId,
+					head,
+					last?.id ?? null,
+					intent,
+					...(folders
+						? [folders.map(({ directory, to, key }) => [directory, to, key])]
+						: []),
+				]),
+			)
+			.digest("hex")
+			.slice(0, 32);
+		return { moveId, head, target, files, folders };
 	});
 
 /** A proposal for an intent: its id and whether the files there are kept (82tn.51). */
@@ -173,7 +195,20 @@ export const previewHeadMove = (sessionId: string, intent: MoveIntent) =>
 	Effect.gen(function* () {
 		const plan = yield* planHeadMove(sessionId, intent);
 		yield* admitOrRefuse(sessionId, { kind: "head_move" });
-		return { moveId: plan.moveId, files: plan.files };
+		return {
+			moveId: plan.moveId,
+			files: plan.files,
+			...(plan.folders
+				? {
+						restore: {
+							folders: plan.folders.map(({ directory, changes }) => ({
+								directory,
+								changes,
+							})),
+						},
+					}
+				: {}),
+		};
 	});
 
 /**
@@ -222,8 +257,8 @@ export const commitHeadMove = ({
 						reason: "head_move_stale",
 					});
 				yield* admitOrRefuse(sessionId, { kind: "head_move" });
-				const { target } = plan;
-				const move = yield* startHeadMove(sessionId, row.provider, {
+				const { target, folders = [] } = plan;
+				const start = startHeadMove(sessionId, row.provider, {
 					moveId,
 					kind: target.kind,
 					from: plan.head,
@@ -231,7 +266,16 @@ export const commitHeadMove = ({
 					...("messageId" in target ? { messageId: target.messageId } : {}),
 					...(intent._tag === "undo" ? { undoes: intent.moveId } : {}),
 					...(resend ? { resend } : {}),
+					...(folders.length > 0
+						? { files: folders.map(({ directory }) => directory) }
+						: {}),
 				});
+				// 82tn.53: the files are restored before the move is journalled started, so a move
+				// in the log always has its files; a crash before that rolls them back at startup.
+				const move =
+					folders.length > 0
+						? yield* restoreFiles(sessionId, moveId, folders, start)
+						: yield* start;
 				return { move, inputs: target.inputs };
 			}),
 		);

@@ -146,7 +146,12 @@ export interface SessionCommandFacts {
 export type SessionCommandRequest =
 	| { readonly kind: "head_move" | "fork" }
 	/** `policy`: the limit policy's own continuation of the current cut-off. */
-	| { readonly kind: "provider_switch"; readonly policy: boolean };
+	| {
+			readonly kind: "provider_switch";
+			readonly policy: boolean;
+			/** The target runs on another driver, which starts from a handoff (ad4c). */
+			readonly crossDriver?: boolean;
+	  };
 
 /** The one admission for the commands the ledger does not own; undefined admits. */
 export const admitSessionCommand = (
@@ -160,7 +165,15 @@ export const admitSessionCommand = (
 			return undefined;
 		// A switch starts its continuation turn on the next account, so only a Run refuses it.
 		case "provider_switch":
-			return facts.runActive && !request.policy ? "run_active" : undefined;
+			if (request.policy) return undefined;
+			if (facts.runActive) return "run_active";
+			// ad4c: another driver could not answer an open prompt or take the
+			// queued inputs the old one holds, so a user's cross-driver switch waits.
+			if (request.crossDriver && facts.interactionPending)
+				return "interaction_pending";
+			return request.crossDriver && facts.inputsQueued
+				? "inputs_queued"
+				: undefined;
 		case "head_move":
 			if (facts.runActive) return "run_active";
 			if (facts.interactionPending) return "interaction_pending";
@@ -373,6 +386,7 @@ export interface SessionUpstreamAdapter {
 }
 
 export type ApplySessionCommandOptions = {
+	/** A new session's pick, or a cross-driver switch's target pick (ad4c). */
 	readonly pick?: TurnSettings;
 	readonly source?: AutoTitleSource;
 	/**
@@ -579,7 +593,9 @@ export const applySessionCommand = (
 								metadata,
 							)
 						: canonicalEvent(command.type, sessionId, command.data, metadata),
-					...(command.type === "session.created" && options.pick
+					...((command.type === "session.created" ||
+						command.type === "session.provider_changed") &&
+					options.pick
 						? sessionPickEvents(sessionId, options.pick)
 						: []),
 				];

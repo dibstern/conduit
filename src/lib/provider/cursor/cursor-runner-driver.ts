@@ -588,6 +588,9 @@ export const makeCursorRunnerDriver = (
 							? { _tag: "Resolved", params: choice.success.values }
 							: { _tag: "SignedOut" },
 						...(typeof digest === "string" ? { forkDigest: digest } : {}),
+						...(input.switchHandoff
+							? { switchHandoff: input.switchHandoff }
+							: {}),
 					};
 					return {
 						cursorCredential: credential,

@@ -1,5 +1,6 @@
 <!--
-  Rewind selection and confirmation. A rewind lands at once and the Head Log undoes it (82tn.51).
+  Rewind selection and confirmation. A rewind lands at once and the Head Log undoes it (82tn.51);
+  it takes the files back too, or says why it cannot (82tn.53).
 -->
 <script lang="ts">
 	import Button from "../ui/Button.svelte";
@@ -11,18 +12,10 @@
 		showToast,
 	} from "../../stores/ui.svelte.js";
 	import { chatState } from "../../stores/chat.svelte.js";
-	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
-	import { getDriverTraits } from "../../stores/instance.svelte.js";
-	import { findSession, sessionState } from "../../stores/session.svelte.js";
-	import { rewindTo } from "../../stores/head-moves.svelte.js";
-	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { sessionState } from "../../stores/session.svelte.js";
+	import { planRewindFiles, rewindTo } from "../../stores/head-moves.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 
-	const restoresFiles = $derived(
-		sessionState.currentId !== null
-			? getDriverTraits(getAvailableInstances().find((instance) => instance.id === findSession(sessionState.currentId ?? "")?.accountId)?.driver)?.supportsFileRewind ?? true
-			: true,
-	);
 	const showBanner = $derived(uiState.rewindActive);
 	const showModal = $derived(
 		showBanner && uiState.rewindSelectedUuid !== null,
@@ -32,19 +25,18 @@
 		const message = chatState.messages.find((message) => message.uuid === uiState.rewindSelectedUuid);
 		return message && "messageId" in message ? message.messageId : undefined;
 	});
-	// Rewind moves only the conversation, so a pruned point stays a valid target.
-	let filesPruned = $state(false);
+	// 82tn.53: the rewind with files, previewed on open: its Restore Plan (the paths that change),
+	// or why the files cannot go back. The conversation-only rewind stays open either way.
+	let files = $state<{ paths: string[] } | { refused: string } | undefined>();
 	$effect(() => {
 		const sessionId = sessionState.currentId;
 		const messageId = selectedMessageId;
-		filesPruned = false;
+		files = undefined;
 		if (!showModal || !sessionId || !messageId) return;
 		let current = true;
-		rpc("GetHeadMoveFiles", { sessionId, messageId })
-			.then(({ files }) => {
-				if (current) filesPruned = files === "pruned";
-			})
-			.catch(() => {});
+		void planRewindFiles(sessionId, messageId).then((plan) => {
+			if (current) files = plan;
+		});
 		return () => {
 			current = false;
 		};
@@ -58,7 +50,7 @@
 		selectRewindMessage(null);
 	}
 
-	function handleConfirm(): void {
+	function handleConfirm(withFiles: boolean): void {
 		const sessionId = sessionState.currentId;
 		const messageId = selectedMessageId;
 		if (!uiState.rewindSelectedUuid || !sessionId) return;
@@ -71,7 +63,7 @@
 			return;
 		}
 		// A head move like the transcript's (82tn.51): it lands at once and the Head Log undoes it.
-		void rewindTo(sessionId, messageId);
+		void rewindTo(sessionId, messageId, withFiles);
 	}
 
 	function handleKeydown(e: KeyboardEvent): void {
@@ -117,16 +109,30 @@
 		<p class="mb-3 text-sm text-text-secondary">
 			This message and everything after it will be removed. Every move can be undone from the Head Log.
 		</p>
-		<p class="mb-5 text-sm text-text-secondary">
-			{filesPruned
-				? "Files from this point were pruned."
-				: restoresFiles
-					? "Files are restored to this point."
-					: "Files are not restored."}
-		</p>
+		<div class="mb-5">
+			<p id="rewind-files-status" role="status" class="mb-2 text-sm text-text-secondary">
+				{files === undefined
+					? "Checking the files…"
+					: "refused" in files
+						? files.refused
+						: files.paths.length > 0
+							? "With files, these change:"
+							: "No files change."}
+			</p>
+			{#if files && "paths" in files && files.paths.length > 0}
+				<ul
+					aria-label="Files that change"
+					class="max-h-40 overflow-y-auto font-mono text-xs text-text-secondary break-all"
+				>
+					{#each files.paths as path (path)}
+						<li>{path}</li>
+					{/each}
+				</ul>
+			{/if}
+		</div>
 
-		<!-- Action buttons -->
-		<div class="flex gap-2 justify-end">
+		<!-- Action buttons; they wrap on a phone. -->
+		<div class="flex flex-wrap gap-2 justify-end">
 			<Button
 				variant="secondary"
 				tone="muted"
@@ -137,12 +143,22 @@
 				Cancel
 			</Button>
 			<Button
+				variant="secondary"
+				size="content"
+				class="rounded-lg py-1.5 px-4 text-base"
+				onclick={() => handleConfirm(false)}
+			>
+				Conversation only
+			</Button>
+			<Button
 				variant="primary"
 				size="content"
 				class="rounded-lg py-1.5 px-4 text-base font-medium"
-				onclick={handleConfirm}
+				disabled={files === undefined || "refused" in files}
+				aria-describedby={files && "refused" in files ? "rewind-files-status" : undefined}
+				onclick={() => handleConfirm(true)}
 			>
-				Rewind
+				Rewind conversation and files
 			</Button>
 		</div>
 	</Surface>

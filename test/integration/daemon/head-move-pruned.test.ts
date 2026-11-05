@@ -222,6 +222,12 @@ describe("Head moves into pruned history through the built daemon", () => {
 		expect(fork.forkedFrom).toBe(sent);
 		evidence["forkPrompts"] = await prompts(fork.sessionId);
 		expect(evidence["forkPrompts"]).toEqual(["sent-first.txt"]);
+		// A point the fork inherited has no checkpoints of its own: not available, not pruned (82tn.53).
+		evidence["forkFiles"] = await files(
+			fork.sessionId,
+			await userMessage(fork.sessionId, "sent-first.txt"),
+		);
+		expect(evidence["forkFiles"]).toBe("not_available");
 
 		// The send after an eviction that landed between choosing the rewind and
 		// sending commits the rewind (1) and runs as a new turn (3).

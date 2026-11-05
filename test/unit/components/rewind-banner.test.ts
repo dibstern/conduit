@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FilesRefused } from "../../../src/lib/contracts/limit-recovery.js";
 import RewindBanner from "../../../src/lib/frontend/components/overlays/RewindBanner.svelte";
 import {
 	chatState,
@@ -7,33 +8,45 @@ import {
 	getOrCreateSessionActivity,
 	getOrCreateSessionMessages,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import {
-	clearInstanceState,
-	instanceState,
-} from "../../../src/lib/frontend/stores/instance.svelte.js";
+import { clearInstanceState } from "../../../src/lib/frontend/stores/instance.svelte.js";
 import {
 	applyTranscriptEnvelope,
 	deriveTranscriptMessages,
 } from "../../../src/lib/frontend/stores/transcript.svelte.js";
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
-import { applySessionChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
-// 82tn.51: the banner's rewind is a head move, previewed then committed; files are asked first.
+// 82tn.51: the banner's rewind is a head move, previewed then committed. 82tn.53: on open it
+// previews the rewind with files, for the Restore Plan or the reason the files cannot go back.
+// Failure modes: the plan's paths are not listed; the files control stays enabled over a
+// refusal, or its reason is not tied to it for a screen reader; a refusal of the files also
+// blocks the conversation-only rewind; the files control commits without withFiles.
 const rpcSpy = vi.hoisted(() =>
 	vi.fn<(tag: string, input: unknown) => Promise<unknown>>((tag) =>
 		Promise.resolve(
-			tag === "GetHeadMoveFiles"
-				? { files: "available" }
-				: tag === "PreviewHeadMove"
-					? { moveId: "move-1", files: "available" }
-					: { moveId: "move-1" },
+			tag === "PreviewHeadMove"
+				? {
+						moveId: "move-1",
+						files: "available",
+						restore: {
+							folders: [
+								{
+									directory: "/repo",
+									changes: [
+										{ path: "notes.md", change: "modified" },
+										{ path: "docs/new.md", change: "deleted" },
+									],
+								},
+							],
+						},
+					}
+				: { moveId: "move-1" },
 		),
 	),
 );
-const moves = () =>
-	rpcSpy.mock.calls.filter(([tag]) => tag !== "GetHeadMoveFiles");
+/** The calls after the dialog's opening plan. */
+const moves = () => rpcSpy.mock.calls.slice(1);
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
@@ -81,34 +94,32 @@ describe("RewindBanner", () => {
 		uiState.rewindSelectedUuid = null;
 	});
 
-	it("says files are not restored for an OpenCode session", () => {
-		instanceState.instances = [
+	it("lists the paths a rewind with files changes, and rewinds with files", async () => {
+		const { findByRole, getByRole } = render(RewindBanner);
+
+		const paths = await findByRole("list", { name: "Files that change" });
+		expect(rpcSpy.mock.calls[0]).toEqual([
+			"PreviewHeadMove",
 			{
-				id: "opencode",
-				name: "OpenCode",
-				driver: "opencode",
-				status: "healthy",
-				port: 0,
-				managed: false,
-				restartCount: 0,
-				createdAt: 0,
+				sessionId: "session-1",
+				intent: { _tag: "rewind", messageId: "provider-1", withFiles: true },
 			},
-		];
-		applySessionChange({
-			_tag: "snapshot",
-			sequence: 1,
-			rows: [
-				{
-					id: "session-1",
-					title: "Rewind",
-					projectSlug: "project-a",
-					accountId: "opencode",
-					status: "idle",
-				},
-			],
-		});
-		const { getByText } = render(RewindBanner);
-		expect(getByText("Files are not restored.")).toBeTruthy();
+		]);
+		expect(paths.textContent).toContain("notes.md");
+		expect(paths.textContent).toContain("docs/new.md");
+		await fireEvent.click(
+			getByRole("button", { name: "Rewind conversation and files" }),
+		);
+		const intent = { _tag: "rewind", messageId: "provider-1", withFiles: true };
+		await waitFor(() =>
+			expect(moves()).toEqual([
+				["PreviewHeadMove", { sessionId: "session-1", intent }],
+				[
+					"CommitHeadMove",
+					{ sessionId: "session-1", intent, moveId: "move-1" },
+				],
+			]),
+		);
 	});
 
 	it("says the Head Log undoes the rewind for an event-seeded target", () => {
@@ -144,13 +155,12 @@ describe("RewindBanner", () => {
 				"This message and everything after it will be removed. Every move can be undone from the Head Log.",
 			),
 		).toBeTruthy();
-		expect(getByText("Files are restored to this point.")).toBeTruthy();
 	});
 
 	it("rewinds as a head move: previews it, then commits the preview", async () => {
 		const { getByRole } = render(RewindBanner);
 
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 
 		const intent = { _tag: "rewind", messageId: "provider-1" };
 		await waitFor(() =>
@@ -166,26 +176,28 @@ describe("RewindBanner", () => {
 		expect(uiState.rewindSelectedUuid).toBeNull();
 	});
 
-	it("says the files at a pruned point were pruned once, and keeps Rewind enabled", async () => {
-		rpcSpy.mockImplementation((tag) =>
-			Promise.resolve(
-				tag === "CommitHeadMove"
-					? { moveId: "move-1" }
-					: { moveId: "move-1", files: "pruned" },
+	it("says the files at a pruned point were pruned once, and still rewinds the conversation", async () => {
+		rpcSpy.mockImplementation((_tag, input) =>
+			(input as { intent?: { withFiles?: boolean } }).intent?.withFiles
+				? Promise.reject(
+						new FilesRefused({ sessionId: "session-1", reason: "pruned" }),
+					)
+				: Promise.resolve({ moveId: "move-1", files: "pruned" }),
+		);
+		const { getByRole } = render(RewindBanner);
+
+		await waitFor(() =>
+			expect(getByRole("status").textContent?.trim()).toBe(
+				"Files from this point were pruned.",
 			),
 		);
-		const { findByText, getByRole, queryByText } = render(RewindBanner);
-
-		expect(await findByText("Files from this point were pruned.")).toBeTruthy();
-		expect(rpcSpy).toHaveBeenCalledWith("GetHeadMoveFiles", {
-			sessionId: "session-1",
-			messageId: "provider-1",
+		const reason = getByRole("status");
+		const files = getByRole("button", {
+			name: "Rewind conversation and files",
 		});
-		expect(queryByText("Files are not restored.")).toBeNull();
-		expect(queryByText("Files are restored to this point.")).toBeNull();
-		const rewind = getByRole("button", { name: "Rewind" });
-		expect(rewind.hasAttribute("disabled")).toBe(false);
-		await fireEvent.click(rewind);
+		expect(files.hasAttribute("disabled")).toBe(true);
+		expect(files.getAttribute("aria-describedby")).toBe(reason.id);
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 		await waitFor(() =>
 			expect(moves().map(([tag]) => tag)).toEqual([
 				"PreviewHeadMove",
@@ -210,7 +222,7 @@ describe("RewindBanner", () => {
 			},
 		];
 		const { getByRole } = render(RewindBanner);
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 		await waitFor(() =>
 			expect(moves()[1]).toEqual([
 				"CommitHeadMove",
@@ -230,7 +242,7 @@ describe("RewindBanner", () => {
 			{ type: "user", uuid: "message-1", text: "Pending" },
 		];
 		const { getByRole } = render(RewindBanner);
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 		expect(rpcSpy).not.toHaveBeenCalled();
 		expect(chatState.messages).toHaveLength(1);
 		expect(uiState.rewindActive).toBe(false);
@@ -243,13 +255,11 @@ describe("RewindBanner", () => {
 	});
 
 	it("keeps the transcript and reports a refused move", async () => {
-		rpcSpy.mockImplementation((tag) =>
-			tag === "GetHeadMoveFiles"
-				? Promise.resolve({ files: "available" })
-				: Promise.reject(new Error("Target not found")),
+		rpcSpy.mockImplementation(() =>
+			Promise.reject(new Error("Target not found")),
 		);
 		const { getByRole } = render(RewindBanner);
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 		await waitFor(() =>
 			expect(uiState.toasts).toEqual([
 				expect.objectContaining({
@@ -269,13 +279,9 @@ describe("RewindBanner", () => {
 		const refused = new Promise((_, reject) => {
 			refuse = reject;
 		});
-		rpcSpy.mockImplementation((tag) =>
-			tag === "GetHeadMoveFiles"
-				? Promise.resolve({ files: "available" })
-				: refused,
-		);
+		rpcSpy.mockImplementation(() => refused);
 		const { getByRole } = render(RewindBanner);
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 		await waitFor(() =>
 			expect(moves().map(([tag]) => tag)).toEqual(["PreviewHeadMove"]),
 		);
@@ -312,7 +318,7 @@ describe("RewindBanner", () => {
 			{ type: "user", uuid: "after", text: "Remove this too" },
 		];
 		const { getByRole } = render(RewindBanner);
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await fireEvent.click(getByRole("button", { name: "Conversation only" }));
 		await waitFor(() => expect(land).toBeTypeOf("function"));
 		expect(chatState.messages).toHaveLength(3);
 		land({ moveId: "move-1" });
