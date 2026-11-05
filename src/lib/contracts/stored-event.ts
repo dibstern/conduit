@@ -717,7 +717,12 @@ export const CanonicalEvents = {
 		),
 	),
 	"run.requested": live(
-		Schema.Struct({ runId: Schema.String, inputId: Schema.String }),
+		Schema.Struct({
+			runId: Schema.String,
+			inputId: Schema.String,
+			/** The folder the Run is launched in: its tool rows' folder, on a replay too (82tn.65). */
+			folder: Schema.optionalKey(Schema.String),
+		}),
 	),
 	"run.dispatched": live(
 		Schema.Struct({
