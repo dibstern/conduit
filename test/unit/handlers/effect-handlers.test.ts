@@ -2734,7 +2734,9 @@ describe("handleDeleteSession", () => {
 			}).pipe(
 				Effect.provide(layer, { local: true }),
 				Effect.tap(() => Effect.sync(() => {
-					expect(deleteSession).toHaveBeenCalledWith("deleted-session");
+					expect(deleteSession).toHaveBeenCalledWith("deleted-session", {
+				closeCommandId: expect.any(String),
+			});
 					expect(listSessions).not.toHaveBeenCalled();
 					expect(ws.setClientSession).not.toHaveBeenCalled();
 					expect(log.info).not.toHaveBeenCalled();
@@ -2779,7 +2781,9 @@ describe("handleDeleteSession", () => {
 				Effect.provide(layer, { local: true }),
 				Effect.tap(() => Effect.sync(() => {
 					expect(ws.getClientsForSession).not.toHaveBeenCalled();
-					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session");
+					expect(serviceDeleteSession).toHaveBeenCalledWith("deleted-session", {
+				closeCommandId: expect.any(String),
+			});
 					expect(legacyDeleteSession).not.toHaveBeenCalled();
 					expect(serviceListSessions).not.toHaveBeenCalled();
 					expect(legacyListSessions).not.toHaveBeenCalled();

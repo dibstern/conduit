@@ -1,4 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { Effect, PubSub, Result } from "effect";
+import { SqlClient } from "effect/sql";
 import { accountRefFromSelection } from "../account-directory.js";
 import type { Account, AccountRef } from "../contracts/account.js";
 import type { AccountId } from "../contracts/provider-instance.js";
@@ -33,8 +35,11 @@ import {
 	prepareSessionWorktreeDeletion,
 } from "../domain/relay/Services/session-worktree-deletion.js";
 import * as Failure from "../effect/failure-classification.js";
+import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
+import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { loadLedger } from "../persistence/effect/run-ledger-arm.js";
+import { canonicalEvent } from "../persistence/events.js";
 import { messageRowsToHistory } from "../persistence/session-history-adapter.js";
 import { closeConfirm } from "../provider/run-ledger/run-ledger-decider.js";
 import {
@@ -399,6 +404,11 @@ export const deleteSessionForClient = ({
 			ledger === undefined ? undefined : closeConfirm(ledger.state, confirm);
 		if (snapshotEntry !== undefined)
 			return yield* new DeleteNeedsConfirm({ snapshotEntry });
+		// Test seam: widens the gap between this check and the delete's close.
+		if (process.env["NODE_ENV"] === "test")
+			yield* Effect.sleep(
+				Number(process.env["CONDUIT_TEST_DELETE_CHECK_DELAY_MS"] ?? 0),
+			);
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const deletion = Effect.gen(function* () {
 			const sessionManagerService = yield* projectSessionManager;
@@ -418,10 +428,40 @@ export const deleteSessionForClient = ({
 				),
 			);
 
-			const didDelete = yield* confirm === undefined
-				? sessionManagerService.deleteSession(id)
-				: sessionManagerService.deleteSession(id, { confirmed: confirm });
-			if (!didDelete) return [];
+			const closeCommandId = randomUUID();
+			const didDelete = yield* sessionManagerService.deleteSession(id, {
+				closeCommandId,
+				...(confirm === undefined ? {} : { confirmed: confirm }),
+			});
+			if (!didDelete) {
+				// 8.4 2880: a snapshot after the check above held the close, so the session stays.
+				// Gap (2870-2899 give the gate no cancel): the delete withdraws its close and asks again.
+				const sql = yield* SqlClient.SqlClient;
+				const [held] = yield* sql<{ held: number }>`
+					SELECT 1 AS held FROM provider_command_outbox
+					WHERE command_id = ${closeCommandId} AND status = 'held'`;
+				if (held === undefined) return [];
+				const store = yield* EventStoreEffectTag;
+				yield* (yield* makeCommitAndSignal).write((project) =>
+					Effect.gen(function* () {
+						yield* project(
+							yield* store.appendBatch([
+								canonicalEvent("escalation.dismissed", id, {
+									commandId: closeCommandId,
+								}),
+							]),
+						);
+					}),
+				);
+				const latest = yield* loadLedger(id);
+				const snapshotEntry =
+					latest === undefined
+						? undefined
+						: closeConfirm(latest.state, confirm);
+				if (snapshotEntry !== undefined)
+					return yield* new DeleteNeedsConfirm({ snapshotEntry });
+				return [];
+			}
 
 			log.info(`client=${clientId} Deleted: ${id}`);
 			const warnings = inspection.warnings;

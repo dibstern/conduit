@@ -494,9 +494,13 @@ const commandFor = (
 						snapshotEntry: event.data.snapshotEntry,
 					},
 				};
-			// Gap: 8.4 (2870-2899) gives the gate no cancel; a withdrawn send drops its held close.
-			case "input.cancelled": {
-				const commandId = `inbox-close:${event.data.inputId}`;
+			// Gap: 8.4 (2870-2899) gives the gate no cancel; a withdrawn send or delete drops its held close.
+			case "input.cancelled":
+			case "escalation.dismissed": {
+				const commandId =
+					event.type === "input.cancelled"
+						? `inbox-close:${event.data.inputId}`
+						: event.data.commandId;
 				const [held] = yield* sql<{ command_id: string }>`
 					SELECT command_id FROM provider_command_outbox
 					WHERE command_id = ${commandId} AND status = 'held'`;
@@ -769,6 +773,7 @@ const HANDLES = [
 	"session.end_requested",
 	"tasks.stop_requested",
 	"escalation.confirmed",
+	"escalation.dismissed",
 	"input.cancelled",
 	"native_command.requested",
 	"evidence.process_started",

@@ -241,6 +241,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Committed by the browser's confirm of a stuck Stop",
 	},
+	"escalation.dismissed": {
+		produced: false,
+		reason: "Committed by a delete that withdraws its held close",
+	},
 	"native_command.requested": {
 		produced: false,
 		reason: "Committed by the provider control outbox",
