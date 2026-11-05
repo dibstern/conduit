@@ -264,6 +264,30 @@ describe("RewindBanner", () => {
 		rpcSpy.mockReset();
 	});
 
+	it("does not report a refusal once the user has moved to another session", async () => {
+		let refuse!: (error: Error) => void;
+		const refused = new Promise((_, reject) => {
+			refuse = reject;
+		});
+		rpcSpy.mockImplementation((tag) =>
+			tag === "GetHeadMoveFiles"
+				? Promise.resolve({ files: "available" })
+				: refused,
+		);
+		const { getByRole } = render(RewindBanner);
+		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await waitFor(() =>
+			expect(moves().map(([tag]) => tag)).toEqual(["PreviewHeadMove"]),
+		);
+		openSessionForSetup("session-2", "project-a");
+		refuse(new Error("Session is busy"));
+		// The move awaited the refusal first, so its handler has run by now.
+		await refused.catch(() => {});
+		// 82tn.51: the refusal belongs to the session the user left; the old dialog dropped it too.
+		expect(uiState.toasts).toEqual([]);
+		rpcSpy.mockReset();
+	});
+
 	it("leaves transcript changes to the subscription while the move lands", async () => {
 		let land!: (reply: { moveId: string }) => void;
 		rpcSpy.mockImplementation((tag) =>

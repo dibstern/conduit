@@ -4,6 +4,7 @@
 import type { MoveIntent } from "../../contracts/ws-rpc.js";
 import { toastFailure } from "../transport/rpc-errors.js";
 import { rpc } from "../transport/ws-rpc-client.js";
+import { sessionState } from "./session.svelte.js";
 import { showToast } from "./ui.svelte.js";
 
 /** The session whose Head Log dialog is open, if any. */
@@ -40,7 +41,8 @@ export const switchBranch = (
 ): Promise<boolean> => moveHead(sessionId, { _tag: "switch", nodeId });
 
 /** Previews and commits one move with the preview's id, so another device confirming the same
- *  proposal lands the same move. Resolves whether it landed; a refusal is toasted. */
+ *  proposal lands the same move. Resolves whether it landed; a refusal is toasted while the
+ *  session is still the one shown. */
 async function moveHead(
 	sessionId: string,
 	intent: MoveIntent,
@@ -57,7 +59,8 @@ async function moveHead(
 			showToast("Files from this point were pruned.");
 		return true;
 	} catch (error) {
-		toastFailure("Could not move the conversation.", "warn")(error);
+		if (sessionState.currentId === sessionId)
+			toastFailure("Could not move the conversation.", "warn")(error);
 		return false;
 	}
 }
