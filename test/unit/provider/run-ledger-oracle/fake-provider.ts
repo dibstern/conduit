@@ -1179,6 +1179,11 @@ export class FakeProvider {
 	}
 	/** The feeder reports `hold_exhausted` only for an unheld run, so never while a live runner still works one of its transmissions (4.3 steps 2-3). */
 	private heldElsewhere(commandId: string): boolean {
+		// 6.1, L2: a run dispatched to a runner not yet started is that runner's to work.
+		if (
+			[...this.spawnHeld.values()].some((held) => held.commandId === commandId)
+		)
+			return true;
 		return [...this.holdBindings].some(([token, binding]) => {
 			const native = this.sends.get(token);
 			return (
@@ -1642,8 +1647,17 @@ export class FakeProvider {
 			const at = this.mainInbox.findIndex(
 				(item) => item.inputId === command.inputId,
 			);
-			if (at < 0) this.mainInbox.push(entry);
-			else this.mainInbox[at] = entry;
+			// CONTRACT.md 5903-5904: a re-admit of an input main already sent adds nothing, so main
+			// never claims it again (3.9).
+			if (at >= 0) this.mainInbox[at] = entry;
+			else if (
+				![...this.sends.values()].some(
+					({ send }) =>
+						(send.effect.kind === "start" || send.effect.kind === "steer") &&
+						send.effect.inputId === command.inputId,
+				)
+			)
+				this.mainInbox.push(entry);
 		}
 		// 3.4 (CONTRACT.md 535-537): an end_session success covers the sends issued before its issue,
 		// which is its end commit.
@@ -4334,6 +4348,7 @@ export class FakeProvider {
 						),
 						"3.9: main sent an input again while an earlier send of it may still run",
 					);
+
 					if (direct) {
 						// The relaunch is a new transmission of the same Run's start (3.6, D50): its token is the
 						// new runId, and the start stays its Run's, so reached reads it (CONTRACT.md 621-640).
@@ -5132,7 +5147,9 @@ export class FakeProvider {
 					this.dead(runnerOf(issueLabel)) ||
 					this.heldElsewhere(issue.commandId) ||
 					this.retiredHolds.has(issue.commandId) ||
-					this.terminals.has(heldRunId(issue));
+					this.terminals.has(heldRunId(issue)) ||
+					// D50 (CONTRACT.md 664-669): an unlaunched try's Run is main's to relaunch, not the feeder's.
+					(original !== undefined && this.unlaunchedTries.has(original.token));
 				// 4.4: the re-step reads the gate before holdRun; a gated try transmits nothing.
 				if (!dropped && this.gate !== "served") {
 					this.gateAnswers.unshift({
