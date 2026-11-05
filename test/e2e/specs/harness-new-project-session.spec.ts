@@ -19,16 +19,9 @@ test.use({ harnessOptions: { opencodeRecording: "chat-simple" } });
 // Only OpenCode is recorded here, and a draft may default to another harness
 // with no model, which leaves Send disabled.
 async function createSession(page: Page, app: AppPage): Promise<void> {
-	const projectSlug = new URL(page.url()).searchParams.get("project");
-	expect(projectSlug).toBeTruthy();
-	// ChatLayout records the project after attachment is acknowledged.
-	await expect
-		.poll(() =>
-			page.evaluate(() =>
-				localStorage.getItem("conduit:last-attached-project"),
-			),
-		)
-		.toBe(projectSlug);
+	// The draft names its project, which every request carries; there is no
+	// attachment to wait for (m379.5).
+	expect(new URL(page.url()).searchParams.get("project")).toBeTruthy();
 	const picker = page.locator(
 		'[data-testid="model-picker-trigger"]:visible, [data-testid="composer-word-model"]:visible',
 	);

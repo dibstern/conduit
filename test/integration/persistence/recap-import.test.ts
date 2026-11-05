@@ -43,7 +43,8 @@ it.each([
 				);
 			expected = db.prepare("SELECT * FROM turn_recaps ORDER BY version").all();
 			// Recreate the deployed suffix without assigning later migrations old IDs.
-			db.exec("ALTER TABLE sessions DROP COLUMN jev");
+			db.exec(`ALTER TABLE sessions DROP COLUMN jev;
+				ALTER TABLE sessions DROP COLUMN diff_base`);
 			if (lineage === "redesign") {
 				db.exec(`ALTER TABLE sessions DROP COLUMN goal_stuck;
 					DELETE FROM effect_sql_migrations WHERE name = 'sessions_goal_stuck'`);

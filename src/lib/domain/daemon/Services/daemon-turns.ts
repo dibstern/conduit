@@ -74,23 +74,16 @@ export const DaemonTurnsLive = Layer.effect(
 		}>();
 		const newest = (projectId: string) => attached.get(projectId)?.at(-1);
 
+		const sweep = (projectId: string) =>
+			Effect.suspend(() => newest(projectId)?.sweep ?? Effect.void).pipe(
+				Effect.catchCause((cause) =>
+					Failure.isInterruptedOnly(cause)
+						? Effect.interrupt
+						: Effect.logError("Continuation sweep failed", projectId, cause),
+				),
+			);
 		const sweepAll = Effect.suspend(() =>
-			Effect.forEach(
-				[...attached.keys()],
-				(projectId) =>
-					(newest(projectId)?.sweep ?? Effect.void).pipe(
-						Effect.catchCause((cause) =>
-							Failure.isInterruptedOnly(cause)
-								? Effect.interrupt
-								: Effect.logError(
-										"Continuation sweep failed",
-										projectId,
-										cause,
-									),
-						),
-					),
-				{ discard: true },
-			),
+			Effect.forEach([...attached.keys()], sweep, { discard: true }),
 		);
 		yield* Effect.forkScoped(
 			Effect.andThen(
@@ -113,9 +106,12 @@ export const DaemonTurnsLive = Layer.effect(
 					if (!parts) return Effect.void;
 					if (sessionId !== undefined) return parts.applyLimitPolicy(sessionId);
 					waiting.delete(projectId);
-					return Effect.forEach(parked, parts.applyLimitPolicy, {
-						discard: true,
-					});
+					// The daemon's first sweep ran before this relay was lent, so a
+					// continuation that fell due while the daemon was down fires now.
+					return Effect.andThen(
+						sweep(projectId),
+						Effect.forEach(parked, parts.applyLimitPolicy, { discard: true }),
+					);
 				}),
 				Effect.forever,
 			),

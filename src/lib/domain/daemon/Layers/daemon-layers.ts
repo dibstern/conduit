@@ -50,6 +50,7 @@ import {
 import { CodexAccountResourcesLive } from "../../../provider/codex/codex-account-resources.js";
 import { readCodexSessionIdentity } from "../../../provider/codex/codex-session-store.js";
 import { CursorAccountResourcesLive } from "../../../provider/cursor/cursor-account-resources.js";
+import type { ProjectShellEnvResolver } from "../../../provider/project-shell-env.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import {
 	ServerBuildUpdateLive,
@@ -121,6 +122,10 @@ import {
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
 import {
+	type OpenCodeInstances,
+	OpenCodeInstancesTag,
+} from "../Services/opencode-instances-service.js";
+import {
 	makeOpenCodeProjectStreamsLive,
 	OpenCodeProjectStreams,
 } from "../Services/opencode-project-streams.js";
@@ -180,6 +185,7 @@ import { makePreviewGateLive } from "./preview-gate-layer.js";
 import { ProjectContextLive } from "./project-context-layer.js";
 import {
 	makeProjectShellEnvLive,
+	ProjectShellEnvTag,
 	ProjectShellEnvWiringLive,
 } from "./project-shell-env-layer.js";
 import { makeProviderAdaptersLive } from "./provider-adapters-layer.js";
@@ -701,6 +707,10 @@ export interface DaemonLiveOptions {
 	persistedConfigNeedsMigration?: boolean;
 	/** Test seam: an in-process Claude SDK for the provider adapters and every project. */
 	claudeSdk?: ClaudeSdkSeam;
+	/** Test seam: stands in for every OpenCode server the daemon reaches. */
+	openCodeInstances?: OpenCodeInstances;
+	/** Test seam: stands in for project shell environment capture and readiness. */
+	shellEnv?: ProjectShellEnvResolver;
 }
 
 /**
@@ -791,7 +801,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		tlsCertWithDeps,
 		EnsureCertsLive,
 		PushNotificationManagerLive(configDir),
-		makeProjectShellEnvLive(),
+		options.shellEnv
+			? Layer.succeed(ProjectShellEnvTag, options.shellEnv)
+			: makeProjectShellEnvLive(),
 		makeAccountResourceScopesLive(),
 	).pipe(Layer.provideMerge(foundation));
 
@@ -908,9 +920,11 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		configDir,
 	).pipe(Layer.provideMerge(withAvatar));
 
-	const withOpenCodeInstances = OpenCodeInstancesLive.pipe(
-		Layer.provideMerge(withManagedOpenCodeServers),
-	);
+	const withOpenCodeInstances = (
+		options.openCodeInstances
+			? Layer.succeed(OpenCodeInstancesTag, options.openCodeInstances)
+			: OpenCodeInstancesLive
+	).pipe(Layer.provideMerge(withManagedOpenCodeServers));
 	const withSessionDirectory = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
