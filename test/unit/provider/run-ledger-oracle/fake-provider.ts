@@ -440,6 +440,8 @@ export class FakeProvider {
 	private readonly destroyed = new Set<SendToken>();
 	/** Sends each end commit found, by its commandId: its success covers only those (3.4 535-537). */
 	private readonly endScopes = new Map<string, ReadonlySet<string>>();
+	/** End controls admitted but not yet listed live: each waits on its confirm (3.4). */
+	private readonly endsAwaitingIssue = new Set<string>();
 	/** The removal macro's runner, whose process_lost precedes the gate (H4, 6.3). */
 	private removing:
 		| { readonly runner: string; readonly gate: ProjectGate }
@@ -1663,9 +1665,27 @@ export class FakeProvider {
 		// which is its end commit.
 		// A control row main has not claimed has no send yet, so the scope also names each live one's
 		// commandId; its later claims are of that issue (3.4). A start or steer relaunch is a new issue (3.6).
-		if (command.verb === "control" && command.control.kind === "end")
+		// CONTRACT.md 538-539: an End that waits on its confirm is issued at the step that first lists it,
+		// so its scope is read again there.
+		const endIssued = [...this.endsAwaitingIssue].filter((commandId) =>
+			after.live.some(
+				(item) => item.tag === "Main" && item.commandId === commandId,
+			),
+		);
+		const ending =
+			command.verb === "control" && command.control.kind === "end"
+				? [command.control.commandId]
+				: [];
+		for (const commandId of [...ending, ...endIssued]) {
+			this.endsAwaitingIssue.delete(commandId);
+			if (
+				!after.live.some(
+					(item) => item.tag === "Main" && item.commandId === commandId,
+				)
+			)
+				this.endsAwaitingIssue.add(commandId);
 			this.endScopes.set(
-				command.control.commandId,
+				commandId,
 				new Set([
 					...this.sends.keys(),
 					...before.live.flatMap((item) =>
@@ -1677,6 +1697,7 @@ export class FakeProvider {
 					),
 				]),
 			);
+		}
 		// L6, D58: a Stop, End or Run now is the projection of main's stop commit, which interrupts main's open run.
 		if (
 			command.verb === "control" &&
