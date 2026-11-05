@@ -14,7 +14,12 @@ import type {
 	TaskKey,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import { mainGateRefusal, openCodeLateTurn, pendingCases } from "./pending.js";
+import {
+	joinedSteerOutlived,
+	mainGateRefusal,
+	openCodeLateTurn,
+	pendingCases,
+} from "./pending.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
 export interface TraceAction {
@@ -336,6 +341,8 @@ export class FakeProvider {
 	private readonly retiredHolds = new Set<string>();
 	/** Runs whose own direct start main's gate refused at removal: D50 leaves them unchecked (pending.ts). */
 	private readonly mainGateRefused = new Set<string>();
+	/** Pended (pending.ts joinedSteerOutlived): steer Runs main joined into an open Run by run.started. */
+	private readonly joinedSteerRuns = new Set<string>();
 	private readonly terminals = new Map<string, RunEnded>();
 	private readonly seenEvents = new Set<string>();
 	private readonly processFacts = new Set<string>();
@@ -1825,6 +1832,12 @@ export class FakeProvider {
 				this.terminals.has(this.steerParents.get(observation.inputId) ?? "")
 			)
 				this.hostStarted.add(observation.requestedRunId);
+			if (
+				observation.kind === "run_started" &&
+				observation.requestedRunId !== observation.runId &&
+				pendingCases.has(joinedSteerOutlived)
+			)
+				this.joinedSteerRuns.add(observation.requestedRunId);
 			// 3.8 GAP 5, 9: OpenCode's turn.error ends the turn and its query in one write, so main's error
 			// terminal is the native turn's end whichever of the pair folds first.
 			if (
@@ -2616,7 +2629,8 @@ export class FakeProvider {
 			before.active !== undefined &&
 			before.active.tag !== "Interrupting" &&
 			(before.active.tag === "Queued" || !this.reached(before.active.runId)) &&
-			!this.mainGateRefused.has(before.active.runId)
+			!this.mainGateRefused.has(before.active.runId) &&
+			!this.joinedSteerRuns.has(before.active.runId)
 				? before.active.runId
 				: undefined;
 		const truth = this.groundTruth();

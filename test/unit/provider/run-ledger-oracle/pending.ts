@@ -19,6 +19,16 @@ export const mainGateRefusal =
 export const openCodeLateTurn =
 	"[gap] OpenCode late turn of a Run main already ended";
 
+/**
+ * A property pend: a steer main joined into an open Run by run.started outlives that Run's end and
+ * becomes a Run of its own (CONTRACT.md 978-983, 3.9). Its send reached the host inside the ended Run,
+ * and 978-983 say only that its host's run.started starts it, not whether that earlier delivery counts,
+ * so the ledger keeps a Stop waiting on it while the fake has it not yet delivered. The fake skips its
+ * D50 Stop check for such a Run until a contract round decides; the entry goes with that rule.
+ */
+export const joinedSteerOutlived =
+	"[gap] a joined steer that outlives its Run's end";
+
 // Remove an entry when its implementation lands; an unexpected pass fails the suite.
 export const pendingCases: ReadonlyMap<string, string> = new Map([
 	// 32.2.3/32.2.4 convergence: each entry is a live test the oracle and the fake still disagree on, keyed by
@@ -56,6 +66,10 @@ export const pendingCases: ReadonlyMap<string, string> = new Map([
 	[
 		openCodeLateTurn,
 		"CONTRACT.md 871-876 against 3086-3089 (GAP 5 against section 9): whether OpenCode work of a Run main ended can still run late is undecided; for vkira",
+	],
+	[
+		joinedSteerOutlived,
+		"CONTRACT.md 978-983 (3.9): whether a steer already delivered inside a Run that ended counts as reached for its own Run is undecided; for vkira",
 	],
 	[
 		mainGateRefusal,
