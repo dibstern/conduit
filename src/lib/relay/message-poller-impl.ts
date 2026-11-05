@@ -36,6 +36,8 @@ export interface MessagePollerOptions {
 	client: { session: Pick<OpenCodeAPI["session"], "messages"> };
 	/** Polling interval in milliseconds (default: 750) */
 	interval?: number;
+	/** SSE silence before REST reads resume (default: SSE_SILENCE_THRESHOLD_MS) */
+	sseSilenceMs?: number;
 	log?: Logger;
 	/**
 	 * Whether a tab views the session. Viewers hold the poller; once none
@@ -53,6 +55,7 @@ export type MessagePollerEventsCallback = (
 export class MessagePoller {
 	private readonly client: MessagePollerOptions["client"];
 	private readonly interval: number;
+	private readonly sseSilenceMs: number;
 	private readonly log: Logger;
 	private readonly hasViewers: (() => boolean) | undefined;
 
@@ -91,6 +94,7 @@ export class MessagePoller {
 	constructor(options: MessagePollerOptions) {
 		this.client = options.client;
 		this.interval = options.interval ?? POLL_INTERVAL_MS;
+		this.sseSilenceMs = options.sseSilenceMs ?? SSE_SILENCE_THRESHOLD_MS;
 		this.log = options.log ?? createSilentLogger();
 		this.hasViewers = options.hasViewers;
 	}
@@ -192,7 +196,7 @@ export class MessagePoller {
 	 */
 	isSSEActive(): boolean {
 		if (this.lastSSEEventAt === 0) return false;
-		return Date.now() - this.lastSSEEventAt < SSE_SILENCE_THRESHOLD_MS;
+		return Date.now() - this.lastSSEEventAt < this.sseSilenceMs;
 	}
 
 	/**
@@ -329,6 +333,7 @@ export interface MessagePollerManagerOptions {
 	client: MessagePollerOptions["client"];
 	log?: Logger;
 	interval?: number;
+	sseSilenceMs?: number;
 	/** External viewer check — delegates to SessionRegistry */
 	hasViewers?: (sessionId: string) => boolean;
 }
@@ -338,6 +343,7 @@ export class MessagePollerManager {
 	private readonly client: MessagePollerOptions["client"];
 	private readonly log: Logger;
 	private readonly interval?: number;
+	private readonly sseSilenceMs?: number;
 
 	/** External viewer check — delegates to SessionRegistry when provided */
 	private readonly _hasViewers: ((sessionId: string) => boolean) | undefined;
@@ -349,6 +355,7 @@ export class MessagePollerManager {
 		this.client = options.client;
 		this.log = options.log ?? createSilentLogger();
 		if (options.interval != null) this.interval = options.interval;
+		if (options.sseSilenceMs != null) this.sseSilenceMs = options.sseSilenceMs;
 		this._hasViewers = options.hasViewers;
 	}
 
@@ -373,6 +380,7 @@ export class MessagePollerManager {
 		const poller = new MessagePoller({
 			client: this.client,
 			...(this.interval != null && { interval: this.interval }),
+			...(this.sseSilenceMs != null && { sseSilenceMs: this.sseSilenceMs }),
 			log: this.log,
 			hasViewers: () => this.hasViewers(sessionId),
 		});

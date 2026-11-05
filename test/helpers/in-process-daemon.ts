@@ -180,6 +180,8 @@ export async function createDaemonProject(
 		readonly openCodeInstances?: DaemonLiveOptions["openCodeInstances"];
 		/** Stands in for shell environment capture and its readiness. */
 		readonly shellEnv?: DaemonLiveOptions["shellEnv"];
+		/** Shortened poll intervals and SSE grace/staleness. */
+		readonly pollerTimings?: DaemonLiveOptions["pollerTimings"];
 	} = {},
 ) {
 	const slug = options.slug ?? "integration-test";
@@ -227,6 +229,7 @@ export async function createDaemonProject(
 			openCodeInstances: options.openCodeInstances,
 		}),
 		...(options.shellEnv && { shellEnv: options.shellEnv }),
+		...(options.pollerTimings && { pollerTimings: options.pollerTimings }),
 	});
 	const clients: TestWsClient[] = [];
 	const stop = async () => {
