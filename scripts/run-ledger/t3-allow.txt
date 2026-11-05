@@ -2094,3 +2094,4 @@ Lane 32.8c (wt/82tn32r3: 47d2e37c, c4364a1f, 7f9e4b0c, b2ab90bc). The Codex trac
 the Stop's acceptance has two owners: the stopping map holds only the	pointer
 Seam: provider-turn-service's Stop entry (stopping map, startStop,	pointer
 review round 6: 1 material finding (Sol gpt-6.1-sol xhigh on 68a2a168)	pointer
+stopping, journal replay, a key passed to a new runner, and background work	history
