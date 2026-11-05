@@ -2,11 +2,7 @@
 // The replay fixture mocks OpenCode, but terminal tabs run the worker's shell.
 
 import type { Page } from "@playwright/test";
-import {
-	answerSubscribeInstances,
-	expect,
-	test,
-} from "../helpers/replay-fixture.js";
+import { expect, test } from "../helpers/replay-fixture.js";
 import { finger, openPhoneTerminal } from "../helpers/terminal-keys.js";
 import { AppPage } from "../page-objects/app.page.js";
 
@@ -23,15 +19,12 @@ test.describe("Phone terminal controls", () => {
 	test("folder picker taps open a working terminal", async ({
 		page,
 		relayUrl,
-		relayInstances,
 	}, testInfo) => {
 		const root = process.cwd();
 		// Supply multi-folder metadata while keeping terminal RPCs and shells real.
 		await page.routeWebSocket(/\/rpc$/, (ws) => {
 			const server = ws.connectToServer();
-			const answerInstances = answerSubscribeInstances(ws, relayInstances);
 			ws.onMessage((data) => {
-				if (answerInstances(data)) return;
 				const frame: { _tag?: string; tag?: string; id?: string } =
 					typeof data === "string" ? JSON.parse(data) : {};
 				if (frame._tag === "Request" && frame.tag === "GetFileTree") {
