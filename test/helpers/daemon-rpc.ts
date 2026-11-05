@@ -61,6 +61,7 @@ import {
 	makeUsage,
 	Usage,
 } from "../../src/lib/domain/daemon/Services/usage.js";
+import { PortWatcher } from "../../src/lib/domain/persistence/Services/port-watcher.js";
 import { SessionEventBusLive } from "../../src/lib/domain/relay/Services/session-event-bus.js";
 import { AuthManagerFromConfigLive } from "../../src/lib/domain/server/Layers/auth-middleware.js";
 import {
@@ -183,6 +184,10 @@ export const makeDaemonRpcTestLayer = (
 				},
 			}),
 		),
+		Layer.succeed(PortWatcher)({
+			mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+			known: () => true,
+		}),
 		Layer.succeed(PortScannerTag)({
 			getKnownPorts: () => Effect.succeed(new Set<number>()),
 			scanNow: () => Effect.succeed({ discovered: [], lost: [], active: [] }),

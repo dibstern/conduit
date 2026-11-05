@@ -7,6 +7,7 @@ import {
 } from "../../../daemon/config-persistence.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import { ENV } from "../../../env.js";
+import { PortWatcher } from "../../persistence/Services/port-watcher.js";
 import { DaemonConfigRefTag } from "../Services/daemon-config-ref.js";
 import { DaemonEvent, DaemonEventBusTag } from "../Services/daemon-pubsub.js";
 import {
@@ -29,6 +30,7 @@ export const AutoSettleLive = () =>
 			const cache = yield* RelayCacheTag;
 			const bus = yield* DaemonEventBusTag;
 			const storeContext = yield* persistenceStoreContext;
+			const watcher = yield* PortWatcher;
 			const missingDirectories = new Set<string>();
 
 			const sweep = Effect.gen(function* () {
@@ -93,8 +95,12 @@ export const AutoSettleLive = () =>
 								? yield* cache.get(project.slug)
 								: null;
 						if (relay === null) return;
+						// 8.7: until the first scan and one hold have passed, servers are unknown and
+						// auto-settle waits.
 						const settled =
-							idleWindowMs === null || relay.settleIdleSessions === undefined
+							idleWindowMs === null ||
+							!watcher.known() ||
+							relay.settleIdleSessions === undefined
 								? 0
 								: yield* relay.settleIdleSessions(idleWindowMs, now);
 						const archived =

@@ -31,6 +31,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
@@ -109,6 +110,10 @@ describe("archived tree retention", () => {
 							),
 							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 							Layer.effect(SessionActivityTag, makeSessionActivity),
+							Layer.succeed(PortWatcher)({
+								mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+								known: () => true,
+							}),
 							RelayStatusSnapshotLive,
 							makeOverridesStateLive(),
 							Layer.succeed(OpenCodeInstancesTag)(

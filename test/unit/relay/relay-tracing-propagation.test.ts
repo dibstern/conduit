@@ -33,6 +33,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
+import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
@@ -92,6 +93,10 @@ describe("relay tracing propagation", () => {
 				Layer.succeed(VersionCheckerTag)({
 					getLatestKnown: () => Effect.succeed(null),
 					getCurrentVersion: () => Effect.succeed("unknown"),
+				}),
+				Layer.succeed(PortWatcher)({
+					mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+					known: () => true,
 				}),
 				Layer.succeed(PushManagerTag)({
 					subscribe: () => Effect.void,

@@ -1,4 +1,5 @@
 // Failure modes: docs/plans/2026-10-16-shared-store-cutover-failure-modes.md.
+
 import {
 	existsSync,
 	mkdirSync,
@@ -66,6 +67,7 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { readColdWorktreeCleanupCandidates } from "../../../src/lib/domain/daemon/Services/worktree-cleanup-reader.js";
 import * as persistence from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { PushManagerTag } from "../../../src/lib/domain/server/Services/push-service.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -198,6 +200,10 @@ function startup(root: string, projects: readonly StoredProject[]) {
 							store,
 							registry,
 							directory,
+							Layer.succeed(PortWatcher)({
+								mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+								known: () => true,
+							}),
 							Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 							Layer.succeed(CursorAccountResources)(
 								cursorAccountResourcesFixture(createCursorSdkPort()),
