@@ -89,7 +89,8 @@ const rowJson = (table: "messages" | "message_parts", alias: string) =>
 
 /**
  * Moves `messageIds` and their parts off the head path into `history_off_head`, each with its
- * node, before their removal from the head-path tables. Nothing of a branch is lost.
+ * node, before their removal from the head-path tables, with the turn links that name them,
+ * which their removal clears. Nothing of a branch is lost.
  */
 export const keepOffHead = (sessionId: string, messageIds: readonly string[]) =>
 	Effect.gen(function* () {
@@ -108,6 +109,15 @@ export const keepOffHead = (sessionId: string, messageIds: readonly string[]) =>
 			`INSERT OR REPLACE INTO history_off_head (session_id, node_id, source_table, row_key, row_json)
 			SELECT m.session_id, m.history_node_id, 'message_parts', p.id, ${part}
 			FROM message_parts p JOIN messages m ON m.id = p.message_id
+			WHERE m.session_id = ? AND m.id IN (SELECT value FROM json_each(?))`,
+			[sessionId, list],
+		);
+		yield* sql.unsafe(
+			`INSERT OR REPLACE INTO history_off_head (session_id, node_id, source_table, row_key, row_json)
+			SELECT m.session_id, m.history_node_id, 'turn_links', m.id, json_object('turnId', t.id,
+				'link', CASE WHEN t.user_message_id = m.id THEN 'user' ELSE 'assistant' END)
+			FROM messages m JOIN turns t ON t.session_id = m.session_id
+				AND (t.user_message_id = m.id OR t.assistant_message_id = m.id)
 			WHERE m.session_id = ? AND m.id IN (SELECT value FROM json_each(?))`,
 			[sessionId, list],
 		);
@@ -179,7 +189,8 @@ const fromRowJson = (table: "messages" | "message_parts") =>
 
 /**
  * Puts the kept rows of `nodeIds` back on the head path at `version`, so subscribers receive
- * them again, and clears their tombstones. Returns the restored message ids.
+ * them again, links their turns to them again, and clears their tombstones. Rows kept before
+ * links were kept come back unlinked. Returns the restored message ids.
  */
 export const restoreToHead = (
 	sessionId: string,
@@ -207,6 +218,19 @@ export const restoreToHead = (
 			`INSERT OR IGNORE INTO message_parts (${part.names}) SELECT ${part.values} ${kept("message_parts")}`,
 			[version, sessionId, nodes],
 		);
+		const links = yield* sql.unsafe<{
+			turn: string;
+			message: string;
+			link: "user" | "assistant";
+		}>(
+			`SELECT json_extract(row_json, '$.turnId') AS turn, row_key AS message,
+				json_extract(row_json, '$.link') AS link ${kept("turn_links")}`,
+			[sessionId, nodes],
+		);
+		for (const { turn, message, link } of links)
+			yield* link === "user"
+				? sql`UPDATE turns SET user_message_id = ${message} WHERE session_id = ${sessionId} AND id = ${turn}`
+				: sql`UPDATE turns SET assistant_message_id = ${message} WHERE session_id = ${sessionId} AND id = ${turn}`;
 		yield* sql.unsafe(
 			`DELETE FROM history_off_head WHERE session_id = ? AND node_id IN (SELECT value FROM json_each(?))`,
 			[sessionId, nodes],
