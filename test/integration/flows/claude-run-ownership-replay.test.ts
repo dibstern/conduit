@@ -230,9 +230,12 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 					{ timeout: 15_000 },
 				);
 				if (action === "slash") {
+					// CONTRACT.md 8.1 (2740): the busy-slash hold is deleted (82tn.32.26),
+					// so a steered slash stops nothing; Alpha runs on to its end.
 					expect(await submit(b, "/compact", "steer")).toMatchObject({
 						ok: true,
 					});
+					fixture.claudeReplayer?.release();
 				} else {
 					expect(await submit(b, "Bravo")).toMatchObject({ ok: true });
 					if (action === "stop")
@@ -245,25 +248,23 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 							),
 						).toMatchObject({ ok: true });
 				}
-				await vi.waitFor(
-					() => {
-						const state = ledger(fixture);
-						expect(["interrupted", "error"]).toContain(state.turns[0]?.state);
-						expect(
-							state.ends.filter((event) => event.type === "turn.interrupted"),
-						).toHaveLength(1);
-						if (action !== "slash") {
+				if (action !== "slash") {
+					await vi.waitFor(
+						() => {
+							const state = ledger(fixture);
+							expect(["interrupted", "error"]).toContain(state.turns[0]?.state);
+							expect(
+								state.ends.filter((event) => event.type === "turn.interrupted"),
+							).toHaveLength(1);
 							expect(
 								state.commands.map((command) => command.command_id),
 							).toEqual([a]);
 							expect(state.queued.map((input) => input.input_id)).toEqual(
 								action === "stop" ? [b, c] : [b],
 							);
-						}
-					},
-					{ timeout: 15_000 },
-				);
-				if (action !== "slash") {
+						},
+						{ timeout: 15_000 },
+					);
 					expect(
 						await rpc(fixture, (client) =>
 							client["input.sendNow"]({ sessionId, inputId: b }),
@@ -274,7 +275,7 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 					() => {
 						const state = ledger(fixture);
 						expect(state.turns.map((turn) => turn.state)).toEqual([
-							"interrupted",
+							action === "slash" ? "completed" : "interrupted",
 							"completed",
 							...(action === "stop" ? ["completed"] : []),
 						]);
@@ -292,6 +293,14 @@ describe("Claude run ownership through the browser's in-process replay relay", (
 					final.turns.length,
 				);
 				expect(final.ends.every((event) => event.run_id !== null)).toBe(true);
+				// Each run ends once, under its own id.
+				if (action === "slash")
+					expect(final.ends).toEqual(
+						final.runs.map((run) => ({
+							type: "turn.completed",
+							run_id: run.id,
+						})),
+					);
 				proof.turns = final.turns.map((turn) => turn.state);
 				proof.ownedEnds = final.ends.length;
 				proof.outcome = "passed";
