@@ -38,7 +38,8 @@ const titleOf = ({ cell, file }) => {
 };
 const proved = manifest.cells
 	.filter(({ status }) => status === "proved")
-	.map((cell) => ({ ...cell, title: titleOf(cell) }));
+	// An it.each cell names its expanded title; others take it from the source.
+	.map((cell) => ({ ...cell, title: cell.title ?? titleOf(cell) }));
 const files = [...new Set(proved.map(({ file }) => file))];
 const pattern = proved.map(({ title }) => literal(title)).join("|");
 

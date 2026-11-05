@@ -375,13 +375,14 @@
 		},
 		{
 			"cell": "claude/journal/finished",
-			"status": "covered",
-			"tests": "claude-runner-restart:262 (journal answer not asserted)"
+			"status": "proved",
+			"file": "test/integration/daemon/claude-runner-restart.test.ts"
 		},
 		{
 			"cell": "claude/journal/uncertain",
-			"status": "covered",
-			"tests": "claude-runner-at-most-once:81 (never re-sent; held/delivery_indeterminate unasserted)"
+			"status": "proved",
+			"file": "test/integration/daemon/claude-runner-at-most-once.test.ts",
+			"title": "does not resend a command after a crash during send, even when replayed to a new runner (partial journal: false)"
 		},
 		{
 			"cell": "claude/journal/absent",
@@ -574,9 +575,19 @@
 			"tests": "runner-forced-stop:911; claude-runner-quarantine:265; provider-runner-quarantine:15"
 		},
 		{
-			"cell": "two-build/old-daemon-upgrade",
-			"status": "uncovered",
-			"gap": "see audit"
+			"cell": "two-build/claude",
+			"status": "proved",
+			"file": "test/integration/daemon/run-ledger-two-build.test.ts"
+		},
+		{
+			"cell": "two-build/codex",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "two-build/cursor",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
 		}
 	]
 }

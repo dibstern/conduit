@@ -31,6 +31,7 @@ import {
 import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { isRecord } from "../../../src/lib/utils.js";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import {
 	ProcessHarness,
 	responseChunks,
@@ -73,6 +74,11 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 				data: string;
 				metadata: string;
 			}>,
+			ends: db
+				.prepare(
+					"SELECT json_extract(entry_json, '$.outcome') AS outcome FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",
+				)
+				.all(sessionId) as Array<{ outcome: string }>,
 			commands: db
 				.prepare(
 					"SELECT o.command_id, o.run_id, o.status, r.status AS receipt_status FROM provider_command_outbox o LEFT JOIN command_receipts r ON r.command_id = o.command_id WHERE o.session_id = ? AND o.effect_type = 'send_turn' ORDER BY o.request_sequence",
@@ -331,6 +337,17 @@ describe("Claude runners survive server replacement through built dist", () => {
 				),
 			).toHaveLength(3);
 			sequences.push(comparable(stored.events, harness.root));
+			// The runner finished the turn while the daemon was down; its journal answers finished,
+			// so the restart settles the Run once as completed and never re-sends it.
+			if (restart) {
+				expect(stored.turns.map(({ state }) => state)).toEqual(["completed"]);
+				expect(stored.ends).toEqual([{ outcome: "completed" }]);
+				proveCrashMatrixCell(
+					"claude/journal/finished",
+					harness.daemonStorePath(),
+					sessionId,
+				);
+			}
 			proofs.push({
 				restart,
 				runner,
