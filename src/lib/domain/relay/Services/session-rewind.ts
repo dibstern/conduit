@@ -1,6 +1,7 @@
 import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { InputDraftsTag } from "./input-drafts.js";
 import { LoggerTag } from "./services.js";
 import {
 	admitOrRefuse,
@@ -57,13 +58,14 @@ const moveHead = <E>(
 				return move && (yield* startHeadMove(sessionId, row.provider, move));
 			}),
 		);
-		if (!started) return;
+		if (!started) return false;
 		// Test seam: widens the window a send can arrive in while the move is in progress.
 		if (process.env["NODE_ENV"] === "test")
 			yield* Effect.sleep(
 				Number(process.env["CONDUIT_TEST_HEAD_MOVE_DELAY_MS"] ?? 0),
 			);
 		yield* inbox.withSession(sessionId, finishHeadMove(sessionId, started));
+		return true;
 	});
 
 export const rewindSessionToMessage = ({
@@ -76,21 +78,49 @@ export const rewindSessionToMessage = ({
 	messageId: string;
 }) =>
 	Effect.gen(function* () {
-		yield* moveHead(sessionId, (row) =>
+		let inputs: readonly string[] = [];
+		const moved = yield* moveHead(sessionId, (row) =>
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const [target] = yield* sql<{ id: string }>`SELECT id FROM messages
-				WHERE session_id = ${sessionId} AND id = ${messageId}`;
+				const [target] = yield* sql<{ node: string | null; role: string }>`
+					SELECT history_node_id AS node, role FROM messages
+					WHERE session_id = ${sessionId} AND id = ${messageId}`;
 				if (!target)
 					return yield* new RewindTargetNotFound({
 						sessionId,
 						messageId,
 						message: `Rewind target ${messageId} not found in session ${sessionId}`,
 					});
-				if (row.pending_rewind_message_id === messageId) return undefined;
-				return { kind: "rewind" as const, messageId };
+				// 82tn.50: a steer is one Run with the input before it, so a rewind to a steer moves
+				// to its Run's first row: the Head lands on the Run's parent, and the Run's typed
+				// inputs return to the composer. Any other target cuts where it did before.
+				const rows = yield* sql<{ id: string; role: string; text: string }>`
+					SELECT id, role, text FROM messages
+					WHERE session_id = ${sessionId} AND history_node_id = ${target.node}
+					ORDER BY ordinal, created_at, id`;
+				const first = rows[0]?.id;
+				const steer =
+					target.role === "user" && first !== undefined && first !== messageId;
+				const cut = steer ? first : messageId;
+				if (row.pending_rewind_message_id === cut) return undefined;
+				inputs = steer
+					? rows.flatMap(({ role, text }) =>
+							role === "user" && text !== "" ? [text] : [],
+						)
+					: [];
+				return { kind: "rewind" as const, messageId: cut };
 			}),
 		);
+		if (moved && inputs.length > 0) {
+			const restore = (yield* InputDraftsTag).restoreChange(
+				{ session: sessionId },
+				`rewind:${messageId}`,
+				[],
+				inputs.join("\n\n"),
+			);
+			yield* restore.write;
+			yield* restore.publish;
+		}
 		const log = yield* LoggerTag;
 		log.info(
 			`client=${clientId} session=${sessionId} Rewound to message: ${messageId}`,

@@ -53,6 +53,7 @@ it.effect(
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			expect(
 				yield* sql`SELECT runner_id FROM provider_runs WHERE id = 'old'`,
@@ -83,6 +84,7 @@ it.effect(
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			expect(
 				yield* sql`SELECT runner_id, held_transmission FROM provider_runs WHERE id = 'legacy'`,
@@ -192,6 +194,7 @@ it.effect(
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			expect(yield* sql`SELECT effort, context_window FROM turns`).toEqual([
 				{ effort: null, context_window: null },
@@ -745,6 +748,7 @@ const expectedNames = [
 	"messages_ordinal",
 	"tool_row_run",
 	"drop_owned_run_ids",
+	"history_graph",
 ];
 const legacyNames = [
 	"create_event_store_tables",
@@ -804,6 +808,7 @@ it.effect(
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			yield* sql`UPDATE sessions SET forked_from = 'source' WHERE id = 'fork'`;
 			expect(yield* makeEffectSqlMigrator()).toEqual([]);
@@ -864,6 +869,7 @@ describe("Effect migration lineage", () => {
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			expect(
 				yield* sql`SELECT * FROM effect_sql_migrations WHERE migration_id <= 68 ORDER BY migration_id`,
@@ -957,7 +963,7 @@ describe("Effect migration lineage", () => {
 						const entries = {
 							...effectMigrationEntries,
 							...(migrationPath === "gap"
-								? { "0094_test_marker": Effect.void }
+								? { "0095_test_marker": Effect.void }
 								: {}),
 						};
 						yield* makeEffectSqlMigrator(entries);
@@ -1023,6 +1029,7 @@ describe("Effect migration lineage", () => {
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			expect(
 				yield* sql`SELECT reason, turn_index, judge_model FROM session_goal_checks`,
@@ -1069,6 +1076,7 @@ describe("Effect migration lineage", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				expect(
 					yield* sql`SELECT text, created_at, updated_at, surfacing_ordinal, surfacing_probabilities, surfacing_set_version, surfacing_model FROM message_parts`,
@@ -1218,6 +1226,7 @@ describe("Effect migration lineage", () => {
 					91,
 					92,
 					93,
+					94,
 				]);
 				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, workspace_hint, workspace_hint_sequence)
 					VALUES ('main-database', 'claude', 'Preserved', 'idle', 1, 1, '/repo/worktree', 123)`;
@@ -1382,8 +1391,8 @@ describe("Effect migration lineage", () => {
 			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
-	it("registers the contiguous production chain from 1 through 93", () => {
-		expect(migrationEntries).toHaveLength(93);
+	it("registers the contiguous production chain from 1 through 94", () => {
+		expect(migrationEntries).toHaveLength(94);
 		expect(migrationEntries.map(([key]) => key)).toEqual(
 			expectedNames.map(
 				(name, index) => `${String(index + 1).padStart(4, "0")}_${name}`,
@@ -1593,6 +1602,7 @@ describe("Effect migration lineage", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				expect(yield* sql`SELECT type FROM events WHERE sequence = 45`).toEqual(
 					[{ type: "thinking.end" }],
@@ -1707,6 +1717,7 @@ describe("Effect migration lineage", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace_hint, workspace_hint_sequence
@@ -1800,6 +1811,7 @@ describe("Effect migration lineage", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				expect(
 					yield* sql`SELECT title, workspace, claude_worktree_state FROM sessions WHERE id = 'kept-workspace'`,
@@ -1835,6 +1847,52 @@ describe("Effect migration lineage", () => {
 				[2, "fixed"],
 			]);
 		}).pipe(Effect.provide(EffectSqliteClient.layer({ filename: ":memory:" }))),
+	);
+
+	it.effect(
+		"a restart that interrupts the History Graph migration leaves no graph, and the rerun builds it (82tn.50 #6)",
+		() =>
+			Effect.gen(function* () {
+				const sql = yield* SqlClient.SqlClient;
+				yield* makeEffectSqlMigrator(prefix(93));
+				yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at)
+					VALUES ('s', 'claude', 'Kept', 'idle', 1, 1)`;
+				yield* sql`INSERT INTO messages (id, session_id, role, text, created_at, updated_at, ordinal)
+					VALUES ('u', 's', 'user', 'hello', 1, 1, 1), ('a', 's', 'assistant', 'hi', 2, 2, 2)`;
+				const graph = Effect.gen(function* () {
+					const tables = yield* sql<{
+						name: string;
+					}>`SELECT name FROM sqlite_master
+						WHERE type = 'table' AND name LIKE 'history_%' ORDER BY name`;
+					const columns = yield* sql<{
+						name: string;
+					}>`SELECT name FROM pragma_table_info('messages')
+						WHERE name = 'history_node_id'`;
+					return { tables: tables.map(({ name }) => name), columns };
+				});
+				const interrupted = yield* Effect.exit(
+					makeEffectSqlMigrator({
+						...effectMigrationEntries,
+						"0095_interrupted": sql.unsafe("CREATE TABLE broken ("),
+					}),
+				);
+				expect(Exit.isFailure(interrupted)).toBe(true);
+				expect(yield* graph).toEqual({ tables: [], columns: [] });
+				expect(yield* makeEffectSqlMigrator()).toEqual([[94, "history_graph"]]);
+				expect(yield* graph).toEqual({
+					tables: ["history_heads", "history_nodes", "history_off_head"],
+					columns: [{ name: "history_node_id" }],
+				});
+				expect(
+					yield* sql`SELECT id, history_node_id AS node FROM messages ORDER BY ordinal`,
+				).toEqual([
+					{ id: "u", node: "m:u" },
+					{ id: "a", node: "m:u" },
+				]);
+				expect(
+					yield* sql`SELECT session_id, node_id FROM history_heads`,
+				).toEqual([{ session_id: "s", node_id: "m:u" }]);
+			}).pipe(Effect.provide(makeFileSqlLayer())),
 	);
 
 	it.effect("runs migrations in key order with a gap in ids", () =>
@@ -2427,6 +2485,7 @@ describe("Effect migration lineage", () => {
 				[91, "messages_ordinal"],
 				[92, "tool_row_run"],
 				[93, "drop_owned_run_ids"],
+				[94, "history_graph"],
 			]);
 			const columns = yield* sql<{ name: string }>`PRAGMA table_info(sessions)`;
 			expect(columns.map((row) => row.name)).not.toContain("marked_unread_at");
@@ -2557,6 +2616,7 @@ describe("Effect migration lineage", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				const rows = yield* sql<{
 					id: string;

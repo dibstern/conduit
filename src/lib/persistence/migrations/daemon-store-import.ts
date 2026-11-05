@@ -134,6 +134,10 @@ const copiedTables = [
 	// The Run Ledger's fold: its arm's cursor is raised to the frontier with the others.
 	"run_ledger_entries",
 	"run_ledger_sessions",
+	// The History Graph (82tn.50): each session's nodes, Head and off-head rows.
+	"history_nodes",
+	"history_heads",
+	"history_off_head",
 ] as const;
 const singletonTables = [
 	"projector_cursors",

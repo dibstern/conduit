@@ -150,6 +150,9 @@ describe("Persistence Effect", () => {
 					"daemon_store_imports",
 					"draft_attachments",
 					"events",
+					"history_heads",
+					"history_nodes",
+					"history_off_head",
 					"input_drafts",
 					"message_part_read_state",
 					"message_part_tombstones",
@@ -373,6 +376,7 @@ describe("Persistence Effect", () => {
 				{ migration_id: 91, name: "messages_ordinal" },
 				{ migration_id: 92, name: "tool_row_run" },
 				{ migration_id: 93, name: "drop_owned_run_ids" },
+				{ migration_id: 94, name: "history_graph" },
 			]);
 
 			const legacyMigrationTable = yield* sql<{ name: string }>`
@@ -641,7 +645,7 @@ describe("Persistence Effect", () => {
 					if (scenario === "below threshold") return;
 					db.exec("BEGIN");
 					try {
-						for (let index = 0; index < 80; index++) {
+						for (let index = 0; index < 100; index++) {
 							insert.run(
 								`redundant-${index}`,
 								index + 3,
@@ -658,7 +662,7 @@ describe("Persistence Effect", () => {
 					retainedRows = db
 						.prepare(
 							`SELECT * FROM events
-							WHERE event_id IN ('start', 'end', 'redundant-79')
+							WHERE event_id IN ('start', 'end', 'redundant-99')
 							ORDER BY sequence`,
 						)
 						.all();

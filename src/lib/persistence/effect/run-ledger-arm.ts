@@ -41,6 +41,7 @@ import { sendToken } from "../../provider/runner/runner-protocol.js";
 import { harnessForModelProvider } from "../../provider/turn-settings.js";
 import { backgroundTaskText } from "../../shared-types.js";
 import { canonicalEvent, type StoredEvent } from "../events.js";
+import { joinHeadWhileIdle, sealHistoryNode } from "./history-graph.js";
 import { queuePendingWrite } from "./pending-writes.js";
 import type {
 	EffectProjector,
@@ -1100,6 +1101,12 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							${ctx.version})
 						ON CONFLICT (id) DO NOTHING`;
 				}
+				// 82tn.50: a notice outside any Run is the last Run's; one inside a Run joins its node.
+				if (before.active === undefined)
+					yield* joinHeadWhileIdle(
+						event.sessionId,
+						notes.map(({ id }) => id),
+					);
 				const noticed = yield* stampMessage(
 					notes.map(({ id }) => id),
 					ctx,
@@ -1217,6 +1224,9 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 					],
 					...(noticed.sidebar ? { sidebar: noticed.sidebar } : {}),
 				};
+				// 82tn.50: an ended Run's rows become its History Node, and the Head moves to it.
+				for (const { runId } of decision.ended)
+					yield* sealHistoryNode(event.sessionId, runId, event.createdAt);
 				// 82tn.45: the Run's terminal classification ends its open foreground tool rows.
 				const endedRun = before.active?.runId;
 				return endedRun && endedRun !== view.active?.runId
