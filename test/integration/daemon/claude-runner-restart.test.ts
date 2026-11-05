@@ -445,11 +445,7 @@ describe("Claude runners survive server replacement through built dist", () => {
 					mark["kind"] === "enqueue" && mark["prompt"] === "restart-stream",
 			),
 		).toHaveLength(1);
-		proveCrashMatrixCell(
-			"claude/inherited-key",
-			harness.daemonStorePath(),
-			sessionId,
-		);
+		proveCrashMatrixCell("inherited-key", harness.daemonStorePath(), sessionId);
 	}, 90_000);
 
 	it.each([
