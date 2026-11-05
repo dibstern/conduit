@@ -2,6 +2,8 @@ import { expect, type Page } from "@playwright/test";
 import { Stream } from "effect";
 import {
 	type SessionDiffBase,
+	type SessionDiffEdit,
+	SessionDiffEditError,
 	SessionDiffError,
 	type SessionDiffFile,
 	type SessionDiffFolder,
@@ -39,6 +41,12 @@ interface DiffFixture {
 	/** Live subscriptions opened, and the session the latest one is for. */
 	subscriptions: number;
 	live: string;
+	/** Every discard and stage request, in order. */
+	readonly edits: (Omit<SessionDiffEdit, "sessionId"> & {
+		action: "discard" | "stage";
+	})[];
+	/** The session's agent is running, so every edit answers Busy. */
+	busy: boolean;
 	holdList: boolean;
 	holdPatch: string | null;
 	release: (() => void) | null;
@@ -145,6 +153,8 @@ function seed(
 		version: 0,
 		subscriptions: 0,
 		live: "",
+		edits: [],
+		busy: false,
 		holdList: false,
 		holdPatch: null,
 		release: null,
@@ -231,6 +241,8 @@ function seed(
 			const fileNotes = notes.get(path);
 			return fileNotes ? { patch, notes: fileNotes } : { patch };
 		},
+		SessionDiffDiscard: (request) => edit(page, fixture, "discard", request),
+		SessionDiffStage: (request) => edit(page, fixture, "stage", request),
 		// The server opens a live scope with its current revision.
 		SubscribeSessionDiff: ({ sessionId }) => {
 			fixture.subscriptions += 1;
@@ -242,6 +254,43 @@ function seed(
 		},
 	});
 	return fixture;
+}
+
+/**
+ * As the daemon: refuses while the agent runs or when the file is no longer
+ * the blob the user saw; otherwise the file leaves the unstaged listing and
+ * the new revision is pushed to the live scope.
+ */
+async function edit(
+	page: Page,
+	fixture: DiffFixture,
+	action: "discard" | "stage",
+	{
+		sessionId: _,
+		_tag: __,
+		...request
+	}: SessionDiffEdit & { readonly _tag: string },
+) {
+	fixture.edits.push({ action, ...request });
+	if (fixture.busy)
+		throw new SessionDiffEditError({
+			reason: "busy",
+			message: "The agent is running; wait for it to finish",
+		});
+	const index = fixture.files.findIndex(({ path }) => path === request.path);
+	if (fixture.files[index]?.after !== request.expected)
+		throw new SessionDiffEditError({
+			reason: "stale",
+			message: `${request.path} changed since it was listed`,
+		});
+	fixture.files.splice(index, 1);
+	fixture.version += 1;
+	requireRpcControl(page).sendChunk(
+		"SubscribeSessionDiff",
+		[{ revision: revisionOf(fixture, fixture.live) }],
+		fixture.live,
+	);
+	return { ok: true as const };
 }
 
 function requireFixture(page: Page): DiffFixture {
@@ -1083,6 +1132,95 @@ export const sessionDiffHandlers: StepHandler[] = [
 						tag !== "SubscribeSessionDiff",
 				),
 			).toEqual([]);
+		},
+	},
+	{
+		name: "agent running for diff edits",
+		match: /^the agent is running in the session whose diff is shown$/,
+		run: async ({ world }) => {
+			requireFixture(world.page).busy = true;
+		},
+	},
+	{
+		name: "diff offers edits",
+		match: /^the (\S+) diff offers Stage and Discard$/,
+		run: async ({ world, match }) => {
+			const actions = rowHeader(world.page, match[1] ?? "");
+			for (const name of ["Stage", "Discard"])
+				await expect(
+					actions.getByRole("button", { name, exact: true }),
+				).toBeVisible();
+			await expect(
+				actions.getByRole("button", { name: "Confirm discard" }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "press diff edit",
+		match:
+			/^I press (Stage|Discard|Stage hunk|Discard hunk|Confirm discard|Cancel) on the (\S+) diff$/,
+		run: async ({ world, match }) => {
+			await row(world.page, match[2] ?? "")
+				.getByRole("button", { name: match[1] ?? "", exact: true })
+				.first()
+				.click();
+		},
+	},
+	{
+		name: "diff discard confirms",
+		match: /^the (\S+) diff asks to confirm the discard$/,
+		run: async ({ world, match }) => {
+			const header = rowHeader(world.page, match[1] ?? "");
+			await expect(
+				header.getByRole("button", { name: "Confirm discard" }),
+			).toBeVisible();
+			await expect(
+				header.getByRole("button", { name: "Discard", exact: true }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "no diff edit",
+		match: /^no diff edit was sent( after the first)?$/,
+		run: async ({ world, match }) => {
+			await settle(world.page);
+			expect(requireFixture(world.page).edits).toHaveLength(match[1] ? 1 : 0);
+		},
+	},
+	{
+		name: "diff edit sent",
+		match:
+			/^the daemon was asked to (discard|stage) (?:hunk ([0-9]+) of )?(\S+) as the blob it listed$/,
+		run: async ({ world, match }) => {
+			const [, action, hunk, path] = match;
+			const fixture = requireFixture(world.page);
+			await expect.poll(() => fixture.edits.at(-1)?.path).toBe(path);
+			const listed = changed(path ?? "");
+			expect(fixture.edits.at(-1)).toEqual({
+				action,
+				folder: "/workspace/myapp",
+				path,
+				expected: listed.after,
+				...(hunk === undefined
+					? {}
+					: {
+							hunk: {
+								revision: revisionOf(fixture, fixture.live).replace(
+									/#[0-9]+$/,
+									`#${fixture.version - 1}`,
+								),
+								before: listed.before,
+								index: Number(hunk),
+							},
+						}),
+			});
+		},
+	},
+	{
+		name: "diff no longer listed",
+		match: /^the (\S+) diff is no longer listed$/,
+		run: async ({ world, match }) => {
+			await expect(row(world.page, match[1] ?? "")).toHaveCount(0);
 		},
 	},
 	{

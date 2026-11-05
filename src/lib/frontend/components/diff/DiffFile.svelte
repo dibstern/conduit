@@ -21,7 +21,7 @@
 </script>
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { mount, untrack, unmount } from "svelte";
 	import { REVIEW_EXCERPT_MAX_CHARS, REVIEW_TEXT_MAX_CHARS } from "../../../contracts/review-comment.js";
 	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import type { DiffRow } from "../../stores/session-diff.svelte.js";
@@ -34,6 +34,7 @@
 	import Button from "../ui/Button.svelte";
 	import Textarea from "../ui/Textarea.svelte";
 	import TextButton from "../ui/TextButton.svelte";
+	import DiffEditActions from "./DiffEditActions.svelte";
 
 	// `reveal` changes each time this file is asked for, from a link, Back or a click.
 	const { row, reveal }: { row: DiffRow; reveal?: string | null | undefined } = $props();
@@ -57,7 +58,7 @@
 	let clicked = $state(false);
 	let host = $state<HTMLDivElement>();
 	let section = $state<HTMLElement>();
-	let view: FileDiff | undefined;
+	let view: FileDiff<number> | undefined;
 	// The lines picked for a review comment, and the comment being written.
 	let selection = $state<SelectedLineRange | null>(null);
 	let comment = $state("");
@@ -94,7 +95,14 @@
 			(parsed) => parsed.files,
 		);
 		if (!fileDiff) return;
-		const next = new FileDiff(
+		// A rename, a mode change, an added or a deleted file has no hunk git applies alone.
+		const { edit } = row;
+		const hunks =
+			edit && file.before !== null && file.after !== null && file.oldPath === undefined && file.mode === undefined
+				? fileDiff.hunks
+				: [];
+		const actions: ReturnType<typeof mount>[] = [];
+		const next = new FileDiff<number>(
 			{
 				theme,
 				themeType: untrack(() => themeState.resolved),
@@ -107,14 +115,31 @@
 					selection = range;
 					commentError = "";
 				},
+				renderAnnotation: ({ metadata: index }) => {
+					if (!edit) return undefined;
+					const target = document.createElement("div");
+					target.className = "flex justify-end px-3 py-1";
+					actions.push(mount(DiffEditActions, { target, props: { hunk: true, edit: (action) => edit(action, index) } }));
+					return target;
+				},
 			},
 			workerPool(),
 		);
-		next.render({ fileDiff, containerWrapper: host });
+		next.render({
+			fileDiff,
+			containerWrapper: host,
+			// Each hunk's actions sit under its last line.
+			lineAnnotations: hunks.map((hunk, index) =>
+				hunk.additionCount > 0
+					? { side: "additions", lineNumber: hunk.additionStart + hunk.additionCount - 1, metadata: index }
+					: { side: "deletions", lineNumber: hunk.deletionStart + hunk.deletionCount - 1, metadata: index },
+			),
+		});
 		view = next;
 		return () => {
 			view = undefined;
 			next.cleanUp();
+			for (const action of actions) void unmount(action);
 		};
 	});
 
@@ -215,6 +240,7 @@
 			<span class="shrink-0 font-mono text-success">+{file.insertions}</span>
 			<span class="shrink-0 font-mono text-error">−{file.deletions}</span>
 		{/if}
+		{#if row.edit}<DiffEditActions edit={row.edit} />{/if}
 	</header>
 	{#if file.tier === "tooLarge"}
 		<div class="flex items-center gap-2 px-3 pb-2 text-xs text-text-dimmer">

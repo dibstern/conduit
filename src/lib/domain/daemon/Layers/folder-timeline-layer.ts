@@ -58,7 +58,7 @@ const CONFIG = [
 	"filter.lfs.required=false",
 ];
 
-const baseEnv = () => {
+export const baseEnv = () => {
 	const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0" };
 	for (const key of [
 		"GIT_DIR",
@@ -70,6 +70,18 @@ const baseEnv = () => {
 	])
 		delete env[key];
 	return env;
+};
+
+/**
+ * Copies an index for git to work on. Racy-git: an mtime floored to the second
+ * re-hashes same-second edits. A repository with no index yet rejects, and
+ * leaves no copy, which git reads as empty.
+ */
+export const copyIndex = async (indexFile: string, copy: string) => {
+	const { mtimeMs } = await stat(indexFile);
+	await copyFile(indexFile, copy);
+	const seconds = Math.floor(mtimeMs / 1000);
+	await utimes(copy, seconds, seconds);
 };
 
 const fs = <A>(run: () => Promise<A>) =>
@@ -437,7 +449,7 @@ export const makeFolderTimeline = (configDir: string) =>
 			return repository;
 		});
 
-		const take = (directory: string) =>
+		const take = (directory: string, pathspecs: readonly string[] = ["."]) =>
 			Effect.gen(function* () {
 				const repository = yield* resolve(directory);
 				const temp = join(repository.store, `snapshot-${randomUUID()}.index`);
@@ -446,18 +458,13 @@ export const makeFolderTimeline = (configDir: string) =>
 					GIT_OBJECT_DIRECTORY: join(repository.store, "objects"),
 				};
 				return yield* Effect.gen(function* () {
-					// Racy-git: an mtime floored to the second re-hashes same-second edits.
-					// A repository with no index yet leaves no copy, which git reads as empty.
-					yield* fs(async () => {
-						const { mtimeMs } = await stat(repository.indexFile);
-						await copyFile(repository.indexFile, temp);
-						const seconds = Math.floor(mtimeMs / 1000);
-						await utimes(temp, seconds, seconds);
-					}).pipe(Effect.ignore);
+					yield* fs(() => copyIndex(repository.indexFile, temp)).pipe(
+						Effect.ignore,
+					);
 					const index = (yield* run(directory, ["write-tree"], {
 						env,
 					})).stdout.trim();
-					yield* run(directory, ["add", "--all", "--", "."], { env });
+					yield* run(directory, ["add", "--all", "--", ...pathspecs], { env });
 					const worktree = (yield* run(directory, ["write-tree"], {
 						env,
 					})).stdout.trim();
@@ -529,8 +536,13 @@ export const makeFolderTimeline = (configDir: string) =>
 			Effect.forkScoped,
 		);
 
-		const snapshot = (directory: string) =>
+		const snapshot = (directory: string, paths?: readonly string[]) =>
 			Effect.gen(function* () {
+				if (paths)
+					return yield* take(
+						directory,
+						paths.map((path) => `:(literal)${path}`),
+					);
 				const running = inFlight.get(directory);
 				if (running) return yield* Deferred.await(running);
 				const deferred = yield* Deferred.make<

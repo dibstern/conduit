@@ -126,3 +126,42 @@ export class SessionDiffError extends Schema.TaggedError<SessionDiffError>()(
 		message: Schema.String,
 	},
 ) {}
+
+/**
+ * Discards or stages one listed file of the unstaged scope, or one hunk of its
+ * patch. `expected` is the working-tree blob the user saw (null when deleted);
+ * a hunk names the listing its patch came from and its position in it.
+ */
+export const SessionDiffEditSchema = Schema.Struct({
+	sessionId: Schema.String,
+	folder: Schema.String,
+	path: Schema.String,
+	oldPath: Schema.optional(Schema.String),
+	expected: Schema.NullOr(Schema.String),
+	hunk: Schema.optional(
+		Schema.Struct({
+			revision: Schema.String,
+			before: Schema.String,
+			index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+		}),
+	),
+});
+export type SessionDiffEdit = typeof SessionDiffEditSchema.Type;
+
+/**
+ * Stale: the file is no longer what the user saw, so re-list. Busy: the
+ * session's agent is running. Conflict: git refused, and nothing was written.
+ */
+export class SessionDiffEditError extends Schema.TaggedError<SessionDiffEditError>()(
+	"SessionDiffEditError",
+	{
+		reason: Schema.Literals([
+			"stale",
+			"busy",
+			"conflict",
+			"unavailable",
+			"timeout",
+		]),
+		message: Schema.String,
+	},
+) {}

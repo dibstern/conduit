@@ -51,6 +51,7 @@ export const copy: {
 	ClaudeSettingsTrustBoundaryError: (error) => error.message,
 	ClaudeSettingsResolveError: (error) => error.message,
 	SessionDiffError: (error) => error.message,
+	SessionDiffEditError: (error) => error.message,
 };
 
 const isDeclared = Schema.is(

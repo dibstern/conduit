@@ -30,9 +30,14 @@ export class FolderTimelineError extends Data.TaggedError(
 export class FolderTimeline extends Context.Service<
 	FolderTimeline,
 	{
-		/** Single-flight per folder. */
+		/**
+		 * Single-flight per folder. With `paths` (folder-relative), a snapshot of
+		 * its own, taken now, that re-hashes only those paths: elsewhere its
+		 * worktree tree is the index.
+		 */
 		readonly snapshot: (
 			directory: string,
+			paths?: readonly string[],
 		) => Effect.Effect<FolderSnapshot, FolderTimelineError>;
 		/** Read-only git against a snapshot's store. */
 		readonly git: (

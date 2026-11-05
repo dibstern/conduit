@@ -1,6 +1,8 @@
-import { Effect, Option, Schema, Stream } from "effect";
+import { type Context, Effect, Option, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import {
+	type SessionDiffEdit,
+	SessionDiffEditError,
 	SessionDiffError,
 	type SessionDiffScope,
 } from "../../contracts/session-diff.js";
@@ -8,6 +10,7 @@ import { RunChangesCapturedSchema } from "../../contracts/stored-event.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
+import { WorkingTreeEdits } from "../../domain/daemon/Services/working-tree-edits.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../../domain/relay/Services/session-worktree-deletion.js";
 import { recordedOwnershipForFolder } from "../../persistence/effect/session-worktree-ownership.js";
@@ -15,15 +18,17 @@ import { toolFileChanges } from "../../persistence/tool-wire-projection.js";
 import { guardWorkspacePath } from "../../session/workspace-directories.js";
 import { mapRpcFailure, type WsRpcHandlerMap } from "./shared.js";
 
-const sessionDiff = Effect.serviceOption(SessionDiff).pipe(
-	Effect.flatMap((service) =>
-		service._tag === "Some"
-			? Effect.succeed(service.value)
-			: Effect.fail(
-					new WsRpcError({ message: "Session diffs are unavailable" }),
-				),
-	),
-);
+const available = <I, S>(tag: Context.Key<I, S>) =>
+	Effect.serviceOption(tag).pipe(
+		Effect.flatMap((service) =>
+			service._tag === "Some"
+				? Effect.succeed(service.value)
+				: Effect.fail(
+						new WsRpcError({ message: "Session diffs are unavailable" }),
+					),
+		),
+	);
+const sessionDiff = available(SessionDiff);
 
 /** The turn's recorded run capture, once its run-end checkpoint has settled. */
 const turnCapture = (sessionId: string, turnId: string) =>
@@ -156,6 +161,29 @@ export const subscribeSessionDiff = (request: {
 		}).pipe(Effect.catch(mapRpcFailure("SubscribeSessionDiff"))),
 	);
 
+/** An edit of the unstaged scope, against the session's folders as the server resolves them. */
+const edit = (
+	action: "discard" | "stage",
+	{ sessionId, _tag, ...request }: SessionDiffEdit & { readonly _tag: string },
+) =>
+	Effect.gen(function* () {
+		const edits = yield* available(WorkingTreeEdits);
+		yield* edits[action]({
+			...request,
+			session: yield* sessionFolders(sessionId, { kind: "unstaged" }),
+		});
+		return { ok: true as const };
+	}).pipe(
+		Effect.catch(
+			(error): Effect.Effect<never, SessionDiffEditError | WsRpcError> =>
+				error instanceof SessionDiffEditError
+					? Effect.fail(error)
+					: mapRpcFailure(
+							action === "discard" ? "SessionDiffDiscard" : "SessionDiffStage",
+						)(error),
+		),
+	);
+
 export const sessionDiffHandlers = {
 	SessionDiffList: (request) =>
 		Effect.gen(function* () {
@@ -166,6 +194,8 @@ export const sessionDiffHandlers = {
 				request.revision,
 			);
 		}).pipe(Effect.catch(mapRpcFailure("SessionDiffList"))),
+	SessionDiffDiscard: (request) => edit("discard", request),
+	SessionDiffStage: (request) => edit("stage", request),
 	SessionDiffFile: (request) =>
 		Effect.gen(function* () {
 			const diff = yield* sessionDiff;
@@ -178,4 +208,10 @@ export const sessionDiffHandlers = {
 						: mapRpcFailure("SessionDiffFile")(error),
 			),
 		),
-} satisfies Pick<WsRpcHandlerMap, "SessionDiffList" | "SessionDiffFile">;
+} satisfies Pick<
+	WsRpcHandlerMap,
+	| "SessionDiffList"
+	| "SessionDiffFile"
+	| "SessionDiffDiscard"
+	| "SessionDiffStage"
+>;
