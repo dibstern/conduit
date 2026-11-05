@@ -10,7 +10,7 @@ import { SessionActivityTag } from "../../../src/lib/domain/daemon/Services/sess
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
 	createLocalSessionId,
-	SessionManagerServiceTag,
+	projectSessionManager,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -244,7 +244,7 @@ it.each([
 		await harness.stack.effectRuntime.runtime.runPromise(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				const read = yield* ReadQueryEffectTag;

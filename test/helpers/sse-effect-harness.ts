@@ -16,6 +16,7 @@ import {
 	ProjectSettingsLive,
 	ProjectSettingsTag,
 } from "../../src/lib/domain/relay/Services/project-settings.js";
+import { ConfigTag } from "../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -23,7 +24,11 @@ import {
 	type SSEWiringDeps,
 	wireSSEConsumerEffect,
 } from "../../src/lib/relay/sse-wiring.js";
-import { makeMockSessionManagerService } from "./mock-factories.js";
+import {
+	makeMockConfig,
+	makeMockSessionManagerService,
+	mockSessionManagers,
+} from "./mock-factories.js";
 
 export function makeSSETestServices() {
 	const pendingInteractions = Effect.runSync(
@@ -48,7 +53,10 @@ export function makeSSETestServices() {
 		Layer.succeed(AlertsTag)(alerts),
 		Layer.succeed(PendingInteractionServiceTag)(pendingInteractions),
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag)(sessionService),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers(sessionService),
+		),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.succeed(ProjectSettingsTag)(projectSettings),
 	);
 	return {

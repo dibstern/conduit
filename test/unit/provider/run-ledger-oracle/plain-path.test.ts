@@ -3512,6 +3512,38 @@ describe("[32.2.12] core destructive confirm and lost work: the bead's acceptanc
 	} as const;
 
 	describe("each destructive path gives the right confirm, or one lost-work fact per label (8.4, L3, L5)", () => {
+		it("U2's close after a confirmed retire issues once, even when a repeat snapshot lands first (2893-2897)", () => {
+			agreed("claude", (d) => {
+				snapshot(d, [shell]);
+				running(d);
+				stop(d, 9_000);
+				const asked = d.view().pendingConfirm?.snapshotEntry;
+				expect(confirm(d)).toMatchObject({ tag: "Accepted" });
+				// The runner reports the same tasks again before main's close lands.
+				snapshot(d, [shell]);
+				// A released retire is not asked about again (2876-2877).
+				expect(d.view().pendingConfirm).toBeUndefined();
+				const close = (commandId: string, confirmed: number | undefined) =>
+					step(d, {
+						verb: "control",
+						control: {
+							kind: "end",
+							commandId,
+							deadlineAt: null,
+							...(confirmed === undefined ? {} : { confirmed }),
+						},
+					});
+				close("end-retire", asked);
+				expect(endSessions(d)).toHaveLength(1);
+				expect(d.view().pendingConfirm).toBeUndefined();
+				// Used once, so it is then an entry no confirm holds: a later close carrying it asks
+				// again (failure modes 2 and 3).
+				close("end-again", asked);
+				expect(endSessions(d)).toHaveLength(1);
+				expect(d.view().pendingConfirm?.step).toBe("end_session");
+			});
+		});
+
 		it("restart: an interrupted Run with live tasks waits on a retire confirm, and the relaunch's process_started records the old label's lost work once", () => {
 			agreed("claude", (d) => {
 				snapshot(d, [shell]);

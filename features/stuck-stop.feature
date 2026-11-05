@@ -78,3 +78,25 @@ Scenario: Dismissing the delete ask sends nothing more, and unknown tasks say so
   Then the confirm reads "Background state unknown. Deleting may end background work. Continue?"
   When I cancel the confirm
   Then the panel choice session's deletes carried confirms none
+
+Scenario: A held close with no live turn asks on the last turn, and the confirm carries the entry it showed
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a settled turn
+  When closing the session is held at snapshot entry 7 with a dev server and a vitest shell without its command
+  Then the panel choice turn head reads "Close is held. Closing will end 2 tasks: pnpm dev (shell), (shell): Run vitest in watch mode"
+  When I press Close now on the held close
+  Then the confirm reads "Closing will end: pnpm dev (shell), (shell): Run vitest in watch mode. Continue?"
+  When I accept the close
+  Then the stuck Stop was confirmed at snapshot entries 7
+
+Scenario: A held close with no snapshot says the background state is unknown
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a settled turn
+  When closing the session is held at snapshot entry 3 with no snapshot
+  Then the panel choice turn head reads "Close is held. Background state unknown"
+  When I press Close now on the held close
+  Then the confirm reads "Background state unknown. Closing may end background work. Continue?"
+  When I cancel the confirm
+  Then the stuck Stop was confirmed at snapshot entries none

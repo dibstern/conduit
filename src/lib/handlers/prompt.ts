@@ -14,7 +14,7 @@ import {
 	WebSocketHandlerTag,
 } from "../domain/relay/Services/services.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../domain/relay/Services/session-manager-service.js";
 import { ReadQueryEffectTag } from "../persistence/effect/read-query-effect.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { assertSessionRunnerAvailable } from "../provider/runner/runner-provider-instance.js";
@@ -58,7 +58,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				),
 		});
 		const log = yield* LoggerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 
 		const { clientId, text, images } = input;
 		let activeId = input.sessionId;

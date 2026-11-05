@@ -28,10 +28,7 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionEventBusLive } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import {
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { subscribeShell } from "../../../src/lib/domain/relay/Services/shell-subscription.js";
@@ -48,6 +45,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 
 describe("SessionManagerService settle signal", () => {
@@ -67,7 +65,7 @@ describe("SessionManagerService settle signal", () => {
 			// Same wiring as project-relay-layers: one shared bus for the
 			// persistence stack and the relay services.
 			const layer = Layer.provideMerge(
-				Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
+				Layer.provideMerge(standaloneSessionManagerLive, SessionWorkspaceLive),
 				Layer.mergeAll(
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					makeSessionManagerStateLive(),
@@ -99,7 +97,7 @@ describe("SessionManagerService settle signal", () => {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* runner.markRecovered();
 				yield* runner
 					.projectEvent(

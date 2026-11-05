@@ -7,7 +7,7 @@ import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { OpenCodeInstanceEvent } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
@@ -355,7 +355,7 @@ it("recovers historical sessions before startup can create a live session", asyn
 		});
 		const sessions = await relay.effectRuntime.runtime.runPromise(
 			Effect.gen(function* () {
-				const manager = yield* SessionManagerServiceTag;
+				const manager = yield* projectSessionManager;
 				const live = yield* manager.createSession("Live", {
 					pick: {
 						harness: "claude",

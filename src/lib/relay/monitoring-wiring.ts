@@ -14,8 +14,14 @@ import {
 	type AlertsTag,
 	publishAlert,
 } from "../domain/relay/Services/alerts.js";
-import { StatusPollerTag } from "../domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	type ConfigTag,
+	StatusPollerTag,
+} from "../domain/relay/Services/services.js";
+import {
+	projectSessionManager,
+	type SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import {
 	clearProcessingTimeout,
 	type OverridesStateTag,
@@ -632,6 +638,7 @@ export const wireMonitoringEffect = (
 	EffectMonitoringWiringResult,
 	never,
 	| SessionManagerServiceTag
+	| ConfigTag
 	| StatusPollerTag
 	| OverridesStateTag
 	| AlertsTag
@@ -641,7 +648,7 @@ export const wireMonitoringEffect = (
 		const statusPoller = yield* StatusPollerTag;
 		const directory = yield* AccountDirectory;
 		const runtime = yield* Effect.context<
-			SessionManagerServiceTag | OverridesStateTag | AlertsTag
+			SessionManagerServiceTag | ConfigTag | OverridesStateTag | AlertsTag
 		>();
 		const {
 			wsHandler,
@@ -675,7 +682,7 @@ export const wireMonitoringEffect = (
 			runFork(
 				Effect.gen(function* () {
 					if (!monitoringActive) return;
-					const sessionService = yield* SessionManagerServiceTag;
+					const sessionService = yield* projectSessionManager;
 					const providers = yield* statusPoller.getSessionProviders();
 					const accounts = new Map(
 						yield* Effect.forEach(

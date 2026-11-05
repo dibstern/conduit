@@ -8,7 +8,7 @@ import { makePersistenceEffectLayer } from "../../src/lib/persistence/effect/liv
 import {
 	makeMockAccountDirectory,
 	makeMockOpenCodeAPI,
-	makeMockSessionManagerService,
+	mockSessionManagers,
 } from "./mock-factories.js";
 
 type OpenCodeAPIOverrides = {
@@ -59,6 +59,6 @@ export function makeSessionSettingsLayer() {
 	return Layer.mergeAll(
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+		Layer.succeed(SessionManagerServiceTag)(mockSessionManagers()),
 	);
 }

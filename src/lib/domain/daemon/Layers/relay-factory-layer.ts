@@ -56,7 +56,9 @@ import {
 } from "../../relay/Services/project-management-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
+import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
+import { SessionSetupTag } from "../../relay/Services/session-setup.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -87,6 +89,7 @@ import {
 } from "../Services/instance-manager-service.js";
 import { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectContext } from "../Services/project-context.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
@@ -101,6 +104,7 @@ import { ProviderAdapters } from "../Services/provider-adapters.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDirectory } from "../Services/session-directory.js";
 import { SessionGit } from "../Services/session-git.js";
+import { SessionManagerOwner } from "../Services/session-manager-owner.js";
 import { Subprocess } from "../Services/subprocess.js";
 import { Usage } from "../Services/usage.js";
 import { WorktreeCleanupQueueTag } from "../Services/worktree-cleanup-service.js";
@@ -231,6 +235,12 @@ export const RelayFactoryLive = (
 			const projectContext = yield* Effect.serviceOption(ProjectContext);
 			const overrides = yield* Effect.serviceOption(OverridesStateTag);
 			const sessionWorkspace = yield* Effect.serviceOption(SessionWorkspaceTag);
+			const sessionSetup = yield* Effect.serviceOption(SessionSetupTag);
+			const owners = yield* Effect.serviceOption(OwnerScopes);
+			const sessionManager = yield* Effect.serviceOption(SessionManagerOwner);
+			const sessionManagers = yield* Effect.serviceOption(
+				SessionManagerServiceTag,
+			);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -618,6 +628,32 @@ export const RelayFactoryLive = (
 										)
 										.pipe(
 											Context.add(Subprocess, subprocess),
+											Context.merge(
+												Option.isSome(owners)
+													? Context.make(OwnerScopes, owners.value)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(sessionSetup)
+													? Context.make(SessionSetupTag, sessionSetup.value)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(sessionManager)
+													? Context.make(
+															SessionManagerOwner,
+															sessionManager.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(sessionManagers)
+													? Context.make(
+															SessionManagerServiceTag,
+															sessionManagers.value,
+														)
+													: Context.empty(),
+											),
 											Context.merge(
 												Option.isSome(sessionGit)
 													? Context.make(SessionGit, sessionGit.value)

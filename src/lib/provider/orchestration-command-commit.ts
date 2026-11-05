@@ -90,6 +90,9 @@ export class DurableCommandCommitRepository {
 						...(payload.retireRunIds
 							? { retireRunIds: payload.retireRunIds }
 							: {}),
+						...(payload.confirmed === undefined
+							? {}
+							: { confirmed: payload.confirmed }),
 					},
 					opts,
 				);

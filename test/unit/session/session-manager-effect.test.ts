@@ -34,8 +34,7 @@ import { listSessions } from "../../../src/lib/domain/relay/Services/session-man
 import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
 import {
 	deleteSession,
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
+	projectSessionManager,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
@@ -84,6 +83,7 @@ import {
 	makeMockLogger,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -153,7 +153,7 @@ describe("SessionManager Effect", () => {
 			: undefined;
 
 		return Layer.provideMerge(
-			Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
+			Layer.provideMerge(standaloneSessionManagerLive, SessionWorkspaceLive),
 			Layer.mergeAll(
 				Layer.fresh(makeTestLayer(mockApi, configDir)),
 				Layer.succeed(LoggerTag)(makeMockLogger()),
@@ -258,7 +258,7 @@ describe("SessionManager Effect", () => {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				yield* sql`
@@ -356,7 +356,7 @@ describe("SessionManager Effect", () => {
 
 		return Effect.gen(function* () {
 			const runner = yield* ProjectionRunnerEffectTag;
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			const sql = yield* SqlClient.SqlClient;
 			yield* runner.markRecovered();
 			yield* sql`
@@ -432,7 +432,7 @@ describe("SessionManager Effect", () => {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const sql = yield* SqlClient.SqlClient;
 				yield* runner.markRecovered();
 				yield* sql`
@@ -479,7 +479,7 @@ describe("SessionManager Effect", () => {
 
 			return Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				yield* service.renameSession(sessionId, "API title");
 
@@ -510,7 +510,7 @@ describe("SessionManager Effect", () => {
 			return Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const session = yield* service.createSession("New", {
 					account: {
@@ -563,7 +563,7 @@ describe("SessionManager Effect", () => {
 			const layer = makeLiveServiceLayer(mockApi, filename);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const store = yield* EventStoreEffectTag;
 				const sql = yield* SqlClient.SqlClient;
 				yield* sql`
@@ -644,7 +644,7 @@ describe("SessionManager Effect", () => {
 			const layer = makeLiveServiceLayer(mockApi, filename, readQuery);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const result = yield* Effect.result(
 					service.renameSession(sessionId, "API title"),

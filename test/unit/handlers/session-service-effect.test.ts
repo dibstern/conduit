@@ -40,6 +40,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockStatusPoller,
 	makeMockWebSocketHandler,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
 function makeSessionMetadataLayer(options: {
@@ -84,7 +85,9 @@ function makeSessionMetadataLayer(options: {
 		makePersistenceEffectLayer(":memory:", "test-project"),
 		Layer.succeed(OpenCodeAPITag)(api),
 		Layer.succeed(WebSocketHandlerTag)(wsHandler),
-		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers(sessionManagerService),
+		),
 		Layer.succeed(LoggerTag)(logger),
 		Layer.succeed(ConfigTag)(makeMockConfig()),
 		PendingInteractionServiceLive,

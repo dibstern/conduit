@@ -24,10 +24,14 @@ import {
 	refreshModelSettings,
 } from "../domain/relay/Services/project-settings.js";
 import {
+	type ConfigTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	projectSessionManager,
+	type SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import {
 	getPermissionMode,
 	type OverridesStateTag,
@@ -430,7 +434,7 @@ const recordSSEEventStartEffect = (
 			return ingested;
 
 		if (eventSessionId && event.type.startsWith("message.")) {
-			const sessionService = yield* SessionManagerServiceTag;
+			const sessionService = yield* projectSessionManager;
 			yield* sessionService.recordMessageActivity(eventSessionId, Date.now());
 		}
 		return ingested;
@@ -548,7 +552,7 @@ function questionAskedPush(
 
 const refreshLineageAfterUpdateEffect = (deps: SSEWiringDeps) =>
 	Effect.gen(function* () {
-		const sessionService = yield* SessionManagerServiceTag;
+		const sessionService = yield* projectSessionManager;
 		yield* sessionService
 			.refreshSessionLineage()
 			.pipe(
@@ -579,7 +583,7 @@ const handleSSEEventAfterPendingEffect = (
 						? ((info as Record<string, unknown>)["parentID"] as string)
 						: undefined;
 				if (childId && parentId) {
-					const sessionService = yield* SessionManagerServiceTag;
+					const sessionService = yield* projectSessionManager;
 					yield* sessionService.addToParentMap(childId, parentId);
 				}
 			}
@@ -668,7 +672,7 @@ const handleSSEEventAfterPendingEffect = (
 
 			let parentMap = new Map<string, string>();
 			if (targetSessionId != null) {
-				const sessionService = yield* SessionManagerServiceTag;
+				const sessionService = yield* projectSessionManager;
 				parentMap = yield* sessionService.getSessionParentMap({
 					activityOnly: true,
 				});
@@ -869,6 +873,7 @@ export const wireSSEConsumerEffect = (
 			| PendingInteractionServiceTag
 			| OverridesStateTag
 			| SessionManagerServiceTag
+			| ConfigTag
 			| ProjectSettingsTag
 			| AlertsTag
 		>();

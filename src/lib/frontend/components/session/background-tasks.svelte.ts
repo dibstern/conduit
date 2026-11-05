@@ -227,7 +227,7 @@ const askMoved = (sessionId: string, entry: number, ms: number) =>
 
 /** 8.4: the ask before a step ends background tasks; no list means the state is unknown. */
 const endAsk = (
-	step: "Stopping now" | "Deleting",
+	step: "Stopping now" | "Closing" | "Deleting",
 	tasks: readonly BackgroundTask[] | undefined,
 ) =>
 	tasks
@@ -283,7 +283,10 @@ export async function confirmStuckStop(sessionId: string): Promise<void> {
 	for (;;) {
 		const ask = findSession(sessionId)?.stopConfirm;
 		if (!ask) return;
-		if (!(await confirm(endAsk("Stopping now", ask.tasks), "Stop now"))) return;
+		// A held close (a refresh, 2897) confirms through the same gate; cancelling leaves it held.
+		const closing = ask.step === "end_session";
+		const text = endAsk(closing ? "Closing" : "Stopping now", ask.tasks);
+		if (!(await confirm(text, closing ? "Close now" : "Stop now"))) return;
 		try {
 			await rpc("ConfirmEscalation", {
 				sessionId,

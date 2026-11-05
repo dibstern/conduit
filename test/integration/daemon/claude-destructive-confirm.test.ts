@@ -12,6 +12,7 @@
 // 19. the list shown and the snapshot entry come from different reads;
 // 13, 14. a confirmed close leaves no timeline entry, or a close with no tasks leaves one.
 // 24. a delete with tasks live ends them unasked, or a stale confirm deletes.
+// 25. a refresh with tasks live ends them unasked, waits for the turn, or shows no ask.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -68,6 +69,19 @@ const sessionRows = (harness: ProcessHarness, sessionId: string) => {
 	}
 };
 
+const endRows = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return db
+			.prepare(
+				"SELECT status, error_code AS errorCode FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'end_session' ORDER BY request_sequence",
+			)
+			.all(sessionId) as { status: string; errorCode: string | null }[];
+	} finally {
+		db.close();
+	}
+};
+
 const lostNotices = async (browser: BrowserClient, sessionId: string) =>
 	(await browser.history(sessionId)).flatMap((message) =>
 		(message.parts ?? []).flatMap((part) =>
@@ -80,6 +94,7 @@ const lostNotices = async (browser: BrowserClient, sessionId: string) =>
 type StopConfirm = {
 	readonly snapshotEntry: number;
 	readonly tasks?: readonly { readonly id: string }[];
+	readonly step?: "end_session";
 };
 const confirmOf = (message: Record<string, unknown>) =>
 	message["stopConfirm"] as StopConfirm | undefined;
@@ -124,6 +139,33 @@ const startTurn = async (harness: ProcessHarness, browser: BrowserClient) => {
 	});
 	return { sessionId, queryId: String(held?.["queryId"]) };
 };
+
+/** Confirms the newest ask the browser has from `from` on, asking again on a stale answer, as the UI does. */
+const confirmNewest = (
+	browser: BrowserClient,
+	sessionId: string,
+	from: number,
+) =>
+	// test-waits-allow polling: each try reads the newest ask the browser has.
+	vi.waitFor(
+		async () => {
+			const newest = browser.frames
+				.slice(from)
+				.map(({ message }) =>
+					message["type"] === "session_row" && message["id"] === sessionId
+						? confirmOf(message)
+						: undefined,
+				)
+				.filter((confirm) => confirm !== undefined)
+				.at(-1);
+			const entry = newest?.snapshotEntry ?? 0;
+			await Effect.runPromise(
+				browser.rpc.ConfirmEscalation({ sessionId, snapshotEntry: entry }),
+			);
+			return entry;
+		},
+		{ timeout: 10_000, interval: 200 },
+	);
 
 const stop = (browser: BrowserClient, sessionId: string) => {
 	const stopped = Effect.runPromise(
@@ -189,6 +231,8 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		const first = confirmOf(asked);
 		proof["asked"] = first;
 		expect(first?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		// A stuck Stop names no step: the page reads it as a Stop, not a held close.
+		expect(first?.step).toBeUndefined();
 		// test-waits-allow real-wait: nothing destroying is an absence past the deadline.
 		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
 		expect(closedQueries(fixture, queryId)).toEqual([]);
@@ -494,6 +538,153 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		});
 		proof["restart: lost work"] = lost;
 		expect(lost[0]).toMatch(/^Background work ended: .*\(shell\)/);
+	});
+
+	it("holds a refresh while tasks are live, asks with no turn needed, and closes on a confirm", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		const cursor = browser.frames.length;
+		const startedAt = Date.now();
+		await Effect.runPromise(
+			browser.rpc.ReloadProviderSession({
+				sessionId,
+				commandId: crypto.randomUUID(),
+			}),
+		);
+		const repliedMs = Date.now() - startedAt;
+		const asked = confirmOf(
+			await row(browser, sessionId, cursor, (message) =>
+				Boolean(confirmOf(message)),
+			),
+		);
+		proof["refresh: asked"] = { repliedMs, asked };
+		expect(asked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		// 2897: the ask names the held close, so the page asks with no turn live.
+		expect(asked?.step).toBe("end_session");
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		proof["refresh: held rows"] = endRows(fixture, sessionId);
+		expect(endRows(fixture, sessionId)).toEqual([
+			{ status: "held", errorCode: null },
+		]);
+		const confirmed = await confirmNewest(browser, sessionId, cursor);
+		proof["refresh: rows after confirm"] = endRows(fixture, sessionId);
+		// test-waits-allow polling: the fake SDK reports a closed query only through sdk-proof.ndjson.
+		await vi.waitFor(
+			() => expect(closedQueries(fixture, queryId)).toHaveLength(1),
+			{ timeout: 5_000 },
+		);
+		const cleared = await row(
+			browser,
+			sessionId,
+			cursor,
+			(message) => message["stopConfirm"] === undefined,
+		);
+		proof["refresh: confirmed"] = {
+			confirmed,
+			closed: closedQueries(fixture, queryId).length,
+			events: read(fixture, sessionId),
+			cleared: confirmOf(cleared) ?? null,
+		};
+	});
+
+	// 2897: "end then continues to its end_session step", so the held refresh outlives its turn (D43).
+	it("keeps a held refresh, still asking, when its turn ends on its own", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		const cursor = browser.frames.length;
+		await Effect.runPromise(
+			browser.rpc.ReloadProviderSession({
+				sessionId,
+				commandId: crypto.randomUUID(),
+			}),
+		);
+		await row(browser, sessionId, cursor, (message) =>
+			Boolean(confirmOf(message)),
+		);
+		const endedFrom = browser.frames.length;
+		writeFileSync(join(fixture.root, "task-stop-release-result"), "release");
+		const idle = await row(
+			browser,
+			sessionId,
+			endedFrom,
+			(message) => message["status"] === "idle",
+		);
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const held = endRows(fixture, sessionId);
+		proof["turn ended: held"] = {
+			asked: confirmOf(idle) ?? null,
+			rows: held,
+			closed: closedQueries(fixture, queryId).length,
+		};
+		expect(
+			confirmOf(idle)
+				?.tasks?.map((task) => task.id)
+				.sort(),
+		).toEqual(allIds);
+		expect(held).toEqual([{ status: "held", errorCode: null }]);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		await confirmNewest(browser, sessionId, endedFrom);
+		// test-waits-allow polling: the fake SDK reports a closed query only through sdk-proof.ndjson.
+		await vi.waitFor(
+			() => expect(closedQueries(fixture, queryId)).toHaveLength(1),
+			{ timeout: 5_000 },
+		);
+		proof["turn ended: confirmed"] = endRows(fixture, sessionId);
+	});
+
+	// 2875-2899 keep the step in the gate, which the store rebuilds, so a restart keeps it held:
+	// recovery never claims a held row, and only a confirm after the restart releases it.
+	it("keeps a held refresh across a daemon restart until a confirm", async () => {
+		const { fixture, browser } = await start();
+		const { sessionId } = await startTurn(fixture, browser);
+		const cursor = browser.frames.length;
+		await Effect.runPromise(
+			browser.rpc.ReloadProviderSession({
+				sessionId,
+				commandId: crypto.randomUUID(),
+			}),
+		);
+		await row(browser, sessionId, cursor, (message) =>
+			Boolean(confirmOf(message)),
+		);
+		await browser.close();
+		await fixture.kill();
+		await fixture.restart({
+			serviceEnvironment: {
+				CONDUIT_TEST_STOP_ABORT_WAIT_MS: String(STOP_WAIT_MS),
+			},
+		});
+		const after = await fixture.connect();
+		await after.followSessions();
+		await after.followSession(sessionId);
+		const reasked = confirmOf(
+			await row(after, sessionId, 0, (message) => {
+				const confirm = confirmOf(message);
+				return confirm?.tasks?.length === taskStopFixture.length;
+			}),
+		);
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const held = endRows(fixture, sessionId);
+		proof["restart refresh: held"] = { reasked, rows: held };
+		expect(reasked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		expect(held).toEqual([{ status: "held", errorCode: null }]);
+		expect(
+			read(fixture, sessionId).filter((event) => event.retire !== null),
+		).toEqual([]);
+		await confirmNewest(after, sessionId, 0);
+		// test-waits-allow polling: the released row's outcome reaches only the store.
+		await vi.waitFor(
+			() =>
+				expect(endRows(fixture, sessionId)).toEqual([
+					{ status: "completed", errorCode: null },
+				]),
+			{ timeout: 5_000 },
+		);
+		proof["restart refresh: confirmed"] = endRows(fixture, sessionId);
 	});
 
 	// Audit 2: a reattach that sends no snapshot. L1 (CONTRACT.md 351-353) makes a reattach at the same

@@ -330,6 +330,14 @@ interface Book {
 		| undefined;
 	/** 8.4, D45: raised by every non-older snapshot, process_started and raised label. */
 	snapshotEntry: number;
+	/**
+	 * 8.4 (2876-2877, 2893-2897): the Run whose retire a confirm released, which no snapshot asks
+	 * about again, and the entry it matched, which U2's close carries once to continue that step.
+	 * D45 still counts every snapshot.
+	 */
+	retireConfirmed?:
+		| { readonly runId?: string | undefined; entry?: number | undefined }
+		| undefined;
 	/** 8.7: by port; only server_gone removes one (8.2). */
 	readonly servers: Map<number, Server>;
 }
@@ -542,6 +550,25 @@ export function closeConfirm(
 	return taskView(book).tag === "none" || confirmed === book.snapshotEntry
 		? undefined
 		: book.snapshotEntry;
+}
+/**
+ * 8.4 (2875-2899, "the gate stores its step"): main's end_session row the gate holds, by its
+ * commandId, and whether the ledger has issued a row. Main holds the row until it is issued (gap:
+ * 2903 has the ledger neither hold nor escalate main's end_session; the user chose the gate).
+ */
+export function endSessionStep(
+	state: SessionLedgerState,
+	commandId: string,
+): "held" | "issued" | "none" {
+	const book = bookOf(state);
+	if (
+		book.confirm?.step === "end_session" &&
+		book.confirm.commandId === commandId
+	)
+		return "held";
+	return book.sends.some((send) => send.commandId === commandId)
+		? "issued"
+		: "none";
 }
 /** 8.4: the current runner's tasks; a pending address has none. */
 function taskView(book: Book): TasksView {
@@ -2744,14 +2771,33 @@ function openRetireGate(book: Book) {
 	if (
 		run?.phase === "Interrupting" &&
 		run.by !== "end" &&
+		book.retireConfirmed?.runId !== run.runId &&
 		taskView(book).tag !== "none"
 	)
 		book.confirm ??= { step: "retire", runId: run.runId };
 }
 
-/** 8.4 (L3): the end_session step waits on the confirm gate with tasks live or unknown. */
-function gateEndSession(book: Book, run: Run | undefined, commandId: string) {
-	if (taskView(book).tag === "none") endSession(book, run, commandId);
+/**
+ * 8.4 (L3): the end_session step waits on the confirm gate with tasks live or unknown. A step the
+ * user confirmed goes unasked while its entry is the latest snapshot (2880 "a confirm must match").
+ */
+function gateEndSession(
+	book: Book,
+	run: Run | undefined,
+	commandId: string,
+	confirmed?: number,
+) {
+	// 2893-2897: U2's close continues the retire step its confirm released, which matched the latest
+	// snapshot when given (2873), so a repeat snapshot since does not ask twice.
+	const retired = book.retireConfirmed;
+	const continues = confirmed !== undefined && confirmed === retired?.entry;
+	if (continues) retired.entry = undefined;
+	if (
+		taskView(book).tag === "none" ||
+		confirmed === book.snapshotEntry ||
+		continues
+	)
+		endSession(book, run, commandId);
 	else book.confirm = { step: "end_session", runId: run?.runId, commandId };
 }
 
@@ -2763,6 +2809,7 @@ function commit(
 	by: InterruptBy,
 	deadlineAt: number | null,
 	commandId: string,
+	confirmed?: number,
 ): Outcome {
 	const run = activeRun(book);
 	// 3.10: a Pending interaction on a label with work is resolved at the commit, unless its answer may act.
@@ -2797,7 +2844,7 @@ function commit(
 	const acting =
 		run !== undefined && run.phase !== "Queued" && !nothingMayAct(book, run);
 	// 8.4: an end's Stop row is its end_session, not an interrupt.
-	if (by === "end") gateEndSession(book, run, commandId);
+	if (by === "end") gateEndSession(book, run, commandId, confirmed);
 	else if (acting || labelWorkOutstanding(book)) {
 		const runId = acting ? (run?.runId ?? null) : null;
 		issueControl(
@@ -2825,6 +2872,7 @@ function commit(
 	if (
 		by !== "end" &&
 		run?.phase === "Interrupting" &&
+		book.retireConfirmed?.runId !== run.runId &&
 		taskView(book).tag !== "none"
 	)
 		book.confirm ??= { step: "retire", runId: run.runId };
@@ -2896,8 +2944,9 @@ function control(
 					"end",
 					command.deadlineAt,
 					command.commandId,
+					command.confirmed,
 				);
-			gateEndSession(book, run, command.commandId);
+			gateEndSession(book, run, command.commandId, command.confirmed);
 			return changed;
 		}
 		case "answer": {
@@ -2951,6 +3000,11 @@ function control(
 			if (command.snapshotEntry !== book.snapshotEntry)
 				return rejected("stale confirm (8.4)");
 			book.confirm = undefined;
+			if (gate.step === "retire")
+				book.retireConfirmed = {
+					runId: gate.runId,
+					entry: command.snapshotEntry,
+				};
 			if (gate.step === "end_session" && gate.commandId !== undefined)
 				endSession(book, findRun(book, gate.runId), gate.commandId);
 			return changed;
@@ -2997,8 +3051,13 @@ function apply(book: Book, entry: Entry, step: Step): Outcome {
 			run.retryAt = undefined;
 			run.exec.settle = undefined;
 			run.ended = { outcome: entry.outcome, reason: entry.reason };
-			// D43: the gate drops with its Run.
-			if (book.confirm?.runId === entry.runId) book.confirm = undefined;
+			// D43: the gate drops with its Run; an end's end_session step outlives it (2897 "`end` then
+			// continues to its end_session step").
+			if (
+				book.confirm?.runId === entry.runId &&
+				book.confirm.step !== "end_session"
+			)
+				book.confirm = undefined;
 			return changed;
 		}
 		case "release": {

@@ -23,9 +23,8 @@ import {
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
 import {
+	projectSessionManager,
 	type SessionManagerService,
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
@@ -48,6 +47,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 
 type OperationsOutsideReadModelParity = keyof Pick<
@@ -60,6 +60,7 @@ type OperationsOutsideReadModelParity = keyof Pick<
 	| "loadPreRenderedHistory"
 	| "recordMessageActivity"
 	| "addToParentMap"
+	| "holdSession"
 	| "getSessionParentMap"
 	| "refreshSessionLineage"
 	// Archive's read-model parity is covered by the real-relay session-archive E2E.
@@ -344,7 +345,10 @@ describe("SessionManager read-your-writes parity", () => {
 					"test-project",
 				);
 				const layer = Layer.provideMerge(
-					Layer.provideMerge(SessionManagerServiceLive, SessionWorkspaceLive),
+					Layer.provideMerge(
+						standaloneSessionManagerLive,
+						SessionWorkspaceLive,
+					),
 					Layer.mergeAll(
 						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						makeSessionManagerStateLive(),
@@ -371,7 +375,7 @@ describe("SessionManager read-your-writes parity", () => {
 					const store = yield* EventStoreEffectTag;
 					const projectionRunner = yield* ProjectionRunnerEffectTag;
 					const readQuery = yield* ReadQueryEffectTag;
-					const service = yield* SessionManagerServiceTag;
+					const service = yield* projectSessionManager;
 					yield* projectionRunner.markRecovered();
 
 					const seedSession: ParityContext["seedSession"] = (

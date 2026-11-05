@@ -38,7 +38,7 @@ import {
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { persistSessionPermissionMode } from "../../../src/lib/domain/relay/Services/session-manager-permission-mode.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { sessionPickEvents } from "../../../src/lib/domain/relay/Services/session-pick.js";
 import {
@@ -159,7 +159,7 @@ it("establishOpenCodeSession advances the version of the session it seeds", asyn
 			Effect.scoped(
 				Effect.gen(function* () {
 					yield* (yield* ProjectionRunnerEffectTag).recover();
-					const manager = yield* SessionManagerServiceTag;
+					const manager = yield* projectSessionManager;
 					const announced = yield* announcedDuring(
 						manager.establishOpenCodeSession(
 							{
@@ -200,7 +200,7 @@ it("local session creation advances its row version and announces its session", 
 			Effect.scoped(
 				Effect.gen(function* () {
 					yield* (yield* ProjectionRunnerEffectTag).recover();
-					const manager = yield* SessionManagerServiceTag;
+					const manager = yield* projectSessionManager;
 					let sessionId = "";
 					const announced = yield* announcedDuring(
 						manager
@@ -252,7 +252,7 @@ it("session-manager rename advances its row version and announces its session", 
 			Effect.scoped(
 				Effect.gen(function* () {
 					yield* (yield* ProjectionRunnerEffectTag).recover();
-					const manager = yield* SessionManagerServiceTag;
+					const manager = yield* projectSessionManager;
 					const session = yield* manager.createSession("Before rename", {
 						account: yield* (yield* AccountDirectory).resolve({
 							_tag: "DriverDefault",

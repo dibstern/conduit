@@ -665,7 +665,7 @@ async function main(): Promise<void> {
 				join(codeRoot, "lib/domain/relay/Services", `services.${extension}`),
 			).href
 		)) as typeof import("../../src/lib/domain/relay/Services/services.js");
-		const { SessionManagerServiceTag } = (await import(
+		const { projectSessionManager } = (await import(
 			pathToFileURL(
 				join(
 					codeRoot,
@@ -732,7 +732,7 @@ async function main(): Promise<void> {
 										: hold
 							).pipe(Effect.forkDetach);
 							if (existsSync(join(root, "workspace-retention-proof"))) {
-								const manager = yield* SessionManagerServiceTag;
+								const manager = yield* projectSessionManager;
 								yield* Effect.gen(function* () {
 									writeFileSync(`${gate}-retention-started`, "daemon callback");
 									// AutoSettle calls the captured manager from the daemon context.

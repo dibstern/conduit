@@ -31,9 +31,18 @@ const VITEST = {
 /** The snapshot entry a newer snapshot moves the ask to before the page's next confirm lands. */
 const newer = new WeakMap<Page, number>();
 
-const ask = (page: Page, snapshotEntry: number, tasks?: readonly object[]) =>
-	setSessionRowStatus(page, SESSION, "busy", {
-		stopConfirm: { snapshotEntry, ...(tasks ? { tasks } : {}) },
+const ask = (
+	page: Page,
+	snapshotEntry: number,
+	tasks?: readonly object[],
+	step?: "end_session",
+) =>
+	setSessionRowStatus(page, SESSION, step ? "idle" : "busy", {
+		stopConfirm: {
+			snapshotEntry,
+			...(tasks ? { tasks } : {}),
+			...(step ? { step } : {}),
+		},
 	});
 
 const stub = (page: Page) =>
@@ -66,6 +75,35 @@ export const stuckStopHandlers: StepHandler[] = [
 				match[2] === "no snapshot" ? undefined : [DEV, VITEST],
 			);
 			await expect(head(world.page)).toContainText("Stop is stuck");
+		},
+	},
+	{
+		// A refresh with no live turn: the gate holds main's end_session step (8.4, 2897).
+		name: "hold a close for a confirm",
+		match:
+			/^closing the session is held at snapshot entry (\d+) with (a dev server and a vitest shell without its command|no snapshot)$/,
+		run: async ({ world, match }) => {
+			stub(world.page);
+			ask(
+				world.page,
+				Number(match[1]),
+				match[2] === "no snapshot" ? undefined : [DEV, VITEST],
+				"end_session",
+			);
+			await expect(
+				world.page.getByTestId("stuck-stop-actions").last(),
+			).toBeVisible();
+		},
+	},
+	{
+		name: "press Close now on a held close",
+		match: /^I press Close now on the held close$/,
+		run: async ({ world }) => {
+			await world.page
+				.getByTestId("stuck-stop-actions")
+				.last()
+				.getByRole("button", { name: "Close now", exact: true })
+				.click();
 		},
 	},
 	{
@@ -145,7 +183,7 @@ export const stuckStopHandlers: StepHandler[] = [
 	},
 	{
 		name: "answer the confirm",
-		match: /^I (accept|cancel) the (confirm|delete)$/,
+		match: /^I (accept|cancel) the (confirm|delete|close)$/,
 		run: async ({ world, match }) => {
 			const modal = dialog(world.page);
 			await expect(modal).toBeVisible();
@@ -157,7 +195,9 @@ export const stuckStopHandlers: StepHandler[] = [
 							? "Cancel"
 							: match[2] === "delete"
 								? "Delete"
-								: "Stop now",
+								: match[2] === "close"
+									? "Close now"
+									: "Stop now",
 					exact: true,
 				})
 				.click();

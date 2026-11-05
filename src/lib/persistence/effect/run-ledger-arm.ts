@@ -20,6 +20,7 @@ import type {
 import { inputIdFromOpenCodeMessageId } from "../../provider/opencode/opencode-input-message-id.js";
 import {
 	decide,
+	endSessionStep,
 	evolve,
 	fenceHolds,
 	initialSessionLedgerState,
@@ -472,6 +473,9 @@ const commandFor = (
 						deadlineAt: event.data.retireRunIds
 							? null
 							: (event.data.stop?.deadlineAt ?? null),
+						...(event.data.confirmed === undefined
+							? {}
+							: { confirmed: event.data.confirmed }),
 					},
 				};
 			}
@@ -1118,6 +1122,27 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 							)
 						)
 							wakeAfterCommit(sql, fenceWakeKey, ledgerFenceWakes);
+					}
+					// 8.4 (CONTRACT.md 2875-2899): main's end_session row waits, held, while the gate stores
+					// its step, and is claimable again once the ledger issues it, after a restart too. Gap
+					// (2903): there the ledger neither holds nor escalates main's end_session.
+					const ends = yield* sql<{ command_id: string; status: string }>`
+						SELECT command_id, status FROM provider_command_outbox
+						WHERE project_key = ${event.projectId} AND session_id = ${event.sessionId}
+							AND effect_type = 'end_session' AND status IN ('pending', 'held')`;
+					for (const end of ends) {
+						const step = endSessionStep(state, end.command_id);
+						if (end.status === "pending" && step === "held")
+							yield* sql`UPDATE provider_command_outbox SET status = 'held', updated_at = ${event.createdAt}
+								WHERE command_id = ${end.command_id} AND status = 'pending'`;
+						else if (end.status === "held" && step === "issued") {
+							yield* sql`UPDATE provider_command_outbox SET status = 'pending', updated_at = ${event.createdAt}
+								WHERE command_id = ${end.command_id} AND status = 'held'`;
+							wakeAfterCommit(sql, fenceWakeKey, ledgerFenceWakes);
+						} else if (end.status === "held" && step === "none")
+							yield* sql`UPDATE provider_command_outbox
+								SET status = 'cancelled', error_code = 'confirm_dropped', updated_at = ${event.createdAt}
+								WHERE command_id = ${end.command_id} AND status = 'held'`;
 					}
 				}
 				// A folded fact advances the read model (A.21): its session row takes the version.

@@ -25,7 +25,7 @@ import {
 } from "../domain/relay/Services/services.js";
 import { forkSession } from "../domain/relay/Services/session-command.js";
 import type { CreateSessionOptions } from "../domain/relay/Services/session-manager-service.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../domain/relay/Services/session-manager-service.js";
 import { clearSession as clearEffectOverrideSession } from "../domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import {
@@ -247,7 +247,7 @@ export const createSessionForClient = <E = never>({
 	readonly initializeWorkspace?: (sessionId: string) => Effect.Effect<void, E>;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		const { account, pick } =
 			resolvedCreation ??
@@ -401,7 +401,7 @@ export const deleteSessionForClient = ({
 			return yield* new DeleteNeedsConfirm({ snapshotEntry });
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const deletion = Effect.gen(function* () {
-			const sessionManagerService = yield* SessionManagerServiceTag;
+			const sessionManagerService = yield* projectSessionManager;
 			const log = yield* LoggerTag;
 
 			const id = sessionId;
@@ -418,7 +418,9 @@ export const deleteSessionForClient = ({
 				),
 			);
 
-			const didDelete = yield* sessionManagerService.deleteSession(id);
+			const didDelete = yield* confirm === undefined
+				? sessionManagerService.deleteSession(id)
+				: sessionManagerService.deleteSession(id, { confirmed: confirm });
 			if (!didDelete) return [];
 
 			log.info(`client=${clientId} Deleted: ${id}`);
@@ -473,7 +475,7 @@ export const renameSessionForClient = ({
 	readonly title: string;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 
 		const id = sessionId;
@@ -493,7 +495,7 @@ export const setSessionSettledForClient = ({
 	readonly settled: boolean;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionSettled(sessionId, { settled })) {
 			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
@@ -513,7 +515,7 @@ export const setSessionArchivedForClient = ({
 	readonly archived: boolean;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (
 			yield* service.setSessionArchived(
@@ -538,7 +540,7 @@ export const setSessionPinnedForClient = ({
 	readonly pinned: boolean;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionPinned(sessionId, pinned)) {
 			log.info(`client=${clientId} Set pinned=${pinned}: ${sessionId}`);
@@ -555,7 +557,7 @@ export const setSessionAutoSettleForClient = ({
 	readonly disabled: boolean;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionAutoSettleDisabled(sessionId, disabled)) {
 			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
@@ -577,7 +579,7 @@ export const setSessionJevForClient = ({
 	readonly jev: "on" | "off" | null;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (yield* service.setSessionJev(sessionId, jev)) {
 			const bus = yield* Effect.serviceOption(DaemonEventBusTag);
@@ -597,7 +599,7 @@ export const snoozeSessionForClient = ({
 	readonly until: number | null;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (yield* service.snoozeSession(sessionId, until)) {
 			log.info(`client=${clientId} Snoozed: ${sessionId}`);
@@ -612,7 +614,7 @@ export const unsnoozeSessionForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const service = yield* SessionManagerServiceTag;
+		const service = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 		if (yield* service.unsnoozeSession(sessionId)) {
 			log.info(`client=${clientId} Unsnoozed: ${sessionId}`);
@@ -627,7 +629,7 @@ export const markSessionUnreadForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 
 		if (sessionId) {
@@ -646,7 +648,7 @@ export const markSessionSeenForClient = ({
 	readonly upTo: number;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 
 		// A failed save leaves the row unread; the typed error goes back to the
@@ -676,7 +678,7 @@ export const markSessionReadForClient = ({
 	readonly sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const log = yield* LoggerTag;
 
 		if (sessionId) {
@@ -723,7 +725,7 @@ export const forkSessionForClient = ({
 }) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 
 		const sessionId =
 			requestedSessionId || wsHandler.getClientSession(clientId) || "";
@@ -737,6 +739,7 @@ export const forkSessionForClient = ({
 			...(instanceId === undefined ? {} : { instanceId }),
 		});
 
+		yield* sessionManagerService.holdSession(forked.id);
 		yield* clearEffectOverrideSession(sessionId);
 
 		// The forking tab gets the lineage in its response; other tabs read it

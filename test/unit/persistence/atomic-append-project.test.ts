@@ -23,7 +23,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
@@ -438,7 +438,7 @@ it("failed establishment validation rolls back the seed, event and projections",
 	try {
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				const manager = yield* SessionManagerServiceTag;
+				const manager = yield* projectSessionManager;
 				const store = yield* EventStoreEffectTag;
 				const readQuery = yield* ReadQueryEffectTag;
 				const result = yield* Effect.result(

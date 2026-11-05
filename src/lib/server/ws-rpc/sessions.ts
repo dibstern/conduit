@@ -47,7 +47,7 @@ import { setRead } from "../../domain/relay/Services/session-attention.js";
 import { forkSession } from "../../domain/relay/Services/session-command.js";
 import {
 	createLocalSessionId,
-	SessionManagerServiceTag,
+	projectSessionManager,
 } from "../../domain/relay/Services/session-manager-service.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import {
@@ -317,7 +317,7 @@ export const sessionsHandlers = {
 	ResolveSession: (request) =>
 		Effect.gen(function* () {
 			const config = yield* ConfigTag;
-			const sessionManager = yield* SessionManagerServiceTag;
+			const sessionManager = yield* projectSessionManager;
 			const exists = yield* sessionManager.sessionExists(request.sessionId);
 			if (!exists)
 				return yield* new WsRpcError({
@@ -1006,7 +1006,8 @@ export const sessionsHandlers = {
 				});
 				// Refresh now rather than on the next projection burst: the side
 				// thread's first turn must not read as activity on its parent.
-				const sessionManager = yield* SessionManagerServiceTag;
+				const sessionManager = yield* projectSessionManager;
+				yield* sessionManager.holdSession(session.id);
 				yield* sessionManager.refreshSessionLineage();
 				return session.id;
 			}).pipe(sideThreadStarts.withPermits(1));

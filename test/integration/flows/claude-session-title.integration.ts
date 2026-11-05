@@ -37,6 +37,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 
 const SESSION_ID = "claude-title-integration-session";
@@ -103,7 +104,9 @@ const makeTitleServiceLayer = (input: {
 				}),
 			),
 			Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
-			Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+			Layer.succeed(SessionManagerServiceTag)(
+				mockSessionManagers(makeMockSessionManagerService()),
+			),
 			makePersistenceEffectLayer(input.filename, "test-project"),
 		),
 	);

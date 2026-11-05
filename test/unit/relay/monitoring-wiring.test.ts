@@ -18,7 +18,10 @@ import {
 import { OpenCodeUnavailable } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { AlertLedgerLive } from "../../../src/lib/domain/relay/Services/alert-ledger.js";
 import { AlertsTag } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { StatusPollerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	StatusPollerTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
@@ -44,6 +47,10 @@ import {
 import { sendPushForEventEffect } from "../../../src/lib/relay/sse-wiring.js";
 import { turnEndedAlert } from "../../../src/lib/relay/turn-ended-alert.js";
 import type { PushNotificationSender } from "../../../src/lib/server/push.js";
+import {
+	makeMockConfig,
+	mockSessionManagers,
+} from "../../helpers/mock-factories.js";
 
 type ChangedCallback = Parameters<SessionStatusPollerService["on"]>[1];
 
@@ -881,35 +888,39 @@ async function createEffectHarness(
 	const layer = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(accountDirectory()),
 		Layer.succeed(AlertsTag)(alerts),
-		Layer.succeed(SessionManagerServiceTag)({
-			initialize: unused,
-			getDefaultSessionId: unused,
-			getLastKnownSessionCount: unused,
-			sessionExists: unused,
-			listSessions: unused,
-			establishOpenCodeSession: unused,
-			createSession: unused,
-			deleteSession: unused,
-			deleteArchivedSessions: unused,
-			renameSession: unused,
-			markSessionRead: unused,
-			markSessionUnread: unused,
-			markSessionSeen: unused,
-			setSessionSettled: unused,
-			setSessionArchived: unused,
-			restoreSessionForSend: unused,
-			setSessionAutoSettleDisabled: unused,
-			setSessionJev: unused,
-			setSessionPinned: unused,
-			snoozeSession: unused,
-			unsnoozeSession: unused,
-			loadPreRenderedHistory: unused,
-			recordMessageActivity: unused,
-			addToParentMap: unused,
-			setForkEntry: unused,
-			refreshSessionLineage,
-			getSessionParentMap: () => Effect.succeed(new Map<string, string>()),
-		}),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers({
+				initialize: unused,
+				getDefaultSessionId: unused,
+				getLastKnownSessionCount: unused,
+				holdSession: unused,
+				sessionExists: unused,
+				listSessions: unused,
+				establishOpenCodeSession: unused,
+				createSession: unused,
+				deleteSession: unused,
+				deleteArchivedSessions: unused,
+				renameSession: unused,
+				markSessionRead: unused,
+				markSessionUnread: unused,
+				markSessionSeen: unused,
+				setSessionSettled: unused,
+				setSessionArchived: unused,
+				restoreSessionForSend: unused,
+				setSessionAutoSettleDisabled: unused,
+				setSessionJev: unused,
+				setSessionPinned: unused,
+				snoozeSession: unused,
+				unsnoozeSession: unused,
+				loadPreRenderedHistory: unused,
+				recordMessageActivity: unused,
+				addToParentMap: unused,
+				setForkEntry: unused,
+				refreshSessionLineage,
+				getSessionParentMap: () => Effect.succeed(new Map<string, string>()),
+			}),
+		),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.succeed(StatusPollerTag)({
 			on: (_event, callback) =>
 				Effect.sync(() => {

@@ -18,8 +18,12 @@ import {
 	SessionEventBusLive,
 	type SessionEventBusTag,
 } from "../Services/session-event-bus.js";
-import { SessionManagerServiceLive } from "../Services/session-manager-service.js";
-import { makeSessionManagerStateLive } from "../Services/session-manager-state.js";
+import {
+	makeSessionManagerCoordination,
+	makeSessionManagerStateLive,
+	SessionManagerCoordinationTag,
+	type SessionManagerStateTag,
+} from "../Services/session-manager-state.js";
 import {
 	makeOverridesStateLive,
 	type OverridesStateTag,
@@ -50,19 +54,27 @@ export const makeRelayStateLive = (
 		readonly sessionEventBusLayer?: Layer.Layer<SessionEventBusTag>;
 		/** Borrowing relays must leave session overrides and timers with the daemon. */
 		readonly overridesStateLayer?: Layer.Layer<OverridesStateTag>;
+		/** Daemon relays borrow the project's session manager state from the daemon. */
+		readonly sessionManagerStateLayer?: Layer.Layer<
+			SessionManagerStateTag | SessionManagerCoordinationTag
+		>;
 	} = {},
 ) => {
 	const sessionEventBusLayer =
 		options.sessionEventBusLayer ?? SessionEventBusLive;
-	const sessionManagerStateAndServiceLive = SessionManagerServiceLive.pipe(
-		Layer.provideMerge(
-			Layer.mergeAll(
+	// The session manager itself is the daemon's; the relay lends it these parts.
+	const sessionManagerParts = Layer.mergeAll(
+		options.sessionManagerStateLayer ??
+			Layer.merge(
 				makeSessionManagerStateLive(),
-				DaemonEventBusLive,
-				sessionEventBusLayer,
-				RelayStatusSnapshotLive,
+				Layer.effect(
+					SessionManagerCoordinationTag,
+					makeSessionManagerCoordination(),
+				),
 			),
-		),
+		DaemonEventBusLive,
+		sessionEventBusLayer,
+		RelayStatusSnapshotLive,
 	);
 	return Layer.mergeAll(
 		// Session state
@@ -71,8 +83,8 @@ export const makeRelayStateLive = (
 			makeSessionTitleServiceLive(),
 			Layer.mergeAll(
 				ProjectSettingsLive,
-				Layer.provideMerge(
-					sessionManagerStateAndServiceLive,
+				Layer.merge(
+					sessionManagerParts,
 					options.overridesStateLayer ?? makeOverridesStateLive(),
 				),
 			),

@@ -1135,6 +1135,8 @@ export const CanonicalEvents = {
 			providerProcessId: Schema.String,
 			stop: Schema.optionalKey(Schema.NullOr(ProviderStopSnapshotSchema)),
 			retireRunIds: Schema.optionalKey(Schema.Array(Schema.String)),
+			/** 8.4: the snapshot entry the user confirmed this step at. */
+			confirmed: Schema.optionalKey(Schema.Number),
 		}),
 	),
 	/** The browser's Stop tasks (8.4): "all", or the live tasks it named, folded as stop_tasks. */

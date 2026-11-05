@@ -31,6 +31,8 @@ const STATUSES = [
 	"failed",
 	"retryable_failed",
 	"cancelled",
+	// 8.4 (2875-2899): an end_session the gate holds. 3.12 names no such status; gap, reported.
+	"held",
 ] as const;
 const statusesIn = (text: string) =>
 	STATUSES.filter((value) => new RegExp(`['"]${value}['"]`).test(text));
@@ -182,6 +184,11 @@ describe("T5-writers", () => {
 				"src/lib/provider/orchestration-engine.ts#acceptStopEffect: retryable_failed -> deleted",
 				// The ledger arm's keyed INSERT OR IGNORE of probe, stop_task and cancel_request.
 				"src/lib/persistence/effect/run-ledger-arm.ts#project: new -> pending",
+				// 8.4 (2875-2899): main's end_session waits held while the gate stores its step, runs once
+				// the ledger issues it, and is dropped when the gate leaves without issuing it.
+				"src/lib/persistence/effect/run-ledger-arm.ts#project: pending -> held",
+				"src/lib/persistence/effect/run-ledger-arm.ts#project: held -> pending",
+				"src/lib/persistence/effect/run-ledger-arm.ts#project: held -> cancelled",
 				// The ledger effects' executor: its claimed row's outcome, with its effect_outcome.
 				"src/lib/provider/orchestration-side-effect-reactor.ts#runLedgerEffect: running -> completed,failed,retryable_failed,cancelled",
 				// Outside the machine (3.12): the two migration-time deletes.

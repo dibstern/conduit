@@ -191,6 +191,11 @@ export interface EndSessionCommand {
 	readonly call?: ProviderCall;
 	/** Default false -- keep binding. Set true to also unbind. */
 	readonly unbind?: boolean;
+	/**
+	 * 8.4: the snapshot entry the user confirmed this step at; the gate lets it go unasked while
+	 * that is still the latest snapshot.
+	 */
+	readonly confirmed?: number;
 }
 
 /** A native command (8.5): a session send main issues, never a chat message or an inbox input. */
@@ -1465,6 +1470,15 @@ export class OrchestrationEngine {
 						),
 					);
 				const { providerId, newlyAccepted } = acceptance;
+				// 8.4 (CONTRACT.md 2875-2899): with tasks live or unknown the gate holds an end_session
+				// step; the arm marked its row held, and the drain runs it once the ledger issues it.
+				if (command.type === "end_session") {
+					const [row] = yield* durable.sql<{ status: string }>`
+						SELECT status FROM provider_command_outbox WHERE command_id = ${command.commandId}`.pipe(
+						Effect.orDie,
+					);
+					if (row?.status === "held") return;
+				}
 				if (
 					newlyAccepted &&
 					(command.type === "end_session" ||

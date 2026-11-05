@@ -61,7 +61,9 @@ import {
 	releaseInputDraftClaims,
 } from "../../relay/Services/input-drafts.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
+import { SessionManagerServiceLive } from "../../relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
+import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -127,6 +129,7 @@ import {
 	SessionDirectory,
 } from "../Services/session-directory.js";
 import { SessionGit, SessionGitLive } from "../Services/session-git.js";
+import { SessionManagerOwnerLive } from "../Services/session-manager-owner.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
@@ -936,8 +939,24 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withGitChanges));
+	const withSessionSetup = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return DaemonSessionSetupLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionWorkspace));
+	const withSessionManager = Layer.merge(
+		SessionManagerOwnerLive,
+		SessionManagerServiceLive,
+	).pipe(Layer.provideMerge(withSessionSetup));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
-		Layer.provideMerge(withSessionWorkspace),
+		Layer.provideMerge(withSessionManager),
 	);
 	const registries = RelayFactoryLive(configDir).pipe(
 		Layer.provideMerge(withOrchestration),

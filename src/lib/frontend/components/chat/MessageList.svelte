@@ -412,7 +412,7 @@
 	// itself names its waking task on the live turn's head.
 	const headLabel = $derived.by((): RunLabel | undefined => {
 		const ask = activeSession?.stopConfirm;
-		if (ask) return { kind: "stopping", stuck: ask.tasks ? { tasks: ask.tasks } : {} };
+		if (ask) return { kind: ask.step ? "closing" : "stopping", stuck: ask.tasks ? { tasks: ask.tasks } : {} };
 		const wake = activeSession?.wakeRun;
 		return wake && { kind: "woken", ...(wake.task ? { task: wake.task } : {}) };
 	});
