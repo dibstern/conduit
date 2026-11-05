@@ -384,7 +384,7 @@ describe("OpenCode on the Run Ledger", () => {
 			15_000,
 		);
 		await until(
-			() => expect(read(fixture, sessionId).ends).toHaveLength(1),
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
 			15_000,
 		);
 
@@ -408,7 +408,11 @@ describe("OpenCode on the Run Ledger", () => {
 		// Stored when the session was made, before any pick, and kept.
 		expect(created.ledger).toBe("opencode");
 		expect(driver()).toEqual({ pick: "fake", ledger: "opencode" });
-		expect(after.ends).toEqual([{ runId: heldRun, reason: "process_lost" }]);
+		// OpenCode's own busy then idle is a wake Run, ended completed (CONTRACT.md 8.3, 2837-2845).
+		expect(after.ends).toEqual([
+			{ runId: expect.not.stringMatching(heldRun ?? ""), reason: "completed" },
+			{ runId: heldRun, reason: "process_lost" },
+		]);
 	});
 
 	it("a conduit Stop of the instance mid-Run writes its loss once, and the next send runs under a new id", async () => {
