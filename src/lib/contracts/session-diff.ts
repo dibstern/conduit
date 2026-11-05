@@ -127,6 +127,8 @@ export const SessionDiffListingSchema = Schema.Struct({
 	folders: Schema.Array(SessionDiffFolderSchema),
 	/** Turn scope: the turn's run has no capture, so it lists no folders. */
 	notCaptured: Schema.optionalKey(Schema.Literal(true)),
+	/** Turn scope: the turn's run is still being captured; a new revision follows once it lands or fails. */
+	pending: Schema.optionalKey(Schema.Literal(true)),
 	/** Turn scope: Folder Timeline evicted the turn's content; files and counts remain. */
 	pruned: Schema.optionalKey(Schema.Literal(true)),
 	/** Tool-call scope: the provider reported the changes, or they were read from the tool's input. */

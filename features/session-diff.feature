@@ -383,6 +383,24 @@ Examples:
   | turn_id        | baseline               |
   | surfacing-user | turn-diff-not-captured |
 
+Scenario Outline: A turn still being captured says so, then lists its files once the capture lands
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the <turn_id> turn is still being captured, then changes <first_path> and <second_path>
+  And the panel choice session has a settled turn
+  When I expand the surfaced turn
+  Then the turn footer says its changes are being captured
+  When the turn's capture lands
+  Then the turn footer shows "<entry>"
+  And the turn footer has no pending note
+  When I open the turn's changed files
+  Then the turn diff lists <first_path> and <second_path>
+
+Examples:
+  | turn_id        | first_path | second_path | entry           |
+  | surfacing-user | src/app.ts | src/util.ts | 2 files changed |
+
 Scenario Outline: An evicted turn still lists its files and line counts, marked Pruned, without a patch
   Given message surfacing is inactive at Most
   And the conduit app is served with the connected mockup

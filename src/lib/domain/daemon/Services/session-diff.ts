@@ -28,6 +28,8 @@ export interface SessionDiffSession {
 	readonly capture?: RunChangesCaptured;
 	/** Folder Timeline evicted the capture's content: only its record remains. */
 	readonly pruned?: true;
+	/** A turn scope without a capture: the run whose capture is still recording. */
+	readonly pending?: string;
 	/** A tool-call scope's Tool File Changes and where they came from. */
 	readonly toolCall?: {
 		readonly source: "provider" | "toolInput";

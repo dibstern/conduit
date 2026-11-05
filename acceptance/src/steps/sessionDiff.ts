@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { Stream } from "effect";
+import { Effect, Stream } from "effect";
 import {
 	type SessionDiffBase,
 	type SessionDiffEdit,
@@ -54,6 +54,8 @@ interface DiffFixture {
 }
 
 const fixtures = new WeakMap<Page, DiffFixture>();
+/** Lands a seeded turn's capture that is still recording. */
+const captureLandings = new WeakMap<Page, () => void>();
 
 /** How many RPC requests the page had sent when the last reveal was clicked. */
 const revealMarks = new WeakMap<Page, number>();
@@ -787,6 +789,86 @@ export const sessionDiffHandlers: StepHandler[] = [
 		match: /^the (\S+) turn was not captured$/,
 		run: async ({ world, match }) => {
 			seedTurn(world.page, match[1] ?? "", { folders: [], notCaptured: true });
+		},
+	},
+	{
+		name: "seed a turn still being captured",
+		match:
+			/^the (\S+) turn is still being captured, then changes (\S+) and (\S+)$/,
+		run: async ({ world, match }) => {
+			const [, turnId = "", first = "", second = ""] = match;
+			let landed = false;
+			const landing = new Promise<void>((resolve) =>
+				captureLandings.set(world.page, () => {
+					landed = true;
+					resolve();
+				}),
+			);
+			const own = (scope: SessionDiffScope) =>
+				scope.kind === "turn" && scope.turnId === turnId;
+			// As the daemon: the turn lists pending, then its live scope pushes
+			// the landed revision once the capture is recorded.
+			requireRpcControl(world.page).setStubs({
+				SessionDiffList: ({ scope }) =>
+					!own(scope)
+						? { revision: "turn", folders: [] }
+						: landed
+							? {
+									revision: "landed",
+									folders: [
+										{
+											folder: "/workspace/myapp",
+											files: [changed(first, 3, 1), changed(second)],
+										},
+									],
+								}
+							: { revision: "pending", folders: [], pending: true },
+				SessionDiffFile: ({ path }) => ({ patch: patchFor(path) }),
+				SubscribeSessionDiff: ({ scope }) =>
+					Stream.concat(
+						own(scope)
+							? Stream.concat(
+									Stream.succeed({ revision: "pending" }),
+									Stream.fromEffect(
+										Effect.promise(() => landing).pipe(
+											Effect.as({ revision: "landed" }),
+										),
+									),
+								)
+							: Stream.succeed({ revision: "turn" }),
+						Stream.never,
+					),
+			});
+		},
+	},
+	{
+		name: "turn capture lands",
+		match: /^the turn's capture lands$/,
+		run: async ({ world }) => {
+			const land = captureLandings.get(world.page);
+			if (!land) throw new Error("No turn capture was seeded as pending");
+			land();
+		},
+	},
+	{
+		name: "turn capture pending",
+		match: /^the turn footer says its changes are being captured$/,
+		run: async ({ world }) => {
+			const footer = turnFooter(world.page);
+			await expect(footer.getByTestId("turn-diff-pending")).toHaveText(
+				"Capturing changes…",
+			);
+			await expect(footer.getByTestId("turn-diff-not-captured")).toHaveCount(0);
+			await expect(footer.getByTestId("turn-diff-toggle")).toHaveCount(0);
+		},
+	},
+	{
+		name: "turn capture no longer pending",
+		match: /^the turn footer has no pending note$/,
+		run: async ({ world }) => {
+			await expect(
+				turnFooter(world.page).getByTestId("turn-diff-pending"),
+			).toHaveCount(0);
 		},
 	},
 	{

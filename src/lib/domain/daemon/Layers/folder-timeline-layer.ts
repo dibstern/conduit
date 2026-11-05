@@ -25,7 +25,6 @@ const GRACE_MS = 15 * 60_000;
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 /** A start checkpoint delays the run, so it gets less than a full git deadline. */
 const START_BUDGET_MS = 3_000;
-const SETTLE_WAIT_MS = 5_000;
 /** A run that changes more paths than this records a gap instead. */
 const MAX_CHANGES = 5_000;
 const SESSION_REF = "refs/conduit/session";
@@ -675,22 +674,37 @@ export const makeFolderTimeline = (configDir: string) =>
 						Effect.gen(function* () {
 							// Forgotten while its end checkpoint was taken.
 							if (!runs.has(runId)) return;
-							const store = yield* openSessionStore(
-								run,
-								root,
-								sessionStore(live.sessionId),
-								live,
-							);
-							const capture = {
-								runId,
-								folders: yield* Effect.forEach(
-									ends,
-									([directory, end]) =>
-										captureFolder(git, live, store, directory, end),
-									{ concurrency: "unbounded" },
+							const capture = yield* Effect.gen(function* () {
+								const store = yield* openSessionStore(
+									run,
+									root,
+									sessionStore(live.sessionId),
+									live,
+								);
+								const capture = {
+									runId,
+									folders: yield* Effect.forEach(
+										ends,
+										([directory, end]) =>
+											captureFolder(git, live, store, directory, end),
+										{ concurrency: "unbounded" },
+									),
+								};
+								yield* commitCapture(git, store, capture);
+								return capture;
+							}).pipe(
+								// A capture the store cannot save still says why each folder is missing.
+								Effect.catch((error) =>
+									Effect.succeed({
+										runId,
+										folders: live.directories.map((directory) => ({
+											directory,
+											...gapOf(error),
+											message: `Saving the capture failed: ${error.message}`,
+										})),
+									}),
 								),
-							};
-							yield* commitCapture(git, store, capture);
+							);
 							yield* record(live.sessionId, capture);
 						}),
 					);
@@ -703,11 +717,7 @@ export const makeFolderTimeline = (configDir: string) =>
 			settled: (runId) =>
 				Effect.gen(function* () {
 					const live = runs.get(runId);
-					if (live)
-						yield* Deferred.await(live.done).pipe(
-							Effect.timeout(SETTLE_WAIT_MS),
-							Effect.ignore,
-						);
+					if (live) yield* Deferred.await(live.done);
 				}),
 			forget: (sessionId) =>
 				Effect.gen(function* () {

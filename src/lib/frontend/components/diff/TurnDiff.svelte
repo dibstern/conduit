@@ -9,7 +9,7 @@
 	let { sessionId, turnId, open = $bindable(false) }: { sessionId: string; turnId: string; open?: boolean } = $props();
 
 	const view = $derived(new SessionDiffView(sessionId, { kind: "turn", turnId }));
-	// A settled turn's capture never changes, so one lease while the footer shows lists it once.
+	// A settled turn's capture never changes once recorded; one lease follows it from pending until it lands.
 	$effect(() => view.watch());
 
 	const listed = $derived(view.state.kind === "listed" ? view.state : null);
@@ -17,7 +17,9 @@
 </script>
 
 <!-- Loading and failed turns show nothing: the entry is a shortcut, and the Diff pane reports errors. -->
-{#if listed?.notCaptured}
+{#if listed?.pending}
+	<span data-testid="turn-diff-pending" class="whitespace-nowrap text-[11.5px] text-text-muted">Capturing changes…</span>
+{:else if listed?.notCaptured}
 	<span data-testid="turn-diff-not-captured" class="whitespace-nowrap text-[11.5px] text-text-muted">
 		Not captured · <TextButton underline="always" onclick={() => setRightPaneView("diff")}>Branch diff</TextButton>
 	</span>

@@ -81,7 +81,11 @@ export class FolderTimeline extends Context.Service<
 				capture: RunChangesCaptured,
 			) => Effect.Effect<void, E>,
 		) => Effect.Effect<void>;
-		/** Waits, bounded, until a live run's capture is recorded. */
+		/**
+		 * Waits until a live run's capture is recorded or abandoned (failed, or
+		 * its session forgotten); at once for a run the timeline no longer holds,
+		 * which after a daemon restart is every run that was still capturing.
+		 */
 		readonly settled: (runId: string) => Effect.Effect<void>;
 		/** The store holding a session's captures, for `git`. */
 		readonly sessionStore: (sessionId: string) => string;
