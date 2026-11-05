@@ -558,6 +558,100 @@ describe("Codex skills and digest forks through the daemon and detached runners"
 		);
 	}
 
+	// m379.11: a fork into another project starts a fresh thread in that project's folder, seeded once with the
+	// digest, instead of forking the source's thread in the source's folder.
+	it("forks into another project with a fresh thread seeded once in the target's folder", async () => {
+		const { fixture, browser, accountId } = await start("fork-into-project");
+		const targetDir = join(fixture.root, "project-b");
+		mkdirSync(targetDir, { recursive: true });
+		await fixture.requestRpc({ _tag: "SaveProject", folders: [targetDir] });
+		const sourceId = await create(browser, "codex", accountId);
+		writeTrace(fixtureRows("turn-command"));
+		const sourcePrompt = "SOURCE_CONTEXT_codex: preserve this investigation.";
+		await browser.send(sourceId, sourcePrompt, TIMEOUT);
+		await completed(fixture, sourceId, 1);
+		const fork = await fixture.requestRpc({
+			_tag: "ForkSession",
+			originId: browser.originId,
+			sessionId: sourceId,
+			targetProjectSlug: "project-b",
+		});
+		sessions.add(fork.sessionId);
+		expect(fork.projectSlug).toBe("project-b");
+		const digest = renderForkDigest(inheritedMessages(fixture, fork.sessionId));
+		expect(digest).toContain(sourcePrompt);
+		// The target folder reads its own catalog first; authentication is cached by home.
+		const catalog = fixtureRows("model-list");
+		const accountReadId = catalog.find(
+			({ message }) => message?.method === "account/read",
+		)?.message?.id;
+		writeTrace(
+			catalog.filter(({ message }) => message?.id !== accountReadId),
+			targetDir,
+		);
+		const target = await fixture.connect(undefined, undefined, "project-b");
+		await Effect.runPromise(
+			target.rpc.GetCommands({ sessionId: fork.sessionId }),
+		);
+		const trace = fixtureRows("fork-seed");
+		const oldThread = trace.find(
+			({ message }) => message?.method === "turn/start",
+		)?.message?.params?.["threadId"];
+		if (typeof oldThread !== "string")
+			throw new Error("No captured fork thread");
+		writeTrace(
+			JSON.parse(
+				JSON.stringify(trace).replaceAll(oldThread, randomUUID()),
+			) as TraceRow[],
+			targetDir,
+		);
+		const before = requests().length;
+		await target.send(fork.sessionId, "Say hello", TIMEOUT);
+		await target.send(fork.sessionId, "Say hello again", TIMEOUT);
+		await completed(fixture, fork.sessionId, 3);
+		const opened = rows<TraceRow>(capturePath)
+			.filter(
+				({ dir, message }) =>
+					dir === "out" &&
+					(message?.method === "thread/start" ||
+						message?.method === "thread/fork"),
+			)
+			.map(({ message }) => ({
+				method: message?.method,
+				cwd: message?.params?.["cwd"],
+			}));
+		const landed = {
+			projectId: (() => {
+				const db = new Database(fixture.daemonStorePath(), {
+					readonly: true,
+				});
+				try {
+					return (
+						db
+							.prepare("SELECT project_id FROM sessions WHERE id = ?")
+							.get(fork.sessionId) as { project_id: string } | undefined
+					)?.project_id;
+				} finally {
+					db.close();
+				}
+			})(),
+			opened: opened.at(-1),
+			inputs: requests().slice(before).map(turnInput),
+		};
+		evidence["fork into another project"] = landed;
+		expect(landed).toEqual({
+			projectId: "project-b",
+			opened: { method: "thread/start", cwd: targetDir },
+			inputs: [
+				[
+					{ type: "text", text: digest, text_elements: [] },
+					{ type: "text", text: "Say hello", text_elements: [] },
+				],
+				[{ type: "text", text: "Say hello again", text_elements: [] }],
+			],
+		});
+	});
+
 	it(
 		"retains a pending identity across a runner restart before its first turn",
 		async () => {

@@ -935,49 +935,48 @@ export const sessionsHandlers = {
 			),
 		),
 	ForkSession: (request) =>
-		Effect.flatMap(ConfigTag, (config) =>
-			forkSessionForClient({
-				clientId: request.originId,
-				...("sessionId" in request ? { sessionId: request.sessionId } : {}),
-				...(request.messageId != null ? { messageId: request.messageId } : {}),
-				...(request.instanceId != null
-					? { instanceId: request.instanceId }
-					: {}),
-			}).pipe(
-				Effect.flatMap((session) =>
-					session == null
-						? Effect.fail(
-								new WsRpcError({
-									message: "ForkSession failed: no active session",
-								}),
-							)
-						: Effect.succeed({
-								projectSlug: config.slug,
-								sessionId: session.id,
-								forkedFrom: session.forkedFrom,
-								...(session.forkMessageId && {
-									forkMessageId: session.forkMessageId,
-								}),
-								...(session.forkPointTimestamp != null && {
-									forkPointTimestamp: session.forkPointTimestamp,
-								}),
+		forkSessionForClient({
+			clientId: request.originId,
+			...("sessionId" in request ? { sessionId: request.sessionId } : {}),
+			...(request.messageId != null ? { messageId: request.messageId } : {}),
+			...(request.instanceId != null ? { instanceId: request.instanceId } : {}),
+			...(request.targetProjectSlug != null
+				? { targetProjectSlug: request.targetProjectSlug }
+				: {}),
+		}).pipe(
+			Effect.flatMap((session) =>
+				session == null
+					? Effect.fail(
+							new WsRpcError({
+								message: "ForkSession failed: no active session",
 							}),
-				),
-				Effect.catch((error) =>
-					Effect.gen(function* () {
-						const log = yield* LoggerTag;
-						log.warn("ForkSession failed", { cause: error });
-						return yield* Effect.fail(
-							error instanceof WsRpcError ||
-								error instanceof AccountUnroutable ||
-								error instanceof SessionBusy
-								? error
-								: new WsRpcError({
-										message: `ForkSession failed: ${String(error)}`,
-									}),
-						);
-					}),
-				),
+						)
+					: Effect.succeed({
+							projectSlug: session.projectSlug,
+							sessionId: session.id,
+							forkedFrom: session.forkedFrom,
+							...(session.forkMessageId && {
+								forkMessageId: session.forkMessageId,
+							}),
+							...(session.forkPointTimestamp != null && {
+								forkPointTimestamp: session.forkPointTimestamp,
+							}),
+						}),
+			),
+			Effect.catch((error) =>
+				Effect.gen(function* () {
+					const log = yield* LoggerTag;
+					log.warn("ForkSession failed", { cause: error });
+					return yield* Effect.fail(
+						error instanceof WsRpcError ||
+							error instanceof AccountUnroutable ||
+							error instanceof SessionBusy
+							? error
+							: new WsRpcError({
+									message: `ForkSession failed: ${String(error)}`,
+								}),
+					);
+				}),
 			),
 		),
 	StartSideThread: (request) =>

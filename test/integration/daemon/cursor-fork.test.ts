@@ -708,6 +708,63 @@ describe("Cursor transcript forks through the built daemon and detached runner",
 		TIMEOUT * 4,
 	);
 
+	// m379.11: a fork into another project lists there and its first turn runs a fresh, seeded agent in that
+	// project's folder, not the source's.
+	it("forks into another project with a fresh agent seeded once in the target's folder", async () => {
+		const { fixture, browser, id, trace } = await start("fork-into-project");
+		const targetDir = join(fixture.root, "project-b");
+		mkdirSync(targetDir, { recursive: true });
+		await fixture.requestRpc({ _tag: "SaveProject", folders: [targetDir] });
+		await browser.send(id, "SOURCE_CONTEXT: the codename is amber.", TIMEOUT);
+		await completed(fixture, id, 1);
+		freshCapturedAgent(trace);
+		const fork = await fixture.requestRpc({
+			_tag: "ForkSession",
+			originId: browser.originId,
+			sessionId: id,
+			targetProjectSlug: "project-b",
+		});
+		expect(fork.projectSlug).toBe("project-b");
+		const digest = inheritedDigest(fixture, fork.sessionId);
+		expect(digest).toContain("SOURCE_CONTEXT: the codename is amber.");
+		const createdBefore = rows(capture).filter(
+			({ kind }) => kind === "create.options",
+		).length;
+		const target = await fixture.connect(undefined, undefined, "project-b");
+		await target.send(fork.sessionId, "Continue in project b.", TIMEOUT);
+		await completed(fixture, fork.sessionId, 2);
+		const created = rows(capture)
+			.filter(({ kind }) => kind === "create.options")
+			.slice(createdBefore)
+			.map(
+				({ data }) =>
+					(data as { local?: { cwd?: string } } | undefined)?.local?.cwd,
+			);
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		const projectId = (() => {
+			try {
+				return (
+					db
+						.prepare("SELECT project_id FROM sessions WHERE id = ?")
+						.get(fork.sessionId) as { project_id: string } | undefined
+				)?.project_id;
+			} finally {
+				db.close();
+			}
+		})();
+		const landed = {
+			projectId,
+			created,
+			firstSend: sends(capture).at(-1),
+		};
+		scenarios.push({ scenario, landed });
+		expect(landed).toEqual({
+			projectId: "project-b",
+			created: [targetDir],
+			firstSend: `${digest}\n\n[Current request]\nContinue in project b.`,
+		});
+	});
+
 	it(
 		"bounds and redacts large context and retains its seed across restart before the first send",
 		async () => {

@@ -35,6 +35,7 @@ import {
 import { loadClaudeSdkTestModule } from "./claude-sdk-module.js";
 import {
 	CLAUDE_FORK_SOURCE_KEY,
+	CLAUDE_FRESH_START_KEY,
 	type ClaudeSessionForkSdk,
 	defaultClaudeSessionForkSdk,
 	resolveForkUpToUuid,
@@ -417,6 +418,7 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 					!recordedThread &&
 					!options.nativeResumeFallback &&
 					forkState?.[`claude.forkRefused:${instanceId}`] !== "true" &&
+					forkState?.[CLAUDE_FRESH_START_KEY] !== "true" &&
 					options.rewind === undefined &&
 					session.provider === instanceId
 				) {

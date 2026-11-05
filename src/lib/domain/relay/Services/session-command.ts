@@ -10,7 +10,8 @@
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { randomUUID } from "node:crypto";
-import { type Cause, Data, Effect, Option } from "effect";
+import { existsSync } from "node:fs";
+import { type Cause, type Context, Data, Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
@@ -54,13 +55,17 @@ import {
 	readSideThreadForkBoundary,
 } from "../../../persistence/fork-history.js";
 import { sameClaudeLogin } from "../../../provider/claude/claude-sdk-env.js";
-import { CLAUDE_FORK_SOURCE_KEY } from "../../../provider/claude/claude-session-fork.js";
+import {
+	CLAUDE_FORK_SOURCE_KEY,
+	CLAUDE_FRESH_START_KEY,
+} from "../../../provider/claude/claude-session-fork.js";
 import { prepareCodexAccount } from "../../../provider/codex/codex-home.js";
 import { resolveCodexForkSource } from "../../../provider/codex/codex-native-history.js";
 import { writeCodexSessionIdentity } from "../../../provider/codex/codex-session-store.js";
 import { codexUpstreamAdapter } from "../../../provider/codex/codex-session-upstream.js";
 import { cursorUpstreamAdapter } from "../../../provider/cursor/cursor-session-upstream.js";
 import { renderForkDigest } from "../../../provider/fork-digest.js";
+import { openCodeForkSeedMessageId } from "../../../provider/opencode/opencode-input-message-id.js";
 import { sideThreadPermissionRules } from "../../../provider/opencode-provider-instance.js";
 import {
 	PickRequired,
@@ -76,6 +81,7 @@ import type { DraftChange } from "./input-drafts.js";
 import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { inheritRead, markSeen } from "./session-attention.js";
+import type { ProjectSessionManagerParts } from "./session-manager-service.js";
 import {
 	OverridesStateTag,
 	setPermissionMode,
@@ -1009,6 +1015,8 @@ const forkSessionInWorkspace = (
 		messageId?: string;
 		instanceId?: string;
 		side?: { title: string; inputId: string };
+		/** The services are another project's: the fork starts fresh in its folder. */
+		intoProject?: boolean;
 	},
 ) =>
 	Effect.gen(function* () {
@@ -1040,6 +1048,16 @@ const forkSessionInWorkspace = (
 				message:
 					"Cross-provider forks require Codex and a transcript destination",
 			});
+		if (
+			options?.intoProject &&
+			config._tag === "Some" &&
+			!existsSync(config.value.projectDir)
+		)
+			return yield* new SessionCommandError({
+				operation: "session.forked.project",
+				cause: config.value.projectDir,
+				message: `The target project's folder ${config.value.projectDir} is missing`,
+			});
 		if (options?.side) {
 			if (!parent) {
 				return yield* new SessionCommandError({
@@ -1057,7 +1075,10 @@ const forkSessionInWorkspace = (
 			}
 		}
 		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
-		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
+		if (
+			PROVIDER_DRIVERS[account.driver].runsOpenCodeServer &&
+			!options?.intoProject
+		) {
 			// A native OpenCode fork needs only the Side Thread's mid-turn cut.
 			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 			const messageId =
@@ -1152,6 +1173,9 @@ const forkSessionInWorkspace = (
 					};
 				}
 				case "opencode":
+					// Only a fork into another project gets here; it starts a fresh
+					// session on that folder's server, seeded after publication.
+					return undefined;
 				case "cursor":
 					return yield* new SessionCommandError({
 						operation: "session.forked.unsupported_account",
@@ -1171,7 +1195,9 @@ const forkSessionInWorkspace = (
 		);
 		const source = yield* readForkSource(parentSessionId, {
 			...(options?.messageId !== undefined && { messageId: options.messageId }),
-			sideThread: options?.side !== undefined,
+			// Like a Side Thread, a fork into another project cuts at the last
+			// settled turn, so a Run in progress is not seeded half-written.
+			sideThread: options?.side !== undefined || options?.intoProject === true,
 		}).pipe(
 			Effect.catchTag("ForkRefusal", (refusal) =>
 				Effect.fail(forkRefusalError(parentSessionId, refusal)),
@@ -1181,15 +1207,45 @@ const forkSessionInWorkspace = (
 		const side = options?.side;
 		const title = side ? sideThreadTitle(side.title) : `${parent.title} (fork)`;
 		const relayConfig = config;
+		const openCode =
+			account.driver === "opencode"
+				? yield* Effect.gen(function* () {
+						if (relayConfig._tag === "None")
+							return yield* new SessionCommandError({
+								operation: "session.forked.opencode",
+								cause: "OpenCode fork requires the target project's folder",
+							});
+						const directory = relayConfig.value.projectDir;
+						const api = yield* (yield* OpenCodeInstancesTag)
+							.use(account.id, directory)
+							.pipe(
+								Effect.mapError(
+									(cause) =>
+										new SessionCommandError({
+											operation: "session.forked.opencode",
+											cause,
+										}),
+								),
+							);
+						return { api, directory };
+					})
+				: undefined;
 		const fork = yield* Effect.gen(function* () {
 			if (!native) {
-				const id = randomUUID();
+				// OpenCode's session id is the conduit session's id.
+				const id = openCode
+					? `ses_${randomUUID().replaceAll("-", "")}`
+					: randomUUID();
 				const configDir =
 					relayConfig._tag === "Some"
 						? (relayConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
 						: DEFAULT_CONFIG_DIR;
+				// A fork into another project starts a fresh thread in that project's
+				// folder; the runner seeds it with the fork digest on its first turn.
 				const codex =
-					account.driver === "codex" && sourceAccount.driver === "codex"
+					account.driver === "codex" &&
+					sourceAccount.driver === "codex" &&
+					!options?.intoProject
 						? yield* Effect.gen(function* () {
 								const { home } = yield* prepareCodexAccount(account, configDir);
 								const forkSource = yield* resolveCodexForkSource(
@@ -1228,7 +1284,7 @@ const forkSessionInWorkspace = (
 					provider: account.id,
 					driver: account.driver,
 					pick,
-					providerSessionId: undefined,
+					providerSessionId: openCode ? id : undefined,
 					saveProviderState: codex
 						? () =>
 								Effect.gen(function* () {
@@ -1270,7 +1326,9 @@ const forkSessionInWorkspace = (
 						thread: NativeThread;
 				  }
 				| undefined;
-			for (const instanceId of instanceIds) {
+			// Claude keeps a conversation per folder, so a fork into another
+			// project never resumes the parent's.
+			for (const instanceId of options?.intoProject ? [] : instanceIds) {
 				const historical = yield* accounts.resolve({
 					_tag: "Id",
 					id: instanceId,
@@ -1324,19 +1382,23 @@ const forkSessionInWorkspace = (
 				// Preserve the native source selected for this cut. The child owns
 				// no Claude transcript until shared turn preparation launches it.
 				saveProviderState: () =>
-					parentThread
+					options?.intoProject
 						? state.saveUpdates(id, [
-								{
-									key: CLAUDE_FORK_SOURCE_KEY,
-									value: JSON.stringify({
-										instanceId: provider,
-										resumeSessionId: parentThread.resumeSessionId,
-										configDir: forkAccount.folder,
-										messageId: source.boundary.messageId,
-									}),
-								},
+								{ key: CLAUDE_FRESH_START_KEY, value: "true" },
 							])
-						: Effect.void,
+						: parentThread
+							? state.saveUpdates(id, [
+									{
+										key: CLAUDE_FORK_SOURCE_KEY,
+										value: JSON.stringify({
+											instanceId: provider,
+											resumeSessionId: parentThread.resumeSessionId,
+											configDir: forkAccount.folder,
+											messageId: source.boundary.messageId,
+										}),
+									},
+								])
+							: Effect.void,
 			};
 		});
 		const { id, provider, pick } = fork;
@@ -1396,7 +1458,8 @@ const forkSessionInWorkspace = (
 					...sessionPickEvents(id, pick),
 				]);
 				yield* project(created);
-				if (workspace._tag === "Some")
+				// Another project's fork starts at that project's main folder.
+				if (workspace._tag === "Some" && !options?.intoProject)
 					yield* workspace.value.inherit(id, parentSessionId, {
 						project,
 					});
@@ -1413,9 +1476,60 @@ const forkSessionInWorkspace = (
 				return current.boundary;
 			}),
 		);
-		const boundary = yield* workspace._tag === "Some"
-			? workspace.value.withLaunch(id, publish)
+		// OpenCode's session exists before the fork is announced, and the target's
+		// stream waits on the creation gate until conduit owns the id. The seed
+		// follows publication, which copies the turns it carries.
+		const creationGate = yield* Effect.serviceOption(
+			OpenCodeSessionCreationGateTag,
+		);
+		const seeded = openCode
+			? Effect.gen(function* () {
+					yield* Effect.tryPromise(() =>
+						openCode.api.session.create({
+							title,
+							directory: openCode.directory,
+							id,
+						}),
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "session.forked.upstream",
+									cause,
+								}),
+						),
+					);
+					const published = yield* publish;
+					const inherited =
+						(yield* readOption.value.getSessionMessagesWithParts(id)).filter(
+							(message) => message.is_inherited === 1,
+						);
+					yield* Effect.tryPromise(() =>
+						openCode.api.session.seed(
+							id,
+							openCodeForkSeedMessageId(id),
+							renderForkDigest(inherited),
+						),
+					).pipe(
+						Effect.mapError(
+							(cause) =>
+								new SessionCommandError({
+									operation: "session.forked.seed",
+									cause,
+									message: "Could not give the fork its transcript",
+								}),
+						),
+					);
+					return published;
+				})
 			: publish;
+		const launch =
+			openCode && creationGate._tag === "Some"
+				? creationGate.value.withPermits(1)(seeded)
+				: seeded;
+		const boundary = yield* workspace._tag === "Some"
+			? workspace.value.withLaunch(id, launch)
+			: launch;
 		// The copied turns were the parent's to read, so the fork starts seen up
 		// to its last imported turn end rather than with a dot. SessionAttention
 		// caps at the committed turn end, so this has to follow the commit.
@@ -1442,12 +1556,21 @@ export const forkSession = (
 		messageId?: string;
 		instanceId?: string;
 		side?: { title: string; inputId: string };
+		/** Another project's relay parts; the fork is written into that project. */
+		into?: Context.Context<ProjectSessionManagerParts>;
 	},
 ) =>
 	Effect.gen(function* () {
 		yield* admitOrRefuse(parentSessionId, { kind: "fork" });
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
-		const fork = forkSessionInWorkspace(parentSessionId, options);
+		const { into, ...forkOptions } = options ?? {};
+		// Admission and the parent's launch lock stay with the parent's project.
+		const fork = into
+			? forkSessionInWorkspace(parentSessionId, {
+					...forkOptions,
+					intoProject: true,
+				}).pipe(Effect.provide(into))
+			: forkSessionInWorkspace(parentSessionId, forkOptions);
 		return yield* workspace._tag === "Some"
 			? workspace.value.withLaunch(parentSessionId, fork)
 			: fork;

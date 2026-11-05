@@ -444,6 +444,22 @@ class SessionNamespace {
 		);
 	}
 
+	/** Add context the model reads on the next turn, with no reply and no turn. */
+	async seed(
+		sessionId: string,
+		messageId: string,
+		text: string,
+	): Promise<void> {
+		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
+			this.api._sdk.session.promptAsync({
+				sessionID: sessionId,
+				messageID: messageId,
+				noReply: true,
+				parts: [{ type: "text", text, synthetic: true }],
+			}),
+		);
+	}
+
 	async prompt(sessionId: string, options: PromptOptions): Promise<void> {
 		await this.api.sdk("session.prompt", decodeOpenCodeUndefinedResponse, () =>
 			this.api._sdk.session.promptAsync({

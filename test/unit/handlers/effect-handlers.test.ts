@@ -1640,6 +1640,7 @@ describe("handleForkSession", () => {
 					expect(fork).toEqual({
 						id: "ses-child",
 						forkedFrom: "ses-parent",
+						projectSlug: "test-project",
 						forkMessageId: "msg-1",
 						forkPointTimestamp: 456,
 					});

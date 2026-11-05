@@ -33,6 +33,7 @@ import {
 	type FileReadEcho,
 	fileReadEcho,
 } from "./opencode-history-backfill.js";
+import { isOpenCodeForkSeed } from "./opencode-input-message-id.js";
 import { openCodeToolFileChanges } from "./opencode-tool-file-changes.js";
 
 interface TrackedPart {
@@ -157,6 +158,21 @@ export class OpenCodeRuntimeEventTranslator {
 		sessionId: string,
 		state: SessionTranslation,
 	): ProviderRuntimeEvent[] | null {
+		const props = event.properties as {
+			messageID?: unknown;
+			part?: { messageID?: unknown } | null;
+			info?: { id?: unknown } | null;
+			message?: { id?: unknown } | null;
+		};
+		if (
+			isOpenCodeForkSeed(
+				props.messageID ??
+					props.part?.messageID ??
+					props.info?.id ??
+					props.message?.id,
+			)
+		)
+			return null;
 		if (isMessageCreatedEvent(event)) {
 			return this.translateMessageCreated(event, sessionId, state);
 		}

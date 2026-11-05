@@ -63,6 +63,8 @@ See docs/adr/0004-session-mutations-are-canonical-events.md.`;
 			"api.session.create(",
 			"api.session.fork(",
 			"api.session.update(",
+			// A fork into another project: a fresh session on the target's folder.
+			"api.session.create(",
 		]);
 	});
 });
