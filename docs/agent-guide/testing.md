@@ -302,8 +302,13 @@ at most one churn read per tier interval plus the leading read, and zero spawns
 during each list RPC's actual start/end interval, including background spawns
 that overlap it. The report also preserves every raw control-phase spawn and
 counts those outside the RPC, including up to 50 ms spent polling for the end
-acknowledgment after the RPC has returned. Run again on a quiet
-machine to investigate timing variance; do not loosen the budgets.
+acknowledgment after the RPC has returned. PortWatcher's lsof and ps sit apart
+from the 6 a minute and from list reads: in every phase, at most one listing
+lsof per 2 s, and a process table, environment or cwd read only for a scan that
+listed a socket the scan before it had not. An lsof shim on the daemon's PATH
+keeps each real listing under the fixture's `port-scans/` to count those scans.
+Run again on a quiet machine to investigate timing variance; do not loosen the
+budgets.
 
 This suite has its own Vitest config. It is excluded from default unit,
 integration, E2E and `scripts/test-all.sh` release groups. Its expected red

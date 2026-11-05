@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import {
 	existsSync,
 	mkdirSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	renameSync,
 	rmSync,
+	statSync,
 	writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
@@ -40,6 +42,11 @@ const BUDGET = {
 	churnEveryMs: 500,
 	tierIntervalMs: { Running: 15_000, Viewed: 5_000, Listed: 30_000 },
 	listReadSpawns: 0,
+	// PortWatcher, apart from the 6 a minute: the lsof listing listeners once per 2 s (CONTRACT 8.7,
+	// 30 a minute), plus a process table, environment and cwd read only for a scan that listed a
+	// socket the scan before it had not.
+	portScanIntervalMs: 2_000,
+	portScanReadsPerChange: 3,
 } as const;
 
 const exec = promisify(execFile);
@@ -60,7 +67,12 @@ function gitCommand(spawn: Spawn) {
 	return `git ${args[0] ?? "unknown"}`;
 }
 
+/** Only PortWatcher runs lsof and ps through Subprocess; its listing names -iTCP. */
+const isPortScan = ({ command }: Spawn) =>
+	command === "lsof" || command === "ps";
+
 function summarize(measurement: DaemonBudgetMeasurement) {
+	const portScan = measurement.spawns.filter(isPortScan);
 	const commands: Record<string, number> = {};
 	const gitReads: Record<string, number> = {};
 	for (const spawn of measurement.spawns) {
@@ -79,6 +91,15 @@ function summarize(measurement: DaemonBudgetMeasurement) {
 		spawnsPerMinute: Math.round(
 			(measurement.spawns.length * 60_000) / measurement.durationMs,
 		),
+		otherSpawnsPerMinute: Math.round(
+			((measurement.spawns.length - portScan.length) * 60_000) /
+				measurement.durationMs,
+		),
+		portScan: {
+			scans: portScan.filter(({ args }) => args.includes("-iTCP")).length,
+			reads: portScan.filter(({ args }) => !args.includes("-iTCP")).length,
+			ps: portScan.filter(({ command }) => command === "ps").length,
+		},
 		spawnsPerMinuteByCommand: Object.fromEntries(
 			byCommand.map(([command, count]) => [
 				command,
@@ -196,6 +217,73 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 	mkdirSync(metricsDir);
 	const logFile = join(metricsDir, "daemon.log");
 	const { measure, waitForQuiescence } = budgetProbe(metricsDir, logFile);
+	// PortWatcher lists the machine's real listeners, which other processes open and close. An lsof
+	// shim keeps each listing, so a phase's process reads are judged against what it listed.
+	const scanDir = join(harness.root, "port-scans");
+	mkdirSync(join(scanDir, "bin"), { recursive: true });
+	const lsof = (process.env["PATH"] ?? "")
+		.split(":")
+		.map((dir) => join(dir, "lsof"))
+		.find(existsSync);
+	if (lsof)
+		writeFileSync(
+			join(scanDir, "bin", "lsof"),
+			`#!/bin/sh\ncase "$*" in *-iTCP*) ;; *) exec '${lsof}' "$@" ;; esac\nscan=$(mktemp '${scanDir}/scan.XXXXXX') || exit 1\n'${lsof}' "$@" >"$scan.out"; rc=$?\ncat "$scan.out"; mv "$scan.out" "$scan.$rc"; rm -f "$scan"; exit $rc\n`,
+			{ mode: 0o755 },
+		);
+	/** Listings that named a socket (pid, kernel address, name) the listing before had not. */
+	const changedScans = (fromMs: number, toMs: number) => {
+		const scans = readdirSync(scanDir)
+			.filter((name) => /^scan\.\w+\.\d+$/.test(name))
+			.map((name) => ({
+				atMs: statSync(join(scanDir, name)).birthtimeMs,
+				text: readFileSync(join(scanDir, name), "utf8"),
+				ok: name.endsWith(".0"),
+			}))
+			.filter(({ ok, text }) => ok || text === "")
+			.sort((a, b) => a.atMs - b.atMs);
+		let before: ReadonlySet<string> = new Set();
+		let changed = 0;
+		for (const { atMs, text } of scans) {
+			const sockets = new Set<string>();
+			let pid = "";
+			let device = "";
+			for (const line of text.split("\n")) {
+				if (line[0] === "p") pid = line.slice(1);
+				else if (line[0] === "f") device = "";
+				else if (line[0] === "d") device = line.slice(1);
+				else if (line[0] === "n")
+					sockets.add(`${pid} ${device} ${line.slice(1)}`);
+			}
+			if (
+				atMs >= fromMs &&
+				atMs <= toMs &&
+				[...sockets].some((socket) => !before.has(socket))
+			)
+				changed++;
+			before = sockets;
+		}
+		return changed;
+	};
+	const portScanCheck = (
+		phase: string,
+		measurement: Awaited<ReturnType<typeof measure>>,
+	) => {
+		const { scans, reads } = measurement.portScan;
+		// A scan just before the phase may read inside it.
+		const changed = changedScans(
+			measurement.startedAtMs - BUDGET.portScanIntervalMs,
+			measurement.startedAtMs + measurement.durationMs,
+		);
+		const maxScans =
+			1 + Math.floor(measurement.durationMs / BUDGET.portScanIntervalMs);
+		check(scans <= maxScans, `${phase}: ${scans} port scans > ${maxScans}`);
+		check(
+			reads <= BUDGET.portScanReadsPerChange * changed,
+			`${phase}: ${reads} port scan process reads for ${changed} scans that listed a new socket`,
+		);
+		return { ...measurement.portScan, maxScans, changedScans: changed };
+	};
 
 	try {
 		report["revision"] = await git(resolve("."), "rev-parse", "HEAD");
@@ -308,14 +396,21 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			join(metricsDir, "request.json"),
 			JSON.stringify({ id: 0, action: "begin" }),
 		);
-		await harness.restart({
-			skipBrowserProbe: true,
-			logFile,
-			serviceEnvironment: {
-				CONDUIT_TEST_SUBPROCESS_BUDGET: metricsDir,
-				CONDUIT_SLOW_RPC_MS: String(BUDGET.slowRpcMs),
-			},
-		});
+		// The daemon inherits this process's PATH at start.
+		const testPath = process.env["PATH"] ?? "";
+		if (lsof) process.env["PATH"] = `${join(scanDir, "bin")}:${testPath}`;
+		try {
+			await harness.restart({
+				skipBrowserProbe: true,
+				logFile,
+				serviceEnvironment: {
+					CONDUIT_TEST_SUBPROCESS_BUDGET: metricsDir,
+					CONDUIT_SLOW_RPC_MS: String(BUDGET.slowRpcMs),
+				},
+			});
+		} finally {
+			process.env["PATH"] = testPath;
+		}
 		const startupAt = performance.now();
 		const startupDb = new Database(join(harness.configDir, "events.db"), {
 			readonly: true,
@@ -351,7 +446,12 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			(reads, folder) => reads + (noInterests.gitReads[folder] ?? 0),
 			0,
 		);
-		report["noInterests"] = { ...noInterests, coldFolders, coldReads };
+		report["noInterests"] = {
+			...noInterests,
+			coldFolders,
+			coldReads,
+			portScan: portScanCheck("no Interests", noInterests),
+		};
 		check(coldReads === 0, `no Interests: ${coldReads} cold-project git reads`);
 		const browser = await harness.connect(
 			undefined,
@@ -364,10 +464,12 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			"all 30 sessions must reach the browser snapshot",
 		);
 		const idle = await measure(() => idleFor(BUDGET.idleMs));
-		report["idle"] = idle;
+		report["idle"] = { ...idle, portScan: portScanCheck("idle", idle) };
+		const idlePortScan = idle.portScan.scans + idle.portScan.reads;
 		check(
-			(idle.spawns * 60_000) / idle.durationMs <= BUDGET.idleSpawnsPerMinute,
-			`idle: ${idle.spawnsPerMinute} spawns/min > ${BUDGET.idleSpawnsPerMinute}`,
+			((idle.spawns - idlePortScan) * 60_000) / idle.durationMs <=
+				BUDGET.idleSpawnsPerMinute,
+			`idle: ${idle.otherSpawnsPerMinute} spawns/min besides PortWatcher > ${BUDGET.idleSpawnsPerMinute}`,
 		);
 		check(
 			idle.loopDelayMs.p99 < BUDGET.loopP99Ms,
@@ -428,6 +530,7 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 		}
 		report["externalCommit"] = {
 			...externalCommit,
+			portScan: portScanCheck("external commit", externalCommit),
 			commitMs: Math.round(commitMs),
 			visibleMs: visibleMs === null ? null : Math.round(visibleMs),
 			expectedHead,
@@ -495,7 +598,11 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			);
 			return { id, tier, intervalMs, reads, maxReads, rounds: rounds[id] ?? 0 };
 		});
-		report["churn"] = { ...churn, worktrees };
+		report["churn"] = {
+			...churn,
+			worktrees,
+			portScan: portScanCheck("churn", churn),
+		};
 		check(
 			churn.loopDelayMs.p99 < BUDGET.loopP99Ms,
 			`churn: loop p99 ${churn.loopDelayMs.p99}ms >= ${BUDGET.loopP99Ms}ms`,
@@ -535,17 +642,22 @@ it("keeps daemon git and loop delay within idle, read and churn budgets", async 
 			});
 			// The control-file end acknowledgment can arrive after a deferred
 			// refresh starts. Keep that phase evidence and count the RPC itself.
-			const readSpawns = measurement.spawnEvents.filter(({ atMs }) => {
+			// PortWatcher's 2 s scan may land inside the RPC; it is counted, not caused, by the read.
+			const duringRead = measurement.spawnEvents.filter(({ atMs }) => {
 				const at = measurement.startedAtMs + atMs;
 				return (
 					at >= measurement.runStartedAtMs && at <= measurement.runCompletedAtMs
 				);
-			}).length;
+			});
+			const readSpawns = duringRead.filter(
+				(spawn) => !isPortScan(spawn),
+			).length;
 			listReads.push({
 				kind,
 				...measurement,
 				readSpawns,
-				outsideReadSpawns: measurement.spawns - readSpawns,
+				portScanReadSpawns: duringRead.length - readSpawns,
+				outsideReadSpawns: measurement.spawns - duringRead.length,
 			});
 			check(
 				readSpawns === BUDGET.listReadSpawns,
