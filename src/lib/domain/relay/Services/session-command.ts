@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { type Cause, type Context, Data, Effect, Option } from "effect";
+import { type Cause, type Context, Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
@@ -501,9 +501,6 @@ export const applySessionCommand = (
 	options: ApplySessionCommandOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const api = Option.getOrUndefined(
-			yield* Effect.serviceOption(OpenCodeAPITag),
-		);
 		const log = yield* LoggerTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
@@ -661,7 +658,10 @@ export const applySessionCommand = (
 					? options.upstreamAdapter
 					: command.type === "session.renamed" ||
 							command.type === "session.deleted"
-						? yield* sessionUpstreamAdapter(account?.driver ?? "opencode", api)
+						? yield* sessionUpstreamAdapter(
+								account?.driver ?? "opencode",
+								undefined,
+							)
 						: null;
 
 			if (adapter !== null) {
