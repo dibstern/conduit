@@ -33,6 +33,8 @@ export class DaemonTurns extends Context.Service<
 		readonly serialised: (
 			sessionId: string,
 		) => <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+		/** Sessions holding or awaiting a permit; none once their work ends. */
+		readonly heldPermits: () => number;
 		/** Lend a relay's continuation for its project until the relay's scope closes. */
 		readonly attach: (
 			projectId: string,
@@ -57,7 +59,12 @@ export const DaemonTurnsLive = Layer.effect(
 		const unowned = yield* FiberMap.make<string, void, unknown>();
 		const held = new Map<string, DispatchFibers>();
 		const lock = yield* Semaphore.make(1);
-		const permits = new Map<string, Semaphore.Semaphore>();
+		// A permit lives while its session's work holds or awaits it, so a
+		// finished or deleted session leaves nothing behind.
+		const permits = new Map<
+			string,
+			{ readonly permit: Semaphore.Semaphore; users: number }
+		>();
 		const attached = new Map<string, ProjectContinuation[]>();
 		const waiting = new Map<string, string[]>();
 		// An entry without a session marks a newly lent relay for its project.
@@ -138,14 +145,25 @@ export const DaemonTurnsLive = Layer.effect(
 						);
 					}),
 				),
-			serialised: (sessionId) => {
-				let permit = permits.get(sessionId);
-				if (!permit) {
-					permit = Semaphore.makeUnsafe(1);
-					permits.set(sessionId, permit);
-				}
-				return permit.withPermits(1);
-			},
+			serialised: (sessionId) => (effect) =>
+				Effect.acquireUseRelease(
+					Effect.sync(() => {
+						const entry = permits.get(sessionId) ?? {
+							permit: Semaphore.makeUnsafe(1),
+							users: 0,
+						};
+						entry.users += 1;
+						permits.set(sessionId, entry);
+						return entry;
+					}),
+					({ permit }) => permit.withPermits(1)(effect),
+					(entry) =>
+						Effect.sync(() => {
+							entry.users -= 1;
+							if (entry.users === 0) permits.delete(sessionId);
+						}),
+				),
+			heldPermits: () => permits.size,
 			attach: (projectId, parts) =>
 				Effect.acquireRelease(
 					Effect.andThen(
