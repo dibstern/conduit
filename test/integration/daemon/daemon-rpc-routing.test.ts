@@ -54,204 +54,180 @@ const makeProjectStore = (
 };
 
 describe("daemon shared RPC routing", () => {
-	it.effect.each(["ViewSession", "AttachProject"] as const)(
-		"routes %s across projects on one daemon RPC socket",
-		(operation) =>
-			Effect.gen(function* () {
-				const root = yield* Effect.acquireRelease(
-					Effect.sync(() => mkdtempSync(join(tmpdir(), "conduit-daemon-ws-"))),
-					(path) =>
-						Effect.sync(() => rmSync(path, { recursive: true, force: true })),
-				);
-				const projectA = join(root, "project-a");
-				const projectB = join(root, "project-b");
-				mkdirSync(projectA);
-				mkdirSync(projectB);
-				makeProjectStore(root, "project-a", "session-a");
-				makeProjectStore(root, "project-b", "session-b");
-				const projects = [
-					{
-						slug: "project-a",
-						title: "Project A",
-						folders: [projectA] as const,
-						lastUsed: 2,
-					},
-					{
-						slug: "project-b",
-						title: "Project B",
-						folders: [projectB] as const,
-						lastUsed: 1,
-					},
-				];
-				const handlers = new Map<
-					string,
-					ReturnType<typeof makeMockWebSocketHandler>
-				>();
-				const startPolling = vi.fn();
-				const factory = (slug: string) =>
-					Effect.gen(function* () {
-						const wsHandler = makeMockWebSocketHandler();
-						const pollerManager = {
-							on: vi.fn(),
-							isPolling: vi.fn(() => false),
-							startPolling,
-							stopPolling: vi.fn(),
-							notifySSEEvent: vi.fn(),
-						};
-						const runtime = ManagedRuntime.make(
-							Layer.mergeAll(
-								makeTestHandlerLayer({
-									config: makeMockConfig({ slug }),
-									persistenceLayer: makePersistenceEffectLayer(
-										daemonStorePath(root),
-										slug,
-									),
-									wsHandler,
-									pollerManager,
-								}),
-								makeWsTransportLive({ noServer: true }),
-							),
-						);
-						const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
-							runtime,
-						}).pipe(Effect.provide(yield* runtime.contextEffect));
-						handlers.set(slug, wsHandler);
-						return {
-							slug,
-							wsHandler,
-							rpcWsHandler,
-							syncGlobalSetting: () => Effect.void,
-							refreshGlobalDefaults: () => Effect.void,
-							stop: async () => {
-								await rpcWsHandler.drain();
-								await runtime.dispose();
-							},
-						};
-					});
-
-				const server = yield* Effect.acquireRelease(
-					Effect.callback<Server, Error>((resume) => {
-						const server = createServer();
-						server.once("error", (error) => resume(Effect.fail(error)));
-						server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
-					}),
-					(server) =>
-						Effect.callback<void>((resume) => {
-							server.close(() => resume(Effect.void));
-						}),
-				);
-				const upgrades = vi.fn();
-				server.on("upgrade", upgrades);
-				const routerContext = yield* Layer.build(
-					WebSocketRelayRouterLive.pipe(
-						Layer.provide(
-							Layer.mergeAll(
-								makeProjectRegistryLive(projects),
-								makeRelayCacheLive(factory),
-								DaemonEventBusLive,
-								ConfigPersistenceNoopLive,
-							),
-						),
-					),
-				);
-				const relayRouter = yield* WebSocketRelayRouterTag.pipe(
-					Effect.provide(routerContext),
-				);
-				yield* Layer.build(
-					WebSocketRoutingLive.pipe(
-						Layer.provide(
-							makeDaemonRpcTestLayer(projects, factory, { configDir: root }),
-						),
-						Layer.provide(
-							Layer.mergeAll(
-								Layer.effect(HttpServerRefTag, Ref.make<Server | null>(server)),
-								DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-								makeAuthManagerLive(
-									new AuthManager({ getPinHash: () => null }),
+	it.effect("routes ViewSession across projects on one daemon RPC socket", () =>
+		Effect.gen(function* () {
+			const root = yield* Effect.acquireRelease(
+				Effect.sync(() => mkdtempSync(join(tmpdir(), "conduit-daemon-ws-"))),
+				(path) =>
+					Effect.sync(() => rmSync(path, { recursive: true, force: true })),
+			);
+			const projectA = join(root, "project-a");
+			const projectB = join(root, "project-b");
+			mkdirSync(projectA);
+			mkdirSync(projectB);
+			makeProjectStore(root, "project-a", "session-a");
+			makeProjectStore(root, "project-b", "session-b");
+			const projects = [
+				{
+					slug: "project-a",
+					title: "Project A",
+					folders: [projectA] as const,
+					lastUsed: 2,
+				},
+				{
+					slug: "project-b",
+					title: "Project B",
+					folders: [projectB] as const,
+					lastUsed: 1,
+				},
+			];
+			const handlers = new Map<
+				string,
+				ReturnType<typeof makeMockWebSocketHandler>
+			>();
+			const startPolling = vi.fn();
+			const factory = (slug: string) =>
+				Effect.gen(function* () {
+					const wsHandler = makeMockWebSocketHandler();
+					const pollerManager = {
+						on: vi.fn(),
+						isPolling: vi.fn(() => false),
+						startPolling,
+						stopPolling: vi.fn(),
+						notifySSEEvent: vi.fn(),
+					};
+					const runtime = ManagedRuntime.make(
+						Layer.mergeAll(
+							makeTestHandlerLayer({
+								config: makeMockConfig({ slug }),
+								persistenceLayer: makePersistenceEffectLayer(
+									daemonStorePath(root),
+									slug,
 								),
-								Layer.succeed(WebSocketRelayRouterTag)(relayRouter),
-							),
-						),
-					),
-				);
-				const address = server.address();
-				if (!address || typeof address === "string") {
-					return yield* Effect.fail(new Error("No TCP address"));
-				}
-				const rpcContext = yield* Layer.build(
-					RpcClient.layerProtocolSocket().pipe(
-						Layer.provide(
-							Socket.layerWebSocket(`ws://127.0.0.1:${address.port}/rpc`),
-						),
-						Layer.provide(Socket.layerWebSocketConstructorGlobal),
-						Layer.provide(RpcSerialization.layerJson),
-					),
-				);
-				const rpcClient = yield* RpcClient.make(WsRpcGroup).pipe(
-					Effect.provide(rpcContext),
-				);
-				expect(
-					yield* rpcClient.AttachProject({
-						projectSlug: "project-a",
-						originId: "daemon-client",
-					}),
-				).toEqual({ projectSlug: "project-a", sessionSlug: null });
-				if (operation === "ViewSession") {
-					yield* rpcClient.SyncInputDraft({
-						key: { session: "session-b" },
-						text: "saved draft",
-					});
-				}
-				expect(
-					yield* operation === "ViewSession"
-						? rpcClient.ViewSession({
-								sessionId: "session-b",
-								originId: "daemon-client",
-							})
-						: rpcClient.AttachProject({
-								sessionId: "session-b",
-								originId: "daemon-client",
+								wsHandler,
+								pollerManager,
 							}),
-				).toMatchObject(
-					operation === "ViewSession"
-						? { ok: true }
-						: { projectSlug: "project-b" },
-				);
-				if (operation === "ViewSession")
-					expect(
-						yield* Stream.runHead(
-							rpcClient.SubscribeInputDraft({ key: { session: "session-b" } }),
+							makeWsTransportLive({ noServer: true }),
 						),
-					).toEqual(
-						Option.some({
-							_tag: "synchronized",
-							text: "saved draft",
-							attachments: [],
-						}),
 					);
-				for (const projectSlug of ["project-a", "project-b"]) {
-					expect(yield* rpcClient.GetCommands({ projectSlug })).toMatchObject({
-						projectSlug,
-						commands: [],
-					});
-				}
-				expect(upgrades).toHaveBeenCalledTimes(1);
+					const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
+						runtime,
+					}).pipe(Effect.provide(yield* runtime.contextEffect));
+					handlers.set(slug, wsHandler);
+					return {
+						slug,
+						wsHandler,
+						rpcWsHandler,
+						syncGlobalSetting: () => Effect.void,
+						refreshGlobalDefaults: () => Effect.void,
+						stop: async () => {
+							await rpcWsHandler.drain();
+							await runtime.dispose();
+						},
+					};
+				});
 
-				const handlerA = handlers.get("project-a");
-				const handlerB = handlers.get("project-b");
-				if (!handlerA || !handlerB) {
-					return yield* Effect.fail(new Error("Expected both relays to start"));
-				}
-				if (operation === "ViewSession") {
-					expect(handlerB.setClientSession).toHaveBeenCalledWith(
-						"daemon-client",
-						"session-b",
-						"project-b",
-						undefined,
-					);
-					expect(startPolling).toHaveBeenCalledWith("session-b");
-				}
-			}),
+			const server = yield* Effect.acquireRelease(
+				Effect.callback<Server, Error>((resume) => {
+					const server = createServer();
+					server.once("error", (error) => resume(Effect.fail(error)));
+					server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+				}),
+				(server) =>
+					Effect.callback<void>((resume) => {
+						server.close(() => resume(Effect.void));
+					}),
+			);
+			const upgrades = vi.fn();
+			server.on("upgrade", upgrades);
+			const routerContext = yield* Layer.build(
+				WebSocketRelayRouterLive.pipe(
+					Layer.provide(
+						Layer.mergeAll(
+							makeProjectRegistryLive(projects),
+							makeRelayCacheLive(factory),
+							DaemonEventBusLive,
+							ConfigPersistenceNoopLive,
+						),
+					),
+				),
+			);
+			const relayRouter = yield* WebSocketRelayRouterTag.pipe(
+				Effect.provide(routerContext),
+			);
+			yield* Layer.build(
+				WebSocketRoutingLive.pipe(
+					Layer.provide(
+						makeDaemonRpcTestLayer(projects, factory, { configDir: root }),
+					),
+					Layer.provide(
+						Layer.mergeAll(
+							Layer.effect(HttpServerRefTag, Ref.make<Server | null>(server)),
+							DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
+							makeAuthManagerLive(new AuthManager({ getPinHash: () => null })),
+							Layer.succeed(WebSocketRelayRouterTag)(relayRouter),
+						),
+					),
+				),
+			);
+			const address = server.address();
+			if (!address || typeof address === "string") {
+				return yield* Effect.fail(new Error("No TCP address"));
+			}
+			const rpcContext = yield* Layer.build(
+				RpcClient.layerProtocolSocket().pipe(
+					Layer.provide(
+						Socket.layerWebSocket(`ws://127.0.0.1:${address.port}/rpc`),
+					),
+					Layer.provide(Socket.layerWebSocketConstructorGlobal),
+					Layer.provide(RpcSerialization.layerJson),
+				),
+			);
+			const rpcClient = yield* RpcClient.make(WsRpcGroup).pipe(
+				Effect.provide(rpcContext),
+			);
+			yield* rpcClient.SyncInputDraft({
+				key: { session: "session-b" },
+				text: "saved draft",
+			});
+			expect(
+				yield* rpcClient.ViewSession({
+					sessionId: "session-b",
+					originId: "daemon-client",
+				}),
+			).toMatchObject({ ok: true });
+			expect(
+				yield* Stream.runHead(
+					rpcClient.SubscribeInputDraft({ key: { session: "session-b" } }),
+				),
+			).toEqual(
+				Option.some({
+					_tag: "synchronized",
+					text: "saved draft",
+					attachments: [],
+				}),
+			);
+			for (const projectSlug of ["project-a", "project-b"]) {
+				expect(yield* rpcClient.GetCommands({ projectSlug })).toMatchObject({
+					projectSlug,
+					commands: [],
+				});
+			}
+			expect(upgrades).toHaveBeenCalledTimes(1);
+
+			const handlerA = handlers.get("project-a");
+			const handlerB = handlers.get("project-b");
+			if (!handlerA || !handlerB) {
+				return yield* Effect.fail(new Error("Expected both relays to start"));
+			}
+			expect(handlerB.setClientSession).toHaveBeenCalledWith(
+				"daemon-client",
+				"session-b",
+				"project-b",
+				undefined,
+			);
+			expect(startPolling).toHaveBeenCalledWith("session-b");
+		}),
 	);
 
 	it.effect(

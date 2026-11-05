@@ -8,7 +8,7 @@ import { AppPage } from "../page-objects/app.page.js";
 const artifactPath = "test-results/82tn20-session-routing.json";
 const initialSteps = {
 	createdBothSessions: false,
-	attachedToA: false,
+	routedToA: false,
 	submittedToB: false,
 	replyInB: false,
 	persistedInBOnly: false,
@@ -24,9 +24,9 @@ test.beforeEach(() => {
 	);
 });
 
-// Failure modes: the attached project wins over the session owner, an unknown
+// Failure modes: the last project a socket used wins over the session owner, an unknown
 // session silently falls back, or a successful RPC loses the persisted turn.
-test("session RPCs use the owner even when the page attaches to another project", async ({
+test("session RPCs use the owner even after the socket asks another project", async ({
 	page,
 	harness,
 }, testInfo) => {
@@ -114,9 +114,8 @@ test("session RPCs use the owner even when the page attaches to another project"
 					);
 				});
 			try {
-				const attached = await request("1", "AttachProject", {
+				const routed = await request("1", "GetCommands", {
 					projectSlug: "process-test",
-					originId: "routing-page",
 				});
 				const submitted = await request("2", "input.submit", {
 					sessionId,
@@ -126,16 +125,16 @@ test("session RPCs use the owner even when the page attaches to another project"
 					text: "cross-project-routing",
 				});
 				return {
-					attached: attached["projectSlug"],
+					routed: routed["projectSlug"],
 					submitted: submitted["ok"],
 				};
 			} finally {
 				socket.close();
 			}
 		}, b.sessionId);
-		steps.attachedToA = result.attached === "process-test";
+		steps.routedToA = result.routed === "process-test";
 		steps.submittedToB = result.submitted === true;
-		expect(steps.attachedToA).toBe(true);
+		expect(steps.routedToA).toBe(true);
 		expect(steps.submittedToB).toBe(true);
 		await app.goto(`${harness.baseUrl}/s/${b.sessionId}`);
 		await expect(page.locator("#messages")).toContainText(

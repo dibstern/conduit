@@ -192,6 +192,8 @@ describe("browser audiences without attaching a project (82tn.13)", () => {
 		const { fixture, slugB, sessions } = await twoProjects(
 			"approval-other-project",
 		);
+		// 9: no tab can attach a project; navigation names its session or project.
+		expect(WsRpcGroup.requests.has("AttachProject")).toBe(false);
 		const onA = await fixture.connect(sessions.a, undefined, "process-test");
 		const onB = await fixture.connect(sessions.b, undefined, slugB);
 		await onB.followAlerts();

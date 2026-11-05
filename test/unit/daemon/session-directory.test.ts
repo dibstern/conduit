@@ -1,32 +1,23 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { it } from "@effect/vitest";
-import { Effect, Layer, Option, Ref } from "effect";
+import { Effect, Layer, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, expect, vi } from "vitest";
-import { AuthManager } from "../../../src/lib/auth.js";
 
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { makeDaemonSharedStoreLayer } from "../../../src/lib/domain/daemon/Layers/daemon-shared-store-layer.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
-import { HttpServerRefTag } from "../../../src/lib/domain/daemon/Layers/relay-factory-layer.js";
 import { resolveDaemonOpenCodeSession } from "../../../src/lib/domain/daemon/Services/daemon-session-reader.js";
 import { makeProjectRegistryLive } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
 import {
 	makeSharedSessionDirectoryLive,
 	SessionDirectory,
 } from "../../../src/lib/domain/daemon/Services/session-directory.js";
-import { makeAuthManagerLive } from "../../../src/lib/domain/server/Layers/auth-middleware.js";
-import {
-	WebSocketRelayRouterTag,
-	WebSocketRoutingLive,
-} from "../../../src/lib/domain/server/Layers/ws-routing-layer.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import * as wsRpcHandler from "../../../src/lib/server/ws-rpc-handler.js";
 import type { StoredProject } from "../../../src/lib/types.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import { writeEventStore } from "../../helpers/persistence-factories.js";
@@ -64,14 +55,10 @@ function fixture() {
 }
 
 it.effect(
-	"ResolveSession and AttachProject find the stored owner of a cold non-first project",
+	"ResolveSession finds the stored owner of a cold non-first project",
 	() => {
 		const { root, projects } = fixture();
 		return Effect.gen(function* () {
-			const attachFactory = vi.spyOn(
-				wsRpcHandler,
-				"makeRoutedWsRpcWebSocketHandler",
-			);
 			const daemon = makeDaemonRpcTestLayer(projects, undefined, {
 				configDir: root,
 			});
@@ -91,35 +78,6 @@ it.effect(
 						_tag: "ResolveSession",
 						sessionId: "missing",
 					}),
-				),
-			).toMatchObject({ _tag: "Failure", failure: { _tag: "WsRpcError" } });
-			yield* Layer.build(
-				WebSocketRoutingLive.pipe(
-					Layer.provide(
-						Layer.mergeAll(
-							Layer.succeedContext(context),
-							Layer.effect(
-								HttpServerRefTag,
-								Ref.make<import("node:http").Server | null>(createServer()),
-							),
-							makeAuthManagerLive(new AuthManager({ getPinHash: () => null })),
-							Layer.succeed(WebSocketRelayRouterTag)({
-								ensureRelayStarted: () => Effect.void,
-								waitForRelay: () => Effect.succeed({ rpcWsHandler: {} }),
-								touchLastUsed: () => Effect.void,
-							}),
-						),
-					),
-				),
-			);
-			const attach = attachFactory.mock.calls.at(-1)?.[4];
-			if (!attach) throw new Error("AttachProject handler missing");
-			expect(
-				yield* attach({ originId: "directory-test", sessionId: "ses_b" }),
-			).toEqual({ projectSlug: "b", sessionSlug: "b" });
-			expect(
-				yield* Effect.result(
-					attach({ originId: "directory-test", sessionId: "missing" }),
 				),
 			).toMatchObject({ _tag: "Failure", failure: { _tag: "WsRpcError" } });
 		});

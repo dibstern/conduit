@@ -283,18 +283,6 @@ export type ResolveRpcContext = (
 	WsRpcError
 >;
 
-export type AttachDaemonProject = (payload: {
-	readonly originId: string;
-	readonly projectSlug?: string | undefined;
-	readonly sessionId?: string | undefined;
-}) => Effect.Effect<
-	{
-		readonly projectSlug: string | null;
-		readonly sessionSlug: string | null;
-	},
-	WsRpcError
->;
-
 export type DaemonRpcName =
 	| keyof typeof daemonOnlyHandlers
 	| "GetProjects"
@@ -407,7 +395,6 @@ export const makeRoutedWsRpcServerLayer = <
 	resolveContext: ResolveRpcContext,
 	daemonHandlers?: D,
 	defaultProjectSlug?: string,
-	attachProject?: AttachDaemonProject,
 ) =>
 	Layer.unwrap(
 		Effect.gen(function* () {
@@ -534,7 +521,6 @@ export const makeRoutedWsRpcServerLayer = <
 						: never
 				>;
 			};
-			if (attachProject) handlers.AttachProject = attachProject;
 			if (daemonHandlers) {
 				const routeCreateSession = routeHandler(unaryHandlers.CreateSession);
 				handlers.CreateSession = (

@@ -32,7 +32,6 @@ import { EventDelivery } from "./event-audiences.js";
 import { CurrentEventDelivery } from "./event-delivery.js";
 import { getClientIp, isLoopbackAddress } from "./http-utils.js";
 import {
-	type AttachDaemonProject,
 	BrowserRpcConnectionsTag,
 	type DaemonRpcHandlers,
 	makeRoutedWsRpcServerLayer,
@@ -445,7 +444,6 @@ export const makeRoutedWsRpcWebSocketHandler = (
 	daemonHandlers?: DaemonRpcHandlers,
 	defaultProjectSlug?: string,
 	onSuccessfulShutdownResponse?: OnSuccessfulShutdownResponse,
-	attachProject?: AttachDaemonProject,
 ) =>
 	Effect.gen(function* () {
 		const browserConnections = yield* Effect.serviceOption(
@@ -463,7 +461,6 @@ export const makeRoutedWsRpcWebSocketHandler = (
 			resolveContext,
 			daemonHandlers,
 			defaultProjectSlug,
-			attachProject,
 		).pipe(Layer.provide(Layer.succeed(SessionDirectory, directory)));
 		const handler = new WsRpcWebSocketHandler(undefined, {
 			transport: Context.get(transportContext, WsTransportTag),

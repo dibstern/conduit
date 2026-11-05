@@ -2868,31 +2868,6 @@ export const PreWarmDraft = Rpc.make("PreWarmDraft", {
 	error: WsRpcError,
 });
 
-export const AttachProject = Rpc.make("AttachProject", {
-	payload: Schema.TaggedStruct("AttachProject", {
-		// Omission attaches the daemon's default project.
-
-		projectSlug: Schema.optional(NonEmptyString),
-		originId: NonEmptyString,
-	}),
-	success: Schema.Struct({
-		projectSlug: Schema.NullOr(Schema.String),
-		// Project-only attaches have no session location.
-		sessionSlug: Schema.NullOr(Schema.String),
-	}),
-	error: WsRpcError,
-});
-
-/** Session-scoped form of AttachProject; its owner supplies the project. */
-export const AttachProjectForSession = Rpc.make(AttachProject._tag, {
-	payload: Schema.TaggedStruct(AttachProject._tag, {
-		sessionId: NonEmptyString,
-		originId: NonEmptyString,
-	}),
-	success: AttachProject.successSchema,
-	error: AttachProject.errorSchema,
-});
-
 export const DeleteSession = Rpc.make("DeleteSession", {
 	payload: Schema.TaggedStruct("DeleteSession", {
 		sessionId: NonEmptyString,
@@ -3392,23 +3367,6 @@ const wsRpcRequests = [
 	CancelCodexLogin,
 	LogoutCodex,
 	GetInstanceStatus,
-	{
-		requests: [AttachProjectForSession, AttachProject],
-		rpc: Rpc.make(AttachProject._tag, {
-			payload: Schema.Union([
-				closedPayload({
-					...AttachProjectForSession.payloadSchema.fields,
-					_tag: wireTag(AttachProjectForSession._tag),
-				}),
-				closedPayload({
-					...AttachProject.payloadSchema.fields,
-					_tag: wireTag(AttachProject._tag),
-				}),
-			]),
-			success: AttachProject.successSchema,
-			error: AttachProject.errorSchema,
-		}),
-	},
 	ResolveSession,
 	GetGoalDetails,
 	GenerateGoalSummary,
