@@ -49,7 +49,8 @@
 				"unarchived_at": null,
 				"last_user_message_at": null,
 				"goal_stuck": null,
-				"jev": null
+				"jev": null,
+				"diff_base": null
 			}
 		],
 		"turns": [
@@ -724,7 +725,8 @@
 				"unarchived_at": null,
 				"last_user_message_at": null,
 				"goal_stuck": null,
-				"jev": null
+				"jev": null,
+				"diff_base": null
 			}
 		],
 		"turns": [
@@ -1015,7 +1017,8 @@
 				"unarchived_at": null,
 				"last_user_message_at": null,
 				"goal_stuck": null,
-				"jev": null
+				"jev": null,
+				"diff_base": null
 			}
 		],
 		"turns": [
