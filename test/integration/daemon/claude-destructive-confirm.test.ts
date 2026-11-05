@@ -13,6 +13,8 @@
 // 13, 14. a confirmed close leaves no timeline entry, or a close with no tasks leaves one.
 // 24. a delete with tasks live ends them unasked, or a stale confirm deletes.
 // 25. a refresh with tasks live ends them unasked, waits for the turn, or shows no ask.
+// 25-27. a send on a switched account is refused, or on confirm the old process closes twice, not
+// at all, or the message is lost, doubled, or sent on the old account.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -82,6 +84,60 @@ const endRows = (harness: ProcessHarness, sessionId: string) => {
 	}
 };
 
+/** The session's end_session rows with the process each was addressed to. */
+const endTargets = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return db
+			.prepare(
+				"SELECT command_id AS commandId, status, provider_process_id AS process FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'end_session' ORDER BY request_sequence",
+			)
+			.all(sessionId) as {
+			commandId: string;
+			status: string;
+			process: string | null;
+		}[];
+	} finally {
+		db.close();
+	}
+};
+
+/** The runner process ids reported for the session, oldest first (a label adds ":<generation>"). */
+const processesStarted = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return (
+			db
+				.prepare(
+					"SELECT json_extract(data, '$.label') AS label FROM events WHERE session_id = ? AND type = 'evidence.process_started' ORDER BY sequence",
+				)
+				.all(sessionId) as { label: string }[]
+		).map((row) => row.label.split(":")[0]);
+	} finally {
+		db.close();
+	}
+};
+
+/** Adds two Claude accounts with their own login folders. */
+const addAccounts = async (harness: ProcessHarness) => {
+	const ids: string[] = [];
+	for (const name of ["A", "B"]) {
+		const configDir = join(harness.root, name);
+		mkdirSync(configDir, { recursive: true });
+		const { addedInstanceId } = await harness.requestRpc({
+			_tag: "AddInstance",
+			name,
+			driver: "claude",
+			configDir,
+		});
+		if (!addedInstanceId) throw new Error("Missing fixture account");
+		ids.push(addedInstanceId);
+	}
+	const [a, b] = ids;
+	if (!a || !b) throw new Error("Missing fixture accounts");
+	return { a, b };
+};
+
 const lostNotices = async (browser: BrowserClient, sessionId: string) =>
 	(await browser.history(sessionId)).flatMap((message) =>
 		(message.parts ?? []).flatMap((part) =>
@@ -116,8 +172,12 @@ const row = (
 	);
 
 /** The deaf held turn, once its four tasks show on the session row. */
-const startTurn = async (harness: ProcessHarness, browser: BrowserClient) => {
-	const sessionId = await browser.createSession("Destructive confirm");
+const startTurn = async (
+	harness: ProcessHarness,
+	browser: BrowserClient,
+	account?: string,
+) => {
+	const sessionId = await browser.createSession("Destructive confirm", account);
 	await browser.followSession(sessionId);
 	const turn = browser.send(sessionId, deaf);
 	void turn.catch(() => undefined);
@@ -817,5 +877,96 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		proof["delete confirmed"] = {
 			closed: closedQueries(fixture, queryId).length,
 		};
+	});
+
+	// 25-27, R5: a send on another account of the same driver needs a new process, so with tasks
+	// live it waits behind the held close (8.4 2875-2899); a confirm closes the old one once.
+	it("holds a send on a switched account while tasks are live, then closes the old process once and sends on the new one", async () => {
+		const { fixture, browser } = await start();
+		const { a, b } = await addAccounts(fixture);
+		const { sessionId, queryId } = await startTurn(fixture, browser, a);
+		// The turn ends on its own; its tasks keep running (a switch refuses a live turn).
+		const endedFrom = browser.frames.length;
+		writeFileSync(join(fixture.root, "task-stop-release-result"), "release");
+		await row(
+			browser,
+			sessionId,
+			endedFrom,
+			(message) => message["status"] === "idle",
+		);
+		const oldProcess = processesStarted(fixture, sessionId).at(-1);
+		await fixture.requestRpc({
+			_tag: "ContinueSession",
+			sessionId,
+			instanceId: b,
+			expectedInstanceId: a,
+		});
+		const cursor = browser.frames.length;
+		const inputId = crypto.randomUUID();
+		const text = "after-held-account-switch";
+		const submitted = await Effect.runPromise(
+			Effect.result(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId,
+					delivery: "queue",
+					text,
+				}),
+			),
+		);
+		proof["switch: submitted"] =
+			submitted._tag === "Success"
+				? submitted.success
+				: { refused: String(submitted.failure) };
+		expect(submitted._tag).toBe("Success");
+		const asked = confirmOf(
+			await row(browser, sessionId, cursor, (message) =>
+				Boolean(confirmOf(message)),
+			),
+		);
+		expect(asked?.step).toBe("end_session");
+		expect(asked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const held = endTargets(fixture, sessionId);
+		proof["switch: held"] = { asked, oldProcess, rows: held };
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		expect(held).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "held",
+				process: oldProcess,
+			},
+		]);
+		const enqueued = () =>
+			marks(fixture).filter(
+				(mark) => mark["kind"] === "enqueue" && mark["request"] === text,
+			);
+		expect(enqueued()).toEqual([]);
+		await confirmNewest(browser, sessionId, cursor);
+		// test-waits-allow polling: the fake SDK reports its queries only through sdk-proof.ndjson.
+		await vi.waitFor(() => expect(enqueued()).toHaveLength(1), {
+			timeout: 10_000,
+		});
+		const launches = fixture.claudeOptions();
+		proof["switch: confirmed"] = {
+			rows: endTargets(fixture, sessionId),
+			closed: closedQueries(fixture, queryId).length,
+			sent: enqueued(),
+			launches: launches.map(({ options }) => options["env"]),
+		};
+		expect(closedQueries(fixture, queryId)).toHaveLength(1);
+		expect(endTargets(fixture, sessionId)).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "completed",
+				process: oldProcess,
+			},
+		]);
+		expect(enqueued()[0]?.["queryId"]).not.toBe(queryId);
+		expect(launches.at(-1)?.options["env"]).toEqual(
+			expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "B") }),
+		);
 	});
 });

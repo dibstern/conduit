@@ -9,7 +9,6 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, expect, it, vi } from "vitest";
 import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
-import { AccountSwitchBusy } from "../../../src/lib/contracts/limit-recovery.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { discoverRunners } from "../../../src/lib/provider/runner/runner-registry.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
@@ -417,7 +416,7 @@ it("drops removed account credentials after upgrade and through A B A rebinding"
 	expect(controller()?.runnerId).toBe(upgraded?.runnerId);
 }, 40_000);
 
-it("refuses an account switch while background work runs, then rebinds on the next quiet send", async () => {
+it("holds an account switch while background work runs, then sends it on the new account once the work ends", async () => {
 	const fixture = ProcessHarness.create({ dist: "dist", restartProof: true });
 	harness = fixture;
 	await fixture.restart();
@@ -446,25 +445,17 @@ it("refuses an account switch while background work runs, then rebinds on the ne
 		expectedInstanceId: a,
 	});
 	const inputId = randomUUID();
-	const prompt = "refused-account-switch";
-	const refusal = await Effect.runPromise(
+	const prompt = "held-account-switch";
+	// 82tn.32.25: the send waits behind the old process's held close instead of being refused.
+	const submitted = await Effect.runPromise(
 		browser.rpc["input.submit"]({
 			sessionId,
 			originId: browser.originId,
 			inputId,
 			delivery: "queue",
 			text: prompt,
-		}).pipe(Effect.flip),
+		}),
 	);
-	expect(refusal).toBeInstanceOf(AccountSwitchBusy);
-	expect(refusal).toMatchObject({
-		_tag: "AccountSwitchBusy",
-		sessionId,
-		fromAccountId: a,
-		toAccountId: b,
-		message:
-			"Background work is still running on A. Stop it or wait for it to finish, then resend to switch to B.",
-	});
 	const commandsWhileBusy = fixture
 		.proof()
 		.marks.filter(
@@ -487,6 +478,12 @@ it("refuses an account switch while background work runs, then rebinds on the ne
 					},
 			);
 	const db = new Database(fixture.daemonStorePath(), { readonly: true });
+	const heldClose = () =>
+		db
+			.prepare<[string], { status: string }>(
+				"SELECT status FROM provider_command_outbox WHERE command_id = ? AND effect_type = 'end_session'",
+			)
+			.get(`inbox-close:${inputId}`)?.status;
 	try {
 		expect(
 			db
@@ -495,6 +492,7 @@ it("refuses an account switch while background work runs, then rebinds on the ne
 				)
 				.get(inputId),
 		).toBeUndefined();
+		expect(heldClose()).toBe("held");
 	} finally {
 		db.close();
 	}
@@ -532,12 +530,23 @@ it("refuses an account switch while background work runs, then rebinds on the ne
 					queryId === backgroundQuery,
 			),
 	).toEqual([]);
-	await browser.send(sessionId, "after-refused-account-switch");
+	// The ended work lets the ledger issue the held close; the held send follows it.
+	// test-waits-allow polling: the fake SDK reports its queries only through sdk-proof.ndjson.
+	await vi.waitFor(
+		() =>
+			expect(
+				marks().some(
+					({ kind, request }) => kind === "enqueue" && request === prompt,
+				),
+			).toBe(true),
+		{ timeout: 10_000 },
+	);
+	await browser.send(sessionId, "after-held-account-switch");
 	const launches = fixture.claudeOptions();
 	const enqueued = marks().filter(({ kind }) => kind === "enqueue");
 	proofs.push({
 		sessionId,
-		refusal,
+		submitted,
 		commandsWhileBusy,
 		launchesWhileBusy,
 		backgroundMarks,
@@ -546,11 +555,14 @@ it("refuses an account switch while background work runs, then rebinds on the ne
 	});
 	expect(enqueued.map(({ request }) => request)).toEqual([
 		"upgrade-background-work",
-		"after-refused-account-switch",
+		prompt,
+		"after-held-account-switch",
 	]);
 	expect(enqueued[1]?.queryId).not.toBe(enqueued[0]?.queryId);
+	expect(enqueued[2]?.queryId).toBe(enqueued[1]?.queryId);
 	expect(launches.map(({ options }) => options["env"])).toEqual([
 		expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "A") }),
+		expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "B") }),
 		expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "B") }),
 	]);
 }, 60_000);
@@ -1131,11 +1143,15 @@ it.each([
 		const beforeRelease = command();
 		if (action === "cancel-preparing")
 			writeFileSync(join(fixture.root, "home/release-recovery-env"), "release");
+		// A delete with tasks live asks first; the user confirms the snapshot it showed.
 		if (action === "end")
 			await Effect.runPromise(
-				browser.rpc
-					.DeleteSession({ sessionId })
-					.pipe(Effect.timeout("5 seconds")),
+				browser.rpc.DeleteSession({ sessionId }).pipe(
+					Effect.catchTag("DeleteNeedsConfirm", ({ snapshotEntry }) =>
+						browser.rpc.DeleteSession({ sessionId, confirm: snapshotEntry }),
+					),
+					Effect.timeout("5 seconds"),
+				),
 			);
 		writeFileSync(join(fixture.root, "release-upgrade-background"), "release");
 		if (action === "end")
