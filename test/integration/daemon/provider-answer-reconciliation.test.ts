@@ -273,7 +273,10 @@ describe("runner answer timeout reconciliation", () => {
 					)
 					.all(sessionId, originalRun.id),
 			).toEqual([{ type: "turn.completed" }]);
-			await browser.answerApproval(request, "allow");
+			// A second answer meets a settled ask: refused in plain words, nothing sent.
+			await expect(browser.answerApproval(request, "allow")).rejects.toThrow(
+				"This prompt was already answered or ended with its run, so your answer was not sent.",
+			);
 			expect(snapshot().controls).toHaveLength(1);
 			expect(
 				sdkProof(harness).filter(

@@ -384,7 +384,7 @@ describe("OpenCode on the Run Ledger", () => {
 			15_000,
 		);
 		await until(
-			() => expect(read(fixture, sessionId).ends).toHaveLength(1),
+			() => expect(read(fixture, sessionId).ends).toHaveLength(2),
 			15_000,
 		);
 
@@ -408,7 +408,11 @@ describe("OpenCode on the Run Ledger", () => {
 		// Stored when the session was made, before any pick, and kept.
 		expect(created.ledger).toBe("opencode");
 		expect(driver()).toEqual({ pick: "fake", ledger: "opencode" });
-		expect(after.ends).toEqual([{ runId: heldRun, reason: "process_lost" }]);
+		// OpenCode's own busy then idle is a wake Run, ended completed (CONTRACT.md 8.3, 2837-2845).
+		expect(after.ends).toEqual([
+			{ runId: expect.not.stringMatching(heldRun ?? ""), reason: "completed" },
+			{ runId: heldRun, reason: "process_lost" },
+		]);
 	});
 
 	it("a conduit Stop of the instance mid-Run writes its loss once, and the next send runs under a new id", async () => {
@@ -747,8 +751,17 @@ describe("OpenCode on the Run Ledger", () => {
 			]),
 		);
 		const recovered = read(fixture, sessionId);
-		// The next send starts a new process; its start retires the old id with the Run already ended.
-		await (await fixture.connect()).send(sessionId, "after the daemon restart");
+		// A fresh OpenCode sends nothing for a session until it is used, and a restarted daemon has no
+		// earlier process of its own to retire (gap, reported), so the test starts the new process and
+		// sends its first event, which reports its start and retires the old id with the Run ended.
+		const next = await fixture.connect();
+		await next.startInstance(instanceId);
+		await streaming(fixture, 1);
+		await idle(fixture, sessionId);
+		await until(() =>
+			expect(started(read(fixture, sessionId))).toHaveLength(2),
+		);
+		await next.send(sessionId, "after the daemon restart");
 
 		const after = read(fixture, sessionId);
 		const [, second] = started(after);

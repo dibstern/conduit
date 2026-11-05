@@ -1183,6 +1183,7 @@ export class WsRpcError extends Schema.TaggedError<WsRpcError>()("WsRpcError", {
 			"unknown-turn",
 			"project-mismatch",
 			"ownership-lookup-failed",
+			"prompt-settled",
 		]),
 	),
 }) {}

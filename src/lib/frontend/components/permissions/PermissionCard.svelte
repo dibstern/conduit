@@ -12,6 +12,7 @@
 	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import Surface from "../ui/Surface.svelte";
 	import { rpc } from "../../transport/ws-rpc-client.js";
+	import { toastFailure } from "../../transport/rpc-errors.js";
 	let { request }: { request: PermissionRequest } = $props();
 
 	let resolved = $state<"allow" | "allow_always" | "deny" | null>(null);
@@ -138,6 +139,9 @@
 			originId: getBrowserClientId(),
 			commandId: crypto.randomUUID(),
 			...input,
+		}).catch((error) => {
+			resolved = null;
+			toastFailure("Answer not sent")(error);
 		});
 	}
 

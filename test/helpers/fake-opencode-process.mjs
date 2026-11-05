@@ -73,6 +73,11 @@ const updateState = (update) => {
 	update(state);
 	writeFileSync(stateFile, JSON.stringify(state));
 };
+// OpenCode keeps session status in memory: a new process has no busy session.
+if (existsSync(stateFile))
+	updateState((state) => {
+		state.statuses = {};
+	});
 const canonical = (directory) => {
 	try {
 		return realpathSync(directory);

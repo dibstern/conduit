@@ -1,9 +1,13 @@
 import { expect } from "@playwright/test";
+import { WsRpcError } from "../../../src/lib/contracts/ws-rpc.js";
 import type { StepHandler } from "../runtime.js";
 import { requireRpcControl, setSessionRowStatus } from "./shared.js";
 
 /** The project tree fixture names its sessions `<slug>-<n>`. */
 const ownerOf = (sessionId: string) => sessionId.split("-")[0] ?? null;
+
+/** The ask Beacon session 1 shows once it is open. */
+const askId = "beacon-ask";
 
 export const crossProjectAsksHandlers: StepHandler[] = [
 	{
@@ -38,6 +42,95 @@ export const crossProjectAsksHandlers: StepHandler[] = [
 					? { pendingPermissionCount: 1 }
 					: { pendingQuestionCount: 1 }),
 			});
+		},
+	},
+	{
+		name: "refuse an answer to an ask that already settled",
+		match:
+			/^an answer to Beacon session \d+ is refused because the ask already settled$/,
+		run: ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			const refuse = (): never => {
+				// The server's feed drops the settled ask as the refusal comes back.
+				rpc.sendChunk("SubscribeApprovals", [
+					{ _tag: "remove", id: askId, sequence: 2 },
+				]);
+				throw new WsRpcError({
+					message:
+						"This prompt was already answered or ended with its run, so your answer was not sent.",
+					code: "prompt-settled",
+				});
+			};
+			rpc.setStubs({
+				RespondPermission: refuse,
+				AnswerQuestion: refuse,
+				RejectQuestion: refuse,
+			});
+		},
+	},
+	{
+		name: "show the open Beacon session's ask card",
+		match: /^Beacon session (\d+) shows its (approval|a reply) card$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const sessionId = `beacon-${match[1]}`;
+			await expect.poll(() => rpc.hasStream("SubscribeApprovals")).toBe(true);
+			rpc.sendChunk("SubscribeApprovals", [
+				{
+					_tag: "upsert",
+					sequence: 1,
+					item:
+						match[2] === "approval"
+							? {
+									_tag: "permission",
+									sessionId,
+									requestId: askId,
+									toolUseId: "beacon-tool",
+									toolName: "Bash",
+									toolInput: { command: "pnpm deploy" },
+								}
+							: {
+									_tag: "question",
+									sessionId,
+									toolId: askId,
+									toolUseId: "beacon-tool",
+									providerId: "claude",
+									questions: [
+										{
+											question: "Deploy now?",
+											header: "Deploy",
+											options: [{ label: "Yes", description: "Ship it" }],
+											multiSelect: false,
+										},
+									],
+								},
+				},
+			]);
+		},
+	},
+	{
+		name: "answer the open ask card",
+		match: /^I answer the (approval|a reply) card$/,
+		run: async ({ world, match }) => {
+			const page = world.page;
+			if (match[1] === "approval") {
+				await page.getByRole("button", { name: "Allow", exact: true }).click();
+				return;
+			}
+			const card = page.locator(".question-card");
+			await card.getByText("Yes", { exact: true }).click();
+			await card.locator(".question-submit-btn").click();
+		},
+	},
+	{
+		name: "assert the refused answer is told",
+		match: /^a toast says the answer was not sent$/,
+		run: async ({ world }) => {
+			const toast = world.page.getByTestId("toast");
+			await expect(toast).toContainText("Answer not sent");
+			await expect(toast).toContainText(
+				"already answered or ended with its run",
+			);
 		},
 	},
 	{
