@@ -4,7 +4,7 @@ import { describe, it } from "@effect/vitest";
 import { Effect, Layer, Ref, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect } from "vitest";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import {
@@ -52,6 +52,7 @@ import {
 	makeMockConfig,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
@@ -104,7 +105,11 @@ describe("interaction timeout run ownership", () => {
 							),
 							PendingInteractionServiceLive,
 							makeOverridesStateLive(),
-							Layer.succeed(OpenCodeAPITag)(makeHandlerOpenCodeAPI()),
+							Layer.succeed(OpenCodeInstancesTag)(
+								makeOpenCodeInstancesStub({
+									opencode: makeHandlerOpenCodeAPI(),
+								}),
+							),
 							Layer.succeed(WebSocketHandlerTag)(makeMockWebSocketHandler()),
 							Layer.succeed(LoggerTag)(createSilentLogger()),
 							Layer.succeed(AgentServiceTag)(makeMockAgentService()),
