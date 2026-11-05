@@ -152,6 +152,7 @@ import {
 	DaemonWsRpcHandlersLive,
 	DaemonWsRpcHandlersTag,
 } from "./daemon-ws-rpc-layer.js";
+import { FolderTimelineEvictionLive } from "./folder-timeline-eviction-layer.js";
 import { KeepAwakeLive } from "./keep-awake-layer.js";
 import { MessageSurfacingSettingsLive } from "./message-surfacing-settings-layer.js";
 import { OpenCodeInstancesLive } from "./opencode-instances-layer.js";
@@ -966,12 +967,25 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withSessionWorkspace));
+	// Before runs can start: it finishes evictions a crash interrupted.
+	const withEviction = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return FolderTimelineEvictionLive.pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	).pipe(Layer.provideMerge(withSessionSetup));
 	const withSessionManager = Layer.mergeAll(
 		SessionManagerOwnerLive,
 		SessionManagerServiceLive,
 		DaemonTurnsLive,
 		ProviderTurnsLive,
-	).pipe(Layer.provideMerge(withSessionSetup));
+	).pipe(Layer.provideMerge(withEviction));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),
 	);

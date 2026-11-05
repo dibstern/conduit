@@ -838,6 +838,62 @@ export const sessionDiffHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "seed a pruned turn",
+		match:
+			/^the (\S+) turn changed (\S+) by (\d+) and (\d+) lines and (\S+), then was pruned$/,
+		run: async ({ world, match }) => {
+			const [, turnId = "", first = "", insertions, deletions, second = ""] =
+				match;
+			const pruned = (path: string, counts: number[]) => {
+				const { bytes: _bytes, binary: _binary, ...file } = changed(path);
+				return {
+					...file,
+					tier: "pruned" as const,
+					insertions: counts[0],
+					deletions: counts[1],
+				};
+			};
+			seedTurn(world.page, turnId, {
+				folders: [
+					{
+						folder: "/workspace/myapp",
+						files: [
+							pruned(first, [Number(insertions), Number(deletions)]),
+							pruned(second, [1, 1]),
+						],
+					},
+				],
+				pruned: true,
+			});
+		},
+	},
+	{
+		name: "turn pruned",
+		match: /^the turn footer says Pruned$/,
+		run: async ({ world }) => {
+			await expect(
+				turnFooter(world.page).getByTestId("turn-diff-pruned"),
+			).toHaveText("Pruned");
+		},
+	},
+	{
+		name: "pruned turn row",
+		match: /^the (\S+) diff is marked Pruned with \+(\d+) −(\d+) and no patch$/,
+		run: async ({ world, match }) => {
+			const [, path = "", insertions, deletions] = match;
+			const file = turnFooter(world.page)
+				.getByTestId("turn-diff")
+				.locator(`[data-testid="session-diff-file"][data-path="${path}"]`);
+			await expect(file.getByTestId("session-diff-pruned")).toHaveText(
+				"Pruned",
+			);
+			for (const count of [`+${insertions}`, `−${deletions}`])
+				await expect(file.locator("header")).toContainText(count);
+			await expect(file).toContainText("removed to keep snapshots");
+			await expect(file.getByText(`changed ${path}`)).toHaveCount(0);
+		},
+	},
+	{
 		name: "open the branch diff from a turn",
 		match: /^I open the branch diff from the turn footer$/,
 		run: async ({ world }) => {

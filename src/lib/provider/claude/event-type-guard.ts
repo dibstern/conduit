@@ -205,6 +205,10 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Relay-owned diff base preference",
 	},
+	"folder_timeline.evicted": {
+		produced: false,
+		reason: "Appended by the Folder Timeline's eviction pass",
+	},
 	"session.unsnoozed": { produced: false, reason: "Relay-owned triage state" },
 	"permission.asked": {
 		produced: false,

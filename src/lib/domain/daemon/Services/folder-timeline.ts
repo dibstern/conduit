@@ -1,4 +1,5 @@
-import { Context, Data, type Effect, Layer } from "effect";
+import { Context, Data, Effect, Layer } from "effect";
+import { SqlClient } from "effect/sql";
 import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
 import { makeFolderTimeline } from "../Layers/folder-timeline-layer.js";
 import type { SubprocessResult } from "./subprocess.js";
@@ -84,10 +85,48 @@ export class FolderTimeline extends Context.Service<
 		readonly settled: (runId: string) => Effect.Effect<void>;
 		/** The store holding a session's captures, for `git`. */
 		readonly sessionStore: (sessionId: string) => string;
+		/** Bytes the session's store holds on disk; 0 without one. */
+		readonly storeBytes: (sessionId: string) => Effect.Effect<number>;
+		/** Bytes all session stores hold on disk. */
+		readonly diskUse: Effect.Effect<number>;
+		/**
+		 * Evicts the session's captures, serialized with its captures: `append`
+		 * records the eviction (false declines it), then the session's ref is
+		 * deleted and its store pruned. Recovery passes an append that already
+		 * happened. Returns whether it evicted.
+		 */
+		readonly evict: <E, R>(
+			sessionId: string,
+			append: Effect.Effect<boolean, E, R>,
+		) => Effect.Effect<boolean, E, R>;
 		/** Drops the session's live runs and its captures. */
 		readonly forget: (sessionId: string) => Effect.Effect<void>;
 	}
 >()("FolderTimeline") {}
 
+/** Folder Timeline's eviction against the Daemon Settings budget. */
+export class FolderTimelineEviction extends Context.Service<
+	FolderTimelineEviction,
+	{
+		/** Runs a pass after any pass already running, and returns when it ends. */
+		readonly pass: Effect.Effect<void>;
+	}
+>()("FolderTimelineEviction") {}
+
 export const FolderTimelineLive = (configDir: string) =>
 	Layer.effect(FolderTimeline, makeFolderTimeline(configDir));
+
+/**
+ * Whether the session's history at `sequence` (an event's sequence, such as a
+ * turn's capture) is pruned: an eviction came after it, so its files are gone.
+ * Durable, read from the event log; eviction is never undone.
+ */
+export const isPruned = (sessionId: string, sequence: number) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{ readonly hit: number }>`
+			SELECT 1 AS hit FROM events
+			WHERE session_id = ${sessionId} AND type = 'folder_timeline.evicted' AND sequence > ${sequence}
+			LIMIT 1`;
+		return rows.length > 0;
+	});

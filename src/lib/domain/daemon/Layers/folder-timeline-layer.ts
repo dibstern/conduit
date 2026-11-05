@@ -91,6 +91,25 @@ const fs = <A>(run: () => Promise<A>) =>
 			new FolderTimelineError({ reason: "failed", message: String(cause) }),
 	});
 
+/** Bytes of the files under `path`; 0 when it is gone. */
+const bytesUnder = async (path: string) => {
+	const entries = await readdir(path, {
+		recursive: true,
+		withFileTypes: true,
+	}).catch(() => []);
+	const sizes = await Promise.all(
+		entries
+			.filter((entry) => entry.isFile())
+			.map((entry) =>
+				stat(join(entry.parentPath, entry.name)).then(
+					({ size }) => size,
+					() => 0,
+				),
+			),
+	);
+	return sizes.reduce((total, size) => total + size, 0);
+};
+
 interface Repository {
 	readonly indexFile: string;
 	readonly store: string;
@@ -123,11 +142,15 @@ const gapOf = (error: FolderTimelineError) => ({
 	message: error.message,
 });
 
-/** `diff-tree -z --raw --no-renames`: a status record, then its path. */
+/**
+ * `diff-tree -z --raw --numstat --no-renames`: status records with their paths,
+ * then each path's line counts ("-" for a binary file, which gets none).
+ */
 function parseRaw(output: string): Change[] {
 	const tokens = output.split("\0");
 	const changes: Change[] = [];
-	for (let at = 0; tokens[at]?.startsWith(":"); at += 2) {
+	let at = 0;
+	for (; tokens[at]?.startsWith(":"); at += 2) {
 		const [beforeMode = "", afterMode = "", before = "", after = ""] =
 			tokens[at]?.slice(1).split(" ") ?? [];
 		const side = (mode: string, blob: string) =>
@@ -138,7 +161,20 @@ function parseRaw(output: string): Change[] {
 			after: side(afterMode, after),
 		});
 	}
-	return changes;
+	const counts = new Map(
+		tokens.slice(at).flatMap((token) => {
+			const match = /^(\d+)\t(\d+)\t(.*)$/s.exec(token);
+			return match
+				? [
+						[
+							match[3],
+							{ insertions: Number(match[1]), deletions: Number(match[2]) },
+						] as const,
+					]
+				: [];
+		}),
+	);
+	return changes.map((change) => ({ ...change, ...counts.get(change.path) }));
 }
 
 type Git = (
@@ -213,6 +249,7 @@ const captureFolder = (
 			"-r",
 			"-z",
 			"--raw",
+			"--numstat",
 			"--no-renames",
 			...(start.prefix === "" ? [] : [`--relative=${start.prefix}`]),
 			start.worktree,
@@ -698,5 +735,28 @@ export const makeFolderTimeline = (configDir: string) =>
 					);
 					sessionLocks.delete(sessionId);
 				}),
+			storeBytes: (sessionId) =>
+				Effect.promise(() => bytesUnder(sessionStore(sessionId))),
+			diskUse: Effect.promise(() => bytesUnder(join(root, "sessions"))),
+			evict: (sessionId, append) =>
+				sessionLock(sessionId).withPermits(1)(
+					Effect.gen(function* () {
+						if (!(yield* append)) return false;
+						const store = sessionStore(sessionId);
+						// The ref goes first: a store without it holds nothing reachable.
+						yield* git(store, ["update-ref", "-d", SESSION_REF]).pipe(
+							Effect.ignore,
+						);
+						yield* fs(() => rm(store, { recursive: true, force: true })).pipe(
+							Effect.catch((error) =>
+								Effect.logWarning("Evicted store not removed", {
+									sessionId,
+									error,
+								}),
+							),
+						);
+						return true;
+					}),
+				),
 		} satisfies FolderTimeline["Service"];
 	});

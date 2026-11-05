@@ -99,6 +99,9 @@ export const buildDaemonConfigSnapshot = Effect.gen(function* () {
 		...(runtime.usageLimits !== undefined && {
 			usageLimits: runtime.usageLimits,
 		}),
+		...(runtime.snapshotBudget !== undefined && {
+			snapshotBudget: runtime.snapshotBudget,
+		}),
 		...(runtime.cursorUsageBinding !== undefined && {
 			cursorUsageBinding: runtime.cursorUsageBinding,
 		}),
