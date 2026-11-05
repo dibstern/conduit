@@ -410,6 +410,8 @@ export class FakeProvider {
 	) => LedgerCommand | undefined)[] = [];
 	/** The time of the packet being drawn: a stop commit's retiredAt (6.5). */
 	private clock = 0;
+	/** The ledger's view at this step: main's writer places an input by its value (3.9). */
+	private ledgerView: LedgerView | undefined;
 	/** Gated holds: a phantom send with no transmission (4.4, 4.8). */
 	private readonly gatedHolds = new WeakMap<IssuedEffect, Send>();
 	/**
@@ -3935,6 +3937,24 @@ export class FakeProvider {
 	 * transmission is the hold's run.dispatched (3.4, 4.11); direct (OpenCode, `runsOpenCodeServer`):
 	 * run_requested is the transmission, its token the runId. Each event has main's event id.
 	 */
+	/**
+	 * 3.9 (CONTRACT.md 965-973): main's writer places an input by the ledger's value, so an OpenCode start the
+	 * ledger shows Queued again (an absent reading the idle read after it settled, 3128-3132) is main's to send
+	 * again, a fresh claim of the same Run's start.
+	 */
+	private requeued(): boolean {
+		const open = this.mainRun;
+		const active = this.ledgerView?.active;
+		return (
+			this.provider === "opencode" &&
+			open !== undefined &&
+			active?.runId === open.runId &&
+			active.inputs.some(
+				({ inputId, state }) =>
+					inputId === open.inputId && state.tag === "Queued",
+			)
+		);
+	}
 	private main(action: TraceAction): LedgerCommand {
 		const alarm = {
 			verb: "settle",
@@ -4295,10 +4315,25 @@ export class FakeProvider {
 						!open ||
 						token === undefined ||
 						this.terminals.has(open.runId) ||
-						!this.unlaunchedTries.has(token) ||
+						(!this.unlaunchedTries.has(token) && !this.requeued()) ||
 						open.issue.effect.kind !== "start"
 					)
 						continue;
+					// 3.9 (CONTRACT.md 965-973), 9 (3128-3132): main sends an input again only where the ledger placed
+					// it back, so no earlier send of it may still run; else the input runs twice.
+					assert(
+						![...this.sends.values()].some(
+							({ send, unfinished, notConsumed, ended }) =>
+								(send.effect.kind === "start" ||
+									send.effect.kind === "steer") &&
+								send.effect.inputId === open.inputId &&
+								!this.unlaunchedTries.has(send.token) &&
+								unfinished &&
+								!notConsumed &&
+								!ended,
+						),
+						"3.9: main sent an input again while an earlier send of it may still run",
+					);
 					if (direct) {
 						// The relaunch is a new transmission of the same Run's start (3.6, D50): its token is the
 						// new runId, and the start stays its Run's, so reached reads it (CONTRACT.md 621-640).
@@ -4554,6 +4589,10 @@ export class FakeProvider {
 				now: Math.max(snapshot.now, snapshot.alarmAt ?? snapshot.now),
 			};
 		if (absentAt !== undefined) this.lost = undefined;
+		// 3.9: main's next move after either reading is its re-send, where the ledger placed the input back.
+		this.deferred.push(() =>
+			this.requeued() ? this.main({ ...action, variant: 3 }) : undefined,
+		);
 		return {
 			command: {
 				verb: "observe",
@@ -4570,6 +4609,7 @@ export class FakeProvider {
 	next(action: TraceAction, snapshot: ProviderSnapshot): TracePacket {
 		this.q28 = undefined;
 		this.clock = snapshot.now;
+		this.ledgerView = snapshot.view;
 		// A stop commit's facts fold in one transaction: nothing interleaves them (4.5).
 		const committed = this.commit.shift();
 		if (committed) return { command: committed, now: snapshot.now };

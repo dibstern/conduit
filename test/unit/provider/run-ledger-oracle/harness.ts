@@ -686,6 +686,7 @@ export const generatedShapes = [
 	"native_resume_rejected",
 	"probe input_present without id",
 	"OpenCode absent reading settled by the idle read after it",
+	"OpenCode lost prompt sent again",
 	"query replacement",
 	"confirm copied before a query replacement",
 	"turn joined to an input Run",
@@ -776,7 +777,10 @@ export class Coverage {
 	private readonly observed = new Set<string>();
 	private readonly unknownInputs = new Set<string>();
 	/** The idle probes decide issued after an OpenCode absent reading (CONTRACT.md 3128-3132). */
-	private readonly idleAfterAbsent = new Set<SendToken>();
+	/** Each idle probe an absent reading issued, to the input that reading named. */
+	private readonly idleAfterAbsent = new Map<SendToken, string | undefined>();
+	/** Inputs whose absent reading an idle read settled: main's to send again (3.9). */
+	private readonly absentSettled = new Set<string>();
 	/** 3.10: answer commandIds by interaction, and their refusals, failures and reopens. */
 	private readonly answerCommands = new Map<string, string>();
 	private readonly refusedAnswers = new Set<string>();
@@ -1016,21 +1020,44 @@ export class Coverage {
 		// CONTRACT.md 3128-3132: an OpenCode absent reading issues an idle probe; its idle read settles it.
 		if (command.verb === "observe" && result.tag === "Accepted") {
 			const e = command.observation;
-			if (e.kind === "probe_result" && e.finding.tag === "input_absent")
+			if (
+				e.tag === "Answer" &&
+				e.kind === "probe_result" &&
+				e.finding.tag === "input_absent"
+			) {
+				const probed = d.issued.find(
+					(item) => item.tag === "Tokened" && item.token === e.token,
+				)?.effect;
 				for (const issued of result.effects)
 					if (
 						issued.tag === "Tokened" &&
 						issued.effect.kind === "probe" &&
 						issued.effect.target.tag === "native_session"
 					)
-						this.idleAfterAbsent.add(issued.token);
+						this.idleAfterAbsent.set(
+							issued.token,
+							probed?.kind === "probe" && probed.target.tag === "input"
+								? probed.target.inputId
+								: undefined,
+						);
+			}
 			if (
 				e.tag === "Answer" &&
 				e.kind === "probe_result" &&
 				e.finding.tag === "native_idle" &&
 				this.idleAfterAbsent.has(e.token)
-			)
+			) {
 				hit("OpenCode absent reading settled by the idle read after it");
+				const inputId = this.idleAfterAbsent.get(e.token);
+				if (inputId !== undefined) this.absentSettled.add(inputId);
+			}
+			// 3.9 (CONTRACT.md 965-973): main sends the settled input again, a fresh claim of its Run's start.
+			if (
+				e.tag === "Main" &&
+				e.kind === "run_requested" &&
+				this.absentSettled.delete(e.inputId)
+			)
+				hit("OpenCode lost prompt sent again");
 		}
 		// D45: a confirm for an entry taken before a query replacement, whatever its verdict.
 		if (
