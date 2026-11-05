@@ -62,6 +62,7 @@ import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import { SessionSetupTag } from "../../relay/Services/session-setup.js";
+import { StatusPollerCoreTag } from "../../relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -262,6 +263,7 @@ export const RelayFactoryLive = (
 			const retentionScheduler = yield* Effect.serviceOption(
 				EventRetentionSchedulerTag,
 			);
+			const statusPoller = yield* Effect.serviceOption(StatusPollerCoreTag);
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
 			);
@@ -690,6 +692,14 @@ export const RelayFactoryLive = (
 													? Context.make(
 															EventRetentionSchedulerTag,
 															retentionScheduler.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(statusPoller)
+													? Context.make(
+															StatusPollerCoreTag,
+															statusPoller.value,
 														)
 													: Context.empty(),
 											),

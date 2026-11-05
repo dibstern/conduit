@@ -82,6 +82,21 @@ export class PollerPubSubTag extends Context.Service<
 	PubSub.PubSub<PollerChangedEvent>
 >()("PollerPubSub") {}
 
+/**
+ * The daemon's one status poller (82tn.16). A poll settles the served projects' stale sessions,
+ * then every project's view re-reads its own rows.
+ */
+export class StatusPollerCoreTag extends Context.Service<
+	StatusPollerCoreTag,
+	{
+		readonly poll: Effect.Effect<void>;
+		/** Published after each poll. */
+		readonly polled: PubSub.PubSub<void>;
+		/** 8.1: a project is processing while any session's activity has a turn or work running. */
+		readonly isProcessing: (projectId: string) => Effect.Effect<boolean>;
+	}
+>()("StatusPollerCore") {}
+
 export const makePollerStateLive = (
 	initial?: Partial<PollerState>,
 ): Layer.Layer<PollerStateTag> =>
@@ -319,7 +334,10 @@ export interface ReconciliationDeps {
 		unknown
 	>;
 	/** Sessions blocked on an open question or permission prompt. */
-	readonly getSessionsAwaitingUser: () => Effect.Effect<ReadonlySet<string>>;
+	readonly getSessionsAwaitingUser: () => Effect.Effect<
+		ReadonlySet<string>,
+		unknown
+	>;
 	readonly getStrandedChildren: () => Effect.Effect<
 		ReadonlyArray<{ id: string; task_id: string; owner_id: string }>,
 		unknown
@@ -335,7 +353,7 @@ export interface ReconciliationDeps {
 	) => Effect.Effect<void, unknown>;
 }
 
-const runReconciliation = (deps: ReconciliationDeps) =>
+export const runReconciliation = (deps: ReconciliationDeps) =>
 	Effect.gen(function* () {
 		// Staleness check
 		yield* Effect.gen(function* () {

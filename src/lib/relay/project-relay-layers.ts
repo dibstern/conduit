@@ -174,7 +174,10 @@ import {
 	SessionSetupOrOwn,
 	type SessionSetupTag,
 } from "../domain/relay/Services/session-setup.js";
-import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
+import {
+	type PollerStateTag,
+	StatusPollerCoreTag,
+} from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
@@ -1123,7 +1126,15 @@ export function createProjectRelayLayers({
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		Layer.merge(
-			StatusPollerLive,
+			StatusPollerLive.pipe(
+				Layer.provide(
+					Layer.succeedContext(
+						Context.pick(StatusPollerCoreTag)(
+							config.daemonConfigContext ?? Context.empty(),
+						),
+					),
+				),
+			),
 			// The daemon runs the one alarm scheduler; a standalone relay runs its own.
 			Option.isSome(sharedStore)
 				? Layer.empty

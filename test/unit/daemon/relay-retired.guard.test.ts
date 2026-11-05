@@ -121,6 +121,8 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makePortWatcherLive",
 			"makeRunLedgerSchedulerLive",
 			"makeEventRetentionSchedulerLive",
+			"makeStatusPollerCoreLive",
+			"makeStatusPollerCore",
 		]);
 		expect(tally(server, named(services))).toEqual(
 			new Map([
@@ -128,11 +130,13 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/persistence/Services/run-ledger-scheduler.ts", 1],
 				["src/lib/domain/persistence/Services/event-retention-scheduler.ts", 1],
 				// Each one's import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 6],
+				[`${daemon}/Layers/daemon-layers.ts`, 8],
 				// A store opened without the daemon schedules its own project's retention.
 				["src/lib/persistence/effect/live.ts", 2],
 				// relay: a standalone relay's own alarm scheduler.
 				[`${relay}/project-relay-layers.ts`, 2],
+				// The status poller's definition and daemon layer, and a standalone relay's own poller.
+				["src/lib/domain/relay/Layers/status-poller-layer.ts", 4],
 			]),
 		);
 	});

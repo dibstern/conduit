@@ -65,6 +65,7 @@ import {
 import { makePortWatcherLive } from "../../persistence/Services/port-watcher.js";
 import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledger-scheduler.js";
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
+import { makeStatusPollerCoreLive } from "../../relay/Layers/status-poller-layer.js";
 import { AlertsLive } from "../../relay/Services/alerts.js";
 import {
 	InputDraftsLive,
@@ -914,8 +915,9 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withProjectContext),
 	);
 	// One PortWatcher per daemon (CONTRACT.md 8.7), serving every registered project's sessions.
-	// One watcher, one alarm scheduler and one retention scheduler per daemon, serving registered
-	// projects' sessions; retention drains once at start, so a project no tab opens is reclaimed too.
+	// One watcher, one alarm scheduler, one retention scheduler and one status poller per daemon,
+	// serving registered projects' sessions; retention and the poller run once at start, so a
+	// project no tab opens is reclaimed and settled too.
 	const withPortWatcher = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
@@ -932,6 +934,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 				),
 				makeRunLedgerSchedulerLive(served),
 			).pipe(
+				Layer.merge(makeStatusPollerCoreLive(served)),
 				Layer.merge(
 					Layer.effectDiscard(
 						Effect.flatMap(EventRetentionSchedulerTag, (s) => s.kick),
