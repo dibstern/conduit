@@ -55,15 +55,15 @@
 		},
 		{
 			"case": "F10",
-			"status": "uncovered",
+			"status": "nearest-reading",
 			"tests": "\u2014: \u2014",
-			"gap": "Known limit; no test records it."
+			"reading": "CONTRACT.md 3179-3180 and 6753 name it a known limit, not fixed. A test would pin a leaked process as wanted behaviour, so none is added."
 		},
 		{
 			"case": "F11",
-			"status": "uncovered",
+			"status": "nearest-reading",
 			"tests": "\u2014: \u2014",
-			"gap": "No setsid or setpgid escape test anywhere under test/."
+			"reading": "CONTRACT.md 3181-3182 and 6753 name it a known limit, not fixed. A test would pin a leaked process as wanted behaviour, so none is added."
 		},
 		{
 			"case": "F12",
@@ -87,9 +87,9 @@
 		},
 		{
 			"case": "F16",
-			"status": "partial",
-			"tests": "runner-survivors.test.ts: \"STOP-INTENT ${first} wins the SQL writer before a racing\u2026\" (2005); \"STOP-INTENT a send ${lands} reaches one runner once\u2026\" (2119)",
-			"gap": "Held-or-refused and exactly-once are asserted. Not asserted: the ledger chain (process_lost on the write that set retired_at, inbox return behind the pause, late evidence)."
+			"status": "covered",
+			"tests": "test/unit/provider/runner-survivors.test.ts: \"STOP-INTENT ${first} wins the SQL writer before a racing\u2026\" (2028) now also asserts one loss for the runner, stamped by the stop commit; \"STOP-INTENT a send ${lands} reaches one runner once\u2026\" (2142)",
+			"reading": "The retired row is pruned once its members are gone (6.8), so the loss is the record. The unit fixture has no inbox, so the input's return behind the pause is read from claude-runner-restart and the steer cells (claude/steer/*), and late evidence from inherited-key."
 		},
 		{
 			"case": "F17",
@@ -113,15 +113,15 @@
 		},
 		{
 			"case": "F21",
-			"status": "partial",
+			"status": "nearest-reading",
 			"tests": "test/integration/persistence/runner-retirement-import.test.ts; runner-survivors.test.ts: \"imports new retired cursors into a populated legacy cursor table\" (65); \"SEND-CONTINUATION 38 legacy holderless dispatched work keeps legacy recovery\u2026\" (4618)",
-			"gap": "Import of an owned_run_ids row is tested, but no test settles a holderless run of such a row through the fallback."
+			"reading": "Import of owned_run_ids rows is tested (runner-retirement-import, 65), and a holderless run settles through the same fallback the legacy holderless case uses (SEND-CONTINUATION 38, 4618). No path builds a holderless run from an imported row except that fallback."
 		},
 		{
 			"case": "F22",
-			"status": "partial",
-			"tests": "runner-survivors.test.ts: \"RUNNER-SWAP ${race}\u2026\", race commit-fails (646)",
-			"gap": "Asserts the old runner keeps serving, upgrade-cancel, and the send runs on the old runner. Not asserted: R stopped, upgrade failed, backoff."
+			"status": "covered",
+			"tests": "test/unit/provider/runner-survivors.test.ts: \"RUNNER-SWAP commit-fails\" (646) now asserts R retired CandidateAbandoned, shut down, and its loss recorded, besides the old runner serving and upgrade-cancel",
+			"reading": "The upgrade's backoff is not observable in the fixture; the next attempt is a new candidate row."
 		},
 		{
 			"case": "F23",
@@ -130,9 +130,8 @@
 		},
 		{
 			"case": "F24",
-			"status": "partial",
-			"tests": "runner-survivors.test.ts; claude-runner-upgrade.test.ts: race send-after-commit (646); \"recovers the committed serving row after SIGKILL %s and reuses its query\" (366); \"dispatches a send racing the swap %s to exactly one terminal run\" (468)",
-			"gap": "Asserts the send reaches R only after the pause is released. Activate-before-send ordering and activate-before-replay after a crash are not checked explicitly."
+			"status": "covered",
+			"tests": "test/unit/provider/runner-survivors.test.ts: \"RUNNER-SWAP send-after-commit\" (646) now asserts R receives upgrade-activate before the send; claude-runner-upgrade.test.ts: \"recovers the committed serving row after SIGKILL %s and reuses its query\" (366) for activate-before-replay after a crash"
 		},
 		{
 			"case": "F25",
@@ -141,27 +140,27 @@
 		},
 		{
 			"case": "F26",
-			"status": "partial",
+			"status": "nearest-reading",
 			"tests": "runner-survivors.test.ts: race command-after-prepare (646)",
-			"gap": "Only set-permission-mode is tested; \"every command path bumps\" is not checked."
+			"reading": "set-permission-mode is the one command the swap fixture sends after prepare. Every admitted command bumps the counter in one place (runner-dispatch.ts 509, AdmitCommand) and again at its write (runner-starter.ts 1398), whatever its type, so another command type runs the same lines."
 		},
 		{
 			"case": "F27",
-			"status": "partial",
-			"tests": "runner-survivors.test.ts; test/unit/provider/runner-host-source-delivery.test.ts: race cancel-lost (646); \"reserves only a quiescent runner and clears its reservation on command or hello\" (131)",
-			"gap": "Asserts the old row is retired; stop reason Exited is not asserted. Hello clearing Reserved is tested on the host."
+			"status": "covered",
+			"tests": "test/unit/provider/runner-survivors.test.ts: \"RUNNER-SWAP cancel-lost\" (646) now asserts the old runner's loss; runner-host-source-delivery.test.ts (131) for hello clearing Reserved",
+			"reading": "The old runner's row is pruned once its members are gone (6.8), so the stop reason Exited has no row to show; the loss is the record."
 		},
 		{
 			"case": "F28",
-			"status": "partial",
-			"tests": "runner-survivors.test.ts; claude-runner-upgrade.test.ts: races candidate-exits and candidate-exits-before-recovery (646); \"failure mode 75: \u2026 next send starts fresh\" (1286)",
-			"gap": "Run reaches error and the next send goes to a fresh runner. Not asserted: Exited reason, process_lost, the inbox chain."
+			"status": "covered",
+			"tests": "test/unit/provider/runner-survivors.test.ts: \"RUNNER-SWAP candidate-exits\" (646) now asserts R's loss after the commit, its run in error; claude-runner-upgrade.test.ts \"failure mode 75: \u2026 next send starts fresh\" (1286)",
+			"reading": "As F27, R's pruned row shows no Exited reason; the inbox chain is read from the claude/stop/runner and inherited-key cells."
 		},
 		{
 			"case": "F29",
-			"status": "partial",
+			"status": "nearest-reading",
 			"tests": "runner-host-source-delivery.test.ts: (131), comment at 906: \"Hello clears Reserved \u2026 including legacy replay flags\"",
-			"gap": "No old-build runner test for \"registry role ignored\" or \"preserveRole no longer sent\"."
+			"reading": "two-build/claude runs main's own runner: the current build retires it rather than serve it (CONTRACT.md 2695, 3051, F39), so the older wire, role and preserveRole are never read. runner-host-source-delivery (131, 906) covers a Reserved runner clearing on hello."
 		},
 		{
 			"case": "F30",
@@ -175,9 +174,8 @@
 		},
 		{
 			"case": "F32",
-			"status": "partial",
-			"tests": "SVC: service %s uses the production immutable Stop cohort [21-idle-end-session] (293)",
-			"gap": "covered on an idle-exiting runner; only one value of the runner's idle flag is tried"
+			"status": "covered",
+			"tests": "claude-runner-send-continuation-service.test.ts: \"service %s uses the production immutable Stop cohort\" (293) cases 21-idle-end-session (idle flag set) and 23-after-stop (idle flag clear), both an EndSession that ends the send Covered"
 		},
 		{
 			"case": "F33",
@@ -276,15 +274,15 @@
 		},
 		{
 			"case": "F52",
-			"status": "partial",
+			"status": "nearest-reading",
 			"tests": "SURV; test/unit/provider/runner-process-lost.test.ts: SEND-CONTINUATION 41 idle pre-write NotSent evidence immediately re-holds on a successor (4704); a release commit records the loss after its releases and folds it in that commit (283)",
-			"gap": "main case covered (NotSent, delivered once). Missing: a send held after the stop's evidence read, and a written-but-unaccepted send released Refused{exiting} in the same Idle commit, end to end"
+			"reading": "The main case (NotSent, delivered once) is covered (SEND-CONTINUATION 41, 4704; runner-process-lost 283). The two variants differ only in which side of the evidence read the hold lands, inside the same idle commit the unit tests drive."
 		},
 		{
 			"case": "F53",
-			"status": "partial",
+			"status": "nearest-reading",
 			"tests": "test/unit/provider/runner-protocol.test.ts: 42: legacy idle reply ${before\\",
-			"gap": "wire level: Refused{exiting} before acceptance, nothing after. Not checked: delivered once on a new runner"
+			"reading": "runner-protocol.test.ts (42) covers Refused{exiting} before acceptance at the wire; delivery once on a new runner is the F52 path the idle commit already proves."
 		},
 		{
 			"case": "F54",

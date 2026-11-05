@@ -774,6 +774,18 @@ for (const race of [
 							).toEqual([
 								{ status: "running", runner_id: candidate.options.runnerId },
 							]);
+							// F24 (CONTRACT.md 3237-3239): R is activated before the send reaches it.
+							expect(
+								f.commands
+									.filter(
+										({ runnerId }) => runnerId === candidate.options.runnerId,
+									)
+									.map(({ type }) => type)
+									.filter(
+										(type) =>
+											type === "upgrade-activate" || type === "send-turn",
+									),
+							).toEqual(["upgrade-activate", "send-turn"]);
 						}
 						yield* TestClock.adjust("4 seconds");
 						if (
@@ -891,6 +903,30 @@ for (const race of [
 							).toEqual([{ status: "pending" }]);
 						}
 					}
+					// The catalogue's swap cases (82tn.32.14; CONTRACT.md 10.3): F22 a failed commit stops R,
+					// F27 a lost cancel records the old runner's loss, F28 R dying after the commit records
+					// R's loss. A runner whose members are all gone is pruned (6.8), so its row carries no
+					// stop reason to read; the loss is the record.
+					const lost = yield* f.sql<{
+						runnerId: string;
+					}>`SELECT json_extract(data, '$.runnerId') AS runnerId FROM events WHERE type = 'evidence.process_lost'`;
+					if (race === "commit-fails") {
+						const candidate = f.connections[1]?.options.runnerId;
+						expect(
+							yield* f.sql`SELECT stop_reason FROM claude_runner_cursors WHERE runner_id = ${candidate ?? ""} AND retired_at IS NOT NULL`,
+						).toEqual([{ stop_reason: '{"_tag":"CandidateAbandoned"}' }]);
+						expect(f.commands).toContainEqual({
+							runnerId: candidate,
+							type: "shutdown",
+						});
+						expect(lost).toEqual([{ runnerId: candidate }]);
+					}
+					if (race === "cancel-lost")
+						expect(lost).toContainEqual({ runnerId: f.old.options.runnerId });
+					if (race === "candidate-exits")
+						expect(lost.at(-1)).toEqual({
+							runnerId: f.connections[1]?.options.runnerId,
+						});
 					expect(
 						(yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE session_id = 's' AND retired_at IS NULL AND role = 'serving'`)
 							.length,
@@ -2096,6 +2132,13 @@ for (const first of ["send", "Stop"] as const)
 								yield* f.sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
 							).toHaveLength(1);
 						}
+						// F16's ledger chain (82tn.32.14; CONTRACT.md 3215-3218): one loss for the
+						// runner, stamped by the stop commit at virtual time 0, not by a later write
+						// after the 12 seconds above. The row itself is pruned once its members are
+						// gone (6.8), so the loss is the record left.
+						expect(
+							yield* f.sql`SELECT json_extract(data, '$.retiredAt') AS retiredAt FROM events WHERE type = 'evidence.process_lost' AND json_extract(data, '$.runnerId') = ${f.runner.runnerId}`,
+						).toEqual([{ retiredAt: 0 }]);
 					}).pipe(Effect.ensuring(Deferred.succeed(release, undefined)));
 				}),
 			),
