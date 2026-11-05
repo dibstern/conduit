@@ -11,11 +11,24 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Option } from "effect";
+import {
+	Deferred,
+	Effect,
+	Fiber,
+	Layer,
+	ManagedRuntime,
+	Option,
+	PubSub,
+	Stream,
+} from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/provider-instance.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type OpenCodeInstanceEvent,
+	OpenCodeInstancesTag,
+} from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
@@ -24,6 +37,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -37,8 +51,14 @@ import {
 import {
 	createDaemonProject,
 	type DaemonProject,
+	FixedShellEnv,
 } from "../../helpers/in-process-daemon.js";
+import {
+	makeMockOpenCodeAPI,
+	makeOpenCodeInstancesStub,
+} from "../../helpers/mock-factories.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
+import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
 interface MockOpenCode {
 	readonly url: string;
@@ -671,4 +691,160 @@ describe("Daemon Effect OpenCode runtime ingress", () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
+});
+
+// Failure modes: stopping a named server settles managed sessions, stopping
+// managed settles named sessions, secondary stops leak across accounts, or
+// permission/question waits stop being pending. The stand-in stops every
+// server as conduit's own (managedStopped): an external server conduit only
+// disconnects from keeps running, so its sessions settle by OpenCode's
+// work-ended rule instead (CONTRACT.md 9, "An unmanaged server exposes no
+// process token").
+it.each([
+	{ stoppedId: "managed-test" },
+	{ stoppedId: "opencode" },
+	{ stoppedId: "secondary" },
+])("a confirmed stop of $stoppedId settles only its sessions and keeps every wait", async ({
+	stoppedId,
+}) => {
+	const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-named-stop-"));
+	const bus = await Effect.runPromise(
+		PubSub.unbounded<OpenCodeInstanceEvent>(),
+	);
+	const health = {
+		connected: false,
+		stale: false,
+		lastEventAt: null,
+		reconnectCount: 0,
+	};
+	const send = (instanceId: string, payload: ReturnType<typeof makeSSEEvent>) =>
+		PubSub.publish(bus, { _tag: "event", instanceId, payload, health });
+	const client = makeMockOpenCodeAPI();
+	let project: DaemonProject | undefined;
+	try {
+		project = await createDaemonProject("chat-simple", {
+			projectDir: dir,
+			slug: "named-stop",
+			shellEnv: new FixedShellEnv({}),
+			openCodeInstances: {
+				...makeOpenCodeInstancesStub({
+					"managed-test": client,
+					opencode: client,
+					secondary: client,
+				}),
+				events: () => Stream.fromPubSub(bus),
+				stop: (instanceId) =>
+					PubSub.publish(bus, {
+						_tag: "connection",
+						instanceId,
+						state: "stopped",
+						managedStopped: true,
+						health,
+					}).pipe(Effect.asVoid),
+			},
+		});
+		const { run } = project;
+		const rows = [
+			{ id: "named-work", provider: "managed-test" },
+			{ id: "managed-work", provider: "opencode" },
+			{ id: "secondary-work", provider: "secondary" },
+			{ id: "named-permission", provider: "managed-test" },
+			{ id: "managed-question", provider: "opencode" },
+		];
+		await run(
+			Effect.gen(function* () {
+				const manager = yield* projectSessionManager;
+				for (const row of rows) {
+					yield* manager.establishOpenCodeSession(
+						{
+							id: row.id,
+							projectID: "named-stop",
+							directory: dir,
+							title: row.id,
+							version: "test",
+							time: { created: 0, updated: 0 },
+						},
+						AccountIdSchema.make(row.provider),
+					);
+					yield* send(
+						row.provider,
+						makeSSEEvent("session.status", {
+							sessionID: row.id,
+							status: { type: "busy" },
+						}),
+					);
+				}
+				yield* send(
+					"managed-test",
+					makeSSEEvent("permission.asked", {
+						id: "stop-permission",
+						sessionID: "named-permission",
+						permission: "bash",
+						patterns: ["git *"],
+						metadata: {},
+						always: [],
+					}),
+				);
+				yield* send(
+					"opencode",
+					makeSSEEvent("question.asked", {
+						id: "stop-question",
+						sessionID: "managed-question",
+						questions: [],
+					}),
+				);
+			}),
+		);
+		const snapshot = () =>
+			run(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					return {
+						sessions: yield* sql<{
+							id: string;
+							provider: string;
+							status: string;
+						}>`SELECT id, provider, status FROM sessions WHERE id IN ${sql.in(rows.map((row) => row.id))} ORDER BY id`,
+						pending: yield* sql<{ type: string; status: string }>`
+							SELECT type, status FROM pending_approvals ORDER BY type`,
+						completed: yield* sql<{ count: number }>`
+							SELECT COUNT(*) AS count FROM events WHERE type = 'turn.completed'`,
+					};
+				}),
+			);
+		const expected = (settled: boolean) => ({
+			sessions: rows
+				.map((row) => ({
+					...row,
+					status: settled && row.provider === stoppedId ? "idle" : "busy",
+				}))
+				.sort((a, b) => a.id.localeCompare(b.id)),
+			pending: [
+				{ type: "permission", status: "pending" },
+				{ type: "question", status: "pending" },
+			],
+			completed: [{ count: 0 }],
+		});
+		const busy = expected(false);
+		expect(
+			await eventually(
+				snapshot,
+				(value) => JSON.stringify(value) === JSON.stringify(busy),
+			),
+		).toEqual(busy);
+		await run(
+			Effect.flatMap(OpenCodeInstancesTag, (view) => view.stop(stoppedId)),
+		);
+		const settled = expected(true);
+		expect(
+			await eventually(
+				snapshot,
+				(value) => JSON.stringify(value) === JSON.stringify(settled),
+			),
+		).toEqual(settled);
+	} finally {
+		await project?.stop();
+		await Effect.runPromise(PubSub.shutdown(bus));
+		rmSync(dir, { recursive: true, force: true });
+	}
 });
