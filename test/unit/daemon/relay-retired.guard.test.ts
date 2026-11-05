@@ -150,7 +150,6 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/provider/runner/send-scope.ts", 1],
 				// relay
 				["src/lib/domain/relay/Layers/message-poller-manager-layer.ts", 1],
-				["src/lib/domain/relay/Services/sse-stream-service.ts", 1],
 				["src/lib/domain/server/Layers/http-router-layer.ts", 1],
 			]),
 		);

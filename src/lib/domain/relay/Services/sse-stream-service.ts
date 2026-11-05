@@ -1,16 +1,5 @@
-import {
-	Context,
-	Effect,
-	Fiber,
-	Layer,
-	Schema,
-	Scope,
-	Semaphore,
-	Stream,
-} from "effect";
-import { SqlClient } from "effect/sql";
+import { Context, Effect, Layer, Queue, Semaphore, Stream } from "effect";
 import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../../contracts/provider-instance.js";
-import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { Logger } from "../../../logger.js";
 import { makeRetireReplacedProcessPrompts } from "../../../persistence/effect/retire-pending-prompts.js";
 import type {
@@ -18,10 +7,8 @@ import type {
 	SSEStreamPort,
 } from "../../../relay/sse-stream.js";
 import type { ConnectionHealth } from "../../../types.js";
-import {
-	type OpenCodeInstanceEvent,
-	OpenCodeInstancesTag,
-} from "../../daemon/Services/opencode-instances-service.js";
+import type { OpenCodeInstanceEvent } from "../../daemon/Services/opencode-instances-service.js";
+import { OpenCodeProjectStreams } from "../../daemon/Services/opencode-project-streams.js";
 import { ConfigTag } from "./services.js";
 
 export interface RelayOpenCodeStream extends SSEStreamPort {
@@ -121,21 +108,15 @@ const makeChannel = (log: Logger | undefined) => {
 export const SSEStreamLive: Layer.Layer<
 	SSEStreamTag,
 	never,
-	OpenCodeInstancesTag | ConfigTag
+	OpenCodeProjectStreams | ConfigTag
 > = Layer.effect(
 	SSEStreamTag,
 	Effect.gen(function* () {
-		const instances = yield* OpenCodeInstancesTag;
+		const streams = yield* OpenCodeProjectStreams;
 		const config = yield* ConfigTag;
-		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 		const retireReplacedPrompts = yield* makeRetireReplacedProcessPrompts;
 		const observedProcesses = new Map<string, string>();
-		const directories = new Set([
-			config.projectDir,
-			...(config.extraFolders ?? []),
-		]);
 		const log = config.log;
-		const scope = yield* Effect.scope;
 		const gate = yield* Semaphore.make(1);
 		// The main channel belongs to managed OpenCode; other accounts keep their ids.
 		const selectedId = MANAGED_OPENCODE_ACCOUNT_ID;
@@ -205,12 +186,18 @@ export const SSEStreamLive: Layer.Layer<
 				}
 				channel.dispatch(message);
 			});
-		let fiber: Fiber.Fiber<void> | undefined;
+		// The daemon's project stream owns the subscription; this layer only dispatches.
+		const inbox = yield* Queue.unbounded<OpenCodeInstanceEvent>();
+		yield* Stream.fromQueue(inbox).pipe(
+			Stream.runForEach(route),
+			Effect.forkScoped,
+		);
+		let detach: Effect.Effect<void> | undefined;
 		const disconnectEffect = () =>
 			gate.withPermits(1)(
 				Effect.gen(function* () {
-					if (fiber) yield* Fiber.interrupt(fiber);
-					fiber = undefined;
+					if (detach) yield* detach;
+					detach = undefined;
 					main.markDisconnected();
 				}),
 			);
@@ -220,57 +207,14 @@ export const SSEStreamLive: Layer.Layer<
 			getHealth: main.getHealth,
 			isConnected: main.isConnected,
 			includeDirectory: (directory) =>
-				Effect.sync(() => {
-					directories.add(directory);
-				}),
+				streams.includeDirectory(config.slug, directory),
 			connectEffect: () =>
 				gate.withPermits(1)(
 					Effect.gen(function* () {
-						if (fiber) return;
-						if (sql._tag === "Some") {
-							const rows = yield* sql.value<{ workspace: string }>`
-								SELECT workspace FROM sessions
-								WHERE project_id = ${config.slug} AND workspace IS NOT NULL`.pipe(
-								Effect.catch((error) => {
-									log?.warn(
-										"Failed to read OpenCode workspace directories",
-										error,
-									);
-									return Effect.succeed([]);
-								}),
-							);
-							for (const row of rows) {
-								const workspace = yield* Schema.decodeUnknownEffect(
-									Schema.fromJsonString(SessionWorkspaceSchema),
-								)(row.workspace).pipe(Effect.option);
-								if (workspace._tag === "None") continue;
-								for (const directory of Object.values(
-									workspace.value.worktrees ?? {},
-								))
-									directories.add(directory);
-							}
-						}
-						yield* Effect.uninterruptible(
-							Effect.gen(function* () {
-								const subscriptionScope = yield* Scope.fork(scope);
-								// Acquire registration before returning; callback setup is forked in Effect 4.
-								const pull = yield* Stream.toPull(
-									instances.events(() => [...directories]),
-								).pipe(Scope.provide(subscriptionScope));
-								fiber = yield* Effect.forkIn(
-									Stream.runForEach(
-										Stream.fromPull(Effect.succeed(pull)),
-										route,
-									).pipe(
-										Effect.onExit((exit) =>
-											Scope.close(subscriptionScope, exit),
-										),
-									),
-									scope,
-									{ uninterruptible: false },
-								);
-							}),
-						);
+						if (detach) return;
+						detach = yield* streams.attach(config.slug, (message) => {
+							Queue.offerUnsafe(inbox, message);
+						});
 					}),
 				),
 			disconnectEffect,

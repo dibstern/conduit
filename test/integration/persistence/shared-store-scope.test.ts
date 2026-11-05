@@ -32,6 +32,7 @@ import {
 	type OpenCodeInstanceEvent,
 	OpenCodeInstancesTag,
 } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { makeOpenCodeProjectStreamsLive } from "../../../src/lib/domain/daemon/Services/opencode-project-streams.js";
 import {
 	makeSessionActivity,
 	SessionActivityTag,
@@ -1069,7 +1070,13 @@ describe("shared-store relay project scope", () => {
 							Layer.provide(
 								Layer.mergeAll(
 									Layer.succeed(ConfigTag)(config()),
-									Layer.succeed(OpenCodeInstancesTag)(instances),
+									makeOpenCodeProjectStreamsLive(() => [
+										{ slug: A, folders: [store.root] },
+									]).pipe(
+										Layer.provide(
+											Layer.succeed(OpenCodeInstancesTag)(instances),
+										),
+									),
 								),
 							),
 						),
