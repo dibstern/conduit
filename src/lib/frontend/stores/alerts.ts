@@ -1,11 +1,12 @@
 // Every project's in-app alerts, read through the attached project's
 // SubscribeAlerts stream: a session finished or failed while this tab was
-// looking elsewhere. Push covers
+// looking elsewhere, or asks for an approval or an answer. Push covers
 // subscribed browsers (triggerNotifications stands down for them); this is the
 // ding for every other one. Live-only, so a reconnect never re-fires an alert.
 
 import { Effect, Fiber, Stream } from "effect";
 import { notificationContent } from "../../notification-content.js";
+import type { PermissionId } from "../../shared-types.js";
 import { getRuntime, runTransportEffect } from "../transport/runtime.js";
 import { WsRpcClients } from "../transport/shared-client.js";
 import { supervise } from "../transport/supervise.js";
@@ -18,6 +19,21 @@ import { triggerNotifications } from "./ws-notifications.js";
 export const applyAlert = (alert: Alert): void => {
 	if (alert.kind === "warning") {
 		if (alert.message) showToast(alert.message, { variant: "warn" });
+		return;
+	}
+	if (alert.kind === "permission" || alert.kind === "question") {
+		const sessionId = alert.sessionId ?? "";
+		void triggerNotifications(
+			alert.kind === "permission"
+				? {
+						_tag: "permission",
+						sessionId,
+						requestId: alert.alertId as PermissionId,
+						toolName: alert.message ?? "",
+						toolInput: {},
+					}
+				: { _tag: "question", sessionId, toolId: alert.alertId, questions: [] },
+		);
 		return;
 	}
 	const failed = alert.kind === "error";
