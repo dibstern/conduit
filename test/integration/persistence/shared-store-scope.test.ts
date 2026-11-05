@@ -662,7 +662,7 @@ describe("shared-store relay project scope", () => {
 		const acted = await store.runtime.runPromise(
 			Effect.gen(function* () {
 				const setup = yield* SessionSetupTag;
-				yield* setup.recover;
+				yield* setup.recover(A);
 				const sql = yield* SqlClient.SqlClient;
 				return (
 					(yield* sql<{

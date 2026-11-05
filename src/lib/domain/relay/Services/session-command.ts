@@ -10,7 +10,7 @@
 // See docs/adr/0004-session-mutations-are-canonical-events.md.
 
 import { randomUUID } from "node:crypto";
-import { type Cause, Data, Effect } from "effect";
+import { type Cause, Data, Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
@@ -252,12 +252,22 @@ export const claudeUpstreamAdapter: SessionUpstreamAdapter = {
 
 export const sessionUpstreamAdapter = (
 	provider: KnownProviderDriverKind,
-	api: OpenCodeAPI,
+	/** Absent for daemon-originated commands; upstream sync is best-effort (ADR-0004). */
+	api: OpenCodeAPI | undefined,
 ): Effect.Effect<SessionUpstreamAdapter> =>
 	Effect.gen(function* () {
 		switch (provider) {
 			case "opencode":
-				return openCodeUpstreamAdapter(api);
+				return api
+					? openCodeUpstreamAdapter(api)
+					: {
+							provider,
+							sync: (command) =>
+								Effect.logWarning(
+									"No OpenCode client to sync this session change upstream",
+									command.type,
+								),
+						};
 			case "claude":
 				return claudeUpstreamAdapter;
 			case "cursor":
@@ -292,7 +302,9 @@ export const applySessionCommand = (
 	options: ApplySessionCommandOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const api = yield* OpenCodeAPITag;
+		const api = Option.getOrUndefined(
+			yield* Effect.serviceOption(OpenCodeAPITag),
+		);
 		const log = yield* LoggerTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
