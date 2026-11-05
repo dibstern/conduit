@@ -15,6 +15,7 @@
 // 25. a refresh with tasks live ends them unasked, waits for the turn, or shows no ask.
 // 25-27. a send on a switched account is refused, or on confirm the old process closes twice, not
 // at all, or the message is lost, doubled, or sent on the old account.
+// 28, 29. an agent change, or a send after a rewind, replaces the query with tasks live, unasked.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -879,13 +880,12 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		};
 	});
 
-	// 25-27, R5: a send on another account of the same driver needs a new process, so with tasks
-	// live it waits behind the held close (8.4 2875-2899); a confirm closes the old one once.
-	it("holds a send on a switched account while tasks are live, then closes the old process once and sends on the new one", async () => {
-		const { fixture, browser } = await start();
-		const { a, b } = await addAccounts(fixture);
-		const { sessionId, queryId } = await startTurn(fixture, browser, a);
-		// The turn ends on its own; its tasks keep running (a switch refuses a live turn).
+	/** The turn ends on its own; its tasks keep running (a switch refuses a live turn). */
+	const endTurn = async (
+		fixture: ProcessHarness,
+		browser: BrowserClient,
+		sessionId: string,
+	) => {
 		const endedFrom = browser.frames.length;
 		writeFileSync(join(fixture.root, "task-stop-release-result"), "release");
 		await row(
@@ -894,16 +894,22 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 			endedFrom,
 			(message) => message["status"] === "idle",
 		);
+	};
+
+	/**
+	 * 8.4 2875-2899: a send that needs a new process waits behind the held close of the old one
+	 * while tasks are live; a confirm closes the old process once and sends the message once.
+	 */
+	const holdsSend = async (
+		label: string,
+		{ fixture, browser }: { fixture: ProcessHarness; browser: BrowserClient },
+		sessionId: string,
+		queryId: string,
+	) => {
 		const oldProcess = processesStarted(fixture, sessionId).at(-1);
-		await fixture.requestRpc({
-			_tag: "ContinueSession",
-			sessionId,
-			instanceId: b,
-			expectedInstanceId: a,
-		});
 		const cursor = browser.frames.length;
 		const inputId = crypto.randomUUID();
-		const text = "after-held-account-switch";
+		const text = `after-held-${label}`;
 		const submitted = await Effect.runPromise(
 			Effect.result(
 				browser.rpc["input.submit"]({
@@ -915,7 +921,7 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 				}),
 			),
 		);
-		proof["switch: submitted"] =
+		proof[`${label}: submitted`] =
 			submitted._tag === "Success"
 				? submitted.success
 				: { refused: String(submitted.failure) };
@@ -930,7 +936,7 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		// test-waits-allow real-wait: nothing destroying is an absence over time.
 		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
 		const held = endTargets(fixture, sessionId);
-		proof["switch: held"] = { asked, oldProcess, rows: held };
+		proof[`${label}: held`] = { asked, oldProcess, rows: held };
 		expect(closedQueries(fixture, queryId)).toEqual([]);
 		expect(held).toEqual([
 			{
@@ -950,11 +956,11 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 			timeout: 10_000,
 		});
 		const launches = fixture.claudeOptions();
-		proof["switch: confirmed"] = {
+		proof[`${label}: confirmed`] = {
 			rows: endTargets(fixture, sessionId),
 			closed: closedQueries(fixture, queryId).length,
 			sent: enqueued(),
-			launches: launches.map(({ options }) => options["env"]),
+			launch: launches.at(-1)?.options,
 		};
 		expect(closedQueries(fixture, queryId)).toHaveLength(1);
 		expect(endTargets(fixture, sessionId)).toEqual([
@@ -965,8 +971,43 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 			},
 		]);
 		expect(enqueued()[0]?.["queryId"]).not.toBe(queryId);
-		expect(launches.at(-1)?.options["env"]).toEqual(
-			expect.objectContaining({ CLAUDE_CONFIG_DIR: join(fixture.root, "B") }),
+		return launches.at(-1)?.options;
+	};
+
+	// 25-27, R5: a send on another account of the same driver needs a new process.
+	it("holds a send on a switched account while tasks are live, then closes the old process once and sends on the new one", async () => {
+		const started = await start();
+		const { a, b } = await addAccounts(started.fixture);
+		const { sessionId, queryId } = await startTurn(
+			started.fixture,
+			started.browser,
+			a,
 		);
+		await endTurn(started.fixture, started.browser, sessionId);
+		await started.fixture.requestRpc({
+			_tag: "ContinueSession",
+			sessionId,
+			instanceId: b,
+			expectedInstanceId: a,
+		});
+		const launch = await holdsSend("switch", started, sessionId, queryId);
+		expect(launch?.["env"]).toEqual(
+			expect.objectContaining({
+				CLAUDE_CONFIG_DIR: join(started.fixture.root, "B"),
+			}),
+		);
+	});
+
+	// 28: an agent change needs a new query (6.1 2106).
+	it("holds a send after an agent change while tasks are live, then closes the old process once and sends on a new one", async () => {
+		const started = await start();
+		const { sessionId, queryId } = await startTurn(
+			started.fixture,
+			started.browser,
+		);
+		await endTurn(started.fixture, started.browser, sessionId);
+		await started.browser.switchAgent(sessionId, "reviewer");
+		const launch = await holdsSend("agent", started, sessionId, queryId);
+		proof["agent: launch agent"] = launch?.["agent"] ?? null;
 	});
 });

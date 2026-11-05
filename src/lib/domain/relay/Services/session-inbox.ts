@@ -47,10 +47,12 @@ import {
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedger } from "../../../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
 import type { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
+import { closeConfirm } from "../../../provider/run-ledger/run-ledger-decider.js";
 import {
 	assertSessionRunnerAvailable,
 	RunnerProviderInstance,
@@ -663,7 +665,7 @@ export const SessionInboxLive = Layer.effect(
 		// behind the user's confirm while tasks are live or unknown. True while the send must wait.
 		const closesFirst = (
 			sessionId: string,
-			inputId: string,
+			{ inputId, request }: { inputId: string; request: InputRequest },
 			provider?: string,
 		) =>
 			Effect.gen(function* () {
@@ -690,7 +692,16 @@ export const SessionInboxLive = Layer.effect(
 					sessionId,
 					account,
 				);
-				if (!block || block.fromAccountId === block.toAccountId) return false;
+				if (!block || block.fromAccountId === block.toAccountId) {
+					// An agent change replaces the query too; with no tasks at risk it keeps its in-place
+					// restart, so only tasks live or unknown send it through the close.
+					if (request.agent === native.agent) return false;
+					const ledger = yield* loadLedger(sessionId).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					if (!ledger || closeConfirm(ledger.state, undefined) === undefined)
+						return false;
+				}
 				const previous = yield* resolveAccount(native.instanceId);
 				// Without tasks at risk the close runs now and the send follows it.
 				yield* engine
@@ -760,7 +771,7 @@ export const SessionInboxLive = Layer.effect(
 				// The send stays queued behind its close; Close now drains it, dismiss returns it.
 				if (
 					!decision.steer &&
-					(yield* closesFirst(sessionId, handoff.inputId, provider?.provider))
+					(yield* closesFirst(sessionId, handoff, provider?.provider))
 				) {
 					const kept = events.filter((event) => event.type !== "input.sent");
 					if (kept.length > 0)
