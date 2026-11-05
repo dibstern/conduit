@@ -121,6 +121,10 @@ it("round-trips every declared error class as its own instance", async () => {
 							Exit.isSuccess(Schema.decodeUnknownExit(payloadSchema)(payload)),
 						),
 						Arbitrary.map(Schema.decodeUnknownSync(payloadSchema)),
+						// A decoded optional field can hold undefined, which the wire cannot carry.
+						Arbitrary.filter((payload) =>
+							Exit.isSuccess(Schema.encodeUnknownExit(payloadSchema)(payload)),
+						),
 					),
 					{ seed: 42, count: 1 },
 				),

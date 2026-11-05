@@ -188,6 +188,15 @@ export class FolderTimeline extends Context.Service<
 			readonly guard: Effect.Effect<void, E, R>;
 			readonly journal: Effect.Effect<A, E, R>;
 		}) => Effect.Effect<A, E | FolderTimelineError | FolderRestoreRefused, R>;
+		/**
+		 * Writes the folder of `to` (a repository-wide tree in this folder's store) into
+		 * `directory`, a new checkout of the same repository, deleting the paths it lacks. Never
+		 * reads or writes any other folder. Returns the folder's worktree tree after (82tn.54).
+		 */
+		readonly materialize: (
+			directory: string,
+			to: string,
+		) => Effect.Effect<string, FolderTimelineError>;
 		/** A restored folder's receipt: its tree before the move, and the move's target. */
 		readonly receipt: (
 			sessionId: string,

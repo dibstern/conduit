@@ -206,6 +206,11 @@ export const headMovesHandlers: StepHandler[] = [
 							: {}),
 					};
 				},
+				ForkSession: (payload) => ({
+					projectSlug: "myapp",
+					sessionId: `${sessionId}-fork`,
+					forkedFrom: "sessionId" in payload ? payload.sessionId : "",
+				}),
 				CommitHeadMove: ({ intent, moveId }) => {
 					if (intent._tag === "undo")
 						state.log = [
@@ -384,6 +389,54 @@ export const headMovesHandlers: StepHandler[] = [
 				messageId: match[1] ?? "",
 				withFiles: true,
 			});
+		},
+	},
+	{
+		name: "branch into a worktree",
+		match: /^I choose to branch into a worktree$/,
+		run: async ({ world }) => {
+			await rewindDialog(world.page)
+				.getByRole("button", { name: "Branch into a worktree" })
+				.click();
+		},
+	},
+	{
+		name: "branching into a worktree is not offered",
+		match: /^branching into a worktree is not offered$/,
+		run: async ({ world }) => {
+			await expect(
+				rewindDialog(world.page).getByRole("button", {
+					name: "Branch into a worktree",
+				}),
+			).toHaveCount(0);
+		},
+	},
+	{
+		// 82tn.54: the files go into a new worktree, and the conversation stays where it is.
+		name: "one fork with files keeps the conversation up to a message",
+		match: /^one fork with files keeps the conversation up to (\S+)$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const fork = await rpc.waitForRequest(
+				(request) => request.tag === "ForkSession",
+			);
+			expect(fork.payload).toMatchObject({
+				sessionId,
+				messageId: match[1] ?? "",
+				files: true,
+			});
+			expect(
+				rpc.getRequests().filter((request) => request.tag === "ForkSession"),
+			).toHaveLength(1);
+		},
+	},
+	{
+		name: "the fork is open",
+		match: /^the fork (\S+) is open$/,
+		run: async ({ world, match }) => {
+			await expect(world.page).toHaveURL(
+				new RegExp(`/s/${match[1] ?? ""}(?:[/?]|$)`),
+			);
 		},
 	},
 	{

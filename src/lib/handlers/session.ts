@@ -783,12 +783,15 @@ export const forkSessionForClient = ({
 	messageId,
 	instanceId,
 	targetProjectSlug,
+	forkId,
 }: {
 	readonly clientId: string;
 	readonly sessionId?: string;
 	readonly messageId?: string;
 	readonly instanceId?: string;
 	readonly targetProjectSlug?: string;
+	/** The fork's id, when its worktree was made first (82tn.54). */
+	readonly forkId?: string;
 }) =>
 	Effect.gen(function* () {
 		const wsHandler = yield* WebSocketHandlerTag;
@@ -811,6 +814,7 @@ export const forkSessionForClient = ({
 			...(messageId === undefined ? {} : { messageId }),
 			...(instanceId === undefined ? {} : { instanceId }),
 			...(target === undefined ? {} : { into: yield* managers.parts(target) }),
+			...(forkId === undefined ? {} : { sessionId: forkId }),
 		});
 
 		yield* sessionManagerService.holdSession(forked.id);
