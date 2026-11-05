@@ -15,8 +15,7 @@ const FIVE_MINUTES = 5 * 60_000;
 const SKILL_TOOL_ID = "tool-skill-live";
 const navigationScrollTops = new WeakMap<Page, number>();
 
-// Found by its own steps: a window read at an agent's skill run starts at
-// that reply, so the turn's prompt may not be loaded above it.
+// Found by its own steps, which a window read at the skill run always loads.
 const activityPanel = (page: Page, turn: string) =>
 	page.locator(
 		`#messages .turn-activity:has([data-part^="msg-skill-nav-agent-${turn}/"])`,

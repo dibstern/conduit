@@ -477,8 +477,14 @@ export interface TranscriptBounds {
 interface SessionTranscriptPageOptions {
 	readonly before?: string;
 	readonly limit: number;
-	/** Read from the oldest message, or inclusively from the supplied cursor. */
-	readonly forward?: { readonly from?: string; readonly exclusive?: boolean };
+	/** Read from the oldest message, or inclusively from the supplied cursor.
+	 *  `turn` starts instead at the prompt of the turn holding `from`, widening
+	 *  the page to reach `from`, or at `from` when that outgrows a frame. */
+	readonly forward?: {
+		readonly from?: string;
+		readonly exclusive?: boolean;
+		readonly turn?: boolean;
+	};
 	readonly bounds?: TranscriptBounds;
 	readonly windowKind?: "latest" | "historical";
 	/** Cut long tool outputs as the browser opens them (see previewParts). */
@@ -1931,6 +1937,30 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 							before: cursorId,
 						});
 					}
+					// The newest prompt at or before the cursor, as turns are drawn,
+					// with the page length it takes to reach the cursor.
+					const [turnStart] =
+						options.forward?.turn && cursor
+							? yield* sql<{
+									ordinal: number;
+									created_at: number;
+									id: string;
+									reach: number;
+								}>`
+								SELECT ordinal, created_at, id, (
+									SELECT COUNT(*) FROM messages m
+									WHERE m.session_id = ${sessionId} AND NOT ${pendingRewindHides("m")}
+										AND (m.ordinal, m.created_at, m.id) >= (messages.ordinal, messages.created_at, messages.id)
+										AND (m.ordinal, m.created_at, m.id) <= (${cursor.ordinal}, ${cursor.created_at}, ${cursor.id})
+								) AS reach
+								FROM messages
+								WHERE session_id = ${sessionId} AND role = 'user' AND NOT ${pendingRewindHides()} AND ${inBounds}
+									AND (ordinal, created_at, id) <= (${cursor.ordinal}, ${cursor.created_at}, ${cursor.id})
+								ORDER BY ordinal DESC, created_at DESC, id DESC
+								LIMIT 1`
+							: [];
+					const start = turnStart ?? cursor;
+					const forwardLimit = Math.max(options.limit, turnStart?.reach ?? 0);
 					// The first page reaches back to the newest prompt, or further to
 					// the prompt still running, which a prompt queued behind it would
 					// otherwise push off the page. A turn left running before a later
@@ -1956,11 +1986,11 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								FROM messages
 								WHERE messages.session_id = ${sessionId}
 									AND NOT ${pendingRewindHides()} AND ${inBounds}
-									AND (${cursor?.id ?? null} IS NULL
+									AND (${start?.id ?? null} IS NULL
 										OR (messages.ordinal, messages.created_at, messages.id) ${sql.literal(options.forward?.exclusive ? ">" : ">=")}
-											(${cursor?.ordinal ?? null}, ${cursor?.created_at ?? null}, ${cursor?.id ?? null}))
+											(${start?.ordinal ?? null}, ${start?.created_at ?? null}, ${start?.id ?? null}))
 								ORDER BY messages.ordinal, messages.created_at, messages.id
-								LIMIT ${options.limit + 1}`
+								LIMIT ${forwardLimit + 1}`
 						: cursor
 							? yield* sql<{ id: string; created_at: number }>`
 								SELECT messages.id, messages.created_at
@@ -1985,8 +2015,9 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 										AND (m.ordinal, m.created_at, m.id)
 											>= (${anchor?.ordinal ?? null}, ${anchor?.created_at ?? null}, ${anchor?.id ?? null})
 								)`;
-					const pageLimit =
-						forward || cursor
+					const pageLimit = forward
+						? forwardLimit
+						: cursor
 							? options.limit
 							: Math.max(
 									options.limit,
@@ -1996,7 +2027,12 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 					const messages: MessageWithParts[] = [];
 					if (options.previewTools) {
 						let bytes = FRAME_ENVELOPE_BYTES;
-						for (const candidate of page) {
+						const target = turnStart
+							? page.findIndex((message) => message.id === cursorId)
+							: -1;
+						for (let index = 0; index < page.length; index++) {
+							const candidate = page[index];
+							if (candidate === undefined) break;
 							const row = (yield* sql<MessageWithTurnModelRow>`
 								SELECT messages.*,
 									turns.requested_model AS turn_requested_model,
@@ -2031,11 +2067,17 @@ export const makeReadQueryEffect = Effect.gen(function* () {
 								) + 1;
 							// Preserve the newest whole message even when it exceeds the
 							// frame. Part paging is a separate protocol change.
-							if (messages.length > 0 && bytes + weight > PAGE_FRAME_BUDGET)
-								break;
+							if (messages.length > 0 && bytes + weight > PAGE_FRAME_BUDGET) {
+								if (index > target) break;
+								// A turn too long for one frame opens at the cursor instead.
+								messages.length = 0;
+								bytes = FRAME_ENVELOPE_BYTES;
+								index = target - 1;
+								continue;
+							}
 							messages.push(...group);
 							bytes += weight;
-							if (bytes >= PAGE_FRAME_BUDGET) break;
+							if (bytes >= PAGE_FRAME_BUDGET && index >= target) break;
 						}
 					} else {
 						// Provider replay needs full history, without the browser budget.
