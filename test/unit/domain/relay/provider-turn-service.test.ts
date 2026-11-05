@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "@effect/vitest";
 import {
 	Clock,
+	Context,
 	Deferred,
 	Effect,
 	Exit,
@@ -36,7 +37,13 @@ import {
 	AccountDirectoryFromConfigLive,
 	AccountDirectoryStateLive,
 } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
+import { DaemonTurnsLive } from "../../../../src/lib/domain/daemon/Services/daemon-turns.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import {
+	type OwnerScope,
+	OwnerScopeProvenanceError,
+	OwnerScopes,
+} from "../../../../src/lib/domain/daemon/Services/owner-scopes.js";
 import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
@@ -53,10 +60,13 @@ import {
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
 import {
+	attachProviderTurnsLive,
 	type ProviderTurnService,
 	ProviderTurnServiceLive,
 	type ProviderTurnServiceSendInput,
 	ProviderTurnServiceTag,
+	ProviderTurns,
+	ProviderTurnsLive,
 	STOP_ABORT_WAIT_MS,
 } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -479,11 +489,10 @@ const serviceLayer = (input: {
 		),
 		baseLayer,
 	);
+	const parts = Layer.provideMerge(SessionWorkspaceLive, completeLayer);
 	return {
-		layer: Layer.provideMerge(
-			ProviderTurnServiceLive,
-			Layer.provideMerge(SessionWorkspaceLive, completeLayer),
-		),
+		parts,
+		layer: Layer.provideMerge(ProviderTurnServiceLive, parts),
 		liveLayer: Layer.provideMerge(
 			ProviderTurnServiceLive,
 			Layer.provideMerge(
@@ -2144,6 +2153,193 @@ describe("ProviderTurnService", () => {
 					}).pipe(Effect.provide(liveLayer));
 				}),
 		);
+
+		// 82tn.10.9: one turn service per daemon. Every relay of a project lends
+		// the same store and engine, as relays of one project do in the daemon.
+		describe("daemon-owned turn service", () => {
+			const owned = (scope: Scope.Scope): OwnerScope => ({
+				acquire: (resource) => resource.pipe(Scope.provide(scope)),
+			});
+			const daemon = (sessionIds: readonly string[]) =>
+				Effect.gen(function* () {
+					const { parts, log } = serviceLayer({
+						engine: makeEngine({ providerId: "claude" }),
+					});
+					const scopes = {
+						project: yield* Scope.make(),
+						sessions: new Map<string, Scope.Closeable>(),
+					};
+					for (const id of sessionIds)
+						scopes.sessions.set(id, yield* Scope.make());
+					const owners = Layer.succeed(OwnerScopes)({
+						projectScope: () => Effect.sync(() => owned(scopes.project)),
+						sessionScope: (sessionId) => {
+							const scope = scopes.sessions.get(sessionId);
+							return scope
+								? Effect.succeed(owned(scope))
+								: Effect.fail(new OwnerScopeProvenanceError({ sessionId }));
+						},
+						close: () => Effect.void,
+					});
+					const context = yield* Layer.build(
+						Layer.mergeAll(ProviderTurnsLive, DaemonTurnsLive).pipe(
+							Layer.provideMerge(Layer.merge(parts, owners)),
+						),
+					);
+					const relay = (scope: Scope.Scope) =>
+						Layer.buildWithScope(attachProviderTurnsLive, scope).pipe(
+							Effect.provide(context),
+							Effect.map((built) => Context.get(built, ProviderTurnServiceTag)),
+						);
+					const engine = Context.get(context, OrchestrationEngineTag);
+					const accept = engine.acceptStopEffect;
+					const accepted = { count: 0, interrupted: false };
+					engine.acceptStopEffect = (input) => {
+						accepted.count += 1;
+						return accept(input);
+					};
+					const delivering = Deferred.makeUnsafe<void>();
+					engine.executeAcceptedStopEffect = () =>
+						Deferred.succeed(delivering, undefined).pipe(
+							Effect.andThen(Effect.never),
+							Effect.onInterrupt(() =>
+								Effect.sync(() => {
+									accepted.interrupted = true;
+								}),
+							),
+						);
+					return { context, log, scopes, relay, accepted, delivering };
+				});
+			const stop = (commandId: string) => ({
+				clientId: "client-1",
+				commandId,
+				sessionId: "session-1",
+			});
+
+			it.effect(
+				"a Stop begun through one relay outlives it, and its lift reaches the next",
+				() =>
+					Effect.scoped(
+						Effect.gen(function* () {
+							const { relay, accepted, delivering } = yield* daemon([
+								"session-1",
+							]);
+							const first = yield* Scope.make();
+							const a = yield* relay(first);
+							const b = yield* relay(yield* Effect.scope);
+							const lifted = yield* Effect.forkChild(
+								Stream.runHead(yield* b.fenceLifts),
+							);
+							const stopped = yield* a.beginStop(stop("cmd-outlives"));
+							yield* Deferred.await(delivering);
+							yield* Scope.close(first, Exit.void);
+							expect(accepted.interrupted).toBe(false);
+							expect(b.turnFences("session-1").stopping).toBe(true);
+							yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+							yield* stopped;
+							expect(b.turnFences("session-1").stopping).toBe(false);
+							expect(yield* Fiber.join(lifted)).toEqual(
+								Option.some("session-1"),
+							);
+						}),
+					),
+			);
+
+			it.effect(
+				"closing the session's owner scope ends its Stop and logs nothing",
+				() =>
+					Effect.scoped(
+						Effect.gen(function* () {
+							const { relay, accepted, delivering, scopes, log } =
+								yield* daemon(["session-1"]);
+							const service = yield* relay(yield* Effect.scope);
+							yield* service.beginStop(stop("cmd-deleted"));
+							yield* Deferred.await(delivering);
+							const session = scopes.sessions.get("session-1");
+							if (session) yield* Scope.close(session, Exit.void);
+							expect(accepted.interrupted).toBe(true);
+							expect(service.turnFences("session-1").stopping).toBe(false);
+							expect(warnsNaming(log, "cmd-deleted")).toHaveLength(0);
+						}),
+					),
+			);
+
+			it.effect(
+				"a Stop for a session with no owner scope still fences and lifts",
+				() =>
+					Effect.scoped(
+						Effect.gen(function* () {
+							const { relay, delivering } = yield* daemon([]);
+							const service = yield* relay(yield* Effect.scope);
+							const lifted = yield* Effect.forkChild(
+								Stream.runHead(yield* service.fenceLifts),
+							);
+							const stopped = yield* service.beginStop(stop("cmd-unowned"));
+							yield* Deferred.await(delivering);
+							expect(service.turnFences("session-1").stopping).toBe(true);
+							yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+							yield* stopped;
+							expect(yield* Fiber.join(lifted)).toEqual(
+								Option.some("session-1"),
+							);
+						}),
+					),
+			);
+
+			it.effect(
+				"recovers an outbox Stop once per project, before the first relay is served",
+				() =>
+					Effect.scoped(
+						Effect.gen(function* () {
+							const { context, relay, accepted, scopes } = yield* daemon([
+								"session-1",
+							]);
+							yield* Effect.gen(function* () {
+								yield* seedSession;
+								yield* seedClaimedRun("active-input", 1);
+								yield* seedCapturedStop("recovered-stop");
+							}).pipe(Effect.provide(context));
+							const a = yield* relay(yield* Effect.scope);
+							expect(a.turnFences("session-1").stopping).toBe(true);
+							const b = yield* relay(yield* Effect.scope);
+							expect(b.turnFences("session-1").stopping).toBe(true);
+							expect(accepted.count).toBe(1);
+							// The project is removed and added again: its next relay recovers.
+							for (const scope of [scopes.project, ...scopes.sessions.values()])
+								yield* Scope.close(scope, Exit.void);
+							scopes.project = yield* Scope.make();
+							scopes.sessions.set("session-1", yield* Scope.make());
+							const c = yield* relay(yield* Effect.scope);
+							expect(c.turnFences("session-1").stopping).toBe(true);
+							expect(accepted.count).toBe(2);
+						}),
+					),
+			);
+
+			it.effect("projects share no fences or lifts", () =>
+				Effect.scoped(
+					Effect.gen(function* () {
+						const { context, relay, delivering } = yield* daemon([]);
+						const p = yield* relay(yield* Effect.scope);
+						const q = yield* Context.get(context, ProviderTurns).forProject(
+							"other-project",
+							context,
+						);
+						const lifted = yield* Effect.forkChild(
+							Stream.runHead(yield* q.fenceLifts),
+						);
+						const stopped = yield* p.beginStop(stop("cmd-project-p"));
+						yield* Deferred.await(delivering);
+						expect(p.turnFences("session-1").stopping).toBe(true);
+						expect(q.turnFences("session-1").stopping).toBe(false);
+						yield* TestClock.adjust(STOP_ABORT_WAIT_MS);
+						yield* stopped;
+						for (let i = 0; i < 10; i++) yield* Effect.yieldNow;
+						expect(lifted.pollUnsafe()).toBeUndefined();
+					}),
+				),
+			);
+		});
 	});
 
 	for (const driver of ["opencode", "claude"] as const) {

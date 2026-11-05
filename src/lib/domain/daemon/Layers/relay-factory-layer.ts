@@ -54,6 +54,7 @@ import {
 	ProjectManagementServiceTag,
 	type SaveProjectResult,
 } from "../../relay/Services/project-management-service.js";
+import { ProviderTurns } from "../../relay/Services/provider-turn-service.js";
 import { ScanServiceTag } from "../../relay/Services/scan-service.js";
 import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
@@ -243,6 +244,7 @@ export const RelayFactoryLive = (
 				SessionManagerServiceTag,
 			);
 			const daemonTurns = yield* Effect.serviceOption(DaemonTurns);
+			const providerTurns = yield* Effect.serviceOption(ProviderTurns);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -659,6 +661,11 @@ export const RelayFactoryLive = (
 											Context.merge(
 												Option.isSome(daemonTurns)
 													? Context.make(DaemonTurns, daemonTurns.value)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(providerTurns)
+													? Context.make(ProviderTurns, providerTurns.value)
 													: Context.empty(),
 											),
 											Context.merge(

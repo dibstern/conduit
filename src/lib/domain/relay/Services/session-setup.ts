@@ -348,3 +348,12 @@ export const DaemonSessionSetupLive = Layer.effect(
 		});
 	}),
 );
+
+/** The daemon's session setup when it lends one; a standalone relay is its own daemon. */
+export const SessionSetupOrOwn = Layer.unwrap(
+	Effect.map(Effect.serviceOption(SessionSetupTag), (shared) =>
+		Option.isSome(shared)
+			? Layer.succeed(SessionSetupTag, shared.value)
+			: SessionSetupLive,
+	),
+);

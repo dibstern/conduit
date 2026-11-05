@@ -145,3 +145,150 @@ describe("Owner Scope source boundary", () => {
 		).toEqual([]);
 	});
 });
+
+// 82tn.10.9: the daemon owns sessions and turns. A relay lends its parts; it
+// names no owner's constructor, and each owner keeps its standalone fallback.
+const ownerConstructors = new Set([
+	"SessionManagerServiceLive",
+	"ProviderTurnsLive",
+	"DraftPreWarmLive",
+	"SessionWorkspaceLive",
+	"SessionSetupLive",
+	"DaemonTurnsLive",
+]);
+const scopeOpeners = new Set([
+	"Scope.make",
+	"Scope.makeUnsafe",
+	"Scope.fork",
+	"ManagedRuntime.make",
+]);
+const ownerModules = [
+	"src/lib/domain/relay/Services/provider-turn-service.ts",
+	"src/lib/domain/relay/Services/provider-turn-dispatch.ts",
+	"src/lib/domain/relay/Services/provider-turn-session.ts",
+	"src/lib/domain/relay/Services/session-manager-service.ts",
+	"src/lib/domain/relay/Services/draft-prewarm.ts",
+	"src/lib/domain/relay/Services/session-setup.ts",
+	"src/lib/domain/relay/Layers/session-workspace-layer.ts",
+	"src/lib/provider/orchestration-wiring.ts",
+];
+// Each remaining opener, and why it is not a project or session scope.
+const scopeOpenerSites = new Map([
+	// Owner Scopes opens every project and session scope.
+	[`${root}/Layers/owner-scopes-layer.ts:Scope.makeUnsafe`, 1],
+	// An account's resources, not a project's or session's.
+	[`${root}/Layers/account-resource-scopes-layer.ts:Scope.make`, 1],
+	[`${root}/Layers/keep-awake-layer.ts:Scope.fork`, 1],
+	// The daemon's own runtime.
+	[`${root}/Layers/daemon-foreground.ts:ManagedRuntime.make`, 1],
+	// The relay's runtimes; 82tn.16 deletes the relay.
+	["src/lib/relay/project-relay-layers.ts:ManagedRuntime.make", 1],
+	["src/lib/relay/relay-stack.ts:ManagedRuntime.make", 1],
+]);
+
+function constructions(text: string): string[] {
+	const source = ts.createSourceFile(
+		"source.ts",
+		text,
+		ts.ScriptTarget.Latest,
+		true,
+	);
+	const hits: string[] = [];
+	const visit = (node: ts.Node) => {
+		if (ts.isIdentifier(node) && ownerConstructors.has(node.text))
+			hits.push(node.text);
+		if (
+			ts.isNewExpression(node) &&
+			node.expression.getText(source) === "OrchestrationEngine"
+		)
+			hits.push("new OrchestrationEngine");
+		if (
+			ts.isCallExpression(node) &&
+			scopeOpeners.has(node.expression.getText(source))
+		)
+			hits.push(node.expression.getText(source));
+		if (ts.isIdentifier(node) && node.text === "WebSocketHandlerTag")
+			hits.push("WebSocketHandlerTag");
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return hits;
+}
+
+const tally = (paths: readonly string[], kept: (hit: string) => boolean) => {
+	const actual = new Map<string, number>();
+	for (const path of paths)
+		for (const hit of constructions(readFileSync(path, "utf8")).filter(kept)) {
+			const key = `${path}:${hit}`;
+			actual.set(key, (actual.get(key) ?? 0) + 1);
+		}
+	return actual;
+};
+
+describe("daemon-owned sessions and turns (82tn.10.9)", () => {
+	it("the relay names no daemon owner's constructor and builds no engine", () => {
+		expect(
+			tally(
+				sources("src/lib/relay"),
+				(hit) =>
+					ownerConstructors.has(hit) || hit === "new OrchestrationEngine",
+			),
+		).toEqual(new Map());
+	});
+
+	it("only the daemon and a standalone relay's fallback build an engine", () => {
+		expect(
+			tally(sources("src/lib"), (hit) => hit === "new OrchestrationEngine"),
+		).toEqual(
+			new Map([
+				[
+					`${root}/Layers/daemon-orchestration-layer.ts:new OrchestrationEngine`,
+					1,
+				],
+				["src/lib/provider/orchestration-wiring.ts:new OrchestrationEngine", 1],
+			]),
+		);
+		const wiring = readFileSync(
+			"src/lib/provider/orchestration-wiring.ts",
+			"utf8",
+		);
+		expect(wiring.indexOf("engine: daemon.value.engine")).toBeGreaterThan(0);
+		expect(wiring.indexOf("engine: daemon.value.engine")).toBeLessThan(
+			wiring.indexOf("new OrchestrationEngine"),
+		);
+	});
+
+	it("only Owner Scopes opens project and session scopes; no new runtimes", () => {
+		expect(
+			tally(
+				[...sources(root), ...sources("src/lib/relay"), ...ownerModules],
+				(hit) => scopeOpeners.has(hit),
+			),
+		).toEqual(scopeOpenerSites);
+	});
+
+	it("session and turn owners reach clients only through Event Delivery", () => {
+		expect(
+			tally(
+				[...ownerModules, `${root}/Services/daemon-turns.ts`],
+				(hit) => hit === "WebSocketHandlerTag",
+			),
+		).toEqual(new Map());
+	});
+
+	it.each([
+		[
+			"import { SessionManagerServiceLive } from 'x'",
+			"SessionManagerServiceLive",
+		],
+		["Layer.provide(ProviderTurnsLive)", "ProviderTurnsLive"],
+		["const e = new OrchestrationEngine({})", "new OrchestrationEngine"],
+		["const s = yield* Scope.make()", "Scope.make"],
+		["const s = Scope.makeUnsafe('sequential')", "Scope.makeUnsafe"],
+		["const s = yield* Scope.fork(parent)", "Scope.fork"],
+		["const r = ManagedRuntime.make(layer)", "ManagedRuntime.make"],
+		["type R = WebSocketHandlerTag", "WebSocketHandlerTag"],
+	])("detects %s", (text, hit) => {
+		expect(constructions(text)).toEqual([hit]);
+	});
+});
