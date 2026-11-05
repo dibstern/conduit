@@ -3,6 +3,7 @@ import { expect, fn, userEvent, within } from "storybook/test";
 import { DEFAULT_CATEGORY_SET } from "../../../contracts/category-set.js";
 import { DEFAULT_MESSAGE_SURFACING_SETTINGS } from "../../../contracts/message-surfacing.js";
 import { Utf8Bytes } from "../../../contracts/tool-wire.js";
+import { connectedSocket, failRpc } from "../../stories/sockets.js";
 import { expandTurn, showTurnStop } from "../../stories/turn-controls.js";
 import { turnFixtureMessages } from "../../stories/turn-fixtures.js";
 import { setupTurnStory } from "../../stories/turn-setup.js";
@@ -353,11 +354,20 @@ const [truncated = EMPTY_TURN] = segmentTurns(truncatedMessages, false);
 const [truncatedSegment = EMPTY_SEGMENT] = truncated.segments;
 
 /**
- * Expanding a previewed output loads the rest at once. Stories have no project
- * to load it from, so this shows the failure and its retry in the log row.
+ * Expanding a previewed output loads the rest at once. The shown session's
+ * project now names where to load it from (m379.5), so the read fails here to
+ * show the failure and its retry in the log row.
  */
 export const PreviewedOutputRetry: Story = {
 	args: { turn: truncated, segment: truncatedSegment, final: true },
+	beforeEach: () => {
+		const restoreSocket = connectedSocket();
+		const restoreRpc = failRpc("GetToolDetails");
+		return () => {
+			restoreRpc();
+			restoreSocket();
+		};
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		const toggle = canvas.getByRole("button", {
