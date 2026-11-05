@@ -1,12 +1,15 @@
-import { Effect, Layer, Schema, Semaphore, Stream } from "effect";
+import { Effect, Layer, Option, Schema, Semaphore, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { SessionWorkspaceSchema } from "../../../contracts/session-workspace.js";
 import type { StoredEvent } from "../../../contracts/stored-event.js";
 import { realWorkspacePath } from "../../../git/worktrees.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
 import {
-	EventStoreEffectTag,
+	makeCommitAndSignal,
+	makeUnboundCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
+import {
 	EventStoreError,
+	UnboundEventStoreEffectTag,
 } from "../../../persistence/effect/event-store-effect.js";
 import { announceSidebar } from "../../../persistence/effect/sidebar-projection.js";
 import {
@@ -19,8 +22,10 @@ import {
 	collectWorkspaceHintPaths,
 	resolveWorkspaceHint,
 } from "../../../session/workspace-hint.js";
-import { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
-import { ConfigTag } from "./services.js";
+import {
+	getEntry,
+	ProjectRegistryTag,
+} from "../../daemon/Services/project-registry-service.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { SessionWorkspaceTag } from "./session-workspace.js";
 import { SessionWorkspaceHintStateTag } from "./session-workspace-hint-state.js";
@@ -62,22 +67,28 @@ const decodeWorkspace = Schema.decodeUnknownSync(
 	Schema.fromJsonString(SessionWorkspaceSchema),
 );
 
-/** Observe live turn ends; projection and replay only fold the recorded result. */
+/** One daemon reactor for every project, on the daemon's session event bus.
+ *  Observe live turn ends; projection and replay only fold the recorded result. */
 export const SessionWorkspaceHintReactorLive = Layer.effectDiscard(
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		const bus = yield* SessionEventBusTag;
 		const workspace = yield* SessionWorkspaceTag;
-		const config = yield* ConfigTag;
-		const { projectId } = yield* PersistenceProjectTag;
-		const store = yield* EventStoreEffectTag;
-		const commit = yield* makeCommitAndSignal;
+		const registry = yield* ProjectRegistryTag;
+		const store = yield* UnboundEventStoreEffectTag;
+		const commit = yield* makeUnboundCommitAndSignal;
 		const events = yield* bus.subscribe();
 		const observations = yield* Semaphore.make(1);
 		const observedTurns = new Map<string, number>();
 
 		const observeTurn = (end: StoredEvent) =>
 			Effect.gen(function* () {
+				const entry = yield* getEntry(end.projectId).pipe(
+					Effect.provideService(ProjectRegistryTag, registry),
+				);
+				const projectDir = Option.getOrUndefined(entry)?.project.folders[0];
+				// A removed project's sessions stay as they are.
+				if (projectDir === undefined) return;
 				const [{ previous = 0 } = {}] = yield* sql<{ previous: number }>`
 					SELECT COALESCE(MAX(sequence), 0) AS previous FROM events
 					WHERE session_id = ${end.sessionId} AND sequence < ${end.sequence}
@@ -106,8 +117,7 @@ export const SessionWorkspaceHintReactorLive = Layer.effectDiscard(
 						? { ...decoded, cause: decoded.cause }
 						: undefined;
 				const directory =
-					recorded?.path ??
-					effectiveWorkingDirectory(config.projectDir, recorded);
+					recorded?.path ?? effectiveWorkingDirectory(projectDir, recorded);
 				const rows = yield* sql<StoredEventRow>`
 					SELECT project_id, sequence, event_id, session_id, stream_version,
 						type, data, metadata, provider, created_at FROM events
@@ -128,8 +138,8 @@ export const SessionWorkspaceHintReactorLive = Layer.effectDiscard(
 					workspace.resolve,
 				);
 				if (path === undefined) return;
-				const main = yield* realWorkspacePath(config.projectDir).pipe(
-					Effect.orElseSucceed(() => config.projectDir),
+				const main = yield* realWorkspacePath(projectDir).pipe(
+					Effect.orElseSucceed(() => projectDir),
 				);
 				yield* commit.write((project) =>
 					Effect.gen(function* () {
@@ -139,27 +149,28 @@ export const SessionWorkspaceHintReactorLive = Layer.effectDiscard(
 						}>`SELECT workspace, workspace_hint FROM sessions WHERE id = ${end.sessionId}`;
 						if (!row) return;
 						const current = effectiveWorkingDirectory(
-							config.projectDir,
+							projectDir,
 							row.workspace ? decodeWorkspace(row.workspace) : undefined,
 						);
 						// A user can accept/move during resolution. Do not restore a matching hint.
 						const hint =
-							path === (current === config.projectDir ? main : current)
-								? null
-								: path;
+							path === (current === projectDir ? main : current) ? null : path;
 						if (row.workspace_hint === hint) return;
-						const stored = yield* store.append({
-							eventId: `workspace-hint:${end.eventId}`,
-							sessionId: end.sessionId,
-							type: "session.workspace_hint_changed",
-							data: { path: hint },
-							metadata: {
-								causationEventId: end.eventId,
-								source: "workspace-hint",
+						const stored = yield* store.append(
+							{
+								eventId: `workspace-hint:${end.eventId}`,
+								sessionId: end.sessionId,
+								type: "session.workspace_hint_changed",
+								data: { path: hint },
+								metadata: {
+									causationEventId: end.eventId,
+									source: "workspace-hint",
+								},
+								provider: end.provider,
+								createdAt: end.createdAt,
 							},
-							provider: end.provider,
-							createdAt: end.createdAt,
-						});
+							end.projectId,
+						);
 						yield* project([stored]);
 					}),
 				);
@@ -167,7 +178,6 @@ export const SessionWorkspaceHintReactorLive = Layer.effectDiscard(
 
 		yield* Effect.forkScoped(
 			Stream.runForEach(events, (event) => {
-				if (event.projectId !== projectId) return Effect.void;
 				if (
 					event.type === "turn.completed" ||
 					event.type === "turn.error" ||

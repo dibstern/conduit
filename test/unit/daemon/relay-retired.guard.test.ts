@@ -126,14 +126,19 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeEventRetentionSchedulerLive",
 			"makeStatusPollerCoreLive",
 			"makeStatusPollerCore",
+			"GoalStuckStopReactorLive",
+			"SessionWorkspaceHintReactorLive",
 		]);
 		expect(tally(server, named(services))).toEqual(
 			new Map([
 				["src/lib/domain/persistence/Services/port-watcher.ts", 1],
 				["src/lib/domain/persistence/Services/run-ledger-scheduler.ts", 1],
 				["src/lib/domain/persistence/Services/event-retention-scheduler.ts", 1],
+				// One reactor for every project, on the daemon's one session event bus.
+				["src/lib/domain/relay/Services/goal-stuck-stop.ts", 1],
+				["src/lib/domain/relay/Services/session-workspace-hint.ts", 1],
 				// Each one's import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 8],
+				[`${daemon}/Layers/daemon-layers.ts`, 12],
 				// A store opened without the daemon schedules its own project's retention.
 				["src/lib/persistence/effect/live.ts", 2],
 				// relay: a standalone relay's own alarm scheduler.

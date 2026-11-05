@@ -70,6 +70,7 @@ import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledge
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
 import { makeStatusPollerCoreLive } from "../../relay/Layers/status-poller-layer.js";
 import { AlertsLive } from "../../relay/Services/alerts.js";
+import { GoalStuckStopReactorLive } from "../../relay/Services/goal-stuck-stop.js";
 import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
@@ -79,6 +80,7 @@ import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
 import { DaemonSessionSetupLive } from "../../relay/Services/session-setup.js";
+import { SessionWorkspaceHintReactorLive } from "../../relay/Services/session-workspace-hint.js";
 import { AuthManagerFromConfigLive } from "../../server/Layers/auth-middleware.js";
 import {
 	DaemonHttpRequestHandlerTag,
@@ -1159,9 +1161,26 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// Tier 5: Scoped fiber Layers (need registries + config)
 	// Side-effect-only Layers (scopedDiscard) that fork background fibers.
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
+	// One goal-stuck and one workspace-hint reactor for every project (82tn.16).
+	const reactors = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			return Layer.merge(
+				GoalStuckStopReactorLive,
+				SessionWorkspaceHintReactorLive,
+			).pipe(
+				Layer.provide(
+					makePersistenceDaemonLayer().pipe(
+						Layer.provideMerge(Layer.succeedContext(store)),
+					),
+				),
+			);
+		}),
+	);
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
 		AskAlertsLive,
+		reactors,
 		AutoSettleLive(),
 		WorktreeCleanupLive(),
 		WebSocketRoutingLive,

@@ -98,7 +98,6 @@ import {
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
 import { DraftPreWarmOrOwn } from "../domain/relay/Services/draft-prewarm.js";
-import { GoalStuckStopReactorLive } from "../domain/relay/Services/goal-stuck-stop.js";
 import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
 import { InputDraftsTag } from "../domain/relay/Services/input-drafts.js";
@@ -174,7 +173,6 @@ import {
 	StatusPollerCoreTag,
 } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
-import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
 import { SSEStreamLive } from "../domain/relay/Services/sse-stream-service.js";
 import {
@@ -1153,17 +1151,7 @@ export function createProjectRelayLayers({
 	const fullLayer = Layer.provideMerge(
 		Layer.provideMerge(
 			RpcSubscriptionScopeLive,
-			Layer.provideMerge(
-				Layer.mergeAll(
-					wiringLayers,
-					inboxLayer,
-					SessionWorkspaceHintReactorLive,
-					GoalStuckStopReactorLive.pipe(
-						Layer.provide(Layer.merge(inboxLayer, alertLedgerLayer)),
-					),
-				),
-				fullBaseLayers,
-			),
+			Layer.provideMerge(Layer.merge(wiringLayers, inboxLayer), fullBaseLayers),
 		),
 		config.tracer === undefined
 			? Layer.empty
