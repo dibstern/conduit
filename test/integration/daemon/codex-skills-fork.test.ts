@@ -207,10 +207,13 @@ describe("Codex skills and digest forks through the daemon and detached runners"
 
 	async function completed(fixture: ProcessHarness, id: string, count: number) {
 		await vi.waitFor(
-			() =>
+			() => {
 				expect(snapshot(fixture, id).turns.map(({ state }) => state)).toEqual(
 					Array.from({ length: count }, () => "completed"),
-				),
+				);
+				// The run-end file capture lands after the turn completes (f02e9.8).
+				expect(fixture.uncapturedRuns(id)).toEqual([]);
+			},
 			{ timeout: TIMEOUT },
 		);
 	}
