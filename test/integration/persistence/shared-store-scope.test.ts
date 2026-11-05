@@ -836,6 +836,7 @@ describe("shared-store relay project scope", () => {
 			cancel: unused,
 			sendNow: unused,
 			steerDeclined: unused,
+			landHeadMove: unused,
 			start: Effect.void,
 		};
 		const localPty: LocalPtyServiceTag["Service"] = {
@@ -1191,6 +1192,7 @@ describe("shared-store relay project scope", () => {
 						cancel: unexpected,
 						sendNow: unexpected,
 						steerDeclined: unexpected,
+						landHeadMove: unexpected,
 					}),
 					Effect.provide(AlertsLive),
 					Effect.provide(makeOverridesStateLive()),

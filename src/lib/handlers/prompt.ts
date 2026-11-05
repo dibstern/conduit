@@ -4,7 +4,11 @@ import {
 	AttachmentValidationError,
 	validateAttachmentDataUrls,
 } from "../attachment-data-url.js";
-import type { InputDelivery, SteerBlocker } from "../contracts/stored-event.js";
+import type {
+	InputDelivery,
+	InputRequest,
+	SteerBlocker,
+} from "../contracts/stored-event.js";
 import type { InputDraftKey } from "../contracts/ws-rpc.js";
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { AgentServiceTag } from "../domain/relay/Services/agent-service.js";
@@ -46,6 +50,27 @@ export type SendMessageToSessionResult = {
 	/** Why the steer was refused; nothing was admitted. */
 	| { readonly refused: SteerBlocker; readonly handedOff?: never }
 );
+
+/** A send's request with the session's model, agent and settings (also a head move's resend). */
+export const sessionInputRequest = (sessionId: string, text: string) =>
+	Effect.gen(function* () {
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		const agent = yield* (yield* AgentServiceTag).getActiveAgent(sessionId);
+		return {
+			text,
+			...(session?.model_id && session.model_provider
+				? {
+						model: {
+							modelID: session.model_id,
+							providerID: session.model_provider,
+						},
+					}
+				: {}),
+			...(agent ? { agent } : {}),
+			variant: session?.variant ?? "",
+			contextWindow: session?.context_window ?? "",
+		} satisfies InputRequest;
+	});
 
 export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 	Effect.gen(function* () {
@@ -136,17 +161,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 		yield* sessionManagerService.recordMessageActivity(activeId);
 
 		// The inbox records the session pick; dispatch re-reads the durable pick.
-		const agentService = yield* AgentServiceTag;
-		const sessionAgent = yield* agentService.getActiveAgent(activeId);
-		const session =
-			activeId === originalActiveId
-				? originalSession
-				: yield* read.getSession(activeId);
-		const model =
-			session?.model_id && session.model_provider
-				? { modelID: session.model_id, providerID: session.model_provider }
-				: undefined;
-
+		const request = yield* sessionInputRequest(activeId, text);
 		const inbox = yield* SessionInboxTag;
 		const submitted = yield* inbox.submit({
 			clientId,
@@ -158,14 +173,7 @@ export const sendMessageToSession = (input: SendMessageToSessionInput) =>
 				text: input.draftText ?? text,
 				attachmentIds: input.attachmentIds ?? [],
 			},
-			request: {
-				text,
-				...(imageList ? { images: imageList } : {}),
-				...(model ? { model } : {}),
-				...(sessionAgent ? { agent: sessionAgent } : {}),
-				variant: session?.variant ?? "",
-				contextWindow: session?.context_window ?? "",
-			},
+			request: { ...request, ...(imageList ? { images: imageList } : {}) },
 		});
 		// A refused steer admitted nothing: the text stays in the input box.
 		if ("refused" in submitted)
