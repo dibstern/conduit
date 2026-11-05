@@ -1,5 +1,5 @@
 <!--
-  Rewind selection and confirmation, or the pending rewind notice at the composer.
+  Rewind selection and confirmation. A rewind lands at once and the Head Log undoes it (82tn.51).
 -->
 <script lang="ts">
 	import { selection } from "../../stores/selection.svelte.js";
@@ -11,7 +11,7 @@
 		selectRewindMessage,
 		showToast,
 	} from "../../stores/ui.svelte.js";
-	import { chatState, currentChat } from "../../stores/chat.svelte.js";
+	import { chatState } from "../../stores/chat.svelte.js";
 	import { getAvailableInstances } from "../../stores/discovery.svelte.js";
 	import { getDriverTraits } from "../../stores/instance.svelte.js";
 	import { findSession, sessionState } from "../../stores/session.svelte.js";
@@ -20,24 +20,17 @@
 	import Surface from "../ui/Surface.svelte";
 
 	let {
-		pendingOnly = false,
 		onRewind,
 	}: {
-		pendingOnly?: boolean;
 		onRewind?: (uuid: string, mode: string) => void;
 	} = $props();
 
-	let undoing = $state(false);
-
-	const pendingMessageId = $derived(
-		currentChat().transcript?.pendingRewindMessageId ?? null,
-	);
 	const restoresFiles = $derived(
-		!pendingOnly && sessionState.currentId !== null
+		sessionState.currentId !== null
 			? getDriverTraits(getAvailableInstances().find((instance) => instance.id === findSession(sessionState.currentId ?? "")?.accountId)?.driver)?.supportsFileRewind ?? true
 			: true,
 	);
-	const showBanner = $derived(!pendingOnly && uiState.rewindActive);
+	const showBanner = $derived(uiState.rewindActive);
 	const showModal = $derived(
 		showBanner && uiState.rewindSelectedUuid !== null,
 	);
@@ -110,21 +103,6 @@
 		exitRewindMode();
 	}
 
-	async function handleUndo(): Promise<void> {
-		const sessionId = sessionState.currentId;
-		const projectSlug = selection.scope?.project;
-		if (!pendingMessageId || !sessionId || !projectSlug || undoing) return;
-		undoing = true;
-		try {
-			await rpc("UndoRewind", { sessionId });
-		} catch (error) {
-			if (sessionState.currentId === sessionId && selection.scope?.project === projectSlug)
-				toastFailure("Could not undo the rewind.", "warn")(error);
-		} finally {
-			undoing = false;
-		}
-	}
-
 	function handleKeydown(e: KeyboardEvent): void {
 		if (e.key === "Escape") {
 			handleExit();
@@ -153,68 +131,48 @@
 	</div>
 {/if}
 
-{#if pendingOnly && pendingMessageId}
-	<div
-		class="rewind-pending flex shrink-0 items-center justify-between gap-3 border-t border-border-subtle bg-accent-bg px-4 py-2.5 text-sm text-accent"
-		data-testid="rewind-pending"
+<Dialog open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
+	<Surface
+		variant="raised"
+		radius="lg"
+		elevation="modal"
+		id="rewind-modal"
+		class="modal-dialog py-5 px-6 max-w-80 w-[90vw]"
 	>
-		<span role="status">Rewound. Sending your next message makes it permanent.</span>
-		<Button
-			variant="ghost-accent"
-			size="sm"
-			loading={undoing}
-			onclick={handleUndo}
-			data-testid="undo-rewind"
-		>
-			Undo
-		</Button>
-	</div>
-{/if}
+		<h3 id="rewind-modal-title" class="text-sm font-semibold text-text mb-4">
+			Rewind to this point?
+		</h3>
 
-{#if !pendingOnly}
-	<Dialog open={showModal} onclose={handleCancel} labelledBy="rewind-modal-title">
-		<Surface
-			variant="raised"
-			radius="lg"
-			elevation="modal"
-			id="rewind-modal"
-			class="modal-dialog py-5 px-6 max-w-80 w-[90vw]"
-		>
-			<h3 id="rewind-modal-title" class="text-sm font-semibold text-text mb-4">
-				Rewind to this point?
-			</h3>
+		<p class="mb-3 text-sm text-text-secondary">
+			This message and everything after it will be removed. You can undo it later.
+		</p>
+		<p class="mb-5 text-sm text-text-secondary">
+			{filesPruned
+				? "Files from this point were pruned."
+				: restoresFiles
+					? "Files are restored to this point."
+					: "Files are not restored."}
+		</p>
 
-			<p class="mb-3 text-sm text-text-secondary">
-				This message and everything after it will be removed. You can undo until you send your next message.
-			</p>
-			<p class="mb-5 text-sm text-text-secondary">
-				{filesPruned
-					? "Files from this point were pruned."
-					: restoresFiles
-						? "Files are restored to this point."
-						: "Files are not restored."}
-			</p>
-
-			<!-- Action buttons -->
-			<div class="flex gap-2 justify-end">
-				<Button
-					variant="secondary"
-					tone="muted"
-					size="content"
-					class="rounded-lg py-1.5 px-4 text-base"
-					onclick={handleCancel}
-				>
-					Cancel
-				</Button>
-				<Button
-					variant="primary"
-					size="content"
-					class="rounded-lg py-1.5 px-4 text-base font-medium"
-					onclick={handleConfirm}
-				>
-					Rewind
-				</Button>
-			</div>
-		</Surface>
-	</Dialog>
-{/if}
+		<!-- Action buttons -->
+		<div class="flex gap-2 justify-end">
+			<Button
+				variant="secondary"
+				tone="muted"
+				size="content"
+				class="rounded-lg py-1.5 px-4 text-base"
+				onclick={handleCancel}
+			>
+				Cancel
+			</Button>
+			<Button
+				variant="primary"
+				size="content"
+				class="rounded-lg py-1.5 px-4 text-base font-medium"
+				onclick={handleConfirm}
+			>
+				Rewind
+			</Button>
+		</div>
+	</Surface>
+</Dialog>

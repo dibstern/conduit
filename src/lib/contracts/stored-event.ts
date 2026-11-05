@@ -901,13 +901,16 @@ export const CanonicalEvents = {
 			title: Schema.String,
 		}),
 	),
-	"session.rewound": live(
+	// 82tn.51: a rewind lands at once as a head move; migration 0096 turned one left pending into one.
+	"session.rewound": retired(
+		"A rewind is a head move that lands at once",
 		Schema.Struct({
 			messageId: Schema.String,
 			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		}),
 	),
-	"session.rewind_undone": live(
+	"session.rewind_undone": retired(
+		"An undo is a head move from the Head Log",
 		Schema.Struct({
 			previousMessageId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 		}),

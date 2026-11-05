@@ -64,40 +64,4 @@ export const headMoveHandlers: StepHandler[] = [
 			).toHaveCount(0);
 		},
 	},
-	{
-		name: "the session carries an undoable rewind",
-		match: /^the session has a rewind to undo$/,
-		run: async ({ world }) => {
-			requireRpcControl(world.page).sendChunk(
-				"SubscribeSessionDetail",
-				[
-					{
-						_tag: "upsert",
-						item: { _tag: "rewind", messageId: "rewound-message" },
-						sequence: 1,
-					},
-				],
-				currentSessionId(world.page),
-			);
-			await expect(world.page.getByTestId("undo-rewind")).toBeVisible();
-		},
-	},
-	{
-		name: "undo the rewind",
-		match: /^I undo the rewind$/,
-		run: async ({ world }) => {
-			await world.page.getByTestId("undo-rewind").click();
-		},
-	},
-	{
-		name: "the undo toast says why it was refused",
-		match: /^the undo is refused with (.+)$/,
-		run: async ({ world, match }) => {
-			const toast = world.page
-				.getByTestId("toast")
-				.filter({ hasText: "Could not undo the rewind." });
-			await expect(toast).toContainText(match[1] ?? "");
-			await expect(world.page.getByTestId("undo-rewind")).toBeEnabled();
-		},
-	},
 ];

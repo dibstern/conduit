@@ -139,7 +139,6 @@ export interface SessionCommandFacts {
 	readonly inputsQueued: boolean;
 	/** Limit Recovery: an open cut-off or a scheduled continuation. */
 	readonly limitRecovery: boolean;
-	readonly rewindPending: boolean;
 	/** A head move started and not moved (ADR-0014). */
 	readonly headMoving: boolean;
 }
@@ -161,16 +160,12 @@ export const admitSessionCommand = (
 			return undefined;
 		// A switch starts its continuation turn on the next account, so only a Run refuses it.
 		case "provider_switch":
-			if (facts.rewindPending) return "rewind_pending";
 			return facts.runActive && !request.policy ? "run_active" : undefined;
 		case "head_move":
 			if (facts.runActive) return "run_active";
 			if (facts.interactionPending) return "interaction_pending";
 			if (facts.inputsQueued) return "inputs_queued";
-			// A pending rewind already cut the limit's request off the head.
-			return facts.limitRecovery && !facts.rewindPending
-				? "limit_recovery"
-				: undefined;
+			return facts.limitRecovery ? "limit_recovery" : undefined;
 	}
 };
 
@@ -193,7 +188,6 @@ export const readSessionCommandFacts = (sessionId: string) =>
 			inputs_queued: number;
 			prompt_open: number;
 			limited: number | null;
-			rewind_pending: number | null;
 			head_moving: number;
 		}>`SELECT
 			EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId}
@@ -203,7 +197,6 @@ export const readSessionCommandFacts = (sessionId: string) =>
 			(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 				OR json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL
 				FROM sessions WHERE id = ${sessionId}) AS limited,
-			(SELECT pending_rewind_message_id IS NOT NULL FROM sessions WHERE id = ${sessionId}) AS rewind_pending,
 			${headMoveInProgress(sql, sessionId)} AS head_moving`;
 		return {
 			runActive: view?.active !== undefined,
@@ -215,7 +208,6 @@ export const readSessionCommandFacts = (sessionId: string) =>
 					false),
 			inputsQueued: row?.inputs_queued === 1,
 			limitRecovery: row?.limited === 1,
-			rewindPending: row?.rewind_pending === 1,
 			headMoving: row?.head_moving === 1,
 		} satisfies SessionCommandFacts;
 	});
@@ -270,54 +262,18 @@ export const finishHeadMove = (sessionId: string, move: HeadMoveStart) =>
 			WHERE session_id = ${sessionId} AND type = 'head.moved'
 			AND json_extract(data, '$.moveId') = ${move.moveId} LIMIT 1`;
 		if (done) return;
-		// 82tn.51: the move names its target, and its moved alone moves the Head.
-		if ("to" in move)
-			return yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
-				canonicalEvent(
-					"head.moved",
-					sessionId,
-					{ moveId: move.moveId, to: move.to ?? null },
-					{ provider: row.provider },
-				),
-			);
-		const pending = row.pending_rewind_message_id ?? null;
-		const target =
-			move.kind === "rewind" && move.messageId !== undefined
-				? (yield* sql<{ id: string }>`SELECT id FROM messages
-					WHERE session_id = ${sessionId} AND id = ${move.messageId}`)[0]?.id
-				: undefined;
-		const provider = { provider: row.provider };
-		const landed =
-			move.kind === "undo"
-				? pending === null
-					? []
-					: [
-							canonicalEvent(
-								"session.rewind_undone",
-								sessionId,
-								{ previousMessageId: pending },
-								provider,
-							),
-						]
-				: target === undefined || target === pending
-					? []
-					: [
-							canonicalEvent(
-								"session.rewound",
-								sessionId,
-								{ messageId: target, previousMessageId: pending },
-								provider,
-							),
-						];
-		yield* (yield* ClaudeEventPersistEffectTag).persistEvents([
-			...landed,
+		// 82tn.51: the move names its target, and its moved alone moves the Head. A move journaled
+		// before targets existed has none, so it lands where the Head already is.
+		yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
 			canonicalEvent(
 				"head.moved",
 				sessionId,
-				{ moveId: move.moveId },
-				provider,
+				"to" in move
+					? { moveId: move.moveId, to: move.to ?? null }
+					: { moveId: move.moveId },
+				{ provider: row.provider },
 			),
-		]);
+		);
 	});
 
 /** The resend a move admits after it lands: one input, whoever admits it (82tn.51). */
@@ -1402,7 +1358,6 @@ const forkSessionInWorkspace = (
 				thread &&
 				thread.firstSequence <= forkPointSequence &&
 				forkPointSequence <= thread.deliveredThrough &&
-				parent.pending_rewind_message_id == null &&
 				lastRewindCommitSequence <= thread.deliveredThrough
 					? thread
 					: undefined;

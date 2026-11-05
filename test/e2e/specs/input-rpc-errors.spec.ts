@@ -367,36 +367,8 @@ for (const action of ["remove", "resume"] as const) {
 	});
 }
 
-test("undo rewind shows the server refusal and leaves undo available", async ({
-	page,
-	harness,
-}, testInfo) => {
-	const { rpc } = await openChat(page, harness.relayBaseUrl, {
-		UndoRewind: () => {
-			throw new WsRpcError({ message: "The rewind point expired." });
-		},
-	});
-	rpc.sendChunk(
-		"SubscribeSessionDetail",
-		[
-			{
-				_tag: "upsert",
-				item: { _tag: "rewind", messageId: "rewound-message" },
-				sequence: 1,
-			},
-		],
-		"sess-mockup-001",
-	);
-	await page.getByTestId("undo-rewind").click();
-	const toast = page
-		.getByTestId("toast")
-		.filter({ hasText: "Could not undo the rewind." });
-	await expect(toast).toContainText("Could not undo the rewind.");
-	await expect(toast).toContainText("The rewind point expired.");
-	await expect(page.getByTestId("undo-rewind")).toBeEnabled();
-	await attachScreen(page, testInfo);
-});
-
+// 82tn.51: undo moved from the pending rewind banner to the Head Log, whose own scenarios
+// cover a refused undo.
 for (const withReason of [true, false]) {
 	test(`tool details refusal ${withReason ? "shows the server reason" : "uses the fallback"} and permits retry`, async ({
 		page,

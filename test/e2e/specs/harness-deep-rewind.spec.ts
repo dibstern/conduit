@@ -174,11 +174,9 @@ test("deep rewind pages every older message once and undo restores the transcrip
 						messageId: messageId(cut),
 					}),
 				);
-				await expect(page.getByTestId("rewind-pending")).toBeVisible({
-					timeout: 30_000,
-				});
+				// 82tn.51: the rewind lands at once; no pending notice shows.
 				await expect
-					.poll(ids)
+					.poll(ids, { timeout: 30_000 })
 					.toEqual(allIds.slice(Math.max(0, cut - 50), cut));
 				scenario["rewoundPage"] = await ids();
 				// Exact ids assert every row at/after the cut is absent, and the
@@ -207,10 +205,9 @@ test("deep rewind pages every older message once and undo restores the transcrip
 						sessionId: SESSION,
 					}),
 				);
-				await expect(page.getByTestId("rewind-pending")).toBeHidden({
+				await expect(app.messages).toContainText("Message 199.", {
 					timeout: 30_000,
 				});
-				await expect(app.messages).toContainText("Message 199.");
 				await scrollToAll(allIds);
 				scenario["afterUndo"] = await ids();
 				expect(pageErrors).toEqual([]);

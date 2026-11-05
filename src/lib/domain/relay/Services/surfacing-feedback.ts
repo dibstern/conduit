@@ -33,10 +33,7 @@ export const readSessionCategoryCounts = (
 		}>`SELECT mp.surfacing_probabilities, sm.level, sm.category, sm.reason, sm.direction
 			FROM message_parts mp JOIN messages m ON m.id = mp.message_id
 			LEFT JOIN surfacing_marks sm ON sm.session_id = m.session_id AND sm.part_id = mp.id AND sm.message_id = m.id
-			WHERE m.session_id = ${sessionId} AND ${surfacingTextEligibility(sql)}
-			AND NOT EXISTS (
-				SELECT 1 FROM sessions s JOIN messages cut ON cut.id = s.pending_rewind_message_id AND cut.session_id = s.id
-				WHERE s.id = m.session_id AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id))`;
+			WHERE m.session_id = ${sessionId} AND ${surfacingTextEligibility(sql)}`;
 		const verdicts = yield* Schema.decodeUnknownEffect(
 			Schema.Array(
 				Schema.Struct({

@@ -539,10 +539,6 @@ export const SessionDetailItemSchema = Schema.Union([
 		part: HistoryMessagePartSchema,
 	}),
 	Schema.Struct({
-		_tag: Schema.Literal("rewind"),
-		messageId: Schema.NullOr(Schema.String),
-	}),
-	Schema.Struct({
 		_tag: Schema.Literal("pendingInput"),
 		input: Schema.Struct({
 			inputId: Schema.String,

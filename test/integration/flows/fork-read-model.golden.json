@@ -41,7 +41,6 @@
 				"claude_worktree_state": null,
 				"workspace_hint": null,
 				"workspace_hint_sequence": null,
-				"pending_rewind_message_id": null,
 				"project_id": "integration-test",
 				"forked_from": "SOURCE",
 				"archived_at": null,
@@ -49,7 +48,8 @@
 				"unarchived_at": null,
 				"last_user_message_at": null,
 				"goal_stuck": null,
-				"jev": null
+				"jev": null,
+				"diff_base": null
 			}
 		],
 		"turns": [
@@ -716,7 +716,6 @@
 				"claude_worktree_state": null,
 				"workspace_hint": null,
 				"workspace_hint_sequence": null,
-				"pending_rewind_message_id": null,
 				"project_id": "integration-test",
 				"forked_from": "SOURCE",
 				"archived_at": null,
@@ -724,7 +723,8 @@
 				"unarchived_at": null,
 				"last_user_message_at": null,
 				"goal_stuck": null,
-				"jev": null
+				"jev": null,
+				"diff_base": null
 			}
 		],
 		"turns": [
@@ -1007,7 +1007,6 @@
 				"claude_worktree_state": null,
 				"workspace_hint": null,
 				"workspace_hint_sequence": null,
-				"pending_rewind_message_id": null,
 				"project_id": "integration-test",
 				"forked_from": "SOURCE",
 				"archived_at": null,
@@ -1015,7 +1014,8 @@
 				"unarchived_at": null,
 				"last_user_message_at": null,
 				"goal_stuck": null,
-				"jev": null
+				"jev": null,
+				"diff_base": null
 			}
 		],
 		"turns": [

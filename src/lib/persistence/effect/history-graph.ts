@@ -3,8 +3,7 @@
  * session. `messages`, `message_parts` and `turns` hold exactly the head path, so their readers
  * never compute it; rows leaving the head path move to `history_off_head`, kept with their node.
  * Only projectors call this module: the Run Ledger arm builds a node at each Run end and moves
- * the Head to it, and the message projector moves it at a head move (82tn.51) and at the legacy
- * rewind, undo and commit.
+ * the Head to it, and the message projector moves it at a head move (82tn.51).
  */
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
@@ -65,21 +64,15 @@ export const joinHeadWhileIdle = (
 					WHERE session_id = ${sessionId} AND active_run_id IS NOT NULL)`;
 	});
 
-/**
- * The Head is the node of the newest tagged row on the head path: before `cutId` while a rewind
- * to it is pending, else the newest. A rewind to a node's first row (a steer snaps there) lands
- * on its parent, a cut at a reply stays on the reply's node, and an undo lands back where it was.
- */
-export const refreshHistoryHead = (sessionId: string, cutId: string | null) =>
+/** The Head is the node of the newest tagged row on the head path (82tn.51: no pending cut). */
+export const refreshHistoryHead = (sessionId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`INSERT INTO history_heads (session_id, node_id)
 			SELECT ${sessionId}, (
-				SELECT m.history_node_id FROM messages m
-				LEFT JOIN messages cut ON cut.id = ${cutId} AND cut.session_id = m.session_id
-				WHERE m.session_id = ${sessionId} AND m.history_node_id IS NOT NULL
-					AND (cut.id IS NULL OR (m.ordinal, m.created_at, m.id) < (cut.ordinal, cut.created_at, cut.id))
-				ORDER BY m.ordinal DESC, m.created_at DESC, m.id DESC LIMIT 1)
+				SELECT history_node_id FROM messages
+				WHERE session_id = ${sessionId} AND history_node_id IS NOT NULL
+				ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1)
 			WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})
 			ON CONFLICT (session_id) DO UPDATE SET node_id = excluded.node_id`;
 	});

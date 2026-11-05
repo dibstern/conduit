@@ -22,10 +22,7 @@ import {
 } from "../../../src/lib/contracts/ws-rpc.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { SessionEventBusTag } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import {
-	makeSurfacingFeedback,
-	readSessionCategoryCounts,
-} from "../../../src/lib/domain/relay/Services/surfacing-feedback.js";
+import { makeSurfacingFeedback } from "../../../src/lib/domain/relay/Services/surfacing-feedback.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -493,45 +490,6 @@ it("counts the whole session through daemon RPC without changing its verdicts", 
 	} finally {
 		await reopened.dispose();
 		rmSync(directory, { recursive: true, force: true });
-	}
-});
-
-// Failure mode: pending rewinds hide messages from the transcript while counts
-// still include them, especially after the provider reconciles their ordering.
-it("follows current transcript ordering around a pending rewind", async () => {
-	const runtime = ManagedRuntime.make(
-		makePersistenceEffectLayer(":memory:", "test-project"),
-	);
-	try {
-		await runtime.runPromise(
-			Effect.gen(function* () {
-				yield* seed;
-				const sql = yield* SqlClient.SqlClient;
-				yield* sql`UPDATE messages SET created_at = 3 WHERE id = 'm'`;
-				yield* sql`UPDATE sessions SET pending_rewind_message_id = 'user' WHERE id = 's'`;
-				expect(
-					(yield* readSessionCategoryCounts("s", DEFAULT_CATEGORY_SET))[
-						"finding"
-					],
-				).toBe(0);
-				yield* sql`UPDATE messages SET created_at = 1 WHERE id = 'm'`;
-				expect(
-					(yield* readSessionCategoryCounts("s", DEFAULT_CATEGORY_SET))[
-						"finding"
-					],
-				).toBe(1);
-				// Equal times: the prompt written first hides "m" written after it,
-				// though "m" sorts first by id (conduit-test-lczrn.1).
-				yield* sql`UPDATE messages SET ordinal = CASE id WHEN 'user' THEN 1 WHEN 'm' THEN 2 ELSE 3 END WHERE session_id = 's'`;
-				expect(
-					(yield* readSessionCategoryCounts("s", DEFAULT_CATEGORY_SET))[
-						"finding"
-					],
-				).toBe(0);
-			}),
-		);
-	} finally {
-		await runtime.dispose();
 	}
 });
 

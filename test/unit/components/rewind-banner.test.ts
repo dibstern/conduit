@@ -144,44 +144,11 @@ describe("RewindBanner", () => {
 
 		expect(
 			getByText(
-				"This message and everything after it will be removed. You can undo until you send your next message.",
+				// 82tn.51: a rewind lands at once and stays undoable from the Head Log.
+				"This message and everything after it will be removed. You can undo it later.",
 			),
 		).toBeTruthy();
 		expect(getByText("Files are restored to this point.")).toBeTruthy();
-	});
-
-	it("explains that the next send makes an event-delivered pending rewind permanent", async () => {
-		const slot = getOrCreateSessionMessages("session-1");
-		slot.transcript = applyTranscriptEnvelope(
-			{
-				project: "project-a",
-				rows: [],
-				pending: [],
-				hwm: null,
-				hasMore: false,
-				status: { _tag: "live" },
-				waiting: new Map(),
-				partOrder: new Map(),
-			},
-			{ _tag: "snapshot", sequence: 1, rows: [] },
-		);
-		const { getByRole, queryByRole } = render(RewindBanner, {
-			pendingOnly: true,
-		});
-		expect(queryByRole("status")).toBeNull();
-
-		slot.transcript = applyTranscriptEnvelope(slot.transcript, {
-			_tag: "upsert",
-			sequence: 2,
-			item: { _tag: "rewind", messageId: "provider-1" },
-		});
-
-		await waitFor(() =>
-			expect(getByRole("status").textContent).toBe(
-				"Rewound. Sending your next message makes it permanent.",
-			),
-		);
-		expect(getByRole("button", { name: "Undo" })).toBeTruthy();
 	});
 
 	it("confirms rewind through RPC for the active session", async () => {

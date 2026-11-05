@@ -11,6 +11,9 @@
 //    moves tells the provider the wrong cut.
 // 6, 7. a switch to another branch brings back other rows than that branch's own, lands mid-branch
 //    instead of at its tip, or cannot be undone; a branch whose rows are gone is offered or moved to.
+// 12-18. a rewind left pending by the build before is lost, comes back, is missing from the Head
+//    Log, is never told to Claude, splits its Run, or is landed twice; a pending cut at a message
+//    that is gone invents a move.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -223,7 +226,13 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 			await vi.waitFor(() => expect(openSends(fixture, sessionId)).toBe(0));
 		}
 		const target = await userMessage(browser, sessionId, "moves-cut");
-		return { fixture, browser, sessionId, target };
+		return {
+			fixture,
+			browser,
+			sessionId,
+			target,
+			instanceId: addedInstanceId,
+		};
 	};
 
 	// 1, 11.
@@ -530,6 +539,209 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		expect(after.head).toBe(siblings.at(-1)?.id);
 		// The two branches left behind keep their user message and reply each.
 		expect(after.kept).toBe(4);
+	});
+
+	// 12-18.
+	it("lands a rewind the build before left pending as a Head Log move, tells Claude at the next send, and lands it once", async () => {
+		const { fixture, browser, sessionId, target, instanceId } = await start(
+			"pending-upgrade",
+			0,
+		);
+		// A second session pends a cut at a reply, inside its Run; a third at a message that is gone.
+		const mid = await browser.createSession("Mid", instanceId);
+		await browser.followSession(mid);
+		for (const prompt of ["mid-kept", "mid-cut"]) {
+			await browser.send(mid, prompt);
+			// test-waits-allow polling: the native cursor publishes when the send command settles.
+			await vi.waitFor(() => expect(openSends(fixture, mid)).toBe(0));
+		}
+		const gone = await browser.createSession("Gone", instanceId);
+		const before = {
+			moves: await browser.history(sessionId),
+			mid: await browser.history(mid),
+			gone: await browser.history(gone),
+		};
+		const midReply = before.mid[3];
+		if (!midReply) throw new Error("Missing the mid-Run reply");
+		const pending = [
+			[sessionId, target.id],
+			[mid, midReply.id],
+			[gone, "gone-message"],
+		] as const;
+		await fixture.kill();
+		// The store as the build before left it: the column, each cut pending with its Head before
+		// the cut and its rewind event projected, and no record of the migration that retires it.
+		const db = new Database(fixture.daemonStorePath());
+		if (
+			!(
+				db.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]
+			).some(({ name }) => name === "pending_rewind_message_id")
+		)
+			db.exec("ALTER TABLE sessions ADD COLUMN pending_rewind_message_id TEXT");
+		const projected = (
+			db.prepare("SELECT MAX(sequence) AS n FROM events").get() as {
+				n: number;
+			}
+		).n;
+		for (const [id, cut] of pending) {
+			db.prepare(
+				"UPDATE sessions SET pending_rewind_message_id = ? WHERE id = ?",
+			).run(cut, id);
+			db.prepare(
+				`UPDATE history_heads SET node_id = (SELECT m.history_node_id FROM messages m
+					LEFT JOIN messages cut ON cut.id = ? AND cut.session_id = m.session_id
+					WHERE m.session_id = ? AND m.history_node_id IS NOT NULL
+						AND (cut.id IS NULL OR (m.ordinal, m.created_at, m.id) < (cut.ordinal, cut.created_at, cut.id))
+					ORDER BY m.ordinal DESC, m.created_at DESC, m.id DESC LIMIT 1)
+				WHERE session_id = ?`,
+			).run(cut, id, id);
+			db.prepare(
+				`INSERT INTO events (project_id, event_id, session_id, stream_version, type, data, metadata, provider, created_at)
+				SELECT project_id, ?, session_id, MAX(stream_version) + 1, 'session.rewound', ?, '{}', provider, MAX(created_at)
+				FROM events WHERE session_id = ?`,
+			).run(
+				`rewound-${id}`,
+				JSON.stringify({ messageId: cut, previousMessageId: null }),
+				id,
+			);
+		}
+		db.prepare(
+			"UPDATE projector_cursors SET last_applied_seq = (SELECT MAX(sequence) FROM events) WHERE last_applied_seq >= ?",
+		).run(projected);
+		db.prepare(
+			"DELETE FROM effect_sql_migrations WHERE name = 'pending_rewind_to_head_move'",
+		).run();
+		db.close();
+		await fixture.restart();
+		const reader = await fixture.connect();
+		await reader.followSessions();
+		const store = new Database(fixture.daemonStorePath(), { readonly: true });
+		const columns = (
+			store.prepare("PRAGMA table_info(sessions)").all() as { name: string }[]
+		).map(({ name }) => name);
+		const midDraft = (
+			store
+				.prepare(
+					"SELECT text FROM input_drafts WHERE draft_key = ? AND kind = 'session'",
+				)
+				.get(mid) as { text: string } | undefined
+		)?.text;
+		store.close();
+		const log = async (id: string) =>
+			(await Effect.runPromise(reader.rpc.GetHeadLog({ sessionId: id })))
+				.entries;
+		const upgraded = {
+			moves: await userTexts(reader, sessionId),
+			mid: await userTexts(reader, mid),
+			gone: await reader.history(gone),
+			movesLog: await log(sessionId),
+			midLog: await log(mid),
+			goneLog: await log(gone),
+			movesGraph: graph(fixture, sessionId),
+			midGraph: graph(fixture, mid),
+			midDraft,
+		};
+		proof = {
+			pending,
+			columns,
+			before: Object.fromEntries(
+				Object.entries(before).map(([key, rows]) => [
+					key,
+					rows.map(({ id, role }) => ({ id, role })),
+				]),
+			),
+			upgraded,
+		};
+		expect(columns).not.toContain("pending_rewind_message_id");
+		// 12, 13: the cut leaves the Head and is kept off it.
+		expect(upgraded.moves).toEqual(["moves-kept"]);
+		expect(upgraded.movesGraph.kept).toBe(2);
+		// 14: one landed rewind in the Head Log, at the pending cut.
+		expect(
+			upgraded.movesLog.map(({ kind, messageId, landed }) => ({
+				kind,
+				messageId,
+				landed,
+			})),
+		).toEqual([{ kind: "rewind", messageId: target.id, landed: true }]);
+		// 16: a cut at a reply moves before its Run, and the Run's prompt returns to the composer.
+		expect(upgraded.mid).toEqual(["mid-kept"]);
+		expect(upgraded.midDraft).toBe("mid-cut");
+		expect(upgraded.midLog).toMatchObject([
+			{ kind: "rewind", messageId: before.mid[2]?.id, landed: true },
+		]);
+		// 17: a cut at a message that is gone moves nothing.
+		expect(upgraded.goneLog).toEqual([]);
+		expect(upgraded.gone).toEqual(before.gone);
+
+		// 18: a second restart lands nothing again.
+		const journals = () => pending.map(([id]) => journal(fixture, id));
+		const landed = journals();
+		await fixture.kill();
+		await fixture.restart();
+		const again = await fixture.connect();
+		await again.followSessions();
+		const relanded = journals();
+		proof = { ...proof, landed, relanded };
+		expect(relanded).toEqual(landed);
+		for (const events of landed) {
+			expect(count(events, "head.moved")).toBe(
+				count(events, "head.move_started"),
+			);
+			expect(count(events, "head.moved")).toBeLessThanOrEqual(1);
+		}
+
+		// 16: the Run the mid-Run cut moved before comes back whole with an undo.
+		await move(again, mid, {
+			_tag: "undo",
+			moveId: upgraded.midLog[0]?.moveId ?? "",
+		});
+		const midUndone = await again.history(mid);
+		proof = {
+			...proof,
+			midUndone: midUndone.map(({ id, role }) => ({ id, role })),
+		};
+		expect(midUndone.map(({ id }) => id)).toEqual(
+			before.mid.map(({ id }) => id),
+		);
+
+		// 15: the next send tells Claude the cut: it resumes its own thread at the reply before it.
+		await again.followSession(sessionId);
+		await again.send(sessionId, "moves-after-upgrade");
+		// test-waits-allow polling: the reply lands after the send's receipt.
+		await vi.waitFor(
+			async () =>
+				expect(await userTexts(again, sessionId)).toEqual([
+					"moves-kept",
+					"moves-after-upgrade",
+				]),
+			{ timeout: 20_000 },
+		);
+		const queries = resumes(fixture);
+		const resumed = queries.at(-1);
+		const nativeFile = join(
+			fixture.root,
+			"A",
+			`conduit-test-transcript-${resumed?.thread}.ndjson`,
+		);
+		const resumedAt = (
+			existsSync(nativeFile) ? readFileSync(nativeFile, "utf8") : ""
+		)
+			.split("\n")
+			.filter(Boolean)
+			.map(
+				(line) =>
+					JSON.parse(line) as { uuid?: string; message?: { id?: string } },
+			)
+			.find(({ uuid }) => uuid === resumed?.at)?.message?.id;
+		proof = {
+			...proof,
+			queries,
+			resumedAt,
+			afterSend: journal(fixture, sessionId),
+		};
+		expect(resumed?.thread).toBe(queries[0]?.thread);
+		expect(resumedAt).toBe(before.moves[1]?.id);
 	});
 
 	// 6, 7.
