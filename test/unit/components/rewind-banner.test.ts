@@ -45,13 +45,21 @@ vi.mock(
 		getCurrentSearchParams: () => new URLSearchParams(),
 	}),
 );
+const filesSpy = vi.hoisted(() =>
+	vi.fn<typeof rpc<"GetHeadMoveFiles">>(() =>
+		Promise.resolve({ files: "available" as const }),
+	),
+);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	rpc: rpcSpy,
+	rpc: (
+		...[tag, input]: Parameters<typeof rpcSpy> | Parameters<typeof filesSpy>
+	) => (tag === "GetHeadMoveFiles" ? filesSpy(tag, input) : rpcSpy(tag, input)),
 }));
 
 describe("RewindBanner", () => {
 	beforeEach(() => {
 		rpcSpy.mockClear();
+		filesSpy.mockClear();
 		openSessionForSetup("session-1", "project-a");
 		getOrCreateSessionActivity("session-1");
 		uiState.rewindActive = true;
@@ -189,6 +197,28 @@ describe("RewindBanner", () => {
 		});
 		expect(uiState.rewindActive).toBe(false);
 		expect(uiState.rewindSelectedUuid).toBeNull();
+	});
+
+	it("says the files at a pruned point were pruned and keeps Rewind enabled", async () => {
+		filesSpy.mockResolvedValueOnce({ files: "pruned" });
+		const { findByText, getByRole, queryByText } = render(RewindBanner);
+
+		expect(await findByText("Files from this point were pruned.")).toBeTruthy();
+		expect(filesSpy).toHaveBeenCalledWith("GetHeadMoveFiles", {
+			sessionId: "session-1",
+			messageId: "provider-1",
+		});
+		expect(queryByText("Files are not restored.")).toBeNull();
+		expect(queryByText("Files are restored to this point.")).toBeNull();
+		const rewind = getByRole("button", { name: "Rewind" });
+		expect(rewind.hasAttribute("disabled")).toBe(false);
+		await fireEvent.click(rewind);
+		await waitFor(() =>
+			expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
+				sessionId: "session-1",
+				messageId: "provider-1",
+			}),
+		);
 	});
 
 	it("rewinds to an assistant message with a provider id", async () => {
