@@ -9,7 +9,7 @@ Use this guide before changing daemon behavior, project routing, relay wiring, e
 | CLI | `src/bin/cli.ts` is the thin entrypoint; `src/bin/cli-core.ts` routes commands. |
 | Process model | `conduit serve` runs the server in the foreground. Other CLI commands use browser RPC over a protected Unix socket. `conduit service install` optionally keeps it running through launchd or systemd. |
 | Daemon | Daemon lifecycle is owned by Effect domain services/layers under `src/lib/domain/daemon/*`, with low-level socket/server helpers in `src/lib/daemon/*`. `serve` enters through the Effect-backed foreground starter. |
-| Multi-project model | One daemon can host many projects, each mounted under `/p/<slug>`. |
+| Multi-project model | One daemon can host many projects. Browsers reach them through one `/rpc` socket; each RPC names its `projectSlug` and the server keeps no current project. `/p/<slug>` URLs open the app; `/p/<slug>/api/status` answers a project's status and other `/p/<slug>/api/*` paths answer not found. |
 
 ## System Context Diagram
 
@@ -37,7 +37,7 @@ Mermaid diagram: docs/agent-guide/per-project-relay-flow-diagram.mermaid
 
 ## Key Boundaries
 
-`src/lib/relay/relay-stack.ts` builds each project relay with `createProjectRelay()`.
+`src/lib/relay/relay-stack.ts` builds each project relay with `createProjectRelay()`. The relay is being retired (82tn.16), following t3code's one process-wide orchestrator: `test/unit/daemon/relay-retired.guard.test.ts` pins every remaining per-project runtime, relay name, scope opener, per-project client registry, Run state writer and OpenCode home site, and each retirement slice shrinks its maps.
 
 | Boundary | Meaning |
 |---|---|

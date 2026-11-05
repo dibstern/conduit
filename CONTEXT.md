@@ -7,7 +7,10 @@ way sessions are grouped (ADR-0011). Its first folder is the main folder, which
 no other project may use as its main folder; other folders can be shared.
 Every session belongs to one project for life, and projects never merge.
 Conduit is never "in" a project: the `?p=<slug>` Scope names a project but is
-not app state.
+not app state, and the server keeps no current project either; each request
+names its project. A project is not a runtime: one daemon serves every project,
+and a project's lifetime is its Owner Scope.
+_Avoid_: current project; project relay as a place a project lives.
 
 The **Scratch Project** is the hidden project behind New Session's "No
 project". Each scratch session runs in its own `<configDir>/scratch/<session
