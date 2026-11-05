@@ -96,6 +96,7 @@ import {
 	resolveDaemonSession,
 } from "../Services/daemon-session-reader.js";
 import { DaemonStateTag } from "../Services/daemon-state.js";
+import { FolderTimeline } from "../Services/folder-timeline.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance,
@@ -186,6 +187,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 			(projects) => projects.map((project) => project.slug),
 		);
 		// The daemon lends its one alert feed; handler-only fixtures get an idle one.
+		const timeline = yield* Effect.serviceOption(FolderTimeline);
 		const sharedAlerts = yield* Effect.serviceOption(AlertsTag);
 		const alerts = Option.isSome(sharedAlerts)
 			? sharedAlerts.value
@@ -615,6 +617,9 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							version: getVersion(),
 							logLevel: getLogLevel(),
 							supervised: isServerSupervised(),
+							...(Option.isSome(timeline) && {
+								snapshotBytes: yield* timeline.value.diskUse,
+							}),
 						};
 					}),
 				),
@@ -1099,6 +1104,10 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 				run(wsRpcHandlers.GetUsageLimitsSetting(request)),
 			SetUsageLimitsSetting: (request) =>
 				run(wsRpcHandlers.SetUsageLimitsSetting(request)),
+			GetSnapshotBudgetSetting: (request) =>
+				run(wsRpcHandlers.GetSnapshotBudgetSetting(request)),
+			SetSnapshotBudgetSetting: (request) =>
+				run(wsRpcHandlers.SetSnapshotBudgetSetting(request)),
 			SetCursorUsageKeychain: (request) =>
 				run(
 					wsRpcHandlers

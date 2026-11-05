@@ -20,6 +20,27 @@ export const SESSION_DIFF_TOO_LARGE_BYTES = 1024 * 1024;
 /** Changed lines up to which a file's patch loads as it scrolls into view. */
 export const SESSION_DIFF_AUTO_LINES = 500;
 
+const bytesSchema = Schema.Number.pipe(
+	Schema.check(Schema.isInt()),
+	Schema.check(
+		Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+	),
+);
+/**
+ * Daemon Settings: past `budgetBytes` of captures, Folder Timeline evicts
+ * eligible sessions down to 90% of it; past `alertBytes` with nothing eligible
+ * left, it warns.
+ */
+export const SnapshotBudgetSchema = Schema.Struct({
+	budgetBytes: bytesSchema,
+	alertBytes: bytesSchema,
+});
+export type SnapshotBudget = typeof SnapshotBudgetSchema.Type;
+export const DEFAULT_SNAPSHOT_BUDGET: SnapshotBudget = {
+	budgetBytes: 5 * 1024 ** 3,
+	alertBytes: 5 * 1024 ** 3,
+};
+
 const fileFields = {
 	path: Schema.String,
 	oldPath: Schema.optional(Schema.String),
@@ -43,9 +64,20 @@ const fileFields = {
 	),
 };
 
-/** A tooLarge file carries no line counts: git never diffs it. */
+const { bytes: _bytes, ...prunedFields } = fileFields;
+
+/**
+ * A tooLarge file carries no line counts: git never diffs it. A pruned file's
+ * content was evicted: it keeps the counts its capture recorded, if any.
+ */
 export const SessionDiffFileSchema = Schema.Union([
 	Schema.Struct({ ...fileFields, tier: Schema.Literal("tooLarge") }),
+	Schema.Struct({
+		...prunedFields,
+		tier: Schema.Literal("pruned"),
+		insertions: Schema.optional(Schema.Number),
+		deletions: Schema.optional(Schema.Number),
+	}),
 	Schema.Struct({
 		...fileFields,
 		tier: Schema.Literals(["auto", "onDemand"]),
@@ -93,6 +125,8 @@ export const SessionDiffListingSchema = Schema.Struct({
 	folders: Schema.Array(SessionDiffFolderSchema),
 	/** Turn scope: the turn's run has no capture, so it lists no folders. */
 	notCaptured: Schema.optionalKey(Schema.Literal(true)),
+	/** Turn scope: Folder Timeline evicted the turn's content; files and counts remain. */
+	pruned: Schema.optionalKey(Schema.Literal(true)),
 	/** Tool-call scope: the provider reported the changes, or they were read from the tool's input. */
 	source: Schema.optionalKey(Schema.Literals(["provider", "toolInput"])),
 });

@@ -70,6 +70,8 @@ export class SessionDiffView {
 				readonly folders: readonly DiffFolder[];
 				/** The turn's run was never captured, so there is nothing to list. */
 				readonly notCaptured?: true;
+				/** Turn scope: the capture's content was evicted; files and counts remain. */
+				readonly pruned?: true;
 				/** A tool call's listing: where its Tool File Changes came from. */
 				readonly source?: "provider" | "toolInput";
 		  }
@@ -204,6 +206,7 @@ export class SessionDiffView {
 				kind: "listed",
 				folders,
 				...(listing.notCaptured && { notCaptured: listing.notCaptured }),
+				...(listing.pruned && { pruned: listing.pruned }),
 				...(listing.source && { source: listing.source }),
 			};
 			for (const row of rows.values())

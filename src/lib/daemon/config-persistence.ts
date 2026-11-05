@@ -38,6 +38,7 @@ import {
 	migrateLegacyDefaultOpencodeInstanceId,
 	PROVIDER_DRIVERS,
 } from "../contracts/provider-instance.js";
+import { SnapshotBudgetSchema } from "../contracts/session-diff.js";
 import { AvatarChoiceSchema } from "../contracts/user-avatar.js";
 import {
 	DEFAULT_WORKTREE_CLEANUP,
@@ -223,6 +224,7 @@ const DaemonConfigFields = {
 	),
 	worktreeCleanup: Schema.optionalKey(WorktreeCleanupSchema),
 	usageLimits: Schema.optionalKey(UsageLimitsSettingSchema),
+	snapshotBudget: Schema.optionalKey(SnapshotBudgetSchema),
 	cursorUsageBinding: Schema.optionalKey(CursorUsageBindingSchema),
 	keepAwakeCommand: Schema.optionalKey(Schema.String),
 	keepAwakeArgs: Schema.optionalKey(

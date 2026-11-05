@@ -26,6 +26,8 @@ export interface SessionDiffSession {
 	readonly folders: readonly SessionDiffFolder[];
 	/** The turn's recorded run capture; a turn scope without one is not captured. */
 	readonly capture?: RunChangesCaptured;
+	/** Folder Timeline evicted the capture's content: only its record remains. */
+	readonly pruned?: true;
 	/** A tool-call scope's Tool File Changes and where they came from. */
 	readonly toolCall?: {
 		readonly source: "provider" | "toolInput";

@@ -314,6 +314,8 @@ export type DaemonRpcName =
 	| "GetTerminalKeys"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
+	| "GetSnapshotBudgetSetting"
+	| "SetSnapshotBudgetSetting"
 	| "SetCursorUsageKeychain"
 	| "ScanNow"
 	| "DetectProxy"

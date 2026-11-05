@@ -7,6 +7,7 @@ import {
 	AccountUnroutable,
 	DEFAULT_USAGE_LIMITS,
 } from "../../contracts/limit-recovery.js";
+import { DEFAULT_SNAPSHOT_BUDGET } from "../../contracts/session-diff.js";
 import { DEFAULT_WORKTREE_CLEANUP } from "../../contracts/worktree.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
 import {
@@ -24,6 +25,7 @@ import {
 	DaemonEventBusTag,
 	publishInstanceStatusChanged,
 } from "../../domain/daemon/Services/daemon-pubsub.js";
+import { FolderTimelineEviction } from "../../domain/daemon/Services/folder-timeline.js";
 import {
 	getProject,
 	ProjectRegistryTag,
@@ -204,6 +206,26 @@ export const settingsHandlers = {
 			yield* persistence.flush;
 			return { usageLimits };
 		}).pipe(Effect.catch(mapRpcFailure("SetUsageLimitsSetting"))),
+	GetSnapshotBudgetSetting: (_request) =>
+		Effect.gen(function* () {
+			const config = yield* Ref.get(yield* DaemonConfigRefTag);
+			return config.snapshotBudget ?? DEFAULT_SNAPSHOT_BUDGET;
+		}),
+	SetSnapshotBudgetSetting: ({ budgetBytes, alertBytes }) =>
+		Effect.gen(function* () {
+			const snapshotBudget = { budgetBytes, alertBytes };
+			yield* commitDaemonRuntimeConfig((config) => ({
+				...config,
+				snapshotBudget,
+			}));
+			const persistence = yield* ConfigPersistenceTag;
+			yield* persistence.requestSave;
+			yield* persistence.flush;
+			const eviction = yield* Effect.serviceOption(FolderTimelineEviction);
+			// The reply follows the pass, so a lowered budget has taken effect.
+			if (Option.isSome(eviction)) yield* eviction.value.pass;
+			return snapshotBudget;
+		}).pipe(Effect.catch(mapRpcFailure("SetSnapshotBudgetSetting"))),
 	SetCursorUsageKeychain: ({ accountId, enabled }) =>
 		Effect.gen(function* () {
 			const accounts = yield* (yield* AccountDirectory).list;
@@ -334,6 +356,8 @@ export const settingsHandlers = {
 	| "CleanUpWorktreesNow"
 	| "GetUsageLimitsSetting"
 	| "SetUsageLimitsSetting"
+	| "GetSnapshotBudgetSetting"
+	| "SetSnapshotBudgetSetting"
 	| "SetCursorUsageKeychain"
 	| "SetDefaultPermissionMode"
 	| "SetDefaultSessionMode"

@@ -780,6 +780,9 @@ export const CanonicalEvents = {
 								path: Schema.String,
 								before: Schema.NullOr(ChangeSideSchema),
 								after: Schema.NullOr(ChangeSideSchema),
+								/** Line counts, kept for a Pruned listing; absent for binary files and older captures. */
+								insertions: Schema.optionalKey(Schema.Number),
+								deletions: Schema.optionalKey(Schema.Number),
 							}),
 						),
 					}),
@@ -1020,6 +1023,13 @@ export const CanonicalEvents = {
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),
 			base: Schema.NullOr(Schema.String),
+		}),
+	),
+	/** Folder Timeline evicted the session's captures; its events stay (ADR-0013). */
+	"folder_timeline.evicted": live(
+		Schema.Struct({
+			sessionId: Schema.String.pipe(SessionRef(false)),
+			reason: Schema.Literals(["settled", "merged"]),
 		}),
 	),
 	"session.unsnoozed": live(

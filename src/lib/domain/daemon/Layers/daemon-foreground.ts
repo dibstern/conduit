@@ -164,6 +164,9 @@ const buildInitialRuntimeConfig = (
 		...(persisted?.usageLimits !== undefined && {
 			usageLimits: persisted.usageLimits,
 		}),
+		...(persisted?.snapshotBudget !== undefined && {
+			snapshotBudget: persisted.snapshotBudget,
+		}),
 		...(persisted?.cursorUsageBinding !== undefined && {
 			cursorUsageBinding: persisted.cursorUsageBinding,
 		}),

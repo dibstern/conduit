@@ -65,6 +65,35 @@ const modes = (before = "", after = "") => {
 	};
 };
 
+/** A captured change whose content was evicted: its record, without bytes or a patch. */
+const prunedFile = (
+	change: Extract<
+		RunChangesCaptured["folders"][number],
+		{ readonly changes: unknown }
+	>["changes"][number],
+): SessionDiffFile => {
+	const { before, after } = change;
+	const status =
+		before === null
+			? "added"
+			: after === null
+				? "deleted"
+				: before.mode.slice(0, 2) === after.mode.slice(0, 2)
+					? "modified"
+					: "typeChanged";
+	return {
+		path: change.path,
+		status,
+		before: before?.blob ?? null,
+		after: after?.blob ?? null,
+		...modes(before?.mode, after?.mode),
+		tier: "pruned",
+		...(change.insertions === undefined
+			? {}
+			: { insertions: change.insertions, deletions: change.deletions ?? 0 }),
+	};
+};
+
 /** `diff-tree -z --raw --numstat` prints every raw record, then every numstat record. */
 export function parseDiffTree(output: string) {
 	const tokens = output.split("\0");
@@ -380,7 +409,10 @@ export const makeSessionDiff = Effect.gen(function* () {
 			message: error.message,
 		});
 
-	/** A turn lists its run's capture: each changed path before and after, from the session's store. */
+	/**
+	 * A turn lists its run's capture: each changed path before and after, from
+	 * the session's store. A pruned capture lists its record's paths and counts.
+	 */
 	const listTurn = (session: SessionDiffSession, capture: RunChangesCaptured) =>
 		Effect.forEach(
 			capture.folders,
@@ -394,6 +426,12 @@ export const makeSessionDiff = Effect.gen(function* () {
 						folder,
 						error: captured.gap === "timeout" ? "timeout" : "unavailable",
 						message: captured.message,
+					});
+				if (session.pruned)
+					return Effect.succeed<Listed>({
+						folder,
+						files: captured.changes.map(prunedFile),
+						patches: new Map(),
 					});
 				const snapshot = {
 					store: timeline.sessionStore(session.id),
@@ -470,6 +508,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 			const recalled = recall(session.id, scopeKey, revision);
 			if (recalled) return recalled;
 			const notCaptured = scope.kind === "turn" && !session.capture;
+			const pruned = scope.kind === "turn" && session.capture && session.pruned;
 			const folders: readonly Listed[] = yield* listScope(session, scope);
 			const listed = createHash("sha256")
 				.update(
@@ -486,6 +525,7 @@ export const makeSessionDiff = Effect.gen(function* () {
 				revision: listed,
 				folders: folders.map(listingOf),
 				...(notCaptured ? { notCaptured: true as const } : {}),
+				...(pruned ? { pruned: true as const } : {}),
 				...(session.toolCall ? { source: session.toolCall.source } : {}),
 			} satisfies SessionDiffListing;
 			memo.delete(listed);
