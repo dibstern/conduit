@@ -207,6 +207,27 @@ export const DEFAULT_USAGE_LIMITS: UsageLimitsSetting = {
 	order: [],
 };
 
+/**
+ * ad4c: how a switch's handoff reached its account. `resume` resumed the
+ * account's own native thread and caught it up after `afterSequence`; `fresh`
+ * started a new thread with the full kept history (`afterSequence` 0).
+ * `throughSequence` is the last event the handoff covers; `inputId` the send.
+ */
+export const handoffDeliveryFields = {
+	strategy: Schema.optionalKey(Schema.Literals(["resume", "fresh"])),
+	afterSequence: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	),
+	throughSequence: Schema.optionalKey(
+		Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	),
+	inputId: Schema.optionalKey(Schema.String),
+	/** Why a resume became a fresh handoff: the provider refused it, or the catch-up did not fit. */
+	fallback: Schema.optionalKey(
+		Schema.Literals(["resume_rejected", "catch_up_too_long"]),
+	),
+};
+
 export const HandoffSummarySchema = Schema.Struct({
 	continuationKind: Schema.optional(
 		Schema.Literals(["native-thread", "transcript-digest"]),
@@ -221,6 +242,7 @@ export const HandoffSummarySchema = Schema.Struct({
 	),
 	firstMessageIncluded: Schema.Boolean,
 	tokens: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+	...handoffDeliveryFields,
 });
 export type HandoffSummary = typeof HandoffSummarySchema.Type;
 

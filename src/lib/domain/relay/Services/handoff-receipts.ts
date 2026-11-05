@@ -24,9 +24,11 @@ export const HandoffReceiptsLive = Layer.effectDiscard(
 					const commands = yield* sql<{
 						command_id: string;
 						instance_id: string;
+						input_id: string | null;
 						handoff: string | null;
 					}>`
 						SELECT o.command_id, COALESCE(json_extract(o.payload_json, '$.instanceId'), o.provider_id) AS instance_id,
+						json_extract(o.payload_json, '$.inputId') AS input_id,
 						json_extract(o.payload_json, '$.handoff') AS handoff
 						FROM provider_command_outbox o JOIN provider_runs r ON r.id = o.run_id
 						WHERE o.session_id = ${event.sessionId} AND o.project_key = ${store.projectId}
@@ -56,6 +58,8 @@ export const HandoffReceiptsLive = Layer.effectDiscard(
 							{
 								...handoff,
 								instanceId: handoff.instanceId ?? command.instance_id,
+								// ad4c: the record names the input whose turn carried the handoff.
+								...(command.input_id ? { inputId: command.input_id } : {}),
 							},
 							command.command_id,
 							store.projectId,

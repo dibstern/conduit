@@ -3,7 +3,10 @@ import {
 	AttachmentRefSchema,
 	AttachmentSourceSchema,
 } from "./attachment-ref.js";
-import { ContinuationReasonSchema } from "./limit-recovery.js";
+import {
+	ContinuationReasonSchema,
+	handoffDeliveryFields,
+} from "./limit-recovery.js";
 import {
 	SessionSetupFinishedPayloadSchema,
 	SessionSetupOutputPayloadSchema,
@@ -1180,6 +1183,7 @@ export const CanonicalEvents = {
 			),
 			firstMessageIncluded: Schema.optionalKey(Schema.Boolean),
 			instanceId: Schema.optionalKey(Schema.String),
+			...handoffDeliveryFields,
 		}),
 	),
 	"session.usage_limited": live(

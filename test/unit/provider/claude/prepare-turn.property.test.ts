@@ -894,6 +894,9 @@ it("prepares intact, ordered, budgeted context only for a fresh native thread", 
 								omitted: messages.length - selected.length,
 								firstMessageIncluded: true,
 								tokens: Buffer.byteLength(hidden),
+								strategy: "fresh",
+								afterSequence: 0,
+								throughSequence: expect.any(Number),
 							});
 							expect(hidden).toContain(
 								`Included ${selected.length} intact messages; omitted ${messages.length - selected.length} messages.`,
