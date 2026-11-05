@@ -390,9 +390,13 @@ export interface SessionInbox {
 		{ readonly handedOff: boolean } | { readonly refused: SteerBlocker },
 		SessionInboxError
 	>;
-	/** Remove a queued input before it is sent. */
+	/** Remove a queued input before it is sent; restoreTo returns its attachments, and its text with
+	 *  restoreText (the browser restores the text itself when the user takes the message back). */
 	readonly cancel: (
-		target: SessionInboxTarget & { readonly restoreTo?: InputDraftKey },
+		target: SessionInboxTarget & {
+			readonly restoreTo?: InputDraftKey;
+			readonly restoreText?: boolean;
+		},
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** Hand a queued input off now: a steer on a busy session, else the next
 	 *  turn. With interrupt, stop the running turn and send this input next. */
@@ -835,6 +839,7 @@ export const SessionInboxLive = Layer.effect(
 				target: SessionInboxTarget & {
 					readonly interrupt?: boolean;
 					readonly restoreTo?: InputDraftKey;
+					readonly restoreText?: boolean;
 				},
 			) =>
 				Effect.gen(function* () {
@@ -852,6 +857,9 @@ export const SessionInboxLive = Layer.effect(
 								inputId: target.inputId,
 								...(runNow ? { interrupt: true } : {}),
 							});
+							const request = view.queued.find(
+								(item) => item.inputId === target.inputId,
+							)?.request;
 							yield* commit(
 								target.sessionId,
 								decision,
@@ -866,9 +874,8 @@ export const SessionInboxLive = Layer.effect(
 									? drafts.restoreChange(
 											target.restoreTo,
 											target.inputId,
-											view.queued.find(
-												(item) => item.inputId === target.inputId,
-											)?.request.images ?? [],
+											request?.images ?? [],
+											target.restoreText ? request?.text : undefined,
 										)
 									: undefined,
 							);

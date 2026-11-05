@@ -898,9 +898,9 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 
 	/**
 	 * 8.4 2875-2899: a send that needs a new process waits behind the held close of the old one
-	 * while tasks are live; a confirm closes the old process once and sends the message once.
+	 * while tasks are live: the ask shows, the row is held, nothing closes and nothing is sent.
 	 */
-	const holdsSend = async (
+	const holdSend = async (
 		label: string,
 		{ fixture, browser }: { fixture: ProcessHarness; browser: BrowserClient },
 		sessionId: string,
@@ -950,6 +950,23 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 				(mark) => mark["kind"] === "enqueue" && mark["request"] === text,
 			);
 		expect(enqueued()).toEqual([]);
+		return { oldProcess, cursor, inputId, text, enqueued };
+	};
+
+	/** A held send (holdSend) the user confirms: the old process closes once and the message is sent once. */
+	const holdsSend = async (
+		label: string,
+		started: { fixture: ProcessHarness; browser: BrowserClient },
+		sessionId: string,
+		queryId: string,
+	) => {
+		const { fixture, browser } = started;
+		const { oldProcess, cursor, inputId, enqueued } = await holdSend(
+			label,
+			started,
+			sessionId,
+			queryId,
+		);
 		await confirmNewest(browser, sessionId, cursor);
 		// test-waits-allow polling: the fake SDK reports its queries only through sdk-proof.ndjson.
 		await vi.waitFor(() => expect(enqueued()).toHaveLength(1), {
@@ -1027,5 +1044,108 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		const launch = await holdsSend("rewind", started, sessionId, queryId);
 		// The cut is the first message, so the new process resumes nothing.
 		expect(launch?.["resume"]).toBeUndefined();
+	});
+
+	/** The session's composer draft and the timeline notices, from the daemon's store. */
+	const composer = (fixture: ProcessHarness, sessionId: string) => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			const draft = db
+				.prepare("SELECT text FROM input_drafts WHERE draft_key = ?")
+				.get(sessionId) as { text: string } | undefined;
+			const notices = db
+				.prepare(
+					"SELECT json_extract(data, '$.text') AS text FROM events WHERE session_id = ? AND type = 'turn.notice'",
+				)
+				.all(sessionId) as { text: string }[];
+			return { draft: draft?.text, notices: notices.map(({ text }) => text) };
+		} finally {
+			db.close();
+		}
+	};
+
+	// 32-35, 43: dismiss (gap: 8.4 2870-2899 gives the gate no cancel; dismiss withdraws the send).
+	it("dismisses a held send: keeps the old process and its tasks, and returns the message to the composer with a notice", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { oldProcess, inputId, text, enqueued } = await holdSend(
+			"dismiss",
+			started,
+			sessionId,
+			queryId,
+		);
+		const from = browser.frames.length;
+		await Effect.runPromise(browser.rpc.DismissEscalation({ sessionId }));
+		const after = await row(
+			browser,
+			sessionId,
+			from,
+			(message) => !confirmOf(message),
+		);
+		// test-waits-allow real-wait: nothing closing or sending is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const kept = composer(fixture, sessionId);
+		const again = await Effect.runPromise(
+			Effect.result(browser.rpc.DismissEscalation({ sessionId })),
+		);
+		proof["dismiss: dismissed"] = {
+			rows: endTargets(fixture, sessionId),
+			closed: closedQueries(fixture, queryId).length,
+			tasks: after["backgroundTasks"],
+			composer: kept,
+			again: again._tag === "Failure" ? String(again.failure) : again.success,
+		};
+		expect(endTargets(fixture, sessionId)).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "cancelled",
+				process: oldProcess,
+			},
+		]);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		expect(enqueued()).toEqual([]);
+		expect(
+			(after["backgroundTasks"] as { id: string }[]).map(({ id }) => id).sort(),
+		).toEqual(allIds);
+		expect(kept.draft).toBe(text);
+		expect(kept.notices).toHaveLength(1);
+		expect(again._tag).toBe("Failure");
+		expect(processesStarted(fixture, sessionId).at(-1)).toBe(oldProcess);
+	});
+
+	// 42: the user takes the held message back from the queue; its close goes with it.
+	it("drops a held send's close when the user takes the message back from the queue", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { oldProcess, inputId } = await holdSend(
+			"tray",
+			started,
+			sessionId,
+			queryId,
+		);
+		const from = browser.frames.length;
+		await Effect.runPromise(
+			browser.rpc["input.cancel"]({
+				sessionId,
+				inputId,
+				restoreTo: { session: sessionId },
+			}),
+		);
+		await row(browser, sessionId, from, (message) => !confirmOf(message));
+		proof["tray: cancelled"] = { rows: endTargets(fixture, sessionId) };
+		expect(endTargets(fixture, sessionId)).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "cancelled",
+				process: oldProcess,
+			},
+		]);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
 	});
 });

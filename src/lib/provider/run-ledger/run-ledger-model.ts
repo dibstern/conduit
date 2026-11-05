@@ -270,6 +270,8 @@ export type Control =
 	  }
 	| { readonly kind: "stop_tasks"; readonly tasks: "all" | readonly TaskKey[] }
 	| { readonly kind: "confirm_escalation"; readonly snapshotEntry: number }
+	/** Gap: 8.4 (2870-2899) gives the gate no cancel; a send's held close goes with its send. */
+	| { readonly kind: "dismiss_escalation"; readonly commandId: string }
 	| {
 			readonly kind: "native_command";
 			readonly commandId: string;

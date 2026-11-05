@@ -33,6 +33,7 @@ import {
 } from "../../domain/relay/Services/session-overrides-state.js";
 import {
 	confirmEscalation,
+	dismissEscalation,
 	stopTasks,
 } from "../../handlers/background-tasks.js";
 import {
@@ -153,6 +154,14 @@ export const conversationHandlers = {
 				Effect.fail(new WsRpcError({ message })),
 			),
 			Effect.catch(mapRpcFailure("ConfirmEscalation")),
+		),
+	DismissEscalation: ({ sessionId }) =>
+		dismissEscalation(sessionId).pipe(
+			Effect.as({ ok: true as const }),
+			Effect.catchTag("DismissEscalationRefused", ({ message }) =>
+				Effect.fail(new WsRpcError({ message })),
+			),
+			Effect.catch(mapRpcFailure("DismissEscalation")),
 		),
 	StopServer: ({ sessionId, server }) =>
 		Effect.gen(function* () {
@@ -446,6 +455,7 @@ export const conversationHandlers = {
 	| "ExplainAsk"
 	| "StopTasks"
 	| "ConfirmEscalation"
+	| "DismissEscalation"
 	| "StopServer"
 	| "SwitchPermissionMode"
 	| "RespondPermission"
