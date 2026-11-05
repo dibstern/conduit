@@ -1,6 +1,7 @@
-import { Context, Effect, Option } from "effect";
+import { Context, Effect, Exit, Option, Scope } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
+import { OwnerScopes } from "../../domain/daemon/Services/owner-scopes.js";
 import { PersistenceProjectTag } from "../../domain/persistence/Services/persistence-service.js";
 import { PendingInteractionServiceTag } from "../../domain/relay/Services/pending-interaction-service.js";
 import { type CanonicalEvent, canonicalEvent } from "../events.js";
@@ -91,6 +92,59 @@ export const retirePendingPrompts = (
 				);
 		}
 		return retired.length;
+	});
+
+/**
+ * 82tn.14: a removed project's open asks resolve with its owner scope, as a retired runner's do
+ * (CONTRACT.md 3.11 has no rule for them; nearest reading: its runners retire at removal). A detach
+ * keeps them for the next daemon; the binding of a replaced relay (`relayScope` closed) does nothing.
+ */
+export const retireAsksOnProjectRemoval = (relayScope: Scope.Scope) =>
+	Effect.gen(function* () {
+		const owners = yield* Effect.serviceOption(OwnerScopes);
+		if (Option.isNone(owners)) return;
+		const { projectId } = yield* EventStoreEffectTag;
+		let live = true;
+		yield* Scope.addFinalizer(
+			relayScope,
+			Effect.sync(() => (live = false)),
+		);
+		const context = yield* Effect.context<
+			SqlClient.SqlClient | EventStoreEffectTag | ProjectionRunnerEffectTag
+		>();
+		const pending = yield* Effect.serviceOption(PendingInteractionServiceTag);
+		const retire = Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* retirePendingPrompts(
+				yield* sql<PendingPrompt>`SELECT pa.id, pa.session_id AS sessionId, pa.type
+					FROM pending_approvals pa JOIN sessions s ON s.id = pa.session_id
+					WHERE s.project_id = ${projectId} AND pa.status = 'pending'
+						AND pa.type IN ('permission', 'question')`,
+			);
+		}).pipe(
+			Option.isSome(pending)
+				? Effect.provideService(PendingInteractionServiceTag, pending.value)
+				: (effect) => effect,
+			Effect.provide(context),
+			Effect.catchCause((cause) =>
+				Effect.logWarning(
+					"Could not resolve a removed project's open asks",
+					cause,
+				),
+			),
+		);
+		yield* owners.value.projectScope(projectId).pipe(
+			Effect.flatMap((scope) =>
+				scope.acquire<void, never, never>(
+					Effect.addFinalizer((exit) =>
+						live && Exit.isSuccess(exit) && exit.value === "remove"
+							? retire
+							: Effect.void,
+					),
+				),
+			),
+			Effect.ignore,
+		);
 	});
 
 /** Non-persistent runner and stream test stacks have no prompts to retire. */

@@ -120,7 +120,8 @@ const refreshProjectRollups = (changedSlugs: readonly string[]) =>
 		const { advance } = yield* sql
 			.withTransaction(
 				Effect.gen(function* () {
-					const registered = [...HashMap.keys(yield* Ref.get(ref))].filter(
+					const held = yield* Ref.get(ref);
+					const registered = [...HashMap.keys(held)].filter(
 						(slug) => !unavailable.has(slug),
 					);
 					const roots = yield* sql<{ id: string; project_id: string }>`
@@ -131,15 +132,29 @@ const refreshProjectRollups = (changedSlugs: readonly string[]) =>
 					const version = yield* runner.nextVersion.pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);
-					const sessionIds = roots.map(({ id }) => id);
-					yield* refreshSidebar(sessionIds, version, registered).pipe(
-						Effect.provideService(SqlClient.SqlClient, sql),
-					);
+					yield* refreshSidebar(
+						roots.map(({ id }) => id),
+						version,
+						registered,
+					).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+					// 82tn.14: a removed project's sessions leave every open feed, so an open tab drops their ask cards.
+					const gone = changedSlugs.filter((slug) => !HashMap.has(held, slug));
+					const removedSessionIds =
+						gone.length === 0
+							? []
+							: (yield* sql<{ id: string }>`
+				SELECT id FROM sessions WHERE project_id IN ${sql.in(gone)}`).map(
+									({ id }) => id,
+								);
+					const removed = new Set(removedSessionIds);
 					return {
 						registered,
 						advance: {
 							version,
-							sessionIds,
+							sessionIds: roots
+								.map(({ id }) => id)
+								.filter((id) => !removed.has(id)),
+							removedSessionIds,
 							projectIds: [
 								...new Set(roots.map(({ project_id }) => project_id)),
 							],
@@ -156,8 +171,10 @@ const refreshProjectRollups = (changedSlugs: readonly string[]) =>
 		if (advance && Option.isSome(bus))
 			yield* bus.value.publishAdvance({
 				...advance,
-				removedSessionIds: [],
-				collections: ["sidebar"],
+				collections:
+					advance.removedSessionIds.length === 0
+						? ["sidebar"]
+						: ["sidebar", "approvals"],
 			});
 	});
 

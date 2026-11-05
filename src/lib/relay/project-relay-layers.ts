@@ -996,6 +996,8 @@ export function createProjectRelayLayers({
 	const openCodeTerminalServiceLayer = OpenCodeTerminalServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
+				// 82tn.14: the daemon's owner scopes, so a removal closes the project's terminals.
+				daemonContextLayer,
 				openCodeInstancesLayer,
 				webSocketHandlerLayer,
 				loggerLayer,
