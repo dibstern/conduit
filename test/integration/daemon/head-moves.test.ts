@@ -934,9 +934,17 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		// Back to the cut branch, then one more turn on it.
 		await move(browser, sessionId, { _tag: "switch", nodeId: cut.id });
 		const back = await ids();
+		// 82tn.52: Claude resumes its own session at the branch it returns to.
+		const planBack = (
+			await Effect.runPromise(browser.rpc.GetResumePlan({ sessionId }))
+		).plan;
 		await browser.send(sessionId, "moves-cut-more");
 		await settled(6, 4);
 		const deeper = await ids();
+		const resumedOnCut = resumes(fixture).at(-1);
+		const planAfter = (
+			await Effect.runPromise(browser.rpc.GetResumePlan({ sessionId }))
+		).plan;
 		const cutTip = graph(fixture, sessionId).nodes[3];
 		if (!cutTip) throw new Error("Missing cut branch tip");
 		await move(browser, sessionId, { _tag: "switch", nodeId: branchB.id });
@@ -987,6 +995,10 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 			refused: { ...refused, message: refused.message },
 			graph: graph(fixture, sessionId),
 			journal: journal(fixture, sessionId),
+			planBack,
+			resumedOnCut,
+			planAfter,
+			queries: resumes(fixture),
 		};
 		const fork = (tipOfCut: string, available = true) => [
 			{
@@ -1006,6 +1018,12 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		// A switch brings back that branch's own rows, and nothing else.
 		expect(back).toEqual(original);
 		expect(deeper.slice(0, 4)).toEqual(original);
+		expect(planBack).toBe("native");
+		expect(planAfter).toBe("current");
+		expect(resumedOnCut).toEqual({
+			thread: resumes(fixture)[0]?.thread,
+			at: original.at(-1),
+		});
 		expect(onB).toEqual(edited);
 		expect(offeredOnB).toEqual(fork(cutTip.id));
 		expect(atTip).toEqual(deeper);

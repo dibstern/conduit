@@ -44,9 +44,8 @@ export const readOwedRealignment = (
 		if (!first || !last) return undefined;
 		const head = yield* readHead(sessionId);
 		const onHead = new Set(yield* pathToRoot(sessionId, head));
-		const lost = (yield* pathToRoot(sessionId, first.from_node))
-			.filter((id) => !onHead.has(id))
-			.reverse();
+		const held = yield* pathToRoot(sessionId, first.from_node);
+		const lost = held.filter((id) => !onHead.has(id)).reverse();
 		const removed =
 			lost.length === 0
 				? []
@@ -79,7 +78,10 @@ export const readOwedRealignment = (
 					? undefined
 					: {
 							resumeSessionAt: resume?.id ?? null,
-							targetMessageId: target,
+							// A switch to another branch keeps no turn before the dropped one: the
+							// provider resumes through the end of the resume row's own turn.
+							targetMessageId:
+								head === null || held.includes(head) ? target : undefined,
 							removedMessageIds,
 						},
 			events: [
