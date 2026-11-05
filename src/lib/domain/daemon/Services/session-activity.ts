@@ -8,6 +8,7 @@ import {
 	type Scope,
 	Stream,
 } from "effect";
+import { SqlClient } from "effect/sql";
 import type { EventPayloadMap } from "../../../contracts/stored-event.js";
 import type {
 	LedgerView,
@@ -244,15 +245,18 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 		},
 		/**
 		 * 8.1 (2734): what the session is doing, read only from the ledger's hand-over, the goal
-		 * tracker's phase and the row's open prompts.
+		 * tracker's phase and the row's open prompts. `childRun`: the subagent child's own run
+		 * record is open (`openChildRuns`), its foreground while the ledger holds no Run.
 		 */
 		activityOf(
 			sessionId: string,
 			prompts: { readonly approvals: number; readonly questions: number },
 			goal?: SessionActivityView["goal"],
+			childRun?: boolean,
 		): SessionActivityView {
 			const entry = views.get(sessionId);
-			const origin = entry?.ledger?.active?.origin;
+			const origin =
+				entry?.ledger?.active?.origin ?? (childRun ? "input" : undefined);
 			return deriveSessionActivity({
 				...(origin ? { run: { origin } } : {}),
 				tasks: entry?.view ?? { tag: "none" },
@@ -314,6 +318,22 @@ function makeLedgerTasks(changed: (sessionId: string) => void) {
 		},
 	};
 }
+
+/**
+ * Subagent children whose own run record is open. The provider opens such a child's Run itself
+ * (its prompt's run.started), so the Run Ledger never holds it; CONTRACT.md 8.1 (2727, 2734) names
+ * no rule for it. Nearest reading: that record is the child's foreground (82tn.68). Read with the
+ * rows, in their snapshot; nothing is kept.
+ */
+export const openChildRuns = Effect.gen(function* () {
+	const sql = yield* SqlClient.SqlClient;
+	const rows = yield* sql<{ session_id: string }>`
+		SELECT DISTINCT run.session_id FROM provider_runs run
+		JOIN sessions s ON s.id = run.session_id
+		WHERE run.status IN ('pending', 'running')
+			AND s.parent_id IS NOT NULL AND s.side_thread = 0`;
+	return new Set(rows.map(({ session_id }) => session_id));
+});
 
 export interface SessionActivity {
 	readonly background: ReturnType<typeof makeLedgerTasks>;
