@@ -1604,7 +1604,8 @@ export const effectMigrationEntries = {
 			["retired_at", "INTEGER"],
 			["pid", "INTEGER"],
 			["start_time", "TEXT"],
-			["owned_run_ids", "TEXT NOT NULL DEFAULT '[]'"],
+			// owned_run_ids sat here; 0093 drops it from older tables. A gap filled after 0093
+			// (a store missing only 0089) must not add it back.
 			// Retired rows must remain recoverable after their registration vanishes.
 			["session_id", "TEXT NOT NULL DEFAULT ''"],
 			["signalled", "INTEGER NOT NULL DEFAULT 0"],

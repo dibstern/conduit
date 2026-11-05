@@ -357,6 +357,9 @@ export class DurableCommandCommitRepository {
 						typeof payload["inputId"] === "string"
 							? payload["inputId"]
 							: request.commandId,
+					...(typeof payload["workspaceRoot"] === "string" && {
+						folder: payload["workspaceRoot"],
+					}),
 				},
 				{
 					provider: request.providerId,

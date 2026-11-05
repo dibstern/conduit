@@ -36,12 +36,12 @@ export const stampToolRow = (
 			WHERE s.id = ${event.sessionId} AND p.type = 'tool' AND json_valid(p.metadata)
 				AND json_extract(p.metadata, '$.childSessionId') = ${event.sessionId}
 			ORDER BY p.created_at DESC LIMIT 1`;
-		const [launch] = yield* sql<{ folder: string | null }>`
-			SELECT json_extract(payload_json, '$.workspaceRoot') AS folder
-			FROM provider_command_outbox
-			WHERE session_id = ${event.sessionId} AND effect_type = 'send_turn'
-				AND json_valid(payload_json) AND requested_at <= ${event.createdAt}
-			ORDER BY run_id IS ${runId ?? null} DESC, request_sequence DESC LIMIT 1`;
+		// From the event log, not the outbox, which a replay never rebuilds (CONTRACT.md 271).
+		const [launch] = yield* sql<{ folder: string }>`
+			SELECT json_extract(data, '$.folder') AS folder FROM events
+			WHERE session_id = ${event.sessionId} AND type = 'run.requested'
+				AND sequence < ${event.sequence} AND json_extract(data, '$.folder') IS NOT NULL
+			ORDER BY json_extract(data, '$.runId') IS ${runId ?? null} DESC, sequence DESC LIMIT 1`;
 		yield* sql`UPDATE message_parts
 			SET run_id = ${runId ?? parent?.run_id ?? null},
 				folder = ${launch?.folder ?? parent?.folder ?? null},

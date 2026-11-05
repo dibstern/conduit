@@ -68,8 +68,13 @@ const created = (sessionId: string, parentId?: string) =>
 		at(1000),
 	);
 
-/** One input admitted, sent, requested and started as `runId`. */
-const start = (sessionId: string, runId: string, t: number) => [
+/** One input admitted, sent, requested (launched in `folder`) and started as `runId`. */
+const start = (
+	sessionId: string,
+	runId: string,
+	t: number,
+	folder?: string,
+) => [
 	canonicalEvent(
 		"input.admitted",
 		sessionId,
@@ -90,7 +95,7 @@ const start = (sessionId: string, runId: string, t: number) => [
 	canonicalEvent(
 		"run.requested",
 		sessionId,
-		{ runId, inputId: `u-${runId}` },
+		{ runId, inputId: `u-${runId}`, ...(folder && { folder }) },
 		at(t + 2, { runId }),
 	),
 	canonicalEvent(
@@ -163,16 +168,6 @@ const project = (events: readonly CanonicalEvent[]) =>
 			yield* runner.projectEvent(yield* store.append(event));
 	});
 
-/** main's send for a Run: the folder its launch resolved (provider-turn-dispatch). */
-const launch = (sessionId: string, runId: string, folder: string) =>
-	Effect.gen(function* () {
-		const sql = yield* SqlClient.SqlClient;
-		yield* sql`INSERT INTO provider_command_outbox (command_id, project_key, session_id,
-			provider_id, effect_type, payload_json, run_id, status, requested_at, updated_at)
-			VALUES (${`send:${runId}`}, 'test-project', ${sessionId}, 'claude', 'send_turn',
-				${JSON.stringify({ workspaceRoot: folder })}, ${runId}, 'completed', 0, 0)`;
-	});
-
 const rows = Effect.gen(function* () {
 	const sql = yield* SqlClient.SqlClient;
 	return yield* sql<{
@@ -197,8 +192,10 @@ describe("Tool rows on the Run Ledger", () => {
 		() =>
 			withStore(
 				Effect.gen(function* () {
-					yield* project([created("s1"), ...start("s1", "r1", 1001)]);
-					yield* launch("s1", "r1", "/work/a");
+					yield* project([
+						created("s1"),
+						...start("s1", "r1", 1001, "/work/a"),
+					]);
 					// 1: before any Run, and between Runs, the row's run is unknown.
 					yield* project([created("s0"), toolStarted("s0", "orphan", 1009)]);
 					yield* project([toolStarted("s1", "t1", 1010)]);
@@ -221,8 +218,7 @@ describe("Tool rows on the Run Ledger", () => {
 						folder: "/work/a",
 					});
 					// 8: a later Run never re-stamps a row a redelivered tool.started names again.
-					yield* project([...start("s1", "r2", 1030)]);
-					yield* launch("s1", "r2", "/work/b");
+					yield* project([...start("s1", "r2", 1030, "/work/b")]);
 					yield* project([toolStarted("s1", "t1", 1040)]);
 					expect(yield* row("t1")).toMatchObject({
 						run_id: "r1",
@@ -247,10 +243,9 @@ describe("Tool rows on the Run Ledger", () => {
 							{ runnerId: "rn", label: "rn:1", reattached: false },
 							at(1000),
 						),
-						...start("s1", "r1", 1001),
+						...start("s1", "r1", 1001, "/work/a"),
 						...start("other", "o1", 1001),
 					]);
-					yield* launch("s1", "r1", "/work/a");
 					yield* project([
 						toolStarted("s1", "fg", 1010),
 						toolStarted("s1", "bg", 1011),
@@ -323,8 +318,7 @@ describe("Tool rows on the Run Ledger", () => {
 						ended_by: null,
 					});
 					// 3: a second Run starts and ends; the background row is still open.
-					yield* project([...start("s1", "r2", 1030)]);
-					yield* launch("s1", "r2", "/work/a");
+					yield* project([...start("s1", "r2", 1030, "/work/a")]);
 					yield* project([
 						toolStarted("s1", "fg2", 1035),
 						end("s1", "r2", 1040),
@@ -413,9 +407,8 @@ describe("Tool rows on the Run Ledger", () => {
 						created("s1"),
 						created("c1", "s1"),
 						created("c2", "c1"),
-						...start("s1", "r1", 1001),
+						...start("s1", "r1", 1001, "/work/a"),
 					]);
-					yield* launch("s1", "r1", "/work/a");
 					yield* project([
 						toolStarted("s1", "task1", 1010),
 						toolRunning("s1", "task1", { childSessionId: "c1" }, 1011),
@@ -462,7 +455,7 @@ describe("Tool rows on the Run Ledger", () => {
 			Effect.gen(function* () {
 				const events = [
 					created("s1"),
-					...start("s1", "r1", 1001),
+					...start("s1", "r1", 1001, "/work/a"),
 					toolStarted("s1", "t1", 1010),
 					toolStarted("s1", "t2", 1011),
 					end("s1", "r1", 1020),
@@ -471,7 +464,6 @@ describe("Tool rows on the Run Ledger", () => {
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						yield* project(events.slice(0, 4));
-						yield* launch("s1", "r1", "/work/a");
 						yield* project(events.slice(4));
 						// An old store: its rows predate the columns.
 						yield* sql`UPDATE message_parts SET run_id = NULL, folder = NULL,
@@ -489,7 +481,6 @@ describe("Tool rows on the Run Ledger", () => {
 					Effect.gen(function* () {
 						const store = yield* EventStoreEffectTag;
 						for (const event of events) yield* store.append(event);
-						yield* launch("s1", "r1", "/work/a");
 						yield* (yield* ProjectionRunnerEffectTag).recover();
 						return (yield* rows).filter((r) => r.id !== "t1");
 					}),
