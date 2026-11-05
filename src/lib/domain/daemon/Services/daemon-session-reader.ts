@@ -146,6 +146,11 @@ export const hasProviderRecoveryCandidate = (
 						WHERE project_key = ${project.slug} AND command_id = pending.input_id
 						AND session_id = pending.session_id AND effect_type = 'send_turn'
 						ORDER BY request_sequence DESC LIMIT 1) = 'failed'
+			) OR EXISTS (
+				-- A queued message waits for the inbox, which starts with the project's services.
+				SELECT 1 FROM pending_inputs pending
+				JOIN sessions session ON session.id = pending.session_id
+				WHERE session.project_id = ${project.slug} AND pending.state = 'queued'
 			) AS needs_recovery`;
 			return rows[0]?.needs_recovery === 1;
 		}).pipe(Effect.provide(database));
