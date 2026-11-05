@@ -31,7 +31,7 @@ import {
 	mockFileContent,
 	mockFileTree,
 } from "../../stories/mocks.js";
-import { connectedSocket, failRpc } from "../../stories/sockets.js";
+import { connectedSocket, failRpc, replyRpc } from "../../stories/sockets.js";
 import { applySessionChange } from "../../transport/session-subscription.svelte.js";
 import { loadHighlighter } from "../../utils/load-highlighter.js";
 import ChatLayout from "./ChatLayout.svelte";
@@ -127,10 +127,16 @@ const meta = {
 		});
 		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
 		applySessionChange({ _tag: "synchronized" });
+		// The chat home shows test-project, so its catalog is read for that project.
+		const restoreModels = replyRpc("GetModels", () => ({
+			projectSlug: "test-project",
+			providers: [claudeProvider],
+		}));
 		// Static Storybook hosting needs a socket that completes its connection.
 		const restoreSocket = connectedSocket("test-project");
 		const restoreFetch = stubProjectFetches();
 		return () => {
+			restoreModels();
 			restoreFetch();
 			restoreSocket();
 			projectState.projects = projects;
