@@ -2268,9 +2268,11 @@ describe("durable control outbox scheduling", () => {
 								answers: {},
 								operation: "reject" as const,
 							};
+				// The answer is kept and its delivery retries, so the request succeeds
+				// (CONTRACT.md 1015-1018, 82tn.32.9); the rows below show it undelivered.
 				expect(
 					yield* Effect.result(orchestration.dispatchEffect(command)),
-				).toMatchObject({ _tag: "Failure" });
+				).toMatchObject({ _tag: "Success" });
 				expect(
 					yield* sql`SELECT status, attempt_count, next_attempt_at FROM provider_command_outbox`,
 				).toEqual([
