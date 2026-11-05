@@ -38,6 +38,7 @@ import {
 	addWithoutRelay,
 	startRelay,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { ProviderAdapters } from "../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { RelayCacheTag } from "../../src/lib/domain/daemon/Services/relay-cache.js";
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
@@ -217,7 +218,22 @@ export async function createDaemonProject(
 					// A reused configDir is a restart: daemon.json already holds the project.
 					Effect.catchTag("ProjectAlreadyExists", () => Effect.void),
 				);
-				yield* startRelay(slug);
+				// As foreground startup does, start every project with recovery work alongside this
+				// one, opened or not: recovery waits until each has lent its services.
+				const relays = yield* RelayCacheTag;
+				yield* Effect.all(
+					[
+						startRelay(slug),
+						Effect.forEach(
+							(yield* ProviderAdapters).recoveryProjects.filter(
+								(recovering) => recovering !== slug,
+							),
+							(recovering) => relays.get(recovering),
+							{ concurrency: "unbounded", discard: true },
+						),
+					],
+					{ concurrency: "unbounded", discard: true },
+				);
 				// Foreground startup starts the provider command outbox once its
 				// projects are up; Stop's abort and probe effects run there.
 				yield* (yield* DaemonOrchestration).start;

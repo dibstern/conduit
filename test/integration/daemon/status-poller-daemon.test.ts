@@ -60,12 +60,10 @@ it("after a restart, the daemon settles a stale busy session of a project no tab
 	const store = ManagedRuntime.make(
 		makePersistenceStoreLayer(join(configDir, "events.db")),
 	);
-	// The held session sits in the opened project: an Open row with no runner in a project no
-	// tab has opened stalls daemon start today (lane-16c audit, finding 32).
 	const sessions = [
 		["integration-test", "integration-test-stuck", "opencode"],
 		["unopened", "unopened-stuck", "opencode"],
-		["integration-test", "opened-held", "claude"],
+		["unopened", "unopened-held", "claude"],
 		["gone", "gone-stuck", "opencode"],
 	] as const;
 	for (const [projectId, sessionId, provider] of sessions)
@@ -88,7 +86,7 @@ it("after a restart, the daemon settles a stale busy session of a project no tab
 				]);
 				yield* (yield* ProjectionRunnerEffectTag).recover();
 				// Something may still act in this session (3.12: the ledger's Open row).
-				if (sessionId === "opened-held")
+				if (sessionId === "unopened-held")
 					yield* (yield* SqlClient.SqlClient)`INSERT INTO run_ledger_sessions
 						(session_id, provider, state) VALUES (${sessionId}, ${provider}, 'Open')`;
 			}).pipe(Effect.provideService(PersistenceProjectTag, { projectId })),
@@ -119,7 +117,7 @@ it("after a restart, the daemon settles a stale busy session of a project no tab
 	const statuses = {
 		opened: statusOf("integration-test-stuck"),
 		unopened: statusOf("unopened-stuck"),
-		held: statusOf("opened-held"),
+		held: statusOf("unopened-held"),
 		gone: statusOf("gone-stuck"),
 	};
 	mkdirSync("test-results/status-poller", { recursive: true });
