@@ -16,9 +16,11 @@ const read = (storePath: string, sessionId: string) => {
 			runs: all<{ id: string; status: string }>(
 				"SELECT id, status FROM provider_runs WHERE session_id = ?",
 			),
-			// 3.9, 4.8: a steer's main run is a Run Input of the Run it steered; it ends no Run.
+			// 3.9, 4.8: a joined steer's main run is a Run Input of the Run it steered; it ends no Run.
+			// A steer that outlives its Run is a Run of its own once its host starts it, and ends
+			// once (CONTRACT.md 978-984).
 			steerRuns: all<{ runId: string }>(
-				"SELECT json_extract(r.data, '$.runId') AS runId FROM events r JOIN events s ON s.session_id = r.session_id AND s.type = 'input.sent' AND json_extract(s.data, '$.steer') = 1 AND json_extract(s.data, '$.inputId') = json_extract(r.data, '$.inputId') WHERE r.session_id = ? AND r.type = 'run.requested'",
+				"SELECT json_extract(r.data, '$.runId') AS runId FROM events r JOIN events s ON s.session_id = r.session_id AND s.type = 'input.sent' AND json_extract(s.data, '$.steer') = 1 AND json_extract(s.data, '$.inputId') = json_extract(r.data, '$.inputId') WHERE r.session_id = ? AND r.type = 'run.requested' AND NOT EXISTS (SELECT 1 FROM events started WHERE started.session_id = r.session_id AND started.type = 'run.started' AND json_extract(started.data, '$.requestedRunId') = json_extract(r.data, '$.runId'))",
 			).map(({ runId }) => runId),
 			ends: all<{ runId: string; outcome: string }>(
 				"SELECT json_extract(entry_json, '$.runId') AS runId, json_extract(entry_json, '$.outcome') AS outcome FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",

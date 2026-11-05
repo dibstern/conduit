@@ -43,6 +43,7 @@ import {
 	type TraceRow,
 } from "../../helpers/codex-app-server.js";
 import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
+import { historicalRunnerBundle } from "../../helpers/historical-runner-bundle.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -214,6 +215,7 @@ describe("Codex on the Run Ledger", () => {
 		trace: TraceRow[],
 		environment: Record<string, string> = {},
 		options: Parameters<typeof ProcessHarness.create>[0] = {},
+		view = true,
 	) => {
 		const fixture = ProcessHarness.create({
 			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
@@ -237,8 +239,9 @@ describe("Codex on the Run Ledger", () => {
 			traceMap,
 			JSON.stringify({ "*": { "codex-discovery": { trace: discoveryPath } } }),
 		);
-		const restart = () =>
+		const restart = (dist?: string) =>
 			fixture.restart({
+				...(dist ? { dist } : {}),
 				startupTimeoutMs: TIMEOUT,
 				runnerStartupTimeoutMs: TIMEOUT,
 				serviceEnvironment: {
@@ -251,23 +254,36 @@ describe("Codex on the Run Ledger", () => {
 				},
 			});
 		await restart();
-		const browser = await fixture.connect();
+		const browser = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			view,
+		);
+		// main's account list fails this build's schema, so read main's account from its config.
 		const account = await vi.waitFor(
 			async () => {
-				const found = (await browser.instances()).instances.find(
-					({ driver }) => driver === "codex",
-				);
+				const found = (
+					options.dist
+						? (
+								JSON.parse(
+									readFileSync(join(fixture.configDir, "daemon.json"), "utf8"),
+								) as { instances: { id: string; driver: string }[] }
+							).instances
+						: (await browser.instances()).instances
+				).find(({ driver }) => driver === "codex");
 				expect(found).toBeDefined();
 				return found;
 			},
 			{ timeout: TIMEOUT },
 		);
 		if (!account) throw new Error("Missing Codex account");
-		await codexModels(browser, account.id);
+		if (!options.dist) await codexModels(browser, account.id);
 		const sessionId = await browser.createSession(name, account.id, "codex", {
 			modelId: "gpt-6.1-sol",
 			contextWindow: "",
 			permissionMode: "ask",
+			view,
 		});
 		writeTrace(trace);
 		return { fixture, browser, sessionId, restart };
@@ -278,8 +294,9 @@ describe("Codex on the Run Ledger", () => {
 		text: string,
 		delivery: "queue" | "steer" = "queue",
 		inputId: string = randomUUID(),
+		view = true,
 	) => {
-		await browser.followSession(sessionId);
+		if (view) await browser.followSession(sessionId);
 		const result = await Effect.runPromise(
 			browser.rpc["input.submit"]({
 				sessionId,
@@ -292,7 +309,11 @@ describe("Codex on the Run Ledger", () => {
 		expect(result.ok).toBe(true);
 	};
 	/** Sets the goal (it goes to Codex first at the next launch), then sends its prompt. */
-	const goalSubmit = async (browser: ProcessBrowser, sessionId: string) => {
+	const goalSubmit = async (
+		browser: ProcessBrowser,
+		sessionId: string,
+		view = true,
+	) => {
 		const set = await Effect.runPromise(
 			browser.rpc.SetGoal({
 				sessionId,
@@ -301,7 +322,7 @@ describe("Codex on the Run Ledger", () => {
 			}),
 		);
 		expect(set).toEqual({ ok: true });
-		await submit(browser, sessionId, "Say hello");
+		await submit(browser, sessionId, "Say hello", "queue", randomUUID(), view);
 	};
 	const turns = (
 		fixture: ProcessHarness,
@@ -715,16 +736,20 @@ describe("Codex on the Run Ledger", () => {
 		] as TraceRow[];
 	};
 	/** A goal send whose successor misses the window, so Codex starts it while conduit is idle. */
-	const wake = async (name: string, trace: TraceRow[]) => {
+	const wake = async (name: string, trace: TraceRow[], view = true) => {
 		const firstEnd = trace.find(
 			({ message }) => message?.method === "turn/completed",
 		)?.["at"];
 		if (typeof firstEnd !== "number") throw new Error("Missing turn end");
-		const started = await start(name, trace, {
-			CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500",
-		});
+		const started = await start(
+			name,
+			trace,
+			{ CONDUIT_TEST_CODEX_GOAL_SUCCESSOR_TIMEOUT_MS: "500" },
+			{},
+			view,
+		);
 		writeFileSync(gatePath, String(firstEnd));
-		await goalSubmit(started.browser, started.sessionId);
+		await goalSubmit(started.browser, started.sessionId, view);
 		// test-waits-allow polling: the window closing reaches only the store's ledger.
 		await vi.waitFor(
 			() =>
@@ -804,7 +829,9 @@ describe("Codex on the Run Ledger", () => {
 	// With no tab viewing the session, every done reaches the project's alerts.
 	it("sends one done alert for a Codex wake, at its end", async () => {
 		const chain = oneWake(fixtureRows("goal-chain"));
-		const { fixture, browser, sessionId } = await wake("wake-done", chain);
+		// No tab ever views the session: closing a viewer is not seen by the daemon at once,
+		// so a wake ending first would route its done to that viewer, not to the alerts.
+		const { fixture, sessionId } = await wake("wake-done", chain, false);
 		const wakeEnd = chain.filter(
 			({ message }) => message?.method === "turn/completed",
 		)[1]?.["at"];
@@ -851,7 +878,6 @@ describe("Codex on the Run Ledger", () => {
 			timeout: TIMEOUT,
 			interval: 50,
 		});
-		await browser.close();
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		const done = () =>
 			alerts.filter(
@@ -1102,6 +1128,50 @@ describe("Codex on the Run Ledger", () => {
 		);
 	});
 
+	// Two-build upgrade (CONTRACT.md 3051): main's daemon holds a Codex turn, is SIGKILLed, and
+	// the current build restarts on its store.
+	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
+	it("settles a Codex turn main's runner held through an upgrade once, never re-sent", async (context) => {
+		const historical = await historicalRunnerBundle(
+			"020678548921ff6419796274482a1a9ecc5dfc69",
+		);
+		if (!historical.available) context.skip(historical.reason);
+		if (!historical.available) return;
+		const { fixture, browser, sessionId, restart } = await start(
+			"two-build",
+			fixtureRows("basic"),
+			{},
+			{ dist: historical.dist },
+		);
+		const delta = fixtureRows("basic").find(
+			({ message }) => message?.method === "item/agentMessage/delta",
+		)?.["at"];
+		writeFileSync(gatePath, String(delta));
+		await submit(browser, sessionId, "Say hello");
+		// test-waits-allow polling: the app-server's output reaches only its capture file.
+		await vi.waitFor(
+			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),
+			{ timeout: TIMEOUT },
+		);
+		expect(captured("turn/start", "out")).toHaveLength(1);
+		await fixture.kill();
+		await restart(process.env["CONDUIT_TEST_DIST"] ?? "dist");
+		await (await fixture.connect()).followSession(sessionId);
+		// main's runner is an older build: this build retires it and ends its turn once, never
+		// re-sending it (CONTRACT.md 3051, F39).
+		await turns(fixture, sessionId, ["error"]);
+		const ledger = read(fixture, sessionId);
+		endsOnce(ledger);
+		expect(ledger.ends).toEqual([
+			expect.objectContaining({ outcome: "error" }),
+		]);
+		expect(ledger.runs).toHaveLength(1);
+		proveCrashMatrixCell(
+			"two-build/codex",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 300_000);
 	it("keeps a wake running through a daemon restart; it ends once at its own result", async () => {
 		const { fixture, sessionId, trace, restart } = await wake(
 			"restart-wake",

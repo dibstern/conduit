@@ -5,6 +5,7 @@
 // 14. the entry is a transient toast, not a timeline entry, or is gone after a reload.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { taskStopFixture } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	type ProcessBrowser as BrowserClient,
@@ -91,6 +92,44 @@ describe("lost background work", () => {
 		const afterReload = await lostNotices(reloaded, sessionId);
 		proof["killed with tasks: after reload"] = afterReload;
 		expect(afterReload).toEqual(lost);
+	});
+
+	it("names a process's live tasks once when it dies while the daemon is down, after the restart and a reload", async () => {
+		harness = await ProcessHarness.start({ restartProof: true });
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Lost work across a restart");
+		await browser.followSession(sessionId);
+		void browser.send(sessionId, "task-stop-foreground").catch(() => undefined);
+		const live = (await browser.waitFor(
+			(message) =>
+				message["type"] === "session_row" &&
+				message["id"] === sessionId &&
+				Array.isArray(message["backgroundTasks"]) &&
+				message["backgroundTasks"].length === taskStopFixture.length,
+		)) as Row;
+		const tasks = live["backgroundTasks"] as Shown[];
+		await harness.kill();
+		await killRunner(harness);
+		await harness.restart();
+		const restarted = await harness.connect(sessionId);
+		// test-waits-allow polling: the restarted daemon's notice is read back as history.
+		const lost = await vi.waitFor(async () => {
+			const found = await lostNotices(restarted, sessionId);
+			expect(found).toHaveLength(1);
+			return found;
+		});
+		proof["lost across a restart: notice"] = lost;
+		for (const task of tasks) expect(lost[0]).toContain(named(task));
+		const afterReload = await lostNotices(
+			await harness.connect(sessionId),
+			sessionId,
+		);
+		expect(afterReload).toEqual(lost);
+		proveCrashMatrixCell(
+			"background/lost-work",
+			harness.daemonStorePath(),
+			sessionId,
+		);
 	});
 
 	it("records nothing when a process with no tasks is lost", async () => {

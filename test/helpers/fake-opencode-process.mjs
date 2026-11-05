@@ -457,6 +457,10 @@ const server = createServer(async (request, response) => {
 		request.method === "POST"
 	) {
 		const requestID = path.split("/")[4];
+		// A test holds the reply in flight, received and not yet answered (82tn.32.14).
+		while (existsSync(join(configDir, "fake-opencode-hold-reply")))
+			// test-waits-allow real-wait: the hold is a file the test removes; it has no event.
+			await new Promise((resolve) => setTimeout(resolve, 50));
 		const owner = answerPrompt("permissions", requestID);
 		if (owner)
 			emitTyped(owner, "permission.replied", {

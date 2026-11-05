@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeRunnerSocket } from "../../../src/lib/provider/claude/claude-runner-protocol.js";
 import { currentSendToken } from "../../../src/lib/provider/runner/runner-protocol.js";
 import type { SessionTurn } from "../../../src/lib/provider/runner/session-runner.js";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 const TIMEOUT = 120_000;
@@ -57,6 +58,16 @@ function stored(harness: ProcessHarness, sessionId: string) {
 					"SELECT receipt.status FROM command_receipts receipt JOIN provider_command_outbox outbox ON outbox.command_id = receipt.command_id AND outbox.project_key = receipt.project_key WHERE outbox.session_id = ? AND outbox.effect_type = 'send_turn' ORDER BY outbox.request_sequence",
 				)
 				.all(sessionId) as Array<{ status: string }>,
+			indeterminate: db
+				.prepare(
+					"SELECT error_code FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+				)
+				.all(sessionId) as Array<{ error_code: string | null }>,
+			ends: db
+				.prepare(
+					"SELECT json_extract(entry_json, '$.outcome') AS outcome FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end'",
+				)
+				.all(sessionId) as Array<{ outcome: string }>,
 			errors: db
 				.prepare(
 					"SELECT data, json_extract(metadata, '$.runId') AS run_id FROM events WHERE session_id = ? AND type = 'turn.error'",
@@ -193,6 +204,24 @@ describe("runner host at-most-once delivery through Claude's process seam", () =
 					(mark) => mark["kind"] === "enqueue" && mark["prompt"] === prompt,
 				),
 			).toHaveLength(1);
+			// The dead runner's journal keeps the send with no outcome (uncertain): Settle codes it
+			// delivery_indeterminate and the Run ends once, never re-sent (CONTRACT.md 1926).
+			const settledState = stored(harness, sessionId);
+			expect(settledState.indeterminate).toEqual([
+				{ error_code: "delivery_indeterminate" },
+			]);
+			expect(
+				settledState.errors.map(
+					({ data }) => (JSON.parse(data) as { code?: string }).code,
+				),
+			).toEqual(["delivery_indeterminate"]);
+			expect(settledState.ends).toEqual([{ outcome: "error" }]);
+			if (!partialJournal)
+				proveCrashMatrixCell(
+					"claude/journal/uncertain",
+					harness.daemonStorePath(),
+					sessionId,
+				);
 			await recovered.send(sessionId, "explicit-next-message", TIMEOUT);
 			await vi.waitFor(
 				() =>

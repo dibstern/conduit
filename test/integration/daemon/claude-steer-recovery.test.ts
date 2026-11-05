@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +20,7 @@ import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-s
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
@@ -397,6 +404,89 @@ describe("Claude pending steer recovery through the process seam", () => {
 				null,
 				2,
 			),
+		);
+	}, 90_000);
+
+	// test-waits-allow timeout-override: a daemon restart and the adopted turn each take seconds.
+	it("delivers a steer once when the daemon is SIGKILLed with the steer handed to its live runner", async () => {
+		harness = ProcessHarness.create({ dist: "dist", restartProof: true });
+		await harness.restart();
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"Steer through a daemon kill",
+		);
+		void browser.send(sessionId, "upgrade-long-turn").catch(() => undefined);
+		await harness.waitForMark(
+			(mark) =>
+				mark.kind === "assistant-held" &&
+				mark.prompt.endsWith("upgrade-long-turn"),
+		);
+		const steerId = randomUUID();
+		const steer = "correction through a daemon kill";
+		const result = await Effect.runPromise(
+			browser.rpc["input.submit"]({
+				sessionId,
+				originId: browser.originId,
+				inputId: steerId,
+				delivery: "steer",
+				text: steer,
+			}),
+		);
+		expect(result.ok).toBe(true);
+		const running = harness;
+		// The adopted runner's marks reach only its proof file once its spawning daemon is gone.
+		const enqueued = () =>
+			readFileSync(join(running.root, "sdk-proof.ndjson"), "utf8")
+				.trim()
+				.split("\n")
+				.map((line) => JSON.parse(line) as { kind: string; prompt?: string })
+				.filter(
+					({ kind, prompt }) => kind === "enqueue" && prompt?.endsWith(steer),
+				);
+		// The runner holds the steer for the SDK's next pull: the held turn has not taken it yet.
+		const receipt = await harness.waitForMark(
+			(mark) => mark.kind === "receipt" && mark.prompt === steer,
+		);
+		const received = running.marks.indexOf(receipt);
+		await harness.waitForMark(
+			(mark) => mark.kind === "runner-command",
+			received + 1,
+		);
+		// test-waits-allow polling: the steer's handoff reaches only the store's inbox.
+		await vi.waitFor(
+			() =>
+				expect(inbox(running, sessionId).inputs).toContainEqual({
+					input_id: steerId,
+					state: "steering",
+				}),
+			{ timeout: 30_000 },
+		);
+		expect(enqueued()).toEqual([]);
+		await harness.kill();
+		await harness.restart();
+		await harness.connect(sessionId);
+		writeFileSync(join(harness.root, "release-upgrade-turn"), "");
+		// test-waits-allow polling: the adopted turn's end reaches only the store.
+		await vi.waitFor(
+			() => {
+				const state = inbox(running, sessionId);
+				expect(state.session.status).toBe("idle");
+				expect(state.turns.map(({ state }) => state)).toEqual([
+					"completed",
+					"completed",
+				]);
+				expect(
+					state.inputs.filter(({ state }) => state === "steering"),
+				).toEqual([]);
+			},
+			{ timeout: 30_000 },
+		);
+		expect(enqueued()).toHaveLength(1);
+		proveCrashMatrixCell(
+			"claude/steer/daemon",
+			harness.daemonStorePath(),
+			sessionId,
+			[steerId],
 		);
 	}, 90_000);
 });

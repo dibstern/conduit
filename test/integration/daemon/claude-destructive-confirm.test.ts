@@ -21,6 +21,7 @@ import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { taskStopFixture } from "../../helpers/fake-claude-process-sdk.js";
 import {
 	type ProcessBrowser as BrowserClient,
@@ -600,6 +601,16 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		});
 		proof["restart: lost work"] = lost;
 		expect(lost[0]).toMatch(/^Background work ended: .*\(shell\)/);
+		// test-waits-allow polling: the retired process's end settles only in the store.
+		await vi.waitFor(
+			() =>
+				proveCrashMatrixCell(
+					"background/confirm",
+					fixture.daemonStorePath(),
+					sessionId,
+				),
+			{ timeout: 30_000, interval: 500 },
+		);
 	});
 
 	it("holds a refresh while tasks are live, asks with no turn needed, and closes on a confirm", async () => {
