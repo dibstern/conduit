@@ -51,6 +51,7 @@ import { join, resolve } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -1003,4 +1004,254 @@ describe("Cursor on the Run Ledger", () => {
 		},
 		SHELL_TEST_TIMEOUT,
 	);
+	// The crash matrix's Cursor cells (82tn.32.14; CONTRACT.md 4.9, 11.3). How they could fail:
+	// M1 a Run ends twice, or never; M2 an effect is left running or held with no owner (S9.6);
+	// M3 an input or an answer lands twice, or a requeued input twice; M4 a turn or the session stays
+	// busy, or a steer stays steering; M5 a send, steer or answer reaches the SDK again after the
+	// kill; M6 the next send after a runner's death never runs, or runs on the dead runner.
+	const cellRuns = (fixture: ProcessHarness, sessionId: string) => {
+		const ledger = read(fixture, sessionId);
+		return ledger.runs.map((run) => ({
+			status: run.status,
+			ends: ledger.ends
+				.filter((end) => end.runId === run.id)
+				.map((end) => end.outcome),
+		}));
+	};
+	const held = () => {
+		const gate = join(mkdtempSync(join(tmpdir(), "cursor-gate-")), "gate");
+		writeFileSync(gate, "hold");
+		return gate;
+	};
+	const answerQuestion = async (browser: ProcessBrowser, sessionId: string) => {
+		const cursor = browser.frames.length;
+		await submit(
+			browser,
+			sessionId,
+			"Ask me which deployment to use with ask_user.",
+		);
+		const question = await browser.waitFor(
+			(message) =>
+				message["type"] === "question_pending" &&
+				message["sessionId"] === sessionId,
+			cursor,
+			TIMEOUT,
+		);
+		expect(
+			await Effect.runPromise(
+				browser.rpc.AnswerQuestion({
+					projectSlug: "process-test",
+					originId: browser.originId,
+					commandId: randomUUID(),
+					toolId: String(question["toolId"]),
+					answers: { "0": "Blue" },
+				}),
+			),
+		).toEqual({ ok: true });
+		// test-waits-allow polling: the SDK's take of the answer reaches only its capture file.
+		await vi.waitFor(() => expect(captured("custom.result")).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+	};
+	// The runner holds each turn's terminal this long after its stream, so a kill lands inside it.
+	const WAIT_HELD = { CONDUIT_TEST_CURSOR_WAIT_DELAY_MS: "4000" };
+	// The SDK settles a Stop's cancel this long after it, so a kill lands with the Stop in flight.
+	const CANCEL_HELD = { CONDUIT_TEST_CURSOR_CANCEL_TERMINAL_DELAY_MS: "4000" };
+	const CANCEL_PROMPT = "Call the human custom tool once, then say done.";
+
+	// test-waits-allow timeout-override: a daemon restart and the held terminal each take seconds.
+	it("settles a send its runner finished while the daemon was down once, from the runner's journal (finished)", async () => {
+		const gate = held();
+		const { fixture, browser, sessionId, restart } = await start(
+			"matrix-finished",
+			"basic",
+			{ CONDUIT_TEST_CURSOR_STREAM_GATE: gate },
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		await thinking(fixture, sessionId);
+		await fixture.kill();
+		rmSync(gate);
+		// test-waits-allow polling: the runner's finish reaches only its capture file while the daemon is down.
+		await vi.waitFor(() => expect(captured("stream.end")).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+		await restart();
+		await turns(fixture, sessionId, ["completed"]);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "completed", ends: ["completed"] },
+		]);
+		expect(captured("send.options")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"cursor/journal/finished",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a new runner's start and the next send each take seconds.
+	it("never re-sends a send its runner held before streaming when the runner died (uncertain)", async () => {
+		const gate = held();
+		const { fixture, browser, sessionId } = await start(
+			"matrix-uncertain",
+			"basic",
+			{ CONDUIT_TEST_CURSOR_SEND_GATE: gate },
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		// test-waits-allow polling: the SDK's take of the send reaches only its capture file.
+		await vi.waitFor(() => expect(captured("send.options")).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+		expect(
+			fixture.signalOwnedRunner(runnerPid(fixture, sessionId), "SIGKILL"),
+		).toBe(true);
+		await turns(fixture, sessionId, ["error"]);
+		rmSync(gate);
+		await submit(browser, sessionId, "Replay the captured basic turn again.");
+		await turns(fixture, sessionId, ["error", "completed"]);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "error", ends: ["error"] },
+			{ status: "completed", ends: ["completed"] },
+		]);
+		expect(captured("send.options")).toHaveLength(2);
+		proveCrashMatrixCell(
+			"cursor/journal/uncertain",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and the steered turn each take seconds.
+	it("delivers a steer once when the daemon dies with the steer handed to the SDK, unacknowledged", async () => {
+		const gate = held();
+		const { fixture, browser, sessionId, restart } = await start(
+			"matrix-steer-daemon",
+			"steer",
+			{ CONDUIT_TEST_CURSOR_STREAM_GATE: gate },
+		);
+		await submit(browser, sessionId, "Replay the captured running turn.");
+		await thinking(fixture, sessionId);
+		await submit(browser, sessionId, STEER, "steer", "matrix-steer");
+		// test-waits-allow polling: the SDK's take of the steer reaches only its capture file.
+		await vi.waitFor(() => expect(captured("steer.call")).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+		await fixture.kill();
+		rmSync(gate);
+		await restart();
+		await turns(fixture, sessionId, ["completed", "completed"]);
+		expect(captured("steer.call")).toHaveLength(1);
+		expect(captured("send.options")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"cursor/steer/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+			["matrix-steer"],
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and the held cancel each take seconds.
+	it("ends a Stop's Run interrupted once when the daemon dies with the cancel unsettled", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"matrix-stop-daemon",
+			"cancel",
+			CANCEL_HELD,
+		);
+		await submit(browser, sessionId, CANCEL_PROMPT);
+		await thinking(fixture, sessionId);
+		await stop(browser, sessionId);
+		await fixture.kill();
+		await restart();
+		await turns(fixture, sessionId, ["interrupted"]);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "interrupted", ends: ["interrupted"] },
+		]);
+		proveCrashMatrixCell(
+			"cursor/stop/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a new runner's start and the next send each take seconds.
+	it("ends a Stop's Run interrupted once when its runner dies with the cancel unsettled, and runs the next send once", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"matrix-stop-runner",
+			"cancel",
+			CANCEL_HELD,
+		);
+		await submit(browser, sessionId, CANCEL_PROMPT);
+		await thinking(fixture, sessionId);
+		await stop(browser, sessionId);
+		expect(
+			fixture.signalOwnedRunner(runnerPid(fixture, sessionId), "SIGKILL"),
+		).toBe(true);
+		// test-waits-allow polling: the killed Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns).not.toContain("running"),
+			{ timeout: TIMEOUT },
+		);
+		await submit(browser, sessionId, "Say cancel followup.");
+		// test-waits-allow polling: the next Run's end reaches only the store's ledger.
+		await vi.waitFor(
+			() => expect(read(fixture, sessionId).turns.at(-1)).toBe("completed"),
+			{ timeout: TIMEOUT },
+		);
+		// A Stop asked ends its Run interrupted before its lost runner's error (CONTRACT 857-859).
+		expect(cellRuns(fixture, sessionId).map(({ ends }) => ends)).toEqual([
+			["interrupted"],
+			["completed"],
+		]);
+		expect(captured("send.options")).toHaveLength(2);
+		proveCrashMatrixCell(
+			"cursor/stop/runner",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: a daemon restart and the held terminal each take seconds.
+	it("ends an answered question's Run once when the daemon dies after the SDK took the answer", async () => {
+		const { fixture, browser, sessionId, restart } = await start(
+			"matrix-answer-daemon",
+			"question-basic",
+			WAIT_HELD,
+		);
+		await answerQuestion(browser, sessionId);
+		await fixture.kill();
+		await restart();
+		await turns(fixture, sessionId, ["completed"]);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "completed", ends: ["completed"] },
+		]);
+		expect(captured("custom.result")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"cursor/answer/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
+
+	// test-waits-allow timeout-override: the held terminal and the loss each take seconds.
+	it("ends an answered question's Run once when its runner dies after the SDK took the answer, never answering again", async () => {
+		const { fixture, browser, sessionId } = await start(
+			"matrix-answer-runner",
+			"question-basic",
+			WAIT_HELD,
+		);
+		await answerQuestion(browser, sessionId);
+		expect(
+			fixture.signalOwnedRunner(runnerPid(fixture, sessionId), "SIGKILL"),
+		).toBe(true);
+		await turns(fixture, sessionId, ["error"]);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "error", ends: ["error"] },
+		]);
+		expect(captured("custom.result")).toHaveLength(1);
+		expect(captured("send.options")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"cursor/answer/runner",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
 });
