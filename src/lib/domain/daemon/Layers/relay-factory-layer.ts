@@ -92,6 +92,7 @@ import {
 } from "../Services/instance-manager-service.js";
 import { MessageSurfacingSettings } from "../Services/message-surfacing-settings.js";
 import { OpenCodeInstancesTag } from "../Services/opencode-instances-service.js";
+import { OpenCodeProjectStreams } from "../Services/opencode-project-streams.js";
 import { OwnerScopes } from "../Services/owner-scopes.js";
 import { ProjectContext } from "../Services/project-context.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
@@ -237,6 +238,9 @@ export const RelayFactoryLive = (
 			const surfacing = yield* Effect.serviceOption(MessageSurfacingSettings);
 			const categories = yield* Effect.serviceOption(CategorySet);
 			const sessionDirectory = yield* Effect.serviceOption(SessionDirectory);
+			const projectStreams = yield* Effect.serviceOption(
+				OpenCodeProjectStreams,
+			);
 			const projectContext = yield* Effect.serviceOption(ProjectContext);
 			const overrides = yield* Effect.serviceOption(OverridesStateTag);
 			const sessionWorkspace = yield* Effect.serviceOption(SessionWorkspaceTag);
@@ -687,6 +691,14 @@ export const RelayFactoryLive = (
 													? Context.make(
 															SessionDirectory,
 															sessionDirectory.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(projectStreams)
+													? Context.make(
+															OpenCodeProjectStreams,
+															projectStreams.value,
 														)
 													: Context.empty(),
 											),

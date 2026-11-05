@@ -9,7 +9,9 @@ import {
 	Data,
 	Deferred,
 	Effect,
+	HashMap,
 	Layer,
+	Option,
 	PubSub,
 	Ref,
 	Stream,
@@ -113,6 +115,10 @@ import {
 	makeInstanceManagerStateFromDaemonStateLive,
 	makeInstanceManagerStateLive,
 } from "../Services/instance-manager-service.js";
+import {
+	makeOpenCodeProjectStreamsLive,
+	OpenCodeProjectStreams,
+} from "../Services/opencode-project-streams.js";
 import { persistenceStoreContext } from "../Services/project-read-database.js";
 import {
 	allProjects,
@@ -482,6 +488,23 @@ export const makeRelayCacheLayer = (): Layer.Layer<
 				}),
 			);
 			relayCache = relayCacheService;
+			// A project holding OpenCode events with no tab open starts its pipeline (82tn.16).
+			const projectStreams = yield* Effect.serviceOption(
+				OpenCodeProjectStreams,
+			);
+			if (Option.isSome(projectStreams))
+				yield* Stream.fromQueue(projectStreams.value.wakes).pipe(
+					Stream.runForEach((slug) =>
+						relayCacheService
+							.get(slug)
+							.pipe(
+								Effect.catchCause((cause) =>
+									Effect.logError(`Failed to start project "${slug}"`, cause),
+								),
+							),
+					),
+					Effect.forkScoped,
+				);
 			return relayCacheService;
 		}),
 	);
@@ -891,8 +914,21 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withOpenCodeInstances));
-	const withOwnerScopes = OwnerScopesLive.pipe(
-		Layer.provideMerge(withSessionDirectory),
+	// Each registered project's OpenCode stream lives in its owner scope (82tn.16).
+	const withOwnerScopes = Layer.unwrap(
+		Effect.gen(function* () {
+			const store = yield* PersistenceStore;
+			const registry = yield* ProjectRegistryTag;
+			return makeOpenCodeProjectStreamsLive(() =>
+				[...HashMap.values(Ref.getUnsafe(registry))].map(
+					({ project }) => project,
+				),
+			).pipe(Layer.provide(Layer.succeedContext(store)));
+		}),
+	).pipe(
+		Layer.provideMerge(
+			OwnerScopesLive.pipe(Layer.provideMerge(withSessionDirectory)),
+		),
 	);
 	const withProjectContext = ProjectContextLive.pipe(
 		Layer.provideMerge(withOwnerScopes),

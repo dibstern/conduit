@@ -62,6 +62,10 @@ import {
 	type OpenCodeInstances,
 	OpenCodeInstancesTag,
 } from "../domain/daemon/Services/opencode-instances-service.js";
+import {
+	makeOpenCodeProjectStreamsLive,
+	OpenCodeProjectStreams,
+} from "../domain/daemon/Services/opencode-project-streams.js";
 import { ProjectContext } from "../domain/daemon/Services/project-context.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import {
@@ -918,10 +922,31 @@ export function createProjectRelayLayers({
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
 		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
 	);
+	// Daemon relays feed from the daemon's per-project OpenCode streams (82tn.16).
+	const projectStreamsLayer = Option.match(
+		Context.getOption(
+			config.daemonConfigContext ?? Context.empty(),
+			OpenCodeProjectStreams,
+		),
+		{
+			onSome: (streams) => Layer.sync(OpenCodeProjectStreams, () => streams),
+			onNone: () =>
+				makeOpenCodeProjectStreamsLive(() => [
+					{
+						slug: config.slug,
+						folders: [config.projectDir, ...(config.extraFolders ?? [])],
+					},
+				]).pipe(
+					Layer.provide(
+						Layer.merge(openCodeInstancesLayer, persistenceEffectLayer),
+					),
+				),
+		},
+	);
 	const sseStreamLayer = SSEStreamLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeInstancesLayer,
+				projectStreamsLayer,
 				configLayer,
 				persistenceEffectLayer,
 				sessionEventBusLayer,
