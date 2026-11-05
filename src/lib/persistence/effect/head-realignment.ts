@@ -60,7 +60,10 @@ export const readOwedRealignment = (
 		// The provider resumes at the newest row it holds. Conduit's own notices (an error, a
 		// compaction marker) never reach it (as inherit-fork-history skips them), and nothing written
 		// since the first move did either: a send that reached it would have confirmed the move.
-		const [resume] = yield* sql<{ id: string }>`SELECT id FROM messages
+		const [resume] = yield* sql<{
+			id: string;
+			node: string | null;
+		}>`SELECT id, history_node_id AS node FROM messages
 			WHERE session_id = ${sessionId}
 				AND id NOT GLOB 'compaction-[0-9]*' AND id NOT GLOB 'turn-error-[0-9]*'
 				AND id NOT IN (SELECT COALESCE(json_extract(data, '$.messageId'), '') FROM events
@@ -81,7 +84,9 @@ export const readOwedRealignment = (
 							// A switch to another branch keeps no turn before the dropped one: the
 							// provider resumes through the end of the resume row's own turn.
 							targetMessageId:
-								head === null || held.includes(head) ? target : undefined,
+								resume?.node == null || held.includes(resume.node)
+									? target
+									: undefined,
 							removedMessageIds,
 						},
 			events: [
@@ -168,17 +173,25 @@ export const readResumePlan = (
 			return (facts?.history ? "handoff" : "current") satisfies ResumePlan;
 		if (moved) {
 			// As prepare-turn: Claude resumes at the newest kept row only when that row is its own;
-			// a row another provider wrote is not in its session, so it starts fresh from the path.
+			// a row another account wrote is not in its session, so it starts fresh from the path.
+			// The writer is the account that held the session when the row was created.
 			const resume = (yield* readOwedRealignment(sql, sessionId))?.rewind
 				?.resumeSessionAt;
 			const [writer] = resume
-				? yield* sql<{ provider: string }>`SELECT provider FROM events
-					WHERE session_id = ${sessionId} AND type = 'message.created'
+				? yield* sql<{ account: string | null }>`SELECT COALESCE(
+						(SELECT json_extract(data, '$.newProvider') FROM events
+							WHERE session_id = ${sessionId} AND type = 'session.provider_changed'
+								AND sequence < created.sequence ORDER BY sequence DESC LIMIT 1),
+						(SELECT json_extract(data, '$.oldProvider') FROM events
+							WHERE session_id = ${sessionId} AND type = 'session.provider_changed'
+								AND sequence > created.sequence ORDER BY sequence LIMIT 1),
+						${instanceId}) AS account
+					FROM events created WHERE session_id = ${sessionId} AND type = 'message.created'
 						AND json_extract(data, '$.messageId') = ${resume}
 					ORDER BY sequence LIMIT 1`
 				: [];
 			return (
-				writer?.provider === instanceId ? "native" : "handoff"
+				writer?.account === instanceId ? "native" : "handoff"
 			) satisfies ResumePlan;
 		}
 		// As prepare-turn: a rewind it never heard of invalidates the thread; a switch since its
