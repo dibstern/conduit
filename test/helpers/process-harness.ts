@@ -31,6 +31,7 @@ import {
 	Fiber,
 	Layer,
 	ManagedRuntime,
+	Option,
 	Schema,
 	Stream,
 } from "effect";
@@ -44,6 +45,7 @@ import {
 } from "../../src/lib/contracts/provider-instance.js";
 import {
 	type PtyEnvelope,
+	SubscribeApprovals,
 	WsRpcGroup,
 	type WsRpcRequest,
 } from "../../src/lib/contracts/ws-rpc.js";
@@ -69,9 +71,10 @@ import type {
 	ProviderAgentInfo,
 } from "../../src/lib/provider/types.js";
 import type { RelaySettings } from "../../src/lib/relay/relay-settings.js";
-import type {
-	PtyInfo,
-	SessionPermissionMode,
+import {
+	type PtyInfo,
+	type SessionPermissionMode,
+	WS_PROTOCOL_VERSION,
 } from "../../src/lib/shared-types.js";
 import { stopPtyHost } from "../../src/lib/terminal/pty-host-client.js";
 import { isRecord } from "../../src/lib/utils.js";
@@ -110,10 +113,21 @@ function remainingTimeout(deadline: number | undefined, timeoutMs?: number) {
 	);
 }
 
+// The two-build tests drive a daemon built from main, whose approvals feed
+// (wire 7) is per project and requires `projectSlug`; wire 8 made it daemon-wide
+// (82tn.13). The current contract strips the key on encode, so the harness's
+// copy accepts it for that older build.
+const HarnessRpcGroup = WsRpcGroup.omit("SubscribeApprovals").add(
+	SubscribeApprovals.setPayload({
+		...SubscribeApprovals.payloadSchema.fields,
+		projectSlug: Schema.optional(Schema.NonEmptyString),
+	}),
+);
+
 class BrowserRpc extends Context.Service<
 	BrowserRpc,
 	RpcClient.RpcClient<
-		RpcGroup.Rpcs<typeof WsRpcGroup>,
+		RpcGroup.Rpcs<typeof HarnessRpcGroup>,
 		import("effect/rpc/RpcClientError").RpcClientError
 	>
 >()("ProcessHarnessBrowserRpc") {}
@@ -143,7 +157,7 @@ function browserRpcRuntime(
 		),
 	);
 	return ManagedRuntime.make(
-		Layer.effect(BrowserRpc, RpcClient.make(WsRpcGroup)).pipe(
+		Layer.effect(BrowserRpc, RpcClient.make(HarnessRpcGroup)).pipe(
 			Layer.provide(protocol),
 		),
 	);
@@ -2679,7 +2693,16 @@ export class ProcessBrowser {
 	// `approval_removed` its resolution.
 	private async watchApprovals(): Promise<void> {
 		const cursor = this.frames.length;
-		this.approvals = this.watch(this.rpc.SubscribeApprovals({}), (envelope) =>
+		// The daemon's wire version, as the page reads it for its version banner.
+		const status = await this.runtime.runPromise(
+			Stream.runHead(this.rpc.SubscribeServerStatus({})),
+		);
+		const feed = this.rpc.SubscribeApprovals(
+			Option.exists(status, (s) => s.protocolVersion < WS_PROTOCOL_VERSION)
+				? { projectSlug: this.projectSlug }
+				: {},
+		);
+		this.approvals = this.watch(feed, (envelope) =>
 			Effect.sync(() => {
 				this.record({ type: "approvals", ...envelope });
 				const items =
