@@ -349,6 +349,8 @@ export class FakeProvider {
 	private readonly wakeLabels = new Set<string>();
 	/** 3.9 (CONTRACT.md 978-982): steers' own Runs that main's run.started started after their Run ended. */
 	private readonly hostStarted = new Set<string>();
+	/** Main event ids already read: a repeat is Accepted with no events (D60, CONTRACT.md 497-500). */
+	private readonly readMainEvents = new Set<string>();
 	private readonly executions: WakeExecution[] = [];
 	/** Sends the provider refused at delivery, with the refusal code (D34). */
 	private readonly refusedCommands = new Map<string, string>();
@@ -1813,6 +1815,8 @@ export class FakeProvider {
 		const observation = command.observation;
 		// D60: main's run events are this host's own acts, already applied when main wrote them.
 		if (observation.tag === "Main") {
+			if (this.readMainEvents.has(observation.eventId)) return;
+			this.readMainEvents.add(observation.eventId);
 			// 3.9 (CONTRACT.md 978-982): a steer its Run's end left pending is a Run of its own, and its
 			// host's run.started starts it, so it has reached (D50), whether main names the ended Run or the
 			// steer's own (REDESIGN-9's late steer).
