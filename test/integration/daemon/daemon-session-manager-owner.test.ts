@@ -8,11 +8,14 @@
  * 14 removing a project leaves its manager state in the daemon, so a project
  *    added again under the same slug reads the old caches;
  *  1 one owner serving two projects mixes their state;
+ * 15 a delete closes the session's scope before its row is gone or before
+ *    its provider cleanup ran, so cleanup loses the resources it depends on;
  * 22 a session scope that cannot open for a reason other than a delete (an
  *    unregistered project, a directory read error) still lets the write land.
  */
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -38,11 +41,13 @@ import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-fac
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { OwnerScopes } from "../../../src/lib/domain/daemon/Services/owner-scopes.js";
 import { addWithoutRelay } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { runnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 
 const artifacts = join(process.cwd(), "test-results");
@@ -216,6 +221,8 @@ const start = async (scenario: string) => {
 		);
 	return {
 		daemon,
+		configDir,
+		folder: (slug: string) => project(slug).folders[0],
 		register,
 		relay,
 		stop,
@@ -328,6 +335,52 @@ describe("daemon-owned session manager state", () => {
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({ deleted: true, activity: {}, parents: {} });
+	});
+
+	it("closes a deleted session's scope only after the delete commits and its provider cleanup ran", async () => {
+		const daemon = await start("delete-closes-after-cleanup");
+		await daemon.register("alpha");
+		const alpha = await daemon.relay("alpha");
+		await daemon.sessions(alpha, { id: "ending" });
+		// Provider cleanup for a Claude session removes its runner send journal.
+		const sends = join(
+			runnerDirectory(daemon.folder("alpha"), daemon.configDir),
+			"sends",
+			"ending",
+		);
+		mkdirSync(sends, { recursive: true });
+		const atClose: Array<{ rowExists: boolean; sendsExist: boolean }> = [];
+		await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				const directory = yield* SessionDirectory;
+				const scope = yield* (yield* OwnerScopes).sessionScope("ending");
+				yield* scope.acquire<void, never, never>(
+					Effect.acquireRelease(Effect.void, () =>
+						directory.projectOf("ending").pipe(
+							Effect.orDie,
+							Effect.flatMap((owner) =>
+								Effect.sync(() =>
+									atClose.push({
+										rowExists: Option.isSome(owner),
+										sendsExist: existsSync(sends),
+									}),
+								),
+							),
+						),
+					),
+				);
+			}),
+		);
+		const deleted = await daemon.manager(alpha, (service) =>
+			service.deleteSession("ending", { keepWorktrees: true }),
+		);
+		const observed = { deleted, atClose, sendsAfter: existsSync(sends) };
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			deleted: true,
+			atClose: [{ rowExists: false, sendsExist: false }],
+			sendsAfter: false,
+		});
 	});
 
 	it("fails a write whose session scope cannot open, unless the session has no row yet", async () => {
