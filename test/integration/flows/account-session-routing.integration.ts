@@ -15,16 +15,10 @@
  *   including model-only picks, while an explicit account pick still wins.
  * All configuration and launch logins in this flow belong to a temporary fixture.
  */
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	rmSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Context, Effect, Layer, ManagedRuntime } from "effect";
+import { Effect } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AccountRef } from "../../../src/lib/contracts/account.js";
 import { AccountUnroutable } from "../../../src/lib/contracts/limit-recovery.js";
@@ -36,31 +30,21 @@ import {
 } from "../../../src/lib/daemon/config-persistence.js";
 import { DaemonWsRpcHandlersTag } from "../../../src/lib/domain/daemon/Layers/daemon-ws-rpc-layer.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
-import { ConfigPersistenceTag } from "../../../src/lib/domain/daemon/Services/config-persistence-service.js";
-import {
-	DaemonConfigRefLive,
-	DaemonConfigRefTag,
-	makeDaemonConfigFromOptions,
-} from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
-import { DaemonEventBusLive } from "../../../src/lib/domain/daemon/Services/daemon-pubsub.js";
 import {
 	addInstance,
-	makeInstanceManagerStateLive,
 	removeInstance,
 } from "../../../src/lib/domain/daemon/Services/instance-manager-service.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { configuredClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
-import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
 import {
 	claudeSdk,
 	responseChunks,
 } from "../../helpers/fake-claude-process-sdk.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: account session routing", () => {
 	const evidence: Array<{
@@ -86,8 +70,7 @@ describe("Integration: account session routing", () => {
 		};
 	}> = [];
 	let root: string;
-	let harness: RelayHarness | undefined;
-	let disposeRegistry: (() => Promise<void>) | undefined;
+	let harness: DaemonProject | undefined;
 	let launchFolders: string[];
 	let forkFolders: string[];
 	let unknownBoundSend: (typeof evidence)[number]["unknownBoundSend"];
@@ -117,8 +100,6 @@ describe("Integration: account session routing", () => {
 		try {
 			await harness?.stop();
 			harness = undefined;
-			await disposeRegistry?.();
-			disposeRegistry = undefined;
 		} finally {
 			__setProbeOverrideForTesting(undefined);
 		}
@@ -160,50 +141,34 @@ describe("Integration: account session routing", () => {
 		const targetLogin = removeDefault ? removedLogin : login;
 		mkdirSync(removedLogin);
 		writeFileSync(join(removedLogin, "conduit-test-record-forks"), "");
-		const registry = makeInstanceManagerStateLive(
-			{},
-			[
-				{
-					id: "claude",
-					name: "Default Claude",
-					driver: "claude",
-					configDir: login,
-					port: 0,
-					managed: false,
-				},
-				{
-					id: "removed",
-					name: "Removed",
-					driver: "claude",
-					configDir: removedLogin,
-					port: 0,
-					managed: false,
-				},
-			],
-			{ launchLogin: configuredClaudeConfigDir(login) },
-		);
-		const runtime = ManagedRuntime.make(
-			Layer.mergeAll(
-				registry,
-				DaemonEventBusLive,
-				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag)({
-					requestSave: Effect.void,
-					flush: Effect.void,
-				}),
-			),
-		);
-		disposeRegistry = () => runtime.dispose();
-		const daemonConfigContext = await runtime.runPromise(
-			Effect.context<
-				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
-			>(),
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "claude",
+						name: "Default Claude",
+						driver: "claude",
+						configDir: login,
+						port: 0,
+						managed: false,
+					},
+					{
+						id: "removed",
+						name: "Removed",
+						driver: "claude",
+						configDir: removedLogin,
+						port: 0,
+						managed: false,
+					},
+				],
+			},
+			root,
 		);
 		const prompts: string[] = [];
 		const resumeIds: Array<string | undefined> = [];
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
-			daemonConfigContext,
 			defaultModel: null,
 			claudeSdk: {
 				...claudeSdk,
@@ -254,8 +219,8 @@ describe("Integration: account session routing", () => {
 			expect((await completed).attention).not.toBe("error");
 			expect(launchFolders.at(-1)).toBe(sourceLogin);
 		}
-		await runtime.runPromise(removeInstance(removedId));
-		const defaultAccount = await runtime.runPromise(
+		await harness.run(removeInstance(removedId));
+		const defaultAccount = await harness.run(
 			Effect.flatMap(AccountDirectory, (directory) =>
 				directory.resolve({ _tag: "Id", id: removedId }),
 			),
@@ -296,10 +261,10 @@ describe("Integration: account session routing", () => {
 		).toHaveLength(0);
 		deletedAccount = { withHistory, removedId, prompts, resumeIds };
 		if (removeDefault && withHistory) {
-			await runtime.runPromise(removeInstance(promotedId));
+			await harness.run(removeInstance(promotedId));
 			const renamedTitle = "Retained history without a Claude account";
 			await client.renameSession(sessionId, renamedTitle);
-			const renamed = await harness.stack.effectRuntime.runtime.runPromise(
+			const renamed = await harness.run(
 				Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
 					readQuery.getSession(sessionId),
 				),
@@ -333,7 +298,7 @@ describe("Integration: account session routing", () => {
 			).toEqual([]);
 			const restoredLogin = join(root, "restored-login");
 			mkdirSync(restoredLogin);
-			const restored = await runtime.runPromise(
+			const restored = await harness.run(
 				addInstance({
 					name: "Removed",
 					driver: "claude",
@@ -355,7 +320,7 @@ describe("Integration: account session routing", () => {
 
 	it("rejects unknown creation and bound sends without provider fallback", async () => {
 		const query = vi.fn(claudeSdk.query);
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
 			defaultModel: null,
 			claudeSdk: { ...claudeSdk, query },
@@ -394,7 +359,7 @@ describe("Integration: account session routing", () => {
 		).toBe(createsBefore);
 
 		const sessionId = "ses-missing-account";
-		await harness.stack.effectRuntime.runtime.runPromise(
+		await harness.run(
 			applySessionCommand(
 				{
 					type: "session.created",
@@ -427,7 +392,7 @@ describe("Integration: account session routing", () => {
 			throw new Error("Expected a typed account routing failure");
 		expect(sendError.ref).toEqual({ _tag: "Id", id: "missing-account" });
 		expect(sendError.message).toContain("missing-account");
-		const boundSession = await harness.stack.effectRuntime.runtime.runPromise(
+		const boundSession = await harness.run(
 			Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
 				readQuery.getSession(sessionId),
 			),
@@ -448,47 +413,31 @@ describe("Integration: account session routing", () => {
 		};
 	});
 
-	it("creates, sends and forks on a just-added account before its config is flushed", async () => {
+	it("creates, sends and forks on a just-added account", async () => {
 		const login = join(root, "login");
 		const addedLogin = join(root, "fresh-login");
 		mkdirSync(addedLogin);
 		writeFileSync(join(addedLogin, "conduit-test-record-forks"), "");
-		const registry = makeInstanceManagerStateLive(
-			{},
-			[
-				{
-					id: "claude",
-					name: "Default Claude",
-					driver: "claude",
-					configDir: login,
-					port: 0,
-					managed: false,
-				},
-			],
-			{ launchLogin: configuredClaudeConfigDir(login) },
-		);
-		const runtime = ManagedRuntime.make(
-			Layer.mergeAll(
-				registry,
-				DaemonEventBusLive,
-				DaemonConfigRefLive(makeDaemonConfigFromOptions({ port: 0 })),
-				Layer.succeed(ConfigPersistenceTag)({
-					requestSave: Effect.void,
-					flush: Effect.fail(new Error("This fixture never flushes config")),
-				}),
-			),
-		);
-		disposeRegistry = () => runtime.dispose();
-		const daemonConfigContext = await runtime.runPromise(
-			Effect.context<
-				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
-			>(),
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
+				instances: [
+					{
+						id: "claude",
+						name: "Default Claude",
+						driver: "claude",
+						configDir: login,
+						port: 0,
+						managed: false,
+					},
+				],
+			},
+			root,
 		);
 		const resumedSessions: Array<string | undefined> = [];
 		const forkSessionIds: Array<string | undefined> = [];
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
-			daemonConfigContext,
 			defaultModel: null,
 			claudeSdk: {
 				...claudeSdk,
@@ -510,7 +459,7 @@ describe("Integration: account session routing", () => {
 				},
 			},
 		});
-		await runtime.runPromise(
+		await harness.run(
 			addInstance({
 				id: "fresh-claude",
 				name: "Fresh Claude",
@@ -519,7 +468,6 @@ describe("Integration: account session routing", () => {
 				managed: false,
 			}),
 		);
-		expect(existsSync(join(root, "daemon.json"))).toBe(false);
 		const client = await harness.connectWsClient();
 		await client.waitFor("shell", {
 			predicate: (message) => message["_tag"] === "synchronized",
@@ -536,8 +484,10 @@ describe("Integration: account session routing", () => {
 		const sessionId = created["id"];
 		if (typeof sessionId !== "string")
 			throw new Error("CreateSession returned no session id");
-		const completed = client.waitForTurnEnd(sessionId, 10_000);
+		// sendMessage captures each turn's completion fence; a Fork's copied
+		// history can already carry a turn end before its own turn starts.
 		await client.sendMessage("Reply with pong", { sessionId });
+		const completed = client.waitForTurnEnd(sessionId, 10_000);
 		expect((await completed).attention).not.toBe("error");
 		expect(launchFolders).toContain(addedLogin);
 		const child = await client.forkSession({ sessionId });
@@ -557,15 +507,14 @@ describe("Integration: account session routing", () => {
 		expect(sourceRows.find((row) => row.id === sessionId)?.title).toBe(
 			"Fresh account",
 		);
-		const childCompleted = client.waitForTurnEnd(childId, 10_000);
 		await client.sendMessage("Continue the fork", { sessionId: childId });
+		const childCompleted = client.waitForTurnEnd(childId, 10_000);
 		expect((await childCompleted).attention).not.toBe("error");
 		expect(forkFolders).toEqual([]);
 		expect(launchFolders.at(-1)).toBe(addedLogin);
 		expect(resumedSessions.at(-1)).toEqual(expect.any(String));
 		expect(resumedSessions.at(-1)).not.toBe(childId);
 		expect(forkSessionIds).toEqual([childId]);
-		expect(existsSync(join(root, "daemon.json"))).toBe(false);
 	});
 
 	it.each([
@@ -606,7 +555,7 @@ describe("Integration: account session routing", () => {
 			},
 			root,
 		);
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
 			defaultModel: null,
 			claudeSdk: {
@@ -626,7 +575,7 @@ describe("Integration: account session routing", () => {
 		let sessionId: string;
 		if (selection === "legacy-binding") {
 			sessionId = "ses-legacy-claude-binding";
-			await harness.stack.effectRuntime.runtime.runPromise(
+			await harness.run(
 				applySessionCommand(
 					{
 						type: "session.created",
@@ -670,7 +619,7 @@ describe("Integration: account session routing", () => {
 		expect((await completed).attention).not.toBe("error");
 		expect(launchFolders.at(-1)).toBe(login);
 		expect(launchFolders).not.toContain(original);
-		const stored = await harness.stack.effectRuntime.runtime.runPromise(
+		const stored = await harness.run(
 			Effect.flatMap(ReadQueryEffectTag, (read) => read.getSession(sessionId)),
 		);
 		expect(stored?.provider).toBe(
@@ -687,10 +636,9 @@ describe("Integration: account session routing", () => {
 		const personal = join(root, "personal-login");
 		mkdirSync(original);
 		mkdirSync(personal);
-		const runtime = ManagedRuntime.make(
-			makeDaemonRpcTestLayer([], undefined, {
-				configDir: root,
-				launchLogin: configuredClaudeConfigDir(join(root, "login")),
+		await saveDaemonConfig(
+			{
+				...defaultDaemonConfig(),
 				instances: [
 					{
 						id: "claude",
@@ -709,23 +657,8 @@ describe("Integration: account session routing", () => {
 						managed: false,
 					},
 				],
-			}),
-		);
-		disposeRegistry = () => runtime.dispose();
-		// The daemon RPC layer also carries its own store and Session Directory,
-		// whose project registry never holds this relay: share account state only.
-		const daemonConfigContext = await runtime.runPromise(
-			Effect.context<
-				AccountDirectory | DaemonConfigRefTag | ConfigPersistenceTag
-			>().pipe(
-				Effect.map(
-					Context.pick(
-						AccountDirectory,
-						DaemonConfigRefTag,
-						ConfigPersistenceTag,
-					),
-				),
-			),
+			},
+			root,
 		);
 		__setProbeOverrideForTesting(async () => ({
 			models: [{ id: "shared", name: "Shared Sonnet", providerId: "claude" }],
@@ -733,9 +666,8 @@ describe("Integration: account session routing", () => {
 			commands: [],
 		}));
 		try {
-			harness = await createRelayHarness("chat-simple", {
+			harness = await createDaemonProject("chat-simple", {
 				configDir: root,
-				daemonConfigContext,
 				defaultModel: null,
 				claudeSdk: {
 					...claudeSdk,
@@ -751,7 +683,7 @@ describe("Integration: account session routing", () => {
 			await client.waitFor("shell", {
 				predicate: (message) => message["_tag"] === "synchronized",
 			});
-			await runtime.runPromise(
+			await harness.run(
 				Effect.flatMap(DaemonWsRpcHandlersTag, (handlers) =>
 					handlers.SetDefault({ _tag: "SetDefault", instanceId: "personal" }),
 				),

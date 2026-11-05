@@ -69,6 +69,8 @@ export class TestWsClient {
 	>();
 	private detailSubscriptionKey: string | undefined;
 	private readonly sessionRows = new Map<string, SessionInfo>();
+	/** The highest turn end seen per session: family frames can trail shell ones. */
+	private readonly turnEndsSeen = new Map<string, number>();
 	private readonly discoveredCatalogs = new Map<
 		string,
 		readonly ProviderInfo[]
@@ -180,12 +182,7 @@ export class TestWsClient {
 		}
 		await this.subscribeSessionDetail(sessionId);
 		await this.subscribeFamily(sessionId);
-		const endedBefore = new Map(
-			[...this.sessionRows].map(([id, row]) => [
-				id,
-				row.lastTurnEndVersion ?? -1,
-			]),
-		);
+		const endedBefore = new Map(this.turnEndsSeen);
 		this.turnEndVersions.set(sessionId, endedBefore.get(sessionId) ?? -1);
 		const cursor = this.received.length;
 		this.turnCursors.set(sessionId, cursor);
@@ -573,7 +570,7 @@ export class TestWsClient {
 							? [envelope.item]
 							: [];
 				if (envelope._tag === "snapshot") this.sessionRows.clear();
-				for (const row of rows) this.sessionRows.set(row.id, row);
+				this.noteRows(rows);
 				if (envelope._tag === "remove") this.sessionRows.delete(envelope.id);
 			},
 		);
@@ -722,7 +719,7 @@ export class TestWsClient {
 						: envelope._tag === "upsert"
 							? [envelope.item]
 							: [];
-				for (const row of rows) this.sessionRows.set(row.id, row);
+				this.noteRows(rows);
 				if (envelope._tag === "remove") this.sessionRows.delete(envelope.id);
 			},
 		);
@@ -1065,10 +1062,23 @@ export class TestWsClient {
 		return this.received.filter((m) => m.type === type);
 	}
 
+	private noteRows(rows: readonly SessionInfo[]): void {
+		for (const row of rows) {
+			this.sessionRows.set(row.id, row);
+			this.turnEndsSeen.set(
+				row.id,
+				Math.max(
+					this.turnEndsSeen.get(row.id) ?? -1,
+					row.lastTurnEndVersion ?? -1,
+				),
+			);
+		}
+	}
+
 	/** Clear received messages */
 	clearReceived(): void {
-		for (const [id, row] of this.sessionRows)
-			this.turnEndVersions.set(id, row.lastTurnEndVersion ?? -1);
+		for (const [id, version] of this.turnEndsSeen)
+			this.turnEndVersions.set(id, version);
 		this.turnCursors.clear();
 		this.received = [];
 	}
