@@ -301,6 +301,13 @@ export async function confirmStuckStop(sessionId: string): Promise<void> {
 	}
 }
 
+/** Withdraw the send a held close waits on: the process and its tasks stay, the message returns to the composer. */
+export async function keepTasks(sessionId: string): Promise<void> {
+	await rpc("DismissEscalation", { sessionId }).catch(
+		toastFailure("Could not keep the tasks"),
+	);
+}
+
 /** Compact age: 40s, 6m, 1h 5m. The SDK gives no start time, so this counts from when conduit first saw the task. */
 export function taskAge(
 	task: Pick<BackgroundTask, "firstSeenAt">,

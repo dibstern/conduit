@@ -100,3 +100,25 @@ Scenario: A held close with no snapshot says the background state is unknown
   Then the confirm reads "Background state unknown. Closing may end background work. Continue?"
   When I cancel the confirm
   Then the stuck Stop was confirmed at snapshot entries none
+
+Scenario: A send held behind the close can be withdrawn, keeping the process and its tasks
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the panel choice session has a settled turn
+  When closing the session is held at snapshot entry 7 with a dev server and a vitest shell without its command
+  Then the held close offers no Keep tasks
+  When the mock relay queues Fix the login bug
+  And I press Keep tasks on the held close
+  Then the held send was withdrawn once and the held close's actions are gone
+  And the stuck Stop was confirmed at snapshot entries none
+
+Scenario: On a phone the held close's whole label and its three actions stay on screen
+  Given message surfacing is active at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a phone
+  And the panel choice session has a settled turn
+  When closing the session is held at snapshot entry 7 with a dev server and a vitest shell without its command
+  And the mock relay queues Fix the login bug
+  Then the held close's whole label and its three actions are on screen
+  When I press Keep tasks on the held close
+  Then the held send was withdrawn once and the held close's actions are gone
