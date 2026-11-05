@@ -5,6 +5,8 @@
 // 11. a second restart moves the rows again or sends the resend again;
 // 2, 4. desktop and phone confirming the same proposal get two moves, two resends, different
 //    receipts, or the second is refused as stale.
+// 25, 26. an edit or a regenerate overwrites the turn it replaces instead of making a sibling
+//    branch, or its reply lands on the old branch;
 // 5. an undo pops the entry it undoes, or cannot itself be undone; the next send after a chain of
 //    moves tells the provider the wrong cut.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -78,6 +80,36 @@ const openSends = (harness: ProcessHarness, sessionId: string) => {
 				)
 				.get(sessionId) as { n: number }
 		).n;
+	} finally {
+		db.close();
+	}
+};
+
+/** The session's history graph: every node with its parent, and the Head. */
+const graph = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return {
+			nodes: db
+				.prepare(
+					"SELECT id, parent_id AS parent FROM history_nodes WHERE session_id = ? ORDER BY created_at, id",
+				)
+				.all(sessionId) as { id: string; parent: string | null }[],
+			head: (
+				db
+					.prepare(
+						"SELECT node_id AS head FROM history_heads WHERE session_id = ?",
+					)
+					.get(sessionId) as { head: string | null } | undefined
+			)?.head,
+			kept: (
+				db
+					.prepare(
+						"SELECT count(*) AS n FROM history_off_head WHERE session_id = ? AND source_table = 'messages'",
+					)
+					.get(sessionId) as { n: number }
+			).n,
+		};
 	} finally {
 		db.close();
 	}
@@ -432,5 +464,69 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		expect(more).toEqual([]);
 		expect(resumed?.thread).toBe(opened?.thread);
 		expect(resumed?.at).not.toBeNull();
+	});
+
+	// 25, 26.
+	it("regenerates a reply and edits a message, each as a sibling branch of the same point", async () => {
+		const { browser, sessionId, target, fixture } = await start("siblings", 0);
+		const before = graph(fixture, sessionId);
+		// Regenerate: back to before the message, the same text again.
+		const regenerate = await move(browser, sessionId, {
+			_tag: "rewind",
+			messageId: target.id,
+			resend: "moves-cut",
+		});
+		// test-waits-allow polling: the resend's reply lands after the move's receipt.
+		await vi.waitFor(
+			async () =>
+				expect(
+					(await browser.history(sessionId)).map(({ role }) => role),
+				).toEqual(["user", "assistant", "user", "assistant"]),
+			{ timeout: 20_000 },
+		);
+		// test-waits-allow polling: the Run's node is sealed when its send settles.
+		await vi.waitFor(() =>
+			expect(graph(fixture, sessionId).nodes).toHaveLength(3),
+		);
+		const regenerated = await browser.history(sessionId);
+		const again = regenerated[2];
+		if (!again) throw new Error("Missing regenerated message");
+		const edit = await move(browser, sessionId, {
+			_tag: "rewind",
+			messageId: again.id,
+			resend: "moves-edited-sibling",
+		});
+		// test-waits-allow polling: the resend's reply lands after the move's receipt.
+		await vi.waitFor(
+			async () =>
+				expect(await userTexts(browser, sessionId)).toEqual([
+					"moves-kept",
+					"moves-edited-sibling",
+				]),
+			{ timeout: 20_000 },
+		);
+		// test-waits-allow polling: the Run's node is sealed when its send settles.
+		await vi.waitFor(() =>
+			expect(graph(fixture, sessionId).nodes).toHaveLength(4),
+		);
+		const after = graph(fixture, sessionId);
+		const [root] = before.nodes;
+		proof = {
+			before,
+			after,
+			regenerate,
+			edit,
+			regenerated: regenerated.map(({ id, role }) => ({ id, role })),
+			journal: journal(fixture, sessionId),
+		};
+		expect(before.nodes).toHaveLength(2);
+		expect(enqueued(fixture, "moves-cut")).toHaveLength(2);
+		expect(regenerated[2]?.id).not.toBe(target.id);
+		// Three siblings under the first turn: the original, the regenerate and the edit.
+		const siblings = after.nodes.filter(({ parent }) => parent === root?.id);
+		expect(siblings).toHaveLength(3);
+		expect(after.head).toBe(siblings.at(-1)?.id);
+		// The two branches left behind keep their user message and reply each.
+		expect(after.kept).toBe(4);
 	});
 });
