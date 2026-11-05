@@ -325,7 +325,7 @@ test.describe("rewind confirmation", () => {
 		);
 		await page.goto("http://rpc.test/");
 		await page.addScriptTag({ type: "module", content: browserCode });
-		await page.getByRole("button", { name: "Rewind", exact: true }).click();
+		await page.getByRole("button", { name: "Conversation only" }).click();
 		await rpc.waitForRequest(({ tag }) => tag === "PreviewHeadMove");
 		const toast = page.getByTestId("toast");
 		await expect(toast).toContainText("Could not move the conversation.");
