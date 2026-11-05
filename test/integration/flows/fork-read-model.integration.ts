@@ -18,6 +18,7 @@ import { readSessionWorktreeOwnership } from "../../../src/lib/domain/relay/Serv
 import { splitAtForkPoint } from "../../../src/lib/frontend/utils/fork-split.js";
 import { historyToChatMessages } from "../../../src/lib/frontend/utils/history-logic.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import { sealHistoryNode } from "../../../src/lib/persistence/effect/history-graph.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
@@ -89,6 +90,14 @@ async function emit(harness: DaemonProject, events: readonly CanonicalEvent[]) {
 			if (pending.length) yield* ingestion.value.ingestBatch(pending);
 		}),
 	);
+}
+
+/** 82tn.51: turns 1 and 2, each ended as a history node, so a rewind can move the Head. */
+async function emitRuns(harness: DaemonProject, sessionId: string) {
+	for (const n of [1, 2]) {
+		await emit(harness, turn(sessionId, n));
+		await harness.run(sealHistoryNode(sessionId, `turn-${n}`, Date.now()));
+	}
 }
 
 function turn(sessionId: string, n: number, finished = true): CanonicalEvent[] {
@@ -623,17 +632,18 @@ describe("Fork read-model inheritance", () => {
 		});
 		const sourceId = String(created["id"]);
 		await emit(harness, [...turn(sourceId, 1), ...turn(sourceId, 2)]);
-		await client.rpcCall((rpc) =>
-			rpc.RewindSession({ sessionId: sourceId, messageId: "turn-2-user" }),
-		);
-		await emit(harness, [
-			canonicalEvent(
-				"message.removed",
-				sourceId,
-				{ messageId: "turn-2-user" },
-				{ provider: "claude", createdAt: NOW - 750 },
+		// 82tn.51: the provider's removal of turn 2 stands in for the retired pending rewind's commit.
+		await emit(
+			harness,
+			["turn-2-user", "turn-2-assistant"].map((messageId) =>
+				canonicalEvent(
+					"message.removed",
+					sourceId,
+					{ messageId },
+					{ provider: "claude", createdAt: NOW - 750 },
+				),
 			),
-		]);
+		);
 		await emit(harness, [...turn(sourceId, 3), ...turn(sourceId, 4, false)]);
 		// Refresh the Source's sidebar after batched fake output. These real
 		// commands do not enter inherited history, and leave its title unchanged.
@@ -672,9 +682,9 @@ describe("Fork read-model inheritance", () => {
 		expect(report.danglingPartPointers).toEqual([]);
 	});
 
-	// Failure cases: a missing/hidden cut sneaks through, a pending rewind
+	// Failure cases: a missing/hidden cut sneaks through, a rewind
 	// leaks hidden rows, or a Side Thread inherits the unfinished first turn.
-	it("rejects hidden cuts and unfinished Side Threads and respects pending rewind", async () => {
+	it("rejects hidden cuts and unfinished Side Threads and respects a rewind (82tn.51)", async () => {
 		harness = await createDaemonProject("chat-simple", { claudeSdk });
 		const run = harness.run;
 		const client = await harness.connectWsClient();
@@ -689,7 +699,7 @@ describe("Fork read-model inheritance", () => {
 			},
 		});
 		const sourceId = String(created["id"]);
-		await emit(harness, [...turn(sourceId, 1), ...turn(sourceId, 2)]);
+		await emitRuns(harness, sourceId);
 		const userCut = await run(
 			forkSession(sourceId, { messageId: "turn-1-user" }),
 		);
@@ -747,9 +757,7 @@ describe("Fork read-model inheritance", () => {
 		} finally {
 			db.close();
 		}
-		await client.rpcCall((rpc) =>
-			rpc.RewindSession({ sessionId: sourceId, messageId: "turn-2-assistant" }),
-		);
+		// 82tn.51: the rewind above already took turn 2's Run, reply and all, off the Head.
 		const visibleSide = await run(
 			forkSession(sourceId, {
 				side: { title: "Visible completed turn", inputId: "visible-side" },

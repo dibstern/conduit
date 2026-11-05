@@ -570,10 +570,6 @@ const prepareEngineTurnInput = (
 		const traits: ProviderDriverTraits = PROVIDER_DRIVERS[driver];
 		const readQuery = yield* ReadQueryEffectTag;
 		const sessionRow = yield* readQuery.getSession(resolvedInput.sessionId);
-		if (sessionRow?.pending_rewind_message_id && resolvedInput.continuation) {
-			yield* clearProcessingTimeout(resolvedInput.sessionId);
-			return undefined;
-		}
 		const harness = driver;
 		const pick = storedSessionPick(sessionRow, harness);
 		if (!pick) {

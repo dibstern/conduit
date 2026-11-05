@@ -68,7 +68,6 @@
 
 	async function resend(sessionId: string, messageId: string, text: string): Promise<void> {
 		sending = true;
-		// The resend carries text only; the note under the box says so when there were attachments.
 		if (await resendFrom(sessionId, messageId, text)) draft = undefined;
 		sending = false;
 	}
@@ -105,7 +104,6 @@
 			{@const messageId = message.messageId}
 			<div data-testid="user-message-edit" class="flex flex-col gap-[8px] max-md:col-span-2">
 				<Textarea bind:value={draft} aria-label="Edit message" rows={3} />
-				{#if message.attachments?.length}<p class="text-[12px] text-text-dimmer">Attachments are not resent.</p>{/if}
 				<div class="flex justify-end gap-[8px]">
 					<Button variant="ghost" size="sm" onclick={() => { draft = undefined; }}>Cancel</Button>
 					<Button variant="primary" size="sm" disabled={sending || !draft.trim()} onclick={() => draft && resend(sessionId, messageId, draft.trim())}>Send</Button>

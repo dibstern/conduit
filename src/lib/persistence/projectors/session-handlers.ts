@@ -225,18 +225,6 @@ function isAutoTitleRename(event: StoredEvent): boolean {
 // Keys declare the session projector's handled events and type each payload.
 // Cross-projector coverage is checked beside the projector factory list.
 export const sessionHandlers = {
-	"session.rewound": (event) => [
-		{
-			sql: "UPDATE sessions SET pending_rewind_message_id = ?, updated_at = ? WHERE id = ?",
-			params: [event.data.messageId, event.createdAt, event.sessionId],
-		},
-	],
-	"session.rewind_undone": (event) => [
-		{
-			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",
-			params: [event.createdAt, event.sessionId],
-		},
-	],
 	// 82tn.49: the head move journal writes nothing on the row; stamping it announces the
 	// session, so the inbox drains the sends it queued behind the move once it lands.
 	"head.move_started": (event) => [
@@ -253,7 +241,7 @@ export const sessionHandlers = {
 	],
 	"session.rewind_committed": (event) => [
 		{
-			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",
+			sql: "UPDATE sessions SET updated_at = ? WHERE id = ?",
 			params: [event.createdAt, event.sessionId],
 		},
 	],

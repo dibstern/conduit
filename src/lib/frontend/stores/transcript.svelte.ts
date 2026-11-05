@@ -388,8 +388,6 @@ const withRow = (entry: TranscriptEntry, item: DetailItem): TranscriptEntry => {
 		}
 		case "inbox":
 			return { ...entry, ...item.inbox };
-		case "rewind":
-			return { ...entry, pendingRewindMessageId: item.messageId };
 	}
 };
 
@@ -431,7 +429,6 @@ export function applyTranscriptEnvelope(
 				partOrder,
 				pending: [],
 				hasMore: false,
-				pendingRewindMessageId: null,
 				paused: false,
 				steer: undefined,
 			};
@@ -457,7 +454,6 @@ export function applyTranscriptEnvelope(
 						pending.set(item.input.inputId, item.input);
 						break;
 					case "inbox":
-					case "rewind":
 					case "window":
 						next = withRow(next, item);
 						break;

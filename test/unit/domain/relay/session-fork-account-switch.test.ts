@@ -1,3 +1,4 @@
+import { SqlClient } from "effect/sql";
 import { AccountIdSchema } from "../../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
@@ -350,7 +351,7 @@ it.each([
 // its discarded tail. Exercise canonical events, SQLite projection, the fork
 // command and the child's real turn planner without opening a relay socket.
 it.each([
-	"pending",
+	"owed",
 	"committed",
 ] as const)("forks only kept Claude history after a %s rewind", async (phase) => {
 	const readTranscript = vi.fn(async (sdkId: string) =>
@@ -402,23 +403,39 @@ it.each([
 					}),
 				},
 			]);
+			// 82tn.51: the rewind is a head move that lands at once; "owed" is before the next send
+			// tells Claude, "committed" after.
+			const sql = yield* SqlClient.SqlClient;
+			for (const [node, parent, rows] of [
+				["kept", null, ["first", "before"]],
+				["cut", "kept", ["uncovered", "later"]],
+			] as const) {
+				yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+					VALUES ('parent', ${node}, ${parent}, ${node}, 1, 0)`;
+				yield* sql`UPDATE messages SET history_node_id = ${node} WHERE id IN ${sql.in(rows)}`;
+			}
+			yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES ('parent', 'cut')`;
 			yield* commit([
-				canonicalEvent("session.rewound", "parent", {
+				canonicalEvent("head.move_started", "parent", {
+					moveId: "rewind",
+					kind: "rewind",
 					messageId: "uncovered",
+					from: "cut",
+					to: "kept",
 				}),
+				canonicalEvent("head.moved", "parent", {
+					moveId: "rewind",
+					to: "kept",
+				}),
+				...(phase === "committed"
+					? [
+							canonicalEvent("session.rewind_committed", "parent", {
+								messageId: "uncovered",
+								moveId: "rewind",
+							}),
+						]
+					: []),
 			]);
-			if (phase === "committed")
-				yield* commit([
-					canonicalEvent("message.removed", "parent", {
-						messageId: "uncovered",
-					}),
-					canonicalEvent("message.removed", "parent", {
-						messageId: "later",
-					}),
-					canonicalEvent("session.rewind_committed", "parent", {
-						messageId: "uncovered",
-					}),
-				]);
 			expect(
 				(yield* read.getSessionMessagesWithParts("parent")).map(
 					(row) => row.id,

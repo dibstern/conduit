@@ -264,25 +264,8 @@ export const subscribeSessionDetail = (options: {
 													},
 												]
 											: [];
-									// The pending rewind point moves with the session row too.
-									const session = yield* readQuery.getSession(
-										options.sessionId,
-									);
-									const rewindRows =
-										session && moved(session.version)
-											? [
-													{
-														item: {
-															_tag: "rewind" as const,
-															messageId:
-																session.pending_rewind_message_id ?? null,
-														} satisfies SessionDetailItem,
-														version: at(session.version),
-													},
-												]
-											: [];
 									return {
-										rows: [...inputs, ...inboxRows, ...rewindRows],
+										rows: [...inputs, ...inboxRows],
 										removed: pending.removed,
 									};
 								});

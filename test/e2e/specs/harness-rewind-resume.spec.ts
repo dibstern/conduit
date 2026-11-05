@@ -11,8 +11,7 @@
 //   a page the frame budget cut short;
 // - the return resumes past rows it only partly applied, and the checksum
 //   disowns the view (a mismatch, then a snapshot);
-// - the rewind point travels only with rows of its own version, so a return
-//   from past it loses the Undo notice, or keeps a stale one after undo;
+// - (82tn.51: a rewind lands at once, so no pending Undo notice rides along;)
 // - the resumed transcript is not the tail of a cold load: a stale, missing
 //   or hidden row. (A cold first page refills to a full page; the resumed one
 //   keeps the window it had, so it may start a turn later.)
@@ -189,7 +188,6 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 	page.on("pageerror", (error) => pageErrors.push(error.message));
 
 	const messages = page.locator("#messages");
-	const notice = page.getByTestId("rewind-pending");
 	const open = async (sessionId: string, shown: string) => {
 		// The title: a hovered row's middle is its mark-read and settle verbs.
 		await page
@@ -293,7 +291,6 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 					tagged("synchronized")(envelope) && "checksum" in envelope,
 			).length,
 			mismatches: mismatches - mismatchesBefore,
-			undoShown: await notice.isVisible(),
 			hiddenShown: hidden === undefined ? false : transcript.includes(hidden),
 			transcriptIsColdTail: cold.endsWith(transcript),
 		};
@@ -329,7 +326,6 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 				messageId: userId(id, last),
 			}),
 		);
-		await expect(notice).toBeVisible({ timeout: 30_000 });
 		await expect(messages).not.toContainText(replyEnd(id, last));
 		scenarios.push({
 			name: `${id}:rewind`,
@@ -338,17 +334,18 @@ test("returning to a session after a rewind or its undo resumes it", async ({
 				replyEnd(id, last - 1),
 				replyEnd(id, last),
 			),
-			expected: { ...resumed, undoShown: true },
+			expected: resumed,
 		});
 
 		// Undo it: the turn comes back.
 		await Effect.runPromise(rpc.UndoRewind({ sessionId: id }));
-		await expect(notice).toBeHidden({ timeout: 30_000 });
-		await expect(messages).toContainText(replyEnd(id, last));
+		await expect(messages).toContainText(replyEnd(id, last), {
+			timeout: 30_000,
+		});
 		scenarios.push({
 			name: `${id}:undo`,
 			verdicts: await leaveAndReturn(id, replyEnd(id, last), undefined),
-			expected: { ...resumed, undoShown: false },
+			expected: resumed,
 		});
 	}
 

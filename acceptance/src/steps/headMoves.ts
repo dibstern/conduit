@@ -368,17 +368,6 @@ export const headMovesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "start editing a message",
-		match: /^I start editing the message (.+)$/,
-		run: async ({ world, match }) => {
-			const message = world.page
-				.locator("#messages .msg-user")
-				.filter({ hasText: match[1] ?? "" });
-			await message.hover();
-			await message.getByRole("button", { name: "Edit message" }).click();
-		},
-	},
-	{
 		name: "edit and resend a message",
 		match: /^I edit the message (.+) to (.+) and send it$/,
 		run: async ({ world, match }) => {
@@ -407,31 +396,11 @@ export const headMovesHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "the edit's note",
-		match: /^the edit says (.+)$/,
-		run: async ({ world, match }) => {
-			await expect(world.page.getByTestId("user-message-edit")).toContainText(
-				match[1] ?? "",
-			);
-		},
-	},
-	{
 		name: "regenerate a reply",
 		match: /^I regenerate the reply from the message menu of reply (\d+)$/,
 		run: async ({ world, match }) => {
 			await openMessageMenu(world.page, Number(match[1]));
 			await world.page.getByRole("menuitem", { name: "Regenerate" }).click();
-		},
-	},
-	{
-		name: "regenerating is unavailable",
-		match: /^regenerating reply (\d+) is unavailable$/,
-		run: async ({ world, match }) => {
-			await world.page.keyboard.press("Escape");
-			await openMessageMenu(world.page, Number(match[1]));
-			await expect(
-				world.page.getByRole("menuitem", { name: /Regenerate/ }),
-			).toHaveAttribute("aria-disabled", "true");
 		},
 	},
 	{

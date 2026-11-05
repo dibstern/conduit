@@ -54,17 +54,15 @@ function detailState(browser: ProcessBrowser, sessionId: string) {
 				partOrder: new Map(),
 			},
 		);
-	return {
-		pending: entry.pendingRewindMessageId ?? null,
-		/** The messages the browser holds whole: a header and its parts. */
-		whole: entry.rows
-			.filter((row) => (row.parts?.length ?? 0) > 0)
-			.map(({ id }) => id),
-	};
+	/** The messages the browser holds whole: a header and its parts. */
+	return entry.rows
+		.filter((row) => (row.parts?.length ?? 0) > 0)
+		.map(({ id }) => id);
 }
 
-const pendingRewind = (browser: ProcessBrowser, sessionId: string) =>
-	detailState(browser, sessionId).pending;
+/** 82tn.51: a rewind lands at once as a Head Log move; there is no pending cut left to read. */
+const headLog = async (browser: ProcessBrowser, sessionId: string) =>
+	(await Effect.runPromise(browser.rpc.GetHeadLog({ sessionId }))).entries;
 
 function nativeTranscript(harness: ProcessHarness, nativeSessionId: string) {
 	return readFileSync(
@@ -113,12 +111,9 @@ function persisted(harness: ProcessHarness, sessionId: string) {
 					)
 					.get(sessionId) as { n: number }
 			).n,
-			session: db
-				.prepare("SELECT pending_rewind_message_id FROM sessions WHERE id = ?")
-				.get(sessionId) as { pending_rewind_message_id: string | null },
 			events: db
 				.prepare(
-					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('session.rewound', 'session.rewind_undone', 'session.rewind_committed', 'message.removed', 'turn.error') ORDER BY sequence",
+					"SELECT type, data FROM events WHERE session_id = ? AND type IN ('head.move_started', 'head.moved', 'session.rewind_committed', 'message.removed', 'turn.error') ORDER BY sequence",
 				)
 				.all(sessionId) as Array<{ type: string; data: string }>,
 			messages: db
@@ -159,19 +154,25 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		}
 	});
 
-	// Failure cases: pending or undo touches the SDK, the warm query ignores
+	// Failure cases: the rewind or undo touches the SDK, the warm query ignores
 	// the cursor, canonical message IDs are confused with native chain UUIDs,
 	// later turns reappear on reload, or the cursor is applied to every turn.
-	it("undo restores hidden turns and commit resumes inclusively at the last kept assistant UUID", async () => {
+	it("undo restores the cut turns and the next send resumes inclusively at the last kept assistant UUID (82tn.51)", async () => {
 		harness = await ProcessHarness.start();
-		evidence = { tickets: ["conduit-test-qqqm", "conduit-test-bu61"] };
+		evidence = {
+			tickets: [
+				"conduit-test-qqqm",
+				"conduit-test-bu61",
+				"conduit-test-82tn.51",
+			],
+		};
 		mkdirSync(join(harness.root, "claude"), { recursive: true });
 		writeFileSync(
 			join(harness.root, "claude", "conduit-test-record-forks"),
 			"record",
 		);
 		const browser = await harness.connect();
-		const sessionId = await browser.createSession("Claude pending rewind");
+		const sessionId = await browser.createSession("Claude landed rewind");
 		// Native cursors publish when the send command settles, after shell idle.
 		for (const prompt of ["rewind-kept", "rewind-discarded", "rewind-later"]) {
 			await browser.send(sessionId, prompt);
@@ -216,11 +217,18 @@ describe("Claude rewind through the detached runner and real relay", () => {
 			);
 
 		await rewind();
-		await vi.waitFor(() => {
-			for (const tab of [browser, second])
-				expect(pendingRewind(tab, sessionId)).toBe(target.id);
-		});
-		for (const tab of [browser, second])
+		// 82tn.51: the rewind lands at once as a Head Log move. Claude hears of it at the next send.
+		const reloadedRewound = await harness.connect(sessionId);
+		await vi.waitFor(async () =>
+			expect(await headLog(reloadedRewound, sessionId)).toEqual([
+				expect.objectContaining({
+					kind: "rewind",
+					messageId: target.id,
+					landed: true,
+				}),
+			]),
+		);
+		for (const tab of [browser, second, reloadedRewound])
 			expect((await tab.history(sessionId)).map(({ id }) => id)).toEqual(
 				kept.map(({ id }) => id),
 			);
@@ -228,36 +236,15 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		expect(nativeTranscript(harness, originalQuery.sessionId)).toEqual(
 			originalNative,
 		);
-		expect(persisted(harness, sessionId).messages.map(({ id }) => id)).toEqual(
-			before.map(({ id }) => id),
-		);
-		const reloadedPending = await harness.connect(sessionId);
-		expect(pendingRewind(reloadedPending, sessionId)).toBe(target.id);
-		evidence["pending"] = persisted(harness, sessionId);
-		const pendingBeforeContinue = persisted(harness, sessionId);
-		const continuation = await Effect.runPromise(
-			Effect.result(
-				browser.rpc.ContinueSession({
-					sessionId,
-					instanceId: "claude",
-					expectedInstanceId: "claude",
-				}),
-			),
-		);
-		expect(continuation).toMatchObject({ _tag: "Success" });
-		expect(pendingRewind(browser, sessionId)).toBe(target.id);
-		expect(persisted(harness, sessionId)).toEqual(pendingBeforeContinue);
-		expect(queries(harness)).toHaveLength(1);
-		evidence["continuationWhilePending"] = continuation;
+		evidence["rewound"] = persisted(harness, sessionId);
 
 		await Effect.runPromise(second.rpc.UndoRewind({ sessionId }));
 		await vi.waitFor(() => {
-			for (const tab of [browser, second, reloadedPending])
-				expect(detailState(tab, sessionId)).toEqual({
-					pending: null,
-					// Restored live, with their parts, without a reload.
-					whole: expect.arrayContaining(hidden.map(({ id }) => id)),
-				});
+			// Restored live, with their parts, without a reload.
+			for (const tab of [browser, second, reloadedRewound])
+				expect(detailState(tab, sessionId)).toEqual(
+					expect.arrayContaining(hidden.map(({ id }) => id)),
+				);
 		});
 		expect((await second.history(sessionId)).map(({ id }) => id)).toEqual(
 			before.map(({ id }) => id),
@@ -297,19 +284,16 @@ describe("Claude rewind through the detached runner and real relay", () => {
 			[],
 		);
 		const reloaded = await harness.connect(sessionId);
-		expect(pendingRewind(reloaded, sessionId)).toBeNull();
 		const committed = await reloaded.history(sessionId);
 		expect(committed.map(({ id }) => id)).toEqual(
 			expect.arrayContaining(kept.map(({ id }) => id)),
 		);
 		for (const { id } of hidden)
 			expect(committed.map((message) => message.id)).not.toContain(id);
+		// 82tn.51: the Head Log keeps every move, newest first; the undo stays undoable.
 		expect(
-			persisted(harness, sessionId).session.pending_rewind_message_id,
-		).toBeNull();
-		await expect(
-			Effect.runPromise(reloaded.rpc.UndoRewind({ sessionId })),
-		).rejects.toThrow();
+			(await headLog(reloaded, sessionId)).map(({ kind }) => kind),
+		).toEqual(["rewind", "undo", "rewind"]);
 		await vi.waitFor(() =>
 			expect(
 				persisted(harness as ProcessHarness, sessionId).activeCommands,
@@ -336,7 +320,7 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		evidence["nativeFile"] = nativeFile;
 	}, 90_000);
 
-	it("rewinding to the first turn starts a fresh native conversation on commit", async () => {
+	it("rewinding to the first turn starts a fresh native conversation at the next send (82tn.51)", async () => {
 		harness = await ProcessHarness.start();
 		evidence = { ticket: "conduit-test-qqqm" };
 		const browser = await harness.connect();
@@ -385,12 +369,13 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		const history = await reloaded.history(sessionId);
 		for (const { id } of before)
 			expect(history.map((message) => message.id)).not.toContain(id);
-		expect(pendingRewind(reloaded, sessionId)).toBeNull();
 		evidence["fresh"] = fresh;
 		evidence["history"] = history;
 	}, 60_000);
 
-	it("keeps the preceding user turn when the cut is an assistant message", async () => {
+	// 82tn.51: a node is one Run, so a cut at a Run's reply goes back before the Run; its typed
+	// text returns to the composer and the next send resumes at the turn before.
+	it("cuts the whole Run when the cut is its assistant reply (82tn.51)", async () => {
 		harness = await ProcessHarness.start();
 		evidence = { ticket: "conduit-test-qqqm" };
 		mkdirSync(join(harness.root, "claude"), { recursive: true });
@@ -412,22 +397,29 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		const target = before
 			.filter((message) => message.role === "assistant")
 			.at(-1);
-		const keptUser = before.filter((message) => message.role === "user").at(-1);
-		if (!target || !keptUser) throw new Error("Missing assistant cut turn");
+		const cutUser = before.filter((message) => message.role === "user").at(-1);
+		const keptReply = before
+			.filter((message) => message.role === "assistant")
+			.at(-2);
+		if (!target || !cutUser || !keptReply)
+			throw new Error("Missing assistant cut turn");
 		const original = await firstQueryMark(harness);
-		const nativeUser = nativeTranscript(harness, original.sessionId).find(
-			(entry) => entry.type === "user" && entry.uuid === keptUser.id,
+		const nativeReply = nativeTranscript(harness, original.sessionId).find(
+			(entry) =>
+				entry.type === "assistant" &&
+				(entry.message as { id?: string }).id === keptReply.id,
 		);
-		if (!nativeUser) throw new Error("Missing kept native user UUID");
+		if (!nativeReply) throw new Error("Missing kept native reply UUID");
 		await Effect.runPromise(
 			browser.rpc.RewindSession({
 				sessionId,
 				messageId: target.id,
 			}),
 		);
-		const pending = await browser.history(sessionId);
-		expect(pending.map(({ id }) => id)).toContain(keptUser.id);
-		expect(pending.map(({ id }) => id)).not.toContain(target.id);
+		const rewound = await browser.history(sessionId);
+		expect(rewound.map(({ id }) => id)).toContain(keptReply.id);
+		expect(rewound.map(({ id }) => id)).not.toContain(cutUser.id);
+		expect(rewound.map(({ id }) => id)).not.toContain(target.id);
 		await browser.send(sessionId, "rewind-assistant-replacement");
 		await vi.waitFor(() =>
 			expect(queries(harness as ProcessHarness)).toHaveLength(2),
@@ -436,13 +428,13 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		if (!resumed) throw new Error("Missing resumed query");
 		expect(resumed.sessionId).toBe(original.sessionId);
 		expect(JSON.parse(resumed.optionsJson) as unknown).toMatchObject({
-			resumeSessionAt: nativeUser.uuid,
+			resumeSessionAt: nativeReply.uuid,
 		});
 		const reloaded = await harness.connect(sessionId);
 		const history = await reloaded.history(sessionId);
-		expect(history.map(({ id }) => id)).toContain(keptUser.id);
+		expect(history.map(({ id }) => id)).toContain(keptReply.id);
+		expect(history.map(({ id }) => id)).not.toContain(cutUser.id);
 		expect(history.map(({ id }) => id)).not.toContain(target.id);
-		expect(pendingRewind(reloaded, sessionId)).toBeNull();
 		evidence["resumed"] = resumed;
 		evidence["history"] = history;
 	}, 60_000);
@@ -491,7 +483,6 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		);
 		const failed = persisted(harness, sessionId);
 		expect(failed.events.map(({ type }) => type)).toContain("turn.error");
-		expect(failed.session.pending_rewind_message_id).toBeNull();
 		for (const { id } of hidden)
 			expect(failed.messages.map((message) => message.id)).not.toContain(id);
 		const retried = await browser.send(sessionId, "rewind-retry-after-failure");
@@ -515,7 +506,6 @@ describe("Claude rewind through the detached runner and real relay", () => {
 		const history = await reloaded.history(sessionId);
 		for (const { id } of hidden)
 			expect(history.map((message) => message.id)).not.toContain(id);
-		expect(pendingRewind(reloaded, sessionId)).toBeNull();
 		evidence["failed"] = failed;
 		evidence["retryContext"] = retryContext;
 		evidence["history"] = history;

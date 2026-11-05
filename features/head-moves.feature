@@ -92,15 +92,14 @@ Examples:
   | phone    | 1     | hm-user-1 | Draft the release notes  | Files from this point were pruned. |
   | desktop  | 1     | hm-user-1 | Draft the release notes  | Files from this point were pruned. |
 
-Scenario Outline: a message with an image says its attachments are not resent
+Scenario Outline: a message with an image can be regenerated
   Given the viewport is a <viewport>
   And the first message carried an image
   And a branched conversation is open
-  When I start editing the message <message>
-  Then the edit says <note>
-  And regenerating reply 1 is unavailable
+  When I regenerate the reply from the message menu of reply <reply>
+  Then the conversation moves with a rewind before <messageId> resending <text>
 
 Examples:
-  | viewport | message                 | note                         |
-  | phone    | Draft the release notes | Attachments are not resent. |
-  | desktop  | Draft the release notes | Attachments are not resent. |
+  | viewport | reply | messageId | text                    |
+  | phone    | 1     | hm-user-1 | Draft the release notes |
+  | desktop  | 1     | hm-user-1 | Draft the release notes |

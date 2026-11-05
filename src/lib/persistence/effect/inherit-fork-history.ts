@@ -44,12 +44,7 @@ export const inheritForkHistory = (
 					AND NOT EXISTS (SELECT 1 FROM message_tombstones removed
 						WHERE removed.session_id = ${sourceId} AND removed.message_id = owner.id))))
 			AND NOT EXISTS (SELECT 1 FROM message_tombstones removed
-				WHERE removed.session_id = ${sourceId} AND removed.message_id = m.id)
-			AND NOT EXISTS (
-				SELECT 1 FROM sessions pending JOIN messages cut
-					ON cut.id = pending.pending_rewind_message_id AND cut.session_id = pending.id
-				WHERE pending.id = ${sourceId}
-				AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id))`;
+				WHERE removed.session_id = ${sourceId} AND removed.message_id = m.id)`;
 
 		// Turns precede messages because messages.turn_id has a foreign key.
 		// Copy closed history, never live reservations or native execution.
@@ -168,7 +163,7 @@ export const inheritForkHistory = (
 			FROM history_nodes n WHERE n.session_id = ${sourceId}
 			AND n.id IN (SELECT history_node_id FROM messages WHERE session_id = ${event.sessionId})
 			ON CONFLICT (session_id, id) DO NOTHING`;
-		yield* refreshHistoryHead(event.sessionId, null);
+		yield* refreshHistoryHead(event.sessionId);
 
 		// The retained result is only the preview. Keep its pointer into the
 		// Source event log so opening full tool output does not duplicate it.

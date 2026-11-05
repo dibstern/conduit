@@ -149,23 +149,38 @@ export const makeCodexRunnerDriver = (
 					const removed = new Set(
 						messages.slice(keptIndex + 1).map(({ turnId }) => turnId),
 					);
-					// 82tn.51: a head move took the cut off the Head when it landed; it is kept off it.
-					if (rewind.targetMessageId !== undefined)
-						for (const { turnId } of yield* sql<{ turnId: string }>`
-							SELECT COALESCE(json_extract(row_json, '$.turn_id'), row_key) AS turnId
-							FROM history_off_head WHERE session_id = ${input.sessionId}
-								AND source_table = 'messages' AND row_key = ${rewind.targetMessageId}`)
-							removed.add(turnId);
+					// 82tn.51: a head move took the cut's Run, and the Runs after it, off the Head when it
+					// landed. Their native turns come from their journalled rows, earliest first.
+					const offHead =
+						rewind.targetMessageId === undefined
+							? []
+							: yield* sql<{ nativeTurnId: string; threadId: string }>`
+								WITH RECURSIVE below(id) AS (
+									SELECT node_id FROM history_off_head WHERE session_id = ${input.sessionId}
+										AND source_table = 'messages' AND row_key = ${rewind.targetMessageId}
+									UNION SELECT n.id FROM history_nodes n JOIN below b
+										ON n.session_id = ${input.sessionId} AND n.parent_id = b.id
+								)
+								SELECT json_extract(e.metadata, '$.providerRefs.providerTurnId') AS nativeTurnId,
+									json_extract(e.metadata, '$.providerRefs.providerSessionId') AS threadId
+								FROM history_off_head h JOIN below b ON h.node_id = b.id
+								JOIN events e ON e.session_id = h.session_id AND e.type = 'message.created'
+									AND json_extract(e.data, '$.messageId') = h.row_key
+								WHERE h.session_id = ${input.sessionId} AND h.source_table = 'messages'
+									AND json_type(e.metadata, '$.providerRefs.providerTurnId') = 'text'
+								ORDER BY e.sequence`;
 					const refs = yield* readCodexNativeTurns(input.sessionId).pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);
-					return refs.find(
-						({ turnId, threadId }) =>
-							removed.has(turnId) &&
-							(!identity ||
-								threadId === identity.threadId ||
-								identity.inheritedThreadIds?.includes(threadId) ||
-								threadId === identity.forkSource?.threadId),
+					return [
+						...offHead,
+						...refs.filter(({ turnId }) => removed.has(turnId)),
+					].find(
+						({ threadId }) =>
+							!identity ||
+							threadId === identity.threadId ||
+							identity.inheritedThreadIds?.includes(threadId) ||
+							threadId === identity.forkSource?.threadId,
 					)?.nativeTurnId;
 				}).pipe(
 					Effect.mapError(

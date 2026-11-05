@@ -10,7 +10,6 @@ import {
 	Semaphore,
 	Stream,
 } from "effect";
-import { SqlClient } from "effect/sql";
 import { hashPin } from "../../../auth.js";
 import { AccountChangeRejected } from "../../../contracts/account.js";
 import {
@@ -59,7 +58,7 @@ import {
 } from "../../../server/ws-rpc.js";
 import { WS_PROTOCOL_VERSION } from "../../../shared-types.js";
 import { getVersion } from "../../../version.js";
-import { portWatcherMark } from "../../persistence/Services/port-watcher.js";
+import { PortWatcher } from "../../persistence/Services/port-watcher.js";
 import { AlertsTag, subscribeAlerts } from "../../relay/Services/alerts.js";
 import { subscribeEveryProjectApprovals } from "../../relay/Services/approvals-subscription.js";
 import { makeCategoryTuning } from "../../relay/Services/category-tuning.js";
@@ -199,6 +198,7 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 		const directory = yield* SessionDirectory;
 		const bus = yield* DaemonEventBusTag;
 		const cache = yield* RelayCacheTag;
+		const watcher = yield* PortWatcher;
 		const handle = yield* DaemonHandleTag;
 		const openCodeInstances = yield* OpenCodeInstancesTag;
 		const usage = yield* Usage;
@@ -1170,33 +1170,21 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 						),
 					),
 				),
-			// 8.7 Declared: each running project's watcher resolves the caller's pid as a scan does;
-			// the one whose store holds the caller's session records or refuses the mark.
+			// 8.7 Declared: the daemon's watcher resolves the caller's pid as a scan does and records
+			// or refuses the mark.
 			MarkServer: (request) =>
 				Effect.gen(function* () {
 					if ((yield* RpcCaller).kind !== "cli")
 						return yield* new WsRpcError({
 							message: "Servers are marked from an agent's shell",
 						});
-					for (const project of yield* allProjects) {
-						const relay = yield* cache.peek(project.slug);
-						if (Option.isNone(relay) || !relay.value.rpcWsHandler.context)
-							continue;
-						const mark = portWatcherMark
-							.get(
-								Context.get(
-									yield* relay.value.rpcWsHandler.context,
-									SqlClient.SqlClient,
-								),
-							)
-							?.get(project.slug);
-						const outcome = mark && (yield* mark(request));
-						if (outcome?.kind === "marked") return { ok: true as const };
-						if (outcome?.kind === "rejected")
-							return yield* new WsRpcError({ message: outcome.reason });
-					}
+					const outcome = yield* watcher.mark(request);
+					if (outcome.kind === "marked") return { ok: true as const };
 					return yield* new WsRpcError({
-						message: "This shell is not inside a Conduit session",
+						message:
+							outcome.kind === "rejected"
+								? outcome.reason
+								: "This shell is not inside a Conduit session",
 					});
 				}).pipe(
 					Effect.provide(context),

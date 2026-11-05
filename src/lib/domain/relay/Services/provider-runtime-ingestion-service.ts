@@ -18,7 +18,6 @@ import {
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
 import { readOwedRealignment } from "../../../persistence/effect/head-realignment.js";
-import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
 import type {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
@@ -793,17 +792,11 @@ export const makeProviderRuntimeIngestionLive = (
 														yield* project(yield* appendEvents(pending));
 														pending = [];
 													}
-													const rewind =
-														(yield* readPendingRewindCommit(
-															sql,
-															event.sessionId,
-															event.data.messageId,
-														)) ??
-														(yield* readOwedRealignment(
-															sql,
-															event.sessionId,
-															event.data.messageId,
-														));
+													const rewind = yield* readOwedRealignment(
+														sql,
+														event.sessionId,
+														event.data.messageId,
+													);
 													if (rewind) {
 														for (const messageId of rewind.removedMessageIds)
 															rewoundMessageIds.add(messageId);

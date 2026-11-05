@@ -3228,10 +3228,18 @@ describe("rewindSessionToMessage", () => {
 			],
 		});
 
-		return rewindSessionToMessage({
-			clientId: "client-1",
-			sessionId: "session-1",
-			messageId: "msg-1",
+		// 82tn.51: a rewind is a head move, so its target must sit in an ended Run's node.
+		return Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+				VALUES ('session-1', 'run-1', NULL, 'run-1', 1, 0)`;
+			yield* sql`UPDATE messages SET history_node_id = 'run-1' WHERE id = 'msg-1'`;
+			yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES ('session-1', 'run-1')`;
+			yield* rewindSessionToMessage({
+				clientId: "client-1",
+				sessionId: "session-1",
+				messageId: "msg-1",
+			});
 		}).pipe(
 			Effect.provide(layer, { local: true }),
 			Effect.tap(() => Effect.sync(() => {

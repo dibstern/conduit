@@ -6,6 +6,8 @@
 // 4. it appends something other than alarm_fired, or appends it in a write that does not fold it;
 // 5. after a restart it does not fire the ledger stop deadline from the session row (no U2 restore).
 // 6. its alarm forces a wake an observer already ended at its Stop's dispose (trace W, L6, A.21).
+// 7. one daemon scheduler over the shared store misses a project no tab has opened since a restart;
+// 8. or it fires a removed project's alarm (82tn.14: removal leaves that project's work alone).
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,17 +16,29 @@ import { Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import { TestClock } from "effect/testing";
 import { expect } from "vitest";
-import { RunLedgerSchedulerLive } from "../../../src/lib/domain/persistence/Services/run-ledger-scheduler.js";
+import { makeRunLedgerSchedulerLive } from "../../../src/lib/domain/persistence/Services/run-ledger-scheduler.js";
 import {
 	type CommitAndSignal,
 	makeCommitAndSignal,
 } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectContext,
 } from "../../../src/lib/persistence/effect/live.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
+
+/** The daemon's one scheduler over the store, serving the named projects. */
+const scheduler = (served: readonly string[]) =>
+	makeRunLedgerSchedulerLive(Effect.succeed(served)).pipe(
+		Layer.provide(
+			Layer.effect(UnboundEventStoreEffectTag, makeUnboundEventStoreEffect),
+		),
+	);
 
 /**
  * One store over the file, with the scheduler running until the body ends (a restart's unit). A
@@ -38,15 +52,29 @@ const open = <A, E>(
 		commit: CommitAndSignal,
 		started: Effect.Effect<void>,
 	) => Effect.Effect<A, E, PersistenceEffectContext>,
+	served: readonly string[] = ["test-project"],
 ) =>
 	Effect.scoped(
 		Effect.gen(function* () {
 			const commit = yield* makeCommitAndSignal;
 			const started = commit.committed();
-			yield* Layer.build(RunLedgerSchedulerLive);
+			yield* Layer.build(scheduler(served));
 			return yield* body(commit, started);
 		}),
 	).pipe(Effect.provide(makePersistenceEffectLayer(file, "test-project")));
+
+/** Appends into a named project, as another project's session does on the shared store. */
+const inProject = (
+	commit: CommitAndSignal,
+	projectId: string,
+	events: ReturnType<typeof wakeThenStop>,
+) =>
+	commit.write((project) =>
+		Effect.gen(function* () {
+			const store = yield* makeUnboundEventStoreEffect;
+			yield* project(yield* store.appendBatch(events, projectId));
+		}),
+	);
 
 /** A Claude wake running with no main run, then a Stop commit whose ledger stop deadline is at. */
 const wakeThenStop = (sessionId: string, deadlineAt: number) => [
@@ -268,6 +296,46 @@ describe("Run Ledger alarm scheduler", () => {
 						expect(after.rows).toEqual([
 							{ session_id: "w", alarm_at: null },
 							{ session_id: "x", alarm_at: null },
+						]);
+					}),
+				),
+			),
+	);
+	it.effect(
+		"one daemon scheduler fires every registered project's alarms and none of a removed one's",
+		() =>
+			Effect.acquireUseRelease(
+				Effect.sync(() => mkdtempSync(join(tmpdir(), "run-ledger-scheduler-"))),
+				(dir) =>
+					open(
+						join(dir, "events.db"),
+						(commit) =>
+							Effect.gen(function* () {
+								// 7: "cold" has no layer of its own; 8: "removed" is no longer registered.
+								yield* commit(wakeThenStop("own", 3000));
+								yield* inProject(commit, "cold", wakeThenStop("cold-s", 3000));
+								yield* inProject(commit, "removed", wakeThenStop("gone", 2000));
+								const fired = commit.committed();
+								// Both due at 3000: one write fires them, the commit to wait for.
+								yield* TestClock.adjust(3000);
+								yield* fired;
+								return yield* observed;
+							}),
+						["test-project", "cold"],
+					),
+				(dir) =>
+					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
+			).pipe(
+				Effect.tap(({ alarms, rows }) =>
+					Effect.sync(() => {
+						expect(alarms).toEqual([
+							{ session_id: "cold-s", created_at: 3000 },
+							{ session_id: "own", created_at: 3000 },
+						]);
+						expect(rows).toEqual([
+							{ session_id: "cold-s", alarm_at: null },
+							{ session_id: "gone", alarm_at: 2000 },
+							{ session_id: "own", alarm_at: null },
 						]);
 					}),
 				),

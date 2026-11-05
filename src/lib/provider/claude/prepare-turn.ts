@@ -6,6 +6,7 @@ import {
 	type LimitRecovery,
 	LimitRecoverySchema,
 } from "../../contracts/limit-recovery.js";
+import { readOwedRealignment } from "../../persistence/effect/head-realignment.js";
 import {
 	heldCatchUpKey,
 	type NativeThread,
@@ -454,7 +455,8 @@ export const makePrepareTurn = (options: PrepareTurnOptions) =>
 						visited.add(sourceId);
 						const source = yield* read.getSession(sourceId);
 						if (!source) break;
-						if (source.pending_rewind_message_id != null) break;
+						// 82tn.51: the source's native thread still holds rows its Head moved off.
+						if ((yield* readOwedRealignment(sql, sourceId))?.rewind) break;
 						const ownerState = yield* state.getState(owner.id);
 						const frozen = ownerState[CLAUDE_FORK_SOURCE_KEY];
 						const frozenSource =

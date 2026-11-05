@@ -18,18 +18,22 @@ import {
 import { uiState } from "../../../src/lib/frontend/stores/ui.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 import { applySessionChange } from "../../../src/lib/frontend/transport/session-subscription.svelte.js";
-import type { rpc } from "../../../src/lib/frontend/transport/ws-rpc-client.js";
 import { detailRowsOf } from "../../helpers/detail-rows.js";
 
+// 82tn.51: the banner's rewind is a head move, previewed then committed; files are asked first.
 const rpcSpy = vi.hoisted(() =>
-	vi.fn<typeof rpc<"RewindSession">>((_tag, input) =>
-		Promise.resolve({
-			ok: true as const,
-			sessionId: input.sessionId,
-			messageId: input.messageId,
-		}),
+	vi.fn<(tag: string, input: unknown) => Promise<unknown>>((tag) =>
+		Promise.resolve(
+			tag === "GetHeadMoveFiles"
+				? { files: "available" }
+				: tag === "PreviewHeadMove"
+					? { moveId: "move-1", files: "available" }
+					: { moveId: "move-1" },
+		),
 	),
 );
+const moves = () =>
+	rpcSpy.mock.calls.filter(([tag]) => tag !== "GetHeadMoveFiles");
 const emptyComponent = vi.hoisted(
 	() => async () => import("../../helpers/Empty.svelte"),
 );
@@ -45,21 +49,13 @@ vi.mock(
 		getCurrentSearchParams: () => new URLSearchParams(),
 	}),
 );
-const filesSpy = vi.hoisted(() =>
-	vi.fn<typeof rpc<"GetHeadMoveFiles">>(() =>
-		Promise.resolve({ files: "available" as const }),
-	),
-);
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
-	rpc: (
-		...[tag, input]: Parameters<typeof rpcSpy> | Parameters<typeof filesSpy>
-	) => (tag === "GetHeadMoveFiles" ? filesSpy(tag, input) : rpcSpy(tag, input)),
+	rpc: (tag: string, input: unknown) => rpcSpy(tag, input),
 }));
 
 describe("RewindBanner", () => {
 	beforeEach(() => {
 		rpcSpy.mockClear();
-		filesSpy.mockClear();
 		openSessionForSetup("session-1", "project-a");
 		getOrCreateSessionActivity("session-1");
 		uiState.rewindActive = true;
@@ -115,7 +111,7 @@ describe("RewindBanner", () => {
 		expect(getByText("Files are not restored.")).toBeTruthy();
 	});
 
-	it("explains permanent removal and the undo deadline for an event-seeded rewind target", () => {
+	it("says the Head Log undoes the rewind for an event-seeded target", () => {
 		const slot = getOrCreateSessionMessages("session-1");
 		slot.transcript = applyTranscriptEnvelope(
 			{
@@ -144,67 +140,38 @@ describe("RewindBanner", () => {
 
 		expect(
 			getByText(
-				"This message and everything after it will be removed. You can undo until you send your next message.",
+				// 82tn.51: a rewind lands at once and every move stays undoable from the Head Log.
+				"This message and everything after it will be removed. Every move can be undone from the Head Log.",
 			),
 		).toBeTruthy();
 		expect(getByText("Files are restored to this point.")).toBeTruthy();
 	});
 
-	it("explains that the next send makes an event-delivered pending rewind permanent", async () => {
-		const slot = getOrCreateSessionMessages("session-1");
-		slot.transcript = applyTranscriptEnvelope(
-			{
-				project: "project-a",
-				rows: [],
-				pending: [],
-				hwm: null,
-				hasMore: false,
-				status: { _tag: "live" },
-				waiting: new Map(),
-				partOrder: new Map(),
-			},
-			{ _tag: "snapshot", sequence: 1, rows: [] },
-		);
-		const { getByRole, queryByRole } = render(RewindBanner, {
-			pendingOnly: true,
-		});
-		expect(queryByRole("status")).toBeNull();
-
-		slot.transcript = applyTranscriptEnvelope(slot.transcript, {
-			_tag: "upsert",
-			sequence: 2,
-			item: { _tag: "rewind", messageId: "provider-1" },
-		});
-
-		await waitFor(() =>
-			expect(getByRole("status").textContent).toBe(
-				"Rewound. Sending your next message makes it permanent.",
-			),
-		);
-		expect(getByRole("button", { name: "Undo" })).toBeTruthy();
-	});
-
-	it("confirms rewind through RPC for the active session", async () => {
+	it("rewinds as a head move: previews it, then commits the preview", async () => {
 		const { getByRole } = render(RewindBanner);
 
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 
-		await waitFor(() => {
-			expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
-				sessionId: "session-1",
-				messageId: "provider-1",
-			});
-		});
+		const intent = { _tag: "rewind", messageId: "provider-1" };
+		await waitFor(() =>
+			expect(moves()).toEqual([
+				["PreviewHeadMove", { sessionId: "session-1", intent }],
+				[
+					"CommitHeadMove",
+					{ sessionId: "session-1", intent, moveId: "move-1" },
+				],
+			]),
+		);
 		expect(uiState.rewindActive).toBe(false);
 		expect(uiState.rewindSelectedUuid).toBeNull();
 	});
 
 	it("says the files at a pruned point were pruned and keeps Rewind enabled", async () => {
-		filesSpy.mockResolvedValueOnce({ files: "pruned" });
+		rpcSpy.mockResolvedValueOnce({ files: "pruned" });
 		const { findByText, getByRole, queryByText } = render(RewindBanner);
 
 		expect(await findByText("Files from this point were pruned.")).toBeTruthy();
-		expect(filesSpy).toHaveBeenCalledWith("GetHeadMoveFiles", {
+		expect(rpcSpy).toHaveBeenCalledWith("GetHeadMoveFiles", {
 			sessionId: "session-1",
 			messageId: "provider-1",
 		});
@@ -214,10 +181,10 @@ describe("RewindBanner", () => {
 		expect(rewind.hasAttribute("disabled")).toBe(false);
 		await fireEvent.click(rewind);
 		await waitFor(() =>
-			expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
-				sessionId: "session-1",
-				messageId: "provider-1",
-			}),
+			expect(moves().map(([tag]) => tag)).toEqual([
+				"PreviewHeadMove",
+				"CommitHeadMove",
+			]),
 		);
 	});
 
@@ -232,15 +199,17 @@ describe("RewindBanner", () => {
 				finalized: true,
 			},
 		];
-		const onRewind = vi.fn();
-		const { getByRole } = render(RewindBanner, { onRewind });
+		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
-		expect(rpcSpy).toHaveBeenCalledWith("RewindSession", {
-			sessionId: "session-1",
-			messageId: "provider-assistant-1",
-		});
 		await waitFor(() =>
-			expect(onRewind).toHaveBeenCalledWith("message-1", "both"),
+			expect(moves()[1]).toEqual([
+				"CommitHeadMove",
+				{
+					sessionId: "session-1",
+					intent: { _tag: "rewind", messageId: "provider-assistant-1" },
+					moveId: "move-1",
+				},
+			]),
 		);
 		expect(chatState.messages).toHaveLength(1);
 		expect(uiState.toasts).toEqual([]);
@@ -263,72 +232,40 @@ describe("RewindBanner", () => {
 		]);
 	});
 
-	it("keeps the transcript and reports an RPC rejection", async () => {
-		rpcSpy.mockRejectedValueOnce(new Error("Target not found"));
+	it("keeps the transcript and reports a refused move", async () => {
+		rpcSpy.mockImplementation((tag) =>
+			tag === "GetHeadMoveFiles"
+				? Promise.resolve({ files: "available" })
+				: Promise.reject(new Error("Target not found")),
+		);
 		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
 		await waitFor(() =>
 			expect(uiState.toasts).toEqual([
 				expect.objectContaining({
 					variant: "warn",
-					title: expect.stringContaining("Could not rewind"),
+					title: expect.stringContaining("Could not move the conversation"),
 				}),
 			]),
 		);
+		expect(moves().map(([tag]) => tag)).toEqual(["PreviewHeadMove"]);
 		expect(chatState.messages).toHaveLength(1);
 		expect(uiState.rewindActive).toBe(false);
+		rpcSpy.mockReset();
 	});
 
-	it("keeps rehydrated messages when the selected render uuid disappears before the reply", async () => {
-		let resolveReply!: (reply: {
-			ok: true;
-			sessionId: string;
-			messageId: string;
-		}) => void;
-		rpcSpy.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					resolveReply = resolve;
-				}),
-		);
-		const onRewind = vi.fn();
-		const { getByRole } = render(RewindBanner, { onRewind });
-		await fireEvent.click(getByRole("button", { name: "Rewind" }));
-		getOrCreateSessionMessages("session-1").messages = [
-			{
-				type: "user",
-				uuid: "rehydrated",
-				messageId: "provider-1",
-				text: "Keep this",
-			},
-		];
-		resolveReply({ ok: true, sessionId: "session-1", messageId: "provider-1" });
-		await waitFor(() =>
-			expect(onRewind).toHaveBeenCalledWith("message-1", "both"),
-		);
-		expect(uiState.toasts).toEqual([]);
-		expect(chatState.messages).toEqual([
-			{
-				type: "user",
-				uuid: "rehydrated",
-				messageId: "provider-1",
-				text: "Keep this",
-			},
-		]);
-		expect(uiState.rewindActive).toBe(false);
-	});
-
-	it("leaves transcript changes to the subscription and confirms only when the RPC succeeds", async () => {
-		let resolveReply!: (reply: {
-			ok: true;
-			sessionId: string;
-			messageId: string;
-		}) => void;
-		rpcSpy.mockImplementationOnce(
-			() =>
-				new Promise((resolve) => {
-					resolveReply = resolve;
-				}),
+	it("leaves transcript changes to the subscription while the move lands", async () => {
+		let land!: (reply: { moveId: string }) => void;
+		rpcSpy.mockImplementation((tag) =>
+			tag === "CommitHeadMove"
+				? new Promise((resolve) => {
+						land = resolve;
+					})
+				: Promise.resolve(
+						tag === "PreviewHeadMove"
+							? { moveId: "move-1", files: "available" }
+							: { files: "available" },
+					),
 		);
 		getOrCreateSessionMessages("session-1").messages = [
 			{ type: "user", uuid: "before", text: "Keep this" },
@@ -340,20 +277,18 @@ describe("RewindBanner", () => {
 			},
 			{ type: "user", uuid: "after", text: "Remove this too" },
 		];
-		const onRewind = vi.fn();
-		const { getByRole } = render(RewindBanner, { onRewind });
+		const { getByRole } = render(RewindBanner);
 		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await waitFor(() => expect(land).toBeTypeOf("function"));
 		expect(chatState.messages).toHaveLength(3);
-		expect(uiState.toasts).toEqual([]);
-		resolveReply({ ok: true, sessionId: "session-1", messageId: "provider-1" });
-		await waitFor(() =>
-			expect(onRewind).toHaveBeenCalledWith("message-1", "both"),
-		);
+		land({ moveId: "move-1" });
+		await Promise.resolve();
 		expect(chatState.messages.map((message) => message.uuid)).toEqual([
 			"before",
 			"message-1",
 			"after",
 		]);
 		expect(uiState.toasts).toEqual([]);
+		rpcSpy.mockReset();
 	});
 });

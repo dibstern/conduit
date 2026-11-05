@@ -27,7 +27,7 @@ const journal = (harness: ProcessHarness, sessionId: string) => {
 	try {
 		return db
 			.prepare(
-				"SELECT sequence, type, json_extract(data, '$.inputId') AS inputId FROM events WHERE session_id = ? AND type IN ('head.move_started', 'head.moved', 'session.rewound', 'session.rewind_undone', 'input.admitted', 'input.sent') ORDER BY sequence",
+				"SELECT sequence, type, json_extract(data, '$.inputId') AS inputId FROM events WHERE session_id = ? AND type IN ('head.move_started', 'head.moved', 'input.admitted', 'input.sent') ORDER BY sequence",
 			)
 			.all(sessionId) as {
 			sequence: number;
@@ -238,12 +238,11 @@ describe("a head move, a fork and a provider switch are admitted from the Run Le
 				(type) => type.startsWith("head.") || type.startsWith("session."),
 			);
 		proof["idle moves"] = moves;
+		// 82tn.51: a rewind and its undo are head moves alone; no pending-rewind event rides along.
 		expect(moves).toEqual([
 			"head.move_started",
-			"session.rewound",
 			"head.moved",
 			"head.move_started",
-			"session.rewind_undone",
 			"head.moved",
 		]);
 	});
@@ -329,9 +328,10 @@ describe("a head move, a fork and a provider switch are admitted from the Run Le
 		const sent = after.filter(
 			(event) => event.type === "input.sent" && event.inputId === inputId,
 		);
-		expect(after.filter(({ type }) => type === "session.rewound")).toHaveLength(
-			1,
-		);
+		// 82tn.51: the rewind is one head move, with no pending-rewind event.
+		expect(
+			after.filter(({ type }) => type === "head.move_started"),
+		).toHaveLength(1);
 		expect(
 			after.filter(
 				(event) => event.type === "input.admitted" && event.inputId === inputId,
@@ -402,9 +402,10 @@ describe("a head move, a fork and a provider switch are admitted from the Run Le
 			(event) => event.type === "input.sent" && event.inputId === inputId,
 		);
 		expect(moved).toHaveLength(1);
-		expect(after.filter(({ type }) => type === "session.rewound")).toHaveLength(
-			1,
-		);
+		// 82tn.51: restart lands the one move it started; no pending-rewind event rides along.
+		expect(
+			after.filter(({ type }) => type === "head.move_started"),
+		).toHaveLength(1);
 		expect(sent).toHaveLength(1);
 		expect(sent[0]?.sequence).toBeGreaterThan(moved[0]?.sequence ?? Infinity);
 	});
