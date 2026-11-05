@@ -4325,20 +4325,22 @@ export class FakeProvider {
 					if (!terminal) continue;
 					// 3.9 (CONTRACT.md 978-983): a joined steer the Run's end leaves unconsumed, not declined or failed,
 					// is a Run of its own and main's open Run; its run.started was read. Nearest reading at any end.
-					const outlived = this.joinedSteers.find(
-						(steer) =>
-							steer.parent === open.runId &&
-							[...this.sends.values()].some(
-								({ send, accepted, ended, notConsumed, transportRank }) =>
-									send.effect.kind === "steer" &&
-									send.effect.inputId === steer.inputId &&
-									send.effect.runId === steer.parent &&
-									!accepted &&
-									!ended &&
-									!notConsumed &&
-									transportRank !== 2,
-							),
-					);
+					// A steer main issued but nothing ever sent is unconsumed too, unless swept (3.4); case (d), 989-991.
+					const outlived = this.joinedSteers.find((steer) => {
+						if (steer.parent !== open.runId) return false;
+						const sent = [...this.sends.values()].filter(
+							({ send }) =>
+								send.effect.kind === "steer" &&
+								send.effect.inputId === steer.inputId &&
+								send.effect.runId === steer.parent,
+						);
+						return sent.length === 0
+							? !this.swept.has(`${steer.inputId}\u0000steer`)
+							: sent.some(
+									({ accepted, ended, notConsumed, transportRank }) =>
+										!accepted && !ended && !notConsumed && transportRank !== 2,
+								);
+					});
 					this.mainRun = outlived && {
 						runId: outlived.runId,
 						inputId: outlived.inputId,
