@@ -561,15 +561,20 @@ describe("daemon-wide shell feed", () => {
 		}
 		expect(sequences).toEqual([...sequences].sort((a, b) => a - b));
 		expect(new Set(sequences).size).toBe(3);
+		// A child's ask reaches its root. A child's busy status no longer does: the
+		// stored row holds no busy, the view says it at read time (CONTRACT 8.1, 2734; 82tn.32.30).
 		let after = feed.frames.length;
 		await f.write("alpha", [
-			canonicalEvent("session.status", "a-child", {
+			canonicalEvent("permission.asked", "a-child", {
+				id: "perm-a-child",
 				sessionId: "a-child",
-				status: "busy",
+				toolName: "Bash",
+				input: {},
 			}),
 		]);
 		expect(await waitUpsert(feed.frames, "a", after)).toMatchObject({
-			item: { projectSlug: "alpha", attention: "working" },
+			item: { projectSlug: "alpha", attention: "needs-approval" },
+			sequence: await f.version("a"),
 		});
 		expect(upserts(feed.frames).some(({ item }) => item.id === "a-child")).toBe(
 			false,
