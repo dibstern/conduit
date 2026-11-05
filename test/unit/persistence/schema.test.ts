@@ -57,6 +57,7 @@ describe("Schema Migration", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -134,6 +135,7 @@ describe("Schema Migration", () => {
 					[91, "messages_ordinal"],
 					[92, "tool_row_run"],
 					[93, "drop_owned_run_ids"],
+					[94, "history_graph"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`
@@ -166,6 +168,9 @@ describe("Schema Migration", () => {
 				"daemon_store_imports",
 				"draft_attachments",
 				"events",
+				"history_heads",
+				"history_nodes",
+				"history_off_head",
 				"input_drafts",
 				"message_part_read_state",
 				"message_part_tombstones",
@@ -333,6 +338,11 @@ describe("Schema Migration", () => {
 				{ name: "idx_events_type", table: "events", unique: false },
 				{ name: "idx_events_unstamped", table: "events", unique: false },
 				{
+					name: "idx_history_off_head_session",
+					table: "history_off_head",
+					unique: false,
+				},
+				{
 					name: "idx_input_drafts_project",
 					table: "input_drafts",
 					unique: false,
@@ -380,6 +390,11 @@ describe("Schema Migration", () => {
 				{
 					name: "idx_message_tombstones_session_version",
 					table: "message_tombstones",
+					unique: false,
+				},
+				{
+					name: "idx_messages_history_node",
+					table: "messages",
 					unique: false,
 				},
 				{ name: "idx_messages_input_id", table: "messages", unique: false },

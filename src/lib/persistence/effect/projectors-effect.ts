@@ -24,6 +24,11 @@ import {
 	NEVER_CUT_TOOL_NAMES,
 	PREVIEW_CODE_POINTS,
 } from "../tool-wire-projection.js";
+import {
+	joinHeadWhileIdle,
+	keepOffHead,
+	refreshHistoryHead,
+} from "./history-graph.js";
 import { inheritForkHistory } from "./inherit-fork-history.js";
 import { makeProviderStateEffect } from "./provider-state-effect.js";
 import { makeRunLedgerArm } from "./run-ledger-arm.js";
@@ -824,7 +829,11 @@ export const makeMessageProjector = defineProjector(() => ({
 					WHERE m.session_id = ${event.sessionId}
 					AND (m.ordinal, m.created_at, m.id) >= (cut.ordinal, cut.created_at, cut.id)
 					ORDER BY m.ordinal, m.created_at, m.id`;
-				return yield* removeMessages(event.sessionId, ids(removed), ctx);
+				// 82tn.50: the cut leaves the head path but stays in the graph, off the Head.
+				yield* keepOffHead(event.sessionId, ids(removed));
+				const touch = yield* removeMessages(event.sessionId, ids(removed), ctx);
+				yield* refreshHistoryHead(event.sessionId, null);
+				return touch;
 			});
 		let replacesUserMessage = false;
 		let previousMessage:
@@ -891,6 +900,8 @@ export const makeMessageProjector = defineProjector(() => ({
 						? []
 						: yield* sql<RewindCut>`SELECT id, ordinal, created_at FROM messages
 							WHERE session_id = ${event.sessionId} AND id IN ${sql.in(cutIds)}`;
+				// 82tn.50: a rewind moves the Head to before its cut; an undo moves it back.
+				yield* refreshHistoryHead(event.sessionId, cutId);
 				return yield* restampRewind(
 					event.sessionId,
 					previousId === null ? null : cuts.find(({ id }) => id === previousId),
@@ -1525,6 +1536,7 @@ export const makeMessageProjector = defineProjector(() => ({
 					VALUES (${`turn-notice-part-${event.sequence}`}, ${messageId}, 'text', ${event.data.text},
 						${encodeJson({ notice: true })}, 0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
+				yield* joinHeadWhileIdle(event.sessionId, [messageId]);
 				return [messageId];
 			}
 
@@ -1550,6 +1562,7 @@ export const makeMessageProjector = defineProjector(() => ({
 						${event.data.code === undefined ? null : encodeJson({ code: event.data.code })},
 						0, ${event.createdAt}, ${event.createdAt}, ${ctx.version})
 					ON CONFLICT (id) DO NOTHING`;
+				yield* joinHeadWhileIdle(event.sessionId, [errorMessageId]);
 				return [errorMessageId];
 			}
 

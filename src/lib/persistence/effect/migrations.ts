@@ -1719,6 +1719,179 @@ export const effectMigrationEntries = {
 			ALTER TABLE claude_runner_cursors DROP COLUMN owned_run_ids;
 		`);
 	}),
+	// The History Graph (ADR-0014, 82tn.50): one node per Ended Run, a Head per session, and
+	// the rows off the head path. Today's sessions become a linear graph whose head path is
+	// their messages; rows an older rewind removed become an unavailable branch.
+	"0094_history_graph": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* executeSqlStatements(`
+			CREATE TABLE IF NOT EXISTS history_nodes (
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				id TEXT NOT NULL,
+				parent_id TEXT,
+				run_id TEXT,
+				available INTEGER NOT NULL DEFAULT 1,
+				created_at INTEGER NOT NULL,
+				PRIMARY KEY (session_id, id)
+			);
+			CREATE TABLE IF NOT EXISTS history_heads (
+				session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+				node_id TEXT
+			);
+			CREATE TABLE IF NOT EXISTS history_off_head (
+				session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+				node_id TEXT,
+				source_table TEXT NOT NULL,
+				row_key TEXT NOT NULL,
+				row_json TEXT,
+				PRIMARY KEY (source_table, row_key)
+			);
+			CREATE INDEX IF NOT EXISTS idx_history_off_head_session ON history_off_head (session_id, node_id);
+			CREATE TRIGGER IF NOT EXISTS attachment_history_off_head_insert AFTER INSERT ON history_off_head
+			WHEN instr(NEW.row_json, 'attachmentHash') > 0
+			BEGIN
+				INSERT OR IGNORE INTO attachment_uses (source_table, source_column, source_row_key, hash)
+				SELECT 'history_off_head', 'row_json', NEW.source_table || ':' || NEW.row_key, blob.hash
+				FROM (SELECT json_extract(NEW.row_json, '$.rest_payload') AS doc
+					UNION ALL SELECT json_extract(NEW.row_json, '$.metadata')) d,
+					json_tree(CASE WHEN json_valid(d.doc) THEN d.doc ELSE NULL END) ref
+				JOIN attachment_blobs blob ON blob.hash = ref.value
+				WHERE ref.key = 'attachmentHash' AND ref.type = 'text'; END;
+			CREATE TRIGGER IF NOT EXISTS attachment_history_off_head_delete AFTER DELETE ON history_off_head
+			WHEN instr(OLD.row_json, 'attachmentHash') > 0
+			BEGIN
+				DELETE FROM attachment_uses WHERE source_table = 'history_off_head'
+				AND source_column = 'row_json' AND source_row_key = OLD.source_table || ':' || OLD.row_key; END;
+		`);
+		yield* runAddColumnMigrationIfMissing(
+			"messages",
+			"history_node_id",
+			"ALTER TABLE messages ADD COLUMN history_node_id TEXT",
+		);
+		yield* executeSqlStatements(`
+			CREATE INDEX IF NOT EXISTS idx_messages_history_node ON messages (session_id, history_node_id);
+		`);
+		const rows = yield* sql<{
+			session_id: string;
+			id: string;
+			role: string;
+			steered: number;
+			run_id: string | null;
+			created_at: number;
+		}>`SELECT m.session_id, m.id, m.role, m.steered, COALESCE(r.joined_into, t.run_id) AS run_id, m.created_at
+			FROM messages m LEFT JOIN turns t ON t.id = m.turn_id LEFT JOIN provider_runs r ON r.id = t.run_id
+			WHERE m.history_node_id IS NULL
+			ORDER BY m.session_id, m.ordinal, m.created_at, m.id`;
+		const active = new Map(
+			(yield* sql<{ session_id: string; active_run_id: string }>`
+				SELECT session_id, active_run_id FROM run_ledger_sessions WHERE active_run_id IS NOT NULL`).map(
+				(row) => [row.session_id, row.active_run_id],
+			),
+		);
+		const removals = yield* sql<{
+			session_id: string;
+			message_id: string;
+			version: number;
+		}>`SELECT t.session_id, t.message_id, t.version FROM message_tombstones t
+			JOIN sessions s ON s.id = t.session_id
+			WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.id = t.message_id)
+			ORDER BY t.session_id, t.version, t.message_id`;
+		type Segment = {
+			run: string | null;
+			rows: (typeof rows)[number][];
+		};
+		const bySession = new Map<string, typeof rows>();
+		for (const row of rows)
+			bySession.set(row.session_id, [
+				...(bySession.get(row.session_id) ?? []),
+				row,
+			]);
+		const removedBySession = new Map<string, Map<number, typeof removals>>();
+		for (const row of removals) {
+			const versions = removedBySession.get(row.session_id) ?? new Map();
+			versions.set(row.version, [...(versions.get(row.version) ?? []), row]);
+			removedBySession.set(row.session_id, versions);
+		}
+		for (const sessionId of new Set([
+			...bySession.keys(),
+			...removedBySession.keys(),
+		])) {
+			// A user row opens the next Run's node, unless it is a steer joined into the open one.
+			// A wake's reply (a Run with no user row) opens its own.
+			const segments: Segment[] = [];
+			for (const row of bySession.get(sessionId) ?? []) {
+				const open = segments.at(-1);
+				const joins =
+					open !== undefined &&
+					(row.role === "user"
+						? row.steered === 1 ||
+							(row.run_id !== null && row.run_id === open.run)
+						: row.run_id === null ||
+							open.run === null ||
+							row.run_id === open.run);
+				if (open && joins) {
+					open.rows.push(row);
+					open.run ??= row.run_id;
+				} else segments.push({ run: row.run_id, rows: [row] });
+			}
+			// A Run still running has not ended: its rows wait for its end to become its node.
+			const running = segments.findIndex(
+				({ run }) => run !== null && run === active.get(sessionId),
+			);
+			const settled = running === -1 ? segments : segments.slice(0, running);
+			const nodeOf = new Map<string, string>();
+			const nodes = new Set<string>();
+			let parent: string | null = null;
+			for (const segment of settled) {
+				const first = segment.rows[0];
+				if (!first) continue;
+				const id: string =
+					segment.run !== null && !nodes.has(segment.run)
+						? segment.run
+						: `m:${first.id}`;
+				nodes.add(id);
+				yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+					VALUES (${sessionId}, ${id}, ${parent}, ${segment.run}, 1, ${first.created_at})`;
+				yield* sql`UPDATE messages SET history_node_id = ${id}
+					WHERE id IN ${sql.in(segment.rows.map((row) => row.id))}`;
+				for (const row of segment.rows) nodeOf.set(row.id, id);
+				parent = id;
+			}
+			yield* sql`INSERT INTO history_heads (session_id, node_id) VALUES (${sessionId}, ${parent})`;
+			const removed = removedBySession.get(sessionId);
+			if (!removed) continue;
+			// Removed rows are gone from the tables; their creation events, where retained, place
+			// the branch after the newest surviving row created before them. Without the events
+			// the branch has no known parent and hangs off the root.
+			const created = new Map(
+				(yield* sql<{ id: string; sequence: number }>`
+					SELECT json_extract(data, '$.messageId') AS id, MIN(sequence) AS sequence FROM events
+					WHERE session_id = ${sessionId} AND type = 'message.created' GROUP BY 1`).map(
+					(row) => [row.id, row.sequence],
+				),
+			);
+			for (const [version, group] of removed) {
+				const starts = group.flatMap(({ message_id }) => {
+					const sequence = created.get(message_id);
+					return sequence === undefined ? [] : [sequence];
+				});
+				const from = starts.length > 0 ? Math.min(...starts) : undefined;
+				const before = (bySession.get(sessionId) ?? []).filter(
+					(row) =>
+						from !== undefined &&
+						nodeOf.has(row.id) &&
+						(created.get(row.id) ?? Number.POSITIVE_INFINITY) < from,
+				);
+				const after = before.at(-1);
+				const id = `removed:${version}`;
+				yield* sql`INSERT INTO history_nodes (session_id, id, parent_id, run_id, available, created_at)
+					VALUES (${sessionId}, ${id}, ${after ? (nodeOf.get(after.id) ?? null) : null}, NULL, 0, 0)`;
+				for (const { message_id } of group)
+					yield* sql`INSERT OR IGNORE INTO history_off_head (session_id, node_id, source_table, row_key, row_json)
+						VALUES (${sessionId}, ${id}, 'messages', ${message_id}, NULL)`;
+			}
+		}
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
