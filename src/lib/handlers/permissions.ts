@@ -44,6 +44,7 @@ import {
 	canonicalEvent,
 	createCommandId,
 } from "../persistence/events.js";
+import { StaleCommandRejected } from "../provider/errors.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
 import { RunnerProviderInstance } from "../provider/runner/runner-provider-instance.js";
 import { saveRelaySettings } from "../relay/relay-settings.js";
@@ -115,10 +116,25 @@ interface StoredPromptReference {
 	readonly has_secret: number;
 }
 
+const promptSettled = new WsRpcError({
+	message:
+		"This prompt was already answered or ended with its run, so your answer was not sent.",
+	code: "prompt-settled",
+});
+
+/** The engine commits an answer only while its ask is pending; a loser of a race is refused alike. */
+const refuseSettledAnswer = <A, E, R>(dispatch: Effect.Effect<A, E, R>) =>
+	Effect.mapError(dispatch, (error) =>
+		error instanceof StaleCommandRejected && error.scopeKind === "interaction"
+			? promptSettled
+			: error,
+	);
+
 const readPromptReference = (
 	id: string,
 	type: "permission" | "question",
 	sessionId?: string,
+	commandId?: string,
 ) =>
 	Effect.gen(function* () {
 		const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
@@ -152,17 +168,25 @@ const readPromptReference = (
 			}
 		}
 		if (stored?.status === "resolved") {
+			// A retry of the command that answered it is that same answer.
+			const [retry] = commandId
+				? yield* sql.value`SELECT 1 FROM command_receipts WHERE command_id = ${commandId} LIMIT 1`
+				: [];
+			if (retry) return stored;
 			const [expired] = yield* sql.value`
 				SELECT 1 FROM events WHERE session_id = ${stored.session_id}
 					AND type = ${`${type}.resolved`}
 					AND json_extract(data, '$.id') = ${stored.id}
 					AND json_extract(metadata, '$.source') = 'provider-process-expired'
 				LIMIT 1`;
-			if (expired)
-				return yield* new WsRpcError({
-					message:
-						"This prompt expired because its provider process is no longer running.",
-				});
+			// The first answer wins and a run's end resolves its asks (CONTRACT.md
+			// 1007, 1028), so a later answer is refused, never silently accepted.
+			return yield* expired
+				? new WsRpcError({
+						message:
+							"This prompt expired because its provider process is no longer running.",
+					})
+				: promptSettled;
 		}
 		if (!stored && sessionId) {
 			const [referenced] = yield* sql.value<{ id: string }>`
@@ -572,7 +596,12 @@ export const handlePermissionResponse = (
 			permissionDestination,
 		} = payload;
 		const visibleSessionId = wsHandler.getClientSession(clientId) ?? "";
-		const stored = yield* readPromptReference(requestId, "permission");
+		const stored = yield* readPromptReference(
+			requestId,
+			"permission",
+			undefined,
+			payload.commandId,
+		);
 		if (stored?.status === "resolved") return;
 		if (stored?.provider_process_id?.startsWith("opencode:"))
 			yield* resolveOpenCodePromptTarget(stored.session_id, stored);
@@ -608,23 +637,25 @@ export const handlePermissionResponse = (
 							(suggestion) => suggestion.destination === permissionDestination,
 						)
 					: undefined;
-			yield* engineOption.value.dispatchEffect({
-				type: "resolve_permission",
-				commandId: payload.commandId ?? createCommandId(),
-				sessionId,
-				requestId,
-				decision: mapped,
-				...(stored?.provider_process_id
-					? { providerProcessId: stored.provider_process_id }
-					: {}),
-				...(stored?.provider_request_id
-					? { nativeRequestId: stored.provider_request_id }
-					: {}),
-				response: {
+			yield* engineOption.value
+				.dispatchEffect({
+					type: "resolve_permission",
+					commandId: payload.commandId ?? createCommandId(),
+					sessionId,
+					requestId,
 					decision: mapped,
-					...(permissionUpdates != null ? { permissionUpdates } : {}),
-				},
-			});
+					...(stored?.provider_process_id
+						? { providerProcessId: stored.provider_process_id }
+						: {}),
+					...(stored?.provider_request_id
+						? { nativeRequestId: stored.provider_request_id }
+						: {}),
+					response: {
+						decision: mapped,
+						...(permissionUpdates != null ? { permissionUpdates } : {}),
+					},
+				})
+				.pipe(refuseSettledAnswer);
 			if (decision === "allow_always" && persistScope) {
 				const providerId =
 					yield* engineOption.value.getProviderForSessionEffect(sessionId);
@@ -809,6 +840,7 @@ export const handleAskUserResponse = (
 			toolId,
 			"question",
 			wsHandler.getClientSession(clientId),
+			payload.commandId,
 		);
 		if (stored?.status === "resolved") return;
 		if (stored?.provider_process_id?.startsWith("opencode:"))
@@ -901,23 +933,25 @@ export const handleAskUserResponse = (
 					});
 				}
 			}
-			yield* engineOption.value.dispatchEffect({
-				type: "resolve_question",
-				commandId: payload.commandId ?? createCommandId(),
-				sessionId,
-				requestId: toolId,
-				answers,
-				...(hasSecret
-					? {
-							secretAnswerIndices:
-								pendingQuestion?.questions.flatMap((question, index) =>
-									question.isSecret ? [String(index)] : [],
-								) ?? [],
-						}
-					: {}),
-				...(providerProcessId ? { providerProcessId } : {}),
-				...(nativeRequestId ? { nativeRequestId } : {}),
-			});
+			yield* engineOption.value
+				.dispatchEffect({
+					type: "resolve_question",
+					commandId: payload.commandId ?? createCommandId(),
+					sessionId,
+					requestId: toolId,
+					answers,
+					...(hasSecret
+						? {
+								secretAnswerIndices:
+									pendingQuestion?.questions.flatMap((question, index) =>
+										question.isSecret ? [String(index)] : [],
+									) ?? [],
+							}
+						: {}),
+					...(providerProcessId ? { providerProcessId } : {}),
+					...(nativeRequestId ? { nativeRequestId } : {}),
+				})
+				.pipe(refuseSettledAnswer);
 			yield* restartProcessingTimeout(sessionId, stored?.run_id);
 			return;
 		}
@@ -1097,6 +1131,7 @@ export const handleQuestionReject = (
 			toolId,
 			"question",
 			wsHandler.getClientSession(clientId),
+			payload.commandId,
 		);
 		if (stored?.status === "resolved") return;
 		if (stored?.provider_process_id?.startsWith("opencode:"))
@@ -1140,16 +1175,18 @@ export const handleQuestionReject = (
 					message:
 						"Claude questions require an answer before the turn can continue.",
 				});
-			yield* engineOption.value.dispatchEffect({
-				type: "resolve_question",
-				commandId: payload.commandId ?? createCommandId(),
-				sessionId,
-				requestId: toolId,
-				answers: {},
-				operation: "reject",
-				...(providerProcessId ? { providerProcessId } : {}),
-				...(nativeRequestId ? { nativeRequestId } : {}),
-			});
+			yield* engineOption.value
+				.dispatchEffect({
+					type: "resolve_question",
+					commandId: payload.commandId ?? createCommandId(),
+					sessionId,
+					requestId: toolId,
+					answers: {},
+					operation: "reject",
+					...(providerProcessId ? { providerProcessId } : {}),
+					...(nativeRequestId ? { nativeRequestId } : {}),
+				})
+				.pipe(refuseSettledAnswer);
 			yield* restartProcessingTimeout(sessionId, stored?.run_id);
 			return;
 		}

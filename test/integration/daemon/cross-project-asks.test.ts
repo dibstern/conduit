@@ -233,6 +233,10 @@ describe("approvals and questions across projects (82tn.11)", () => {
 			() => "accepted",
 			(error: unknown) => `refused: ${String(error)}`,
 		);
+	/** The sender of an answer that lost, or came after the run ended, is told
+	 *  so in plain words (CONTRACT.md 1007, 1028). */
+	const notSent =
+		/^refused: .*This prompt was already answered or ended with its run, so your answer was not sent\.$/s;
 
 	/** Open each asking session from B, answer once, and see its turn end. */
 	async function answerFromB(
@@ -254,8 +258,14 @@ describe("approvals and questions across projects (82tn.11)", () => {
 					? viewer.answerApproval(ask, "allow")
 					: viewer.answerQuestion(ask, { "0": "Continue" });
 			await answer();
-			// A second answer to the same ask never reaches the provider.
+			// A second answer to the same ask never reaches the provider, and its
+			// sender is told.
 			repeated[kind] = await settle(answer());
+			expect(repeated[kind], `the repeated ${kind} answer`).toMatch(notSent);
+			if (kind === "question") {
+				repeated["skip"] = await settle(viewer.rejectQuestion(ask));
+				expect(repeated["skip"], "a skip after the answer").toMatch(notSent);
+			}
 			await viewer.waitForTurnEnd(sessionId, cursor, 60_000);
 			await noLongerWaiting(viewer, sessionId, cursor);
 			expect(
@@ -365,7 +375,7 @@ describe("approvals and questions across projects (82tn.11)", () => {
 		]);
 	});
 
-	it("lets one of two answers given in A and B at once reach the provider", async () => {
+	it("lets one of two answers given in A and B at once reach the provider, and tells the other it was not sent", async () => {
 		const { fixture, slugB, sessions } = await twoProjects(
 			"answered-in-a-and-b",
 		);
@@ -399,13 +409,17 @@ describe("approvals and questions across projects (82tn.11)", () => {
 			events: askEvents(fixture, sessions.approval),
 		};
 		expect(delivered, "one answer reached the provider").toHaveLength(1);
+		// The winner is told nothing; the loser is told its answer was not sent.
+		const winner = delivered[0]?.["behavior"] === "allow" ? 0 : 1;
+		expect(outcomes[winner], "the winning answer").toBe("accepted");
+		expect(outcomes[1 - winner], "the losing answer").toMatch(notSent);
 		expect(askEvents(fixture, sessions.approval)).toEqual([
 			"permission.asked",
 			"permission.resolved",
 		]);
 	});
 
-	it("clears A's ask in B when its run is cancelled, and a late answer delivers nothing", async () => {
+	it("clears A's ask in B when its run is cancelled, and refuses a late answer in plain words", async () => {
 		const { fixture, slugB, sessions } = await twoProjects("run-ended");
 		const prompt = "approval-cross-cancelled";
 		const viewer = await fixture.connect(sessions.b, undefined, slugB);
@@ -430,6 +444,7 @@ describe("approvals and questions across projects (82tn.11)", () => {
 			provider: delivered,
 			events: askEvents(fixture, sessions.approval),
 		};
+		expect(late, "the answer after the run ended").toMatch(notSent);
 		expect(
 			delivered.filter((mark) => mark["behavior"] === "allow"),
 			"the late allow never reached the provider",

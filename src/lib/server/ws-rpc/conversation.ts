@@ -262,13 +262,7 @@ export const conversationHandlers = {
 				: {}),
 		}).pipe(
 			Effect.as({ ok: true as const }),
-			Effect.catch((error) =>
-				Effect.fail(
-					new WsRpcError({
-						message: `RespondPermission failed: ${String(error)}`,
-					}),
-				),
-			),
+			Effect.catch(mapRpcFailure("RespondPermission")),
 		),
 	AnswerQuestion: (request) =>
 		handleAskUserResponse(request.originId, {
