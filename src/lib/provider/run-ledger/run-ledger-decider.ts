@@ -766,6 +766,8 @@ interface RunSummary {
 	readonly endEvidence: boolean;
 	/** GAP 5: no result and main's run still open. */
 	readonly awaiting: boolean;
+	/** Main appended its terminal for each of its runs. */
+	readonly mainEnded: boolean;
 	/** Condition 2. */
 	readonly nothingMayAct: boolean;
 	readonly notYetDelivered: boolean;
@@ -843,6 +845,7 @@ function summarize(book: Book, run: Run): RunSummary {
 		),
 		endEvidence: exec.endEvidence,
 		awaiting,
+		mainEnded: mains.length > 0 && mains.every((main) => !main.open),
 		nothingMayAct: nothingMayAct(book, run),
 		notYetDelivered: notYetDelivered(book, run),
 		// 4.3: the cap's refusal, else the first specific permanent code.
@@ -1023,6 +1026,19 @@ function reconcile(situation: ReturnType<typeof read>): Entry | undefined {
 		// 3.6: a Run not yet launched ends interrupted at its commit.
 		if (run.queued) {
 			if (run.asked) return end(run.runId, interrupted(false));
+			// D50 (CONTRACT.md 664-668, 680): main appends no terminal for an unlaunch, so its terminal
+			// ends a Queued Run; an error is the permanent outcome that ends it refused (D48; 1820: a
+			// held send refused at admission is released and failed in one commit). A reading (gap).
+			if (run.mainEnded)
+				return end(
+					run.runId,
+					run.fold.reason.tag === "provider_error"
+						? {
+								outcome: "error",
+								reason: { tag: "refused", code: run.fold.reason.code },
+							}
+						: run.fold,
+				);
 			continue;
 		}
 		if (run.wake !== undefined) {

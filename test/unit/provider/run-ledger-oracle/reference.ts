@@ -696,11 +696,28 @@ function reconcile(world: World, step: Step): void {
 		for (const run of world.runs) {
 			if (run.phase === "Ended") continue;
 			if (run.phase === "Queued") {
+				const mains = [...world.mainRuns.values()].filter(
+					(main) => main.runId === run.runId,
+				);
 				if (run.asked) {
 					endRun(world, step, run, {
 						outcome: "interrupted",
 						reason: { tag: "interrupted", forced: false },
 					});
+				} else if (mains.length > 0 && mains.every((main) => !main.open)) {
+					// D50 (CONTRACT.md 680): main's terminal ends a Queued Run; an error ends it refused (D48).
+					const ended = fold(foldItems(world, run), false);
+					endRun(
+						world,
+						step,
+						run,
+						ended.reason.tag === "provider_error"
+							? {
+									outcome: "error",
+									reason: { tag: "refused", code: ended.reason.code },
+								}
+							: ended,
+					);
 				}
 				continue;
 			}
