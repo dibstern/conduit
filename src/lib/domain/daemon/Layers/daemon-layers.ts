@@ -98,6 +98,7 @@ import {
 	DaemonStateTag,
 	makeDaemonStateLive,
 } from "../Services/daemon-state.js";
+import { DaemonTurnsLive } from "../Services/daemon-turns.js";
 import { EventLoopBlockMonitorLive } from "../Services/event-loop-delay.js";
 import { InstanceHealthCheckLive } from "../Services/instance-health-service.js";
 import {
@@ -951,9 +952,10 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			);
 		}),
 	).pipe(Layer.provideMerge(withSessionWorkspace));
-	const withSessionManager = Layer.merge(
+	const withSessionManager = Layer.mergeAll(
 		SessionManagerOwnerLive,
 		SessionManagerServiceLive,
+		DaemonTurnsLive,
 	).pipe(Layer.provideMerge(withSessionSetup));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),

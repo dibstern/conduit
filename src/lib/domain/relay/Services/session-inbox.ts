@@ -12,7 +12,6 @@ import {
 	Layer,
 	Option,
 	Schema,
-	Semaphore,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -53,6 +52,10 @@ import type { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
 import { assertSessionRunnerAvailable } from "../../../provider/runner/runner-provider-instance.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import {
+	DaemonTurns,
+	DaemonTurnsOrOwn,
+} from "../../daemon/Services/daemon-turns.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import { type Continuation, ContinuationTag } from "./continuation.js";
 import { type DraftChange, InputDraftsTag } from "./input-drafts.js";
@@ -431,15 +434,8 @@ export const SessionInboxLive = Layer.effect(
 			yield* Effect.context<
 				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 			>();
-		const permits = new Map<string, Semaphore.Semaphore>();
-		const serialised = (sessionId: string) => {
-			let permit = permits.get(sessionId);
-			if (!permit) {
-				permit = Semaphore.makeUnsafe(1);
-				permits.set(sessionId, permit);
-			}
-			return permit.withPermits(1);
-		};
+		// The daemon holds the permits, so two relays of one project share them.
+		const { serialised } = yield* DaemonTurns;
 
 		const readView = (sessionId: string, inputId?: string) =>
 			Effect.gen(function* () {
@@ -973,4 +969,4 @@ export const SessionInboxLive = Layer.effect(
 				),
 		} satisfies SessionInbox;
 	}),
-);
+).pipe(Layer.provide(DaemonTurnsOrOwn));

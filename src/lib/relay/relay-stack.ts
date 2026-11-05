@@ -25,7 +25,6 @@ import {
 	Layer,
 	ManagedRuntime,
 	Option,
-	Schedule,
 } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
@@ -37,6 +36,7 @@ import {
 	ConfigSnapshotTag,
 } from "../domain/daemon/Services/config-persistence-service.js";
 import { DaemonConfigRefTag } from "../domain/daemon/Services/daemon-config-ref.js";
+import { DaemonTurns } from "../domain/daemon/Services/daemon-turns.js";
 import { ProviderAdapters } from "../domain/daemon/Services/provider-adapters.js";
 import { SessionActivityTag } from "../domain/daemon/Services/session-activity.js";
 import {
@@ -505,21 +505,25 @@ export async function createProjectRelay(
 	});
 	const api = startup.api;
 	wsHandler = startup.wsHandler;
+	// The relay lends its continuation to the daemon's one sweep until stop().
 	const continuationSweep = layers.relayManagedRuntime.runFork(
-		Effect.flatMap(ContinuationTag, (continuation) =>
-			Effect.zip(
-				continuation.sweepDueContinuations().pipe(
-					Effect.catchCause((cause) =>
-						Failure.isInterruptedOnly(cause)
-							? Effect.interrupt
-							: Effect.logError("Continuation sweep failed", cause),
-					),
-					Effect.repeat(Schedule.fixed(ENV.continuationSweepIntervalMs)),
-				),
-				continuation.runLimitPolicies,
-				{ concurrent: true },
-			),
-		),
+		Effect.gen(function* () {
+			const continuation = yield* ContinuationTag;
+			const context =
+				yield* Effect.context<
+					Effect.Services<ReturnType<typeof continuation.applyLimitPolicy>>
+				>();
+			yield* (yield* DaemonTurns).attach(config.slug, {
+				sweep: continuation
+					.sweepDueContinuations()
+					.pipe(Effect.provideContext(context)),
+				applyLimitPolicy: (sessionId) =>
+					continuation
+						.applyLimitPolicy(sessionId)
+						.pipe(Effect.provideContext(context)),
+			});
+			return yield* Effect.never;
+		}).pipe(Effect.scoped),
 	);
 	const {
 		rpcWsHandler,

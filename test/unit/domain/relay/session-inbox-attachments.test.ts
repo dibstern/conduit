@@ -50,7 +50,7 @@ it("retains files in history when queued dispatch cannot place the input and pau
 			cancelContinuation: () => Effect.void,
 			sweepDueContinuations: () => Effect.void,
 			queueLimitPolicy: () => Effect.void,
-			runLimitPolicies: Effect.never,
+			applyLimitPolicy: () => Effect.void,
 		}),
 		Layer.succeed(ProviderTurnServiceTag, {
 			holdUserTurnsForAccountSwitch: () => Effect.void,

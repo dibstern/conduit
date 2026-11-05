@@ -242,6 +242,22 @@ beforeAll(async () => {
 	);
 	expect(bridged).not.toBe(current);
 	writeFileSync(runner, bridged);
+	// R2's turn service provides its own dispatch FiberMap under a tag
+	// (6c9ff950 provider-turn-service.ts 402); the current dispatch asks the daemon's turns.
+	const dispatch = join(
+		scratch,
+		"src/lib/domain/relay/Services/provider-turn-dispatch.ts",
+	);
+	const daemonFibers = readFileSync(dispatch, "utf8");
+	const ownFibers = daemonFibers.replace(
+		/yield\* \(yield\* DaemonTurns\)\.dispatchFibers\(\s*resolvedInput\.sessionId,\s*\)/,
+		"yield* ProviderTurnDispatchFibersTag",
+	);
+	expect(ownFibers).not.toBe(daemonFibers);
+	writeFileSync(
+		dispatch,
+		`${ownFibers}\nexport class ProviderTurnDispatchFibersTag extends Context.Service<ProviderTurnDispatchFibersTag, FiberMap.FiberMap<string, void, unknown>>()("ProviderTurnDispatchFibers") {}\n`,
+	);
 	const main: typeof import("./replay.js") = await import(
 		join(scratch, "test/unit/provider/run-ledger-oracle/replay.ts")
 	);

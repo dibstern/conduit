@@ -2,6 +2,7 @@
 // a held-only Resume is recorded as cancellation, loses its divider or sends a
 // continuation turn; advances overtake Held Messages; cancellation re-arms or
 // drains after reconstruction before the user sends something new.
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -20,10 +21,7 @@ import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import {
-	ContinuationTag,
-	makeContinuation,
-} from "../../../src/lib/domain/relay/Services/continuation.js";
+import { ContinuationTag } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -48,6 +46,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeTestContinuation } from "../../helpers/daemon-turns.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -121,7 +120,7 @@ const heldMessageFixture = Effect.gen(function* () {
 			}).pipe(Effect.orDie),
 	};
 	const makeInbox = Effect.gen(function* () {
-		const continuation = yield* makeContinuation;
+		const continuation = yield* makeTestContinuation;
 		const context = yield* Layer.build(SessionInboxLive).pipe(
 			Effect.provide(InputDraftsLive),
 			Effect.provideService(ContinuationTag, continuation),

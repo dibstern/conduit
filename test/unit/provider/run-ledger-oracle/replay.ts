@@ -459,7 +459,7 @@ export function replayTrace(
 					cancelContinuation: () => Effect.void,
 					sweepDueContinuations: () => Effect.void,
 					queueLimitPolicy: () => Effect.void,
-					runLimitPolicies: Effect.never,
+					applyLimitPolicy: () => Effect.void,
 				}),
 			);
 			return WsRpcServerLayer.pipe(

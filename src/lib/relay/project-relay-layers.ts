@@ -54,6 +54,7 @@ import {
 	makeDaemonConfigFromOptions,
 } from "../domain/daemon/Services/daemon-config-ref.js";
 import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
+import { DaemonTurnsOrOwn } from "../domain/daemon/Services/daemon-turns.js";
 import {
 	MessageSurfacingSettings,
 	makeMessageSurfacingSettings,
@@ -448,9 +449,13 @@ export function createProjectRelayLayers({
 					);
 		}),
 	).pipe(Layer.provideMerge(daemonSettingsLayer));
+	// A standalone relay is its own daemon.
+	const daemonTurnsLayer = DaemonTurnsOrOwn.pipe(
+		Layer.provideMerge(claudeAccountsLayer),
+	);
 	const daemonConfigLayer = UserAvatarLive.pipe(
 		Layer.provide(AccountPictureLive),
-		Layer.provideMerge(claudeAccountsLayer),
+		Layer.provideMerge(daemonTurnsLayer),
 	);
 	const activityLayer = Layer.effect(
 		SessionActivityTag,
@@ -815,6 +820,7 @@ export function createProjectRelayLayers({
 				loggerLayer,
 				usageLayer,
 				recapSettingsLayer,
+				daemonConfigLayer,
 			),
 		),
 	);

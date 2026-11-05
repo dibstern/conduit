@@ -8,6 +8,7 @@
 // Account-routing failures: a legacy binding selects the wrong receipt/login;
 // prewarm rereads stale or invalid disk config; an unknown account is ignored;
 // revalidation re-resolves an account instead of keeping the admitted snapshot.
+
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -30,7 +31,6 @@ import { Usage } from "../../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../../src/lib/domain/relay/Services/alerts.js";
-import { makeContinuation } from "../../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -56,6 +56,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../../src/lib/provider/provider-registry.js";
 import type { PreWarmSessionInput } from "../../../../src/lib/provider/types.js";
+import { makeTestContinuation } from "../../../helpers/daemon-turns.js";
 import { activeRunEvents } from "../../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
@@ -77,153 +78,157 @@ afterEach(() => {
 // Failure modes and agreed seams are recorded in the account-switch report.
 it("records one limit per user turn, closes only the cut-off on Dismiss, and clears recovery on a reply", async () => {
 	await Effect.runPromise(
-		Effect.gen(function* () {
-			const commit = yield* makeCommitAndSignal;
-			const store = yield* EventStoreEffectTag;
-			const read = yield* ReadQueryEffectTag;
-			const continuation = yield* makeContinuation;
-			yield* commit([
-				canonicalEvent("session.created", "s1", {
-					sessionId: "s1",
-					title: "Limited",
-					provider: "account-1",
-				}),
-				canonicalEvent("message.created", "s1", {
-					sessionId: "s1",
-					messageId: "u1",
-					role: "user",
-				}),
-			]);
-			const signal = {
-				instanceId: "account-1",
-				rateLimitType: "seven_day",
-				resetsAt: 1791234000,
-				cutOffMessageId: "u1",
-			};
-			yield* Effect.all(
-				[
-					continuation.intakeLimit(
-						canonicalEvent("session.usage_limited", "s1", signal, {
-							provider: "claude",
-						}),
-					),
-					continuation.intakeLimit(
-						canonicalEvent("session.usage_limited", "s1", signal, {
-							provider: "claude",
-						}),
-					),
-				],
-				{ concurrency: 2 },
-			);
-			const limits = () =>
-				store
-					.readAllBySession("s1")
-					.pipe(
-						Effect.map((events) =>
-							events.filter((event) => event.type === "session.usage_limited"),
+		Effect.scoped(
+			Effect.gen(function* () {
+				const commit = yield* makeCommitAndSignal;
+				const store = yield* EventStoreEffectTag;
+				const read = yield* ReadQueryEffectTag;
+				const continuation = yield* makeTestContinuation;
+				yield* commit([
+					canonicalEvent("session.created", "s1", {
+						sessionId: "s1",
+						title: "Limited",
+						provider: "account-1",
+					}),
+					canonicalEvent("message.created", "s1", {
+						sessionId: "s1",
+						messageId: "u1",
+						role: "user",
+					}),
+				]);
+				const signal = {
+					instanceId: "account-1",
+					rateLimitType: "seven_day",
+					resetsAt: 1791234000,
+					cutOffMessageId: "u1",
+				};
+				yield* Effect.all(
+					[
+						continuation.intakeLimit(
+							canonicalEvent("session.usage_limited", "s1", signal, {
+								provider: "claude",
+							}),
 						),
-					);
-			const limitEvents = yield* limits();
-			expect(limitEvents).toHaveLength(1);
-			expect(
-				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-					?.limitRecovery,
-			).toEqual({
-				...signal,
-				limitedAt: limitEvents[0]?.createdAt,
-				rearms: 0,
-				continued: false,
-			});
-			yield* continuation.dismissCutOff("s1");
-			yield* continuation.dismissCutOff("s1");
-			yield* continuation.dismissCutOff("missing");
-			expect(
-				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-					?.limitRecovery,
-			).toEqual({
-				instanceId: "account-1",
-				rateLimitType: "seven_day",
-				resetsAt: 1791234000,
-				limitedAt: limitEvents[0]?.createdAt,
-				rearms: 0,
-				continued: false,
-			});
-			expect(
-				(yield* store.readAllBySession("s1")).filter(
-					(event) => event.type === "session.cut_off_dismissed",
-				),
-			).toHaveLength(1);
-			// A stale repeat after Dismiss must not re-open the cut-off.
-			yield* continuation.intakeLimit(
-				canonicalEvent("session.usage_limited", "s1", signal, {
-					provider: "claude",
-				}),
-			);
-			expect(yield* limits()).toHaveLength(1);
-			// The same limit tuple is a new limit once a newer user turn exists.
-			yield* commit([
-				canonicalEvent("message.created", "s1", {
-					sessionId: "s1",
-					messageId: "u2",
-					role: "user",
-				}),
-			]);
-			yield* continuation.intakeLimit(
-				canonicalEvent("session.usage_limited", "s1", signal, {
-					provider: "claude",
-				}),
-			);
-			yield* continuation.intakeLimit(
-				canonicalEvent("session.usage_limited", "s1", signal, {
-					provider: "claude",
-				}),
-			);
-			expect(yield* limits()).toHaveLength(2);
-			expect(
-				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-					?.limitRecovery?.cutOffMessageId,
-			).toBe("u1");
-			yield* commit([
-				canonicalEvent("message.created", "s1", {
-					sessionId: "s1",
-					messageId: "a2",
-					role: "assistant",
-				}),
-			]);
-			expect(
-				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-					?.limitRecovery,
-			).toBeNull();
-			// A dismissed cut-off still leaves the strip until the session replies.
-			yield* commit([
-				canonicalEvent("message.created", "s1", {
-					sessionId: "s1",
-					messageId: "u3",
-					role: "user",
-				}),
-			]);
-			yield* continuation.intakeLimit(
-				canonicalEvent(
-					"session.usage_limited",
-					"s1",
-					{ ...signal, cutOffMessageId: "u3" },
-					{ provider: "claude" },
-				),
-			);
-			yield* continuation.dismissCutOff("s1");
-			yield* commit([
-				canonicalEvent("message.created", "s1", {
-					sessionId: "s1",
-					messageId: "a3",
-					role: "assistant",
-				}),
-			]);
-			expect(
-				(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
-					?.limitRecovery,
-			).toBeNull();
-		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+						continuation.intakeLimit(
+							canonicalEvent("session.usage_limited", "s1", signal, {
+								provider: "claude",
+							}),
+						),
+					],
+					{ concurrency: 2 },
+				);
+				const limits = () =>
+					store
+						.readAllBySession("s1")
+						.pipe(
+							Effect.map((events) =>
+								events.filter(
+									(event) => event.type === "session.usage_limited",
+								),
+							),
+						);
+				const limitEvents = yield* limits();
+				expect(limitEvents).toHaveLength(1);
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery,
+				).toEqual({
+					...signal,
+					limitedAt: limitEvents[0]?.createdAt,
+					rearms: 0,
+					continued: false,
+				});
+				yield* continuation.dismissCutOff("s1");
+				yield* continuation.dismissCutOff("s1");
+				yield* continuation.dismissCutOff("missing");
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery,
+				).toEqual({
+					instanceId: "account-1",
+					rateLimitType: "seven_day",
+					resetsAt: 1791234000,
+					limitedAt: limitEvents[0]?.createdAt,
+					rearms: 0,
+					continued: false,
+				});
+				expect(
+					(yield* store.readAllBySession("s1")).filter(
+						(event) => event.type === "session.cut_off_dismissed",
+					),
+				).toHaveLength(1);
+				// A stale repeat after Dismiss must not re-open the cut-off.
+				yield* continuation.intakeLimit(
+					canonicalEvent("session.usage_limited", "s1", signal, {
+						provider: "claude",
+					}),
+				);
+				expect(yield* limits()).toHaveLength(1);
+				// The same limit tuple is a new limit once a newer user turn exists.
+				yield* commit([
+					canonicalEvent("message.created", "s1", {
+						sessionId: "s1",
+						messageId: "u2",
+						role: "user",
+					}),
+				]);
+				yield* continuation.intakeLimit(
+					canonicalEvent("session.usage_limited", "s1", signal, {
+						provider: "claude",
+					}),
+				);
+				yield* continuation.intakeLimit(
+					canonicalEvent("session.usage_limited", "s1", signal, {
+						provider: "claude",
+					}),
+				);
+				expect(yield* limits()).toHaveLength(2);
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery?.cutOffMessageId,
+				).toBe("u1");
+				yield* commit([
+					canonicalEvent("message.created", "s1", {
+						sessionId: "s1",
+						messageId: "a2",
+						role: "assistant",
+					}),
+				]);
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery,
+				).toBeNull();
+				// A dismissed cut-off still leaves the strip until the session replies.
+				yield* commit([
+					canonicalEvent("message.created", "s1", {
+						sessionId: "s1",
+						messageId: "u3",
+						role: "user",
+					}),
+				]);
+				yield* continuation.intakeLimit(
+					canonicalEvent(
+						"session.usage_limited",
+						"s1",
+						{ ...signal, cutOffMessageId: "u3" },
+						{ provider: "claude" },
+					),
+				);
+				yield* continuation.dismissCutOff("s1");
+				yield* commit([
+					canonicalEvent("message.created", "s1", {
+						sessionId: "s1",
+						messageId: "a3",
+						role: "assistant",
+					}),
+				]);
+				expect(
+					(yield* read.listSessionInfos({ projectIds: ["test-project"] }))[0]
+						?.limitRecovery,
+				).toBeNull();
+			}).pipe(
+				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
+			),
 		),
 	);
 });
@@ -303,170 +308,176 @@ for (const scenario of [
 		);
 		const registry = new ProviderRegistry();
 		await Effect.runPromise(
-			Effect.gen(function* () {
-				const sql = yield* SqlClient.SqlClient;
-				const commit = yield* makeCommitAndSignal;
-				const store = yield* EventStoreEffectTag;
-				const continuation = yield* makeContinuation;
-				yield* commit([
-					canonicalEvent("session.created", "s1", {
-						sessionId: "s1",
-						title: "Cut off",
-						provider: "provider" in scenario ? scenario.provider : "claude",
-					}),
-					canonicalEvent("session.usage_limited", "s1", {
-						instanceId: "claude",
-						rateLimitType: "seven_day",
-						cutOffMessageId: "u1",
-					}),
-				]);
-				if ("busy" in scenario && scenario.busy)
-					yield* commit(activeRunEvents("s1"));
-				const before = yield* store.readAllBySession("s1");
-				const result = yield* continuation
-					.requestContinuation("s1", {
-						instanceId:
-							"instanceId" in scenario ? scenario.instanceId : "claude",
-						reason: "user",
-						expectedInstanceId:
-							"expected" in scenario ? scenario.expected : "claude",
-					})
-					.pipe(
-						Effect.provideService(Usage, {
-							readings: Stream.empty,
-							latest: () => Effect.succeed(undefined),
-							turnEnded: () => Effect.void,
-							refresh: (_options) =>
-								Effect.gen(function* () {
-									probes++;
-									if ("duringProbe" in scenario) {
-										if (scenario.duringProbe === "provider")
-											yield* sql`UPDATE sessions SET provider = 'other' WHERE id = 's1'`;
-										else if (scenario.duringProbe === "busy")
-											yield* commit(activeRunEvents("s1"));
-										else
-											accountState = accountsStateFromInstances(
-												[
-													{
-														id: "claude",
-														name: "Claude",
-														driver: "claude",
-														configDir: join(isolatedRoot, "changed-login"),
-													},
-												],
-												launchLogin,
-											);
-									}
-									const limited = usageReading("claude", {
-										status: "limited",
-										windows: [
-											{
-												kind: "seven_day",
-												utilization: 100,
-												resetsAt: new Date(
-													Date.now() + 3_600_000,
-												).toISOString(),
-											},
-										],
-										readAt: Date.now() + 60_000,
-									});
-									return [
-										"quota" in scenario
-											? {
-													Unavailable: usageReading("claude", {
-														status: "unavailable",
-														reason: "Not logged in",
-													}),
-													Limited: limited,
-													CheckingLimited: { ...limited, checking: true },
-												}[scenario.quota]
-											: usageReading("claude"),
-									];
-								}).pipe(Effect.orDie),
-							pickFailover: () => Effect.succeed(undefined),
+			Effect.scoped(
+				Effect.gen(function* () {
+					const sql = yield* SqlClient.SqlClient;
+					const commit = yield* makeCommitAndSignal;
+					const store = yield* EventStoreEffectTag;
+					const continuation = yield* makeTestContinuation;
+					yield* commit([
+						canonicalEvent("session.created", "s1", {
+							sessionId: "s1",
+							title: "Cut off",
+							provider: "provider" in scenario ? scenario.provider : "claude",
 						}),
-						Effect.result,
+						canonicalEvent("session.usage_limited", "s1", {
+							instanceId: "claude",
+							rateLimitType: "seven_day",
+							cutOffMessageId: "u1",
+						}),
+					]);
+					if ("busy" in scenario && scenario.busy)
+						yield* commit(activeRunEvents("s1"));
+					const before = yield* store.readAllBySession("s1");
+					const result = yield* continuation
+						.requestContinuation("s1", {
+							instanceId:
+								"instanceId" in scenario ? scenario.instanceId : "claude",
+							reason: "user",
+							expectedInstanceId:
+								"expected" in scenario ? scenario.expected : "claude",
+						})
+						.pipe(
+							Effect.provideService(Usage, {
+								readings: Stream.empty,
+								latest: () => Effect.succeed(undefined),
+								turnEnded: () => Effect.void,
+								refresh: (_options) =>
+									Effect.gen(function* () {
+										probes++;
+										if ("duringProbe" in scenario) {
+											if (scenario.duringProbe === "provider")
+												yield* sql`UPDATE sessions SET provider = 'other' WHERE id = 's1'`;
+											else if (scenario.duringProbe === "busy")
+												yield* commit(activeRunEvents("s1"));
+											else
+												accountState = accountsStateFromInstances(
+													[
+														{
+															id: "claude",
+															name: "Claude",
+															driver: "claude",
+															configDir: join(isolatedRoot, "changed-login"),
+														},
+													],
+													launchLogin,
+												);
+										}
+										const limited = usageReading("claude", {
+											status: "limited",
+											windows: [
+												{
+													kind: "seven_day",
+													utilization: 100,
+													resetsAt: new Date(
+														Date.now() + 3_600_000,
+													).toISOString(),
+												},
+											],
+											readAt: Date.now() + 60_000,
+										});
+										return [
+											"quota" in scenario
+												? {
+														Unavailable: usageReading("claude", {
+															status: "unavailable",
+															reason: "Not logged in",
+														}),
+														Limited: limited,
+														CheckingLimited: { ...limited, checking: true },
+													}[scenario.quota]
+												: usageReading("claude"),
+										];
+									}).pipe(Effect.orDie),
+								pickFailover: () => Effect.succeed(undefined),
+							}),
+							Effect.result,
+						);
+					expect(result._tag).toBe(
+						scenario.result === "Right" ? "Success" : "Failure",
 					);
-				expect(result._tag).toBe(
-					scenario.result === "Right" ? "Success" : "Failure",
-				);
-				if (result._tag === "Failure")
-					expect(result.failure._tag).toBe(scenario.result);
-				expect(probes).toBe(scenario.probes);
-				expect(dispatches).toBe(scenario.result === "Right" ? 1 : 0);
-				if (scenario.result === "Right") {
-					expect(admittedSessions).toEqual(["s1"]);
-					expect(dispatchedAccounts).toHaveLength(1);
-					expect(dispatchedAccounts[0]).toMatchObject({
-						id: "claude",
-						folder: launchLogin,
-					});
-				} else {
-					expect(admittedSessions).toEqual([]);
-					const after = yield* store.readAllBySession("s1");
-					expect(after.slice(0, before.length)).toEqual(before);
-					expect(after.slice(before.length).map((event) => event.type)).toEqual(
-						"duringProbe" in scenario && scenario.duringProbe === "busy"
-							? ["input.admitted", "input.sent", "run.requested"]
-							: [],
-					);
-				}
-			}).pipe(
-				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
-				Effect.provideService(LoggerTag, makeMockLogger()),
-				Effect.provideService(
-					OrchestrationEngineTag,
-					new OrchestrationEngine({ registry }),
-				),
-				Effect.provideService(ProviderRegistryTag, registry),
-				Effect.provideService(
-					AccountDirectory,
-					makeAccountDirectory(
-						Effect.sync(() => accountState),
-						Effect.succeed(NO_OPENCODE_HEALTH),
+					if (result._tag === "Failure")
+						expect(result.failure._tag).toBe(scenario.result);
+					expect(probes).toBe(scenario.probes);
+					expect(dispatches).toBe(scenario.result === "Right" ? 1 : 0);
+					if (scenario.result === "Right") {
+						expect(admittedSessions).toEqual(["s1"]);
+						expect(dispatchedAccounts).toHaveLength(1);
+						expect(dispatchedAccounts[0]).toMatchObject({
+							id: "claude",
+							folder: launchLogin,
+						});
+					} else {
+						expect(admittedSessions).toEqual([]);
+						const after = yield* store.readAllBySession("s1");
+						expect(after.slice(0, before.length)).toEqual(before);
+						expect(
+							after.slice(before.length).map((event) => event.type),
+						).toEqual(
+							"duringProbe" in scenario && scenario.duringProbe === "busy"
+								? ["input.admitted", "input.sent", "run.requested"]
+								: [],
+						);
+					}
+				}).pipe(
+					Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
+					Effect.provideService(LoggerTag, makeMockLogger()),
+					Effect.provideService(
+						OrchestrationEngineTag,
+						new OrchestrationEngine({ registry }),
+					),
+					Effect.provideService(ProviderRegistryTag, registry),
+					Effect.provideService(
+						AccountDirectory,
+						makeAccountDirectory(
+							Effect.sync(() => accountState),
+							Effect.succeed(NO_OPENCODE_HEALTH),
+						),
+					),
+					Effect.provideService(AgentServiceTag, {
+						getActiveAgent: () => Effect.succeed(undefined),
+						listAgents: () => Effect.die("A refusal must not discover agents"),
+						switchAgent: () => Effect.die("A refusal must not change agents"),
+					}),
+					Effect.provide(AlertsLive),
+					Effect.provideService(ConfigTag, {
+						httpServer: createServer(),
+						projectDir: isolatedRoot,
+						slug: "gate-test",
+						configDir: isolatedRoot,
+						persistenceDbPath: ":memory:",
+						publishGlobalSetting: () => Effect.void,
+					}),
+					Effect.provideService(ProviderTurnServiceTag, {
+						holdUserTurnsForAccountSwitch: () => Effect.void,
+						prepareTurnSession: (input) => Effect.succeed(input.sessionId),
+						sendTurn: (input) =>
+							Effect.sync(() => {
+								dispatches++;
+								if (input.account) dispatchedAccounts.push(input.account);
+							}),
+						turnFences: () => ({ stopping: false, switching: false }),
+						fenceLifts: Effect.succeed(Stream.never),
+						beginStop: () => Effect.succeed(Effect.void),
+					}),
+					Effect.provideService(SessionInboxTag, {
+						steerDeclined: () => Effect.void,
+						withSession: (sessionId, effect) =>
+							admission.withPermits(1)(
+								Effect.sync(() => admittedSessions.push(sessionId)).pipe(
+									Effect.andThen(effect),
+								),
+							),
+						start: Effect.void,
+						submit: () => Effect.die("This fixture only admits continuations"),
+						cancel: () => Effect.die("This fixture only admits continuations"),
+						sendNow: () => Effect.die("This fixture only admits continuations"),
+					}),
+					Effect.provide(makeOverridesStateLive()),
+					Effect.provide(
+						makePersistenceEffectLayer(":memory:", "test-project"),
 					),
 				),
-				Effect.provideService(AgentServiceTag, {
-					getActiveAgent: () => Effect.succeed(undefined),
-					listAgents: () => Effect.die("A refusal must not discover agents"),
-					switchAgent: () => Effect.die("A refusal must not change agents"),
-				}),
-				Effect.provide(AlertsLive),
-				Effect.provideService(ConfigTag, {
-					httpServer: createServer(),
-					projectDir: isolatedRoot,
-					slug: "gate-test",
-					configDir: isolatedRoot,
-					persistenceDbPath: ":memory:",
-					publishGlobalSetting: () => Effect.void,
-				}),
-				Effect.provideService(ProviderTurnServiceTag, {
-					holdUserTurnsForAccountSwitch: () => Effect.void,
-					prepareTurnSession: (input) => Effect.succeed(input.sessionId),
-					sendTurn: (input) =>
-						Effect.sync(() => {
-							dispatches++;
-							if (input.account) dispatchedAccounts.push(input.account);
-						}),
-					turnFences: () => ({ stopping: false, switching: false }),
-					fenceLifts: Effect.succeed(Stream.never),
-					beginStop: () => Effect.succeed(Effect.void),
-				}),
-				Effect.provideService(SessionInboxTag, {
-					steerDeclined: () => Effect.void,
-					withSession: (sessionId, effect) =>
-						admission.withPermits(1)(
-							Effect.sync(() => admittedSessions.push(sessionId)).pipe(
-								Effect.andThen(effect),
-							),
-						),
-					start: Effect.void,
-					submit: () => Effect.die("This fixture only admits continuations"),
-					cancel: () => Effect.die("This fixture only admits continuations"),
-					sendNow: () => Effect.die("This fixture only admits continuations"),
-				}),
-				Effect.provide(makeOverridesStateLive()),
-				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
 			),
 		);
 	});

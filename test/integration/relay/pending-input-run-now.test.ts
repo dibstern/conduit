@@ -28,10 +28,7 @@ import {
 import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { SessionWorkspaceLive } from "../../../src/lib/domain/relay/Layers/session-workspace-layer.js";
-import {
-	ContinuationTag,
-	makeContinuation,
-} from "../../../src/lib/domain/relay/Services/continuation.js";
+import { ContinuationTag } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
 import { makeProviderRuntimeIngestionLive } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
@@ -65,6 +62,7 @@ import { ClaudeBoundaryError } from "../../../src/lib/provider/event-sink-errors
 import { getOrchestrationLayer } from "../../../src/lib/provider/orchestration-wiring.js";
 import type { SSEEvent } from "../../../src/lib/relay/opencode-events.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
+import { makeTestContinuation } from "../../helpers/daemon-turns.js";
 import {
 	MOCK_OPENCODE_GPT4_CATALOG,
 	makeMockAccountDirectory,
@@ -587,7 +585,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 							cancelContinuation: () => Effect.void,
 							sweepDueContinuations: () => Effect.void,
 							queueLimitPolicy: () => Effect.void,
-							runLimitPolicies: Effect.never,
+							applyLimitPolicy: () => Effect.void,
 						}),
 					);
 					const inboxDeps =
@@ -812,7 +810,7 @@ describe("Run now through RPC, inbox, durable orchestration and provider adapter
 									cutOffMessageId: "running",
 								}),
 							);
-							const continuation = yield* makeContinuation;
+							const continuation = yield* makeTestContinuation;
 							yield* Effect.forkScoped(continuation.runLimitPolicies);
 							yield* Effect.addFinalizer(() =>
 								Effect.sync(() => releaseContinuation.resolve()),

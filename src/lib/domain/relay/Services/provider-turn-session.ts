@@ -21,12 +21,7 @@ import type {
 	ProviderTurnServiceInterruptInput,
 	ProviderTurnServicePrepareInput,
 } from "./provider-turn-service.js";
-import {
-	ConfigTag,
-	LoggerTag,
-	OrchestrationEngineTag,
-	WebSocketHandlerTag,
-} from "./services.js";
+import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { projectSessionManager } from "./session-manager-service.js";
 import { clearProcessingTimeout } from "./session-overrides-state.js";
 
@@ -176,7 +171,6 @@ const materializeOpenCodeSession = (
 	Effect.gen(function* () {
 		const orchestrationEngine = yield* OrchestrationEngineTag;
 		const log = yield* LoggerTag;
-		const wsHandler = yield* WebSocketHandlerTag;
 		const sessionManagerService = yield* projectSessionManager;
 		const readQuery = yield* ReadQueryEffectTag;
 
@@ -205,11 +199,11 @@ const materializeOpenCodeSession = (
 			sourceSessionId: row.id,
 		});
 		orchestrationEngine.bindSession(session.id, account.id);
-		wsHandler.setClientSession(
+		// The connection's interests follow it; no relay handler is involved.
+		(yield* CurrentEventDelivery)?.setClientSession(
 			input.clientId,
 			session.id,
 			(yield* ConfigTag).slug,
-			yield* CurrentEventDelivery,
 		);
 		log.info(
 			`client=${input.clientId} materialized OpenCode session ${session.id} from local session ${input.sessionId}`,

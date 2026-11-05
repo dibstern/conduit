@@ -1,6 +1,7 @@
 // Failure modes: cached usage wins over a fresh reading; a full account sends;
 // unknown usage refuses; sign-in or busy refusals disappear; another session
 // resumes; a Resume during the refresh duplicates a turn or reports a refusal.
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -19,10 +20,7 @@ import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import {
-	ContinuationTag,
-	makeContinuation,
-} from "../../../src/lib/domain/relay/Services/continuation.js";
+import { ContinuationTag } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { InputDraftsLive } from "../../../src/lib/domain/relay/Services/input-drafts.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
@@ -47,6 +45,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeTestContinuation } from "../../helpers/daemon-turns.js";
 import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
@@ -148,7 +147,7 @@ const fixture = Effect.gen(function* () {
 			),
 		]);
 	yield* TestClock.setTime(2_000);
-	const continuation = yield* makeContinuation;
+	const continuation = yield* makeTestContinuation;
 	const context = yield* Layer.build(SessionInboxLive).pipe(
 		Effect.provide(InputDraftsLive),
 		Effect.provideService(ContinuationTag, continuation),

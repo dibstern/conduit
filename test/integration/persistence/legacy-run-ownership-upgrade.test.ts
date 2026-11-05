@@ -114,7 +114,7 @@ it.each([
 				cancelContinuation: () => Effect.void,
 				sweepDueContinuations: () => Effect.void,
 				queueLimitPolicy: () => Effect.void,
-				runLimitPolicies: Effect.never,
+				applyLimitPolicy: () => Effect.void,
 			}),
 			Layer.succeed(ProviderTurnServiceTag)({
 				holdUserTurnsForAccountSwitch: () => Effect.void,

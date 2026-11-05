@@ -4,7 +4,6 @@ import {
 	Deferred,
 	Effect,
 	Exit,
-	FiberMap,
 	Layer,
 	Option,
 	PubSub,
@@ -32,6 +31,10 @@ import type { CanonicalEvent } from "../../../persistence/events.js";
 import { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { settleSessionRuns } from "../../../provider/session-run-settlement.js";
 import type { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import {
+	type DaemonTurns,
+	DaemonTurnsOrOwn,
+} from "../../daemon/Services/daemon-turns.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
@@ -44,10 +47,7 @@ import {
 	type ProviderRuntimeIngestionError,
 	ProviderRuntimeIngestionTag,
 } from "./provider-runtime-ingestion-service.js";
-import {
-	ProviderTurnDispatchFibersTag,
-	sendTurn,
-} from "./provider-turn-dispatch.js";
+import { sendTurn } from "./provider-turn-dispatch.js";
 import {
 	completeRecoveredQuestion,
 	interruptTurn,
@@ -192,7 +192,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 		| AlertsTag
 		| ProviderStateEffectTag
 		| SessionTitleServiceTag
-		| ProviderTurnDispatchFibersTag
+		| DaemonTurns
 		| SqlClient.SqlClient
 		| EventStoreEffectTag
 		| ProjectionRunnerEffectTag
@@ -477,11 +477,6 @@ const makeProviderTurnService = Effect.gen(function* () {
 	return service;
 });
 
-const ProviderTurnDispatchFibersLive = Layer.effect(
-	ProviderTurnDispatchFibersTag,
-	FiberMap.make<string, void, unknown>(),
-);
-
 export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
@@ -506,5 +501,5 @@ export const ProviderTurnServiceLive: Layer.Layer<
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 > = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
-	Layer.provide(ProviderTurnDispatchFibersLive),
+	Layer.provide(DaemonTurnsOrOwn),
 );

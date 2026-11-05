@@ -6,7 +6,6 @@ import {
 	Effect,
 	Layer,
 	Option,
-	Queue,
 	Ref,
 	Schema,
 } from "effect";
@@ -53,6 +52,10 @@ import { makePrepareTurn } from "../../../provider/claude/prepare-turn.js";
 import { assertNever } from "../../../utils.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonConfigRefTag } from "../../daemon/Services/daemon-config-ref.js";
+import {
+	DaemonTurns,
+	DaemonTurnsOrOwn,
+} from "../../daemon/Services/daemon-turns.js";
 import { Usage } from "../../daemon/Services/usage.js";
 import {
 	type ProviderTurnService,
@@ -230,9 +233,11 @@ export interface Continuation {
 	) => ReturnType<Continuation["requestContinuation"]>;
 	/** Ingress calls this after its outer commit, for an accepted limit only. */
 	readonly queueLimitPolicy: (sessionId: string) => Effect.Effect<void>;
-	/** Applies the usage-limit policy to each queued limit; the relay runs it for its lifetime. */
-	readonly runLimitPolicies: Effect.Effect<
-		never,
+	/** Applies the usage-limit policy to one queued limit; the daemon's one consumer calls it. */
+	readonly applyLimitPolicy: (
+		sessionId: string,
+	) => Effect.Effect<
+		void,
 		never,
 		Effect.Services<ReturnType<Continuation["requestContinuation"]>>
 	>;
@@ -940,31 +945,25 @@ export const makeContinuation = Effect.gen(function* () {
 			);
 			return true;
 		});
-	const limits = yield* Queue.unbounded<string>();
+	const turns = yield* DaemonTurns;
 	const queueLimitPolicy = (sessionId: string) =>
-		Effect.asVoid(Queue.offer(limits, sessionId));
+		turns.queueLimitPolicy(store.projectId, sessionId);
 	// A refusal leaves the recorded limit as it is: the strip still offers its actions.
-	const runLimitPolicies: Continuation["runLimitPolicies"] = Queue.take(
-		limits,
-	).pipe(
-		Effect.flatMap((sessionId) =>
-			Effect.gen(function* () {
-				const switched = yield* tryAutoSwitch(sessionId).pipe(
-					Effect.catchCause((cause) =>
-						Effect.logWarning("Auto-switch refused", sessionId, cause).pipe(
-							Effect.as(false),
-						),
-					),
-				);
-				if (!switched) yield* tryAutoResume(sessionId);
-			}).pipe(
+	const applyLimitPolicy: Continuation["applyLimitPolicy"] = (sessionId) =>
+		Effect.gen(function* () {
+			const switched = yield* tryAutoSwitch(sessionId).pipe(
 				Effect.catchCause((cause) =>
-					Effect.logWarning("Usage limit policy refused", sessionId, cause),
+					Effect.logWarning("Auto-switch refused", sessionId, cause).pipe(
+						Effect.as(false),
+					),
 				),
+			);
+			if (!switched) yield* tryAutoResume(sessionId);
+		}).pipe(
+			Effect.catchCause((cause) =>
+				Effect.logWarning("Usage limit policy refused", sessionId, cause),
 			),
-		),
-		Effect.forever,
-	);
+		);
 
 	const intakeLimit: Continuation["intakeLimit"] = (event, withinCommit) => {
 		const append = (project: CommitAndSignalProject) =>
@@ -1049,9 +1048,12 @@ export const makeContinuation = Effect.gen(function* () {
 		cancelContinuation,
 		sweepDueContinuations,
 		queueLimitPolicy,
-		runLimitPolicies,
+		applyLimitPolicy,
 		requestContinuation,
 	} satisfies Continuation;
 });
 
-export const ContinuationLive = Layer.effect(ContinuationTag, makeContinuation);
+export const ContinuationLive = Layer.effect(
+	ContinuationTag,
+	makeContinuation,
+).pipe(Layer.provide(DaemonTurnsOrOwn));

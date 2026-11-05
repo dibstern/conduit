@@ -2,6 +2,7 @@
 // probes or resumes early; repeated limits lose the time-only guard after a
 // reply; failed reads retry each sweep; projects duplicate one account's read;
 // racing Resumes dispatch twice, cancel the winner, or report a refusal.
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -36,7 +37,6 @@ import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Servi
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { makeContinuation } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -61,6 +61,7 @@ import {
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
 import type { UsageRead } from "../../../src/lib/provider/usage-reader.js";
+import { makeTestContinuation } from "../../helpers/daemon-turns.js";
 import { activeRunEvents } from "../../helpers/ledger-tasks.js";
 import {
 	makeMockLogger,
@@ -140,7 +141,7 @@ const sweepFixture = Effect.gen(function* () {
 			return yield* Effect.gen(function* () {
 				const commit = yield* makeCommitAndSignal;
 				const read = yield* ReadQueryEffectTag;
-				const continuation = yield* makeContinuation;
+				const continuation = yield* makeTestContinuation;
 				const sends: string[] = [];
 				let limitedAgain = false;
 				const resetsAt =

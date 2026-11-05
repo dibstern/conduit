@@ -5,6 +5,7 @@ import {
 	Effect,
 	Fiber,
 	FiberMap,
+	Option,
 	Ref,
 	Result,
 	Schema,
@@ -49,9 +50,12 @@ import {
 	type TurnSettings,
 } from "../../../provider/turn-settings.js";
 import type { ModelInfo, SendTurnInput } from "../../../provider/types.js";
+import { delivers } from "../../../server/event-audiences.js";
 import { sessionFolders } from "../../../session/session-workspace.js";
 import { workspaceFolderPresent } from "../../../session/workspace-directories.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
+import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
+import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { publishAlert } from "./alerts.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
@@ -63,7 +67,6 @@ import {
 	LoggerTag,
 	OpenCodeModelServiceTag,
 	OrchestrationEngineTag,
-	WebSocketHandlerTag,
 } from "./services.js";
 import {
 	clearProcessingTimeout,
@@ -276,11 +279,6 @@ export const resolveSessionFolders = (
 		return yield* resolveLaunchFolders(state, session.id, workspaceRoot);
 	});
 
-export class ProviderTurnDispatchFibersTag extends Context.Service<
-	ProviderTurnDispatchFibersTag,
-	FiberMap.FiberMap<string, void, unknown>
->()("ProviderTurnDispatchFibers") {}
-
 const loadClaudeHistoryMetadata = (sessionId: string) =>
 	Effect.gen(function* () {
 		const log = yield* LoggerTag;
@@ -490,10 +488,18 @@ const handleDispatchFailure = (
 					: { inputId: input.commandId },
 			);
 		if (missing) {
-			const ws = yield* Effect.serviceOption(WebSocketHandlerTag);
+			// Any connection on the daemon that would receive the session's events.
+			const activity = yield* Effect.serviceOption(SessionActivityTag);
+			const audience = {
+				_tag: "session",
+				sessionId: input.sessionId,
+				projectId: (yield* ConfigTag).slug,
+			} as const;
 			if (
-				ws._tag === "Some" &&
-				ws.value.getClientsForSession(input.sessionId).length > 0
+				Option.isSome(activity) &&
+				[...activity.value.connectionInterests.values()].some((interests) =>
+					delivers(audience, interests),
+				)
 			)
 				yield* publishAlert({
 					_tag: "alert",
@@ -752,7 +758,9 @@ const dispatchEngineTurn = (
 	Effect.gen(function* () {
 		const driver = account.driver;
 		const orchestrationEngine = yield* OrchestrationEngineTag;
-		const dispatchFibers = yield* ProviderTurnDispatchFibersTag;
+		const dispatchFibers = yield* (yield* DaemonTurns).dispatchFibers(
+			resolvedInput.sessionId,
+		);
 		const config = yield* ConfigTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const previousProviderId =
@@ -884,7 +892,11 @@ const dispatchEngineTurn = (
 							),
 						),
 			),
-			Effect.onInterrupt(() => restorePreviousBinding),
+			Effect.onInterrupt(() =>
+				Effect.logWarning("Turn dispatch interrupted", {
+					sessionId: resolvedInput.sessionId,
+				}).pipe(Effect.andThen(restorePreviousBinding)),
+			),
 			Effect.catchTag("ProviderInstanceFailure", (error) =>
 				Deferred.fail(accepted, error).pipe(Effect.asVoid),
 			),

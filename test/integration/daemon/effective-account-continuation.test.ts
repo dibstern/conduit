@@ -10,6 +10,7 @@
  * must publish Work as the binding and send with Work's own folder.
  * All account folders, HOME, CLAUDE_CONFIG_DIR and configDir are fixture-owned.
  */
+
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -30,10 +31,7 @@ import { Usage } from "../../../src/lib/domain/daemon/Services/usage.js";
 import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
-import {
-	makeContinuation,
-	previewContinuation,
-} from "../../../src/lib/domain/relay/Services/continuation.js";
+import { previewContinuation } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import {
 	ConfigTag,
@@ -53,6 +51,7 @@ import {
 	ProviderRegistry,
 	ProviderRegistryTag,
 } from "../../../src/lib/provider/provider-registry.js";
+import { makeTestContinuation } from "../../helpers/daemon-turns.js";
 import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
@@ -188,7 +187,7 @@ for (const scenario of [
 			const store = yield* EventStoreEffectTag;
 			const commit = yield* makeCommitAndSignal;
 			const read = yield* ReadQueryEffectTag;
-			const continuation = yield* makeContinuation;
+			const continuation = yield* makeTestContinuation;
 			yield* commit([
 				canonicalEvent("session.created", "s1", {
 					sessionId: "s1",

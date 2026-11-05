@@ -76,6 +76,7 @@ import {
 	listDaemonSessions as listEffectDaemonSessions,
 } from "../Services/daemon-session-reader.js";
 import { DaemonStoreAvailability } from "../Services/daemon-store-availability.js";
+import { DaemonTurns } from "../Services/daemon-turns.js";
 import type { InstanceHealthCheckTag } from "../Services/instance-health-service.js";
 import {
 	addInstance as addEffectInstance,
@@ -241,6 +242,7 @@ export const RelayFactoryLive = (
 			const sessionManagers = yield* Effect.serviceOption(
 				SessionManagerServiceTag,
 			);
+			const daemonTurns = yield* Effect.serviceOption(DaemonTurns);
 			const storeContext = yield* persistenceStoreContext;
 			const sharedDrafts = yield* Effect.serviceOption(InputDraftsTag);
 			const inputDrafts = Option.isSome(sharedDrafts)
@@ -652,6 +654,11 @@ export const RelayFactoryLive = (
 															SessionManagerServiceTag,
 															sessionManagers.value,
 														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(daemonTurns)
+													? Context.make(DaemonTurns, daemonTurns.value)
 													: Context.empty(),
 											),
 											Context.merge(

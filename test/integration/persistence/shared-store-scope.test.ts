@@ -46,7 +46,6 @@ import {
 	AlertsLive,
 	AlertsTag,
 } from "../../../src/lib/domain/relay/Services/alerts.js";
-import { makeContinuation } from "../../../src/lib/domain/relay/Services/continuation.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../../../src/lib/domain/relay/Services/opencode-runtime-ingress-service.js";
 import {
 	makeProviderRuntimeIngestionLive,
@@ -125,6 +124,7 @@ import {
 	type WorktreeCleanupRetry,
 } from "../../../src/lib/session/worktree-cleanup-sweep.js";
 import { projectManifest } from "../../helpers/daemon-store-import-manifest.js";
+import { makeTestContinuation } from "../../helpers/daemon-turns.js";
 import {
 	makeMockAccountDirectory,
 	makeMockConfig,
@@ -1148,7 +1148,7 @@ describe("shared-store relay project scope", () => {
 		await store.runtime.runPromise(
 			Effect.scoped(
 				Effect.gen(function* () {
-					const continuation = yield* makeContinuation;
+					const continuation = yield* makeTestContinuation;
 					yield* continuation.sweepDueContinuations(10);
 				}).pipe(
 					Effect.provideService(ConfigTag, config()),
