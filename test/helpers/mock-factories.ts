@@ -1452,6 +1452,7 @@ export const PassThroughSessionInbox = Layer.effect(
 			cancel: () => Effect.succeed("already_started" as const),
 			sendNow: () => Effect.succeed("already_started" as const),
 			steerDeclined: () => Effect.void,
+			landHeadMove: () => Effect.void,
 			start: Effect.void,
 		};
 	}),

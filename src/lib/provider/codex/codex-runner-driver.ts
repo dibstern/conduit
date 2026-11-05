@@ -149,6 +149,13 @@ export const makeCodexRunnerDriver = (
 					const removed = new Set(
 						messages.slice(keptIndex + 1).map(({ turnId }) => turnId),
 					);
+					// 82tn.51: a head move took the cut off the Head when it landed; it is kept off it.
+					if (rewind.targetMessageId !== undefined)
+						for (const { turnId } of yield* sql<{ turnId: string }>`
+							SELECT COALESCE(json_extract(row_json, '$.turn_id'), row_key) AS turnId
+							FROM history_off_head WHERE session_id = ${input.sessionId}
+								AND source_table = 'messages' AND row_key = ${rewind.targetMessageId}`)
+							removed.add(turnId);
 					const refs = yield* readCodexNativeTurns(input.sessionId).pipe(
 						Effect.provideService(SqlClient.SqlClient, sql),
 					);

@@ -4,15 +4,15 @@
 import { randomUUID } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Send Message", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeEach(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		harness.mock.resetQueues();
 	}, 30_000);
 

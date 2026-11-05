@@ -40,6 +40,7 @@ import {
 	PersistenceStore,
 } from "../../../persistence/effect/live.js";
 import { ClaudeAccountScopesLive } from "../../../provider/claude/claude-account-scopes.js";
+import { makeClaudeSessionRunner } from "../../../provider/claude/claude-provider-runtime.js";
 import {
 	type ClaudeConfigDir,
 	captureClaudeLaunchLogin,
@@ -56,6 +57,7 @@ import {
 	BrowserRpcConnectionsLive,
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
+import type { ClaudeSdkSeam } from "../../../types.js";
 import { makePortWatcherLive } from "../../persistence/Services/port-watcher.js";
 import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledger-scheduler.js";
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
@@ -669,6 +671,8 @@ export interface DaemonLiveOptions {
 	persistedConfig?: DaemonConfig;
 	/** Computed while loading that snapshot, before normalization discards the old values. */
 	persistedConfigNeedsMigration?: boolean;
+	/** Test seam: an in-process Claude SDK for the provider adapters and every project. */
+	claudeSdk?: ClaudeSdkSeam;
 }
 
 /**
@@ -932,7 +936,15 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		}),
 	).pipe(Layer.provideMerge(withInputDrafts));
 	// Runner adapters record account usage readings (Codex), so Usage precedes them.
-	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
+	const withProviderAdapters = makeProviderAdaptersLive(
+		configDir,
+		options.claudeSdk
+			? {
+					claudeSdk: options.claudeSdk,
+					claudeRunnerFactory: makeClaudeSessionRunner,
+				}
+			: {},
+	).pipe(
 		Layer.provideMerge(UsageLive().pipe(Layer.provideMerge(withPortWatcher))),
 	);
 	const withWorktrees = Layer.mergeAll(
@@ -1019,7 +1031,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),
 	);
-	const registries = RelayFactoryLive(configDir).pipe(
+	const registries = RelayFactoryLive(configDir, options.claudeSdk).pipe(
 		Layer.provideMerge(withOrchestration),
 	);
 

@@ -3119,6 +3119,92 @@ export const UndoRewind = Rpc.make("UndoRewind", {
 	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
 });
 
+/**
+ * What a head move does (82tn.51): back to before a message, optionally sending new text from
+ * there (edit-and-resend, or the same text to regenerate); back to where an earlier move left
+ * (undo, a new entry); or to another branch's tip.
+ */
+export const MoveIntentSchema = Schema.Union([
+	Schema.TaggedStruct("rewind", {
+		messageId: NonEmptyString,
+		resend: Schema.optionalKey(NonEmptyString),
+	}),
+	Schema.TaggedStruct("undo", { moveId: NonEmptyString }),
+	Schema.TaggedStruct("switch", { nodeId: NonEmptyString }),
+]);
+export type MoveIntent = typeof MoveIntentSchema.Type;
+
+const HeadMoveFilesSchema = Schema.Literals(["available", "pruned"]);
+
+/** A proposal: the id both devices confirming it share, and whether the files are kept. */
+export const PreviewHeadMove = Rpc.make("PreviewHeadMove", {
+	payload: Schema.TaggedStruct("PreviewHeadMove", {
+		sessionId: NonEmptyString,
+		intent: MoveIntentSchema,
+	}),
+	success: Schema.Struct({
+		moveId: NonEmptyString,
+		files: HeadMoveFilesSchema,
+	}),
+	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
+});
+
+/** Lands a previewed move; the same `moveId` again returns the same receipt. */
+export const CommitHeadMove = Rpc.make("CommitHeadMove", {
+	payload: Schema.TaggedStruct("CommitHeadMove", {
+		sessionId: NonEmptyString,
+		intent: MoveIntentSchema,
+		moveId: NonEmptyString,
+	}),
+	success: Schema.Struct({ moveId: NonEmptyString }),
+	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
+});
+
+export const HeadLogEntrySchema = Schema.Struct({
+	moveId: NonEmptyString,
+	kind: Schema.Literals(["rewind", "undo", "switch"]),
+	at: Schema.Number,
+	/** The message a rewind went back before. */
+	messageId: Schema.optionalKey(Schema.String),
+	/** The entry this one undid. */
+	undoes: Schema.optionalKey(Schema.String),
+	resend: Schema.optionalKey(Schema.String),
+	/** False while the move is still landing. */
+	landed: Schema.Boolean,
+});
+export type HeadLogEntry = typeof HeadLogEntrySchema.Type;
+
+/** The session's head moves, newest first; each can be undone. */
+export const GetHeadLog = Rpc.make("GetHeadLog", {
+	payload: Schema.TaggedStruct("GetHeadLog", { sessionId: NonEmptyString }),
+	success: Schema.Struct({ entries: Schema.Array(HeadLogEntrySchema) }),
+	error: WsRpcError,
+});
+
+/** A point on the Head's path where the conversation branched: the on-Head message the branches
+ *  start at, and each branch the tip a switch lands on. */
+export const HeadForkSchema = Schema.Struct({
+	messageId: NonEmptyString,
+	branches: Schema.Array(
+		Schema.Struct({
+			tip: NonEmptyString,
+			text: Schema.String,
+			onHead: Schema.Boolean,
+			available: Schema.Boolean,
+		}),
+	),
+});
+export type HeadFork = typeof HeadForkSchema.Type;
+
+/** Where the conversation branched along the Head's path (82tn.51), root first. */
+export const GetHeadBranches = Rpc.make("GetHeadBranches", {
+	payload: Schema.TaggedStruct("GetHeadBranches", {
+		sessionId: NonEmptyString,
+	}),
+	success: Schema.Struct({ forks: Schema.Array(HeadForkSchema) }),
+	error: WsRpcError,
+});
+
 /** Whether the files at a head move's target are still kept, or were pruned. */
 export const GetHeadMoveFiles = Rpc.make("GetHeadMoveFiles", {
 	payload: Schema.TaggedStruct("GetHeadMoveFiles", {
@@ -3896,6 +3982,10 @@ const wsRpcRequests = [
 	RewindSession,
 	UndoRewind,
 	GetHeadMoveFiles,
+	PreviewHeadMove,
+	CommitHeadMove,
+	GetHeadLog,
+	GetHeadBranches,
 	SubmitInput,
 	CancelInput,
 	SendInputNow,

@@ -70,6 +70,7 @@
 	import ContinuationDivider from "./ContinuationDivider.svelte";
 	import { getInstanceById } from "../../stores/instance.svelte.js";
 	import type { SessionResume } from "../../../contracts/limit-recovery.js";
+	import type { HeadFork } from "../../stores/head-moves.svelte.js";
 	import { formatSnoozeTime } from "../../utils/format.js";
 	import { retryFeedsNow } from "../../transport/supervise.js";
 	import { primaryTranscript, transcriptFeed, type TranscriptView } from "../../stores/transcript.svelte.js";
@@ -362,6 +363,20 @@
 	const projectCurrentTurns = turnProjection();
 	const windowProcessing = $derived(processing && view.window.kind === "latest");
 	const turns = $derived(projectTurns(chat.messages, windowProcessing));
+	// Where the conversation branched, by the message each fork starts at (82tn.51); refetched when
+	// the user messages change, which every head move does. Only the primary transcript moves its
+	// Head; a drawer's child session does not.
+	let forks = $state<ReadonlyMap<string, HeadFork>>(new Map());
+	const userMessageIds = $derived(turns.map((turn) => turn.user?.messageId ?? "").join(" "));
+	$effect(() => {
+		const sessionId = viewedSessionId;
+		if (!primary || !sessionId || !userMessageIds.trim()) return;
+		let current = true;
+		rpc("GetHeadBranches", { sessionId })
+			.then((result) => { if (current) forks = new Map(result.forks.map((fork) => [fork.messageId, fork])); })
+			.catch(toastFailure("Could not load the conversation's branches."));
+		return () => { current = false; };
+	});
 	$effect(() => {
 		const turn = turns.at(-1);
 		if (!windowProcessing || chat.loadLifecycle !== "ready" || !turn || turn.user) return;
@@ -597,7 +612,7 @@
 		<div data-live-turn={turn.live ? "" : undefined}>
 		{#if turn.user}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
-				<UserMessage message={turn.user} onDismissCutOff={turn.user.messageId !== undefined && turn.user.messageId === cutOffMessageId ? dismissCutOff : undefined} />
+				<UserMessage message={turn.user} sessionId={primary ? viewedSessionId ?? undefined : undefined} fork={turn.user.messageId ? forks.get(turn.user.messageId) : undefined} onDismissCutOff={turn.user.messageId !== undefined && turn.user.messageId === cutOffMessageId ? dismissCutOff : undefined} />
 			</div>
 		{/if}
 		{#if goal && turn.id === goalNoticeTurnId}
@@ -626,7 +641,7 @@
 				onreposition={scrollCtrl.reposition}
 				onReplyToAsk={(reference, text) => { if (viewedSessionId) insertComposerReference(reference, viewedSessionId); if (text) insertInputDraft(text); }}
 				forkMessageId={reply ? forkMessageIdAtReply(turn, reply) : undefined}
-				modelExecution={turn.user?.modelExecution} />
+				modelExecution={turn.user?.modelExecution} turnUser={primary ? turn.user : undefined} />
 		{/if}
 		<!-- Notices sit between the final work and reply: they are lifted out of
 		     the activity log so a failure is never hidden behind a collapsed panel. -->
@@ -639,7 +654,7 @@
 			{#if !log.resumedParts.has(reply.uuid)}{@render resumed(reply.uuid)}{/if}
 			<div class="msg-container" class:rewind-point={primary && uiState.rewindActive}>
 				<AssistantMessage {sessionId} {providerId} message={reply} forkMessageId={forkMessageIdAtReply(turn, reply)}
-					hideHeader={reply === segment.reply[0] && hasActivity}
+					hideHeader={reply === segment.reply[0] && hasActivity} turnUser={primary ? turn.user : undefined}
 					modelExecution={turn.user?.modelExecution} />
 			</div>
 		{/each}

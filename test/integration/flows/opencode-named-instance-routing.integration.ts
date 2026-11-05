@@ -2,17 +2,18 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { AccountIdSchema } from "../../../src/lib/contracts/account.js";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import type {
 	OpenCodeInteraction,
 	OpenCodeRecording,
 } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
-import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
+import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 
 const NAMED_INSTANCE_ID = "work-oc";
 const NAMED_SESSION_ID = "ses_named_instance";
@@ -71,8 +72,9 @@ const promptCount = (mock: MockOpenCodeServer): number =>
 	);
 
 describe("Integration: named OpenCode instance routing", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 	let namedMock: MockOpenCodeServer;
+	let defaultMock: MockOpenCodeServer;
 	let tempDir: string;
 
 	beforeAll(async () => {
@@ -84,6 +86,8 @@ describe("Integration: named OpenCode instance routing", () => {
 			),
 		);
 		await namedMock.start();
+		defaultMock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
+		await defaultMock.start();
 
 		const daemonConfig: DaemonConfig = {
 			pid: 1234,
@@ -93,7 +97,18 @@ describe("Integration: named OpenCode instance routing", () => {
 			debug: false,
 			keepAwake: false,
 			projects: [],
+			// Server A stays the default; the daemon would otherwise pick the
+			// first named server once it is healthy.
+			accountDefaults: { opencode: AccountIdSchema.make("opencode") },
 			instances: [
+				{
+					id: "opencode",
+					name: "Default",
+					port: 0,
+					managed: false,
+					driver: "opencode",
+					url: defaultMock.url,
+				},
 				{
 					id: NAMED_INSTANCE_ID,
 					name: "Work OpenCode",
@@ -105,14 +120,16 @@ describe("Integration: named OpenCode instance routing", () => {
 			],
 		};
 		writeFileSync(join(tempDir, "daemon.json"), JSON.stringify(daemonConfig));
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: tempDir,
+			opencodeUrl: defaultMock.url,
 		});
 	}, 30_000);
 
 	afterAll(async () => {
 		if (harness) await harness.stop();
 		if (namedMock) await namedMock.stop();
+		if (defaultMock) await defaultMock.stop();
 		if (tempDir) rmSync(tempDir, { recursive: true, force: true });
 	});
 
@@ -120,7 +137,7 @@ describe("Integration: named OpenCode instance routing", () => {
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 
-		const defaultCreatesBefore = sessionCreateCount(harness.mock);
+		const defaultCreatesBefore = sessionCreateCount(defaultMock);
 		const namedCreatesBefore = sessionCreateCount(namedMock);
 		const created = await client.createSession("Named instance", {
 			instanceId: NAMED_INSTANCE_ID,
@@ -128,10 +145,10 @@ describe("Integration: named OpenCode instance routing", () => {
 		const namedSessionId = created["id"];
 		expect(namedSessionId).toBe(NAMED_SESSION_ID);
 		expect(sessionCreateCount(namedMock)).toBe(namedCreatesBefore + 1);
-		expect(sessionCreateCount(harness.mock)).toBe(defaultCreatesBefore);
+		expect(sessionCreateCount(defaultMock)).toBe(defaultCreatesBefore);
 
 		client.clearReceived();
-		const defaultPromptsBeforeNamedTurn = promptCount(harness.mock);
+		const defaultPromptsBeforeNamedTurn = promptCount(defaultMock);
 		const namedPromptsBeforeNamedTurn = promptCount(namedMock);
 		const namedDelta = client.waitForAssistantText(NAMED_SESSION_ID, 15_000);
 		const namedDone = client.waitForTurnEnd(NAMED_SESSION_ID, 15_000);
@@ -149,14 +166,14 @@ describe("Integration: named OpenCode instance routing", () => {
 		// Isolation: the named turn never touched the project-default server A.
 		// (Positive default-instance -> A routing is unchanged by 4.4 — the
 		// clientFor-returns-undefined default path — and is covered by the wider
-		// OpenCode integration suite; the relay-harness default session is
+		// OpenCode integration suite; the harness default session is
 		// Claude-backed, so it must not be used to assert OpenCode routing here.)
-		expect(promptCount(harness.mock)).toBe(defaultPromptsBeforeNamedTurn);
+		expect(promptCount(defaultMock)).toBe(defaultPromptsBeforeNamedTurn);
 
 		await client.viewSession(NAMED_SESSION_ID);
 		await namedMock.stop();
 		client.clearReceived();
-		const defaultPromptsBeforeFailure = promptCount(harness.mock);
+		const defaultPromptsBeforeFailure = promptCount(defaultMock);
 		const failure = client.waitForTranscriptMessage(
 			(message) =>
 				message.parts?.some(
@@ -182,6 +199,6 @@ describe("Integration: named OpenCode instance routing", () => {
 		expect(
 			failureMessage.parts?.find((part) => part.type === "error")?.text,
 		).toMatch(/unreachable|ECONNREFUSED|fetch failed|timed out/i);
-		expect(promptCount(harness.mock)).toBe(defaultPromptsBeforeFailure);
+		expect(promptCount(defaultMock)).toBe(defaultPromptsBeforeFailure);
 	}, 45_000);
 });

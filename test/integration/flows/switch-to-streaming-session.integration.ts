@@ -1,16 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Switch to Streaming Session", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	// No resetQueues() here: relay startup already consumed the recording's
 	// first POST /session, and re-arming it would hand Session B that same id.
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {

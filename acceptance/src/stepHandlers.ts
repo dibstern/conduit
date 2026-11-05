@@ -43,6 +43,7 @@ import { forkIntoProjectHandlers } from "./steps/forkIntoProject.js";
 import { harnessHandlers } from "./steps/harness.js";
 import { headerTapOnLiftHandlers } from "./steps/headerTapOnLift.js";
 import { headMoveHandlers } from "./steps/headMove.js";
+import { headMovesHandlers } from "./steps/headMoves.js";
 import { launchingRowsHandlers } from "./steps/launchingRows.js";
 import { mockAppHandlers } from "./steps/mockApp.js";
 import { modelDriftHandlers } from "./steps/modelDrift.js";
@@ -194,6 +195,7 @@ export const conduitVisualHandlers: StepHandler[] = [
 	...composerLiveStatusHandlers,
 	...pendingInputTrayHandlers,
 	...headMoveHandlers,
+	...headMovesHandlers,
 	...sessionActivityHandlers,
 	...whyBusyHandlers,
 	...composerPickerHandlers,

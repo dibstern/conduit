@@ -4,15 +4,15 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Message Lifecycle", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeEach(async () => {
-		harness = await createRelayHarness("chat-multi-turn");
+		harness = await createDaemonProject("chat-multi-turn");
 	}, 30_000);
 
 	afterEach(async () => {

@@ -47,7 +47,10 @@ import { EventStoreEffectTag } from "../../../persistence/effect/event-store-eff
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import { loadLedger } from "../../../persistence/effect/run-ledger-arm.js";
-import { canonicalEvent } from "../../../persistence/events.js";
+import {
+	canonicalEvent,
+	type EventPayloadMap,
+} from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
 import type { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
@@ -73,6 +76,7 @@ import {
 	danglingHeadMoves,
 	finishHeadMove,
 	headMoveInProgress,
+	resendInputId,
 } from "./session-command.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
@@ -424,6 +428,11 @@ export interface SessionInbox {
 		sessionId: string,
 		inputId: string,
 	) => Effect.Effect<void, SqlError | ClaudeEventPersistFailure>;
+	/** Lands a started head move, then admits its resend, under one permit (82tn.51). */
+	readonly landHeadMove: (
+		sessionId: string,
+		move: EventPayloadMap["head.move_started"],
+	) => Effect.Effect<void, SessionInboxError>;
 	/** Start draining once the relay's providers are registered and recovered. */
 	readonly start: Effect.Effect<void>;
 }
@@ -467,6 +476,10 @@ export const SessionInboxLive = Layer.effect(
 		const continuationContext =
 			yield* Effect.context<
 				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
+			>();
+		const moveContext =
+			yield* Effect.context<
+				Effect.Services<ReturnType<typeof finishHeadMove>>
 			>();
 		// The daemon holds the permits, so two relays of one project share them.
 		// Queued and held inputs stay in pending_inputs (CONTRACT.md 5865, D57); only
@@ -985,7 +998,7 @@ export const SessionInboxLive = Layer.effect(
 							Effect.forEach(
 								moves,
 								({ sessionId, move }) =>
-									serialised(sessionId)(finishHeadMove(sessionId, move)),
+									serialised(sessionId)(landHeld(sessionId, move)),
 								{ discard: true },
 							),
 						),
@@ -1024,90 +1037,110 @@ export const SessionInboxLive = Layer.effect(
 			{ uninterruptible: "inherit" },
 		);
 
+		const submitHeld = (input: SessionInboxSubmitInput) =>
+			Effect.gen(function* () {
+				const view = yield* readView(input.sessionId, input.inputId);
+				if (view.known) return { _tag: "Accepted" as const, events: [] };
+				// Busy and approval-blocked inputs may never reach runner execution.
+				yield* admits(input.sessionId, view.provider);
+				const { refs, reviewContext, hashes } = input.draft
+					? yield* drafts.takeForSend(
+							input.draft.key,
+							input.draft.attachmentIds,
+						)
+					: { refs: [], reviewContext: "", hashes: [] };
+				const request = {
+					...input.request,
+					...(refs.length > 0 && {
+						images: [...(input.request.images ?? []), ...refs],
+					}),
+					...(reviewContext && {
+						text: [input.request.text, reviewContext]
+							.filter(Boolean)
+							.join("\n\n"),
+					}),
+				};
+				const decision = decideInbox(input.sessionId, view, {
+					_tag: "Submit",
+					inputId: input.inputId,
+					delivery: input.delivery,
+					request,
+				});
+				// Submit is only refused as a steer: a known id is accepted.
+				if (decision._tag === "Rejected") return decision;
+				const draftChange = input.draft
+					? drafts.sendChange(
+							input.draft.key,
+							input.sessionId,
+							input.draft.text ?? input.request.text,
+							input.draft.attachmentIds,
+							hashes,
+						)
+					: undefined;
+				const delayMs =
+					process.env["NODE_ENV"] === "test"
+						? Number(process.env["CONDUIT_TEST_DRAFT_SEND_BEFORE_COMMIT_MS"])
+						: 0;
+				if (draftChange && Number.isFinite(delayMs) && delayMs > 0) {
+					log.info(`draft-send-before-commit:${input.inputId}`);
+					yield* Effect.sleep(delayMs);
+				}
+				// A queued input handed off ahead of this one has no requesting client.
+				const own = decision.handoff?.inputId === input.inputId;
+				yield* commit(
+					input.sessionId,
+					decision,
+					own ? input : DRAINED,
+					draftChange,
+				);
+				if (
+					!decision.handoff &&
+					decision.events.length > 0 &&
+					view.usageResetsAt !== undefined &&
+					!view.scheduled &&
+					view.provider !== undefined
+				)
+					yield* continuation
+						.requestContinuation(input.sessionId, {
+							instanceId: view.provider,
+							expectedInstanceId: view.provider,
+							reason: "reset",
+							at: view.usageResetsAt,
+							onlyIfUnscheduled: true,
+						})
+						.pipe(Effect.provide(continuationContext));
+				return decision;
+			});
+
+		// 82tn.51: the resend's id comes from the move, so a retry or recovery admits it once.
+		const landHeld = (
+			sessionId: string,
+			move: EventPayloadMap["head.move_started"],
+		) =>
+			Effect.gen(function* () {
+				yield* finishHeadMove(sessionId, move).pipe(
+					Effect.provide(moveContext),
+				);
+				if (move.resend)
+					yield* submitHeld({
+						clientId: DRAINED.clientId,
+						sessionId,
+						inputId: resendInputId(move.moveId),
+						delivery: "queue",
+						request: move.resend,
+					});
+			});
+
 		return {
 			withSession: (sessionId, effect) => serialised(sessionId)(effect),
+			landHeadMove: (sessionId, move) =>
+				serialised(sessionId)(landHeld(sessionId, move)),
 			start: Deferred.succeed(ready, undefined).pipe(Effect.asVoid),
 			cancel: act("Cancel"),
 			sendNow: act("SendNow"),
 			steerDeclined,
 			submit: (input) =>
-				serialised(input.sessionId)(
-					Effect.gen(function* () {
-						const view = yield* readView(input.sessionId, input.inputId);
-						if (view.known) return { _tag: "Accepted" as const, events: [] };
-						// Busy and approval-blocked inputs may never reach runner execution.
-						yield* admits(input.sessionId, view.provider);
-						const { refs, reviewContext, hashes } = input.draft
-							? yield* drafts.takeForSend(
-									input.draft.key,
-									input.draft.attachmentIds,
-								)
-							: { refs: [], reviewContext: "", hashes: [] };
-						const request = {
-							...input.request,
-							...(refs.length > 0 && {
-								images: [...(input.request.images ?? []), ...refs],
-							}),
-							...(reviewContext && {
-								text: [input.request.text, reviewContext]
-									.filter(Boolean)
-									.join("\n\n"),
-							}),
-						};
-						const decision = decideInbox(input.sessionId, view, {
-							_tag: "Submit",
-							inputId: input.inputId,
-							delivery: input.delivery,
-							request,
-						});
-						// Submit is only refused as a steer: a known id is accepted.
-						if (decision._tag === "Rejected") return decision;
-						const draftChange = input.draft
-							? drafts.sendChange(
-									input.draft.key,
-									input.sessionId,
-									input.draft.text ?? input.request.text,
-									input.draft.attachmentIds,
-									hashes,
-								)
-							: undefined;
-						const delayMs =
-							process.env["NODE_ENV"] === "test"
-								? Number(
-										process.env["CONDUIT_TEST_DRAFT_SEND_BEFORE_COMMIT_MS"],
-									)
-								: 0;
-						if (draftChange && Number.isFinite(delayMs) && delayMs > 0) {
-							log.info(`draft-send-before-commit:${input.inputId}`);
-							yield* Effect.sleep(delayMs);
-						}
-						// A queued input handed off ahead of this one has no requesting client.
-						const own = decision.handoff?.inputId === input.inputId;
-						yield* commit(
-							input.sessionId,
-							decision,
-							own ? input : DRAINED,
-							draftChange,
-						);
-						if (
-							!decision.handoff &&
-							decision.events.length > 0 &&
-							view.usageResetsAt !== undefined &&
-							!view.scheduled &&
-							view.provider !== undefined
-						)
-							yield* continuation
-								.requestContinuation(input.sessionId, {
-									instanceId: view.provider,
-									expectedInstanceId: view.provider,
-									reason: "reset",
-									at: view.usageResetsAt,
-									onlyIfUnscheduled: true,
-								})
-								.pipe(Effect.provide(continuationContext));
-						return decision;
-					}),
-				).pipe(
+				serialised(input.sessionId)(submitHeld(input)).pipe(
 					Effect.map((decision) =>
 						decision._tag === "Rejected" &&
 						decision.reason !== "already_started"
