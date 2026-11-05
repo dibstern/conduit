@@ -1067,6 +1067,40 @@ export class FakeProvider {
 		];
 		assert(first);
 		this.commit.push(...rest);
+		// 3.6, 4.8 (CONTRACT.md 670): one loss in two, main relaunches the start the retirement unlaunched
+		// while its older gate answer waits; the host then delivers that answer to the reissue (D49, 3965-3968).
+		const open = this.mainRun;
+		const queued = this.gateAnswers.find(
+			({ target }) =>
+				target.tag === "Held" &&
+				target.held === open?.issue &&
+				target.runner === runner,
+		);
+		if (open && queued && Math.floor(variant / 4) % 2 === 0)
+			this.deferred.push(
+				() => {
+					const token = this.bound(open.issue).token;
+					return this.mainRun === open &&
+						!this.terminals.has(open.runId) &&
+						token !== undefined &&
+						this.unlaunchedTries.has(token)
+						? this.main({
+								operation: 0,
+								selection: 0,
+								index: 0,
+								variant: 3,
+								input: 0,
+								advance: 0,
+							})
+						: undefined;
+				},
+				(snapshot) =>
+					this.gateAnswers[0] === queued &&
+					queued.target.tag === "Held" &&
+					this.mainRun?.issue !== queued.target.held
+						? this.gateAnswer(snapshot.now)
+						: undefined,
+			);
 		return first;
 	}
 	/**
@@ -1149,6 +1183,19 @@ export class FakeProvider {
 			}
 		if (this.lostRunners.has(runner)) return;
 		for (const runId of this.runsOn(runner)) this.unlaunch(runId);
+		// 3.6 (CONTRACT.md 670): main's start that met the gate while this runner served was addressed to it
+		// and has no hold, so its retirement unlaunches the Run and main relaunches it (4.8).
+		const open = this.mainRun;
+		if (
+			open &&
+			this.gateAnswers.some(
+				({ target }) =>
+					target.tag === "Held" &&
+					target.held === open.issue &&
+					target.runner === runner,
+			)
+		)
+			this.unlaunch(open.runId);
 		this.lostRunners.add(runner);
 		for (const [token, gated] of this.gatedCommands)
 			if (gated.runner === runner) this.gatedCommands.delete(token);
