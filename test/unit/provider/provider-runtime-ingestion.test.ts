@@ -102,7 +102,7 @@ const setupRunSettlement = Effect.gen(function* () {
 		runId: "held-run",
 		commandId: "input",
 	});
-	yield* sql`UPDATE claude_runner_cursors SET retired_at = 1, owned_run_ids = '["held-run"]', retirement_state = 'GonePending' WHERE runner_id = 'old-runner'`;
+	yield* sql`UPDATE claude_runner_cursors SET retired_at = 1 WHERE runner_id = 'old-runner'`;
 	const readOwners = vi.fn();
 	const owners = Effect.gen(function* () {
 		readOwners();
@@ -178,7 +178,7 @@ describe("transactional runner settlement ingestion", () => {
 	it("preserves a native success committed before settlement reads its owners", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				const { sql, receipts, owners, readOwners } = yield* setupRunSettlement;
+				const { sql, owners, readOwners } = yield* setupRunSettlement;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				yield* ingestion.ingest(
 					runtimeEvent({
@@ -197,7 +197,6 @@ describe("transactional runner settlement ingestion", () => {
 							owners,
 							errorCode: "process_lost",
 						},
-						beforeCommit: receipts.settled("old-runner"),
 					}),
 				).toBe(0);
 				expect(readOwners).toHaveBeenCalledOnce();
@@ -207,9 +206,6 @@ describe("transactional runner settlement ingestion", () => {
 				expect(
 					yield* sql`SELECT type FROM events WHERE type IN ('turn.completed', 'turn.error', 'turn.interrupted')`,
 				).toEqual([{ type: "turn.completed" }]);
-				expect(
-					yield* sql`SELECT retirement_state FROM claude_runner_cursors WHERE runner_id = 'old-runner'`,
-				).toEqual([{ retirement_state: "Complete" }]);
 			}).pipe(
 				Effect.provide(ProviderRuntimeIngestionLive),
 				Effect.provide(makePersistenceEffectLayer(":memory:", "test-project")),
@@ -217,10 +213,10 @@ describe("transactional runner settlement ingestion", () => {
 		);
 	});
 
-	it("rolls owner reads, appended terminals and receipt settlement back together, then retries", async () => {
+	it("rolls owner reads and appended terminals back with a failed commit, then retries", async () => {
 		await Effect.runPromise(
 			Effect.gen(function* () {
-				const { sql, receipts, owners } = yield* setupRunSettlement;
+				const { sql, owners } = yield* setupRunSettlement;
 				const ingestion = yield* ProviderRuntimeIngestionTag;
 				yield* sql`CREATE TABLE settlement_query (run_id TEXT)`;
 				const queriedOwners =
@@ -235,27 +231,17 @@ describe("transactional runner settlement ingestion", () => {
 				const failed = yield* Effect.exit(
 					ingestion.ingestBatch([], {
 						settleRuns: settlement,
-						beforeCommit: receipts
-							.settled("old-runner")
-							.pipe(
-								Effect.andThen(
-									sql.unsafe(
-										"SELECT missing_settlement_column FROM claude_runner_cursors",
-									),
-								),
-								Effect.asVoid,
-							),
+						beforeCommit: sql
+							.unsafe(
+								"SELECT missing_settlement_column FROM claude_runner_cursors",
+							)
+							.pipe(Effect.asVoid),
 					}),
 				);
 				expect(failed._tag).toBe("Failure");
 				expect(
 					yield* sql`SELECT status FROM provider_runs WHERE id = 'held-run'`,
 				).toEqual([{ status: "running" }]);
-				expect(
-					yield* sql`SELECT owned_run_ids, retirement_state FROM claude_runner_cursors WHERE runner_id = 'old-runner'`,
-				).toEqual([
-					{ owned_run_ids: '["held-run"]', retirement_state: "GonePending" },
-				]);
 				expect(yield* sql`SELECT COUNT(*) AS n FROM settlement_query`).toEqual([
 					{ n: 0 },
 				]);
@@ -263,17 +249,11 @@ describe("transactional runner settlement ingestion", () => {
 					yield* sql`SELECT COUNT(*) AS n FROM events WHERE type = 'turn.interrupted'`,
 				).toEqual([{ n: 0 }]);
 				expect(
-					yield* ingestion.ingestBatch([], {
-						settleRuns: settlement,
-						beforeCommit: receipts.settled("old-runner"),
-					}),
+					yield* ingestion.ingestBatch([], { settleRuns: settlement }),
 				).toBe(2);
 				expect(
 					yield* sql`SELECT status FROM provider_runs WHERE id = 'held-run'`,
 				).toEqual([{ status: "interrupted" }]);
-				expect(
-					yield* sql`SELECT owned_run_ids, retirement_state FROM claude_runner_cursors WHERE runner_id = 'old-runner'`,
-				).toEqual([{ owned_run_ids: "[]", retirement_state: "Complete" }]);
 				expect(yield* sql`SELECT COUNT(*) AS n FROM settlement_query`).toEqual([
 					{ n: 1 },
 				]);

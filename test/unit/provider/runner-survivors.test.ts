@@ -178,7 +178,6 @@ const setup = Effect.gen(function* () {
 			readonly registeredAt?: number;
 			readonly retired?: boolean;
 			readonly role?: "candidate";
-			readonly ownedRunIds?: readonly string[];
 		} = {},
 	) =>
 		Effect.gen(function* () {
@@ -203,13 +202,13 @@ const setup = Effect.gen(function* () {
 				...(entry.startTime ? { startTime: entry.startTime } : {}),
 			});
 			if (options.retired !== false)
-				yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, retired_at, pid, start_time, owned_run_ids, signalled)
-			VALUES (${id}, 0, ${entry.sessionId}, 1, ${pid}, ${entry.startTime ?? null}, ${JSON.stringify(options.ownedRunIds ?? [])}, ${options.signalled === false ? 0 : 1})`;
+				yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, retired_at, pid, start_time, signalled)
+			VALUES (${id}, 0, ${entry.sessionId}, 1, ${pid}, ${entry.startTime ?? null}, ${options.signalled === false ? 0 : 1})`;
 			else {
 				const [serving] =
 					yield* sql`SELECT runner_id FROM claude_runner_cursors WHERE session_id = ${entry.sessionId} AND retired_at IS NULL AND role = 'serving'`;
-				yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, pid, start_time, owned_run_ids, role)
-				VALUES (${id}, 0, ${entry.sessionId}, ${pid}, ${entry.startTime ?? null}, ${JSON.stringify(options.ownedRunIds ?? [])}, ${options.role ?? (serving ? "candidate" : "serving")})`;
+				yield* sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, pid, start_time, role)
+				VALUES (${id}, 0, ${entry.sessionId}, ${pid}, ${entry.startTime ?? null}, ${options.role ?? (serving ? "candidate" : "serving")})`;
 			}
 			return entry;
 		});
@@ -900,68 +899,62 @@ for (const race of [
 			),
 	);
 
-for (const retired of [true, false])
-	it.effect(
-		`recovers valid retired runners while retaining a malformed ${retired ? "retirement" : "ownership"} row`,
-		() => {
-			const warnings: unknown[] = [];
-			return run(
-				Effect.gen(function* () {
-					const f = yield* setup;
-					const bad = yield* f.register("badbadbadbad", 100_051, { retired });
-					if (retired)
-						yield* f.sql`UPDATE claude_runner_cursors SET signal_members = '{}' WHERE runner_id = ${bad.runnerId}`;
-					else
-						yield* f.sql`UPDATE claude_runner_cursors SET owned_run_ids = '{}' WHERE runner_id = ${bad.runnerId}`;
-					const before =
-						yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`;
-					const valid = yield* f.register("abcabcabcabc", 100_052, {
-						ownedRunIds: ["valid-run"],
-					});
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('valid-run', 's', 'running', 1)`;
-					yield* f.recover;
-					expect(f.connect).not.toHaveBeenCalled();
-					expect(
-						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'valid-run'`,
-					).toEqual([{ status: "running" }]);
-					f.processes.set(valid.pid, { state: "gone" });
-					yield* TestClock.adjust("60 seconds");
-					expect(
-						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'valid-run'`,
-					).toEqual([{ status: "error" }]);
-					expect(
-						yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`,
-					).toEqual(before);
-					expect(warnings).toHaveLength(1);
-					expect(warnings[0]).toEqual(
-						expect.arrayContaining([
-							expect.stringContaining(bad.runnerId),
-							expect.objectContaining({
-								_tag: "RunnerRetirementDecodeError",
-								runnerId: bad.runnerId,
-							}),
-						]),
-					);
-					f.processes.set(valid.pid, { state: "gone" });
-					yield* TestClock.adjust("10 seconds");
-					expect(
-						yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${valid.runnerId}`,
-					).toEqual([]);
-					expect(
-						yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`,
-					).toEqual(before);
-				}),
-			).pipe(
-				Effect.provide(
-					Logger.layer([
-						Logger.make((options) => {
-							if (options.logLevel === "Warn") warnings.push(options.message);
+it.effect(
+	"recovers valid retired runners while retaining a malformed retirement row",
+	() => {
+		const warnings: unknown[] = [];
+		return run(
+			Effect.gen(function* () {
+				const f = yield* setup;
+				const bad = yield* f.register("badbadbadbad", 100_051);
+				yield* f.sql`UPDATE claude_runner_cursors SET signal_members = '{}' WHERE runner_id = ${bad.runnerId}`;
+				const before =
+					yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`;
+				const valid = yield* f.register("abcabcabcabc", 100_052);
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('valid-run', 's', 'running', 1, ${valid.runnerId})`;
+				yield* f.recover;
+				expect(f.connect).not.toHaveBeenCalled();
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'valid-run'`,
+				).toEqual([{ status: "running" }]);
+				f.processes.set(valid.pid, { state: "gone" });
+				yield* TestClock.adjust("60 seconds");
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'valid-run'`,
+				).toEqual([{ status: "error" }]);
+				expect(
+					yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`,
+				).toEqual(before);
+				expect(warnings).toHaveLength(1);
+				expect(warnings[0]).toEqual(
+					expect.arrayContaining([
+						expect.stringContaining(bad.runnerId),
+						expect.objectContaining({
+							_tag: "RunnerRetirementDecodeError",
+							runnerId: bad.runnerId,
 						}),
 					]),
-				),
-			);
-		},
-	);
+				);
+				f.processes.set(valid.pid, { state: "gone" });
+				yield* TestClock.adjust("10 seconds");
+				expect(
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${valid.runnerId}`,
+				).toEqual([]);
+				expect(
+					yield* f.sql`SELECT * FROM claude_runner_cursors WHERE runner_id = ${bad.runnerId}`,
+				).toEqual(before);
+			}),
+		).pipe(
+			Effect.provide(
+				Logger.layer([
+					Logger.make((options) => {
+						if (options.logLevel === "Warn") warnings.push(options.message);
+					}),
+				]),
+			),
+		);
+	},
+);
 
 it.effect(
 	"keeps a corrupted watched retirement untouched until a later valid pass",
@@ -2569,7 +2562,7 @@ it.effect(
 );
 
 it.effect(
-	"STOP-INTENT a transferred run survives its former holder and legacy unheld runs still settle",
+	"STOP-INTENT a transferred run survives its former holder and an unheld run is not the runner's",
 	() =>
 		run(
 			Effect.gen(function* () {
@@ -2580,8 +2573,6 @@ it.effect(
 				yield* f.dispatch("held-run");
 				f.accept("held-run");
 				yield* f.sql`UPDATE provider_runs SET runner_id = 'replacement-holder' WHERE id = 'moved-run'`;
-				// Only pre-amendment rows use this compatibility cohort, and it can contain moved runs.
-				yield* f.sql`UPDATE claude_runner_cursors SET owned_run_ids = '["legacy-run"]' WHERE runner_id = ${f.runner.runnerId}`;
 				f.exitOnSignal();
 				const stopping = yield* f.stop.pipe(Effect.result, Effect.forkChild);
 				yield* TestClock.adjust("12 seconds");
@@ -2594,7 +2585,8 @@ it.effect(
 						status: "interrupted",
 						runner_id: f.runner.runnerId,
 					},
-					{ id: "legacy-run", status: "interrupted", runner_id: null },
+					// The holder is the one copy (CONTRACT.md 6.5): an unheld run is not this runner's.
+					{ id: "legacy-run", status: "running", runner_id: null },
 					{
 						id: "moved-run",
 						status: "running",
@@ -2603,14 +2595,14 @@ it.effect(
 				]);
 				expect(
 					yield* f.sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-				).toHaveLength(2);
+				).toHaveLength(1);
 				yield* TestClock.adjust("70 seconds");
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'moved-run'`,
 				).toEqual([{ status: "running" }]);
 				expect(
 					yield* f.sql`SELECT type FROM events WHERE type = 'turn.interrupted'`,
-				).toHaveLength(2);
+				).toHaveLength(1);
 			}),
 		),
 );
@@ -2810,14 +2802,12 @@ it.effect(
 		run(
 			Effect.gen(function* () {
 				const f = yield* setup;
-				const entry = yield* f.register("abababab3434", 100_032, {
-					ownedRunIds: ["old-run"],
-				});
-				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('old-run', 's', 'running', 1)`;
+				const entry = yield* f.register("abababab3434", 100_032);
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('old-run', 's', 'running', 1, ${entry.runnerId})`;
 				yield* f.sql`CREATE TABLE retirement_parent (id TEXT PRIMARY KEY)`;
 				yield* f.sql`CREATE TABLE retirement_commit_check (id TEXT REFERENCES retirement_parent(id) DEFERRABLE INITIALLY DEFERRED)`;
-				yield* f.sql`CREATE TRIGGER fail_retirement_settlement AFTER UPDATE OF owned_run_ids ON claude_runner_cursors
-			WHEN NEW.runner_id = 'abababab3434' AND NEW.owned_run_ids = '[]'
+				yield* f.sql`CREATE TRIGGER fail_retirement_settlement AFTER UPDATE OF status ON provider_runs
+			WHEN NEW.id = 'old-run' AND NEW.status <> 'running'
 			BEGIN INSERT INTO retirement_commit_check VALUES ('missing'); END`;
 				yield* f.recover;
 				f.processes.set(entry.pid, { state: "gone" });
@@ -2826,8 +2816,8 @@ it.effect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
 				).toEqual([{ status: "running" }]);
 				expect(
-					yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
-				).toEqual([{ owned_run_ids: '["old-run"]' }]);
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+				).toEqual([{ runner_id: entry.runnerId }]);
 				expect(
 					yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.interrupted'`,
 				).toEqual([]);
@@ -2855,10 +2845,8 @@ it.effect(
 		run(
 			Effect.gen(function* () {
 				const f = yield* setup;
-				const entry = yield* f.register("abababab5656", 100_033, {
-					ownedRunIds: ["old-run"],
-				});
-				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('old-run', 's', 'running', 1)`;
+				const entry = yield* f.register("abababab5656", 100_033);
+				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('old-run', 's', 'running', 1, ${entry.runnerId})`;
 				const writer = yield* makeCommitAndSignal;
 				const entered = yield* Deferred.make<void>();
 				const release = yield* Deferred.make<void>();
@@ -2880,19 +2868,19 @@ it.effect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
 				).toEqual([{ status: "running" }]);
 				expect(
-					yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
-				).toEqual([{ owned_run_ids: '["old-run"]' }]);
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+				).toEqual([{ runner_id: entry.runnerId }]);
 				f.processes.set(entry.pid, { state: "gone" });
 				yield* TestClock.adjust("20 seconds");
 				expect(
 					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
 				).toEqual([{ status: "error" }]);
 				expect(
-					yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
 				).toEqual([]);
 				yield* TestClock.adjust("2 minutes");
 				expect(
-					yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
+					yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${entry.runnerId}`,
 				).toEqual([]);
 				expect(
 					yield* f.sql`SELECT event_id FROM events WHERE type = 'turn.error'`,
@@ -3280,10 +3268,11 @@ for (const crossDirectory of [false, true])
 						registeredAt: 2,
 						retired: false,
 					});
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at) VALUES ('old-run', 's', 'running', 1, 1), ('new-run', 's', 'running', 2, 2)`;
+					// The holder is the one copy of which runs a runner owns (CONTRACT.md 6.5).
+					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, started_at, runner_id) VALUES ('old-run', 's', 'running', 1, 1, ${older.runnerId}), ('new-run', 's', 'running', 2, 2, NULL)`;
 					yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, run_id, provider_process_id, payload_json, status, attempt_count, requested_at, updated_at)
 					VALUES (1, 'old-command', 'test-project', 's', 'claude', 'send_turn', 'old-run', NULL, '{}', 'running', 1, 1, 1), (2, 'new-command', 'test-project', 's', 'claude', 'send_turn', 'new-run', NULL, '{}', 'running', 1, 2, 2)`;
-					yield* f.sql`UPDATE claude_runner_cursors SET role = 'candidate', sequence = 1, owned_run_ids = '["old-run"]' WHERE runner_id = ${older.runnerId}`;
+					yield* f.sql`UPDATE claude_runner_cursors SET role = 'candidate', sequence = 1 WHERE runner_id = ${older.runnerId}`;
 					yield* f.sql`UPDATE claude_runner_cursors SET role = 'serving', sequence = 1 WHERE runner_id = ${newer.runnerId}`;
 					let moved: RunnerRegistration | undefined;
 					if (crossDirectory) {
@@ -3399,14 +3388,12 @@ for (const processState of ["running", "gone", "zombie"] as const)
 			run(
 				Effect.gen(function* () {
 					const f = yield* setup;
-					const retired = yield* f.register("fafafafafafa", 100_014, {
-						ownedRunIds: ["old-run"],
-					});
+					const retired = yield* f.register("fafafafafafa", 100_014);
 					f.processes.set(retired.pid, {
 						state: processState,
 						startTime: "original",
 					});
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('old-run', 's', 'running', 1), ('new-run', 's', 'running', 2)`;
+					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, runner_id) VALUES ('old-run', 's', 'running', 1, ${retired.runnerId}), ('new-run', 's', 'running', 2, NULL)`;
 					yield* f.recover;
 					expect(
 						yield* f.sql`SELECT id, status FROM provider_runs ORDER BY id`,
@@ -3770,8 +3757,8 @@ for (const deniedTerm of [false, true])
 					expect(ending.pollUnsafe()).toMatchObject({ _tag: "Success" });
 					yield* Fiber.join(ending);
 					expect(
-						yield* f.sql`SELECT owned_run_ids FROM claude_runner_cursors WHERE runner_id = ${old?.runnerId ?? ""} AND retired_at IS NOT NULL`,
-					).toEqual([{ owned_run_ids: "[]" }]);
+						yield* f.sql`SELECT runner_id FROM claude_runner_cursors WHERE runner_id = ${old?.runnerId ?? ""} AND retired_at IS NOT NULL`,
+					).toEqual([{ runner_id: old?.runnerId }]);
 					expect(
 						yield* f.sql`SELECT status FROM provider_runs WHERE id = 'old-run'`,
 					).toEqual([{ status: "running" }]);
@@ -4633,9 +4620,7 @@ it.effect(
 		run(
 			Effect.gen(function* () {
 				const f = yield* setup;
-				const old = yield* f.register("legacy", 100_350, {
-					ownedRunIds: ["legacy-run"],
-				});
+				const old = yield* f.register("legacy", 100_350);
 				f.processes.set(old.pid, { state: "gone" });
 				yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('legacy-run', 's', 'running', 1)`;
 				yield* f.sql`INSERT INTO provider_command_outbox (request_sequence, command_id, project_key, session_id, provider_id, effect_type, payload_json, status, attempt_count, requested_at, updated_at, run_id, provider_process_id)
@@ -4667,6 +4652,39 @@ it.effect(
 				yield* TestClock.adjust("12 seconds");
 				expect(f.connect).not.toHaveBeenCalled();
 				expect(f.children.size).toBe(0);
+				// A run with no holder is not the reconciler's (CONTRACT.md 6.5);
+				// legacy recovery settles it.
+				expect(
+					yield* f.sql`SELECT status FROM provider_runs WHERE id = 'legacy-run'`,
+				).toEqual([{ status: "running" }]);
+				expect(
+					yield* f.manager.ownsRetirementCleanupEffect?.("s", "legacy-run") ??
+						Effect.die("missing retirement ownership seam"),
+				).toBe(false);
+				yield* RunnerRecovery.settleUnclaimedRunnerCommands(
+					f.sql,
+					new Set(),
+					"claude",
+					() => "claude",
+					(sinkId, turn, failure, beforeProject) =>
+						failRunnerTurn(
+							(output) =>
+								output.type === "event"
+									? ingestion
+											.ingestBatch([output.event], { beforeProject })
+											.pipe(
+												Effect.mapError((cause) =>
+													runnerFailure("test legacy recovery", cause),
+												),
+												Effect.as({}),
+											)
+									: Effect.succeed({}),
+							sinkId,
+							turn,
+							failure,
+							"claude",
+						),
+				);
 				expect(
 					yield* f.sql`SELECT status, runner_id, held_transmission FROM provider_runs WHERE id = 'legacy-run'`,
 				).toEqual([
@@ -5346,31 +5364,6 @@ it.effect(
 		),
 );
 
-for (const provenance of ["direct", "joined"] as const)
-	it.effect(
-		`R2 SQL legacy cohort ${provenance} survives missing event timestamps and malformed neighbors`,
-		() =>
-			run(
-				Effect.gen(function* () {
-					const f = yield* setup;
-					yield* f.register("cdcdcdcdcdcd", 100_901, {
-						ownedRunIds: [provenance === "direct" ? "old-owner" : "old-joined"],
-					});
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('old-owner','s','running',1)`;
-					if (provenance === "joined")
-						yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at, joined_into) VALUES ('old-joined','s','joined',1,'old-owner')`;
-					yield* f.sql`INSERT INTO claude_runner_cursors (runner_id, sequence, session_id, owned_run_ids, retired_at) VALUES ('bad-json',0,'s','not-json',1),('bad-object',0,'s','{"run":"object-only"}',1)`;
-					yield* f.sql`INSERT INTO provider_runs (id, session_id, status, requested_at) VALUES ('object-only','s','pending',1)`;
-					expect(yield* legacyRunnerRunQuery(f.sql, "s", "old-owner")).toBe(
-						true,
-					);
-					expect(yield* legacyRunnerRunQuery(f.sql, "s", "object-only")).toBe(
-						false,
-					);
-				}),
-			),
-	);
-
 for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
 	it.effect(
 		`R2 SQL legacy cohort cannot override modern ${reason} or pending owner provenance`,
@@ -5378,9 +5371,7 @@ for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
 			run(
 				Effect.gen(function* () {
 					const f = yield* setup;
-					yield* f.register("cececececece", 100_902, {
-						ownedRunIds: ["released", "modern"],
-					});
+					yield* f.register("cececececece", 100_902);
 					yield* f.sql`INSERT INTO provider_runs (id,session_id,status,requested_at) VALUES ('released','s','running',1),('modern','s','pending',1),('queued','s','pending',1),('discovered','s','running',1)`;
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([

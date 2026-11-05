@@ -37,7 +37,6 @@ for (const restart of [false, true])
 							signalLog: [],
 							signal: { tag: "None" },
 							retirement: { tag: "Watching" },
-							ownedRunIds: [],
 							retiredAt: 0,
 						};
 						const options = {

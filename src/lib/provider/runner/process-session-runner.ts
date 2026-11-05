@@ -647,7 +647,7 @@ export const makeProcessSessionRunner = (
 					JOIN provider_runs owner ON owner.id = COALESCE(requested.joined_into, requested.id) AND owner.session_id = requested.session_id
 					JOIN claude_runner_cursors stop ON stop.session_id = owner.session_id AND stop.retired_at IS NOT NULL
 					WHERE requested.session_id = ${sessionId} AND requested.id = ${runId}
-					AND (owner.runner_id = stop.runner_id OR (owner.runner_id IS NULL AND requested.id IN (SELECT value FROM json_each(stop.owned_run_ids))))
+					AND owner.runner_id = stop.runner_id
 				) AS held`.pipe(
 						Effect.map(([row]) => row?.held === 1),
 						Effect.catchCause((cause) =>

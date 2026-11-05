@@ -977,10 +977,7 @@ export const makeRunnerStopReconciler = (options: {
 					const [session] = yield* sql<{
 						id: string;
 					}>`SELECT id FROM sessions WHERE id = ${retirement.sessionId}`;
-					if (session) return false;
-					if (options.receipts)
-						yield* options.receipts.settled(retirement.runnerId);
-					return true;
+					return !session;
 				}
 				const commands = yield* heldCommands(sql, retirement);
 				for (const command of commands) {
@@ -1109,7 +1106,7 @@ export const makeRunnerStopReconciler = (options: {
 					JOIN provider_runs send_run ON send_run.id = command.run_id AND send_run.session_id = command.session_id
 					WHERE command.session_id = requested.session_id AND command.effect_type = 'send_turn'
 					AND COALESCE(send_run.joined_into, send_run.id) = owner.id))
-			AND (owner.runner_id = ${retirement.runnerId} OR (owner.runner_id IS NULL AND requested.id IN ${sql.in(retirement.ownedRunIds)}))`;
+			AND owner.runner_id = ${retirement.runnerId}`;
 				// Every retirement but the user's End ends its launched runs process
 				// lost, an error as on main (3.8, 3.11). An orphan's EndSession
 				// carries `orphan`, so only the user's End reads interrupted. A crash
@@ -1130,22 +1127,6 @@ export const makeRunnerStopReconciler = (options: {
 						"Provider process stopped",
 						(events) => sessionIngestion.ingestBatch(events),
 					);
-				// Exact cohorts in other sessions, such as subagent children, settle
-				// in their own session before the receipt-carrying commit below.
-				const foreignSessions = retirement.ownedRunIds.length
-					? yield* sql<{
-							session_id: string;
-						}>`SELECT DISTINCT session_id FROM provider_runs WHERE id IN ${sql.in(retirement.ownedRunIds)} AND session_id <> ${retirement.sessionId}`
-					: [];
-				for (const { session_id } of foreignSessions)
-					yield* sessionIngestion.ingestBatch([], {
-						settleRuns: {
-							sessionId: session_id,
-							reason: "Provider process stopped",
-							owners: owners(session_id),
-							...(errorCode ? { errorCode } : {}),
-						},
-					});
 				yield* sessionIngestion.ingestBatch([], {
 					settleRuns: {
 						sessionId: retirement.sessionId,
@@ -1153,9 +1134,6 @@ export const makeRunnerStopReconciler = (options: {
 						owners: owners(retirement.sessionId),
 						...(errorCode ? { errorCode } : {}),
 					},
-					...(options.receipts
-						? { beforeCommit: options.receipts.settled(retirement.runnerId) }
-						: {}),
 				});
 				return true;
 			});
@@ -1867,7 +1845,6 @@ export const makeRunnerRetirement = (
 				signalLog: identity.signalLog,
 				signal: identity.signal,
 				retirement: { tag: "Watching" },
-				ownedRunIds: [],
 				retiredAt: clock.currentTimeMillisUnsafe(),
 				stopReason: "runner retired",
 			};

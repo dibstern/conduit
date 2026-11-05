@@ -2559,58 +2559,39 @@ export const makeRunnerStarter = (options: RunnerStarterOptions) =>
 							...registration,
 							entry: undefined as RunnerChild | undefined,
 						}));
-						// Legacy cursor rows have no owned_run_ids, and send_turn never
-						// stores provider_process_id. Read the host's send journal before
-						// adoption revokes a losing registration, without replaying output.
-						const cursorOwners = receipts
-							? yield* receipts
-									.owners(identities.map((identity) => identity.runnerId))
-									.pipe(
-										Effect.mapError((cause) =>
-											runnerFailure("recover runner cohort", cause),
+						// send_turn never stores provider_process_id. Read the host's send
+						// journal before adoption revokes a losing registration, without
+						// replaying output.
+						const known = yield* Effect.forEach(identities, (identity) =>
+							Effect.gen(function* () {
+								const commands = yield* Effect.try({
+									try: () =>
+										runnerSendCommandsForProcess(
+											dirname(identity.socketPath),
+											identity.sessionId,
+											driver.driverKind,
+											identity.pid,
 										),
-									)
-							: { rows: [], rejected: [] };
-						const known = yield* Effect.forEach(
-							identities.filter(
-								(identity) =>
-									!cursorOwners.rejected.some(
-										(error) => error.runnerId === identity.runnerId,
-									),
-							),
-							(identity) =>
-								Effect.gen(function* () {
-									const commands = yield* Effect.try({
-										try: () =>
-											runnerSendCommandsForProcess(
-												dirname(identity.socketPath),
-												identity.sessionId,
-												driver.driverKind,
-												identity.pid,
+									catch: (cause) =>
+										runnerFailure("recover runner journal", cause),
+								});
+								const owned = yield* issuedSendTokens(
+									sql,
+									identity.sessionId,
+									commands,
+								);
+								return {
+									...identity,
+									ownedRunIds: [
+										...new Set([
+											...(identity.ownedRunIds ?? []),
+											...[...owned.values()].flatMap((command) =>
+												command?.runId ? [command.runId] : [],
 											),
-										catch: (cause) =>
-											runnerFailure("recover runner journal", cause),
-									});
-									const owned = yield* issuedSendTokens(
-										sql,
-										identity.sessionId,
-										commands,
-									);
-									return {
-										...identity,
-										ownedRunIds: [
-											...new Set([
-												...(identity.ownedRunIds ?? []),
-												...(cursorOwners.rows.find(
-													(owner) => owner.runnerId === identity.runnerId,
-												)?.ownedRunIds ?? []),
-												...[...owned.values()].flatMap((command) =>
-													command?.runId ? [command.runId] : [],
-												),
-											]),
-										],
-									};
-								}),
+										]),
+									],
+								};
+							}),
 						);
 						// Only durable serving rows restore process authority. Other hosts
 						// get a Starting grant solely to verify hello and retire the host.

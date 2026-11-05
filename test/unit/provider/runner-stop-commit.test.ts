@@ -34,7 +34,6 @@ const target = (runnerId: string, pid: number): RunnerRetirement => ({
 	signalLog: [],
 	signal: { tag: "None" },
 	retirement: { tag: "Watching" },
-	ownedRunIds: [],
 	retiredAt: 0,
 });
 const refusal: RunRelease = {

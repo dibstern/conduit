@@ -1706,6 +1706,19 @@ export const effectMigrationEntries = {
 				ON message_parts (parent_tool_id) WHERE parent_tool_id IS NOT NULL;
 		`);
 	}),
+	// The run's holder is the one copy of which runs a runner owns (CONTRACT.md 6.5, 32.13).
+	// A retirement waiting only on its old copy is complete.
+	"0093_drop_owned_run_ids": Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = yield* sql<{
+			name: string;
+		}>`PRAGMA table_info(claude_runner_cursors)`;
+		if (!columns.some(({ name }) => name === "owned_run_ids")) return;
+		yield* executeSqlStatements(`
+			UPDATE claude_runner_cursors SET retirement_state = 'Complete' WHERE retirement_state = 'GonePending';
+			ALTER TABLE claude_runner_cursors DROP COLUMN owned_run_ids;
+		`);
+	}),
 } satisfies Record<
 	string,
 	Effect.Effect<void, SqlError | Migrator.MigrationError, SqlClient.SqlClient>
