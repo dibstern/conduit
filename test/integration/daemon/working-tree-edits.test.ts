@@ -1,6 +1,8 @@
 import { execFileSync } from "node:child_process";
 import {
+	chmodSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -9,6 +11,7 @@ import {
 	realpathSync,
 	renameSync,
 	rmSync,
+	statSync,
 	symlinkSync,
 	writeFileSync,
 } from "node:fs";
@@ -59,9 +62,15 @@ const GIT_KEYS = [
 let root = "";
 /** Runs once, right after the guard's blob read: a save or a turn start in that window. */
 let afterGuardRead: Effect.Effect<unknown> | undefined;
+/** Runs once, right after a write re-hashes the live file: a save during the write. */
+let afterRehash: Effect.Effect<unknown> | undefined;
+/** Makes a reverse `git apply` refuse, as for a patch that does not fit. */
+let refuseReverseApply = false;
 
 beforeEach(() => {
 	afterGuardRead = undefined;
+	afterRehash = undefined;
+	refuseReverseApply = false;
 	for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
 	root = realpathSync(mkdtempSync(join(tmpdir(), "working-tree-edits-")));
 });
@@ -110,15 +119,31 @@ const racedSubprocess = Layer.effect(
 		return {
 			...base,
 			run: (command, args, options) =>
-				base.run(command, args, options).pipe(
-					Effect.tap(() => {
-						const race = args.includes("--batch-check=%(objectname)")
-							? afterGuardRead
-							: undefined;
-						if (race) afterGuardRead = undefined;
-						return race ?? Effect.void;
-					}),
-				),
+				refuseReverseApply && args[0] === "apply" && args.includes("-R")
+					? Effect.succeed({
+							stdout: "",
+							stderr: "error: patch failed",
+							exitCode: 1,
+						})
+					: base.run(command, args, options).pipe(
+							Effect.tap(() => {
+								if (args.includes("--batch-check=%(objectname)")) {
+									const race = afterGuardRead;
+									afterGuardRead = undefined;
+									return race ?? Effect.void;
+								}
+								// The write's re-hash of the live file names its path; the scratch blob's does not.
+								if (
+									args.includes("hash-object") &&
+									args.some((arg) => arg.startsWith("--path="))
+								) {
+									const race = afterRehash;
+									afterRehash = undefined;
+									return race ?? Effect.void;
+								}
+								return Effect.void;
+							}),
+						),
 		} satisfies SubprocessService;
 	}),
 );
@@ -679,4 +704,262 @@ it("stages one hunk of a non-UTF-8 file byte for byte", async () => {
 	expect(index).toEqual(
 		latin(original.replace("caf\xe9 1\n", "caf\xe9 \xfcn\n")),
 	);
+});
+
+// A hunk discard builds the new file from the blob the user saw and renames it
+// over the live file only while that file is still the one it hashed. Failure
+// modes: a save after the guard or during the write is overwritten or has the
+// hunk reversed onto it; two discards of one file both write; a file deleted,
+// or replaced by a symlink, a directory or a symlinked parent, is recreated or
+// written through; the mode or CRLF endings are lost; a refused or failed
+// write leaves part of itself or a temp file behind.
+const twoHunks = (text: string) =>
+	text
+		.replace("line 1\n", "line ONE\n")
+		.replace("line 28\n", "line TWENTY-EIGHT\n");
+const firstUndone = (text: string) =>
+	text.replace("line 28\n", "line TWENTY-EIGHT\n");
+const secondUndone = (text: string) => text.replace("line 1\n", "line ONE\n");
+const crlf = (text: string) => text.replaceAll("\n", "\r\n");
+const conduitLeftovers = (directory: string) =>
+	readdirSync(directory).filter((name) => name.includes("conduit"));
+
+it("refuses a hunk discard as Stale when the file is saved after the guard or during the write, keeping the saved bytes", async () => {
+	const repo = repository({ "guard.txt": lines(30), "write.txt": lines(30) });
+	for (const path of ["guard.txt", "write.txt"])
+		writeFileSync(join(repo, path), twoHunks(lines(30)));
+	// The save keeps the hunk, so reversing it onto the saved bytes would apply.
+	const saved = twoHunks(lines(30)).replace("line 15\n", "saved 15\n");
+	const save = (path: string) =>
+		Effect.sync(() => writeFileSync(join(repo, path), saved));
+
+	const outcomes = await run(
+		Effect.gen(function* () {
+			const { revision, files } = yield* list(repo);
+			const edit = (path: string) => {
+				const file = files[path];
+				if (!file) throw new Error(`${path} is not listed`);
+				return hunkEdit(repo, revision, file, 0);
+			};
+			afterGuardRead = save("guard.txt");
+			const afterGuard = yield* discard(edit("guard.txt"));
+			afterRehash = save("write.txt");
+			const duringWrite = yield* discard(edit("write.txt"));
+			return { afterGuard, duringWrite };
+		}),
+	);
+
+	const evidence = {
+		outcomes,
+		"guard.txt": read(join(repo, "guard.txt")),
+		"write.txt": read(join(repo, "write.txt")),
+		leftovers: [
+			...conduitLeftovers(repo),
+			...conduitLeftovers(join(repo, ".git")),
+		],
+		invalidated,
+	};
+	mkdirSync("test-results", { recursive: true });
+	writeFileSync(
+		"test-results/f02e9-11-hunk-discard-race.json",
+		`${JSON.stringify(evidence, null, 2)}\n`,
+	);
+	expect(evidence).toEqual({
+		outcomes: { afterGuard: "stale", duringWrite: "stale" },
+		"guard.txt": saved,
+		"write.txt": saved,
+		leftovers: [],
+		invalidated: [],
+	});
+});
+
+it("lets one of two concurrent hunk discards of one file through, for different hunks and for the same hunk", async () => {
+	const repo = repository({
+		"different.txt": lines(30),
+		"same.txt": lines(30),
+	});
+	for (const path of ["different.txt", "same.txt"])
+		writeFileSync(join(repo, path), twoHunks(lines(30)));
+
+	const { different, same } = await run(
+		Effect.gen(function* () {
+			const { revision, files } = yield* list(repo);
+			const edit = (path: string, index: number) => {
+				const file = files[path];
+				if (!file) throw new Error(`${path} is not listed`);
+				return hunkEdit(repo, revision, file, index);
+			};
+			const both = (a: WorkingTreeEdit, b: WorkingTreeEdit) =>
+				Effect.all([discard(a), discard(b)], { concurrency: "unbounded" });
+			return {
+				different: yield* both(
+					edit("different.txt", 0),
+					edit("different.txt", 1),
+				),
+				same: yield* both(edit("same.txt", 0), edit("same.txt", 0)),
+			};
+		}),
+	);
+
+	expect([...different].sort()).toEqual(["ok", "stale"]);
+	expect([...same].sort()).toEqual(["ok", "stale"]);
+	expect(read(join(repo, "different.txt"))).toBe(
+		different[0] === "ok" ? firstUndone(lines(30)) : secondUndone(lines(30)),
+	);
+	expect(read(join(repo, "same.txt"))).toBe(firstUndone(lines(30)));
+	expect(invalidated).toHaveLength(2);
+});
+
+it("refuses a hunk discard as Stale when the file is deleted, or replaced by a symlink, a directory or a symlinked parent after the guard", async () => {
+	const repo = repository({
+		"gone.txt": lines(30),
+		"linked.txt": lines(30),
+		"dir.txt": lines(30),
+		"sub/inner.txt": lines(30),
+	});
+	for (const path of ["gone.txt", "linked.txt", "dir.txt", "sub/inner.txt"])
+		writeFileSync(join(repo, path), twoHunks(lines(30)));
+	// Outside the folder, the same bytes the user saw, so only the path can tell them apart.
+	const outside = join(root, "outside");
+	mkdirSync(outside);
+	writeFileSync(join(outside, "inner.txt"), twoHunks(lines(30)));
+
+	const outcomes = await run(
+		Effect.gen(function* () {
+			const { revision, files } = yield* list(repo);
+			const raced = (path: string, race: () => void) => {
+				const file = files[path];
+				if (!file) throw new Error(`${path} is not listed`);
+				afterGuardRead = Effect.sync(race);
+				return discard(hunkEdit(repo, revision, file, 0));
+			};
+			return {
+				deleted: yield* raced("gone.txt", () => rmSync(join(repo, "gone.txt"))),
+				symlink: yield* raced("linked.txt", () => {
+					rmSync(join(repo, "linked.txt"));
+					symlinkSync(join(outside, "inner.txt"), join(repo, "linked.txt"));
+				}),
+				directory: yield* raced("dir.txt", () => {
+					rmSync(join(repo, "dir.txt"));
+					mkdirSync(join(repo, "dir.txt"));
+				}),
+				symlinkedParent: yield* raced("sub/inner.txt", () => {
+					renameSync(join(repo, "sub"), join(root, "sub-moved"));
+					symlinkSync(outside, join(repo, "sub"));
+				}),
+			};
+		}),
+	);
+
+	expect(outcomes).toEqual({
+		deleted: "stale",
+		symlink: "stale",
+		directory: "stale",
+		symlinkedParent: "stale",
+	});
+	expect(existsSync(join(repo, "gone.txt"))).toBe(false);
+	expect(lstatSync(join(repo, "linked.txt")).isSymbolicLink()).toBe(true);
+	expect(lstatSync(join(repo, "dir.txt")).isDirectory()).toBe(true);
+	expect(readdirSync(outside)).toEqual(["inner.txt"]);
+	expect(read(join(outside, "inner.txt"))).toBe(twoHunks(lines(30)));
+	expect(conduitLeftovers(repo)).toEqual([]);
+	expect(invalidated).toEqual([]);
+});
+
+it("keeps the file's mode and its line endings through a hunk discard", async () => {
+	const repo = repository({
+		".gitattributes": "crlf.txt text eol=crlf\n",
+		"crlf.txt": lines(30),
+		"raw.txt": crlf(lines(30)),
+		"tool.sh": lines(30),
+	});
+	chmodSync(join(repo, "tool.sh"), 0o700);
+	git(repo, "add", "tool.sh");
+	git(
+		repo,
+		"-c",
+		"user.name=Edit test",
+		"-c",
+		"user.email=edit@example.test",
+		"commit",
+		"-qm",
+		"Executable",
+	);
+	writeFileSync(join(repo, "crlf.txt"), crlf(twoHunks(lines(30))));
+	writeFileSync(join(repo, "raw.txt"), crlf(twoHunks(lines(30))));
+	writeFileSync(join(repo, "tool.sh"), twoHunks(lines(30)));
+
+	const outcomes = await run(
+		Effect.gen(function* () {
+			const { revision, files } = yield* list(repo);
+			const outcomes: Record<string, string> = {};
+			for (const path of ["crlf.txt", "raw.txt", "tool.sh"]) {
+				const file = files[path];
+				if (!file) throw new Error(`${path} is not listed`);
+				outcomes[path] = yield* discard(hunkEdit(repo, revision, file, 0));
+			}
+			return outcomes;
+		}),
+	);
+
+	expect(outcomes).toEqual({
+		"crlf.txt": "ok",
+		"raw.txt": "ok",
+		"tool.sh": "ok",
+	});
+	expect(read(join(repo, "crlf.txt"))).toBe(crlf(firstUndone(lines(30))));
+	expect(read(join(repo, "raw.txt"))).toBe(crlf(firstUndone(lines(30))));
+	expect(read(join(repo, "tool.sh"))).toBe(firstUndone(lines(30)));
+	expect(statSync(join(repo, "tool.sh")).mode & 0o777).toBe(0o700);
+});
+
+it("refuses a hunk discard whose reverse patch git refuses as Conflict, writing nothing", async () => {
+	const repo = repository({ "long.txt": lines(30) });
+	writeFileSync(join(repo, "long.txt"), twoHunks(lines(30)));
+
+	const refused = await run(
+		Effect.gen(function* () {
+			const { revision, files } = yield* list(repo);
+			const file = files["long.txt"];
+			if (!file) throw new Error("long.txt is not listed");
+			refuseReverseApply = true;
+			return yield* Effect.flatMap(WorkingTreeEdits, (edits) =>
+				edits.discard(hunkEdit(repo, revision, file, 0)),
+			).pipe(
+				Effect.flip,
+				Effect.map(({ reason, message }) => ({ reason, message })),
+			);
+		}),
+	);
+
+	expect(refused).toEqual({
+		reason: "conflict",
+		message: "The hunk no longer applies, so nothing was written",
+	});
+	expect(read(join(repo, "long.txt"))).toBe(twoHunks(lines(30)));
+	expect(conduitLeftovers(repo)).toEqual([]);
+	expect(invalidated).toEqual([]);
+});
+
+it("leaves the file whole and no temp file behind when the discarded hunk cannot be written", async () => {
+	const repo = repository({ "sub/long.txt": lines(30) });
+	writeFileSync(join(repo, "sub", "long.txt"), twoHunks(lines(30)));
+	chmodSync(join(repo, "sub"), 0o555);
+
+	try {
+		const result = await run(
+			Effect.gen(function* () {
+				const { revision, files } = yield* list(repo);
+				const file = files["sub/long.txt"];
+				if (!file) throw new Error("sub/long.txt is not listed");
+				return yield* discard(hunkEdit(repo, revision, file, 0));
+			}),
+		);
+		expect(result).toBe("unavailable");
+	} finally {
+		chmodSync(join(repo, "sub"), 0o755);
+	}
+	expect(read(join(repo, "sub", "long.txt"))).toBe(twoHunks(lines(30)));
+	expect(conduitLeftovers(join(repo, "sub"))).toEqual([]);
+	expect(invalidated).toEqual([]);
 });

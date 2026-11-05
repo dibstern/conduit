@@ -1,18 +1,23 @@
 import { randomUUID } from "node:crypto";
+import { lstatSync, realpathSync, renameSync } from "node:fs";
 import {
 	link,
 	lstat,
+	mkdir,
+	mkdtemp,
 	open,
 	readlink,
+	realpath,
 	rename,
 	rm,
 	symlink,
 	writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Effect, Semaphore } from "effect";
 import {
+	SESSION_DIFF_TOO_LARGE_BYTES,
 	SessionDiffEditError,
 	type SessionDiffPatch,
 } from "../../../contracts/session-diff.js";
@@ -20,7 +25,7 @@ import { FolderTimeline } from "../Services/folder-timeline.js";
 import { SessionActivityTag } from "../Services/session-activity.js";
 import { SessionDiff } from "../Services/session-diff.js";
 import { SessionGit } from "../Services/session-git.js";
-import { Subprocess } from "../Services/subprocess.js";
+import { Subprocess, type SubprocessOptions } from "../Services/subprocess.js";
 import type {
 	WorkingTreeEdit,
 	WorkingTreeEdits,
@@ -28,6 +33,18 @@ import type {
 import { baseEnv, copyIndex } from "./folder-timeline-layer.js";
 
 const GIT_TIMEOUT_MS = 10_000;
+
+// The snapshot hashes without LFS's filters (folder-timeline-layer CONFIG), so its blobs are read back the same way.
+const NO_LFS = [
+	"-c",
+	"filter.lfs.process=",
+	"-c",
+	"filter.lfs.clean=",
+	"-c",
+	"filter.lfs.smudge=",
+	"-c",
+	"filter.lfs.required=false",
+];
 
 const refuse = (reason: SessionDiffEditError["reason"], message: string) =>
 	new SessionDiffEditError({ reason, message });
@@ -45,15 +62,17 @@ const listable = (path: string) =>
 
 /**
  * One hunk of a one-file patch under that file's header, as the bytes git
- * printed. A header that renames, adds, deletes or changes the mode, or a
- * binary patch, has no hunk that applies on its own.
+ * printed. A header that renames, adds, deletes or changes the mode, a
+ * symlink's, or a binary patch, has no hunk that applies on its own.
  */
 const hunkPatch = ({ patch, notes }: SessionDiffPatch, index: number) => {
 	const [header = "", ...hunks] = patch.split(/^(?=@@ )/m);
 	const hunk = hunks[index];
 	if (
 		hunk === undefined ||
-		/^(?:old|new|deleted|rename|copy|similarity|dissimilarity) /m.test(header)
+		/^(?:old|new|deleted|rename|copy|similarity|dissimilarity) |^index \S+ 120000$/m.test(
+			header,
+		)
 	)
 		return undefined;
 	return Buffer.from(
@@ -84,15 +103,17 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 	const git = (
 		directory: string,
 		args: readonly string[],
-		env: NodeJS.ProcessEnv = {},
-		input?: string,
+		{
+			env = {},
+			...options
+		}: Pick<SubprocessOptions, "env" | "input" | "onStdout" | "maxBuffer"> = {},
 	) =>
 		subprocess
 			.run("git", args, {
 				cwd: directory,
 				env: { ...baseEnv(), ...env },
 				timeoutMs: GIT_TIMEOUT_MS,
-				...(input === undefined ? {} : { input }),
+				...options,
 			})
 			.pipe(
 				Effect.mapError((error) =>
@@ -162,6 +183,7 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			)
 				return yield* changed;
 			return {
+				store: snapshot.store,
 				prefix: snapshot.prefix,
 				paths,
 				tracked: paths.filter((_, n) => blobs[n * 2 + 1] !== null),
@@ -203,13 +225,18 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 				}),
 			);
 
+	const noLongerApplies = (error: SessionDiffEditError) =>
+		error.reason === "conflict"
+			? refuse("conflict", "The hunk no longer applies, so nothing was written")
+			: error;
+
 	/** `git apply` checks the whole patch before it writes, so a refusal writes nothing. */
 	const apply = (
 		directory: string,
 		prefix: string,
 		patch: Buffer,
 		args: readonly string[],
-		env?: NodeJS.ProcessEnv,
+		env: NodeJS.ProcessEnv,
 	) =>
 		Effect.acquireUseRelease(
 			fs(async () => {
@@ -227,17 +254,8 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 						...(prefix === "" ? [] : [`--directory=${prefix}`]),
 						file,
 					],
-					env,
-				).pipe(
-					Effect.mapError((error) =>
-						error.reason === "conflict"
-							? refuse(
-									"conflict",
-									"The hunk no longer applies, so nothing was written",
-								)
-							: error,
-					),
-				),
+					{ env },
+				).pipe(Effect.mapError(noLongerApplies)),
 			(file) => Effect.promise(() => rm(file, { force: true })),
 		);
 
@@ -329,8 +347,7 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 					target === undefined
 						? ["hash-object", `--path=${path}`, aside]
 						: ["hash-object", "--no-filters", "--stdin"],
-					{},
-					target,
+					target === undefined ? {} : { input: target },
 				).pipe(Effect.orElseSucceed(() => ""));
 				if (blob.trim() !== expected) return yield* stale(path);
 				yield* write;
@@ -339,6 +356,139 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			);
 			yield* fs(() => rm(aside, { force: true }));
 		}).pipe(Effect.uninterruptible);
+
+	/**
+	 * The blob the user saw with one hunk reversed, as working-tree bytes. The
+	 * patch applies in a scratch folder outside any repository, and the result
+	 * goes through the folder's filters from a scratch object store, so the live
+	 * file is never read and the repository is never written.
+	 */
+	const reversed = (
+		directory: string,
+		{ store, prefix }: { readonly store: string; readonly prefix: string },
+		path: string,
+		seen: string,
+		patch: Buffer,
+	) =>
+		Effect.acquireUseRelease(
+			fs(() => mkdtemp(join(tmpdir(), "conduit-hunk-"))),
+			(scratch) =>
+				Effect.gen(function* () {
+					const bytes: Buffer[] = [];
+					yield* timeline
+						.git(store, ["cat-file", "blob", seen], {
+							onStdout: (chunk) => bytes.push(chunk),
+						})
+						.pipe(Effect.mapError(() => stale(path)));
+					const file = join(scratch, "tree", path);
+					const objects = join(scratch, "objects");
+					yield* fs(async () => {
+						await mkdir(dirname(file), { recursive: true });
+						await mkdir(objects);
+						await writeFile(file, Buffer.concat(bytes));
+						await writeFile(join(scratch, "hunk.patch"), patch);
+					});
+					yield* git(
+						join(scratch, "tree"),
+						["apply", "-R", join(scratch, "hunk.patch")],
+						{ env: { GIT_CEILING_DIRECTORIES: dirname(scratch) } },
+					).pipe(Effect.mapError(noLongerApplies));
+					const env = { GIT_OBJECT_DIRECTORY: objects };
+					const blob = (yield* git(
+						directory,
+						["hash-object", "-w", "--no-filters", file],
+						{ env },
+					)).trim();
+					const content: Buffer[] = [];
+					// cat-file's --path is from the repository root; hash-object's is from the folder.
+					yield* git(
+						directory,
+						[
+							...NO_LFS,
+							"cat-file",
+							"--filters",
+							`--path=${prefix}${path}`,
+							blob,
+						],
+						{
+							env,
+							onStdout: (chunk) => content.push(chunk),
+							// A file with hunks is under the listing's size cap; line-ending filters can double it.
+							maxBuffer: 2 * SESSION_DIFF_TOO_LARGE_BYTES,
+						},
+					);
+					return Buffer.concat(content);
+				}),
+			(scratch) =>
+				Effect.promise(() => rm(scratch, { recursive: true, force: true })),
+		);
+
+	/**
+	 * Renames `content` over the file only while the file is still the one the
+	 * user saw: a regular file, inside the folder, hashing to `seen`, with the
+	 * same stat as when it was hashed. The temp file sits beside it with its
+	 * mode, so the rename is atomic and keeps the mode. The last look and the
+	 * rename are back-to-back syscalls; nothing in this process runs between them.
+	 */
+	const replace = (
+		directory: string,
+		path: string,
+		seen: string,
+		content: Buffer,
+	) =>
+		Effect.gen(function* () {
+			const file = join(directory, path);
+			const parent = join(yield* fs(() => realpath(directory)), dirname(path));
+			const hashed = lstatSync(file, { bigint: true, throwIfNoEntry: false });
+			if (!hashed?.isFile()) return yield* stale(path);
+			const blob = yield* git(directory, [
+				...NO_LFS,
+				"hash-object",
+				`--path=${path}`,
+				file,
+			]).pipe(Effect.orElseSucceed(() => ""));
+			if (blob.trim() !== seen) return yield* stale(path);
+			const temp = join(
+				dirname(file),
+				`.${basename(file)}.conduit-${randomUUID()}`,
+			);
+			const mode = Number(hashed.mode & 0o7777n);
+			yield* Effect.gen(function* () {
+				yield* fs(async () => {
+					const handle = await open(temp, "wx", mode);
+					try {
+						await handle.writeFile(content);
+						await handle.chmod(mode);
+						await handle.sync();
+					} finally {
+						await handle.close();
+					}
+				});
+				const unchanged = yield* Effect.try({
+					try: () => {
+						const now = lstatSync(file, {
+							bigint: true,
+							throwIfNoEntry: false,
+						});
+						if (
+							!now ||
+							now.dev !== hashed.dev ||
+							now.ino !== hashed.ino ||
+							now.mode !== hashed.mode ||
+							now.size !== hashed.size ||
+							now.mtimeNs !== hashed.mtimeNs ||
+							now.ctimeNs !== hashed.ctimeNs ||
+							realpathSync.native(dirname(file)) !== parent
+						)
+							return false;
+						renameSync(temp, file);
+						return true;
+					},
+					catch: (cause) => refuse("unavailable", String(cause)),
+				});
+				if (!unchanged) return yield* stale(path);
+			}).pipe(Effect.ensuring(Effect.promise(() => rm(temp, { force: true }))));
+		});
 
 	const edit =
 		(
@@ -368,28 +518,37 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 			});
 
 	return {
-		discard: edit((directory, request, { prefix, tracked }) => {
-			if (request.hunk)
-				return Effect.flatMap(hunkOf(request, request.hunk), (patch) =>
-					apply(directory, prefix, patch, ["-R"]),
-				);
+		discard: edit((directory, request, guarded) => {
+			const { expected, hunk } = request;
+			if (hunk)
+				return expected === null
+					? refuse(
+							"conflict",
+							`${request.path} has no such hunk to apply alone`,
+						)
+					: hunkOf(request, hunk).pipe(
+							Effect.flatMap((patch) =>
+								reversed(directory, guarded, request.path, expected, patch),
+							),
+							Effect.flatMap((content) =>
+								replace(directory, request.path, expected, content),
+							),
+						);
+			const { tracked } = guarded;
 			// Without --force git writes only paths that are absent, so a file saved since stays.
 			const checkout =
 				tracked.length === 0
 					? Effect.void
-					: git(
-							directory,
-							["checkout-index", "-z", "--stdin"],
-							{},
-							tracked.join("\0"),
-						).pipe(
+					: git(directory, ["checkout-index", "-z", "--stdin"], {
+							input: tracked.join("\0"),
+						}).pipe(
 							Effect.mapError((error) =>
 								error.reason === "conflict" ? stale(request.path) : error,
 							),
 						);
-			return request.expected === null
+			return expected === null
 				? checkout
-				: discardFile(directory, request.path, request.expected, checkout);
+				: discardFile(directory, request.path, expected, checkout);
 		}),
 		stage: edit((directory, request, { prefix, paths }) =>
 			request.hunk
@@ -403,17 +562,15 @@ export const makeWorkingTreeEdits = Effect.gen(function* () {
 				: swapIndex(directory, (index) =>
 						Effect.gen(function* () {
 							const env = { GIT_INDEX_FILE: index };
-							yield* git(
-								directory,
-								["add", "--all", "--", ...literal(paths)],
+							yield* git(directory, ["add", "--all", "--", ...literal(paths)], {
 								env,
-							);
+							});
 							// git add read the file again; a save since the guard leaves the index untouched.
 							const staged = new Map(
 								(yield* git(
 									directory,
 									["ls-files", "--stage", "-z", "--", ...literal(paths)],
-									env,
+									{ env },
 								))
 									.split("\0")
 									.filter((entry) => entry !== "")
