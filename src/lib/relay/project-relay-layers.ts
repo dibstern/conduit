@@ -79,7 +79,7 @@ import {
 import { SessionManagerOwner } from "../domain/daemon/Services/session-manager-owner.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
-import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
+import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -178,7 +178,10 @@ import {
 	SessionSetupOrOwn,
 	type SessionSetupTag,
 } from "../domain/relay/Services/session-setup.js";
-import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
+import {
+	type PollerStateTag,
+	StatusPollerCoreTag,
+} from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
 import { SessionWorkspaceHintReactorLive } from "../domain/relay/Services/session-workspace-hint.js";
 import { SessionWorkspaceHintStateTag } from "../domain/relay/Services/session-workspace-hint-state.js";
@@ -581,10 +584,19 @@ export function createProjectRelayLayers({
 	const sessionEventBusLayer = Option.isSome(sharedBus)
 		? Layer.sync(SessionEventBusTag, () => sharedBus.value)
 		: SessionEventBusLive;
+	const sharedRetention = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		EventRetentionSchedulerTag,
+	);
 	const persistenceEffectLayer = (
 		Option.isSome(sharedStore)
 			? makePersistenceProjectLayer(config.slug, {
 					sessionEventBusLayer,
+					retentionSchedulerLayer: Option.isSome(sharedRetention)
+						? Layer.succeedContext(
+								Context.make(EventRetentionSchedulerTag, sharedRetention.value),
+							)
+						: undefined,
 				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
 			: makePersistenceEffectLayer(
 					config.persistenceDbPath,
@@ -1139,7 +1151,15 @@ export function createProjectRelayLayers({
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
 		Layer.merge(
-			StatusPollerLive,
+			StatusPollerLive.pipe(
+				Layer.provide(
+					Layer.succeedContext(
+						Context.pick(StatusPollerCoreTag)(
+							config.daemonConfigContext ?? Context.empty(),
+						),
+					),
+				),
+			),
 			// The daemon runs the one alarm scheduler; a standalone relay runs its own.
 			Option.isSome(sharedStore)
 				? Layer.empty

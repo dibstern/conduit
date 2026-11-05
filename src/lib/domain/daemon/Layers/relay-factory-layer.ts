@@ -36,6 +36,7 @@ import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-sco
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
+import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { AlertsTag } from "../../relay/Services/alerts.js";
 import {
 	DaemonSessionQueryServiceError,
@@ -61,6 +62,7 @@ import { SessionEventBusTag } from "../../relay/Services/session-event-bus.js";
 import { SessionManagerServiceTag } from "../../relay/Services/session-manager-service.js";
 import { OverridesStateTag } from "../../relay/Services/session-overrides-state.js";
 import { SessionSetupTag } from "../../relay/Services/session-setup.js";
+import { StatusPollerCoreTag } from "../../relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../../relay/Services/session-workspace.js";
 import { PushManagerTag } from "../../server/Services/push-service.js";
 import { AccountDirectory } from "../Services/account-directory.js";
@@ -262,6 +264,10 @@ export const RelayFactoryLive = (
 			const configRef = yield* DaemonConfigRefTag;
 			const subprocess = yield* Subprocess;
 			const sessionGit = yield* Effect.serviceOption(SessionGit);
+			const retentionScheduler = yield* Effect.serviceOption(
+				EventRetentionSchedulerTag,
+			);
+			const statusPoller = yield* Effect.serviceOption(StatusPollerCoreTag);
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
 			);
@@ -683,6 +689,22 @@ export const RelayFactoryLive = (
 											Context.merge(
 												Option.isSome(sessionGit)
 													? Context.make(SessionGit, sessionGit.value)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(retentionScheduler)
+													? Context.make(
+															EventRetentionSchedulerTag,
+															retentionScheduler.value,
+														)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(statusPoller)
+													? Context.make(
+															StatusPollerCoreTag,
+															statusPoller.value,
+														)
 													: Context.empty(),
 											),
 											Context.merge(daemonServices),

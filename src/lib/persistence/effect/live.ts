@@ -12,13 +12,10 @@ import {
 	AttachmentStoreLive,
 	type AttachmentStoreTag,
 } from "../../domain/persistence/Services/attachment-store.js";
+import { EventRetentionTag } from "../../domain/persistence/Services/event-retention.js";
 import {
-	EventRetentionLive,
-	type EventRetentionTag,
-} from "../../domain/persistence/Services/event-retention.js";
-import {
-	EventRetentionSchedulerLive,
-	type EventRetentionSchedulerTag,
+	EventRetentionSchedulerTag,
+	makeEventRetentionSchedulerLive,
 } from "../../domain/persistence/Services/event-retention-scheduler.js";
 import {
 	makePersistenceService,
@@ -217,6 +214,8 @@ export function makePersistenceStoreLayer(
 type PersistenceProjectOptions = {
 	// Use the same shared bus as ingestion so publishers meet subscribers.
 	sessionEventBusLayer?: Layer.Layer<SessionEventBusTag> | undefined;
+	// The daemon's one scheduler; a store opened alone schedules its own project.
+	retentionSchedulerLayer?: Layer.Layer<EventRetentionSchedulerTag> | undefined;
 };
 
 export type PersistenceDaemonContext =
@@ -281,9 +280,15 @@ export function makePersistenceProjectLayer(
 		Layer.effect(PersistenceServiceTag, makePersistenceService),
 	).pipe(Layer.provide(projectLayer));
 	const baseLayer = Layer.merge(projectLayer, persistenceServiceLayer);
-	const retentionLayer = EventRetentionSchedulerLive.pipe(
-		Layer.provideMerge(EventRetentionLive.pipe(Layer.provideMerge(baseLayer))),
-	);
+	const schedulerLayer =
+		options.retentionSchedulerLayer ??
+		makeEventRetentionSchedulerLive(Effect.succeed([projectId]));
+	const retentionLayer = Layer.effect(
+		EventRetentionTag,
+		Effect.flatMap(EventRetentionSchedulerTag, (scheduler) =>
+			scheduler.retention(projectId),
+		),
+	).pipe(Layer.provideMerge(schedulerLayer));
 	const daemonLayer = makePersistenceDaemonLayer(options);
 	const eventStoreLayer = Layer.effect(
 		EventStoreEffectTag,

@@ -1,4 +1,5 @@
 import {
+	Array as Arr,
 	type Cause,
 	Duration,
 	Effect,
@@ -7,12 +8,18 @@ import {
 	Option,
 	PubSub,
 	Ref,
+	Semaphore,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
+import type { SessionScope } from "../../../contracts/session-scope.js";
 import * as Failure from "../../../effect/failure-classification.js";
 import type { SessionStatus } from "../../../instance/sdk-types.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import {
+	type CommitAndSignal,
+	makeCommitAndSignal,
+	makeUnboundCommitAndSignal,
+} from "../../../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
@@ -22,14 +29,8 @@ import {
 	type SessionStatusValue,
 } from "../../../persistence/events.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
-import { PendingInteractionServiceTag } from "../Services/pending-interaction-service.js";
 import { RelayStatusSnapshotTag } from "../Services/relay-status-snapshot.js";
-import {
-	ConfigTag,
-	LiveTaskListTag,
-	LoggerTag,
-	StatusPollerTag,
-} from "../Services/services.js";
+import { ConfigTag, LoggerTag, StatusPollerTag } from "../Services/services.js";
 import { SessionManagerStateTag } from "../Services/session-manager-state.js";
 import {
 	DEFAULT_RECONCILIATION_INTERVAL_MS,
@@ -40,7 +41,9 @@ import {
 	PollerStateTag,
 	poll,
 	type ReconciliationDeps,
+	runReconciliation,
 	type SessionStatusPollerService,
+	StatusPollerCoreTag,
 	strandedChildren,
 } from "../Services/session-status-poller.js";
 
@@ -48,75 +51,44 @@ type StatusPollerChangedCallback = Parameters<
 	SessionStatusPollerService["on"]
 >[1];
 
-export const StatusPollerLive: Layer.Layer<
-	StatusPollerTag,
-	never,
-	| ConfigTag
-	| LoggerTag
-	| PollerPubSubTag
-	| PollerStateTag
-	| RelayStatusSnapshotTag
-	| SessionActivityTag
-	| SessionManagerStateTag
-	| PendingInteractionServiceTag
-	| ReadQueryEffectTag
-	| EventStoreEffectTag
-	| ProjectionRunnerEffectTag
-	| SqlClient.SqlClient
-> = Layer.effect(
-	StatusPollerTag,
+/**
+ * One status poller per daemon (82tn.16), over the sessions of the projects `projects` names: a
+ * project no tab has opened since a restart is settled too, and a removed one is left alone
+ * (82tn.14). It polls once before it serves, then every `interval`.
+ */
+export const makeStatusPollerCore = (options: {
+	readonly projects: Effect.Effect<readonly string[]>;
+	readonly interval: Duration.Duration;
+	readonly commit: CommitAndSignal;
+}) =>
 	Effect.gen(function* () {
-		const config = yield* ConfigTag;
-		const log = yield* LoggerTag;
-		const stateRef = yield* PollerStateTag;
-		const pubsub = yield* PollerPubSubTag;
-		const statusSnapshot = yield* RelayStatusSnapshotTag;
-		const sessionState = yield* SessionManagerStateTag;
-		const pendingInteractions = yield* PendingInteractionServiceTag;
-		const readQuery = yield* ReadQueryEffectTag;
-		const eventStore = yield* EventStoreEffectTag;
-		const projectionRunner = yield* ProjectionRunnerEffectTag;
 		const sql = yield* SqlClient.SqlClient;
-		const liveTaskList = yield* Effect.serviceOption(LiveTaskListTag);
+		const readQuery = yield* ReadQueryEffectTag;
 		const activity = yield* SessionActivityTag;
-		// The corrective event is the poller's only write, and it moves the read
-		// model, so it goes through the seam that projects and announces together.
-		const commitAndSignal = yield* makeCommitAndSignal.pipe(
-			Effect.provideService(SqlClient.SqlClient, sql),
-			Effect.provideService(EventStoreEffectTag, eventStore),
-			Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
-		);
-		const reconciliationDeps: ReconciliationDeps = {
+		const polled = yield* PubSub.sliding<void>(1);
+		const lock = yield* Semaphore.make(1);
+		const reconciliation = (
+			projectIds: SessionScope["projectIds"],
+		): ReconciliationDeps => ({
 			getProjectedSessions: () =>
-				readQuery.getSessionsForReconciliation(
-					{ projectIds: [eventStore.projectId] },
-					[],
-				),
+				readQuery.getSessionsForReconciliation({ projectIds }, []),
 			getStrandedChildren: () =>
-				strandedChildren({ projectIds: [eventStore.projectId] }).pipe(
+				strandedChildren({ projectIds }).pipe(
 					Effect.provideService(SqlClient.SqlClient, sql),
 				),
-			liveListOf: (sessionId) =>
-				Option.isSome(liveTaskList) ? liveTaskList.value(sessionId) : undefined,
+			liveListOf: activity.background.liveListOf,
+			// The store's open prompts; an async question does not hold its session.
 			getSessionsAwaitingUser: () =>
-				Effect.all([
-					pendingInteractions.listPendingQuestions(),
-					pendingInteractions.listPendingPermissions(),
-				]).pipe(
-					Effect.map(
-						([questions, permissions]) =>
-							new Set(
-								[
-									...questions.filter(
-										(question) => question.delivery !== "async",
-									),
-									...permissions,
-								].map((p) => p.sessionId),
-							),
-					),
+				sql<{
+					session_id: string;
+				}>`SELECT DISTINCT pa.session_id FROM pending_approvals pa
+					JOIN sessions s ON s.id = pa.session_id
+					WHERE pa.status = 'pending' AND s.project_id IN ${sql.in(projectIds)}
+						AND COALESCE(json_extract(pa.details, '$.delivery'), '') <> 'async'`.pipe(
+					Effect.map((rows) => new Set(rows.map((row) => row.session_id))),
 				),
 			injectCorrectiveEvent: (sessionId: string, status: string) =>
-				commitAndSignal([
+				options.commit([
 					canonicalEvent(
 						"session.status",
 						sessionId,
@@ -135,7 +107,109 @@ export const StatusPollerLive: Layer.Layer<
 						},
 					),
 				]),
-		};
+		});
+		const poll = Effect.gen(function* () {
+			const projectIds = yield* options.projects;
+			if (Arr.isReadonlyArrayNonEmpty(projectIds))
+				yield* runReconciliation(reconciliation(projectIds));
+			yield* PubSub.publish(polled, undefined);
+		}).pipe(
+			lock.withPermits(1),
+			Effect.catchCause((cause) =>
+				Failure.isInterruptedOnly(cause)
+					? Effect.interrupt
+					: Effect.logWarning(
+							`Status poller poll failed: ${Failure.renderCause(cause)}`,
+						),
+			),
+		);
+		const isProcessing = (projectId: string) =>
+			sql<{
+				id: string;
+			}>`SELECT id FROM sessions WHERE project_id = ${projectId}`.pipe(
+				Effect.map((rows) =>
+					rows.some(({ id }) => {
+						const { foreground, background } = activity.background.activityOf(
+							id,
+							{ approvals: 0, questions: 0 },
+						);
+						return foreground === "working" || background === "work";
+					}),
+				),
+				Effect.catch((cause) =>
+					Effect.as(
+						Effect.logWarning(
+							`Status poller processing read failed: ${String(cause)}`,
+						),
+						false,
+					),
+				),
+			);
+		yield* poll;
+		yield* Effect.forkScoped(
+			Effect.forever(Effect.sleep(options.interval).pipe(Effect.andThen(poll))),
+		);
+		return { poll, polled, isProcessing };
+	});
+
+export const makeStatusPollerCoreLive = (
+	projects: Effect.Effect<readonly string[]>,
+) =>
+	Layer.effect(
+		StatusPollerCoreTag,
+		Effect.flatMap(makeUnboundCommitAndSignal, (commit) =>
+			makeStatusPollerCore({
+				projects,
+				interval: Duration.millis(DEFAULT_RECONCILIATION_INTERVAL_MS),
+				commit,
+			}),
+		),
+	);
+
+export const StatusPollerLive: Layer.Layer<
+	StatusPollerTag,
+	never,
+	| ConfigTag
+	| LoggerTag
+	| PollerPubSubTag
+	| PollerStateTag
+	| RelayStatusSnapshotTag
+	| SessionActivityTag
+	| SessionManagerStateTag
+	| ReadQueryEffectTag
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag
+	| SqlClient.SqlClient
+> = Layer.effect(
+	StatusPollerTag,
+	Effect.gen(function* () {
+		const config = yield* ConfigTag;
+		const log = yield* LoggerTag;
+		const stateRef = yield* PollerStateTag;
+		const pubsub = yield* PollerPubSubTag;
+		const statusSnapshot = yield* RelayStatusSnapshotTag;
+		const sessionState = yield* SessionManagerStateTag;
+		const readQuery = yield* ReadQueryEffectTag;
+		const eventStore = yield* EventStoreEffectTag;
+		const projectionRunner = yield* ProjectionRunnerEffectTag;
+		const sql = yield* SqlClient.SqlClient;
+		const activity = yield* SessionActivityTag;
+		const interval = Duration.millis(
+			config.statusPollerInterval ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
+		);
+		// The daemon's one poller settles stale sessions; a relay with no daemon runs its own.
+		const shared = yield* Effect.serviceOption(StatusPollerCoreTag);
+		const core = Option.isSome(shared)
+			? shared.value
+			: yield* makeStatusPollerCore({
+					projects: Effect.succeed([eventStore.projectId]),
+					interval,
+					commit: yield* makeCommitAndSignal.pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+						Effect.provideService(EventStoreEffectTag, eventStore),
+						Effect.provideService(ProjectionRunnerEffectTag, projectionRunner),
+					),
+				});
 		const sessionProviders = yield* Ref.make<ReadonlyMap<string, string>>(
 			new Map(),
 		);
@@ -186,13 +260,7 @@ export const StatusPollerLive: Layer.Layer<
 		const pollerPubSub = <A, E, R>(
 			effect: Effect.Effect<A, E, R | PollerPubSubTag>,
 		) => effect.pipe(Effect.provideService(PollerPubSubTag, pubsub));
-		const pollDeps = {
-			getRawStatuses: readProjectedStatuses,
-			reconciliation: reconciliationDeps,
-		};
-		const interval = Duration.millis(
-			config.statusPollerInterval ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
-		);
+		const pollDeps = { getRawStatuses: readProjectedStatuses };
 		const subscribers = yield* Ref.make<
 			ReadonlyArray<StatusPollerChangedCallback>
 		>([]);
@@ -204,19 +272,9 @@ export const StatusPollerLive: Layer.Layer<
 				: Effect.sync(() =>
 						statusLog.warn(`${prefix}: ${Failure.renderCause(cause)}`),
 					);
-		// 8.1: the project is processing while any session's activity has a turn or work running.
-		const updateStatusSnapshot = Effect.gen(function* () {
-			const sessions = yield* Ref.get(sessionProviders);
-			yield* statusSnapshot.setIsProcessing(
-				[...sessions.keys()].some((sessionId) => {
-					const { foreground, background } = activity.background.activityOf(
-						sessionId,
-						{ approvals: 0, questions: 0 },
-					);
-					return foreground === "working" || background === "work";
-				}),
-			);
-		});
+		const updateStatusSnapshot = core
+			.isProcessing(eventStore.projectId)
+			.pipe(Effect.flatMap(statusSnapshot.setIsProcessing));
 		const runPoll = poll(pollDeps).pipe(
 			pollerState,
 			pollerPubSub,
@@ -225,7 +283,7 @@ export const StatusPollerLive: Layer.Layer<
 				reportFailure("Status poller poll failed", cause),
 			),
 		);
-		const forkPoll = runPoll.pipe(
+		const forkPoll = core.poll.pipe(
 			Effect.forkChild({ uninterruptible: "inherit" }),
 			Effect.asVoid,
 		);
@@ -273,17 +331,17 @@ export const StatusPollerLive: Layer.Layer<
 			),
 			{ uninterruptible: "inherit" },
 		);
+		// This project's view re-reads after each of the poller's polls.
 		yield* Effect.forkScoped(
-			Effect.forever(
-				Effect.sleep(interval).pipe(
-					Effect.andThen(
+			Effect.scoped(
+				Effect.gen(function* () {
+					const polls = yield* PubSub.subscribe(core.polled);
+					yield* Stream.runForEach(Stream.fromSubscription(polls), () =>
 						Effect.gen(function* () {
-							if (yield* Ref.get(started)) {
-								yield* runPoll;
-							}
+							if (yield* Ref.get(started)) yield* runPoll;
 						}),
-					),
-				),
+					);
+				}),
 			),
 			{ uninterruptible: "inherit" },
 		);

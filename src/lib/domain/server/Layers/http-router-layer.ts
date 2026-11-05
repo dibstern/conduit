@@ -33,6 +33,7 @@ import {
 	RelayCacheTag,
 } from "../../daemon/Services/relay-cache.js";
 import { AttachmentStoreTag } from "../../persistence/Services/attachment-store.js";
+import { StatusPollerCoreTag } from "../../relay/Services/session-status-poller.js";
 import { PushManagerTag } from "../Services/push-service.js";
 import { StaticDirTag } from "../Services/static-file-handler.js";
 import {
@@ -173,8 +174,9 @@ const makeDaemonProjectsReader = (deps: {
 	readonly configRef: Ref.Ref<DaemonRuntimeConfig>;
 	readonly projectRegistry: Ref.Ref<HashMap.HashMap<string, ProjectState>>;
 	readonly relayCache: RelayCache;
+	readonly statusPoller: Option.Option<StatusPollerCoreTag["Service"]>;
 }) => {
-	const { configRef, projectRegistry, relayCache } = deps;
+	const { configRef, projectRegistry, relayCache, statusPoller } = deps;
 	return () =>
 		Effect.gen(function* () {
 			const config = yield* Ref.get(configRef);
@@ -201,7 +203,10 @@ const makeDaemonProjectsReader = (deps: {
 						...(entry._tag === "Error" && { error: entry.error }),
 						clients: relayStatus?.clients ?? 0,
 						sessions,
-						isProcessing: relayStatus?.isProcessing ?? false,
+						// The daemon's poller answers for a project no tab has opened too.
+						isProcessing: Option.isSome(statusPoller)
+							? yield* statusPoller.value.isProcessing(slug)
+							: (relayStatus?.isProcessing ?? false),
 					} satisfies RouterProjectInfo;
 				}),
 			);
@@ -242,6 +247,7 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 			const tls = yield* TlsCertTag;
 			const projectRegistry = yield* ProjectRegistryTag;
 			const relayCache = yield* RelayCacheTag;
+			const statusPoller = yield* Effect.serviceOption(StatusPollerCoreTag);
 			const pushManager = yield* PushManagerTag;
 			const legacyPushManager = yield* pushManager.getLegacyManager;
 			return yield* buildHttpRouterRequestHandlerEffect({
@@ -268,6 +274,7 @@ export const makeDaemonHttpRouterLive = (staticDir: string) =>
 					configRef,
 					projectRegistry,
 					relayCache,
+					statusPoller,
 				}),
 				getHealthResponse: () => daemonHandle.getStatus(),
 				pushManager: Option.getOrUndefined(legacyPushManager),
