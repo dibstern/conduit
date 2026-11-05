@@ -58,7 +58,6 @@ export interface RunnerChild {
 		readonly declaresLogin: boolean;
 	};
 	readonly interactionSinks?: ReadonlyMap<string, string>;
-	readonly ownedRunIds?: ReadonlySet<string>;
 	/** One verified terminal delivery, including its release-sink unwind. */
 	readonly sourceDelivery?: RunnerSourceDelivery | undefined;
 	readonly upgrade: RunnerUpgrade;
@@ -470,11 +469,6 @@ export const upgradeState = (
 export const touch = (entry: RunnerChild): number => {
 	const upgrade: Writable<RunnerUpgrade> = entry.upgrade;
 	return ++upgrade.activity;
-};
-
-export const ownRun = (entry: RunnerChild, runId: string) => {
-	const writable: Writable<RunnerChild> = entry;
-	writable.ownedRunIds = new Set(entry.ownedRunIds).add(runId);
 };
 
 export const ownPendingSends = (

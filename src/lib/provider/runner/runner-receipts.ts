@@ -296,7 +296,6 @@ export interface RunnerCursorIdentity {
 	readonly driverKind?: string | undefined;
 	readonly pid?: number | undefined;
 	readonly startTime?: string | undefined;
-	readonly ownedRunIds?: readonly string[] | undefined;
 	readonly reaper?: RunnerMember | undefined;
 	/** Recorded at hello; see journalsBeforeExecution. */
 	readonly journalsBeforeExecution?: boolean | undefined;

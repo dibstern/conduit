@@ -34,7 +34,6 @@ export interface RunnerRegistration {
 	readonly startTime?: string;
 	readonly registeredAt?: number;
 	readonly signalled?: boolean;
-	readonly ownedRunIds?: readonly string[];
 }
 
 export interface RunnerProcessTable {
@@ -486,10 +485,6 @@ function discoverRunnersInDirectory(
 						? value["registeredAt"]
 						: lstatSync(`${socketPath}.json`).mtimeMs,
 				...(value["signalled"] === true ? { signalled: true } : {}),
-				...(Array.isArray(value["ownedRunIds"]) &&
-				value["ownedRunIds"].every((id) => typeof id === "string")
-					? { ownedRunIds: value["ownedRunIds"] }
-					: {}),
 			});
 		} catch {
 			removeRunnerDiscovery(socketPath);

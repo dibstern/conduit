@@ -1816,7 +1816,6 @@ export const makeRunnerRetirement = (
 				registeredAt: entry.registeredAt ?? 0,
 				socketPath: entry.socketPath,
 				attachmentId: entry.attachmentId,
-				ownedRunIds: [...(entry.ownedRunIds ?? [])],
 				signalled: retirement !== undefined && retirement.signal.tag !== "None",
 				signal: retirement?.signal ?? { tag: "None" },
 				entry,

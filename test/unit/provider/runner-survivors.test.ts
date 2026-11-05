@@ -5395,22 +5395,6 @@ for (const reason of ["ResumeRejected", "JournalAbsent"] as const)
 							transmission: 1,
 						}),
 					]);
-					// Discovery-only ownership cannot enter this SQL-backed classification.
-					const directory = prepareRunnerDirectory(f.root, f.root);
-					const runnerId = "cfcfcfcfcfcf";
-					const socketPath = join(directory, runnerId);
-					writeFileSync(
-						`${socketPath}.json`,
-						JSON.stringify({
-							runnerId,
-							sessionId: "s",
-							driverKind: "claude",
-							socketPath,
-							pid: 100_903,
-							buildId: runnerBuildId(),
-							ownedRunIds: ["discovered"],
-						}),
-					);
 					for (const runId of ["released", "modern", "queued", "discovered"])
 						expect(yield* legacyRunnerRunQuery(f.sql, "s", runId)).toBe(false);
 				}),

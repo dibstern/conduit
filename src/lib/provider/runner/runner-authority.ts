@@ -46,7 +46,6 @@ export interface RunnerIdentity<A> {
 	readonly signalLog: readonly RunnerSignalAttempt[];
 	readonly registeredAt: number;
 	readonly socketPath: string | undefined;
-	readonly ownedRunIds: readonly string[];
 	readonly signalled: boolean;
 	readonly signal: RunnerSignal;
 	readonly attachmentId: string | undefined;
@@ -126,7 +125,6 @@ export const makeRunnerAuthority = <A>(
 				signalLog: Object.freeze([...(identity.signalLog ?? [])]),
 				registeredAt: identity.registeredAt ?? 0,
 				socketPath: identity.socketPath,
-				ownedRunIds: Object.freeze([...(identity.ownedRunIds ?? [])]),
 				signalled: identity.signalled ?? false,
 				signal: identity.signal?.members
 					? Object.freeze({
@@ -446,10 +444,7 @@ export const makeRunnerAuthority = <A>(
 			},
 			captureBeforeRevoke: (
 				runnerId: string,
-				evidence: Pick<
-					RunnerIdentity<A>,
-					"pid" | "startTime" | "ownedRunIds" | "signalled"
-				> & {
+				evidence: Pick<RunnerIdentity<A>, "pid" | "startTime" | "signalled"> & {
 					readonly signal?: RunnerSignal;
 					readonly reaper?: RunnerMember | undefined;
 					readonly members?: readonly RunnerMember[];
@@ -468,7 +463,6 @@ export const makeRunnerAuthority = <A>(
 						...record.identity,
 						pid: evidence.pid,
 						startTime: evidence.startTime,
-						ownedRunIds: evidence.ownedRunIds,
 						signalled: record.identity.signalled || evidence.signalled,
 						signal: evidence.signal ?? record.identity.signal,
 						reaper: evidence.reaper ?? record.identity.reaper,

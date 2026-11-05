@@ -35,7 +35,7 @@ it.effect(
 		Effect.gen(function* () {
 			const authority = yield* makeRunnerAuthority();
 			const starting = (yield* authority.adopt(
-				[{ runnerId: "warm", sessionId: "s", ownedRunIds: ["run"] }],
+				[{ runnerId: "warm", sessionId: "s" }],
 				"starting",
 			)).grants.get("warm");
 			if (!starting) return yield* Effect.die("missing starting grant");
@@ -58,7 +58,7 @@ it.effect(
 				),
 			).toBe("fact");
 			const live = (yield* authority.adopt(
-				[{ runnerId: "live", sessionId: "s", ownedRunIds: ["run"] }],
+				[{ runnerId: "live", sessionId: "s" }],
 				"live",
 			)).grants.get("live");
 			if (!live) return yield* Effect.die("missing live grant");
@@ -76,7 +76,7 @@ it.effect(
 				const record = authority.records.get(runnerId);
 				expect(record?.tag._tag).toBe("Retired");
 				expect(record).not.toHaveProperty("cleanup");
-				expect(record?.identity.ownedRunIds).toEqual(["run"]);
+				expect(record?.identity.sessionId).toBe("s");
 				expect(
 					Option.isNone(
 						yield* authority.guarded(grant, { kind: "output" }, () => ++writes),
@@ -299,7 +299,6 @@ it.effect(
 				attachmentId: "foreign",
 				pid: 42,
 				startTime: "started",
-				ownedRunIds: ["owned"],
 				signalled: true,
 			};
 			expect(authority.captureBeforeRevoke("r", evidence)).toBe(true);
@@ -310,7 +309,6 @@ it.effect(
 				attachmentId: "attached",
 				pid: 42,
 				startTime: "started",
-				ownedRunIds: ["owned"],
 				signalled: true,
 			});
 			expect(snapshot?.identity.pid).toBeUndefined();

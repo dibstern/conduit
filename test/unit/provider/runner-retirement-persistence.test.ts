@@ -39,7 +39,6 @@ const retirement = {
 	driverKind: "cursor",
 	pid: 123,
 	startTime: "process-start",
-	ownedRunIds: ["owned-run"],
 	retiredAt: 100,
 	signalled: true,
 };
@@ -410,10 +409,7 @@ it.effect(
 				retiredAt: 100,
 				stopState: "Requested",
 			});
-			yield* receipts.attach("runner", "replacement", {
-				...retirement,
-				ownedRunIds: ["new-run"],
-			});
+			yield* receipts.attach("runner", "replacement", retirement);
 			yield* TestClock.setTime(200);
 			expect(stopped(yield* receipts.requestStop(decodedRetirement))).toEqual(
 				first,
