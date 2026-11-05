@@ -1,4 +1,5 @@
-// Project Alerts Subscription (conduit-test-ni8.15)
+// Alerts Subscription (conduit-test-ni8.15). The daemon owns one feed that
+// every project's relay publishes to and every tab reads (82tn.12).
 // A session finished or failed while no tab was viewing it. Push covers
 // subscribed browsers; this feed is the in-app ding for every open tab, which
 // is the only one a browser without push gets.

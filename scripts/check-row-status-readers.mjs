@@ -76,5 +76,33 @@ for (const file of Object.keys(allowed))
 		);
 		violations++;
 	}
+
+// 82tn.49: a head move, a fork and a provider switch are admitted by one function that reads the
+// Run Ledger and SessionActivity. Their paths may read no other busy copy: the outbox, the turn
+// fences, the processing timeouts or the stop covers (32.13 deletes them), and each must still
+// call the admission.
+const admissionPaths = {
+	"src/lib/domain/relay/Services/session-rewind.ts": "head move",
+	"src/lib/domain/relay/Services/continuation.ts": "provider switch",
+	"src/lib/domain/relay/Services/session-command.ts": "fork",
+};
+const otherBusy =
+	/provider_command_outbox|hasActiveProcessingTimeout|turnFences|fenceLifts|stopCovers|session-busy(?:\.js)?["']/;
+for (const [file, command] of Object.entries(admissionPaths)) {
+	const lines = readFileSync(resolve(file), "utf8").split("\n");
+	lines.forEach((line, index) => {
+		if (!otherBusy.test(line)) return;
+		console.error(
+			`${file}:${index + 1}: a ${command} path reads busy outside the Run Ledger and SessionActivity; use admitOrRefuse.`,
+		);
+		violations++;
+	});
+	if (!lines.some((line) => /\badmitOrRefuse\(/.test(line))) {
+		console.error(
+			`${file}: the ${command} path no longer calls admitOrRefuse.`,
+		);
+		violations++;
+	}
+}
 console.log(`Row status readers: ${violations} violation(s).`);
 process.exitCode = violations ? 1 : 0;

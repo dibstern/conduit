@@ -866,6 +866,16 @@ export const CanonicalEvents = {
 		}),
 	),
 	"session.rewind_committed": live(Schema.Struct({ messageId: Schema.String })),
+	// 82tn.49, ADR-0014: a head move is journalled started, then moved; a start with no moved is a
+	// move in progress, which the inbox's admit reads.
+	"head.move_started": live(
+		Schema.Struct({
+			moveId: Schema.String,
+			kind: Schema.Literals(["rewind", "undo"]),
+			messageId: Schema.optionalKey(Schema.String),
+		}),
+	),
+	"head.moved": live(Schema.Struct({ moveId: Schema.String })),
 	"session.workspace_changed": live(
 		Schema.Struct({
 			sessionId: Schema.String.pipe(SessionRef(false)),

@@ -933,6 +933,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					| "CONDUIT_TEST_RUN_LEDGER_NATIVE_COMMAND_MS"
 					| "CONDUIT_TEST_STOP_ABORT_WAIT_MS"
 					| "CONDUIT_TEST_REAL_CLAUDE_DEAF_INTERRUPT"
+					| "CONDUIT_TEST_HEAD_MOVE_DELAY_MS"
 					| "CONDUIT_CONTENTION_METRICS"
 					| "XPC_SERVICE_NAME"
 				>
@@ -2772,6 +2773,23 @@ export class ProcessBrowser {
 			);
 		})();
 		return this.sessionsReady;
+	}
+
+	/** Records each in-app alert as `{ type: "alert", ... }`; resolves once live. */
+	async followAlerts(): Promise<void> {
+		const cursor = this.frames.length;
+		this.detailFibers.add(
+			this.watch(
+				this.rpc.SubscribeAlerts({ projectSlug: this.projectSlug }),
+				(envelope) =>
+					Effect.sync(() => this.record({ ...envelope, type: "alert" })),
+			),
+		);
+		await this.waitFor(
+			(message) =>
+				message["type"] === "alert" && message["_tag"] === "synchronized",
+			cursor,
+		);
 	}
 
 	followSession(sessionId: string): Promise<void> {

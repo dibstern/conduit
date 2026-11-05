@@ -666,7 +666,10 @@ const handleSSEEventAfterPendingEffect = (
 				log: pipelineLog,
 			});
 
-			if (msg.type === "done" && targetSessionId) {
+			// Only an identified done notified; an idle hint (no alertId) must not
+			// suppress the status poller's done, which takes the ledger run end's
+			// identity, or a turn whose final step the stream missed never notifies.
+			if (msg.type === "done" && msg.alertId && targetSessionId) {
 				yield* Effect.sync(() => deps.onDoneProcessed?.(targetSessionId));
 			}
 

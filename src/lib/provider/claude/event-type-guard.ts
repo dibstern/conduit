@@ -99,6 +99,14 @@ export const CLAUDE_EVENT_CLASSIFICATION = {
 		produced: false,
 		reason: "Relay-owned cut committed at send admission or upstream removal",
 	},
+	"head.move_started": {
+		produced: false,
+		reason: "Relay-owned head move journal, with no Claude SDK mutation",
+	},
+	"head.moved": {
+		produced: false,
+		reason: "Relay-owned head move journal, with no Claude SDK mutation",
+	},
 	"session.provider_changed": {
 		produced: false,
 		reason: "Provider switching is a relay-level concept",

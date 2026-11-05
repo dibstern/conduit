@@ -7,7 +7,6 @@ import type { RelayMessage } from "../types.js";
 import { NOTIFICATION_DISMISS_MS } from "../ui-constants.js";
 import { getNotifSettings } from "../utils/notif-settings.js";
 import { emitDoneSound, readyDoneSound } from "../utils/sound.js";
-import { getCurrentSlug } from "./router.svelte.js";
 import { selection } from "./selection.svelte.js";
 
 // When push notifications are active, browser alerts and the in-page ding are
@@ -117,15 +116,16 @@ export function initSWMessageListener(): void {
 // Deliver through one channel when a notable event arrives.
 
 // The same ids the server's push ledger uses, so one receipt covers both.
+// Session ids are daemon-wide and every tab hears every project's alerts, so
+// the key names no project: tabs on different projects share it (82tn.12).
 function alertIdentity(msg: RelayMessage | Approval): string {
-	const project = getCurrentSlug() ?? "";
 	if ("_tag" in msg)
 		return msg._tag === "permission"
-			? `${project}:${msg.sessionId}:permission:${msg.requestId}`
-			: `${project}:${msg.sessionId}:question:${msg.toolId}`;
+			? `${msg.sessionId}:permission:${msg.requestId}`
+			: `${msg.sessionId}:question:${msg.toolId}`;
 	const session = "sessionId" in msg ? msg.sessionId : "";
-	if ("alertId" in msg && msg.alertId) return `${project}:${msg.alertId}`;
-	return `${project}:${session}:${msg.type}`;
+	if ("alertId" in msg && msg.alertId) return msg.alertId;
+	return `${session}:${msg.type}`;
 }
 
 /** Fallback: show a browser Notification API alert (no reliable tab switching). */

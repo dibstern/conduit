@@ -3,7 +3,7 @@
 // Only imported by relay-stack.ts (composition root). All other modules use
 // structural interfaces (PollerManagerLike) instead of concrete classes.
 //
-// MessagePoller: single-session poller with SSE suppression + idle timeout.
+// MessagePoller: single-session poller with SSE suppression, held by viewers.
 // MessagePollerManager: manages multiple concurrent MessagePoller instances.
 
 import { isOpenCodeNotRunningError } from "../domain/daemon/Services/opencode-instances-service.js";
@@ -26,11 +26,11 @@ const POLL_INTERVAL_MS = ENV.messagePollerIntervalMs;
 const SSE_SILENCE_THRESHOLD_MS = 2000;
 
 /**
- * How long to poll with no new content before auto-stopping.
- * Prevents indefinite 750ms polling for truly idle sessions.
+ * How long polling outlives the last tab viewing the session: a reconnect
+ * inside it keeps the poller, past it the poller stops (82tn.12).
  * The poller can be restarted by calling startPolling() again.
  */
-const IDLE_TIMEOUT_MS = 5000;
+const VIEWER_GRACE_MS = 5000;
 
 export interface MessagePollerOptions {
 	client: { session: Pick<OpenCodeAPI["session"], "messages"> };
@@ -38,10 +38,8 @@ export interface MessagePollerOptions {
 	interval?: number;
 	log?: Logger;
 	/**
-	 * Optional callback checked before applying the idle timeout.
-	 * When this returns true, the poller stays alive even without new
-	 * content — used to keep polling while browser clients are viewing
-	 * a session (e.g. TUI sessions where SSE events don't cross processes).
+	 * Whether a tab views the session. Viewers hold the poller; once none
+	 * has for VIEWER_GRACE_MS, it stops.
 	 */
 	hasViewers?: () => boolean;
 }
@@ -66,8 +64,8 @@ export class MessagePoller {
 	/** Timestamp of the last SSE event for the active session */
 	private lastSSEEventAt = 0;
 
-	/** Timestamp of the last poll that found new content */
-	private lastContentAt = 0;
+	/** Timestamp of the last poll a tab was viewing the session */
+	private lastViewedAt = 0;
 
 	/**
 	 * True when SSE events have been received since the last reseed.
@@ -124,7 +122,7 @@ export class MessagePoller {
 		this.activeSessionId = sessionId;
 		this.previousSnapshot = new Map();
 		this.lastSSEEventAt = 0;
-		this.lastContentAt = Date.now(); // Grace period: treat start as "content" to avoid immediate timeout
+		this.lastViewedAt = Date.now(); // Grace period: treat start as viewed to avoid immediate stop
 		this.needsReseed = false;
 		this.needsSeedOnFirstPoll = false;
 
@@ -224,17 +222,12 @@ export class MessagePoller {
 			return;
 		}
 
-		// Auto-stop if no content detected for IDLE_TIMEOUT_MS,
-		// but only when no browser clients are viewing this session.
-		// When viewers are present, keep polling so we can detect
-		// activity from external processes (e.g. the OpenCode TUI).
-		if (
-			this.lastContentAt > 0 &&
-			Date.now() - this.lastContentAt > IDLE_TIMEOUT_MS &&
-			!this.hasViewers?.()
-		) {
+		// Tabs viewing the session hold the poller; content still flowing does
+		// not. The run's end comes from the status loop, not from this poller.
+		if (this.hasViewers?.()) this.lastViewedAt = Date.now();
+		else if (Date.now() - this.lastViewedAt > VIEWER_GRACE_MS) {
 			this.log.info(
-				`IDLE TIMEOUT session=${this.activeSessionId.slice(0, 12)} — auto-stopping`,
+				`NO VIEWERS session=${this.activeSessionId.slice(0, 12)} — auto-stopping`,
 			);
 			this.stopPolling();
 			return;
@@ -278,7 +271,6 @@ export class MessagePoller {
 			);
 
 			if (events.length > 0 || hasActivity) {
-				this.lastContentAt = Date.now();
 				this.log.info(
 					`SYNTHESIZED session=${sessionId.slice(0, 12)} events=${events.length} types=[${events.map((e) => e.type).join(",")}]`,
 				);

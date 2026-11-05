@@ -292,3 +292,35 @@ describe("daemon-owned sessions and turns (82tn.10.9)", () => {
 		expect(constructions(text)).toEqual([hit]);
 	});
 });
+
+describe("one alert feed and pollers held by tabs (82tn.12)", () => {
+	const read = (path: string) => readFileSync(path, "utf8");
+
+	it("the daemon builds the alert feed and lends it; a relay builds one only when none is lent", () => {
+		expect(read(`${root}/Layers/daemon-layers.ts`)).toContain(
+			"Layer.merge(AlertsLive)",
+		);
+		expect(read(`${root}/Layers/relay-factory-layer.ts`)).toContain(
+			"Context.make(AlertsTag, alerts.value)",
+		);
+		const relay = read("src/lib/relay/project-relay-layers.ts");
+		// The import and the standalone fallback, nothing else.
+		expect(relay.match(/\bAlertsLive\b/g)).toHaveLength(2);
+		expect(relay.indexOf("Option.isSome(sharedAlerts)")).toBeGreaterThan(0);
+		expect(relay.indexOf("Option.isSome(sharedAlerts)")).toBeLessThan(
+			relay.lastIndexOf("AlertsLive"),
+		);
+	});
+
+	it("a tab hears every project's alerts", () => {
+		expect(read("src/lib/server/event-delivery.ts")).toMatch(
+			/SubscribeAlerts: \(request, producer\) =>\s*projectAudience\(request, producer\)\.pipe\(Effect\.andThen\(globalAudience\)\)/,
+		);
+	});
+
+	it("only tabs viewing a session hold its message poller", () => {
+		const poller = read("src/lib/relay/message-poller-impl.ts");
+		expect(poller).toContain("VIEWER_GRACE_MS");
+		expect(poller).not.toMatch(/lastContentAt|IDLE_TIMEOUT_MS/);
+	});
+});

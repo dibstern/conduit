@@ -60,6 +60,7 @@ import {
 	AccountUnroutable,
 	ContinuationErrorSchema,
 	HandoffSummarySchema,
+	SessionBusy,
 	UsageLimitsSettingSchema,
 	UsageReadingSchema,
 } from "./limit-recovery.js";
@@ -2917,7 +2918,12 @@ export const ForkSession = Rpc.make("ForkSession", {
 		messageId: Schema.optional(NonEmptyString),
 	}),
 	success: ForkSessionResponseSchema,
-	error: Schema.Union([WsRpcError, Schema.suspend(() => AccountUnroutable)]),
+	/** SessionBusy: the admission's typed refusal (82tn.49). */
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => AccountUnroutable),
+		Schema.suspend(() => SessionBusy),
+	]),
 });
 
 /** Session-scoped form of ForkSession; its owner supplies the project. */
@@ -3017,7 +3023,8 @@ export const RewindSession = Rpc.make("RewindSession", {
 		messageId: NonEmptyString,
 	}),
 	success: RewindSessionResponseSchema,
-	error: WsRpcError,
+	/** SessionBusy: the admission's typed refusal (82tn.49). */
+	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
 });
 
 export const UndoRewindResponseSchema = Schema.Struct({
@@ -3031,7 +3038,7 @@ export const UndoRewind = Rpc.make("UndoRewind", {
 		sessionId: NonEmptyString,
 	}),
 	success: UndoRewindResponseSchema,
-	error: WsRpcError,
+	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
 });
 
 /** The composer's only send. The inbox hands it off when the session is idle
@@ -4074,7 +4081,7 @@ export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
 	stream: true,
 });
 
-/** A session finished or failed in this project while no tab was viewing it. */
+/** A session in any project finished or failed while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
 	kind: Schema.Literals(["done", "error", "warning"]),
@@ -4091,7 +4098,8 @@ export type AlertsEnvelope = typeof AlertsEnvelopeSchema.Type;
 
 /**
  * Live-only: opens with `synchronized` and has no snapshot, so a reconnect or
- * reload never re-fires a ding. Cross-tab dedupe rides the alertId.
+ * reload never re-fires a ding. Cross-tab dedupe rides the alertId. The
+ * project checks the producer; the feed carries every project's alerts.
  */
 export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
 	payload: { projectSlug: NonEmptyString },
