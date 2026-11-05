@@ -25,7 +25,13 @@ import { ProcessHarness } from "../../helpers/process-harness.js";
 // session that ran in the folder after the target (3) or has a run open there
 // (4), or names the wrong session; refusing it also refuses the
 // conversation-only move (5); a daemon killed mid-apply leaves the folder half
-// restored, or the move journalled without its files (6).
+// restored, or the move journalled without its files (6). Lane 53b: an edit
+// between preview and commit is overwritten unseen (7); undo goes ahead over a
+// session that ran in the folder since the move (8); a session in another
+// folder blocks the move (9); two devices confirming one move apply it twice or
+// refuse one (10); a daemon killed after the move is journalled loses its files
+// or its undo (11); an eviction between preview and commit restores from
+// pruned history, or sends the resend anyway (12).
 const GIT_KEYS = [
 	"GIT_DIR",
 	"GIT_INDEX_FILE",
@@ -76,7 +82,10 @@ describe("Head moves with files through the built daemon", () => {
 	});
 
 	const start = async (
-		serviceEnvironment: { CONDUIT_TEST_RESTORE_PAUSE_AT?: string } = {},
+		serviceEnvironment: {
+			CONDUIT_TEST_RESTORE_PAUSE_AT?: string;
+			CONDUIT_TEST_HEAD_MOVE_DELAY_MS?: string;
+		} = {},
 	) => {
 		for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
 		harness = ProcessHarness.create({
@@ -174,8 +183,23 @@ describe("Head moves with files through the built daemon", () => {
 			);
 		const visible = async (sessionId: string) =>
 			(await browser.history(sessionId)).map(({ id }) => id);
+		/** The session's journalled moves, oldest first. */
+		const moves = (sessionId: string) =>
+			query<{ type: string }>(
+				`SELECT type FROM events WHERE session_id = ?
+				AND type IN ('head.move_started', 'head.moved') ORDER BY sequence`,
+				sessionId,
+			).map(({ type }) => type);
+		const setBudget = (budgetBytes: number) =>
+			sendRpcRequest(socket, {
+				_tag: "SetSnapshotBudgetSetting",
+				budgetBytes,
+				alertBytes: budgetBytes,
+			});
 		return {
 			fixture,
+			moves,
+			setBudget,
 			repo,
 			browser,
 			query,
@@ -330,5 +354,232 @@ describe("Head moves with files through the built daemon", () => {
 				session,
 			),
 		).toEqual([]);
+	});
+
+	it("reads a commit stale when a planned file was edited after the preview, and writes nothing", async () => {
+		evidence["name"] = "stale";
+		const { repo, browser, turn, preview, moves } = await start();
+		const session = await browser.createSession("Stale plan");
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "tracked.txt"), "changed\n"),
+		);
+		const intent = {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		} as const;
+		const { moveId } = await preview(session, intent);
+		writeFileSync(join(repo, "tracked.txt"), "edited by hand\n");
+		const edited = listing(repo);
+		const stale = await Effect.runPromise(
+			Effect.flip(
+				browser.rpc.CommitHeadMove({ sessionId: session, intent, moveId }),
+			),
+		);
+		evidence["stale"] = stale;
+		expect(stale).toMatchObject({
+			_tag: "SessionBusy",
+			reason: "head_move_stale",
+		});
+		expect(listing(repo)).toEqual(edited);
+		expect(moves(session)).toEqual([]);
+	});
+
+	it("refuses an undo with files naming a session that ran in the folder since the move, and the conversation-only undo still goes", async () => {
+		evidence["name"] = "undo-refused";
+		const { repo, browser, query, turn, move, refusal, visible } =
+			await start();
+		const mine = await browser.createSession("Mine");
+		const second = await turn(mine, "mine second", () =>
+			writeFileSync(join(repo, "mine.txt"), "mine\n"),
+		);
+		const { moveId } = await move(mine, {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		});
+		const theirs = await browser.createSession("Theirs");
+		await turn(theirs, "theirs", () =>
+			writeFileSync(join(repo, "theirs.txt"), "theirs\n"),
+		);
+		const intent = { _tag: "undo", moveId, withFiles: true } as const;
+		const refused = await refusal(mine, intent);
+		evidence["refused"] = refused;
+		expect(refused).toMatchObject({
+			_tag: "FilesRefused",
+			reason: "other_session",
+			directory: repo,
+			other: {
+				sessionId: theirs,
+				title: query<{ title: string }>(
+					"SELECT title FROM sessions WHERE id = ?",
+					theirs,
+				)[0]?.title,
+				running: false,
+			},
+		});
+		const before = listing(repo);
+		await move(mine, { _tag: "undo", moveId });
+		expect(await visible(mine)).toContain(second);
+		expect(listing(repo)).toEqual(before);
+	});
+
+	it("lets a session in another folder run, open or done, without refusing the move", async () => {
+		evidence["name"] = "other-folder";
+		const { fixture, repo, browser, query, turn, openTurn, preview, move } =
+			await start();
+		const elsewhere = join(fixture.root, "elsewhere");
+		git(repo, "worktree", "add", "-q", "-b", "elsewhere", elsewhere);
+		const mine = await browser.createSession("Mine");
+		const before = listing(repo);
+		const second = await turn(mine, "mine second", () =>
+			writeFileSync(join(repo, "mine.txt"), "mine\n"),
+		);
+		const theirs = await browser.createSession("Theirs", undefined, "claude", {
+			worktreePath: elsewhere,
+		});
+		const intent = {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		} as const;
+		const finish = await openTurn(theirs, "theirs");
+		evidence["whileOpen"] = await preview(mine, intent);
+		await finish(() =>
+			writeFileSync(join(elsewhere, "theirs.txt"), "theirs\n"),
+		);
+		// Their run captured its own folder, so the exemption is the folder's, not an empty capture.
+		evidence["theirFolders"] = query<{ directory: string }>(
+			`SELECT json_extract(f.value, '$.directory') AS directory FROM events e, json_each(e.data, '$.folders') f
+			WHERE e.session_id = ? AND e.type = 'run.changes_captured'`,
+			theirs,
+		).map(({ directory }) => directory);
+		expect(evidence["theirFolders"]).toContain(elsewhere);
+		await move(mine, intent);
+		expect(listing(repo)).toEqual(before);
+		expect(readFileSync(join(elsewhere, "theirs.txt"), "utf8")).toBe(
+			"theirs\n",
+		);
+	});
+
+	it("applies one move once when two devices confirm it at the same time", async () => {
+		evidence["name"] = "two-devices";
+		const { fixture, repo, browser, turn, preview, moves } = await start();
+		const session = await browser.createSession("Two devices");
+		const before = listing(repo);
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "second.txt"), "second\n"),
+		);
+		const intent = {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		} as const;
+		const { moveId } = await preview(session, intent);
+		const other = await fixture.connect();
+		const receipts = await Promise.all(
+			[browser, other].map((device) =>
+				Effect.runPromise(
+					device.rpc.CommitHeadMove({ sessionId: session, intent, moveId }),
+				),
+			),
+		);
+		evidence["receipts"] = receipts;
+		expect(receipts).toEqual([{ moveId }, { moveId }]);
+		expect(listing(repo)).toEqual(before);
+		expect(moves(session)).toEqual(["head.move_started", "head.moved"]);
+	});
+
+	it("lands a move with files the daemon died in after journalling it, and its undo still puts the files back", async () => {
+		evidence["name"] = "roll-forward";
+		const { fixture, repo, browser, turn, preview, moves } = await start({
+			CONDUIT_TEST_HEAD_MOVE_DELAY_MS: "60000",
+		});
+		const session = await browser.createSession("Crash after journal");
+		const before = listing(repo);
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "second.txt"), "second\n"),
+		);
+		const ended = listing(repo);
+		const intent = {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		} as const;
+		const { moveId } = await preview(session, intent);
+		void Effect.runPromise(
+			browser.rpc.CommitHeadMove({ sessionId: session, intent, moveId }),
+		).catch(() => {});
+		// test-waits-allow polling: the move's start is a store event, not a frame this test follows.
+		await vi.waitFor(() =>
+			expect(moves(session)).toEqual(["head.move_started"]),
+		);
+		evidence["journalled"] = listing(repo);
+		await fixture.kill();
+		await fixture.restart();
+		// test-waits-allow polling: startup lands the move in the background.
+		await vi.waitFor(() =>
+			expect(moves(session)).toEqual(["head.move_started", "head.moved"]),
+		);
+		evidence["landed"] = listing(repo);
+		expect(listing(repo)).toEqual(before);
+		const reader = await fixture.connect();
+		expect((await reader.history(session)).map(({ id }) => id)).not.toContain(
+			second,
+		);
+		const undo = { _tag: "undo", moveId, withFiles: true } as const;
+		const plan = await Effect.runPromise(
+			reader.rpc.PreviewHeadMove({ sessionId: session, intent: undo }),
+		);
+		await Effect.runPromise(
+			reader.rpc.CommitHeadMove({
+				sessionId: session,
+				intent: undo,
+				moveId: plan.moveId,
+			}),
+		);
+		expect(listing(repo)).toEqual(ended);
+	});
+
+	it("refuses a resend with files as pruned when an eviction lands between preview and commit, writing and sending nothing", async () => {
+		evidence["name"] = "evicted-between";
+		const { repo, browser, query, turn, preview, moves, setBudget, visible } =
+			await start();
+		const session = await browser.createSession("Evicted between");
+		await turn(session, "first", () =>
+			writeFileSync(join(repo, "first.txt"), "first\n".repeat(4_000)),
+		);
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "second.txt"), "second\n".repeat(4_000)),
+		);
+		const intent = {
+			_tag: "rewind",
+			messageId: second,
+			resend: "again",
+			withFiles: true,
+		} as const;
+		const { moveId, files } = await preview(session, intent);
+		expect(files).toBe("available");
+		const shown = await visible(session);
+		const ended = listing(repo);
+		await browser.setSettled(session, true);
+		await setBudget(1);
+		await setBudget(1024 * 1024 * 1024);
+		expect(
+			query(
+				"SELECT 1 FROM events WHERE session_id = ? AND type = 'folder_timeline.evicted'",
+				session,
+			),
+		).toHaveLength(1);
+		const refused = await Effect.runPromise(
+			Effect.flip(
+				browser.rpc.CommitHeadMove({ sessionId: session, intent, moveId }),
+			),
+		);
+		evidence["refused"] = refused;
+		expect(refused).toMatchObject({ _tag: "FilesRefused", reason: "pruned" });
+		expect(listing(repo)).toEqual(ended);
+		expect(moves(session)).toEqual([]);
+		expect(await visible(session)).toEqual(shown);
 	});
 });
