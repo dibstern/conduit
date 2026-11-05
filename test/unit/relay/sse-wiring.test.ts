@@ -233,66 +233,6 @@ describe("handleSSEEventEffect", () => {
 		).toHaveBeenCalledWith("perm-1");
 	});
 
-	it("sends push notification for permission.asked", async () => {
-		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
-			sendToAll: vi
-				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
-				.mockResolvedValue({
-					delivered: ["device-1"],
-					expired: [],
-					failed: [],
-				}),
-		});
-		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-
-		const event: OpenCodeEvent = {
-			type: "permission.asked",
-			properties: { id: "perm-1", permission: "Bash", sessionID: "s1" },
-		};
-		await runSSEEvent(deps, event);
-
-		assert.exists(mockPush, "expected push service");
-		expect(mockPush.sendToAll).toHaveBeenCalledWith({
-			type: "permission_request",
-			title: "Permission Needed",
-			body: "Bash needs approval",
-			tag: "perm-perm-1",
-			slug: "test-project",
-			sessionId: "s1",
-			alertId: "s1:permission:perm-1",
-		});
-	});
-
-	it("sends push notification for question.asked", async () => {
-		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
-			sendToAll: vi
-				.fn<NonNullable<SSEWiringDeps["pushManager"]>["sendToAll"]>()
-				.mockResolvedValue({
-					delivered: ["device-1"],
-					expired: [],
-					failed: [],
-				}),
-		});
-		const deps = createMockSSEWiringDeps({ pushManager: mockPush });
-
-		const event: OpenCodeEvent = {
-			type: "question.asked",
-			properties: { id: "q-1", sessionID: "s1", questions: [] },
-		};
-		await runSSEEvent(deps, event);
-
-		assert.exists(mockPush, "expected push service");
-		expect(mockPush.sendToAll).toHaveBeenCalledWith({
-			type: "ask_user",
-			title: "Question from Agent",
-			body: "Agent has a question for you.",
-			tag: "opencode-ask",
-			slug: "test-project",
-			sessionId: "s1",
-			alertId: "s1:question:q-1",
-		});
-	});
-
 	it("does not send push for anonymous done status hints", async () => {
 		const mockPush = partialFake<NonNullable<SSEWiringDeps["pushManager"]>>({
 			sendToAll: vi
@@ -683,6 +623,50 @@ describe("wireSSEConsumerEffect", () => {
 				status,
 			});
 		}
+	});
+
+	// 82tn.61: a session idle that overtook its turn's last parts ended the Run before the reply.
+	it("hands one session's events over in arrival order, without holding back other sessions", async () => {
+		const handled: string[] = [];
+		let handledAll = () => {};
+		const allHandled = new Promise<void>((resolve) => {
+			handledAll = resolve;
+		});
+		const deps = createMockSSEWiringDeps({
+			opencodeRuntimeIngress: {
+				onReconnect: () => Effect.void,
+				onInstanceStopped: () => Effect.void,
+				onSSEEventEffect: (event: OpenCodeEvent) => {
+					const step = (event.properties as { step?: string }).step ?? "";
+					return Effect.gen(function* () {
+						if (step === "s1-text") yield* Effect.sleep("30 millis");
+						if (step === "s3-dies") return yield* Effect.die("boom");
+						handled.push(step);
+						if (handled.length === 4) handledAll();
+						return { ok: false, reason: "not-translatable" } as const;
+					});
+				},
+			},
+		});
+		const listeners = new Map<string, (...args: unknown[]) => void>();
+		const consumer = partialFake<Parameters<typeof wireSSEConsumerEffect>[1]>({
+			on: vi.fn((name: string, fn: (...args: unknown[]) => void) => {
+				listeners.set(name, fn);
+			}),
+		});
+		await wireSSEConsumerForTest(deps, consumer);
+		const emit = listeners.get("event");
+		assert.exists(emit);
+		for (const [sessionID, step] of [
+			["s1", "s1-text"],
+			["s1", "s1-idle"],
+			["s2", "s2-text"],
+			["s3", "s3-dies"],
+			["s3", "s3-after"],
+		])
+			emit({ type: "message.part.delta", properties: { sessionID, step } });
+		await allHandled;
+		expect(handled).toEqual(["s2-text", "s3-after", "s1-text", "s1-idle"]);
 	});
 });
 

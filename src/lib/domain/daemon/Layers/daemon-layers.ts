@@ -136,6 +136,7 @@ import { SessionManagerOwnerLive } from "../Services/session-manager-owner.js";
 import { WorktreeCleanupQueueLive } from "../Services/worktree-cleanup-service.js";
 import { AccountPictureLive } from "./account-picture-layer.js";
 import { makeAccountResourceScopesLive } from "./account-resource-scopes-layer.js";
+import { AskAlertsLive } from "./ask-alerts-layer.js";
 import { AutoSettleLive } from "./auto-settle-layer.js";
 import { CategorySetLive } from "./category-set-layer.js";
 import {
@@ -1025,6 +1026,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 	// They read Tags from upstream tiers via Layer.provideMerge passthrough.
 	const scopedFibers = Layer.mergeAll(
 		DaemonRpcServerLive,
+		AskAlertsLive,
 		AutoSettleLive(),
 		WorktreeCleanupLive(),
 		WebSocketRoutingLive,

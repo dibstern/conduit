@@ -21,7 +21,10 @@
 
 import { Effect, Option, Schema, Stream } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
-import { advanceTouchesScope } from "../../../contracts/read-model-advance.js";
+import {
+	advanceTouchesScope,
+	type ReadModelAdvance,
+} from "../../../contracts/read-model-advance.js";
 import {
 	type ReadQueryEffectError,
 	ReadQueryEffectTag,
@@ -106,7 +109,7 @@ const toApproval = (row: PendingApprovalRow): Approval | undefined => {
 };
 
 /** The id a `remove` names an approval by: its pending_approvals row id. */
-const approvalId = (approval: Approval): string =>
+export const approvalId = (approval: Approval): string =>
 	approval._tag === "permission" ? approval.requestId : approval.toolId;
 
 /**
@@ -123,11 +126,49 @@ export const subscribeApprovals = (
 	ReadQueryEffectTag | SessionEventBusTag | PersistenceProjectTag
 > =>
 	Stream.unwrap(
+		Effect.map(PersistenceProjectTag, ({ projectId }) => {
+			const scope: SessionScope = { projectIds: [projectId] };
+			return followApprovals({
+				projectIds: Effect.succeed(scope.projectIds),
+				touches: (advance) => advanceTouchesScope(advance, scope),
+				shareKey: `approvals/${projectId}`,
+				resumeFromSequence: options.resumeFromSequence,
+			});
+		}),
+	);
+
+/**
+ * The same feed over every project the daemon holds, read afresh for each
+ * window so a project added later is covered (82tn.12: ask alerts).
+ */
+export const subscribeEveryProjectApprovals = (
+	projectIds: Effect.Effect<readonly string[]>,
+): Stream.Stream<
+	Envelope<Approval>,
+	ApprovalsSubscriptionError,
+	ReadQueryEffectTag | SessionEventBusTag
+> =>
+	followApprovals({
+		projectIds,
+		touches: () => true,
+		shareKey: "approvals/*",
+		resumeFromSequence: undefined,
+	});
+
+const followApprovals = (options: {
+	readonly projectIds: Effect.Effect<readonly string[]>;
+	readonly touches: (advance: ReadModelAdvance) => boolean;
+	readonly shareKey: string;
+	readonly resumeFromSequence: number | undefined;
+}): Stream.Stream<
+	Envelope<Approval>,
+	ApprovalsSubscriptionError,
+	ReadQueryEffectTag | SessionEventBusTag
+> =>
+	Stream.unwrap(
 		Effect.gen(function* () {
 			const readQuery = yield* ReadQueryEffectTag;
 			const bus = yield* SessionEventBusTag;
-			const { projectId } = yield* PersistenceProjectTag;
-			const scope: SessionScope = { projectIds: [projectId] };
 			// The pending approvals this subscriber holds, by owning session: the
 			// only way to name what a cascaded session delete took with it.
 			const announced = new Map<string, string>();
@@ -137,27 +178,39 @@ export const subscribeApprovals = (
 					name: "approvals",
 					collections: ["approvals"],
 					shareReads: true,
-					shareKey: `approvals/${projectId}`,
+					shareKey: options.shareKey,
 					read: (range) =>
-						Effect.map(
-							readQuery.readPendingApprovals(scope, range),
-							(answer) => {
-								const rows = [];
-								const removed = [];
-								for (const row of answer.rows) {
-									const item =
-										row.status === "pending" ? toApproval(row) : undefined;
-									if (item !== undefined)
-										rows.push({ item, version: row.version });
-									else if (range !== undefined)
-										removed.push({ id: row.id, version: row.version });
-								}
-								return { rows, removed, version: answer.version };
-							},
+						Effect.flatMap(options.projectIds, ([first, ...rest]) =>
+							first === undefined
+								? Effect.succeed({
+										rows: [],
+										removed: [],
+										version: range?.through ?? range?.after ?? 0,
+									})
+								: Effect.map(
+										readQuery.readPendingApprovals(
+											{ projectIds: [first, ...rest] },
+											range,
+										),
+										(answer) => {
+											const rows = [];
+											const removed = [];
+											for (const row of answer.rows) {
+												const item =
+													row.status === "pending"
+														? toApproval(row)
+														: undefined;
+												if (item !== undefined)
+													rows.push({ item, version: row.version });
+												else if (range !== undefined)
+													removed.push({ id: row.id, version: row.version });
+											}
+											return { rows, removed, version: answer.version };
+										},
+									),
 						),
 					route: (advance) => {
-						if (!advanceTouchesScope(advance, scope))
-							return { moved: false, removed: [] };
+						if (!options.touches(advance)) return { moved: false, removed: [] };
 						const gone = new Set(advance.removedSessionIds);
 						const removed = [...announced]
 							.filter(([, sessionId]) => gone.has(sessionId))

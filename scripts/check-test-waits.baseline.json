@@ -464,6 +464,11 @@
 		"polling": 1,
 		"timeout-override": 1
 	},
+	"test/integration/daemon/ask-alerts.test.ts": {
+		"polling": 1,
+		"real-wait": 1,
+		"timeout-override": 1
+	},
 	"test/integration/daemon/category-set-process.test.ts": {
 		"timeout-override": 1
 	},
@@ -882,9 +887,9 @@
 		"timeout-override": 1
 	},
 	"test/integration/daemon/opencode-poller-demand.test.ts": {
-		"polling": 6,
+		"polling": 13,
 		"real-wait": 1,
-		"timeout-override": 2
+		"timeout-override": 6
 	},
 	"test/integration/daemon/opencode-real-lifecycle.test.ts": {
 		"polling": 3,

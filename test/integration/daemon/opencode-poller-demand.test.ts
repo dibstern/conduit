@@ -6,7 +6,11 @@
 // 3. a busy session nobody views starts a message poller;
 // 4. the last tab leaves mid-turn and the run end is never seen;
 // 5, 14. the completion never reaches a tab on another project;
-// 13. the done is notified twice.
+// 6. a tab that reconnects inside the grace loses its poller to the pending stop, or gains a second;
+// 7. a turn started elsewhere whose messages the stream missed never reaches stored history;
+// 8. a relay replacement leaves the old relay's poller reading, or the new relay never polls;
+// 13. the done is notified twice;
+// 17. a session deleted while a tab views it keeps its poller.
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
@@ -359,5 +363,318 @@ describe("OpenCode pollers keyed by demand", () => {
 			{ kind: "done", alertId: expect.any(String) },
 		]);
 		expect(alertsOf(elsewhere)).toEqual(alertsOf(nearby));
+	}, 120_000);
+
+	// Entry 7: a turn conduit did not start (the TUI) whose message events the
+	// stream never delivered. Only its busy and idle arrive; the transcript must
+	// still hold what it wrote, before any tab opens the session.
+	it("a turn started elsewhere whose messages the stream missed still lands in the transcript", async () => {
+		const fixture = await start();
+		const author = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const sessionId = await author.createSession(
+			"Elsewhere",
+			instanceId,
+			"opencode",
+		);
+		await author.close();
+		const directory = realpathSync(fixture.projectDir);
+		const status = (type: "busy" | "idle") =>
+			fixture.emitOpenCodeEvent({
+				directory,
+				payload: {
+					id: randomUUID(),
+					type: "session.status",
+					properties: { sessionID: sessionId, status: { type } },
+				},
+			});
+		const complete = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare("SELECT history_complete FROM sessions WHERE id = ?")
+						.get(sessionId) as { history_complete: number } | undefined
+				)?.history_complete;
+			} finally {
+				db.close();
+			}
+		};
+		const stored = (text: string) => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return (
+					db
+						.prepare(
+							"SELECT count(*) AS n FROM events WHERE session_id = ? AND instr(data, ?) > 0",
+						)
+						.get(sessionId, text) as { n: number }
+				).n;
+			} finally {
+				db.close();
+			}
+		};
+		// The session is synced: its first sighting backfilled an empty history.
+		await status("idle");
+		await vi.waitFor(() => expect(complete()).toBe(1), { timeout: 15_000 });
+		const created = Date.now();
+		const message = (id: string, role: "user" | "assistant", text: string) => ({
+			info: {
+				id,
+				sessionID: sessionId,
+				role,
+				time: { created, completed: created + 1 },
+				...(role === "user" && {
+					agent: "build",
+					model: { providerID: "fake", modelID: "fake-model" },
+				}),
+				...(role === "assistant" && {
+					parentID: "msg_elsewhere_user",
+					modelID: "fake-model",
+					providerID: "fake",
+					mode: "build",
+					path: { cwd: "/", root: "/" },
+					cost: 0,
+					tokens: {
+						input: 1,
+						output: 1,
+						reasoning: 0,
+						cache: { read: 0, write: 0 },
+					},
+				}),
+			},
+			parts: [
+				{
+					id: `prt_${id}`,
+					messageID: id,
+					sessionID: sessionId,
+					type: "text",
+					text,
+				},
+			],
+		});
+		const file = join(fixture.configDir, "fake-opencode-history.json");
+		writeFileSync(
+			file,
+			JSON.stringify({
+				[sessionId]: [
+					message("msg_elsewhere_user", "user", "asked from the terminal"),
+					message("msg_elsewhere_reply", "assistant", "answered while missed"),
+				],
+			}),
+		);
+		const turnAt = Date.now();
+		await status("busy");
+		await status("idle");
+		let landed = 0;
+		await vi
+			.waitFor(
+				() => {
+					landed = stored("answered while missed");
+					expect(landed).toBeGreaterThan(0);
+				},
+				{ timeout: 15_000 },
+			)
+			.catch(() => {});
+		const viewer = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		const seen = JSON.stringify(await viewer.history(sessionId));
+		proofs.push({
+			test: "missed-turn",
+			historyReadsAfterTurn: reads(
+				fixture,
+				`/session/${sessionId}/message`,
+				turnAt,
+			),
+			storedBeforeAnyTab: landed,
+			seenByTab: seen.includes("answered while missed"),
+		});
+		expect(landed).toBeGreaterThan(0);
+		expect(seen).toContain("answered while missed");
+	}, 120_000);
+
+	it("a tab that reconnects inside the grace keeps the one message poller", async () => {
+		const fixture = await start();
+		const author = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const sessionId = await author.createSession(
+			"Reconnect",
+			instanceId,
+			"opencode",
+		);
+		await hold(fixture, author, sessionId);
+		await busy(fixture, sessionId);
+		await author.close();
+		const stopTicker = ticker(fixture, sessionId);
+		await fixture.closeOpenCodeStreams({ silenceReconnect: true });
+		const messages = `/session/${sessionId}/message`;
+		const viewer = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		await vi.waitFor(
+			() => expect(reads(fixture, messages, 0)).toBeGreaterThan(0),
+			{ timeout: 15_000 },
+		);
+		const before = await window(fixture, messages);
+		await viewer.close();
+		await pause(1_000);
+		const back = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		// Past the grace the left tab's stop would have run.
+		await pause(AFTER_GRACE_MS);
+		const afterGrace = await window(fixture, messages);
+		await back.close();
+		stopTicker();
+		await idle(fixture, sessionId);
+		await vi.waitFor(
+			() => expect(runEnds(fixture, sessionId)).toHaveLength(1),
+			{ timeout: 15_000 },
+		);
+		proofs.push({
+			test: "reconnect-inside-grace",
+			windowMs: WINDOW_MS,
+			messageReadsBefore: before,
+			messageReadsAfterGrace: afterGrace,
+			runEnds: runEnds(fixture, sessionId).length,
+		});
+		// One poller at 750 ms reads about four times a window; none reads zero, two about eight.
+		expect(before).toBeGreaterThanOrEqual(2);
+		expect(afterGrace).toBeGreaterThanOrEqual(2);
+		expect(afterGrace).toBeLessThanOrEqual(6);
+	}, 120_000);
+
+	it("a relay replaced mid-turn hands its viewed session to one message poller", async () => {
+		const fixture = await start();
+		const author = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const sessionId = await author.createSession(
+			"Replace",
+			instanceId,
+			"opencode",
+		);
+		await hold(fixture, author, sessionId);
+		await busy(fixture, sessionId);
+		await author.close();
+		const stopTicker = ticker(fixture, sessionId);
+		await fixture.closeOpenCodeStreams({ silenceReconnect: true });
+		const messages = `/session/${sessionId}/message`;
+		const viewer = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		await vi.waitFor(
+			() => expect(reads(fixture, messages, 0)).toBeGreaterThan(0),
+			{ timeout: 15_000 },
+		);
+		const before = await window(fixture, messages);
+		// Saving the project with another folder replaces its relay.
+		const extra = join(fixture.root, "added-mid-turn");
+		mkdirSync(extra, { recursive: true });
+		await sendRpcRequest(join(fixture.configDir, "relay.sock"), {
+			_tag: "SaveProject",
+			folders: [fixture.projectDir, extra],
+		});
+		await viewer.close();
+		const back = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		await pause(AFTER_GRACE_MS);
+		const afterReplace = await window(fixture, messages);
+		await back.close();
+		await pause(AFTER_GRACE_MS);
+		const afterLeave = await window(fixture, messages);
+		stopTicker();
+		await idle(fixture, sessionId);
+		await vi.waitFor(
+			() => expect(runEnds(fixture, sessionId)).toHaveLength(1),
+			{ timeout: 15_000 },
+		);
+		proofs.push({
+			test: "relay-replaced",
+			windowMs: WINDOW_MS,
+			messageReadsBefore: before,
+			messageReadsAfterReplace: afterReplace,
+			messageReadsAfterLeave: afterLeave,
+			runEnds: runEnds(fixture, sessionId).length,
+		});
+		expect(before).toBeGreaterThanOrEqual(2);
+		// One poller, not the old relay's and the new one's.
+		expect(afterReplace).toBeGreaterThanOrEqual(2);
+		expect(afterReplace).toBeLessThanOrEqual(6);
+		expect(afterLeave).toBe(0);
+	}, 150_000);
+
+	it("a session deleted while a tab views it stops its message poller", async () => {
+		const fixture = await start();
+		const author = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const sessionId = await author.createSession(
+			"Delete",
+			instanceId,
+			"opencode",
+		);
+		await hold(fixture, author, sessionId);
+		await busy(fixture, sessionId);
+		await author.close();
+		const stopTicker = ticker(fixture, sessionId);
+		await fixture.closeOpenCodeStreams({ silenceReconnect: true });
+		const messages = `/session/${sessionId}/message`;
+		const viewer = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		await vi.waitFor(
+			() => expect(reads(fixture, messages, 0)).toBeGreaterThan(0),
+			{ timeout: 15_000 },
+		);
+		const before = await window(fixture, messages);
+		await viewer.deleteSession(sessionId);
+		// The deleting tab stays open; only the delete may end the poller.
+		await pause(2_000);
+		const afterDelete = await window(fixture, messages);
+		stopTicker();
+		await viewer.close();
+		proofs.push({
+			test: "deleted-while-viewed",
+			windowMs: WINDOW_MS,
+			messageReadsBefore: before,
+			messageReadsAfterDelete: afterDelete,
+		});
+		expect(before).toBeGreaterThanOrEqual(2);
+		expect(afterDelete).toBe(0);
 	}, 120_000);
 });

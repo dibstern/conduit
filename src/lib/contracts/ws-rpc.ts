@@ -4084,10 +4084,14 @@ export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
 	stream: true,
 });
 
-/** A session in any project finished or failed while no tab was viewing it. */
+/**
+ * A session in any project finished, failed, or asks for an approval or an
+ * answer. For `permission` and `question` the alertId is the ask's requestId
+ * or toolId and `message` is the tool name.
+ */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
-	kind: Schema.Literals(["done", "error", "warning"]),
+	kind: Schema.Literals(["done", "error", "warning", "permission", "question"]),
 	alertId: NonEmptyString,
 	sessionId: Schema.optional(Schema.String),
 	message: Schema.optional(Schema.String),

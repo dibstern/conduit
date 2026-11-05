@@ -24,6 +24,8 @@ const allowed = {
 	"src/lib/relay/sse-wiring.ts": "event",
 	"src/lib/persistence/effect/inherit-fork-history.ts": "event",
 	"src/lib/domain/daemon/Layers/opencode-instances-reconcile.ts": "event",
+	// A busy status from the stream marks a synced session's history for a reread (82tn.12).
+	"src/lib/domain/relay/Services/opencode-runtime-ingress-service.ts": "event",
 	// View readers: the status poller publishes each session's status from SessionActivity (busy
 	// while the ledger holds its active Run), so these read the view's status, not a row's.
 	"src/lib/session-busy.ts": "view",

@@ -323,4 +323,20 @@ describe("one alert feed and pollers held by tabs (82tn.12)", () => {
 		expect(poller).toContain("VIEWER_GRACE_MS");
 		expect(poller).not.toMatch(/lastContentAt|IDLE_TIMEOUT_MS/);
 	});
+
+	it("one daemon owner tells tabs and devices about every project's asks", () => {
+		expect(
+			read(`${root}/Layers/daemon-layers.ts`).match(/\bAskAlertsLive\b/g),
+		).toHaveLength(2);
+		expect(read(`${root}/Layers/ask-alerts-layer.ts`)).toContain(
+			"subscribeEveryProjectApprovals(",
+		);
+		// No second ding: the relay pushes no asks and the tab's approvals store dings nothing.
+		expect(read("src/lib/relay/sse-wiring.ts")).not.toMatch(
+			/AskedPush|permission\.asked[^\n]*sendPush/,
+		);
+		expect(read("src/lib/frontend/stores/approvals.ts")).not.toContain(
+			"triggerNotifications",
+		);
+	});
 });
