@@ -882,9 +882,9 @@
 		"timeout-override": 1
 	},
 	"test/integration/daemon/opencode-poller-demand.test.ts": {
-		"polling": 4,
+		"polling": 6,
 		"real-wait": 1,
-		"timeout-override": 1
+		"timeout-override": 2
 	},
 	"test/integration/daemon/opencode-real-lifecycle.test.ts": {
 		"polling": 3,

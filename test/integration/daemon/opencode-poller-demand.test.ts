@@ -31,6 +31,7 @@ import {
 const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
 // The reconnect grace (PollerDemand) plus slack for one poll interval.
 const AFTER_GRACE_MS = 7_000;
+const WINDOW_MS = 3_000;
 
 describe("OpenCode pollers keyed by demand", () => {
 	let harness: ProcessHarness | undefined;
@@ -215,6 +216,75 @@ describe("OpenCode pollers keyed by demand", () => {
 		});
 		return result.savedSlug as string;
 	};
+
+	const window = async (fixture: ProcessHarness, path: string) => {
+		const since = Date.now();
+		await pause(WINDOW_MS);
+		return reads(fixture, path, since);
+	};
+
+	it("two tabs share one message poller; closing both tears it down; the run still ends", async () => {
+		const fixture = await start();
+		const author = await fixture.connect(
+			undefined,
+			undefined,
+			"process-test",
+			false,
+		);
+		const sessionId = await author.createSession(
+			"Demand",
+			instanceId,
+			"opencode",
+		);
+		await hold(fixture, author, sessionId);
+		await busy(fixture, sessionId);
+		const stopTicker = ticker(fixture, sessionId);
+		await fixture.closeOpenCodeStreams({ silenceReconnect: true });
+		const messages = `/session/${sessionId}/message`;
+		const first = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		const second = await fixture.connect(
+			sessionId,
+			undefined,
+			"process-test",
+			false,
+		);
+		await vi.waitFor(
+			() => expect(reads(fixture, messages, 0)).toBeGreaterThan(0),
+			{
+				timeout: 15_000,
+			},
+		);
+		const shared = await window(fixture, messages);
+		await Promise.all([author.close(), first.close(), second.close()]);
+		await pause(AFTER_GRACE_MS);
+		const afterLeave = await window(fixture, messages);
+		stopTicker();
+		await idle(fixture, sessionId);
+		await vi.waitFor(
+			() => expect(runEnds(fixture, sessionId)).toHaveLength(1),
+			{
+				timeout: 15_000,
+			},
+		);
+		await pause(AFTER_GRACE_MS);
+		const proof = {
+			test: "two-tabs",
+			windowMs: WINDOW_MS,
+			sharedMessageReads: shared,
+			messageReadsAfterLeave: afterLeave,
+			runEnds: runEnds(fixture, sessionId),
+		};
+		proofs.push(proof);
+		// One poller at 750 ms reads about four times a window; two would read about eight.
+		expect(shared).toBeGreaterThanOrEqual(2);
+		expect(shared).toBeLessThanOrEqual(6);
+		expect(afterLeave).toBe(0);
+	}, 120_000);
 
 	it("a busy session no tab views completes, and a tab on another project gets one done alert", async () => {
 		const fixture = await start();
