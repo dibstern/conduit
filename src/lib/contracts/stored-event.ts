@@ -933,7 +933,7 @@ export const CanonicalEvents = {
 			/** An undo names the Head Log entry it undoes. */
 			undoes: Schema.optionalKey(Schema.String),
 			/** Edit-and-resend and regenerate: admitted after the move, keyed by the move id. */
-			resend: Schema.optionalKey(Schema.Struct({ text: Schema.String })),
+			resend: Schema.optionalKey(InputRequestSchema),
 		}),
 	),
 	"head.moved": live(
@@ -1525,7 +1525,8 @@ export type CanonicalEvent<T extends CanonicalEventType = LiveEventType> = {
 }[T];
 
 // Array.map loses the correlation between each key and its payload schema.
-// The mapped type above restates the discriminated union of those envelopes.
+// The mapped type above restates the discriminated union of those envelopes. TS gives up
+// comparing the two once a payload nests the input request (82tn.51), hence via unknown.
 function canonicalEventSchema<
 	const Fields extends Readonly<Record<string, Schema.Codec<unknown>>>,
 >(fields: Fields) {
@@ -1535,7 +1536,7 @@ function canonicalEventSchema<
 				Schema.fieldsAssign(fields),
 			),
 		),
-	) as Schema.Codec<
+	) as unknown as Schema.Codec<
 		CanonicalEvent<CanonicalEventType> & Schema.Struct.Type<Fields>
 	>;
 }

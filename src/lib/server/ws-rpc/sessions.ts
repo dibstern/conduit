@@ -50,6 +50,11 @@ import {
 	createLocalSessionId,
 	projectSessionManager,
 } from "../../domain/relay/Services/session-manager-service.js";
+import {
+	commitHeadMove,
+	previewHeadMove,
+	readHeadLog,
+} from "../../domain/relay/Services/session-rewind.js";
 import { SessionSetupTag } from "../../domain/relay/Services/session-setup.js";
 import {
 	recreateSessionWorktrees,
@@ -69,6 +74,7 @@ import {
 import {
 	rewindSessionToMessage,
 	sendMessageToSession,
+	sessionInputRequest,
 	undoSessionRewind,
 } from "../../handlers/prompt.js";
 import { reloadProviderSessionForClient } from "../../handlers/reload.js";
@@ -1087,6 +1093,40 @@ export const sessionsHandlers = {
 						: mapRpcFailure("UndoRewind")(error),
 			),
 		),
+	PreviewHeadMove: (request) =>
+		previewHeadMove(request.sessionId, request.intent).pipe(
+			Effect.catch(
+				(error): Effect.Effect<never, SessionBusy | WsRpcError> =>
+					error instanceof SessionBusy
+						? Effect.fail(error)
+						: mapRpcFailure("PreviewHeadMove")(error),
+			),
+		),
+	CommitHeadMove: ({ sessionId, intent, moveId }) =>
+		Effect.gen(function* () {
+			const resend =
+				intent._tag === "rewind" && intent.resend !== undefined
+					? yield* sessionInputRequest(sessionId, intent.resend)
+					: undefined;
+			return yield* commitHeadMove({
+				sessionId,
+				intent,
+				moveId,
+				...(resend ? { resend } : {}),
+			});
+		}).pipe(
+			Effect.catch(
+				(error): Effect.Effect<never, SessionBusy | WsRpcError> =>
+					error instanceof SessionBusy
+						? Effect.fail(error)
+						: mapRpcFailure("CommitHeadMove")(error),
+			),
+		),
+	GetHeadLog: (request) =>
+		readHeadLog(request.sessionId).pipe(
+			Effect.map((entries) => ({ entries })),
+			Effect.catch(mapRpcFailure("GetHeadLog")),
+		),
 	RewindSession: (request) =>
 		rewindSessionToMessage({
 			clientId: "rpc",
@@ -1155,4 +1195,7 @@ export const sessionsHandlers = {
 	| "LoadMoreHistory"
 	| "RewindSession"
 	| "UndoRewind"
+	| "PreviewHeadMove"
+	| "CommitHeadMove"
+	| "GetHeadLog"
 >;

@@ -244,10 +244,13 @@ type HeadMoveStart = EventPayloadMap["head.move_started"];
 export const startHeadMove = (
 	sessionId: string,
 	provider: string,
-	move: Omit<HeadMoveStart, "moveId">,
+	move: Omit<HeadMoveStart, "moveId"> & { readonly moveId?: string },
 ) =>
 	Effect.gen(function* () {
-		const started: HeadMoveStart = { moveId: randomUUID(), ...move };
+		const started: HeadMoveStart = {
+			...move,
+			moveId: move.moveId ?? randomUUID(),
+		};
 		yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
 			canonicalEvent("head.move_started", sessionId, started, { provider }),
 		);
@@ -263,6 +266,20 @@ export const finishHeadMove = (sessionId: string, move: HeadMoveStart) =>
 		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
 		if (!row) return;
 		const sql = yield* SqlClient.SqlClient;
+		const [done] = yield* sql<{ n: number }>`SELECT 1 AS n FROM events
+			WHERE session_id = ${sessionId} AND type = 'head.moved'
+			AND json_extract(data, '$.moveId') = ${move.moveId} LIMIT 1`;
+		if (done) return;
+		// 82tn.51: the move names its target, and its moved alone moves the Head.
+		if ("to" in move)
+			return yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
+				canonicalEvent(
+					"head.moved",
+					sessionId,
+					{ moveId: move.moveId, to: move.to ?? null },
+					{ provider: row.provider },
+				),
+			);
 		const pending = row.pending_rewind_message_id ?? null;
 		const target =
 			move.kind === "rewind" && move.messageId !== undefined
@@ -303,7 +320,13 @@ export const finishHeadMove = (sessionId: string, move: HeadMoveStart) =>
 		]);
 	});
 
-/** The project's moves started and never moved: a daemon died between the two (ADR-0014). */
+/** The resend a move admits after it lands: one input, whoever admits it (82tn.51). */
+export const resendInputId = (moveId: string) => `resend:${moveId}`;
+
+/**
+ * The project's moves a daemon died inside (ADR-0014): started and never moved, or a session's
+ * newest move landed with its resend not yet admitted (82tn.51).
+ */
 export const danglingHeadMoves = (projectId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -311,9 +334,16 @@ export const danglingHeadMoves = (projectId: string) =>
 			SELECT started.session_id, started.data FROM events started
 			JOIN sessions ON sessions.id = started.session_id
 			WHERE started.type = 'head.move_started' AND sessions.project_id = ${projectId}
-			AND NOT EXISTS (SELECT 1 FROM events moved
-				WHERE moved.session_id = started.session_id AND moved.type = 'head.moved'
-				AND json_extract(moved.data, '$.moveId') = json_extract(started.data, '$.moveId'))
+			AND (NOT EXISTS (SELECT 1 FROM events moved
+					WHERE moved.session_id = started.session_id AND moved.type = 'head.moved'
+					AND json_extract(moved.data, '$.moveId') = json_extract(started.data, '$.moveId'))
+				OR (json_type(started.data, '$.resend') IS NOT NULL
+					AND started.sequence = (SELECT MAX(sequence) FROM events
+						WHERE session_id = started.session_id AND type = 'head.move_started')
+					AND NOT EXISTS (SELECT 1 FROM pending_inputs
+						WHERE input_id = 'resend:' || json_extract(started.data, '$.moveId'))
+					AND NOT EXISTS (SELECT 1 FROM messages
+						WHERE input_id = 'resend:' || json_extract(started.data, '$.moveId'))))
 			ORDER BY started.sequence`;
 		return rows.map((row) => ({
 			sessionId: row.session_id,

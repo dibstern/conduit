@@ -46,6 +46,7 @@ import {
 	type EventStoreError,
 	makeEventStoreEffect,
 } from "../persistence/effect/event-store-effect.js";
+import { readOwedRealignment } from "../persistence/effect/head-realignment.js";
 import { readPendingRewindCommit } from "../persistence/effect/pending-rewind.js";
 import { type CanonicalEvent, canonicalEvent } from "../persistence/events.js";
 import type { ClaudeSessionForkSdk } from "./claude/claude-session-fork.js";
@@ -1733,7 +1734,11 @@ export class OrchestrationEngine {
 			);
 			const pendingRewind = command.input.continuation
 				? undefined
-				: yield* readPendingRewindCommit(durable.sql, command.input.sessionId);
+				: ((yield* readPendingRewindCommit(
+						durable.sql,
+						command.input.sessionId,
+					)) ??
+					(yield* readOwedRealignment(durable.sql, command.input.sessionId)));
 			const [maxRow] = yield* durable.sql<{ readonly m: number }>`
 					SELECT COALESCE(MAX(request_sequence), 0) AS m FROM provider_command_outbox`;
 			const requestSequence = (maxRow?.m ?? 0) + 1;
@@ -1754,7 +1759,7 @@ export class OrchestrationEngine {
 						...(account ? { account: { ...account, env: undefined } } : {}),
 						...((traits?.supportsNativeResume ||
 							traits?.revertsConversationNatively) &&
-						pendingRewind
+						pendingRewind?.rewind
 							? { rewind: pendingRewind.rewind }
 							: {}),
 						dispatchId,
@@ -1776,7 +1781,7 @@ export class OrchestrationEngine {
 					payloadJson,
 					// A native revert confirms the removal itself, after it succeeds.
 					events: [
-						...(traits?.revertsConversationNatively
+						...(traits?.revertsConversationNatively && pendingRewind?.rewind
 							? []
 							: (pendingRewind?.events ?? [])),
 						...(command.events ?? []),
