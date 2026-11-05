@@ -298,6 +298,8 @@ export interface SendTurnInput
 	readonly rewind?: {
 		readonly resumeSessionAt: string | null;
 		readonly targetMessageId?: string;
+		/** Every row the move took off the path the provider holds, earliest first. */
+		readonly removedMessageIds?: readonly string[];
 	};
 	/** SDK chain UUID resolved from a committed rewind, used only when launching. */
 	readonly resumeSessionAt?: string | undefined;

@@ -3,6 +3,8 @@
 // goal successor, undo changes native history, or a failed revert commits locally.
 // A fork of a fork must retain inherited boundaries; a missing fork source must
 // seed the frozen digest once, while unrelated fork errors must remain failures.
+// A rewind's revert must name a turn on the path Codex holds (not one on an
+// abandoned branch), including a fork's inherited copies (82tn.51).
 import { randomUUID } from "node:crypto";
 import {
 	mkdirSync,
@@ -89,6 +91,39 @@ function splitForkTrace(source: string | TraceRow[]) {
 				),
 		],
 	};
+}
+
+/** The recorded revert and the turn after it, aimed at `beforeTurnId` on `threadId`: a later
+ *  revert in a longer trace. The new turn and its items get fresh ids, tagged with `tag`. */
+function revertThenTurn(
+	threadId: string,
+	beforeTurnId: string,
+	text: string,
+	tag: string,
+): TraceRow[] {
+	const recorded = fixtureRows("rewind-revert");
+	const at = recorded.findIndex(
+		({ message }) => message?.method === "thread/revert",
+	);
+	const revert = recorded[at]?.message?.params;
+	const tail = recorded.slice(at).filter(({ dir }) => dir !== "exit");
+	const fresh = [
+		nativeStarts(recorded).at(-1)?.turn.id,
+		...tail.flatMap(({ message }) =>
+			message?.method === "item/started"
+				? [(message.params?.["item"] as { id: string }).id]
+				: [],
+		),
+	];
+	let json = JSON.stringify(tail)
+		.replaceAll(String(revert?.["threadId"]), threadId)
+		.replaceAll("Continue after rewind", text);
+	for (const id of fresh) json = json.replaceAll(String(id), `${id}-${tag}`);
+	const rows = JSON.parse(json) as TraceRow[];
+	const params = rows[0]?.message?.params;
+	if (!params) throw new Error("Missing recorded revert");
+	params["beforeTurnId"] = beforeTurnId;
+	return rows;
 }
 
 describe("Codex native forks and conversation rewind through the daemon", () => {
@@ -939,4 +974,113 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 			},
 			TIMEOUT,
 		);
+	// test-waits-allow timeout-override: a daemon and a replayed Codex, like the cases above.
+	it(
+		"reverts along the path Codex holds, not an abandoned branch",
+		async () => {
+			const { fixture, browser, id } = await start("rewind-held-path");
+			const trace = fixtureRows("rewind-revert");
+			const native = nativeStarts(trace);
+			const threadId = native[0]?.threadId;
+			const second = native[3]?.turn.id;
+			if (!threadId || !second) throw new Error("Missing native turns");
+			writeTrace([
+				...trace.filter(({ dir }) => dir !== "exit"),
+				...revertThenTurn(threadId, second, "Continue on a new branch", "b"),
+				...trace.filter(({ dir }) => dir === "exit"),
+			]);
+			for (const text of [
+				"Say hello",
+				"Say hello again",
+				"Say hello a third time",
+			])
+				await browser.send(id, text, TIMEOUT);
+			await settled(fixture, id, 3);
+			const users = (await browser.history(id)).filter(
+				({ role }) => role === "user",
+			);
+			const [first, cut] = users;
+			if (!first || !cut) throw new Error("Missing user messages");
+			// The second and third turns become a branch Codex drops; the fourth replaces them.
+			await Effect.runPromise(
+				browser.rpc.RewindSession({ sessionId: id, messageId: cut.id }),
+			);
+			await browser.send(id, "Continue after rewind", TIMEOUT);
+			// The first turn never reached Codex as a native turn (as in rewind-before-native), so
+			// the revert must name the next turn on the path Codex holds: the fourth.
+			const db = new Database(fixture.daemonStorePath());
+			try {
+				db.prepare(
+					"UPDATE events SET metadata = json_remove(metadata, '$.providerRefs') WHERE session_id = ? AND json_extract(metadata, '$.correlationId') = ?",
+				).run(id, first.id);
+			} finally {
+				db.close();
+			}
+			// test-waits-allow polling: a move is refused until the previous send's outbox row settles.
+			await vi.waitFor(
+				() =>
+					Effect.runPromise(
+						browser.rpc.RewindSession({ sessionId: id, messageId: first.id }),
+					),
+				{ timeout: TIMEOUT },
+			);
+			await browser.send(id, "Continue on a new branch", TIMEOUT);
+			expect(requests("thread/revert")).toEqual([
+				expect.objectContaining({ threadId, beforeTurnId: native[1]?.turn.id }),
+				expect.objectContaining({ threadId, beforeTurnId: second }),
+			]);
+		},
+		TIMEOUT,
+	);
+
+	// test-waits-allow timeout-override: a daemon and a replayed Codex, like the cases above.
+	it(
+		"reverts before an inherited turn in a fork",
+		async () => {
+			const { fixture, browser, id } = await start("rewind-fork-copy");
+			const trace = splitForkTrace("fork-native");
+			writeTrace(trace.parent);
+			await browser.send(id, "Say hello", TIMEOUT);
+			await browser.send(id, "Say hello again", TIMEOUT);
+			await settled(fixture, id, 2);
+			const point = (await browser.history(id)).find(
+				({ role }) => role === "assistant",
+			);
+			if (!point) throw new Error("Missing first assistant");
+			const child = await fork(fixture, browser, id, point.id);
+			const inherited = nativeStarts(trace.parent)[0]?.turn.id;
+			const childThread = nativeStarts(trace.child)[0]?.threadId;
+			if (!inherited || !childThread) throw new Error("Missing native turns");
+			writeTrace([
+				...trace.child.filter(({ dir }) => dir !== "exit"),
+				...revertThenTurn(
+					childThread,
+					inherited,
+					"Start the fork over",
+					"fork",
+				),
+				...trace.child.filter(({ dir }) => dir === "exit"),
+			]);
+			await browser.send(child, "What do you remember?", TIMEOUT);
+			await settled(fixture, child, 2);
+			// The fork's copy of the source's first message carries the fork's id suffix; its native
+			// turn is recorded on the source's events.
+			const copy = (await browser.history(child)).find(
+				({ role }) => role === "user",
+			);
+			if (!copy) throw new Error("Missing inherited user message");
+			expect(copy.id).toMatch(new RegExp(`_${child}$`));
+			await Effect.runPromise(
+				browser.rpc.RewindSession({ sessionId: child, messageId: copy.id }),
+			);
+			await browser.send(child, "Start the fork over", TIMEOUT);
+			expect(requests("thread/revert")).toEqual([
+				expect.objectContaining({
+					threadId: childThread,
+					beforeTurnId: inherited,
+				}),
+			]);
+		},
+		TIMEOUT,
+	);
 });
