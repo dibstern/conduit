@@ -453,21 +453,28 @@ export const listenerOn = (port: number) =>
 			: { server: { pid, startedAt, port } satisfies ServerKey, host };
 	});
 
-/** `lsof -F` output as [pid, [fd, name]]; malformed lines fail the scan. */
+/** `lsof -F` output as [pid, [fd, device, name]]; malformed lines fail the scan. */
 const lsofFields = (stdout: string) =>
 	Effect.gen(function* () {
-		const byPid = new Map<number, { fd: string; name: string }[]>();
-		let names: { fd: string; name: string }[] | undefined;
+		const byPid = new Map<
+			number,
+			{ fd: string; device: string; name: string }[]
+		>();
+		let names: { fd: string; device: string; name: string }[] | undefined;
 		let fd = "";
+		let device = "";
 		for (const line of stdout.split("\n")) {
 			if (line === "") continue;
 			if (line[0] === "p" && /^p\d+$/.test(line)) {
 				names = [];
 				fd = "";
 				byPid.set(Number(line.slice(1)), names);
-			} else if (line[0] === "f" && names !== undefined) fd = line.slice(1);
+			} else if (line[0] === "f" && names !== undefined) {
+				fd = line.slice(1);
+				device = "";
+			} else if (line[0] === "d" && names !== undefined) device = line.slice(1);
 			else if (line[0] === "n" && names !== undefined)
-				names.push({ fd, name: line.slice(1) });
+				names.push({ fd, device, name: line.slice(1) });
 			else return yield* new PortScanError({ reason: `lsof line ${line}` });
 		}
 		return byPid;
@@ -532,9 +539,28 @@ export const makePortWatcherLive = (
 						),
 					);
 
+			// lsof and ps only (/proc reads every scan, spawning nothing). The process table last read
+			// and the listening sockets (pid, kernel address, name) it was read for: a scan whose
+			// sockets were all listed then reuses it, as a socket's address is new for each socket and
+			// a reused pid's listener is a new socket. A process's ps -E line and cwd and stdout, by pid
+			// and start time, are read once: they cannot change while it runs (cwd as its server_seen
+			// records it).
+			let table:
+				| {
+						readonly sockets: ReadonlySet<string>;
+						readonly procs: ReadonlyMap<
+							number,
+							{ ppid: number; startedAt: number; command: string }
+						>;
+				  }
+				| undefined;
+			let envLines = new Map<string, string>();
+			let fdsOf = new Map<string, readonly { fd: string; name: string }[]>();
+
 			// A mark scans for its caller's session and its port's listener, marked or not.
 			const scan = (mark?: MarkRequest) =>
 				Effect.gen(function* () {
+					const sockets = new Set<string>();
 					const listening: ReadonlyMap<number, readonly number[]> =
 						root !== ""
 							? new Map(
@@ -556,59 +582,70 @@ export const makePortWatcherLive = (
 												"-u",
 												String(uid),
 												"-F",
-												"pn",
+												"pdn",
 											],
 											"empty",
 										),
 									);
 									const ports = new Map<number, number[]>();
 									for (const [pid, names] of byPid)
-										for (const { name } of names) {
+										for (const { device, name } of names) {
 											const port = Number(/:(\d+)$/.exec(name)?.[1]);
 											if (!Number.isInteger(port) || port <= 0)
 												return yield* new PortScanError({
 													reason: `lsof name ${name}`,
 												});
 											ports.set(pid, [...(ports.get(pid) ?? []), port]);
+											sockets.add(`${pid} ${device} ${name}`);
 										}
 									return ports;
 								});
 					const none = new Map<number, ServerKey>();
-					if (listening.size === 0 && mark === undefined)
+					if (listening.size === 0 && mark === undefined) {
+						table = undefined;
 						return { scanned: [], servers: none };
+					}
+					const listed = table;
 					const procs: ReadonlyMap<
 						number,
 						{ ppid: number; startedAt: number; command: string }
 					> =
 						root !== ""
 							? yield* procTable(root)
-							: yield* Effect.gen(function* () {
-									const table = new Map<
-										number,
-										{ ppid: number; startedAt: number; command: string }
-									>();
-									for (const line of (yield* run("ps", [
-										"-axww",
-										"-o",
-										"pid=,ppid=,lstart=,command=",
-									])).split("\n")) {
-										if (line.trim() === "") continue;
-										const row = PS_ROW.exec(line);
-										const startedAt = row
-											? Date.parse(row[3] ?? "")
-											: Number.NaN;
-										if (!row || Number.isNaN(startedAt))
-											return yield* new PortScanError({
-												reason: `ps line ${line}`,
+							: mark === undefined &&
+									listed !== undefined &&
+									[...sockets].every((socket) => listed.sockets.has(socket))
+								? listed.procs
+								: yield* Effect.gen(function* () {
+										const rows = new Map<
+											number,
+											{ ppid: number; startedAt: number; command: string }
+										>();
+										for (const line of (yield* run("ps", [
+											"-axww",
+											"-o",
+											"pid=,ppid=,lstart=,command=",
+										])).split("\n")) {
+											if (line.trim() === "") continue;
+											const row = PS_ROW.exec(line);
+											const startedAt = row
+												? Date.parse(row[3] ?? "")
+												: Number.NaN;
+											if (!row || Number.isNaN(startedAt))
+												return yield* new PortScanError({
+													reason: `ps line ${line}`,
+												});
+											rows.set(Number(row[1]), {
+												ppid: Number(row[2]),
+												startedAt,
+												command: row[4] ?? "",
 											});
-										table.set(Number(row[1]), {
-											ppid: Number(row[2]),
-											startedAt,
-											command: row[4] ?? "",
-										});
-									}
-									return table;
-								});
+										}
+										return rows;
+									});
+					if (root === "") table = { sockets, procs };
+					const procKey = (pid: number) =>
+						`${pid}:${procs.get(pid)?.startedAt}`;
 					// 8.7: one entry per port, the earliest-started process; one process's IPv4 and IPv6
 					// listeners are one server. A pid gone since lsof listed it is not listening.
 					const servers = new Map<number, ServerKey>();
@@ -653,20 +690,46 @@ export const makePortWatcherLive = (
 									}
 									return texts;
 								})
-							: new Map(
-									(yield* run("ps", [
-										"-wwE",
-										"-p",
-										[...chainPids].join(","),
-										"-o",
-										"pid=,command=",
-									]))
-										.split("\n")
-										.map((line) => [
-											Number(/^\s*(\d+)\s/.exec(line)?.[1]),
-											line,
+							: yield* Effect.gen(function* () {
+									const unread = [...chainPids].filter(
+										(pid) => !envLines.has(procKey(pid)),
+									);
+									const read = new Map(
+										(unread.length === 0
+											? ""
+											: yield* run(
+													"ps",
+													[
+														"-wwE",
+														"-p",
+														unread.join(","),
+														"-o",
+														"pid=,command=",
+													],
+													// Exit 1 with no output: every pid named has exited.
+													"partial",
+												)
+										)
+											.split("\n")
+											.map((line) => [
+												Number(/^\s*(\d+)\s/.exec(line)?.[1]),
+												line,
+											]),
+									);
+									// Only this scan's chains stay; a pid ps did not list has exited, read as no marker.
+									envLines = new Map(
+										[...chainPids].map((pid) => [
+											procKey(pid),
+											envLines.get(procKey(pid)) ?? read.get(pid) ?? "",
 										]),
-								);
+									);
+									return new Map(
+										[...chainPids].map((pid) => [
+											pid,
+											envLines.get(procKey(pid)) ?? "",
+										]),
+									);
+								});
 					const envs = new Map<number, ReadonlyMap<string, string>>();
 					for (const [pid, line] of environments) {
 						const env = new Map(
@@ -789,23 +852,43 @@ export const makePortWatcherLive = (
 									}
 									return files;
 								})
-							: yield* lsofFields(
-									yield* run(
-										"lsof",
-										[
-											"-nP",
-											"-w",
-											"-a",
-											"-d",
-											"cwd,1",
-											"-p",
-											markedPids.join(","),
-											"-F",
-											"pn",
-										],
-										"partial",
-									),
-								);
+							: yield* Effect.gen(function* () {
+									const unread = markedPids.filter(
+										(pid) => !fdsOf.has(procKey(pid)),
+									);
+									const read =
+										unread.length === 0
+											? new Map<number, { fd: string; name: string }[]>()
+											: yield* lsofFields(
+													yield* run(
+														"lsof",
+														[
+															"-nP",
+															"-w",
+															"-a",
+															"-d",
+															"cwd,1",
+															"-p",
+															unread.join(","),
+															"-F",
+															"pn",
+														],
+														"partial",
+													),
+												);
+									fdsOf = new Map(
+										markedPids.map((pid) => [
+											procKey(pid),
+											fdsOf.get(procKey(pid)) ?? read.get(pid) ?? [],
+										]),
+									);
+									return new Map(
+										markedPids.map((pid) => [
+											pid,
+											fdsOf.get(procKey(pid)) ?? [],
+										]),
+									);
+								});
 					const describe = (server: ServerKey): Omit<Scanned, "sessionId"> => {
 						const fds = cwds.get(server.pid) ?? [];
 						const taskId = TASK_OUTPUT.exec(
