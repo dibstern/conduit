@@ -198,6 +198,7 @@ describe("Ticket 3.3 — CLI Interface", () => {
 			[["--title", "My Project"], { command: "title", title: "My Project" }],
 			[["--port", "3000"], { port: 3000 }],
 			[["-p", "8080"], { port: 8080 }],
+			[["--port", "0"], { port: 0, portExplicit: true }],
 			[["--oc-port", "5000"], { ocPort: 5000 }],
 		];
 		it.each(
@@ -243,7 +244,7 @@ describe("Ticket 3.3 — CLI Interface", () => {
 				}),
 				(argv) => {
 					const args = parseArgs(argv);
-					expect(args.port).toBeGreaterThanOrEqual(1);
+					expect(args.port).toBeGreaterThanOrEqual(0);
 					expect(args.port).toBeLessThanOrEqual(65535);
 				},
 			),
