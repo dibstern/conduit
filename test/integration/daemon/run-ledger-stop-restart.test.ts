@@ -8,11 +8,12 @@
 //    retire row) or a `provider_process_gone` cancel instead of the host's terminal;
 // 4. the stop outlives the host's terminal, so a following send waits for the deadline.
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterEach, describe, expect, it } from "vitest";
+import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
 describe("Run Ledger: a Stop across a full daemon rebuild over a surviving runner", () => {
@@ -184,4 +185,60 @@ describe("Run Ledger: a Stop across a full daemon rebuild over a surviving runne
 			db.close();
 		}
 	});
+
+	// test-waits-allow timeout-override: a new runner's start and the next send each take seconds.
+	it("ends a Stop's Run interrupted once when its runner dies with the interrupt unanswered, and runs the next send once", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+		});
+		harnesses.push(harness);
+		writeFileSync(
+			join(harness.root, "claude", "conduit-test-hold-stop"),
+			"hold",
+		);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession(
+			"Stop with the runner killed",
+		);
+		const turn = browser
+			.send(sessionId, "upgrade-long-turn")
+			.catch(() => undefined);
+		await harness.waitForMark((mark) => mark.kind === "assistant-held");
+		const stopping = Effect.runPromise(
+			browser.rpc.CancelSession({ sessionId, commandId: randomUUID() }),
+		).catch(() => undefined);
+		await harness.waitForMark((mark) => mark.kind === "stop-held");
+		for (const pid of harness.runnerPids())
+			expect(harness.signalOwnedRunner(pid, "SIGKILL")).toBe(true);
+		await Promise.all([turn, stopping]);
+		rmSync(join(harness.root, "claude", "conduit-test-hold-stop"));
+		const next = await browser.send(sessionId, "after-runner-loss");
+		expect(next.chunks.join("")).toContain("after-runner-loss");
+		const db = new Database(harness.daemonStorePath(), { readonly: true });
+		try {
+			// A Stop asked ends its Run interrupted before its lost runner's error (CONTRACT 857-859).
+			expect(
+				db
+					.prepare(
+						"SELECT json_extract(entry_json, '$.outcome') AS outcome FROM run_ledger_entries WHERE session_id = ? AND json_extract(entry_json, '$.kind') = 'end' ORDER BY entry_seq",
+					)
+					.all(sessionId),
+			).toEqual([{ outcome: "interrupted" }, { outcome: "completed" }]);
+			expect(
+				db
+					.prepare(
+						"SELECT COUNT(*) AS n FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'send_turn'",
+					)
+					.get(sessionId),
+			).toEqual({ n: 2 });
+		} finally {
+			db.close();
+		}
+		proveCrashMatrixCell(
+			"claude/stop/runner",
+			harness.daemonStorePath(),
+			sessionId,
+		);
+	}, 120_000);
 });

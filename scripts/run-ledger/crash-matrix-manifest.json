@@ -355,8 +355,8 @@
 		},
 		{
 			"cell": "claude/stop/runner",
-			"status": "covered",
-			"tests": "provider-control-restart:200 (runner killed with the daemon)"
+			"status": "proved",
+			"file": "test/integration/daemon/run-ledger-stop-restart.test.ts"
 		},
 		{
 			"cell": "claude/answer/daemon",
