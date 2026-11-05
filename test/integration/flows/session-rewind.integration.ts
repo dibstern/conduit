@@ -1,9 +1,17 @@
 import { channel } from "node:diagnostics_channel";
-import { mkdirSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	mkdtempSync,
+	realpathSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { SessionDetailEnvelopeSchema } from "../../../src/lib/contracts/ws-rpc.js";
 import type { ReadModelRead } from "../../../src/lib/domain/relay/Services/read-model-subscription.js";
 import {
@@ -18,9 +26,9 @@ import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-que
 import type { StoredEventRow } from "../../../src/lib/persistence/effect/stored-event-row.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 type DetailEnvelope = typeof SessionDetailEnvelopeSchema.Type;
@@ -65,7 +73,7 @@ function detailState(
 	};
 }
 
-function persistedRewinds(harness: RelayHarness, sessionId: string) {
+function persistedRewinds(harness: DaemonProject, sessionId: string) {
 	const db = new Database(harness.eventsDbPath, { readonly: true });
 	try {
 		return {
@@ -92,7 +100,7 @@ function persistedRewinds(harness: RelayHarness, sessionId: string) {
 }
 
 async function seedTurns(
-	harness: RelayHarness,
+	harness: DaemonProject,
 	client: TestWsClient,
 	messageIds = seededIds,
 	withTools = false,
@@ -280,7 +288,7 @@ function legacyRewindRows(
 }
 
 describe("OpenCode pending rewind through the relay", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let evidence: Record<string, unknown> = {};
 
 	afterEach(async (context) => {
@@ -309,7 +317,7 @@ describe("OpenCode pending rewind through the relay", () => {
 	// Failure cases: a short tail rewrite stamps the entire transcript, a moved
 	// cut loses restored parts, or a viewer's newest page leaks hidden messages.
 	it("bounds rewind and undo projection writes in a large transcript", async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		evidence = { tickets: ["conduit-test-yyin", "conduit-test-qr9d"] };
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -352,6 +360,17 @@ describe("OpenCode pending rewind through the relay", () => {
 					).n,
 				};
 			};
+			// Opening the session starts its first REST reconcile, which snapshots
+			// all 200 rows whenever it lands; let it land before the counted window.
+			await vi.waitFor(
+				() =>
+					expect(
+						db
+							.prepare("SELECT history_complete FROM sessions WHERE id = ?")
+							.get(sessionId),
+					).toEqual({ history_complete: 1 }),
+				{ timeout: 10_000 },
+			);
 			let previousVersion = writes().version;
 			for (const cut of [190, 196, 180]) {
 				const messageId = messageIds[cut];
@@ -624,7 +643,12 @@ describe("OpenCode pending rewind through the relay", () => {
 	// pending point, paging leaks hidden messages, undo loses turns, or duplicate
 	// provider removals fail after the committed transcript has removed them.
 	it("commits a long transcript when the cut is removed first, coalesces duplicate removals, then replays it", async () => {
-		harness = await createRelayHarness();
+		// Outside the worktree, whose git changes stamp the session and add reads.
+		const projectDir = realpathSync(
+			mkdtempSync(join(tmpdir(), "rewind-project-")),
+		);
+		onTestFinished(() => rmSync(projectDir, { recursive: true, force: true }));
+		harness = await createDaemonProject("chat-simple", { projectDir });
 		evidence = { ticket: "conduit-test-hiuf.4" };
 		const fixture = harness;
 		const client = await fixture.connectWsClient();
@@ -636,10 +660,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		const sessionId = await seedTurns(fixture, client, messageIds, true);
 		const removedIds = messageIds.slice(2);
 		const target = removedIds[0] as string;
-		const project = () =>
-			fixture.stack.effectRuntime.runtime.runPromise(
-				rewindProjection(sessionId),
-			);
+		const project = () => fixture.run(rewindProjection(sessionId));
 		await vi.waitFor(async () => {
 			const seeded = await project();
 			expect(
@@ -652,6 +673,16 @@ describe("OpenCode pending rewind through the relay", () => {
 				),
 			).toBe(true);
 		});
+		const db = new Database(fixture.eventsDbPath, { readonly: true });
+		// The folder's first git read stamps the session whenever it lands; let it
+		// land before the counted window. The folder never changes after it.
+		await vi.waitFor(() =>
+			expect(
+				db
+					.prepare("SELECT 1 FROM session_git_published WHERE directory = ?")
+					.get(projectDir),
+			).toBeDefined(),
+		);
 		await client.rpcCall((rpc) =>
 			rpc.RewindSession({ sessionId, messageId: target }),
 		);
@@ -661,7 +692,6 @@ describe("OpenCode pending rewind through the relay", () => {
 				pending: target,
 			}),
 		);
-		const db = new Database(fixture.eventsDbPath, { readonly: true });
 		const reads: ReadModelRead[] = [];
 		const readChannel = channel("conduit:read-model-read");
 		const observeRead = (message: unknown) => {
@@ -771,7 +801,7 @@ describe("OpenCode pending rewind through the relay", () => {
 	}, 60_000);
 
 	async function fixture(ids = seededIds, orderedClocks = false) {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		evidence = { ticket: "conduit-test-82tn.55" };
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
@@ -787,7 +817,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		return { relay: harness, client, second, sessionId };
 	}
 
-	function wire(relay: RelayHarness, sessionId: string) {
+	function wire(relay: DaemonProject, sessionId: string) {
 		return relay.mock.requestBodies.filter(
 			(request) =>
 				request.path.startsWith(`/session/${sessionId}/`) &&
@@ -796,7 +826,7 @@ describe("OpenCode pending rewind through the relay", () => {
 		);
 	}
 
-	async function nativeIds(relay: RelayHarness, sessionId: string) {
+	async function nativeIds(relay: DaemonProject, sessionId: string) {
 		const response = await fetch(
 			`${relay.mock.url}/session/${sessionId}/message`,
 		);
@@ -990,14 +1020,15 @@ describe("OpenCode pending rewind through the relay", () => {
 				commandId: "rapid-second",
 			}),
 		]);
-		expect(
-			wire(relay, sessionId).filter(({ method }) => method === "DELETE"),
-		).toHaveLength(2);
+		// A submit returns once admitted; truncation runs before each prompt.
 		for (const id of ["msg_conduit_rapid-first", "msg_conduit_rapid-second"])
 			await client.waitForTranscriptMessage(
 				(message) => message.id === id,
 				sessionId,
 			);
+		expect(
+			wire(relay, sessionId).filter(({ method }) => method === "DELETE"),
+		).toHaveLength(2);
 		const history = await client.loadMoreHistory(sessionId);
 		const native = await nativeIds(relay, sessionId);
 		expect(native).toHaveLength(6);
@@ -1056,7 +1087,7 @@ describe("OpenCode pending rewind through the relay", () => {
 	it("commits only on removal of the cut itself, never another tail message", async () => {
 		const { relay, client, sessionId } = await fixture();
 		await rewind(client, sessionId);
-		await relay.stack.effectRuntime.runtime.runPromise(
+		await relay.run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				expect(

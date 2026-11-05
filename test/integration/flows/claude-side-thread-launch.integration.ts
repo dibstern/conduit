@@ -9,6 +9,7 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
 import {
 	getPermissionMode,
@@ -19,11 +20,12 @@ import {
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import type { Options, Query } from "../../../src/lib/provider/claude/types.js";
 import { ProjectShellEnvResolver } from "../../../src/lib/provider/project-shell-env.js";
+import { ProviderRegistryTag } from "../../../src/lib/provider/provider-registry.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 const worktreeLine =
 	"To work in another worktree, use EnterWorktree instead of cd.";
@@ -32,7 +34,7 @@ const sideThreadLine =
 
 describe("Integration: Claude Side Thread launch fence", () => {
 	let root: string;
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let launches: Array<{ options: Options; query: Query }>;
 	const evidence: unknown[] = [];
 
@@ -112,7 +114,7 @@ describe("Integration: Claude Side Thread launch fence", () => {
 		const sdkPermissionMode = changedPermissions
 			? "bypassPermissions"
 			: "default";
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
 			defaultModel: null,
 			claudeSdk: {
@@ -126,7 +128,7 @@ describe("Integration: Claude Side Thread launch fence", () => {
 				},
 			},
 		});
-		const runtime = harness.stack.effectRuntime.runtime;
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const parent = await client.createSession("Parent task", {
@@ -140,8 +142,8 @@ describe("Integration: Claude Side Thread launch fence", () => {
 		});
 		const parentId = parent["id"];
 		if (typeof parentId !== "string") throw new Error("Missing parent id");
-		await runtime.runPromise(setDefaultPermissionMode("full"));
-		await runtime.runPromise(setPermissionMode(parentId, "full"));
+		await run(setDefaultPermissionMode("full"));
+		await run(setPermissionMode(parentId, "full"));
 		const parentEnd = client.waitForTurnEnd(parentId);
 		await client.sendMessage("Reply with pong", { sessionId: parentId });
 		expect((await parentEnd).attention).not.toBe("error");
@@ -156,21 +158,22 @@ describe("Integration: Claude Side Thread launch fence", () => {
 		if (launch !== "cold") {
 			// StartSideThread admits immediately. Create through its same command,
 			// then retry that input id over RPC after warming the idle Side Thread.
-			const side = await runtime.runPromise(
+			const side = await run(
 				forkSession(parentId, { side: { title: "Side question", inputId } }),
 			);
 			reservedId = side.id;
-			expect(await runtime.runPromise(getPermissionMode(side.id))).toBe("ask");
-			if (changedPermissions)
-				await runtime.runPromise(setPermissionMode(side.id, "full"));
+			expect(await run(getPermissionMode(side.id))).toBe("ask");
+			if (changedPermissions) await run(setPermissionMode(side.id, "full"));
 			// This reserved session has not reached send dispatch's transient binding.
-			harness.stack.orchestration.engine.bindSession(side.id, "claude");
-			await runtime.runPromise(
-				setModel(side.id, { providerID: "claude", modelID: "sonnet" }),
+			(await harness.run(OrchestrationEngineTag)).bindSession(
+				side.id,
+				"claude",
 			);
+			await run(setModel(side.id, { providerID: "claude", modelID: "sonnet" }));
 			if (launch === "unfenced pre-warm") {
-				const instance =
-					harness.stack.orchestration.registry.getInstance("claude");
+				const instance = (await harness.run(ProviderRegistryTag)).getInstance(
+					"claude",
+				);
 				if (!instance?.preWarmSessionEffect)
 					throw new Error("Claude pre-warm is unavailable");
 				const preWarm = instance.preWarmSessionEffect.bind(instance);
@@ -210,10 +213,10 @@ describe("Integration: Claude Side Thread launch fence", () => {
 		);
 		if (reservedId) expect(side.sessionId).toBe(reservedId);
 		await client.viewSession(side.sessionId);
-		expect((await client.waitForTurnEnd(side.sessionId)).attention).not.toBe(
-			"error",
-		);
-		expect(await runtime.runPromise(getPermissionMode(side.sessionId))).toBe(
+		expect(
+			(await client.waitForTurnEnd(side.sessionId, 10_000, inputId)).attention,
+		).not.toBe("error");
+		expect(await run(getPermissionMode(side.sessionId))).toBe(
 			changedPermissions ? "full" : "ask",
 		);
 		const sideLaunch = launches.at(-1)?.options;
@@ -251,9 +254,14 @@ describe("Integration: Claude Side Thread launch fence", () => {
 		const fork = await client.forkSession({ sessionId: parentId });
 		const forkId = fork["id"];
 		if (typeof forkId !== "string") throw new Error("Missing Fork id");
-		const forkEnd = client.waitForTurnEnd(forkId);
-		await client.sendMessage("Continue the task", { sessionId: forkId });
-		expect((await forkEnd).attention).not.toBe("error");
+		const forkInputId = randomUUID();
+		await client.sendMessage("Continue the task", {
+			sessionId: forkId,
+			commandId: forkInputId,
+		});
+		expect(
+			(await client.waitForTurnEnd(forkId, 10_000, forkInputId)).attention,
+		).not.toBe("error");
 		const forkLaunch = launches.at(-1)?.options;
 		expect(forkLaunch).toMatchObject({
 			resume: expect.any(String),

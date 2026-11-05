@@ -27,19 +27,19 @@ import { PREVIEW_CODE_POINTS } from "../../../src/lib/persistence/tool-wire-proj
 import { readWorktreeCleanupPaths } from "../../../src/lib/session/worktree-cleanup-sweep.js";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
-import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
 
 const NOW = 1_800_000_000_000;
 const goldenPath = new URL("./fork-read-model.golden.json", import.meta.url);
 
 // Read markers are viewer annotations (ADR-0004), not replayable events.
 // Keep every event-derived content, model, usage and tool-result field checked.
-const checkParity = (harness: RelayHarness) =>
+const checkParity = (harness: DaemonProject) =>
 	Effect.runPromise(
 		verifyReplayParity(harness.eventsDbPath, {
 			projectId: "integration-test",
@@ -56,8 +56,8 @@ const checkParity = (harness: RelayHarness) =>
 	);
 
 /** Fake provider output still enters the relay's production ingestion seam. */
-async function emit(harness: RelayHarness, events: readonly CanonicalEvent[]) {
-	await harness.stack.effectRuntime.runtime.runPromise(
+async function emit(harness: DaemonProject, events: readonly CanonicalEvent[]) {
+	await harness.run(
 		Effect.gen(function* () {
 			const ingestion = yield* Effect.serviceOption(
 				ProviderRuntimeIngestionTag,
@@ -245,7 +245,7 @@ function turn(sessionId: string, n: number, finished = true): CanonicalEvent[] {
 	];
 }
 
-function dump(harness: RelayHarness, sessionId: string, sourceId: string) {
+function dump(harness: DaemonProject, sessionId: string, sourceId: string) {
 	const db = new Database(harness.eventsDbPath, { readonly: true });
 	try {
 		const rows = {
@@ -298,7 +298,7 @@ function dump(harness: RelayHarness, sessionId: string, sourceId: string) {
 }
 
 describe("Fork read-model inheritance", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	afterEach(async () => {
 		vi.restoreAllMocks();
 		await harness?.stop();
@@ -309,8 +309,8 @@ describe("Fork read-model inheritance", () => {
 		"current",
 		"pre-snapshot",
 	] as const)("retains each deleted descendant's own worktree ownership after marker-only drain (%s)", async (storage) => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const rootId = "ownership-root";
 		const childId = "ownership-child";
 		const rootOwnership = {
@@ -325,7 +325,7 @@ describe("Fork read-model inheritance", () => {
 			branchName: "conduit/child",
 			head: "b".repeat(40),
 		};
-		await runtime.runPromise(
+		await run(
 			applySessionCommand(
 				{
 					type: "session.created",
@@ -341,7 +341,7 @@ describe("Fork read-model inheritance", () => {
 				},
 			),
 		);
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				yield* applySessionCommand({
 					type: "session.created",
@@ -369,13 +369,13 @@ describe("Fork read-model inheritance", () => {
 			}),
 		);
 		await emit(harness, turn(rootId, 1));
-		const inherited = await runtime.runPromise(
+		const inherited = await run(
 			forkSession(rootId, {
 				side: { title: "Inherited checkout", inputId: "ownership-side" },
 			}),
 		);
 		const renamed = { ...rootOwnership, branchName: "conduit/renamed-root" };
-		await runtime.runPromise(
+		await run(
 			applySessionCommand({
 				type: "session.workspace_changed",
 				data: {
@@ -388,16 +388,12 @@ describe("Fork read-model inheritance", () => {
 			}),
 		);
 		// Prove the real fixture supplies inspection and canonical ownership before deletion.
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(rootId)),
-		).toEqual([renamed]);
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(childId)),
-		).toEqual([childOwnership]);
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(inherited.id)),
-		).toEqual([]);
-		await runtime.runPromise(
+		expect(await run(readSessionWorktreeOwnership(rootId))).toEqual([renamed]);
+		expect(await run(readSessionWorktreeOwnership(childId))).toEqual([
+			childOwnership,
+		]);
+		expect(await run(readSessionWorktreeOwnership(inherited.id))).toEqual([]);
+		await run(
 			applySessionCommand({
 				type: "session.deleted",
 				data: { sessionId: rootId },
@@ -408,7 +404,7 @@ describe("Fork read-model inheritance", () => {
 			),
 		);
 		if (storage === "pre-snapshot") {
-			await runtime.runPromise(
+			await run(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`UPDATE events SET data = json_remove(data, '$.worktreeOwnership')
@@ -443,15 +439,13 @@ describe("Fork read-model inheritance", () => {
 			} finally {
 				db.close();
 			}
-			expect(
-				await runtime.runPromise(readSessionWorktreeOwnership(rootId)),
-			).toEqual([renamed]);
-			expect(
-				await runtime.runPromise(readSessionWorktreeOwnership(childId)),
-			).toEqual([childOwnership]);
-			expect(
-				await runtime.runPromise(readSessionWorktreeOwnership(inherited.id)),
-			).toEqual([]);
+			expect(await run(readSessionWorktreeOwnership(rootId))).toEqual([
+				renamed,
+			]);
+			expect(await run(readSessionWorktreeOwnership(childId))).toEqual([
+				childOwnership,
+			]);
+			expect(await run(readSessionWorktreeOwnership(inherited.id))).toEqual([]);
 		}
 		await harness.drainEventRetention();
 		const db = new Database(harness.eventsDbPath, { readonly: true });
@@ -476,15 +470,11 @@ describe("Fork read-model inheritance", () => {
 		} finally {
 			db.close();
 		}
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(rootId)),
-		).toEqual([renamed]);
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(childId)),
-		).toEqual([childOwnership]);
-		expect(
-			await runtime.runPromise(readSessionWorktreeOwnership(inherited.id)),
-		).toEqual([]);
+		expect(await run(readSessionWorktreeOwnership(rootId))).toEqual([renamed]);
+		expect(await run(readSessionWorktreeOwnership(childId))).toEqual([
+			childOwnership,
+		]);
+		expect(await run(readSessionWorktreeOwnership(inherited.id))).toEqual([]);
 	});
 
 	// Discovery must retain known paths without reviving older ownership authority.
@@ -496,8 +486,8 @@ describe("Fork read-model inheritance", () => {
 		state,
 		legacy,
 	}) => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const sessionId = `ownership-${state}`;
 		const owned = {
 			folder: process.cwd(),
@@ -525,7 +515,7 @@ describe("Fork read-model inheritance", () => {
 				SELECT event_id || '-newer', session_id, stream_version + 1, type, ${newerData}, metadata, provider, created_at + 1, project_id
 				FROM events WHERE session_id = ${sessionId} AND type = 'session.deleted'`;
 		});
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				yield* applySessionCommand({
 					type: "session.created",
@@ -566,10 +556,10 @@ describe("Fork read-model inheritance", () => {
 		);
 		if (!legacy) {
 			await harness.drainEventRetention();
-			expect(
-				await runtime.runPromise(readSessionWorktreeOwnership(sessionId)),
-			).toEqual([owned]);
-			await runtime.runPromise(
+			expect(await run(readSessionWorktreeOwnership(sessionId))).toEqual([
+				owned,
+			]);
+			await run(
 				Effect.flatMap(SqlClient.SqlClient, (sql) =>
 					sql.withTransaction(rewriteMarkers),
 				),
@@ -593,7 +583,7 @@ describe("Fork read-model inheritance", () => {
 		} finally {
 			db.close();
 		}
-		const inspection = await runtime.runPromise(
+		const inspection = await run(
 			Effect.result(readSessionWorktreeOwnership(sessionId)),
 		);
 		expect(inspection).toMatchObject(
@@ -602,7 +592,7 @@ describe("Fork read-model inheritance", () => {
 				: { _tag: "Failure", failure: { operation: "worktree.inspect" } },
 		);
 		expect(
-			await runtime.runPromise(
+			await run(
 				readWorktreeCleanupPaths.pipe(
 					Effect.provideService(PersistenceProjectTag, {
 						projectId: "integration-test",
@@ -618,7 +608,7 @@ describe("Fork read-model inheritance", () => {
 	// Failure cases: missing rich parts, inclusion of a removed turn, a cut
 	// leaking future messages, lost model/context state, or a busy Side Thread.
 	it("matches the old replay rows at latest, earlier and mid-turn Side Thread cuts", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		vi.spyOn(Date, "now").mockReturnValue(NOW);
@@ -654,7 +644,7 @@ describe("Fork read-model inheritance", () => {
 			sessionId: sourceId,
 			messageId: "turn-1-assistant",
 		});
-		const side = await harness.stack.effectRuntime.runtime.runPromise(
+		const side = await harness.run(
 			forkSession(sourceId, {
 				side: { title: "Mid-turn", inputId: "side-input" },
 			}),
@@ -685,8 +675,8 @@ describe("Fork read-model inheritance", () => {
 	// Failure cases: a missing/hidden cut sneaks through, a pending rewind
 	// leaks hidden rows, or a Side Thread inherits the unfinished first turn.
 	it("rejects hidden cuts and unfinished Side Threads and respects pending rewind", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Pending", {
@@ -700,7 +690,7 @@ describe("Fork read-model inheritance", () => {
 		});
 		const sourceId = String(created["id"]);
 		await emit(harness, [...turn(sourceId, 1), ...turn(sourceId, 2)]);
-		const userCut = await runtime.runPromise(
+		const userCut = await run(
 			forkSession(sourceId, { messageId: "turn-1-user" }),
 		);
 		const cutDb = new Database(harness.eventsDbPath, { readonly: true });
@@ -741,7 +731,7 @@ describe("Fork read-model inheritance", () => {
 		await expect(
 			client.forkSession({ sessionId: sourceId, messageId: "missing" }),
 		).rejects.toThrow(/not found/);
-		const fork = await runtime.runPromise(forkSession(sourceId));
+		const fork = await run(forkSession(sourceId));
 		const db = new Database(harness.eventsDbPath, { readonly: true });
 		try {
 			expect(
@@ -760,7 +750,7 @@ describe("Fork read-model inheritance", () => {
 		await client.rpcCall((rpc) =>
 			rpc.RewindSession({ sessionId: sourceId, messageId: "turn-2-assistant" }),
 		);
-		const visibleSide = await runtime.runPromise(
+		const visibleSide = await run(
 			forkSession(sourceId, {
 				side: { title: "Visible completed turn", inputId: "visible-side" },
 			}),
@@ -777,7 +767,7 @@ describe("Fork read-model inheritance", () => {
 		});
 		const unfinishedId = String(unfinished["id"]);
 		await expect(
-			runtime.runPromise(
+			run(
 				forkSession(unfinishedId, {
 					side: { title: "Empty", inputId: "empty-side" },
 				}),
@@ -785,7 +775,7 @@ describe("Fork read-model inheritance", () => {
 		).rejects.toThrow(
 			"This session has no messages yet. Send a message first.",
 		);
-		await runtime.runPromise(
+		await run(
 			applySessionCommand(
 				{
 					type: "session.created",
@@ -841,7 +831,7 @@ describe("Fork read-model inheritance", () => {
 				},
 			),
 		]);
-		const resultOnly = await runtime.runPromise(
+		const resultOnly = await run(
 			forkSession("result-only-source", {
 				side: { title: "Result side", inputId: "result-only-side" },
 			}),
@@ -849,7 +839,7 @@ describe("Fork read-model inheritance", () => {
 		expect(resultOnly.forkMessageId).toBe("result-only-user");
 		await emit(harness, turn(unfinishedId, 5, false));
 		await expect(
-			runtime.runPromise(
+			run(
 				forkSession(unfinishedId, {
 					side: { title: "Unfinished", inputId: "unfinished-side" },
 				}),
@@ -861,8 +851,8 @@ describe("Fork read-model inheritance", () => {
 	// preflight read but precedes its append transaction. The command must read
 	// the point again under the same transaction that creates the child.
 	it("rejects a cut removed between preflight and the append transaction", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Racing cut", {
@@ -878,7 +868,7 @@ describe("Fork read-model inheritance", () => {
 		await emit(harness, turn(sourceId, 1));
 		let removed = false;
 		await expect(
-			runtime.runPromise(
+			run(
 				Effect.gen(function* () {
 					const commit = yield* makeCommitAndSignal;
 					return yield* forkSession(sourceId, {
@@ -921,8 +911,8 @@ describe("Fork read-model inheritance", () => {
 	// Historical logs contain their own inherited events. Absence of the flag
 	// must leave creation alone even when the Source and cut are available.
 	it("replays legacy fork events once and can fork inherited read-model messages", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Legacy Source", {
@@ -950,7 +940,7 @@ describe("Fork read-model inheritance", () => {
 			),
 		]);
 		const legacyId = "legacy-fork";
-		await runtime.runPromise(
+		await run(
 			Effect.gen(function* () {
 				yield* applySessionCommand({
 					type: "session.created",
@@ -1016,8 +1006,8 @@ describe("Fork read-model inheritance", () => {
 				]);
 			}),
 		);
-		const first = await runtime.runPromise(forkSession(sourceId));
-		const second = await runtime.runPromise(
+		const first = await run(forkSession(sourceId));
+		const second = await run(
 			forkSession(first.id, { messageId: `turn-1-assistant_${first.id}` }),
 		);
 		const db = new Database(harness.eventsDbPath, { readonly: true });
@@ -1059,8 +1049,8 @@ describe("Fork read-model inheritance", () => {
 		true,
 		false,
 	])("preserves a reopened turn's display reply and bounds its earlier cut (keyed model: %s)", async (keyed) => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Reopened turn", {
@@ -1160,11 +1150,11 @@ describe("Fork read-model inheritance", () => {
 				{ provider: "claude", createdAt: NOW - 298, metadata: continuation },
 			),
 		]);
-		const latest = await runtime.runPromise(forkSession(sourceId));
-		const earlier = await runtime.runPromise(
+		const latest = await run(forkSession(sourceId));
+		const earlier = await run(
 			forkSession(sourceId, { messageId: "turn-6-assistant" }),
 		);
-		const nested = await runtime.runPromise(
+		const nested = await run(
 			forkSession(latest.id, { messageId: `turn-6-assistant_${latest.id}` }),
 		);
 		const db = new Database(harness.eventsDbPath, { readonly: true });
@@ -1203,7 +1193,7 @@ describe("Fork read-model inheritance", () => {
 	});
 
 	it("keeps a turn error's synthetic message when cutting at its owning reply", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Errored turn", {
@@ -1233,7 +1223,7 @@ describe("Fork read-model inheritance", () => {
 				},
 			),
 		]);
-		const fork = await harness.stack.effectRuntime.runtime.runPromise(
+		const fork = await harness.run(
 			forkSession(sourceId, { messageId: "turn-7-assistant" }),
 		);
 		const db = new Database(harness.eventsDbPath, { readonly: true });
@@ -1259,7 +1249,7 @@ describe("Fork read-model inheritance", () => {
 	});
 
 	it("renders copied prefix-related ids on the inherited side of a tied Source cut", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const created = await client.createSession("Tied ordering", {
@@ -1293,9 +1283,7 @@ describe("Fork read-model inheritance", () => {
 				),
 			]),
 		);
-		const fork = await harness.stack.effectRuntime.runtime.runPromise(
-			forkSession(sourceId, { messageId: "a0" }),
-		);
+		const fork = await harness.run(forkSession(sourceId, { messageId: "a0" }));
 		const rendered = historyToChatMessages([
 			...(await client.loadMoreHistory(fork.id)).messages,
 		] as HistoryMessage[]);
@@ -1309,8 +1297,8 @@ describe("Fork read-model inheritance", () => {
 	});
 
 	it("forks a Cursor source without appending copied events or saving a digest early", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		await harness.stack.effectRuntime.runtime.runPromise(
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		await harness.run(
 			Effect.gen(function* () {
 				const sourceId = "cursor-digest-source";
 				yield* applySessionCommand(
@@ -1470,8 +1458,8 @@ describe("Fork read-model inheritance", () => {
 	// projection and all command bookkeeping. SQL instrumentation counts the
 	// actual statements executed by this command's fiber in the relay runtime.
 	it("creates N and 10N message forks with equal statement counts", async () => {
-		harness = await createRelayHarness("chat-simple", { claudeSdk });
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject("chat-simple", { claudeSdk });
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const measurements = [];
@@ -1576,7 +1564,7 @@ describe("Fork read-model inheritance", () => {
 			for (const kind of ["fork", "side-thread"] as const) {
 				const statements: string[] = [];
 				const started = performance.now();
-				const fork = await runtime.runPromise(
+				const fork = await run(
 					forkSession(
 						sourceId,
 						kind === "side-thread"
@@ -1592,7 +1580,7 @@ describe("Fork read-model inheritance", () => {
 					),
 				);
 				const milliseconds = performance.now() - started;
-				const counts = await runtime.runPromise(
+				const counts = await run(
 					Effect.gen(function* () {
 						const sql = yield* SqlClient.SqlClient;
 						return (yield* sql<{ messages: number; events: number }>`SELECT

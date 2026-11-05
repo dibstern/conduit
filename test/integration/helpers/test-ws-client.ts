@@ -620,10 +620,15 @@ export class TestWsClient {
 		await started;
 	}
 
-	/** The terminal shell row must advance past the fence captured before sending. */
+	/**
+	 * The terminal shell row must advance past the fence captured before sending.
+	 * Name the send's `inputId` when no fence exists: a Fork or Side Thread row
+	 * already carries its copied history's turn end.
+	 */
 	async waitForTurnEnd(
 		sessionId = this.getActiveSessionId(),
 		timeout = 10_000,
+		inputId?: string,
 	): Promise<SessionInfo> {
 		if (!sessionId)
 			throw new Error("Cannot wait for a turn before selecting a session");
@@ -637,7 +642,8 @@ export class TestWsClient {
 		const matches = (row: SessionInfo) =>
 			row.id === sessionId &&
 			(row.status === "idle" || row.status === "error") &&
-			(row.lastTurnEndVersion ?? -1) > endedBefore;
+			(row.lastTurnEndVersion ?? -1) > endedBefore &&
+			(inputId === undefined || row.lastTurnEndInputId === inputId);
 		const frame = await this.waitForAny(["shell", "family"], {
 			timeout,
 			cursor: this.turnCursors.get(sessionId) ?? 0,
