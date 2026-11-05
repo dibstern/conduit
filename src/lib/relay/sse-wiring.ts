@@ -2,7 +2,7 @@
 // OpenCode, persists them, maintains timeouts, and publishes alerts and push
 // notifications using RPC viewer presence.
 
-import { Data, Effect, Option, Result, Schema } from "effect";
+import { Data, Effect, Fiber, Option, Result, Schema } from "effect";
 import type { SqlError } from "effect/sql/SqlError";
 import { OpenCodeEventSchema } from "../contracts/providers/opencode-sdk.js";
 import type { OpenCodeConnectionStatus } from "../contracts/ws-rpc.js";
@@ -782,6 +782,9 @@ export const wireSSEConsumerEffect = (
 		>();
 		yield* Effect.sync(() => {
 			const runFork = Effect.runForkWith(runtime);
+			// Each session's last event still in hand: its next event waits for it, so ingestion and
+			// the translator see one session's events in arrival order. Sessions stay independent.
+			const sessionTails = new Map<string, Fiber.Fiber<void>>();
 			let connectionRevision = 0;
 			wireSSEConsumerWithCallbacks(deps, consumer, {
 				onConnectionStatus: (status, managedStopped, stoppedProcessId) => {
@@ -820,17 +823,27 @@ export const wireSSEConsumerEffect = (
 						deps.onPtysChanged?.(deps.providerInstanceId);
 						return;
 					}
-					runFork(
-						handleSSEEventEffect(deps, event, context).pipe(
-							Effect.catchCause((cause) =>
-								Effect.sync(() =>
-									deps.log.warn(
-										`SSE event handling failed: ${Failure.renderCause(cause)}`,
-									),
+					const handle = handleSSEEventEffect(deps, event, context).pipe(
+						Effect.catchCause((cause) =>
+							Effect.sync(() =>
+								deps.log.warn(
+									`SSE event handling failed: ${Failure.renderCause(cause)}`,
 								),
 							),
 						),
 					);
+					const sessionId = extractSessionId(event);
+					const previous =
+						sessionId === undefined ? undefined : sessionTails.get(sessionId);
+					const fiber = runFork(
+						previous ? Effect.andThen(Fiber.await(previous), handle) : handle,
+					);
+					if (sessionId === undefined) return;
+					sessionTails.set(sessionId, fiber);
+					fiber.addObserver(() => {
+						if (sessionTails.get(sessionId) === fiber)
+							sessionTails.delete(sessionId);
+					});
 				},
 				onReconnect: (providerProcessId) => {
 					if (deps.opencodeRuntimeIngress)
