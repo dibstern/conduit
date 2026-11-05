@@ -879,7 +879,8 @@ export type ProjectSessionManagerParts =
 	| EventStoreEffectTag
 	| ProjectionRunnerEffectTag
 	| SqlClient.SqlClient
-	| SessionWorkspaceTag;
+	| SessionWorkspaceTag
+	| SessionManagerServiceTag;
 
 /** The daemon's one session manager; every call names its project. */
 export interface SessionManagers {
@@ -1021,6 +1022,8 @@ const makeProjectSessionManager: Effect.Effect<
 	const accounts = yield* AccountDirectory;
 	const overrides = yield* OverridesStateTag;
 	const workspace = yield* SessionWorkspaceTag;
+	// The archive sweep deletes through the daemon's service, as any caller does.
+	const managers = yield* SessionManagerServiceTag;
 	const modelService = yield* Effect.serviceOption(OpenCodeModelServiceTag);
 	// Captured here, not read at call time: the auto-settle sweep calls in from
 	// a daemon fiber that lacks the project's bus, and a commit without it
@@ -1392,7 +1395,7 @@ const makeProjectSessionManager: Effect.Effect<
 						{
 							hasLiveBackgroundWork: activity.background.hasLiveWork,
 							deleteSession: (id, retentionVersions) =>
-								service.deleteSession(id, {
+								managers.forProject(config.slug).deleteSession(id, {
 									keepWorktrees: true,
 									retentionVersions,
 								}),
@@ -1592,6 +1595,7 @@ export const SessionManagerServiceLive = Layer.sync(
 			string,
 			Array<Context.Context<ProjectSessionManagerParts>>
 		>();
+		const services = new Map<string, SessionManagerService>();
 		const project = (projectId: string) =>
 			Effect.suspend(() => {
 				const parts = attached.get(projectId)?.at(-1);
@@ -1619,14 +1623,19 @@ export const SessionManagerServiceLive = Layer.sync(
 								(entry) => entry !== parts,
 							);
 							if (rest.length > 0) attached.set(projectId, rest);
-							else attached.delete(projectId);
+							else {
+								attached.delete(projectId);
+								services.delete(projectId);
+							}
 						}),
 				),
 			forProject: (projectId) => {
+				const existing = services.get(projectId);
+				if (existing) return existing;
 				const run = <A, E>(
 					use: (service: SessionManagerService) => Effect.Effect<A, E>,
 				) => Effect.flatMap(project(projectId), use);
-				return {
+				const service: SessionManagerService = {
 					initialize: (title) => run((s) => s.initialize(title)),
 					getDefaultSessionId: (title) =>
 						run((s) => s.getDefaultSessionId(title)),
@@ -1672,6 +1681,8 @@ export const SessionManagerServiceLive = Layer.sync(
 					setForkEntry: (id, entry) => run((s) => s.setForkEntry(id, entry)),
 					refreshSessionLineage: () => run((s) => s.refreshSessionLineage()),
 				};
+				services.set(projectId, service);
+				return service;
 			},
 		};
 	},
