@@ -1,0 +1,582 @@
+{
+	"ticket": "conduit-test-82tn.32.14",
+	"invariants": [
+		"runEndsOnce",
+		"everyRunningEffectHasOneOwner",
+		"inputAtMostOnce",
+		"noStuckBusy",
+		"atMostFiveTransmissions"
+	],
+	"catalogue": [
+		{
+			"case": "F1",
+			"status": "covered",
+			"tests": "test/integration/daemon/claude-runner-restart.test.ts: \"keeps the same runner, reaper and fixture Claude child alive during mid-turn daemon replacement\" (1442); \"adopts a runner after SIGKILL and more than 60 seconds detached\u2026\" (1673)"
+		},
+		{
+			"case": "F2",
+			"status": "covered",
+			"tests": "test/integration/daemon/runner-forced-stop.test.ts: \"clears a TERM-ignoring descendant and settles its accepted run: %j\" (508), {leaderExits:false}"
+		},
+		{
+			"case": "F3",
+			"status": "covered",
+			"tests": "same: same (508), {leaderExits:true, killReaper:false}"
+		},
+		{
+			"case": "F4",
+			"status": "covered",
+			"tests": "test/unit/provider/runner-survivors.test.ts: \"retains an unsignalled descendant for {watcher retry / restart recovery} after refused TERM and KILL\" (2612); \"finishes committed registered escalation while retaining a descendant that refuses KILL\" (1155)"
+		},
+		{
+			"case": "F5",
+			"status": "covered",
+			"tests": "runner-forced-stop.test.ts: \"recovers the durable members after a daemon crash %s\" (743), points before-term / during-grace / after-kill / refused-kill"
+		},
+		{
+			"case": "F6",
+			"status": "covered",
+			"tests": "runner-forced-stop.test.ts: (508) {leaderExits:true, killReaper:true}"
+		},
+		{
+			"case": "F7",
+			"status": "covered",
+			"tests": "runner-forced-stop.test.ts: \"reaps a SIGKILLed leader independently of the paused daemon and prunes its settled record\" (677)"
+		},
+		{
+			"case": "F8",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: \"skips a reused snapshot member instead of signalling its replacement\" (2759); \"rejects a reused group when the final ${pin} exits during enumeration\" (1100)"
+		},
+		{
+			"case": "F9",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: \"recovers valid retired runners while retaining a malformed retirement row\" (903); \"keeps a corrupted watched retirement untouched until a later valid pass\" (960)"
+		},
+		{
+			"case": "F10",
+			"status": "uncovered",
+			"tests": "\u2014: \u2014",
+			"gap": "Known limit; no test records it."
+		},
+		{
+			"case": "F11",
+			"status": "uncovered",
+			"tests": "\u2014: \u2014",
+			"gap": "No setsid or setpgid escape test anywhere under test/."
+		},
+		{
+			"case": "F12",
+			"status": "covered",
+			"tests": "test/unit/provider/runner-stop-commit.test.ts; runner-survivors.test.ts: \"F12 a non-retryable store error\u2026\" (879); \"F58 \u2026 lands once through the reconciler\" (184); \"STOP-INTENT failed commit keeps accepted runs serving until the reconciler's retry lands\" (1629)"
+		},
+		{
+			"case": "F13",
+			"status": "covered",
+			"tests": "runner-stop-commit.test.ts; runner-survivors.test.ts; runner-retirement-fence.test.ts: \"a stop returned to Running by $cause\u2026\" (738: rejection, Superseded failure, defect); \"STOP-INTENT rejected own row fails without shutdown, signals or lost run ownership\" (1713); \"32.29.3 R3 a rejected startup Stop fails only its runner\u2026\" (fence 9676)"
+		},
+		{
+			"case": "F14",
+			"status": "covered",
+			"tests": "runner-forced-stop.test.ts: crash before-shutdown (743); \"does not adopt or replay a surviving retired runner after daemon restart\" (911)"
+		},
+		{
+			"case": "F15",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: \"STOP-INTENT retries a failed ${write} write without failing committed Stop waiters\" (1839)"
+		},
+		{
+			"case": "F16",
+			"status": "partial",
+			"tests": "runner-survivors.test.ts: \"STOP-INTENT ${first} wins the SQL writer before a racing\u2026\" (2005); \"STOP-INTENT a send ${lands} reaches one runner once\u2026\" (2119)",
+			"gap": "Held-or-refused and exactly-once are asserted. Not asserted: the ledger chain (process_lost on the write that set retired_at, inbox return behind the pause, late evidence)."
+		},
+		{
+			"case": "F17",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: \"STOP-INTENT racing Stops join one blocked commit and settle their held run once\" (1789)"
+		},
+		{
+			"case": "F18",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: \"STOP-INTENT a runner exiting during Committing settles its held run after the commit\" (1885)"
+		},
+		{
+			"case": "F19",
+			"status": "covered",
+			"tests": "test/integration/daemon/82tn-9-runner-provenance.test.ts; runner-survivors.test.ts: \"retires prompts through the stored owner\u2026, unverifiable $0\" (396, check ~582); \"never signals an unverified process and uses the honest notice wording\" (3936)"
+		},
+		{
+			"case": "F20",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: \"STOP-INTENT a transferred run survives its former holder and an unheld run is not the runner's\" (2565)"
+		},
+		{
+			"case": "F21",
+			"status": "partial",
+			"tests": "test/integration/persistence/runner-retirement-import.test.ts; runner-survivors.test.ts: \"imports new retired cursors into a populated legacy cursor table\" (65); \"SEND-CONTINUATION 38 legacy holderless dispatched work keeps legacy recovery\u2026\" (4618)",
+			"gap": "Import of an owned_run_ids row is tested, but no test settles a holderless run of such a row through the fallback."
+		},
+		{
+			"case": "F22",
+			"status": "partial",
+			"tests": "runner-survivors.test.ts: \"RUNNER-SWAP ${race}\u2026\", race commit-fails (646)",
+			"gap": "Asserts the old runner keeps serving, upgrade-cancel, and the send runs on the old runner. Not asserted: R stopped, upgrade failed, backoff."
+		},
+		{
+			"case": "F23",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts; test/integration/daemon/claude-runner-upgrade.test.ts: race send-before (646); \"sends through the old warm query during a switch and retries at that turn end\" (611)"
+		},
+		{
+			"case": "F24",
+			"status": "partial",
+			"tests": "runner-survivors.test.ts; claude-runner-upgrade.test.ts: race send-after-commit (646); \"recovers the committed serving row after SIGKILL %s and reuses its query\" (366); \"dispatches a send racing the swap %s to exactly one terminal run\" (468)",
+			"gap": "Asserts the send reaches R only after the pause is released. Activate-before-send ordering and activate-before-replay after a crash are not checked explicitly."
+		},
+		{
+			"case": "F25",
+			"status": "covered",
+			"tests": "runner-survivors.test.ts: race plain-stop-during-commit (646)"
+		},
+		{
+			"case": "F26",
+			"status": "partial",
+			"tests": "runner-survivors.test.ts: race command-after-prepare (646)",
+			"gap": "Only set-permission-mode is tested; \"every command path bumps\" is not checked."
+		},
+		{
+			"case": "F27",
+			"status": "partial",
+			"tests": "runner-survivors.test.ts; test/unit/provider/runner-host-source-delivery.test.ts: race cancel-lost (646); \"reserves only a quiescent runner and clears its reservation on command or hello\" (131)",
+			"gap": "Asserts the old row is retired; stop reason Exited is not asserted. Hello clearing Reserved is tested on the host."
+		},
+		{
+			"case": "F28",
+			"status": "partial",
+			"tests": "runner-survivors.test.ts; claude-runner-upgrade.test.ts: races candidate-exits and candidate-exits-before-recovery (646); \"failure mode 75: \u2026 next send starts fresh\" (1286)",
+			"gap": "Run reaches error and the next send goes to a fresh runner. Not asserted: Exited reason, process_lost, the inbox chain."
+		},
+		{
+			"case": "F29",
+			"status": "partial",
+			"tests": "runner-host-source-delivery.test.ts: (131), comment at 906: \"Hello clears Reserved \u2026 including legacy replay flags\"",
+			"gap": "No old-build runner test for \"registry role ignored\" or \"preserveRole no longer sent\"."
+		},
+		{
+			"case": "F30",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 19: idle refusal continues once (260)"
+		},
+		{
+			"case": "F31",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 20: plain Stop refusal never delivers (260)"
+		},
+		{
+			"case": "F32",
+			"status": "partial",
+			"tests": "SVC: service %s uses the production immutable Stop cohort [21-idle-end-session] (293)",
+			"gap": "covered on an idle-exiting runner; only one value of the runner's idle flag is tried"
+		},
+		{
+			"case": "F33",
+			"status": "covered",
+			"tests": "SVC: same, [22-admission] (293)"
+		},
+		{
+			"case": "F34",
+			"status": "covered",
+			"tests": "SVC: same, [23-after-stop] (293)"
+		},
+		{
+			"case": "F35",
+			"status": "covered",
+			"tests": "SVC: service 24 never exposes a gap between the Stop snapshot and control acceptance (417)"
+		},
+		{
+			"case": "F36",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 25 live refusal racing reconciler release delivers once and preserves the successor hold (4421)"
+		},
+		{
+			"case": "F37",
+			"status": "covered",
+			"tests": "E2E; SURV: SEND-CONTINUATION 26: restart feeds an unheld running send (260); SEND-CONTINUATION restart prepares an unheld running owner from durable input before feeding once (4804)"
+		},
+		{
+			"case": "F38",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 27 received journal never retransmits uncertain delivery (4558)"
+		},
+		{
+			"case": "F39",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 28 {corrupt,older-build} journal never retransmits\u2026 (4558)"
+		},
+		{
+			"case": "F40",
+			"status": "covered",
+			"tests": "E2E; ORA/plain-path.test.ts: SEND-CONTINUATION 29: abandoned-run retirement continues once (260); a Refused release after the Run ended process lost finds it Ended, and the input runs on a new Run (F40) (2096)"
+		},
+		{
+			"case": "F41",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 30: adoption never adds a transmission (260)"
+		},
+		{
+			"case": "F42",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 31 fifth refused transmission exhausts once without delivery (4183)"
+		},
+		{
+			"case": "F43",
+			"status": "covered",
+			"tests": "test/unit/persistence/run-holder.test.ts: guards releases by runner and transmission and rebuilds the released hold in event order (264)"
+		},
+		{
+			"case": "F44",
+			"status": "covered",
+			"tests": "SVC: same as F33, [33-recommit] (293)"
+		},
+		{
+			"case": "F45",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 34: old unread socket is drained before adoption (260)"
+		},
+		{
+			"case": "F46",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 35: Stop fences a late bound transmission (260)"
+		},
+		{
+			"case": "F47",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 36 refusal requeues its handle before pending retirement cleanup (4210)"
+		},
+		{
+			"case": "F48",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 37 ${variant} resume refusal releases before prepare-turn's fresh fallback (4252); \u202637 restart ${variant} rejection\u2026 (4857)"
+		},
+		{
+			"case": "F49",
+			"status": "covered",
+			"tests": "SURV: SEND-CONTINUATION 38 legacy holderless dispatched work keeps legacy recovery and never enters C2 (4618)"
+		},
+		{
+			"case": "F50",
+			"status": "covered",
+			"tests": "SURV; test/unit/persistence/run-holder.test.ts: SEND-CONTINUATION 39 retry on a fresh run keeps the stable send transmission count (4349); caps transmissions durably by command across runs and settles exhaustion once (318)"
+		},
+		{
+			"case": "F51",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 40: live reconciliation releases an exited reader (260)"
+		},
+		{
+			"case": "F52",
+			"status": "partial",
+			"tests": "SURV; test/unit/provider/runner-process-lost.test.ts: SEND-CONTINUATION 41 idle pre-write NotSent evidence immediately re-holds on a successor (4704); a release commit records the loss after its releases and folds it in that commit (283)",
+			"gap": "main case covered (NotSent, delivered once). Missing: a send held after the stop's evidence read, and a written-but-unaccepted send released Refused{exiting} in the same Idle commit, end to end"
+		},
+		{
+			"case": "F53",
+			"status": "partial",
+			"tests": "test/unit/provider/runner-protocol.test.ts: 42: legacy idle reply ${before\\",
+			"gap": "wire level: Refused{exiting} before acceptance, nothing after. Not checked: delivered once on a new runner"
+		},
+		{
+			"case": "F54",
+			"status": "covered",
+			"tests": "E2E: SEND-CONTINUATION 43: adoption releases a never-written hold (260)"
+		},
+		{
+			"case": "F55",
+			"status": "covered",
+			"tests": "SVC: same as F33, [44-replay] (293)"
+		},
+		{
+			"case": "F56",
+			"status": "covered",
+			"tests": "test/unit/provider/runner-host-source-delivery.test.ts: 35/45: remembers interrupted run ids while admitting a continuation with the same input id (139)"
+		},
+		{
+			"case": "F57",
+			"status": "covered",
+			"tests": "ORA/scenarios.ts (run by ORA/scenarios.test.ts): [F57] a retained first-attempt ack changes nothing \u2026 B starts only after its ${end} ends the stop's work (1098)"
+		},
+		{
+			"case": "F58",
+			"status": "covered",
+			"tests": "ORA/scenarios.ts: [F58] after a project removal retires A's runner\u2026 (1174); [F58] a relay load error leaves Run now's B Queued\u2026 (1245)"
+		},
+		{
+			"case": "F59",
+			"status": "covered",
+			"tests": "ORA/scenarios.ts: [5C] late first-answer confirmation cannot overwrite an actual error result (1310, id R10-3)"
+		},
+		{
+			"case": "F60",
+			"status": "covered",
+			"tests": "ORA/contract.test.ts: [F60] a retried input probe refused after its project is removed transmits nothing (677)"
+		},
+		{
+			"case": "F61",
+			"status": "covered",
+			"tests": "ORA/scenarios.ts; ORA/contract.test.ts: [step1] a late receipt leaves the original Settling deadline unchanged (1347, id R10-5); [5C] conflicting result evidence cannot replace a recorded failure or extend settlement (175)"
+		}
+	],
+	"cells": [
+		{
+			"cell": "claude/send/daemon",
+			"status": "covered",
+			"tests": "send-turn-daemon-kill:271; claude-runner-restart:1442, :1673; claude-run-ledger:291"
+		},
+		{
+			"cell": "claude/send/runner",
+			"status": "covered",
+			"tests": "claude-run-ledger:888, :947; claude-runner-at-most-once:81"
+		},
+		{
+			"cell": "claude/steer/daemon",
+			"status": "covered",
+			"tests": "claude-steer-recovery:157 mode=adopted (daemon SIGINT, not SIGKILL)"
+		},
+		{
+			"cell": "claude/steer/runner",
+			"status": "covered",
+			"tests": "claude-steer-recovery:157; claude-stranded-steer-recovery:33"
+		},
+		{
+			"cell": "claude/stop/daemon",
+			"status": "covered",
+			"tests": "run-ledger-stop-restart:27; provider-control-restart:25, :200"
+		},
+		{
+			"cell": "claude/stop/runner",
+			"status": "covered",
+			"tests": "provider-control-restart:200 (runner killed with the daemon)"
+		},
+		{
+			"cell": "claude/answer/daemon",
+			"status": "covered",
+			"tests": "claude-run-ledger:1354, :1424; claude-runner-restart:353; provider-control-restart:401"
+		},
+		{
+			"cell": "claude/answer/runner",
+			"status": "covered",
+			"tests": "claude-runner-restart:1209; provider-control-restart:401; provider-answer-reconciliation:135"
+		},
+		{
+			"cell": "claude/journal/running",
+			"status": "covered",
+			"tests": "claude-runner-restart:1442, :1673; claude-run-ledger:291"
+		},
+		{
+			"cell": "claude/journal/finished",
+			"status": "covered",
+			"tests": "claude-runner-restart:262 (journal answer not asserted)"
+		},
+		{
+			"cell": "claude/journal/uncertain",
+			"status": "covered",
+			"tests": "claude-runner-at-most-once:81 (never re-sent; held/delivery_indeterminate unasserted)"
+		},
+		{
+			"cell": "claude/journal/absent",
+			"status": "covered",
+			"tests": "claude-runner-restart:854; claude-stranded-steer-recovery:33"
+		},
+		{
+			"cell": "codex/send/daemon/running",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/send/daemon/absent",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/send/runner",
+			"status": "covered",
+			"tests": "codex-control:546, :597"
+		},
+		{
+			"cell": "codex/steer/daemon",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/steer/runner/uncertain",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/stop/daemon",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/stop/runner",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/answer/daemon",
+			"status": "covered",
+			"tests": "codex-interactions:472, :1608, :1862"
+		},
+		{
+			"cell": "codex/answer/runner",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/journal/finished",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "codex/journal/uncertain",
+			"status": "proved",
+			"file": "test/integration/daemon/codex-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/send/daemon",
+			"status": "covered",
+			"tests": "cursor-run-ledger:563; cursor-recovery:437, :792"
+		},
+		{
+			"cell": "cursor/send/runner",
+			"status": "covered",
+			"tests": "cursor-recovery:532; cursor-run-ledger:602"
+		},
+		{
+			"cell": "cursor/steer/daemon",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/steer/runner",
+			"status": "covered",
+			"tests": "cursor-steer:881"
+		},
+		{
+			"cell": "cursor/stop/daemon",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/stop/runner",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/answer/daemon",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/answer/runner",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/journal/running",
+			"status": "covered",
+			"tests": "cursor-recovery:792; cursor-run-ledger:563"
+		},
+		{
+			"cell": "cursor/journal/finished",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/journal/uncertain",
+			"status": "proved",
+			"file": "test/integration/daemon/cursor-run-ledger.test.ts"
+		},
+		{
+			"cell": "cursor/journal/absent",
+			"status": "covered",
+			"tests": "cursor-recovery:699, :721"
+		},
+		{
+			"cell": "opencode/send/daemon",
+			"status": "covered",
+			"tests": "send-turn-daemon-kill:271, :686; opencode-run-ledger:697"
+		},
+		{
+			"cell": "opencode/send/runner",
+			"status": "covered",
+			"tests": "opencode-run-ledger:263, :730; opencode-crash:117"
+		},
+		{
+			"cell": "opencode/steer/daemon",
+			"status": "covered",
+			"tests": "send-turn-daemon-kill:490, :686"
+		},
+		{
+			"cell": "opencode/steer/runner",
+			"status": "not-applicable",
+			"reason": "OpenCode admits no steer (CONTRACT 4431-4432; opencode-run-ledger:516 proves the refusal)"
+		},
+		{
+			"cell": "opencode/stop/daemon",
+			"status": "proved",
+			"file": "test/integration/daemon/opencode-run-ledger.test.ts"
+		},
+		{
+			"cell": "opencode/stop/runner",
+			"status": "proved",
+			"file": "test/integration/daemon/opencode-run-ledger.test.ts"
+		},
+		{
+			"cell": "opencode/answer/daemon",
+			"status": "uncovered",
+			"gap": "permission survives a restart (opencode-reconcile:192) but no test answers it in flight"
+		},
+		{
+			"cell": "opencode/answer/runner",
+			"status": "uncovered",
+			"gap": "no test answers a permission and then kills OpenCode"
+		},
+		{
+			"cell": "inherited-key",
+			"status": "uncovered",
+			"gap": "unit only (runner-retirement-fence:2182); no integration test asserts the journal key a successor inherits"
+		},
+		{
+			"cell": "main-built/legacy-recovery",
+			"status": "covered",
+			"tests": "unit runner-retirement-fence:1657, :1387, :1490; integration claude-runner-historical:99, :312 (refusal path)"
+		},
+		{
+			"cell": "background/confirm",
+			"status": "covered",
+			"tests": "claude-destructive-confirm:513, :702, :754"
+		},
+		{
+			"cell": "background/lost-work",
+			"status": "uncovered",
+			"gap": "lost-work notice across a daemon restart: oracle unit only (plain-path:3547)"
+		},
+		{
+			"cell": "background/native-command",
+			"status": "covered",
+			"tests": "claude-goals:276, :346; codex-goals:403"
+		},
+		{
+			"cell": "background/retired-runner",
+			"status": "covered",
+			"tests": "runner-forced-stop:911; claude-runner-quarantine:265; provider-runner-quarantine:15"
+		},
+		{
+			"cell": "two-build/old-daemon-upgrade",
+			"status": "uncovered",
+			"gap": "see audit"
+		}
+	]
+}
