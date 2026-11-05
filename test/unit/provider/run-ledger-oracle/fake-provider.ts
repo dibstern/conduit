@@ -261,6 +261,13 @@ export class FakeProvider {
 		readonly parent: string;
 		readonly issue: IssuedEffect;
 	}[] = [];
+	/** Steers a run.started joined to main's open run (3.9): one that run's end leaves unconsumed is main's next open Run. */
+	private readonly joinedSteers: {
+		readonly inputId: string;
+		readonly runId: string;
+		readonly parent: string;
+		readonly issue: IssuedEffect;
+	}[] = [];
 	/** Each input main last sent as a steer, to the Run it sent it into (3.9); every host reads main's issues. */
 	private readonly steerParents = new Map<string, string>();
 	/** Direct steers a retryable outcome answered (3.6, CONTRACT.md 692-698): main tries each again into its open parent. */
@@ -4211,6 +4218,8 @@ export class FakeProvider {
 						return first;
 					}
 					const steer = this.mainSteers.shift();
+					if (steer && open?.runId === steer.parent)
+						this.joinedSteers.push(steer);
 					if (steer && !open)
 						this.mainRun = {
 							runId: steer.runId,
@@ -4314,7 +4323,29 @@ export class FakeProvider {
 											? ({ outcome: "interrupted", code: "abandoned" } as const)
 											: ({ outcome: "interrupted" } as const);
 					if (!terminal) continue;
-					this.mainRun = undefined;
+					// 3.9 (CONTRACT.md 978-983): a joined steer the Run's end leaves unconsumed, not declined or failed,
+					// is a Run of its own and main's open Run; its run.started was read. Nearest reading at any end.
+					const outlived = this.joinedSteers.find(
+						(steer) =>
+							steer.parent === open.runId &&
+							[...this.sends.values()].some(
+								({ send, accepted, ended, notConsumed, transportRank }) =>
+									send.effect.kind === "steer" &&
+									send.effect.inputId === steer.inputId &&
+									send.effect.runId === steer.parent &&
+									!accepted &&
+									!ended &&
+									!notConsumed &&
+									transportRank !== 2,
+							),
+					);
+					this.mainRun = outlived && {
+						runId: outlived.runId,
+						inputId: outlived.inputId,
+						issue: outlived.issue,
+						started: true,
+						stopped: false,
+					};
 					// 3113-3117: after an abandonment main claims a next start, then the abandoned runner retires.
 					if (terminal.code === "abandoned" && native) {
 						const runner = runnerOf(native.label);
