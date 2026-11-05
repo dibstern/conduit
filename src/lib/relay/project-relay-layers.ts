@@ -919,7 +919,7 @@ export function createProjectRelayLayers({
 		}),
 	).pipe(Layer.provide(providerOrchestrationLayer));
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
-		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
+		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
 	const openCodeModelServiceLayer = OpenCodeModelServiceLive.pipe(
 		Layer.provide(
@@ -932,7 +932,7 @@ export function createProjectRelayLayers({
 		),
 	);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
-		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
+		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
 	// Daemon relays feed from the daemon's per-project OpenCode streams (82tn.16).
 	const projectStreamsLayer = Option.match(

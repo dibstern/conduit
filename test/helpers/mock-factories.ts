@@ -1190,7 +1190,7 @@ export function makeTestHandlerLayer(
 		sessionTitleService,
 	);
 	const openCodeFileServiceLayer = OpenCodeFileServiceLive.pipe(
-		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
+		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
 	const openCodeModelServiceLayer = opts?.openCodeModelService
 		? Layer.succeed(OpenCodeModelServiceTag)(opts.openCodeModelService)
@@ -1205,7 +1205,7 @@ export function makeTestHandlerLayer(
 				),
 			);
 	const openCodeSettingsServiceLayer = OpenCodeSettingsServiceLive.pipe(
-		Layer.provide(Layer.merge(openCodeApiLayer, openCodeInstancesLayer)),
+		Layer.provide(Layer.merge(configLayer, openCodeInstancesLayer)),
 	);
 	const projectManagementServiceLayer = opts?.projectManagementService
 		? Layer.succeed(ProjectManagementServiceTag)(opts.projectManagementService)

@@ -4,7 +4,6 @@ import { expect, vi } from "vitest";
 
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { ProjectManagementServiceLive } from "../../../src/lib/domain/relay/Services/project-management-service.js";
 import {
 	ConfigTag,
@@ -80,7 +79,7 @@ describe("settings reads with Effect-native settings service", () => {
 			const settingsLayer = OpenCodeSettingsServiceLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
-						Layer.succeed(OpenCodeAPITag)(api),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 						Layer.succeed(OpenCodeInstancesTag)({
 							...makeOpenCodeInstancesStub(),
 							use,
