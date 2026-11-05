@@ -143,7 +143,9 @@ export const subscriptionAudiences = {
 	SubscribeProjectSettings: projectAudience,
 	SubscribeDraftModels: (request, producer) =>
 		projectAudience(request, producer).pipe(Effect.andThen(globalAudience)),
-	SubscribeAlerts: projectAudience,
+	// The feed is the daemon's: every project's completions reach every tab.
+	SubscribeAlerts: (request, producer) =>
+		projectAudience(request, producer).pipe(Effect.andThen(globalAudience)),
 	SubscribeInputDraft: (request, producer) =>
 		"session" in request.key
 			? sessionAudience(request.key.session, producer)

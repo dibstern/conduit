@@ -56,6 +56,7 @@ import {
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
+import { AlertsLive } from "../../relay/Services/alerts.js";
 import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
@@ -891,7 +892,12 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 			yield* releaseInputDraftClaims().pipe(Effect.provide(store));
 			return InputDraftsLive.pipe(Layer.provide(Layer.succeedContext(store)));
 		}),
-	).pipe(Layer.provideMerge(withProjectContext));
+	).pipe(
+		// One alert feed for the daemon: every project's relay publishes to it,
+		// so a tab on any project hears completions from all of them (82tn.12).
+		Layer.merge(AlertsLive),
+		Layer.provideMerge(withProjectContext),
+	);
 	// Runner adapters record account usage readings (Codex), so Usage precedes them.
 	const withProviderAdapters = makeProviderAdaptersLive(configDir).pipe(
 		Layer.provideMerge(UsageLive().pipe(Layer.provideMerge(withInputDrafts))),

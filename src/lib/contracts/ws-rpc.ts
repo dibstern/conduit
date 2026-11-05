@@ -4073,7 +4073,7 @@ export const SubscribeDraftModels = Rpc.make("SubscribeDraftModels", {
 	stream: true,
 });
 
-/** A session finished or failed in this project while no tab was viewing it. */
+/** A session in any project finished or failed while no tab was viewing it. */
 export const AlertSchema = Schema.TaggedStruct("alert", {
 	/** `warning`: a launch went ahead degraded; the user is told, not dinged. */
 	kind: Schema.Literals(["done", "error", "warning"]),
@@ -4090,7 +4090,8 @@ export type AlertsEnvelope = typeof AlertsEnvelopeSchema.Type;
 
 /**
  * Live-only: opens with `synchronized` and has no snapshot, so a reconnect or
- * reload never re-fires a ding. Cross-tab dedupe rides the alertId.
+ * reload never re-fires a ding. Cross-tab dedupe rides the alertId. The
+ * project checks the producer; the feed carries every project's alerts.
  */
 export const SubscribeAlerts = Rpc.make("SubscribeAlerts", {
 	payload: { projectSlug: NonEmptyString },

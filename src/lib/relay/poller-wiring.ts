@@ -134,7 +134,7 @@ const handlePollerEventsEffect = (
 			);
 
 			// Record done delivery for dedup with status-poller synthetic done
-			if (msg.type === "done" && polledSessionId) {
+			if (msg.type === "done" && msg.alertId && polledSessionId) {
 				yield* Effect.sync(() => deps.onDoneProcessed?.(polledSessionId));
 			}
 
@@ -208,7 +208,7 @@ export function wirePollers(deps: PollerWiringDeps): void {
 			applyPipelineResult(pollerResult, polledSessionId, pipelineDeps);
 
 			// Record done delivery for dedup with status-poller synthetic done
-			if (msg.type === "done" && polledSessionId) {
+			if (msg.type === "done" && msg.alertId && polledSessionId) {
 				deps.onDoneProcessed?.(polledSessionId);
 			}
 
