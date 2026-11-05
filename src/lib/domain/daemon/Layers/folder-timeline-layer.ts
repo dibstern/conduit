@@ -9,8 +9,18 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { Clock, Deferred, Effect, type Result, Semaphore } from "effect";
+import {
+	Clock,
+	Deferred,
+	Effect,
+	Exit,
+	Option,
+	Result,
+	Schema,
+	Semaphore,
+} from "effect";
 import type { RunChangesCaptured } from "../../../contracts/stored-event.js";
+import * as Failure from "../../../effect/failure-classification.js";
 import {
 	type FolderSnapshot,
 	type FolderTimeline,
@@ -35,6 +45,20 @@ const IDENTITY = {
 	GIT_COMMITTER_NAME: "conduit",
 	GIT_COMMITTER_EMAIL: "conduit@localhost",
 };
+
+/**
+ * A pin is a commit whose subject names what a restart needs to capture its
+ * run. Its tree is the folder's start tree, then its end tree once `end` is set.
+ */
+const Pin = Schema.Struct({
+	sessionId: Schema.String,
+	directories: Schema.Array(Schema.String),
+	prefix: Schema.String,
+	end: Schema.optionalKey(
+		Schema.Struct({ start: Schema.String, shared: Schema.Boolean }),
+	),
+});
+const decodePin = Schema.decodeUnknownOption(Schema.fromJsonString(Pin));
 
 // Copied indexes must never split, monitor or trigger maintenance, and LFS
 // clean filters would write into the repository's .git/lfs.
@@ -188,6 +212,27 @@ type Git = (
 type Snapshot = (
 	directory: string,
 ) => Effect.Effect<FolderSnapshot, FolderTimelineError>;
+type End = readonly [
+	directory: string,
+	end: Result.Result<FolderSnapshot, FolderTimelineError>,
+];
+
+/** Moves the folder's pin to a commit of `tree` that says what it holds. */
+const pin = (
+	git: Git,
+	store: string,
+	ref: string,
+	tree: string,
+	content: typeof Pin.Type,
+	parent: readonly string[] = [],
+) =>
+	git(store, ["commit-tree", tree, ...parent, "-m", JSON.stringify(content)], {
+		env: IDENTITY,
+	}).pipe(
+		Effect.flatMap(({ stdout }) =>
+			git(store, ["update-ref", ref, stdout.trim()]),
+		),
+	);
 
 /** Marks the folders a new run shares with live runs of other sessions, on both sides. */
 function markShared(runs: Iterable<LiveRun>, live: LiveRun) {
@@ -356,11 +401,11 @@ const checkpointStart = (
 		const start = yield* snapshot(directory);
 		// The pin keeps the start tree's objects past the grace period. Folders
 		// sharing a store each need their own.
-		yield* git(start.store, [
-			"update-ref",
-			`${PINS}${runId}/${index}`,
-			start.worktree,
-		]);
+		yield* pin(git, start.store, `${PINS}${runId}/${index}`, start.worktree, {
+			sessionId: live.sessionId,
+			directories: live.directories,
+			prefix: start.prefix,
+		});
 		live.starts.set(directory, start);
 	}).pipe(
 		Effect.timeoutOrElse({
@@ -627,6 +672,69 @@ export const makeFolderTimeline = (configDir: string) =>
 				yield* Deferred.succeed(live.done, undefined);
 			});
 
+		/** Copies the run's changes into its session's store and records them. */
+		const capture = <E>(
+			runId: string,
+			live: LiveRun,
+			ends: readonly End[],
+			record: (
+				sessionId: string,
+				capture: RunChangesCaptured,
+			) => Effect.Effect<void, E>,
+		) =>
+			sessionLock(live.sessionId).withPermits(1)(
+				Effect.gen(function* () {
+					// Forgotten while its end checkpoint was taken.
+					if (!runs.has(runId)) return;
+					const capture = yield* Effect.gen(function* () {
+						const store = yield* openSessionStore(
+							run,
+							root,
+							sessionStore(live.sessionId),
+							live,
+						);
+						const capture = {
+							runId,
+							folders: yield* Effect.forEach(
+								ends,
+								([directory, end]) =>
+									captureFolder(git, live, store, directory, end),
+								{ concurrency: "unbounded" },
+							),
+						};
+						yield* commitCapture(git, store, capture);
+						return capture;
+					}).pipe(
+						// A capture the store cannot save still says why each folder is missing.
+						Effect.catch((error) =>
+							Effect.succeed({
+								runId,
+								folders: live.directories.map((directory) => ({
+									directory,
+									...gapOf(error),
+									message: `Saving the capture failed: ${error.message}`,
+								})),
+							}),
+						),
+					);
+					yield* record(live.sessionId, capture);
+				}),
+			);
+		const finish =
+			(runId: string) =>
+			<E>(effect: Effect.Effect<void, E>) =>
+				effect.pipe(
+					// A shutdown keeps the run's pins, so the next start finishes its capture.
+					Effect.onExit((exit) =>
+						Exit.isFailure(exit) && Failure.isInterrupted(exit.cause)
+							? Effect.void
+							: drop(runId),
+					),
+					Effect.catchCause((cause) =>
+						Effect.logWarning("Run capture failed", { runId, cause }),
+					),
+				);
+
 		return {
 			snapshot,
 			git,
@@ -666,54 +774,124 @@ export const makeFolderTimeline = (configDir: string) =>
 						live.directories,
 						(directory) =>
 							Effect.result(snapshot(directory)).pipe(
-								Effect.map((end) => [directory, end] as const),
+								Effect.map((end): End => [directory, end]),
 							),
 						{ concurrency: "unbounded" },
 					);
-					yield* sessionLock(live.sessionId).withPermits(1)(
-						Effect.gen(function* () {
-							// Forgotten while its end checkpoint was taken.
-							if (!runs.has(runId)) return;
-							const capture = yield* Effect.gen(function* () {
-								const store = yield* openSessionStore(
-									run,
-									root,
-									sessionStore(live.sessionId),
-									live,
-								);
-								const capture = {
-									runId,
-									folders: yield* Effect.forEach(
-										ends,
-										([directory, end]) =>
-											captureFolder(git, live, store, directory, end),
-										{ concurrency: "unbounded" },
-									),
-								};
-								yield* commitCapture(git, store, capture);
-								return capture;
-							}).pipe(
-								// A capture the store cannot save still says why each folder is missing.
-								Effect.catch((error) =>
-									Effect.succeed({
-										runId,
-										folders: live.directories.map((directory) => ({
-											directory,
-											...gapOf(error),
-											message: `Saving the capture failed: ${error.message}`,
-										})),
-									}),
-								),
-							);
-							yield* record(live.sessionId, capture);
-						}),
+					// Pinned beside its start, so a restart captures the folder as the run left it.
+					yield* Effect.forEach(
+						ends,
+						([directory, end], index) => {
+							const start = live.starts.get(directory);
+							if (!start || !("store" in start) || Result.isFailure(end))
+								return Effect.void;
+							const ref = `${PINS}${runId}/${index}`;
+							return pin(
+								git,
+								start.store,
+								ref,
+								end.success.worktree,
+								{
+									sessionId: live.sessionId,
+									directories: live.directories,
+									prefix: start.prefix,
+									end: {
+										start: start.worktree,
+										shared: live.shared.has(directory),
+									},
+								},
+								["-p", ref],
+							).pipe(Effect.ignore);
+						},
+						{ concurrency: "unbounded", discard: true },
 					);
-				}).pipe(
-					Effect.catchCause((cause) =>
-						Effect.logWarning("Run capture failed", { runId, cause }),
-					),
-					Effect.ensuring(drop(runId)),
-				),
+					yield* capture(runId, live, ends, record);
+				}).pipe(finish(runId)),
+			recover: (owed, record) =>
+				Effect.gen(function* () {
+					const pinned = new Map<
+						string,
+						{ readonly live: LiveRun; readonly ends: Map<string, End[1]> }
+					>();
+					const names = yield* fs(() => readdir(root)).pipe(
+						Effect.orElseSucceed((): string[] => []),
+					);
+					for (const name of names.filter((name) => name.endsWith(".git"))) {
+						const store = join(root, name);
+						const { stdout } = yield* git(store, [
+							"for-each-ref",
+							"--format=%(refname)%00%(tree)%00%(contents:subject)",
+							PINS,
+						]).pipe(Effect.orElseSucceed(() => ({ stdout: "" })));
+						for (const line of stdout.split("\n")) {
+							const [ref = "", tree = "", subject = ""] = line.split("\0");
+							const slash = ref.lastIndexOf("/");
+							const runId = ref.slice(PINS.length, slash);
+							// The old code pinned bare trees; collect drops those.
+							const decoded = decodePin(subject);
+							if (Option.isNone(decoded)) continue;
+							const { sessionId, directories, prefix, end } = decoded.value;
+							const directory = directories[Number(ref.slice(slash + 1))];
+							if (directory === undefined) continue;
+							const known = pinned.get(runId) ?? {
+								live: {
+									sessionId,
+									directories,
+									starts: new Map(),
+									shared: new Set(),
+									done: yield* Deferred.make<void>(),
+									ended: false,
+								},
+								ends: new Map(),
+							};
+							pinned.set(runId, known);
+							const start = end?.start ?? tree;
+							known.live.starts.set(directory, {
+								store,
+								prefix,
+								index: start,
+								worktree: start,
+							});
+							if (!end) continue;
+							known.ends.set(
+								directory,
+								Result.succeed({ store, prefix, index: tree, worktree: tree }),
+							);
+							if (end.shared) known.live.shared.add(directory);
+						}
+					}
+					const owing: [string, LiveRun, readonly End[]][] = [];
+					for (const [runId, { live, ends }] of pinned) {
+						const fate = yield* owed(live.sessionId, runId);
+						if (fate === "running") markShared(runs.values(), live);
+						live.ended = fate !== "running";
+						runs.set(runId, live);
+						if (fate === "done") yield* drop(runId);
+						if (fate === "ended")
+							owing.push([
+								runId,
+								live,
+								live.directories.map(
+									(directory): End => [
+										directory,
+										ends.get(directory) ??
+											Result.fail(
+												new FolderTimelineError({
+													reason: "failed",
+													message:
+														"The daemon restarted before the run's end checkpoint",
+												}),
+											),
+									],
+								),
+							]);
+					}
+					for (const [runId, live, ends] of owing)
+						yield* capture(runId, live, ends, record).pipe(
+							finish(runId),
+							Effect.forkIn(scope),
+						);
+				}),
 			settled: (runId) =>
 				Effect.gen(function* () {
 					const live = runs.get(runId);
