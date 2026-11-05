@@ -1194,10 +1194,12 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 						}),
 					).pipe(Stream.scoped),
 				use: (instanceId, directory) =>
-					Effect.flatMap(resolveId(instanceId), (id) => use(id, directory)),
+					Effect.flatMap(resolveId(instanceId), (id) =>
+						use(id, directory ?? undefined),
+					),
 				borrow: (instanceId, directory) =>
 					Effect.flatMap(resolveId(instanceId), (id) =>
-						use(id, directory, true),
+						use(id, directory ?? undefined, true),
 					),
 				useIfRunning: (instanceId, directory) =>
 					Effect.flatMap(resolveId(instanceId), (instanceId) =>
@@ -1224,12 +1226,14 @@ export const makeOpenCodeInstancesLive = <R, Start = never, Stop = never>(
 								);
 								yield* settle(instanceId);
 								yield* ensureStream(instanceId, endpoint);
-								return Option.some(clientFor(endpoint, directory, instanceId));
+								return Option.some(
+									clientFor(endpoint, directory ?? undefined, instanceId),
+								);
 							}),
 						),
 					),
 				// Reads process state only: no request, no stream, never a start.
-				ifRunning: (instanceId: string, directory?: string | null) =>
+				ifRunning: (instanceId: string, directory: string | null) =>
 					Effect.flatMap(resolveId(instanceId), (instanceId) =>
 						Effect.map(resolveIn(instanceId), (endpoint) =>
 							endpoint &&

@@ -199,7 +199,7 @@ describe("managed OpenCode stop confirmation", () => {
 					if (operation === "stop") yield* instances.stop("opencode");
 					else {
 						const started = yield* Effect.exit(
-							Effect.scoped(instances.use("opencode")),
+							Effect.scoped(instances.use("opencode", null)),
 						);
 						expect(Exit.isFailure(started)).toBe(true);
 					}

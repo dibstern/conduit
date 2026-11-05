@@ -3,6 +3,7 @@ import {
 	copyFile,
 	mkdir,
 	readdir,
+	rename,
 	rm,
 	rmdir,
 	stat,
@@ -10,6 +11,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { deflateSync } from "node:zlib";
 import {
 	Clock,
 	Deferred,
@@ -249,8 +251,8 @@ const pin = (
 		),
 	);
 
-/** A test holds a restore at `step`, so a test can stop the daemon there. */
-const pause = (step: "receipt" | "deleted" | "written") =>
+/** A test holds a restore or a materialize at `step`, so a test can stop the daemon there. */
+const pause = (step: "receipt" | "deleted" | "written" | "materialized") =>
 	Effect.suspend(() =>
 		process.env["NODE_ENV"] === "test" &&
 		process.env["CONDUIT_TEST_RESTORE_PAUSE_AT"] === step
@@ -734,6 +736,57 @@ export const makeFolderTimeline = (configDir: string) =>
 						}).pipe(Effect.ignore);
 				}
 			});
+		/**
+		 * Bytes of the loose objects in the repository stores that a session's kept refs hold and
+		 * no other ref does: what eviction frees. Without a session, what every kept ref holds.
+		 * Objects borrowed from the user's repository are not loose here, so they never count.
+		 */
+		const keptBytes = (sessionId?: string) =>
+			Effect.gen(function* () {
+				const prefix =
+					sessionId === undefined ? KEPT : `${KEPT}${hash(sessionId)}/`;
+				const names = yield* fs(() => readdir(root));
+				let total = 0;
+				for (const name of names.filter((name) => name.endsWith(".git"))) {
+					const store = join(root, name);
+					const refs = (yield* git(store, [
+						"for-each-ref",
+						"--format=%(refname)",
+					])).stdout
+						.split("\n")
+						.filter((ref) => ref !== "");
+					const mine = refs.filter((ref) => ref.startsWith(prefix));
+					if (mine.length === 0) continue;
+					const reachable = (from: readonly string[]) =>
+						from.length === 0
+							? Effect.succeed(new Set<string>())
+							: git(store, ["rev-list", "--objects", "--stdin"], {
+									input: `${from.join("\n")}\n`,
+								}).pipe(
+									// Each line is an object id, then its path for blobs and trees.
+									Effect.map(({ stdout }) => new Set(stdout.match(/^\w+/gm))),
+								);
+					const others =
+						sessionId === undefined
+							? new Set<string>()
+							: yield* reachable(refs.filter((ref) => !ref.startsWith(prefix)));
+					const held = yield* reachable(mine);
+					const loose = yield* fs(() =>
+						readdir(join(store, "objects"), {
+							recursive: true,
+							withFileTypes: true,
+						}),
+					);
+					for (const entry of loose) {
+						const id = `${entry.parentPath.slice(-2)}${entry.name}`;
+						if (entry.isFile() && held.has(id) && !others.has(id))
+							total += (yield* fs(() =>
+								stat(join(entry.parentPath, entry.name)),
+							)).size;
+					}
+				}
+				return total;
+			}).pipe(Effect.orElseSucceed(() => 0));
 		/** A kept ref's tree and its parent's tree, or nothing once it is gone. */
 		const readKept = (store: string, ref: string) =>
 			git(store, ["rev-parse", `${ref}^{tree}`, `${ref}^1^{tree}`]).pipe(
@@ -765,6 +818,75 @@ export const makeFolderTimeline = (configDir: string) =>
 					{ env: IDENTITY },
 				)).stdout.trim();
 				yield* git(store, ["update-ref", ref, commit]);
+			});
+		/**
+		 * Copies into the store, loose, the objects `rev` reaches that it only borrows and that
+		 * the folder's HEAD tree does not hold, so a `git gc` in the repository cannot take a kept
+		 * tree's files (82tn.54). HEAD's objects stay borrowed: its reflog keeps them through a gc.
+		 * Loose copies count in `keptBytes` and are pruned once no kept ref holds them.
+		 */
+		const own = (directory: string, store: string, rev: string) =>
+			Effect.gen(function* () {
+				const head = yield* run(directory, [
+					"rev-parse",
+					"--verify",
+					"--quiet",
+					"HEAD^{tree}",
+				]).pipe(
+					Effect.map(({ stdout }) => stdout.trim()),
+					Effect.orElseSucceed(() => ""),
+				);
+				const reached = (yield* git(
+					store,
+					["rev-list", "--objects", "--no-object-names", "--stdin"],
+					{ input: `${rev}\n${head === "" ? "" : `^${head}\n`}` },
+				)).stdout.match(/^\w+/gm);
+				const loose = (id: string) =>
+					join(store, "objects", id.slice(0, 2), id.slice(2));
+				const borrowed: string[] = [];
+				for (const id of reached ?? [])
+					if (
+						!(yield* fs(() => stat(loose(id))).pipe(
+							Effect.as(true),
+							Effect.orElseSucceed(() => false),
+						))
+					)
+						borrowed.push(id);
+				if (borrowed.length === 0) return;
+				const chunks: Buffer[] = [];
+				yield* git(store, ["cat-file", "--batch"], {
+					input: `${borrowed.join("\n")}\n`,
+					onStdout: (chunk) => chunks.push(chunk),
+				});
+				const out = Buffer.concat(chunks);
+				// Each object is "<id> <type> <size>\n<content>\n".
+				for (let at = 0; at < out.length; ) {
+					const eol = out.indexOf(10, at);
+					const [id = "", type = "", size = ""] = out
+						.toString("latin1", at, eol)
+						.split(" ");
+					if (type === "missing" || size === "")
+						return yield* new FolderTimelineError({
+							reason: "failed",
+							message: `Object ${id} is missing`,
+						});
+					const end = eol + 1 + Number(size);
+					const temp = join(store, "objects", `copy-${randomUUID()}`);
+					yield* fs(() => mkdir(dirname(loose(id)), { recursive: true }));
+					yield* fs(() =>
+						writeFile(
+							temp,
+							deflateSync(
+								Buffer.concat([
+									Buffer.from(`${type} ${size}\0`),
+									out.subarray(eol + 1, end),
+								]),
+							),
+						),
+					);
+					yield* fs(() => rename(temp, loose(id)));
+					at = end + 1;
+				}
 			});
 		/** The folder's paths (folder-relative) that differ between two trees; submodules excepted. */
 		const diff = (store: string, prefix: string, from: string, to: string) =>
@@ -920,12 +1042,21 @@ export const makeFolderTimeline = (configDir: string) =>
 						live.directories,
 						(directory, index) => {
 							const start = live.starts.get(directory);
+							const ref = checkpointRef(live.sessionId, runId, directory);
 							return start && "store" in start
 								? git(start.store, [
 										"update-ref",
-										checkpointRef(live.sessionId, runId, directory),
+										ref,
 										`${PINS}${runId}/${index}`,
-									]).pipe(Effect.ignore)
+									]).pipe(
+										Effect.andThen(own(directory, start.store, ref)),
+										Effect.catch((error) =>
+											Effect.logWarning("Checkpoint not kept whole", {
+												directory,
+												error,
+											}),
+										),
+									)
 								: Effect.void;
 						},
 						{ concurrency: "unbounded", discard: true },
@@ -1052,6 +1183,15 @@ export const makeFolderTimeline = (configDir: string) =>
 								} satisfies typeof Receipt.Type),
 							);
 							receipted.push(entry);
+							yield* own(
+								entry.folder.directory,
+								entry.now.store,
+								entry.ref,
+							).pipe(
+								Effect.catch((error) =>
+									Effect.logWarning("Receipt not kept whole", { error }),
+								),
+							);
 						}
 						yield* pause("receipt");
 						for (const { folder, writes } of checked)
@@ -1093,6 +1233,18 @@ export const makeFolderTimeline = (configDir: string) =>
 						sessionLock(sessionId).withPermits(1)(apply),
 					);
 			},
+			materialize: (directory, to) =>
+				folderLock(directory).withPermits(1)(
+					Effect.gen(function* () {
+						const now = yield* take(directory);
+						const writes = yield* diff(now.store, now.prefix, now.worktree, to);
+						yield* remove(directory, deletes(writes));
+						yield* checkout(directory, now.store, to, updates(writes));
+						const written = (yield* take(directory)).worktree;
+						yield* pause("materialized");
+						return written;
+					}),
+				),
 			receipt: (sessionId, moveId, directory) =>
 				Effect.gen(function* () {
 					const { store } = yield* resolve(directory);
@@ -1314,8 +1466,16 @@ export const makeFolderTimeline = (configDir: string) =>
 					sessionLocks.delete(sessionId);
 				}),
 			storeBytes: (sessionId) =>
-				Effect.promise(() => bytesUnder(sessionStore(sessionId))),
-			diskUse: Effect.promise(() => bytesUnder(join(root, "sessions"))),
+				Effect.zipWith(
+					Effect.promise(() => bytesUnder(sessionStore(sessionId))),
+					keptBytes(sessionId),
+					(store, kept) => store + kept,
+				),
+			diskUse: Effect.zipWith(
+				Effect.promise(() => bytesUnder(join(root, "sessions"))),
+				keptBytes(),
+				(sessions, kept) => sessions + kept,
+			),
 			evict: (sessionId, append) =>
 				sessionLock(sessionId).withPermits(1)(
 					Effect.gen(function* () {

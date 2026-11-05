@@ -128,9 +128,17 @@ const meta = {
 		applySessionChange({ _tag: "snapshot", rows: [], sequence: Date.now() });
 		applySessionChange({ _tag: "synchronized" });
 		// The chat home shows test-project, so its catalog is read for that project.
-		const restoreModels = replyRpc("GetModels", () => ({
+		// A shown session's catalog is read by its id, and the server answers with
+		// the session's model (m379.5).
+		const restoreModels = replyRpc("GetModels", (payload) => ({
 			projectSlug: "test-project",
 			providers: [claudeProvider],
+			...(typeof payload === "object" &&
+				payload !== null &&
+				"sessionId" in payload && {
+					instanceId: mockClaudeAccount.id,
+					active: { model: claudeModel.id, provider: "claude" },
+				}),
 		}));
 		// Static Storybook hosting needs a socket that completes its connection.
 		const restoreSocket = connectedSocket("test-project");

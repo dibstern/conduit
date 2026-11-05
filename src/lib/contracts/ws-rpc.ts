@@ -2950,13 +2950,16 @@ export const ForkSession = Rpc.make("ForkSession", {
 		/** Project the fork joins; defaults to the parent's project. */
 		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
+		/** Fork into a new worktree holding the files kept at the message (82tn.54). */
+		files: Schema.optionalKey(Schema.Boolean),
 	}),
 	success: ForkSessionResponseSchema,
-	/** SessionBusy: the admission's typed refusal (82tn.49). */
+	/** SessionBusy: the admission's typed refusal (82tn.49). FilesRefused: a fork with files. */
 	error: Schema.Union([
 		WsRpcError,
 		Schema.suspend(() => AccountUnroutable),
 		Schema.suspend(() => SessionBusy),
+		Schema.suspend(() => FilesRefused),
 	]),
 });
 
@@ -2970,6 +2973,8 @@ export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
 		/** Project the fork joins; defaults to the parent's project. */
 		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
+		/** Fork into a new worktree holding the files kept at the message (82tn.54). */
+		files: Schema.optionalKey(Schema.Boolean),
 	}),
 	success: ForkSession.successSchema,
 	error: ForkSession.errorSchema,
@@ -3258,16 +3263,6 @@ export type ResumePlan = typeof ResumePlanSchema.Type;
 export const GetResumePlan = Rpc.make("GetResumePlan", {
 	payload: Schema.TaggedStruct("GetResumePlan", { sessionId: NonEmptyString }),
 	success: Schema.Struct({ plan: ResumePlanSchema }),
-	error: WsRpcError,
-});
-
-/** Whether the files at a head move's target are still kept, or were pruned. */
-export const GetHeadMoveFiles = Rpc.make("GetHeadMoveFiles", {
-	payload: Schema.TaggedStruct("GetHeadMoveFiles", {
-		sessionId: NonEmptyString,
-		messageId: NonEmptyString,
-	}),
-	success: Schema.Struct({ files: HeadMoveFilesSchema }),
 	error: WsRpcError,
 });
 
@@ -4037,7 +4032,6 @@ const wsRpcRequests = [
 	LoadMoreHistory,
 	RewindSession,
 	UndoRewind,
-	GetHeadMoveFiles,
 	PreviewHeadMove,
 	CommitHeadMove,
 	GetHeadLog,

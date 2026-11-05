@@ -1,7 +1,7 @@
 // Composes all Effect-native state Layers into a single merged Layer.
 // These provide the state Tags that Effect handler functions use.
 //
-// External deps provided by caller: OpenCodeAPITag, ConfigTag, LoggerTag,
+// External deps provided by caller: ConfigTag, LoggerTag,
 // provider instances, persistence, and transport services.
 
 import { Layer } from "effect";
@@ -9,7 +9,6 @@ import { DaemonEventBusLive } from "../../daemon/Services/daemon-pubsub.js";
 import { makeOpenCodeRuntimeStateLive } from "../../daemon/Services/instance-manager-service.js";
 import { AlertsLive, type AlertsTag } from "../Services/alerts.js";
 import { InputDraftsLive } from "../Services/input-drafts.js";
-import { makePollerManagerStateLive } from "../Services/message-poller.js";
 import { ProjectSettingsLive } from "../Services/project-settings.js";
 import { PtyManagerStateLive } from "../Services/pty-manager-service.js";
 import { RelayEventBusLive } from "../Services/relay-event-bus.js";
@@ -92,7 +91,6 @@ export const makeRelayStateLive = (
 			),
 		),
 		// Poller state
-		makePollerManagerStateLive(),
 		makePollerStateLive(),
 		makePollerPubSubLive(),
 		// Per-relay domain event fanout

@@ -10,7 +10,7 @@ import { harnessForModelProvider } from "../../../provider/turn-settings.js";
 import type { ProviderAgentInfo } from "../../../provider/types.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
-import { LoggerTag, OrchestrationEngineTag } from "./services.js";
+import { ConfigTag, LoggerTag, OrchestrationEngineTag } from "./services.js";
 import {
 	clearAgent,
 	getAgent,
@@ -157,6 +157,7 @@ const scopedAgentList = (
 export const AgentServiceLive: Layer.Layer<
 	AgentServiceTag,
 	never,
+	| ConfigTag
 	| OpenCodeInstancesTag
 	| LoggerTag
 	| OverridesStateTag
@@ -165,6 +166,7 @@ export const AgentServiceLive: Layer.Layer<
 > = Layer.effect(
 	AgentServiceTag,
 	Effect.gen(function* () {
+		const config = yield* ConfigTag;
 		const instances = yield* OpenCodeInstancesTag;
 		const log = yield* LoggerTag;
 		const overridesRef = yield* OverridesStateTag;
@@ -230,7 +232,10 @@ export const AgentServiceLive: Layer.Layer<
 					if (PROVIDER_DRIVERS[account.driver].catalogSource === "discovery")
 						return yield* listClaudeAgents(account);
 
-					const running = yield* instances.ifRunning(account.id);
+					const running = yield* instances.ifRunning(
+						account.id,
+						config.projectDir,
+					);
 					if (Option.isNone(running)) {
 						// A stopped instance has no catalog to validate the saved selection against.
 						return yield* provideOverrides(

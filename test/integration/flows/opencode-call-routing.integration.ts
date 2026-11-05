@@ -158,7 +158,7 @@ describe("OpenCode adapter call routing through OpenCode Instances", () => {
 			clientForSession: () => Effect.succeed(defaultClient),
 
 			clientForAccount: (account, directory) =>
-				instances.use(account.id, directory),
+				instances.use(account.id, directory ?? null),
 		});
 	});
 

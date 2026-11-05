@@ -1,10 +1,13 @@
 // One status poller per daemon (82tn.16): at start it settles a stale busy session of every
 // registered project, including one no tab has opened since a restart, and none of a removed one.
+// An idle correction asks the Run Ledger first (CONTRACT.md 8.3, 2849-2853): a session it holds
+// open stays busy however long it has been busy.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, ManagedRuntime } from "effect";
+import { SqlClient } from "effect/sql";
 import { afterEach, expect, it } from "vitest";
 import { defaultDaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
@@ -25,7 +28,7 @@ afterEach(async () => {
 	for (const dispose of cleanup.splice(0)) dispose();
 });
 
-it("after a restart, the daemon settles a stale busy session of a project no tab has opened, and leaves one of a removed project", async () => {
+it("after a restart, the daemon settles a stale busy session of a project no tab has opened, leaves one the Run Ledger holds open, and leaves one of a removed project", async () => {
 	const root = mkdtempSync(join(tmpdir(), "status-poller-daemon-"));
 	cleanup.push(() => rmSync(root, { recursive: true, force: true }));
 	const configDir = join(root, "config");
@@ -57,16 +60,21 @@ it("after a restart, the daemon settles a stale busy session of a project no tab
 	const store = ManagedRuntime.make(
 		makePersistenceStoreLayer(join(configDir, "events.db")),
 	);
-	for (const projectId of ["integration-test", "unopened", "gone"])
+	const sessions = [
+		["integration-test", "integration-test-stuck", "opencode"],
+		["unopened", "unopened-stuck", "opencode"],
+		["unopened", "unopened-held", "claude"],
+		["gone", "gone-stuck", "opencode"],
+	] as const;
+	for (const [projectId, sessionId, provider] of sessions)
 		await store.runPromise(
 			Effect.gen(function* () {
-				const sessionId = `${projectId}-stuck`;
 				const events = yield* makeEventStoreEffect;
 				yield* events.appendBatch([
 					canonicalEvent(
 						"session.created",
 						sessionId,
-						{ sessionId, title: `Stuck in ${projectId}`, provider: "opencode" },
+						{ sessionId, title: `Stuck in ${projectId}`, provider },
 						{ createdAt: stale },
 					),
 					canonicalEvent(
@@ -77,23 +85,28 @@ it("after a restart, the daemon settles a stale busy session of a project no tab
 					),
 				]);
 				yield* (yield* ProjectionRunnerEffectTag).recover();
+				// Something may still act in this session (3.12: the ledger's Open row).
+				if (sessionId === "unopened-held")
+					yield* (yield* SqlClient.SqlClient)`INSERT INTO run_ledger_sessions
+						(session_id, provider, state) VALUES (${sessionId}, ${provider}, 'Open')`;
 			}).pipe(Effect.provideService(PersistenceProjectTag, { projectId })),
 		);
 	await store.dispose();
 	// Each read opens its own connection; one opened before the daemon does not see its writes.
-	const statusOf = (projectId: string) => {
+	const statusOf = (sessionId: string) => {
 		const db = new Database(join(configDir, "events.db"), { readonly: true });
 		try {
 			return (
 				db
 					.prepare("SELECT status FROM sessions WHERE id = ?")
-					.get(`${projectId}-stuck`) as { status: string }
+					.get(sessionId) as { status: string }
 			).status;
 		} finally {
 			db.close();
 		}
 	};
-	expect(["integration-test", "unopened", "gone"].map(statusOf)).toEqual([
+	expect(sessions.map(([, sessionId]) => statusOf(sessionId))).toEqual([
+		"busy",
 		"busy",
 		"busy",
 		"busy",
@@ -102,14 +115,20 @@ it("after a restart, the daemon settles a stale busy session of a project no tab
 	// The daemon's first poll runs before it serves, so the rows read settled once it is up.
 	harness = await createDaemonProject("chat-simple", { configDir });
 	const statuses = {
-		opened: statusOf("integration-test"),
-		unopened: statusOf("unopened"),
-		gone: statusOf("gone"),
+		opened: statusOf("integration-test-stuck"),
+		unopened: statusOf("unopened-stuck"),
+		held: statusOf("unopened-held"),
+		gone: statusOf("gone-stuck"),
 	};
 	mkdirSync("test-results/status-poller", { recursive: true });
 	writeFileSync(
 		"test-results/status-poller/daemon-poller.json",
 		`${JSON.stringify(statuses, null, 2)}\n`,
 	);
-	expect(statuses).toEqual({ opened: "idle", unopened: "idle", gone: "busy" });
+	expect(statuses).toEqual({
+		opened: "idle",
+		unopened: "idle",
+		held: "busy",
+		gone: "busy",
+	});
 });

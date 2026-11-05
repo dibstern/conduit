@@ -34,6 +34,7 @@ import {
 } from "../../../persistence/project-storage.js";
 import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-scopes.js";
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
+import type { PollerGatingConfig } from "../../../relay/monitoring-types.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
@@ -186,6 +187,14 @@ export class RelayFactoryTag extends Context.Service<
 	RelayFactory
 >()("RelayFactory") {}
 
+/** Test seam: shortened poll intervals and SSE grace/staleness (milliseconds). */
+export interface PollerTimings {
+	readonly pollerGatingConfig?: Partial<PollerGatingConfig>;
+	readonly statusPollerInterval?: number;
+	readonly messagePollerInterval?: number;
+	readonly messagePollerSseSilence?: number;
+}
+
 /**
  * Create a Layer providing RelayFactoryTag.
  *
@@ -205,6 +214,8 @@ export const RelayFactoryLive = (
 	configDir: string,
 	/** Test seam: the in-process Claude SDK every project relay uses. */
 	claudeSdk?: ClaudeSdkSeam,
+	/** Test seam: shortened poll intervals and SSE grace/staleness for every project relay. */
+	pollerTimings?: PollerTimings,
 ): Layer.Layer<
 	RelayFactoryTag | HttpServerRefTag,
 	never,
@@ -372,7 +383,9 @@ export const RelayFactoryLive = (
 							Effect.flatMap((instance) =>
 								getProviderDriver(instance.driver ?? "opencode")
 									?.runsOpenCodeServer
-									? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
+									? Effect.asVoid(
+											Effect.scoped(openCodeInstances.use(id, null)),
+										)
 									: Effect.void,
 							),
 							Effect.andThen(configPersistence.flush),
@@ -745,6 +758,7 @@ export const RelayFactoryLive = (
 									}),
 									slug: project.slug,
 									...(claudeSdk && { claudeSdk }),
+									...pollerTimings,
 									noServer: true,
 									signal: ac.signal,
 									configDir,

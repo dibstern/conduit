@@ -17,6 +17,7 @@ import {
 	Ref,
 	Result,
 } from "effect";
+import { MANAGED_OPENCODE_ACCOUNT_ID } from "../../src/lib/contracts/provider-instance.js";
 import { loadDaemonConfigStartupResult } from "../../src/lib/daemon/config-persistence.js";
 import {
 	type SendRPC,
@@ -41,6 +42,7 @@ import {
 	addWithoutRelay,
 	startRelay,
 } from "../../src/lib/domain/daemon/Services/project-registry-service.js";
+import { ProviderAdapters } from "../../src/lib/domain/daemon/Services/provider-adapters.js";
 import { RelayCacheTag } from "../../src/lib/domain/daemon/Services/relay-cache.js";
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
@@ -180,15 +182,25 @@ export async function createDaemonProject(
 		readonly openCodeInstances?: DaemonLiveOptions["openCodeInstances"];
 		/** Stands in for shell environment capture and its readiness. */
 		readonly shellEnv?: DaemonLiveOptions["shellEnv"];
+		/** Shortened poll intervals and SSE grace/staleness. */
+		readonly pollerTimings?: DaemonLiveOptions["pollerTimings"];
+		/** A started mock the caller owns and stops, in place of the recording's. */
+		readonly mock?: MockOpenCodeServer;
+		/** The built frontend to serve; an empty directory by default. */
+		readonly staticDir?: string;
+		/** A fixed port, as a restart reuses; OS-assigned by default. */
+		readonly port?: number;
 	} = {},
 ) {
 	const slug = options.slug ?? "integration-test";
-	const mock = new MockOpenCodeServer(
-		typeof recording === "string"
-			? loadOpenCodeRecording(recording)
-			: recording,
-	);
-	await mock.start();
+	const mock =
+		options.mock ??
+		new MockOpenCodeServer(
+			typeof recording === "string"
+				? loadOpenCodeRecording(recording)
+				: recording,
+		);
+	if (!options.mock) await mock.start();
 	const root = realpathSync(mkdtempSync(join(tmpdir(), "dp-")));
 	const configDir = options.configDir ?? join(root, "config");
 	mkdirSync(configDir, { recursive: true });
@@ -207,13 +219,18 @@ export async function createDaemonProject(
 	const daemon = makeDaemonRuntime({
 		configDir,
 		socketPath: join(root, "d.sock"),
-		staticDir: root,
+		staticDir: options.staticDir ?? root,
 		launchLogin: sdkDefaultClaudeConfigDir(join(root, "home", ".claude")),
 		initialConfig: makeDaemonConfigFromOptions({
-			port: 0,
+			port: options.port ?? 0,
 			host: "127.0.0.1",
 			tlsEnabled: false,
 			hostExplicit: true,
+			// An answered avatar question, as foreground startup carries it over.
+			...(Result.isSuccess(loaded) &&
+				loaded.success.config.avatar !== undefined && {
+					avatar: loaded.success.config.avatar,
+				}),
 		}),
 		smartDefault: false,
 		defaultOpencodeUrl: options.opencodeUrl ?? mock.url,
@@ -227,14 +244,16 @@ export async function createDaemonProject(
 			openCodeInstances: options.openCodeInstances,
 		}),
 		...(options.shellEnv && { shellEnv: options.shellEnv }),
+		...(options.pollerTimings && { pollerTimings: options.pollerTimings }),
 	});
 	const clients: TestWsClient[] = [];
 	const stop = async () => {
 		for (const client of clients) await client.close().catch(() => {});
 		await daemon.dispose();
-		await mock.stop();
+		if (!options.mock) await mock.stop();
 		rmSync(root, { recursive: true, force: true });
 	};
+	const projectDir = options.projectDir ?? process.cwd();
 	try {
 		const { port, projectContext } = await daemon.runPromise(
 			Effect.gen(function* () {
@@ -242,17 +261,29 @@ export async function createDaemonProject(
 					{
 						slug,
 						title: slug,
-						folders: [
-							options.projectDir ?? process.cwd(),
-							...(options.extraFolders ?? []),
-						],
+						folders: [projectDir, ...(options.extraFolders ?? [])],
 					},
 					{ silent: true },
 				).pipe(
 					// A reused configDir is a restart: daemon.json already holds the project.
 					Effect.catchTag("ProjectAlreadyExists", () => Effect.void),
 				);
-				yield* startRelay(slug);
+				// As foreground startup does, start every project with recovery work alongside this
+				// one, opened or not: recovery waits until each has lent its services.
+				const relays = yield* RelayCacheTag;
+				yield* Effect.all(
+					[
+						startRelay(slug),
+						Effect.forEach(
+							(yield* ProviderAdapters).recoveryProjects.filter(
+								(recovering) => recovering !== slug,
+							),
+							(recovering) => relays.get(recovering),
+							{ concurrency: "unbounded", discard: true },
+						),
+					],
+					{ concurrency: "unbounded", discard: true },
+				);
 				// Foreground startup starts the provider command outbox once its
 				// projects are up; Stop's abort and probe effects run there.
 				yield* (yield* DaemonOrchestration).start;
@@ -263,7 +294,9 @@ export async function createDaemonProject(
 					yield* (yield* AccountDirectory).list,
 					(account) =>
 						account.driver === "opencode" && !account.managed
-							? Effect.scoped(instances.use(account.id)).pipe(Effect.ignore)
+							? Effect.scoped(instances.use(account.id, null)).pipe(
+									Effect.ignore,
+								)
 							: Effect.void,
 					{ discard: true },
 				);
@@ -293,6 +326,15 @@ export async function createDaemonProject(
 			mock,
 			daemon,
 			run,
+			/** The managed OpenCode client for the project's folder. */
+			opencode: () =>
+				run(
+					Effect.scoped(
+						Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+							instances.use(MANAGED_OPENCODE_ACCOUNT_ID, projectDir),
+						),
+					),
+				),
 			/** The daemon's handle on the project relay (settle, archive, status). */
 			relay: () =>
 				daemon.runPromise(

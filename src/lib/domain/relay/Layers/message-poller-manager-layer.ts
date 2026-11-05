@@ -70,6 +70,9 @@ export const makeMessagePollerManagerLive = (
 				...(config.messagePollerInterval != null && {
 					interval: config.messagePollerInterval,
 				}),
+				...(config.messagePollerSseSilence != null && {
+					sseSilenceMs: config.messagePollerSseSilence,
+				}),
 			});
 
 			yield* Effect.addFinalizer((exit) =>

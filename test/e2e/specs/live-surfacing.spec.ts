@@ -51,11 +51,11 @@ console.log("verified");
 				"e2e-test",
 			);
 			harness.trackSession(sessionId);
-			await harness.stack.client.session.update(sessionId, {
+			await harness.client.session.update(sessionId, {
 				permission: [{ permission: "bash", pattern: "*", action: "allow" }],
 			});
-			// The standalone relay has no daemon settings RPCs. Supply only the
-			// opt-in/category settings; all session traffic uses the real relay.
+			// Supply only the opt-in/category settings; all session traffic uses
+			// the real daemon.
 			await page.routeWebSocket(/\/rpc(?:\?|$)/, (ws) => {
 				const server = ws.connectToServer();
 				ws.onMessage((message) => {
@@ -107,7 +107,7 @@ console.log("verified");
 				.toBe(true);
 			await expect(page.getByTestId("turn-live-head")).toBeVisible();
 			await expect(chat.stopBtn).toBeVisible();
-			const messages = await harness.stack.client.session.messages(sessionId);
+			const messages = await harness.client.session.messages(sessionId);
 			const assistantParts = messages
 				.filter(({ role }) => role === "assistant")
 				.flatMap((message) =>
@@ -148,7 +148,7 @@ console.log("verified");
 				model: "jev-test",
 				probabilities: index === 0 ? { ask: 1 } : { risk: 1 },
 			}));
-			await harness.stack.effectRuntime.runtime.runPromise(
+			await harness.project.run(
 				Effect.gen(function* () {
 					const commit = yield* makeCommitAndSignal;
 					yield* commit(
@@ -220,7 +220,7 @@ console.log("verified");
 						verdicts,
 						live,
 						reloaded,
-						messages: await harness.stack.client.session.messages(sessionId),
+						messages: await harness.client.session.messages(sessionId),
 					},
 					null,
 					2,

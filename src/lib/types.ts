@@ -235,6 +235,8 @@ export interface ProjectRelayConfig {
 	 * Default: 750ms. Tests can use a shorter interval for faster feedback.
 	 */
 	messagePollerInterval?: number;
+	/** Test seam: how long after a session's last SSE event its message poller skips reads. Default 2000ms. */
+	messagePollerSseSilence?: number;
 	/** SQLite event-store path for Effect-native persistence services. */
 	persistenceDbPath: string;
 	/** Test seam: replaces only the session-title query. Overrides `claudeSdk.titleQuery`. */

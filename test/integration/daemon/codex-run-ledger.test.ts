@@ -1137,17 +1137,20 @@ describe("Codex on the Run Ledger", () => {
 		);
 		if (!historical.available) context.skip(historical.reason);
 		if (!historical.available) return;
+		// main's session detail feed fails this build's schema (82tn.51 dropped its rewind row),
+		// so the browser leaves main's session unviewed.
 		const { fixture, browser, sessionId, restart } = await start(
 			"two-build",
 			fixtureRows("basic"),
 			{},
 			{ dist: historical.dist },
+			false,
 		);
 		const delta = fixtureRows("basic").find(
 			({ message }) => message?.method === "item/agentMessage/delta",
 		)?.["at"];
 		writeFileSync(gatePath, String(delta));
-		await submit(browser, sessionId, "Say hello");
+		await submit(browser, sessionId, "Say hello", "queue", randomUUID(), false);
 		// test-waits-allow polling: the app-server's output reaches only its capture file.
 		await vi.waitFor(
 			() => expect(captured("item/agentMessage/delta")).not.toEqual([]),

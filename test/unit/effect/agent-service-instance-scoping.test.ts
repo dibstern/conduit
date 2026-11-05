@@ -7,12 +7,12 @@ import {
 } from "../../../src/lib/contracts/provider-instance.js";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceLive,
 	AgentServiceTag,
 } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -22,6 +22,7 @@ import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	makeMockAccountDirectory,
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
@@ -66,7 +67,7 @@ const makeLayer = ({
 } = {}) => {
 	const baseDependencies = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-		Layer.succeed(OpenCodeAPITag)(api),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: api }),
 		),

@@ -207,6 +207,11 @@ export const headMovesHandlers: StepHandler[] = [
 							: {}),
 					};
 				},
+				ForkSession: (payload) => ({
+					projectSlug: "myapp",
+					sessionId: `${sessionId}-fork`,
+					forkedFrom: "sessionId" in payload ? payload.sessionId : "",
+				}),
 				CommitHeadMove: ({ intent, moveId }) => {
 					if (intent._tag === "undo")
 						state.log = [
@@ -284,6 +289,18 @@ export const headMovesHandlers: StepHandler[] = [
 						command: "head_move",
 						reason: "run_active",
 					});
+				},
+			});
+		},
+	},
+	{
+		// The preview read the files kept; an eviction lands before the commit (f02e9.13).
+		name: "the files are pruned before the commit",
+		match: /^the files there are pruned before the move is confirmed$/,
+		run: ({ world }) => {
+			requireRpcControl(world.page).setStubs({
+				CommitHeadMove: () => {
+					throw new FilesRefused({ sessionId, reason: "pruned" });
 				},
 			});
 		},
@@ -373,6 +390,54 @@ export const headMovesHandlers: StepHandler[] = [
 				messageId: match[1] ?? "",
 				withFiles: true,
 			});
+		},
+	},
+	{
+		name: "branch into a worktree",
+		match: /^I choose to branch into a worktree$/,
+		run: async ({ world }) => {
+			await rewindDialog(world.page)
+				.getByRole("button", { name: "Branch into a worktree" })
+				.click();
+		},
+	},
+	{
+		name: "branching into a worktree is not offered",
+		match: /^branching into a worktree is not offered$/,
+		run: async ({ world }) => {
+			await expect(
+				rewindDialog(world.page).getByRole("button", {
+					name: "Branch into a worktree",
+				}),
+			).toHaveCount(0);
+		},
+	},
+	{
+		// 82tn.54: the files go into a new worktree, and the conversation stays where it is.
+		name: "one fork with files keeps the conversation up to a message",
+		match: /^one fork with files keeps the conversation up to (\S+)$/,
+		run: async ({ world, match }) => {
+			const rpc = requireRpcControl(world.page);
+			const fork = await rpc.waitForRequest(
+				(request) => request.tag === "ForkSession",
+			);
+			expect(fork.payload).toMatchObject({
+				sessionId,
+				messageId: match[1] ?? "",
+				files: true,
+			});
+			expect(
+				rpc.getRequests().filter((request) => request.tag === "ForkSession"),
+			).toHaveLength(1);
+		},
+	},
+	{
+		name: "the fork is open",
+		match: /^the fork (\S+) is open$/,
+		run: async ({ world, match }) => {
+			await expect(world.page).toHaveURL(
+				new RegExp(`/s/${match[1] ?? ""}(?:[/?]|$)`),
+			);
 		},
 	},
 	{
@@ -551,6 +616,17 @@ export const headMovesHandlers: StepHandler[] = [
 				.getByRole("textbox", { name: "Edit message" })
 				.fill(match[2] ?? "");
 			await edit.getByRole("button", { name: "Send" }).click();
+		},
+	},
+	{
+		name: "the edit box keeps the draft",
+		match: /^the edit box still holds (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page
+					.getByTestId("user-message-edit")
+					.getByRole("textbox", { name: "Edit message" }),
+			).toHaveValue(match[1] ?? "");
 		},
 	},
 	{

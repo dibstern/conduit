@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { type Cause, type Context, Data, Effect, Option } from "effect";
+import { type Cause, type Context, Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import type { Account } from "../../../contracts/account.js";
@@ -515,9 +515,6 @@ export const applySessionCommand = (
 	options: ApplySessionCommandOptions = {},
 ) =>
 	Effect.gen(function* () {
-		const api = Option.getOrUndefined(
-			yield* Effect.serviceOption(OpenCodeAPITag),
-		);
 		const log = yield* LoggerTag;
 		const readQuery = yield* ReadQueryEffectTag;
 		const eventStore = yield* EventStoreEffectTag;
@@ -677,7 +674,10 @@ export const applySessionCommand = (
 					? options.upstreamAdapter
 					: command.type === "session.renamed" ||
 							command.type === "session.deleted"
-						? yield* sessionUpstreamAdapter(account?.driver ?? "opencode", api)
+						? yield* sessionUpstreamAdapter(
+								account?.driver ?? "opencode",
+								undefined,
+							)
 						: null;
 
 			if (adapter !== null) {
@@ -698,7 +698,7 @@ export const applySessionCommand = (
 					instances._tag === "Some"
 						? Effect.scoped(
 								Effect.flatMap(
-									instances.value.use(account.id, directory),
+									instances.value.use(account.id, directory ?? null),
 									(client) => openCodeUpstreamAdapter(client).sync(command),
 								),
 							)
@@ -1023,6 +1023,8 @@ const forkSessionInWorkspace = (
 		side?: { title: string; inputId: string };
 		/** The services are another project's: the fork starts fresh in its folder. */
 		intoProject?: boolean;
+		/** The fork's id, chosen by a caller that made its worktree first (82tn.54). */
+		sessionId?: string;
 	},
 ) =>
 	Effect.gen(function* () {
@@ -1239,9 +1241,9 @@ const forkSessionInWorkspace = (
 		const fork = yield* Effect.gen(function* () {
 			if (!native) {
 				// OpenCode's session id is the conduit session's id.
-				const id = openCode
-					? `ses_${randomUUID().replaceAll("-", "")}`
-					: randomUUID();
+				const id =
+					options?.sessionId ??
+					(openCode ? `ses_${randomUUID().replaceAll("-", "")}` : randomUUID());
 				const configDir =
 					relayConfig._tag === "Some"
 						? (relayConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
@@ -1377,7 +1379,7 @@ const forkSessionInWorkspace = (
 				lastRewindCommitSequence <= thread.deliveredThrough
 					? thread
 					: undefined;
-			const id = randomUUID();
+			const id = options?.sessionId ?? randomUUID();
 			return {
 				id,
 				provider,
@@ -1563,6 +1565,8 @@ export const forkSession = (
 		side?: { title: string; inputId: string };
 		/** Another project's relay parts; the fork is written into that project. */
 		into?: Context.Context<ProjectSessionManagerParts>;
+		/** The fork's id, chosen by a caller that made its worktree first (82tn.54). */
+		sessionId?: string;
 	},
 ) =>
 	Effect.gen(function* () {

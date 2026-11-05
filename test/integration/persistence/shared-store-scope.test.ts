@@ -812,6 +812,9 @@ describe("shared-store relay project scope", () => {
 			recreateAll: unused,
 			create: unused,
 			rollback: unused,
+			hold: unused,
+			settle: unused,
+			recoverHeld: () => Effect.void,
 			inspectCheckoutCleanup: inspect,
 			removeCheckout: (folder) =>
 				Effect.sync(() => {
