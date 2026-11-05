@@ -1429,9 +1429,6 @@
 	"test/unit/domain/relay/opencode-run-recovery.test.ts": {
 		"polling": 1
 	},
-	"test/unit/domain/relay/opencode-runtime-ingress-effect.test.ts": {
-		"polling": 2
-	},
 	"test/unit/domain/relay/opencode-runtime-ingress-projection.test.ts": {
 		"polling": 2,
 		"real-wait": 19
@@ -1591,9 +1588,6 @@
 	},
 	"test/unit/relay/push-notification-done.test.ts": {
 		"polling": 1
-	},
-	"test/unit/relay/relay-startup-recovery.test.ts": {
-		"polling": 2
 	},
 	"test/unit/relay/shared-opencode-reconnect.test.ts": {
 		"polling": 20

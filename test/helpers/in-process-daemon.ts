@@ -26,7 +26,10 @@ import {
 	type ForegroundDaemonHandle,
 	startForegroundDaemon,
 } from "../../src/lib/domain/daemon/Layers/daemon-foreground.js";
-import { makeDaemonLive } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import {
+	type DaemonLiveOptions,
+	makeDaemonLive,
+} from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
 import { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	DaemonConfigRefTag,
@@ -42,6 +45,7 @@ import { RelayCacheTag } from "../../src/lib/domain/daemon/Services/relay-cache.
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
 import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
+import { ProjectShellEnvResolver } from "../../src/lib/provider/project-shell-env.js";
 import type { createProjectRelayLayers } from "../../src/lib/relay/project-relay-layers.js";
 import type { ClaudeSdkSeam } from "../../src/lib/types.js";
 import type { OpenCodeRecording } from "../e2e/fixtures/recorded/types.js";
@@ -131,6 +135,25 @@ type ProjectServices = ManagedRuntime.ManagedRuntime.Services<
 	ReturnType<typeof createProjectRelayLayers>["relayManagedRuntime"]
 >;
 
+/** Shell capture stand-in: a fixed environment, readiness from the test. */
+export class FixedShellEnv extends ProjectShellEnvResolver {
+	constructor(
+		private readonly fixed: Readonly<Record<string, string>>,
+		private readonly ready: (
+			directory: string,
+		) => Promise<boolean> = async () => true,
+	) {
+		super({ env: fixed });
+	}
+	override register() {}
+	override getSnapshot() {
+		return { env: this.fixed, declared: {} };
+	}
+	override waitUntilReady(directory: string) {
+		return this.ready(directory);
+	}
+}
+
 export type DaemonProject = Awaited<ReturnType<typeof createDaemonProject>>;
 
 /**
@@ -152,6 +175,11 @@ export async function createDaemonProject(
 		readonly opencodeUrl?: string;
 		readonly slug?: string;
 		readonly projectDir?: string;
+		readonly extraFolders?: readonly string[];
+		/** Stands in for every OpenCode server (the recording's mock goes unused). */
+		readonly openCodeInstances?: DaemonLiveOptions["openCodeInstances"];
+		/** Stands in for shell environment capture and its readiness. */
+		readonly shellEnv?: DaemonLiveOptions["shellEnv"];
 	} = {},
 ) {
 	const slug = options.slug ?? "integration-test";
@@ -195,6 +223,10 @@ export async function createDaemonProject(
 		}),
 		// Stubbed session titles: no test makes a live title call.
 		claudeSdk: { ...sdk, titleQuery: options.titleQuery ?? sdk.titleQuery },
+		...(options.openCodeInstances && {
+			openCodeInstances: options.openCodeInstances,
+		}),
+		...(options.shellEnv && { shellEnv: options.shellEnv }),
 	});
 	const clients: TestWsClient[] = [];
 	const stop = async () => {
@@ -210,7 +242,10 @@ export async function createDaemonProject(
 					{
 						slug,
 						title: slug,
-						folders: [options.projectDir ?? process.cwd()],
+						folders: [
+							options.projectDir ?? process.cwd(),
+							...(options.extraFolders ?? []),
+						],
 					},
 					{ silent: true },
 				).pipe(

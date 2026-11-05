@@ -81,6 +81,7 @@ const partTypes: ReadonlySet<string> = new Set([
 	"thinking",
 	"error",
 	"setup",
+	"notice",
 ]);
 const isPartType = (type: string): type is HistoryMessagePart["type"] =>
 	partTypes.has(type);

@@ -694,6 +694,30 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 	}
 
 	/**
+	 * Started runs of the session without their run-end file capture. The
+	 * daemon records it beside the bus, after the turn has settled (f02e9.8),
+	 * so a test that pins a settled session's events waits for this to empty.
+	 */
+	uncapturedRuns(sessionId: string): string[] {
+		const db = new Database(this.daemonStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare<[string], { run_id: string }>(
+					`SELECT json_extract(started.metadata, '$.runId') AS run_id FROM events started
+					WHERE started.session_id = ? AND started.type = 'run.started'
+					AND json_extract(started.metadata, '$.runId') = json_extract(started.data, '$.requestedRunId')
+					AND NOT EXISTS (SELECT 1 FROM events captured WHERE captured.session_id = started.session_id
+						AND captured.type = 'run.changes_captured'
+						AND json_extract(captured.data, '$.runId') = json_extract(started.metadata, '$.runId'))`,
+				)
+				.all(sessionId)
+				.map(({ run_id }) => run_id);
+		} finally {
+			db.close();
+		}
+	}
+
+	/**
 	 * Turn off auto-settle and auto-archive before the next start. A seeded
 	 * store of old, read sessions is otherwise due for both all at once.
 	 */

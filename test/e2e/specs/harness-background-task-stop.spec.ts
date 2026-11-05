@@ -433,9 +433,10 @@ test("stopping an agent also stops its live descendants and leaves unrelated wor
 				exact: true,
 			})
 			.click();
+		// The server issues stops in its own snapshot's order, which 8.4 leaves open (82tn.32.24).
 		await expect
-			.poll(() => requestedIds(harness))
-			.toEqual([nested.task_id, agent.task_id]);
+			.poll(() => requestedIds(harness).sort())
+			.toEqual([agent.task_id, nested.task_id].sort());
 		await expectTasks(
 			page,
 			taskStopFixture.map((task) => task.description),
@@ -545,7 +546,9 @@ test("a real failure keeps the row, duplicate clients and finished IDs are harml
 			.click();
 		// 8.4 (2866): a failed stop is a timeline notice, shown whenever it lands.
 		await expect(
-			page.getByText(/^Could not stop .*; it is still running$/),
+			page.getByText("Could not stop sleep 600 (shell); it is still running", {
+				exact: true,
+			}),
 		).toBeVisible();
 		await expectTasks(
 			page,

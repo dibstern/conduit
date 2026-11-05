@@ -92,8 +92,9 @@ function state(fixture: ProcessHarness, sessionId: string) {
 					}
 				>(
 					// The source's transcript, not its runner's ledger evidence: a restart
-					// reattaches its runner, which reports a start (CONTRACT 6.1).
-					"SELECT event_id, sequence, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ? AND type NOT LIKE 'evidence.%' ORDER BY sequence",
+					// reattaches its runner, which reports a start (CONTRACT 6.1). Nor a
+					// run's file capture, which lands after its turn completes (f02e9.8).
+					"SELECT event_id, sequence, stream_version, type, data, metadata, provider, created_at FROM events WHERE session_id = ? AND type NOT LIKE 'evidence.%' AND type != 'run.changes_captured' ORDER BY sequence",
 				)
 				.all(sessionId),
 			messages: db
