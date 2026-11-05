@@ -151,6 +151,17 @@ export const forkIntoProjectHandlers: StepHandler[] = [
 		},
 	},
 	{
+		name: "run a session on OpenCode",
+		match: /^Atlas session 1 runs on OpenCode$/,
+		run: ({ world }) => {
+			setSessionRowStatus(world.page, "myapp-1", "idle", {
+				title: "Atlas session 1",
+				projectSlug: "myapp",
+				accountId: "opencode",
+			});
+		},
+	},
+	{
 		name: "assert plain Fork only",
 		match: /^the commands offer Fork without Fork into$/,
 		run: async ({ world }) => {

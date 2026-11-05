@@ -1,5 +1,9 @@
 import { getBrowserClientId } from "../../stores/client-identity.js";
 import {
+	getDriverTraits,
+	getInstanceById,
+} from "../../stores/instance.svelte.js";
+import {
 	messageSurfacing,
 	sessionJevEnabled,
 } from "../../stores/message-surfacing.svelte.js";
@@ -373,8 +377,11 @@ function fork(session: SessionInfo, targetProjectSlug?: string) {
 		.catch(toastFailure("Failed to fork session"));
 }
 
-/** Every other project, when there is one: the fork starts there, seeded with this transcript. */
+/** Every other project, when there is one: the fork starts there, seeded with this transcript.
+ *  OpenCode has no seeded fresh start yet, so its sessions keep plain Fork. */
 function forkInto(session: SessionInfo): SessionCommand[] {
+	const driver = getInstanceById(session.accountId ?? "")?.driver;
+	if (getDriverTraits(driver)?.runsOpenCodeServer) return [];
 	const targets = projectState.projects.filter(
 		(project) => project.slug !== session.projectSlug,
 	);
