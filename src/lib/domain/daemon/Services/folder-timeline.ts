@@ -150,15 +150,26 @@ export class FolderTimeline extends Context.Service<
 			runId: string,
 			directory: string,
 		) => Effect.Effect<Checkpoint | undefined, FolderTimelineError>;
+		/** The runs the timeline holds that name the folder, live or still capturing. */
+		readonly runsIn: (
+			directory: string,
+		) => Effect.Effect<
+			readonly { readonly sessionId: string; readonly runId: string }[]
+		>;
 		/**
 		 * The Restore Plan for moving the folder to `to` (a repository-wide
-		 * tree): a fresh snapshot, and the paths that change.
+		 * tree): a fresh snapshot, and the paths that change. `key` names the
+		 * plan by each path's state now, so edits outside the folder keep it.
 		 */
 		readonly plan: (
 			directory: string,
 			to: string,
 		) => Effect.Effect<
-			{ readonly from: string; readonly changes: readonly RestoreChange[] },
+			{
+				readonly from: string;
+				readonly key: string;
+				readonly changes: readonly RestoreChange[];
+			},
 			FolderTimelineError | FolderRestoreRefused
 		>;
 		/**

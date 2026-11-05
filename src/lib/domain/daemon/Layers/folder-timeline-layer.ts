@@ -955,6 +955,12 @@ export const makeFolderTimeline = (configDir: string) =>
 				run(directory, args),
 			collect,
 			sessionStore,
+			runsIn: (directory) =>
+				Effect.sync(() =>
+					[...runs]
+						.filter(([, live]) => live.directories.includes(directory))
+						.map(([runId, { sessionId }]) => ({ sessionId, runId })),
+				),
 			checkpoint: (sessionId, runId, directory) =>
 				Effect.gen(function* () {
 					const { store, prefix } = yield* resolve(directory);
@@ -977,6 +983,17 @@ export const makeFolderTimeline = (configDir: string) =>
 					const changes = yield* diff(now.store, now.prefix, now.worktree, to);
 					return {
 						from: now.worktree,
+						key: createHash("sha256")
+							.update(
+								JSON.stringify(
+									changes.map(({ path, before, after }) => [
+										path,
+										before,
+										after,
+									]),
+								),
+							)
+							.digest("hex"),
 						changes: changes.map(({ path, before, after }) => ({
 							path,
 							change:

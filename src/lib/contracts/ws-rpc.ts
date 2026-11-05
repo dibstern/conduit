@@ -63,6 +63,7 @@ import {
 	AccountSwitchBusy,
 	AccountUnroutable,
 	ContinuationErrorSchema,
+	FilesRefused,
 	HandoffSummarySchema,
 	SessionBusy,
 	UsageLimitsSettingSchema,
@@ -3120,13 +3121,21 @@ export const UndoRewind = Rpc.make("UndoRewind", {
  * there (edit-and-resend, or the same text to regenerate); back to where an earlier move left
  * (undo, a new entry); or to another branch's tip.
  */
+// 82tn.53: `withFiles` also puts each folder the session ran in back as it was there.
 export const MoveIntentSchema = Schema.Union([
 	Schema.TaggedStruct("rewind", {
 		messageId: NonEmptyString,
 		resend: Schema.optionalKey(NonEmptyString),
+		withFiles: Schema.optionalKey(Schema.Boolean),
 	}),
-	Schema.TaggedStruct("undo", { moveId: NonEmptyString }),
-	Schema.TaggedStruct("switch", { nodeId: NonEmptyString }),
+	Schema.TaggedStruct("undo", {
+		moveId: NonEmptyString,
+		withFiles: Schema.optionalKey(Schema.Boolean),
+	}),
+	Schema.TaggedStruct("switch", {
+		nodeId: NonEmptyString,
+		withFiles: Schema.optionalKey(Schema.Boolean),
+	}),
 ]);
 export type MoveIntent = typeof MoveIntentSchema.Type;
 
@@ -3137,6 +3146,21 @@ const HeadMoveFilesSchema = Schema.Literals([
 	"not_available",
 ]);
 
+/** A move with files' Restore Plan: per folder, the paths that change (82tn.53). */
+const RestorePlanSchema = Schema.Struct({
+	folders: Schema.Array(
+		Schema.Struct({
+			directory: Schema.String,
+			changes: Schema.Array(
+				Schema.Struct({
+					path: Schema.String,
+					change: Schema.Literals(["added", "modified", "deleted"]),
+				}),
+			),
+		}),
+	),
+});
+
 /** A proposal: the id both devices confirming it share, and whether the files are kept. */
 export const PreviewHeadMove = Rpc.make("PreviewHeadMove", {
 	payload: Schema.TaggedStruct("PreviewHeadMove", {
@@ -3146,8 +3170,13 @@ export const PreviewHeadMove = Rpc.make("PreviewHeadMove", {
 	success: Schema.Struct({
 		moveId: NonEmptyString,
 		files: HeadMoveFilesSchema,
+		restore: Schema.optionalKey(RestorePlanSchema),
 	}),
-	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => SessionBusy),
+		Schema.suspend(() => FilesRefused),
+	]),
 });
 
 /** Lands a previewed move; the same `moveId` again returns the same receipt. */
@@ -3158,7 +3187,11 @@ export const CommitHeadMove = Rpc.make("CommitHeadMove", {
 		moveId: NonEmptyString,
 	}),
 	success: Schema.Struct({ moveId: NonEmptyString }),
-	error: Schema.Union([WsRpcError, Schema.suspend(() => SessionBusy)]),
+	error: Schema.Union([
+		WsRpcError,
+		Schema.suspend(() => SessionBusy),
+		Schema.suspend(() => FilesRefused),
+	]),
 });
 
 export const HeadLogEntrySchema = Schema.Struct({

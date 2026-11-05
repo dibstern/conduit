@@ -937,6 +937,8 @@ export const CanonicalEvents = {
 			undoes: Schema.optionalKey(Schema.String),
 			/** Edit-and-resend and regenerate: admitted after the move, keyed by the move id. */
 			resend: Schema.optionalKey(InputRequestSchema),
+			/** 82tn.53: the folders the move restored, each with a Restore Receipt. */
+			files: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
 	"head.moved": live(
