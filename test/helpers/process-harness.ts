@@ -2542,6 +2542,9 @@ export class ProcessBrowser {
 	private failure: Error | undefined;
 	private ptys: Fiber.Fiber<void, unknown> | undefined;
 	private approvals: Fiber.Fiber<void, unknown> | undefined;
+	// The card feed in use; a feed replaced by `open` is retired, so its end
+	// is not a failure and its late envelopes are dropped.
+	private approvalsFeed = { retired: false };
 	private projectSettings: Fiber.Fiber<void, unknown> | undefined;
 	private instanceFeed: Fiber.Fiber<void, unknown> | undefined;
 	private sessions: Fiber.Fiber<void, unknown> | undefined;
@@ -2554,7 +2557,7 @@ export class ProcessBrowser {
 		private readonly runtime: ManagedRuntime.ManagedRuntime<BrowserRpc, never>,
 		readonly rpc: BrowserRpc["Service"],
 		originId: string,
-		private readonly projectSlug: string,
+		private projectSlug: string,
 		private readonly followRows: boolean,
 		private readonly deadline?: number,
 	) {
@@ -2619,11 +2622,13 @@ export class ProcessBrowser {
 	private watch<A, E>(
 		stream: Stream.Stream<A, E>,
 		record: (envelope: A) => Effect.Effect<void, unknown>,
+		feed?: { readonly retired: boolean },
 	): Fiber.Fiber<void, unknown> {
 		return this.runtime.runFork(
 			Stream.runForEach(stream, record).pipe(
 				Effect.onExit((exit) =>
 					Effect.sync(() => {
+						if (feed?.retired) return;
 						if (Exit.isFailure(exit)) this.fail(Cause.squash(exit.cause));
 						else this.fail(new Error("Browser RPC subscription ended"));
 					}),
@@ -2670,10 +2675,13 @@ export class ProcessBrowser {
 	// `approval_removed` its resolution.
 	private async watchApprovals(): Promise<void> {
 		const cursor = this.frames.length;
+		const feed = { retired: false };
+		this.approvalsFeed = feed;
 		this.approvals = this.watch(
 			this.rpc.SubscribeApprovals({ projectSlug: this.projectSlug }),
 			(envelope) =>
 				Effect.sync(() => {
+					if (feed.retired) return;
 					this.record({ type: "approvals", ...envelope });
 					const items =
 						envelope._tag === "snapshot"
@@ -2686,6 +2694,7 @@ export class ProcessBrowser {
 					if (envelope._tag === "remove")
 						this.record({ type: "approval_removed", id: envelope.id });
 				}),
+			feed,
 		);
 		await this.waitFor(
 			(message) =>
@@ -3069,6 +3078,26 @@ export class ProcessBrowser {
 		}, cursor);
 	}
 
+	/**
+	 * Open a session as the browser's Open does: attach its project, move the
+	 * card feed there when the project changes (the browser clears and
+	 * resubscribes on attach), then view it.
+	 */
+	async open(sessionId: string): Promise<void> {
+		const { projectSlug } = await this.run(
+			this.rpc.AttachProject({ sessionId, originId: this.originId }),
+		);
+		if (projectSlug !== null && projectSlug !== this.projectSlug) {
+			this.approvalsFeed.retired = true;
+			const previous = this.approvals;
+			this.approvals = undefined;
+			if (previous) await this.runtime.runPromise(Fiber.interrupt(previous));
+			this.projectSlug = projectSlug;
+			await this.watchApprovals();
+		}
+		await this.view(sessionId);
+	}
+
 	async view(sessionId: string): Promise<void> {
 		await this.followSession(sessionId);
 		await this.run(
@@ -3210,6 +3239,21 @@ export class ProcessBrowser {
 				...(decision === "allow_always"
 					? { permissionDestination: "session" as const }
 					: {}),
+			}),
+		);
+	}
+
+	async answerQuestion(
+		request: Record<string, unknown>,
+		answers: Record<string, string>,
+	): Promise<void> {
+		await this.run(
+			this.rpc.AnswerQuestion({
+				projectSlug: this.projectSlug,
+				originId: this.originId,
+				commandId: randomUUID(),
+				toolId: String(request["toolId"]),
+				answers,
 			}),
 		);
 	}
