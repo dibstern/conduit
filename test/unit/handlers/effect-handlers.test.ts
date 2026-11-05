@@ -18,7 +18,10 @@ import { ProviderTurnServiceLive } from "../../../src/lib/domain/relay/Services/
 import { RelayStatusSnapshotLive } from "../../../src/lib/domain/relay/Services/relay-status-snapshot.js";
 import { SessionTitleServiceTag } from "../../../src/lib/domain/relay/Services/session-title-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
-import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
+import {
+	makeMockAccountDirectory,
+	standaloneSessionManagerLive,
+} from "../../helpers/mock-factories.js";
 // Effect Handler Tests (Batch 1)
 // Verifies that the Effect handler implementations produce the expected
 // observable side effects when run against a mock
@@ -74,8 +77,8 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerError } from "../../../src/lib/domain/relay/Services/session-manager-error.js";
 import {
+	projectSessionManager,
 	type SessionManagerService,
-	SessionManagerServiceLive,
 	SessionManagerServiceTag,
 } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
@@ -168,6 +171,7 @@ import {
 	makeMockStatusPoller,
 	makeOpenCodeInstancesStub,
 	makeTestHandlerLayer,
+	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { makeBaseSendTurnInput } from "../../helpers/mock-sdk.js";
@@ -1385,7 +1389,7 @@ function makeForkSessionLayer(options?: {
 		openCodeModelLayer(client),
 		Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 		Layer.succeed(WebSocketHandlerTag)(ws),
-		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+		Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 		PendingInteractionServiceLive,
 		Layer.succeed(LoggerTag)(log),
 		Layer.succeed(StatusPollerTag)(makeMockStatusPoller({
@@ -1436,7 +1440,7 @@ function makeSessionLifecycleLayer(options?: {
 		openCodeModelLayer(client),
 		Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [{ id: "sonnet", name: "Sonnet", providerId: "claude" }] })) })),
 		Layer.succeed(WebSocketHandlerTag)(ws),
-		Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+		Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 		PendingInteractionServiceLive,
 		Layer.succeed(LoggerTag)(log),
 		Layer.succeed(StatusPollerTag)(makeMockStatusPoller({
@@ -2102,7 +2106,7 @@ describe("handleQuestionReject", () => {
 			Layer.succeed(WebSocketHandlerTag)(ws),
 			Layer.succeed(OrchestrationEngineTag)(engine),
 			Layer.succeed(LoggerTag)(log),
-			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 			makeOverridesStateLive(),
 		);
 
@@ -2149,7 +2153,7 @@ describe("handleQuestionReject", () => {
 				Layer.succeed(OpenCodeAPITag)(client),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 				makeOverridesStateLive(),
@@ -2212,7 +2216,7 @@ describe("handleAskUserResponse", () => {
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(ConfigTag)(mockConfig()),
 				Layer.succeed(LoggerTag)(mockLogger()),
-				Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(makeMockSessionManagerService())),
 				Layer.succeed(ProviderTurnServiceTag)(turns),
 				Layer.succeed(OrchestrationEngineTag)(engine),
 				PendingInteractionServiceLive,
@@ -2279,7 +2283,7 @@ describe("handleAskUserResponse", () => {
 					Layer.succeed(ConfigTag)(mockConfig()),
 					PendingInteractionServiceLive,
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					makeOverridesStateLive(),
 				),
 			);
@@ -2333,7 +2337,7 @@ describe("handleAskUserResponse", () => {
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(ConfigTag)(mockConfig()),
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
 					makeOverridesStateLive(),
@@ -2551,7 +2555,7 @@ describe("handleNewSession", () => {
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ReadQueryEffectTag)(readQuery),
 				PendingInteractionServiceLive,
 				Layer.succeed(StatusPollerTag)(makeMockStatusPoller({
@@ -2661,7 +2665,7 @@ describe("handleNewSession", () => {
 				openCodeModelLayer(client),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ReadQueryEffectTag)(readQuery),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({
@@ -2831,7 +2835,7 @@ describe("renameSessionForClient", () => {
 
 			const layer = Layer.mergeAll(
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 			);
 
@@ -2862,7 +2866,7 @@ describe("renameSessionForClient", () => {
 
 		const layer = Layer.mergeAll(
 			Layer.succeed(LoggerTag)(log),
-			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 			Layer.succeed(WebSocketHandlerTag)(ws),
 		);
 
@@ -3004,7 +3008,7 @@ describe("loadMoreHistoryForSession", () => {
 			),
 		} satisfies ReadQueryEffect;
 		const layer = Layer.merge(
-			Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 			Layer.succeed(ReadQueryEffectTag)(readQuery),
 		);
 
@@ -3046,7 +3050,7 @@ describe("sendMessageToSession", () => {
 				const loggerLayer = Layer.succeed(LoggerTag)(makeMockLogger());
 				const openCodeApi = makeMockOpenCodeAPI();
 				const serviceLayer = Layer.provideMerge(
-					SessionManagerServiceLive,
+					standaloneSessionManagerLive,
 					Layer.mergeAll(
 						Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 						Layer.succeed(OpenCodeAPITag)(openCodeApi),
@@ -3066,7 +3070,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 				return Effect.gen(function* () {
 					const store = yield* EventStoreEffectTag;
 					const runner = yield* ProjectionRunnerEffectTag;
-					const service = yield* SessionManagerServiceTag;
+					const service = yield* projectSessionManager;
 					yield* runner.markRecovered();
 					yield* runner.projectEvent(
 						yield* store.append(
@@ -3160,7 +3164,7 @@ Layer.effect(SessionActivityTag, makeSessionActivity),
 			Layer.succeed(WebSocketHandlerTag)(mockWsHandler()),
 			Layer.succeed(LoggerTag)(mockLogger()),
 			Layer.succeed(ConfigTag)(mockConfig()),
-			Layer.succeed(SessionManagerServiceTag)(service),
+			Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(service)),
 			PendingInteractionServiceLive,
 			makeOverridesStateLive(),
 		);
@@ -3252,7 +3256,7 @@ describe("handleMessage", () => {
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ConfigTag)(config),
 				PendingInteractionServiceLive,
 				makeOverridesStateLive(),
@@ -3299,7 +3303,7 @@ describe("handleMessage", () => {
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ConfigTag)(config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -3400,7 +3404,7 @@ describe("handleMessage", () => {
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
 					// Production always supplies ProviderRuntimeIngestion for Claude output
@@ -3530,7 +3534,7 @@ describe("handleMessage", () => {
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -3633,7 +3637,7 @@ describe("handleMessage", () => {
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -3701,7 +3705,7 @@ describe("handleMessage", () => {
 				Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
-				Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+				Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 				Layer.succeed(ConfigTag)(config),
 				PendingInteractionServiceLive,
 				Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -3821,7 +3825,7 @@ describe("handleMessage", () => {
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -3902,7 +3906,7 @@ describe("handleMessage", () => {
 					Layer.succeed(OpenCodeInstancesTag)(makeOpenCodeInstancesStub({ opencode: client })),
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
-					Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+					Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(sessionManagerService)),
 					Layer.succeed(ConfigTag)(config),
 					PendingInteractionServiceLive,
 					Layer.succeed(OrchestrationEngineTag)(withDispatchEffect(engine)),
@@ -3982,7 +3986,10 @@ describe("markSessionSeenForClient", () => {
 					Layer.mergeAll(
 						Layer.succeed(WebSocketHandlerTag)(ws),
 						Layer.succeed(LoggerTag)(log),
-						Layer.succeed(SessionManagerServiceTag)(sessionManagerService),
+						Layer.succeed(SessionManagerServiceTag)(
+							mockSessionManagers(sessionManagerService),
+						),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 					),
 					{ local: true },
 				),

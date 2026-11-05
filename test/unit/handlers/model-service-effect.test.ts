@@ -80,11 +80,12 @@ import {
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(makeMockSessionManagerService())), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()), Layer.succeed(ConfigTag)(makeMockConfig()), ProjectSettingsLive, RpcSubscriptionScopeLive))("persistent handler runtime", (it) => {
 describe("model handlers with Effect-native model service", () => {
 	it.effect("uses Default and warns once when a saved parameter choice is no longer offered", () => {
 		const configDir = mkdtempSync(join(tmpdir(), "conduit-stale-choice-"));

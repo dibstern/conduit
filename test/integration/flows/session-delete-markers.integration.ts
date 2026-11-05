@@ -7,7 +7,7 @@ import {
 	type SessionEventBus,
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
@@ -48,7 +48,7 @@ describe("cascaded session deletion markers", () => {
 						yield* Effect.serviceOption(SessionEventBusTag),
 					),
 					reads: yield* ReadQueryEffectTag,
-					manager: yield* SessionManagerServiceTag,
+					manager: yield* projectSessionManager,
 					sql: yield* SqlClient.SqlClient,
 				};
 			}),

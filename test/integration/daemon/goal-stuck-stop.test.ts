@@ -12,7 +12,7 @@ import { expect, it, vi } from "vitest";
 import { decodeClaudeSDKMessage } from "../../../src/lib/contracts/providers/claude-agent-sdk.js";
 import { ProviderTurnServiceTag } from "../../../src/lib/domain/relay/Services/provider-turn-service.js";
 import { SessionInboxTag } from "../../../src/lib/domain/relay/Services/session-inbox.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { notificationContent } from "../../../src/lib/notification-content.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
@@ -219,7 +219,7 @@ it("stops and pushes after ten live stuck verdicts, restarting the count after u
 	try {
 		await runtime.runPromise(
 			Effect.gen(function* () {
-				yield* (yield* SessionManagerServiceTag).createSession("Stuck goal", {
+				yield* (yield* projectSessionManager).createSession("Stuck goal", {
 					sessionId,
 					pick: {
 						harness: "claude",

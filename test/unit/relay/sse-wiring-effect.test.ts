@@ -5,7 +5,10 @@ import {
 	PendingInteractionServiceLive,
 	PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
+import {
+	ConfigTag,
+	OrchestrationEngineTag,
+} from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	hasActiveProcessingTimeout,
@@ -18,7 +21,11 @@ import {
 	type SSEWiringDeps,
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { OpenCodeEvent, RelayMessage } from "../../../src/lib/types.js";
-import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import {
+	createMockSSEWiringDeps,
+	makeMockConfig,
+	mockSessionManagers,
+} from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 
 const permissionAskedEvent = (
@@ -40,9 +47,12 @@ const makeEffectLayer = () =>
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag)({
-			getSessionParentMap: () => Effect.succeed(new Map()),
-		} as never),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers({
+				getSessionParentMap: () => Effect.succeed(new Map()),
+			} as never),
+		),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 	);
 
 const makeEffectDeps = (
@@ -133,9 +143,12 @@ describe("handleSSEEventEffect", () => {
 						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
-						Layer.succeed(SessionManagerServiceTag)({
-							getSessionParentMap: () => Effect.succeed(new Map()),
-						} as never),
+						Layer.succeed(SessionManagerServiceTag)(
+							mockSessionManagers({
+								getSessionParentMap: () => Effect.succeed(new Map()),
+							} as never),
+						),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 					),
 					{ local: true },
 				),
@@ -170,10 +183,13 @@ describe("handleSSEEventEffect", () => {
 						AlertsLive,
 						PendingInteractionServiceLive,
 						makeOverridesStateLive(),
-						Layer.succeed(SessionManagerServiceTag)({
-							recordMessageActivity,
-							getSessionParentMap: () => Effect.succeed(new Map()),
-						} as never),
+						Layer.succeed(SessionManagerServiceTag)(
+							mockSessionManagers({
+								recordMessageActivity,
+								getSessionParentMap: () => Effect.succeed(new Map()),
+							} as never),
+						),
+						Layer.succeed(ConfigTag)(makeMockConfig()),
 					),
 					{ local: true },
 				),

@@ -30,7 +30,10 @@ import {
 } from "../domain/relay/Services/services.js";
 import { announceBackgroundWork } from "../domain/relay/Services/session-attention.js";
 import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
-import { SessionManagerServiceTag } from "../domain/relay/Services/session-manager-service.js";
+import {
+	projectSessionManager,
+	type SessionManagerServiceTag,
+} from "../domain/relay/Services/session-manager-service.js";
 import { restoreSessionSettings } from "../domain/relay/Services/session-model-settings.js";
 import {
 	OverridesStateTag,
@@ -258,7 +261,7 @@ function acquireStartupServices(inputs: StartupInputs) {
 				),
 			);
 		}
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		// Read-model only: creating a first session could call OpenCode, so attach
 		// creates it instead (getDefaultSessionId).
 		const readQueryEffect = yield* ReadQueryEffectTag;

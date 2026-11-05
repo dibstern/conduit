@@ -24,6 +24,7 @@ import {
 	PendingInteractionServiceLive,
 	type PendingInteractionServiceTag,
 } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import {
 	type SessionEventBus,
 	SessionEventBusTag,
@@ -43,7 +44,11 @@ import {
 } from "../../../src/lib/relay/sse-wiring.js";
 import type { PushDeliveryReport } from "../../../src/lib/server/push.js";
 import type { OpenCodeEvent } from "../../../src/lib/types.js";
-import { createMockSSEWiringDeps } from "../../helpers/mock-factories.js";
+import {
+	createMockSSEWiringDeps,
+	makeMockConfig,
+	mockSessionManagers,
+} from "../../helpers/mock-factories.js";
 
 const SESSION = "session-1";
 
@@ -89,6 +94,7 @@ const run = async (
 		| PendingInteractionServiceTag
 		| OverridesStateTag
 		| SessionManagerServiceTag
+		| ConfigTag
 		| AlertsTag
 	>,
 ): Promise<string[]> => {
@@ -106,9 +112,12 @@ const run = async (
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag)({
-			getSessionParentMap: () => Effect.succeed(new Map()),
-		} as never),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers({
+				getSessionParentMap: () => Effect.succeed(new Map()),
+			} as never),
+		),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 	).pipe(Layer.provideMerge(persistence));
 	try {
 		await Effect.runPromise(

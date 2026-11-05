@@ -31,10 +31,7 @@ import {
 	PollerManagerTag,
 	StatusPollerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
@@ -58,6 +55,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockStatusPoller,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 import { partialFake } from "../../helpers/partial-fake.js";
 
@@ -187,7 +185,10 @@ function makeServiceLifecycleLayers<ROut, E, RIn>(
 		),
 	);
 
-	const serviceLayer = Layer.mergeAll(wiringLayer, SessionManagerServiceLive);
+	const serviceLayer = Layer.mergeAll(
+		wiringLayer,
+		standaloneSessionManagerLive,
+	);
 	return { baseLayer, serviceLayer };
 }
 
@@ -279,7 +280,7 @@ describe("SessionLifecycleWiringLive", () => {
 			} satisfies OpenCodeInstances;
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* flushSubscribers;
 				yield* service.createSession("Claude", {
 					account: yield* (yield* AccountDirectory).resolve({
@@ -401,7 +402,7 @@ describe("SessionLifecycleWiringLive", () => {
 			vi.mocked(api.session.messages).mockResolvedValue(seedMessages);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* flushSubscribers;
 				yield* service.createSession("Service Created", {
 					account: {
@@ -461,7 +462,7 @@ describe("SessionLifecycleWiringLive", () => {
 			};
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* flushSubscribers;
 				yield* service.deleteSession("service-deleted");
 				yield* waitForAssertion(() =>
@@ -527,7 +528,7 @@ describe("SessionLifecycleWiringLive", () => {
 			return Effect.gen(function* () {
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const sql = yield* SqlClient.SqlClient;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* sql`
 					INSERT INTO sessions (
 						id, provider, provider_sid, title, status, created_at, updated_at

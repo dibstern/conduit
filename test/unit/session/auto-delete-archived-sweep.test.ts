@@ -40,10 +40,7 @@ import {
 	OrchestrationEngineTag,
 	WebSocketHandlerTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
-import {
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeSessionManagerStateLive } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
@@ -65,6 +62,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 
 const DAY = 86_400_000;
@@ -92,7 +90,7 @@ describe("archived tree retention", () => {
 					),
 				);
 				const layer = Layer.provideMerge(
-					SessionManagerServiceLive,
+					standaloneSessionManagerLive,
 					SessionWorkspaceLive,
 				).pipe(
 					Layer.provideMerge(
@@ -138,7 +136,7 @@ describe("archived tree retention", () => {
 					const runner = yield* ProjectionRunnerEffectTag;
 					const read = yield* ReadQueryEffectTag;
 					const sql = yield* SqlClient.SqlClient;
-					const service = yield* SessionManagerServiceTag;
+					const service = yield* projectSessionManager;
 					const configRef = yield* DaemonConfigRefTag;
 					const now = 100 * DAY;
 					yield* TestClock.setTime(now);

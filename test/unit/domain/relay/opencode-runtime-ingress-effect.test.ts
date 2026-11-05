@@ -40,7 +40,7 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
-import { SessionManagerServiceTag } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { createSilentLogger } from "../../../../src/lib/logger.js";
 import { makePersistenceEffectLayer } from "../../../../src/lib/persistence/effect/live.js";
 import type { ProjectionRunnerEffect } from "../../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -136,7 +136,7 @@ describe("concrete OpenCode stop through the relay graph", () => {
 			];
 			await runtime.runPromise(
 				Effect.gen(function* () {
-					const manager = yield* SessionManagerServiceTag;
+					const manager = yield* projectSessionManager;
 					const view = yield* OpenCodeInstancesTag;
 					// Receiving lifecycle events requires a used/restored binding.
 					yield* view.use("opencode").pipe(Effect.scoped);

@@ -55,6 +55,7 @@ import {
 	makeMockSessionManagerService,
 	makeMockSessionTitleService,
 	makeOpenCodeInstancesStub,
+	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -193,7 +194,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
-						makeMockSessionManagerService(),
+						mockSessionManagers(makeMockSessionManagerService()),
 					),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)({
@@ -328,7 +329,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 				Layer.succeed(WebSocketHandlerTag)(ws),
 				Layer.succeed(LoggerTag)(log),
 				Layer.succeed(SessionManagerServiceTag)(
-					makeMockSessionManagerService(),
+					mockSessionManagers(makeMockSessionManagerService()),
 				),
 				Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 				Layer.succeed(ConfigTag)({
@@ -464,7 +465,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
-						makeMockSessionManagerService(),
+						mockSessionManagers(makeMockSessionManagerService()),
 					),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)({
@@ -626,7 +627,7 @@ describe("handleMessage with Effect provider state persistence", () => {
 					Layer.succeed(WebSocketHandlerTag)(ws),
 					Layer.succeed(LoggerTag)(log),
 					Layer.succeed(SessionManagerServiceTag)(
-						makeMockSessionManagerService(),
+						mockSessionManagers(makeMockSessionManagerService()),
 					),
 					Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
 					Layer.succeed(ConfigTag)({

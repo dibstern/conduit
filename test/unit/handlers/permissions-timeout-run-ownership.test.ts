@@ -52,6 +52,7 @@ import {
 	makeMockConfig,
 	makeMockSessionManagerService,
 	makeMockWebSocketHandler,
+	mockSessionManagers,
 	PassThroughSessionInbox,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
@@ -109,7 +110,7 @@ describe("interaction timeout run ownership", () => {
 							Layer.succeed(AgentServiceTag)(makeMockAgentService()),
 							Layer.succeed(ConfigTag)(makeMockConfig()),
 							Layer.succeed(SessionManagerServiceTag)(
-								makeMockSessionManagerService(),
+								mockSessionManagers(makeMockSessionManagerService()),
 							),
 							Layer.succeed(ProviderRegistryTag)(new ProviderRegistry()),
 							Layer.succeed(ProviderTurnServiceTag)({

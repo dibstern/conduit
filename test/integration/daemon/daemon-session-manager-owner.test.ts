@@ -7,10 +7,18 @@
  *    threads, session count) until the next list;
  * 14 removing a project leaves its manager state in the daemon, so a project
  *    added again under the same slug reads the old caches;
- *  1 one owner serving two projects mixes their state.
+ *  1 one owner serving two projects mixes their state;
+ * 15 a delete closes the session's scope before its row is gone or before
+ *    its provider cleanup ran, so cleanup loses the resources it depends on;
+ * 22 a session scope that cannot open for a reason other than a delete (an
+ *    unregistered project, a directory read error) still lets the write land;
+ * 23 each relay builds its own session manager, so the service a caller holds
+ *    depends on which relay it came from and dies with that relay;
+ * 24 a call naming one project runs against another project's store.
  */
 import { execFileSync } from "node:child_process";
 import {
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -23,6 +31,7 @@ import { NodePath } from "@effect/platform-node";
 import {
 	Context,
 	Effect,
+	Exit,
 	HashMap,
 	Layer,
 	ManagedRuntime,
@@ -35,11 +44,16 @@ import { RelayFactoryTag } from "../../../src/lib/domain/daemon/Layers/relay-fac
 import { makeDaemonConfigFromOptions } from "../../../src/lib/domain/daemon/Services/daemon-config-ref.js";
 import { OwnerScopes } from "../../../src/lib/domain/daemon/Services/owner-scopes.js";
 import { addWithoutRelay } from "../../../src/lib/domain/daemon/Services/project-registry-service.js";
-import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { SessionDirectory } from "../../../src/lib/domain/daemon/Services/session-directory.js";
+import {
+	type SessionManagerService,
+	SessionManagerServiceTag,
+} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { SessionManagerStateTag } from "../../../src/lib/domain/relay/Services/session-manager-state.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
+import { runnerDirectory } from "../../../src/lib/provider/runner/runner-registry.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
 
 const artifacts = join(process.cwd(), "test-results");
@@ -115,9 +129,9 @@ const start = async (scenario: string) => {
 			smartDefault: false,
 		}).pipe(Layer.provide(NodePath.layer)),
 	);
-	const relays = new Set<ProjectRelay>();
+	const relays = new Map<ProjectRelay, string>();
 	cleanups.push(async () => {
-		for (const relay of relays) await relay.stop();
+		for (const relay of relays.keys()) await relay.stop();
 		await daemon.dispose();
 		rmSync(root, { recursive: true, force: true });
 	});
@@ -134,7 +148,7 @@ const start = async (scenario: string) => {
 				factory.create(project(slug)),
 			),
 		);
-		relays.add(created);
+		relays.set(created, slug);
 		return created;
 	};
 	const stop = async (target: ProjectRelay) => {
@@ -191,12 +205,12 @@ const start = async (scenario: string) => {
 		);
 	const manager = <A, E>(
 		target: ProjectRelay,
-		use: (
-			service: Context.Service.Shape<typeof SessionManagerServiceTag>,
-		) => Effect.Effect<A, E>,
+		use: (service: SessionManagerService) => Effect.Effect<A, E>,
 	) =>
 		target.effectRuntime.runtime.runPromise(
-			Effect.flatMap(SessionManagerServiceTag, use),
+			Effect.flatMap(SessionManagerServiceTag, (service) =>
+				use(service.forProject(relays.get(target) ?? "")),
+			),
 		);
 	/** "open" while the session's owner scope takes resources, else the close reason. */
 	const scopeOf = (sessionId: string) =>
@@ -213,6 +227,8 @@ const start = async (scenario: string) => {
 		);
 	return {
 		daemon,
+		configDir,
+		folder: (slug: string) => project(slug).folders[0],
 		register,
 		relay,
 		stop,
@@ -293,7 +309,9 @@ describe("daemon-owned session manager state", () => {
 		const remove = (target: ProjectRelay) =>
 			target.effectRuntime.runtime.runPromise(
 				Effect.flatMap(SessionManagerServiceTag, (service) =>
-					service.deleteSession("doomed", { keepWorktrees: true }),
+					service
+						.forProject("alpha")
+						.deleteSession("doomed", { keepWorktrees: true }),
 				),
 			);
 		const results = await Promise.all([remove(first), remove(second)]);
@@ -325,6 +343,78 @@ describe("daemon-owned session manager state", () => {
 		};
 		evidence.observed = observed;
 		expect(observed).toEqual({ deleted: true, activity: {}, parents: {} });
+	});
+
+	it("closes a deleted session's scope only after the delete commits and its provider cleanup ran", async () => {
+		const daemon = await start("delete-closes-after-cleanup");
+		await daemon.register("alpha");
+		const alpha = await daemon.relay("alpha");
+		await daemon.sessions(alpha, { id: "ending" });
+		// Provider cleanup for a Claude session removes its runner send journal.
+		const sends = join(
+			runnerDirectory(daemon.folder("alpha"), daemon.configDir),
+			"sends",
+			"ending",
+		);
+		mkdirSync(sends, { recursive: true });
+		const atClose: Array<{ rowExists: boolean; sendsExist: boolean }> = [];
+		await daemon.daemon.runPromise(
+			Effect.gen(function* () {
+				const directory = yield* SessionDirectory;
+				const scope = yield* (yield* OwnerScopes).sessionScope("ending");
+				yield* scope.acquire<void, never, never>(
+					Effect.acquireRelease(Effect.void, () =>
+						directory.projectOf("ending").pipe(
+							Effect.orDie,
+							Effect.flatMap((owner) =>
+								Effect.sync(() =>
+									atClose.push({
+										rowExists: Option.isSome(owner),
+										sendsExist: existsSync(sends),
+									}),
+								),
+							),
+						),
+					),
+				);
+			}),
+		);
+		const deleted = await daemon.manager(alpha, (service) =>
+			service.deleteSession("ending", { keepWorktrees: true }),
+		);
+		const observed = { deleted, atClose, sendsAfter: existsSync(sends) };
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			deleted: true,
+			atClose: [{ rowExists: false, sendsExist: false }],
+			sendsAfter: false,
+		});
+	});
+
+	it("fails a write whose session scope cannot open, unless the session has no row yet", async () => {
+		const daemon = await start("hold-fails-closed");
+		await daemon.register("alpha");
+		const alpha = await daemon.relay("alpha");
+		// beta is never registered, so its session's scope cannot open.
+		const beta = await daemon.relay("beta");
+		await daemon.sessions(beta, { id: "stray" });
+		const write = (sessionId: string) =>
+			daemon.manager(alpha, (service) =>
+				service
+					.recordMessageActivity(sessionId, 1_000)
+					.pipe(Effect.exit, Effect.map(Exit.isSuccess)),
+			);
+		const observed = {
+			unborn: await write("unborn"),
+			stray: await write("stray"),
+			activity: await daemon.activity(alpha),
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			unborn: true,
+			stray: false,
+			activity: { unborn: 1_000 },
+		});
 	});
 
 	it("closes every session a delete removes and none a declined delete keeps", async () => {
@@ -360,6 +450,59 @@ describe("daemon-owned session manager state", () => {
 			declined: false,
 			removed: true,
 			scopes: { root: "remove", child: "remove", kept: "open" },
+		});
+	});
+
+	it("serves every project from one daemon session manager, whichever relay a caller came from", async () => {
+		const daemon = await start("one-daemon-manager");
+		await daemon.register("alpha");
+		await daemon.register("beta");
+		const alpha = await daemon.relay("alpha");
+		const beta = await daemon.relay("beta");
+		await daemon.sessions(alpha, { id: "a1" });
+		await daemon.sessions(beta, { id: "b1" });
+		const owned = await daemon.daemon.runPromise(SessionManagerServiceTag);
+		const held = async (target: ProjectRelay) =>
+			Option.getOrThrow(
+				Context.getOption(
+					await target.effectRuntime.runtime.context(),
+					SessionManagerServiceTag,
+				),
+			);
+		const ids = (projectId: string) =>
+			daemon.daemon.runPromise(
+				owned
+					.forProject(projectId)
+					.listSessions()
+					.pipe(Effect.map((sessions) => sessions.map(({ id }) => id).sort())),
+			);
+		const sameInstance = {
+			alpha: (await held(alpha)) === owned,
+			beta: (await held(beta)) === owned,
+		};
+		const listed = { alpha: await ids("alpha"), beta: await ids("beta") };
+		// alpha's relay deletes beta's session by naming beta.
+		const deletedThroughAlpha = await alpha.effectRuntime.runtime.runPromise(
+			Effect.flatMap(SessionManagerServiceTag, (service) =>
+				service.forProject("beta").deleteSession("b1", { keepWorktrees: true }),
+			),
+		);
+		await daemon.stop(alpha);
+		const rebuilt = await daemon.relay("alpha");
+		const observed = {
+			sameInstance,
+			listed,
+			deletedThroughAlpha,
+			afterDelete: { alpha: await ids("alpha"), beta: await ids("beta") },
+			sameAfterRebuild: (await held(rebuilt)) === owned,
+		};
+		evidence.observed = observed;
+		expect(observed).toEqual({
+			sameInstance: { alpha: true, beta: true },
+			listed: { alpha: ["a1"], beta: ["b1"] },
+			deletedThroughAlpha: true,
+			afterDelete: { alpha: ["a1"], beta: [] },
+			sameAfterRebuild: true,
 		});
 	});
 });

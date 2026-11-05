@@ -59,10 +59,7 @@ import {
 } from "../../../src/lib/domain/relay/Services/services.js";
 import { loadPreRenderedHistory } from "../../../src/lib/domain/relay/Services/session-manager-history.js";
 import { listSessions } from "../../../src/lib/domain/relay/Services/session-manager-list.js";
-import {
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
-} from "../../../src/lib/domain/relay/Services/session-manager-service.js";
+import { projectSessionManager } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import {
 	makeSessionManagerStateLive,
 	SessionManagerStateTag,
@@ -121,6 +118,7 @@ import {
 	makeMockStatusPoller,
 	makeMockWebSocketHandler,
 	makeOpenCodeInstancesStub,
+	standaloneSessionManagerLive,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
@@ -444,7 +442,7 @@ describe("SessionManagerService", () => {
 	for (const deadRef of ["sessionId", "parentId"] as const) {
 		it.effect(`refuses OpenCode establishment with a dead ${deadRef}`, () => {
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					makeSessionManagerStateLive(),
@@ -452,7 +450,7 @@ describe("SessionManagerService", () => {
 				),
 			);
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const sql = yield* SqlClient.SqlClient;
 				const eventStore = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
@@ -502,7 +500,7 @@ describe("SessionManagerService", () => {
 		const api = makeMockOpenCodeAPI();
 		const readQuery = makeReadQueryEffect([makeRow("existing")]);
 		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
+			standaloneSessionManagerLive,
 			Layer.mergeAll(
 				requiredSessionServices,
 				Layer.succeed(OpenCodeAPITag)(api),
@@ -517,7 +515,7 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			expect(yield* service.sessionExists("existing")).toBe(true);
 			expect(yield* service.sessionExists("missing")).toBe(false);
 			expect(readQuery.getSession).toHaveBeenCalledTimes(2);
@@ -540,7 +538,7 @@ describe("SessionManagerService", () => {
 		vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
 		vi.spyOn(api.session, "list").mockResolvedValue([]);
 		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
+			standaloneSessionManagerLive,
 			Layer.mergeAll(
 				requiredSessionServices,
 				Layer.succeed(OpenCodeAPITag)(api),
@@ -560,7 +558,7 @@ describe("SessionManagerService", () => {
 		);
 
 		return Effect.gen(function* () {
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			// Deleting the root takes the whole lineage with it, so nothing about
 			// a descendant may outlive it.
 			yield* service.deleteSession("parent-1");
@@ -591,7 +589,7 @@ describe("SessionManagerService", () => {
 				time: { created: 10, updated: 10 },
 			});
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -607,7 +605,7 @@ describe("SessionManagerService", () => {
 
 			return Effect.gen(function* () {
 				const sub = yield* subscribeToDaemonEvents;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const session = yield* service.createSession("Created", {
 					account: {
@@ -648,7 +646,7 @@ describe("SessionManagerService", () => {
 			const api = makeMockOpenCodeAPI();
 			vi.spyOn(api.session, "create");
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -668,7 +666,7 @@ describe("SessionManagerService", () => {
 					providerID: "claude",
 					modelID: "claude-sonnet-4-7",
 				});
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const session = yield* service.createSession("Local Claude", {
 					pick: claudePick,
@@ -714,7 +712,7 @@ describe("SessionManagerService", () => {
 			});
 			const bindSession = vi.spyOn(engine, "bindSession");
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -731,7 +729,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const session = yield* service.createSession("OpenCode Session", {
 					account: {
@@ -819,7 +817,7 @@ describe("SessionManagerService", () => {
 				time: { created: 10, updated: 10 },
 			});
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -833,7 +831,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const result = yield* Effect.result(
 					service.createSession("No persistence", {
 						account: {
@@ -863,7 +861,7 @@ describe("SessionManagerService", () => {
 				`conduit-session-manager-fork-establish-${Date.now()}.sqlite`,
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -876,7 +874,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const child = {
 					id: "forked-opencode-child",
@@ -955,7 +953,7 @@ describe("SessionManagerService", () => {
 					: projector,
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -967,7 +965,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const result = yield* Effect.result(
 					service.establishOpenCodeSession(
 						{
@@ -1014,7 +1012,7 @@ describe("SessionManagerService", () => {
 				`conduit-session-manager-append-failure-${Date.now()}.sqlite`,
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -1035,7 +1033,7 @@ describe("SessionManagerService", () => {
 						SELECT RAISE(ABORT, 'simulated append failure');
 					END
 				`);
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const result = yield* Effect.result(
 					service.establishOpenCodeSession(
 						{
@@ -1077,7 +1075,7 @@ describe("SessionManagerService", () => {
 				`conduit-session-manager-claude-single-create-${Date.now()}.sqlite`,
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -1090,7 +1088,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const persist = yield* ClaudeEventPersistEffectTag;
 				const session = yield* service.createSession("Native Claude", {
 					account: yield* (yield* AccountDirectory).resolve({
@@ -1151,7 +1149,7 @@ describe("SessionManagerService", () => {
 				registry: new ProviderRegistry(),
 			});
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1179,7 +1177,7 @@ describe("SessionManagerService", () => {
 					providerID: "opencode",
 					modelID: "openai/gpt-5",
 				});
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const claudeSession = yield* service.createSession(
 					"Claude Instance Session",
@@ -1287,7 +1285,7 @@ describe("SessionManagerService", () => {
 				registry: new ProviderRegistry(),
 			});
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1309,7 +1307,7 @@ describe("SessionManagerService", () => {
 				yield* Effect.tryPromise(() =>
 					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 				);
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const session = yield* service.createSession("Named", {
 					account: {
 						driver: "opencode",
@@ -1380,7 +1378,7 @@ describe("SessionManagerService", () => {
 				new Error("OpenCode unavailable"),
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1396,7 +1394,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const result = yield* Effect.result(
 					service.createSession("OpenCode Session", {
@@ -1438,7 +1436,7 @@ describe("SessionManagerService", () => {
 			});
 			const bindSession = vi.spyOn(engine, "bindSession");
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1455,7 +1453,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 
 				const result = yield* Effect.result(
 					service.createSession("Local before models"),
@@ -1522,7 +1520,7 @@ describe("SessionManagerService", () => {
 			engine.bindSession(sessionId, "work-oc");
 			const logger = makeMockLogger();
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1543,7 +1541,7 @@ describe("SessionManagerService", () => {
 				yield* Effect.tryPromise(() =>
 					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 				);
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const stateRef = yield* SessionManagerStateTag;
 				yield* Ref.update(stateRef, (state) => ({
 					...state,
@@ -1640,7 +1638,7 @@ describe("SessionManagerService", () => {
 			engine.bindSession(sessionId, "opencode");
 			const logger = makeMockLogger();
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1660,7 +1658,7 @@ describe("SessionManagerService", () => {
 					_tag: "Id",
 					id: "opencode",
 				});
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* service.deleteSession(sessionId);
 				const eventStore = yield* EventStoreEffectTag;
 				const events = yield* eventStore.readAllBySession(sessionId);
@@ -1721,7 +1719,7 @@ describe("SessionManagerService", () => {
 				Effect.sync(() => engine.unbindSession(sessionId)),
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1738,7 +1736,7 @@ describe("SessionManagerService", () => {
 			);
 
 			yield* Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const stateRef = yield* SessionManagerStateTag;
 				const relayStatus = yield* RelayStatusSnapshotTag;
 				const daemonEvents = yield* subscribeToDaemonEvents;
@@ -1822,7 +1820,7 @@ describe("SessionManagerService", () => {
 			const engine = withDispatchEffect({ dispatch });
 			engine.bindSession(sessionId, "work-oc");
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1843,7 +1841,7 @@ describe("SessionManagerService", () => {
 				yield* Effect.tryPromise(() =>
 					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 				);
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const deleteExit = yield* Effect.exit(service.deleteSession(sessionId));
 				const eventStore = yield* EventStoreEffectTag;
 				const events = yield* eventStore.readAllBySession(sessionId);
@@ -1928,7 +1926,7 @@ describe("SessionManagerService", () => {
 			});
 			engine.bindSession(sessionId, "work-oc");
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -1949,7 +1947,7 @@ describe("SessionManagerService", () => {
 				yield* Effect.tryPromise(() =>
 					saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 				);
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const deleteExit = yield* Effect.exit(service.deleteSession(sessionId));
 				const eventStore = yield* EventStoreEffectTag;
 				const events = yield* eventStore.readAllBySession(sessionId);
@@ -2005,7 +2003,7 @@ describe("SessionManagerService", () => {
 		});
 		engine.bindSession(sessionId, "work-oc");
 		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
+			standaloneSessionManagerLive,
 			Layer.mergeAll(
 				requiredSessionServices,
 				Layer.succeed(OpenCodeAPITag)(api),
@@ -2026,7 +2024,7 @@ describe("SessionManagerService", () => {
 			yield* Effect.tryPromise(() =>
 				saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 			);
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			yield* service.deleteSession(sessionId);
 			const eventStore = yield* EventStoreEffectTag;
 			const events = yield* eventStore.readAllBySession(sessionId);
@@ -2066,7 +2064,7 @@ describe("SessionManagerService", () => {
 			const engine = withDispatchEffect({ dispatch });
 			engine.bindSession(sessionId, "claude");
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -2086,7 +2084,7 @@ describe("SessionManagerService", () => {
 					_tag: "Id",
 					id: "claude",
 				});
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* service.deleteSession(sessionId);
 				const eventStore = yield* EventStoreEffectTag;
 				const events = yield* eventStore.readAllBySession(sessionId);
@@ -2217,7 +2215,7 @@ describe("SessionManagerService", () => {
 				stop: () => Effect.void,
 			} satisfies OpenCodeInstances;
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -2240,7 +2238,7 @@ describe("SessionManagerService", () => {
 				expect(yield* engine.getProviderForSessionEffect(sessionId)).toBe(
 					"work-oc",
 				);
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* service.deleteSession(sessionId);
 				const eventStore = yield* EventStoreEffectTag;
 				const events = yield* eventStore.readAllBySession(sessionId);
@@ -2298,7 +2296,7 @@ describe("SessionManagerService", () => {
 					stop: () => Effect.void,
 				} satisfies OpenCodeInstances;
 				const layer = Layer.provideMerge(
-					SessionManagerServiceLive,
+					standaloneSessionManagerLive,
 					Layer.mergeAll(
 						requiredSessionServices,
 						Layer.succeed(OpenCodeAPITag)(api),
@@ -2319,7 +2317,7 @@ describe("SessionManagerService", () => {
 					yield* Effect.tryPromise(() =>
 						saveDaemonConfig(makeNamedOpenCodeDaemonConfig(), tmpDir),
 					);
-					const service = yield* SessionManagerServiceTag;
+					const service = yield* projectSessionManager;
 					const fiber = yield* Effect.forkChild(
 						service.deleteSession(sessionId),
 					);
@@ -2407,7 +2405,7 @@ describe("SessionManagerService", () => {
 			});
 			vi.spyOn(api.session, "delete").mockResolvedValue(undefined);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -2423,7 +2421,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const snapshot = yield* RelayStatusSnapshotTag;
 				const sql = yield* SqlClient.SqlClient;
 				const runner = yield* ProjectionRunnerEffectTag;
@@ -2665,7 +2663,7 @@ describe("SessionManagerService", () => {
 			`conduit-session-manager-pending-${Date.now()}.sqlite`,
 		);
 		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
+			standaloneSessionManagerLive,
 			Layer.mergeAll(
 				requiredSessionServices,
 				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -2680,7 +2678,7 @@ describe("SessionManagerService", () => {
 			const sql = yield* SqlClient.SqlClient;
 			const store = yield* EventStoreEffectTag;
 			const projectionRunner = yield* ProjectionRunnerEffectTag;
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			yield* projectionRunner.markRecovered();
 			yield* sql`
 					INSERT INTO sessions
@@ -2737,7 +2735,7 @@ describe("SessionManagerService", () => {
 				`conduit-triage-recovery-${crypto.randomUUID()}.sqlite`,
 			);
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -2749,7 +2747,7 @@ describe("SessionManagerService", () => {
 			);
 			return Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				for (const id of ["settled", "pinned"]) {
 					yield* store.append(
 						canonicalEvent(
@@ -2801,7 +2799,7 @@ describe("SessionManagerService", () => {
 			);
 			const api = makeMockOpenCodeAPI();
 			const layer = Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(api),
@@ -2817,7 +2815,7 @@ describe("SessionManagerService", () => {
 			return Effect.gen(function* () {
 				const store = yield* EventStoreEffectTag;
 				const runner = yield* ProjectionRunnerEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* runner.markRecovered();
 				for (const [id, createdAt] of [
 					["older", 10],
@@ -2918,7 +2916,7 @@ describe("SessionManagerService", () => {
 			`conduit-session-manager-unread-${Date.now()}.sqlite`,
 		);
 		const layer = Layer.provideMerge(
-			SessionManagerServiceLive,
+			standaloneSessionManagerLive,
 			Layer.mergeAll(
 				requiredSessionServices,
 				Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -2932,7 +2930,7 @@ describe("SessionManagerService", () => {
 		return Effect.gen(function* () {
 			const store = yield* EventStoreEffectTag;
 			const projectionRunner = yield* ProjectionRunnerEffectTag;
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			yield* projectionRunner.markRecovered();
 
 			for (const event of [
@@ -3054,7 +3052,7 @@ describe("SessionManagerService", () => {
 			let parentMap = yield* getSessionParentMap();
 			expect(Array.from(parentMap.entries())).toEqual([["child-1", "root-1"]]);
 
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			yield* service.addToParentMap("child-2", "root-2");
 			parentMap = yield* service.getSessionParentMap();
 
@@ -3063,7 +3061,7 @@ describe("SessionManagerService", () => {
 				["child-2", "root-2"],
 			]);
 		}).pipe(
-			Effect.provide(SessionManagerServiceLive),
+			Effect.provide(standaloneSessionManagerLive),
 			Effect.provide(layer),
 			Effect.provide(requiredSessionServices, { local: true }),
 		);
@@ -3107,7 +3105,7 @@ describe("SessionManagerService", () => {
 			RelayStatusSnapshotLive,
 		);
 		return Effect.gen(function* () {
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			yield* service.refreshSessionLineage();
 			expect(readQuery.listSessionInfos).not.toHaveBeenCalled();
 			expect(readQuery.getSessionLineage).toHaveBeenCalledTimes(1);
@@ -3121,7 +3119,7 @@ describe("SessionManagerService", () => {
 				3,
 			);
 		}).pipe(
-			Effect.provide(SessionManagerServiceLive),
+			Effect.provide(standaloneSessionManagerLive),
 			Effect.provide(layer),
 			Effect.provide(requiredSessionServices, { local: true }),
 		);
@@ -3134,7 +3132,7 @@ describe("SessionManagerService", () => {
 			const readQuery = makeReadQueryEffect([
 				makeRow("session-1", { title: "Session 1", updated_at: 1 }),
 			]);
-			const layer = SessionManagerServiceLive.pipe(
+			const layer = standaloneSessionManagerLive.pipe(
 				Layer.provide(
 					Layer.mergeAll(
 						Layer.succeed(OpenCodeAPITag)(api),
@@ -3161,7 +3159,7 @@ describe("SessionManagerService", () => {
 			);
 
 			return Effect.gen(function* () {
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				const sessions = yield* service.listSessions();
 
 				// 8.1 (CONTRACT.md 2734): busy is SessionActivity's active Run, never the poller's (82tn.32.30).
@@ -3191,7 +3189,7 @@ describe("snooze session commands", () => {
 		return {
 			dbFile,
 			layer: Layer.provideMerge(
-				SessionManagerServiceLive,
+				standaloneSessionManagerLive,
 				Layer.mergeAll(
 					requiredSessionServices,
 					Layer.succeed(OpenCodeAPITag)(makeMockOpenCodeAPI()),
@@ -3216,7 +3214,7 @@ describe("snooze session commands", () => {
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 				if (reason === "pinned")
 					yield* sql`UPDATE sessions SET pinned_at = 2 WHERE id = 's1'`;
@@ -3248,7 +3246,7 @@ describe("snooze session commands", () => {
 		return Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
 			const store = yield* EventStoreEffectTag;
-			const service = yield* SessionManagerServiceTag;
+			const service = yield* projectSessionManager;
 			yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 			const firstUntil = Date.now() + 60_000;
 			expect(yield* service.snoozeSession("s1", firstUntil)).toBe(true);
@@ -3272,7 +3270,7 @@ describe("snooze session commands", () => {
 			return Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const store = yield* EventStoreEffectTag;
-				const service = yield* SessionManagerServiceTag;
+				const service = yield* projectSessionManager;
 				yield* sql`INSERT INTO sessions (id, project_id, provider, title, status, created_at, updated_at) VALUES ('s1', 'test-project', 'opencode', 'Session', 'idle', 1, 1)`;
 				yield* service.snoozeSession("s1", null);
 				if (action === "settle")

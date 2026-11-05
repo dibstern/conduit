@@ -6,7 +6,11 @@ import {
 	SessionStateProjectionNotifierTag,
 } from "../../../persistence/effect/session-state-projection-notifier.js";
 import { SessionGit } from "../../daemon/Services/session-git.js";
-import { SessionManagerServiceTag } from "../Services/session-manager-service.js";
+import type { ConfigTag } from "../Services/services.js";
+import {
+	projectSessionManager,
+	type SessionManagerServiceTag,
+} from "../Services/session-manager-service.js";
 
 const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
 	if (Failure.isInterruptedOnly(cause)) return Effect.interrupt;
@@ -22,12 +26,12 @@ const logFailure = (operation: string, cause: Cause.Cause<unknown>) => {
 export const SessionStateProjectionNotifierLive: Layer.Layer<
 	SessionStateProjectionNotifierTag,
 	never,
-	SessionManagerServiceTag
+	SessionManagerServiceTag | ConfigTag
 > = Layer.effect(
 	SessionStateProjectionNotifierTag,
 	Effect.gen(function* () {
 		const scope = yield* Scope.Scope;
-		const sessionManagerService = yield* SessionManagerServiceTag;
+		const sessionManagerService = yield* projectSessionManager;
 		const sessionGit = yield* Effect.serviceOption(SessionGit);
 		const broadcastPending = yield* Ref.make(false);
 

@@ -5,6 +5,7 @@ import { Cause, Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import { PendingInteractionServiceLive } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
+import { ConfigTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SessionManagerServiceTag } from "../../../src/lib/domain/relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import {
@@ -14,7 +15,9 @@ import {
 import type { RelayMessage } from "../../../src/lib/types.js";
 import {
 	createMockSSEWiringDeps,
+	makeMockConfig,
 	makeMockSessionManagerService,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 import { makeSSEEvent } from "../../helpers/sse-factories.js";
 
@@ -52,7 +55,10 @@ function createServicesLayer() {
 		AlertsLive,
 		PendingInteractionServiceLive,
 		makeOverridesStateLive(),
-		Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()),
+		Layer.succeed(SessionManagerServiceTag)(
+			mockSessionManagers(makeMockSessionManagerService()),
+		),
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 	);
 }
 

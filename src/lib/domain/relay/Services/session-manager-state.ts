@@ -72,8 +72,11 @@ export interface SessionManagerCoordination {
 	/**
 	 * Hold the session's manager state in its owner scope before writing it.
 	 * False once the session's scope closed (it was deleted): skip the write.
+	 * Fails when the scope cannot open for any reason but a missing row.
 	 */
-	readonly hold: (sessionId: string) => Effect.Effect<boolean>;
+	readonly hold: (
+		sessionId: string,
+	) => Effect.Effect<boolean, SessionManagerError>;
 }
 
 export class SessionManagerCoordinationTag extends Context.Service<

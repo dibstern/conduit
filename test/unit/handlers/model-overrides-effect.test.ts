@@ -35,6 +35,7 @@ import {
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
 	makeTestHandlerLayer,
+	mockSessionManagers,
 } from "../../helpers/mock-factories.js";
 import { withDispatchEffect } from "../../helpers/orchestration-engine-test-double.js";
 import { makeSessionCreatedEvent } from "../../helpers/persistence-factories.js";
@@ -61,7 +62,7 @@ const flushDispatchContinuation = () =>
 	Effect.promise<void>(() => new Promise((resolve) => setImmediate(resolve)));
 
 // biome-ignore format: Keep the existing test layout inside this runtime suite.
-layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(makeMockSessionManagerService()), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry())))("persistent handler runtime", (it) => {
+layer(Layer.mergeAll(Layer.succeed(AccountDirectory)(makeMockAccountDirectory()), makePersistenceEffectLayer(":memory:", "test-project"), Layer.succeed(SessionManagerServiceTag)(mockSessionManagers(makeMockSessionManagerService())), Layer.succeed(OrchestrationEngineTag)(withDispatchEffect({ dispatch: vi.fn(async () => ({ models: [], commands: [] })) })), Layer.succeed(ProviderRegistryTag)(new ProviderRegistry())))("persistent handler runtime", (it) => {
 describe("model handlers with Effect override state", () => {
 	it.effect(
 		"stores selected session model and restored variant without legacy SessionOverrides",
