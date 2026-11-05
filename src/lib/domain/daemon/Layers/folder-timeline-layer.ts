@@ -39,6 +39,8 @@ const START_BUDGET_MS = 3_000;
 const MAX_CHANGES = 5_000;
 const SESSION_REF = "refs/conduit/session";
 const PINS = "refs/conduit/runs/";
+/** A session's kept refs in a repository store: its checkpoints, then its receipts. */
+const KEPT = "refs/conduit/sessions/";
 const IDENTITY = {
 	GIT_AUTHOR_NAME: "conduit",
 	GIT_AUTHOR_EMAIL: "conduit@localhost",
@@ -441,12 +443,15 @@ export const makeFolderTimeline = (configDir: string) =>
 		const runs = new Map<string, LiveRun>();
 		// A session's captures and its forgetting write one store, one at a time.
 		const sessionLocks = new Map<string, Semaphore.Semaphore>();
+		const hash = (text: string) =>
+			createHash("sha256").update(text).digest("hex").slice(0, 16);
 		const sessionStore = (sessionId: string) =>
-			join(
-				root,
-				"sessions",
-				`${createHash("sha256").update(sessionId).digest("hex").slice(0, 16)}.git`,
-			);
+			join(root, "sessions", `${hash(sessionId)}.git`);
+		const checkpointRef = (
+			sessionId: string,
+			runId: string,
+			directory: string,
+		) => `${KEPT}${hash(sessionId)}/checkpoints/${runId}/${hash(directory)}`;
 		const sessionLock = (sessionId: string) => {
 			const known = sessionLocks.get(sessionId);
 			if (known) return known;
@@ -652,6 +657,26 @@ export const makeFolderTimeline = (configDir: string) =>
 			} = {},
 		) => run(store, ["--git-dir", store, ...args], options);
 
+		/** Deletes the session's kept refs in every repository store. */
+		const dropKept = (sessionId: string) =>
+			Effect.gen(function* () {
+				const names = yield* fs(() => readdir(root)).pipe(
+					Effect.orElseSucceed((): string[] => []),
+				);
+				for (const name of names.filter((name) => name.endsWith(".git"))) {
+					const store = join(root, name);
+					const { stdout } = yield* git(store, [
+						"for-each-ref",
+						"--format=%(refname)",
+						`${KEPT}${hash(sessionId)}/`,
+					]).pipe(Effect.orElseSucceed(() => ({ stdout: "" })));
+					const refs = stdout.split("\n").filter((ref) => ref !== "");
+					if (refs.length > 0)
+						yield* git(store, ["update-ref", "--stdin"], {
+							input: refs.map((ref) => `delete ${ref}\n`).join(""),
+						}).pipe(Effect.ignore);
+				}
+			});
 		const unpin = (runId: string, live: LiveRun) =>
 			Effect.forEach(live.directories, (directory, index) => {
 				const start = live.starts.get(directory);
@@ -717,6 +742,22 @@ export const makeFolderTimeline = (configDir: string) =>
 							}),
 						),
 					);
+					// The end pin (its parent the start pin) outlives the run as the
+					// folder's checkpoint, for head moves with files.
+					yield* Effect.forEach(
+						live.directories,
+						(directory, index) => {
+							const start = live.starts.get(directory);
+							return start && "store" in start
+								? git(start.store, [
+										"update-ref",
+										checkpointRef(live.sessionId, runId, directory),
+										`${PINS}${runId}/${index}`,
+									]).pipe(Effect.ignore)
+								: Effect.void;
+						},
+						{ concurrency: "unbounded", discard: true },
+					);
 					yield* record(live.sessionId, capture);
 				}),
 			);
@@ -742,6 +783,21 @@ export const makeFolderTimeline = (configDir: string) =>
 				run(directory, args),
 			collect,
 			sessionStore,
+			checkpoint: (sessionId, runId, directory) =>
+				Effect.gen(function* () {
+					const { store, prefix } = yield* resolve(directory);
+					const ref = checkpointRef(sessionId, runId, directory);
+					// A pin without a parent is a start whose end was never pinned.
+					const [end, start] = yield* git(store, [
+						"rev-parse",
+						`${ref}^{tree}`,
+						`${ref}^1^{tree}`,
+					]).pipe(
+						Effect.map(({ stdout }) => stdout.trim().split("\n")),
+						Effect.orElseSucceed((): string[] => []),
+					);
+					return start && end ? { store, prefix, start, end } : undefined;
+				}),
 			runStarted: ({ sessionId, runId, directories }) =>
 				Effect.gen(function* () {
 					// A retried send keeps its first checkpoint.
@@ -904,7 +960,7 @@ export const makeFolderTimeline = (configDir: string) =>
 					yield* sessionLock(sessionId).withPermits(1)(
 						fs(() =>
 							rm(sessionStore(sessionId), { recursive: true, force: true }),
-						).pipe(Effect.ignore),
+						).pipe(Effect.ignore, Effect.andThen(dropKept(sessionId))),
 					);
 					sessionLocks.delete(sessionId);
 				}),
@@ -920,6 +976,7 @@ export const makeFolderTimeline = (configDir: string) =>
 						yield* git(store, ["update-ref", "-d", SESSION_REF]).pipe(
 							Effect.ignore,
 						);
+						yield* dropKept(sessionId);
 						yield* fs(() => rm(store, { recursive: true, force: true })).pipe(
 							Effect.catch((error) =>
 								Effect.logWarning("Evicted store not removed", {

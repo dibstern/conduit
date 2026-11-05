@@ -14,6 +14,15 @@ export interface FolderSnapshot {
 	readonly worktree: string;
 }
 
+/** A run's folder at its start and end, kept for head moves with files. */
+export interface Checkpoint {
+	readonly store: string;
+	readonly prefix: string;
+	/** Repository-wide worktree trees; the folder is under `prefix`. */
+	readonly start: string;
+	readonly end: string;
+}
+
 export class FolderTimelineError extends Data.TaggedError(
 	"FolderTimelineError",
 )<{
@@ -27,6 +36,8 @@ export class FolderTimelineError extends Data.TaggedError(
  * no ref and are pruned after a grace period. A run's checkpoints are pinned
  * until its capture is recorded, so a restart can finish it; captures are copied into the session's own store
  * under one ref, so they outlive the user's history and leave with the session.
+ * The whole-folder checkpoints then stay in the repository's store, for head
+ * moves with files, until the session is evicted or forgotten.
  */
 export class FolderTimeline extends Context.Service<
 	FolderTimeline,
@@ -105,6 +116,15 @@ export class FolderTimeline extends Context.Service<
 		readonly settled: (runId: string) => Effect.Effect<void>;
 		/** The store holding a session's captures, for `git`. */
 		readonly sessionStore: (sessionId: string) => string;
+		/**
+		 * The run's whole-folder checkpoint in `directory`, kept from its
+		 * capture until the session is evicted or forgotten.
+		 */
+		readonly checkpoint: (
+			sessionId: string,
+			runId: string,
+			directory: string,
+		) => Effect.Effect<Checkpoint | undefined, FolderTimelineError>;
 		/** Bytes the session's store holds on disk; 0 without one. */
 		readonly storeBytes: (sessionId: string) => Effect.Effect<number>;
 		/** Bytes all session stores hold on disk. */
