@@ -1,7 +1,5 @@
 import { type Context, Effect, HashMap, Ref } from "effect";
 import { SqlClient } from "effect/sql";
-import type { OpenCodeAPI } from "../../../instance/opencode-api.js";
-import type { SessionDetail } from "../../../instance/sdk-types.js";
 import {
 	type ReadQueryEffect,
 	ReadQueryEffectTag,
@@ -16,7 +14,6 @@ import {
 	makeSessionRows,
 	type SessionRowsScope,
 } from "../../daemon/Services/session-rows.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import {
 	type RelayStatusSnapshotService,
 	RelayStatusSnapshotTag,
@@ -38,19 +35,6 @@ const sessionRowsParentMap = (
 	for (const row of rows) {
 		if (row.parent_id) {
 			parentMap = HashMap.set(parentMap, row.id, row.parent_id);
-		}
-	}
-	return parentMap;
-};
-
-export const sessionDetailsParentMap = (
-	sessions: readonly SessionDetail[],
-): HashMap.HashMap<string, string> => {
-	let parentMap = HashMap.empty<string, string>();
-	for (const session of sessions) {
-		const parentID = session.parentID;
-		if (parentID) {
-			parentMap = HashMap.set(parentMap, session.id, parentID);
 		}
 	}
 	return parentMap;
@@ -137,7 +121,6 @@ export const sessionExists = (sessionId: string) =>
 	);
 
 export const makeSessionListOperations = ({
-	api,
 	stateRef,
 	readQuery,
 	sql,
@@ -147,7 +130,6 @@ export const makeSessionListOperations = ({
 	projectFolders,
 	projectSlug,
 }: {
-	api: OpenCodeAPI;
 	stateRef: Ref.Ref<SessionManagerState>;
 	readQuery: ReadQueryEffect;
 	sql: SqlClient.SqlClient;
@@ -163,7 +145,6 @@ export const makeSessionListOperations = ({
 				slug: projectSlug,
 				folders: projectFolders,
 			}).pipe(
-				Effect.provideService(OpenCodeAPITag, api),
 				Effect.provideService(SessionManagerStateTag, stateRef),
 				Effect.provideService(SqlClient.SqlClient, sql),
 				Effect.provideService(AccountDirectory, accounts),

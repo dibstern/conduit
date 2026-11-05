@@ -15,7 +15,7 @@ import {
 } from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it } from "vitest";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	makePendingInteractionServiceLive,
 	PendingInteractionServiceTag,
@@ -60,6 +60,7 @@ import {
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeMockWebSocketHandler,
+	makeOpenCodeInstancesStub,
 } from "../../helpers/mock-factories.js";
 
 const sessionId = "recovered-session";
@@ -337,7 +338,10 @@ describe("Claude permission ownership during startup cleanup", () => {
 					ConfigTag,
 					makeMockConfig({ projectDir: root, configDir: root }),
 				),
-				Effect.provideService(OpenCodeAPITag, makeMockOpenCodeAPI()),
+				Effect.provideService(
+					OpenCodeInstancesTag,
+					makeOpenCodeInstancesStub({ opencode: makeMockOpenCodeAPI() }),
+				),
 			);
 			await runtime.runPromise(answer);
 			// A second, separate answer meets a settled ask: refused, not silently accepted.

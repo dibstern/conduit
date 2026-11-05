@@ -3,12 +3,12 @@ import { Effect, Layer } from "effect";
 import { expect, vi } from "vitest";
 import { AccountDirectory } from "../../../src/lib/domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import {
 	AgentServiceLive,
 	AgentServiceTag,
 } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../../../src/lib/domain/relay/Services/services.js";
@@ -22,6 +22,7 @@ import type { Logger } from "../../../src/lib/logger.js";
 import type { OrchestrationEngine } from "../../../src/lib/provider/orchestration-engine.js";
 import {
 	makeMockAccountDirectory,
+	makeMockConfig,
 	makeMockLogger,
 	makeMockOpenCodeAPI,
 	makeOpenCodeInstancesStub,
@@ -66,13 +67,12 @@ function makeLayer({
 	log?: Logger;
 	engine?: OrchestrationEngine;
 } = {}) {
-	const apiLayer = Layer.succeed(OpenCodeAPITag)(api);
 	const overridesLayer = makeOverridesStateLive();
 	const loggerLayer = Layer.succeed(LoggerTag)(log);
 	const engineLayer = Layer.succeed(OrchestrationEngineTag)(engine);
 	const deps = Layer.mergeAll(
 		Layer.succeed(AccountDirectory)(makeMockAccountDirectory()),
-		apiLayer,
+		Layer.succeed(ConfigTag)(makeMockConfig()),
 		Layer.succeed(OpenCodeInstancesTag)(
 			makeOpenCodeInstancesStub({ opencode: api }),
 		),

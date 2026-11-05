@@ -265,6 +265,7 @@ export const cleanUpProjectWorktrees = (
 									return true;
 							const client = yield* instances.useIfRunning(
 								MANAGED_OPENCODE_ACCOUNT_ID,
+								config.projectDir,
 							);
 							if (client._tag === "None") return false;
 							// Cleanup cannot trust the UI's cached list after a discovery error.

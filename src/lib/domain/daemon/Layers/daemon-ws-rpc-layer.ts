@@ -915,7 +915,9 @@ export const DaemonWsRpcHandlersLive = Layer.effect(
 							getProviderDriver(instance.driver ?? "opencode")
 								?.runsOpenCodeServer
 						)
-							yield* Effect.scoped(openCodeInstances.use(request.instanceId));
+							yield* Effect.scoped(
+								openCodeInstances.use(request.instanceId, null),
+							);
 						yield* saveConfig;
 						return {
 							projectSlug: request.projectSlug,

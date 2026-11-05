@@ -8,7 +8,6 @@ import { Cause, Effect, Exit, Option, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodePtySchema } from "../../../src/lib/contracts/providers/opencode-sdk.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PtyManagerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import {
@@ -84,7 +83,7 @@ function waitForPty(
 
 async function createExternalPty(harness: DaemonProject) {
 	return Schema.decodeUnknownSync(OpenCodePtySchema)(
-		await (await harness.run(OpenCodeAPITag)).pty.create(),
+		await (await harness.opencode()).pty.create(),
 	);
 }
 
@@ -154,17 +153,22 @@ describe("Integration: Terminal (PTY)", () => {
 		const registrations = vi.spyOn(manager, "registerSession");
 		// Discovery attaches as soon as the PTY appears, before any subscriber
 		// asks, so hold the first attachment lease whoever requested it.
-		const lease = vi.spyOn(instances, "useIfRunning").mockImplementation((id) =>
-			Effect.suspend(() => {
-				const unattached = manager.listSessions().some(({ id: ptyId }) => {
-					const session = manager.getSession(ptyId);
-					return session?.source === "opencode" && !session.upstream;
-				});
-				if (!unattached || attaching.mock.calls.length > 0) return acquire(id);
-				attaching();
-				return Effect.promise(() => held).pipe(Effect.andThen(acquire(id)));
-			}),
-		);
+		const lease = vi
+			.spyOn(instances, "useIfRunning")
+			.mockImplementation((id, directory) =>
+				Effect.suspend(() => {
+					const unattached = manager.listSessions().some(({ id: ptyId }) => {
+						const session = manager.getSession(ptyId);
+						return session?.source === "opencode" && !session.upstream;
+					});
+					if (!unattached || attaching.mock.calls.length > 0)
+						return acquire(id, directory);
+					attaching();
+					return Effect.promise(() => held).pipe(
+						Effect.andThen(acquire(id, directory)),
+					);
+				}),
+			);
 		const pty = await createExternalPty(isolated);
 		const first = await isolated.connectWsClient();
 		const second = await isolated.connectWsClient();
@@ -176,7 +180,7 @@ describe("Integration: Terminal (PTY)", () => {
 		try {
 			await expect.poll(() => attaching.mock.calls.length).toBe(1);
 			await first.close();
-			await (await isolated.run(OpenCodeAPITag)).pty.delete(pty.id);
+			await (await isolated.opencode()).pty.delete(pty.id);
 			const next = second.listPtys();
 			// The old caller-owned path completes this empty read while its
 			// detached attachment is pending. The worker instead waits for it.
@@ -231,13 +235,13 @@ describe("Integration: Terminal (PTY)", () => {
 			await waitForOutput(client, removed.id, "$ ");
 			// Silent inventory changes model missed SSE events. Complete them
 			// before reconnect so its snapshot cannot precede the new PTY.
-			await (await harness.run(OpenCodeAPITag)).pty.delete(removed.id);
+			await (await harness.opencode()).pty.delete(removed.id);
 			added = await createExternalPty(harness);
 			harness.mock.disconnectSseClients();
 			await waitForRemoved(client, removed.id);
 			await waitForPty(client, added.id, "running", added.title);
 		} finally {
-			await (await harness.run(OpenCodeAPITag)).pty.delete(removed.id);
+			await (await harness.opencode()).pty.delete(removed.id);
 			if (added) await client.closePty(added.id);
 			await client.close();
 		}
@@ -314,7 +318,7 @@ describe("Integration: Terminal (PTY)", () => {
 			});
 			signal(harness, "pty.exited", pty);
 			await waitForPty(client, info.id, "exited", "Exited shell");
-			await (await harness.run(OpenCodeAPITag)).pty.delete(info.id);
+			await (await harness.opencode()).pty.delete(info.id);
 			signal(harness, "pty.deleted", pty);
 			await waitForRemoved(client, info.id);
 			mkdirSync("test-results", { recursive: true });
@@ -324,7 +328,7 @@ describe("Integration: Terminal (PTY)", () => {
 			);
 		} finally {
 			harness.mock.rejectedPtyConnections.delete(pty.id);
-			await (await harness.run(OpenCodeAPITag)).pty.delete(pty.id);
+			await (await harness.opencode()).pty.delete(pty.id);
 			await client.close();
 		}
 	}, 20_000);
@@ -336,7 +340,7 @@ describe("Integration: Terminal (PTY)", () => {
 		try {
 			signal(harness, "pty.created", deleted);
 			await waitForPty(client, deleted.id, "running", deleted.title);
-			await (await harness.run(OpenCodeAPITag)).pty.delete(deleted.id); // No deleted SSE.
+			await (await harness.opencode()).pty.delete(deleted.id); // No deleted SSE.
 			signal(harness, "pty.updated", survivor);
 			signal(harness, "pty.created", deleted);
 			await waitForRemoved(client, deleted.id);
@@ -345,7 +349,7 @@ describe("Integration: Terminal (PTY)", () => {
 				deleted.id,
 			);
 		} finally {
-			await (await harness.run(OpenCodeAPITag)).pty.delete(deleted.id);
+			await (await harness.opencode()).pty.delete(deleted.id);
 			await client.closePty(survivor.id);
 			await client.close();
 		}
@@ -376,7 +380,7 @@ describe("Integration: Terminal (PTY)", () => {
 			await waitForPty(client, id, "running", local.title);
 			const restored = manager.getSession(id);
 			expect(restored?.source).toBe("local");
-			await (await harness.run(OpenCodeAPITag)).pty.delete(id);
+			await (await harness.opencode()).pty.delete(id);
 			for (const type of ["pty.updated", "pty.exited", "pty.deleted"] as const)
 				signal(harness, type, collision);
 			await client.ptyInput(id, "echo LOCAL_COLLISION_SURVIVED\n");
@@ -386,7 +390,7 @@ describe("Integration: Terminal (PTY)", () => {
 				(await client.listPtys()).ptys.find((pty) => pty.id === id),
 			).toEqual(local);
 		} finally {
-			await (await harness.run(OpenCodeAPITag)).pty.delete(id);
+			await (await harness.opencode()).pty.delete(id);
 			await client.closePty(id);
 			await client.close();
 		}
@@ -406,14 +410,14 @@ describe("Integration: Terminal (PTY)", () => {
 		const acquire = instances.useIfRunning;
 		const useIfRunning = vi
 			.spyOn(instances, "useIfRunning")
-			.mockImplementation((id) =>
+			.mockImplementation((id, directory) =>
 				Effect.suspend(() => {
 					const session = manager.getSession(pty.id);
 					if (session?.source !== "opencode" || session.upstream)
-						return acquire(id);
+						return acquire(id, directory);
 					acquiring();
 					return Effect.promise(() => held).pipe(
-						Effect.andThen(acquire(id)),
+						Effect.andThen(acquire(id, directory)),
 						Effect.onExit((exit) =>
 							Effect.sync(() => {
 								acquisitionInterrupted =
@@ -469,8 +473,8 @@ describe("Integration: Terminal (PTY)", () => {
 		} finally {
 			use.mockRestore();
 			lease.mockRestore();
-			await (await harness.run(OpenCodeAPITag)).pty.delete(pty.id);
-			await (await harness.run(OpenCodeAPITag)).pty.delete(cached.id);
+			await (await harness.opencode()).pty.delete(pty.id);
+			await (await harness.opencode()).pty.delete(cached.id);
 			manager.closeSession(cached.id);
 			await client.close();
 		}

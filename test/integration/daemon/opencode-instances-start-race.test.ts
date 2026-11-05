@@ -143,7 +143,7 @@ describe("OpenCode Instances shared start", () => {
 
 	const cwdViaUse = Effect.flatMap(OpenCodeInstancesTag, ({ use }) =>
 		Effect.scoped(
-			Effect.flatMap(use("opencode"), (client) =>
+			Effect.flatMap(use("opencode", null), (client) =>
 				Effect.promise(() => client.app.path()),
 			),
 		),
@@ -163,7 +163,7 @@ describe("OpenCode Instances shared start", () => {
 				const outcome = await Effect.runPromise(
 					Effect.gen(function* () {
 						const owner = yield* OpenCodeInstancesTag;
-						const client = yield* owner[acquisition]("opencode");
+						const client = yield* owner[acquisition]("opencode", null);
 						yield* Effect.tryPromise(() =>
 							client.permission.reply("session-1", "perm-1", "once"),
 						);
@@ -201,9 +201,9 @@ describe("OpenCode Instances shared start", () => {
 		const clients = await Effect.runPromise(
 			Effect.gen(function* () {
 				const owner = yield* OpenCodeInstancesTag;
-				const managed = yield* owner.use("opencode");
+				const managed = yield* owner.use("opencode", null);
 				endpoint = { url, status: "healthy", managed: false };
-				const external = yield* owner.use("opencode");
+				const external = yield* owner.use("opencode", null);
 				return {
 					managed: managed.controlReplaySafe,
 					external: external.controlReplaySafe,
@@ -279,7 +279,7 @@ describe("OpenCode Instances shared start", () => {
 				Effect.gen(function* () {
 					const { use } = yield* OpenCodeInstancesTag;
 					const pending = yield* Effect.forkChild(
-						Effect.result(use("opencode")),
+						Effect.result(use("opencode", null)),
 					);
 					const healthResponse = yield* Deferred.await(healthRequested);
 					const { stream, closed } = yield* Deferred.await(streamOpened);
