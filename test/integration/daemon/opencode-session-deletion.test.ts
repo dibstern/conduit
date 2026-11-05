@@ -156,6 +156,16 @@ describe("OpenCode session deletion", () => {
 		const removal = await viewer.waitFor(isRemoval(id), cursor);
 		evidence["removal"] = removal;
 		expect(removal).toMatchObject({ deleted: true });
+		// 8.4 (CONTRACT.md 2880): the delete closes the process before the row goes, so the
+		// family feed upserts the row until its own removal; late events are read after it.
+		await viewer.waitFor(
+			(message) =>
+				message["type"] === "family" &&
+				message["_tag"] === "remove" &&
+				message["id"] === id,
+			cursor,
+		);
+		const lateCursor = viewer.frames.length;
 		expect(fixture.opencodeRequests()).toContainEqual(
 			expect.objectContaining({
 				method: "DELETE",
@@ -222,11 +232,11 @@ describe("OpenCode session deletion", () => {
 			cursor,
 		);
 		expect(
-			viewer.frames.slice(cursor).some(({ message }) => isRow(id)(message)),
+			viewer.frames.slice(lateCursor).some(({ message }) => isRow(id)(message)),
 		).toBe(false);
 		expect(
 			viewer.frames
-				.slice(cursor)
+				.slice(lateCursor)
 				.some(({ message }) => isRow(childId)(message)),
 		).toBe(false);
 		const fresh = await fixture.connect(

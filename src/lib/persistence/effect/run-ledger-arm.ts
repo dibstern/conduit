@@ -298,6 +298,7 @@ export const loadLedgerView = (sessionId: string) =>
 const commandFor = (
 	event: StoredEvent,
 	provider: ProviderKind,
+	state: SessionLedgerState,
 ): Effect.Effect<LedgerCommand | undefined, SqlError, SqlClient.SqlClient> =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -383,6 +384,43 @@ const commandFor = (
 				// 3.9 D59: main's terminal rule; a wake's turn.completed under an ended Run ends nothing (F18).
 				const outcome = runTerminalStatus(event, event.provider);
 				const runId = event.metadata.runId;
+				if (
+					event.type === "session.status" &&
+					getProviderDriver(provider)?.runsOpenCodeServer === true
+				) {
+					// 8.3, D47, 9 (CONTRACT.md 2817-2823, 3032, 3089): OpenCode busy with no active Run is an
+					// unsolicited turn on its process's label, a wake Run; idle is that label's query_ended,
+					// read only for a wake Run (gap: the contract names no event for it, 874, 4720).
+					const active = viewLedger(state).active;
+					const kind =
+						event.data.status === "idle"
+							? active?.origin === "wake"
+								? "query_ended"
+								: undefined
+							: event.data.status !== "error" && active === undefined
+								? "turn_started"
+								: undefined;
+					// 3.9: a status naming a run main requested stays main's, even after its Run ended.
+					const [started] = kind
+						? yield* sql<{ label: string }>`
+							SELECT json_extract(data, '$.label') AS label FROM events
+							WHERE session_id = ${event.sessionId} AND type = 'evidence.process_started'
+								AND sequence < ${event.sequence}
+								AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = ${event.sessionId}
+									AND type = 'run.requested' AND json_extract(data, '$.runId') = ${runId ?? null})
+							ORDER BY sequence DESC LIMIT 1`
+						: [];
+					if (kind && started)
+						return {
+							verb: "observe",
+							observation: {
+								tag: "Unsolicited",
+								label: started.label,
+								eventId: event.eventId,
+								kind,
+							},
+						};
+				}
 				if (!outcome || !runId) return undefined;
 				const code =
 					event.type === "turn.error" || event.type === "turn.interrupted"
@@ -906,7 +944,7 @@ export function makeRunLedgerArm(): Omit<EffectProjector, "handles"> & {
 				}
 				const ledger = yield* current(event.sessionId);
 				if (!ledger || event.sequence <= ledger.eventSequence) return untouched;
-				const command = yield* commandFor(event, ledger.provider);
+				const command = yield* commandFor(event, ledger.provider, ledger.state);
 				if (!command) return untouched;
 				let minted = 0;
 				const decision = decide(ledger.state, command, {
