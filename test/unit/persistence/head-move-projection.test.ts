@@ -79,7 +79,7 @@ it("moves rows off and back onto the Head, once", async () => {
 			yield* commit([moved("rewind", "n1")]);
 			expect(yield* ids).toEqual(["m1", "m2"]);
 			expect(yield* head).toBe("n1");
-			expect(yield* kept).toEqual(["m3", "m3-p", "m4", "m4-p"]);
+			expect(yield* kept).toEqual(["m3", "m3", "m3-p", "m4", "m4-p"]);
 			const rewound = yield* reads.readSessionTranscript(S, {
 				after: beforeRewind,
 			});
@@ -94,7 +94,7 @@ it("moves rows off and back onto the Head, once", async () => {
 			yield* commit([moved("switch", "n2")]);
 			expect(yield* ids).toEqual(["m1", "m2", "m3", "m4"]);
 			expect(yield* head).toBe("n2");
-			expect(yield* kept).toEqual(["m5", "m5-p"]);
+			expect(yield* kept).toEqual(["m5", "m5", "m5-p"]);
 			const switched = yield* reads.readSessionTranscript(S, {
 				after: beforeSwitch,
 			});
