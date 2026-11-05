@@ -101,7 +101,8 @@ async function settled(
 			expect(commands.map((command) => command.status)).toEqual(
 				Array.from({ length: turns }, () => "completed"),
 			);
-			// The handoff receipt is recorded once the turn has settled.
+			expect(harness.uncapturedRuns(sessionId)).toEqual([]);
+			// The handoff receipt and the run's file capture are recorded once the turn has settled.
 			const last = events
 				.map((event) => event.type)
 				.lastIndexOf("session.status");
@@ -109,7 +110,11 @@ async function settled(
 			expect(
 				events
 					.slice(last + 1)
-					.filter((event) => event.type !== "session.handoff_delivered"),
+					.filter(
+						(event) =>
+							event.type !== "session.handoff_delivered" &&
+							event.type !== "run.changes_captured",
+					),
 			).toEqual([]);
 		},
 		{ timeout: 5000 },

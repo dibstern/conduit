@@ -2740,6 +2740,9 @@ for (const behavior of [
 				await Effect.runPromise(browser.rpc.MarkSessionRead({ sessionId }));
 				await expect.poll(() => latest()?.attention).toBe("idle");
 			}
+			// Each run's file capture lands after its turn settles (f02e9.8), and
+			// would move the snapshot taken here.
+			await expect.poll(() => harness.uncapturedRuns(sessionId)).toEqual([]);
 			const before = await snapshot();
 			const historyBefore = await Effect.runPromise(
 				browser.rpc.LoadMoreHistory({ sessionId }),

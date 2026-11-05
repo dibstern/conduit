@@ -16,13 +16,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { sendRpcRequest } from "../../../src/lib/daemon/daemon-rpc-client.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
 
+// A run's file capture lands beside the bus after its turn settles (f02e9.8),
+// so it is left out of the event order these assertions pin.
 function persisted(harness: ProcessHarness, sessionId: string) {
 	const db = new Database(harness.daemonStorePath(), { readonly: true });
 	try {
 		return {
 			events: db
 				.prepare(
-					"SELECT sequence, type, data FROM events WHERE session_id = ? ORDER BY sequence",
+					"SELECT sequence, type, data FROM events WHERE session_id = ? AND type != 'run.changes_captured' ORDER BY sequence",
 				)
 				.all(sessionId)
 				.map((row) => {

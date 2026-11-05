@@ -80,6 +80,9 @@
 	// DOM ref for the <code> element (for hljs)
 	let codeEl: HTMLElement | undefined = $state();
 
+	// The project as a string, so a new scope object for the same project refetches nothing.
+	const project = $derived(selection.scope?.project);
+
 	// Fetch when the selection changes or the preview becomes visible.
 	$effect(() => {
 		const path = visible ? sessionViewState.filePreview?.path : null;
@@ -88,7 +91,7 @@
 		if (!path) return;
 		const scope = fileTreeState.scope;
 		if (scope === null) return;
-		const slug = selection.scope?.project;
+		const slug = project;
 		const sessionId = getCurrentSessionId();
 		if (!slug) return;
 		filePath = path;

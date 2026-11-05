@@ -227,14 +227,11 @@ test("composer Stop preserves tasks on both clients and Stop them waits for SDK 
 						(mark) =>
 							mark["kind"] === "task-stop" && mark["phase"] === "requested",
 					)
-					.map((mark) => mark["taskId"]),
+					.map((mark) => String(mark["taskId"]))
+					.sort(),
 			)
-			.toEqual([
-				taskStopFixture[3].task_id,
-				taskStopFixture[2].task_id,
-				taskStopFixture[1].task_id,
-				taskStopFixture[0].task_id,
-			]);
+			// "all" is the server's own snapshot, in an order 8.4 leaves open (82tn.32.24).
+			.toEqual(taskStopFixture.map((task) => task.task_id).sort());
 		await expect(
 			page.getByRole("button", { name: /^4 background tasks(:|$)/ }),
 		).toBeVisible();

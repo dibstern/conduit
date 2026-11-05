@@ -82,7 +82,8 @@ test("reports provider folder and worktree capabilities through instance info", 
 				supportsMultiFolder: false,
 				supportsWorktree: false,
 				supportsNewWorktree: false,
-				supportsTaskStop: false,
+				// Stop tasks ends a Codex background terminal (82tn.32.28).
+				supportsTaskStop: true,
 			},
 		},
 		{
