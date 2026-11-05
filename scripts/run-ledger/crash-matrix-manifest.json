@@ -536,13 +536,13 @@
 		},
 		{
 			"cell": "opencode/answer/daemon",
-			"status": "uncovered",
-			"gap": "permission survives a restart (opencode-reconcile:192) but no test answers it in flight"
+			"status": "proved",
+			"file": "test/integration/daemon/opencode-run-ledger.test.ts"
 		},
 		{
 			"cell": "opencode/answer/runner",
-			"status": "uncovered",
-			"gap": "no test answers a permission and then kills OpenCode"
+			"status": "proved",
+			"file": "test/integration/daemon/opencode-run-ledger.test.ts"
 		},
 		{
 			"cell": "inherited-key",

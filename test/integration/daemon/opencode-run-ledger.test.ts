@@ -862,6 +862,127 @@ describe("OpenCode on the Run Ledger", () => {
 		);
 	}, 60_000);
 
+	// The crash matrix's OpenCode answer cells (82tn.32.14; CONTRACT.md 11.3). How they could fail:
+	// M1 the answered Run ends twice, or never; M2 the reply is left running or held with no owner
+	// (S9.6); M3 the reply goes out more than five times, or the answered ask is shown again;
+	// M4 a turn or the session stays busy.
+	const answerInFlight = async (name: string) => {
+		const fixture = await start();
+		const browser = await fixture.connect();
+		const sessionId = await browser.createSession(name, instanceId, "opencode");
+		await browser.followSession(sessionId);
+		const before = await hold(fixture, browser, sessionId);
+		const permissionId = `answer-${randomUUID()}`;
+		const cursor = browser.frames.length;
+		await fixture.addOpenCodePrompt("permission", fixture.projectDir, {
+			id: permissionId,
+			sessionID: sessionId,
+			permission: "bash",
+			patterns: ["echo answer"],
+			metadata: {},
+			always: [],
+		});
+		const asked = await browser.waitFor(
+			(message) =>
+				message["type"] === "permission_pending" &&
+				fixture.providerRequestIdForPrompt(String(message["requestId"])) ===
+					permissionId,
+			cursor,
+		);
+		const held = join(fixture.configDir, "fake-opencode-hold-reply");
+		writeFileSync(held, "hold");
+		const answering = browser
+			.answerApproval(asked, "allow")
+			.catch((error: unknown) => error);
+		const replies = () =>
+			fixture
+				.opencodeRequests()
+				.filter(
+					({ method, url }) =>
+						method === "POST" &&
+						url.split("?")[0] ===
+							`/session/${sessionId}/permissions/${permissionId}`,
+				);
+		await until(() => expect(replies().length).toBeGreaterThan(0), 15_000);
+		// The ask's stored life, by the id OpenCode gave it.
+		const ask = () => {
+			const db = new Database(fixture.daemonStorePath(), { readonly: true });
+			try {
+				return db
+					.prepare(
+						"SELECT type, json_extract(data, '$.id') AS id FROM events WHERE session_id = ? AND type LIKE 'permission.%' AND json_extract(data, '$.providerRequestId') = ? ORDER BY sequence",
+					)
+					.all(sessionId, permissionId) as { type: string; id: string }[];
+			} finally {
+				db.close();
+			}
+		};
+		return { fixture, sessionId, before, answering, replies, held, ask };
+	};
+
+	// test-waits-allow timeout-override: a daemon restart takes seconds.
+	it("ends an answered Run once when the daemon dies with the reply sent and not yet answered", async () => {
+		const { fixture, sessionId, before, answering, replies, held, ask } =
+			await answerInFlight("Answer, daemon dies");
+		await fixture.kill();
+		await answering;
+		unlinkSync(held);
+		await fixture.restart();
+		await idle(fixture, sessionId);
+		await until(() => expect(read(fixture, sessionId).ends).toHaveLength(1));
+		expect(read(fixture, sessionId).ends.map(({ runId }) => runId)).toEqual([
+			before.runs[0]?.id,
+		]);
+		// The restarted daemon sends the unsettled reply again (S9.5 bounds it at five), and the
+		// answered ask is shown once and settled once.
+		expect(replies().length).toBeLessThanOrEqual(5);
+		expect(ask().map(({ type }) => type)).toEqual([
+			"permission.asked",
+			"permission.resolved",
+		]);
+		proveCrashMatrixCell(
+			"opencode/answer/daemon",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 60_000);
+
+	// test-waits-allow timeout-override: the managed instance restarts its OpenCode, which takes seconds.
+	it("ends an answered Run once when OpenCode dies with the reply sent and not yet answered", async () => {
+		const { fixture, sessionId, before, answering, replies, held, ask } =
+			await answerInFlight("Answer, OpenCode dies");
+		const [victim] = spawned(fixture);
+		if (!victim) throw new Error("No fake OpenCode");
+		process.kill(victim.pid, "SIGKILL");
+		await answering;
+		unlinkSync(held);
+		await streaming(fixture, 1);
+		await idle(fixture, sessionId);
+		await until(
+			() => expect(read(fixture, sessionId).ends).toHaveLength(1),
+			15_000,
+		);
+		expect(read(fixture, sessionId).ends.map(({ runId }) => runId)).toEqual([
+			before.runs[0]?.id,
+		]);
+		// The reply dies with its process and is not sent again; the answered ask settles once.
+		// The fake keeps its asks on disk, so its new process reports the ask again, as a new ask
+		// under the new process; a real OpenCode loses its asks with its process.
+		expect(replies()).toHaveLength(1);
+		const [first, settled, again] = ask();
+		expect([first?.type, settled?.type, settled?.id]).toEqual([
+			"permission.asked",
+			"permission.resolved",
+			first?.id,
+		]);
+		expect(again?.id).not.toBe(first?.id);
+		proveCrashMatrixCell(
+			"opencode/answer/runner",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 60_000);
+
 	// Live checks against the pinned real OpenCode, with a local model server so no credential is
 	// needed (CONTRACT.md 9 "Open, needs a live check": OpenCode `prompt_async`/abort executing after
 	// the client request ended). How these could fail, beyond 1 to 8 above:
