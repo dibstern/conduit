@@ -3130,7 +3130,12 @@ export const MoveIntentSchema = Schema.Union([
 ]);
 export type MoveIntent = typeof MoveIntentSchema.Type;
 
-const HeadMoveFilesSchema = Schema.Literals(["available", "pruned"]);
+/** Whether the files at a target are kept: pruned by an eviction, or never this session's (a fork's inherited point). */
+const HeadMoveFilesSchema = Schema.Literals([
+	"available",
+	"pruned",
+	"not_available",
+]);
 
 /** A proposal: the id both devices confirming it share, and whether the files are kept. */
 export const PreviewHeadMove = Rpc.make("PreviewHeadMove", {
@@ -3207,7 +3212,7 @@ export const GetHeadMoveFiles = Rpc.make("GetHeadMoveFiles", {
 		sessionId: NonEmptyString,
 		messageId: NonEmptyString,
 	}),
-	success: Schema.Struct({ files: Schema.Literals(["available", "pruned"]) }),
+	success: Schema.Struct({ files: HeadMoveFilesSchema }),
 	error: WsRpcError,
 });
 

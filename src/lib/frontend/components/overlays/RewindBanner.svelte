@@ -33,16 +33,16 @@
 		return message && "messageId" in message ? message.messageId : undefined;
 	});
 	// Rewind moves only the conversation, so a pruned point stays a valid target.
-	let filesPruned = $state(false);
+	let filesGone = $state<"pruned" | "not_available" | undefined>();
 	$effect(() => {
 		const sessionId = sessionState.currentId;
 		const messageId = selectedMessageId;
-		filesPruned = false;
+		filesGone = undefined;
 		if (!showModal || !sessionId || !messageId) return;
 		let current = true;
 		rpc("GetHeadMoveFiles", { sessionId, messageId })
 			.then(({ files }) => {
-				if (current) filesPruned = files === "pruned";
+				if (current) filesGone = files === "available" ? undefined : files;
 			})
 			.catch(() => {});
 		return () => {
@@ -118,9 +118,11 @@
 			This message and everything after it will be removed. Every move can be undone from the Head Log.
 		</p>
 		<p class="mb-5 text-sm text-text-secondary">
-			{filesPruned
+			{filesGone === "pruned"
 				? "Files from this point were pruned."
-				: restoresFiles
+				: filesGone === "not_available"
+					? "Files from this point are not available."
+					: restoresFiles
 					? "Files are restored to this point."
 					: "Files are not restored."}
 		</p>

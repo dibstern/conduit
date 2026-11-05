@@ -156,7 +156,7 @@ export const isPruned = (sessionId: string, sequence: number) =>
  * eviction came after `messageId` was created, since its run's checkpoints went
  * with it. Head moves that need files refuse "pruned"; conversation-only moves
  * go ahead and show the files unavailable. A message this session did not
- * create (inherited by a fork) has no checkpoints here, so it reads "pruned".
+ * create (inherited by a fork) never had checkpoints here: "not_available".
  */
 export const headMoveFiles = (sessionId: string, messageId: string) =>
 	Effect.gen(function* () {
@@ -166,7 +166,8 @@ export const headMoveFiles = (sessionId: string, messageId: string) =>
 			WHERE session_id = ${sessionId} AND type = 'message.created'
 				AND json_extract(data, '$.messageId') = ${messageId}`;
 		const sequence = row?.sequence;
-		return sequence == null || (yield* isPruned(sessionId, sequence))
+		if (sequence == null) return "not_available" as const;
+		return (yield* isPruned(sessionId, sequence))
 			? ("pruned" as const)
 			: ("available" as const);
 	});

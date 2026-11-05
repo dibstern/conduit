@@ -51,6 +51,8 @@ async function moveHead(
 		await rpc("CommitHeadMove", { sessionId, intent, moveId });
 		// Conversation-only moves go into pruned history; only the files there are gone.
 		if (files === "pruned") showToast("Files from this point were pruned.");
+		if (files === "not_available")
+			showToast("Files from this point are not available.");
 		return true;
 	} catch (error) {
 		toastFailure("Could not move the conversation.", "warn")(error);
