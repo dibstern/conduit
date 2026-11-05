@@ -37,6 +37,7 @@ import {
 } from "../../../src/lib/persistence/events.js";
 import type { SidebarRow } from "../../../src/lib/persistence/sidebar-row.js";
 import type { StoredProject } from "../../../src/lib/types.js";
+import { publishRun } from "../../helpers/ledger-tasks.js";
 import { makeMockAccountDirectory } from "../../helpers/mock-factories.js";
 
 describe("retained child sidebar roll-up", () => {
@@ -81,18 +82,18 @@ describe("retained child sidebar roll-up", () => {
 										provider: "opencode",
 										parentId: "parent",
 									}),
-									state === "busy"
-										? canonicalEvent("session.status", "child", {
-												sessionId: "child",
-												status: "busy",
-											})
-										: canonicalEvent(`${state}.asked`, "child", {
-												id: "child-approval",
-												sessionId: "child",
-												questions: [],
-												toolName: "Bash",
-												input: {},
-											}),
+									// A busy child is the Run Ledger's live view, published below (82tn.32.30).
+									...(state === "busy"
+										? []
+										: [
+												canonicalEvent(`${state}.asked`, "child", {
+													id: "child-approval",
+													sessionId: "child",
+													questions: [],
+													toolName: "Bash",
+													input: {},
+												}),
+											]),
 								);
 							}
 							yield* runner.projectBatch(yield* store.appendBatch(events));
@@ -136,6 +137,8 @@ describe("retained child sidebar roll-up", () => {
 						const events = yield* EventStoreEffectTag;
 						const runner = yield* ProjectionRunnerEffectTag;
 						yield* runner.recover();
+						if (state === "busy")
+							publishRun((yield* SessionActivityTag).background, "child");
 						const writeParentStatus = () =>
 							Effect.gen(function* () {
 								yield* runner.projectBatch(
@@ -171,14 +174,16 @@ describe("retained child sidebar roll-up", () => {
 									["full session list", full.find(({ id }) => id === "parent")],
 								] as const) {
 									expect.soft(session, label).toBeDefined();
+									// 8.1 (CONTRACT.md 2734): a stored row holds no busy; readers add it from the view.
+									const busy = state === "busy" && label !== "stored sidebar";
 									expect.soft(session?.status, label).toBe("idle");
 									expect
 										.soft(session?.processing ?? false, label)
-										.toBe(registered && state === "busy");
+										.toBe(registered && busy);
 									expect
 										.soft(session?.attention, label)
 										.toBe(
-											!registered
+											!registered || (state === "busy" && !busy)
 												? "idle"
 												: state === "busy"
 													? "working"
@@ -303,20 +308,21 @@ describe("retained child sidebar roll-up", () => {
 									provider: "opencode",
 									parentId: "child",
 								}),
-								state === "busy"
-									? canonicalEvent("session.status", "grandchild", {
-											sessionId: "grandchild",
-											status: "busy",
-										})
-									: canonicalEvent(`${state}.asked`, "grandchild", {
-											id: "grandchild-approval",
-											sessionId: "grandchild",
-											questions: [],
-											toolName: "Bash",
-											input: {},
-										}),
+								...(state === "busy"
+									? []
+									: [
+											canonicalEvent(`${state}.asked`, "grandchild", {
+												id: "grandchild-approval",
+												sessionId: "grandchild",
+												questions: [],
+												toolName: "Bash",
+												input: {},
+											}),
+										]),
 							]),
 						);
+						const { background } = yield* SessionActivityTag;
+						if (state === "busy") publishRun(background, "grandchild");
 						const checkGrandchild = (active: boolean) =>
 							Effect.gen(function* () {
 								const cached = (yield* rows.read()).rows.find(
@@ -352,6 +358,9 @@ describe("retained child sidebar roll-up", () => {
 								}
 							});
 						yield* checkGrandchild(true);
+						// The Run ends: the view holds no active Run for the grandchild.
+						if (state === "busy")
+							background.publish("grandchild", { tag: "none" });
 						yield* runner.projectBatch(
 							yield* events.appendBatch([
 								state === "busy"
