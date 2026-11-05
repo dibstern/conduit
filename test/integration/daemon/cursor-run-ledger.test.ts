@@ -52,6 +52,7 @@ import Database from "better-sqlite3";
 import { Effect } from "effect";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { proveCrashMatrixCell } from "../../helpers/crash-matrix-cell.js";
+import { historicalRunnerBundle } from "../../helpers/historical-runner-bundle.js";
 import {
 	type ProcessBrowser,
 	ProcessHarness,
@@ -233,9 +234,10 @@ describe("Cursor on the Run Ledger", () => {
 		source: string,
 		environment: Record<string, string> = {},
 		buildId?: string,
+		dist = process.env["CONDUIT_TEST_DIST"] ?? "dist",
 	) => {
 		const fixture = ProcessHarness.create({
-			dist: process.env["CONDUIT_TEST_DIST"] ?? "dist",
+			dist,
 			...(buildId ? { buildId } : {}),
 		});
 		harness = fixture;
@@ -263,8 +265,9 @@ describe("Cursor on the Run Ledger", () => {
 			tracePath,
 			`${rows.map((row) => JSON.stringify(row)).join("\n")}\n`,
 		);
-		const restart = (nextBuildId?: string) =>
+		const restart = (nextBuildId?: string, nextDist?: string) =>
 			fixture.restart({
+				...(nextDist ? { dist: nextDist } : {}),
 				startupTimeoutMs: TIMEOUT,
 				runnerStartupTimeoutMs: TIMEOUT,
 				...(nextBuildId ? { buildId: nextBuildId } : {}),
@@ -1119,6 +1122,46 @@ describe("Cursor on the Run Ledger", () => {
 			sessionId,
 		);
 	}, 120_000);
+
+	// Two-build upgrade (CONTRACT.md 3051): main's daemon holds a Cursor turn, is SIGKILLed, and
+	// the current build restarts on its store.
+	// test-waits-allow timeout-override: a cold cache builds main's tree before the test runs.
+	it("settles a Cursor turn main's runner held through an upgrade once, never re-sent", async (context) => {
+		const historical = await historicalRunnerBundle(
+			"020678548921ff6419796274482a1a9ecc5dfc69",
+		);
+		if (!historical.available) context.skip(historical.reason);
+		if (!historical.available) return;
+		const gate = held();
+		const { fixture, browser, sessionId, restart } = await start(
+			"two-build",
+			"basic",
+			{ CONDUIT_TEST_CURSOR_STREAM_GATE: gate },
+			undefined,
+			historical.dist,
+		);
+		await submit(browser, sessionId, "Replay the captured basic turn.");
+		// test-waits-allow polling: the SDK's take of the send reaches only its capture file.
+		await vi.waitFor(() => expect(captured("send.options")).toHaveLength(1), {
+			timeout: TIMEOUT,
+		});
+		await fixture.kill();
+		await restart(undefined, process.env["CONDUIT_TEST_DIST"] ?? "dist");
+		await fixture.connect(sessionId);
+		// main's runner is an older build: this build retires it and ends its turn once, never
+		// re-sending it (CONTRACT.md 3051, F39).
+		await turns(fixture, sessionId, ["error"]);
+		rmSync(gate);
+		expect(cellRuns(fixture, sessionId)).toEqual([
+			{ status: "error", ends: ["error"] },
+		]);
+		expect(captured("send.options")).toHaveLength(1);
+		proveCrashMatrixCell(
+			"two-build/cursor",
+			fixture.daemonStorePath(),
+			sessionId,
+		);
+	}, 300_000);
 
 	// test-waits-allow timeout-override: a daemon restart and the steered turn each take seconds.
 	it("delivers a steer once when the daemon dies with the steer handed to the SDK, unacknowledged", async () => {
