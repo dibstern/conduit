@@ -97,6 +97,7 @@ export interface EffectOpenCodeRuntimeIngressPort {
 		stoppedProcessId?: string,
 	): Effect.Effect<void>;
 	reconcileSession(sessionId: string): Effect.Effect<void>;
+	linkProcess(sessionId: string, processId: string): Effect.Effect<void>;
 	shutdown(): void;
 	isHistoryComplete(sessionId: string): Effect.Effect<boolean>;
 	getStats(): Readonly<OpenCodeRuntimeIngressStats>;
@@ -108,6 +109,12 @@ export class OpenCodeHistoryReconcileTag extends Context.Service<
 	OpenCodeHistoryReconcileTag,
 	{ reconcileSession(sessionId: string): Effect.Effect<void> }
 >()("OpenCodeHistoryReconcile") {}
+
+/** The relay's ingress, for a send that links its process before the Run is written. */
+export class OpenCodeProcessLinkTag extends Context.Service<
+	OpenCodeProcessLinkTag,
+	{ linkProcess(sessionId: string, processId: string): Effect.Effect<void> }
+>()("OpenCodeProcessLink") {}
 
 export class OpenCodeSessionCreationGateTag extends Context.Service<
 	OpenCodeSessionCreationGateTag,
@@ -1960,6 +1967,41 @@ export class EffectOpenCodeRuntimeIngress
 				}
 			}),
 		);
+	}
+
+	/**
+	 * CONTRACT.md 9 "OpenCode adapter": process_started when a session binds the instance. A send
+	 * links the process it will reach before its Run is written, so a process that started after a
+	 * daemon restart retires the dead one (L1) before the Run is addressed, not after (gap, audit).
+	 */
+	linkProcess(sessionId: string, processId: string): Effect.Effect<void> {
+		return this.sessionGate(sessionId)
+			.withPermits(1)(
+				Effect.suspend(() =>
+					this.reportedProcesses.get(sessionId) === processId
+						? Effect.void
+						: this.withSql(
+								this.ingestion.ingestBatch([], {
+									publishToRelay: false,
+									evidence: this.processStarted(sessionId, processId),
+									afterCommit: Effect.sync(() =>
+										this.reportedProcesses.set(sessionId, processId),
+									),
+								}),
+							),
+				),
+			)
+			.pipe(
+				Effect.asVoid,
+				Effect.catchCause((cause) =>
+					Effect.sync(() =>
+						this.log.warn("OpenCode process link deferred", {
+							sessionId,
+							error: Failure.renderCause(cause),
+						}),
+					),
+				),
+			);
 	}
 
 	reconcileSession(sessionId: string): Effect.Effect<void> {
