@@ -7,14 +7,14 @@ import {
 	type ReplayHarness,
 } from "../../e2e/helpers/e2e-harness.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { TestWsClient } from "../helpers/test-ws-client.js";
 
 // Native fork copies arrive before the fork HTTP response. They are history,
 // not native acceptance of new work in the fork.
-let harness: RelayHarness | undefined;
+let harness: DaemonProject | undefined;
 let replayHarness: ReplayHarness | undefined;
 let replayClient: TestWsClient | undefined;
 afterEach(async () => {
@@ -27,7 +27,7 @@ afterEach(async () => {
 });
 
 it("recorded native fork copies never keep the first fresh input queued", async () => {
-	harness = await createRelayHarness("fork-session");
+	harness = await createDaemonProject("fork-session");
 	const client = await harness.connectWsClient();
 	await client.waitForInitialState();
 	const created = await client.createSession("Fork source", {

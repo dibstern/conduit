@@ -7,12 +7,12 @@ import { Effect } from "effect";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { verifyReplayParity } from "../../../src/lib/persistence/replay-parity.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Replay parity through the relay", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let evidence: Record<string, unknown> = {};
 
 	afterEach(async () => {
@@ -31,7 +31,7 @@ describe("Replay parity through the relay", () => {
 	// Failure cases: tool results lose their event pointers, deleted
 	// sidebar tombstones count as live rows, or a mismatch escapes the report.
 	it("replays a tool result, fork and deletion and reports copied-store corruption", async () => {
-		harness = await createRelayHarness("chat-tool-call");
+		harness = await createDaemonProject("chat-tool-call");
 		evidence = {
 			ticket: "conduit-test-hiuf.2",
 			ignoredProjectionColumns: [

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Effect } from "effect";
@@ -8,24 +7,23 @@ import { RpcTest } from "effect/rpc";
 import { SqlClient } from "effect/sql";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { attachmentFromDataUrl } from "../../../src/lib/persistence/attachment-store.js";
 import { ClaudeEventPersistEffectTag } from "../../../src/lib/persistence/effect/claude-event-persist-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import type { SDKUserMessage } from "../../../src/lib/provider/claude/types.js";
 import { WsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
-import type { ProjectRelayConfig } from "../../../src/lib/types.js";
+import type { ClaudeSdkSeam } from "../../../src/lib/types.js";
 import { claudeSdk as fakeClaudeSdk } from "../../helpers/fake-claude-process-sdk.js";
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
 // Failure modes at the browser RPC -> durable inbox/outbox -> provider seam:
 // - A queued input retains its text but loses attachments during replay.
 // - Runner serialization drops a file, its filename/MIME, or decoded bytes.
 // - A direct RPC bypasses attachment validation and writes an input/command,
 //   or creates a Side Thread before discovering the invalid attachment.
-// Only SDK/HTTP transports are faked; relay, admission, queues and runners are real.
-describe("Integration: attachment delivery through the relay", () => {
+// Only SDK/HTTP transports are faked; the daemon, admission, queues and runners are real.
+describe("Integration: attachment delivery through the daemon", () => {
 	const text = 'export const greeting = "héllo";\n';
 	const pdf = Buffer.from(
 		"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF\n",
@@ -43,7 +41,7 @@ describe("Integration: attachment delivery through the relay", () => {
 		__setProbeOverrideForTesting(undefined);
 	});
 
-	async function startRelay() {
+	async function startProject() {
 		__setProbeOverrideForTesting(async () => ({
 			models: [{ id: "claude-sonnet-4", name: "Sonnet", providerId: "claude" }],
 			commands: [],
@@ -55,7 +53,7 @@ describe("Integration: attachment delivery through the relay", () => {
 		const claudeReceived: SDKUserMessage["message"]["content"][] = [];
 		const openCodeReceived: { parts: unknown[] }[] = [];
 		const sessions: Record<string, unknown> = {};
-		const sdk: NonNullable<ProjectRelayConfig["claudeSdk"]> = {
+		const sdk: ClaudeSdkSeam = {
 			...fakeClaudeSdk,
 			query: (params) =>
 				fakeClaudeSdk.query({
@@ -163,36 +161,23 @@ describe("Integration: attachment delivery through the relay", () => {
 			if (session && sessions[session]) return json(sessions[session]);
 			return new Response("Not found", { status: 404 });
 		});
-		const server = createServer();
-		const relay = await createProjectRelay({
-			httpServer: server,
-			noServer: true,
+		const project = await createDaemonProject("chat-simple", {
 			opencodeUrl: "http://opencode.test",
 			projectDir: root,
-			configDir: join(root, "config"),
-			persistenceDbPath: join(root, "events.db"),
 			slug: "attachment-delivery",
 			claudeSdk: sdk,
-			publishGlobalSetting: () => Effect.void,
-			statusPollerInterval: 60_000,
-			messagePollerInterval: 60_000,
-			log: createSilentLogger(),
 		});
 		cleanups.push(async () => {
-			await relay.stop();
-			server.close();
+			await project.stop();
 			rmSync(root, { recursive: true, force: true });
 		});
-		const rpcContext = relay.rpcWsHandler.context;
-		if (!rpcContext) throw new Error("Expected the relay's RPC context");
-		const context = await Effect.runPromise(rpcContext);
-		return { context, claudeReceived, openCodeReceived };
+		return { run: project.run, claudeReceived, openCodeReceived };
 	}
 
 	for (const provider of ["claude", "opencode"] as const) {
 		it(`delivers queued text and PDF bytes to ${provider}`, async () => {
-			const { context, claudeReceived, openCodeReceived } = await startRelay();
-			await Effect.runPromise(
+			const { run, claudeReceived, openCodeReceived } = await startProject();
+			await run(
 				Effect.gen(function* () {
 					const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 						Effect.provide(WsRpcServerLayer),
@@ -277,7 +262,7 @@ describe("Integration: attachment delivery through the relay", () => {
 					expect(
 						yield* sql`SELECT command_id FROM provider_command_outbox WHERE command_id = ${inputId} AND effect_type = 'send_turn'`,
 					).toHaveLength(1);
-				}).pipe(Effect.provide(context), Effect.scoped),
+				}).pipe(Effect.scoped),
 			);
 
 			if (provider === "claude") {
@@ -330,8 +315,8 @@ describe("Integration: attachment delivery through the relay", () => {
 	}
 
 	it("rejects invalid direct RPC attachments before inbox, outbox or Side Thread writes", async () => {
-		const { context, claudeReceived, openCodeReceived } = await startRelay();
-		await Effect.runPromise(
+		const { run, claudeReceived, openCodeReceived } = await startProject();
+		await run(
 			Effect.gen(function* () {
 				const client = yield* RpcTest.makeClient(WsRpcGroup).pipe(
 					Effect.provide(WsRpcServerLayer),
@@ -409,7 +394,7 @@ describe("Integration: attachment delivery through the relay", () => {
 						).toEqual(commandsBefore);
 					}
 				}
-			}).pipe(Effect.provide(context), Effect.scoped),
+			}).pipe(Effect.scoped),
 		);
 		expect(claudeReceived).toHaveLength(0);
 		expect(openCodeReceived).toHaveLength(0);

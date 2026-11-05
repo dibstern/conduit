@@ -16,9 +16,9 @@ import {
 	startControlledOpenCodeInference,
 } from "../../helpers/controlled-opencode-inference.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 const CONTENTS = "conduit-attachment-marker-7f3a\n";
@@ -26,7 +26,7 @@ const PROMPT = "Reply with just the word 'ok'.";
 
 describe("Integration: OpenCode text file attachment", () => {
 	let opencode: SpawnedOpenCode;
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 	let client: TestWsClient;
 	let inference:
 		| Awaited<ReturnType<typeof startControlledOpenCodeInference>>
@@ -45,7 +45,7 @@ describe("Integration: OpenCode text file attachment", () => {
 			);
 			opencode = await spawnOpenCode({ env: inference.env });
 			await inference.assertOpenCodeConfig(opencode.url);
-			harness = await createRelayHarness("chat-simple", {
+			harness = await createDaemonProject("chat-simple", {
 				opencodeUrl: opencode.url,
 				defaultModel: CONTROLLED_MODEL_ID,
 			});

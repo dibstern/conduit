@@ -9,9 +9,9 @@ import http from "node:http";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 /** Make an HTTP request and return the status code, or "ECONNREFUSED" on failure. */
 async function httpStatus(url: string): Promise<number | "ECONNREFUSED"> {
@@ -37,7 +37,7 @@ async function httpStatus(url: string): Promise<number | "ECONNREFUSED"> {
 }
 
 describe("Relay stack lifecycle (real timers)", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeEach(() => {
 		// Use the built-in fallback catalogue without launching a real Claude query.
@@ -57,8 +57,8 @@ describe("Relay stack lifecycle (real timers)", () => {
 	});
 
 	it("stop() shuts down the HTTP server — no more connections accepted", async () => {
-		harness = await createRelayHarness("chat-simple");
-		const baseUrl = harness.relayBaseUrl;
+		harness = await createDaemonProject("chat-simple");
+		const baseUrl = harness.baseUrl;
 
 		// Relay is alive
 		const statusBefore = await httpStatus(`${baseUrl}/health`);
@@ -73,7 +73,7 @@ describe("Relay stack lifecycle (real timers)", () => {
 	});
 
 	it("stop() after WS client connected closes the client", async () => {
-		harness = await createRelayHarness("chat-simple");
+		harness = await createDaemonProject("chat-simple");
 		const client = await harness.connectWsClient();
 
 		await client.waitForInitialState();

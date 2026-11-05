@@ -5,9 +5,9 @@ import { Socket } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { createRelayHarness } from "../helpers/relay-harness.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
-type Harness = Awaited<ReturnType<typeof createRelayHarness>>;
+type Harness = Awaited<ReturnType<typeof createDaemonProject>>;
 
 /** Replay through its synchronization boundary, including every removal. */
 const resume = async (harness: Harness, sessionId: string, cursor: number) => {
@@ -30,7 +30,7 @@ const resume = async (harness: Harness, sessionId: string, cursor: number) => {
 				}).pipe(
 					Effect.provide(RpcClient.layerProtocolSocket()),
 					Effect.provide(
-						Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+						Socket.layerWebSocket(`ws://127.0.0.1:${harness.port}/rpc`),
 					),
 					Effect.provide(Socket.layerWebSocketConstructorGlobal),
 					Effect.provide(RpcSerialization.layerJson),
@@ -45,7 +45,7 @@ const resume = async (harness: Harness, sessionId: string, cursor: number) => {
 
 describe("session detail removal over WebSocket", () => {
 	it("resumes after a rewind removal and pages without the removed message", async () => {
-		const harness = await createRelayHarness();
+		const harness = await createDaemonProject();
 		try {
 			const client = await harness.connectWsClient();
 			await client.waitForInitialState();
@@ -124,7 +124,7 @@ describe("session detail removal over WebSocket", () => {
 	}, 45_000);
 
 	it("resumes after a part removal with the removal and the message it moved", async () => {
-		const harness = await createRelayHarness();
+		const harness = await createDaemonProject();
 		try {
 			const client = await harness.connectWsClient();
 			await client.waitForInitialState();

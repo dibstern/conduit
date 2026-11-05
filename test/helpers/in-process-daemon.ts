@@ -27,10 +27,13 @@ import {
 	startForegroundDaemon,
 } from "../../src/lib/domain/daemon/Layers/daemon-foreground.js";
 import { makeDaemonLive } from "../../src/lib/domain/daemon/Layers/daemon-layers.js";
+import { AccountDirectory } from "../../src/lib/domain/daemon/Services/account-directory.js";
 import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../../src/lib/domain/daemon/Services/daemon-config-ref.js";
+import { DaemonOrchestration } from "../../src/lib/domain/daemon/Services/daemon-orchestration.js";
+import { OpenCodeInstancesTag } from "../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import {
 	addWithoutRelay,
 	startRelay,
@@ -39,7 +42,7 @@ import { RelayCacheTag } from "../../src/lib/domain/daemon/Services/relay-cache.
 import { EventRetentionTag } from "../../src/lib/domain/persistence/Services/event-retention.js";
 import { verifyReplayParity } from "../../src/lib/persistence/replay-parity.js";
 import { sdkDefaultClaudeConfigDir } from "../../src/lib/provider/claude/claude-sdk-env.js";
-import type { RelayRuntimeServices } from "../../src/lib/relay/project-relay-layers.js";
+import type { createProjectRelayLayers } from "../../src/lib/relay/project-relay-layers.js";
 import type { ClaudeSdkSeam } from "../../src/lib/types.js";
 import type { OpenCodeRecording } from "../e2e/fixtures/recorded/types.js";
 import {
@@ -123,6 +126,10 @@ const makeDaemonRuntime = (options: Parameters<typeof makeDaemonLive>[0]) =>
 	);
 type DaemonRuntime = ReturnType<typeof makeDaemonRuntime>;
 type DaemonServices = ManagedRuntime.ManagedRuntime.Services<DaemonRuntime>;
+/** Everything the project's relay runtime provides, which RPC borrows. */
+type ProjectServices = ManagedRuntime.ManagedRuntime.Services<
+	ReturnType<typeof createProjectRelayLayers>["relayManagedRuntime"]
+>;
 
 export type DaemonProject = Awaited<ReturnType<typeof createDaemonProject>>;
 
@@ -207,6 +214,20 @@ export async function createDaemonProject(
 					{ silent: true },
 				);
 				yield* startRelay(slug);
+				// Foreground startup starts the provider command outbox once its
+				// projects are up; Stop's abort and probe effects run there.
+				yield* (yield* DaemonOrchestration).start;
+				// The daemon treats an external OpenCode as running only once it is
+				// in use; the relay harness found each one live at start.
+				const instances = yield* OpenCodeInstancesTag;
+				yield* Effect.forEach(
+					yield* (yield* AccountDirectory).list,
+					(account) =>
+						account.driver === "opencode" && !account.managed
+							? Effect.scoped(instances.use(account.id)).pipe(Effect.ignore)
+							: Effect.void,
+					{ discard: true },
+				);
 				const relay = yield* Effect.flatMap(RelayCacheTag, (cache) =>
 					cache.get(slug),
 				);
@@ -217,12 +238,12 @@ export async function createDaemonProject(
 					// Until the relay retires (82tn.16 S6), the project's services
 					// are its relay runtime's whole context, which RPC borrows.
 					projectContext:
-						(yield* context) as unknown as Context.Context<RelayRuntimeServices>,
+						(yield* context) as unknown as Context.Context<ProjectServices>,
 				};
 			}),
 		);
 		const run = <A, E>(
-			effect: Effect.Effect<A, E, RelayRuntimeServices | DaemonServices>,
+			effect: Effect.Effect<A, E, ProjectServices | DaemonServices>,
 		) => daemon.runPromise(Effect.provide(effect, projectContext));
 		return {
 			slug,
