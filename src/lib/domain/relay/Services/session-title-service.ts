@@ -22,7 +22,6 @@ import { catalogFromProviderList } from "../../../provider/turn-settings.js";
 import { loadRelaySettings } from "../../../relay/relay-settings.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";
 import { ConfigTag, LoggerTag } from "./services.js";
 import { applySessionCommand } from "./session-command.js";
@@ -98,7 +97,6 @@ export const makeSessionTitleServiceLive = (
 	SessionTitleServiceTag,
 	never,
 	| LoggerTag
-	| OpenCodeAPITag
 	| ConfigTag
 	| ReadQueryEffectTag
 	| EventStoreEffectTag
@@ -114,7 +112,6 @@ export const makeSessionTitleServiceLive = (
 			const providers = yield* ProviderRegistryTag;
 			const scope = yield* Effect.scope;
 			const log = yield* LoggerTag;
-			const api = yield* OpenCodeAPITag;
 			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 			const config = yield* ConfigTag;
 			const projectSettings = yield* Effect.serviceOption(ProjectSettingsTag);
@@ -181,7 +178,6 @@ export const makeSessionTitleServiceLive = (
 						{ type: "session.renamed", data: { sessionId, title } },
 						{ source: AUTO_TITLE_SOURCE },
 					).pipe(
-						Effect.provideService(OpenCodeAPITag, api),
 						Effect.provideService(AccountDirectory, accounts),
 						Effect.provideService(LoggerTag, log),
 						Effect.provideService(ConfigTag, config),

@@ -35,7 +35,6 @@ import {
 	type OpenCodeUnavailable,
 } from "../../daemon/Services/opencode-instances-service.js";
 import type { SessionBackground } from "../../daemon/Services/session-activity.js";
-import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { SessionStatusPollerService } from "./session-status-poller.js";
 
 export type { WebSocketHandlerShape };
@@ -152,13 +151,25 @@ export class OpenCodeFileServiceTag extends Context.Service<
 export const OpenCodeFileServiceLive: Layer.Layer<
 	OpenCodeFileServiceTag,
 	never,
-	OpenCodeAPITag | OpenCodeInstancesTag
+	ConfigTag | OpenCodeInstancesTag
 > = Layer.effect(
 	OpenCodeFileServiceTag,
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const config = yield* ConfigTag;
 		const instances = yield* OpenCodeInstancesTag;
-		const instanceId = MANAGED_OPENCODE_ACCOUNT_ID;
+		// The managed instance, in the caller's folder or else the project's.
+		const client = (directory: string | undefined, startIfStopped: boolean) =>
+			startIfStopped
+				? instances
+						.use(MANAGED_OPENCODE_ACCOUNT_ID, directory ?? config.projectDir)
+						.pipe(
+							Effect.map(Option.some),
+							Failure.mapEffectFailures(Failure.unknownError),
+						)
+				: instances.ifRunning(
+						MANAGED_OPENCODE_ACCOUNT_ID,
+						directory ?? config.projectDir,
+					);
 		return {
 			list: (
 				path: string,
@@ -166,9 +177,7 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 				{ startIfStopped = true } = {},
 			) =>
 				Effect.gen(function* () {
-					const available = startIfStopped
-						? Option.some(client)
-						: yield* instances.ifRunning(instanceId);
+					const available = yield* client(directory, startIfStopped);
 					if (Option.isNone(available)) return [];
 					return yield* Effect.tryPromise((signal) =>
 						available.value.file.list(path, { signal, directory }),
@@ -180,9 +189,7 @@ export const OpenCodeFileServiceLive: Layer.Layer<
 				{ startIfStopped = true } = {},
 			) =>
 				Effect.gen(function* () {
-					const available = startIfStopped
-						? Option.some(client)
-						: yield* instances.ifRunning(instanceId);
+					const available = yield* client(directory, startIfStopped);
 					if (Option.isNone(available)) return { content: "" };
 					return yield* Effect.tryPromise((signal) =>
 						available.value.file.read(path, { signal, directory }),
@@ -327,7 +334,6 @@ export interface OpenCodeSettingsService {
 		Awaited<ReturnType<typeof discoverOpenCodeCatalog>>,
 		Cause.UnknownError | OpenCodeUnavailable
 	>;
-	listProjects(): Effect.Effect<OpenCodeProjectList, Cause.UnknownError>;
 }
 
 export class OpenCodeSettingsServiceTag extends Context.Service<
@@ -338,16 +344,16 @@ export class OpenCodeSettingsServiceTag extends Context.Service<
 export const OpenCodeSettingsServiceLive: Layer.Layer<
 	OpenCodeSettingsServiceTag,
 	never,
-	OpenCodeAPITag | OpenCodeInstancesTag
+	ConfigTag | OpenCodeInstancesTag
 > = Layer.effect(
 	OpenCodeSettingsServiceTag,
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const config = yield* ConfigTag;
 		const instances = yield* OpenCodeInstancesTag;
 		return {
 			listCatalog: ({
 				startIfStopped = true,
-				directory,
+				directory = config.projectDir,
 				instanceId = MANAGED_OPENCODE_ACCOUNT_ID,
 			} = {}) =>
 				Effect.gen(function* () {
@@ -359,7 +365,6 @@ export const OpenCodeSettingsServiceLive: Layer.Layer<
 						discoverOpenCodeCatalog(available.value, directory),
 					);
 				}).pipe(Effect.scoped),
-			listProjects: () => Effect.tryPromise(() => client.app.projects()),
 		};
 	}),
 );
@@ -447,29 +452,27 @@ export class ClientIdTag extends Context.Service<ClientIdTag, string>()(
 type _AssertCoverage = {
 	[K in keyof Required<HandlerDeps>]: K extends "wsHandler"
 		? WebSocketHandlerShape
-		: K extends "client"
-			? OpenCodeAPI
-			: K extends "sessionMgr"
-				? SessionManagerShape
-				: K extends "ptyManager"
-					? PtyManager
-					: K extends "config"
-						? ProjectRelayConfig
-						: K extends "log"
-							? Logger
-							: K extends "statusPoller"
-								? StatusPollerShape
-								: K extends "pollerManager"
-									? PollerManagerShape
-									: K extends "connectPtyUpstream"
-										? ConnectPtyUpstreamShape
-										: K extends "instanceMgmt"
-											? InstanceManagementDeps
-											: K extends "projectMgmt"
-												? ProjectManagementDeps
-												: K extends "orchestrationEngine"
-													? OrchestrationEngine
-													: never;
+		: K extends "sessionMgr"
+			? SessionManagerShape
+			: K extends "ptyManager"
+				? PtyManager
+				: K extends "config"
+					? ProjectRelayConfig
+					: K extends "log"
+						? Logger
+						: K extends "statusPoller"
+							? StatusPollerShape
+							: K extends "pollerManager"
+								? PollerManagerShape
+								: K extends "connectPtyUpstream"
+									? ConnectPtyUpstreamShape
+									: K extends "instanceMgmt"
+										? InstanceManagementDeps
+										: K extends "projectMgmt"
+											? ProjectManagementDeps
+											: K extends "orchestrationEngine"
+												? OrchestrationEngine
+												: never;
 };
 
 // If any field maps to `never`, this assignment will fail at compile time.
@@ -484,7 +487,6 @@ type _ExhaustiveCheck = {
 declare const _check: _ExhaustiveCheck;
 
 export { RateLimiterTag } from "../Layers/rate-limiter-layer.js";
-export { PollerManagerStateTag } from "./message-poller.js";
 export { SessionManagerStateTag } from "./session-manager-state.js";
 export { OverridesStateTag } from "./session-overrides-state.js";
 export { SessionRegistryStateTag } from "./session-registry-state.js";

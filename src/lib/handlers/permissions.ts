@@ -1,5 +1,3 @@
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
-
 //
 // Browser ids name Conduit's persisted prompts. OpenCode answers use the
 // provider reference on that row, so questions survive relay restarts.
@@ -522,17 +520,20 @@ export const recordPermissionTimedOut = (entry: {
 
 /** Persist permission rule to opencode.jsonc. */
 const persistPermissionRule = (
+	instanceId: string,
 	toolName: string,
 	scope: "tool" | "pattern",
 	pattern?: string,
 ) =>
 	Effect.gen(function* () {
-		const client = yield* OpenCodeAPITag;
+		const instances = yield* OpenCodeInstancesTag;
 		const config = yield* ConfigTag;
 		const log = yield* LoggerTag;
 
 		const persistResult = yield* Effect.result(
 			Effect.gen(function* () {
+				// The rule lives in the project's opencode.jsonc, so the request names the project folder.
+				const client = yield* instances.use(instanceId, config.projectDir);
 				const configData = yield* Effect.tryPromise(() => client.config.get());
 				const rawPermission = configData["permission"];
 
@@ -664,6 +665,7 @@ export const handlePermissionResponse = (
 						.runsOpenCodeServer
 				)
 					yield* persistPermissionRule(
+						providerId ?? MANAGED_OPENCODE_ACCOUNT_ID,
 						stored?.tool_name ?? pending?.toolName ?? "",
 						persistScope,
 						persistPattern,
@@ -759,6 +761,7 @@ export const handlePermissionResponse = (
 				traits.runsOpenCodeServer
 			) {
 				yield* persistPermissionRule(
+					call?.account.id ?? bindingId ?? MANAGED_OPENCODE_ACCOUNT_ID,
 					result.toolName,
 					persistScope,
 					persistPattern,
@@ -774,9 +777,8 @@ const resolveOpenCodePromptTarget = (
 ) =>
 	Effect.gen(function* () {
 		const providerProcessId = prompt?.provider_process_id;
-		const defaultClient = yield* OpenCodeAPITag;
 		const engine = yield* Effect.serviceOption(OrchestrationEngineTag);
-		const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
+		const instances = yield* OpenCodeInstancesTag;
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const call =
 			prompt && engine._tag === "Some"
@@ -794,21 +796,15 @@ const resolveOpenCodePromptTarget = (
 			(workspace._tag === "Some"
 				? yield* workspace.value.get(sessionId)
 				: undefined);
-		if (engine._tag === "None" || instances._tag === "None") {
-			if (
-				providerProcessId &&
-				defaultClient.promptProcessId !== providerProcessId
-			)
-				return yield* expirePrompt(prompt);
-			return { client: defaultClient, directory };
-		}
-		const instanceId =
+		const boundId =
 			call?.account.id ??
-			(yield* engine.value.getProviderForSessionEffect(sessionId));
-		const boundId = instanceId ?? MANAGED_OPENCODE_ACCOUNT_ID;
+			(engine._tag === "Some"
+				? yield* engine.value.getProviderForSessionEffect(sessionId)
+				: undefined) ??
+			MANAGED_OPENCODE_ACCOUNT_ID;
 		const running = providerProcessId
-			? yield* instances.value.ifRunning(boundId, directory)
-			: Option.some(yield* instances.value.use(boundId, directory));
+			? yield* instances.ifRunning(boundId, directory ?? null)
+			: Option.some(yield* instances.use(boundId, directory ?? null));
 		if (
 			Option.isNone(running) ||
 			(providerProcessId && running.value.promptProcessId !== providerProcessId)

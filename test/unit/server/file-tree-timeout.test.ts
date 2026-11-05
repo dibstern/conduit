@@ -5,7 +5,6 @@ import { TestClock } from "effect/testing";
 import { expect, vi } from "vitest";
 
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { AlertsLive } from "../../../src/lib/domain/relay/Services/alerts.js";
 import {
 	ConfigTag,
@@ -434,7 +433,7 @@ describe("file tree time limits", () => {
 					OpenCodeFileServiceLive.pipe(
 						Layer.provide(
 							Layer.mergeAll(
-								Layer.succeed(OpenCodeAPITag)(api),
+								Layer.succeed(ConfigTag)(makeMockConfig()),
 								Layer.succeed(OpenCodeInstancesTag)(
 									makeOpenCodeInstancesStub({ opencode: api }),
 								),
@@ -482,7 +481,7 @@ describe("file tree time limits", () => {
 					OpenCodeFileServiceLive.pipe(
 						Layer.provide(
 							Layer.mergeAll(
-								Layer.succeed(OpenCodeAPITag)(api),
+								Layer.succeed(ConfigTag)(makeMockConfig()),
 								Layer.succeed(OpenCodeInstancesTag)(
 									makeOpenCodeInstancesStub({ opencode: api }),
 								),

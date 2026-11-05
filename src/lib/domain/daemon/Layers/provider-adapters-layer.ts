@@ -475,7 +475,7 @@ export const makeProviderAdaptersLive = (
 				yield* OpenCodeDriver.create({
 					configDir,
 					clientForAccount: (account, directory) =>
-						instances.use(account.id, directory),
+						instances.use(account.id, directory ?? null),
 					instanceIdForSession: (sessionId) =>
 						bindings.getProviderForSession(sessionId),
 					clientForSession: (sessionId) =>

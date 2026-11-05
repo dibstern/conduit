@@ -11,7 +11,6 @@ import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttachmentSource } from "../../../src/lib/contracts/attachment-ref.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { attachmentFromDataUrl } from "../../../src/lib/persistence/attachment-store.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -328,7 +327,7 @@ async function runPaginationDifferential(count: number) {
 		const served = await client2.loadMoreHistory(sessionId);
 		const providerHistory = new SessionManager({
 			projectSlug: "test-project",
-			client: await paginationHarness.run(OpenCodeAPITag),
+			client: await paginationHarness.opencode(),
 		});
 		const rest = await providerHistory.loadPreRenderedHistory(sessionId);
 		const projected = await projectedHistory(store, sessionId, 50);
@@ -852,7 +851,7 @@ describe("Integration: Session Visibility Repros", () => {
 			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
 				projectSlug: "test-project",
-				client: await metadataHarness.run(OpenCodeAPITag),
+				client: await metadataHarness.opencode(),
 			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(store, sessionId);
 			expect(projected.kind).toBe("rest-history");
@@ -980,7 +979,7 @@ describe("Integration: Session Visibility Repros", () => {
 			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
 				projectSlug: "test-project",
-				client: await fileHarness.run(OpenCodeAPITag),
+				client: await fileHarness.opencode(),
 			}).loadPreRenderedHistory(sessionId);
 			const projected = await projectedHistory(store, sessionId);
 			expect(projected.kind).toBe("rest-history");

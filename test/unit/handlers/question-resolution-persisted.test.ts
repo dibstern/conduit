@@ -15,7 +15,7 @@ import { Effect, Layer, Schema, Stream } from "effect";
 import { SqlClient } from "effect/sql";
 import { expect, it, vi } from "vitest";
 import type { ReadModelAdvance } from "../../../src/lib/contracts/read-model-advance.js";
-import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
+import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { AgentServiceTag } from "../../../src/lib/domain/relay/Services/agent-service.js";
 import {
 	InputDraftsLive,
@@ -77,6 +77,7 @@ import {
 	makeMockConfig,
 	makeMockOpenCodeAPI,
 	makeMockSessionManagerService,
+	makeOpenCodeInstancesStub,
 	mockSessionManagers,
 	NoopProviderRuntimeIngestionLive,
 	PassThroughSessionInbox,
@@ -110,7 +111,7 @@ type HandlerStack =
 	| SessionEventBusTag
 	| ConfigTag
 	| PendingInteractionServiceTag
-	| OpenCodeAPITag
+	| OpenCodeInstancesTag
 	| WebSocketHandlerTag
 	| LoggerTag
 	| SessionManagerServiceTag
@@ -152,7 +153,9 @@ const withHandlerStack = async (
 		bus,
 		Layer.succeed(ConfigTag)(makeMockConfig({ configDir: dir })),
 		PendingInteractionServiceLive,
-		Layer.succeed(OpenCodeAPITag)(client),
+		Layer.succeed(OpenCodeInstancesTag)(
+			makeOpenCodeInstancesStub({ opencode: client }),
+		),
 		Layer.succeed(WebSocketHandlerTag)(makeWsHandler()),
 		Layer.succeed(LoggerTag)(createSilentLogger()),
 		Layer.succeed(SessionManagerServiceTag)(

@@ -12,7 +12,6 @@ import { SessionActivityTag } from "../domain/daemon/Services/session-activity.j
 import { AttachmentStoreTag } from "../domain/persistence/Services/attachment-store.js";
 import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { PersistenceProjectTag } from "../domain/persistence/Services/persistence-service.js";
-import { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeEffectOpenCodeRuntimeIngress } from "../domain/relay/Services/opencode-runtime-ingress-service.js";
 import type { ProjectSettingsTag } from "../domain/relay/Services/project-settings.js";
 import { makeEventSinkFactory } from "../domain/relay/Services/provider-turn-dispatch.js";
@@ -127,7 +126,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 		const projectSettingsContext = yield* Effect.context<
 			ProjectSettingsTag | OverridesStateTag | ConfigTag
 		>();
-		const api = yield* OpenCodeAPITag;
 		const translator = yield* TranslatorTag;
 		const wsHandler = yield* WebSocketHandlerTag;
 		const rpcWsHandler = yield* makeWsRpcWebSocketHandler({
@@ -412,7 +410,6 @@ function acquireStartupServices(inputs: StartupInputs) {
 			activity,
 			projectSettingsContext,
 			translator,
-			api,
 			wsHandler,
 			rpcWsHandler,
 			statusSnapshot,
@@ -615,7 +612,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 				const {
 					sql,
 					sessionManagerService,
-					api,
 					wsHandler,
 					rpcWsHandler,
 					sseStream,
@@ -633,7 +629,6 @@ export async function startProjectRelay(inputs: StartupInputs) {
 					sessionManagerService,
 					// The sidebar and open family feeds follow the stamped row.
 					announceBackgroundWork: services.onBackgroundWorkChanged,
-					api,
 					wsHandler,
 					rpcWsHandler,
 					sseStream,

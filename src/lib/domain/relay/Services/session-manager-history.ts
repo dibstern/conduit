@@ -8,7 +8,6 @@ import type {
 } from "./session-manager-service.js";
 
 const DEFAULT_HISTORY_PAGE_SIZE = 50;
-export const CURSOR_SCAN_LIMIT = 10_000;
 
 /** Load the newest REST page for initial OpenCode history while backfill runs. */
 export const loadHistory = (sessionId: string, options?: LoadHistoryOptions) =>
