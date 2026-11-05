@@ -1020,6 +1020,229 @@ describe("Claude on the Run Ledger", () => {
 		});
 	});
 
+	// 82tn.32.48 (lane audit 1-4): the ledger ends a lost runner's Run at its loss, before main's
+	// Gone settlement writes the failed turn's error. The gate holds that settlement open.
+	const lostRunnerGap = async () => {
+		const started = await start(
+			{},
+			{
+				serviceEnvironment: {
+					CONDUIT_TEST_SEND_CONTINUATION_PAUSE: "before-gone",
+				},
+			},
+		);
+		const { fixture, browser } = started;
+		const sessionId = await browser.createSession("Claude ledger loss gap");
+		const failed = browser
+			.send(sessionId, "local-work-turn")
+			.catch((error: unknown) => error);
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "pre-assistant-held" &&
+				mark["prompt"] === "local-work-turn",
+		);
+		const gate = join(
+			fixture.root,
+			"conduit-test-send-continuation-before-gone",
+		);
+		writeFileSync(gate, "hold");
+		const [dead] = fixture.runnerPids();
+		expect(dead && fixture.signalOwnedRunner(dead, "SIGKILL")).toBe(true);
+		await fixture.waitForMark(
+			(mark) =>
+				mark.kind === "send-continuation-paused" &&
+				mark["point"] === "before-gone",
+		);
+		const shellStatus = () =>
+			browser.frames
+				.map(({ message }) => message)
+				.filter(
+					(message) =>
+						message["type"] === "session_row" && message["id"] === sessionId,
+				)
+				.at(-1)?.["status"];
+		// test-waits-allow polling: the loss reaches the browser only as a row change.
+		await vi.waitFor(() => expect(shellStatus()).toBe("idle"));
+		return { ...started, sessionId, gate, failed, shellStatus };
+	};
+	const sentInputs = (fixture: ProcessHarness, sessionId: string) => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			return db
+				.prepare(
+					"SELECT json_extract(data, '$.inputId') AS inputId FROM events WHERE session_id = ? AND type = 'input.sent' ORDER BY sequence",
+				)
+				.all(sessionId)
+				.map((row) => (row as { inputId: string }).inputId);
+		} finally {
+			db.close();
+		}
+	};
+	const promptsSent = (fixture: ProcessHarness, prompt: string) =>
+		fixture.marks.filter(
+			(mark) => mark.kind === "enqueue" && mark.prompt.endsWith(prompt),
+		).length;
+	const admitted = (
+		fixture: ProcessHarness,
+		sessionId: string,
+		count: number,
+	) =>
+		// test-waits-allow polling: the browser sees no frame when an input is admitted.
+		vi.waitFor(() =>
+			expect(
+				read(fixture, sessionId).events.filter(
+					(event) => event.type === "input.admitted",
+				),
+			).toHaveLength(count),
+		);
+
+	it("sends a message sent after its runner's loss once, after the failed turn's error (82tn.32.48)", async () => {
+		const { fixture, browser, sessionId, gate, failed, shellStatus } =
+			await lostRunnerGap();
+		// Lane audit 1: the shell shows idle, so the send must go once the failed turn closes.
+		const gapSend = browser.send(sessionId, "after-loss");
+		await admitted(fixture, sessionId, 2);
+		// Lane audit 4: nothing reaches a runner while the failed turn is still open.
+		expect(promptsSent(fixture, "after-loss")).toBe(0);
+		rmSync(gate, { force: true });
+		await failed;
+		const answered = await gapSend;
+		expect(answered.chunks.join("")).toBe(
+			responseChunks("after-loss").join(""),
+		);
+		// Lane audit 2, 3: sent once, to a new runner.
+		const ledger = read(fixture, sessionId);
+		expect(promptsSent(fixture, "after-loss")).toBe(1);
+		expect(sentInputs(fixture, sessionId)).toHaveLength(2);
+		const lost = ledger.events.filter(
+			(event) => event.type === "evidence.process_lost",
+		);
+		expect(lost).toHaveLength(1);
+		expect(ledger.runners.at(-1)?.runnerId).not.toBe(lost[0]?.runnerId);
+		expect(ledger.runs.map((run) => run.status)).toEqual([
+			"error",
+			"completed",
+		]);
+		proofs.push({
+			case: "send-after-loss",
+			sessionId,
+			runs: ledger.runs,
+			ends: ledger.ends,
+			types: ledger.events.map(({ type }) => type),
+		});
+	});
+
+	it("sends two messages sent after its runner's loss once each, in order (82tn.32.48)", async () => {
+		const { fixture, browser, sessionId, gate, failed } = await lostRunnerGap();
+		// Lane audit 7, 8: the second queues behind the first, and the failed turn's late error
+		// must not hold it once the first completes.
+		const first = browser.send(sessionId, "gap-first");
+		await admitted(fixture, sessionId, 2);
+		const second = browser.send(sessionId, "gap-second");
+		await admitted(fixture, sessionId, 3);
+		rmSync(gate, { force: true });
+		await failed;
+		await Promise.all([first, second]);
+		// test-waits-allow polling: two sends share one browser, so turn ends do not name a send.
+		await vi.waitFor(
+			() =>
+				expect(read(fixture, sessionId).runs.map((run) => run.status)).toEqual([
+					"error",
+					"completed",
+					"completed",
+				]),
+			{ timeout: 20_000 },
+		);
+		// Each once, the first first.
+		const order = fixture.marks.flatMap((mark) =>
+			mark.kind === "enqueue"
+				? ["gap-first", "gap-second"].filter((prompt) =>
+						mark.prompt.endsWith(prompt),
+					)
+				: [],
+		);
+		expect(order).toEqual(["gap-first", "gap-second"]);
+		expect(sentInputs(fixture, sessionId)).toHaveLength(3);
+		const ledger = read(fixture, sessionId);
+		proofs.push({
+			case: "two-sends-after-loss",
+			sessionId,
+			runs: ledger.runs,
+			ends: ledger.ends,
+		});
+	});
+
+	it("sends a message sent after its runner's loss once across a daemon restart (82tn.32.48)", async () => {
+		const { fixture, browser, sessionId, gate, failed } = await lostRunnerGap();
+		// Lane audit 9: the daemon dies in the gap; its next start writes the failed turn's error.
+		browser.send(sessionId, "gap-restart").catch(() => undefined);
+		await admitted(fixture, sessionId, 2);
+		await fixture.kill();
+		await failed;
+		rmSync(gate, { force: true });
+		await fixture.restart();
+		await fixture.connect(sessionId);
+		// test-waits-allow polling: the send's browser died with the daemon.
+		await vi.waitFor(
+			() =>
+				expect(read(fixture, sessionId).runs.map((run) => run.status)).toEqual([
+					"error",
+					"completed",
+				]),
+			{ timeout: 20_000 },
+		);
+		expect(promptsSent(fixture, "gap-restart")).toBe(1);
+		expect(sentInputs(fixture, sessionId)).toHaveLength(2);
+		const ledger = read(fixture, sessionId);
+		proofs.push({
+			case: "send-after-loss-restart",
+			sessionId,
+			runs: ledger.runs,
+			ends: ledger.ends,
+		});
+	});
+
+	// Lane audit 12: a subagent child's open run is its shown foreground while the ledger holds no
+	// Run (82tn.68); the inbox reads the same, so a send to the child waits for that run.
+	it("holds a send to a running subagent child until its run ends, then sends it once (82tn.32.48)", async () => {
+		const { fixture, browser } = await start({
+			claudeReplay: {
+				turns: ["subagent-task-turn", "pong-thinking-text-turn"],
+				plan: { holdBefore: { turn: 1, message: 36 } },
+			},
+		});
+		const root = await browser.createSession("Claude child inbox");
+		await browser.followSession(root);
+		const turn = browser.send(root, "Ask a subagent to summarise package.json");
+		await fixture.claudeReplayer?.held();
+		const child = browser.frames.find(
+			({ message }) =>
+				message["type"] === "session_row" && message["parentID"] === root,
+		)?.message["id"];
+		if (typeof child !== "string") throw new Error("no child row");
+		expect(read(fixture, child).runs).toEqual([
+			{ id: expect.any(String), status: "running" },
+		]);
+		const childSend = browser
+			.send(child, "child-follow-up")
+			.catch((error: unknown) => error);
+		await admitted(fixture, child, 1);
+		expect(sentInputs(fixture, child)).toEqual([]);
+		fixture.claudeReplayer?.release();
+		await turn;
+		// test-waits-allow polling: the child's drain has no frame the root's browser awaits.
+		await vi.waitFor(() => expect(sentInputs(fixture, child)).toHaveLength(1), {
+			timeout: 20_000,
+		});
+		await childSend;
+		expect(sentInputs(fixture, child)).toHaveLength(1);
+		proofs.push({
+			case: "child-send-held",
+			sessionId: child,
+			runs: read(fixture, child).runs,
+		});
+	});
+
 	it("ends a wake whose stream fails at the translator's endTurn", async () => {
 		const { fixture, browser } = await start({
 			claudeReplay: {

@@ -232,11 +232,11 @@ export const makeProcessSessionRunner = (
 			});
 
 		const pauseSend = (
-			point: "before-hold" | "after-hold" | "after-release",
+			point: "before-hold" | "after-hold" | "after-release" | "before-gone",
 			input: {
 				readonly sessionId: string;
-				readonly runId: string;
-				readonly commandId: string;
+				readonly runId?: string;
+				readonly commandId?: string;
 				readonly runnerId?: string;
 				readonly transmission?: number;
 			},
@@ -381,10 +381,15 @@ export const makeProcessSessionRunner = (
 					sql,
 					configDir,
 					closeSends: sends.closeRunner,
+					// The Gone settlement's first step; a test holds it here, after the loss.
 					ingestion: (sessionId, entry) =>
-						deps.recoveryForSession
-							? ingestionForSession(sessionId)
-							: Effect.succeed(entry?.ingestion ?? ingestion),
+						pauseSend("before-gone", { sessionId }).pipe(
+							Effect.andThen(
+								deps.recoveryForSession
+									? ingestionForSession(sessionId)
+									: Effect.succeed(entry?.ingestion ?? ingestion),
+							),
+						),
 					projectRoot: deps.projectRootForSession,
 					commit: commitSettlement,
 					wake: wakeReactor,
