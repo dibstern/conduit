@@ -739,6 +739,67 @@ describe("subscribeSessionDetail", () => {
 			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
 	);
 	it.effect(
+		"a historical window opened at an agent reply starts at its turn's prompt",
+		() =>
+			Effect.gen(function* () {
+				yield* recoverProjections;
+				yield* establishSession(SID);
+				const sql = yield* SqlClient.SqlClient;
+				const insert = (id: string, role: string, at: number) =>
+					sql`INSERT INTO messages (id,session_id,role,text,created_at,updated_at) VALUES (${id},${SID},${role},'',${at},${at})`;
+				yield* insert("head", "assistant", 0);
+				for (let i = 1; i <= 30; i++) {
+					const turn = `t${String(i).padStart(2, "0")}`;
+					yield* insert(`${turn}-q`, "user", i * 10);
+					yield* insert(`${turn}-a`, "assistant", i * 10 + 1);
+					yield* insert(`${turn}-b`, "assistant", i * 10 + 2);
+				}
+				// A turn longer than one page, then one whose steps outgrow a frame.
+				yield* insert("long-q", "user", 1000);
+				for (let i = 0; i < 60; i++)
+					yield* insert(
+						`long-${String(i).padStart(2, "0")}`,
+						"assistant",
+						1001 + i,
+					);
+				yield* insert("big-q", "user", 2000);
+				for (let i = 0; i < 3; i++) {
+					yield* insert(`big-${i}`, "assistant", 2001 + i);
+					yield* sql`INSERT INTO message_parts (id,message_id,type,text,sort_order,created_at,updated_at) VALUES (${`big-${i}-text`},${`big-${i}`},'text',${"x".repeat(120 * 1024)},0,${2001 + i},${2001 + i})`;
+				}
+				const windowIds = (
+					anchorMessageId: string,
+					direction: "from" | "before" | "after" = "from",
+				) =>
+					subscribeSessionDetail({
+						sessionId: SID,
+						window: { anchorMessageId, direction },
+					}).pipe(
+						Stream.take(1),
+						Stream.runCollect,
+						Effect.map(([first]) => {
+							if (first?._tag !== "snapshot")
+								throw new Error("expected snapshot");
+							return first.rows.flatMap((row) =>
+								row._tag === "message" ? [row.message.id] : [],
+							);
+						}),
+					);
+				const reply = yield* windowIds("t10-b");
+				expect(reply.slice(0, 3)).toEqual(["t10-q", "t10-a", "t10-b"]);
+				expect(reply).toHaveLength(50);
+				expect((yield* windowIds("t10-q"))[0]).toBe("t10-q");
+				expect((yield* windowIds("head"))[0]).toBe("head");
+				expect((yield* windowIds("t10-b", "after"))[0]).toBe("t11-q");
+				expect((yield* windowIds("t10-b", "before")).at(-1)).toBe("t10-a");
+				const long = yield* windowIds("long-55");
+				expect(long[0]).toBe("long-q");
+				expect(long.at(-1)).toBe("long-55");
+				// Prompt to target exceeds the frame: the target still opens.
+				expect((yield* windowIds("big-2"))[0]).toBe("big-2");
+			}).pipe(Effect.provide(makeDetailTestLayer(), { local: true })),
+	);
+	it.effect(
 		"cold start includes only the newest 50 messages and a paging cursor",
 		() =>
 			Effect.gen(function* () {

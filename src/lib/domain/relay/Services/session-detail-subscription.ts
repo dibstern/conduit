@@ -300,9 +300,11 @@ export const subscribeSessionDetail = (options: {
 												? request.direction === "before"
 													? { before: request.anchorMessageId }
 													: {
+															// A jump opens at the turn's prompt, so it shows what was asked.
 															forward: {
 																from: request.anchorMessageId,
 																exclusive: request.direction === "after",
+																turn: request.direction === "from",
 															},
 														}
 												: {}),
