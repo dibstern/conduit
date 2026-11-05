@@ -256,12 +256,13 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		}
 	});
 
-	const start = async () => {
+	const start = async (serviceEnvironment: Record<string, string> = {}) => {
 		const fixture = ProcessHarness.create({ restartProof: true });
 		harness = fixture;
 		await fixture.restart({
 			serviceEnvironment: {
 				CONDUIT_TEST_STOP_ABORT_WAIT_MS: String(STOP_WAIT_MS),
+				...serviceEnvironment,
 			},
 		});
 		const browser = await fixture.connect();
@@ -1147,5 +1148,34 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 			},
 		]);
 		expect(closedQueries(fixture, queryId)).toEqual([]);
+	});
+
+	// Removal ends the project's rows as project_inactive and its runners with it; a held close is one of those rows.
+	it("removing a project with a held close cancels the row and closes its process", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { enqueued } = await holdSend("remove", started, sessionId, queryId);
+		await Effect.runPromise(
+			browser.rpc.RemoveProject({ slug: "process-test" }),
+		);
+		// test-waits-allow polling: removal's outcome reports through the store and the process table only.
+		await vi.waitFor(
+			() => {
+				expect(endRows(fixture, sessionId)).toEqual([
+					{ status: "cancelled", errorCode: "project_inactive" },
+				]);
+				expect(fixture.remainingRunnerPids()).toEqual([]);
+			},
+			{ timeout: 15_000, interval: 200 },
+		);
+		proof["remove: removed"] = {
+			rows: endRows(fixture, sessionId),
+			runners: fixture.remainingRunnerPids(),
+			sent: enqueued(),
+		};
+		expect(enqueued()).toEqual([]);
 	});
 });
