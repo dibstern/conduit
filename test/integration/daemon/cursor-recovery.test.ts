@@ -107,9 +107,16 @@ function comparable(
 	};
 	return JSON.parse(
 		// A restart's reattach reports its runner's start (CONTRACT 6.1), which this
-		// parity leaves to test/integration/daemon/claude-run-ledger.test.ts.
+		// parity leaves to test/integration/daemon/claude-run-ledger.test.ts. A
+		// run's file capture lands after its turn completes, and a restart only
+		// finishes one in a git folder (f02e9.8, f02e9.20); that is
+		// test/integration/daemon/session-diff-turn-capture.test.ts's to pin.
 		JSON.stringify(
-			events.filter(({ type }) => type !== "evidence.process_started"),
+			events.filter(
+				({ type }) =>
+					type !== "evidence.process_started" &&
+					type !== "run.changes_captured",
+			),
 			(key, value: unknown) => {
 				if (
 					/^(createdAt|startedAt|completedAt|timestamp|duration|durationMs)$/.test(
