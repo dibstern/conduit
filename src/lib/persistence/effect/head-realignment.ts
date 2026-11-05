@@ -149,17 +149,21 @@ export const readResumePlan = (
 			(SELECT value FROM provider_state WHERE session_id = ${sessionId}
 				AND key = ${nativeThreadKey(instanceId)}) AS receipt,
 			(SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId}
-				AND type = 'session.provider_changed'
-				AND json_extract(data, '$.newProvider') = ${instanceId}
-				AND json_extract(data, '$.oldProvider') <> ${instanceId}) AS switched,
+				AND ((type = 'session.provider_changed'
+					AND json_extract(data, '$.newProvider') = ${instanceId}
+					AND json_extract(data, '$.oldProvider') <> ${instanceId})
+				OR (type = 'session.rewind_committed'
+					AND json_extract(data, '$.moveId') IS NOT NULL))) AS switched,
 			(SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId}
 				AND type = 'session.handoff_delivered'
 				AND json_extract(data, '$.instanceId') = ${instanceId}) AS delivered,
 			EXISTS (SELECT 1 FROM messages WHERE session_id = ${sessionId}) AS history`;
 		if (!traits?.supportsNativeResume)
-			// planSwitchHandoff (switch-handoff.ts) owes the same handoff at launch.
+			// planSwitchHandoff (switch-handoff.ts) owes the same handoff at launch: the send
+			// confirms every owed move, and a confirmed move owes a fresh agent.
 			return (
 				moved ||
+				owed !== undefined ||
 				(facts?.switched != null && (facts.delivered ?? 0) < facts.switched)
 					? "handoff"
 					: "current"

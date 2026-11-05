@@ -377,6 +377,61 @@ describe("Codex unjournaled commands through daemon recovery", () => {
 		TIMEOUT * 4,
 	);
 
+	it("refuses a move off the path Codex holds, and still rewinds along it (82tn.52)", async () => {
+		const { fixture, browser, id } = await start("off-path");
+		writeTrace(fixtureRows("rewind-revert"));
+		for (const prompt of [
+			"Say hello",
+			"Say hello again",
+			"Say hello a third time",
+		])
+			await browser.send(id, prompt, TIMEOUT);
+		await completed(fixture, id, 3);
+		const users = async () =>
+			(await browser.history(id)).filter(({ role }) => role === "user");
+		const target = (await users())[1];
+		if (!target) throw new Error("Missing rewind target");
+		await Effect.runPromise(
+			browser.rpc.RewindSession({ sessionId: id, messageId: target.id }),
+		);
+		const plan = async () =>
+			(await Effect.runPromise(browser.rpc.GetResumePlan({ sessionId: id })))
+				.plan;
+		const planOwed = await plan();
+		await browser.send(id, "Continue after rewind", TIMEOUT);
+		await completed(fixture, id, 4);
+		const planAfter = await plan();
+		const [rewound] = (
+			await Effect.runPromise(browser.rpc.GetHeadLog({ sessionId: id }))
+		).entries;
+		if (!rewound) throw new Error("Missing the rewind's log entry");
+		// Codex dropped the cut turns from its thread: undoing the rewind leaves its path.
+		const refused = await Effect.runPromise(
+			Effect.flip(
+				browser.rpc.PreviewHeadMove({
+					sessionId: id,
+					intent: { _tag: "undo", moveId: rewound.moveId },
+				}),
+			),
+		);
+		const first = (await users())[0];
+		if (!first) throw new Error("Missing first user message");
+		const along = await Effect.runPromise(
+			browser.rpc.PreviewHeadMove({
+				sessionId: id,
+				intent: { _tag: "rewind", messageId: first.id },
+			}),
+		);
+		expect(planOwed).toBe("native");
+		expect(planAfter).toBe("current");
+		expect(refused).toMatchObject({
+			_tag: "SessionBusy",
+			command: "head_move",
+			reason: "branch_unsupported",
+		});
+		expect(along.moveId).toEqual(expect.any(String));
+	});
+
 	it(
 		"recovers the historical prompt for an unjournaled Codex continuation",
 		async () => {

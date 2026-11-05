@@ -150,6 +150,13 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 				: yield* sql<{ id: string }>`SELECT id FROM history_nodes
 					WHERE session_id = ${sessionId} AND id IN ${sql.in(joining)} AND available = 0`;
 		if (missing || lost) return yield* noTarget(sessionId);
+		// 82tn.52: a native revert (Codex, OpenCode) only drops turns from the path it holds.
+		if ((yield* readSessionResumePlan(sessionId, target.to)) === "refused")
+			return yield* new SessionBusy({
+				sessionId,
+				command: "head_move",
+				reason: "branch_unsupported",
+			});
 		const [tip] =
 			target.to === null
 				? []

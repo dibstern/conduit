@@ -53,9 +53,10 @@ export const previewFreshHandoff = (read: ReadQueryEffect, sessionId: string) =>
 
 /**
  * A target that cannot resume a native thread across a switch (Cursor) owes a
- * fresh full handoff once per switch into its account: the latest switch to it
- * that no handoff record has answered yet. Derived from the store alone, so a
- * crash between the switch and the first turn still owes it.
+ * fresh full handoff once per switch into its account, and once per head move a
+ * send of its confirmed (82tn.52: a fresh agent holds only the kept path): the
+ * latest of those that no handoff record has answered yet. Derived from the
+ * store alone, so a crash between the switch and the first turn still owes it.
  */
 export const planSwitchHandoff = (input: {
 	readonly read: ReadQueryEffect;
@@ -72,9 +73,11 @@ export const planSwitchHandoff = (input: {
 			delivered: number | null;
 		}>`SELECT
 			(SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId}
-				AND type = 'session.provider_changed'
-				AND json_extract(data, '$.newProvider') = ${instanceId}
-				AND json_extract(data, '$.oldProvider') <> ${instanceId}) AS switched,
+				AND ((type = 'session.provider_changed'
+					AND json_extract(data, '$.newProvider') = ${instanceId}
+					AND json_extract(data, '$.oldProvider') <> ${instanceId})
+				OR (type = 'session.rewind_committed'
+					AND json_extract(data, '$.moveId') IS NOT NULL))) AS switched,
 			(SELECT MAX(sequence) FROM events WHERE session_id = ${sessionId}
 				AND type = 'session.handoff_delivered'
 				AND json_extract(data, '$.instanceId') = ${instanceId}) AS delivered`;

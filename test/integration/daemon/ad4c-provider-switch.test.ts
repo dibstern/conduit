@@ -430,6 +430,48 @@ it("rewinds past a switch: Claude resumes its own row natively, and starts fresh
 	);
 });
 
+it("rewinds on Cursor: the next send opens a new agent seeded once with the kept path (82tn.52)", async () => {
+	const s = await switchFixture("cursor-rewind");
+	await s.browser.send(s.sessionId, "ad4c-claude-one MARK-C1", 90_000);
+	await s.switchTo(s.cursor, s.claude);
+	await s.browser.send(s.sessionId, "ad4c-cursor-two MARK-CUR2", 90_000);
+	await s.browser.send(s.sessionId, "ad4c-cursor-three MARK-CUR3", 90_000);
+	const cut = (await s.browser.history(s.sessionId)).filter(
+		({ role }) => role === "user",
+	)[2];
+	if (!cut) throw new Error("Missing Cursor's second turn");
+	await s.fixture.requestRpc({
+		_tag: "RewindSession",
+		sessionId: s.sessionId,
+		messageId: String(cut.id),
+	});
+	const planOwed = await s.plan();
+	await s.browser.send(s.sessionId, "ad4c-cursor-four", 90_000);
+	const seeded = s.cursorPrompts().at(-1) ?? "";
+	const planAfter = await s.plan();
+	await s.browser.send(s.sessionId, "ad4c-cursor-five", 90_000);
+	const next = s.cursorPrompts().at(-1) ?? "";
+	const recorded = s.handoffs();
+	Object.assign(evidence, {
+		planOwed,
+		seeded,
+		planAfter,
+		next,
+		handoffs: recorded,
+	});
+	expect(planOwed).toBe("handoff");
+	expect(seeded).toContain("[Conduit context handoff]");
+	for (const kept of ["MARK-C1", "MARK-CUR2"]) expect(seeded).toContain(kept);
+	expect(seeded).not.toContain("MARK-CUR3");
+	expect(seeded.endsWith("ad4c-cursor-four")).toBe(true);
+	expect(planAfter).toBe("current");
+	expect(next).toBe("ad4c-cursor-five");
+	expect(recorded.filter(({ instanceId }) => instanceId === s.cursor)).toEqual([
+		expect.objectContaining({ strategy: "fresh" }),
+		expect.objectContaining({ strategy: "fresh" }),
+	]);
+});
+
 it("still owes Cursor the handoff after a crash between the switch and its first turn (entry 7)", async () => {
 	const s = await switchFixture("crash");
 	await s.browser.send(s.sessionId, "ad4c-claude-one MARK-CLAUDE-1", 90_000);

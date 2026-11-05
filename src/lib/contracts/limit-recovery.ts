@@ -53,6 +53,7 @@ export const SessionRefusalSchema = Schema.Literals([
 	"limit_recovery",
 	"head_move_stale",
 	"history_unavailable",
+	"branch_unsupported",
 ]);
 export type SessionRefusal = typeof SessionRefusalSchema.Type;
 
@@ -66,6 +67,8 @@ const refusalCopy: Record<SessionRefusal, string> = {
 	head_move_stale:
 		"The conversation changed since this was proposed. Review it again.",
 	history_unavailable: "That part of the conversation is no longer kept.",
+	branch_unsupported:
+		"This provider can only go back along its own conversation, not move to another branch.",
 };
 
 export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
