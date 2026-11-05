@@ -287,8 +287,8 @@ function makeRelayConfig(configDir: string): ProjectRelayConfig {
 	};
 }
 
-function openFixtureDb(filename: string) {
-	const db = new Database(filename);
+function openFixtureDb(filename: string, options?: Database.Options) {
+	const db = new Database(filename, options);
 	return {
 		exec: (sql: string) => db.exec(sql),
 		execute: (sql: string, values: readonly (string | number | null)[]) => {
@@ -343,7 +343,7 @@ function seedProjectedSessionBinding(
 }
 
 function readProjectedDeleteState(dbFile: string, sessionId: string) {
-	const db = openFixtureDb(dbFile);
+	const db = openFixtureDb(dbFile, { readonly: true });
 	try {
 		return {
 			sessionPresent:
@@ -364,7 +364,7 @@ function readProjectedDeleteState(dbFile: string, sessionId: string) {
 
 function readTombstoneFirstState(dbFile: string, sessionId: string) {
 	const projected = readProjectedDeleteState(dbFile, sessionId);
-	const db = openFixtureDb(dbFile);
+	const db = openFixtureDb(dbFile, { readonly: true });
 	try {
 		return {
 			...projected,
@@ -1594,14 +1594,21 @@ describe("SessionManagerService", () => {
 					reason:
 						"end_session: orchestration unavailable; provider_delete: upstream delete unavailable",
 				});
+				// A user's delete settles its close while the session is still there to ask on.
 				expect(dispatchObservations).toEqual([
+					{
+						sessionPresent: true,
+						bindingPresent: true,
+						tombstonePresent: false,
+					},
+				]);
+				expect(providerDeleteObservations).toEqual([
 					{
 						sessionPresent: false,
 						bindingPresent: false,
 						tombstonePresent: true,
 					},
 				]);
-				expect(providerDeleteObservations).toEqual(dispatchObservations);
 			}).pipe(
 				Effect.provide(Layer.fresh(layer)),
 				Effect.ensuring(
@@ -1674,14 +1681,21 @@ describe("SessionManagerService", () => {
 				});
 				expect(api.session.delete).toHaveBeenCalledOnce();
 				expect(api.session.delete).toHaveBeenCalledWith(sessionId);
+				// A user's delete settles its close while the session is still there to ask on.
 				expect(dispatchObservations).toEqual([
+					{
+						sessionPresent: true,
+						bindingPresent: true,
+						tombstonePresent: false,
+					},
+				]);
+				expect(providerDeleteObservations).toEqual([
 					{
 						sessionPresent: false,
 						bindingPresent: false,
 						tombstonePresent: true,
 					},
 				]);
-				expect(providerDeleteObservations).toEqual(dispatchObservations);
 				expect(events.map((event) => event.type)).toEqual(["session.deleted"]);
 				expect(logger.warn).not.toHaveBeenCalled();
 			}).pipe(
@@ -2043,7 +2057,7 @@ describe("SessionManagerService", () => {
 	});
 
 	it.effect(
-		"dispatches Claude end_session after the tombstone is projected",
+		"dispatches Claude end_session before the tombstone, while the session is there to ask on",
 		() => {
 			const tmpDir = mkdtempSync(
 				join(tmpdir(), "conduit-session-delete-claude-order-"),
@@ -2091,9 +2105,9 @@ describe("SessionManagerService", () => {
 
 				expect(dispatchObservations).toEqual([
 					{
-						sessionPresent: false,
-						bindingPresent: false,
-						tombstonePresent: true,
+						sessionPresent: true,
+						bindingPresent: true,
+						tombstonePresent: false,
 					},
 				]);
 				expect(dispatch).toHaveBeenCalledWith({
@@ -2245,7 +2259,7 @@ describe("SessionManagerService", () => {
 
 				expect(providerInstance.endSessionEffect).toHaveBeenCalledOnce();
 				expect(cleanupObservations).toEqual([
-					{ sessionPresent: false, bindingPresent: false },
+					{ sessionPresent: true, bindingPresent: true },
 				]);
 				expect(
 					yield* engine.getProviderForSessionEffect(sessionId),
@@ -2285,7 +2299,12 @@ describe("SessionManagerService", () => {
 				engine.bindSession(sessionId, "work-oc");
 				const bindSession = vi.spyOn(engine, "bindSession").mockClear();
 				const api = makeMockOpenCodeAPI();
-				const use = vi.fn(() => neverSettles);
+				const deleteStarted = yield* Deferred.make<void>();
+				const use = vi.fn(() =>
+					Deferred.succeed(deleteStarted, undefined).pipe(
+						Effect.andThen(Effect.never),
+					),
+				);
 				const instanceClients = {
 					events: () => Stream.empty,
 					use,
@@ -2331,7 +2350,10 @@ describe("SessionManagerService", () => {
 							),
 						),
 					).toBe(true);
+					// The close times out first, then the provider delete after the write.
 					yield* TestClock.adjust("1 millis");
+					yield* Deferred.await(deleteStarted);
+					yield* TestClock.adjust("2000 millis");
 					const completed = yield* Effect.sync(() =>
 						Option.fromUndefinedOr(fiber.pollUnsafe()),
 					);
@@ -2354,7 +2376,9 @@ describe("SessionManagerService", () => {
 					expect(events.some((event) => event.type === "session.deleted")).toBe(
 						true,
 					);
-					expect(receipt?.data.reason).toBe("cleanup: timed out after 2s");
+					expect(receipt?.data.reason).toBe(
+						"end_session: timed out after 2s; cleanup: timed out after 2s",
+					);
 					expect(yield* engine.getProviderForSessionEffect(sessionId)).toBe(
 						"claude",
 					);

@@ -881,6 +881,50 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		};
 	});
 
+	// 2880 "a confirm must match": a task that starts after the delete's check is one the user never saw.
+	it("a snapshot between the delete's check and its close refuses the delete instead of leaving a held close", async () => {
+		const { fixture, browser } = await start({
+			CONDUIT_TEST_DELETE_CHECK_DELAY_MS: "1500",
+		});
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		const asked = await Effect.runPromise(
+			Effect.flip(browser.rpc.DeleteSession({ sessionId })),
+		);
+		const entry =
+			"snapshotEntry" in asked ? Number(asked.snapshotEntry) : Number.NaN;
+		const from = browser.frames.length;
+		const deleting = Effect.runPromise(
+			Effect.result(browser.rpc.DeleteSession({ sessionId, confirm: entry })),
+		);
+		// Inside the delay: the delete has passed its check and not yet closed anything.
+		writeFileSync(join(fixture.root, "task-stop-late-task"), "start");
+		await row(
+			browser,
+			sessionId,
+			from,
+			(message) =>
+				Array.isArray(message["backgroundTasks"]) &&
+				message["backgroundTasks"].length === taskStopFixture.length + 1,
+		);
+		const deleted = await deleting;
+		const outcome = {
+			deleted: deleted._tag === "Success" ? deleted.success : deleted.failure,
+			rows: endRows(fixture, sessionId),
+			session: sessionRows(fixture, sessionId).length,
+			closed: closedQueries(fixture, queryId).length,
+		};
+		proof["delete raced: outcome"] = outcome;
+		expect(outcome.deleted).toMatchObject({ _tag: "DeleteNeedsConfirm" });
+		expect(
+			"snapshotEntry" in outcome.deleted
+				? Number(outcome.deleted.snapshotEntry)
+				: Number.NaN,
+		).toBeGreaterThan(entry);
+		expect(outcome.session).toBe(1);
+		expect(outcome.rows.filter((end) => end.status === "held")).toEqual([]);
+		expect(outcome.closed).toBe(0);
+	});
+
 	/** The turn ends on its own; its tasks keep running (a switch refuses a live turn). */
 	const endTurn = async (
 		fixture: ProcessHarness,
