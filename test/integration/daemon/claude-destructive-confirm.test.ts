@@ -1222,4 +1222,176 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		};
 		expect(enqueued()).toEqual([]);
 	});
+
+	/** The session's sends of `texts` the fake SDK took, with the query each went to. */
+	const sendsOf = (fixture: ProcessHarness, texts: readonly string[]) =>
+		marks(fixture).flatMap((mark) =>
+			mark["kind"] === "enqueue" && texts.includes(String(mark["request"]))
+				? [{ request: String(mark["request"]), queryId: mark["queryId"] }]
+				: [],
+		);
+	const queue = (
+		browser: BrowserClient,
+		sessionId: string,
+		text: string,
+		delivery: "queue" | "steer" = "queue",
+	) =>
+		Effect.runPromise(
+			Effect.result(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId: crypto.randomUUID(),
+					delivery,
+					text,
+				}),
+			),
+		);
+
+	// 30: a steer typed while the close is held never reaches the old process, nor goes ahead of the held message.
+	it("keeps a steer typed while a close is held off the old process and behind the held message", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { cursor, text } = await holdSend(
+			"steer",
+			started,
+			sessionId,
+			queryId,
+		);
+		const steer = "steer-while-held";
+		const steered = await queue(browser, sessionId, steer, "steer");
+		// test-waits-allow real-wait: nothing sent is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const whileHeld = sendsOf(fixture, [text, steer]);
+		await confirmNewest(browser, sessionId, cursor);
+		const expected = steered._tag === "Success" ? [text, steer] : [text];
+		// test-waits-allow polling: the fake SDK reports its sends only through sdk-proof.ndjson.
+		await vi.waitFor(
+			() =>
+				expect(
+					sendsOf(fixture, [text, steer]).map(({ request }) => request),
+				).toEqual(expected),
+			{ timeout: 15_000 },
+		);
+		proof["steer: outcome"] = {
+			steered:
+				steered._tag === "Success" ? steered.success : String(steered.failure),
+			whileHeld,
+			sent: sendsOf(fixture, [text, steer]),
+			rows: endTargets(fixture, sessionId),
+		};
+		expect(whileHeld).toEqual([]);
+		expect(
+			sendsOf(fixture, [text, steer]).filter(
+				(send) => send.queryId === queryId,
+			),
+		).toEqual([]);
+		expect(closedQueries(fixture, queryId)).toHaveLength(1);
+	});
+
+	// 36: the held close's process dies: the message is not held again forever; it goes once on a new process.
+	it("sends a held message once on a new process when the old process dies while its close is held", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { inputId, text, enqueued } = await holdSend(
+			"lost",
+			started,
+			sessionId,
+			queryId,
+		);
+		const killed = fixture
+			.remainingRunnerPids()
+			.filter((pid) => fixture.signalOwnedRunner(pid, "SIGKILL"));
+		expect(killed).not.toEqual([]);
+		// test-waits-allow polling: the fake SDK reports its sends only through sdk-proof.ndjson.
+		await vi.waitFor(() => expect(enqueued()).toHaveLength(1), {
+			timeout: 15_000,
+		});
+		const rows = endTargets(fixture, sessionId);
+		proof["lost: outcome"] = {
+			killed,
+			rows,
+			sent: sendsOf(fixture, [text]),
+			session: browser.frames
+				.map(({ message }) => message)
+				.filter(
+					(message) =>
+						message["type"] === "session_row" && message["id"] === sessionId,
+				)
+				.at(-1),
+		};
+		expect(rows.map(({ commandId }) => commandId)).toEqual([
+			`inbox-close:${inputId}`,
+		]);
+		expect(rows[0]?.status).not.toBe("held");
+		expect(enqueued()[0]?.["queryId"]).not.toBe(queryId);
+	});
+
+	// 44: a second message queued behind a dismissed one needs the same new process: it is held again, with its own ask.
+	it("holds a second queued message again, with its own ask, after the first is dismissed", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { oldProcess, inputId, text } = await holdSend(
+			"first",
+			started,
+			sessionId,
+			queryId,
+		);
+		const second = "after-held-second";
+		expect((await queue(browser, sessionId, second))._tag).toBe("Success");
+		const from = browser.frames.length;
+		await Effect.runPromise(browser.rpc.DismissEscalation({ sessionId }));
+		// test-waits-allow polling: the second close is a store row before it is an ask.
+		await vi.waitFor(
+			() =>
+				expect(endTargets(fixture, sessionId)).toEqual([
+					{
+						commandId: `inbox-close:${inputId}`,
+						status: "cancelled",
+						process: oldProcess,
+					},
+					expect.objectContaining({ status: "held", process: oldProcess }),
+				]),
+			{ timeout: 10_000, interval: 200 },
+		);
+		const asked = confirmOf(
+			await row(browser, sessionId, from, (message) => {
+				const confirm = confirmOf(message);
+				return confirm?.step === "end_session";
+			}),
+		);
+		// test-waits-allow real-wait: nothing sent or closed is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const whileHeld = sendsOf(fixture, [text, second]);
+		const closedWhileHeld = closedQueries(fixture, queryId).length;
+		await confirmNewest(browser, sessionId, from);
+		// test-waits-allow polling: the fake SDK reports its sends only through sdk-proof.ndjson.
+		await vi.waitFor(
+			() =>
+				expect(
+					sendsOf(fixture, [text, second]).map(({ request }) => request),
+				).toEqual([second]),
+			{ timeout: 15_000 },
+		);
+		proof["second: outcome"] = {
+			asked,
+			whileHeld,
+			sent: sendsOf(fixture, [text, second]),
+			rows: endTargets(fixture, sessionId),
+		};
+		expect(asked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		expect(whileHeld).toEqual([]);
+		expect(closedWhileHeld).toBe(0);
+		expect(sendsOf(fixture, [second])[0]?.queryId).not.toBe(queryId);
+		expect(closedQueries(fixture, queryId)).toHaveLength(1);
+	});
 });
