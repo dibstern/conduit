@@ -37,7 +37,8 @@ import {
 	replayProjectionTables,
 } from "../src/lib/persistence/replay-parity.js";
 
-// Keep identical to checkReplayParity() in test/integration/helpers/relay-harness.ts.
+// The base of checkReplayParity() in test/helpers/in-process-daemon.ts, which also
+// ignores wake annotations that sit outside the log (ADR-0013).
 const ignoredColumns = [
 	"version",
 	"session_sidebar.row.version",

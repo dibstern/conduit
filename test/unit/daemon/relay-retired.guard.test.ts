@@ -206,6 +206,28 @@ describe("per-project relay stays retired (82tn.16)", () => {
 		);
 	});
 
+	it("tests reach projects only through the daemon harness", () => {
+		const tests = ["test", "scripts"].flatMap(sources);
+		expect(
+			tests.filter((file) => file.endsWith("helpers/relay-harness.ts")),
+		).toEqual([]);
+		// relay: the last users of the standalone relay helpers.
+		expect(
+			tally(
+				tests,
+				named(new Set(["createTestProjectRelay", "createTestRelayStack"])),
+			),
+		).toEqual(
+			new Map([
+				["test/e2e/helpers/e2e-harness.ts", 1],
+				["test/helpers/project-relay.ts", 2],
+				["test/integration/relay/sse-aware-poller-gating.test.ts", 1],
+				["test/unit/domain/relay/opencode-runtime-ingress-effect.test.ts", 1],
+				["test/unit/relay/relay-startup-recovery.test.ts", 1],
+			]),
+		);
+	});
+
 	it.each([
 		["const r = ManagedRuntime.make(layer)", "ManagedRuntime.make"],
 		["import { createProjectRelay } from 'x'", "createProjectRelay"],

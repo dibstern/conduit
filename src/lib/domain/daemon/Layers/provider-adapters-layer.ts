@@ -643,6 +643,7 @@ export const makeProviderAdaptersLive = (
 			);
 			return {
 				registry,
+				...(testSdk?.fork && { claudeSessionForkSdk: testSdk.fork }),
 				shutdown,
 				projectContext: (projectId) =>
 					Option.fromUndefinedOr(

@@ -1,31 +1,25 @@
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 // Verifies that status-poller transitions reach RPC subscribers through the
 // session's shell row.
 
-import { rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import { dirname } from "node:path";
-import { Effect, Ref } from "effect";
+import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { PollerStateTag } from "../../../src/lib/domain/relay/Services/session-status-poller.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
-import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import {
 	type CanonicalEvent,
 	canonicalEvent,
 } from "../../../src/lib/persistence/events.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { activeRunEvents } from "../../helpers/ledger-tasks.js";
-import { tempEventsDbPath } from "../../helpers/temp-events-db.js";
-import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
+import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 interface MockOpenCode {
 	server: Server;
@@ -225,129 +219,57 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 }
 
 interface TestHarness {
-	relay: ProjectRelay;
+	project: DaemonProject;
 	mock: MockOpenCode;
-	relayPort: number;
-	connectClient(opts?: { session?: string }): Promise<TestWsClient>;
+	connectClient(): Promise<TestWsClient>;
 	stop(): Promise<void>;
 }
 
 async function createTestHarness(): Promise<TestHarness> {
 	const mock = await createMockOpenCode();
-
-	const relayServer = createServer();
-	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
-	const relayPort = (relayServer.address() as { port: number }).port;
-	const dbPath = tempEventsDbPath();
-	await Effect.runPromise(
-		Effect.gen(function* () {
-			const store = yield* EventStoreEffectTag;
-			for (const sessionId of ["sess-A", "sess-B"]) {
-				yield* store.append(
+	// The mock OpenCode is the daemon's default instance; the harness opens its
+	// event stream at start.
+	const project = await createDaemonProject("chat-simple", {
+		opencodeUrl: `http://127.0.0.1:${mock.port}`,
+		slug: "test-status-poller",
+	}).catch(async (error: unknown) => {
+		await mock.close();
+		throw error;
+	});
+	await project.run(
+		Effect.flatMap(makeCommitAndSignal, (commit) =>
+			commit(
+				["sess-A", "sess-B"].map((sessionId) =>
 					canonicalEvent(
 						"session.created",
 						sessionId,
-						{
-							sessionId,
-							title: sessionId,
-							provider: "opencode",
-						},
+						{ sessionId, title: sessionId, provider: "opencode" },
 						{ provider: "opencode" },
 					),
-				);
-			}
-		}).pipe(
-			Effect.provide(makePersistenceEffectLayer(dbPath, "test-status-poller"), {
-				local: true,
-			}),
-		),
-	);
-
-	const relay = await createProjectRelay({
-		persistenceDbPath: dbPath,
-		publishGlobalSetting: () => Effect.void,
-		httpServer: relayServer,
-		opencodeUrl: `http://127.0.0.1:${mock.port}`,
-		projectDir: process.cwd(),
-		configDir: dirname(dbPath),
-		slug: "test-status-poller",
-		noServer: true,
-		log: createSilentLogger(),
-		statusPollerInterval: 100,
-		messagePollerInterval: 150,
-		pollerGatingConfig: {
-			sseGracePeriodMs: 300,
-			sseActiveThresholdMs: 500,
-		},
-	});
-
-	relayServer.on("upgrade", (req, socket, head) => {
-		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
-			relay.rpcWsHandler.handleUpgrade(req, socket, head);
-			return;
-		}
-		socket.destroy();
-	});
-
-	// Relay startup makes no OpenCode requests; the first use opens the stream.
-	await relay.effectRuntime.runtime.runPromise(
-		Effect.scoped(
-			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-				instances.use("opencode"),
+				),
 			),
 		),
 	);
 	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 
 	return {
-		relay,
+		project,
 		mock,
-		relayPort,
-		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}/rpc?p=test-status-poller`;
-			if (opts?.session) {
-				url += `&session=${encodeURIComponent(opts.session)}`;
-			}
-			const client = new TestWsClient(url);
-			await client.waitForOpen();
-			return client;
-		},
+		connectClient: () => project.connectWsClient(),
 		async stop() {
-			await relay.stop();
-			await new Promise<void>((r) => relayServer.close(() => r()));
-			await mock.close();
-			rmSync(dirname(dbPath), { recursive: true, force: true });
+			try {
+				await project.stop();
+			} finally {
+				await mock.close();
+			}
 		},
 	};
 }
 
 describe("Status poller → browser shell transitions", () => {
 	let harness: TestHarness;
-	const publishStatus = (sessionId: string, status: "busy" | "idle") => {
-		harness.mock.sessionStatuses[sessionId] = { type: status };
-		harness.mock.injectSSE({
-			type: "session.status",
-			properties: { sessionID: sessionId, status: { type: status } },
-		});
-	};
-
 	beforeAll(async () => {
 		harness = await createTestHarness();
-		publishStatus("sess-A", "idle");
-		publishStatus("sess-B", "idle");
-		await vi.waitFor(
-			async () => {
-				const statuses = await harness.relay.effectRuntime.runtime.runPromise(
-					Effect.gen(function* () {
-						const state = yield* Ref.get(yield* PollerStateTag);
-						return state.previousStatuses;
-					}),
-				);
-				expect(statuses["sess-A"]?.type).toBe("idle");
-				expect(statuses["sess-B"]?.type).toBe("idle");
-			},
-			{ timeout: 3000 },
-		);
 	}, 15_000);
 
 	afterAll(async () => {
@@ -360,7 +282,7 @@ describe("Status poller → browser shell transitions", () => {
 		await client.viewSession("sess-B");
 		await client.subscribeShell();
 		const commit = (events: readonly CanonicalEvent[]) =>
-			harness.relay.effectRuntime.runtime.runPromise(
+			harness.project.run(
 				Effect.gen(function* () {
 					yield* (yield* makeCommitAndSignal)(events);
 				}),
@@ -403,30 +325,5 @@ describe("Status poller → browser shell transitions", () => {
 		});
 
 		await client.close();
-	});
-
-	it("shares status-poller state with the relay Effect runtime", async () => {
-		// The poller's busy is the ledger's active Run (82tn.32.30), so the relay commits one.
-		await harness.relay.effectRuntime.runtime.runPromise(
-			Effect.gen(function* () {
-				yield* (yield* makeCommitAndSignal)(activeRunEvents("sess-A"));
-			}),
-		);
-
-		await vi.waitFor(
-			async () =>
-				expect(
-					await harness.relay.effectRuntime.runtime.runPromise(
-						Effect.gen(function* () {
-							const ref = yield* PollerStateTag;
-							const state = yield* Ref.get(ref);
-							return state.previousStatuses["sess-A"]?.type;
-						}),
-					),
-				).toBe("busy"),
-			{ timeout: 3000 },
-		);
-		// The project's processing reads the session's activity, not this status (82tn.32.30);
-		// test/integration/daemon/claude-session-activity.test.ts covers it end to end.
 	});
 });

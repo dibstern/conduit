@@ -144,6 +144,8 @@ export async function createDaemonProject(
 		readonly configDir?: string;
 		/** Default model ("provider/model"); null leaves the native default in control. */
 		readonly defaultModel?: string | null;
+		/** More settings.jsonc fields, as the daemon reads them at start. */
+		readonly settings?: Readonly<Record<string, unknown>>;
 		readonly claudeSdk?: ClaudeSdkSeam;
 		readonly titleQuery?: ClaudeSdkSeam["titleQuery"];
 		/** A real OpenCode server to use instead of the recording's mock. */
@@ -164,14 +166,13 @@ export async function createDaemonProject(
 	mkdirSync(configDir, { recursive: true });
 	writeFileSync(
 		join(configDir, "settings.jsonc"),
-		JSON.stringify(
-			options.defaultModel === null
-				? {}
-				: {
-						defaultModel:
-							options.defaultModel ?? "anthropic/claude-opus-4-5-20251101",
-					},
-		),
+		JSON.stringify({
+			...(options.defaultModel !== null && {
+				defaultModel:
+					options.defaultModel ?? "anthropic/claude-opus-4-5-20251101",
+			}),
+			...options.settings,
+		}),
 	);
 	const loaded = loadDaemonConfigStartupResult(configDir);
 	const sdk = options.claudeSdk ?? fakeClaudeSdk;
