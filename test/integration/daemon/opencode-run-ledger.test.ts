@@ -16,6 +16,8 @@
 // 9. a session OpenCode made itself on a named instance, with no model pick when the ledger first
 //    reads it, is stored as Claude's, so its send is no direct start and a crash ends nothing
 //    (82tn.32.41).
+// 11. after a real crash mid-Run, main's run stays open, so the next message waits for a Stop, or
+//    the crashed Run ends twice, or by anything but process loss (82tn.32.13).
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -1074,7 +1076,7 @@ describe("OpenCode on the Run Ledger", () => {
 			]);
 		});
 
-		it("a crash of the real OpenCode mid-Run ends that Run as lost once, at the new process's start, while main leaves its run open", async () => {
+		it("a crash of the real OpenCode mid-Run ends that Run as lost once, at the new process's start, and main's run ends with it", async () => {
 			const { fixture, browser, sessionId } = await startReal();
 			const before = await holdReal(fixture, browser, sessionId);
 			const [first] = started(before);
@@ -1101,10 +1103,82 @@ describe("OpenCode on the Run Ledger", () => {
 				reattached: 0,
 			});
 			expect(started(after)).toHaveLength(2);
-			// No conduit stop, so no loss event: the old id retires at the new id's start (L1), and
-			// main settles that nowhere and leaves its run open (CONTRACT.md 2.1, 9).
+			// No conduit stop, so no loss event: the old id retires at the new id's start (L1). Main's
+			// run ends in that write (82tn.32.13; CONTRACT.md 2.1 and 9 left it open).
 			expect(lost(after)).toEqual([]);
-			expect(after.runs).toEqual([{ id: heldRun, status: "running" }]);
+			expect(after.runs).toEqual([{ id: heldRun, status: "interrupted" }]);
+		});
+
+		it("after a crash of the real OpenCode mid-Run, the next message is answered with no Stop, and the crashed Run reads as lost (82tn.32.13)", async () => {
+			const { fixture, browser, sessionId } = await startReal();
+			const before = await holdReal(fixture, browser, sessionId);
+			const heldRun = before.runs[0]?.id;
+			const [victim] = spawned(fixture) as { pid: number; childPid?: number }[];
+			if (!victim?.childPid) throw new Error("No real OpenCode");
+			process.kill(victim.childPid, "SIGKILL");
+			await streaming(fixture, 1);
+			await until(
+				() =>
+					expect(read(fixture, sessionId).ends).toEqual([
+						{ runId: heldRun, reason: "process_lost" },
+					]),
+				20_000,
+			);
+			const crashed = read(fixture, sessionId);
+
+			const text = `after crash ${randomUUID()}`;
+			const proof = () => {
+				const after = read(fixture, sessionId);
+				const aborts = fixture
+					.opencodeRequests()
+					.filter(
+						({ method, url }) =>
+							method === "POST" &&
+							url.split("?")[0] === `/session/${sessionId}/abort`,
+					);
+				mkdirSync("test-results", { recursive: true });
+				writeFileSync(
+					"test-results/82tn-32-13-opencode-crash.json",
+					JSON.stringify(
+						{
+							ticket: "conduit-test-82tn.32.13",
+							opencode: resolveRealOpenCode(),
+							crashed,
+							after,
+							aborts: aborts.length,
+							turns: turns(fixture, sessionId),
+							model: calls,
+							wire: wire(fixture, sessionId),
+						},
+						null,
+						2,
+					),
+				);
+				return { after, aborts };
+			};
+			let answer: string[] = [];
+			try {
+				answer = (await browser.send(sessionId, text, 15_000)).chunks;
+			} finally {
+				proof();
+			}
+			const { after, aborts } = proof();
+			// Nobody pressed Stop: no interrupt and no abort reached OpenCode.
+			expect(after.controls).toEqual([]);
+			expect(aborts).toEqual([]);
+			expect(calls).toContainEqual(
+				expect.objectContaining({ text, outcome: "answered" }),
+			);
+			expect(answer.join("")).toContain("Done.");
+			// The crashed Run ends once, as lost; the next send's Run ends by its own work.
+			const nextRun = after.runs.find(({ id }) => id !== heldRun)?.id;
+			expect(after.ends).toEqual([
+				{ runId: heldRun, reason: "process_lost" },
+				{ runId: nextRun, reason: "completed" },
+			]);
+			expect(after.runs.find(({ id }) => id === heldRun)?.status).not.toBe(
+				"running",
+			);
 		});
 
 		it("a conduit stop and start of the real instance mid-Run writes its loss once, and the next send runs under a new id", async () => {
