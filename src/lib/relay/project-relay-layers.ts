@@ -75,7 +75,7 @@ import {
 import { SessionManagerOwner } from "../domain/daemon/Services/session-manager-owner.js";
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
-import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
+import { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
 import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
@@ -577,10 +577,19 @@ export function createProjectRelayLayers({
 	const sessionEventBusLayer = Option.isSome(sharedBus)
 		? Layer.sync(SessionEventBusTag, () => sharedBus.value)
 		: SessionEventBusLive;
+	const sharedRetention = Context.getOption(
+		config.daemonConfigContext ?? Context.empty(),
+		EventRetentionSchedulerTag,
+	);
 	const persistenceEffectLayer = (
 		Option.isSome(sharedStore)
 			? makePersistenceProjectLayer(config.slug, {
 					sessionEventBusLayer,
+					retentionSchedulerLayer: Option.isSome(sharedRetention)
+						? Layer.succeedContext(
+								Context.make(EventRetentionSchedulerTag, sharedRetention.value),
+							)
+						: undefined,
 				}).pipe(Layer.provideMerge(Layer.succeedContext(sharedStore.value)))
 			: makePersistenceEffectLayer(
 					config.persistenceDbPath,

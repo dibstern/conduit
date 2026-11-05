@@ -404,6 +404,7 @@ describe("Fork read-model inheritance", () => {
 			}).pipe(
 				Effect.provideService(EventRetentionSchedulerTag, {
 					kick: Effect.void,
+					retention: () => Effect.die("unused"),
 				}),
 			),
 		);
@@ -561,6 +562,7 @@ describe("Fork read-model inheritance", () => {
 			}).pipe(
 				Effect.provideService(EventRetentionSchedulerTag, {
 					kick: Effect.void,
+					retention: () => Effect.die("unused"),
 				}),
 			),
 		);

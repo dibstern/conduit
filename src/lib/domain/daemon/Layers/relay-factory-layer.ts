@@ -36,6 +36,7 @@ import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-sco
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
 import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
+import { EventRetentionSchedulerTag } from "../../persistence/Services/event-retention-scheduler.js";
 import { AlertsTag } from "../../relay/Services/alerts.js";
 import {
 	DaemonSessionQueryServiceError,
@@ -258,6 +259,9 @@ export const RelayFactoryLive = (
 			const configRef = yield* DaemonConfigRefTag;
 			const subprocess = yield* Subprocess;
 			const sessionGit = yield* Effect.serviceOption(SessionGit);
+			const retentionScheduler = yield* Effect.serviceOption(
+				EventRetentionSchedulerTag,
+			);
 			const envResolver = Option.getOrUndefined(
 				yield* Effect.serviceOption(ProjectShellEnvTag),
 			);
@@ -679,6 +683,14 @@ export const RelayFactoryLive = (
 											Context.merge(
 												Option.isSome(sessionGit)
 													? Context.make(SessionGit, sessionGit.value)
+													: Context.empty(),
+											),
+											Context.merge(
+												Option.isSome(retentionScheduler)
+													? Context.make(
+															EventRetentionSchedulerTag,
+															retentionScheduler.value,
+														)
 													: Context.empty(),
 											),
 											Context.merge(daemonServices),

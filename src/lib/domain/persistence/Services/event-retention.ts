@@ -1,4 +1,4 @@
-import { Context, Effect, Layer } from "effect";
+import { Context, Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import type { SqlError } from "effect/sql/SqlError";
 import {
@@ -229,8 +229,3 @@ export const makeEventRetention = Effect.gen(function* () {
 	});
 	return { drain };
 });
-
-export const EventRetentionLive = Layer.effect(
-	EventRetentionTag,
-	makeEventRetention,
-);
