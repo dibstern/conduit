@@ -2795,9 +2795,16 @@ export class FakeProvider {
 			);
 		}
 		if (retiredLifecycle) {
+			// 3.4 (CONTRACT.md 510-514): the evidence is still recorded on its send's chains, and an input's
+			// delivery reads those chains (3.8, 630), so only the Run itself must stay as it was.
+			const run = (view: LedgerView) =>
+				view.active && {
+					...view.active,
+					inputs: view.active.inputs.map(({ inputId }) => inputId),
+				};
 			assert.deepEqual(
-				after.active,
-				before.active,
+				run(after),
+				run(before),
 				"3.4: lifecycle evidence on a retired or covered send changed Run state",
 			);
 			assert.equal(
