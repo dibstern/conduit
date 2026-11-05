@@ -18,7 +18,6 @@ import {
 } from "node:fs";
 import { createServer as createHttpServer, type Server } from "node:http";
 import { createRequire } from "node:module";
-import { createServer } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -1057,20 +1056,9 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 				}),
 			);
 		}
-		if (this.foregroundCli && !options.exactCliArgs && this.port === 0) {
-			this.port = await new Promise<number>((done, fail) => {
-				const server = createServer();
-				server.once("error", fail);
-				server.listen(0, "127.0.0.1", () => {
-					const address = server.address();
-					if (!address || typeof address === "string") {
-						server.close(() => fail(new Error("No isolated CLI port")));
-						return;
-					}
-					server.close(() => done(address.port));
-				});
-			});
-		}
+		// The daemon binds port 0 and reports the port it got. A number picked
+		// here and freed before the daemon binds it can be taken in between.
+		const requestedPort = options.keepPort ? this.port : 0;
 		const startupAt = performance.now();
 		const child = spawn(
 			process.execPath,
@@ -1095,7 +1083,7 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 								? []
 								: [
 										"--port",
-										String(this.port),
+										String(requestedPort),
 										"--host",
 										"127.0.0.1",
 										"--no-https",
@@ -1116,8 +1104,8 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 					// Bootstrap once, including configs replaced by a fixture before start.
 					CONDUIT_TEST_REGISTER_PROJECT:
 						this.generations.length === 0 ? "1" : "0",
-					...(options.keepPort && this.port
-						? { CONDUIT_TEST_PORT: String(this.port) }
+					...(requestedPort
+						? { CONDUIT_TEST_PORT: String(requestedPort) }
 						: {}),
 					...(options.metricsFile
 						? { CONDUIT_TEST_SERVER_METRICS: options.metricsFile }
@@ -1521,7 +1509,11 @@ ProviderRegistry.prototype.getInstanceEffect = function (providerId) {
 							const instances = await this.requestRpc({ _tag: "GetInstances" });
 							if (
 								child.pid &&
-								(options.exactCliArgs || status.port === this.port)
+								(options.exactCliArgs ||
+									// Port 0 until the HTTP server binds.
+									(requestedPort === 0
+										? status.port !== 0
+										: status.port === requestedPort))
 							) {
 								ready({
 									pid: child.pid,

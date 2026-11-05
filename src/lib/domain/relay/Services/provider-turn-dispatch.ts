@@ -55,9 +55,11 @@ import { sessionFolders } from "../../../session/session-workspace.js";
 import { workspaceFolderPresent } from "../../../session/workspace-directories.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { DaemonTurns } from "../../daemon/Services/daemon-turns.js";
+import { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import { WorktreeServiceTag } from "../../daemon/Services/worktree-service.js";
 import { publishAlert } from "./alerts.js";
+import { OpenCodeProcessLinkTag } from "./opencode-runtime-ingress-service.js";
 import { PendingInteractionServiceTag } from "./pending-interaction-service.js";
 import { ProjectSettingsTag } from "./project-settings.js";
 import { ProviderRuntimeIngestionTag } from "./provider-runtime-ingestion-service.js";
@@ -926,10 +928,30 @@ const dispatchEngineTurn = (
 		const handoffId =
 			events.find((event) => event.type === "input.sent")?.eventId ??
 			sendTurnInput.inputId;
+		// CONTRACT.md 9 "OpenCode adapter": the send holds the instance it will reach and links that
+		// process to the session before its Run is written, so a process that a send after a daemon
+		// restart spawns does not retire the Run it was spawned for (82tn.59).
+		const linked = Effect.scoped(
+			Effect.gen(function* () {
+				const link = yield* Effect.serviceOption(OpenCodeProcessLinkTag);
+				if (
+					PROVIDER_DRIVERS[driver].runsOpenCodeServer &&
+					Option.isSome(link)
+				) {
+					const client = yield* (yield* OpenCodeInstancesTag)
+						.use(account.id, sendTurnInput.workspaceRoot)
+						.pipe(Effect.option);
+					const processId = Option.getOrUndefined(client)?.promptProcessId;
+					if (processId)
+						yield* link.value.linkProcess(resolvedInput.sessionId, processId);
+				}
+				return yield* dispatchProgram;
+			}),
+		);
 		const fiber = yield* FiberMap.run(
 			dispatchFibers,
 			`${resolvedInput.sessionId}:${handoffId}`,
-			dispatchProgram,
+			linked,
 			{ onlyIfMissing: true },
 		);
 		// The race interrupts its loser, which an uninterruptible caller (a
