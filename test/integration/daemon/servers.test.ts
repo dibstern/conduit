@@ -21,6 +21,9 @@
 // several projects loaded, a mark reaches only the last project's watcher, or none once one closes;
 // an unmarked server a session in one project declared, or a server its OpenCode shell started, is
 // recorded for a session in another.
+// One watcher per daemon (82tn.16): a project no tab has opened since a restart has its servers
+// unrecorded, its marks refused or its ended sessions' servers spared; a server is recorded twice or
+// for the other project when two projects share a folder; a removed project's session still marks.
 import { type ChildProcess, spawn } from "node:child_process";
 import { once } from "node:events";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
@@ -960,6 +963,60 @@ it("conduit server mark rejects a dead port, another session's port and a caller
 	]);
 });
 
+it("after a restart, one watcher serves a project no tab has opened: its session's server is recorded once though another project shares its folder, its mark is accepted, and its settled session's server is killed", async () => {
+	harness = ProcessHarness.create({ logLevel: "warn" });
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+	const configDir = harness.configDir;
+	const first = await harness.connect();
+	const shared = mkdtempSync(join(tmpdir(), "shared-folder-"));
+	const save = (title: string, folders: string[]) =>
+		Effect.runPromise(first.rpc.SaveProject({ title, folders })).then(
+			({ savedSlug }) => savedSlug,
+		);
+	const cold = await save("Cold project", [shared]);
+	// Two projects in one folder: the second's main folder is its own, the shared one its second.
+	const neighbour = await save("Neighbour", [
+		mkdtempSync(join(tmpdir(), "neighbour-")),
+		shared,
+	]);
+	const coldTab = await harness.connect(undefined, undefined, cold);
+	const liveId = await coldTab.createSession("Live");
+	const settledId = await coldTab.createSession("Settled");
+	await coldTab.setSettled(settledId, true);
+	await harness.shutdown();
+	// No tab opens the cold project after this restart.
+	await harness.restart({ serviceEnvironment: ENVIRONMENT });
+
+	const live = await startAgent(liveId);
+	const doomed = await startAgent(settledId);
+	// The settled session's server exiting shows the watcher has scanned; the mark shares a scan.
+	const doomedExit = await doomed.exited;
+	const mark = await cliMark(configDir, liveId, String(live.port), "--serving");
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	// The scan's records only: the mark adds its own declared one.
+	const seen = db
+		.prepare<[number], { session_id: string; project_id: string }>(
+			"SELECT session_id, project_id FROM events WHERE type = 'evidence.server_seen' AND json_extract(data, '$.source') = 'detected' AND json_extract(data, '$.server.pid') = ? ORDER BY sequence",
+		)
+		.all(live.pid);
+	db.close();
+	const result = { seen, mark, doomedExit };
+	mkdirSync(ARTIFACT_DIR, { recursive: true });
+	writeFileSync(
+		`${ARTIFACT_DIR}/server-cold-project.json`,
+		JSON.stringify({ cold, neighbour, liveId, settledId, ...result }, null, 2),
+	);
+	expect(result).toEqual({
+		seen: [{ session_id: liveId, project_id: cold }],
+		mark: expect.objectContaining({
+			code: 0,
+			stdout: expect.stringContaining(`Marked port ${live.port} as serving`),
+		}),
+		// 143 is SIGTERM.
+		doomedExit: 143,
+	});
+});
+
 it("with two projects loaded, each project's session marks its server, an unmarked server one project's session declared or its OpenCode shell started is refused to the other's, and removing one project leaves the other's marks working", async () => {
 	harness = ProcessHarness.create({ logLevel: "warn" });
 	// A hold no test outlives: a marker-attributed server is never recorded by a scan here.
@@ -1070,9 +1127,21 @@ it("with two projects loaded, each project's session marks its server, an unmark
 		})),
 		removed: await Effect.runPromise(
 			first.rpc.RemoveProject({ slug: savedSlug }),
-		).then(() =>
-			cliMark(configDir, firstId, String(firstServer.port), "--serving"),
-		),
+		).then(async () => ({
+			other: await cliMark(
+				configDir,
+				firstId,
+				String(firstServer.port),
+				"--serving",
+			),
+			// The removed project's work is gone with it: its session marks nothing.
+			own: await cliMark(
+				configDir,
+				secondId,
+				String(secondServer.port),
+				"--serving",
+			),
+		})),
 	};
 	mkdirSync(ARTIFACT_DIR, { recursive: true });
 	writeFileSync(
@@ -1114,11 +1183,19 @@ it("with two projects loaded, each project's session marks its server, an unmark
 			owner: expect.objectContaining({ code: 0 }),
 			evidence: [{ session: "first", source: "declared" }],
 		},
-		removed: expect.objectContaining({
-			code: 0,
-			stdout: expect.stringContaining(
-				`Marked port ${firstServer.port} as serving`,
-			),
-		}),
+		removed: {
+			other: expect.objectContaining({
+				code: 0,
+				stdout: expect.stringContaining(
+					`Marked port ${firstServer.port} as serving`,
+				),
+			}),
+			own: expect.objectContaining({
+				code: 1,
+				stderr: expect.stringContaining(
+					"This shell is not inside a Conduit session",
+				),
+			}),
+		},
 	});
 });

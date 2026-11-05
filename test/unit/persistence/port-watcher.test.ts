@@ -79,12 +79,16 @@ import {
 } from "../../../src/lib/domain/daemon/Services/session-activity.js";
 import {
 	makePortWatcherLive,
-	portWatcherKnown,
+	PortWatcher,
 } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import {
 	type CommitAndSignal,
 	makeCommitAndSignal,
 } from "../../../src/lib/persistence/effect/commit-and-signal.js";
+import {
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
+} from "../../../src/lib/persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	type PersistenceEffectContext,
@@ -321,7 +325,11 @@ const open = <A, E>(
 	file: string,
 	body: (
 		commit: CommitAndSignal,
-	) => Effect.Effect<A, E, PersistenceEffectContext | SessionActivityTag>,
+	) => Effect.Effect<
+		A,
+		E,
+		PersistenceEffectContext | SessionActivityTag | PortWatcher
+	>,
 	[intervalMs, holdMs] = [INTERVAL_MS, HOLD_MS],
 ) =>
 	Effect.scoped(
@@ -341,8 +349,20 @@ const open = <A, E>(
 						),
 				]),
 			);
-			yield* Layer.build(makePortWatcherLive(() => undefined));
-			return yield* body(commit);
+			const watcher = yield* Layer.build(
+				makePortWatcherLive(
+					() => undefined,
+					Effect.succeed(["test-project"]),
+				).pipe(
+					Layer.provide(
+						Layer.effect(
+							UnboundEventStoreEffectTag,
+							makeUnboundEventStoreEffect,
+						),
+					),
+				),
+			);
+			return yield* body(commit).pipe(Effect.provideContext(watcher));
 		}),
 	).pipe(
 		Effect.provide(
@@ -1016,11 +1036,10 @@ describe.each(["lsof", "proc"] as const)("PortWatcher over %s", (mode) => {
 					showListeners(fake, [[600, "*:3000"]]);
 					return yield* open(file, () =>
 						Effect.gen(function* () {
-							const sql = yield* SqlClient.SqlClient;
-							const known = portWatcherKnown.get(sql)?.get("test-project");
-							const before = known?.();
+							const { known } = yield* PortWatcher;
+							const before = known();
 							const events = yield* eventsUntil(3);
-							yield* until(() => known?.() === true);
+							yield* until(() => known() === true);
 							yield* scans(fake, 2);
 							const activity = yield* SessionActivityTag;
 							return {
@@ -1059,12 +1078,10 @@ describe.each(["lsof", "proc"] as const)("PortWatcher over %s", (mode) => {
 				fake.breakHost();
 				return open(join(dir, "events.db"), () =>
 					Effect.gen(function* () {
-						const known = portWatcherKnown
-							.get(yield* SqlClient.SqlClient)
-							?.get("test-project");
-						const before = known?.();
+						const { known } = yield* PortWatcher;
+						const before = known();
 						const started = Date.now();
-						yield* until(() => known?.() === true);
+						yield* until(() => known() === true);
 						return { before, waited: Date.now() - started };
 					}),
 				);

@@ -1,6 +1,13 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	mkdirSync,
+	readdirSync,
+	realpathSync,
+	rmSync,
+	watch,
+	writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { Effect, Fiber, Queue, Stream } from "effect";
@@ -17,7 +24,8 @@ import {
 // asked reads Not captured, and the live view never learns it landed; 2 a
 // capture that fails after pending was shown stays pending, or reads Not
 // captured with no reason; 3 a daemon restart mid-capture leaves the turn
-// pending forever; 4 a packaging failure records nothing, or the next turn's
+// pending forever, reads Not captured, or lists files written after its run
+// ended (lane f02e9.20); 4 a packaging failure records nothing, or the next turn's
 // capture chains onto it or lists its files; 5 a capture queued behind an
 // earlier turn's reads Not captured or lands with the earlier files; 6 a
 // browser that reconnects while pending never follows the landing; 7 the
@@ -38,6 +46,18 @@ const git = (directory: string, ...args: string[]) =>
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "pipe"],
 	}).trim();
+
+/** Resolves once `done` holds, checked on each change in `directory`; the test's timeout bounds it. */
+const changed = (directory: string, done: () => boolean) =>
+	new Promise<void>((resolve) => {
+		const check = () => {
+			if (!done()) return;
+			watcher.close();
+			resolve();
+		};
+		const watcher = watch(directory, check).on("error", () => watcher.close());
+		check();
+	});
 
 /** A listing as the turn footer reads it. */
 const shape = (listing: SessionDiffListing) => ({
@@ -272,35 +292,94 @@ describe("Turn diff capture states through the built daemon", () => {
 		expect(thirdLanded.folders[0]?.folder).toBe(repo);
 	});
 
-	it("reads a capture the daemon restarted under as Not captured", async () => {
-		evidenceFile = "test-results/f02e9-17-abandoned.json";
-		const { fixture, store, lock, turn, list, runOf, capturedEvents } =
-			await start(3);
+	it("finishes the captures a daemon restart interrupted, with each turn's own files", async () => {
+		evidenceFile = "test-results/f02e9-20-restart.json";
+		const {
+			fixture,
+			repo,
+			store,
+			lock,
+			turn,
+			list,
+			follow,
+			runOf,
+			capturedEvents,
+		} = await start(3);
 		const first = await turn("first.txt");
 		expect(shape(await list(first))).toEqual({
 			folders: [[["first.txt", "added"]]],
 		});
 		git(store, "config", "core.filesRefLockTimeout", "-1");
 		writeFileSync(lock, "");
-		await turn("second.txt");
-		// Queued behind the held second capture, this one cannot land before
-		// two of git's deadlines pass, long after the restart.
+		// Held at the session ref: packed, not yet chained.
+		const second = await turn("second.txt");
+		// Queued behind the second capture, with its end checkpoint taken.
 		const third = await turn("third.txt");
 		const pending = await list(third);
 		evidence["pending"] = pending;
 		expect(shape(pending)).toEqual({ pending: true, folders: [] });
-		// The daemon dies mid-capture and comes back.
+		const timeline = join(fixture.configDir, "folder-timeline");
+		const repoStore = join(
+			timeline,
+			readdirSync(timeline).find((name) => name.endsWith(".git")) ?? "",
+		);
+		const thirdPins = `refs/conduit/runs/${runOf(third)}/`;
+		await changed(join(repoStore, thirdPins), () =>
+			git(
+				repoStore,
+				"for-each-ref",
+				"--format=%(contents:subject)",
+				thirdPins,
+			).includes('"end"'),
+		);
+
+		// The daemon dies mid-capture. Its held git outlives it and chains the
+		// second capture once the lock goes.
 		await fixture.kill();
+		rmSync(lock);
+		await changed(
+			join(store, "refs", "conduit"),
+			() => git(store, "rev-list", "--count", "refs/conduit/session") === "2",
+		);
+		// The user edits while the daemon is down.
+		writeFileSync(join(repo, "after-crash.txt"), "after\n");
 		await fixture.restart();
-		rmSync(lock, { force: true });
-		const abandoned = await list(third);
-		evidence["abandoned"] = abandoned;
-		expect(shape(abandoned)).toEqual({ notCaptured: true, folders: [] });
-		expect(abandoned.revision).not.toBe(pending.revision);
-		// Nothing recorded the abandoned capture, before the restart or after.
+
+		const viewer = await fixture.connect();
+		const landed = await Promise.all(
+			[second, third].map(async (turnId) => {
+				const feed = follow(viewer, turnId);
+				for (;;) {
+					const listing = await list(turnId, await feed.next());
+					if (!listing.pending) return listing;
+				}
+			}),
+		);
+		evidence["secondLanded"] = landed[0];
+		evidence["thirdLanded"] = landed[1];
+		expect(landed.map(shape)).toEqual([
+			{ folders: [[["second.txt", "added"]]] },
+			{ folders: [[["third.txt", "added"]]] },
+		]);
 		const runs = capturedEvents().map((event) => event.runId);
 		evidence["capturedRuns"] = runs;
-		expect(runs).not.toContain(runOf(third));
+		// Recovered captures queue on the session's store in no set order.
+		expect([...runs].sort()).toEqual(
+			[runOf(first), runOf(second), runOf(third)].sort(),
+		);
+		evidence["chainLength"] = git(
+			store,
+			"rev-list",
+			"--count",
+			"refs/conduit/session",
+		);
+		evidence["pinsAfter"] = git(
+			repoStore,
+			"for-each-ref",
+			"--format=%(refname)",
+			"refs/conduit/runs/",
+		);
+		expect(evidence["pinsAfter"]).toBe("");
 	});
 
 	it("records a gap when packaging a capture fails, and the next turn captures on its own", async () => {

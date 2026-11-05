@@ -139,7 +139,6 @@ export interface SessionCommandFacts {
 	readonly inputsQueued: boolean;
 	/** Limit Recovery: an open cut-off or a scheduled continuation. */
 	readonly limitRecovery: boolean;
-	readonly rewindPending: boolean;
 	/** A head move started and not moved (ADR-0014). */
 	readonly headMoving: boolean;
 }
@@ -161,16 +160,12 @@ export const admitSessionCommand = (
 			return undefined;
 		// A switch starts its continuation turn on the next account, so only a Run refuses it.
 		case "provider_switch":
-			if (facts.rewindPending) return "rewind_pending";
 			return facts.runActive && !request.policy ? "run_active" : undefined;
 		case "head_move":
 			if (facts.runActive) return "run_active";
 			if (facts.interactionPending) return "interaction_pending";
 			if (facts.inputsQueued) return "inputs_queued";
-			// A pending rewind already cut the limit's request off the head.
-			return facts.limitRecovery && !facts.rewindPending
-				? "limit_recovery"
-				: undefined;
+			return facts.limitRecovery ? "limit_recovery" : undefined;
 	}
 };
 
@@ -193,7 +188,6 @@ export const readSessionCommandFacts = (sessionId: string) =>
 			inputs_queued: number;
 			prompt_open: number;
 			limited: number | null;
-			rewind_pending: number | null;
 			head_moving: number;
 		}>`SELECT
 			EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId}
@@ -203,7 +197,6 @@ export const readSessionCommandFacts = (sessionId: string) =>
 			(SELECT json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
 				OR json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL
 				FROM sessions WHERE id = ${sessionId}) AS limited,
-			(SELECT pending_rewind_message_id IS NOT NULL FROM sessions WHERE id = ${sessionId}) AS rewind_pending,
 			${headMoveInProgress(sql, sessionId)} AS head_moving`;
 		return {
 			runActive: view?.active !== undefined,
@@ -215,7 +208,6 @@ export const readSessionCommandFacts = (sessionId: string) =>
 					false),
 			inputsQueued: row?.inputs_queued === 1,
 			limitRecovery: row?.limited === 1,
-			rewindPending: row?.rewind_pending === 1,
 			headMoving: row?.head_moving === 1,
 		} satisfies SessionCommandFacts;
 	});
@@ -244,10 +236,13 @@ type HeadMoveStart = EventPayloadMap["head.move_started"];
 export const startHeadMove = (
 	sessionId: string,
 	provider: string,
-	move: Omit<HeadMoveStart, "moveId">,
+	move: Omit<HeadMoveStart, "moveId"> & { readonly moveId?: string },
 ) =>
 	Effect.gen(function* () {
-		const started: HeadMoveStart = { moveId: randomUUID(), ...move };
+		const started: HeadMoveStart = {
+			...move,
+			moveId: move.moveId ?? randomUUID(),
+		};
 		yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
 			canonicalEvent("head.move_started", sessionId, started, { provider }),
 		);
@@ -263,47 +258,31 @@ export const finishHeadMove = (sessionId: string, move: HeadMoveStart) =>
 		const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
 		if (!row) return;
 		const sql = yield* SqlClient.SqlClient;
-		const pending = row.pending_rewind_message_id ?? null;
-		const target =
-			move.kind === "rewind" && move.messageId !== undefined
-				? (yield* sql<{ id: string }>`SELECT id FROM messages
-					WHERE session_id = ${sessionId} AND id = ${move.messageId}`)[0]?.id
-				: undefined;
-		const provider = { provider: row.provider };
-		const landed =
-			move.kind === "undo"
-				? pending === null
-					? []
-					: [
-							canonicalEvent(
-								"session.rewind_undone",
-								sessionId,
-								{ previousMessageId: pending },
-								provider,
-							),
-						]
-				: target === undefined || target === pending
-					? []
-					: [
-							canonicalEvent(
-								"session.rewound",
-								sessionId,
-								{ messageId: target, previousMessageId: pending },
-								provider,
-							),
-						];
-		yield* (yield* ClaudeEventPersistEffectTag).persistEvents([
-			...landed,
+		const [done] = yield* sql<{ n: number }>`SELECT 1 AS n FROM events
+			WHERE session_id = ${sessionId} AND type = 'head.moved'
+			AND json_extract(data, '$.moveId') = ${move.moveId} LIMIT 1`;
+		if (done) return;
+		// 82tn.51: the move names its target, and its moved alone moves the Head. A move journaled
+		// before targets existed has none, so it lands where the Head already is.
+		yield* (yield* ClaudeEventPersistEffectTag).persistEvent(
 			canonicalEvent(
 				"head.moved",
 				sessionId,
-				{ moveId: move.moveId },
-				provider,
+				"to" in move
+					? { moveId: move.moveId, to: move.to ?? null }
+					: { moveId: move.moveId },
+				{ provider: row.provider },
 			),
-		]);
+		);
 	});
 
-/** The project's moves started and never moved: a daemon died between the two (ADR-0014). */
+/** The resend a move admits after it lands: one input, whoever admits it (82tn.51). */
+export const resendInputId = (moveId: string) => `resend:${moveId}`;
+
+/**
+ * The project's moves a daemon died inside (ADR-0014): started and never moved, or a session's
+ * newest move landed with its resend not yet admitted (82tn.51).
+ */
 export const danglingHeadMoves = (projectId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -311,9 +290,16 @@ export const danglingHeadMoves = (projectId: string) =>
 			SELECT started.session_id, started.data FROM events started
 			JOIN sessions ON sessions.id = started.session_id
 			WHERE started.type = 'head.move_started' AND sessions.project_id = ${projectId}
-			AND NOT EXISTS (SELECT 1 FROM events moved
-				WHERE moved.session_id = started.session_id AND moved.type = 'head.moved'
-				AND json_extract(moved.data, '$.moveId') = json_extract(started.data, '$.moveId'))
+			AND (NOT EXISTS (SELECT 1 FROM events moved
+					WHERE moved.session_id = started.session_id AND moved.type = 'head.moved'
+					AND json_extract(moved.data, '$.moveId') = json_extract(started.data, '$.moveId'))
+				OR (json_type(started.data, '$.resend') IS NOT NULL
+					AND started.sequence = (SELECT MAX(sequence) FROM events
+						WHERE session_id = started.session_id AND type = 'head.move_started')
+					AND NOT EXISTS (SELECT 1 FROM pending_inputs
+						WHERE input_id = 'resend:' || json_extract(started.data, '$.moveId'))
+					AND NOT EXISTS (SELECT 1 FROM messages
+						WHERE input_id = 'resend:' || json_extract(started.data, '$.moveId'))))
 			ORDER BY started.sequence`;
 		return rows.map((row) => ({
 			sessionId: row.session_id,
@@ -1372,7 +1358,6 @@ const forkSessionInWorkspace = (
 				thread &&
 				thread.firstSequence <= forkPointSequence &&
 				forkPointSequence <= thread.deliveredThrough &&
-				parent.pending_rewind_message_id == null &&
 				lastRewindCommitSequence <= thread.deliveredThrough
 					? thread
 					: undefined;

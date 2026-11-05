@@ -13,6 +13,7 @@ import {
 	makeSessionActivity,
 	SessionActivityTag,
 } from "../../src/lib/domain/daemon/Services/session-activity.js";
+import { PortWatcher } from "../../src/lib/domain/persistence/Services/port-watcher.js";
 import { ConfigTag } from "../../src/lib/domain/relay/Services/services.js";
 import {
 	PersistenceStore,
@@ -56,6 +57,10 @@ export function makeTestProviderAdaptersLayer(
 	}).pipe(
 		Layer.provideMerge(
 			Layer.mergeAll(
+				Layer.succeed(PortWatcher)({
+					mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+					known: () => true,
+				}),
 				Layer.effect(
 					CursorAccountResources,
 					Effect.gen(function* () {

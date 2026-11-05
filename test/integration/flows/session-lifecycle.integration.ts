@@ -5,12 +5,12 @@ import { Option, Stream } from "effect";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Session Lifecycle", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeAll(async () => {
 		__setProbeOverrideForTesting(async () => ({
@@ -18,7 +18,7 @@ describe("Integration: Session Lifecycle", () => {
 			commands: [],
 			agents: [],
 		}));
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {

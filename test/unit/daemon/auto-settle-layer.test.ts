@@ -32,6 +32,7 @@ import {
 	SessionGit,
 	type SessionGitChange,
 } from "../../../src/lib/domain/daemon/Services/session-git.js";
+import { PortWatcher } from "../../../src/lib/domain/persistence/Services/port-watcher.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
@@ -53,6 +54,12 @@ function fakeRelay(
 	};
 }
 
+// The watcher has scanned, so nothing waits on its readiness.
+const knownWatcher = Layer.succeed(PortWatcher)({
+	mark: () => Effect.succeed({ kind: "unclaimed" } as const),
+	known: () => true,
+});
+
 describe("daemon automatic settlement layer", () => {
 	it.effect(
 		"skips missing projects on every sweep and logs once at debug level",
@@ -67,6 +74,7 @@ describe("daemon automatic settlement layer", () => {
 					logs.push({ level: logLevel.toUpperCase(), message });
 				});
 				const layer = AutoSettleLive().pipe(
+					Layer.provide(knownWatcher),
 					Layer.provide(
 						makeDaemonSharedStoreLayer(directory, defaultDaemonConfig()),
 					),
@@ -159,6 +167,7 @@ describe("daemon automatic settlement layer", () => {
 					),
 				);
 				const layer = AutoSettleLive().pipe(
+					Layer.provide(knownWatcher),
 					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
 					Layer.provideMerge(
 						Layer.mergeAll(
@@ -259,6 +268,7 @@ describe("daemon automatic settlement layer", () => {
 				const sweep = vi.fn(() => Effect.succeed(1));
 				const get = vi.fn(() => Effect.succeed(fakeRelay("cold", sweep)));
 				const layer = AutoSettleLive().pipe(
+					Layer.provide(knownWatcher),
 					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
 					Layer.provideMerge(
 						Layer.mergeAll(
@@ -307,6 +317,7 @@ describe("daemon automatic settlement layer", () => {
 					Effect.sync(() => rmSync(dir, { recursive: true, force: true })),
 				);
 				const layer = AutoSettleLive().pipe(
+					Layer.provide(knownWatcher),
 					Layer.provide(makeDaemonSharedStoreLayer(dir, defaultDaemonConfig())),
 					Layer.provideMerge(
 						Layer.mergeAll(

@@ -14,15 +14,15 @@ import {
 } from "vitest";
 import type { HistoryMessage } from "../../../src/lib/shared-types.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Tool lifecycle through pipeline", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {

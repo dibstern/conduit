@@ -5,9 +5,9 @@ import { Socket } from "effect/socket";
 import { describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { WsRpcGroup } from "../../../src/lib/contracts/ws-rpc.js";
-import { createRelayHarness } from "../helpers/relay-harness.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
-type Harness = Awaited<ReturnType<typeof createRelayHarness>>;
+type Harness = Awaited<ReturnType<typeof createDaemonProject>>;
 
 /** Replay through its synchronization boundary, including every removal. */
 const resume = async (harness: Harness, sessionId: string, cursor: number) => {
@@ -30,7 +30,7 @@ const resume = async (harness: Harness, sessionId: string, cursor: number) => {
 				}).pipe(
 					Effect.provide(RpcClient.layerProtocolSocket()),
 					Effect.provide(
-						Socket.layerWebSocket(`ws://127.0.0.1:${harness.relayPort}/rpc`),
+						Socket.layerWebSocket(`ws://127.0.0.1:${harness.port}/rpc`),
 					),
 					Effect.provide(Socket.layerWebSocketConstructorGlobal),
 					Effect.provide(RpcSerialization.layerJson),
@@ -45,7 +45,7 @@ const resume = async (harness: Harness, sessionId: string, cursor: number) => {
 
 describe("session detail removal over WebSocket", () => {
 	it("resumes after a rewind removal and pages without the removed message", async () => {
-		const harness = await createRelayHarness();
+		const harness = await createDaemonProject();
 		try {
 			const client = await harness.connectWsClient();
 			await client.waitForInitialState();
@@ -86,8 +86,9 @@ describe("session detail removal over WebSocket", () => {
 
 				// An unrelated commit can advance the replay's high-water mark.
 				await client.createSession("Unrelated activity");
+				// 82tn.51: a resume no longer re-sends a pending rewind row.
 				const replay = await resume(harness, sessionId, cursor.value);
-				expect(replay).toHaveLength(3);
+				expect(replay).toHaveLength(2);
 				expect(replay).toEqual(
 					expect.arrayContaining([
 						{
@@ -95,21 +96,9 @@ describe("session detail removal over WebSocket", () => {
 							id: "rewound-message",
 							sequence: removal.version,
 						},
-						{
-							_tag: "upsert",
-							item: { _tag: "rewind", messageId: null },
-							sequence: expect.any(Number),
-						},
 						{ _tag: "synchronized" },
 					]),
 				);
-				const rewind = replay.find(
-					(envelope) =>
-						envelope._tag === "upsert" && envelope.item._tag === "rewind",
-				);
-				expect(
-					rewind && "sequence" in rewind && rewind.sequence,
-				).toBeGreaterThanOrEqual(removal.version);
 				expect(replay.at(-1)).toEqual({ _tag: "synchronized" });
 				const page = await client.loadMoreHistory(sessionId);
 				expect(page.messages.map((message) => message.id)).not.toContain(
@@ -124,7 +113,7 @@ describe("session detail removal over WebSocket", () => {
 	}, 45_000);
 
 	it("resumes after a part removal with the removal and the message it moved", async () => {
-		const harness = await createRelayHarness();
+		const harness = await createDaemonProject();
 		try {
 			const client = await harness.connectWsClient();
 			await client.waitForInitialState();
@@ -181,9 +170,9 @@ describe("session detail removal over WebSocket", () => {
 					.get("removed-part") as { version: number };
 
 				// Only what moved: the part's removal and its message's header, not
-				// the part that stayed, then the held rows every resume re-sends.
+				// the part that stayed. 82tn.51: no pending rewind row follows.
 				const replay = await resume(harness, sessionId, cursor.value);
-				expect(replay).toHaveLength(4);
+				expect(replay).toHaveLength(3);
 				expect(replay).toEqual(
 					expect.arrayContaining([
 						{
@@ -199,21 +188,9 @@ describe("session detail removal over WebSocket", () => {
 							}),
 							sequence: removal.version,
 						}),
-						{
-							_tag: "upsert",
-							item: { _tag: "rewind", messageId: null },
-							sequence: expect.any(Number),
-						},
 						{ _tag: "synchronized" },
 					]),
 				);
-				const rewind = replay.find(
-					(envelope) =>
-						envelope._tag === "upsert" && envelope.item._tag === "rewind",
-				);
-				expect(
-					rewind && "sequence" in rewind && rewind.sequence,
-				).toBeGreaterThanOrEqual(removal.version);
 				expect(replay.at(-1)).toEqual({ _tag: "synchronized" });
 				const page = await client.loadMoreHistory(sessionId);
 				expect(

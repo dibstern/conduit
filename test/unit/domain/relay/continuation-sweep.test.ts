@@ -241,6 +241,7 @@ const withContinuationAdmission = <A, E, R>(effect: Effect.Effect<A, E, R>) => {
 	return effect.pipe(
 		Effect.provideService(SessionInboxTag, {
 			steerDeclined: () => Effect.void,
+			landHeadMove: () => Effect.void,
 			withSession: (_sessionId, admission) => permit.withPermits(1)(admission),
 			start: Effect.void,
 			submit: () => Effect.die("This fixture only dispatches continuations"),
@@ -752,82 +753,6 @@ it("a due continuation waits for the session admission lock before dispatch", as
 		).pipe(Effect.scoped),
 	);
 });
-
-for (const admission of ["user", "quota-reset"] as const) {
-	effectIt.effect(
-		`pending rewind allows ${admission} scheduling and blocks continuation dispatch`,
-		() =>
-			withResetInbox(
-				() =>
-					usageReading("claude", {
-						status: "limited",
-						windows: [
-							{
-								kind: "five_hour",
-								utilization: 100,
-								resetsAt: new Date(10_000).toISOString(),
-							},
-						],
-					}),
-				(fixture) =>
-					Effect.gen(function* () {
-						yield* TestClock.setTime(1_000);
-						yield* fixture.commit([
-							canonicalEvent("message.created", "s1", {
-								sessionId: "s1",
-								messageId: "cut",
-								role: "user",
-							}),
-							canonicalEvent("session.rewound", "s1", { messageId: "cut" }),
-						]);
-						const scheduled = yield* (
-							admission === "user"
-								? fixture.continuation
-										.requestContinuation("s1", {
-											instanceId: "claude",
-											expectedInstanceId: "claude",
-											reason: "user",
-											at: 10,
-										})
-										.pipe(
-											Effect.provideService(
-												ProviderTurnServiceTag,
-												fixture.turns,
-											),
-										)
-								: fixture.submit("q1")
-						).pipe(Effect.result);
-						expect(scheduled).toMatchObject({ _tag: "Success" });
-						expect(
-							(yield* fixture.read.listSessionInfos({
-								projectIds: ["test-project"],
-							}))[0]?.limitRecovery?.scheduledAt,
-						).toBe(10);
-						expect(
-							(yield* fixture.read.getSession("s1"))?.pending_rewind_message_id,
-						).toBe("cut");
-						expect(fixture.dispatches).toEqual([]);
-						const before = yield* fixture.store.readAllBySession("s1");
-						const immediate = yield* fixture.continuation
-							.requestContinuation("s1", {
-								instanceId: "claude",
-								expectedInstanceId: "claude",
-								reason: "user",
-							})
-							.pipe(
-								Effect.provideService(ProviderTurnServiceTag, fixture.turns),
-								Effect.result,
-							);
-						expect(immediate).toMatchObject({
-							_tag: "Failure",
-							failure: { _tag: "SessionBusy" },
-						});
-						expect(yield* fixture.store.readAllBySession("s1")).toEqual(before);
-						expect(fixture.dispatches).toEqual([]);
-					}),
-			),
-	);
-}
 
 for (const schedule of [
 	"none",
@@ -1345,7 +1270,6 @@ for (const scenario of [
 				Effect.gen(function* () {
 					const {
 						commit,
-						sql,
 						store,
 						read,
 						continuation: initial,

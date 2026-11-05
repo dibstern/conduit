@@ -255,14 +255,15 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 		return result.sessionId;
 	}
 
-	function persisted(fixture: ProcessHarness, id: string) {
+	/** 82tn.51: a rewind lands at once; Codex has it once a commit names the move. */
+	function rewindCommits(fixture: ProcessHarness, id: string) {
 		const db = new Database(fixture.daemonStorePath(), { readonly: true });
 		try {
 			return db
-				.prepare<[string], { pending_rewind_message_id: string | null }>(
-					"SELECT pending_rewind_message_id FROM sessions WHERE id = ?",
+				.prepare<[string], { n: number }>(
+					"SELECT count(*) AS n FROM events WHERE session_id = ? AND type = 'session.rewind_committed'",
 				)
-				.get(id);
+				.get(id)?.n;
 		} finally {
 			db.close();
 		}
@@ -915,13 +916,11 @@ describe("Codex native forks and conversation rewind through the daemon", () => 
 						},
 						{ timeout: TIMEOUT },
 					);
-					expect(persisted(fixture, id)?.pending_rewind_message_id).toBe(
-						target.id,
-					);
+					expect(rewindCommits(fixture, id)).toBe(0);
 					expect(requests("turn/start")).toHaveLength(3);
 				} else {
 					await browser.send(id, "Continue after rewind", TIMEOUT);
-					expect(persisted(fixture, id)?.pending_rewind_message_id).toBeNull();
+					expect(rewindCommits(fixture, id)).toBe(1);
 					expect(requests("thread/revert")).toEqual(
 						scenario === "undo"
 							? []

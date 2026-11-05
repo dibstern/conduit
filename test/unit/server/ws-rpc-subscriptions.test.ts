@@ -379,11 +379,11 @@ describe("subscription RPC handlers", () => {
 													text: "Hello",
 												}),
 											},
+											// 82tn.51: no pending cut row follows the messages.
 											{
 												_tag: "message",
 												message: expect.objectContaining({ id: "message-1" }),
 											},
-											{ _tag: "rewind", messageId: null },
 											{
 												_tag: "window",
 												window: {
@@ -451,8 +451,8 @@ describe("subscription RPC handlers", () => {
 							sequence: cursor,
 							rows: [
 								{ _tag: "part", part: { id: "part-1", text: "Hello" } },
+								// 82tn.51: no pending cut row follows the messages.
 								{ _tag: "message", message: { id: "message-1" } },
-								{ _tag: "rewind", messageId: null },
 								{
 									_tag: "window",
 									window: {
@@ -480,28 +480,14 @@ describe("subscription RPC handlers", () => {
 						});
 					}
 					const resumed = Array.from(
-						yield* subscribe(cursor).pipe(
-							Stream.take(member === "SubscribeShell" ? 3 : 4),
-							Stream.runCollect,
-						),
+						yield* subscribe(cursor).pipe(Stream.take(3), Stream.runCollect),
 					);
 					expect(resumed.at(-1)).toEqual({ _tag: "synchronized" });
-					// Both catch up from the cursor; the detail re-sends its held
-					// rows as they stand, since its checksum covers only the transcript.
+					// Both catch up from the cursor (82tn.51: the detail no longer
+					// re-sends a pending cut row after the transcript).
 					expect(
 						resumed.slice(member === "SubscribeShell" ? 1 : 0, -1),
-					).toMatchObject(
-						member === "SubscribeShell"
-							? expected
-							: [
-									...expected,
-									{
-										_tag: "upsert",
-										sequence: liveVersion,
-										item: { _tag: "rewind", messageId: null },
-									},
-								],
-					);
+					).toMatchObject(expected);
 				}).pipe(Effect.provide(makeLayer(), { local: true })),
 			{ timeout: 10000 },
 		);

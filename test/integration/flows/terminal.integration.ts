@@ -4,20 +4,22 @@
 // Verifies shell I/O, multi-client broadcast, close/cleanup, and edge cases.
 
 import { mkdirSync, writeFileSync } from "node:fs";
-import { Cause, Context, Effect, Exit, Option, Schema } from "effect";
+import { Cause, Effect, Exit, Option, Schema } from "effect";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { OpenCodePtySchema } from "../../../src/lib/contracts/providers/opencode-sdk.js";
 import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { PtyManagerTag } from "../../../src/lib/domain/relay/Services/services.js";
+import { SSEStreamTag } from "../../../src/lib/domain/relay/Services/sse-stream-service.js";
 import {
 	isPtyEvent,
 	type PtyEvent,
 } from "../../../src/lib/relay/opencode-events.js";
 import type { PtyInfo } from "../../../src/lib/shared-types.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import type {
 	ReceivedMessage,
 	TestWsClient,
@@ -57,7 +59,7 @@ function waitForOutput(client: TestWsClient, ptyId: string, text: string) {
 	});
 }
 
-async function connect(harness: RelayHarness): Promise<TestWsClient> {
+async function connect(harness: DaemonProject): Promise<TestWsClient> {
 	const client = await harness.connectWsClient();
 	await client.waitForInitialState();
 	await client.subscribePtys();
@@ -80,19 +82,19 @@ function waitForPty(
 	});
 }
 
-async function createExternalPty(harness: RelayHarness) {
+async function createExternalPty(harness: DaemonProject) {
 	return Schema.decodeUnknownSync(OpenCodePtySchema)(
-		await harness.stack.client.pty.create(),
+		await (await harness.run(OpenCodeAPITag)).pty.create(),
 	);
 }
 
-function signalDelivered(
-	harness: RelayHarness,
+async function signalDelivered(
+	harness: DaemonProject,
 	id: string,
 	type: PtyEvent["type"] = "pty.created",
 ) {
 	let delivered = 0;
-	harness.stack.sseStream.on("event", (event) => {
+	(await harness.run(SSEStreamTag)).on("event", (event) => {
 		if (
 			isPtyEvent(event) &&
 			event.type === type &&
@@ -105,7 +107,7 @@ function signalDelivered(
 	return () => delivered;
 }
 
-function signal(harness: RelayHarness, type: PtyEvent["type"], pty: PtyInfo) {
+function signal(harness: DaemonProject, type: PtyEvent["type"], pty: PtyInfo) {
 	harness.mock.injectSSEEvents([
 		{
 			type,
@@ -119,26 +121,21 @@ function signal(harness: RelayHarness, type: PtyEvent["type"], pty: PtyInfo) {
 	]);
 }
 
-const listCount = (harness: RelayHarness) =>
+const listCount = (harness: DaemonProject) =>
 	harness.mock.diagnostics.filter(({ event }) => event === "pty_list").length;
 
-async function relayServices(harness: RelayHarness) {
-	const context = harness.stack.rpcWsHandler.context;
-	if (!context) throw new Error("Relay RPC context is unavailable");
-	const services = await Effect.runPromise(context);
+async function relayServices(harness: DaemonProject) {
 	return {
-		manager: Option.getOrThrow(Context.getOption(services, PtyManagerTag)),
-		instances: Option.getOrThrow(
-			Context.getOption(services, OpenCodeInstancesTag),
-		),
+		manager: await harness.run(PtyManagerTag),
+		instances: await harness.run(OpenCodeInstancesTag),
 	};
 }
 
 describe("Integration: Terminal (PTY)", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {
@@ -146,7 +143,7 @@ describe("Integration: Terminal (PTY)", () => {
 	});
 
 	it("cancelled SubscribePtys cannot attach a phantom after an empty reconcile", async () => {
-		const isolated = await createRelayHarness();
+		const isolated = await createDaemonProject();
 		const { manager, instances } = await relayServices(isolated);
 		let release!: () => void;
 		const held = new Promise<void>((resolve) => {
@@ -179,7 +176,7 @@ describe("Integration: Terminal (PTY)", () => {
 		try {
 			await expect.poll(() => attaching.mock.calls.length).toBe(1);
 			await first.close();
-			await isolated.stack.client.pty.delete(pty.id);
+			await (await isolated.run(OpenCodeAPITag)).pty.delete(pty.id);
 			const next = second.listPtys();
 			// The old caller-owned path completes this empty read while its
 			// detached attachment is pending. The worker instead waits for it.
@@ -234,13 +231,13 @@ describe("Integration: Terminal (PTY)", () => {
 			await waitForOutput(client, removed.id, "$ ");
 			// Silent inventory changes model missed SSE events. Complete them
 			// before reconnect so its snapshot cannot precede the new PTY.
-			await harness.stack.client.pty.delete(removed.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(removed.id);
 			added = await createExternalPty(harness);
 			harness.mock.disconnectSseClients();
 			await waitForRemoved(client, removed.id);
 			await waitForPty(client, added.id, "running", added.title);
 		} finally {
-			await harness.stack.client.pty.delete(removed.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(removed.id);
 			if (added) await client.closePty(added.id);
 			await client.close();
 		}
@@ -269,7 +266,11 @@ describe("Integration: Terminal (PTY)", () => {
 			signal(harness, "pty.created", pty);
 			try {
 				await expect.poll(() => listCount(harness)).toBe(listsBefore + 1);
-				const delivered = signalDelivered(harness, info.id, "pty.updated");
+				const delivered = await signalDelivered(
+					harness,
+					info.id,
+					"pty.updated",
+				);
 				harness.mock.setPtyInfo({ ...info, title: "Renamed shell" });
 				harness.mock.injectSSEEvents(
 					Array.from({ length: 20 }, () => ({
@@ -313,7 +314,7 @@ describe("Integration: Terminal (PTY)", () => {
 			});
 			signal(harness, "pty.exited", pty);
 			await waitForPty(client, info.id, "exited", "Exited shell");
-			await harness.stack.client.pty.delete(info.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(info.id);
 			signal(harness, "pty.deleted", pty);
 			await waitForRemoved(client, info.id);
 			mkdirSync("test-results", { recursive: true });
@@ -323,7 +324,7 @@ describe("Integration: Terminal (PTY)", () => {
 			);
 		} finally {
 			harness.mock.rejectedPtyConnections.delete(pty.id);
-			await harness.stack.client.pty.delete(pty.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(pty.id);
 			await client.close();
 		}
 	}, 20_000);
@@ -335,7 +336,7 @@ describe("Integration: Terminal (PTY)", () => {
 		try {
 			signal(harness, "pty.created", deleted);
 			await waitForPty(client, deleted.id, "running", deleted.title);
-			await harness.stack.client.pty.delete(deleted.id); // No deleted SSE.
+			await (await harness.run(OpenCodeAPITag)).pty.delete(deleted.id); // No deleted SSE.
 			signal(harness, "pty.updated", survivor);
 			signal(harness, "pty.created", deleted);
 			await waitForRemoved(client, deleted.id);
@@ -344,7 +345,7 @@ describe("Integration: Terminal (PTY)", () => {
 				deleted.id,
 			);
 		} finally {
-			await harness.stack.client.pty.delete(deleted.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(deleted.id);
 			await client.closePty(survivor.id);
 			await client.close();
 		}
@@ -375,7 +376,7 @@ describe("Integration: Terminal (PTY)", () => {
 			await waitForPty(client, id, "running", local.title);
 			const restored = manager.getSession(id);
 			expect(restored?.source).toBe("local");
-			await harness.stack.client.pty.delete(id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(id);
 			for (const type of ["pty.updated", "pty.exited", "pty.deleted"] as const)
 				signal(harness, type, collision);
 			await client.ptyInput(id, "echo LOCAL_COLLISION_SURVIVED\n");
@@ -385,14 +386,14 @@ describe("Integration: Terminal (PTY)", () => {
 				(await client.listPtys()).ptys.find((pty) => pty.id === id),
 			).toEqual(local);
 		} finally {
-			await harness.stack.client.pty.delete(id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(id);
 			await client.closePty(id);
 			await client.close();
 		}
 	}, 20_000);
 
 	it("does not attach after relay stop while provider acquisition is pending", async () => {
-		const isolated = await createRelayHarness();
+		const isolated = await createDaemonProject();
 		await connect(isolated);
 		const { manager, instances } = await relayServices(isolated);
 		const pty = await createExternalPty(isolated);
@@ -422,7 +423,7 @@ describe("Integration: Terminal (PTY)", () => {
 					);
 				}),
 			);
-		const delivered = signalDelivered(isolated, pty.id);
+		const delivered = await signalDelivered(isolated, pty.id);
 		try {
 			signal(isolated, "pty.created", pty);
 			await expect.poll(delivered).toBe(1);
@@ -452,8 +453,8 @@ describe("Integration: Terminal (PTY)", () => {
 			.spyOn(instances, "useIfRunning")
 			.mockReturnValue(Effect.succeed(Option.none()));
 		const use = vi.spyOn(instances, "use");
-		const delivered = signalDelivered(harness, pty.id);
-		const deleted = signalDelivered(harness, cached.id, "pty.deleted");
+		const delivered = await signalDelivered(harness, pty.id);
+		const deleted = await signalDelivered(harness, cached.id, "pty.deleted");
 		const listsBefore = listCount(harness);
 		try {
 			signal(harness, "pty.created", pty);
@@ -468,8 +469,8 @@ describe("Integration: Terminal (PTY)", () => {
 		} finally {
 			use.mockRestore();
 			lease.mockRestore();
-			await harness.stack.client.pty.delete(pty.id);
-			await harness.stack.client.pty.delete(cached.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(pty.id);
+			await (await harness.run(OpenCodeAPITag)).pty.delete(cached.id);
 			manager.closeSession(cached.id);
 			await client.close();
 		}

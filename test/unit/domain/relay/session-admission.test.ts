@@ -19,7 +19,6 @@ const idle: SessionCommandFacts = {
 	interactionPending: false,
 	inputsQueued: false,
 	limitRecovery: false,
-	rewindPending: false,
 	headMoving: false,
 };
 
@@ -36,14 +35,9 @@ describe("admitSessionCommand", () => {
 		).toBe(reason);
 	});
 
-	it("admits a head move on an idle session, with only background work live, or over a pending rewind's own cut-off", () => {
+	// 82tn.51: a rewind lands at once, so no pending rewind admits a move over its cut-off.
+	it("admits a head move on an idle session", () => {
 		expect(admitSessionCommand({ kind: "head_move" }, idle)).toBeUndefined();
-		expect(
-			admitSessionCommand(
-				{ kind: "head_move" },
-				{ ...idle, rewindPending: true, limitRecovery: true },
-			),
-		).toBeUndefined();
 	});
 
 	it("refuses a head move in progress before any other reason", () => {
@@ -73,7 +67,8 @@ describe("admitSessionCommand", () => {
 		).toBe("head_move_in_progress");
 	});
 
-	it("refuses a user's switch during a Run, over a pending rewind or during a head move", () => {
+	// 82tn.51: no pending rewind is left to refuse a switch.
+	it("refuses a user's switch during a Run or during a head move", () => {
 		const user = { kind: "provider_switch", policy: false } as const;
 		expect(admitSessionCommand(user, idle)).toBeUndefined();
 		expect(
@@ -87,22 +82,16 @@ describe("admitSessionCommand", () => {
 		expect(admitSessionCommand(user, { ...idle, runActive: true })).toBe(
 			"run_active",
 		);
-		expect(admitSessionCommand(user, { ...idle, rewindPending: true })).toBe(
-			"rewind_pending",
-		);
 		expect(admitSessionCommand(user, { ...idle, headMoving: true })).toBe(
 			"head_move_in_progress",
 		);
 	});
 
-	it("lets the limit policy's continuation past a Run, not past a pending rewind or a head move", () => {
+	it("lets the limit policy's continuation past a Run, not past a head move (82tn.51)", () => {
 		const policy = { kind: "provider_switch", policy: true } as const;
 		expect(
 			admitSessionCommand(policy, { ...idle, runActive: true }),
 		).toBeUndefined();
-		expect(admitSessionCommand(policy, { ...idle, rewindPending: true })).toBe(
-			"rewind_pending",
-		);
 		expect(admitSessionCommand(policy, { ...idle, headMoving: true })).toBe(
 			"head_move_in_progress",
 		);

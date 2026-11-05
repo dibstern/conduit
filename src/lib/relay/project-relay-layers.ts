@@ -76,8 +76,7 @@ import { SessionManagerOwner } from "../domain/daemon/Services/session-manager-o
 import { makeUsage, Usage } from "../domain/daemon/Services/usage.js";
 import type { EventRetentionTag } from "../domain/persistence/Services/event-retention.js";
 import type { EventRetentionSchedulerTag } from "../domain/persistence/Services/event-retention-scheduler.js";
-import { makePortWatcherLive } from "../domain/persistence/Services/port-watcher.js";
-import { RunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
+import { makeRunLedgerSchedulerLive } from "../domain/persistence/Services/run-ledger-scheduler.js";
 import type { OpenCodeAPITag } from "../domain/provider/Services/opencode-api-service.js";
 import { makeMessagePollerManagerLive } from "../domain/relay/Layers/message-poller-manager-layer.js";
 import { makePtyRuntimeLive } from "../domain/relay/Layers/pty-manager-layer.js";
@@ -188,7 +187,11 @@ import { ToolContentServiceLive } from "../domain/relay/Services/tool-content-se
 import { realWorkspacePath } from "../git/worktrees.js";
 import type { CommitAndSignalProject } from "../persistence/effect/commit-and-signal.js";
 import type { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
-import { EventStoreError } from "../persistence/effect/event-store-effect.js";
+import {
+	EventStoreError,
+	makeUnboundEventStoreEffect,
+	UnboundEventStoreEffectTag,
+} from "../persistence/effect/event-store-effect.js";
 import {
 	makePersistenceEffectLayer,
 	makePersistenceProjectLayer,
@@ -205,7 +208,6 @@ import { ClaudeProviderInstance } from "../provider/claude/claude-provider-insta
 import { captureClaudeLaunchLogin } from "../provider/claude/claude-sdk-env.js";
 import { defaultClaudeSessionForkSdk } from "../provider/claude/claude-session-fork.js";
 import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js";
-import { readCodexSessionIdentity } from "../provider/codex/codex-session-store.js";
 import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
@@ -1111,16 +1113,19 @@ export function createProjectRelayLayers({
 		relayStateAndBridges,
 	);
 	const relayStateBridgesAndStatus = Layer.provideMerge(
-		Layer.mergeAll(
+		Layer.merge(
 			StatusPollerLive,
-			RunLedgerSchedulerLive,
-			makePortWatcherLive(
-				(sessionId) =>
-					readCodexSessionIdentity(
-						config.configDir ?? getConfigDir(),
-						sessionId,
-					)?.threadId,
-			),
+			// The daemon runs the one alarm scheduler; a standalone relay runs its own.
+			Option.isSome(sharedStore)
+				? Layer.empty
+				: makeRunLedgerSchedulerLive(Effect.succeed([config.slug])).pipe(
+						Layer.provide(
+							Layer.effect(
+								UnboundEventStoreEffectTag,
+								makeUnboundEventStoreEffect,
+							),
+						),
+					),
 		),
 		relayStateBridgesAndSessions,
 	);

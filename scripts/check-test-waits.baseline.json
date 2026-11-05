@@ -1261,7 +1261,7 @@
 		"timeout-override": 1
 	},
 	"test/integration/flows/session-rewind.integration.ts": {
-		"polling": 10,
+		"polling": 9,
 		"timeout-override": 2
 	},
 	"test/integration/flows/session-visibility-repro.integration.ts": {
@@ -1274,9 +1274,6 @@
 	"test/integration/flows/sse-to-ws-pipeline.integration.ts": {
 		"polling": 1,
 		"timeout-override": 6
-	},
-	"test/integration/flows/standalone-added-project-routing.integration.ts": {
-		"timeout-override": 1
 	},
 	"test/integration/flows/stop-resume-cohort.integration.ts": {
 		"polling": 9,

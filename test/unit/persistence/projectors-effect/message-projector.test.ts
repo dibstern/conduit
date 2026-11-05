@@ -225,60 +225,6 @@ describe("MessageProjector", () => {
 		).toEqual({ is_human_sent: 0 });
 	});
 
-	// The cut was written before "middle", so "middle" stays hidden whatever
-	// clock a later header gives the cut (conduit-test-lczrn.1).
-	it("keeps rewind visibility when a user header corrects the cut's clock", async () => {
-		for (const [messageId, createdAt] of [
-			["cut", 200],
-			["middle", 150],
-		] as const) {
-			await project(
-				makeStored(
-					"message.created",
-					"s1",
-					{ messageId, sessionId: "s1", role: "user", inputId: messageId },
-					1,
-					createdAt,
-				),
-			);
-			await project(
-				makeStored(
-					"text.delta",
-					"s1",
-					{ messageId, partId: `${messageId}-text`, text: "prompt" },
-					2,
-					createdAt,
-				),
-			);
-		}
-		await harness.query(
-			"UPDATE sessions SET pending_rewind_message_id = 'cut' WHERE id = 's1'",
-		);
-		const middle = () =>
-			harness.query(
-				"SELECT m.version, p.version AS part_version FROM messages m JOIN message_parts p ON p.message_id = m.id WHERE m.id = 'middle'",
-			);
-		const before = await middle();
-		const header = makeStored(
-			"message.created",
-			"s1",
-			{ messageId: "cut", sessionId: "s1", role: "user" },
-			3,
-			1000,
-		);
-		for (const providerCreatedAt of [100, 250]) {
-			await project({
-				...header,
-				eventId: createEventId(),
-				metadata: { providerCreatedAt },
-			});
-			expect(await middle()).toEqual(before);
-			expect(
-				(await harness.sessionMessagesWithParts("s1")).map(({ id }) => id),
-			).toEqual([]);
-		}
-	});
-
 	it("uses a late user header's provider clock and retracts a corrected clock", async () => {
 		await project(
 			makeStored(
@@ -664,8 +610,7 @@ describe("MessageProjector", () => {
 	it("has the correct name and handles list", async () => {
 		expect(projector.name).toBe("message");
 		expect(projector.handles).toEqual([
-			"session.rewound",
-			"session.rewind_undone",
+			"head.moved",
 			"session.rewind_committed",
 			"message.created",
 			"message.removed",

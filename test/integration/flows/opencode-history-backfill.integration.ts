@@ -1,4 +1,3 @@
-import { createTestRelayStack as createRelayStack } from "../../helpers/project-relay.js";
 // OpenCode history backfill (conduit-test-iea)
 // An OpenCode session Conduit first sights mid-conversation — started in the
 // TUI, or while the daemon was down — must still project its whole history:
@@ -8,7 +7,7 @@ import { createTestRelayStack as createRelayStack } from "../../helpers/project-
 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
@@ -17,11 +16,14 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
-import type { RelayStack } from "../../../src/lib/relay/relay-stack.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { MockOpenCodeServer } from "../../helpers/mock-opencode-server.js";
 import { TestWsClient } from "../helpers/test-ws-client.js";
 
@@ -259,7 +261,7 @@ function streamLiveAssistant(
 describe("Integration: OpenCode history backfill on first sighting", () => {
 	let mock: MockOpenCodeServer | undefined;
 	let namedMock: MockOpenCodeServer | undefined;
-	let stack: RelayStack | undefined;
+	let stack: DaemonProject | undefined;
 
 	afterEach(async () => {
 		await stack?.stop().catch(() => {});
@@ -273,31 +275,25 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	async function startStack(
 		server: MockOpenCodeServer,
 		dbPath: string,
-		configDir?: string,
-	): Promise<RelayStack> {
+	): Promise<DaemonProject> {
 		const connectsBefore = server.diagnostics.filter(
 			(entry) => entry.event === "sse_connect",
 		).length;
-		const started = await createRelayStack({
-			port: 0,
-			host: "127.0.0.1",
+		// The daemon keeps the project's store at <configDir>/events.db.
+		const started = await createDaemonProject("chat-simple", {
+			configDir: dirname(dbPath),
 			opencodeUrl: server.url,
-			projectDir: process.cwd(),
 			slug: "iea-backfill",
-			sessionTitle: "Backfill Test Session",
-			log: createSilentLogger(),
-			persistenceDbPath: dbPath,
-			...(configDir ? { configDir } : {}),
 		});
 		try {
 			// Startup only subscribes to instance events. A provider read opens
 			// the lazy OpenCode stream without creating or viewing a session.
-			await started.client.app.path();
+			await (await started.run(OpenCodeAPITag)).app.path();
 			await waitFor(
 				() =>
 					server.diagnostics.filter((entry) => entry.event === "sse_connect")
 						.length > connectsBefore,
-				"the relay's SSE connection",
+				"the daemon's SSE connection",
 			);
 			return started;
 		} catch (error) {
@@ -329,7 +325,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("backfills a successful summary as one completed compaction visible on reopen", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-compaction-rest-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -367,7 +363,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		});
 		await waitFor(() => historyComplete(dbPath), "summary backfill");
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.port}/rpc?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
@@ -400,7 +396,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("converges live completion, restart redelivery and REST backfill on one summary event", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-compaction-restart-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -439,7 +435,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		const first = await readCompactionEvents(dbPath);
 		await restartWithRest(mock, dbPath, [u1, { info: completed, parts: [] }]);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack?.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack?.port}/rpc?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
@@ -489,7 +485,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	])("does not clear context or backfill a completed notice for an unsuccessful summary (%s)", async (name) => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-compaction-error-rest-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -542,7 +538,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("reconciles new REST history after restart without an SSE event", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-stale-proof-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -559,7 +555,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 		stack = await startStack(mock, dbPath);
 		expect(await historyComplete(dbPath)).toBe(false);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.port}/rpc?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
@@ -607,8 +603,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 
 	it("resets a named instance's persisted proof and reconciles through that instance on open", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-iea-named-restart-"));
-		const dbPath = join(dir, "events.sqlite");
-		const configDir = join(dir, "config");
+		const dbPath = join(dir, "events.db");
 		const restPath = `/session/${SESSION_ID}/message`;
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -645,13 +640,13 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 					},
 				],
 			},
-			configDir,
+			dir,
 		);
 		mock.setExactResponse("GET", restPath, 200, [u1, a1]);
-		stack = await startStack(mock, dbPath, configDir);
+		stack = await startStack(mock, dbPath);
 		expect(await historyComplete(dbPath)).toBe(false);
 		const client = new TestWsClient(
-			`ws://127.0.0.1:${stack.getPort()}/rpc?p=iea-backfill&session=${SESSION_ID}`,
+			`ws://127.0.0.1:${stack.port}/rpc?p=iea-backfill&session=${SESSION_ID}`,
 		);
 		try {
 			await client.waitForOpen();
@@ -690,7 +685,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("reconciles a rebuilt completeness flag on the next session sighting", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-rebuild-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -728,7 +723,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("projects the full history, marked backfilled, idempotently across restarts", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-backfill-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -844,7 +839,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("retains live deltas during a REST outage and imports the recovered head", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-retry-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -906,7 +901,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("imports disjoint REST history while live messages remain", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-disjoint-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -943,7 +938,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("corrects a settled observed message from REST", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-repair-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1008,7 +1003,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("settles a stored streaming assistant from REST", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-settle-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1063,7 +1058,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("imports a settled head before a stored user and proves the ordered history", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-head-user-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1101,7 +1096,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	}) => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-head-assistant-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1162,7 +1157,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("reattaches a head assistant to its REST parent turn", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-owned-head-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1225,7 +1220,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("imports a head and an interior gap", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-head-gap-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1267,7 +1262,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("imports an interior REST user and repairs assistant ownership", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-turn-repair-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1356,7 +1351,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("imports an equal-time interior REST message", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-equal-time-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1427,7 +1422,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	] as const)("keeps history pending when a stored %s is absent from REST", async (removed) => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-rest-removal-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1484,7 +1479,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	] as const)("projects live %s removal without invalidating complete history", async (removed) => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-live-removal-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1520,7 +1515,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("keeps an absent unsettled REST assistant pending", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-unsettled-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1545,7 +1540,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("rechecks pending history after a live assistant completes without restart", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-pending-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1588,7 +1583,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("corrects a mismatched stored message without repeated REST fetches", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-mismatch-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1619,7 +1614,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("preserves a busy turn with no assistant during reconciliation", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-busy-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1679,7 +1674,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("preserves a resumed turn owned by its second streaming assistant", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-resumed-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1760,7 +1755,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("bounds REST retry attempts while an outage delivers a burst of events", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-backoff-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1795,7 +1790,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("serves backfilled messages after a live anchor despite provider clock skew", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-clock-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1842,7 +1837,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("orders clock-reversed snapshots by REST time and attaches by parentID", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-clock-turn-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1927,7 +1922,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("imports settled provider-ahead history while leaving the live assistant pending", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-ahead-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();
@@ -1955,7 +1950,7 @@ describe("Integration: OpenCode history backfill on first sighting", () => {
 	it("invalidates on an untranslated step part, then snapshots the REST correction once", async () => {
 		const dbPath = join(
 			mkdtempSync(join(tmpdir(), "conduit-iea-step-recheck-")),
-			"events.sqlite",
+			"events.db",
 		);
 		mock = new MockOpenCodeServer(loadOpenCodeRecording("chat-simple"));
 		await mock.start();

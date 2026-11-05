@@ -17,7 +17,7 @@ import {
 	EventStoreEffectTag,
 	type EventStoreError,
 } from "../../../persistence/effect/event-store-effect.js";
-import { readPendingRewindCommit } from "../../../persistence/effect/pending-rewind.js";
+import { readOwedRealignment } from "../../../persistence/effect/head-realignment.js";
 import type {
 	ProjectionRunnerEffectTag,
 	ProjectionRunnerError,
@@ -641,7 +641,20 @@ export const makeProviderRuntimeIngestionLive = (
 															SELECT 1 FROM messages
 															WHERE id = message_tombstones.message_id
 																AND version > message_tombstones.version)`;
-													if (removed) continue;
+													// 82tn.51: a head move removed the provider's cut when it landed;
+													// the provider's removal of it is the confirmation.
+													if (
+														removed &&
+														!(
+															event.type === "message.removed" &&
+															(yield* readOwedRealignment(
+																sql,
+																event.sessionId,
+																event.data.messageId,
+															))
+														)
+													)
+														continue;
 												}
 												if (
 													event.type === "session.created" &&
@@ -779,7 +792,7 @@ export const makeProviderRuntimeIngestionLive = (
 														yield* project(yield* appendEvents(pending));
 														pending = [];
 													}
-													const rewind = yield* readPendingRewindCommit(
+													const rewind = yield* readOwedRealignment(
 														sql,
 														event.sessionId,
 														event.data.messageId,

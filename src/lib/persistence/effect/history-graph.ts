@@ -3,7 +3,7 @@
  * session. `messages`, `message_parts` and `turns` hold exactly the head path, so their readers
  * never compute it; rows leaving the head path move to `history_off_head`, kept with their node.
  * Only projectors call this module: the Run Ledger arm builds a node at each Run end and moves
- * the Head to it, and the message projector moves the Head at a rewind, an undo and a commit.
+ * the Head to it, and the message projector moves it at a head move (82tn.51).
  */
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
@@ -64,21 +64,15 @@ export const joinHeadWhileIdle = (
 					WHERE session_id = ${sessionId} AND active_run_id IS NOT NULL)`;
 	});
 
-/**
- * The Head is the node of the newest tagged row on the head path: before `cutId` while a rewind
- * to it is pending, else the newest. A rewind to a node's first row (a steer snaps there) lands
- * on its parent, a cut at a reply stays on the reply's node, and an undo lands back where it was.
- */
-export const refreshHistoryHead = (sessionId: string, cutId: string | null) =>
+/** The Head is the node of the newest tagged row on the head path (82tn.51: no pending cut). */
+export const refreshHistoryHead = (sessionId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
 		yield* sql`INSERT INTO history_heads (session_id, node_id)
 			SELECT ${sessionId}, (
-				SELECT m.history_node_id FROM messages m
-				LEFT JOIN messages cut ON cut.id = ${cutId} AND cut.session_id = m.session_id
-				WHERE m.session_id = ${sessionId} AND m.history_node_id IS NOT NULL
-					AND (cut.id IS NULL OR (m.ordinal, m.created_at, m.id) < (cut.ordinal, cut.created_at, cut.id))
-				ORDER BY m.ordinal DESC, m.created_at DESC, m.id DESC LIMIT 1)
+				SELECT history_node_id FROM messages
+				WHERE session_id = ${sessionId} AND history_node_id IS NOT NULL
+				ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1)
 			WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})
 			ON CONFLICT (session_id) DO UPDATE SET node_id = excluded.node_id`;
 	});
@@ -117,4 +111,119 @@ export const keepOffHead = (sessionId: string, messageIds: readonly string[]) =>
 			WHERE m.session_id = ? AND m.id IN (SELECT value FROM json_each(?))`,
 			[sessionId, list],
 		);
+	});
+
+/** The nodes from `nodeId` up to the root, nearest first; empty for the root (null). */
+export const pathToRoot = (sessionId: string, nodeId: string | null) =>
+	Effect.gen(function* () {
+		if (nodeId === null) return [];
+		const sql = yield* SqlClient.SqlClient;
+		const rows = yield* sql<{ id: string }>`
+			WITH RECURSIVE path(id, depth) AS (
+				SELECT id, 0 FROM history_nodes WHERE session_id = ${sessionId} AND id = ${nodeId}
+				UNION ALL
+				SELECT n.parent_id, p.depth + 1 FROM history_nodes n JOIN path p ON n.id = p.id
+				WHERE n.session_id = ${sessionId} AND n.parent_id IS NOT NULL
+			)
+			SELECT id FROM path ORDER BY depth`;
+		return rows.map(({ id }) => id);
+	});
+
+export const readHead = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [row] = yield* sql<{ node_id: string | null }>`
+			SELECT node_id FROM history_heads WHERE session_id = ${sessionId}`;
+		return row?.node_id ?? null;
+	});
+
+/**
+ * 82tn.51: the Head moves to `to`. Returns the head-path rows of the nodes leaving the path, for
+ * the caller to keep off the Head and remove, and the nodes joining it, whose kept rows
+ * `restoreToHead` puts back. A row with no node (written before any Run ended) stays.
+ */
+export const headMoveDiff = (sessionId: string, to: string | null) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const from = new Set(
+			yield* pathToRoot(sessionId, yield* readHead(sessionId)),
+		);
+		const target = new Set(yield* pathToRoot(sessionId, to));
+		const leavingNodes = [...from].filter((id) => !target.has(id));
+		const joining = [...target].filter((id) => !from.has(id));
+		const leaving =
+			leavingNodes.length === 0
+				? []
+				: (yield* sql<{ id: string }>`SELECT id FROM messages
+					WHERE session_id = ${sessionId} AND history_node_id IN ${sql.in(leavingNodes)}
+					ORDER BY ordinal, created_at, id`).map(({ id }) => id);
+		return { leaving, joining };
+	});
+
+/** A kept row's columns back out of its JSON, over the table's columns now. */
+const fromRowJson = (table: "messages" | "message_parts") =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const columns = (yield* sql.unsafe<{ name: string }>(
+			`PRAGMA table_info(${table})`,
+		)).map(({ name }) => name);
+		return {
+			names: columns.map((name) => `"${name}"`).join(", "),
+			values: columns
+				.map((name) =>
+					name === "version" ? "?" : `json_extract(row_json, '$."${name}"')`,
+				)
+				.join(", "),
+		};
+	});
+
+/**
+ * Puts the kept rows of `nodeIds` back on the head path at `version`, so subscribers receive
+ * them again, and clears their tombstones. Returns the restored message ids.
+ */
+export const restoreToHead = (
+	sessionId: string,
+	nodeIds: readonly string[],
+	version: number,
+) =>
+	Effect.gen(function* () {
+		if (nodeIds.length === 0) return [];
+		const sql = yield* SqlClient.SqlClient;
+		const nodes = JSON.stringify(nodeIds);
+		const kept = (table: string) =>
+			`FROM history_off_head WHERE session_id = ? AND source_table = '${table}' AND row_json IS NOT NULL
+				AND node_id IN (SELECT value FROM json_each(?))`;
+		const restored = (yield* sql.unsafe<{ id: string }>(
+			`SELECT row_key AS id ${kept("messages")}`,
+			[sessionId, nodes],
+		)).map(({ id }) => id);
+		const message = yield* fromRowJson("messages");
+		const part = yield* fromRowJson("message_parts");
+		yield* sql.unsafe(
+			`INSERT OR IGNORE INTO messages (${message.names}) SELECT ${message.values} ${kept("messages")}`,
+			[version, sessionId, nodes],
+		);
+		yield* sql.unsafe(
+			`INSERT OR IGNORE INTO message_parts (${part.names}) SELECT ${part.values} ${kept("message_parts")}`,
+			[version, sessionId, nodes],
+		);
+		yield* sql.unsafe(
+			`DELETE FROM history_off_head WHERE session_id = ? AND node_id IN (SELECT value FROM json_each(?))`,
+			[sessionId, nodes],
+		);
+		if (restored.length > 0) {
+			yield* sql`DELETE FROM message_tombstones WHERE session_id = ${sessionId}
+				AND message_id IN ${sql.in(restored)}`;
+			yield* sql`DELETE FROM message_part_tombstones WHERE session_id = ${sessionId}
+				AND message_id IN ${sql.in(restored)}`;
+		}
+		return restored;
+	});
+
+export const setHead = (sessionId: string, nodeId: string | null) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		yield* sql`INSERT INTO history_heads (session_id, node_id)
+			SELECT ${sessionId}, ${nodeId} WHERE EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId})
+			ON CONFLICT (session_id) DO UPDATE SET node_id = excluded.node_id`;
 	});

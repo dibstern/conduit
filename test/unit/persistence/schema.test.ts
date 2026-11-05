@@ -59,6 +59,7 @@ describe("Schema Migration", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				for (const [filter, count] of [
 					["", 2],
@@ -138,6 +139,7 @@ describe("Schema Migration", () => {
 					[93, "drop_owned_run_ids"],
 					[94, "history_graph"],
 					[95, "sessions_diff_base"],
+					[96, "pending_rewind_to_head_move"],
 				]);
 				const sql = yield* SqlClient.SqlClient;
 				const plan = yield* sql<{ detail: string }>`

@@ -857,11 +857,19 @@ describe("Codex on the Run Ledger", () => {
 			sessionId: string | undefined;
 			endsBefore: number;
 		}[] = [];
-		let synchronized = false;
+		// The waits resolve on the feed's own envelopes, so the test's limit is their one deadline.
+		let opened = () => {};
+		let alerted = () => {};
+		const synchronized = new Promise<void>((resolve) => {
+			opened = resolve;
+		});
+		const firstDone = new Promise<void>((resolve) => {
+			alerted = resolve;
+		});
 		const alertFiber = Effect.runFork(
 			Stream.runForEach(watcher.rpc.SubscribeAlerts({}), (envelope) =>
 				Effect.sync(() => {
-					if (envelope._tag === "synchronized") synchronized = true;
+					if (envelope._tag === "synchronized") opened();
 					if (envelope._tag !== "alert") return;
 					alerts.push({
 						kind: envelope.kind,
@@ -869,27 +877,19 @@ describe("Codex on the Run Ledger", () => {
 						// How many Runs the store had ended when this alert arrived.
 						endsBefore: read(fixture, sessionId).ends.length,
 					});
+					if (envelope.kind === "done" && envelope.sessionId === sessionId)
+						alerted();
 				}),
 			),
 		);
 		// The feed is live-only, so it must be open before the wake can end.
-		// test-waits-allow polling: the feed reports it is open only through its first envelope.
-		await vi.waitFor(() => expect(synchronized).toBe(true), {
-			timeout: TIMEOUT,
-			interval: 50,
-		});
+		await synchronized;
 		writeFileSync(gatePath, String(Number.MAX_SAFE_INTEGER));
 		const done = () =>
 			alerts.filter(
 				(alert) => alert.kind === "done" && alert.sessionId === sessionId,
 			);
-		// test-waits-allow polling: the wake's done reaches the alerts feed after the wake ends.
-		await vi
-			.waitFor(() => expect(done()).not.toEqual([]), {
-				timeout: TIMEOUT,
-				interval: 100,
-			})
-			.catch(() => {});
+		await firstDone;
 		const ledger = read(fixture, sessionId);
 		await Effect.runPromise(Fiber.interrupt(alertFiber));
 		mkdirSync("test-results", { recursive: true });

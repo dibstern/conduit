@@ -1,0 +1,415 @@
+import { expect, type Page } from "@playwright/test";
+import type {
+	HeadLogEntry,
+	MoveIntent,
+} from "../../../src/lib/contracts/ws-rpc.js";
+import type { HistoryMessage } from "../../../src/lib/shared-types.js";
+import { PINNED_CLOCK_MS } from "../playwrightDriver.js";
+import type { StepHandler } from "../runtime.js";
+import {
+	openSessionRoute,
+	requireRelayControl,
+	requireRpcControl,
+} from "./shared.js";
+
+const sessionId = "sess-head-moves";
+const at = PINNED_CLOCK_MS - 600_000;
+
+/** What the mock server answers for this page's head moves. */
+type Scene = {
+	pruned: boolean;
+	image: boolean;
+	log: HeadLogEntry[];
+};
+const scenes = new WeakMap<Page, Scene>();
+const scene = (page: Page): Scene => {
+	const existing = scenes.get(page);
+	if (existing) return existing;
+	const fresh: Scene = {
+		pruned: false,
+		image: false,
+		log: [
+			{
+				moveId: "move-2",
+				kind: "rewind",
+				at: at + 60_000,
+				messageId: "hm-user-2",
+				resend: "Add a FAQ section",
+				landed: true,
+			},
+			{
+				moveId: "move-1",
+				kind: "rewind",
+				at,
+				messageId: "hm-user-2",
+				landed: true,
+			},
+		],
+	};
+	scenes.set(page, fresh);
+	return fresh;
+};
+
+const exchange = (
+	n: number,
+	prompt: string,
+	reply: string,
+	image: boolean,
+): HistoryMessage[] => [
+	{
+		id: `hm-user-${n}`,
+		role: "user",
+		time: { created: at + n * 10_000 },
+		parts: [
+			{ id: `hm-user-${n}-text`, type: "text", text: prompt },
+			...(image
+				? [
+						{
+							id: `hm-user-${n}-image`,
+							type: "file" as const,
+							mime: "image/png",
+							filename: "notes.png",
+							source: { url: "/missing-notes.png" },
+						},
+					]
+				: []),
+		],
+	},
+	{
+		id: `hm-reply-${n}`,
+		parentID: `hm-user-${n}`,
+		role: "assistant",
+		time: {
+			created: at + n * 10_000 + 1_000,
+			completed: at + n * 10_000 + 2_000,
+		},
+		parts: [{ id: `hm-reply-${n}-text`, type: "text", text: reply }],
+	},
+];
+
+const reply = (page: Page, n: number) =>
+	page.locator("#messages .msg-assistant").nth(n - 1);
+
+async function openMessageMenu(page: Page, n: number): Promise<void> {
+	const target = reply(page, n);
+	await target.hover();
+	await target.getByRole("button", { name: "More message actions" }).click();
+}
+
+async function expectMove(page: Page, intent: MoveIntent): Promise<void> {
+	const rpc = requireRpcControl(page);
+	const commit = await rpc.waitForRequest(
+		(request) => request.tag === "CommitHeadMove",
+	);
+	expect(commit.payload).toMatchObject({ sessionId, intent });
+	const preview = rpc
+		.getRequests()
+		.find((request) => request.tag === "PreviewHeadMove");
+	expect(preview?.payload).toMatchObject({ sessionId, intent });
+	// The commit carries the id the preview answered, which both devices share.
+	expect(commit.payload["moveId"]).toBe(`preview-${JSON.stringify(intent)}`);
+}
+
+const headLog = (page: Page) => page.getByTestId("head-log");
+const entry = (page: Page, text: string) =>
+	headLog(page).getByTestId("head-log-entry").filter({ hasText: text });
+
+export const headMovesHandlers: StepHandler[] = [
+	{
+		name: "a conversation that branched at its second message is open",
+		match: /^a branched conversation is open$/,
+		run: async ({ world }) => {
+			const page = world.page;
+			const state = scene(page);
+			const rpc = requireRpcControl(page);
+			const row = {
+				id: sessionId,
+				title: "Release notes",
+				accountId: "claude",
+				model: { provider: "claude", model: "claude-sonnet-4-5" },
+				status: "idle",
+				messageCount: 4,
+				updatedAt: PINNED_CLOCK_MS,
+			};
+			rpc.setStubs({
+				GetHeadLog: () => ({ entries: state.log }),
+				GetHeadBranches: () => ({
+					forks: [
+						{
+							messageId: "hm-user-2",
+							branches: [
+								{
+									tip: "node-migration",
+									text: "Add a migration section",
+									onHead: true,
+									available: true,
+								},
+								{
+									tip: "node-faq",
+									text: "Add a FAQ section",
+									onHead: false,
+									available: true,
+								},
+								{
+									tip: "node-changelog",
+									text: "Add a changelog",
+									onHead: false,
+									available: false,
+								},
+							],
+						},
+					],
+				}),
+				PreviewHeadMove: ({ intent }) => ({
+					moveId: `preview-${JSON.stringify(intent)}`,
+					files: state.pruned ? "pruned" : "available",
+				}),
+				CommitHeadMove: ({ intent, moveId }) => {
+					if (intent._tag === "undo")
+						state.log = [
+							{
+								moveId,
+								kind: "undo",
+								at: PINNED_CLOCK_MS,
+								undoes: intent.moveId,
+								landed: true,
+							},
+							...state.log,
+						];
+					return { moveId };
+				},
+			});
+			rpc.upsertShellRow(row);
+			rpc.setFamilyRows([row]);
+			requireRelayControl(page).sendMessage({
+				type: "mock_transcript_snapshot",
+				sessionId,
+				history: {
+					hasMore: false,
+					messages: [
+						...exchange(
+							1,
+							"Draft the release notes",
+							"Here is a first draft.",
+							state.image,
+						),
+						...exchange(
+							2,
+							"Add a migration section",
+							"Added a migration section.",
+							false,
+						),
+					],
+				},
+			});
+			await openSessionRoute(page, sessionId);
+			await expect(page.locator("#messages .msg-assistant")).toHaveCount(2);
+		},
+	},
+	{
+		name: "a move is still landing",
+		match: /^the newest head move is still landing$/,
+		run: ({ world }) => {
+			const state = scene(world.page);
+			state.log = [
+				{
+					moveId: "move-3",
+					kind: "switch",
+					at: PINNED_CLOCK_MS,
+					landed: false,
+				},
+				...state.log,
+			];
+		},
+	},
+	{
+		name: "the files at the targets were pruned",
+		match: /^the files at every move's target were pruned$/,
+		run: ({ world }) => {
+			scene(world.page).pruned = true;
+		},
+	},
+	{
+		name: "the first message carried an image",
+		match: /^the first message carried an image$/,
+		run: ({ world }) => {
+			scene(world.page).image = true;
+		},
+	},
+	{
+		name: "open the head log from a reply's message menu",
+		match: /^I open the head log from the first reply's message menu$/,
+		run: async ({ world }) => {
+			await openMessageMenu(world.page, 1);
+			await world.page
+				.getByRole("menuitem", { name: "Rewind and undo…" })
+				.click();
+			await expect(headLog(world.page)).toBeVisible();
+		},
+	},
+	{
+		name: "the head log lists entries newest first",
+		match: /^the head log lists (.+) then (.+)$/,
+		run: async ({ world, match }) => {
+			const entries = headLog(world.page).getByTestId("head-log-entry");
+			await expect(entries.nth(0)).toContainText(match[1] ?? "");
+			await expect(entries.nth(1)).toContainText(match[2] ?? "");
+		},
+	},
+	{
+		name: "undo a head log entry",
+		match: /^I undo the head log entry (.+)$/,
+		run: async ({ world, match }) => {
+			await entry(world.page, match[1] ?? "")
+				.getByRole("button", { name: "Undo" })
+				.click();
+		},
+	},
+	{
+		name: "an entry still landing cannot be undone",
+		match: /^the head log entry (.+) cannot be undone yet$/,
+		run: async ({ world, match }) => {
+			await expect(
+				entry(world.page, match[1] ?? "").getByRole("button", { name: "Undo" }),
+			).toBeDisabled();
+		},
+	},
+	{
+		name: "rewind from the head log",
+		match: /^I choose to rewind to a message from the head log$/,
+		run: async ({ world }) => {
+			await headLog(world.page)
+				.getByRole("button", { name: "Rewind to a message" })
+				.click();
+		},
+	},
+	{
+		name: "the head log is closed",
+		match: /^the head log is closed$/,
+		run: async ({ world }) => {
+			await expect(headLog(world.page)).toBeHidden();
+		},
+	},
+	{
+		name: "the rewind banner text",
+		match: /^the rewind banner reads (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(world.page.locator(".rewind-banner-text")).toHaveText(
+				match[1] ?? "",
+			);
+		},
+	},
+	{
+		name: "the branch switcher sits only on the branched message",
+		match: /^only the message (.+) carries a branch switcher reading (.+)$/,
+		run: async ({ world, match }) => {
+			const switchers = world.page.getByTestId("branch-switcher");
+			await expect(switchers).toHaveCount(1);
+			await expect(switchers).toHaveText(match[2] ?? "");
+			await expect(
+				world.page
+					.locator("#messages .msg-user")
+					.filter({ hasText: match[1] ?? "" })
+					.getByTestId("branch-switcher"),
+			).toHaveCount(1);
+		},
+	},
+	{
+		name: "open the branch switcher",
+		match: /^I open the branch switcher$/,
+		run: async ({ world }) => {
+			await world.page.getByTestId("branch-switcher").click();
+		},
+	},
+	{
+		name: "an unavailable branch cannot be picked",
+		match: /^the branch (.+) is unavailable and cannot be picked$/,
+		run: async ({ world, match }) => {
+			const item = world.page
+				.getByRole("menuitem")
+				.filter({ hasText: match[1] ?? "" });
+			await expect(item).toContainText("unavailable");
+			await expect(item).toHaveAttribute("aria-disabled", "true");
+		},
+	},
+	{
+		name: "pick a branch",
+		match: /^I pick the branch (.+)$/,
+		run: async ({ world, match }) => {
+			await world.page
+				.getByRole("menuitem")
+				.filter({ hasText: match[1] ?? "" })
+				.click();
+		},
+	},
+	{
+		name: "the conversation moves with an undo",
+		match: /^the conversation moves with undo of (.+)$/,
+		run: async ({ world, match }) => {
+			await expectMove(world.page, { _tag: "undo", moveId: match[1] ?? "" });
+		},
+	},
+	{
+		name: "the conversation moves with a switch",
+		match: /^the conversation moves with a switch to (.+)$/,
+		run: async ({ world, match }) => {
+			await expectMove(world.page, { _tag: "switch", nodeId: match[1] ?? "" });
+		},
+	},
+	{
+		name: "the conversation moves with a rewind and a resend",
+		match: /^the conversation moves with a rewind before (\S+) resending (.+)$/,
+		run: async ({ world, match }) => {
+			await expectMove(world.page, {
+				_tag: "rewind",
+				messageId: match[1] ?? "",
+				resend: match[2] ?? "",
+			});
+		},
+	},
+	{
+		name: "edit and resend a message",
+		match: /^I edit the message (.+) to (.+) and send it$/,
+		run: async ({ world, match }) => {
+			const message = world.page
+				.locator("#messages .msg-user")
+				.filter({ hasText: match[1] ?? "" });
+			await message.hover();
+			await message.getByRole("button", { name: "Edit message" }).click();
+			// The message's text becomes the edit box's value, so find the box, not the text.
+			const edit = world.page.getByTestId("user-message-edit");
+			await edit
+				.getByRole("textbox", { name: "Edit message" })
+				.fill(match[2] ?? "");
+			await edit.getByRole("button", { name: "Send" }).click();
+		},
+	},
+	{
+		name: "no plain send",
+		match: /^no message was sent outside the move$/,
+		run: async ({ world }) => {
+			const rpc = requireRpcControl(world.page);
+			await rpc.waitForRequest((request) => request.tag === "CommitHeadMove");
+			expect(
+				rpc.getRequests().filter((request) => request.tag === "input.submit"),
+			).toHaveLength(0);
+		},
+	},
+	{
+		name: "regenerate a reply",
+		match: /^I regenerate the reply from the message menu of reply (\d+)$/,
+		run: async ({ world, match }) => {
+			await openMessageMenu(world.page, Number(match[1]));
+			await world.page.getByRole("menuitem", { name: "Regenerate" }).click();
+		},
+	},
+	{
+		name: "a notice toast says",
+		match: /^a notice says (.+)$/,
+		run: async ({ world, match }) => {
+			await expect(
+				world.page.getByTestId("toast").filter({ hasText: match[1] ?? "" }),
+			).toBeVisible();
+		},
+	},
+];

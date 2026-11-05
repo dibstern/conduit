@@ -779,39 +779,6 @@ describe("readForkSource", () => {
 	);
 
 	it.effect(
-		"uses write order for pending rewind visibility (conduit-test-lczrn.1)",
-		() =>
-			Effect.gen(function* () {
-				yield* seed([
-					...["a", "b", "c"].map((messageId) =>
-						canonicalEvent(
-							"message.created",
-							"parent",
-							{ sessionId: "parent", messageId, role: "assistant" },
-							{ createdAt: 10 },
-						),
-					),
-					canonicalEvent("session.rewound", "parent", { messageId: "b" }),
-				]);
-				const pending = yield* readForkSource("parent", { sideThread: false });
-				expect(pending.retained).toEqual([
-					{ id: "a", role: "assistant", created_at: 10 },
-				]);
-				expect(pending.historyMessageId).toBe("a");
-				const hidden = yield* Effect.result(
-					readForkSource("parent", { messageId: "b", sideThread: false }),
-				);
-				expect(hidden._tag).toBe("Failure");
-				const sql = yield* SqlClient.SqlClient;
-				// A later clock on the cut does not move "c" ahead of it.
-				yield* sql`UPDATE messages SET created_at = 20 WHERE id = 'b'`;
-				const moved = yield* readForkSource("parent", { sideThread: false });
-				expect(moved.retained.map(({ id }) => id)).toEqual(["a"]);
-				expect(moved.historyMessageId).toBe("a");
-			}).pipe(Effect.provide(testLayer, { local: true })),
-	);
-
-	it.effect(
 		"picks and cuts fork points in write order (conduit-test-lczrn.1)",
 		() =>
 			Effect.gen(function* () {
@@ -866,16 +833,6 @@ describe("readForkSource", () => {
 				// A stored point whose row is gone falls back to time, then id.
 				yield* forkAt("legacy", "parent", "missing");
 				expect(yield* copied("legacy")).toEqual([]);
-
-				// A pending rewind at x leaves y as the last visible message.
-				yield* commit([
-					canonicalEvent("session.rewound", "parent", { messageId: "x" }),
-				]);
-				const rewound = yield* readForkSource("parent", {
-					sideThread: false,
-				});
-				expect(rewound.boundary.messageId).toBe("y");
-				expect(rewound.retained.map(({ id }) => id)).toEqual(["z", "y"]);
 			}).pipe(Effect.provide(testLayer, { local: true })),
 	);
 

@@ -7,7 +7,9 @@
      `createdAt` — conduit's timestamps come from the event store, never from
      text a hook prepended to the message body. A queued send never renders
      here: it waits in the pending-input tray until the adapter places it. A
-     steered message carries a "Steered" chip: it joined a running turn. -->
+     steered message carries a "Steered" chip: it joined a running turn.
+     Edit resends new text as a sibling branch (82tn.51); the message where the
+     conversation branched carries the branch switcher. -->
 
 <script lang="ts">
 	import { selection } from "../../stores/selection.svelte.js";
@@ -28,12 +30,21 @@
 	import UserAvatar from "../ui/UserAvatar.svelte";
 	import Button from "../ui/Button.svelte";
 	import AvatarPicker from "../overlays/AvatarPicker.svelte";
+	import Textarea from "../ui/Textarea.svelte";
+	import BranchSwitcher from "./BranchSwitcher.svelte";
+	import { type HeadFork, resendFrom } from "../../stores/head-moves.svelte.js";
 
 	let {
 		message,
 		onDismissCutOff,
+		sessionId,
+		fork,
 	}: {
 		message: UserMessage;
+		/** Present where the conversation's Head can move: edit and branch switch need it. */
+		sessionId?: string | undefined;
+		/** Present when the conversation branched at this message. */
+		fork?: HeadFork | undefined;
 		/** Present while a usage limit has left this message unanswered; the
 		 *  cut-off tag under the card calls it from its Dismiss link. */
 		onDismissCutOff?: (() => void) | undefined;
@@ -51,9 +62,18 @@
 		tokenizeSkills(extractDisplayText(message.text), commandNames),
 	);
 	const failedImages = new SvelteSet<string>();
+
+	let draft = $state<string>();
+	let sending = $state(false);
+
+	async function resend(sessionId: string, messageId: string, text: string): Promise<void> {
+		sending = true;
+		if (await resendFrom(sessionId, messageId, text)) draft = undefined;
+		sending = false;
+	}
 </script>
 
-<div class="msg-user mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid} data-message-id={message.messageId}>
+<div class="msg-user group mx-auto mb-[26px] grid max-w-[820px] grid-cols-[20px_minmax(0,1fr)] gap-x-[8px] px-[14px] md:grid-cols-[28px_minmax(0,1fr)] md:gap-x-[14px] md:px-[32px]" data-uuid={message.uuid} data-message-id={message.messageId}>
 	<AvatarPicker>
 		{#snippet trigger({ props })}<Button {...props} variant="ghost" hoverFill="none" size="content" touchTarget ariaLabel="Change your avatar" class="self-start h-[28px] rounded-full"><UserAvatar size={sessionViewState.compact ? 20 : 28} /></Button>{/snippet}
 	</AvatarPicker>
@@ -75,8 +95,21 @@
 					{sessionViewState.compact ? "Cut off" : "Cut off by usage limit"} · <TextButton tone="inherit" underline="always" touchTarget data-testid="cut-off-dismiss" onclick={onDismissCutOff}>Dismiss</TextButton>
 				</Badge>
 			{/if}
+			{#if fork && sessionId}<BranchSwitcher {fork} {sessionId} />{/if}
+			{#if sessionId && message.messageId && message.text && draft === undefined}
+				<Button variant="ghost" size="content" tone="dimmer" iconOnly icon="pencil" iconSize={14} touchTarget class="ml-auto size-[26px] self-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100" title="Edit message" ariaLabel="Edit message" onclick={() => { draft = extractDisplayText(message.text); }} />
+			{/if}
 		</div>
-		{#if message.text}
+		{#if draft !== undefined && sessionId && message.messageId}
+			{@const messageId = message.messageId}
+			<div data-testid="user-message-edit" class="flex flex-col gap-[8px] max-md:col-span-2">
+				<Textarea bind:value={draft} aria-label="Edit message" rows={3} />
+				<div class="flex justify-end gap-[8px]">
+					<Button variant="ghost" size="sm" onclick={() => { draft = undefined; }}>Cancel</Button>
+					<Button variant="primary" size="sm" disabled={sending || !draft.trim()} onclick={() => draft && resend(sessionId, messageId, draft.trim())}>Send</Button>
+				</div>
+			</div>
+		{:else if message.text}
 			<div class="break-words whitespace-pre-wrap text-[15px] leading-[1.65] text-text max-md:col-span-2">
 				{#each segments as seg (seg.key)}{#if seg.kind === "skill"}<span class="skill-pill">{builtinNames.has(seg.text.slice(1)) ? `$${seg.text.slice(1)}` : seg.text}</span>{:else}{seg.text}{/if}{/each}
 			</div>

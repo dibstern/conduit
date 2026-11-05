@@ -8,17 +8,17 @@
  * its own state is the hold candidates and first-scan readiness, in memory. A failed scan records
  * nothing. SessionActivity reads the Servers each write leaves from the Run Ledger's hand-over.
  *
- * Gap (CONTRACT.md 2976): "One PortWatcher per daemon". Servers live in each project's own store,
- * so this runs once per project relay, each recording only its own store's sessions.
+ * One per daemon (CONTRACT.md 2976), over the shared store: it serves the sessions of registered
+ * projects, so a removed project's servers are neither recorded nor killed (82tn.14).
  */
 import { readdir, readFile, readlink } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { Clock, Config, Data, Effect, Layer } from "effect";
+import { Clock, Config, Context, Data, Effect, Layer } from "effect";
 import { SqlClient } from "effect/sql";
 import type { EventPayloadMap } from "../../../contracts/stored-event.js";
 import * as Failure from "../../../effect/failure-classification.js";
-import { makeCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
-import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
+import { makeUnboundCommitAndSignal } from "../../../persistence/effect/commit-and-signal.js";
+import { UnboundEventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import type {
@@ -52,46 +52,23 @@ export type MarkRequest = {
 	readonly role: "serving" | "awaited";
 } & ({ readonly pid: number } | { readonly sessionId: string });
 
-/** Not this store's caller, recorded, or refused with the reason the CLI prints. */
+/** Not a registered project's session, recorded, or refused with the reason the CLI prints. */
 export type MarkOutcome =
 	| { readonly kind: "unclaimed" }
 	| { readonly kind: "marked" }
 	| { readonly kind: "rejected"; readonly reason: string };
 
-// A daemon's projects share one SqlClient, so each registry holds a watcher per project id.
-
-/** Each project's mark (8.7 Declared), run through the watcher's own scan and write. */
-export const portWatcherMark = new WeakMap<
-	SqlClient.SqlClient,
-	Map<string, (request: MarkRequest) => Effect.Effect<MarkOutcome, unknown>>
->();
-
-/** Each project's readiness (8.7): true once a successful scan and one hold have passed. */
-export const portWatcherKnown = new WeakMap<
-	SqlClient.SqlClient,
-	Map<string, () => boolean>
->();
-
-/** Holds `value` as the project's entry until the watcher's scope closes. */
-const registerWatcher = <T>(
-	registry: WeakMap<SqlClient.SqlClient, Map<string, T>>,
-	sql: SqlClient.SqlClient,
-	projectId: string,
-	value: T,
-) =>
-	Effect.acquireRelease(
-		Effect.sync(() =>
-			registry.set(
-				sql,
-				(registry.get(sql) ?? new Map<string, T>()).set(projectId, value),
-			),
-		),
-		() =>
-			Effect.sync(() => {
-				if (registry.get(sql)?.get(projectId) === value)
-					registry.get(sql)?.delete(projectId);
-			}),
-	);
+export class PortWatcher extends Context.Service<
+	PortWatcher,
+	{
+		/** A mark (8.7 Declared), run through the watcher's own scan and write. */
+		readonly mark: (
+			request: MarkRequest,
+		) => Effect.Effect<MarkOutcome, unknown>;
+		/** Readiness (8.7): true once a successful scan and one hold have passed. */
+		readonly known: () => boolean;
+	}
+>()("PortWatcher") {}
 
 const keyOf = (key: ServerKey) => `${key.pid}:${key.startedAt}:${key.port}`;
 // 8.7 markers: Claude's carries the Conduit id; Codex's thread id and OpenCode's session id (stamped
@@ -482,16 +459,20 @@ const lsofFields = (stdout: string) =>
 
 /**
  * `codexThreadOf` reads the thread a session's Codex identity file holds: a locally created Codex
- * session binds no native id in SQL, and its provider is the account's id, not "codex".
+ * session binds no native id in SQL, and its provider is the account's id, not "codex". `projects`
+ * reads the registered project ids: only their sessions' servers are recorded, marked or killed.
  */
 export const makePortWatcherLive = (
 	codexThreadOf: (sessionId: string) => string | undefined,
+	projects: Effect.Effect<readonly string[]>,
 ) =>
-	Layer.effectDiscard(
+	Layer.effect(
+		PortWatcher,
 		Effect.gen(function* () {
 			const sql = yield* SqlClient.SqlClient;
-			const store = yield* EventStoreEffectTag;
-			const commit = yield* makeCommitAndSignal;
+			const store = yield* UnboundEventStoreEffectTag;
+			const commit = yield* makeUnboundCommitAndSignal;
+			const served = Effect.map(projects, (ids) => JSON.stringify(ids));
 			const subprocess = yield* Subprocess;
 			const intervalMs = yield* Config.Int(
 				"CONDUIT_PORT_WATCH_INTERVAL_MS",
@@ -515,7 +496,7 @@ export const makePortWatcherLive = (
 						// Scans are every interval; a stuck tool fails its scan, never the next one.
 						timeoutMs: Math.max(2000, intervalMs * 5),
 						priority: "background",
-						// Every project's watcher wakes on the same interval grid, so one scan serves all.
+						// A mark and a step on the same interval grid share one scan.
 						key: `port-watcher ${command} ${args.join(" ")}`,
 						maxBuffer: 16 * 1024 * 1024,
 						env: { ...process.env, LC_ALL: "C" },
@@ -962,18 +943,16 @@ export const makePortWatcherLive = (
 			const startedAt = yield* Clock.currentTimeMillis;
 			// Warn once per run of failures: a host without lsof fails every scan.
 			let failing = false;
-			yield* registerWatcher(
-				portWatcherKnown,
-				sql,
-				store.projectId,
-				() => known,
-			);
 
 			// A live server keeps its row Open (8.3) and was recorded by a server_seen, so those rows
 			// and the scan's markers name every session a scan or mark can change.
-			const sessionsWithServers = (ids: readonly string[]) =>
+			const sessionsWithServers = (
+				ids: readonly string[],
+				projectIds: string,
+			) =>
 				sql<{ id: string; provider: string }>`
-				SELECT id, provider FROM sessions WHERE project_id = ${store.projectId}
+				SELECT id, provider FROM sessions
+				WHERE project_id IN (SELECT value FROM json_each(${projectIds}))
 					AND (id IN (SELECT value FROM json_each(${JSON.stringify(ids)}))
 						OR id IN (SELECT l.session_id FROM run_ledger_sessions l WHERE l.state = 'Open'
 							AND EXISTS (SELECT 1 FROM events e WHERE e.session_id = l.session_id
@@ -981,8 +960,8 @@ export const makePortWatcherLive = (
 				ORDER BY id`;
 
 			// 8.7 Declared: rejected, recording nothing, when nothing listens on the port or the port
-			// belongs to another session; recorded at once, skipping the hold. A caller this store
-			// cannot resolve is left to the other projects' watchers.
+			// belongs to another session; recorded at once, skipping the hold. A caller that is no
+			// registered project's session is unclaimed.
 			const mark = (request: MarkRequest) =>
 				Effect.gen(function* () {
 					const { scanned, caller, target } = yield* scan(request);
@@ -996,7 +975,8 @@ export const makePortWatcherLive = (
 								OR archived_at IS NOT NULL
 								OR EXISTS (SELECT 1 FROM events WHERE session_id = sessions.id
 									AND type = 'session.deleted')) AS ended, provider
-								FROM sessions WHERE id = ${caller} AND project_id = ${store.projectId}`;
+								FROM sessions WHERE id = ${caller}
+									AND project_id IN (SELECT value FROM json_each(${yield* served}))`;
 					if (caller === undefined || owned === undefined)
 						return { kind: "unclaimed" } as const;
 					const rejected = (reason: string) =>
@@ -1060,9 +1040,6 @@ export const makePortWatcherLive = (
 						}),
 					);
 				});
-			yield* registerWatcher(portWatcherMark, sql, store.projectId, (request) =>
-				mark(request).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
-			);
 
 			const step = Effect.gen(function* () {
 				const { scanned, servers: listening } = yield* scan();
@@ -1080,6 +1057,7 @@ export const makePortWatcherLive = (
 						const events = [];
 						for (const session of yield* sessionsWithServers(
 							scanned.map((entry) => entry.sessionId),
+							yield* served,
 						)) {
 							const servers = (yield* loadLedgerView(session.id))?.servers;
 							const mine = scanned.filter(
@@ -1127,14 +1105,17 @@ export const makePortWatcherLive = (
 							yield* project(yield* store.appendBatch(events));
 					}),
 				);
-				// 8.7: ended sessions have no servers. Only this store's sessions count, so a marker
-				// this daemon cannot resolve is never read as ended; the hold does not apply.
+				// 8.7: ended sessions have no servers. Only registered projects' sessions count, so a
+				// marker this daemon cannot resolve is never read as ended; the hold does not apply.
+				const projectIds = yield* served;
 				const ended = yield* sql<{ id: string }>`
 				SELECT value AS id FROM json_each(${JSON.stringify(scanned.map((entry) => entry.sessionId))})
-					WHERE value IN (SELECT id FROM sessions WHERE project_id = ${store.projectId}
+					WHERE value IN (SELECT id FROM sessions
+							WHERE project_id IN (SELECT value FROM json_each(${projectIds}))
 							AND (settled_at IS NOT NULL OR archived_at IS NOT NULL))
 						OR EXISTS (SELECT 1 FROM events WHERE session_id = value
-							AND type = 'session.deleted' AND project_id = ${store.projectId})`;
+							AND type = 'session.deleted'
+							AND project_id IN (SELECT value FROM json_each(${projectIds})))`;
 				for (const { sessionId, server } of scanned) {
 					const key = keyOf(server);
 					if (stopping.has(key) || !ended.some((row) => row.id === sessionId))
@@ -1175,5 +1156,10 @@ export const makePortWatcherLive = (
 				),
 			);
 			yield* Effect.forkScoped(Effect.forever(step));
+			return {
+				mark: (request: MarkRequest) =>
+					mark(request).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+				known: () => known,
+			};
 		}),
 	);

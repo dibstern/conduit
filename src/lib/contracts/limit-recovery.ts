@@ -51,7 +51,8 @@ export const SessionRefusalSchema = Schema.Literals([
 	"interaction_pending",
 	"inputs_queued",
 	"limit_recovery",
-	"rewind_pending",
+	"head_move_stale",
+	"history_unavailable",
 ]);
 export type SessionRefusal = typeof SessionRefusalSchema.Type;
 
@@ -62,7 +63,9 @@ const refusalCopy: Record<SessionRefusal, string> = {
 	interaction_pending: "Answer the pending question or permission first.",
 	inputs_queued: "Send or remove the queued messages first.",
 	limit_recovery: "Resume or dismiss the usage-limit continuation first.",
-	rewind_pending: "Send a message or undo the rewind first.",
+	head_move_stale:
+		"The conversation changed since this was proposed. Review it again.",
+	history_unavailable: "That part of the conversation is no longer kept.",
 };
 
 export class SessionBusy extends Schema.TaggedError<SessionBusy>()(
