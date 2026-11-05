@@ -66,10 +66,10 @@ export type ProcessMark =
 	// The daemon's own send-continuation pause (process-session-runner.ts pauseSend).
 	| {
 			kind: "send-continuation-paused";
-			point: "before-hold" | "after-hold" | "after-release";
+			point: "before-hold" | "after-hold" | "after-release" | "before-gone";
 			sessionId: string;
-			runId: string;
-			commandId: string;
+			runId?: string;
+			commandId?: string;
 	  }
 	| {
 			kind: "startup-phase";
