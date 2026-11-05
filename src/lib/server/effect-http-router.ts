@@ -108,18 +108,6 @@ export class SetupInfoProvider extends Context.Service<
 	}
 >()("SetupInfoProvider") {}
 
-/** Standalone project API delegation provider — optional. */
-export class ProjectApiDelegateProvider extends Context.Service<
-	ProjectApiDelegateProvider,
-	{
-		readonly delegateApiRequest: (
-			slug: string,
-			subPath: string,
-			req: HttpServerRequest.HttpServerRequest,
-		) => Effect.Effect<HttpServerResponse.HttpServerResponse, Error>;
-	}
->()("ProjectApiDelegateProvider") {}
-
 function serializeProject(p: RouterProjectInfo): DashboardProjectResponse {
 	return {
 		slug: p.slug,
@@ -392,15 +380,6 @@ const projectRouteHandler = Effect.gen(function* () {
 		} satisfies ProjectStatusResponse);
 	}
 
-	// The standalone router can omit project API delegation.
-	const delegate = yield* Effect.serviceOption(ProjectApiDelegateProvider);
-	if (Option.isSome(delegate)) {
-		return yield* delegate.value.delegateApiRequest(
-			slug,
-			subPath.slice(4),
-			req,
-		);
-	}
 	return yield* jsonError(404, "NOT_FOUND", "Project API route not found");
 });
 
