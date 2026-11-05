@@ -14,7 +14,12 @@ import type {
 	TaskKey,
 	Unsolicited,
 } from "../../../../src/lib/provider/run-ledger/run-ledger-model.js";
-import { mainGateRefusal, openCodeLateTurn, pendingCases } from "./pending.js";
+import {
+	joinedSteerOutlived,
+	mainGateRefusal,
+	openCodeLateTurn,
+	pendingCases,
+} from "./pending.js";
 
 /** Numeric selectors remain useful after fast-check shrinks a trace. */
 export interface TraceAction {
@@ -336,6 +341,8 @@ export class FakeProvider {
 	private readonly retiredHolds = new Set<string>();
 	/** Runs whose own direct start main's gate refused at removal: D50 leaves them unchecked (pending.ts). */
 	private readonly mainGateRefused = new Set<string>();
+	/** Pended (pending.ts joinedSteerOutlived): steer Runs main joined into an open Run by run.started. */
+	private readonly joinedSteerRuns = new Set<string>();
 	private readonly terminals = new Map<string, RunEnded>();
 	private readonly seenEvents = new Set<string>();
 	private readonly processFacts = new Set<string>();
@@ -349,6 +356,8 @@ export class FakeProvider {
 	private readonly wakeLabels = new Set<string>();
 	/** 3.9 (CONTRACT.md 978-982): steers' own Runs that main's run.started started after their Run ended. */
 	private readonly hostStarted = new Set<string>();
+	/** Main event ids already read: a repeat is Accepted with no events (D60, CONTRACT.md 497-500). */
+	private readonly readMainEvents = new Set<string>();
 	private readonly executions: WakeExecution[] = [];
 	/** Sends the provider refused at delivery, with the refusal code (D34). */
 	private readonly refusedCommands = new Map<string, string>();
@@ -830,12 +839,12 @@ export class FakeProvider {
 					this.mainTransmissions.get(send.token)?.name.transmission ??
 					index + 1,
 			}));
-		return [...this.holdBindings].flatMap(([token, binding]) => {
-			const send = this.sends.get(token)?.send;
-			return binding.commandId === issue.commandId && send
-				? [{ send, transmission: binding.transmission }]
-				: [];
-		});
+		const found: { send: Send; transmission: number }[] = [];
+		for (const [token, { commandId, transmission }] of this.holdBindings) {
+			const send = commandId === issue.commandId && this.sends.get(token)?.send;
+			if (send) found.push({ send, transmission });
+		}
+		return found;
 	}
 	/** Older label (3.4, L1): its runner retired, or a querySeq below the latest. A send's own label is never older, so an Answer never is. */
 	private older(observation: Observation): boolean {
@@ -1813,6 +1822,8 @@ export class FakeProvider {
 		const observation = command.observation;
 		// D60: main's run events are this host's own acts, already applied when main wrote them.
 		if (observation.tag === "Main") {
+			if (this.readMainEvents.has(observation.eventId)) return;
+			this.readMainEvents.add(observation.eventId);
 			// 3.9 (CONTRACT.md 978-982): a steer its Run's end left pending is a Run of its own, and its
 			// host's run.started starts it, so it has reached (D50), whether main names the ended Run or the
 			// steer's own (REDESIGN-9's late steer).
@@ -1821,6 +1832,12 @@ export class FakeProvider {
 				this.terminals.has(this.steerParents.get(observation.inputId) ?? "")
 			)
 				this.hostStarted.add(observation.requestedRunId);
+			if (
+				observation.kind === "run_started" &&
+				observation.requestedRunId !== observation.runId &&
+				pendingCases.has(joinedSteerOutlived)
+			)
+				this.joinedSteerRuns.add(observation.requestedRunId);
 			// 3.8 GAP 5, 9: OpenCode's turn.error ends the turn and its query in one write, so main's error
 			// terminal is the native turn's end whichever of the pair folds first.
 			if (
@@ -2612,7 +2629,8 @@ export class FakeProvider {
 			before.active !== undefined &&
 			before.active.tag !== "Interrupting" &&
 			(before.active.tag === "Queued" || !this.reached(before.active.runId)) &&
-			!this.mainGateRefused.has(before.active.runId)
+			!this.mainGateRefused.has(before.active.runId) &&
+			!this.joinedSteerRuns.has(before.active.runId)
 				? before.active.runId
 				: undefined;
 		const truth = this.groundTruth();
@@ -3242,16 +3260,26 @@ export class FakeProvider {
 		action: TraceAction,
 	): Send | undefined {
 		const known = snapshot.issued.map((issued) => this.bound(issued));
+		const tokens = new Set(known.map(({ token }) => token));
+		// One read of an issue's bindings per step: bindingsFor scans every hold.
+		const bindings = new Map<MainIssue, readonly { readonly send: Send }[]>();
+		const bindingsOf = (issue: MainIssue) => {
+			const found = bindings.get(issue) ?? this.bindingsFor(issue);
+			bindings.set(issue, found);
+			return found;
+		};
 		for (const issued of snapshot.issued)
 			if (issued.tag === "Main")
-				for (const binding of this.bindingsFor(issued))
-					if (!known.some((send) => send.token === binding.send.token))
-						known.push(binding.send);
+				for (const { send } of bindingsOf(issued))
+					if (!tokens.has(send.token)) {
+						tokens.add(send.token);
+						known.push(send);
+					}
 		const live = new Set(
 			snapshot.view.live.flatMap((issued) =>
 				issued.tag === "Tokened"
 					? [issued.token]
-					: this.bindingsFor(issued).map(({ send }) => send.token),
+					: bindingsOf(issued).map(({ send }) => send.token),
 			),
 		);
 		const held = new Set(
@@ -4325,20 +4353,22 @@ export class FakeProvider {
 					if (!terminal) continue;
 					// 3.9 (CONTRACT.md 978-983): a joined steer the Run's end leaves unconsumed, not declined or failed,
 					// is a Run of its own and main's open Run; its run.started was read. Nearest reading at any end.
-					const outlived = this.joinedSteers.find(
-						(steer) =>
-							steer.parent === open.runId &&
-							[...this.sends.values()].some(
-								({ send, accepted, ended, notConsumed, transportRank }) =>
-									send.effect.kind === "steer" &&
-									send.effect.inputId === steer.inputId &&
-									send.effect.runId === steer.parent &&
-									!accepted &&
-									!ended &&
-									!notConsumed &&
-									transportRank !== 2,
-							),
-					);
+					// A steer main issued but nothing ever sent is unconsumed too, unless swept (3.4); case (d), 989-991.
+					const outlived = this.joinedSteers.find((steer) => {
+						if (steer.parent !== open.runId) return false;
+						const sent = [...this.sends.values()].filter(
+							({ send }) =>
+								send.effect.kind === "steer" &&
+								send.effect.inputId === steer.inputId &&
+								send.effect.runId === steer.parent,
+						);
+						return sent.length === 0
+							? !this.swept.has(`${steer.inputId}\u0000steer`)
+							: sent.some(
+									({ accepted, ended, notConsumed, transportRank }) =>
+										!accepted && !ended && !notConsumed && transportRank !== 2,
+								);
+					});
 					this.mainRun = outlived && {
 						runId: outlived.runId,
 						inputId: outlived.inputId,

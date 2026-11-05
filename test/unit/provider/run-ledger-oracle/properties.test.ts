@@ -1044,35 +1044,38 @@ const hostFactRun = (
 };
 
 describe.each(providers)("%s generated host facts (H1 to H3)", (provider) => {
-	it("never starts a second serving runner, reattaches a retired one or dispatches a covered send", ({
-		task,
-	}) => {
-		const shapes: Record<string, number> = {};
-		for (const seed of fixedSeeds) {
-			const violations = hostFactRun(provider, false, seed, shapes);
-			expect(violations.slice(0, 5), `seed ${seed}`).toEqual([]);
-		}
-		writeTraceArtifact(
-			`host-facts-${provider}`,
-			{ seeds: fixedSeeds, runs, maxCommands, shapes },
-			task.id,
-		);
-		// Sends issued with no serving process (L2): these kinds need ledger-issued sends.
-		for (const shape of [
-			"issued:start-pending",
-			"issued:steer-while-start-pending",
-			"issued:end_session-while-sends-pending",
-			...(provider === "opencode"
-				? []
-				: [
-						"run_dispatched:before-runner-start",
-						"run_dispatched:retired-runner",
-						"process_lost:dispatched-before-start",
-						"alarm:between-dispatch-and-start",
-					]),
-		])
-			expect(shapes[shape] ?? 0, shape).toBeGreaterThan(0);
-	});
+	// test-waits-allow timeout-override: eight seeds at about 0.2 ms a run alone; 2000 runs took 19 s beside a second loaded long-seed run, so the seed bound, which scales with runs.
+	it(
+		"never starts a second serving runner, reattaches a retired one or dispatches a covered send",
+		{ timeout: seedTimeout },
+		({ task }) => {
+			const shapes: Record<string, number> = {};
+			for (const seed of fixedSeeds) {
+				const violations = hostFactRun(provider, false, seed, shapes);
+				expect(violations.slice(0, 5), `seed ${seed}`).toEqual([]);
+			}
+			writeTraceArtifact(
+				`host-facts-${provider}`,
+				{ seeds: fixedSeeds, runs, maxCommands, shapes },
+				task.id,
+			);
+			// Sends issued with no serving process (L2): these kinds need ledger-issued sends.
+			for (const shape of [
+				"issued:start-pending",
+				"issued:steer-while-start-pending",
+				"issued:end_session-while-sends-pending",
+				...(provider === "opencode"
+					? []
+					: [
+							"run_dispatched:before-runner-start",
+							"run_dispatched:retired-runner",
+							"process_lost:dispatched-before-start",
+							"alarm:between-dispatch-and-start",
+						]),
+			])
+				expect(shapes[shape] ?? 0, shape).toBeGreaterThan(0);
+		},
+	);
 	it("produces another runner's start while one serves only in the explicit totality property (L1 totality)", () => {
 		const violations = hostFactRun(provider, true, fixedSeeds[0]);
 		expect(violations.some((v) => v.includes(": H1 "))).toBe(true);
@@ -2486,7 +2489,6 @@ describe("generated D34 coverage", () => {
 		"not_sent after a joined turn", // 3.6 Otherwise, 8.3
 		"long not_sent run", // 4.8 no cap for not_sent
 		"unlaunch", // 3.6
-		"not_sent start ended its Run", // 3.6 Otherwise, 8.3
 		"removal process_lost", // H4, 6.3
 		"Registering restart turn", // H4 Registering, 6.1 adopted runner
 		// Round 14: D49 unheld_outcome, 3.13 releases, D50 unlaunch and not yet delivered, Q28, D48 amended.
@@ -2555,6 +2557,10 @@ describe("generated D34 coverage", () => {
 	// 8.3 (oracle round 8 clarifications): older wake execution labels never end the Run.
 	it("generated older wake label Run-end evidence never ends the Run", () => {
 		expect(oracleCoverage.shapes["older wake label Run end"]).toBe(0);
+	});
+	// H4 as amended (CONTRACT.md 4008-4009, 4930): a not_sent try ends only its own work, never a Run.
+	it("generated not_sent start never ends its Run", () => {
+		expect(oracleCoverage.shapes["not_sent start ended its Run"]).toBe(0);
 	});
 });
 
