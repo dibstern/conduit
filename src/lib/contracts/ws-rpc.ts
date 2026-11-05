@@ -3201,6 +3201,28 @@ export const GetHeadBranches = Rpc.make("GetHeadBranches", {
 	error: WsRpcError,
 });
 
+/**
+ * How the next send continues from the Head (82tn.52): `current` when the provider already holds
+ * it; `native` resumes the provider's own session there; `catch_up` resumes it and hands it the
+ * turns it missed; `handoff` starts a fresh session from a recorded context handoff; `refused`
+ * when the provider cannot continue from there.
+ */
+export const ResumePlanSchema = Schema.Literals([
+	"current",
+	"native",
+	"catch_up",
+	"handoff",
+	"refused",
+]);
+export type ResumePlan = typeof ResumePlanSchema.Type;
+
+/** The next send's resume plan, shown in the composer before sending. */
+export const GetResumePlan = Rpc.make("GetResumePlan", {
+	payload: Schema.TaggedStruct("GetResumePlan", { sessionId: NonEmptyString }),
+	success: Schema.Struct({ plan: ResumePlanSchema }),
+	error: WsRpcError,
+});
+
 /** Whether the files at a head move's target are still kept, or were pruned. */
 export const GetHeadMoveFiles = Rpc.make("GetHeadMoveFiles", {
 	payload: Schema.TaggedStruct("GetHeadMoveFiles", {
@@ -3982,6 +4004,7 @@ const wsRpcRequests = [
 	CommitHeadMove,
 	GetHeadLog,
 	GetHeadBranches,
+	GetResumePlan,
 	SubmitInput,
 	CancelInput,
 	SendInputNow,

@@ -1,15 +1,17 @@
 import { createHash } from "node:crypto";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { SessionBusy } from "../../../contracts/limit-recovery.js";
 import type { InputRequest } from "../../../contracts/stored-event.js";
 import type { HeadLogEntry, MoveIntent } from "../../../contracts/ws-rpc.js";
+import { readResumePlan } from "../../../persistence/effect/head-realignment.js";
 import {
 	pathToRoot,
 	readHead,
 } from "../../../persistence/effect/history-graph.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
 import type { EventPayloadMap } from "../../../persistence/events.js";
+import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { headMoveFiles } from "../../daemon/Services/folder-timeline.js";
 import { InputDraftsTag } from "./input-drafts.js";
 import { LoggerTag } from "./services.js";
@@ -166,6 +168,29 @@ const planHeadMove = (sessionId: string, intent: MoveIntent) =>
 					? ("available" as const)
 					: yield* headMoveFiles(sessionId, filesAt),
 		};
+	});
+
+/** The next send's resume plan on the session's provider (82tn.52), at the Head or at `head`. */
+export const readSessionResumePlan = (
+	sessionId: string,
+	head?: string | null,
+) =>
+	Effect.gen(function* () {
+		const session = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+		if (!session) return "current" as const;
+		const account = yield* (yield* AccountDirectory)
+			.resolve({ _tag: "Id", id: session.provider })
+			.pipe(Effect.option);
+		return yield* readResumePlan(
+			yield* SqlClient.SqlClient,
+			sessionId,
+			session.provider,
+			Option.match(account, {
+				onNone: () => session.provider,
+				onSome: ({ driver }) => driver,
+			}),
+			head,
+		);
 	});
 
 /** A proposal for an intent: its id and whether the files there are kept (82tn.51). */

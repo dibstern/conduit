@@ -139,6 +139,14 @@ const switchFixture = async (
 				instanceId,
 				expectedInstanceId: from,
 			}),
+		/** 82tn.52: what the next send will do, as the composer shows it. */
+		plan: async () =>
+			(
+				await fixture.requestRpc({
+					_tag: "GetResumePlan",
+					sessionId,
+				})
+			).plan,
 		cursorPrompts: () =>
 			existsSync(cursorCapture)
 				? readFileSync(cursorCapture, "utf8")
@@ -199,10 +207,14 @@ it("round trips Claude, Cursor, Claude: Cursor gets a full handoff, Claude resum
 	const s = await switchFixture("round-trip");
 	await s.browser.send(s.sessionId, "ad4c-claude-one MARK-CLAUDE-1", 90_000);
 	const firstReceipt = s.receipt(s.claude);
+	// 82tn.52: the plan the composer shows before each send matches what the send then does.
+	const plans = [await s.plan()];
 
 	// Claude -> Cursor is a fresh full handoff.
 	await s.switchTo(s.cursor, s.claude);
+	plans.push(await s.plan());
 	await s.browser.send(s.sessionId, "ad4c-cursor-two MARK-CURSOR-2", 90_000);
+	plans.push(await s.plan());
 	const cursorPrompt = s.cursorPrompts().at(-1) ?? "";
 	evidence["cursorPrompts"] = s.cursorPrompts();
 	expect(cursorPrompt).toContain("[Conduit context handoff]");
@@ -212,7 +224,17 @@ it("round trips Claude, Cursor, Claude: Cursor gets a full handoff, Claude resum
 	// Cursor -> Claude resumes the old native thread and catches up only what
 	// came after its receipt.
 	await s.switchTo(s.claude, s.cursor);
+	plans.push(await s.plan());
 	await s.browser.send(s.sessionId, "ad4c-claude-three", 90_000);
+	plans.push(await s.plan());
+	evidence["plans"] = plans;
+	expect(plans).toEqual([
+		"current",
+		"handoff",
+		"current",
+		"catch_up",
+		"current",
+	]);
 	const back = s.claudeTurn("ad4c-claude-three");
 	evidence["claudeReturn"] = back;
 	expect(back?.resumeId).toBe(firstReceipt.resumeSessionId);
