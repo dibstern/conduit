@@ -341,6 +341,9 @@ export const DaemonOrchestrationLive = Layer.effect(
 						Effect.map((make) => make(sessionId, driver)),
 					),
 				persistUserMessage: persist.persistUserMessage,
+				...(adapters.claudeSessionForkSdk && {
+					claudeSessionForkSdk: adapters.claudeSessionForkSdk,
+				}),
 				...(Option.isSome(timeline)
 					? { runStarted: timeline.value.runStarted }
 					: {}),
