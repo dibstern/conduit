@@ -57,6 +57,7 @@ import {
 	makeRoutedWsRpcServerLayer,
 } from "../../../server/ws-rpc.js";
 import { makePortWatcherLive } from "../../persistence/Services/port-watcher.js";
+import { makeRunLedgerSchedulerLive } from "../../persistence/Services/run-ledger-scheduler.js";
 import { SessionWorkspaceLive } from "../../relay/Layers/session-workspace-layer.js";
 import { AlertsLive } from "../../relay/Services/alerts.js";
 import {
@@ -905,16 +906,22 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		Layer.provideMerge(withProjectContext),
 	);
 	// One PortWatcher per daemon (CONTRACT.md 8.7), serving every registered project's sessions.
+	// One watcher and one alarm scheduler per daemon, serving registered projects' sessions.
 	const withPortWatcher = Layer.unwrap(
 		Effect.gen(function* () {
 			const store = yield* PersistenceStore;
 			const registry = yield* ProjectRegistryTag;
-			return makePortWatcherLive(
-				(sessionId) => readCodexSessionIdentity(configDir, sessionId)?.threadId,
-				allProjects.pipe(
-					Effect.map((projects) => projects.map(({ slug }) => slug)),
-					Effect.provideService(ProjectRegistryTag, registry),
+			const served = allProjects.pipe(
+				Effect.map((projects) => projects.map(({ slug }) => slug)),
+				Effect.provideService(ProjectRegistryTag, registry),
+			);
+			return Layer.merge(
+				makePortWatcherLive(
+					(sessionId) =>
+						readCodexSessionIdentity(configDir, sessionId)?.threadId,
+					served,
 				),
+				makeRunLedgerSchedulerLive(served),
 			).pipe(
 				Layer.provide(
 					makePersistenceDaemonLayer().pipe(

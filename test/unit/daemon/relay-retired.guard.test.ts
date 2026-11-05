@@ -117,11 +117,18 @@ describe("per-project relay stays retired (82tn.16)", () => {
 	});
 
 	it("builds daemon-wide services once, in the daemon's layers", () => {
-		expect(tally(server, named(new Set(["makePortWatcherLive"])))).toEqual(
+		const services = new Set([
+			"makePortWatcherLive",
+			"makeRunLedgerSchedulerLive",
+		]);
+		expect(tally(server, named(services))).toEqual(
 			new Map([
 				["src/lib/domain/persistence/Services/port-watcher.ts", 1],
-				// Its import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 2],
+				["src/lib/domain/persistence/Services/run-ledger-scheduler.ts", 1],
+				// Each one's import and its one build.
+				[`${daemon}/Layers/daemon-layers.ts`, 4],
+				// relay: a standalone relay's own alarm scheduler.
+				[`${relay}/project-relay-layers.ts`, 2],
 			]),
 		);
 	});
