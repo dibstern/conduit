@@ -747,8 +747,17 @@ describe("OpenCode on the Run Ledger", () => {
 			]),
 		);
 		const recovered = read(fixture, sessionId);
-		// The next send starts a new process; its start retires the old id with the Run already ended.
-		await (await fixture.connect()).send(sessionId, "after the daemon restart");
+		// A fresh OpenCode sends nothing for a session until it is used, and a restarted daemon has no
+		// earlier process of its own to retire (gap, reported), so the test starts the new process and
+		// sends its first event, which reports its start and retires the old id with the Run ended.
+		const next = await fixture.connect();
+		await next.startInstance(instanceId);
+		await streaming(fixture, 1);
+		await idle(fixture, sessionId);
+		await until(() =>
+			expect(started(read(fixture, sessionId))).toHaveLength(2),
+		);
+		await next.send(sessionId, "after the daemon restart");
 
 		const after = read(fixture, sessionId);
 		const [, second] = started(after);
