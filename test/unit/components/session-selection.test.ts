@@ -389,8 +389,9 @@ describe("session selection at the browser RPC wire", () => {
 		if (moved) module.selection.open(other.id);
 		await settle(1);
 		const viewsBeforeReply = calls("ViewSession").length;
+		// The reply names the fork's project, which a fork into another project changes (m379.11).
 		pending.resolve({
-			projectSlug: "ignored-response-project",
+			projectSlug: "B",
 			sessionId: `fork-reply-${moved}`,
 			forkedFrom: parent.id,
 		});
@@ -400,7 +401,7 @@ describe("session selection at the browser RPC wire", () => {
 		);
 		expect(module.selection.shown).toEqual({
 			kind: "placed",
-			project: "A",
+			project: moved ? "A" : "B",
 			sessionId: moved ? other.id : `fork-reply-${moved}`,
 		});
 		if (moved) expect(calls("ViewSession")).toHaveLength(viewsBeforeReply);

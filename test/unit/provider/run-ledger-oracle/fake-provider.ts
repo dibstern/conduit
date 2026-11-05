@@ -261,6 +261,13 @@ export class FakeProvider {
 		readonly parent: string;
 		readonly issue: IssuedEffect;
 	}[] = [];
+	/** Steers a run.started joined to main's open run (3.9): one that run's end leaves unconsumed is main's next open Run. */
+	private readonly joinedSteers: {
+		readonly inputId: string;
+		readonly runId: string;
+		readonly parent: string;
+		readonly issue: IssuedEffect;
+	}[] = [];
 	/** Each input main last sent as a steer, to the Run it sent it into (3.9); every host reads main's issues. */
 	private readonly steerParents = new Map<string, string>();
 	/** Direct steers a retryable outcome answered (3.6, CONTRACT.md 692-698): main tries each again into its open parent. */
@@ -410,6 +417,8 @@ export class FakeProvider {
 	) => LedgerCommand | undefined)[] = [];
 	/** The time of the packet being drawn: a stop commit's retiredAt (6.5). */
 	private clock = 0;
+	/** The ledger's view at this step: main's writer places an input by its value (3.9). */
+	private ledgerView: LedgerView | undefined;
 	/** Gated holds: a phantom send with no transmission (4.4, 4.8). */
 	private readonly gatedHolds = new WeakMap<IssuedEffect, Send>();
 	/**
@@ -438,6 +447,8 @@ export class FakeProvider {
 	private readonly destroyed = new Set<SendToken>();
 	/** Sends each end commit found, by its commandId: its success covers only those (3.4 535-537). */
 	private readonly endScopes = new Map<string, ReadonlySet<string>>();
+	/** End controls admitted but not yet listed live: each waits on its confirm (3.4). */
+	private readonly endsAwaitingIssue = new Set<string>();
 	/** The removal macro's runner, whose process_lost precedes the gate (H4, 6.3). */
 	private removing:
 		| { readonly runner: string; readonly gate: ProjectGate }
@@ -1177,6 +1188,11 @@ export class FakeProvider {
 	}
 	/** The feeder reports `hold_exhausted` only for an unheld run, so never while a live runner still works one of its transmissions (4.3 steps 2-3). */
 	private heldElsewhere(commandId: string): boolean {
+		// 6.1, L2: a run dispatched to a runner not yet started is that runner's to work.
+		if (
+			[...this.spawnHeld.values()].some((held) => held.commandId === commandId)
+		)
+			return true;
 		return [...this.holdBindings].some(([token, binding]) => {
 			const native = this.sends.get(token);
 			return (
@@ -1640,16 +1656,43 @@ export class FakeProvider {
 			const at = this.mainInbox.findIndex(
 				(item) => item.inputId === command.inputId,
 			);
-			if (at < 0) this.mainInbox.push(entry);
-			else this.mainInbox[at] = entry;
+			// CONTRACT.md 5903-5904: a re-admit of an input main already sent adds nothing, so main
+			// never claims it again (3.9).
+			if (at >= 0) this.mainInbox[at] = entry;
+			else if (
+				![...this.sends.values()].some(
+					({ send }) =>
+						(send.effect.kind === "start" || send.effect.kind === "steer") &&
+						send.effect.inputId === command.inputId,
+				)
+			)
+				this.mainInbox.push(entry);
 		}
 		// 3.4 (CONTRACT.md 535-537): an end_session success covers the sends issued before its issue,
 		// which is its end commit.
 		// A control row main has not claimed has no send yet, so the scope also names each live one's
 		// commandId; its later claims are of that issue (3.4). A start or steer relaunch is a new issue (3.6).
-		if (command.verb === "control" && command.control.kind === "end")
+		// CONTRACT.md 538-539: an End that waits on its confirm is issued at the step that first lists it,
+		// so its scope is read again there.
+		const endIssued = [...this.endsAwaitingIssue].filter((commandId) =>
+			after.live.some(
+				(item) => item.tag === "Main" && item.commandId === commandId,
+			),
+		);
+		const ending =
+			command.verb === "control" && command.control.kind === "end"
+				? [command.control.commandId]
+				: [];
+		for (const commandId of [...ending, ...endIssued]) {
+			this.endsAwaitingIssue.delete(commandId);
+			if (
+				!after.live.some(
+					(item) => item.tag === "Main" && item.commandId === commandId,
+				)
+			)
+				this.endsAwaitingIssue.add(commandId);
 			this.endScopes.set(
-				command.control.commandId,
+				commandId,
 				new Set([
 					...this.sends.keys(),
 					...before.live.flatMap((item) =>
@@ -1661,6 +1704,7 @@ export class FakeProvider {
 					),
 				]),
 			);
+		}
 		// L6, D58: a Stop, End or Run now is the projection of main's stop commit, which interrupts main's open run.
 		if (
 			command.verb === "control" &&
@@ -1989,6 +2033,23 @@ export class FakeProvider {
 				claimed.unfinished = false;
 				if (claimed.send.effect.kind === "send_native_command")
 					this.commands.delete(claimed.send.effect.commandId);
+			}
+		// 3.4 (CONTRACT.md 474-476, 1135-1136): a permanent outcome written with no live claim names the latest
+		// claimed transmission and ends the row, so a retry opened after it is never claimed.
+		if (
+			observation.kind === "effect_outcome" &&
+			observation.outcome.tag === "permanent" &&
+			observation.transmission !== undefined
+		)
+			for (const [token, { name }] of this.mainTransmissions) {
+				const retry = this.sends.get(token);
+				if (
+					retry &&
+					name.commandId === observation.transmission.commandId &&
+					name.transmission > observation.transmission.transmission &&
+					!this.controlOutcomes.has(token)
+				)
+					retry.unfinished = false;
 			}
 		const native = this.sends.get(observation.token);
 		// The answered send's address owns the label (3.4, L2).
@@ -2778,9 +2839,16 @@ export class FakeProvider {
 			);
 		}
 		if (retiredLifecycle) {
+			// 3.4 (CONTRACT.md 510-514): the evidence is still recorded on its send's chains, and an input's
+			// delivery reads those chains (3.8, 630), so only the Run itself must stay as it was.
+			const run = (view: LedgerView) =>
+				view.active && {
+					...view.active,
+					inputs: view.active.inputs.map(({ inputId }) => inputId),
+				};
 			assert.deepEqual(
-				after.active,
-				before.active,
+				run(after),
+				run(before),
 				"3.4: lifecycle evidence on a retired or covered send changed Run state",
 			);
 			assert.equal(
@@ -3911,6 +3979,24 @@ export class FakeProvider {
 	 * transmission is the hold's run.dispatched (3.4, 4.11); direct (OpenCode, `runsOpenCodeServer`):
 	 * run_requested is the transmission, its token the runId. Each event has main's event id.
 	 */
+	/**
+	 * 3.9 (CONTRACT.md 965-973): main's writer places an input by the ledger's value, so an OpenCode start the
+	 * ledger shows Queued again (an absent reading the idle read after it settled, 3128-3132) is main's to send
+	 * again, a fresh claim of the same Run's start.
+	 */
+	private requeued(): boolean {
+		const open = this.mainRun;
+		const active = this.ledgerView?.active;
+		return (
+			this.provider === "opencode" &&
+			open !== undefined &&
+			active?.runId === open.runId &&
+			active.inputs.some(
+				({ inputId, state }) =>
+					inputId === open.inputId && state.tag === "Queued",
+			)
+		);
+	}
 	private main(action: TraceAction): LedgerCommand {
 		const alarm = {
 			verb: "settle",
@@ -3974,6 +4060,19 @@ export class FakeProvider {
 				direct,
 			});
 		}
+		// D53 (3.9): a steer whose send failed permanently before a turn took it fails its input, so
+		// main never starts it.
+		for (const steer of this.mainSteers.filter((item) =>
+			[...this.sends.values()].some(
+				({ send, transportRank, accepted }) =>
+					send.effect.kind === "steer" &&
+					send.effect.inputId === item.inputId &&
+					send.effect.runId === item.parent &&
+					transportRank === 2 &&
+					!accepted,
+			),
+		))
+			this.mainSteers.splice(this.mainSteers.indexOf(steer), 1);
 		// Main makes the first move it can, starting at the chosen one; with none, time passes.
 		for (const offset of [0, 1, 2, 3, 4])
 			switch ((action.variant + offset) % 5) {
@@ -3982,7 +4081,14 @@ export class FakeProvider {
 					// input waits for the open run's terminal (3.9). Its run.requested is appended in the
 					// write that sends the input, after input.sent, never at admit (3.4).
 					const head = this.mainInbox[0];
-					if (!head || (open && head.delivery === "queue")) continue;
+					// 2.1 (CONTRACT.md 57, 262), 3.9 (978-982): a steer its parent's end left pending is a Run of
+					// its own, so main claims nothing until it starts as main's open Run (case 1).
+					if (
+						!head ||
+						(open && head.delivery === "queue") ||
+						(!open && this.mainSteers.length > 0)
+					)
+						continue;
 					this.mainInbox.shift();
 					const runId = `main-run:${this.serial++}`;
 					if (open) {
@@ -4112,6 +4218,16 @@ export class FakeProvider {
 						return first;
 					}
 					const steer = this.mainSteers.shift();
+					if (steer && open?.runId === steer.parent)
+						this.joinedSteers.push(steer);
+					if (steer && !open)
+						this.mainRun = {
+							runId: steer.runId,
+							inputId: steer.inputId,
+							issue: steer.issue,
+							started: true,
+							stopped: false,
+						};
 					if (steer)
 						return emit({
 							tag: "Main",
@@ -4207,7 +4323,29 @@ export class FakeProvider {
 											? ({ outcome: "interrupted", code: "abandoned" } as const)
 											: ({ outcome: "interrupted" } as const);
 					if (!terminal) continue;
-					this.mainRun = undefined;
+					// 3.9 (CONTRACT.md 978-983): a joined steer the Run's end leaves unconsumed, not declined or failed,
+					// is a Run of its own and main's open Run; its run.started was read. Nearest reading at any end.
+					const outlived = this.joinedSteers.find(
+						(steer) =>
+							steer.parent === open.runId &&
+							[...this.sends.values()].some(
+								({ send, accepted, ended, notConsumed, transportRank }) =>
+									send.effect.kind === "steer" &&
+									send.effect.inputId === steer.inputId &&
+									send.effect.runId === steer.parent &&
+									!accepted &&
+									!ended &&
+									!notConsumed &&
+									transportRank !== 2,
+							),
+					);
+					this.mainRun = outlived && {
+						runId: outlived.runId,
+						inputId: outlived.inputId,
+						issue: outlived.issue,
+						started: true,
+						stopped: false,
+					};
 					// 3113-3117: after an abandonment main claims a next start, then the abandoned runner retires.
 					if (terminal.code === "abandoned" && native) {
 						const runner = runnerOf(native.label);
@@ -4243,10 +4381,26 @@ export class FakeProvider {
 						!open ||
 						token === undefined ||
 						this.terminals.has(open.runId) ||
-						!this.unlaunchedTries.has(token) ||
+						(!this.unlaunchedTries.has(token) && !this.requeued()) ||
 						open.issue.effect.kind !== "start"
 					)
 						continue;
+					// 3.9 (CONTRACT.md 965-973), 9 (3128-3132): main sends an input again only where the ledger placed
+					// it back, so no earlier send of it may still run; else the input runs twice.
+					assert(
+						![...this.sends.values()].some(
+							({ send, unfinished, notConsumed, ended }) =>
+								(send.effect.kind === "start" ||
+									send.effect.kind === "steer") &&
+								send.effect.inputId === open.inputId &&
+								!this.unlaunchedTries.has(send.token) &&
+								unfinished &&
+								!notConsumed &&
+								!ended,
+						),
+						"3.9: main sent an input again while an earlier send of it may still run",
+					);
+
 					if (direct) {
 						// The relaunch is a new transmission of the same Run's start (3.6, D50): its token is the
 						// new runId, and the start stays its Run's, so reached reads it (CONTRACT.md 621-640).
@@ -4340,10 +4494,14 @@ export class FakeProvider {
 				? [...this.pendingHeld].find(
 						([, held]) =>
 							held.effect.kind === "start" &&
-							snapshot.view.live.some(
-								(item) =>
-									this.isHeld(item) && item.commandId === held.commandId,
-							),
+							// 3.6 (CONTRACT.md 668-669, 709-711): main's start reaches live only by its run.dispatched,
+							// so one pending before any hold shows as its Starting Run, not in live.
+							((snapshot.view.active?.runId === heldRunId(held) &&
+								snapshot.view.active.tag === "Starting") ||
+								snapshot.view.live.some(
+									(item) =>
+										this.isHeld(item) && item.commandId === held.commandId,
+								)),
 					)
 				: undefined;
 		const binding = spawn && this.holdBindings.get(spawn[0]);
@@ -4502,6 +4660,10 @@ export class FakeProvider {
 				now: Math.max(snapshot.now, snapshot.alarmAt ?? snapshot.now),
 			};
 		if (absentAt !== undefined) this.lost = undefined;
+		// 3.9: main's next move after either reading is its re-send, where the ledger placed the input back.
+		this.deferred.push(() =>
+			this.requeued() ? this.main({ ...action, variant: 3 }) : undefined,
+		);
 		return {
 			command: {
 				verb: "observe",
@@ -4518,6 +4680,7 @@ export class FakeProvider {
 	next(action: TraceAction, snapshot: ProviderSnapshot): TracePacket {
 		this.q28 = undefined;
 		this.clock = snapshot.now;
+		this.ledgerView = snapshot.view;
 		// A stop commit's facts fold in one transaction: nothing interleaves them (4.5).
 		const committed = this.commit.shift();
 		if (committed) return { command: committed, now: snapshot.now };
@@ -5036,7 +5199,9 @@ export class FakeProvider {
 					this.dead(runnerOf(issueLabel)) ||
 					this.heldElsewhere(issue.commandId) ||
 					this.retiredHolds.has(issue.commandId) ||
-					this.terminals.has(heldRunId(issue));
+					this.terminals.has(heldRunId(issue)) ||
+					// D50 (CONTRACT.md 664-669): an unlaunched try's Run is main's to relaunch, not the feeder's.
+					(original !== undefined && this.unlaunchedTries.has(original.token));
 				// 4.4: the re-step reads the gate before holdRun; a gated try transmits nothing.
 				if (!dropped && this.gate !== "served") {
 					this.gateAnswers.unshift({

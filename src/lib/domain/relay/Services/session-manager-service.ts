@@ -73,6 +73,7 @@ import { PersistenceProjectTag } from "../../persistence/Services/persistence-se
 import { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { DraftChange } from "./input-drafts.js";
 import { InputDraftsTag } from "./input-drafts.js";
+import { OpenCodeSessionCreationGateTag } from "./opencode-runtime-ingress-service.js";
 import { RelayStatusSnapshotTag } from "./relay-status-snapshot.js";
 import {
 	ConfigTag,
@@ -927,6 +928,13 @@ export type ProjectSessionManagerParts =
 /** The daemon's one session manager; every call names its project. */
 export interface SessionManagers {
 	readonly forProject: (projectId: string) => SessionManagerService;
+	/** The parts a project's relay lent, for work that lands in that project. */
+	readonly parts: (
+		projectId: string,
+	) => Effect.Effect<
+		Context.Context<ProjectSessionManagerParts>,
+		SessionManagerError
+	>;
 	/** Lend a relay's parts for its project until the relay's scope closes. */
 	readonly attach: (
 		projectId: string,
@@ -1643,11 +1651,11 @@ export const SessionManagerServiceLive = Layer.sync(
 			Array<Context.Context<ProjectSessionManagerParts>>
 		>();
 		const services = new Map<string, SessionManagerService>();
-		const project = (projectId: string) =>
+		const parts = (projectId: string) =>
 			Effect.suspend(() => {
-				const parts = attached.get(projectId)?.at(-1);
-				return parts
-					? Effect.provide(makeProjectSessionManager, parts)
+				const lent = attached.get(projectId)?.at(-1);
+				return lent
+					? Effect.succeed(lent)
 					: Effect.fail(
 							new SessionManagerError({
 								operation: "forProject",
@@ -1655,7 +1663,12 @@ export const SessionManagerServiceLive = Layer.sync(
 							}),
 						);
 			});
+		const project = (projectId: string) =>
+			Effect.flatMap(parts(projectId), (lent) =>
+				Effect.provide(makeProjectSessionManager, lent),
+			);
 		return {
+			parts,
 			attach: (projectId, parts) =>
 				Effect.acquireRelease(
 					Effect.sync(() =>
@@ -1746,9 +1759,14 @@ export const attachSessionManagerLive = Layer.effect(
 	SessionManagerServiceTag,
 	Effect.gen(function* () {
 		const managers = yield* SessionManagerServiceTag;
+		const parts = yield* Effect.context<ProjectSessionManagerParts>();
+		// A fork into this project creates its OpenCode session under this gate.
+		const gate = yield* Effect.serviceOption(OpenCodeSessionCreationGateTag);
 		yield* managers.attach(
 			(yield* ConfigTag).slug,
-			yield* Effect.context<ProjectSessionManagerParts>(),
+			gate._tag === "Some"
+				? Context.add(parts, OpenCodeSessionCreationGateTag, gate.value)
+				: parts,
 		);
 		return managers;
 	}),

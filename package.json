@@ -82,6 +82,7 @@
 		"test:storybook-visual:update-linux": "bash scripts/update-visual-snapshots.sh linux",
 		"generate:media": "tsx scripts/generate-media/index.ts",
 		"check:design-tokens": "node scripts/check-design-tokens.mjs",
+		"test:crash-matrix": "node scripts/run-ledger/crash-matrix.mjs",
 		"check:run-ledger-contract": "python3 -I scripts/run-ledger/t1-cite-check.py && python3 -I scripts/run-ledger/t3-reader-sweep.py",
 		"check:storybook": "pnpm test:storybook && pnpm storybook:build && pnpm exec playwright test --config test/visual/playwright.config.ts --project=desktop --grep 'Built Storybook render health'",
 		"test:all": "bash scripts/test-all.sh",

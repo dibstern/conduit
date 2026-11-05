@@ -446,6 +446,12 @@ export const makeRoutedWsRpcServerLayer = <
 					Effect.gen(function* () {
 						const slug = yield* projectSlugFor(payload, fallbackProjectSlug);
 						const context = yield* resolveContext(slug);
+						// A fork into another project needs that project's relay serving.
+						if (
+							"targetProjectSlug" in payload &&
+							typeof payload.targetProjectSlug === "string"
+						)
+							yield* resolveContext(payload.targetProjectSlug);
 						return yield* Effect.provide(handler(payload), context);
 					});
 

@@ -868,6 +868,9 @@
 		"real-wait": 1,
 		"timeout-override": 2
 	},
+	"test/integration/daemon/opencode-fork-into-project.test.ts": {
+		"polling": 1
+	},
 	"test/integration/daemon/opencode-idle-stop.test.ts": {
 		"polling": 9,
 		"timeout-override": 6
