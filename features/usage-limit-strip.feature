@@ -464,6 +464,51 @@ Examples:
   | desktop  | Last 46 messages and your first one, word for word   | ↪ Continued on personal · switched by you · What carried over? | inline           |
   | phone    | Last 46 messages and your first one                  | ↪ Continued on personal · switched by you                      | on its own line  |
 
+Scenario Outline: a Claude session moves to a Cursor account from the switch picker
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude, self as personal
+  And a Cursor account is available with its live models
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session hits the seven_day limit on claude resetting at 2026-01-05T09:00:00Z
+  And the quota check reads claude limited until 2026-01-05T09:00:00Z, self 23% used
+  And the handoff carries 47 of 112 messages with the first
+  And I open Switch account on the usage limit strip
+  And I pick Cursor work in the account picker
+  Then the PreviewContinuation RPC previews the current session on cursor-work
+  And the handoff dialog asks Continue on Cursor work?
+  And the handoff dialog carries <messages>
+  When I press Switch and continue
+  Then the ContinueSession RPC switches the current session from claude to cursor-work
+  And the handoff dialog is closed
+
+Examples:
+  | viewport | messages                                           |
+  | desktop  | Last 46 messages and your first one, word for word |
+  | phone    | Last 46 messages and your first one                |
+
+Scenario Outline: the handoff review says how the conversation went across
+  Given the conduit app is served with the connected mockup
+  And the viewport is a <viewport>
+  And a session already exists on the Claude harness
+  And the Claude accounts are claude as work2claude
+  And a Cursor account is available with its live models
+  And the transcript ends with the unanswered message Now run the provider tests and fix anything that fails
+  When the session resumes on claude from cursor-work by user and replies All provider tests pass now.
+  And the delivered handoff to claude <how>
+  And I open What carried over? on the transcript divider
+  Then the handoff dialog is read-only and carries <messages>
+  And the handoff review says <review>
+
+Examples:
+  | viewport | how                                       | messages                            | review                                                                                                                  |
+  | desktop  | resumed                                   | 3 new messages since it last ran    | work2claude resumed its earlier session and caught up on what happened since it last ran.                              |
+  | desktop  | started fresh after a refused resume      | All 3 messages, word for word       | work2claude couldn't reopen its earlier session, so Conduit started a fresh one and handed the conversation over.      |
+  | desktop  | started fresh after a long catch-up       | All 3 messages, word for word       | Too much happened since work2claude last ran to catch it up, so Conduit started a fresh session and handed the conversation over. |
+  | phone    | resumed                                   | 3 new messages since it last ran    | work2claude resumed its earlier session and caught up on what happened since it last ran.                              |
+  | phone    | started fresh after a refused resume      | All 3 messages                      | work2claude couldn't reopen its earlier session, so Conduit started a fresh one and handed the conversation over.      |
+
 Scenario Outline: a switch the daemon refuses changes nothing and says why
   Given the conduit app is served with the connected mockup
   And the viewport is a <viewport>

@@ -1,6 +1,6 @@
 <!--
-  AccountSwitch — moves one session to another account of the same provider:
-  accounts with each one's usage read afresh on every open, then the
+  AccountSwitch — moves one session to another account of the same provider,
+  or between Claude and Cursor: accounts with each one's usage read afresh on every open, then the
   handoff confirm, then ContinueSession on the chosen account. The usage-limit
   strip's Switch account brings its own trigger; only the session moves, never
   the project's binding.
@@ -48,7 +48,7 @@
 
 	const compact = $derived(sessionViewState.compact);
 	const claudeAccounts = $derived(getClaudeAccounts(projectSlug, getDriverTraits(getInstanceById(account)?.driver)?.usageHarness === "codex" ? "codex" : "claude"));
-	const accounts = $derived(claudeAccounts.configuredAccounts);
+	const accounts = $derived(claudeAccounts.switchTargets);
 
 	let pickerOpen = $state(false);
 	// Two triggers can be mounted for one session; only the one picked hosts its dialog.
