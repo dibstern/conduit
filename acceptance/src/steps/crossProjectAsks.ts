@@ -15,17 +15,11 @@ export const crossProjectAsksHandlers: StepHandler[] = [
 		match: /^opening a session attaches the session's own project$/,
 		run: ({ world }) => {
 			const rpc = requireRpcControl(world.page);
+			// The browser marks the placed session's project itself (82tn.13).
 			rpc.setStubs({
-				AttachProject: (payload) => {
-					const projectSlug =
-						"sessionId" in payload
-							? ownerOf(payload.sessionId)
-							: (payload.projectSlug ?? rpc.projectSlug);
-					return {
-						projectSlug,
-						sessionSlug: "sessionId" in payload ? projectSlug : null,
-					};
-				},
+				ResolveSession: ({ sessionId }) => ({
+					projectSlug: ownerOf(sessionId),
+				}),
 			});
 		},
 	},
@@ -147,11 +141,10 @@ export const crossProjectAsksHandlers: StepHandler[] = [
 						.getRequests()
 						.some(
 							(request) =>
-								request.tag === "AttachProject" &&
+								// The tab follows its marked project's terminals.
+								request.tag === "SubscribePtys" &&
 								ownerOf(sessionId) === match[2] &&
-								// A known row attaches its project; an unknown one asks by id.
-								(request.payload["projectSlug"] === match[2] ||
-									request.payload["sessionId"] === sessionId),
+								request.payload["projectSlug"] === match[2],
 						),
 				)
 				.toBe(true);

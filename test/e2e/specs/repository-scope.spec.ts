@@ -119,13 +119,6 @@ async function openList(
 							: null,
 				};
 			},
-			AttachProject: (payload) => ({
-				projectSlug:
-					("projectSlug" in payload ? payload.projectSlug : undefined) ??
-					projects[0]?.slug ??
-					null,
-				sessionSlug: null,
-			}),
 			GetProjects: () => ({ projects, current: projects[0]?.slug }),
 		},
 		streams: {
@@ -199,7 +192,7 @@ test.afterEach(async ({ page }, info) => {
 	const requests = controls
 		.get(page)
 		?.getRequests()
-		.filter(({ tag }) => ["ListDaemonSessions", "AttachProject"].includes(tag))
+		.filter(({ tag }) => tag === "ListDaemonSessions")
 		.map(({ tag, payload }) => ({
 			tag,
 			payload: Object.fromEntries(

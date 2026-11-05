@@ -130,7 +130,6 @@ for (const viewport of [
 			expect(
 				rpc
 					.getRequests()
-					.filter(({ tag }) => tag === "AttachProject")
 					.some(({ payload }) => payload["projectSlug"] === oldScope),
 			).toBe(false);
 			await page.getByTestId("session-scope-chip").click();

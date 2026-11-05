@@ -104,10 +104,15 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 }, testInfo) => {
 	const observed = observeRpc(page);
 	await new AppPage(page).goto(harness.baseUrl);
+	// The app settles once it has read the project it marked.
 	await expect
 		.poll(
 			() =>
-				observed.calls.find((call) => call.tag === "AttachProject")?.exit?._tag,
+				observed.calls.find(
+					(call) =>
+						call.tag === "GetFileTree" &&
+						call.payload["projectSlug"] === "process-test",
+				)?.exit?._tag,
 		)
 		.toBe("Success");
 	await expect(
@@ -122,15 +127,6 @@ test("no project open: instance mutations, scan and log level use daemon RPC", a
 	});
 	expect(projects.projects).toEqual([]);
 	await expect(page.getByTestId("project-tree-header")).toHaveCount(0);
-	await expect
-		.poll(
-			() => observed.calls.find((call) => call.tag === "AttachProject")?.exit,
-		)
-		.toEqual({
-			_tag: "Success",
-			// No project, so no session to place either (8rdf.16).
-			value: { projectSlug: null, sessionSlug: null },
-		});
 	// Record transient toasts too, even if they expire before the final assertion.
 	await page.evaluate(() => {
 		new MutationObserver((records) => {

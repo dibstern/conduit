@@ -70,13 +70,6 @@ test.describe("Notification → session navigation (replay)", () => {
 					],
 				},
 				stubs: {
-					AttachProject: (payload) => ({
-						projectSlug:
-							"projectSlug" in payload
-								? (payload.projectSlug ?? "e2e-replay")
-								: "e2e-replay",
-						sessionSlug: "sessionId" in payload ? "e2e-replay" : null,
-					}),
 					ResolveSession: () => ({ projectSlug: project }),
 				},
 			});

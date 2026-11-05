@@ -1283,13 +1283,6 @@ export async function mockWsRpc(
 		}),
 		GetProjects: (payload) =>
 			control.projectsHandler()?.(payload) ?? new Promise<never>(() => {}),
-		AttachProject: (payload) => ({
-			projectSlug:
-				"projectSlug" in payload && typeof payload.projectSlug === "string"
-					? payload.projectSlug
-					: control.projectSlug,
-			sessionSlug: "sessionId" in payload ? control.projectSlug : null,
-		}),
 		ResolveSession: () => ({ projectSlug: control.projectSlug }),
 		SyncInputDraft: ({ key, text, projectSlug, originId }) => {
 			control.sendInputDraft(key, {

@@ -89,7 +89,6 @@ function deferred<T>() {
 	});
 	return { promise, resolve };
 }
-type Attach = { projectSlug: string | null; sessionSlug: string | null };
 let table: { -readonly [K in keyof StubTable]: StubTable[K] };
 let wire: ReturnType<typeof makeRpcWire>;
 let runtime: ManagedRuntime.ManagedRuntime<
@@ -128,11 +127,11 @@ beforeEach(async () => {
 	attachedProjectState.slug = null;
 	clearSessionState();
 	projectState.projects = [];
+	projectState.projectsLoaded = false;
 	projectState.newSessionProject = null;
 	savedDraw.sessionId = null;
 	savedMock.openSavedTranscript.mockResolvedValue(undefined);
 	table = {
-		AttachProject: () => ({ projectSlug: "A", sessionSlug: null }),
 		ResolveSession: () => ({ projectSlug: "A" }),
 		ViewSession: () => ({ ok: true }),
 		GetFileTree: () => ({ projectSlug: "A", entries: [] }),
@@ -318,7 +317,6 @@ describe("session selection at the browser RPC wire", () => {
 		seedSessions([
 			{ id: `notification-${slug}`, title: "Notification", projectSlug: slug },
 		]);
-		table.AttachProject = () => ({ projectSlug: slug, sessionSlug: null });
 		start();
 		serviceWorker.dispatchEvent(
 			new MessageEvent("message", {
@@ -343,6 +341,9 @@ describe("session selection at the browser RPC wire", () => {
 			originId: expect.any(String),
 		});
 		expect(calls("ResolveSession")).toHaveLength(0);
+		// 9: the session's own project is marked here, with no round trip.
+		expect(attachedProjectState.slug).toBe(slug);
+		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it.each([
 		false,
@@ -512,17 +513,16 @@ describe("session selection at the browser RPC wire", () => {
 			sessionId: "follow-draft-late",
 		});
 	});
-	it("a late attach places its own id without moving the session now shown", async () => {
-		const pending = deferred<Attach>();
-		table.AttachProject = () => pending.promise;
+	it("a late cold-link resolve never moves the session now shown or its project", async () => {
+		const pending = deferred<{ projectSlug: string | null }>();
+		table.ResolveSession = () => pending.promise;
 		replaceRoute("/s/attach-old");
 		start();
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await vi.waitFor(() => expect(calls("ResolveSession")).toHaveLength(1));
 		seedSessions([{ id: "attach-new", title: "New", projectSlug: "B" }]);
 		module.selection.open("attach-new");
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(2));
-		await settle(2);
-		pending.resolve({ projectSlug: "A", sessionSlug: "A" });
+		await settle(1);
+		pending.resolve({ projectSlug: "A" });
 		await settle();
 		expect(module.selection.shown).toEqual({
 			kind: "placed",
@@ -530,6 +530,8 @@ describe("session selection at the browser RPC wire", () => {
 			project: "B",
 		});
 		expect(routerState.path).toBe("/s/attach-new");
+		expect(attachedProjectState.slug).toBe("B");
+		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it("a late resolve never moves another session or its route", async () => {
 		attachedProjectState.slug = "A";
@@ -551,23 +553,21 @@ describe("session selection at the browser RPC wire", () => {
 		expect(routerState.sessionNotFound).toBe(false);
 		expect(routerState.path).toBe("/s/resolve-new");
 	});
-	it("two quick project switches finish attached to the second project", async () => {
+	it("two quick project switches finish on the second project with no round trip", async () => {
 		attachedProjectState.slug = "A";
-		const first = deferred<Attach>();
-		const second = deferred<Attach>();
-		table.AttachProject = (payload) =>
-			"projectSlug" in payload && payload.projectSlug === "B"
-				? first.promise
-				: second.promise;
+		projectState.projects = ["A", "B", "C"].map((slug) => ({
+			slug,
+			title: slug,
+			folders: [`/${slug}`],
+		}));
+		projectState.projectsLoaded = true;
 		start();
 		module.selection.openDraft("B");
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		flushSync();
+		expect(attachedProjectState.slug).toBe("B");
 		module.selection.openDraft("C");
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(2));
-		second.resolve({ projectSlug: "C", sessionSlug: null });
-		await settle(1);
-		first.resolve({ projectSlug: "B", sessionSlug: null });
 		await settle();
+		expect(calls("AttachProject")).toHaveLength(0);
 		expect(attachedProjectState.slug).toBe("C");
 		expect(module.selection.scope).toEqual({
 			project: "C",
@@ -597,10 +597,13 @@ describe("session selection at the browser RPC wire", () => {
 		await vi.waitFor(() => expect(routerState.path).toBe("/"));
 		expect(routerState.sessionNotFound).toBe(true);
 		expect(module.selection.shown).toEqual({ kind: "none" });
+		// 10: an unknown session leaves the marked project alone.
+		expect(attachedProjectState.slug).toBe("A");
+		expect(calls("AttachProject")).toHaveLength(0);
 	});
 	it("draws a saved cold page while every scoped read and feed waits for placement", async () => {
-		const pending = deferred<Attach>();
-		table.AttachProject = () => pending.promise;
+		const pending = deferred<{ projectSlug: string | null }>();
+		table.ResolveSession = () => pending.promise;
 		savedMock.openSavedTranscript.mockResolvedValue({
 			schema: 1,
 			sessionId: "saved",
@@ -611,7 +614,7 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		replaceRoute("/s/saved");
 		start();
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await vi.waitFor(() => expect(calls("ResolveSession")).toHaveLength(1));
 		await settle(1);
 		expect(module.selection.shown).toEqual({
 			kind: "drawn",
@@ -619,9 +622,9 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		expect(module.selection.scope).toBeNull();
 		expect(wire.requests.map((request) => request.tag)).toEqual([
-			"AttachProject",
+			"ResolveSession",
 		]);
-		pending.resolve({ projectSlug: "A", sessionSlug: "A" });
+		pending.resolve({ projectSlug: "A" });
 		await vi.waitFor(() =>
 			expect(module.selection.shown).toEqual({
 				kind: "placed",
@@ -633,8 +636,8 @@ describe("session selection at the browser RPC wire", () => {
 		expect(savedDraw.sessionId).toBeNull();
 	});
 	it("saved sidebar rows never place a session", async () => {
-		const pending = deferred<Attach>();
-		table.AttachProject = () => pending.promise;
+		const pending = deferred<{ projectSlug: string | null }>();
+		table.ResolveSession = () => pending.promise;
 		replaceRoute("/s/saved-sidebar");
 		drawSavedShell({
 			schema: 1,
@@ -652,14 +655,14 @@ describe("session selection at the browser RPC wire", () => {
 			],
 		});
 		start();
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await vi.waitFor(() => expect(calls("ResolveSession")).toHaveLength(1));
 		await settle(1);
 		expect(module.selection.shown).toEqual({
 			kind: "placing",
 			sessionId: "saved-sidebar",
 		});
 		expect(module.selection.scope).toBeNull();
-		pending.resolve({ projectSlug: "A", sessionSlug: "A" });
+		pending.resolve({ projectSlug: "A" });
 		await vi.waitFor(() =>
 			expect(module.selection.shown).toEqual({
 				kind: "placed",
@@ -672,8 +675,8 @@ describe("session selection at the browser RPC wire", () => {
 		"B",
 		null,
 	])("discards a saved page placed in %s instead of its saved project", async (project) => {
-		const pending = deferred<Attach>();
-		table.AttachProject = () => pending.promise;
+		const pending = deferred<{ projectSlug: string | null }>();
+		table.ResolveSession = () => pending.promise;
 		savedMock.openSavedTranscript.mockResolvedValue({
 			schema: 1,
 			sessionId: `foreign-saved-${project}`,
@@ -696,10 +699,10 @@ describe("session selection at the browser RPC wire", () => {
 		});
 		replaceRoute(`/s/foreign-saved-${project}`);
 		start();
-		await vi.waitFor(() => expect(calls("AttachProject")).toHaveLength(1));
+		await vi.waitFor(() => expect(calls("ResolveSession")).toHaveLength(1));
 		await settle(1);
 		expect(currentChat().messages).toHaveLength(1);
-		pending.resolve({ projectSlug: project ?? "A", sessionSlug: project });
+		pending.resolve({ projectSlug: project });
 		await settle();
 		expect(currentChat().messages).toHaveLength(0);
 		expect(savedDraw.sessionId).toBeNull();
@@ -724,8 +727,9 @@ describe("session selection at the browser RPC wire", () => {
 		await settle();
 		expect(fileTreeState.entries).toEqual(["new.txt"]);
 	});
-	it("a cold session link attaches and places in one round trip", async () => {
-		table.AttachProject = () => ({ projectSlug: "B", sessionSlug: "B" });
+	it("a cold session link places and marks its project in one resolve", async () => {
+		attachedProjectState.slug = "A";
+		table.ResolveSession = () => ({ projectSlug: "B" });
 		replaceRoute("/s/cold");
 		start();
 		await vi.waitFor(() =>
@@ -735,22 +739,54 @@ describe("session selection at the browser RPC wire", () => {
 				project: "B",
 			}),
 		);
-		expect(calls("AttachProject")).toHaveLength(1);
-		expect(calls("AttachProject")[0]?.payload).toMatchObject({
-			sessionId: "cold",
-		});
-		expect(calls("ResolveSession")).toHaveLength(0);
+		await settle();
+		expect(attachedProjectState.slug).toBe("B");
+		expect(calls("ResolveSession")).toHaveLength(1);
+		expect(calls("AttachProject")).toHaveLength(0);
 	});
-	it("choosing a project scope from home attaches that project", async () => {
-		attachedProjectState.slug = "A";
-		table.AttachProject = () => ({ projectSlug: "B", sessionSlug: null });
-		start();
-		setSessionScope("B");
-		await vi.waitFor(() => expect(attachedProjectState.slug).toBe("B"));
-		expect(calls("AttachProject")[0]?.payload).toMatchObject({
-			projectSlug: "B",
+	describe("the project a home page marks", () => {
+		beforeEach(() => {
+			projectState.projects = ["A", "B"].map((slug) => ({
+				slug,
+				title: slug,
+				folders: [`/${slug}`],
+			}));
+			projectState.projectsLoaded = true;
 		});
-		expect(module.selection.scope).toEqual({ project: "B", sessionId: null });
+		it("choosing a project scope from home marks that project with no round trip", async () => {
+			attachedProjectState.slug = "A";
+			start();
+			setSessionScope("B");
+			flushSync();
+			expect(attachedProjectState.slug).toBe("B");
+			expect(module.selection.scope).toEqual({ project: "B", sessionId: null });
+			await settle();
+			expect(calls("AttachProject")).toHaveLength(0);
+		});
+		it.each([
+			"B",
+			null,
+		])("11: a scope naming a project the daemon no longer holds marks the home draft's project, the first, from %s", async (attached) => {
+			attachedProjectState.slug = attached;
+			start();
+			setSessionScope("gone");
+			await settle();
+			expect(attachedProjectState.slug).toBe("A");
+			expect(calls("AttachProject")).toHaveLength(0);
+		});
+		it("12: nothing is marked before the project list loads; the first project is marked once it does", async () => {
+			const projects = projectState.projects;
+			projectState.projects = [];
+			projectState.projectsLoaded = false;
+			start();
+			await settle();
+			expect(attachedProjectState.slug).toBeNull();
+			projectState.projects = projects;
+			projectState.projectsLoaded = true;
+			await settle();
+			expect(attachedProjectState.slug).toBe("A");
+			expect(calls("AttachProject")).toHaveLength(0);
+		});
 	});
 	it("home reads the attached project's catalogs and files and keeps its draft send ready", async () => {
 		clearDiscoveryState();

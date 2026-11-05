@@ -189,10 +189,7 @@ export function watchSelection(): () => void {
 				untrack(normalizeRoute);
 		});
 		let alive = true;
-		const attaching = new Set<string>();
 		const resolving = new Set<string>();
-		let attachedOnce = attachedProjectState.slug !== null;
-		let previousAttached = attachedProjectState.slug;
 		const loadSessionId = getCurrentSessionId();
 		if (loadSessionId)
 			void openSavedTranscript(loadSessionId).then((record) => {
@@ -269,76 +266,43 @@ export function watchSelection(): () => void {
 			previousId = id;
 		});
 
-		$effect(() => {
-			const wanted = wantedProject;
+		// The browser marks its own project (82tn.13): a placed session's, else a
+		// listed hint, else the marked one while it is listed, else the first. A
+		// session still placing keeps the mark until its resolve places it.
+		const markedProject = $derived.by(() => {
 			const attached = attachedProjectState.slug;
+			if (shown.kind === "placed") return shown.project;
+			if (
+				shown.kind === "placing" ||
+				shown.kind === "drawn" ||
+				!projectState.projectsLoaded
+			)
+				return attached;
+			const listed = (slug: string | null) =>
+				projectState.projects.some((project) => project.slug === slug);
+			if (listed(wantedProject)) return wantedProject;
+			if (listed(attached)) return attached;
+			return projectState.projects[0]?.slug ?? null;
+		});
+		$effect(() => {
+			const target = markedProject;
+			if (
+				getCurrentRoute().page === "chat" &&
+				target !== null &&
+				target !== attachedProjectState.slug
+			)
+				untrack(() => setAttachedProject(target));
+		});
+
+		$effect(() => {
 			const current = shown;
-			const route = getCurrentRoute();
 			const connected = getIsConnected();
 			untrack(() => {
-				if (previousAttached !== null && attached === null)
-					attachedOnce = false;
-				previousAttached = attached;
-				if (!connected || route.page !== "chat") return;
-				const routeSessionId = route.sessionId ?? null;
+				if (!connected) return;
 				const sessionId =
 					current.kind === "placing" || current.kind === "drawn"
 						? current.sessionId
 						: null;
-				if (
-					(wanted !== null && wanted !== attached) ||
-					(!attachedOnce && attached === null)
-				) {
-					// Learning this session's project must not start another attach.
-					const key = JSON.stringify([
-						routeSessionId ? null : wanted,
-						routeSessionId,
-					]);
-					if (attaching.has(key)) return;
-					attaching.add(key);
-					void rpc("AttachProject", {
-						originId: getBrowserClientId(),
-						...(sessionId
-							? { sessionId }
-							: wanted
-								? { projectSlug: wanted }
-								: {}),
-					})
-						.then(({ projectSlug, sessionSlug }) => {
-							attaching.delete(key);
-							if (!alive) return;
-							// Place only this reply's id; a delete always wins over a late reply.
-							const matches =
-								getCurrentSessionId() === routeSessionId &&
-								(wantedProject === wanted ||
-									(sessionId !== null && wantedProject === sessionSlug));
-							if (sessionId && placement.get(sessionId) !== "deleted")
-								placement.set(
-									sessionId,
-									sessionSlug ? { project: sessionSlug } : "missing",
-								);
-							if (!matches) return;
-							attachedOnce = true;
-							if (projectSlug !== null) setAttachedProject(projectSlug);
-						})
-						.catch((error: unknown) => {
-							if (!alive) return;
-							if (
-								sessionId &&
-								error instanceof WsRpcError &&
-								error.code === "unknown-session"
-							) {
-								if (placement.get(sessionId) !== "deleted")
-									placement.set(sessionId, "missing");
-							} else if (
-								getCurrentSessionId() === routeSessionId &&
-								(routeSessionId !== null || wantedProject === wanted)
-							)
-								toastFailure("Failed to switch projects")(error);
-						})
-						.finally(() => attaching.delete(key));
-					return;
-				}
 				if (!sessionId || resolving.has(sessionId)) return;
 				resolving.add(sessionId);
 				void rpc("ResolveSession", { sessionId })

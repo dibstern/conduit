@@ -26,27 +26,25 @@ test.describe("E2E Smoke Test", () => {
 		relayUrl,
 		harness,
 	}) => {
-		// Attach already resolves a cold session URL, so wait for that reply.
-		const attachReplies: unknown[] = [];
+		// The browser marks the session's project itself (82tn.13). Opening the
+		// session ends in ViewSession, whose failure would raise the toast, so
+		// wait for its reply before checking that no toast appeared.
+		const replies: Record<string, unknown>[] = [];
 		page.on("websocket", (ws) => {
-			let requestId: string | undefined;
+			const watched = new Map<string, string>();
 			const parse = (payload: string | Buffer): Record<string, unknown> =>
 				typeof payload === "string" ? JSON.parse(payload) : {};
 			ws.on("framesent", (frame) => {
 				const message = parse(frame.payload);
-				if (message["tag"] === "AttachProject") {
-					requestId = String(message["id"]);
-				}
+				const tag = String(message["tag"]);
+				if (tag === "ResolveSession" || tag === "ViewSession")
+					watched.set(String(message["id"]), tag);
 			});
 			ws.on("framereceived", (frame) => {
 				const message = parse(frame.payload);
-				if (
-					message["_tag"] === "Defect" ||
-					(requestId !== undefined &&
-						String(message["requestId"]) === requestId)
-				) {
-					attachReplies.push(message);
-				}
+				const tag = watched.get(String(message["requestId"]));
+				if (message["_tag"] === "Defect" || tag !== undefined)
+					replies.push({ tag, ...message });
 			});
 		});
 		const app = new AppPage(page);
@@ -59,17 +57,18 @@ test.describe("E2E Smoke Test", () => {
 		).toBeVisible();
 		await expect(app.messages).toBeVisible();
 		await expect
-			.poll(() => attachReplies)
-			.toEqual([
-				{
-					_tag: "Exit",
-					requestId: expect.anything(),
-					exit: {
-						_tag: "Success",
-						value: { projectSlug: "e2e-replay", sessionSlug: "e2e-replay" },
-					},
+			.poll(() => replies.some(({ tag }) => tag === "ViewSession"))
+			.toBe(true);
+		for (const reply of replies)
+			expect(reply).toMatchObject({
+				_tag: "Exit",
+				exit: {
+					_tag: "Success",
+					...(reply["tag"] === "ResolveSession" && {
+						value: { projectSlug: "e2e-replay" },
+					}),
 				},
-			]);
+			});
 		await expect(page.getByText("Failed to open session")).toHaveCount(0);
 	});
 

@@ -293,20 +293,9 @@ const resolveSession = vi.hoisted(() =>
 	})),
 );
 
-const attachProject = vi.hoisted(() =>
-	vi.fn((_input: { sessionId?: string }) =>
-		Promise.resolve({
-			projectSlug: null as string | null,
-			sessionSlug: null as string | null,
-		}),
-	),
-);
-
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: vi.fn((tag: string, input: unknown) => {
 		if (tag === "ResolveSession") return resolveSession(input);
-		if (tag === "AttachProject")
-			return attachProject(input as { sessionId?: string });
 		if (tag === "GetProjects")
 			return Promise.resolve({
 				projectSlug: "test-project",
@@ -379,12 +368,6 @@ describe("ChatLayout RPC lifecycle", () => {
 		vi.mocked(resolveSession).mockResolvedValue({
 			projectSlug: "test-project",
 		});
-		vi.mocked(attachProject).mockImplementation(({ sessionId }) =>
-			Promise.resolve({
-				projectSlug: "test-project",
-				sessionSlug: sessionId ? "test-project" : null,
-			}),
-		);
 		attachedProjectState.slug = null;
 	});
 
