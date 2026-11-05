@@ -1047,14 +1047,6 @@ const forkSessionInWorkspace = (
 				message:
 					"Cross-provider forks require Codex and a transcript destination",
 			});
-		// Only a Claude fork is seeded fresh in another project's folder so far.
-		const notIntoProject = options?.intoProject
-			? new SessionCommandError({
-					operation: "session.forked.project",
-					cause: account.driver,
-					message: `A ${account.driver} session can't be forked into another project yet`,
-				})
-			: undefined;
 		if (
 			options?.intoProject &&
 			config._tag === "Some" &&
@@ -1083,7 +1075,14 @@ const forkSessionInWorkspace = (
 		}
 		const eventStore = yield* Effect.serviceOption(EventStoreEffectTag);
 		if (PROVIDER_DRIVERS[account.driver].runsOpenCodeServer) {
-			if (notIntoProject) return yield* notIntoProject;
+			// OpenCode has no seeded fresh start: its fork copies the session on the
+			// source's server, and its stream would show a seed sent as a prompt.
+			if (options?.intoProject)
+				return yield* new SessionCommandError({
+					operation: "session.forked.project",
+					cause: account.driver,
+					message: "OpenCode sessions can't be forked into another project yet",
+				});
 			// A native OpenCode fork needs only the Side Thread's mid-turn cut.
 			const sql = yield* Effect.serviceOption(SqlClient.SqlClient);
 			const messageId =
@@ -1156,7 +1155,7 @@ const forkSessionInWorkspace = (
 		}
 		const workspace = yield* Effect.serviceOption(SessionWorkspaceTag);
 		const native = yield* Effect.gen(function* () {
-			if (digestFork) return notIntoProject ? yield* notIntoProject : undefined;
+			if (digestFork) return undefined;
 			switch (account.driver) {
 				case "claude": {
 					const state = yield* Effect.serviceOption(ProviderStateEffectTag);
@@ -1184,7 +1183,6 @@ const forkSessionInWorkspace = (
 						cause: account.driver,
 					});
 				case "codex":
-					if (notIntoProject) return yield* notIntoProject;
 					// Like Claude, defer native launch until the inherited cut is durable.
 					return undefined;
 				default:
@@ -1217,8 +1215,12 @@ const forkSessionInWorkspace = (
 					relayConfig._tag === "Some"
 						? (relayConfig.value.configDir ?? DEFAULT_CONFIG_DIR)
 						: DEFAULT_CONFIG_DIR;
+				// A fork into another project starts a fresh thread in that project's
+				// folder; the runner seeds it with the fork digest on its first turn.
 				const codex =
-					account.driver === "codex" && sourceAccount.driver === "codex"
+					account.driver === "codex" &&
+					sourceAccount.driver === "codex" &&
+					!options?.intoProject
 						? yield* Effect.gen(function* () {
 								const { home } = yield* prepareCodexAccount(account, configDir);
 								const forkSource = yield* resolveCodexForkSource(
