@@ -203,6 +203,38 @@ it("drops a session's checkpoints when it is evicted or forgotten, and only its 
 	expect(checkpointRefs()).toHaveLength(1);
 });
 
+// 82tn.54 audit row 1: a checkpoint borrows the objects its repository already has, so a gc
+// there takes a staged blob the user since replaced, and the checkpoint's files are lost.
+it("keeps a checkpoint's files through a git gc in its repository, counting what it copies", async () => {
+	const repo = repository("repo", { "a.txt": "one\n" });
+	const staged = randomBytes(200_000).toString("base64");
+	writeFileSync(join(repo, "staged.txt"), staged);
+	git(repo, "add", "staged.txt");
+	const result = await run(
+		Effect.gen(function* () {
+			const timeline = yield* FolderTimeline;
+			yield* turn("s1", "r1", [repo], () =>
+				writeFileSync(join(repo, "a.txt"), "two\n"),
+			);
+			writeFileSync(join(repo, "staged.txt"), "replaced\n");
+			git(repo, "add", "staged.txt");
+			git(repo, "gc", "--prune=now", "--quiet");
+			const before = yield* timeline.diskUse;
+			const bytes = yield* timeline.storeBytes("s1");
+			const checkpoint = yield* timeline.checkpoint("s1", "r1", repo);
+			yield* timeline.evict("s1", Effect.succeed(true));
+			return { before, bytes, checkpoint, after: yield* timeline.diskUse };
+		}),
+	);
+	const { checkpoint } = result;
+	if (!checkpoint) throw new Error("No checkpoint");
+	expect(show(checkpoint.store, checkpoint.start, "staged.txt")).toBe(staged);
+	expect(show(checkpoint.store, checkpoint.end, "staged.txt")).toBe(staged);
+	expect(show(checkpoint.store, checkpoint.end, "a.txt")).toBe("two");
+	expect(result.bytes).toBeGreaterThan(staged.length / 2);
+	expect(result.before - result.after).toBeGreaterThan(staged.length / 2);
+});
+
 type Entry = string;
 /** The folder as a restore must leave it: each path's type, exec bit and bytes or link target. */
 const listing = (directory: string): Entry[] =>
