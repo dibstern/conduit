@@ -2950,13 +2950,16 @@ export const ForkSession = Rpc.make("ForkSession", {
 		/** Project the fork joins; defaults to the parent's project. */
 		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
+		/** Fork into a new worktree holding the files kept at the message (82tn.54). */
+		files: Schema.optionalKey(Schema.Boolean),
 	}),
 	success: ForkSessionResponseSchema,
-	/** SessionBusy: the admission's typed refusal (82tn.49). */
+	/** SessionBusy: the admission's typed refusal (82tn.49). FilesRefused: a fork with files. */
 	error: Schema.Union([
 		WsRpcError,
 		Schema.suspend(() => AccountUnroutable),
 		Schema.suspend(() => SessionBusy),
+		Schema.suspend(() => FilesRefused),
 	]),
 });
 
@@ -2970,6 +2973,8 @@ export const ForkSessionForSession = Rpc.make(ForkSession._tag, {
 		/** Project the fork joins; defaults to the parent's project. */
 		targetProjectSlug: Schema.optional(NonEmptyString),
 		messageId: Schema.optional(NonEmptyString),
+		/** Fork into a new worktree holding the files kept at the message (82tn.54). */
+		files: Schema.optionalKey(Schema.Boolean),
 	}),
 	success: ForkSession.successSchema,
 	error: ForkSession.errorSchema,
