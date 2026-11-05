@@ -546,8 +546,8 @@
 		},
 		{
 			"cell": "inherited-key",
-			"status": "uncovered",
-			"gap": "unit only (runner-retirement-fence:2182); no integration test asserts the journal key a successor inherits"
+			"status": "proved",
+			"file": "test/integration/daemon/claude-runner-restart.test.ts"
 		},
 		{
 			"cell": "main-built/legacy-recovery",

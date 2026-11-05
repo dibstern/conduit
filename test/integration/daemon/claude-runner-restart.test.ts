@@ -5,6 +5,7 @@ import {
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	renameSync,
 	statSync,
@@ -12,7 +13,7 @@ import {
 } from "node:fs";
 import { createConnection, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import { Effect } from "effect";
@@ -366,6 +367,90 @@ describe("Claude runners survive server replacement through built dist", () => {
 			JSON.stringify({ sequences, proofs }, null, 2),
 		);
 	}, 60_000);
+
+	// test-waits-allow timeout-override: a daemon restart, a new runner and the next send each take seconds.
+	it("settles a send its dead runner finished from the key its successor inherits, never re-sent", async () => {
+		const harness = await ProcessHarness.start({
+			dist: "dist",
+			restartProof: true,
+		});
+		harnesses.push(harness);
+		const browser = await harness.connect();
+		const sessionId = await browser.createSession("Inherited journal key");
+		void browser.send(sessionId, "restart-stream").catch(() => undefined);
+		await browser.waitFor(
+			(message) =>
+				message["type"] === "transcript_message" &&
+				message["role"] === "assistant" &&
+				(message["parts"] as HistoryMessage["parts"])?.some(
+					(part) => part.type === "text" && Boolean(part.text),
+				) === true,
+		);
+		const runner = harness.marks.find((mark) => mark.kind === "runner-started");
+		if (runner?.kind !== "runner-started")
+			throw new Error("Missing verified runner");
+		await harness.kill();
+		// test-waits-allow polling: the orphaned runner's output reaches only its proof file.
+		await vi.waitFor(() =>
+			expect(
+				sdkProof(harness).filter((mark) => mark["kind"] === "emit"),
+			).toHaveLength(3),
+		);
+		const journal = join(dirname(runner.socketPath), "sends", sessionId);
+		const finished = () =>
+			readdirSync(journal).map(
+				(name) =>
+					JSON.parse(readFileSync(join(journal, name), "utf8")) as {
+						completedAt?: number;
+					},
+			);
+		// test-waits-allow polling: the runner's journal reaches only its directory.
+		await vi.waitFor(() =>
+			expect(finished()).toEqual([
+				expect.objectContaining({ completedAt: expect.any(Number) }),
+			]),
+		);
+		expect(harness.signalOwnedRunner(runner.pid, "SIGKILL")).toBe(true);
+		// test-waits-allow polling: a killed runner reports only through the process table.
+		await vi.waitFor(() => expect(() => process.kill(runner.pid, 0)).toThrow());
+		await harness.restart();
+		const after = await harness.connect(sessionId);
+		const cursor = harness.marks.length;
+		const next = await after.send(sessionId, "after-inherited-key");
+		expect(next.chunks.join("")).toContain("after-inherited-key");
+		const stored = persisted(harness, sessionId);
+		// The successor runs in the dead runner's directory and inherits its finished key.
+		const successor = await harness.waitForMark(
+			(mark) => mark.kind === "runner-started",
+			cursor,
+		);
+		if (successor.kind !== "runner-started")
+			throw new Error("Missing successor runner");
+		expect(successor.pid).not.toBe(runner.pid);
+		expect(dirname(successor.socketPath)).toBe(dirname(runner.socketPath));
+		// A Claude journal's finished record holds only intake, which settles nothing
+		// (CONTRACT.md 1925, 2653): the Run ends once from its lost runner, never re-sent,
+		// and the inherited key gains no owner.
+		expect(stored.commands.map(({ status }) => status)).toEqual([
+			"failed",
+			"completed",
+		]);
+		expect(stored.ends).toEqual([
+			{ outcome: "error" },
+			{ outcome: "completed" },
+		]);
+		expect(
+			sdkProof(harness).filter(
+				(mark) =>
+					mark["kind"] === "enqueue" && mark["prompt"] === "restart-stream",
+			),
+		).toHaveLength(1);
+		proveCrashMatrixCell(
+			"claude/inherited-key",
+			harness.daemonStorePath(),
+			sessionId,
+		);
+	}, 90_000);
 
 	it.each([
 		"crash",
