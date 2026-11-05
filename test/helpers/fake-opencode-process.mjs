@@ -137,6 +137,9 @@ const server = createServer(async (request, response) => {
 	let body = "";
 	for await (const chunk of request) body += chunk;
 	const path = new URL(request.url, "http://127.0.0.1").pathname;
+	// Read before the body is logged: a test that sees the prompt's body may lift the hold
+	// at once, and the prompt must still be held (82tn.61).
+	const holdTurn = existsSync(join(configDir, "fake-opencode-hold-turn"));
 	if (body)
 		appendFileSync(
 			join(configDir, "fake-opencode-request-bodies.jsonl"),
@@ -428,7 +431,7 @@ const server = createServer(async (request, response) => {
 		}
 		response.writeHead(204).end();
 		// Crash tests control the remaining stream and idle through /test routes.
-		if (existsSync(join(configDir, "fake-opencode-hold-turn"))) {
+		if (holdTurn) {
 			updateState((state) => {
 				(state.statuses[directory] ??= {})[sessionID] = { type: "busy" };
 			});
