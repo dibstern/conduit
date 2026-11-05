@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Effect } from "effect";
 import { expect, it } from "vitest";
 import { ProjectManagementServiceTag } from "../../../src/lib/domain/relay/Services/project-management-service.js";
-import { createRelayHarness } from "../helpers/relay-harness.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
 it("adds a project from shared memory after daemon.json is corrupted", async () => {
 	const root = mkdtempSync(join(tmpdir(), "82tn18-shared-config-"));
@@ -13,10 +13,10 @@ it("adds a project from shared memory after daemon.json is corrupted", async () 
 	const projectDir = join(root, "added-project");
 	mkdirSync(configDir);
 	mkdirSync(projectDir);
-	const fixture = await createRelayHarness("chat-simple", { configDir });
+	const fixture = await createDaemonProject("chat-simple", { configDir });
 	try {
 		writeFileSync(join(configDir, "daemon.json"), "{corrupted after startup");
-		const result = await fixture.stack.effectRuntime.runtime.runPromise(
+		const result = await fixture.run(
 			Effect.flatMap(ProjectManagementServiceTag, (projects) =>
 				projects.save({ folders: [projectDir] }),
 			),

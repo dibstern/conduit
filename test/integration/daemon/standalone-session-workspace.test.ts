@@ -6,10 +6,9 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Context, Effect, Layer, ManagedRuntime, Option } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { describe, expect, it, vi } from "vitest";
 import * as WorktreeLayer from "../../../src/lib/domain/daemon/Layers/worktree-layer.js";
 import {
@@ -18,26 +17,19 @@ import {
 } from "../../../src/lib/domain/daemon/Services/worktree-service.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { readSessionWorktreeOwnership } from "../../../src/lib/domain/relay/Services/session-worktree-deletion.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
-import { claudeSdk } from "../../helpers/fake-claude-process-sdk.js";
-import { createTestProjectRelay } from "../../helpers/project-relay.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
-// Failure modes: the standalone workspace captures no worktree service; supplying
-// it constructs a second instance; a borrowed service is replaced by a local one.
-describe("standalone SessionWorkspace composition", () => {
-	it.each([
-		false,
-		true,
-	])("renames through its construction-time worktree service (borrowed: %s)", async (borrowed) => {
+// Failure modes: the project's workspace captures no worktree service; the
+// project constructs a second instance instead of borrowing the daemon's.
+describe("daemon project SessionWorkspace composition", () => {
+	it("renames through the daemon's one worktree service", async () => {
 		const root = realpathSync(
 			mkdtempSync(join(tmpdir(), "conduit-standalone-workspace-")),
 		);
 		const projectDir = join(root, "project");
-		const configDir = join(root, "config");
 		mkdirSync(projectDir);
-		mkdirSync(configDir);
 		const git = (directory: string, ...args: string[]) =>
 			execFileSync("git", ["-C", directory, ...args], {
 				encoding: "utf8",
@@ -70,34 +62,15 @@ describe("standalone SessionWorkspace composition", () => {
 					),
 				),
 			);
-		const owner = borrowed
-			? ManagedRuntime.make(WorktreeLayer.makeWorktreeLive(configDir))
-			: undefined;
-		const worktrees = await owner?.runPromise(WorktreeServiceTag);
-		const httpServer = createServer();
-		const relay = await createTestProjectRelay({
-			httpServer,
-			projectDir,
-			configDir,
+		const relay = await createDaemonProject("chat-simple", {
 			slug: "standalone",
-			persistenceDbPath: join(configDir, "events.db"),
-			claudeSdk,
-			log: createSilentLogger(),
-			publishGlobalSetting: () => Effect.void,
-			...(worktrees
-				? { worktreeContext: Context.make(WorktreeServiceTag, worktrees) }
-				: {}),
+			projectDir,
 		});
-		const relayManagedRuntime = relay.effectRuntime.runtime;
-		const evidence: Record<string, unknown> = { borrowed };
+		const evidence: Record<string, unknown> = { borrowed: true };
 		try {
-			const context = await relayManagedRuntime.context();
-			const service = Option.getOrThrow(
-				Context.getOption(context, WorktreeServiceTag),
-			);
+			const service = await relay.run(WorktreeServiceTag);
 			expect([...constructed]).toEqual([service]);
 			expect(construct).toHaveBeenCalledOnce();
-			if (worktrees) expect(service).toBe(worktrees);
 			const rename = vi.spyOn(service, "renameBranch");
 			const sessionId = "standalone-rename";
 			const created = await Effect.runPromise(
@@ -105,7 +78,7 @@ describe("standalone SessionWorkspace composition", () => {
 					{ path: projectDir, projectSlug: "standalone", sessionId },
 				]),
 			);
-			await relayManagedRuntime.runPromise(
+			await relay.run(
 				Effect.gen(function* () {
 					const commit = yield* makeCommitAndSignal;
 					yield* commit([
@@ -124,7 +97,7 @@ describe("standalone SessionWorkspace composition", () => {
 					]);
 				}),
 			);
-			const workspace = Context.get(context, SessionWorkspaceTag);
+			const workspace = await relay.run(SessionWorkspaceTag);
 			evidence["before"] = created;
 			// Run the retained service without a caller context or worktree fallback.
 			await Effect.runPromise(
@@ -134,7 +107,7 @@ describe("standalone SessionWorkspace composition", () => {
 				created.ownership,
 				"renamed-standalone",
 			);
-			const ownership = await relayManagedRuntime.runPromise(
+			const ownership = await relay.run(
 				readSessionWorktreeOwnership(sessionId, false),
 			);
 			expect(ownership).toEqual(
@@ -158,12 +131,11 @@ describe("standalone SessionWorkspace composition", () => {
 			throw error;
 		} finally {
 			await relay.stop();
-			await owner?.dispose();
 			vi.restoreAllMocks();
 			evidence["worktreeInstances"] = constructed.size;
 			mkdirSync("test-results", { recursive: true });
 			writeFileSync(
-				`test-results/82tn-10-3-standalone-workspace-${borrowed ? "borrowed" : "owned"}.json`,
+				"test-results/82tn-10-3-standalone-workspace-borrowed.json",
 				JSON.stringify(evidence, null, 2),
 			);
 			rmSync(root, { recursive: true, force: true });

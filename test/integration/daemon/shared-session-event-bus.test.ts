@@ -1,13 +1,12 @@
 /*
  * Failure modes: daemon relays accidentally retain local buses; disposing one
- * relay closes the shared bus; standalone stores share signals; a sibling's
- * turn runs workspace resolution with the wrong project; sidebar advances stop
- * reaching daemon status, transcript advances trigger needless refreshes, or a
- * continuous burst loses its final refresh.
+ * relay closes the shared bus; a sibling's turn runs workspace resolution with
+ * the wrong project; sidebar advances stop reaching daemon status, transcript
+ * advances trigger needless refreshes, or a continuous burst loses its final
+ * refresh.
  */
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodePath } from "@effect/platform-node";
@@ -41,13 +40,11 @@ import {
 	SessionEventBusTag,
 } from "../../../src/lib/domain/relay/Services/session-event-bus.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { sdkDefaultClaudeConfigDir } from "../../../src/lib/provider/claude/claude-sdk-env.js";
 import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
 
 const relayBus = async (relay: ProjectRelay) => {
 	const context = await relay.effectRuntime.runtime.context();
@@ -233,34 +230,6 @@ describe("daemon-wide committed session signals", () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	}, 30_000);
-
-	it("keeps independently stored standalone relays on separate local buses", async () => {
-		const root = mkdtempSync(join(tmpdir(), "conduit-local-bus-"));
-		const relays: ProjectRelay[] = [];
-		try {
-			for (const slug of ["alpha", "beta"])
-				relays.push(
-					await createProjectRelay({
-						httpServer: createServer(),
-						persistenceDbPath: join(root, `${slug}.db`),
-						configDir: root,
-						projectDir: root,
-						slug,
-						noServer: true,
-						opencodeUrl: "http://127.0.0.1:1",
-						publishGlobalSetting: () => Effect.void,
-						log: createSilentLogger(),
-					}),
-				);
-			const [alpha, beta] = await Promise.all(relays.map(relayBus));
-			expect(alpha).toBeDefined();
-			expect(beta).toBeDefined();
-			expect(alpha).not.toBe(beta);
-		} finally {
-			for (const relay of relays.reverse()) await relay.stop();
-			rmSync(root, { recursive: true, force: true });
-		}
-	});
 
 	it.effect(
 		"coalesces sidebar advances across projects with one trailing refresh",

@@ -514,6 +514,7 @@ export const SessionWorkspaceLive = Layer.effect(
 							const ownership = yield* readSessionWorktreeOwnership(
 								sessionId,
 								false,
+								projectId,
 							);
 							if (ownership.length === 0)
 								return yield* new WorktreeBranchRenameError({
@@ -548,7 +549,11 @@ export const SessionWorkspaceLive = Layer.effect(
 										Effect.gen(function* () {
 											// A post-COMMIT signal failure must not undo recorded ownership.
 											const recorded = yield* Effect.result(
-												readSessionWorktreeOwnership(sessionId, false),
+												readSessionWorktreeOwnership(
+													sessionId,
+													false,
+													projectId,
+												),
 											);
 											if (Result.isFailure(recorded))
 												return yield* new WorktreeBranchRenameError({

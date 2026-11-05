@@ -49,7 +49,7 @@ import { OpenCodeRuntimeEventTranslator } from "../../../src/lib/provider/openco
 import { translateProviderRuntimeEventToDomain } from "../../../src/lib/provider/provider-runtime-event-to-domain.js";
 import { makeRoutedWsRpcServerLayer } from "../../../src/lib/server/ws-rpc.js";
 import { makeDaemonRpcTestLayer } from "../../helpers/daemon-rpc.js";
-import { createRelayHarness } from "../helpers/relay-harness.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
@@ -229,8 +229,8 @@ const waitUpsert = async (
 };
 
 describe("daemon-wide shell feed", () => {
-	it("serves the standalone shell without a project payload", async () => {
-		const harness = await createRelayHarness();
+	it("serves a daemon project's shell without a project payload", async () => {
+		const harness = await createDaemonProject();
 		try {
 			const client = await harness.connectWsClient();
 			const projects = await client.waitFor("shell", {

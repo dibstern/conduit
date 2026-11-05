@@ -11,13 +11,13 @@ import {
 	vi,
 } from "vitest";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 describe("Integration: Cancel / Abort Lifecycle", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	async function drainReplay(client: TestWsClient) {
 		await vi.waitFor(() => {
@@ -43,7 +43,7 @@ describe("Integration: Cancel / Abort Lifecycle", () => {
 	}
 
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {

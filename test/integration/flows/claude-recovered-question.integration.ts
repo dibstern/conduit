@@ -36,13 +36,13 @@ import {
 	responseChunks,
 } from "../../helpers/fake-claude-process-sdk.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: recovered Claude questions", () => {
 	let root: string;
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let evidence: Record<string, unknown>;
 
 	beforeEach(() => {
@@ -117,15 +117,15 @@ describe("Integration: recovered Claude questions", () => {
 				root,
 			);
 		}
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
 			defaultModel: null,
 			claudeSdk,
 		});
 		const fixture = harness;
-		const runtime = fixture.stack.effectRuntime.runtime;
-		const pending = await runtime.runPromise(PendingInteractionServiceTag);
-		const log = await runtime.runPromise(LoggerTag);
+		const run = fixture.run;
+		const pending = await run(PendingInteractionServiceTag);
+		const log = await run(LoggerTag);
 		const warnings = vi.spyOn(log, "warn");
 		const client = await fixture.connectWsClient();
 		await client.waitForInitialState();
@@ -165,8 +165,8 @@ describe("Integration: recovered Claude questions", () => {
 
 			// Dispose the actual SDK runner. Stop intentionally resolves its cards;
 			// runner disposal leaves recoverable questions behind for the next send.
-			await runtime.runPromise(
-				fixture.stack.orchestration.engine.dispatchEffect({
+			await run(
+				(await run(OrchestrationEngineTag)).dispatchEffect({
 					type: "end_session",
 					commandId: randomUUID(),
 					sessionId,
@@ -174,9 +174,9 @@ describe("Integration: recovered Claude questions", () => {
 			);
 			let recovered: PendingQuestion | undefined;
 			await vi.waitFor(async () => {
-				recovered = (
-					await runtime.runPromise(pending.listPendingQuestions(sessionId))
-				).find((entry) => entry.requestId === requestId);
+				recovered = (await run(pending.listPendingQuestions(sessionId))).find(
+					(entry) => entry.requestId === requestId,
+				);
 				expect(recovered).toMatchObject({
 					requestId,
 					sessionId,
@@ -192,7 +192,7 @@ describe("Integration: recovered Claude questions", () => {
 			};
 			// The process driver's confirmed-exit path supplies this terminal. The
 			// injected in-process runner has no child exit notification of its own.
-			await runtime.runPromise(
+			await run(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					const ingestion = yield* ProviderRuntimeIngestionTag;
@@ -211,10 +211,10 @@ describe("Integration: recovered Claude questions", () => {
 			};
 
 			if (scenario === "restored-completed") {
-				await runtime.runPromise(pending.markQuestionResolved(requestId));
-				await runtime.runPromise(restoreClaudeQuestionsFromStore);
+				await run(pending.markQuestionResolved(requestId));
+				await run(restoreClaudeQuestionsFromStore);
 				expect(
-					await runtime.runPromise(pending.listPendingQuestions(sessionId)),
+					await run(pending.listPendingQuestions(sessionId)),
 				).toContainEqual(
 					expect.objectContaining({
 						requestId,
@@ -225,8 +225,8 @@ describe("Integration: recovered Claude questions", () => {
 					}),
 				);
 			} else if (scenario === "open-named-account") {
-				await runtime.runPromise(pending.markQuestionResolved(requestId));
-				await runtime.runPromise(
+				await run(pending.markQuestionResolved(requestId));
+				await run(
 					pending.recoverPendingQuestions([
 						{
 							...recovered,
@@ -240,12 +240,10 @@ describe("Integration: recovered Claude questions", () => {
 				db.prepare("DELETE FROM message_parts WHERE id = ?").run(tool.id);
 			} else if (scenario === "missing-call-id") {
 				const { toolCallId: _toolCallId, ...withoutCallId } = recovered;
-				await runtime.runPromise(pending.markQuestionResolved(requestId));
-				await runtime.runPromise(
-					pending.recoverPendingQuestions([withoutCallId]),
-				);
+				await run(pending.markQuestionResolved(requestId));
+				await run(pending.recoverPendingQuestions([withoutCallId]));
 			} else if (scenario === "lookup-failure") {
-				const read = await runtime.runPromise(ReadQueryEffectTag);
+				const read = await run(ReadQueryEffectTag);
 				vi.spyOn(read, "getPendingClaudeQuestionTool").mockImplementationOnce(
 					() =>
 						Effect.fail(
@@ -261,9 +259,9 @@ describe("Integration: recovered Claude questions", () => {
 				).run(tool.id);
 			}
 			Object.assign(evidence, { sessionId, requestId, accountId, tool });
-			expect(
-				await runtime.runPromise(pending.listPendingQuestions(sessionId)),
-			).toContainEqual(expect.objectContaining({ requestId, recovered: true }));
+			expect(await run(pending.listPendingQuestions(sessionId))).toContainEqual(
+				expect.objectContaining({ requestId, recovered: true }),
+			);
 
 			if (scenario === "answer-runner-owned") {
 				const stored = db
@@ -280,9 +278,9 @@ describe("Integration: recovered Claude questions", () => {
 					.get(sessionId);
 				// The compatibility handler has no command engine. A process-owned
 				// prompt must expire instead of turning its answer into a new input.
-				const contextEffect = fixture.stack.rpcWsHandler.context;
+				const contextEffect = (await fixture.relay()).rpcWsHandler.context;
 				if (!contextEffect) throw new Error("Missing RPC handler context");
-				const handlerContext = await runtime.runPromise(contextEffect);
+				const handlerContext = await run(contextEffect);
 				await expect(
 					Effect.runPromise(
 						handleAskUserResponse(client.getClientId(), {
@@ -384,9 +382,7 @@ describe("Integration: recovered Claude questions", () => {
 						.get(tool.id),
 				).toEqual({ status: "completed" });
 			}
-			expect(
-				await runtime.runPromise(pending.listPendingQuestions(sessionId)),
-			).toEqual([]);
+			expect(await run(pending.listPendingQuestions(sessionId))).toEqual([]);
 			const approval = db
 				.prepare<[string], { status: string }>(
 					"SELECT status FROM pending_approvals WHERE id = ?",

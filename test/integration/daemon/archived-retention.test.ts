@@ -22,9 +22,9 @@ import {
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
 import { publishLedgerTasks } from "../../helpers/ledger-tasks.js";
 import { ProcessHarness } from "../../helpers/process-harness.js";
-import { createRelayHarness } from "../helpers/relay-harness.js";
 
 it("reclaims a root-only archived tree with unarchived side threads and subagents on a live daemon cycle", async () => {
 	const fixtureStarted = performance.now();
@@ -239,9 +239,9 @@ it.each([
 	"restored root",
 	"rearchived root",
 ])("keeps a changed snapshot after %s arrives during retention", async (change) => {
-	const harness = await createRelayHarness();
+	const harness = await createDaemonProject();
 	try {
-		await harness.stack.effectRuntime.runtime.runPromise(
+		await harness.run(
 			Effect.gen(function* () {
 				const sql = yield* SqlClient.SqlClient;
 				const service = yield* projectSessionManager;

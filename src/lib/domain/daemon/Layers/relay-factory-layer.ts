@@ -35,7 +35,7 @@ import {
 import { ClaudeAccountScopes } from "../../../provider/claude/claude-account-scopes.js";
 import { CursorAccountResources } from "../../../provider/cursor/cursor-account-resources.js";
 import type { ProjectRelay } from "../../../relay/relay-stack.js";
-import type { StoredProject } from "../../../types.js";
+import type { ClaudeSdkSeam, StoredProject } from "../../../types.js";
 import { AlertsTag } from "../../relay/Services/alerts.js";
 import {
 	DaemonSessionQueryServiceError,
@@ -200,6 +200,8 @@ export class RelayFactoryTag extends Context.Service<
  */
 export const RelayFactoryLive = (
 	configDir: string,
+	/** Test seam: the in-process Claude SDK every project relay uses. */
+	claudeSdk?: ClaudeSdkSeam,
 ): Layer.Layer<
 	RelayFactoryTag | HttpServerRefTag,
 	never,
@@ -708,6 +710,7 @@ export const RelayFactoryLive = (
 											envResolver.waitUntilReady(directory, project.slug),
 									}),
 									slug: project.slug,
+									...(claudeSdk && { claudeSdk }),
 									noServer: true,
 									signal: ac.signal,
 									configDir,

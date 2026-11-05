@@ -17,9 +17,9 @@ import { isSessionDeleted } from "../../../src/lib/persistence/effect/session-se
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 interface EventRow {
 	sequence: number;
@@ -29,7 +29,7 @@ interface EventRow {
 }
 
 describe("born-dead sessions through the relay", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let db: Database.Database | undefined;
 	const evidence: Record<string, unknown> = {};
 
@@ -58,15 +58,15 @@ describe("born-dead sessions through the relay", () => {
 	});
 
 	it("keeps a live parent and child when the parent's deletion event names another session", async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		const relay = harness;
-		const runtime = relay.stack.effectRuntime.runtime;
+		const run = relay.run;
 		const database = new Database(relay.eventsDbPath, { readonly: true });
 		db = database;
 		const sourceId = "foreign-marker-source";
 		const childId = "foreign-marker-child";
 		const targetId = "foreign-marker-target";
-		const { commit, ingestion, retention, sql } = await runtime.runPromise(
+		const { commit, ingestion, retention, sql } = await run(
 			Effect.gen(function* () {
 				return {
 					commit: yield* makeCommitAndSignal,
@@ -76,7 +76,7 @@ describe("born-dead sessions through the relay", () => {
 				};
 			}),
 		);
-		await runtime.runPromise(
+		await run(
 			commit([
 				canonicalEvent("session.created", sourceId, {
 					sessionId: sourceId,
@@ -119,13 +119,13 @@ describe("born-dead sessions through the relay", () => {
 			),
 		);
 		// The stream belongs to S, but this event deletes T. It is not S's marker.
-		await runtime.runPromise(
+		await run(
 			commit([
 				canonicalEvent("session.deleted", sourceId, { sessionId: targetId }),
 			]),
 		);
 		let transaction: unknown;
-		await runtime.runPromise(
+		await run(
 			ingestion.ingestBatch(
 				[
 					decodeProviderRuntimeEvent({
@@ -202,8 +202,8 @@ describe("born-dead sessions through the relay", () => {
 		expect(
 			database.prepare("SELECT id FROM sessions WHERE id = ?").get(targetId),
 		).toBeUndefined();
-		expect(await runtime.runPromise(isSessionDeleted(sourceId))).toBe(false);
-		expect(await runtime.runPromise(isSessionDeleted(childId))).toBe(false);
+		expect(await run(isSessionDeleted(sourceId))).toBe(false);
+		expect(await run(isSessionDeleted(childId))).toBe(false);
 		expect(childMarkers).toEqual([]);
 		expect(historyAfter).toEqual(expect.arrayContaining(historyBefore));
 		expect(historyAfter).toHaveLength(historyBefore.length + 1);
@@ -230,7 +230,7 @@ describe("born-dead sessions through the relay", () => {
 		{ name: "recreate-own-id", reference: "sessionId", during: false },
 		{ name: "recreate-payload-id", reference: "sessionId", during: false },
 	] as const)("$name", async ({ name, reference, during }) => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		const relay = harness;
 		const database = new Database(relay.eventsDbPath, { readonly: true });
 		db = database;
@@ -241,8 +241,8 @@ describe("born-dead sessions through the relay", () => {
 		});
 		const parentId = String(parent["id"]);
 		const childId = reference === "sessionId" ? parentId : `ses_${name}`;
-		const runtime = relay.stack.effectRuntime.runtime;
-		const { commit, ingestion, retention, sql } = await runtime.runPromise(
+		const run = relay.run;
+		const { commit, ingestion, retention, sql } = await run(
 			Effect.gen(function* () {
 				return {
 					commit: yield* makeCommitAndSignal,
@@ -267,7 +267,7 @@ describe("born-dead sessions through the relay", () => {
 			);
 		};
 		if (during) observeDrains();
-		const deletion = runtime.runPromise(
+		const deletion = run(
 			commit(
 				[canonicalEvent("session.deleted", parentId, { sessionId: parentId })],
 				{
@@ -281,7 +281,7 @@ describe("born-dead sessions through the relay", () => {
 			),
 		);
 		if (during) {
-			await runtime.runPromise(Deferred.await(deleteEntered));
+			await run(Deferred.await(deleteEntered));
 		} else {
 			await deletion;
 			await vi.waitFor(() =>
@@ -299,7 +299,7 @@ describe("born-dead sessions through the relay", () => {
 			.prepare("SELECT COALESCE(MAX(sequence), 0) AS sequence FROM events")
 			.get() as { sequence: number };
 		let transaction: unknown;
-		const arrival = runtime.runPromise(
+		const arrival = run(
 			ingestion.ingestBatch(
 				[
 					decodeProviderRuntimeEvent({
@@ -356,7 +356,7 @@ describe("born-dead sessions through the relay", () => {
 			),
 		);
 		if (during) {
-			await runtime.runPromise(Deferred.succeed(finishDelete, undefined));
+			await run(Deferred.succeed(finishDelete, undefined));
 			await deletion;
 		}
 		await arrival;
@@ -368,7 +368,7 @@ describe("born-dead sessions through the relay", () => {
 			providers: database
 				.prepare("SELECT id FROM session_providers WHERE session_id = ?")
 				.all(childId),
-			dead: await runtime.runPromise(isSessionDeleted(childId)),
+			dead: await run(isSessionDeleted(childId)),
 		};
 		expect(projectedRows).toEqual({ sessions: [], providers: [], dead: true });
 		const beforeDrainParity = await relay.checkReplayParity();
@@ -380,7 +380,7 @@ describe("born-dead sessions through the relay", () => {
 			// No manual drain or additional delete: only the committed marker kicks it.
 			await vi.waitFor(() => expect(drains).toHaveBeenCalled());
 		}
-		await runtime.runPromise(Deferred.succeed(drainGate, undefined));
+		await run(Deferred.succeed(drainGate, undefined));
 		if (reference !== "sessionId") {
 			await vi.waitFor(() => {
 				expect(reports.some((report) => report.sessionsFreed >= 1)).toBe(true);
@@ -410,14 +410,14 @@ describe("born-dead sessions through the relay", () => {
 		"missing-parent",
 		"batch-cascade",
 	] as const)("refuses %s without committing any events", async (scenario) => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 		const relay = harness;
-		const runtime = relay.stack.effectRuntime.runtime;
+		const run = relay.run;
 		const database = new Database(relay.eventsDbPath, { readonly: true });
 		db = database;
 		const eventsBefore = () =>
 			database.prepare("SELECT event_id FROM events ORDER BY sequence").all();
-		const setup = await runtime.runPromise(
+		const setup = await run(
 			Effect.gen(function* () {
 				const commit = yield* makeCommitAndSignal;
 				yield* commit([
@@ -447,7 +447,7 @@ describe("born-dead sessions through the relay", () => {
 		const before = eventsBefore();
 		const result =
 			scenario === "missing-parent"
-				? await runtime.runPromise(
+				? await run(
 						Effect.result(
 							setup.manager.establishOpenCodeSession(
 								{
@@ -463,7 +463,7 @@ describe("born-dead sessions through the relay", () => {
 							),
 						),
 					)
-				: await runtime.runPromise(
+				: await run(
 						Effect.result(
 							setup.persist.persistEvents([
 								canonicalEvent("session.deleted", "batch-parent", {

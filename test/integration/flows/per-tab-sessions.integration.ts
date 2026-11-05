@@ -4,15 +4,15 @@
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 describe("Integration: Per-Tab Sessions", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeAll(async () => {
-		harness = await createRelayHarness();
+		harness = await createDaemonProject();
 	}, 30_000);
 
 	afterAll(async () => {
