@@ -3213,6 +3213,18 @@ export const ConfirmEscalation = Rpc.make("ConfirmEscalation", {
 	error: WsRpcError,
 });
 
+/**
+ * Withdraws the send held behind the old process's close (gap: 8.4 gives the gate no cancel): the
+ * message returns to the composer with a notice, and the process and its tasks stay.
+ */
+export const DismissEscalation = Rpc.make("DismissEscalation", {
+	payload: Schema.TaggedStruct("DismissEscalation", {
+		sessionId: NonEmptyString,
+	}),
+	success: OkResponseSchema,
+	error: WsRpcError,
+});
+
 /** Stops a server the session lists (8.7 Stop); the entry leaves only by the next scan's server_gone. */
 export const StopServer = Rpc.make("StopServer", {
 	payload: Schema.TaggedStruct("StopServer", {
@@ -3746,6 +3758,7 @@ const wsRpcRequests = [
 	CancelSession,
 	StopTasks,
 	ConfirmEscalation,
+	DismissEscalation,
 	SetGoal,
 	ClearGoal,
 	PauseGoal,

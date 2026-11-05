@@ -45,7 +45,7 @@
 	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
 	import { shownCut, toolDetails } from "../../stores/tool-details.js";
 	import { backgroundTaskText } from "../../../shared-types.js";
-	import { confirmStuckStop, stopBackgroundTasks, taskKind } from "../session/background-tasks.svelte.js";
+	import { confirmStuckStop, keepTasks, stopBackgroundTasks, taskKind } from "../session/background-tasks.svelte.js";
 	import type { ModelExecution } from "../../types.js";
 	import Button from "../ui/Button.svelte";
 	import Badge from "../ui/Badge.svelte";
@@ -626,6 +626,8 @@
 					<span class="flex shrink-0 gap-[6px] {phone ? 'order-last basis-full flex-wrap' : ''}" data-testid="stuck-stop-actions">
 						<Button variant="accent-soft" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px]" onclick={() => confirmStuckStop(stuckSession)}>{closing ? "Close now" : "Stop now"}</Button>
 						{#if stuck.tasks}<Button variant="ghost" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] bg-chip" onclick={() => stopBackgroundTasks(stuckSession)}>Stop tasks first</Button>{/if}
+						<!-- A send waiting on the close can be withdrawn: the process and its tasks stay, the message returns. -->
+						{#if closing && view.chat.transcript?.pending?.length}<Button variant="ghost" size="content" touchTarget class="rounded-full px-[10px] py-[4px] text-[12px] bg-chip" onclick={() => keepTasks(stuckSession)}>Keep tasks</Button>{/if}
 					</span>
 				{/if}
 				{#if surfacingActive || summaryEnabled}

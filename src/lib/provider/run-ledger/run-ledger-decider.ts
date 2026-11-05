@@ -3009,6 +3009,17 @@ function control(
 				endSession(book, findRun(book, gate.runId), gate.commandId);
 			return changed;
 		}
+		case "dismiss_escalation": {
+			// Gap: 8.4 (2870-2899) gives the gate no cancel. Nearest reading: a held end_session step
+			// waits for its send, so a withdrawn send drops its step; the process and tasks stay.
+			if (
+				book.confirm?.step !== "end_session" ||
+				book.confirm.commandId !== command.commandId
+			)
+				return rejected("no held close for this command (8.4)");
+			book.confirm = undefined;
+			return changed;
+		}
 		case "native_command": {
 			if (
 				book.nativeCommands.some((item) => item.commandId === command.commandId)

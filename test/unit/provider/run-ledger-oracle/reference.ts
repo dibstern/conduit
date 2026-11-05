@@ -2636,6 +2636,16 @@ function control(
 				foldEndSession(world, gate.runId ?? null, gate.commandId);
 			return changed;
 		}
+		case "dismiss_escalation": {
+			// Gap: 8.4 (2870-2899) gives the gate no cancel; a withdrawn send drops its held step.
+			if (
+				world.confirm?.step !== "end_session" ||
+				world.confirm.commandId !== command.commandId
+			)
+				return rejected("no held close for this command (8.4)");
+			world.confirm = undefined;
+			return changed;
+		}
 		case "native_command": {
 			if (
 				world.nativeCommands.some(

@@ -1,5 +1,6 @@
 import { Clock, Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
+import { SessionInboxTag } from "../domain/relay/Services/session-inbox.js";
 import { makeCommitAndSignal } from "../persistence/effect/commit-and-signal.js";
 import { EventStoreEffectTag } from "../persistence/effect/event-store-effect.js";
 import { loadLedger } from "../persistence/effect/run-ledger-arm.js";
@@ -124,6 +125,54 @@ export const confirmEscalation = (sessionId: string, snapshotEntry: number) =>
 							{ snapshotEntry },
 							{ provider: session.provider, createdAt: now },
 						),
+					]),
+				);
+			}),
+		);
+	});
+
+/** A dismiss with no send held behind a close, or one that already started. */
+export class DismissEscalationRefused extends Data.TaggedError(
+	"DismissEscalationRefused",
+)<{ readonly message: string }> {}
+
+/**
+ * The browser's dismiss of a send held behind the old process's close. Gap: CONTRACT.md 8.4
+ * (2870-2899) gives the gate no cancel; the nearest reading withdraws the send, and the ledger
+ * drops the held close with it (run-ledger-arm, input.cancelled). The message returns to the
+ * composer with a notice; the process and its tasks stay.
+ */
+export const dismissEscalation = (sessionId: string) =>
+	Effect.gen(function* () {
+		const sql = yield* SqlClient.SqlClient;
+		const [held] = yield* sql<{ command_id: string }>`
+			SELECT command_id FROM provider_command_outbox
+			WHERE session_id = ${sessionId} AND effect_type = 'end_session'
+				AND status = 'held' AND command_id LIKE 'inbox-close:%'`;
+		if (!held)
+			return yield* new DismissEscalationRefused({
+				message: "Nothing is waiting to be sent",
+			});
+		const outcome = yield* (yield* SessionInboxTag).cancel({
+			clientId: "rpc",
+			sessionId,
+			inputId: held.command_id.slice("inbox-close:".length),
+			restoreTo: { session: sessionId },
+			restoreText: true,
+		});
+		if (outcome !== "accepted")
+			return yield* new DismissEscalationRefused({
+				message: "That message already started",
+			});
+		const store = yield* EventStoreEffectTag;
+		const commit = yield* makeCommitAndSignal;
+		yield* commit.write((project) =>
+			Effect.gen(function* () {
+				yield* project(
+					yield* store.appendBatch([
+						canonicalEvent("turn.notice", sessionId, {
+							text: "Not sent: this message needs a new process for the session, and closing the current one would end its background tasks. It is back in the message box.",
+						}),
 					]),
 				);
 			}),

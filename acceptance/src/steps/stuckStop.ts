@@ -58,6 +58,11 @@ const stub = (page: Page) =>
 			});
 		},
 		StopTasks: () => ({ ok: true }),
+		// The server cancels the held close and the session settles with its tasks.
+		DismissEscalation: () => {
+			setSessionRowStatus(page, SESSION, "idle", { stopConfirm: undefined });
+			return { ok: true };
+		},
 	});
 
 const dialog = (page: Page) => page.locator("#confirm-modal");
@@ -96,14 +101,43 @@ export const stuckStopHandlers: StepHandler[] = [
 		},
 	},
 	{
-		name: "press Close now on a held close",
-		match: /^I press Close now on the held close$/,
-		run: async ({ world }) => {
+		name: "press an action on a held close",
+		match: /^I press (Close now|Keep tasks) on the held close$/,
+		run: async ({ world, match }) => {
 			await world.page
 				.getByTestId("stuck-stop-actions")
 				.last()
-				.getByRole("button", { name: "Close now", exact: true })
+				.getByRole("button", { name: match[1] ?? "", exact: true })
 				.click();
+		},
+	},
+	{
+		name: "a held close with no send offers no Keep tasks",
+		match: /^the held close offers no Keep tasks$/,
+		run: async ({ world }) => {
+			const actions = world.page.getByTestId("stuck-stop-actions").last();
+			await expect(
+				actions.getByRole("button", { name: "Close now", exact: true }),
+			).toBeVisible();
+			await expect(
+				actions.getByRole("button", { name: "Keep tasks", exact: true }),
+			).toHaveCount(0);
+		},
+	},
+	{
+		name: "assert the held send was withdrawn",
+		match:
+			/^the held send was withdrawn once and the held close's actions are gone$/,
+		run: async ({ world }) => {
+			await expect
+				.poll(() =>
+					requireRpcControl(world.page)
+						.getRequests()
+						.filter((request) => request.tag === "DismissEscalation")
+						.map((request) => request.payload["sessionId"]),
+				)
+				.toEqual([SESSION]);
+			await expect(world.page.getByTestId("stuck-stop-actions")).toHaveCount(0);
 		},
 	},
 	{
@@ -251,17 +285,21 @@ export const stuckStopHandlers: StepHandler[] = [
 	},
 	{
 		name: "the stuck Stop fits a phone",
-		match: /^the stuck Stop's whole label and both actions are on screen$/,
-		run: async ({ world }) => {
+		match:
+			/^the (stuck Stop's whole label and both actions|held close's whole label and its three actions) are on screen$/,
+		run: async ({ world, match }) => {
 			const width = world.page.viewportSize()?.width ?? 0;
-			const label = head(world.page).getByText("Stop is stuck", {
-				exact: false,
-			});
+			const held = match[1]?.startsWith("held") ?? false;
+			const actions = world.page.getByTestId("stuck-stop-actions").last();
+			const label = actions
+				.locator("..")
+				.getByText(held ? "Close is held" : "Stop is stuck", { exact: false });
 			const shown = [
 				label,
-				...["Stop now", "Stop tasks first"].map((name) =>
-					head(world.page).getByRole("button", { name, exact: true }),
-				),
+				...(held
+					? ["Close now", "Stop tasks first", "Keep tasks"]
+					: ["Stop now", "Stop tasks first"]
+				).map((name) => actions.getByRole("button", { name, exact: true })),
 			];
 			for (const element of shown) {
 				const box = await element.boundingBox();

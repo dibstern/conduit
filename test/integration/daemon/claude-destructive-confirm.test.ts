@@ -13,6 +13,9 @@
 // 13, 14. a confirmed close leaves no timeline entry, or a close with no tasks leaves one.
 // 24. a delete with tasks live ends them unasked, or a stale confirm deletes.
 // 25. a refresh with tasks live ends them unasked, waits for the turn, or shows no ask.
+// 25-27. a send on a switched account is refused, or on confirm the old process closes twice, not
+// at all, or the message is lost, doubled, or sent on the old account.
+// 28, 29. an agent change, or a send after a rewind, replaces the query with tasks live, unasked.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -82,6 +85,60 @@ const endRows = (harness: ProcessHarness, sessionId: string) => {
 	}
 };
 
+/** The session's end_session rows with the process each was addressed to. */
+const endTargets = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return db
+			.prepare(
+				"SELECT command_id AS commandId, status, provider_process_id AS process FROM provider_command_outbox WHERE session_id = ? AND effect_type = 'end_session' ORDER BY request_sequence",
+			)
+			.all(sessionId) as {
+			commandId: string;
+			status: string;
+			process: string | null;
+		}[];
+	} finally {
+		db.close();
+	}
+};
+
+/** The runner process ids reported for the session, oldest first (a label adds ":<generation>"). */
+const processesStarted = (harness: ProcessHarness, sessionId: string) => {
+	const db = new Database(harness.daemonStorePath(), { readonly: true });
+	try {
+		return (
+			db
+				.prepare(
+					"SELECT json_extract(data, '$.label') AS label FROM events WHERE session_id = ? AND type = 'evidence.process_started' ORDER BY sequence",
+				)
+				.all(sessionId) as { label: string }[]
+		).map((row) => row.label.split(":")[0]);
+	} finally {
+		db.close();
+	}
+};
+
+/** Adds two Claude accounts with their own login folders. */
+const addAccounts = async (harness: ProcessHarness) => {
+	const ids: string[] = [];
+	for (const name of ["A", "B"]) {
+		const configDir = join(harness.root, name);
+		mkdirSync(configDir, { recursive: true });
+		const { addedInstanceId } = await harness.requestRpc({
+			_tag: "AddInstance",
+			name,
+			driver: "claude",
+			configDir,
+		});
+		if (!addedInstanceId) throw new Error("Missing fixture account");
+		ids.push(addedInstanceId);
+	}
+	const [a, b] = ids;
+	if (!a || !b) throw new Error("Missing fixture accounts");
+	return { a, b };
+};
+
 const lostNotices = async (browser: BrowserClient, sessionId: string) =>
 	(await browser.history(sessionId)).flatMap((message) =>
 		(message.parts ?? []).flatMap((part) =>
@@ -116,8 +173,12 @@ const row = (
 	);
 
 /** The deaf held turn, once its four tasks show on the session row. */
-const startTurn = async (harness: ProcessHarness, browser: BrowserClient) => {
-	const sessionId = await browser.createSession("Destructive confirm");
+const startTurn = async (
+	harness: ProcessHarness,
+	browser: BrowserClient,
+	account?: string,
+) => {
+	const sessionId = await browser.createSession("Destructive confirm", account);
 	await browser.followSession(sessionId);
 	const turn = browser.send(sessionId, deaf);
 	void turn.catch(() => undefined);
@@ -817,5 +878,274 @@ describe("a stuck Stop asks before it ends background tasks", () => {
 		proof["delete confirmed"] = {
 			closed: closedQueries(fixture, queryId).length,
 		};
+	});
+
+	/** The turn ends on its own; its tasks keep running (a switch refuses a live turn). */
+	const endTurn = async (
+		fixture: ProcessHarness,
+		browser: BrowserClient,
+		sessionId: string,
+	) => {
+		const endedFrom = browser.frames.length;
+		writeFileSync(join(fixture.root, "task-stop-release-result"), "release");
+		await row(
+			browser,
+			sessionId,
+			endedFrom,
+			(message) => message["status"] === "idle",
+		);
+	};
+
+	/**
+	 * 8.4 2875-2899: a send that needs a new process waits behind the held close of the old one
+	 * while tasks are live: the ask shows, the row is held, nothing closes and nothing is sent.
+	 */
+	const holdSend = async (
+		label: string,
+		{ fixture, browser }: { fixture: ProcessHarness; browser: BrowserClient },
+		sessionId: string,
+		queryId: string,
+	) => {
+		const oldProcess = processesStarted(fixture, sessionId).at(-1);
+		const cursor = browser.frames.length;
+		const inputId = crypto.randomUUID();
+		const text = `after-held-${label}`;
+		const submitted = await Effect.runPromise(
+			Effect.result(
+				browser.rpc["input.submit"]({
+					sessionId,
+					originId: browser.originId,
+					inputId,
+					delivery: "queue",
+					text,
+				}),
+			),
+		);
+		proof[`${label}: submitted`] =
+			submitted._tag === "Success"
+				? submitted.success
+				: { refused: String(submitted.failure) };
+		expect(submitted._tag).toBe("Success");
+		const asked = confirmOf(
+			await row(browser, sessionId, cursor, (message) =>
+				Boolean(confirmOf(message)),
+			),
+		);
+		expect(asked?.step).toBe("end_session");
+		expect(asked?.tasks?.map((task) => task.id).sort()).toEqual(allIds);
+		// test-waits-allow real-wait: nothing destroying is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const held = endTargets(fixture, sessionId);
+		proof[`${label}: held`] = { asked, oldProcess, rows: held };
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		expect(held).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "held",
+				process: oldProcess,
+			},
+		]);
+		const enqueued = () =>
+			marks(fixture).filter(
+				(mark) => mark["kind"] === "enqueue" && mark["request"] === text,
+			);
+		expect(enqueued()).toEqual([]);
+		return { oldProcess, cursor, inputId, text, enqueued };
+	};
+
+	/** A held send (holdSend) the user confirms: the old process closes once and the message is sent once. */
+	const holdsSend = async (
+		label: string,
+		started: { fixture: ProcessHarness; browser: BrowserClient },
+		sessionId: string,
+		queryId: string,
+	) => {
+		const { fixture, browser } = started;
+		const { oldProcess, cursor, inputId, enqueued } = await holdSend(
+			label,
+			started,
+			sessionId,
+			queryId,
+		);
+		await confirmNewest(browser, sessionId, cursor);
+		// test-waits-allow polling: the fake SDK reports its queries only through sdk-proof.ndjson.
+		await vi.waitFor(() => expect(enqueued()).toHaveLength(1), {
+			timeout: 10_000,
+		});
+		const launches = fixture.claudeOptions();
+		proof[`${label}: confirmed`] = {
+			rows: endTargets(fixture, sessionId),
+			closed: closedQueries(fixture, queryId).length,
+			sent: enqueued(),
+			launch: launches.at(-1)?.options,
+		};
+		expect(closedQueries(fixture, queryId)).toHaveLength(1);
+		expect(endTargets(fixture, sessionId)).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "completed",
+				process: oldProcess,
+			},
+		]);
+		expect(enqueued()[0]?.["queryId"]).not.toBe(queryId);
+		return launches.at(-1)?.options;
+	};
+
+	// 25-27, R5: a send on another account of the same driver needs a new process.
+	it("holds a send on a switched account while tasks are live, then closes the old process once and sends on the new one", async () => {
+		const started = await start();
+		const { a, b } = await addAccounts(started.fixture);
+		const { sessionId, queryId } = await startTurn(
+			started.fixture,
+			started.browser,
+			a,
+		);
+		await endTurn(started.fixture, started.browser, sessionId);
+		await started.fixture.requestRpc({
+			_tag: "ContinueSession",
+			sessionId,
+			instanceId: b,
+			expectedInstanceId: a,
+		});
+		const launch = await holdsSend("switch", started, sessionId, queryId);
+		expect(launch?.["env"]).toEqual(
+			expect.objectContaining({
+				CLAUDE_CONFIG_DIR: join(started.fixture.root, "B"),
+			}),
+		);
+	});
+
+	// 28: an agent change needs a new query (6.1 2106).
+	it("holds a send after an agent change while tasks are live, then closes the old process once and sends on a new one", async () => {
+		const started = await start();
+		const { sessionId, queryId } = await startTurn(
+			started.fixture,
+			started.browser,
+		);
+		await endTurn(started.fixture, started.browser, sessionId);
+		await started.browser.switchAgent(sessionId, "reviewer");
+		const launch = await holdsSend("agent", started, sessionId, queryId);
+		proof["agent: launch agent"] = launch?.["agent"] ?? null;
+	});
+
+	// 29: a send after a rewind starts a fresh query from the cut.
+	it("holds a send after a rewind while tasks are live, then closes the old process once and sends on a new one", async () => {
+		const started = await start();
+		const { browser } = started;
+		const { sessionId, queryId } = await startTurn(started.fixture, browser);
+		await endTurn(started.fixture, browser, sessionId);
+		const target = (await browser.history(sessionId)).find(
+			(message) => message.role === "user",
+		);
+		if (!target) throw new Error("Missing rewind target");
+		await Effect.runPromise(
+			browser.rpc.RewindSession({ sessionId, messageId: target.id }),
+		);
+		const launch = await holdsSend("rewind", started, sessionId, queryId);
+		// The cut is the first message, so the new process resumes nothing.
+		expect(launch?.["resume"]).toBeUndefined();
+	});
+
+	/** The session's composer draft and the timeline notices, from the daemon's store. */
+	const composer = (fixture: ProcessHarness, sessionId: string) => {
+		const db = new Database(fixture.daemonStorePath(), { readonly: true });
+		try {
+			const draft = db
+				.prepare("SELECT text FROM input_drafts WHERE draft_key = ?")
+				.get(sessionId) as { text: string } | undefined;
+			const notices = db
+				.prepare(
+					"SELECT json_extract(data, '$.text') AS text FROM events WHERE session_id = ? AND type = 'turn.notice'",
+				)
+				.all(sessionId) as { text: string }[];
+			return { draft: draft?.text, notices: notices.map(({ text }) => text) };
+		} finally {
+			db.close();
+		}
+	};
+
+	// 32-35, 43: dismiss (gap: 8.4 2870-2899 gives the gate no cancel; dismiss withdraws the send).
+	it("dismisses a held send: keeps the old process and its tasks, and returns the message to the composer with a notice", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { oldProcess, inputId, text, enqueued } = await holdSend(
+			"dismiss",
+			started,
+			sessionId,
+			queryId,
+		);
+		const from = browser.frames.length;
+		await Effect.runPromise(browser.rpc.DismissEscalation({ sessionId }));
+		const after = await row(
+			browser,
+			sessionId,
+			from,
+			(message) => !confirmOf(message),
+		);
+		// test-waits-allow real-wait: nothing closing or sending is an absence over time.
+		await new Promise((resolve) => setTimeout(resolve, STOP_WAIT_MS));
+		const kept = composer(fixture, sessionId);
+		const again = await Effect.runPromise(
+			Effect.result(browser.rpc.DismissEscalation({ sessionId })),
+		);
+		proof["dismiss: dismissed"] = {
+			rows: endTargets(fixture, sessionId),
+			closed: closedQueries(fixture, queryId).length,
+			tasks: after["backgroundTasks"],
+			composer: kept,
+			again: again._tag === "Failure" ? String(again.failure) : again.success,
+		};
+		expect(endTargets(fixture, sessionId)).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "cancelled",
+				process: oldProcess,
+			},
+		]);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
+		expect(enqueued()).toEqual([]);
+		expect(
+			(after["backgroundTasks"] as { id: string }[]).map(({ id }) => id).sort(),
+		).toEqual(allIds);
+		expect(kept.draft).toBe(text);
+		expect(kept.notices).toHaveLength(1);
+		expect(again._tag).toBe("Failure");
+		expect(processesStarted(fixture, sessionId).at(-1)).toBe(oldProcess);
+	});
+
+	// 42: the user takes the held message back from the queue; its close goes with it.
+	it("drops a held send's close when the user takes the message back from the queue", async () => {
+		const started = await start();
+		const { fixture, browser } = started;
+		const { sessionId, queryId } = await startTurn(fixture, browser);
+		await endTurn(fixture, browser, sessionId);
+		await browser.switchAgent(sessionId, "reviewer");
+		const { oldProcess, inputId } = await holdSend(
+			"tray",
+			started,
+			sessionId,
+			queryId,
+		);
+		const from = browser.frames.length;
+		await Effect.runPromise(
+			browser.rpc["input.cancel"]({
+				sessionId,
+				inputId,
+				restoreTo: { session: sessionId },
+			}),
+		);
+		await row(browser, sessionId, from, (message) => !confirmOf(message));
+		proof["tray: cancelled"] = { rows: endTargets(fixture, sessionId) };
+		expect(endTargets(fixture, sessionId)).toEqual([
+			{
+				commandId: `inbox-close:${inputId}`,
+				status: "cancelled",
+				process: oldProcess,
+			},
+		]);
+		expect(closedQueries(fixture, queryId)).toEqual([]);
 	});
 });

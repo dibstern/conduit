@@ -46,11 +46,16 @@ import {
 import { EventStoreEffectTag } from "../../../persistence/effect/event-store-effect.js";
 import { requeueFailedSteers } from "../../../persistence/effect/input-requeue-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import { loadLedger } from "../../../persistence/effect/run-ledger-arm.js";
 import { canonicalEvent } from "../../../persistence/events.js";
 import { inboxRunStatusQuery } from "../../../persistence/inbox-run-status-query.js";
 import type { ProviderInstanceFailure } from "../../../provider/errors.js";
 import { ProviderRegistryTag } from "../../../provider/provider-registry.js";
-import { assertSessionRunnerAvailable } from "../../../provider/runner/runner-provider-instance.js";
+import { closeConfirm } from "../../../provider/run-ledger/run-ledger-decider.js";
+import {
+	assertSessionRunnerAvailable,
+	RunnerProviderInstance,
+} from "../../../provider/runner/runner-provider-instance.js";
 import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import {
 	DaemonTurns,
@@ -63,7 +68,7 @@ import {
 	type ProviderTurnService,
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
-import { LoggerTag } from "./services.js";
+import { LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
 
@@ -89,6 +94,8 @@ export interface InboxView {
 	readonly stopping?: boolean;
 	/** A continuation is moving the session to another account. */
 	readonly switching?: boolean;
+	/** A send's close of the old process is held or running; the send waits for it. */
+	readonly closing?: boolean;
 	/** Existing queued inputs are paused in the shared inbox read model. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
@@ -244,7 +251,8 @@ export function decideInbox(
 			view.usageResetsAt !== undefined ||
 			view.scheduled);
 	// An unanswered prompt blocks a new handoff even when no owned run is open.
-	const idle = !view.busy && !view.steering && !view.promptOpen;
+	const idle =
+		!view.busy && !view.steering && !view.promptOpen && !view.closing;
 	switch (command._tag) {
 		case "Submit": {
 			if (view.known) return { _tag: "Accepted", events: [] };
@@ -259,8 +267,9 @@ export function decideInbox(
 				return !view.interruptRequested
 					? interruptForInput(sessionId, { inputId, request }, [admitted])
 					: { _tag: "Accepted", events: [admitted] };
-			// The switch's continuation owns the next turn; a steer would join the old one.
-			if (view.switching) return { _tag: "Accepted", events: [admitted] };
+			// The switch's continuation, or the held send behind a close, owns the next turn.
+			if (view.switching || view.closing)
+				return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
 			if (!idle) return { _tag: "Accepted", events: [admitted] };
@@ -298,6 +307,8 @@ export function decideInbox(
 				return view.interruptRequested
 					? { _tag: "Accepted", events: [] }
 					: interruptForInput(sessionId, input, []);
+			// It waits behind the held send's close.
+			if (view.closing) return { _tag: "Accepted", events: [] };
 			// Like a queued command's Run now, an open prompt must be answered first.
 			if (!idle && command.interrupt)
 				return view.promptOpen
@@ -382,9 +393,13 @@ export interface SessionInbox {
 		{ readonly handedOff: boolean } | { readonly refused: SteerBlocker },
 		SessionInboxError
 	>;
-	/** Remove a queued input before it is sent. */
+	/** Remove a queued input before it is sent; restoreTo returns its attachments, and its text with
+	 *  restoreText (the browser restores the text itself when the user takes the message back). */
 	readonly cancel: (
-		target: SessionInboxTarget & { readonly restoreTo?: InputDraftKey },
+		target: SessionInboxTarget & {
+			readonly restoreTo?: InputDraftKey;
+			readonly restoreText?: boolean;
+		},
 	) => Effect.Effect<SessionInboxOutcome, SessionInboxError>;
 	/** Hand a queued input off now: a steer on a busy session, else the next
 	 *  turn. With interrupt, stop the running turn and send this input next. */
@@ -404,6 +419,9 @@ export class SessionInboxTag extends Context.Service<
 	SessionInboxTag,
 	SessionInbox
 >()("SessionInbox") {}
+
+// A send that needs a new native process first closes the old one under this id.
+const CLOSE_PREFIX = "inbox-close:";
 
 // A drained handoff has no requesting client.
 const DRAINED = { clientId: "" } as const;
@@ -430,6 +448,9 @@ export const SessionInboxLive = Layer.effect(
 		const log = yield* LoggerTag;
 		const usage = yield* Usage;
 		const continuation = yield* ContinuationTag;
+		const engine = Option.getOrUndefined(
+			yield* Effect.serviceOption(OrchestrationEngineTag),
+		);
 		const continuationContext =
 			yield* Effect.context<
 				Effect.Services<ReturnType<Continuation["requestContinuation"]>>
@@ -467,6 +488,7 @@ export const SessionInboxLive = Layer.effect(
 					model_id: string | null;
 					interrupt_requested: string | null;
 					running: string | null;
+					closing: number;
 				}>`WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)}) SELECT
 					(SELECT status FROM latest_run) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
@@ -491,7 +513,11 @@ export const SessionInboxLive = Layer.effect(
 						JOIN pending_inputs pending ON pending.input_id = outbox.command_id
 						WHERE outbox.session_id = ${sessionId}
 						AND outbox.effect_type = 'send_turn'
-						ORDER BY outbox.request_sequence DESC LIMIT 1) AS running`;
+						ORDER BY outbox.request_sequence DESC LIMIT 1) AS running,
+					EXISTS (SELECT 1 FROM provider_command_outbox
+						WHERE session_id = ${sessionId} AND effect_type = 'end_session'
+						AND command_id LIKE ${`${CLOSE_PREFIX}%`}
+						AND status IN ('held', 'pending', 'running', 'retryable_failed')) AS closing`;
 				const known =
 					inputId === undefined
 						? false
@@ -548,6 +574,7 @@ export const SessionInboxLive = Layer.effect(
 						facts?.run_status === "running",
 					stopping: fences.stopping,
 					switching: fences.switching,
+					closing: facts?.closing === 1,
 					stoppedSinceHandoff: inboxState?.paused === true,
 					limited: facts?.limited === 1,
 					usageResetsAt:
@@ -614,6 +641,93 @@ export const SessionInboxLive = Layer.effect(
 				Effect.asVoid,
 			);
 
+		const resolveAccount = (id: string | undefined) =>
+			id === undefined
+				? Effect.succeed(undefined)
+				: accounts
+						.resolve({ _tag: "Id", id })
+						.pipe(Effect.option, Effect.map(Option.getOrUndefined));
+
+		// A login-folder edit on the same account still refuses while the runner is busy. A switch
+		// to another account is admitted; its send closes the old process first (closesFirst).
+		const admits = (sessionId: string, provider: string | undefined) =>
+			resolveAccount(provider).pipe(
+				Effect.flatMap((account) =>
+					assertSessionRunnerAvailable(sessionId, registry, account),
+				),
+				Effect.catchTag("AccountSwitchBusy", (busy) =>
+					busy.fromAccountId === busy.toAccountId
+						? Effect.fail(busy)
+						: assertSessionRunnerAvailable(sessionId, registry),
+				),
+			);
+
+		// 8.4 (2870-2899): a send that needs a new native process ends the old one and its
+		// background work, so it closes that process first through the gate, which holds the close
+		// behind the user's confirm while tasks are live or unknown. True while the send must wait.
+		const closesFirst = (
+			sessionId: string,
+			{ inputId, request }: { inputId: string; request: InputRequest },
+			provider?: string,
+		) =>
+			Effect.gen(function* () {
+				const commandId = `${CLOSE_PREFIX}${inputId}`;
+				const closeStatus = sql<{ status: string }>`SELECT status
+					FROM provider_command_outbox WHERE command_id = ${commandId}`.pipe(
+					Effect.map(([row]) => row?.status),
+				);
+				const waits = (status: string | undefined) =>
+					status !== undefined &&
+					!["completed", "failed", "cancelled"].includes(status);
+				const earlier = yield* closeStatus;
+				// One close per send: once it settles, the send goes as it would have.
+				if (earlier !== undefined) return waits(earlier);
+				const account = yield* resolveAccount(provider);
+				if (!account || !engine) return false;
+				const instance = registry?.getInstance(account.driver);
+				if (!(instance instanceof RunnerProviderInstance)) return false;
+				const native = yield* instance.getNativeSessionEffect(sessionId);
+				if (!native) return false;
+				// A switch to another account of the same driver needs a fresh process while the old
+				// one is not quiet.
+				const block = yield* instance.getAccountSwitchBlockEffect(
+					sessionId,
+					account,
+				);
+				if (!block || block.fromAccountId === block.toAccountId) {
+					// An agent change or a pending rewind replaces the query too; with no tasks at risk it
+					// keeps its in-place restart, so only tasks live or unknown send it through the close.
+					const [rewind] = yield* sql<{ pending: string | null }>`
+						SELECT pending_rewind_message_id AS pending FROM sessions WHERE id = ${sessionId}`;
+					if (request.agent === native.agent && !rewind?.pending) return false;
+					const ledger = yield* loadLedger(sessionId).pipe(
+						Effect.provideService(SqlClient.SqlClient, sql),
+					);
+					if (!ledger || closeConfirm(ledger.state, undefined) === undefined)
+						return false;
+				}
+				const previous = yield* resolveAccount(native.instanceId);
+				// Without tasks at risk the close runs now and the send follows it.
+				yield* engine
+					.dispatchEffect({
+						type: "end_session",
+						commandId,
+						sessionId,
+						targetProviderId: native.instanceId,
+						...(previous ? { account: previous } : {}),
+					})
+					.pipe(
+						Effect.catch((error) =>
+							Effect.sync(() =>
+								log.warn(
+									`session=${sessionId} close before send ${commandId} failed: ${formatErrorDetail(error)}`,
+								),
+							),
+						),
+					);
+				return waits(yield* closeStatus);
+			});
+
 		const commit = (
 			sessionId: string,
 			decision: InboxDecision,
@@ -658,6 +772,19 @@ export const SessionInboxLive = Layer.effect(
 						event.type === "input.admitted" &&
 						event.data.inputId === handoff.inputId,
 				);
+				// The send stays queued behind its close; Close now drains it, dismiss returns it.
+				if (
+					!decision.steer &&
+					(yield* closesFirst(sessionId, handoff, provider?.provider))
+				) {
+					const kept = events.filter((event) => event.type !== "input.sent");
+					if (kept.length > 0)
+						yield* persist.persistEvents(
+							kept,
+							draftChange ? { draftChange } : undefined,
+						);
+					return;
+				}
 				// input.sent commits with the handoff's send_turn outbox row.
 				const { request } = handoff;
 				yield* providerTurnService
@@ -710,6 +837,7 @@ export const SessionInboxLive = Layer.effect(
 				target: SessionInboxTarget & {
 					readonly interrupt?: boolean;
 					readonly restoreTo?: InputDraftKey;
+					readonly restoreText?: boolean;
 				},
 			) =>
 				Effect.gen(function* () {
@@ -720,23 +848,16 @@ export const SessionInboxLive = Layer.effect(
 					return yield* serialised(target.sessionId)(
 						Effect.gen(function* () {
 							const view = yield* readView(target.sessionId);
-							if (command === "SendNow") {
-								const account = view.provider
-									? yield* accounts
-											.resolve({ _tag: "Id", id: view.provider })
-											.pipe(Effect.option)
-									: Option.none<Account>();
-								yield* assertSessionRunnerAvailable(
-									target.sessionId,
-									registry,
-									Option.getOrUndefined(account),
-								);
-							}
+							if (command === "SendNow")
+								yield* admits(target.sessionId, view.provider);
 							const decision = decideInbox(target.sessionId, view, {
 								_tag: command,
 								inputId: target.inputId,
 								...(runNow ? { interrupt: true } : {}),
 							});
+							const request = view.queued.find(
+								(item) => item.inputId === target.inputId,
+							)?.request;
 							yield* commit(
 								target.sessionId,
 								decision,
@@ -751,9 +872,8 @@ export const SessionInboxLive = Layer.effect(
 									? drafts.restoreChange(
 											target.restoreTo,
 											target.inputId,
-											view.queued.find(
-												(item) => item.inputId === target.inputId,
-											)?.request.images ?? [],
+											request?.images ?? [],
+											target.restoreText ? request?.text : undefined,
 										)
 									: undefined,
 							);
@@ -881,16 +1001,7 @@ export const SessionInboxLive = Layer.effect(
 						const view = yield* readView(input.sessionId, input.inputId);
 						if (view.known) return { _tag: "Accepted" as const, events: [] };
 						// Busy and approval-blocked inputs may never reach runner execution.
-						const account = view.provider
-							? yield* accounts
-									.resolve({ _tag: "Id", id: view.provider })
-									.pipe(Effect.option)
-							: Option.none<Account>();
-						yield* assertSessionRunnerAvailable(
-							input.sessionId,
-							registry,
-							Option.getOrUndefined(account),
-						);
+						yield* admits(input.sessionId, view.provider);
 						const refs = input.draft
 							? yield* drafts.takeForSend(
 									input.draft.key,
