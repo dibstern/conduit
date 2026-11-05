@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Context, Deferred, Effect, Logger, ManagedRuntime } from "effect";
+import { Deferred, Effect, ManagedRuntime } from "effect";
 import { SqlError, UnknownError } from "effect/sql/SqlError";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -10,20 +10,17 @@ import {
 	EventRetentionTag,
 } from "../../../src/lib/domain/persistence/Services/event-retention.js";
 import { PersistenceProjectTag } from "../../../src/lib/domain/persistence/Services/persistence-service.js";
+import { _getOutputStream } from "../../../src/lib/logger.js";
 import { makeCommitAndSignal } from "../../../src/lib/persistence/effect/commit-and-signal.js";
 import { makeEventStoreEffect } from "../../../src/lib/persistence/effect/event-store-effect.js";
-import {
-	makePersistenceStoreLayer,
-	PersistenceStore,
-	type PersistenceStoreContext,
-} from "../../../src/lib/persistence/effect/live.js";
+import { makePersistenceStoreLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ProjectionRunnerEffectTag } from "../../../src/lib/persistence/effect/projection-runner-effect.js";
 import { canonicalEvent } from "../../../src/lib/persistence/events.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 const emptyReport: DrainReport = {
 	sessionsFreed: 0,
@@ -35,7 +32,7 @@ const emptyReport: DrainReport = {
 };
 
 describe("event retention scheduling", () => {
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	const cleanup: (() => Promise<void>)[] = [];
 	const evidence: Record<string, unknown> = {};
 
@@ -66,9 +63,9 @@ describe("event retention scheduling", () => {
 	// Failure modes: lost kicks behind publication/callbacks, concurrent drains,
 	// more than one queued rerun, or a startup backlog waiting for another delete.
 	it("collapses committed deletions during a drain into one rerun", async () => {
-		harness = await createRelayHarness();
-		const runtime = harness.stack.effectRuntime.runtime;
-		const retention = await runtime.runPromise(EventRetentionTag);
+		harness = await createDaemonProject();
+		const run = harness.run;
+		const retention = await run(EventRetentionTag);
 		const gate = Deferred.makeUnsafe<void>();
 		const drains = vi
 			.spyOn(retention, "drain")
@@ -86,7 +83,7 @@ describe("event retention scheduling", () => {
 		// Markers for already absent sessions must kick too, including quiet commits.
 		for (let index = 0; index < 5; index++) {
 			const sessionId = `retention-quiet-death-${index}`;
-			await runtime.runPromise(
+			await run(
 				Effect.flatMap(makeCommitAndSignal, (commit) =>
 					commit(
 						[canonicalEvent("session.deleted", sessionId, { sessionId })],
@@ -96,10 +93,10 @@ describe("event retention scheduling", () => {
 			);
 		}
 		expect(drains).toHaveBeenCalledTimes(1);
-		await runtime.runPromise(Deferred.succeed(gate, undefined));
+		await run(Deferred.succeed(gate, undefined));
 		await vi.waitFor(() => expect(drains).toHaveBeenCalledTimes(2));
 		// A later commit starts a fresh run, rather than leaving the worker stuck.
-		await runtime.runPromise(
+		await run(
 			Effect.flatMap(makeCommitAndSignal, (commit) =>
 				commit([
 					canonicalEvent("session.deleted", "retention-later-death", {
@@ -116,8 +113,8 @@ describe("event retention scheduling", () => {
 	});
 
 	it("logs a failed drain and drains successfully on the next committed deletion", async () => {
-		harness = await createRelayHarness();
-		const runtime = harness.stack.effectRuntime.runtime;
+		harness = await createDaemonProject();
+		const run = harness.run;
 		const client = await harness.connectWsClient();
 		await client.waitForInitialState();
 		const session = await client.createSession("Retention retry", {
@@ -125,7 +122,7 @@ describe("event retention scheduling", () => {
 		});
 		const sessionId = String(session["id"]);
 		// Let the startup drain finish before injecting a failure for this delete.
-		const retention = await runtime.runPromise(EventRetentionTag);
+		const retention = await run(EventRetentionTag);
 		const drain = retention.drain;
 		const failure = new SqlError({
 			reason: new UnknownError({
@@ -134,7 +131,8 @@ describe("event retention scheduling", () => {
 			}),
 		});
 		const reports: DrainReport[] = [];
-		const logs = vi.spyOn(Logger.defaultLogger, "log");
+		// The daemon logs Effect errors through Pino as JSON lines.
+		const logs = vi.spyOn(_getOutputStream(), "write");
 		const drains = vi
 			.spyOn(retention, "drain")
 			.mockImplementationOnce(() => Effect.fail(failure))
@@ -145,26 +143,28 @@ describe("event retention scheduling", () => {
 			);
 		const failures = () =>
 			logs.mock.calls
-				.map(([entry]) => entry)
+				.map(([chunk]): { level: number; msg: string } =>
+					JSON.parse(String(chunk)),
+				)
 				.filter(
-					(entry) =>
-						entry.logLevel === "Error" &&
-						Array.isArray(entry.message) &&
-						entry.message[0] === "Event retention drain failed",
+					(line) =>
+						line.level === 50 &&
+						line.msg.startsWith("Event retention drain failed "),
 				);
 		const db = new Database(harness.eventsDbPath, { readonly: true });
 		try {
 			await client.deleteSession(sessionId);
 			await vi.waitFor(() => expect(failures()).toHaveLength(1));
 			expect(drains).toHaveBeenCalledTimes(1);
-			expect(failures()[0]?.message).toEqual([
-				"Event retention drain failed",
-				expect.objectContaining({
-					projectId: "integration-test",
-					cause: expect.anything(),
-				}),
-			]);
-			expect(JSON.stringify(failures()[0]?.message)).toContain(
+			const logged = JSON.parse(
+				failures()[0]?.msg.slice("Event retention drain failed ".length) ??
+					"{}",
+			);
+			expect(logged).toEqual({
+				projectId: "integration-test",
+				cause: expect.anything(),
+			});
+			expect(JSON.stringify(logged.cause)).toContain(
 				"retention-first-drain-failure",
 			);
 			expect(
@@ -177,7 +177,7 @@ describe("event retention scheduling", () => {
 			// Wait for the error log before committing again, so this is a fresh
 			// kick after failure rather than the original run's queued rerun.
 			const kickSessionId = "retention-after-failure-kick";
-			await runtime.runPromise(
+			await run(
 				Effect.flatMap(makeCommitAndSignal, (commit) =>
 					commit(
 						[
@@ -206,7 +206,7 @@ describe("event retention scheduling", () => {
 				sessionId,
 				kickSessionId,
 				drains: drains.mock.calls.length,
-				error: failures()[0]?.message,
+				error: failures()[0]?.msg,
 				reports,
 			};
 		} finally {
@@ -221,10 +221,6 @@ describe("event retention scheduling", () => {
 			rmSync(directory, { recursive: true, force: true }),
 		);
 		const store = ManagedRuntime.make(makePersistenceStoreLayer(filename));
-		cleanup.push(() => store.dispose());
-		const context = await store.runPromise(
-			Effect.context<PersistenceStoreContext>(),
-		);
 		await store.runPromise(
 			Effect.gen(function* () {
 				const events = yield* makeEventStoreEffect;
@@ -245,9 +241,10 @@ describe("event retention scheduling", () => {
 				}),
 			),
 		);
-		harness = await createRelayHarness("chat-simple", {
+		// The daemon opens <configDir>/events.db itself, so the seeding store closes first.
+		await store.dispose();
+		harness = await createDaemonProject("chat-simple", {
 			configDir: directory,
-			daemonConfigContext: Context.make(PersistenceStore, context),
 		});
 		const db = new Database(filename, { readonly: true });
 		try {

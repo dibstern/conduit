@@ -1,26 +1,23 @@
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
-// Verifies that a standalone createProjectRelay recovers pending permissions on
-// stream connect: OpenCode Instances lists them from the OpenCode API and
+// Verifies that the daemon recovers an OpenCode project's pending permissions
+// on stream connect: OpenCode Instances lists them from the OpenCode API and
 // re-emits them as ordinary permission.asked events, which reach the Effect
 // service. Browsers see them through the approvals subscription (ni8.9). Uses a
 // mock OpenCode server — no real OpenCode required.
 
-import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
 import { PendingInteractionServiceTag } from "../../../src/lib/domain/relay/Services/pending-interaction-service.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 
 // Returns one pending permission from GET /permission.
 
@@ -194,40 +191,20 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 	};
 }
 
-describe("Permission rehydration wiring in createProjectRelay", () => {
+describe("Permission rehydration on the daemon", () => {
 	let mock: MockOpenCode;
-	let relay: ProjectRelay;
-	let relayServer: Server;
-	let persistenceDir: string;
+	let project: DaemonProject;
 
 	beforeAll(async () => {
 		mock = await createMockOpenCode();
-
-		relayServer = createServer();
-		await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
-		persistenceDir = mkdtempSync(join(tmpdir(), "conduit-permission-"));
-
-		relay = await createProjectRelay({
-			httpServer: relayServer,
+		// The mock OpenCode is the daemon's default instance; the harness opens
+		// its event stream at start.
+		project = await createDaemonProject("chat-simple", {
 			opencodeUrl: `http://127.0.0.1:${mock.port}`,
-			projectDir: process.cwd(),
-			configDir: persistenceDir,
 			slug: "test-perm-rehydrate",
-			persistenceDbPath: join(persistenceDir, "events.db"),
-			publishGlobalSetting: () => Effect.void,
-			log: createSilentLogger(),
 		});
-
-		// Relay startup makes no OpenCode requests; the first use opens the stream.
-		await relay.effectRuntime.runtime.runPromise(
-			Effect.scoped(
-				Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-					instances.use("opencode"),
-				),
-			),
-		);
 		await vi.waitFor(async () => {
-			const pending = await relay.effectRuntime.runtime.runPromise(
+			const pending = await project.run(
 				Effect.gen(function* () {
 					const interactions = yield* PendingInteractionServiceTag;
 					return yield* interactions.listPendingPermissions();
@@ -238,15 +215,15 @@ describe("Permission rehydration wiring in createProjectRelay", () => {
 	}, 15_000);
 
 	afterAll(async () => {
-		if (relay) await relay.stop();
-		if (relayServer)
-			await new Promise<void>((r) => relayServer.close(() => r()));
-		if (mock) await mock.close();
-		rmSync(persistenceDir, { recursive: true, force: true });
+		try {
+			if (project) await project.stop();
+		} finally {
+			if (mock) await mock.close();
+		}
 	}, 10_000);
 
 	it("rehydrates pending permissions from OpenCode API into the Effect service on SSE connect", async () => {
-		const { pending, rows } = await relay.effectRuntime.runtime.runPromise(
+		const { pending, rows } = await project.run(
 			Effect.gen(function* () {
 				const pendingInteractions = yield* PendingInteractionServiceTag;
 				const sql = yield* SqlClient.SqlClient;

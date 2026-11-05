@@ -64,13 +64,18 @@ export const readOwedRealignment = (
 			ORDER BY ordinal DESC, created_at DESC, id DESC LIMIT 1`;
 		const [session] = yield* sql<{ provider: string }>`
 			SELECT provider FROM sessions WHERE id = ${sessionId}`;
+		const removedMessageIds = removed.map(({ id }) => id);
 		return {
-			removedMessageIds: removed.map(({ id }) => id),
+			removedMessageIds,
 			// Nothing the provider holds left the Head (a move and its undo): it only confirms.
 			rewind:
 				target === undefined
 					? undefined
-					: { resumeSessionAt: resume?.id ?? null, targetMessageId: target },
+					: {
+							resumeSessionAt: resume?.id ?? null,
+							targetMessageId: target,
+							removedMessageIds,
+						},
 			events: [
 				canonicalEvent(
 					"session.rewind_committed",

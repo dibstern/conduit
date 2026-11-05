@@ -1,28 +1,19 @@
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
-// E2E: Per-Tab Session Routing (Mock OpenCode)
-// Spins up a mock OpenCode HTTP+SSE server and a real relay stack, then connects
-// RPC clients to verify SSE events reach session-detail subscribers.
-//
-// No real OpenCode required — runs in CI without external dependencies.
+// Per-tab session routing (mock OpenCode)
+// Spins up a mock OpenCode HTTP+SSE server as an in-process daemon's default
+// instance, then connects RPC clients to verify SSE events reach
+// session-detail subscribers.
 
-import { mkdtempSync, rmSync } from "node:fs";
 import {
 	createServer,
 	type IncomingMessage,
 	type Server,
 	type ServerResponse,
 } from "node:http";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import Database from "better-sqlite3";
-import { Effect } from "effect";
 import { afterAll, assert, beforeAll, describe, expect, it, vi } from "vitest";
-import { OpenCodeInstancesTag } from "../../../src/lib/domain/daemon/Services/opencode-instances-service.js";
-import { createSilentLogger } from "../../../src/lib/logger.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
-import { saveRelaySettings } from "../../../src/lib/relay/relay-settings.js";
-import type { ProjectRelay } from "../../../src/lib/relay/relay-stack.js";
-import { TestWsClient } from "../../integration/helpers/test-ws-client.js";
+import { createDaemonProject } from "../../helpers/in-process-daemon.js";
+import { TestWsClient } from "../helpers/test-ws-client.js";
 
 // Minimal HTTP server impersonating OpenCode's REST + SSE endpoints.
 // Sessions are stored in-memory; SSE events are injected via helper function.
@@ -250,63 +241,27 @@ async function createMockOpenCode(): Promise<MockOpenCode> {
 }
 
 interface TestHarness {
-	relay: ProjectRelay;
 	mock: MockOpenCode;
-	relayPort: number;
 	connectClient(opts?: { session?: string }): Promise<TestWsClient>;
 	stop(): Promise<void>;
 }
 
 async function createTestHarness(): Promise<TestHarness> {
 	const mock = await createMockOpenCode();
-
-	const relayServer = createServer();
-	await new Promise<void>((r) => relayServer.listen(0, "127.0.0.1", r));
-	const relayPort = (relayServer.address() as { port: number }).port;
-	const persistenceDir = mkdtempSync(join(tmpdir(), "conduit-per-tab-"));
-	// Select the mock OpenCode provider instead of the relay's Claude default.
-	saveRelaySettings({ defaultModel: "openai/gpt-4" }, persistenceDir);
-
-	const relay = await createProjectRelay({
-		httpServer: relayServer,
+	// The mock OpenCode is the daemon's default instance; the default model
+	// selects it instead of Claude.
+	const daemon = await createDaemonProject("chat-simple", {
 		opencodeUrl: `http://127.0.0.1:${mock.port}`,
-		projectDir: process.cwd(),
-		configDir: persistenceDir,
+		defaultModel: "openai/gpt-4",
 		slug: "test-project",
-		persistenceDbPath: join(persistenceDir, "events.db"),
-		publishGlobalSetting: () => Effect.void,
-		log: createSilentLogger(), // silence logs
-		noServer: true,
-		statusPollerInterval: 100,
-		messagePollerInterval: 150,
-		pollerGatingConfig: {
-			sseGracePeriodMs: 300,
-			sseActiveThresholdMs: 500,
-		},
+	}).catch(async (error: unknown) => {
+		await mock.close();
+		throw error;
 	});
-
-	relayServer.on("upgrade", (req, socket, head) => {
-		if (req.url === "/rpc" || req.url?.startsWith("/rpc?")) {
-			relay.rpcWsHandler.handleUpgrade(req, socket, head);
-			return;
-		}
-		socket.destroy();
-	});
-
-	// Relay startup makes no OpenCode requests; the first use opens the stream.
-	await relay.effectRuntime.runtime.runPromise(
-		Effect.scoped(
-			Effect.gen(function* () {
-				yield* (yield* OpenCodeInstancesTag).use("opencode");
-			}),
-		),
-	);
 	await vi.waitFor(() => expect(mock.sseClients.size).toBeGreaterThan(0));
 	for (const session of Object.values(mock.sessions))
 		mock.injectSSE({ type: "session.created", properties: { info: session } });
-	const db = new Database(join(persistenceDir, "events.db"), {
-		readonly: true,
-	});
+	const db = new Database(daemon.eventsDbPath, { readonly: true });
 	try {
 		await vi.waitFor(
 			() => {
@@ -325,29 +280,31 @@ async function createTestHarness(): Promise<TestHarness> {
 		db.close();
 	}
 
+	const clients: TestWsClient[] = [];
 	return {
-		relay,
 		mock,
-		relayPort,
 		async connectClient(opts?: { session?: string }) {
-			let url = `ws://127.0.0.1:${relayPort}/rpc?p=test-project`;
+			let url = `ws://127.0.0.1:${daemon.port}/rpc?p=${daemon.slug}`;
 			if (opts?.session) {
 				url += `&session=${encodeURIComponent(opts.session)}`;
 			}
 			const client = new TestWsClient(url);
+			clients.push(client);
 			await client.waitForOpen();
 			return client;
 		},
 		async stop() {
-			await relay.stop();
-			await new Promise<void>((r) => relayServer.close(() => r()));
-			await mock.close();
-			rmSync(persistenceDir, { recursive: true, force: true });
+			for (const client of clients) await client.close().catch(() => {});
+			try {
+				await daemon.stop();
+			} finally {
+				await mock.close();
+			}
 		},
 	};
 }
 
-describe("E2E: Per-tab session routing with mock OpenCode", () => {
+describe("Per-tab session routing with mock OpenCode", () => {
 	let harness: TestHarness;
 
 	beforeAll(async () => {

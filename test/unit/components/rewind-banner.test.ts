@@ -166,8 +166,14 @@ describe("RewindBanner", () => {
 		expect(uiState.rewindSelectedUuid).toBeNull();
 	});
 
-	it("says the files at a pruned point were pruned and keeps Rewind enabled", async () => {
-		rpcSpy.mockResolvedValueOnce({ files: "pruned" });
+	it("says the files at a pruned point were pruned once, and keeps Rewind enabled", async () => {
+		rpcSpy.mockImplementation((tag) =>
+			Promise.resolve(
+				tag === "CommitHeadMove"
+					? { moveId: "move-1" }
+					: { moveId: "move-1", files: "pruned" },
+			),
+		);
 		const { findByText, getByRole, queryByText } = render(RewindBanner);
 
 		expect(await findByText("Files from this point were pruned.")).toBeTruthy();
@@ -186,6 +192,10 @@ describe("RewindBanner", () => {
 				"CommitHeadMove",
 			]),
 		);
+		// 82tn.51: the dialog said it before the move; the move does not toast it again.
+		await Promise.resolve();
+		expect(uiState.toasts).toEqual([]);
+		rpcSpy.mockReset();
 	});
 
 	it("rewinds to an assistant message with a provider id", async () => {
@@ -251,6 +261,30 @@ describe("RewindBanner", () => {
 		expect(moves().map(([tag]) => tag)).toEqual(["PreviewHeadMove"]);
 		expect(chatState.messages).toHaveLength(1);
 		expect(uiState.rewindActive).toBe(false);
+		rpcSpy.mockReset();
+	});
+
+	it("does not report a refusal once the user has moved to another session", async () => {
+		let refuse!: (error: Error) => void;
+		const refused = new Promise((_, reject) => {
+			refuse = reject;
+		});
+		rpcSpy.mockImplementation((tag) =>
+			tag === "GetHeadMoveFiles"
+				? Promise.resolve({ files: "available" })
+				: refused,
+		);
+		const { getByRole } = render(RewindBanner);
+		await fireEvent.click(getByRole("button", { name: "Rewind" }));
+		await waitFor(() =>
+			expect(moves().map(([tag]) => tag)).toEqual(["PreviewHeadMove"]),
+		);
+		openSessionForSetup("session-2", "project-a");
+		refuse(new Error("Session is busy"));
+		// The move awaited the refusal first, so its handler has run by now.
+		await refused.catch(() => {});
+		// 82tn.51: the refusal belongs to the session the user left; the old dialog dropped it too.
+		expect(uiState.toasts).toEqual([]);
 		rpcSpy.mockReset();
 	});
 

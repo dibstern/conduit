@@ -135,6 +135,7 @@ const LegacyTurn = Schema.Struct({
 		Schema.Struct({
 			resumeSessionAt: Schema.NullOr(Schema.String),
 			targetMessageId: Schema.optionalKey(Schema.String),
+			removedMessageIds: Schema.optionalKey(Schema.Array(Schema.String)),
 		}),
 	),
 	forkSession: Schema.optionalKey(Schema.Boolean),

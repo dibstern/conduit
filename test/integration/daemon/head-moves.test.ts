@@ -15,6 +15,8 @@
 //    Log, is never told to Claude, splits its Run, or is landed twice; a pending cut at a message
 //    that is gone invents a move.
 // 27. an edit or a regenerate of a message with an image resends its text without the image.
+// 30. a second device confirming a move still landing gets its receipt before the move landed.
+// 31. a message sent while a move lands is handed to the provider before the move's resend.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -403,6 +405,84 @@ describe("a head move lands once, with its resend, across devices and crashes", 
 		expect(more).toEqual([]);
 		expect(resumed?.thread).toBe(opened?.thread);
 		expect(resumed?.at).not.toBeNull();
+	});
+
+	// 30.
+	it("answers a second device's commit only once the move it joined has landed", async () => {
+		const { fixture, browser, sessionId, target } = await start(
+			"late-receipt",
+			2_000,
+		);
+		const phone = await fixture.connect();
+		const intent = { _tag: "rewind" as const, messageId: target.id };
+		const { moveId } = await Effect.runPromise(
+			browser.rpc.PreviewHeadMove({ sessionId, intent }),
+		);
+		const desktop = Effect.runPromise(
+			browser.rpc.CommitHeadMove({ sessionId, intent, moveId }),
+		);
+		// test-waits-allow polling: the desktop's move is journalled started before the delay.
+		await vi.waitFor(() =>
+			expect(count(journal(fixture, sessionId), "head.move_started")).toBe(1),
+		);
+		const receipt = await Effect.runPromise(
+			phone.rpc.CommitHeadMove({ sessionId, intent, moveId }),
+		);
+		const atReceipt = journal(fixture, sessionId);
+		await desktop;
+		proof = { receipt, atReceipt, journal: journal(fixture, sessionId) };
+		expect(receipt).toEqual({ moveId });
+		expect(count(atReceipt, "head.moved", { moveId })).toBe(1);
+		expect(count(journal(fixture, sessionId), "head.moved", { moveId })).toBe(
+			1,
+		);
+	});
+
+	// 31.
+	it("sends a message typed while a move lands after the move's resend", async () => {
+		const { fixture, browser, sessionId, target } = await start(
+			"send-during-move",
+			2_000,
+		);
+		const intent = {
+			_tag: "rewind" as const,
+			messageId: target.id,
+			resend: "moves-resent",
+		};
+		const { moveId } = await Effect.runPromise(
+			browser.rpc.PreviewHeadMove({ sessionId, intent }),
+		);
+		const committed = Effect.runPromise(
+			browser.rpc.CommitHeadMove({ sessionId, intent, moveId }),
+		);
+		// test-waits-allow polling: the move is journalled started before the delay.
+		await vi.waitFor(() =>
+			expect(count(journal(fixture, sessionId), "head.move_started")).toBe(1),
+		);
+		const meanwhile = randomUUID();
+		await fixture.requestRpc({
+			_tag: "input.submit",
+			sessionId,
+			inputId: meanwhile,
+			delivery: "queue",
+			text: "moves-meanwhile",
+		});
+		await committed;
+		// test-waits-allow polling: the fake SDK reports its sends only through its marks.
+		await vi.waitFor(
+			() => expect(enqueued(fixture, "moves-meanwhile")).toHaveLength(1),
+			{ timeout: 20_000 },
+		);
+		const sent = journal(fixture, sessionId).flatMap(({ type, inputId }) =>
+			type === "input.sent" && inputId ? [inputId] : [],
+		);
+		proof = { sent, journal: journal(fixture, sessionId) };
+		expect(sent.slice(-2)).toEqual([`resend:${moveId}`, meanwhile]);
+		expect(
+			sdkMarks(fixture)
+				.flatMap((mark) => (mark.kind === "enqueue" ? [mark.request] : []))
+				.slice(-2),
+		).toEqual(["moves-resent", "moves-meanwhile"]);
 	});
 
 	// 5.

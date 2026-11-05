@@ -906,6 +906,9 @@
 	"test/integration/daemon/opencode-run-ledger.test.ts": {
 		"polling": 7
 	},
+	"test/integration/daemon/opencode-runtime-ingress.test.ts": {
+		"polling": 1
+	},
 	"test/integration/daemon/opencode-session-deletion.test.ts": {
 		"polling": 1
 	},
@@ -934,6 +937,14 @@
 	"test/integration/daemon/opencode-worktree.test.ts": {
 		"polling": 1,
 		"timeout-override": 4
+	},
+	"test/integration/daemon/per-tab-routing.test.ts": {
+		"polling": 2,
+		"timeout-override": 2
+	},
+	"test/integration/daemon/permission-rehydration.test.ts": {
+		"polling": 1,
+		"timeout-override": 2
 	},
 	"test/integration/daemon/pin-guard.test.ts": {
 		"timeout-override": 2
@@ -1127,6 +1138,13 @@
 	"test/integration/daemon/skill-location.test.ts": {
 		"timeout-override": 3
 	},
+	"test/integration/daemon/startup-recovery.test.ts": {
+		"polling": 1
+	},
+	"test/integration/daemon/status-poller-broadcast.test.ts": {
+		"polling": 1,
+		"timeout-override": 2
+	},
 	"test/integration/daemon/streaming-cost.test.ts": {
 		"polling": 1,
 		"timeout-override": 1
@@ -1261,7 +1279,7 @@
 		"timeout-override": 1
 	},
 	"test/integration/flows/session-rewind.integration.ts": {
-		"polling": 9,
+		"polling": 11,
 		"timeout-override": 2
 	},
 	"test/integration/flows/session-visibility-repro.integration.ts": {
@@ -1571,26 +1589,11 @@
 	"test/unit/relay/opencode-health-removal.test.ts": {
 		"polling": 1
 	},
-	"test/unit/relay/per-tab-routing-e2e.test.ts": {
-		"polling": 2,
-		"timeout-override": 2
-	},
-	"test/unit/relay/permission-rehydration-wiring.test.ts": {
-		"polling": 1,
-		"timeout-override": 2
-	},
 	"test/unit/relay/push-notification-done.test.ts": {
 		"polling": 1
 	},
-	"test/unit/relay/relay-stack-opencode-runtime-ingress-wiring.test.ts": {
-		"polling": 1,
-		"real-wait": 1
-	},
 	"test/unit/relay/relay-startup-recovery.test.ts": {
 		"polling": 2
-	},
-	"test/unit/relay/relay-tracing-propagation.test.ts": {
-		"polling": 1
 	},
 	"test/unit/relay/shared-opencode-reconnect.test.ts": {
 		"polling": 20
@@ -1598,10 +1601,6 @@
 	"test/unit/relay/sse-stream.test.ts": {
 		"polling": 6,
 		"real-wait": 3
-	},
-	"test/unit/relay/status-poller-broadcast.test.ts": {
-		"polling": 3,
-		"timeout-override": 2
 	},
 	"test/unit/server/pty-storm.test.ts": {
 		"timeout-override": 1

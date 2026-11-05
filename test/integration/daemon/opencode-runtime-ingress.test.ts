@@ -1,4 +1,4 @@
-// Regression guard: relay-stack should use Effect OpenCode runtime ingress only.
+// OpenCode stream events reach the daemon's read model through Effect runtime ingress.
 // Isolated race failures (public ContinueSession refuses busy turns):
 // - A provider switch during workspace resolution aborts unrelated provider events.
 // - A refused move leaves its runner receipt uncommitted and is replayed.
@@ -11,15 +11,7 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-	Context,
-	Deferred,
-	Effect,
-	Fiber,
-	Layer,
-	ManagedRuntime,
-	Option,
-} from "effect";
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Option } from "effect";
 import { SqlClient } from "effect/sql";
 import { describe, expect, it, vi } from "vitest";
 import type { DaemonConfig } from "../../../src/lib/daemon/config-persistence.js";
@@ -30,19 +22,22 @@ import {
 	ProviderRuntimeIngestionLive,
 	ProviderRuntimeIngestionTag,
 } from "../../../src/lib/domain/relay/Services/provider-runtime-ingestion-service.js";
+import { LoggerTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { applySessionCommand } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { SessionWorkspaceTag } from "../../../src/lib/domain/relay/Services/session-workspace.js";
 import { createSilentLogger } from "../../../src/lib/logger.js";
 import { EventStoreEffectTag } from "../../../src/lib/persistence/effect/event-store-effect.js";
 import { makePersistenceEffectLayer } from "../../../src/lib/persistence/effect/live.js";
 import { ReadQueryEffectTag } from "../../../src/lib/persistence/effect/read-query-effect.js";
-import { projectStorageDir } from "../../../src/lib/persistence/project-storage.js";
 import { makeRunnerAuthority } from "../../../src/lib/provider/runner/runner-authority.js";
 import {
 	currentRunnerOutput,
 	makeRunnerReceiptStore,
 } from "../../../src/lib/provider/runner/runner-receipts.js";
-import { createTestProjectRelay as createProjectRelay } from "../../helpers/project-relay.js";
+import {
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { providerRuntimeEvent } from "../../helpers/provider-runtime-event.js";
 
 interface MockOpenCode {
@@ -240,7 +235,7 @@ async function eventually<T>(
 	);
 }
 
-describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
+describe("Daemon Effect OpenCode runtime ingress", () => {
 	it("EffectOpenCodeRuntimeIngress can process SSE events with Effect persistence", async () => {
 		const dir = mkdtempSync(join(tmpdir(), "conduit-effect-runtime-ingress-"));
 		const persistenceLayer = makePersistenceEffectLayer(
@@ -285,53 +280,21 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 		}
 	});
 
-	it("wires relay-stack SSE events into the read model and resolves only its stored owner", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-runtime-ingress-"));
+	it("wires daemon SSE events into the read model and resolves only its stored owner", async () => {
+		const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-runtime-ingress-"));
 		const projectDir = join(dir, "project");
 		mkdirSync(projectDir, { recursive: true });
-		mkdirSync(projectStorageDir(dir, "runtime-ingress-smoke"), {
-			recursive: true,
-		});
-		const dbPath = join(
-			projectStorageDir(dir, "runtime-ingress-smoke"),
-			"events.db",
-		);
 		const mock = await createMockOpenCode(projectDir);
-		const relayServer = createServer();
-		await listenOnRandomPort(relayServer);
-
-		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
+		let project: DaemonProject | undefined;
 		try {
-			relay = await createProjectRelay({
-				httpServer: relayServer,
+			// The daemon uses each external OpenCode at start, which opens the stream.
+			project = await createDaemonProject("chat-simple", {
 				opencodeUrl: mock.url,
 				projectDir,
-				configDir: dir,
-				persistenceDbPath: dbPath,
-				publishGlobalSetting: () => Effect.void,
 				slug: "runtime-ingress-smoke",
-				log: createSilentLogger(),
-				statusPollerInterval: 60_000,
-				messagePollerInterval: 60_000,
 			});
-			// Relay startup makes no OpenCode requests; the first use opens the stream.
-			await relay.effectRuntime.runtime.runPromise(
-				Effect.scoped(
-					Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-						instances.use("opencode"),
-					),
-				),
-			);
-			await eventually(
-				() =>
-					Promise.race([
-						mock.waitForSseClient().then(() => true),
-						new Promise<false>((resolve) =>
-							setTimeout(() => resolve(false), 50),
-						),
-					]),
-				(connected) => connected,
-			);
+			const { run } = project;
+			await mock.waitForSseClient();
 
 			mock.injectSSE([
 				{
@@ -349,25 +312,24 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 						messageID: "msg-1",
 						partID: "part-1",
 						field: "text",
-						delta: "hello from relay",
+						delta: "hello from the daemon",
 					},
 				},
 			]);
 
 			const messages = await eventually(
 				() =>
-					relay?.effectRuntime.runtime.runPromise(
-						Effect.gen(function* () {
-							const readQuery = yield* ReadQueryEffectTag;
-							return yield* readQuery.getSessionMessagesWithParts("sess-1");
-						}),
-					) ?? Promise.resolve([]),
+					run(
+						Effect.flatMap(ReadQueryEffectTag, (readQuery) =>
+							readQuery.getSessionMessagesWithParts("sess-1"),
+						),
+					),
 				(rows) =>
 					rows.some(
 						(row) =>
 							row.id === "msg-1" &&
 							row.role === "assistant" &&
-							row.parts.some((part) => part.text === "hello from relay"),
+							row.parts.some((part) => part.text === "hello from the daemon"),
 					),
 			);
 
@@ -377,36 +339,29 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 						id: "msg-1",
 						role: "assistant",
 						parts: expect.arrayContaining([
-							expect.objectContaining({ text: "hello from relay" }),
+							expect.objectContaining({ text: "hello from the daemon" }),
 						]),
 					}),
 				]),
 			);
-			await relay.effectRuntime.runtime.runPromise(
+			const owners = await run(
 				Effect.gen(function* () {
 					const sql = yield* SqlClient.SqlClient;
 					yield* sql`INSERT INTO sessions (id, provider, title, status, created_at, updated_at, project_id)
 						VALUES ('foreign-owner', 'claude', 'Foreign', 'idle', 1, 1, 'another-project')`;
+					const directory = yield* SessionDirectory;
+					return yield* Effect.all(
+						["sess-1", "foreign-owner", "missing"].map(directory.projectOf),
+					);
 				}),
 			);
-			const directory = Option.getOrThrow(
-				Context.getOption(
-					await relay.effectRuntime.runtime.context(),
-					SessionDirectory,
-				),
-			);
-			expect(await Effect.runPromise(directory.projectOf("sess-1"))).toEqual(
+			expect(owners).toEqual([
 				Option.some("runtime-ingress-smoke"),
-			);
-			expect(
-				await Effect.runPromise(directory.projectOf("foreign-owner")),
-			).toEqual(Option.none());
-			expect(await Effect.runPromise(directory.projectOf("missing"))).toEqual(
 				Option.none(),
-			);
+				Option.none(),
+			]);
 		} finally {
-			if (relay != null) await relay.stop();
-			await closeServer(relayServer);
+			await project?.stop();
 			await mock.close();
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -417,24 +372,19 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 		const projectDir = join(dir, "project");
 		mkdirSync(projectDir);
 		const mock = await createMockOpenCode(projectDir);
-		const relayServer = createServer();
-		await listenOnRandomPort(relayServer);
-		const log = createSilentLogger();
-		const warning = vi.spyOn(log, "warn");
-		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
+		let project: DaemonProject | undefined;
 		try {
-			relay = await createProjectRelay({
-				httpServer: relayServer,
+			project = await createDaemonProject("chat-simple", {
 				opencodeUrl: mock.url,
 				projectDir,
-				configDir: dir,
-				persistenceDbPath: join(dir, "events.db"),
-				publishGlobalSetting: () => Effect.void,
 				slug: "workspace-provider-race",
-				log,
-				statusPollerInterval: 60_000,
-				messagePollerInterval: 60_000,
 			});
+			const log = await project.run(
+				Effect.gen(function* () {
+					return yield* LoggerTag;
+				}),
+			);
+			const warning = vi.spyOn(log, "warn");
 			const program = Effect.scoped(
 				Effect.gen(function* () {
 					const sessionId = "workspace-provider-race";
@@ -532,14 +482,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 					}).pipe(Effect.ensuring(Effect.sync(() => resolve.mockRestore())));
 				}),
 			);
-			// fullBaseLayers supplies these services; the public runtime exposes a narrower facade.
-			const context =
-				(await relay.effectRuntime.runtime.context()) as Context.Context<
-					Effect.Services<typeof program>
-				>;
-			const result = await relay.effectRuntime.runtime.runPromise(
-				Effect.provide(program, context),
-			);
+			const result = await project.run(program);
 			expect(result.row).toMatchObject({
 				provider: "opencode",
 				status: "busy",
@@ -556,32 +499,26 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				expect.objectContaining({ reason: "unsupported-provider" }),
 			);
 		} finally {
-			warning.mockRestore();
-			if (relay != null) await relay.stop();
-			await closeServer(relayServer);
+			vi.restoreAllMocks();
+			await project?.stop();
 			await mock.close();
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
 
 	it("keeps named OpenCode stream provider bindings isolated through the shared ingress", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "conduit-relay-named-ingress-"));
+		const dir = mkdtempSync(join(tmpdir(), "conduit-daemon-named-ingress-"));
 		const projectDir = join(dir, "project");
-		const personalSessionId = "sess-relay-personal";
-		const workSessionId = "sess-relay-work";
+		const configDir = join(dir, "config");
+		const personalSessionId = "sess-daemon-personal";
+		const workSessionId = "sess-daemon-work";
 		mkdirSync(projectDir, { recursive: true });
-		mkdirSync(projectStorageDir(dir, "named-runtime-ingress"), {
-			recursive: true,
-		});
-		const dbPath = join(
-			projectStorageDir(dir, "named-runtime-ingress"),
-			"events.db",
-		);
+		mkdirSync(configDir, { recursive: true });
 		const defaultMock = await createMockOpenCode(projectDir);
 		const workMock = await createMockOpenCode(projectDir);
 		const personalMock = await createMockOpenCode(projectDir);
 		writeFileSync(
-			join(dir, "daemon.json"),
+			join(configDir, "daemon.json"),
 			JSON.stringify({
 				pid: 1234,
 				port: 2633,
@@ -610,38 +547,46 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				],
 			} satisfies DaemonConfig),
 		);
-		const relayServer = createServer();
-		await listenOnRandomPort(relayServer);
 
-		let relay: Awaited<ReturnType<typeof createProjectRelay>> | undefined;
+		let project: DaemonProject | undefined;
+		let held: Fiber.Fiber<never, unknown> | undefined;
 		try {
-			relay = await createProjectRelay({
-				httpServer: relayServer,
+			// The daemon uses both named instances at start, opening their streams.
+			project = await createDaemonProject("chat-simple", {
 				opencodeUrl: defaultMock.url,
 				projectDir,
-				persistenceDbPath: dbPath,
-				publishGlobalSetting: () => Effect.void,
-				configDir: dir,
+				configDir,
 				slug: "named-runtime-ingress",
-				log: createSilentLogger(),
-				statusPollerInterval: 60_000,
-				messagePollerInterval: 60_000,
 			});
-
-			await relay.effectRuntime.runtime.runPromise(
-				Effect.gen(function* () {
-					const instances = yield* OpenCodeInstancesTag;
-					yield* Effect.scoped(instances.use("work-oc"));
-					yield* Effect.scoped(instances.use("personal-oc"));
-				}),
+			const { run } = project;
+			// The start-up use is released at once; hold both streams as a bound
+			// session would.
+			held = await run(
+				Effect.forkDetach(
+					Effect.scoped(
+						Effect.flatMap(OpenCodeInstancesTag, (instances) =>
+							Effect.andThen(
+								Effect.all([
+									instances.use("work-oc"),
+									instances.use("personal-oc"),
+								]),
+								Effect.never,
+							),
+						),
+					),
+				),
 			);
+			await Promise.all([
+				workMock.waitForSseClient(),
+				personalMock.waitForSseClient(),
+			]);
 
 			personalMock.injectSSE([
 				{
 					type: "message.created",
 					properties: {
 						sessionID: personalSessionId,
-						messageID: "msg-relay-personal",
+						messageID: "msg-daemon-personal",
 						info: { role: "assistant", parts: [] },
 					},
 				},
@@ -651,7 +596,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 					type: "message.created",
 					properties: {
 						sessionID: workSessionId,
-						messageID: "msg-relay-work",
+						messageID: "msg-daemon-work",
 						info: { role: "assistant", parts: [] },
 					},
 				},
@@ -659,7 +604,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 
 			const providerBindings = await eventually(
 				() =>
-					relay?.effectRuntime.runtime.runPromise(
+					run(
 						Effect.gen(function* () {
 							const sql = yield* SqlClient.SqlClient;
 							return yield* sql<{
@@ -677,7 +622,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 									AND session_providers.status = 'active'
 								ORDER BY sessions.id`;
 						}),
-					) ?? Promise.resolve([]),
+					),
 				(rows) => rows.length === 2,
 			);
 
@@ -706,7 +651,7 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 					type: "message.created",
 					properties: {
 						sessionID: workSessionId,
-						messageID: "msg-relay-work-after-reconnect",
+						messageID: "msg-daemon-work-after-reconnect",
 						info: { role: "assistant", parts: [] },
 					},
 				},
@@ -718,8 +663,8 @@ describe("Relay stack Effect OpenCode runtime ingress wiring", () => {
 				),
 			).toBeGreaterThan(historyBeforeReconnect);
 		} finally {
-			if (relay != null) await relay.stop();
-			await closeServer(relayServer);
+			if (held) await Effect.runPromise(Fiber.interrupt(held));
+			await project?.stop();
 			await defaultMock.close();
 			await workMock.close();
 			await personalMock.close();

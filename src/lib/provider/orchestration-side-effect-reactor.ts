@@ -3532,7 +3532,11 @@ function isSendTurnOutboxPayload(
 				(value["rewind"]["resumeSessionAt"] === null ||
 					typeof value["rewind"]["resumeSessionAt"] === "string") &&
 				(value["rewind"]["targetMessageId"] === undefined ||
-					typeof value["rewind"]["targetMessageId"] === "string"))) &&
+					typeof value["rewind"]["targetMessageId"] === "string") &&
+				(value["rewind"]["removedMessageIds"] === undefined ||
+					Schema.is(Schema.Array(Schema.String))(
+						value["rewind"]["removedMessageIds"],
+					)))) &&
 		isRecord(value["providerState"]) &&
 		(value["account"] === undefined ||
 			Schema.is(AccountSchema)(value["account"])) &&

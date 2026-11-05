@@ -1,4 +1,4 @@
-// Reproduces two reported bugs at the relay-harness seam:
+// Reproduces two reported bugs through the daemon:
 //
 //  Bug A ("two tabs, one empty"): a fresh client opening a session with
 //    messages must be able to load a populated transcript page.
@@ -7,11 +7,11 @@
 //    OpenCode providerId, the viewed family that follows must
 //    include the new session (read-model projection race).
 
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Effect } from "effect";
 import { SqlClient } from "effect/sql";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AttachmentSource } from "../../../src/lib/contracts/attachment-ref.js";
+import { OpenCodeAPITag } from "../../../src/lib/domain/provider/Services/opencode-api-service.js";
 import { attachmentFromDataUrl } from "../../../src/lib/persistence/attachment-store.js";
 import { makeReadQueryEffect } from "../../../src/lib/persistence/effect/read-query-effect.js";
 import { messageRowsToHistory } from "../../../src/lib/persistence/session-history-adapter.js";
@@ -23,9 +23,9 @@ import type {
 } from "../../e2e/fixtures/recorded/types.js";
 import { loadOpenCodeRecording } from "../../e2e/helpers/recorded-loader.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import { TestWsClient } from "../helpers/test-ws-client.js";
 
 type DifferentialPart = {
@@ -190,14 +190,14 @@ function paginationSse(
  * needs is "the projection has caught up", so ask the projection directly.
  */
 async function waitForProjectedMessage(
-	dbPath: string,
+	store: DaemonProject,
 	sessionId: string,
 	messageId: string,
 	timeoutMs = 20_000,
 ): Promise<void> {
 	await vi.waitFor(
 		async () => {
-			const projected = await projectedHistory(dbPath, sessionId, 200);
+			const projected = await projectedHistory(store, sessionId, 200);
 			expect(
 				projected.history.messages.some((message) => message.id === messageId),
 			).toBe(true);
@@ -207,22 +207,21 @@ async function waitForProjectedMessage(
 }
 
 function readStore<A, E>(
-	dbPath: string,
+	store: DaemonProject,
 	read: Effect.Effect<A, E, SqlClient.SqlClient>,
 ): Promise<A> {
-	return Effect.runPromise(
-		read.pipe(Effect.provide(SqliteClient.layer({ filename: dbPath }))),
-	);
+	// The daemon's own connection: a second one in this process stalled its writes (REPRO-J).
+	return store.run(read);
 }
 
 async function projectedHistory(
-	dbPath: string,
+	store: DaemonProject,
 	sessionId: string,
 	pageSize = 50,
 	before?: string,
 ) {
 	const page = await readStore(
-		dbPath,
+		store,
 		Effect.flatMap(makeReadQueryEffect, (readQuery) =>
 			readQuery.readSessionTranscriptPage(sessionId, {
 				limit: pageSize,
@@ -291,8 +290,8 @@ async function runPaginationDifferential(count: number) {
 		`pagination-${count}`,
 		(sessionId) => paginationSse(sessionId, count),
 	);
-	const paginationHarness = await createRelayHarness(synthetic.recording);
-	const dbPath = paginationHarness.eventsDbPath;
+	const paginationHarness = await createDaemonProject(synthetic.recording);
+	const store = paginationHarness;
 	let client1: TestWsClient | undefined;
 	let client2: TestWsClient | undefined;
 	try {
@@ -310,18 +309,18 @@ async function runPaginationDifferential(count: number) {
 			synthetic.prompt,
 		);
 		const lastMessageId = `msg-${String(count).padStart(3, "0")}`;
-		await waitForProjectedMessage(dbPath, sessionId, lastMessageId);
+		await waitForProjectedMessage(store, sessionId, lastMessageId);
 		await vi.waitFor(
 			async () => {
 				expect(
-					JSON.stringify(await projectedHistory(dbPath, sessionId, 200)),
+					JSON.stringify(await projectedHistory(store, sessionId, 200)),
 				).toContain(`text-${String(count).padStart(3, "0")}`);
 			},
 			{ timeout: 20_000 },
 		);
 
 		client2 = new TestWsClient(
-			`ws://127.0.0.1:${paginationHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+			`ws://127.0.0.1:${paginationHarness.port}/rpc?p=integration-test&session=${sessionId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -329,19 +328,14 @@ async function runPaginationDifferential(count: number) {
 		const served = await client2.loadMoreHistory(sessionId);
 		const providerHistory = new SessionManager({
 			projectSlug: "test-project",
-			client: paginationHarness.stack.client,
+			client: await paginationHarness.run(OpenCodeAPITag),
 		});
 		const rest = await providerHistory.loadPreRenderedHistory(sessionId);
-		const projected = await projectedHistory(dbPath, sessionId, 50);
+		const projected = await projectedHistory(store, sessionId, 50);
 		const before = served.messages[0]?.id;
 		if (!before) throw new Error("served page has no cursor");
 		const older = await client2.loadMoreHistory(sessionId, before);
-		const projectedOlder = await projectedHistory(
-			dbPath,
-			sessionId,
-			50,
-			before,
-		);
+		const projectedOlder = await projectedHistory(store, sessionId, 50, before);
 		expect(projected.kind).toBe("rest-history");
 		const projectedRest =
 			projected.kind === "rest-history"
@@ -403,7 +397,7 @@ async function runPaginationDifferential(count: number) {
 }
 
 describe("Integration: Session Visibility Repros", () => {
-	let harness: RelayHarness;
+	let harness: DaemonProject;
 
 	beforeEach(async () => {
 		__setProbeOverrideForTesting(async () => ({
@@ -411,7 +405,7 @@ describe("Integration: Session Visibility Repros", () => {
 			commands: [],
 			agents: [],
 		}));
-		harness = await createRelayHarness("chat-simple");
+		harness = await createDaemonProject("chat-simple");
 	}, 30_000);
 
 	afterEach(async () => {
@@ -435,10 +429,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		await vi.waitFor(
 			async () => {
-				const projected = await projectedHistory(
-					harness.eventsDbPath,
-					sessionId,
-				);
+				const projected = await projectedHistory(harness, sessionId);
 				expect(projected.kind).toBe("rest-history");
 				if (projected.kind === "rest-history") {
 					expect(
@@ -455,7 +446,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// Fresh client (second browser tab) opens the same session URL.
 		const client2 = new TestWsClient(
-			`ws://127.0.0.1:${harness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+			`ws://127.0.0.1:${harness.port}/rpc?p=integration-test&session=${sessionId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -507,7 +498,7 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.waitForTurnEnd(newId, 10_000);
 		await vi.waitFor(
 			async () => {
-				const projected = await projectedHistory(harness.eventsDbPath, newId);
+				const projected = await projectedHistory(harness, newId);
 				expect(projected.kind).toBe("rest-history");
 				if (projected.kind === "rest-history") {
 					expect(
@@ -525,7 +516,7 @@ describe("Integration: Session Visibility Repros", () => {
 		// Bug 4: a second tab opening the session URL must get
 		// populated history.
 		const client2 = new TestWsClient(
-			`ws://127.0.0.1:${harness.relayPort}/rpc?p=integration-test&session=${newId}`,
+			`ws://127.0.0.1:${harness.port}/rpc?p=integration-test&session=${newId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -566,8 +557,8 @@ describe("Integration: Session Visibility Repros", () => {
 		// Own harness: the projection can only contain what actually streamed
 		// through this relay, so the turn must not race other tests' replay
 		// queue consumption on the shared recording session.
-		const textHarness = await createRelayHarness("chat-simple");
-		const textDbPath = textHarness.eventsDbPath;
+		const textHarness = await createDaemonProject("chat-simple");
+		const textStore = textHarness;
 		const client1 = await textHarness.connectWsClient();
 		await client1.waitForInitialState();
 		const createdId = await createOpenCodeSession(client1, "Text Differential");
@@ -579,7 +570,7 @@ describe("Integration: Session Visibility Repros", () => {
 		await client1.waitForTurnEnd(sessionId);
 		await vi.waitFor(
 			async () => {
-				const projected = await projectedHistory(textDbPath, sessionId);
+				const projected = await projectedHistory(textStore, sessionId);
 				expect(projected.kind).toBe("rest-history");
 				if (projected.kind === "rest-history") {
 					expect(projected.history.messages.length).toBeGreaterThanOrEqual(2);
@@ -597,7 +588,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// A fresh client requests its own transcript page.
 		const client2 = new TestWsClient(
-			`ws://127.0.0.1:${textHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+			`ws://127.0.0.1:${textHarness.port}/rpc?p=integration-test&session=${sessionId}`,
 		);
 		await client2.waitForOpen();
 		await client2.waitForInitialState();
@@ -606,7 +597,7 @@ describe("Integration: Session Visibility Repros", () => {
 
 		// Projection-served history: the exact adapter chain the resolvers use
 		// when falling back to (or preferring) the read model.
-		const projected = await projectedHistory(textDbPath, sessionId, 50);
+		const projected = await projectedHistory(textStore, sessionId, 50);
 
 		const summarize = (
 			msgs: readonly {
@@ -651,8 +642,8 @@ describe("Integration: Session Visibility Repros", () => {
 	}, 45_000);
 
 	it("projected history matches REST for a tool-call turn", async () => {
-		const toolHarness = await createRelayHarness("chat-tool-call");
-		const toolDbPath = toolHarness.eventsDbPath;
+		const toolHarness = await createDaemonProject("chat-tool-call");
+		const toolStore = toolHarness;
 		try {
 			const client1 = await toolHarness.connectWsClient();
 			await client1.waitForInitialState();
@@ -678,21 +669,21 @@ describe("Integration: Session Visibility Repros", () => {
 			await vi.waitFor(
 				async () => {
 					expect(
-						JSON.stringify(await projectedHistory(toolDbPath, sessionId)),
+						JSON.stringify(await projectedHistory(toolStore, sessionId)),
 					).toContain("0.1.0");
 				},
 				{ timeout: 20_000 },
 			);
 
 			const client2 = new TestWsClient(
-				`ws://127.0.0.1:${toolHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+				`ws://127.0.0.1:${toolHarness.port}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
 			await client2.viewSession(sessionId);
 			const restHistory = await client2.loadMoreHistory(sessionId);
 
-			const projected = await projectedHistory(toolDbPath, sessionId, 50);
+			const projected = await projectedHistory(toolStore, sessionId, 50);
 
 			type Msg = {
 				role?: string | undefined;
@@ -824,8 +815,8 @@ describe("Integration: Session Visibility Repros", () => {
 				}),
 			],
 		);
-		const metadataHarness = await createRelayHarness(synthetic.recording);
-		const dbPath = metadataHarness.eventsDbPath;
+		const metadataHarness = await createDaemonProject(synthetic.recording);
+		const store = metadataHarness;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -846,14 +837,14 @@ describe("Integration: Session Visibility Repros", () => {
 			await vi.waitFor(
 				async () => {
 					expect(
-						JSON.stringify(await projectedHistory(dbPath, sessionId)),
+						JSON.stringify(await projectedHistory(store, sessionId)),
 					).toContain("Delegation complete");
 				},
 				{ timeout: 20_000 },
 			);
 
 			client2 = new TestWsClient(
-				`ws://127.0.0.1:${metadataHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+				`ws://127.0.0.1:${metadataHarness.port}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
@@ -861,9 +852,9 @@ describe("Integration: Session Visibility Repros", () => {
 			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
 				projectSlug: "test-project",
-				client: metadataHarness.stack.client,
+				client: await metadataHarness.run(OpenCodeAPITag),
 			}).loadPreRenderedHistory(sessionId);
-			const projected = await projectedHistory(dbPath, sessionId);
+			const projected = await projectedHistory(store, sessionId);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
@@ -956,8 +947,8 @@ describe("Integration: Session Visibility Repros", () => {
 				}),
 			],
 		);
-		const fileHarness = await createRelayHarness(synthetic.recording);
-		const dbPath = fileHarness.eventsDbPath;
+		const fileHarness = await createDaemonProject(synthetic.recording);
+		const store = fileHarness;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -970,18 +961,18 @@ describe("Integration: Session Visibility Repros", () => {
 				synthetic.prompt,
 			);
 			// The synthetic stream has no done marker; wait for final assistant text.
-			await waitForProjectedMessage(dbPath, sessionId, "msg-assistant-h");
+			await waitForProjectedMessage(store, sessionId, "msg-assistant-h");
 			await vi.waitFor(
 				async () => {
 					expect(
-						JSON.stringify(await projectedHistory(dbPath, sessionId)),
+						JSON.stringify(await projectedHistory(store, sessionId)),
 					).toContain("Image received");
 				},
 				{ timeout: 20_000 },
 			);
 
 			client2 = new TestWsClient(
-				`ws://127.0.0.1:${fileHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+				`ws://127.0.0.1:${fileHarness.port}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
@@ -989,9 +980,9 @@ describe("Integration: Session Visibility Repros", () => {
 			const served = await client2.loadMoreHistory(sessionId);
 			const rest = await new SessionManager({
 				projectSlug: "test-project",
-				client: fileHarness.stack.client,
+				client: await fileHarness.run(OpenCodeAPITag),
 			}).loadPreRenderedHistory(sessionId);
-			const projected = await projectedHistory(dbPath, sessionId);
+			const projected = await projectedHistory(store, sessionId);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
@@ -1043,11 +1034,11 @@ describe("Integration: Session Visibility Repros", () => {
 	}, 45_000);
 
 	it("REPRO-I: permission-gated history matches REST and persists permission events", async () => {
-		const permissionHarness = await createRelayHarness("permissions-bash");
+		const permissionHarness = await createDaemonProject("permissions-bash");
 		// The first answer wins and a later one is refused (CONTRACT.md 1006-1007,
 		// 82tn.11), so the recording's own reply waits for the user's, as in OpenCode.
 		permissionHarness.mock.holdRepliesUntilAnswered();
-		const dbPath = permissionHarness.eventsDbPath;
+		const store = permissionHarness;
 		let client1: TestWsClient | undefined;
 		let client2: TestWsClient | undefined;
 		try {
@@ -1067,7 +1058,7 @@ describe("Integration: Session Visibility Repros", () => {
 			const requestId = await vi.waitFor(
 				async () => {
 					const [row] = await readStore(
-						dbPath,
+						store,
 						Effect.flatMap(
 							SqlClient.SqlClient,
 							(sql) =>
@@ -1094,7 +1085,7 @@ describe("Integration: Session Visibility Repros", () => {
 			await vi.waitFor(
 				async () => {
 					const eventTypes = await readStore(
-						dbPath,
+						store,
 						Effect.flatMap(
 							SqlClient.SqlClient,
 							(sql) =>
@@ -1107,20 +1098,20 @@ describe("Integration: Session Visibility Repros", () => {
 						"permission.resolved",
 					);
 					expect(
-						JSON.stringify(await projectedHistory(dbPath, sessionId)),
+						JSON.stringify(await projectedHistory(store, sessionId)),
 					).toContain("Files listed");
 				},
 				{ timeout: 20_000 },
 			);
 
 			client2 = new TestWsClient(
-				`ws://127.0.0.1:${permissionHarness.relayPort}/rpc?p=integration-test&session=${sessionId}`,
+				`ws://127.0.0.1:${permissionHarness.port}/rpc?p=integration-test&session=${sessionId}`,
 			);
 			await client2.waitForOpen();
 			await client2.waitForInitialState();
 			await client2.viewSession(sessionId);
 			const rest = await client2.loadMoreHistory(sessionId);
-			const projected = await projectedHistory(dbPath, sessionId as string);
+			const projected = await projectedHistory(store, sessionId as string);
 			expect(projected.kind).toBe("rest-history");
 			const summarize = (messages: readonly DifferentialMessage[]) =>
 				messages.map((message) => ({
@@ -1148,7 +1139,7 @@ describe("Integration: Session Visibility Repros", () => {
 			expect(projectedSummary).toEqual(restSummary);
 
 			const eventTypes = await readStore(
-				dbPath,
+				store,
 				Effect.flatMap(
 					SqlClient.SqlClient,
 					(sql) =>

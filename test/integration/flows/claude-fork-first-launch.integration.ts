@@ -28,6 +28,7 @@ import {
 	defaultDaemonConfig,
 	saveDaemonConfig,
 } from "../../../src/lib/daemon/config-persistence.js";
+import { OrchestrationEngineTag } from "../../../src/lib/domain/relay/Services/services.js";
 import { forkSession } from "../../../src/lib/domain/relay/Services/session-command.js";
 import { setModel } from "../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { __setProbeOverrideForTesting } from "../../../src/lib/provider/claude/claude-capabilities-probe.js";
@@ -41,9 +42,9 @@ import {
 	responseChunks,
 } from "../../helpers/fake-claude-process-sdk.js";
 import {
-	createRelayHarness,
-	type RelayHarness,
-} from "../helpers/relay-harness.js";
+	createDaemonProject,
+	type DaemonProject,
+} from "../../helpers/in-process-daemon.js";
 import type { TestWsClient } from "../helpers/test-ws-client.js";
 
 type Launch = {
@@ -61,7 +62,7 @@ type TranscriptEntry = {
 describe("Integration: Claude forks at first launch", () => {
 	let root: string;
 	let login: string;
-	let harness: RelayHarness | undefined;
+	let harness: DaemonProject | undefined;
 	let client: TestWsClient;
 	let launches: Launch[];
 	let providerForkCalls: number;
@@ -160,7 +161,7 @@ describe("Integration: Claude forks at first launch", () => {
 	}
 
 	async function start() {
-		harness = await createRelayHarness("chat-simple", {
+		harness = await createDaemonProject("chat-simple", {
 			configDir: root,
 			defaultModel: null,
 			claudeSdk: {
@@ -194,8 +195,9 @@ describe("Integration: Claude forks at first launch", () => {
 
 	async function send(sessionId: string, text: string) {
 		client.clearReceived();
-		await client.sendMessage(text, { sessionId });
-		return client.waitForTurnEnd(sessionId, 10_000);
+		const inputId = randomUUID();
+		await client.sendMessage(text, { sessionId, commandId: inputId });
+		return client.waitForTurnEnd(sessionId, 10_000, inputId);
 	}
 
 	async function source(text = "Source context") {
@@ -278,9 +280,12 @@ describe("Integration: Claude forks at first launch", () => {
 	}
 
 	async function preWarm(sessionId: string) {
-		if (!harness) throw new Error("Missing relay harness");
-		harness.stack.orchestration.engine.bindSession(sessionId, "claude");
-		await harness.stack.effectRuntime.runtime.runPromise(
+		if (!harness) throw new Error("Missing daemon project");
+		(await harness.run(OrchestrationEngineTag)).bindSession(
+			sessionId,
+			"claude",
+		);
+		await harness.run(
 			setModel(sessionId, { providerID: "claude", modelID: "sonnet" }),
 		);
 		client.clearReceived();
@@ -296,7 +301,7 @@ describe("Integration: Claude forks at first launch", () => {
 		};
 		const forkId = await fork(parent.id, parent.cutId);
 		if (!harness) throw new Error("Missing relay harness");
-		const side = await harness.stack.effectRuntime.runtime.runPromise(
+		const side = await harness.run(
 			forkSession(parent.id, {
 				side: { title: "Side question", inputId: randomUUID() },
 			}),

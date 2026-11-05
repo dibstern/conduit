@@ -5,6 +5,7 @@ import type { EventStoreEffectTag } from "../../../persistence/effect/event-stor
 import type { ProjectionRunnerEffectTag } from "../../../persistence/effect/projection-runner-effect.js";
 import type { ProviderStateEffectTag } from "../../../persistence/effect/provider-state-effect.js";
 import type { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
+import type { ClaudeSessionForkSdk } from "../../../provider/claude/claude-session-fork.js";
 import type { OrchestrationEngine } from "../../../provider/orchestration-engine.js";
 import type { ProviderRegistry } from "../../../provider/provider-registry.js";
 import type { PersistenceProjectTag } from "../../persistence/Services/persistence-service.js";
@@ -40,6 +41,8 @@ export class ProviderAdapters extends Context.Service<
 	ProviderAdapters,
 	{
 		readonly registry: ProviderRegistry;
+		/** A test seam's Claude fork SDK; launches use the real SDK without one. */
+		readonly claudeSessionForkSdk?: ClaudeSessionForkSdk;
 		/** Shared by early terminal drain and the owner's acquisition finalizer. */
 		readonly shutdown: Effect.Effect<void>;
 		readonly projectContext: (

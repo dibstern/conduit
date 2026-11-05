@@ -5,6 +5,20 @@ import { SqlClient } from "effect/sql";
 import { codexAccountHome } from "./codex-home.js";
 import { readCodexSessionIdentity } from "./codex-session-store.js";
 
+/** The session and the sessions its rows were copied from, each with the id suffix its copies
+ *  carry here and the last event of it they hold. */
+const ancestors = (sql: SqlClient.SqlClient, sessionId: string) =>
+	sql`WITH RECURSIVE ancestors(session_id, suffix, through_sequence) AS (
+		SELECT ${sessionId}, '', 9223372036854775807
+		UNION ALL
+		SELECT COALESCE(json_extract(e.data, '$.forkedFrom'), json_extract(e.data, '$.parentId')),
+			'_' || a.session_id || a.suffix, e.sequence
+		FROM ancestors a JOIN events e ON e.session_id = a.session_id
+			AND e.type = 'session.created' AND e.sequence < a.through_sequence
+		WHERE json_extract(e.data, '$.inheritsHistory') = 1
+			AND COALESCE(json_extract(e.data, '$.forkedFrom'), json_extract(e.data, '$.parentId')) IS NOT NULL
+	)`;
+
 /** Resolve persisted refs, including messages copied through fork lineage. */
 export const readCodexNativeTurns = Effect.fn("codex.readNativeTurns")(
 	function* (sessionId: string) {
@@ -14,16 +28,7 @@ export const readCodexNativeTurns = Effect.fn("codex.readNativeTurns")(
 			readonly nativeTurnId: string;
 			readonly threadId: string;
 			readonly completed: number;
-		}>`WITH RECURSIVE ancestors(session_id, suffix, through_sequence) AS (
-			SELECT ${sessionId}, '', 9223372036854775807
-			UNION ALL
-			SELECT COALESCE(json_extract(e.data, '$.forkedFrom'), json_extract(e.data, '$.parentId')),
-				'_' || a.session_id || a.suffix, e.sequence
-			FROM ancestors a JOIN events e ON e.session_id = a.session_id
-				AND e.type = 'session.created' AND e.sequence < a.through_sequence
-			WHERE json_extract(e.data, '$.inheritsHistory') = 1
-				AND COALESCE(json_extract(e.data, '$.forkedFrom'), json_extract(e.data, '$.parentId')) IS NOT NULL
-		)
+		}>`${ancestors(sql, sessionId)}
 		SELECT t.id AS turnId,
 			json_extract(e.metadata, '$.providerRefs.providerTurnId') AS nativeTurnId,
 			json_extract(e.metadata, '$.providerRefs.providerSessionId') AS threadId,
@@ -38,6 +43,32 @@ export const readCodexNativeTurns = Effect.fn("codex.readNativeTurns")(
 				WHERE removed.session_id = m.session_id AND removed.message_id = m.id)
 		GROUP BY t.id, nativeTurnId, threadId
 		ORDER BY t.requested_at, t.rowid, MIN(e.sequence)`;
+	},
+);
+
+/** The native turns of rows a head move took off the Head, in the order given. A fork's copies
+ *  carry the fork's id suffix, and their refs sit on the source's events. */
+export const readCodexRemovedTurns = Effect.fn("codex.readRemovedTurns")(
+	function* (sessionId: string, messageIds: readonly string[]) {
+		if (messageIds.length === 0) return [];
+		const sql = yield* SqlClient.SqlClient;
+		const turns = yield* sql<{
+			readonly messageId: string;
+			readonly nativeTurnId: string;
+			readonly threadId: string;
+		}>`${ancestors(sql, sessionId)}
+		SELECT json_extract(e.data, '$.messageId') || a.suffix AS messageId,
+			json_extract(e.metadata, '$.providerRefs.providerTurnId') AS nativeTurnId,
+			json_extract(e.metadata, '$.providerRefs.providerSessionId') AS threadId
+		FROM ancestors a JOIN events e ON e.session_id = a.session_id
+			AND e.sequence < a.through_sequence AND e.type = 'message.created'
+		WHERE json_extract(e.data, '$.messageId') || a.suffix IN ${sql.in(messageIds)}
+			AND json_type(e.metadata, '$.providerRefs.providerTurnId') = 'text'
+		ORDER BY e.sequence`;
+		return [...turns].sort(
+			(a, b) =>
+				messageIds.indexOf(a.messageId) - messageIds.indexOf(b.messageId),
+		);
 	},
 );
 
