@@ -13,7 +13,7 @@ import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 import { DatabaseSync, StatementSync } from "node:sqlite";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { Context, Effect, Fiber, HashMap, Ref } from "effect";
+import { Context, Effect, Fiber, HashMap, Option, Ref } from "effect";
 import type {
 	SubprocessDiagnostic,
 	SubprocessMetrics,
@@ -1111,19 +1111,77 @@ async function main(): Promise<void> {
 				engineIdentity: engineIdentity(event.engine),
 			});
 		});
+		const { OwnerScopes } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`owner-scopes.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/owner-scopes.js");
+		const { SessionDirectory } = (await import(
+			pathToFileURL(
+				join(
+					codeRoot,
+					"lib/domain/daemon/Services",
+					`session-directory.${extension}`,
+				),
+			).href
+		)) as typeof import("../../src/lib/domain/daemon/Services/session-directory.js");
+		// The daemon's owner scope handles are stable per generation, so each
+		// handle's identity names the scope a command ran under (82tn.10.9).
+		const scopeIdentities = new WeakMap<object, number>();
+		let nextScopeIdentity = 0;
+		const scopeIdentity = (handle: object) => {
+			const known = scopeIdentities.get(handle);
+			if (known !== undefined) return known;
+			scopeIdentities.set(handle, ++nextScopeIdentity);
+			return nextScopeIdentity;
+		};
+		const ownerScopesOf = (sessionId: string) =>
+			Effect.gen(function* () {
+				const owners = yield* Effect.serviceOption(OwnerScopes);
+				const directory = yield* Effect.serviceOption(SessionDirectory);
+				if (Option.isNone(owners) || Option.isNone(directory))
+					return {
+						unavailable: Option.isNone(owners)
+							? "OwnerScopes"
+							: "SessionDirectory",
+					};
+				const projectId = yield* directory.value.projectOf(sessionId);
+				if (Option.isNone(projectId)) return { unavailable: "project" };
+				return {
+					projectId: projectId.value,
+					project: scopeIdentity(
+						yield* owners.value.projectScope(projectId.value),
+					),
+					session: scopeIdentity(yield* owners.value.sessionScope(sessionId)),
+				};
+			}).pipe(
+				Effect.catch((error) => Effect.succeed({ unavailable: error._tag })),
+			);
 		const dispatch = OrchestrationEngine.prototype.dispatchEffect;
 		Object.assign(OrchestrationEngine.prototype, {
 			dispatchEffect(
 				this: InstanceType<typeof OrchestrationEngine>,
 				command: import("../../src/lib/provider/orchestration-engine.js").OrchestrationCommand,
 			) {
-				record({
-					kind: "engine-command",
-					engineIdentity: engineIdentity(this),
-					commandId: command.commandId,
-					commandType: command.type,
-				});
-				return dispatch.call(this, command).pipe(
+				const engine = this;
+				return Effect.gen(function* () {
+					record({
+						kind: "engine-command",
+						engineIdentity: engineIdentity(engine),
+						commandId: command.commandId,
+						commandType: command.type,
+						ownerScopes: yield* ownerScopesOf(
+							command.type === "send_turn"
+								? command.input.sessionId
+								: (command.sessionId ?? ""),
+						),
+					});
+					return yield* dispatch.call(engine, command);
+				}).pipe(
 					Effect.onExit((exit) =>
 						Effect.sync(() =>
 							record({
