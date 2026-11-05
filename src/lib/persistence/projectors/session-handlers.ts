@@ -237,6 +237,20 @@ export const sessionHandlers = {
 			params: [event.createdAt, event.sessionId],
 		},
 	],
+	// 82tn.49: the head move journal writes nothing on the row; stamping it announces the
+	// session, so the inbox drains the sends it queued behind the move once it lands.
+	"head.move_started": (event) => [
+		{
+			sql: "UPDATE sessions SET updated_at = updated_at WHERE id = ?",
+			params: [event.sessionId],
+		},
+	],
+	"head.moved": (event) => [
+		{
+			sql: "UPDATE sessions SET updated_at = updated_at WHERE id = ?",
+			params: [event.sessionId],
+		},
+	],
 	"session.rewind_committed": (event) => [
 		{
 			sql: "UPDATE sessions SET pending_rewind_message_id = NULL, updated_at = ? WHERE id = ?",

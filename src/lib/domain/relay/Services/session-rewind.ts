@@ -1,13 +1,13 @@
 import { Data, Effect } from "effect";
 import { SqlClient } from "effect/sql";
-import { ClaudeEventPersistEffectTag } from "../../../persistence/effect/claude-event-persist-effect.js";
 import { ReadQueryEffectTag } from "../../../persistence/effect/read-query-effect.js";
-import { loadLedgerView } from "../../../persistence/effect/run-ledger-arm.js";
-import { canonicalEvent } from "../../../persistence/events.js";
-import { AccountDirectory } from "../../daemon/Services/account-directory.js";
 import { LoggerTag } from "./services.js";
+import {
+	admitOrRefuse,
+	finishHeadMove,
+	startHeadMove,
+} from "./session-command.js";
 import { SessionInboxTag } from "./session-inbox.js";
-import { hasActiveProcessingTimeout } from "./session-overrides-state.js";
 
 export class RewindTargetNotFound extends Data.TaggedError(
 	"RewindTargetNotFound",
@@ -22,42 +22,48 @@ export class RewindUnavailable extends Data.TaggedError("RewindUnavailable")<{
 	readonly message: string;
 }> {}
 
-const readRewindSession = (sessionId: string) =>
+/**
+ * A head move (82tn.49, ADR-0014): admitted from the ledger's facts and journalled under the
+ * inbox's permit, then landed under it again. Between the two, the inbox's admit reads the move
+ * in progress, so a send queues behind it instead of being handed off.
+ */
+const moveHead = <E>(
+	sessionId: string,
+	start: (row: {
+		provider: string;
+		pending_rewind_message_id: string | null;
+	}) => Effect.Effect<
+		Parameters<typeof startHeadMove>[2] | undefined,
+		E,
+		SqlClient.SqlClient
+	>,
+) =>
 	Effect.gen(function* () {
-		const readQuery = yield* ReadQueryEffectTag;
-		const row = yield* readQuery.getSession(sessionId);
-		if (!row)
-			return yield* new RewindUnavailable({
-				sessionId,
-				message: "Session not found",
-			});
-		const sql = yield* SqlClient.SqlClient;
-		const [busy] = yield* sql<{ busy: number }>`SELECT
-		EXISTS (SELECT 1 FROM pending_inputs WHERE session_id = ${sessionId} AND state IN ('queued', 'steering'))
-		OR EXISTS (SELECT 1 FROM provider_command_outbox WHERE session_id = ${sessionId}
-			AND effect_type = 'send_turn' AND status IN ('pending', 'running', 'retryable_failed'))
-		OR EXISTS (SELECT 1 FROM pending_approvals WHERE session_id = ${sessionId} AND status = 'pending')
-		OR EXISTS (SELECT 1 FROM sessions WHERE id = ${sessionId}
-			AND pending_rewind_message_id IS NULL
-			AND (json_extract(limit_recovery, '$.cutOffMessageId') IS NOT NULL
-				OR json_extract(limit_recovery, '$.scheduledAt') IS NOT NULL)) AS busy`;
-		if (
-			// 8.1: the foreground is the ledger's active Run; gap review 1B: rewind is a foreground
-			// action, so background work never blocks it.
-			(yield* loadLedgerView(sessionId))?.active !== undefined ||
-			busy?.busy === 1 ||
-			(yield* hasActiveProcessingTimeout(sessionId))
-		)
-			return yield* new RewindUnavailable({
-				sessionId,
-				message:
-					"Stop the current turn and clear queued inputs or pending continuations before rewinding",
-			});
-		const account = yield* (yield* AccountDirectory).resolve({
-			_tag: "Id",
-			id: row.provider,
-		});
-		return { row, account };
+		const inbox = yield* SessionInboxTag;
+		const started = yield* inbox.withSession(
+			sessionId,
+			Effect.gen(function* () {
+				const row = yield* (yield* ReadQueryEffectTag).getSession(sessionId);
+				if (!row)
+					return yield* new RewindUnavailable({
+						sessionId,
+						message: "Session not found",
+					});
+				yield* admitOrRefuse(sessionId, { kind: "head_move" });
+				const move = yield* start({
+					provider: row.provider,
+					pending_rewind_message_id: row.pending_rewind_message_id ?? null,
+				});
+				return move && (yield* startHeadMove(sessionId, row.provider, move));
+			}),
+		);
+		if (!started) return;
+		// Test seam: widens the window a send can arrive in while the move is in progress.
+		if (process.env["NODE_ENV"] === "test")
+			yield* Effect.sleep(
+				Number(process.env["CONDUIT_TEST_HEAD_MOVE_DELAY_MS"] ?? 0),
+			);
+		yield* inbox.withSession(sessionId, finishHeadMove(sessionId, started));
 	});
 
 export const rewindSessionToMessage = ({
@@ -70,11 +76,8 @@ export const rewindSessionToMessage = ({
 	messageId: string;
 }) =>
 	Effect.gen(function* () {
-		const inbox = yield* SessionInboxTag;
-		yield* inbox.withSession(
-			sessionId,
+		yield* moveHead(sessionId, (row) =>
 			Effect.gen(function* () {
-				const { row } = yield* readRewindSession(sessionId);
 				const sql = yield* SqlClient.SqlClient;
 				const [target] = yield* sql<{ id: string }>`SELECT id FROM messages
 				WHERE session_id = ${sessionId} AND id = ${messageId}`;
@@ -84,24 +87,13 @@ export const rewindSessionToMessage = ({
 						messageId,
 						message: `Rewind target ${messageId} not found in session ${sessionId}`,
 					});
-				if (row.pending_rewind_message_id === messageId) return;
-				const persist = yield* ClaudeEventPersistEffectTag;
-				yield* persist.persistEvent(
-					canonicalEvent(
-						"session.rewound",
-						sessionId,
-						{
-							messageId,
-							previousMessageId: row.pending_rewind_message_id ?? null,
-						},
-						{ provider: row.provider },
-					),
-				);
-				const log = yield* LoggerTag;
-				log.info(
-					`client=${clientId} session=${sessionId} Rewound to message: ${messageId}`,
-				);
+				if (row.pending_rewind_message_id === messageId) return undefined;
+				return { kind: "rewind" as const, messageId };
 			}),
+		);
+		const log = yield* LoggerTag;
+		log.info(
+			`client=${clientId} session=${sessionId} Rewound to message: ${messageId}`,
 		);
 	});
 
@@ -113,27 +105,16 @@ export const undoSessionRewind = ({
 	sessionId: string;
 }) =>
 	Effect.gen(function* () {
-		const inbox = yield* SessionInboxTag;
-		yield* inbox.withSession(
-			sessionId,
-			Effect.gen(function* () {
-				const { row } = yield* readRewindSession(sessionId);
-				if (!row.pending_rewind_message_id)
-					return yield* new RewindUnavailable({
-						sessionId,
-						message: "There is no pending rewind to undo",
-					});
-				const persist = yield* ClaudeEventPersistEffectTag;
-				yield* persist.persistEvent(
-					canonicalEvent(
-						"session.rewind_undone",
-						sessionId,
-						{ previousMessageId: row.pending_rewind_message_id },
-						{ provider: row.provider },
+		yield* moveHead(sessionId, (row) =>
+			row.pending_rewind_message_id
+				? Effect.succeed({ kind: "undo" as const })
+				: Effect.fail(
+						new RewindUnavailable({
+							sessionId,
+							message: "There is no pending rewind to undo",
+						}),
 					),
-				);
-				const log = yield* LoggerTag;
-				log.info(`client=${clientId} session=${sessionId} Undid rewind`);
-			}),
 		);
+		const log = yield* LoggerTag;
+		log.info(`client=${clientId} session=${sessionId} Undid rewind`);
 	});

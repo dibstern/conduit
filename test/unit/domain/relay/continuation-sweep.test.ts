@@ -76,10 +76,7 @@ import {
 	SessionInboxLive,
 	SessionInboxTag,
 } from "../../../../src/lib/domain/relay/Services/session-inbox.js";
-import {
-	makeOverridesStateLive,
-	startProcessingTimeout,
-} from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
+import { makeOverridesStateLive } from "../../../../src/lib/domain/relay/Services/session-overrides-state.js";
 import { makeCommitAndSignal } from "../../../../src/lib/persistence/effect/commit-and-signal.js";
 import {
 	EventStoreEffectTag,
@@ -1098,7 +1095,6 @@ for (const scenario of [
 	"newer-turn",
 	"busy",
 	"retry",
-	"processing",
 	"driver",
 	"account",
 	"limit-account",
@@ -1158,13 +1154,6 @@ for (const scenario of [
 						case "busy":
 						case "retry":
 							yield* commit(activeRunEvents("s1"));
-							break;
-						case "processing":
-							yield* startProcessingTimeout(
-								"s1",
-								"1 minute",
-								() => Effect.void,
-							);
 							break;
 						case "driver":
 							yield* sql`UPDATE sessions SET provider = 'opencode' WHERE id = 's1'`;

@@ -69,6 +69,11 @@ import {
 	ProviderTurnServiceTag,
 } from "./provider-turn-service.js";
 import { LoggerTag, OrchestrationEngineTag } from "./services.js";
+import {
+	danglingHeadMoves,
+	finishHeadMove,
+	headMoveInProgress,
+} from "./session-command.js";
 import { SessionEventBusTag } from "./session-event-bus.js";
 import { OverridesStateTag } from "./session-overrides-state.js";
 
@@ -96,6 +101,8 @@ export interface InboxView {
 	readonly switching?: boolean;
 	/** A send's close of the old process is held or running; the send waits for it. */
 	readonly closing?: boolean;
+	/** A head move started and not moved (82tn.49, ADR-0014): a send queues behind it. */
+	readonly headMoving?: boolean;
 	/** Existing queued inputs are paused in the shared inbox read model. */
 	readonly stoppedSinceHandoff: boolean;
 	/** A usage limit cut a request off, and it is neither answered nor dismissed. */
@@ -252,7 +259,11 @@ export function decideInbox(
 			view.scheduled);
 	// An unanswered prompt blocks a new handoff even when no owned run is open.
 	const idle =
-		!view.busy && !view.steering && !view.promptOpen && !view.closing;
+		!view.busy &&
+		!view.steering &&
+		!view.promptOpen &&
+		!view.closing &&
+		!view.headMoving;
 	switch (command._tag) {
 		case "Submit": {
 			if (view.known) return { _tag: "Accepted", events: [] };
@@ -267,8 +278,9 @@ export function decideInbox(
 				return !view.interruptRequested
 					? interruptForInput(sessionId, { inputId, request }, [admitted])
 					: { _tag: "Accepted", events: [admitted] };
-			// The switch's continuation, or the held send behind a close, owns the next turn.
-			if (view.switching || view.closing)
+			// The switch's continuation, the held send behind a close, or the head move in
+			// progress (82tn.49) owns the next turn.
+			if (view.switching || view.closing || view.headMoving)
 				return { _tag: "Accepted", events: [admitted] };
 			if (!idle && command.delivery === "steer")
 				return steer(sessionId, view, { inputId, request }, [admitted]);
@@ -307,8 +319,9 @@ export function decideInbox(
 				return view.interruptRequested
 					? { _tag: "Accepted", events: [] }
 					: interruptForInput(sessionId, input, []);
-			// It waits behind the held send's close.
-			if (view.closing) return { _tag: "Accepted", events: [] };
+			// It waits behind the held send's close, or the head move in progress (82tn.49).
+			if (view.closing || view.headMoving)
+				return { _tag: "Accepted", events: [] };
 			// Like a queued command's Run now, an open prompt must be answered first.
 			if (!idle && command.interrupt)
 				return view.promptOpen
@@ -489,6 +502,7 @@ export const SessionInboxLive = Layer.effect(
 					interrupt_requested: string | null;
 					running: string | null;
 					closing: number;
+					head_moving: number;
 				}>`WITH latest_run AS (${inboxRunStatusQuery(sql, sessionId)}) SELECT
 					(SELECT status FROM latest_run) AS run_status,
 					(SELECT provider FROM sessions WHERE id = ${sessionId}) AS provider,
@@ -517,7 +531,8 @@ export const SessionInboxLive = Layer.effect(
 					EXISTS (SELECT 1 FROM provider_command_outbox
 						WHERE session_id = ${sessionId} AND effect_type = 'end_session'
 						AND command_id LIKE ${`${CLOSE_PREFIX}%`}
-						AND status IN ('held', 'pending', 'running', 'retryable_failed')) AS closing`;
+						AND status IN ('held', 'pending', 'running', 'retryable_failed')) AS closing,
+					${headMoveInProgress(sql, sessionId)} AS head_moving`;
 				const known =
 					inputId === undefined
 						? false
@@ -575,6 +590,7 @@ export const SessionInboxLive = Layer.effect(
 					stopping: fences.stopping,
 					switching: fences.switching,
 					closing: facts?.closing === 1,
+					headMoving: facts?.head_moving === 1,
 					stoppedSinceHandoff: inboxState?.paused === true,
 					limited: facts?.limited === 1,
 					usageResetsAt:
@@ -958,6 +974,25 @@ export const SessionInboxLive = Layer.effect(
 					requeueFailedSteers(sql, persist).pipe(
 						Effect.catchCause((cause) =>
 							Effect.sync(() => log.warn(`inbox recovery failed: ${cause}`)),
+						),
+					),
+				),
+				// A head move whose daemon died between its start and its landing lands now, before
+				// any send queued behind it drains (82tn.49, ADR-0014).
+				Effect.andThen(
+					danglingHeadMoves(eventStore.projectId).pipe(
+						Effect.flatMap((moves) =>
+							Effect.forEach(
+								moves,
+								({ sessionId, move }) =>
+									serialised(sessionId)(finishHeadMove(sessionId, move)),
+								{ discard: true },
+							),
+						),
+						Effect.catchCause((cause) =>
+							Effect.sync(() =>
+								log.warn(`head move roll-forward failed: ${cause}`),
+							),
 						),
 					),
 				),

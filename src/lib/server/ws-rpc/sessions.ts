@@ -5,6 +5,7 @@ import {
 	AccountUnroutable,
 	type ContinuationError,
 	ContinuationErrorSchema,
+	SessionBusy,
 } from "../../contracts/limit-recovery.js";
 import {
 	PROVIDER_DRIVERS,
@@ -967,7 +968,9 @@ export const sessionsHandlers = {
 						const log = yield* LoggerTag;
 						log.warn("ForkSession failed", { cause: error });
 						return yield* Effect.fail(
-							error instanceof WsRpcError || error instanceof AccountUnroutable
+							error instanceof WsRpcError ||
+								error instanceof AccountUnroutable ||
+								error instanceof SessionBusy
 								? error
 								: new WsRpcError({
 										message: `ForkSession failed: ${String(error)}`,
@@ -1068,7 +1071,12 @@ export const sessionsHandlers = {
 			sessionId: request.sessionId,
 		}).pipe(
 			Effect.as({ ok: true as const, sessionId: request.sessionId }),
-			Effect.catch(mapRpcFailure("UndoRewind")),
+			Effect.catch(
+				(error): Effect.Effect<never, SessionBusy | WsRpcError> =>
+					error instanceof SessionBusy
+						? Effect.fail(error)
+						: mapRpcFailure("UndoRewind")(error),
+			),
 		),
 	RewindSession: (request) =>
 		rewindSessionToMessage({
@@ -1083,9 +1091,11 @@ export const sessionsHandlers = {
 			}),
 			Effect.catch((error) =>
 				Effect.fail(
-					new WsRpcError({
-						message: `RewindSession failed: ${String(error)}`,
-					}),
+					error instanceof SessionBusy
+						? error
+						: new WsRpcError({
+								message: `RewindSession failed: ${String(error)}`,
+							}),
 				),
 			),
 		),
