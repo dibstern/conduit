@@ -86,6 +86,7 @@ describe("Head moves with files through the built daemon", () => {
 			CONDUIT_TEST_RESTORE_PAUSE_AT?: string;
 			CONDUIT_TEST_HEAD_MOVE_DELAY_MS?: string;
 		} = {},
+		{ repository = true } = {},
 	) => {
 		for (const key of GIT_KEYS) vi.stubEnv(key, undefined);
 		harness = ProcessHarness.create({
@@ -99,20 +100,22 @@ describe("Head moves with files through the built daemon", () => {
 		const repo = fixture.projectDir;
 		const release = join(fixture.root, "claude-replay-release");
 		mkdirSync(repo, { recursive: true });
-		git(repo, "init", "-q", "-b", "main");
 		writeFileSync(join(repo, "tracked.txt"), "one\ntwo\nthree\n");
-		git(repo, "add", ".");
-		git(
-			repo,
-			"-c",
-			"user.name=Head move test",
-			"-c",
-			"user.email=head-move@example.test",
-			"commit",
-			"-q",
-			"-m",
-			"Initial",
-		);
+		if (repository) {
+			git(repo, "init", "-q", "-b", "main");
+			git(repo, "add", ".");
+			git(
+				repo,
+				"-c",
+				"user.name=Head move test",
+				"-c",
+				"user.email=head-move@example.test",
+				"commit",
+				"-q",
+				"-m",
+				"Initial",
+			);
+		}
 		await fixture.restart({ serviceEnvironment });
 		const socket = join(fixture.configDir, "relay.sock");
 		await sendRpcRequest(socket, {
@@ -581,5 +584,32 @@ describe("Head moves with files through the built daemon", () => {
 		expect(listing(repo)).toEqual(ended);
 		expect(moves(session)).toEqual([]);
 		expect(await visible(session)).toEqual(shown);
+	});
+
+	it("refuses a rewind with files in a folder that is not a repository, naming the folder, and the conversation-only rewind still goes", async () => {
+		evidence["name"] = "not-a-repository";
+		const { repo, browser, turn, refusal, move, visible } = await start(
+			{},
+			{ repository: false },
+		);
+		const session = await browser.createSession("Plain folder");
+		const second = await turn(session, "second", () =>
+			writeFileSync(join(repo, "second.txt"), "second\n"),
+		);
+		const refused = await refusal(session, {
+			_tag: "rewind",
+			messageId: second,
+			withFiles: true,
+		});
+		evidence["refused"] = refused;
+		expect(refused).toMatchObject({
+			_tag: "FilesRefused",
+			reason: "not_available",
+			directory: repo,
+		});
+		const ended = listing(repo);
+		await move(session, { _tag: "rewind", messageId: second });
+		expect(await visible(session)).not.toContain(second);
+		expect(listing(repo)).toEqual(ended);
 	});
 });
