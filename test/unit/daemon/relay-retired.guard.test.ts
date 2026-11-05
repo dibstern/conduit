@@ -111,7 +111,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/server/Layers/http-router-layer.ts", 2],
 				["src/lib/domain/server/Layers/ws-routing-layer.ts", 3],
 				["src/lib/handlers/types.ts", 2],
-				[`${relay}/project-relay-layers.ts`, 4],
+				[`${relay}/project-relay-layers.ts`, 3],
 				[`${relay}/project-relay-startup.ts`, 5],
 				[`${relay}/relay-stack.ts`, 24],
 				["src/lib/types.ts", 1],
@@ -209,9 +209,9 @@ describe("per-project relay stays retired (82tn.16)", () => {
 	it("names no per-project or relay OpenCode home", () => {
 		expect(tally(server, named(openCodeHomeNames))).toEqual(
 			new Map([
-				// relay: the standalone instance set and its directory default.
+				// relay: the standalone instance set.
 				[`${daemon}/Layers/opencode-instances-layer.ts`, 1],
-				[`${relay}/project-relay-layers.ts`, 4],
+				[`${relay}/project-relay-layers.ts`, 2],
 			]),
 		);
 	});

@@ -501,7 +501,7 @@ export const deleteSession = (
 								? undefined
 								: yield* instanceClients.use(
 										capturedInstanceId,
-										capturedDirectory,
+										capturedDirectory ?? null,
 									);
 						const adapter = yield* sessionUpstreamAdapter(provider, deleteApi);
 						yield* adapter.sync(command);

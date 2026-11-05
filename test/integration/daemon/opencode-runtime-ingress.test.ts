@@ -587,8 +587,8 @@ describe("Daemon Effect OpenCode runtime ingress", () => {
 						Effect.flatMap(OpenCodeInstancesTag, (instances) =>
 							Effect.andThen(
 								Effect.all([
-									instances.use("work-oc"),
-									instances.use("personal-oc"),
+									instances.use("work-oc", null),
+									instances.use("personal-oc", null),
 								]),
 								Effect.never,
 							),

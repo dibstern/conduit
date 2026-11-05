@@ -153,17 +153,22 @@ describe("Integration: Terminal (PTY)", () => {
 		const registrations = vi.spyOn(manager, "registerSession");
 		// Discovery attaches as soon as the PTY appears, before any subscriber
 		// asks, so hold the first attachment lease whoever requested it.
-		const lease = vi.spyOn(instances, "useIfRunning").mockImplementation((id) =>
-			Effect.suspend(() => {
-				const unattached = manager.listSessions().some(({ id: ptyId }) => {
-					const session = manager.getSession(ptyId);
-					return session?.source === "opencode" && !session.upstream;
-				});
-				if (!unattached || attaching.mock.calls.length > 0) return acquire(id);
-				attaching();
-				return Effect.promise(() => held).pipe(Effect.andThen(acquire(id)));
-			}),
-		);
+		const lease = vi
+			.spyOn(instances, "useIfRunning")
+			.mockImplementation((id, directory) =>
+				Effect.suspend(() => {
+					const unattached = manager.listSessions().some(({ id: ptyId }) => {
+						const session = manager.getSession(ptyId);
+						return session?.source === "opencode" && !session.upstream;
+					});
+					if (!unattached || attaching.mock.calls.length > 0)
+						return acquire(id, directory);
+					attaching();
+					return Effect.promise(() => held).pipe(
+						Effect.andThen(acquire(id, directory)),
+					);
+				}),
+			);
 		const pty = await createExternalPty(isolated);
 		const first = await isolated.connectWsClient();
 		const second = await isolated.connectWsClient();
@@ -405,14 +410,14 @@ describe("Integration: Terminal (PTY)", () => {
 		const acquire = instances.useIfRunning;
 		const useIfRunning = vi
 			.spyOn(instances, "useIfRunning")
-			.mockImplementation((id) =>
+			.mockImplementation((id, directory) =>
 				Effect.suspend(() => {
 					const session = manager.getSession(pty.id);
 					if (session?.source !== "opencode" || session.upstream)
-						return acquire(id);
+						return acquire(id, directory);
 					acquiring();
 					return Effect.promise(() => held).pipe(
-						Effect.andThen(acquire(id)),
+						Effect.andThen(acquire(id, directory)),
 						Effect.onExit((exit) =>
 							Effect.sync(() => {
 								acquisitionInterrupted =

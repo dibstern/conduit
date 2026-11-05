@@ -1253,7 +1253,10 @@ export class OrchestrationEngine {
 			const instances = yield* Effect.serviceOption(OpenCodeInstancesTag);
 			if (Option.isSome(instances)) {
 				const running = yield* instances.value
-					.ifRunning(call?.account.id ?? providerId, call?.workspaceRoot)
+					.ifRunning(
+						call?.account.id ?? providerId,
+						call?.workspaceRoot ?? null,
+					)
 					.pipe(Effect.scoped);
 				if (Option.isSome(running) && running.value.promptProcessId)
 					return running.value.promptProcessId;

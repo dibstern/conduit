@@ -1138,7 +1138,7 @@ export function makeTestHandlerLayer(
 	const agentServiceLayer = AgentServiceLive.pipe(
 		Layer.provide(
 			Layer.mergeAll(
-				openCodeApiLayer,
+				configLayer,
 				openCodeInstancesLayer,
 				loggerLayer,
 				overridesStateLayer,

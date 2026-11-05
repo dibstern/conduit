@@ -803,8 +803,8 @@ const resolveOpenCodePromptTarget = (
 				: undefined) ??
 			MANAGED_OPENCODE_ACCOUNT_ID;
 		const running = providerProcessId
-			? yield* instances.ifRunning(boundId, directory)
-			: Option.some(yield* instances.use(boundId, directory));
+			? yield* instances.ifRunning(boundId, directory ?? null)
+			: Option.some(yield* instances.use(boundId, directory ?? null));
 		if (
 			Option.isNone(running) ||
 			(providerProcessId && running.value.promptProcessId !== providerProcessId)

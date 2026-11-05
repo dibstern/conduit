@@ -262,7 +262,9 @@ export async function createDaemonProject(
 					yield* (yield* AccountDirectory).list,
 					(account) =>
 						account.driver === "opencode" && !account.managed
-							? Effect.scoped(instances.use(account.id)).pipe(Effect.ignore)
+							? Effect.scoped(instances.use(account.id, null)).pipe(
+									Effect.ignore,
+								)
 							: Effect.void,
 					{ discard: true },
 				);

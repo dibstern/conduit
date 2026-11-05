@@ -698,7 +698,7 @@ export const applySessionCommand = (
 					instances._tag === "Some"
 						? Effect.scoped(
 								Effect.flatMap(
-									instances.value.use(account.id, directory),
+									instances.value.use(account.id, directory ?? null),
 									(client) => openCodeUpstreamAdapter(client).sync(command),
 								),
 							)

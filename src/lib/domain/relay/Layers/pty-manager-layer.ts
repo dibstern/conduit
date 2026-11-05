@@ -72,6 +72,7 @@ export const makeConnectPtyUpstreamLive = (
 					yield* Effect.gen(function* () {
 						const client = yield* instances.useIfRunning(
 							MANAGED_OPENCODE_ACCOUNT_ID,
+							config.projectDir,
 						);
 						if (Option.isNone(client)) return;
 						yield* Effect.tryPromise({

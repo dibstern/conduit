@@ -102,7 +102,7 @@ describe("OpenCode Instances use during an idle stop", () => {
 				);
 				const cwdViaUse = Effect.flatMap(OpenCodeInstancesTag, ({ use }) =>
 					Effect.scoped(
-						Effect.flatMap(use("opencode"), (client) =>
+						Effect.flatMap(use("opencode", null), (client) =>
 							Effect.promise(() => client.app.path()),
 						),
 					),

@@ -258,7 +258,7 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 			ptyId: string,
 			call: (pty: OpenCodeClient["pty"]) => Promise<unknown>,
 		) =>
-			instances.use(openCodeId).pipe(
+			instances.use(openCodeId, config.projectDir).pipe(
 				Effect.flatMap((client) =>
 					Effect.tryPromise({
 						try: () => call(client.pty),
@@ -358,7 +358,10 @@ export const OpenCodeTerminalServiceLive: Layer.Layer<
 		}).pipe(terminalLock.withPermits(1));
 
 		const reconcile = Effect.gen(function* () {
-			const client = yield* instances.useIfRunning(openCodeId);
+			const client = yield* instances.useIfRunning(
+				openCodeId,
+				config.projectDir,
+			);
 			if (Option.isNone(client)) return false;
 			yield* restoreLocalSessions;
 			const discovered = yield* Effect.tryPromise({

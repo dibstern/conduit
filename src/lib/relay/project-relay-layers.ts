@@ -8,7 +8,6 @@ import {
 	Ref,
 	Result,
 	Semaphore,
-	Stream,
 	Tracer,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -16,10 +15,7 @@ import {
 	accountsStateFromConfig,
 	NO_OPENCODE_HEALTH,
 } from "../account-directory.js";
-import {
-	MANAGED_OPENCODE_ACCOUNT_ID,
-	PROVIDER_DRIVERS,
-} from "../contracts/provider-instance.js";
+import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import {
 	type DaemonConfigLoadError,
 	DaemonConfigUnreadable,
@@ -58,10 +54,7 @@ import {
 	MessageSurfacingSettings,
 	makeMessageSurfacingSettings,
 } from "../domain/daemon/Services/message-surfacing-settings.js";
-import {
-	type OpenCodeInstances,
-	OpenCodeInstancesTag,
-} from "../domain/daemon/Services/opencode-instances-service.js";
+import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
 	makeOpenCodeProjectStreamsLive,
 	OpenCodeProjectStreams,
@@ -216,7 +209,6 @@ import { makeClaudeUsageReader } from "../provider/claude/claude-usage-probe.js"
 import { codexUsageReader } from "../provider/codex/codex-usage.js";
 import { makeOrchestrationRuntimeLayer } from "../provider/orchestration-wiring.js";
 import { ProviderRegistryTag } from "../provider/provider-registry.js";
-import { SqliteProviderSessionBindingReadModel } from "../provider/provider-session-binding-read-model.js";
 import { usageAccounts } from "../provider/usage-reader.js";
 import type { WebSocketHandlerShape } from "../server/ws-handler-shape.js";
 import { RpcSubscriptionScopeLive } from "../server/ws-rpc.js";
@@ -226,55 +218,6 @@ import { createMonitoringWiringState } from "./monitoring-wiring.js";
 import { publishProviderRelayMessage } from "./project-relay-publisher.js";
 import { makeSessionLifecycleWiringLive } from "./session-lifecycle-wiring.js";
 import { PermissionTimeoutLive } from "./timer-wiring.js";
-
-/**
- * Relay view of concrete OpenCode accounts. Clients default to the relay's
- * directory scope; managed OpenCode also delivers native sessions before use.
- */
-const relayOpenCodeInstances = (
-	instances: OpenCodeInstances,
-	config: ProjectRelayConfig,
-	persistedInstanceIds: readonly string[],
-): OpenCodeInstances => {
-	const scope = config.noServer ? config.projectDir : undefined;
-	// Restored sessions receive events before the relay first uses their instance.
-	const used = new Set(persistedInstanceIds);
-	const use: OpenCodeInstances["use"] = (instanceId, directory = scope) =>
-		instances.use(instanceId, directory).pipe(
-			Effect.tap(() =>
-				Effect.sync(() => {
-					used.add(instanceId);
-				}),
-			),
-		);
-	return {
-		events: (directories, instanceId = MANAGED_OPENCODE_ACCOUNT_ID) =>
-			instances
-				.events(directories, instanceId)
-				.pipe(
-					Stream.filter(
-						(message) =>
-							message.instanceId === MANAGED_OPENCODE_ACCOUNT_ID ||
-							used.has(message.instanceId),
-					),
-				),
-		use,
-		borrow: (instanceId, directory = scope) =>
-			instances.borrow(instanceId, directory).pipe(
-				Effect.tap(() =>
-					Effect.sync(() => {
-						used.add(instanceId);
-					}),
-				),
-			),
-		useIfRunning: (instanceId, directory = scope) =>
-			instances.useIfRunning(instanceId, directory),
-		ifRunning: (instanceId, directory = scope) =>
-			instances.ifRunning(instanceId, directory),
-		isManagedStopped: (instanceId) => instances.isManagedStopped(instanceId),
-		stop: (instanceId) => instances.stop(instanceId),
-	};
-};
 
 /** Services promised to callers of ProjectRelay.effectRuntime. */
 export type RelayRuntimeServices =
@@ -637,32 +580,12 @@ export function createProjectRelayLayers({
 					};
 				}),
 			).pipe(Layer.provide(persistenceEffectLayer));
-	const openCodeInstancesLayer = Layer.effect(
-		OpenCodeInstancesTag,
-		Effect.gen(function* () {
-			const instances = yield* OpenCodeInstancesTag;
-			const sql = yield* SqlClient.SqlClient;
-			const bindings = yield* new SqliteProviderSessionBindingReadModel(
-				sql,
-			).listBoundSessions({ projectIds: [config.slug] });
-			return relayOpenCodeInstances(
-				instances,
-				config,
-				bindings.map(({ providerId }) => providerId),
+	// The daemon's instances; every request names its own folder.
+	const openCodeInstancesLayer = sharedInstances
+		? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
+		: makeStandaloneOpenCodeInstancesLive(config).pipe(
+				Layer.provide(daemonConfigLayer),
 			);
-		}),
-	).pipe(
-		Layer.provide(
-			Layer.merge(
-				sharedInstances
-					? Layer.sync(OpenCodeInstancesTag, () => sharedInstances)
-					: makeStandaloneOpenCodeInstancesLive(config).pipe(
-							Layer.provide(daemonConfigLayer),
-						),
-				persistenceEffectLayer,
-			),
-		),
-	);
 	const alertLedgerLayer = AlertLedgerLive.pipe(
 		Layer.provide(persistenceEffectLayer),
 	);

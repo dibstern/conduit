@@ -91,30 +91,32 @@ export interface OpenCodeInstances {
 	 * The open scope counts as demand, as do busy sessions and pending
 	 * prompts OpenCode reports. Without demand the instance stops after an
 	 * idle grace period (external ones only lose their stream).
+	 * Every request names `directory`: the session's folder, or the project's
+	 * where no session applies. Null is the instance's own folder, for
+	 * daemon-level calls that belong to no project.
 	 */
 	readonly use: (
 		instanceId: string,
-		directory?: string,
+		directory: string | null,
 	) => Effect.Effect<OpenCodeClient, OpenCodeUnavailable, Scope.Scope>;
 	/** Inventory hold. A server started only by borrowers gets a short idle grace. */
 	readonly borrow: (
 		instanceId: string,
-		directory?: string,
+		directory: string | null,
 	) => Effect.Effect<OpenCodeClient, OpenCodeUnavailable, Scope.Scope>;
 	/**
 	 * Client when the instance is running; None otherwise. Makes no request.
-	 * A null directory uses the instance default, bypassing relay defaults.
 	 */
 	readonly ifRunning: (
 		instanceId: string,
-		directory?: string | null,
+		directory: string | null,
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
 	/** Positive managed-process termination proof; false also covers unknown/unavailable. */
 	readonly isManagedStopped: (instanceId: string) => Effect.Effect<boolean>;
 	/** Hold a running instance and its stream for this scope; never start it. */
 	readonly useIfRunning: (
 		instanceId: string,
-		directory?: string,
+		directory: string | null,
 	) => Effect.Effect<Option.Option<OpenCodeClient>, never, Scope.Scope>;
 	/** Admin stop, regardless of demand: stops the process and closes its stream. */
 	readonly stop: (instanceId: string) => Effect.Effect<void>;

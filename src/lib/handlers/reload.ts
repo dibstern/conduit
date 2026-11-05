@@ -7,6 +7,7 @@ import { PROVIDER_DRIVERS } from "../contracts/provider-instance.js";
 import { AccountDirectory } from "../domain/daemon/Services/account-directory.js";
 import { OpenCodeInstancesTag } from "../domain/daemon/Services/opencode-instances-service.js";
 import {
+	ConfigTag,
 	LoggerTag,
 	OrchestrationEngineTag,
 } from "../domain/relay/Services/services.js";
@@ -47,7 +48,10 @@ export const reloadProviderSessionForClient = (
 					PROVIDER_DRIVERS[account.driver].runsOpenCodeServer
 				) {
 					// Refresh is an explicit user action; its subsequent catalog reads are passive.
-					yield* (yield* OpenCodeInstancesTag).use(account.id);
+					yield* (yield* OpenCodeInstancesTag).use(
+						account.id,
+						(yield* ConfigTag).projectDir,
+					);
 				}
 				const endSessionResult = yield* Effect.result(
 					engine.dispatchEffect({

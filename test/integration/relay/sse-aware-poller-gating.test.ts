@@ -353,7 +353,7 @@ async function createTestHarness(
 	await relay.effectRuntime.runtime.runPromise(
 		Effect.scoped(
 			Effect.flatMap(OpenCodeInstancesTag, (instances) =>
-				instances.use("opencode"),
+				instances.use("opencode", process.cwd()),
 			),
 		),
 	);

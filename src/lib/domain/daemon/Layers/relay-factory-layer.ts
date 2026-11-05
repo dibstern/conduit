@@ -372,7 +372,9 @@ export const RelayFactoryLive = (
 							Effect.flatMap((instance) =>
 								getProviderDriver(instance.driver ?? "opencode")
 									?.runsOpenCodeServer
-									? Effect.asVoid(Effect.scoped(openCodeInstances.use(id)))
+									? Effect.asVoid(
+											Effect.scoped(openCodeInstances.use(id, null)),
+										)
 									: Effect.void,
 							),
 							Effect.andThen(configPersistence.flush),
