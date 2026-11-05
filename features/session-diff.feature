@@ -382,3 +382,20 @@ Scenario Outline: A turn without a capture says Not captured and links to the Di
 Examples:
   | turn_id        | baseline               |
   | surfacing-user | turn-diff-not-captured |
+
+Scenario Outline: An evicted turn still lists its files and line counts, marked Pruned, without a patch
+  Given message surfacing is inactive at Most
+  And the conduit app is served with the connected mockup
+  And the viewport is a desktop
+  And the <turn_id> turn changed <first_path> by <insertions> and <deletions> lines and <second_path>, then was pruned
+  And the panel choice session has a settled turn
+  When I expand the surfaced turn
+  Then the turn footer shows "<entry>"
+  And the turn footer says Pruned
+  When I open the turn's changed files
+  Then the turn diff lists <first_path> and <second_path>
+  And the <first_path> diff is marked Pruned with +<insertions> −<deletions> and no patch
+
+Examples:
+  | turn_id        | first_path | second_path | insertions | deletions | entry           |
+  | surfacing-user | src/app.ts | src/util.ts | 12         | 4         | 2 files changed |

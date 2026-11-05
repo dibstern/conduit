@@ -8,7 +8,10 @@ import {
 } from "../../contracts/session-diff.js";
 import { RunChangesCapturedSchema } from "../../contracts/stored-event.js";
 import { WsRpcError } from "../../contracts/ws-rpc.js";
-import { FolderTimeline } from "../../domain/daemon/Services/folder-timeline.js";
+import {
+	FolderTimeline,
+	isPruned,
+} from "../../domain/daemon/Services/folder-timeline.js";
 import { SessionDiff } from "../../domain/daemon/Services/session-diff.js";
 import { WorkingTreeEdits } from "../../domain/daemon/Services/working-tree-edits.js";
 import { resolveSessionRequestFolders } from "../../domain/relay/Services/session-workspace.js";
@@ -30,7 +33,7 @@ const available = <I, S>(tag: Context.Key<I, S>) =>
 	);
 const sessionDiff = available(SessionDiff);
 
-/** The turn's recorded run capture, once its run-end checkpoint has settled. */
+/** The turn's recorded run capture, once its run-end checkpoint has settled, and whether it was pruned. */
 const turnCapture = (sessionId: string, turnId: string) =>
 	Effect.gen(function* () {
 		const sql = yield* SqlClient.SqlClient;
@@ -42,14 +45,19 @@ const turnCapture = (sessionId: string, turnId: string) =>
 		if (!runId) return undefined;
 		const timeline = yield* Effect.serviceOption(FolderTimeline);
 		if (Option.isSome(timeline)) yield* timeline.value.settled(runId);
-		const [row] = yield* sql<{ data: string }>`SELECT data FROM events
+		const [row] = yield* sql<{
+			data: string;
+			sequence: number;
+		}>`SELECT data, sequence FROM events
 			WHERE session_id = ${sessionId} AND type = 'run.changes_captured'
 			AND json_extract(data, '$.runId') = ${runId} LIMIT 1`;
-		return row
-			? yield* Schema.decodeUnknownEffect(
-					Schema.fromJsonString(RunChangesCapturedSchema),
-				)(row.data)
-			: undefined;
+		if (!row) return undefined;
+		return {
+			capture: yield* Schema.decodeUnknownEffect(
+				Schema.fromJsonString(RunChangesCapturedSchema),
+			)(row.data),
+			pruned: yield* isPruned(sessionId, row.sequence),
+		};
 	});
 
 const parseJson = (text: string | null): unknown => {
@@ -107,9 +115,10 @@ const scopeRecords = (sessionId: string, scope: SessionDiffScope) =>
 				? yield* toolCallChanges(sessionId, scope.toolId)
 				: undefined;
 		const turnId = scope.kind === "turn" ? scope.turnId : toolCall?.addedIn;
-		const capture = turnId ? yield* turnCapture(sessionId, turnId) : undefined;
+		const captured = turnId ? yield* turnCapture(sessionId, turnId) : undefined;
 		return {
-			...(capture ? { capture } : {}),
+			...(captured ? { capture: captured.capture } : {}),
+			...(captured?.pruned ? { pruned: true as const } : {}),
 			...(toolCall ? { toolCall } : {}),
 		};
 	});

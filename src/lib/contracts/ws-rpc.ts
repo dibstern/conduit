@@ -33,6 +33,7 @@ import {
 	SessionDiffListingSchema,
 	SessionDiffPatchSchema,
 	SessionDiffScopeSchema,
+	SnapshotBudgetSchema,
 } from "./session-diff.js";
 import { AvatarChoiceSchema, AvatarSchema } from "./user-avatar.js";
 import {
@@ -994,6 +995,8 @@ export const GetStatusResponseSchema = Schema.Struct({
 	),
 	keepAwake: Schema.Boolean,
 	keepAwakeCommand: Schema.NullOr(Schema.String),
+	/** Bytes Folder Timeline's session stores hold on disk: turn diff snapshots. */
+	snapshotBytes: Schema.optional(Schema.Number),
 	projects: Schema.Array(
 		Schema.Struct({
 			slug: Schema.String,
@@ -1719,6 +1722,22 @@ export const SetUsageLimitsSetting = Rpc.make("SetUsageLimitsSetting", {
 		usageLimits: UsageLimitsSettingSchema,
 	}),
 	success: UsageLimitsSettingResponseSchema,
+	error: WsRpcError,
+});
+
+export const GetSnapshotBudgetSetting = Rpc.make("GetSnapshotBudgetSetting", {
+	payload: Schema.TaggedStruct("GetSnapshotBudgetSetting", {}),
+	success: SnapshotBudgetSchema,
+	error: WsRpcError,
+});
+
+/** Saving runs an eviction pass against the new budget. */
+export const SetSnapshotBudgetSetting = Rpc.make("SetSnapshotBudgetSetting", {
+	payload: Schema.TaggedStruct(
+		"SetSnapshotBudgetSetting",
+		SnapshotBudgetSchema.fields,
+	),
+	success: SnapshotBudgetSchema,
 	error: WsRpcError,
 });
 
@@ -3763,6 +3782,8 @@ const wsRpcRequests = [
 	CleanUpWorktreesNow,
 	GetUsageLimitsSetting,
 	SetUsageLimitsSetting,
+	GetSnapshotBudgetSetting,
+	SetSnapshotBudgetSetting,
 	SetCursorUsageKeychain,
 	ScanNow,
 	DetectProxy,

@@ -25,6 +25,9 @@
 	<TextButton data-testid="turn-diff-toggle" aria-expanded={open} class="whitespace-nowrap text-[11.5px]" onclick={() => (open = !open)}>
 		{count} {count === 1 ? "file" : "files"} changed
 	</TextButton>
+	{#if listed.pruned}
+		<span data-testid="turn-diff-pruned" class="whitespace-nowrap text-[11.5px] text-text-muted">Pruned</span>
+	{/if}
 	{#if open}
 		<div data-testid="turn-diff" class="order-last -mx-[12px] w-[calc(100%+24px)] border-t border-border">
 			{#each listed.folders as folder (folder.folder)}

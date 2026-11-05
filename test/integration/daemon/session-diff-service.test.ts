@@ -481,7 +481,8 @@ it("reports missing and non-git folders as unavailable beside a listed one", asy
 		listing.folders.map((folder) =>
 			"files" in folder
 				? folder.files.map(
-						({ path, status, bytes }) => `${status} ${path} ${bytes}`,
+						(file) =>
+							`${file.status} ${file.path} ${"bytes" in file ? file.bytes : ""}`,
 					)
 				: [folder.folder, folder.error, folder.message],
 		),
@@ -929,6 +930,9 @@ it("stops snapshotting when a subscriber is interrupted at any step of joining",
 							runEnded: () => Effect.void,
 							settled: () => Effect.void,
 							sessionStore: () => "store",
+							storeBytes: () => Effect.succeed(0),
+							diskUse: Effect.succeed(0),
+							evict: () => Effect.succeed(false),
 							forget: () => Effect.void,
 						}),
 						Effect.provideService(SessionGit, {

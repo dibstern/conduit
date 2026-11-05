@@ -2638,6 +2638,8 @@ export const UNPROJECTED: UnprojectedReasons<Unhandled> = {
 		"Delivery receipt needs no materialized projection",
 	"run.changes_captured":
 		"Turn diffs read the event itself; the Folder Timeline ref is its projection",
+	"folder_timeline.evicted":
+		"Folder Timeline reads the event itself to answer whether history is pruned",
 };
 
 /**
