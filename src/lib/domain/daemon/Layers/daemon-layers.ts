@@ -60,6 +60,7 @@ import {
 	InputDraftsLive,
 	releaseInputDraftClaims,
 } from "../../relay/Services/input-drafts.js";
+import { ProviderTurnsLive } from "../../relay/Services/provider-turn-service.js";
 import { SessionEventBusLive } from "../../relay/Services/session-event-bus.js";
 import { SessionManagerServiceLive } from "../../relay/Services/session-manager-service.js";
 import { makeOverridesStateLive } from "../../relay/Services/session-overrides-state.js";
@@ -956,6 +957,7 @@ export const makeDaemonLive = (options: DaemonLiveOptions) => {
 		SessionManagerOwnerLive,
 		SessionManagerServiceLive,
 		DaemonTurnsLive,
+		ProviderTurnsLive,
 	).pipe(Layer.provideMerge(withSessionSetup));
 	const withOrchestration = DaemonOrchestrationLive.pipe(
 		Layer.provideMerge(withSessionManager),

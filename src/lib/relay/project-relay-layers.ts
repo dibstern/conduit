@@ -53,7 +53,6 @@ import {
 	DaemonConfigRefTag,
 	makeDaemonConfigFromOptions,
 } from "../domain/daemon/Services/daemon-config-ref.js";
-import { DaemonOrchestration } from "../domain/daemon/Services/daemon-orchestration.js";
 import { DaemonTurnsOrOwn } from "../domain/daemon/Services/daemon-turns.js";
 import {
 	MessageSurfacingSettings,
@@ -89,7 +88,7 @@ import {
 } from "../domain/relay/Layers/relay-core-layers.js";
 import { makeRelayStateLive } from "../domain/relay/Layers/relay-layer.js";
 import { SessionStateProjectionNotifierLive } from "../domain/relay/Layers/session-state-projection-notifier-layer.js";
-import { SessionWorkspaceLive } from "../domain/relay/Layers/session-workspace-layer.js";
+import { SessionWorkspaceOrOwn } from "../domain/relay/Layers/session-workspace-layer.js";
 import { StatusPollerLive } from "../domain/relay/Layers/status-poller-layer.js";
 import { WebSocketHandlerLive } from "../domain/relay/Layers/websocket-handler-layer.js";
 import { makeWsTransportLive } from "../domain/relay/Layers/ws-transport-layer.js";
@@ -104,10 +103,7 @@ import {
 	DaemonSessionQueryServiceTag,
 } from "../domain/relay/Services/daemon-session-query-service.js";
 import { DirectoryListingServiceLive } from "../domain/relay/Services/directory-listing-service.js";
-import {
-	DraftPreWarmLive,
-	DraftPreWarmTag,
-} from "../domain/relay/Services/draft-prewarm.js";
+import { DraftPreWarmOrOwn } from "../domain/relay/Services/draft-prewarm.js";
 import { GoalStuckStopReactorLive } from "../domain/relay/Services/goal-stuck-stop.js";
 import { makeGoalSummaryServiceLive } from "../domain/relay/Services/goal-summary-service.js";
 import { HandoffReceiptsLive } from "../domain/relay/Services/handoff-receipts.js";
@@ -134,7 +130,10 @@ import {
 	makeProviderRuntimeIngestionLive,
 	type ProviderRuntimeIngestionTag,
 } from "../domain/relay/Services/provider-runtime-ingestion-service.js";
-import { ProviderTurnServiceLive } from "../domain/relay/Services/provider-turn-service.js";
+import {
+	attachProviderTurnsLive,
+	ProviderTurnsOrOwn,
+} from "../domain/relay/Services/provider-turn-service.js";
 import { makeRecapServiceLive } from "../domain/relay/Services/recap-service.js";
 import {
 	ScanServiceLive,
@@ -161,8 +160,8 @@ import {
 import { SessionInboxLive } from "../domain/relay/Services/session-inbox.js";
 import {
 	attachSessionManagerLive,
-	SessionManagerServiceLive,
-	SessionManagerServiceTag,
+	type SessionManagerServiceTag,
+	SessionManagersOrOwn,
 } from "../domain/relay/Services/session-manager-service.js";
 import {
 	emptySessionManagerState,
@@ -172,8 +171,8 @@ import {
 } from "../domain/relay/Services/session-manager-state.js";
 import { OverridesStateTag } from "../domain/relay/Services/session-overrides-state.js";
 import {
-	SessionSetupLive,
-	SessionSetupTag,
+	SessionSetupOrOwn,
+	type SessionSetupTag,
 } from "../domain/relay/Services/session-setup.js";
 import type { PollerStateTag } from "../domain/relay/Services/session-status-poller.js";
 import { SessionWorkspaceTag } from "../domain/relay/Services/session-workspace.js";
@@ -649,25 +648,24 @@ export function createProjectRelayLayers({
 	const worktreeLayer = config.worktreeContext
 		? Layer.succeedContext(config.worktreeContext)
 		: makeWorktreeLive(config.configDir ?? getConfigDir());
-	const sharedWorkspace = Context.getOption(
+	// The daemon's owners, or a standalone relay's own; the relay builds none.
+	const daemonContextLayer = Layer.succeedContext(
 		config.daemonConfigContext ?? Context.empty(),
-		SessionWorkspaceTag,
 	);
-	const sessionWorkspaceLayer = Option.isSome(sharedWorkspace)
-		? Layer.sync(SessionWorkspaceTag, () => sharedWorkspace.value)
-		: SessionWorkspaceLive.pipe(
-				Layer.provide(
-					Layer.mergeAll(
-						daemonConfigLayer,
-						persistenceEffectLayer,
-						configLayer,
-						loggerLayer,
-						openCodeApiLayer,
-						sessionEventBusLayer,
-						worktreeLayer,
-					),
-				),
-			);
+	const sessionWorkspaceLayer = SessionWorkspaceOrOwn.pipe(
+		Layer.provide(
+			Layer.mergeAll(
+				daemonContextLayer,
+				daemonConfigLayer,
+				persistenceEffectLayer,
+				configLayer,
+				loggerLayer,
+				openCodeApiLayer,
+				sessionEventBusLayer,
+				worktreeLayer,
+			),
+		),
+	);
 	const pendingInteractionServiceLayer = PendingInteractionServiceLive;
 	const recapSettingsLayer = Layer.suspend(() => {
 		const shared = config.daemonConfigContext ?? Context.empty();
@@ -1086,22 +1084,10 @@ export function createProjectRelayLayers({
 		}),
 		bridgeLayers,
 	);
-	const daemonSessionManager = Context.getOption(
-		config.daemonConfigContext ?? Context.empty(),
-		SessionManagerServiceTag,
-	);
 	const relayStateBridgesAndSessions = Layer.provideMerge(
 		attachSessionManagerLive.pipe(
 			Layer.provide(
-				Option.isSome(daemonSessionManager)
-					? Layer.succeedContext(
-							Context.make(
-								SessionManagerServiceTag,
-								daemonSessionManager.value,
-							),
-						)
-					: // A standalone relay is its own daemon.
-						SessionManagerServiceLive,
+				SessionManagersOrOwn.pipe(Layer.provide(daemonContextLayer)),
 			),
 		),
 		relayStateAndBridges,
@@ -1136,13 +1122,9 @@ export function createProjectRelayLayers({
 		relayStateWithRecaps,
 	);
 	const translatorLayer = Layer.sync(TranslatorTag, () => createTranslator());
-	const sharedOrchestration = Context.getOption(
-		config.daemonConfigContext ?? Context.empty(),
-		DaemonOrchestration,
+	const draftPreWarmLayer = DraftPreWarmOrOwn.pipe(
+		Layer.provide(daemonContextLayer),
 	);
-	const draftPreWarmLayer = Option.isSome(sharedOrchestration)
-		? Layer.sync(DraftPreWarmTag, () => sharedOrchestration.value.drafts)
-		: DraftPreWarmLive;
 	const baseLayers = Layer.provideMerge(
 		Layer.merge(translatorLayer, draftPreWarmLayer),
 		relayStateServicesAndBridges,
@@ -1151,17 +1133,13 @@ export function createProjectRelayLayers({
 		SessionStateProjectionNotifierLive,
 		baseLayers,
 	);
-	const sharedSetup = Context.getOption(
-		config.daemonConfigContext ?? Context.empty(),
-		SessionSetupTag,
-	);
 	const fullBaseLayers = Layer.provideMerge(
-		ProviderTurnServiceLive,
+		attachProviderTurnsLive.pipe(
+			Layer.provide(ProviderTurnsOrOwn.pipe(Layer.provide(daemonContextLayer))),
+		),
 		Layer.merge(
-			(Option.isSome(sharedSetup)
-				? Layer.sync(SessionSetupTag, () => sharedSetup.value)
-				: SessionSetupLive
-			).pipe(
+			SessionSetupOrOwn.pipe(
+				Layer.provide(daemonContextLayer),
 				Layer.provideMerge(
 					Layer.merge(sessionWorkspaceLayer, baseLayersWithProjectionNotifier),
 				),

@@ -9,6 +9,7 @@ import {
 	PubSub,
 	Schedule,
 	type Scope,
+	Semaphore,
 	Stream,
 } from "effect";
 import { SqlClient } from "effect/sql";
@@ -36,6 +37,7 @@ import {
 	DaemonTurnsOrOwn,
 } from "../../daemon/Services/daemon-turns.js";
 import type { OpenCodeInstancesTag } from "../../daemon/Services/opencode-instances-service.js";
+import { OwnerScopes } from "../../daemon/Services/owner-scopes.js";
 import { SessionActivityTag } from "../../daemon/Services/session-activity.js";
 import type { OpenCodeAPITag } from "../../provider/Services/opencode-api-service.js";
 import type { AlertsTag } from "./alerts.js";
@@ -55,7 +57,7 @@ import {
 	prepareTurnSession,
 	STOP_ABORT_WAIT_MS,
 } from "./provider-turn-session.js";
-import type { ConfigTag, WebSocketHandlerTag } from "./services.js";
+import type { ConfigTag } from "./services.js";
 import { LoggerTag, OrchestrationEngineTag } from "./services.js";
 import { announceBackgroundWork } from "./session-attention.js";
 import { SessionInboxTag } from "./session-inbox.js";
@@ -173,43 +175,69 @@ export class ProviderTurnServiceTag extends Context.Service<
 	ProviderTurnService
 >()("ProviderTurnService") {}
 
-const makeProviderTurnService = Effect.gen(function* () {
-	const providedContext = yield* Effect.context<
-		| AccountDirectory
-		| OpenCodeInstancesTag
-		| SessionWorkspaceTag
-		| OpenCodeAPITag
-		| WebSocketHandlerTag
-		| LoggerTag
-		| ConfigTag
-		| SessionManagerServiceTag
-		| PendingInteractionServiceTag
-		| OverridesStateTag
-		| OrchestrationEngineTag
-		| ReadQueryEffectTag
-		| ClaudeEventPersistEffectTag
-		| ProviderRuntimeIngestionTag
-		| AlertsTag
-		| ProviderStateEffectTag
-		| SessionTitleServiceTag
-		| DaemonTurns
-		| SqlClient.SqlClient
-		| EventStoreEffectTag
-		| ProjectionRunnerEffectTag
-	>();
-	const sql = yield* SqlClient.SqlClient;
-	const { projectId } = yield* EventStoreEffectTag;
-	const ingestion = yield* ProviderRuntimeIngestionTag;
-	const scope = yield* Effect.scope;
+/** What a relay lends the daemon's turn service. */
+export type ProviderTurnParts =
+	| AccountDirectory
+	| OpenCodeInstancesTag
+	| SessionWorkspaceTag
+	| OpenCodeAPITag
+	| LoggerTag
+	| ConfigTag
+	| SessionManagerServiceTag
+	| PendingInteractionServiceTag
+	| OverridesStateTag
+	| OrchestrationEngineTag
+	| ReadQueryEffectTag
+	| ClaudeEventPersistEffectTag
+	| ProviderRuntimeIngestionTag
+	| AlertsTag
+	| ProviderStateEffectTag
+	| SessionTitleServiceTag
+	| DaemonTurns
+	| SqlClient.SqlClient
+	| EventStoreEffectTag
+	| ProjectionRunnerEffectTag;
+
+/** One project's fences and lifts. They outlive any relay of the project and
+ *  go when the project's owner scope closes. */
+interface ProjectTurns {
+	readonly stopping: Map<string, Deferred.Deferred<void, StopFailure>>;
+	readonly accountSwitches: Map<string, Deferred.Deferred<void>>;
+	readonly lifts: PubSub.PubSub<string>;
+	readonly recovery: Semaphore.Semaphore;
+	recovered: boolean;
+	bound: boolean;
+}
+
+export class ProviderTurns extends Context.Service<
+	ProviderTurns,
+	{
+		/** The project's turn service, run against the calling relay's parts.
+		 *  The project's outbox Stops are recovered once, before it returns. */
+		readonly forProject: (
+			projectId: string,
+			parts: Context.Context<ProviderTurnParts>,
+		) => Effect.Effect<ProviderTurnService>;
+	}
+>()("ProviderTurns") {}
+
+const makeProviderTurnService = Effect.fnUntraced(function* (
+	projectId: string,
+	project: ProjectTurns,
+	providedContext: Context.Context<ProviderTurnParts>,
+	spawn: (
+		sessionId: string,
+		worker: Effect.Effect<unknown, unknown>,
+	) => Effect.Effect<void>,
+) {
 	// A Stop ends with session-wide frames (idle status, done) that can trail
 	// the button press. Each entry lives exactly as long as its abort worker,
 	// so a fence never outlives the process, scope or call that owns it.
-	// Stop fences stay with the relay's turn service, main's run seam (CONTRACT.md
-	// 5874, D57); a replacing relay recovers them from the outbox.
-	const stopping = new Map<string, Deferred.Deferred<void, StopFailure>>();
-	const accountSwitches = new Map<string, Deferred.Deferred<void>>();
+	// Stop fences stay with the daemon's turn service for the project, main's run
+	// seam (CONTRACT.md 5874, D57); a relay replacement keeps them.
+	const { stopping, accountSwitches } = project;
 	// In memory, so no failed write can strand input reserved behind a fence.
-	const lifts = yield* PubSub.unbounded<string>();
+	const { lifts } = project;
 	const lift = (sessionId: string) => PubSub.publish(lifts, sessionId);
 	const abort = (
 		input: ProviderTurnServiceInterruptInput,
@@ -217,14 +245,16 @@ const makeProviderTurnService = Effect.gen(function* () {
 		recovered = false,
 	) =>
 		Effect.gen(function* () {
+			const sql = yield* SqlClient.SqlClient;
+			const ingestion = yield* ProviderRuntimeIngestionTag;
 			if (snapshot.owners.length === 0 && snapshot.retainedSteers) return;
 			const running =
 				snapshot.owners.length === 0
 					? Effect.succeed(false)
 					: sql<{ running: number }>`
-			SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${input.sessionId}
-				AND id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
-				AND status IN ('pending', 'running')) AS running`.pipe(
+		SELECT EXISTS (SELECT 1 FROM provider_runs WHERE session_id = ${input.sessionId}
+			AND id IN ${sql.in(snapshot.owners.map(({ runId }) => runId))}
+			AND status IN ('pending', 'running')) AS running`.pipe(
 							Effect.map(([row]) => row?.running === 1),
 						);
 			const remaining = Math.max(
@@ -239,8 +269,8 @@ const makeProviderTurnService = Effect.gen(function* () {
 								// Delivery failure cannot erase an already committed Stop deadline.
 								const [stored] =
 									yield* sql`SELECT 1 FROM provider_command_outbox
-						WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
-						AND json_type(payload_json, '$.stop') = 'object'`;
+					WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}
+					AND json_type(payload_json, '$.stop') = 'object'`;
 								if (!stored) return yield* Effect.fail(error);
 							}),
 						),
@@ -279,11 +309,11 @@ const makeProviderTurnService = Effect.gen(function* () {
 					);
 					if (view === undefined || view.tasks.tag === "none") return false;
 					const [confirmed] = yield* sql<{ confirmed: number }>`
-						SELECT EXISTS (SELECT 1 FROM events WHERE session_id = ${input.sessionId}
-							AND type = 'escalation.confirmed' AND sequence > (
-								SELECT COALESCE(MAX(sequence), 0) FROM events
-								WHERE session_id = ${input.sessionId} AND type = 'interrupt.requested'
-							)) AS confirmed`;
+					SELECT EXISTS (SELECT 1 FROM events WHERE session_id = ${input.sessionId}
+						AND type = 'escalation.confirmed' AND sequence > (
+							SELECT COALESCE(MAX(sequence), 0) FROM events
+							WHERE session_id = ${input.sessionId} AND type = 'interrupt.requested'
+						)) AS confirmed`;
 					return confirmed?.confirmed !== 1;
 				});
 				yield* Effect.repeat(asked, {
@@ -298,18 +328,18 @@ const makeProviderTurnService = Effect.gen(function* () {
 				// 8.4 (2880): the retire carries the snapshot entry the user confirmed, so the gate
 				// does not ask for it again unless the tasks changed since.
 				const [confirm] = yield* sql<{ entry: number }>`
-					SELECT json_extract(data, '$.snapshotEntry') AS entry FROM events
-					WHERE session_id = ${input.sessionId} AND type = 'escalation.confirmed'
-						AND sequence > (
-							SELECT COALESCE(MAX(sequence), 0) FROM events
-							WHERE session_id = ${input.sessionId} AND type = 'interrupt.requested'
-						)
-					ORDER BY sequence DESC LIMIT 1`;
+				SELECT json_extract(data, '$.snapshotEntry') AS entry FROM events
+				WHERE session_id = ${input.sessionId} AND type = 'escalation.confirmed'
+					AND sequence > (
+						SELECT COALESCE(MAX(sequence), 0) FROM events
+						WHERE session_id = ${input.sessionId} AND type = 'interrupt.requested'
+					)
+				ORDER BY sequence DESC LIMIT 1`;
 				const [target] = yield* sql<{
 					provider_process_id: string | null;
 					provider_id: string;
 				}>`SELECT provider_process_id, provider_id
-					FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}`;
+				FROM provider_command_outbox WHERE command_id = ${input.commandId} AND session_id = ${input.sessionId}`;
 				if (!target?.provider_process_id)
 					return yield* new ProviderInstanceFailure({
 						providerId: target?.provider_id ?? "conduit",
@@ -376,7 +406,7 @@ const makeProviderTurnService = Effect.gen(function* () {
 				),
 				Effect.provide(providedContext),
 				Effect.interruptible,
-				Effect.forkIn(scope),
+				(worker) => spawn(input.sessionId, worker),
 			);
 			return Deferred.await(done);
 		});
@@ -440,68 +470,151 @@ const makeProviderTurnService = Effect.gen(function* () {
 		beginStop,
 	};
 	// Completed delivery receipts still own a deadline until their captured runs
-	// end. Restore the fences before the inbox can admit another foreground turn.
-	const recovered = yield* sql<{
-		command_id: string;
-		session_id: string;
-	}>`
-		SELECT command.command_id, command.session_id
-		FROM provider_command_outbox command
-		WHERE command.effect_type IN ('interrupt_turn', 'end_session')
-			AND command.project_key = ${projectId}
-			AND ((json_type(command.payload_json, '$.stop') = 'object'
-			AND EXISTS (SELECT 1 FROM provider_runs run, json_each(command.payload_json, '$.stop.owners') owner
-				WHERE run.id = json_extract(owner.value, '$.runId') AND run.session_id = command.session_id
-				AND run.status IN ('pending', 'running')))
-			OR (command.effect_type = 'interrupt_turn' AND json_type(command.payload_json, '$.stop') IS NULL
-				AND command.status IN ('pending', 'running')))
-		ORDER BY command.request_sequence`.pipe(Effect.orDie);
-	for (const row of recovered) {
-		if (stopping.has(row.session_id)) continue;
-		const input = {
-			commandId: row.command_id,
-			sessionId: row.session_id,
-			clientId: "stop-recovery",
-		};
-		const accepted = yield* prepareStop(input).pipe(
-			Effect.provide(providedContext),
-			Effect.result,
-		);
-		// A refused row installs nothing, so a later row of the session is tried.
-		if (accepted._tag === "Failure") {
-			(yield* LoggerTag).warn(
-				`session=${input.sessionId} recovered Stop ${input.commandId} refused: ${formatErrorDetail(accepted.failure)}`,
-			);
-			continue;
-		}
-		yield* startStop(input, accepted.success, true);
-	}
+	// end. Restore the fences before the inbox can admit another foreground turn,
+	// once per project however many relays it has.
+	yield* project.recovery.withPermits(1)(
+		Effect.gen(function* () {
+			if (project.recovered) return;
+			const sql = yield* SqlClient.SqlClient;
+			const recovered = yield* sql<{
+				command_id: string;
+				session_id: string;
+			}>`
+	SELECT command.command_id, command.session_id
+	FROM provider_command_outbox command
+	WHERE command.effect_type IN ('interrupt_turn', 'end_session')
+		AND command.project_key = ${projectId}
+		AND ((json_type(command.payload_json, '$.stop') = 'object'
+		AND EXISTS (SELECT 1 FROM provider_runs run, json_each(command.payload_json, '$.stop.owners') owner
+			WHERE run.id = json_extract(owner.value, '$.runId') AND run.session_id = command.session_id
+			AND run.status IN ('pending', 'running')))
+		OR (command.effect_type = 'interrupt_turn' AND json_type(command.payload_json, '$.stop') IS NULL
+			AND command.status IN ('pending', 'running')))
+	ORDER BY command.request_sequence`.pipe(Effect.orDie);
+			for (const row of recovered) {
+				if (stopping.has(row.session_id)) continue;
+				const input = {
+					commandId: row.command_id,
+					sessionId: row.session_id,
+					clientId: "stop-recovery",
+				};
+				const accepted = yield* prepareStop(input).pipe(
+					Effect.provide(providedContext),
+					Effect.result,
+				);
+				// A refused row installs nothing, so a later row of the session is tried.
+				if (accepted._tag === "Failure") {
+					(yield* LoggerTag).warn(
+						`session=${input.sessionId} recovered Stop ${input.commandId} refused: ${formatErrorDetail(accepted.failure)}`,
+					);
+					continue;
+				}
+				yield* startStop(input, accepted.success, true);
+			}
+			project.recovered = true;
+		}).pipe(Effect.provide(providedContext)),
+	);
 	return service;
 });
+
+/** The daemon's turn service: one state per project, kept across relay
+ *  replacements and dropped when the project's owner scope closes. A Stop
+ *  worker runs in its session's owner scope, or the daemon's when the session
+ *  has none. */
+export const ProviderTurnsLive = Layer.effect(
+	ProviderTurns,
+	Effect.gen(function* () {
+		const owners = yield* Effect.serviceOption(OwnerScopes);
+		const daemonScope = yield* Effect.scope;
+		const projects = new Map<string, ProjectTurns>();
+		const spawn = (
+			sessionId: string,
+			worker: Effect.Effect<unknown, unknown>,
+		) =>
+			Option.isNone(owners)
+				? Effect.asVoid(Effect.forkIn(worker, daemonScope))
+				: owners.value.sessionScope(sessionId).pipe(
+						Effect.flatMap((scope) =>
+							scope.acquire<unknown, never, never>(Effect.forkScoped(worker)),
+						),
+						Effect.asVoid,
+						Effect.catch(() =>
+							Effect.asVoid(Effect.forkIn(worker, daemonScope)),
+						),
+					);
+		const bind = (projectId: string, project: ProjectTurns) =>
+			Option.isNone(owners) || project.bound
+				? Effect.void
+				: owners.value.projectScope(projectId).pipe(
+						Effect.flatMap((scope) =>
+							scope.acquire<void, never, never>(
+								Effect.addFinalizer(() =>
+									Effect.sync(() => {
+										if (projects.get(projectId) === project)
+											projects.delete(projectId);
+									}),
+								),
+							),
+						),
+						Effect.tap(() => Effect.sync(() => (project.bound = true))),
+						Effect.ignore,
+					);
+		return ProviderTurns.of({
+			forProject: (projectId, parts) =>
+				Effect.gen(function* () {
+					const project =
+						projects.get(projectId) ??
+						(yield* Effect.map(PubSub.unbounded<string>(), (lifts) => {
+							const created: ProjectTurns = {
+								stopping: new Map(),
+								accountSwitches: new Map(),
+								lifts,
+								recovery: Semaphore.makeUnsafe(1),
+								recovered: false,
+								bound: false,
+							};
+							projects.set(projectId, created);
+							return created;
+						}));
+					yield* bind(projectId, project);
+					return yield* makeProviderTurnService(
+						projectId,
+						project,
+						parts,
+						spawn,
+					);
+				}),
+		});
+	}),
+);
+
+/** The daemon's turn service when the daemon lends one; otherwise its own. */
+export const ProviderTurnsOrOwn = Layer.unwrap(
+	Effect.map(Effect.serviceOption(ProviderTurns), (shared) =>
+		Option.isSome(shared)
+			? Layer.succeed(ProviderTurns, shared.value)
+			: ProviderTurnsLive,
+	),
+);
+
+/** A relay's view of its project's turns, run against the relay's parts. */
+export const attachProviderTurnsLive = Layer.effect(
+	ProviderTurnServiceTag,
+	Effect.gen(function* () {
+		const turns = yield* ProviderTurns;
+		const { projectId } = yield* EventStoreEffectTag;
+		return yield* turns.forProject(
+			projectId,
+			yield* Effect.context<ProviderTurnParts>(),
+		);
+	}),
+);
 
 export const ProviderTurnServiceLive: Layer.Layer<
 	ProviderTurnServiceTag,
 	never,
-	| AccountDirectory
-	| OpenCodeInstancesTag
-	| SessionWorkspaceTag
-	| OpenCodeAPITag
-	| WebSocketHandlerTag
-	| LoggerTag
-	| ConfigTag
-	| SessionManagerServiceTag
-	| PendingInteractionServiceTag
-	| OverridesStateTag
-	| OrchestrationEngineTag
-	| ReadQueryEffectTag
-	| ClaudeEventPersistEffectTag
-	| ProviderRuntimeIngestionTag
-	| AlertsTag
-	| ProviderStateEffectTag
-	| SessionTitleServiceTag
-	| SqlClient.SqlClient
-	| EventStoreEffectTag
-	| ProjectionRunnerEffectTag
-> = Layer.effect(ProviderTurnServiceTag, makeProviderTurnService).pipe(
+	Exclude<ProviderTurnParts, DaemonTurns>
+> = attachProviderTurnsLive.pipe(
+	Layer.provide(ProviderTurnsOrOwn),
 	Layer.provide(DaemonTurnsOrOwn),
 );

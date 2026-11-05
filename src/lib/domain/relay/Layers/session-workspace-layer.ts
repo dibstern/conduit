@@ -1,6 +1,6 @@
 import { relative, resolve as resolvePath } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { Effect, Layer, Result, Schema, Semaphore } from "effect";
+import { Effect, Layer, Option, Result, Schema, Semaphore } from "effect";
 import { SqlClient } from "effect/sql";
 import type { Account } from "../../../contracts/account.js";
 import {
@@ -665,4 +665,13 @@ export const SessionWorkspaceLive = Layer.effect(
 				),
 		} satisfies SessionWorkspace;
 	}),
+);
+
+/** The daemon's session workspace when it lends one; a standalone relay is its own daemon. */
+export const SessionWorkspaceOrOwn = Layer.unwrap(
+	Effect.map(Effect.serviceOption(SessionWorkspaceTag), (shared) =>
+		Option.isSome(shared)
+			? Layer.succeed(SessionWorkspaceTag, shared.value)
+			: SessionWorkspaceLive,
+	),
 );

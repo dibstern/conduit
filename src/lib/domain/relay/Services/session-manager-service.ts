@@ -1714,3 +1714,12 @@ export const attachSessionManagerLive = Layer.effect(
 		return managers;
 	}),
 );
+
+/** The daemon's session managers when it lends them; a standalone relay is its own daemon. */
+export const SessionManagersOrOwn = Layer.unwrap(
+	Effect.map(Effect.serviceOption(SessionManagerServiceTag), (shared) =>
+		Option.isSome(shared)
+			? Layer.succeed(SessionManagerServiceTag, shared.value)
+			: SessionManagerServiceLive,
+	),
+);
