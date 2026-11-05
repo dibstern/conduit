@@ -79,9 +79,6 @@ export const runnerMembersGone = (
 	return members.every((member) => gone(member.pid, member.startTime));
 };
 
-const newestRunnerFirst = (a: RunnerRegistration, b: RunnerRegistration) =>
-	(b.registeredAt ?? 0) - (a.registeredAt ?? 0);
-
 /** Legacy role ranking is used only by the one-time cursor backfill. Delete with 32.13. */
 export function legacyRunnerRanking(
 	configDir: string,
@@ -425,17 +422,15 @@ export function discoverAllRunners(
 		if (isRecord(cause) && cause["code"] === "ENOENT") return [];
 		throw cause;
 	}
-	return directories
-		.flatMap((directory) => {
-			if (!/^[0-9a-f]{12}$/.test(directory)) return [];
-			const target = join(root, directory);
-			if (!lstatSync(target).isDirectory()) return [];
-			return discoverRunnersInDirectory(
-				prepareRunnerSocketDirectory(target),
-				processTable,
-			);
-		})
-		.sort(newestRunnerFirst);
+	return directories.flatMap((directory) => {
+		if (!/^[0-9a-f]{12}$/.test(directory)) return [];
+		const target = join(root, directory);
+		if (!lstatSync(target).isDirectory()) return [];
+		return discoverRunnersInDirectory(
+			prepareRunnerSocketDirectory(target),
+			processTable,
+		);
+	});
 }
 
 function discoverRunnersInDirectory(
@@ -490,5 +485,5 @@ function discoverRunnersInDirectory(
 			removeRunnerDiscovery(socketPath);
 		}
 	}
-	return entries.sort(newestRunnerFirst);
+	return entries;
 }
