@@ -57,10 +57,7 @@ import {
 	clearDiscoveryState,
 	discoveryState,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
 import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import {
@@ -100,7 +97,6 @@ beforeEach(() => {
 	clearDiscoveryState();
 	resetSessionSubscription();
 	routerState.path = "/";
-	attachedProjectState.slug = "project-a";
 });
 
 it("keeps B's GetModels pick when A's row changes model last", async () => {

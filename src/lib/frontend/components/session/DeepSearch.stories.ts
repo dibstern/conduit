@@ -2,7 +2,6 @@ import type { Meta, StoryObj } from "@storybook/svelte-vite";
 import { expect, fireEvent, userEvent, waitFor, within } from "storybook/test";
 import type { ListDaemonSessionsResponse } from "../../../contracts/ws-rpc.js";
 import { projectState } from "../../stores/project.svelte.js";
-import { attachedProjectState } from "../../stores/router.svelte.js";
 import type { rpc } from "../../transport/ws-rpc-client.js";
 import DeepSearch from "./DeepSearch.svelte";
 
@@ -55,7 +54,6 @@ const meta = {
 	tags: ["autodocs", "viewport-capture"],
 	args: { search },
 	beforeEach: () => {
-		attachedProjectState.slug = "conduit";
 		projectState.projects = [
 			{
 				slug: "conduit",
@@ -66,7 +64,6 @@ const meta = {
 			{ slug: "gym", title: "Gym", folders: ["/gym"], clientCount: 1 },
 		];
 		return () => {
-			attachedProjectState.slug = null;
 			projectState.projects = [];
 		};
 	},

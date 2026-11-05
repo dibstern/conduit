@@ -13,7 +13,6 @@ import {
 	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { clearSessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { sessionViewState } from "../../../src/lib/frontend/stores/session-view.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
@@ -72,7 +71,6 @@ vi.mock(
 	"../../../src/lib/frontend/stores/router.svelte.js",
 	async (importOriginal) => ({
 		...(await importOriginal<object>()),
-		getCurrentSlug: () => "project-a",
 	}),
 );
 vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
@@ -129,7 +127,6 @@ describe("InstanceModelPicker", () => {
 		showToastSpy.mockClear();
 		clearDiscoveryState();
 		clearSessionState();
-		attachedProjectState.slug = "project-a";
 		applyInstanceListResponse({
 			instances: [
 				{

@@ -12,10 +12,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { sessionState } from "../../../src/lib/frontend/stores/session.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
@@ -23,7 +20,6 @@ describe("SessionList search summary", () => {
 	beforeEach(() => {
 		clearSessionState();
 		routerState.path = "/";
-		attachedProjectState.slug = "current-project";
 		routerState.search = "";
 		routerState.sessionNotFound = false;
 		// Unarchived hits are live rows: the daemon-wide feed holds every one.

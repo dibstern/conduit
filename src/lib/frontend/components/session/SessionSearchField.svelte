@@ -3,7 +3,7 @@
 <!-- stays project-only. The URL holds the scope (stores/session-scope.ts).  -->
 
 <script lang="ts">
-	import { applyProjectList, confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
+	import { confirmRemoveProjects, projectState } from "../../stores/project.svelte.js";
 	import {
 		getSessionScope,
 		getSessionScopeLabel,
@@ -347,7 +347,6 @@
 			project={editing}
 			projects={projectState.projects}
 			onclose={() => { editing = null; }}
-			onsaved={applyProjectList}
 			returnFocus={() => scopeChip ?? null}
 		/>
 	{/await}

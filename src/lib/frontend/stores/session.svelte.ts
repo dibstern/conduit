@@ -41,15 +41,12 @@ import {
 	refreshCatalogs,
 } from "./discovery.svelte.js";
 import { goalDetails, sessionGoals } from "./goal.svelte.js";
-import { attachedProjectState, getCurrentSlug } from "./router.svelte.js";
 import { markSessionDeleted, selection } from "./selection.svelte.js";
-import { restoreServerUpdateBanner } from "./server-status.svelte.js";
 import type { SessionGrouping, SessionStatusFilter } from "./session-scope.js";
 import { getSessionScope, getSessionStatusFilter } from "./session-scope.js";
 import { clearTodoState } from "./todo.svelte.js";
 import { applyTurnRow, deleteTurn, rebaseTurns } from "./turn.svelte.js";
 import { showToast } from "./ui.svelte.js";
-import { projectAttachedListeners } from "./ws-listeners.js";
 
 // Every session the server has told us about, keyed by id — one representation,
 // not a map plus two arrays kept in step by hand. The map itself belongs to the
@@ -97,17 +94,6 @@ export function rootBackgroundTasks(id: string): readonly BackgroundTask[] {
 		(serverSessions.get(root) ?? familySessions.find((row) => row.id === root))
 			?.backgroundTasks ?? []
 	);
-}
-
-/** Mark this tab's project, from the selection or a cross-project ViewSession reply. */
-export function setAttachedProject(slug: string): void {
-	if (attachedProjectState.slug !== slug)
-		for (const activity of sessionActivity.values())
-			activity.replayGeneration++;
-	attachedProjectState.slug = slug;
-	for (const listener of projectAttachedListeners) listener(slug);
-	// Project listeners reset banners, so restore the daemon-wide update offer.
-	restoreServerUpdateBanner();
 }
 
 // What this tab is looking at. Applying server rows never touches it.
@@ -636,7 +622,7 @@ export async function setSearchIncludeArchived(value: boolean): Promise<void> {
 
 async function runSearchPage(token: number, replace: boolean): Promise<void> {
 	const search = activeSearch;
-	const projectSlug = getCurrentSlug();
+	const projectSlug = selection.scope?.project;
 	if (search === null || !projectSlug) return;
 	const cursor = replace ? null : sessionState.searchCursor;
 	clientSession.searchLoading = true;

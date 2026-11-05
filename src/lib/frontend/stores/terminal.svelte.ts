@@ -329,6 +329,8 @@ let fiber: Fiber.Fiber<void, never> | null = null;
  */
 export function viewPtys(project: string | null): void {
 	if (viewedProject === project) return;
+	// The previous project's rows go at once; the panel stays for the next snapshot.
+	if (viewedProject !== null) handlePtySnapshot([]);
 	viewedProject = project;
 	const currentGeneration = ++generation;
 	const old = fiber;

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { untrack } from "svelte";
 	import {
 		TERMINAL_KEY_ACTIONS,
@@ -6,7 +7,7 @@
 		type TerminalKeysSetting,
 	} from "../../../contracts/terminal-keys.js";
 	import { projectState } from "../../stores/project-state.svelte.js";
-	import { getCurrentRoute, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentRoute } from "../../stores/router.svelte.js";
 	import { getIsConnected } from "../../transport/connection-status.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -35,7 +36,7 @@
 	$effect(() => {
 		if (!getIsConnected()) return;
 		const route = getCurrentRoute();
-		if (route.page === "chat" && route.sessionId && !getCurrentSlug()) return;
+		if (route.page === "chat" && route.sessionId && !selection.scope?.project) return;
 		let current = true;
 		const readRevision = untrack(() => projectState.terminalKeysRevision);
 		void rpc("GetTerminalKeys", {})

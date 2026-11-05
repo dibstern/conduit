@@ -161,12 +161,6 @@ export const serverStatusFeed = (
 		}),
 	);
 
-/** Attaching a project resets per-project state, banners included; put the
- *  server-update banner back if a restart is still on offer. */
-export function restoreServerUpdateBanner(): void {
-	handleServerUpdate(serverUpdateAvailable);
-}
-
 function showBuildMismatchBanner(): void {
 	buildMismatchWarning = true;
 	if (serverUpdateAvailable) return;

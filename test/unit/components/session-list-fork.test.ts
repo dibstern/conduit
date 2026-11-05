@@ -2,10 +2,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -46,7 +43,6 @@ describe("SessionList fork", () => {
 			replaceState: vi.fn(),
 			state: null,
 		});
-		attachedProjectState.slug = "current-project";
 		projectState.projects = [
 			{ slug: "current-project", title: "Current", folders: ["/current"] },
 		];

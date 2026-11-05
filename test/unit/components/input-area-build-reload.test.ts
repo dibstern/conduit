@@ -9,7 +9,6 @@ import {
 	insertInputDraft,
 	persistInputDraft,
 } from "../../../src/lib/frontend/stores/chat.svelte.js";
-import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	openSessionForSetup,
 	setSessionWorkingForSetup,
@@ -97,7 +96,6 @@ describe("InputArea build reload recovery", () => {
 			);
 		sessionStorage.clear();
 		openSessionForSetup(sessionId, "test");
-		attachedProjectState.slug = "test";
 		connectionState.status = "connected";
 		getOrCreateSessionActivity(sessionId);
 		setSessionWorkingForSetup(sessionId, false);
@@ -115,7 +113,6 @@ describe("InputArea build reload recovery", () => {
 		vi.useRealTimers();
 		vi.unstubAllGlobals();
 		openSessionForSetup(null);
-		attachedProjectState.slug = null;
 		connectionState.status = "";
 		seedSessions([]);
 		sessionStorage.clear();

@@ -13,10 +13,7 @@ import {
 } from "../../stores/file-tree.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import {
 	openFileViewer,
 	sessionViewState,
@@ -104,7 +101,6 @@ const meta = {
 		clearFileTreeState();
 		routerState.path = "/";
 		routerState.search = "?p=test-project";
-		attachedProjectState.slug = null;
 		// The fake socket answers no queries, so seed what the server would send:
 		// the project list, a loaded account with its models, the model a new
 		// session starts on, and an empty, settled session list.
@@ -141,7 +137,6 @@ const meta = {
 			instanceState.instances = instances;
 			instanceState.loaded = loaded;
 			clearDiscoveryState();
-			attachedProjectState.slug = null;
 			routerState.search = "";
 		};
 	},

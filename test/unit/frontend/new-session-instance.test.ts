@@ -33,7 +33,6 @@ import {
 	selectInstance,
 } from "../../../src/lib/frontend/stores/discovery.svelte.js";
 import { applyInstanceListResponse } from "../../../src/lib/frontend/stores/instance.svelte.js";
-import { attachedProjectState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { openSessionForSetup } from "../../../src/lib/frontend/stories/session-setup.js";
 
 const instances = ["claude", "claude-2", "opencode"].map((id) => ({
@@ -78,7 +77,6 @@ const defaults = {
 beforeEach(() => {
 	clearDiscoveryState();
 	openSessionForSetup(null);
-	attachedProjectState.slug = "conduit";
 	applyInstanceListResponse({ instances, providerCapabilities: {} });
 	handleDefaultModelInfo({ model: "sonnet", provider: "claude" });
 	handleModelList({ providers: defaults.providers });

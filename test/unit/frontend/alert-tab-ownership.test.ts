@@ -13,7 +13,6 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 	getNotifSettings: () => settings,
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => slug.current,
 	navigate: vi.fn(),
 }));
 const question = {

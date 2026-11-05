@@ -12,10 +12,7 @@ import {
 	viewProjectSettings,
 } from "../../../src/lib/frontend/stores/project-settings.js";
 import { projectState } from "../../../src/lib/frontend/stores/project-state.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import { selection } from "../../../src/lib/frontend/stores/selection.svelte.js";
 import {
 	clearSessionState,
@@ -89,7 +86,6 @@ beforeEach(() => {
 	clearSessionState();
 	discovery.clearDiscoveryState();
 	clearInstanceState();
-	attachedProjectState.slug = "project-a";
 	projectState.projects = [
 		{ slug: "project-a", title: "Project A", folders: ["/project-a"] },
 	];
@@ -175,7 +171,6 @@ afterEach(async () => {
 	await runtime.dispose();
 	clearSessionState();
 	discovery.clearDiscoveryState();
-	attachedProjectState.slug = null;
 	runtimeMock.getRuntime.mockReset();
 	runtimeMock.runTransportEffect.mockReset();
 });
@@ -621,7 +616,6 @@ describe("discovery catalogs over the RPC wire", () => {
 				.getProviderGroupsForInstance("two")
 				.flatMap((group) => group.models.map((model) => model.name)),
 		).toEqual(["Other account model"]);
-		attachedProjectState.slug = "project-b";
 		routerState.search = "?project=project-b";
 		expect(discovery.discoveryState.providers).toEqual([]);
 	});
@@ -704,7 +698,6 @@ describe("discovery catalogs over the RPC wire", () => {
 		});
 		viewProjectSettings("project-a");
 		await vi.waitFor(() => expect(settingsProjects).toEqual(["project-a"]));
-		attachedProjectState.slug = "project-b";
 		routerState.search = "?project=project-b";
 		settingsRead.resolve({
 			_tag: "snapshot",
@@ -733,7 +726,6 @@ describe("discovery catalogs over the RPC wire", () => {
 				provider.models.map((model) => model.name),
 			),
 		).toEqual([]);
-		attachedProjectState.slug = "project-a";
 		routerState.search = "?project=project-a";
 		expect(
 			discovery.discoveryState.providers.flatMap((provider) =>

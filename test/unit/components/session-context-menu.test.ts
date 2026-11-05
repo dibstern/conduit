@@ -23,7 +23,6 @@ vi.mock(
 		...(await importOriginal<
 			typeof import("../../../src/lib/frontend/stores/router.svelte.js")
 		>()),
-		getCurrentSlug: () => "test",
 	}),
 );
 vi.mock(

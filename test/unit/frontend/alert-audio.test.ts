@@ -4,7 +4,6 @@ vi.mock("../../../src/lib/frontend/utils/notif-settings.js", () => ({
 	getNotifSettings: () => ({ sound: true, browser: true, push: true }),
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "project",
 	navigate: vi.fn(),
 }));
 

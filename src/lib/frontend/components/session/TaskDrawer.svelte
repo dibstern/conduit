@@ -4,8 +4,8 @@
   changes the open session, so closing it leaves the parent exactly as it was.
 -->
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { untrack } from "svelte";
-	import { attachedProjectState } from "../../stores/router.svelte.js";
 	import { rootBackgroundTasks, sessionState } from "../../stores/session.svelte.js";
 	import { createTranscriptView } from "../../stores/transcript.svelte.js";
 	import { uiState } from "../../stores/ui.svelte.js";
@@ -28,7 +28,7 @@
 	const listed = $derived(tasks.find((candidate) => candidate.id === task.id));
 
 	$effect(() => {
-		const project = attachedProjectState.slug ?? "";
+		const project = selection.scope?.project ?? "";
 		const sessionId = project ? task.sessionId : null;
 		untrack(() => view.view(project, sessionId));
 		return () => view.dispose();

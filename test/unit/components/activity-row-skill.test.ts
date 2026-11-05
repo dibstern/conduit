@@ -19,8 +19,10 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	) => getSkillContentRpc(input),
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "conduit",
 	getCurrentSessionId: () => null,
+}));
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { scope: { project: "conduit", sessionId: null } },
 }));
 vi.mock("../../../src/lib/frontend/stores/discovery.svelte.js", () => ({
 	discoveryState: {

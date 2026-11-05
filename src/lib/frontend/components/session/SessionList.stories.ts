@@ -3,10 +3,7 @@ import { expect, userEvent, within } from "storybook/test";
 import { tick } from "svelte";
 import { draftList } from "../../stores/draft-list.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -60,7 +57,6 @@ function resetSessionState() {
 	// router, so a scoped story would otherwise scope every story after it.
 	routerState.path = "/";
 	routerState.search = "";
-	attachedProjectState.slug = "conduit";
 	projectState.projects = [
 		{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 		{ slug: "acme", title: "Acme", folders: ["/src/acme"] },
@@ -87,7 +83,6 @@ const meta = {
 				else localStorage.setItem(key, open);
 			}
 			uiState.selectMode = false;
-			attachedProjectState.slug = null;
 			routerState.search = "";
 		};
 	},

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { onMount } from "svelte";
 	import type {
 		ClaudeSettingsOverrides,
@@ -27,7 +28,7 @@
 		getEffectiveInstanceId,
 	} from "../../stores/discovery.svelte.js";
 	import { getCachedInstanceById } from "../../stores/instance.svelte.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { findSession, reloadProviderSession, sessionState } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -137,7 +138,7 @@
 	});
 
 	$effect(() => {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug) return;
 		let cancelled = false;
 		void rpc("GetClaudeSettings", { projectSlug })
@@ -151,7 +152,7 @@
 	});
 
 	$effect(() => {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const instanceId = claudeInstanceId;
 		const requestedWorkspace = workspace;
 		if (!projectSlug) return;
@@ -185,7 +186,7 @@
 		overrides: ClaudeSettingsOverrides,
 		edited: boolean,
 	): Promise<void> {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug) return;
 		const wasEdited = claudeSettingsState.editedKeys.includes(key);
 		const undoWrite = proposeClaudeSettingsOverrides(overrides);
@@ -265,7 +266,7 @@
 		const mode = DEFAULT_MODE_OPTIONS.find(
 			(candidate) => candidate.mode === value,
 		)?.mode;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!mode || !projectSlug) return;
 		const undoDefaultMode = chooseDefaultPermissionMode(mode);
 		void rpc("SetDefaultPermissionMode", { projectSlug, mode })

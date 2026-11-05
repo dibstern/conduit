@@ -3,10 +3,7 @@ import { tick } from "svelte";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import SessionList from "../../../src/lib/frontend/components/session/SessionList.svelte";
 import { projectState } from "../../../src/lib/frontend/stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -24,7 +21,6 @@ describe("SessionList daemon sessions", () => {
 	beforeEach(() => {
 		clearSessionState();
 		routerState.path = "/";
-		attachedProjectState.slug = "current-project";
 		routerState.search = "";
 		seedRootSessions([
 			{

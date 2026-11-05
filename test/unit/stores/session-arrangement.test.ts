@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../../src/lib/frontend/stores/router.svelte.js";
+import { routerState } from "../../../src/lib/frontend/stores/router.svelte.js";
 import {
 	applySearchResultsResponse,
 	clearSessionState,
@@ -164,7 +161,6 @@ describe("projectSessionList", () => {
 	});
 
 	it("composes with the existing project scope and title search", () => {
-		attachedProjectState.slug = "local";
 		routerState.search = "?p=a";
 		seedRootSessions([]);
 		applySessionSnapshot(
@@ -204,7 +200,6 @@ describe("projectSessionList", () => {
 describe("settled shelf counts", () => {
 	beforeEach(() => {
 		clearSessionState();
-		attachedProjectState.slug = "local";
 		routerState.path = "/";
 		routerState.search = "";
 	});

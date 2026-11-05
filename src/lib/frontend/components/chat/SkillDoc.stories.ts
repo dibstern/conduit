@@ -4,7 +4,7 @@ import {
 	discoveryState,
 	handleCommandList,
 } from "../../stores/discovery.svelte.js";
-import { attachedProjectState } from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import { connectedSocket } from "../../stories/sockets.js";
 import SkillDoc from "./SkillDoc.svelte";
 
@@ -21,8 +21,8 @@ type Story = StoryObj<typeof meta>;
 export const Loading: Story = {
 	beforeEach: () => {
 		const restoreSocket = connectedSocket();
-		const previousProject = attachedProjectState.slug;
-		attachedProjectState.slug = "storybook";
+		routerState.path = "/";
+		routerState.search = "?project=storybook";
 		const previousCommands = discoveryState.commands;
 		handleCommandList({
 			commands: [{ name: "flow-example", skillRef: "flow-example-ref" }],
@@ -30,7 +30,7 @@ export const Loading: Story = {
 		return () => {
 			handleCommandList({ commands: previousCommands });
 			restoreSocket();
-			attachedProjectState.slug = previousProject;
+			routerState.search = "";
 		};
 	},
 	play: async ({ canvasElement }) => {

@@ -1,4 +1,5 @@
 <script module lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import type { UsageLimitsSetting } from "../../../contracts/limit-recovery.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 
@@ -28,7 +29,7 @@
 	import { getEffectiveInstanceId } from "../../stores/discovery.svelte.js";
 	import { getCachedInstances, getDriverTraits, getInstanceById } from "../../stores/instance.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import { getCurrentSessionId, getCurrentSlug } from "../../stores/router.svelte.js";
+	import { getCurrentSessionId } from "../../stores/router.svelte.js";
 	import { findSession } from "../../stores/session.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { applyUsageLimitsSetting, orderedSettingsUsageAccounts, usageAlert, usageState } from "../../stores/usage.svelte.js";
@@ -45,7 +46,7 @@
 	import UsageForecast from "./UsageForecast.svelte";
 	import UsageLimitsSettings from "./UsageLimitsSettings.svelte";
 
-	const project = $derived(projectState.projects.find((item) => item.slug === getCurrentSlug()));
+	const project = $derived(projectState.projects.find((item) => item.slug === selection.scope?.project));
 	const refreshSlug = $derived(project?.slug ?? projectState.projects[0]?.slug);
 	const claudeAccounts = $derived(getClaudeAccounts(refreshSlug ?? ""));
 	const accounts = $derived(orderedSettingsUsageAccounts().filter((account) => account.harness === "claude"));

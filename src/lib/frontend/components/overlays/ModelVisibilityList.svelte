@@ -1,7 +1,7 @@
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { untrack } from "svelte";
 	import { refreshCatalogs, loadModelCatalog, getModelProvidersForInstance, applyHiddenEntriesSet, chooseHiddenEntries, discoveryState } from "../../stores/discovery.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { showToast } from "../../stores/ui.svelte.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -67,7 +67,7 @@
 	const catalogAccount = $derived(accountId);
 	// Keep today's agents refresh; only models use the requested account.
 	$effect(() => {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		const instanceId = catalogAccount;
 		if (!projectSlug) return;
 		let current = true;
@@ -92,7 +92,7 @@
 		hiddenModels?: string[];
 		hiddenAgents?: string[];
 	}): Promise<void> {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug) {
 			showToast("No active project connection", { variant: "warn" });
 			return;

@@ -7,8 +7,8 @@ import { featureFlags } from "../../stores/feature-flags.svelte.js";
 import {
 	getCurrentRoute,
 	getCurrentSessionId,
-	getCurrentSlug,
 } from "../../stores/router.svelte.js";
+import { selection } from "../../stores/selection.svelte.js";
 import { getActiveSession } from "../../stores/session.svelte.js";
 import {
 	beginCreateTab,
@@ -123,7 +123,7 @@ export function toggleTerminal(): void {
 	if (wasOpen) return;
 
 	if (terminalState.tabs.size === 0) {
-		const slug = getCurrentSlug();
+		const slug = selection.scope?.project;
 		const sessionId = getCurrentSessionId();
 		const accountId = terminalAccountId();
 		if (slug && beginCreateTab()) {

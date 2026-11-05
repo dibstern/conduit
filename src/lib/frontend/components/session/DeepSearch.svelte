@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount, tick } from "svelte";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
@@ -116,7 +115,7 @@
 	}
 
 	async function fetchPage(searchQuery: string, replace: boolean): Promise<void> {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug) {
 			loading = false;
 			failed = "Search unavailable";

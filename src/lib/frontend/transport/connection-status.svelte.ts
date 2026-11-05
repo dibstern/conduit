@@ -1,6 +1,5 @@
-import { attachedProjectState, replaceRoute } from "../stores/router.svelte.js";
+import { replaceRoute } from "../stores/router.svelte.js";
 import { wsDebugLog } from "../stores/ws-debug.svelte.js";
-import { onProjectAttached } from "../stores/ws-listeners.js";
 import type { ConnectionStatus } from "../types.js";
 
 export const connectionState = $state({
@@ -14,6 +13,8 @@ export const connectionState = $state({
 let controlSocket: WebSocket | null = null;
 let lastMessageAt = 0;
 let relayStatusGeneration = 0;
+/** The shown session's or draft's project, whose relay readiness the overlay shows. */
+let relayProject: string | null = null;
 // Advances on proof of authentication, so a slower probe sent before it
 // cannot send the user back to the PIN page.
 let authGeneration = 0;
@@ -26,7 +27,7 @@ export function getIsConnected(): boolean {
 function fetchRelayStatus(slug: string): void {
 	const generation = ++relayStatusGeneration;
 	const isCurrent = () =>
-		attachedProjectState.slug === slug && relayStatusGeneration === generation;
+		relayProject === slug && relayStatusGeneration === generation;
 	connectionState.relayStatus = undefined;
 	connectionState.relayError = undefined;
 	fetch(`/p/${slug}/api/status`)
@@ -50,7 +51,12 @@ function fetchRelayStatus(slug: string): void {
 		});
 }
 
-onProjectAttached(fetchRelayStatus);
+/** Follow the readiness of the shown session's or draft's project relay. */
+export function viewRelayStatus(project: string | null): void {
+	if (project === relayProject) return;
+	relayProject = project;
+	if (project) fetchRelayStatus(project);
+}
 
 /**
  * A rejected upgrade only surfaces as a close before open, and RPC redials
@@ -102,7 +108,7 @@ export function trackControlSocket(socket: WebSocket): void {
 		if (controlSocket === socket) lastMessageAt = Date.now();
 	});
 
-	if (attachedProjectState.slug) fetchRelayStatus(attachedProjectState.slug);
+	if (relayProject) fetchRelayStatus(relayProject);
 }
 
 /**

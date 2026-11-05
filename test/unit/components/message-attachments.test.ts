@@ -10,8 +10,10 @@ vi.mock("../../../src/lib/frontend/transport/ws-rpc-client.js", () => ({
 	rpc: vi.fn(),
 }));
 vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: () => "conduit",
 	getCurrentSessionId: () => null,
+}));
+vi.mock("../../../src/lib/frontend/stores/selection.svelte.js", () => ({
+	selection: { scope: { project: "conduit", sessionId: null } },
 }));
 vi.mock("../../../src/lib/frontend/stores/session-view.svelte.js", () => ({
 	sessionViewState: { compact: false },

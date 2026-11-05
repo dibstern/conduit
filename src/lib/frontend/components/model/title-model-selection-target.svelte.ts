@@ -15,7 +15,7 @@ import {
 	loadModelCatalog,
 	modelMatchesId,
 } from "../../stores/discovery.svelte.js";
-import { getCurrentSlug } from "../../stores/router.svelte.js";
+import { selection as appSelection } from "../../stores/selection.svelte.js";
 import { showToast } from "../../stores/ui.svelte.js";
 import { toastFailure } from "../../transport/rpc-errors.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
@@ -74,7 +74,7 @@ export function createTitleModelSelectionTarget() {
 	}
 
 	$effect(() => {
-		const project = getCurrentSlug();
+		const project = appSelection.scope?.project;
 		if (project && accountId)
 			void loadCatalog(project, accountId).catch(() => undefined);
 	});
@@ -83,7 +83,7 @@ export function createTitleModelSelectionTarget() {
 		next: TitleGenerationSelection | null,
 		changingAccount = false,
 	): Promise<void> {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = appSelection.scope?.project;
 		if (!projectSlug || saving) return;
 		saving = true;
 		localSelection = next;
@@ -153,11 +153,17 @@ export function createTitleModelSelectionTarget() {
 			return accounts;
 		},
 		get catalog() {
-			return getProviderGroupsForInstance(accountId, getCurrentSlug() ?? "");
+			return getProviderGroupsForInstance(
+				accountId,
+				appSelection.scope?.project ?? "",
+			);
 		},
 		get activeModel() {
 			return accountId
-				? getModelCatalogForInstance(accountId, getCurrentSlug() ?? "")
+				? getModelCatalogForInstance(
+						accountId,
+						appSelection.scope?.project ?? "",
+					)
 						.find((provider) => provider.id === selection.providerId)
 						?.models.find((model) => modelMatchesId(model, selection.modelId))
 				: undefined;
@@ -215,7 +221,7 @@ export function createTitleModelSelectionTarget() {
 			return saving;
 		},
 		refreshCatalog() {
-			const project = getCurrentSlug();
+			const project = appSelection.scope?.project;
 			if (project && accountId)
 				void loadCatalog(project, accountId, true).catch(() => undefined);
 		},

@@ -17,10 +17,7 @@ import {
 } from "../../stores/goal.svelte.js";
 import { instanceState } from "../../stores/instance.svelte.js";
 import { projectState } from "../../stores/project.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import {
 	clearSessionState,
 	sessionState,
@@ -213,7 +210,6 @@ const meta = {
 		instanceState.instances = [];
 		routerState.path = `/s/${mockSession.id}`;
 		routerState.search = "";
-		attachedProjectState.slug = "conduit";
 		projectState.projects = [
 			{ slug: "conduit", title: "conduit", folders: ["/src/conduit"] },
 		];
@@ -247,7 +243,6 @@ const meta = {
 			clearDiscoveryState();
 			globalThis.fetch = guardedFetch;
 			restoreSocket();
-			attachedProjectState.slug = null;
 			goalDetails.open = detailsOpen;
 			sessionState.now = now;
 			getGoalDetails.mockClear();

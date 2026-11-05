@@ -9,9 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import QuestionCard from "../../../src/lib/frontend/components/chat/QuestionCard.svelte";
 import type { QuestionRequest } from "../../../src/lib/frontend/types.js";
 
-vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({
-	getCurrentSlug: vi.fn(() => "conduit"),
-}));
+vi.mock("../../../src/lib/frontend/stores/router.svelte.js", () => ({}));
 
 vi.mock("../../../src/lib/frontend/stores/client-identity.js", () => ({
 	getBrowserClientId: vi.fn(() => "client-1"),

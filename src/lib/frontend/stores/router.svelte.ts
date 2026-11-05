@@ -88,12 +88,6 @@ export const routerState = $state({
 	sessionNotFound: false,
 });
 
-/** The project this tab marks: chosen locally by the selection, or by a
- *  ViewSession that crossed projects. Tab state: each tab marks its own. */
-export const attachedProjectState = $state({
-	slug: null as string | null,
-});
-
 // These compute from routerState.path on each call.
 // Components should wrap in $derived() for reactive caching:
 //   const route = $derived(getCurrentRoute());
@@ -163,12 +157,6 @@ export function normalizeRoute(): void {
 	} else if (search !== routerState.search) {
 		replaceRoute(`${path}${search || "?"}`);
 	}
-}
-
-/** Use the daemon's attached project, or the route hint before the first attach. */
-export function getCurrentSlug(): string | null {
-	if (attachedProjectState.slug !== null) return attachedProjectState.slug;
-	return getCurrentSearchParams().get(SCOPE_PARAM);
 }
 
 /** Get the current session ID from the URL (null if not present). */

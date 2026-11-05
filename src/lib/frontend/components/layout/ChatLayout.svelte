@@ -32,7 +32,6 @@
 	import {
 		uiState,
 		showToast,
-		resetProjectUI,
 		setSidebarWidth,
 		SIDEBAR_MIN_WIDTH,
 		SIDEBAR_MAX_WIDTH,
@@ -41,23 +40,22 @@
 		initSWMessageListener,
 		reconcilePushActive,
 	} from "../../stores/ws-notifications.js";
-	import { onProjectAttached } from "../../stores/ws-listeners.js";
-	import { getIsConnected } from "../../transport/connection-status.svelte.js";
+	import { getIsConnected, viewRelayStatus } from "../../transport/connection-status.svelte.js";
 	import { avatarState, loadAvatar } from "../../stores/avatar.svelte.js";
 	import AvatarFirstRun from "../overlays/AvatarFirstRun.svelte";
-	import { attachedProjectState, getCurrentRoute, getCurrentSlug, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
-	import { clearMessages, localSendsIn } from "../../stores/chat.svelte.js";
-	import { terminalState, destroyAll, viewPtys } from "../../stores/terminal.svelte.js";
-	import { clearSessionSearch, findSession, resetSessionFamily, sessionState } from "../../stores/session.svelte.js";
+	import { getCurrentRoute, getCurrentSearchParams, routerState } from "../../stores/router.svelte.js";
+	import { localSendsIn } from "../../stores/chat.svelte.js";
+	import { terminalState, viewPtys } from "../../stores/terminal.svelte.js";
+	import { findSession, sessionState } from "../../stores/session.svelte.js";
 	import { drawSavedShell, followSessionList, sessionList, stopFollowingSessionList } from "../../stores/session-list.svelte.js";
 	import { followApprovals } from "../../stores/approvals.js";
 	import { selection, watchSelection } from "../../stores/selection.svelte.js";
 	import { openSavedShell } from "../../stores/saved-shell.js";
-	import { clearDiscoveryState, watchCatalogs } from "../../stores/discovery.svelte.js";
-	import { todoState, clearTodoState } from "../../stores/todo.svelte.js";
+	import { watchCatalogs } from "../../stores/discovery.svelte.js";
+	import { todoState } from "../../stores/todo.svelte.js";
 	import { viewProjectSettings } from "../../stores/project-settings.js";
 	import { followAlerts } from "../../stores/alerts.js";
-	import { clearFileTreeState, fileTreeState } from "../../stores/file-tree.svelte.js";
+	import { fileTreeState } from "../../stores/file-tree.svelte.js";
 	import { followDaemonLists, getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import { isBarCollapsed, sessionViewState, watchKeyboard, watchViewportPose } from "../../stores/session-view.svelte.js";
 	import { featureFlags, initFeatureFlags, toggleFeature } from "../../stores/feature-flags.svelte.js";
@@ -307,48 +305,28 @@
 	}
 
 	onMount(() => {
-		let attachGeneration = 0;
+		let mounted = true;
 		const loadPath = routerState.path;
 		const loadSearch = routerState.search;
 		// A page load draws the device's saved sidebar, if any, before any reply.
 		void openSavedShell().then((record) => {
-			if (record && attachGeneration === 0 && routerState.path === loadPath && routerState.search === loadSearch)
+			if (record && mounted && routerState.path === loadPath && routerState.search === loadSearch)
 				drawSavedShell(record);
 		});
 		// One daemon-wide sidebar feed for the page's life, whatever is shown.
 		followSessionList();
-		let previousSlug = attachedProjectState.slug;
-		const hydrateProject = (slug: string) => {
-			attachGeneration++;
-			if (previousSlug !== null && slug !== previousSlug) {
-				clearMessages();
-				clearSessionSearch();
-				resetSessionFamily();
-				destroyAll();
-				clearDiscoveryState();
-				clearTodoState();
-				clearFileTreeState();
-				resetProjectUI();
-			}
-			previousSlug = slug;
-		};
-		const unsubscribe = onProjectAttached(hydrateProject);
-		if (previousSlug !== null) hydrateProject(previousSlug);
 		// Asks and alerts are every project's, so one feed each serves the page.
 		const stopApprovals = followApprovals();
 		const stopAlerts = followAlerts();
 		initSWMessageListener();
 		return () => {
-			attachGeneration++;
+			mounted = false;
 			stopFollowingSessionList();
 			stopApprovals();
 			stopAlerts();
-			unsubscribe();
 		};
 	});
 
-	// Project navigation requests attachment through RPC on the existing socket.
-	// This also covers browser history and project-only links from every caller.
 	const connected = $derived(getIsConnected());
 	// The task drawer belongs to the session it was opened from.
 	$effect(() => {
@@ -360,15 +338,19 @@
 	$effect(() => {
 		if (sessionViewState.compact) taskDrawer.task = null;
 	});
+	// Terminals, project settings and relay readiness follow the shown session's (or draft's) project.
+	const shownProject = $derived(selection.scope?.project ?? null);
 	$effect(() => {
-		const project = attachedProjectState.slug ?? null;
+		const project = shownProject;
 		untrack(() => {
 			viewPtys(project);
 			viewProjectSettings(project);
+			viewRelayStatus(project);
 		});
 		return () => {
 			viewPtys(null);
 			viewProjectSettings(null);
+			viewRelayStatus(null);
 		};
 	});
 	$effect(() => {

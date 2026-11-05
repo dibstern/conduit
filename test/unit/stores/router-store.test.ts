@@ -41,7 +41,6 @@ const {
 	getCurrentRoute,
 	getCurrentSearchParams,
 	getCurrentSessionId,
-	getCurrentSlug,
 	getSessionHref,
 	getTransitionLog,
 	navigate,
@@ -49,14 +48,12 @@ const {
 	previousHistoryEntryIsSessionList,
 	replaceRoute,
 	routerState,
-	attachedProjectState,
 } = await import("../../../src/lib/frontend/stores/router.svelte.js");
 
 beforeEach(() => {
 	routerState.path = "/";
 	routerState.search = "";
 	routerState.sessionNotFound = false;
-	attachedProjectState.slug = null;
 	window.location.pathname = "/";
 	window.location.search = "";
 	historyState = null;
@@ -237,7 +234,6 @@ describe("popstate", () => {
 
 		expect(routerState.path).toBe("/s/123");
 		expect(routerState.search).toBe("?p=other");
-		expect(getCurrentSlug()).toBe("other");
 	});
 });
 
@@ -329,36 +325,6 @@ describe("getCurrentSearchParams", () => {
 	it("returns the current query parameters", () => {
 		navigate("/?p=acme");
 		expect(getCurrentSearchParams().get("p")).toBe("acme");
-	});
-});
-
-describe("getCurrentSlug", () => {
-	it("uses the project query hint before the daemon attaches", () => {
-		navigate("/?p=my-project");
-		expect(getCurrentSlug()).toBe("my-project");
-	});
-
-	it("has no project on a bare session link before attach", () => {
-		routerState.path = "/s/abc123";
-		expect(getCurrentSlug()).toBeNull();
-	});
-
-	it("prefers the attached project over the query hint", () => {
-		attachedProjectState.slug = "project-a";
-		navigate("/s/session-b?p=project-b");
-		expect(getCurrentSlug()).toBe("project-a");
-		expect(getCurrentRoute()).toEqual({ page: "chat", sessionId: "session-b" });
-	});
-
-	it("keeps the attached project through replacement and browser history", () => {
-		attachedProjectState.slug = "project-a";
-		replaceRoute("/?p=project-b");
-		window.location.pathname = "/s/session-c";
-		window.location.search = "?p=project-c";
-		popstateListener?.();
-		expect(getCurrentSlug()).toBe("project-a");
-		attachedProjectState.slug = "project-c";
-		expect(getCurrentSlug()).toBe("project-c");
 	});
 });
 

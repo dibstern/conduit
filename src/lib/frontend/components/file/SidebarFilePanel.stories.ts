@@ -5,16 +5,14 @@ import {
 	clearFileTreeState,
 	fileTreeState,
 } from "../../stores/file-tree.svelte.js";
-import {
-	attachedProjectState,
-	routerState,
-} from "../../stores/router.svelte.js";
+import { routerState } from "../../stores/router.svelte.js";
 import {
 	applyGetFileListResponse,
 	fileBrowserListeners,
 } from "../../stores/ws-listeners.js";
 import { mockFileTree } from "../../stories/mocks.js";
 import { connectedSocket } from "../../stories/sockets.js";
+import { viewRelayStatus } from "../../transport/connection-status.svelte.js";
 import SidebarFilePanel from "./SidebarFilePanel.svelte";
 
 async function showDirectory(
@@ -62,12 +60,14 @@ export const Loading: Story = {
 			return Response.json({ status: "ready" });
 		});
 		const restoreSocket = connectedSocket();
-		const previousProject = attachedProjectState.slug;
-		attachedProjectState.slug = "storybook";
+		routerState.path = "/";
+		routerState.search = "?project=storybook";
+		viewRelayStatus("storybook");
 		return () => {
 			restoreSocket();
+			viewRelayStatus(null);
+			routerState.search = "";
 			globalThis.fetch = realFetch;
-			attachedProjectState.slug = previousProject;
 		};
 	},
 	play: async ({ canvasElement }) => {

@@ -90,7 +90,6 @@ export const InstanceActions: Story = {
 		clearDiscoveryState();
 		openSessionForSetup(null);
 		selectInstance("instance-stopped");
-		projectState.currentSlug = "demo";
 		projectState.projects = [
 			{
 				slug: "demo",
@@ -128,7 +127,6 @@ export const InstanceActions: Story = {
 		return () => {
 			clearDiscoveryState();
 			openSessionForSetup(previousSession);
-			projectState.currentSlug = null;
 			projectState.projects = [];
 			instanceState.instances = [];
 		};

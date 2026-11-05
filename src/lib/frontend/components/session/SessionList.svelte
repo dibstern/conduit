@@ -20,10 +20,7 @@
 		getSessionStatusFilter,
 		setSessionScope,
 	} from "../../stores/session-scope.js";
-	import {
-		getCurrentSlug,
-		routerState,
-	} from "../../stores/router.svelte.js";
+	import { routerState } from "../../stores/router.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
 	import { draftList } from "../../stores/draft-list.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";

@@ -5,7 +5,6 @@
 	import { copyToClipboard } from "../../utils/clipboard.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { followFork, sessionState } from "../../stores/session.svelte.js";
-	import { getCurrentSlug } from "../../stores/router.svelte.js";
 	import { getBrowserClientId } from "../../stores/client-identity.js";
 	import { rpc } from "../../transport/ws-rpc-client.js";
 	import { toastFailure } from "../../transport/rpc-errors.js";
@@ -69,7 +68,7 @@
 
 	function forkMessage() {
 		if (!forkMessageId) return;
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (!projectSlug) return;
 		const sourceSessionId = sessionId ?? sessionState.currentId;
 		const from = selection.scope;

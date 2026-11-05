@@ -14,7 +14,7 @@
 	import { sessionViewState } from "../../stores/session-view.svelte.js";
 	import { DRAFT_PROJECT_PARAM, getCurrentSearchParams, navigate } from "../../stores/router.svelte.js";
 	import { setSessionScope } from "../../stores/session-scope.js";
-	import { applyProjectList, getDraftProject, projectState } from "../../stores/project.svelte.js";
+	import { getDraftProject, projectState } from "../../stores/project.svelte.js";
 	import type { SaveProjectResponse } from "../../transport/ws-rpc.js";
 	import { selection } from "../../stores/selection.svelte.js";
 	import { sessionList } from "../../stores/session-list.svelte.js";
@@ -35,7 +35,6 @@
 	// A new project is where the next session goes: scope the list to it, then
 	// open a draft prefilled with it, so back returns to the scoped list.
 	function handleProjectAdded(response: SaveProjectResponse) {
-		applyProjectList(response);
 		setSessionScope(response.savedSlug);
 		const params = getCurrentSearchParams();
 		if (response.kind === "existing") {

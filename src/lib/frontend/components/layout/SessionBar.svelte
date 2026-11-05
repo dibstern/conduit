@@ -18,6 +18,7 @@
 -->
 
 <script lang="ts">
+	import { selection } from "../../stores/selection.svelte.js";
 	import { tick, untrack } from "svelte";
 	import { currentChat, isProcessing } from "../../stores/chat.svelte.js";
 	import { whyBusy } from "../../../session/why-busy.js";
@@ -26,9 +27,6 @@
 	import { dismissGoalMet, GOAL_LIMITED, goalDetails, goalView, isGoalMetDismissed, sessionGoals, type GoalComposerAction } from "../../stores/goal.svelte.js";
 	import { getDescendantSessionIds } from "../../stores/permissions.svelte.js";
 	import { projectState } from "../../stores/project.svelte.js";
-	import {
-		getCurrentSlug,
-	} from "../../stores/router.svelte.js";
 	import {
 		forceBarOpen,
 		isBarCollapsed,
@@ -145,7 +143,7 @@
 	const stuck = $derived(goalFacts?.goal ? session?.goalStuck : undefined);
 
 	$effect(() => {
-		const projectSlug = getCurrentSlug();
+		const projectSlug = selection.scope?.project;
 		if (detailsProjectSlug !== undefined && projectSlug !== detailsProjectSlug) {
 			goalDetails.open = false;
 		}
@@ -302,7 +300,7 @@
 		}
 	});
 
-	const project = $derived(projectState.projects.find((p) => p.slug === getCurrentSlug()));
+	const project = $derived(projectState.projects.find((p) => p.slug === selection.scope?.project));
 	const sessionInstanceId = $derived(session?.accountId);
 	const sessionInstance = $derived(getAvailableInstances().find((instance) => instance.id === sessionInstanceId));
 	const supportsTaskStop = $derived((
@@ -458,7 +456,7 @@
 
 		{#if sessionViewState.compact}
 			{#if session}
-				<SessionSheetBody {commands} now={sessionState.now} header={{ session, projectLabel: project?.title ?? getCurrentSlug() ?? undefined, projectAccent: getProjectAccent(session), branch: session.git?.branch }} views={viewCards} onselect={selectOverflow} />
+				<SessionSheetBody {commands} now={sessionState.now} header={{ session, projectLabel: project?.title ?? selection.scope?.project ?? undefined, projectAccent: getProjectAccent(session), branch: session.git?.branch }} views={viewCards} onselect={selectOverflow} />
 			{:else}
 				<div class="px-[16px] pt-[8px]">{@render viewCards()}</div>
 			{/if}
@@ -706,7 +704,7 @@
 			{:else}<span class="block truncate">{title}</span>{/if}
 		</h1>
 		</div>
-		{#if duoFolded && session}<span data-testid="session-bar-subline" class="flex min-w-0 items-center gap-[6px] text-[12px] leading-[16px] text-text-secondary"><ProjectMark accent={getProjectAccent(session)} /><span class="truncate">{project?.title ?? getCurrentSlug()}</span>{#if chipsFolded && goalShown}<span data-testid="session-bar-subline-goal" class="duo-subline-mark" data-tone={goalButtonTone}><Icon name={goalIcon} size={12} /><span class="sr-only">Goal {desktopGoalLabel}</span></span>{/if}{#if chipsFolded && backgroundTasks.length > 0}<span class="duo-subline-mark"><ConduitMark size={11} variant="running" tone="inherit" /><span data-testid="session-bar-subline-tasks">{backgroundTasks.length}</span><span class="sr-only"> background {backgroundTasks.length === 1 ? "task" : "tasks"}</span></span>{/if}</span>{/if}
+		{#if duoFolded && session}<span data-testid="session-bar-subline" class="flex min-w-0 items-center gap-[6px] text-[12px] leading-[16px] text-text-secondary"><ProjectMark accent={getProjectAccent(session)} /><span class="truncate">{project?.title ?? selection.scope?.project}</span>{#if chipsFolded && goalShown}<span data-testid="session-bar-subline-goal" class="duo-subline-mark" data-tone={goalButtonTone}><Icon name={goalIcon} size={12} /><span class="sr-only">Goal {desktopGoalLabel}</span></span>{/if}{#if chipsFolded && backgroundTasks.length > 0}<span class="duo-subline-mark"><ConduitMark size={11} variant="running" tone="inherit" /><span data-testid="session-bar-subline-tasks">{backgroundTasks.length}</span><span class="sr-only"> background {backgroundTasks.length === 1 ? "task" : "tasks"}</span></span>{/if}</span>{/if}
 		<!-- Collapsed, the full banner strip is hidden (style.css); this line stands in. -->
 		{#if collapsed}<BannersRow banners={appBanners()} onexpand={showControls} />{/if}
 		</div>

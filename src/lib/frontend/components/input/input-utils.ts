@@ -4,10 +4,8 @@ import {
 	MAX_ATTACHMENT_BASE64_BYTES,
 	parseAttachmentDataUrl,
 } from "../../../attachment-data-url.js";
-import {
-	getCurrentSessionId,
-	getCurrentSlug,
-} from "../../stores/router.svelte.js";
+import { getCurrentSessionId } from "../../stores/router.svelte.js";
+import { selection } from "../../stores/selection.svelte.js";
 import { rpc } from "../../transport/ws-rpc-client.js";
 import { formatFileSize } from "../../utils/format.js";
 
@@ -203,7 +201,7 @@ export async function prepareFileAttachment(file: File): Promise<ResizeResult> {
 
 export function fetchFileContent(
 	path: string,
-	slug = getCurrentSlug(),
+	slug: string | null = selection.scope?.project ?? null,
 ): Promise<{ content: string; binary?: boolean }> {
 	if (!slug)
 		return Promise.reject(new AttachmentValidationError("No project selected"));
@@ -219,7 +217,7 @@ export function fetchFileContent(
 
 export function fetchDirectoryListing(
 	path: string,
-	slug = getCurrentSlug(),
+	slug: string | null = selection.scope?.project ?? null,
 ): Promise<string> {
 	const requestPath = path.replace(/\/$/, "");
 	if (!slug)
