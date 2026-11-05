@@ -530,8 +530,6 @@ export async function createProjectRelay(
 	} = startup;
 	log.info(`✓ Using session: ${sessionId}`);
 
-	// Timer wiring (G5: permission timeouts)
-	// PermissionTimeoutLive is composed into RelayStateLive — no imperative wiring.
 	// Rate limiter cleanup is handled by the Effect RateLimiterLive scoped fiber.
 
 	const getProjectRelayStatusSnapshot = (): ProjectRelayStatusSnapshot => {

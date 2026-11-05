@@ -128,6 +128,7 @@ describe("per-project relay stays retired (82tn.16)", () => {
 			"makeStatusPollerCore",
 			"resolveOrphanedClaudePermissions",
 			"makeOrphanedClaudePermissions",
+			"PermissionTimeoutLive",
 		]);
 		expect(tally(server, named(services))).toEqual(
 			new Map([
@@ -135,7 +136,9 @@ describe("per-project relay stays retired (82tn.16)", () => {
 				["src/lib/domain/persistence/Services/run-ledger-scheduler.ts", 1],
 				["src/lib/domain/persistence/Services/event-retention-scheduler.ts", 1],
 				// Each one's import and its one build.
-				[`${daemon}/Layers/daemon-layers.ts`, 8],
+				[`${daemon}/Layers/daemon-layers.ts`, 10],
+				// Permission timeouts: one loop over every registered project, not one per relay.
+				[`${daemon}/Layers/permission-timeout-layer.ts`, 1],
 				// Orphaned Claude asks: cleared for every registered project when the daemon starts, not at relay start.
 				[
 					"src/lib/domain/relay/Services/resolve-orphaned-claude-permissions.ts",
